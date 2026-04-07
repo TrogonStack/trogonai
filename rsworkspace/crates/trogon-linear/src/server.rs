@@ -1,59 +1,22 @@
 use std::future::IntoFuture as _;
-use std::pin::Pin;
-use std::sync::Arc;
 use std::time::Duration;
 
 use crate::config::LinearConfig;
 use crate::signature;
-use async_nats::jetstream::context::{CreateStreamError, PublishError};
-use async_nats::jetstream::publish::PublishAck;
-use async_nats::jetstream::{self, stream};
+use async_nats::jetstream::stream;
 use axum::{
     Router, body::Bytes, extract::State, http::HeaderMap, http::StatusCode, routing::get,
     routing::post,
 };
 use std::net::SocketAddr;
 use tracing::{info, instrument, warn};
-
-// ── JetStream operation types ─────────────────────────────────────────────────
-
-/// Boxed future that resolves to the JetStream publish acknowledgement.
-type BoxAckFut =
-    Pin<Box<dyn std::future::Future<Output = Result<PublishAck, PublishError>> + Send>>;
-
-/// Injectable publish function: `(subject, headers, payload) → Result<ack_future, error>`.
-///
-/// Abstracting this allows unit tests to inject fakes that simulate ACK timeouts
-/// and ACK errors without requiring a live NATS server.
-type PublishFn = Arc<
-    dyn Fn(
-            String,
-            async_nats::HeaderMap,
-            Bytes,
-        )
-            -> Pin<Box<dyn std::future::Future<Output = Result<BoxAckFut, PublishError>> + Send>>
-        + Send
-        + Sync,
->;
-
-/// Injectable stream-creation function: `(stream_name, subject_prefix, max_age) → Result<(), error>`.
-type EnsureStreamFn = Arc<
-    dyn Fn(
-            String,
-            String,
-            Duration,
-        )
-            -> Pin<Box<dyn std::future::Future<Output = Result<(), CreateStreamError>> + Send>>
-        + Send
-        + Sync,
->;
+use trogon_nats::jetstream::{JetStreamContext, JetStreamPublisher};
 
 // ── Application state ─────────────────────────────────────────────────────────
 
 #[derive(Clone)]
-struct AppState {
-    publish: PublishFn,
-    ensure_stream_fn: EnsureStreamFn,
+struct AppState<J> {
+    js: J,
     webhook_secret: Option<String>,
     subject_prefix: String,
     timestamp_tolerance: Option<Duration>,
@@ -71,39 +34,40 @@ struct AppState {
 /// for incoming requests:
 /// - `POST /webhook` — receives Linear webhook events and publishes to NATS JetStream
 /// - `GET  /health`  — liveness probe, always returns 200 OK
+#[cfg(not(coverage))]
 pub async fn serve(
     config: LinearConfig,
     nats: async_nats::Client,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let js = jetstream::new(nats);
+    use async_nats::jetstream;
+    use trogon_nats::jetstream::NatsJetStreamClient;
+    serve_impl(config, NatsJetStreamClient::new(jetstream::new(nats))).await
+}
 
-    ensure_stream(
-        &js,
-        &config.stream_name,
-        &config.subject_prefix,
-        config.stream_max_age,
-    )
+async fn serve_impl<J>(
+    config: LinearConfig,
+    js: J,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+where
+    J: JetStreamPublisher + JetStreamContext + Clone + Send + Sync + 'static,
+    <J as JetStreamContext>::Error: 'static,
+{
+    js.get_or_create_stream(stream::Config {
+        name: config.stream_name.clone(),
+        subjects: vec![format!("{}.>", config.subject_prefix)],
+        max_age: config.stream_max_age,
+        ..Default::default()
+    })
     .await?;
 
-    // Build injectable closures that delegate to the real JetStream context.
-    let js_pub = js.clone();
-    let publish: PublishFn = Arc::new(move |subject, headers, payload| {
-        let js = js_pub.clone();
-        Box::pin(async move {
-            let ack_future = js.publish_with_headers(subject, headers, payload).await?;
-            Ok(ack_future.into_future())
-        })
-    });
-
-    let js_ensure = js.clone();
-    let ensure_stream_fn: EnsureStreamFn = Arc::new(move |name, prefix, max_age| {
-        let js = js_ensure.clone();
-        Box::pin(async move { ensure_stream(&js, &name, &prefix, max_age).await })
-    });
+    info!(
+        stream = config.stream_name,
+        max_age_secs = config.stream_max_age.as_secs(),
+        "JetStream stream ready"
+    );
 
     let state = AppState {
-        publish,
-        ensure_stream_fn,
+        js,
         webhook_secret: config.webhook_secret,
         subject_prefix: config.subject_prefix,
         timestamp_tolerance: config.timestamp_tolerance,
@@ -114,7 +78,7 @@ pub async fn serve(
     };
 
     let app = Router::new()
-        .route("/webhook", post(handle_webhook))
+        .route("/webhook", post(handle_webhook::<J>))
         .route("/health", get(handle_health))
         .with_state(state);
 
@@ -144,28 +108,6 @@ async fn shutdown_signal() {
     }
 }
 
-async fn ensure_stream(
-    js: &jetstream::Context,
-    stream_name: &str,
-    subject_prefix: &str,
-    max_age: Duration,
-) -> Result<(), async_nats::jetstream::context::CreateStreamError> {
-    js.get_or_create_stream(stream::Config {
-        name: stream_name.to_string(),
-        subjects: vec![format!("{}.>", subject_prefix)],
-        max_age,
-        ..Default::default()
-    })
-    .await?;
-
-    info!(
-        stream = stream_name,
-        max_age_secs = max_age.as_secs(),
-        "JetStream stream ready"
-    );
-    Ok(())
-}
-
 async fn handle_health() -> StatusCode {
     StatusCode::OK
 }
@@ -175,465 +117,6 @@ async fn handle_health() -> StatusCode {
 /// control character (bytes 0–31 and 127).
 fn has_invalid_nats_chars(s: &str) -> bool {
     s.contains(['.', ' ', '*', '>']) || s.bytes().any(|b| b < 32 || b == 127)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::has_invalid_nats_chars;
-
-    // ── Valid tokens ──────────────────────────────────────────────────────────
-
-    #[test]
-    fn valid_alphanumeric_passes() {
-        assert!(!has_invalid_nats_chars("Issue"));
-        assert!(!has_invalid_nats_chars("create"));
-        assert!(!has_invalid_nats_chars("ProjectUpdate"));
-    }
-
-    #[test]
-    fn valid_with_hyphen_and_underscore_passes() {
-        assert!(!has_invalid_nats_chars("foo_bar"));
-        assert!(!has_invalid_nats_chars("foo-bar"));
-    }
-
-    // ── Separator / wildcard chars (branch 1) ─────────────────────────────────
-
-    #[test]
-    fn dot_fails() {
-        assert!(has_invalid_nats_chars("foo.bar"));
-        assert!(has_invalid_nats_chars("."));
-    }
-
-    #[test]
-    fn space_fails() {
-        assert!(has_invalid_nats_chars("foo bar"));
-        assert!(has_invalid_nats_chars(" "));
-    }
-
-    #[test]
-    fn star_wildcard_fails() {
-        assert!(has_invalid_nats_chars("foo*"));
-        assert!(has_invalid_nats_chars("*"));
-    }
-
-    #[test]
-    fn gt_wildcard_fails() {
-        assert!(has_invalid_nats_chars("foo>"));
-        assert!(has_invalid_nats_chars(">"));
-    }
-
-    // ── Control characters (branch 2) ─────────────────────────────────────────
-
-    #[test]
-    fn null_byte_fails() {
-        assert!(has_invalid_nats_chars("foo\0bar"));
-    }
-
-    #[test]
-    fn tab_fails() {
-        assert!(has_invalid_nats_chars("foo\tbar"));
-    }
-
-    #[test]
-    fn newline_fails() {
-        assert!(has_invalid_nats_chars("foo\nbar"));
-    }
-
-    #[test]
-    fn carriage_return_fails() {
-        assert!(has_invalid_nats_chars("foo\rbar"));
-    }
-
-    #[test]
-    fn del_byte_127_fails() {
-        assert!(has_invalid_nats_chars("foo\x7fbar"));
-    }
-
-    // ── UTF-8 multibyte sequences (bytes ≥ 128) ───────────────────────────────
-    //
-    // NATS subjects are byte strings and do support UTF-8 characters.
-    // `has_invalid_nats_chars` only blocks the chars that NATS reserves
-    // (separators, wildcards, control chars 0-31, DEL 127).
-    // Bytes ≥ 128 that form valid UTF-8 code points must pass.
-
-    #[test]
-    fn latin_extended_char_passes() {
-        assert!(!has_invalid_nats_chars("Issu\u{00e9}")); // é — U+00E9, two bytes
-        assert!(!has_invalid_nats_chars("caf\u{00e9}")); // café
-    }
-
-    #[test]
-    fn cjk_char_passes() {
-        assert!(!has_invalid_nats_chars("\u{7968}")); // 票 — U+7968, three bytes
-    }
-
-    #[test]
-    fn emoji_passes() {
-        assert!(!has_invalid_nats_chars("\u{1f980}")); // 🦀 — U+1F980, four bytes
-    }
-
-    // ── Edge: empty string is not flagged (caught by is_empty() upstream) ─────
-
-    #[test]
-    fn empty_string_passes() {
-        assert!(!has_invalid_nats_chars(""));
-    }
-
-    // ── Timeout / error path unit tests ──────────────────────────────────────
-    //
-    // These tests exercise the three error paths in `handle_webhook` that cannot
-    // be reached reliably through a live NATS server (a local server ACKs too
-    // quickly for `Duration::ZERO` to fire before the future resolves).
-    //
-    // The tests inject fake closures into `AppState` that return:
-    //   - a future that never resolves → any finite timeout fires deterministically
-    //   - an immediately-resolving error future → the retry / re-creation branch runs
-    //
-    // No Docker, no NATS server required.
-
-    use super::{AppState, BoxAckFut, EnsureStreamFn, PublishFn, handle_webhook};
-    use async_nats::jetstream::context::{
-        CreateStreamError, CreateStreamErrorKind, PublishError, PublishErrorKind,
-    };
-    use axum::{body::Bytes, extract::State, http::HeaderMap, http::StatusCode};
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicUsize, Ordering as AOrdering};
-    use std::time::Duration;
-
-    const VALID_BODY: &[u8] =
-        br#"{"type":"Issue","action":"create","data":{},"webhookId":"wh-test"}"#;
-
-    /// Build an `AppState` with injectable publish and ensure-stream closures.
-    /// All other fields are set to sensible defaults for the handler under test.
-    fn make_state(publish: PublishFn, ensure_stream_fn: EnsureStreamFn) -> AppState {
-        AppState {
-            publish,
-            ensure_stream_fn,
-            webhook_secret: None,
-            subject_prefix: "linear".to_string(),
-            timestamp_tolerance: None,
-            stream_name: "LINEAR".to_string(),
-            stream_max_age: Duration::from_secs(86400),
-            ack_timeout: Duration::from_millis(50),
-            stream_op_timeout: Duration::from_millis(50),
-        }
-    }
-
-    /// A `PublishFn` whose returned ack-future resolves successfully after one
-    /// yield (simulates a happy-path publish).
-    fn publish_ok() -> PublishFn {
-        Arc::new(|_, _, _| {
-            Box::pin(async move {
-                let ack_fut: BoxAckFut = Box::pin(async move {
-                    // Yield once so tokio can schedule other tasks, then succeed.
-                    tokio::task::yield_now().await;
-                    Ok(async_nats::jetstream::publish::PublishAck {
-                        stream: "LINEAR".to_string(),
-                        sequence: 1,
-                        duplicate: false,
-                        domain: String::new(),
-                        value: None,
-                    })
-                });
-                Ok(ack_fut)
-            })
-        })
-    }
-
-    /// A `PublishFn` whose returned ack-future immediately returns an error
-    /// (simulates a broken-pipe scenario that triggers stream re-creation).
-    fn publish_ack_error() -> PublishFn {
-        Arc::new(|_, _, _| {
-            Box::pin(async move {
-                let ack_fut: BoxAckFut =
-                    Box::pin(async move { Err(PublishError::new(PublishErrorKind::BrokenPipe)) });
-                Ok(ack_fut)
-            })
-        })
-    }
-
-    /// A `PublishFn` whose returned ack-future never resolves (simulates a
-    /// NATS server that accepted the message but never sent an ACK).
-    fn publish_ack_hangs() -> PublishFn {
-        Arc::new(|_, _, _| {
-            Box::pin(async move {
-                let ack_fut: BoxAckFut = Box::pin(std::future::pending());
-                Ok(ack_fut)
-            })
-        })
-    }
-
-    /// An `EnsureStreamFn` that resolves successfully immediately.
-    fn ensure_stream_ok() -> EnsureStreamFn {
-        Arc::new(|_, _, _| Box::pin(async move { Ok(()) }))
-    }
-
-    /// An `EnsureStreamFn` that immediately returns an error.
-    fn ensure_stream_error() -> EnsureStreamFn {
-        Arc::new(|_, _, _| {
-            Box::pin(async move {
-                Err(CreateStreamError::new(
-                    CreateStreamErrorKind::JetStreamUnavailable,
-                ))
-            })
-        })
-    }
-
-    /// An `EnsureStreamFn` whose future never resolves (simulates a NATS
-    /// server that is unreachable for stream operations).
-    fn ensure_stream_hangs() -> EnsureStreamFn {
-        Arc::new(|_, _, _| Box::pin(std::future::pending()))
-    }
-
-    /// A `PublishFn` that immediately returns `Err` on every call (simulates
-    /// the NATS connection being fully broken before the message is even sent).
-    fn publish_fails_directly() -> PublishFn {
-        Arc::new(|_, _, _| {
-            Box::pin(async move {
-                Err(PublishError::new(PublishErrorKind::BrokenPipe))
-                    as Result<BoxAckFut, PublishError>
-            })
-        })
-    }
-
-    /// A stateful `PublishFn` that returns an ack error on the **first** call
-    /// (triggering the recovery path) and then returns `Err` directly on the
-    /// **second** call (simulating the retry publish itself failing).
-    fn publish_ack_error_then_publish_fails() -> PublishFn {
-        let calls = Arc::new(AtomicUsize::new(0));
-        Arc::new(move |_, _, _| {
-            let n = calls.fetch_add(1, AOrdering::SeqCst);
-            Box::pin(async move {
-                if n == 0 {
-                    let ack_fut: BoxAckFut =
-                        Box::pin(
-                            async move { Err(PublishError::new(PublishErrorKind::BrokenPipe)) },
-                        );
-                    Ok(ack_fut)
-                } else {
-                    Err(PublishError::new(PublishErrorKind::BrokenPipe))
-                        as Result<BoxAckFut, PublishError>
-                }
-            })
-        })
-    }
-
-    /// A stateful `PublishFn` that returns an ack error on the **first** call
-    /// (triggering the recovery path) and also returns an ack error on the
-    /// **second** call (simulating the retry ACK failing after re-creation).
-    fn publish_ack_error_both_calls() -> PublishFn {
-        Arc::new(|_, _, _| {
-            Box::pin(async move {
-                let ack_fut: BoxAckFut =
-                    Box::pin(async move { Err(PublishError::new(PublishErrorKind::BrokenPipe)) });
-                Ok(ack_fut)
-            })
-        })
-    }
-
-    /// A stateful `PublishFn` that returns an ack error on the **first** call
-    /// (triggering the recovery path) and a never-resolving ack future on the
-    /// **second** call (simulating the retry ACK timing out after re-creation).
-    fn publish_ack_error_then_ack_hangs() -> PublishFn {
-        let calls = Arc::new(AtomicUsize::new(0));
-        Arc::new(move |_, _, _| {
-            let n = calls.fetch_add(1, AOrdering::SeqCst);
-            Box::pin(async move {
-                let ack_fut: BoxAckFut = if n == 0 {
-                    Box::pin(async move { Err(PublishError::new(PublishErrorKind::BrokenPipe)) })
-                } else {
-                    Box::pin(std::future::pending())
-                };
-                Ok(ack_fut)
-            })
-        })
-    }
-
-    // ── 1. ACK timeout ────────────────────────────────────────────────────────
-
-    /// When the NATS ACK future never resolves and `ack_timeout` elapses,
-    /// the handler must return 500 Internal Server Error.
-    #[tokio::test]
-    async fn ack_timeout_returns_500() {
-        let state = make_state(publish_ack_hangs(), ensure_stream_ok());
-
-        let status = handle_webhook(
-            State(state),
-            HeaderMap::new(),
-            Bytes::from_static(VALID_BODY),
-        )
-        .await;
-
-        assert_eq!(
-            status,
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "expected 500 when ACK times out"
-        );
-    }
-
-    // ── 2. Stream re-creation timeout ─────────────────────────────────────────
-
-    /// When the ACK fails and the subsequent `ensure_stream` call never resolves
-    /// (e.g. NATS is unreachable), the handler must return 500.
-    #[tokio::test]
-    async fn stream_recreation_timeout_returns_500() {
-        let state = make_state(publish_ack_error(), ensure_stream_hangs());
-
-        let status = handle_webhook(
-            State(state),
-            HeaderMap::new(),
-            Bytes::from_static(VALID_BODY),
-        )
-        .await;
-
-        assert_eq!(
-            status,
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "expected 500 when stream re-creation times out"
-        );
-    }
-
-    // ── 3. Stream re-creation error ───────────────────────────────────────────
-
-    /// When the ACK fails and `ensure_stream` returns an error (e.g. JetStream
-    /// is unavailable), the handler must return 500.
-    #[tokio::test]
-    async fn stream_recreation_error_returns_500() {
-        let state = make_state(publish_ack_error(), ensure_stream_error());
-
-        let status = handle_webhook(
-            State(state),
-            HeaderMap::new(),
-            Bytes::from_static(VALID_BODY),
-        )
-        .await;
-
-        assert_eq!(
-            status,
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "expected 500 when stream re-creation returns an error"
-        );
-    }
-
-    // ── 4. Happy path (sanity check) ──────────────────────────────────────────
-
-    /// Sanity: when publish and ACK both succeed the handler returns 200.
-    #[tokio::test]
-    async fn happy_path_returns_200() {
-        let state = make_state(publish_ok(), ensure_stream_ok());
-
-        let status = handle_webhook(
-            State(state),
-            HeaderMap::new(),
-            Bytes::from_static(VALID_BODY),
-        )
-        .await;
-
-        assert_eq!(status, StatusCode::OK, "expected 200 on happy path");
-    }
-
-    // ── 5. First publish fails directly ──────────────────────────────────────
-    //
-    // These four tests cover the retry / post-recovery branches that cannot be
-    // reached through a live NATS server:
-    //
-    //   • async_nats buffers aggressively — `publish_with_headers` almost never
-    //     returns `Err` directly with a live connection (the error surfaces later
-    //     as an ack failure), so paths 5 and 6 cannot be triggered via Docker.
-    //   • Selectively delaying only the *retry* ACK (after recovery) while
-    //     letting the first ACK fail quickly as an error requires a
-    //     protocol-aware NATS proxy that can distinguish individual JetStream
-    //     messages at the byte level — out of scope for the TCP proxy used in
-    //     the e2e tests.
-    //
-    // Unit tests with fake closures are the correct tool here: they verify the
-    // handler logic directly without depending on network timing.
-
-    /// When the `publish_with_headers` call itself returns `Err` (e.g. the
-    /// NATS client's internal acker is shut down), the handler returns 500.
-    #[tokio::test]
-    async fn first_publish_fails_returns_500() {
-        let state = make_state(publish_fails_directly(), ensure_stream_ok());
-
-        let status = handle_webhook(
-            State(state),
-            HeaderMap::new(),
-            Bytes::from_static(VALID_BODY),
-        )
-        .await;
-
-        assert_eq!(
-            status,
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "expected 500 when first publish returns Err"
-        );
-    }
-
-    // ── 6. Retry publish fails directly after stream re-creation ─────────────
-
-    /// When the first ACK fails (triggering stream re-creation) and the retry
-    /// `publish_with_headers` itself returns `Err`, the handler returns 500.
-    #[tokio::test]
-    async fn retry_publish_fails_returns_500() {
-        let state = make_state(publish_ack_error_then_publish_fails(), ensure_stream_ok());
-
-        let status = handle_webhook(
-            State(state),
-            HeaderMap::new(),
-            Bytes::from_static(VALID_BODY),
-        )
-        .await;
-
-        assert_eq!(
-            status,
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "expected 500 when retry publish returns Err after stream re-creation"
-        );
-    }
-
-    // ── 7. Retry ACK fails after stream re-creation ───────────────────────────
-
-    /// When stream re-creation succeeds but the retry ACK returns an error,
-    /// the handler returns 500.
-    #[tokio::test]
-    async fn retry_ack_error_returns_500() {
-        let state = make_state(publish_ack_error_both_calls(), ensure_stream_ok());
-
-        let status = handle_webhook(
-            State(state),
-            HeaderMap::new(),
-            Bytes::from_static(VALID_BODY),
-        )
-        .await;
-
-        assert_eq!(
-            status,
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "expected 500 when retry ACK returns Err after stream re-creation"
-        );
-    }
-
-    // ── 8. Retry ACK times out after stream re-creation ──────────────────────
-
-    /// When stream re-creation succeeds but waiting for the retry ACK exceeds
-    /// `ack_timeout`, the handler returns 500.
-    #[tokio::test]
-    async fn retry_ack_timeout_returns_500() {
-        let state = make_state(publish_ack_error_then_ack_hangs(), ensure_stream_ok());
-
-        let status = handle_webhook(
-            State(state),
-            HeaderMap::new(),
-            Bytes::from_static(VALID_BODY),
-        )
-        .await;
-
-        assert_eq!(
-            status,
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "expected 500 when retry ACK times out after stream re-creation"
-        );
-    }
 }
 
 #[instrument(
@@ -646,11 +129,14 @@ mod tests {
         subject = tracing::field::Empty,
     )
 )]
-async fn handle_webhook(
-    State(state): State<AppState>,
+async fn handle_webhook<J>(
+    State(state): State<AppState<J>>,
     headers: HeaderMap,
     body: Bytes,
-) -> StatusCode {
+) -> StatusCode
+where
+    J: JetStreamPublisher + JetStreamContext + Clone + Send + Sync + 'static,
+{
     // Verify signature if a secret is configured.
     if let Some(secret) = &state.webhook_secret {
         let sig = headers
@@ -752,9 +238,13 @@ async fn handle_webhook(
     nats_headers.insert("X-Linear-Action", action.as_str());
     nats_headers.insert("X-Linear-Webhook-Id", webhook_id.as_str());
 
-    match (state.publish)(subject.clone(), nats_headers, body.clone()).await {
+    match state
+        .js
+        .publish_with_headers(subject.clone(), nats_headers, body.clone())
+        .await
+    {
         Ok(ack_future) => {
-            match tokio::time::timeout(state.ack_timeout, ack_future).await {
+            match tokio::time::timeout(state.ack_timeout, ack_future.into_future()).await {
                 Ok(Ok(_)) => {
                     info!("Published Linear event to NATS");
                     StatusCode::OK
@@ -765,15 +255,16 @@ async fn handle_webhook(
                     warn!(error = %e, "NATS ack failed — attempting stream re-creation");
                     let recreate = tokio::time::timeout(
                         state.stream_op_timeout,
-                        (state.ensure_stream_fn)(
-                            state.stream_name.clone(),
-                            state.subject_prefix.clone(),
-                            state.stream_max_age,
-                        ),
+                        state.js.get_or_create_stream(stream::Config {
+                            name: state.stream_name.clone(),
+                            subjects: vec![format!("{}.>", state.subject_prefix)],
+                            max_age: state.stream_max_age,
+                            ..Default::default()
+                        }),
                     )
                     .await;
                     match recreate {
-                        Ok(Ok(())) => {}
+                        Ok(Ok(_)) => {}
                         Ok(Err(e)) => {
                             warn!(error = %e, "Failed to re-create JetStream stream");
                             return StatusCode::INTERNAL_SERVER_ERROR;
@@ -787,9 +278,15 @@ async fn handle_webhook(
                     retry_headers.insert("X-Linear-Type", event_type.as_str());
                     retry_headers.insert("X-Linear-Action", action.as_str());
                     retry_headers.insert("X-Linear-Webhook-Id", webhook_id.as_str());
-                    match (state.publish)(subject, retry_headers, body).await {
+                    match state
+                        .js
+                        .publish_with_headers(subject, retry_headers, body)
+                        .await
+                    {
                         Ok(ack_future) => {
-                            match tokio::time::timeout(state.ack_timeout, ack_future).await {
+                            match tokio::time::timeout(state.ack_timeout, ack_future.into_future())
+                                .await
+                            {
                                 Ok(Ok(_)) => {
                                     info!(
                                         "Published Linear event to NATS after stream re-creation"
@@ -825,5 +322,410 @@ async fn handle_webhook(
             warn!(error = %e, "Failed to publish Linear event to NATS");
             StatusCode::INTERNAL_SERVER_ERROR
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_nats::jetstream::context::{
+        CreateStreamError, CreateStreamErrorKind, PublishError, PublishErrorKind,
+    };
+    use async_nats::jetstream::publish::PublishAck;
+    use async_nats::subject::ToSubject;
+    use axum::{body::Bytes, extract::State, http::HeaderMap, http::StatusCode};
+    use std::future::{Future, IntoFuture};
+    use std::pin::Pin;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering as AOrdering};
+    use std::time::Duration;
+    use trogon_nats::jetstream::{JetStreamContext, JetStreamPublisher};
+
+    // ── Test JetStream client ─────────────────────────────────────────────────
+
+    type BoxFut<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
+    type PublishCallFn =
+        Arc<dyn Fn() -> Result<BoxFut<Result<PublishAck, PublishError>>, PublishError> + Send + Sync>;
+    type EnsureCallFn = Arc<dyn Fn() -> BoxFut<Result<(), CreateStreamError>> + Send + Sync>;
+
+    /// Newtype wrapper so we can name `AckFuture` concretely as an associated type.
+    struct TestAckFuture(BoxFut<Result<PublishAck, PublishError>>);
+
+    impl IntoFuture for TestAckFuture {
+        type Output = Result<PublishAck, PublishError>;
+        type IntoFuture = BoxFut<Result<PublishAck, PublishError>>;
+        fn into_future(self) -> Self::IntoFuture {
+            self.0
+        }
+    }
+
+    #[derive(Clone)]
+    struct TestJs {
+        publish_fn: PublishCallFn,
+        ensure_fn: EnsureCallFn,
+    }
+
+    impl JetStreamPublisher for TestJs {
+        type PublishError = PublishError;
+        type AckFuture = TestAckFuture;
+
+        async fn publish_with_headers<S: ToSubject + Send>(
+            &self,
+            _subject: S,
+            _headers: async_nats::HeaderMap,
+            _payload: Bytes,
+        ) -> Result<TestAckFuture, PublishError> {
+            (self.publish_fn)().map(TestAckFuture)
+        }
+    }
+
+    impl JetStreamContext for TestJs {
+        type Error = CreateStreamError;
+        type Stream = ();
+
+        async fn get_or_create_stream<S: Into<stream::Config> + Send>(
+            &self,
+            _config: S,
+        ) -> Result<(), CreateStreamError> {
+            (self.ensure_fn)().await
+        }
+    }
+
+    fn make_js(
+        publish: impl Fn() -> Result<BoxFut<Result<PublishAck, PublishError>>, PublishError>
+            + Send
+            + Sync
+            + 'static,
+        ensure: impl Fn() -> BoxFut<Result<(), CreateStreamError>> + Send + Sync + 'static,
+    ) -> TestJs {
+        TestJs {
+            publish_fn: Arc::new(publish),
+            ensure_fn: Arc::new(ensure),
+        }
+    }
+
+    fn make_state(js: TestJs) -> AppState<TestJs> {
+        AppState {
+            js,
+            webhook_secret: None,
+            subject_prefix: "linear".to_string(),
+            timestamp_tolerance: None,
+            stream_name: "LINEAR".to_string(),
+            stream_max_age: Duration::from_secs(86400),
+            ack_timeout: Duration::from_millis(50),
+            stream_op_timeout: Duration::from_millis(50),
+        }
+    }
+
+    // ── Reusable future factories ─────────────────────────────────────────────
+
+    fn ok_ack() -> BoxFut<Result<PublishAck, PublishError>> {
+        Box::pin(async move {
+            tokio::task::yield_now().await;
+            Ok(PublishAck {
+                stream: "LINEAR".to_string(),
+                sequence: 1,
+                duplicate: false,
+                domain: String::new(),
+                value: None,
+            })
+        })
+    }
+
+    fn error_ack() -> BoxFut<Result<PublishAck, PublishError>> {
+        Box::pin(async move { Err(PublishError::new(PublishErrorKind::BrokenPipe)) })
+    }
+
+    fn hanging_ack() -> BoxFut<Result<PublishAck, PublishError>> {
+        Box::pin(std::future::pending())
+    }
+
+    fn ok_ensure() -> BoxFut<Result<(), CreateStreamError>> {
+        Box::pin(async move { Ok(()) })
+    }
+
+    fn error_ensure() -> BoxFut<Result<(), CreateStreamError>> {
+        Box::pin(async move {
+            Err(CreateStreamError::new(
+                CreateStreamErrorKind::JetStreamUnavailable,
+            ))
+        })
+    }
+
+    fn hanging_ensure() -> BoxFut<Result<(), CreateStreamError>> {
+        Box::pin(std::future::pending())
+    }
+
+    const VALID_BODY: &[u8] =
+        br#"{"type":"Issue","action":"create","data":{},"webhookId":"wh-test"}"#;
+
+    // ── has_invalid_nats_chars ────────────────────────────────────────────────
+
+    #[test]
+    fn valid_alphanumeric_passes() {
+        assert!(!has_invalid_nats_chars("Issue"));
+        assert!(!has_invalid_nats_chars("create"));
+        assert!(!has_invalid_nats_chars("ProjectUpdate"));
+    }
+
+    #[test]
+    fn valid_with_hyphen_and_underscore_passes() {
+        assert!(!has_invalid_nats_chars("foo_bar"));
+        assert!(!has_invalid_nats_chars("foo-bar"));
+    }
+
+    #[test]
+    fn dot_fails() {
+        assert!(has_invalid_nats_chars("foo.bar"));
+        assert!(has_invalid_nats_chars("."));
+    }
+
+    #[test]
+    fn space_fails() {
+        assert!(has_invalid_nats_chars("foo bar"));
+        assert!(has_invalid_nats_chars(" "));
+    }
+
+    #[test]
+    fn star_wildcard_fails() {
+        assert!(has_invalid_nats_chars("foo*"));
+        assert!(has_invalid_nats_chars("*"));
+    }
+
+    #[test]
+    fn gt_wildcard_fails() {
+        assert!(has_invalid_nats_chars("foo>"));
+        assert!(has_invalid_nats_chars(">"));
+    }
+
+    #[test]
+    fn null_byte_fails() {
+        assert!(has_invalid_nats_chars("foo\0bar"));
+    }
+
+    #[test]
+    fn tab_fails() {
+        assert!(has_invalid_nats_chars("foo\tbar"));
+    }
+
+    #[test]
+    fn newline_fails() {
+        assert!(has_invalid_nats_chars("foo\nbar"));
+    }
+
+    #[test]
+    fn carriage_return_fails() {
+        assert!(has_invalid_nats_chars("foo\rbar"));
+    }
+
+    #[test]
+    fn del_byte_127_fails() {
+        assert!(has_invalid_nats_chars("foo\x7fbar"));
+    }
+
+    #[test]
+    fn latin_extended_char_passes() {
+        assert!(!has_invalid_nats_chars("Issu\u{00e9}"));
+        assert!(!has_invalid_nats_chars("caf\u{00e9}"));
+    }
+
+    #[test]
+    fn cjk_char_passes() {
+        assert!(!has_invalid_nats_chars("\u{7968}"));
+    }
+
+    #[test]
+    fn emoji_passes() {
+        assert!(!has_invalid_nats_chars("\u{1f980}"));
+    }
+
+    #[test]
+    fn empty_string_passes() {
+        assert!(!has_invalid_nats_chars(""));
+    }
+
+    // ── Timeout / error path unit tests ──────────────────────────────────────
+
+    /// When the NATS ACK future never resolves and `ack_timeout` elapses,
+    /// the handler must return 500 Internal Server Error.
+    #[tokio::test]
+    async fn ack_timeout_returns_500() {
+        let js = make_js(|| Ok(hanging_ack()), || ok_ensure());
+        let state = make_state(js);
+
+        let status = handle_webhook::<TestJs>(
+            State(state),
+            HeaderMap::new(),
+            Bytes::from_static(VALID_BODY),
+        )
+        .await;
+
+        assert_eq!(
+            status,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "expected 500 when ACK times out"
+        );
+    }
+
+    /// When the ACK fails and the subsequent `ensure_stream` call never resolves,
+    /// the handler must return 500.
+    #[tokio::test]
+    async fn stream_recreation_timeout_returns_500() {
+        let js = make_js(|| Ok(error_ack()), || hanging_ensure());
+        let state = make_state(js);
+
+        let status = handle_webhook::<TestJs>(
+            State(state),
+            HeaderMap::new(),
+            Bytes::from_static(VALID_BODY),
+        )
+        .await;
+
+        assert_eq!(
+            status,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "expected 500 when stream re-creation times out"
+        );
+    }
+
+    /// When the ACK fails and `ensure_stream` returns an error,
+    /// the handler must return 500.
+    #[tokio::test]
+    async fn stream_recreation_error_returns_500() {
+        let js = make_js(|| Ok(error_ack()), || error_ensure());
+        let state = make_state(js);
+
+        let status = handle_webhook::<TestJs>(
+            State(state),
+            HeaderMap::new(),
+            Bytes::from_static(VALID_BODY),
+        )
+        .await;
+
+        assert_eq!(
+            status,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "expected 500 when stream re-creation returns an error"
+        );
+    }
+
+    /// Sanity: when publish and ACK both succeed the handler returns 200.
+    #[tokio::test]
+    async fn happy_path_returns_200() {
+        let js = make_js(|| Ok(ok_ack()), || ok_ensure());
+        let state = make_state(js);
+
+        let status = handle_webhook::<TestJs>(
+            State(state),
+            HeaderMap::new(),
+            Bytes::from_static(VALID_BODY),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK, "expected 200 on happy path");
+    }
+
+    /// When the `publish_with_headers` call itself returns `Err`, the handler returns 500.
+    #[tokio::test]
+    async fn first_publish_fails_returns_500() {
+        let js = make_js(
+            || Err(PublishError::new(PublishErrorKind::BrokenPipe)),
+            || ok_ensure(),
+        );
+        let state = make_state(js);
+
+        let status = handle_webhook::<TestJs>(
+            State(state),
+            HeaderMap::new(),
+            Bytes::from_static(VALID_BODY),
+        )
+        .await;
+
+        assert_eq!(
+            status,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "expected 500 when first publish returns Err"
+        );
+    }
+
+    /// When the first ACK fails (triggering stream re-creation) and the retry
+    /// publish itself returns `Err`, the handler returns 500.
+    #[tokio::test]
+    async fn retry_publish_fails_returns_500() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let js = make_js(
+            move || {
+                let n = calls.fetch_add(1, AOrdering::SeqCst);
+                if n == 0 {
+                    Ok(error_ack())
+                } else {
+                    Err(PublishError::new(PublishErrorKind::BrokenPipe))
+                }
+            },
+            || ok_ensure(),
+        );
+        let state = make_state(js);
+
+        let status = handle_webhook::<TestJs>(
+            State(state),
+            HeaderMap::new(),
+            Bytes::from_static(VALID_BODY),
+        )
+        .await;
+
+        assert_eq!(
+            status,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "expected 500 when retry publish returns Err after stream re-creation"
+        );
+    }
+
+    /// When stream re-creation succeeds but the retry ACK returns an error,
+    /// the handler returns 500.
+    #[tokio::test]
+    async fn retry_ack_error_returns_500() {
+        let js = make_js(|| Ok(error_ack()), || ok_ensure());
+        let state = make_state(js);
+
+        let status = handle_webhook::<TestJs>(
+            State(state),
+            HeaderMap::new(),
+            Bytes::from_static(VALID_BODY),
+        )
+        .await;
+
+        assert_eq!(
+            status,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "expected 500 when retry ACK returns Err after stream re-creation"
+        );
+    }
+
+    /// When stream re-creation succeeds but waiting for the retry ACK exceeds
+    /// `ack_timeout`, the handler returns 500.
+    #[tokio::test]
+    async fn retry_ack_timeout_returns_500() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let js = make_js(
+            move || {
+                let n = calls.fetch_add(1, AOrdering::SeqCst);
+                if n == 0 { Ok(error_ack()) } else { Ok(hanging_ack()) }
+            },
+            || ok_ensure(),
+        );
+        let state = make_state(js);
+
+        let status = handle_webhook::<TestJs>(
+            State(state),
+            HeaderMap::new(),
+            Bytes::from_static(VALID_BODY),
+        )
+        .await;
+
+        assert_eq!(
+            status,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "expected 500 when retry ACK times out after stream re-creation"
+        );
     }
 }
