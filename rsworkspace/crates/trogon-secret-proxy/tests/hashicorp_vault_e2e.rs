@@ -17,6 +17,7 @@ use trogon_secret_proxy::{
     proxy::{ProxyState, router},
     stream, subjects, vault_admin, worker,
 };
+use trogon_nats::jetstream::NatsJetStreamClient;
 use trogon_vault::{ApiKeyToken, HashicorpVaultConfig, HashicorpVaultStore, VaultAuth, VaultStore};
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -404,10 +405,10 @@ async fn hashicorp_vault_proxy_worker_pipeline_resolves_real_key() {
 
     // NATS + JetStream.
     let nats = nats_client(nats_port).await;
-    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
 
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
+    stream::ensure_stream(jetstream.context(), "trogon", &outbound_subject)
         .await
         .expect("Failed to ensure PROXY_REQUESTS stream");
 
@@ -417,7 +418,7 @@ async fn hashicorp_vault_proxy_worker_pipeline_resolves_real_key() {
 
     let proxy_state = ProxyState {
         nats: nats.clone(),
-        jetstream: Arc::clone(&jetstream),
+        jetstream: jetstream.clone(),
         prefix: "trogon".to_string(),
         outbound_subject: outbound_subject.clone(),
         worker_timeout: Duration::from_secs(15),
@@ -432,7 +433,7 @@ async fn hashicorp_vault_proxy_worker_pipeline_resolves_real_key() {
         .timeout(Duration::from_secs(15))
         .build()
         .unwrap();
-    let worker_js = Arc::clone(&jetstream);
+    let worker_js = jetstream.clone();
     let worker_nats = nats.clone();
     let worker_vault = Arc::clone(&store);
     let worker_stream = stream::stream_name("trogon");

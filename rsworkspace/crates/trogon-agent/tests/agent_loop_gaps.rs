@@ -8,31 +8,36 @@ use std::sync::Arc;
 use httpmock::MockServer;
 use serde_json::json;
 use trogon_agent::{
-    agent_loop::{AgentLoop, Message},
-    tools::{ToolContext, tool_def},
+    agent_loop::{AgentLoop, Message, ReqwestAnthropicClient},
+    flag_client::AlwaysOnFlagClient,
+    tools::{DefaultToolDispatcher, ToolContext, tool_def},
 };
 
 fn make_agent(proxy_url: &str) -> AgentLoop {
     let http_client = reqwest::Client::new();
-    AgentLoop {
+    let tool_ctx = Arc::new(ToolContext {
         http_client: http_client.clone(),
         proxy_url: proxy_url.to_string(),
-        anthropic_token: "tok_anthropic_prod_test01".to_string(),
+        github_token: "tok_github_prod_test01".to_string(),
+        linear_token: "tok_linear_prod_test01".to_string(),
+        slack_token: String::new(),
+    });
+    AgentLoop {
+        anthropic_client: Arc::new(ReqwestAnthropicClient::new(
+            http_client,
+            proxy_url.to_string(),
+            "tok_anthropic_prod_test01".to_string(),
+        )),
         model: "claude-opus-4-6".to_string(),
         max_iterations: 5,
-        tool_context: Arc::new(ToolContext {
-            http_client,
-            proxy_url: proxy_url.to_string(),
-            github_token: "tok_github_prod_test01".to_string(),
-            linear_token: "tok_linear_prod_test01".to_string(),
-            slack_token: String::new(),
-        }),
+        tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),
+        tool_context: tool_ctx,
         memory_owner: None,
         memory_repo: None,
         memory_path: None,
         mcp_tool_defs: vec![],
         mcp_dispatch: vec![],
-        split_client: None,
+        flag_client: Arc::new(AlwaysOnFlagClient),
         tenant_id: "test".to_string(),
     }
 }

@@ -115,32 +115,41 @@ mod tests {
         assert_eq!(ci_tools().len(), 4);
     }
 
-    #[tokio::test]
-    async fn handle_skips_non_completed_action() {
-        use crate::agent_loop::AgentLoop;
-        use crate::tools::ToolContext;
+    fn make_skip_agent() -> AgentLoop {
+        use crate::agent_loop::ReqwestAnthropicClient;
+        use crate::flag_client::AlwaysOnFlagClient;
+        use crate::tools::{DefaultToolDispatcher, ToolContext};
         use std::sync::Arc;
-        let agent = AgentLoop {
+        let tool_ctx = Arc::new(ToolContext {
             http_client: reqwest::Client::new(),
             proxy_url: "http://localhost:9999".to_string(),
-            anthropic_token: String::new(),
+            github_token: String::new(),
+            linear_token: String::new(),
+            slack_token: String::new(),
+        });
+        AgentLoop {
+            anthropic_client: Arc::new(ReqwestAnthropicClient::new(
+                reqwest::Client::new(),
+                "http://localhost:9999".to_string(),
+                String::new(),
+            )),
             model: "test".to_string(),
             max_iterations: 1,
-            tool_context: Arc::new(ToolContext {
-                http_client: reqwest::Client::new(),
-                proxy_url: "http://localhost:9999".to_string(),
-                github_token: String::new(),
-                linear_token: String::new(),
-                slack_token: String::new(),
-            }),
+            tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),
+            tool_context: tool_ctx,
             memory_owner: None,
             memory_repo: None,
             memory_path: None,
             mcp_tool_defs: vec![],
             mcp_dispatch: vec![],
-            split_client: None,
+            flag_client: Arc::new(AlwaysOnFlagClient),
             tenant_id: "test".to_string(),
-        };
+        }
+    }
+
+    #[tokio::test]
+    async fn handle_skips_non_completed_action() {
+        let agent = make_skip_agent();
         let payload = serde_json::json!({
             "action": "created",
             "check_run": {"name": "CI", "conclusion": null, "pull_requests": [], "details_url": ""},
@@ -155,30 +164,7 @@ mod tests {
 
     #[tokio::test]
     async fn handle_skips_successful_run() {
-        use crate::agent_loop::AgentLoop;
-        use crate::tools::ToolContext;
-        use std::sync::Arc;
-        let agent = AgentLoop {
-            http_client: reqwest::Client::new(),
-            proxy_url: "http://localhost:9999".to_string(),
-            anthropic_token: String::new(),
-            model: "test".to_string(),
-            max_iterations: 1,
-            tool_context: Arc::new(ToolContext {
-                http_client: reqwest::Client::new(),
-                proxy_url: "http://localhost:9999".to_string(),
-                github_token: String::new(),
-                linear_token: String::new(),
-                slack_token: String::new(),
-            }),
-            memory_owner: None,
-            memory_repo: None,
-            memory_path: None,
-            mcp_tool_defs: vec![],
-            mcp_dispatch: vec![],
-            split_client: None,
-            tenant_id: "test".to_string(),
-        };
+        let agent = make_skip_agent();
         let payload = serde_json::json!({
             "action": "completed",
             "check_run": {"name": "CI", "conclusion": "success", "pull_requests": [], "details_url": ""},

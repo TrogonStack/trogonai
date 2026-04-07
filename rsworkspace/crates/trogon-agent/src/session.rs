@@ -7,6 +7,9 @@
 //! All sessions are stored in the `SESSIONS` KV bucket.
 //! Key format: `{tenant_id}.{session_id}`.
 
+use std::future::Future;
+use std::pin::Pin;
+
 use async_nats::jetstream::{self, kv};
 use bytes::Bytes;
 use futures_util::StreamExt as _;
@@ -150,6 +153,160 @@ impl SessionStore {
 
         result.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
         Ok(result)
+    }
+}
+
+// ── Repository trait ──────────────────────────────────────────────────────────
+
+/// Abstraction over a session store.
+///
+/// Implementing this trait allows replacing the real NATS KV backend with a
+/// lightweight in-memory fake in unit tests.
+pub trait SessionRepository: Clone + Send + Sync + 'static {
+    fn put<'a>(
+        &'a self,
+        session: &'a ChatSession,
+    ) -> Pin<Box<dyn Future<Output = Result<(), SessionStoreError>> + Send + 'a>>;
+
+    fn get<'a>(
+        &'a self,
+        tenant_id: &'a str,
+        id: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<ChatSession>, SessionStoreError>> + Send + 'a>>;
+
+    fn delete<'a>(
+        &'a self,
+        tenant_id: &'a str,
+        id: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), SessionStoreError>> + Send + 'a>>;
+
+    fn list<'a>(
+        &'a self,
+        tenant_id: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<ChatSession>, SessionStoreError>> + Send + 'a>>;
+}
+
+impl SessionRepository for SessionStore {
+    fn put<'a>(
+        &'a self,
+        session: &'a ChatSession,
+    ) -> Pin<Box<dyn Future<Output = Result<(), SessionStoreError>> + Send + 'a>> {
+        Box::pin(async move { self.put(session).await })
+    }
+
+    fn get<'a>(
+        &'a self,
+        tenant_id: &'a str,
+        id: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<ChatSession>, SessionStoreError>> + Send + 'a>>
+    {
+        Box::pin(async move { self.get(tenant_id, id).await })
+    }
+
+    fn delete<'a>(
+        &'a self,
+        tenant_id: &'a str,
+        id: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), SessionStoreError>> + Send + 'a>> {
+        Box::pin(async move { self.delete(tenant_id, id).await })
+    }
+
+    fn list<'a>(
+        &'a self,
+        tenant_id: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<ChatSession>, SessionStoreError>> + Send + 'a>> {
+        Box::pin(async move { self.list(tenant_id).await })
+    }
+}
+
+// ── In-memory mock (test-only) ────────────────────────────────────────────────
+
+#[cfg(test)]
+pub mod mock {
+    use super::*;
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex};
+
+    /// HashMap-backed in-memory session store for unit tests.
+    #[derive(Clone, Default)]
+    pub struct MockSessionStore {
+        data: Arc<Mutex<HashMap<String, ChatSession>>>,
+    }
+
+    impl MockSessionStore {
+        pub fn new() -> Self {
+            Self::default()
+        }
+
+        /// Pre-populate the store with a session.
+        pub fn insert(&self, session: ChatSession) {
+            let key = format!("{}.{}", session.tenant_id, session.id);
+            self.data.lock().unwrap().insert(key, session);
+        }
+
+        /// Snapshot the current store contents.
+        pub fn snapshot(&self) -> HashMap<String, ChatSession> {
+            self.data.lock().unwrap().clone()
+        }
+    }
+
+    impl SessionRepository for MockSessionStore {
+        fn put<'a>(
+            &'a self,
+            session: &'a ChatSession,
+        ) -> Pin<Box<dyn Future<Output = Result<(), SessionStoreError>> + Send + 'a>> {
+            let data = Arc::clone(&self.data);
+            let session = session.clone();
+            Box::pin(async move {
+                let key = format!("{}.{}", session.tenant_id, session.id);
+                data.lock().unwrap().insert(key, session);
+                Ok(())
+            })
+        }
+
+        fn get<'a>(
+            &'a self,
+            tenant_id: &'a str,
+            id: &'a str,
+        ) -> Pin<
+            Box<dyn Future<Output = Result<Option<ChatSession>, SessionStoreError>> + Send + 'a>,
+        > {
+            let data = Arc::clone(&self.data);
+            let key = format!("{tenant_id}.{id}");
+            Box::pin(async move { Ok(data.lock().unwrap().get(&key).cloned()) })
+        }
+
+        fn delete<'a>(
+            &'a self,
+            tenant_id: &'a str,
+            id: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<(), SessionStoreError>> + Send + 'a>> {
+            let data = Arc::clone(&self.data);
+            let key = format!("{tenant_id}.{id}");
+            Box::pin(async move {
+                data.lock().unwrap().remove(&key);
+                Ok(())
+            })
+        }
+
+        fn list<'a>(
+            &'a self,
+            tenant_id: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<ChatSession>, SessionStoreError>> + Send + 'a>>
+        {
+            let data = Arc::clone(&self.data);
+            let prefix = format!("{tenant_id}.");
+            Box::pin(async move {
+                let guard = data.lock().unwrap();
+                let mut sessions: Vec<ChatSession> = guard
+                    .iter()
+                    .filter(|(k, _)| k.starts_with(&prefix))
+                    .map(|(_, v)| v.clone())
+                    .collect();
+                sessions.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+                Ok(sessions)
+            })
+        }
     }
 }
 

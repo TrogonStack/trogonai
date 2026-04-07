@@ -234,27 +234,33 @@ mod tests {
     }
 
     fn make_agent() -> AgentLoop {
-        use crate::tools::ToolContext;
+        use crate::agent_loop::ReqwestAnthropicClient;
+        use crate::flag_client::AlwaysOnFlagClient;
+        use crate::tools::{DefaultToolDispatcher, ToolContext};
         use std::sync::Arc;
-        AgentLoop {
+        let tool_ctx = Arc::new(ToolContext {
             http_client: reqwest::Client::new(),
             proxy_url: "http://localhost:9999".to_string(),
-            anthropic_token: String::new(),
+            github_token: String::new(),
+            linear_token: String::new(),
+            slack_token: String::new(),
+        });
+        AgentLoop {
+            anthropic_client: Arc::new(ReqwestAnthropicClient::new(
+                reqwest::Client::new(),
+                "http://localhost:9999".to_string(),
+                String::new(),
+            )),
             model: "test".to_string(),
             max_iterations: 1,
-            tool_context: Arc::new(ToolContext {
-                http_client: reqwest::Client::new(),
-                proxy_url: "http://localhost:9999".to_string(),
-                github_token: String::new(),
-                linear_token: String::new(),
-                slack_token: String::new(),
-            }),
+            tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),
+            tool_context: tool_ctx,
             memory_owner: None,
             memory_repo: None,
             memory_path: None,
             mcp_tool_defs: vec![],
             mcp_dispatch: vec![],
-            split_client: None,
+            flag_client: Arc::new(AlwaysOnFlagClient),
             tenant_id: "test".to_string(),
         }
     }

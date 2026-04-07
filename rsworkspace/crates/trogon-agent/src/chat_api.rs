@@ -28,15 +28,15 @@ use serde_json::json;
 
 use crate::agent_loop::{AgentLoop, Message};
 use crate::handlers::{DEFAULT_MEMORY_PATH, fetch_memory};
-use crate::session::{ChatSession, SessionStore};
+use crate::session::{ChatSession, SessionRepository};
 use crate::tools::all_tool_defs;
 
 // ── App state ─────────────────────────────────────────────────────────────────
 
 #[derive(Clone)]
-pub struct ChatAppState {
+pub struct ChatAppState<R: SessionRepository> {
     pub agent: Arc<AgentLoop>,
-    pub session_store: SessionStore,
+    pub session_store: R,
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -181,7 +181,10 @@ pub struct SendMessageResponse {
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
 
-async fn list_sessions(headers: HeaderMap, State(state): State<ChatAppState>) -> Response {
+async fn list_sessions<R: SessionRepository>(
+    headers: HeaderMap,
+    State(state): State<ChatAppState<R>>,
+) -> Response {
     let tid = match tenant_id(&headers) {
         Ok(t) => t,
         Err(r) => return r,
@@ -195,9 +198,9 @@ async fn list_sessions(headers: HeaderMap, State(state): State<ChatAppState>) ->
     }
 }
 
-async fn create_session(
+async fn create_session<R: SessionRepository>(
     headers: HeaderMap,
-    State(state): State<ChatAppState>,
+    State(state): State<ChatAppState<R>>,
     axum::Json(body): axum::Json<CreateSessionRequest>,
 ) -> Response {
     let tid = match tenant_id(&headers) {
@@ -226,9 +229,9 @@ async fn create_session(
     }
 }
 
-async fn get_session(
+async fn get_session<R: SessionRepository>(
     headers: HeaderMap,
-    State(state): State<ChatAppState>,
+    State(state): State<ChatAppState<R>>,
     Path(id): Path<String>,
 ) -> Response {
     let tid = match tenant_id(&headers) {
@@ -243,9 +246,9 @@ async fn get_session(
     }
 }
 
-async fn update_session(
+async fn update_session<R: SessionRepository>(
     headers: HeaderMap,
-    State(state): State<ChatAppState>,
+    State(state): State<ChatAppState<R>>,
     Path(id): Path<String>,
     axum::Json(body): axum::Json<UpdateSessionRequest>,
 ) -> Response {
@@ -277,9 +280,9 @@ async fn update_session(
     }
 }
 
-async fn delete_session(
+async fn delete_session<R: SessionRepository>(
     headers: HeaderMap,
-    State(state): State<ChatAppState>,
+    State(state): State<ChatAppState<R>>,
     Path(id): Path<String>,
 ) -> Response {
     let tid = match tenant_id(&headers) {
@@ -297,9 +300,9 @@ async fn delete_session(
     }
 }
 
-async fn send_message(
+async fn send_message<R: SessionRepository>(
     headers: HeaderMap,
-    State(state): State<ChatAppState>,
+    State(state): State<ChatAppState<R>>,
     Path(id): Path<String>,
     axum::Json(body): axum::Json<SendMessageRequest>,
 ) -> Response {
@@ -342,18 +345,17 @@ async fn send_message(
         &state.agent
     } else {
         temp_agent = AgentLoop {
-            http_client: state.agent.http_client.clone(),
-            proxy_url: state.agent.proxy_url.clone(),
-            anthropic_token: state.agent.anthropic_token.clone(),
+            anthropic_client: Arc::clone(&state.agent.anthropic_client),
             model: effective_model,
             max_iterations: state.agent.max_iterations,
+            tool_dispatcher: Arc::clone(&state.agent.tool_dispatcher),
             tool_context: Arc::clone(&state.agent.tool_context),
             memory_owner: state.agent.memory_owner.clone(),
             memory_repo: state.agent.memory_repo.clone(),
             memory_path: state.agent.memory_path.clone(),
             mcp_tool_defs: state.agent.mcp_tool_defs.clone(),
             mcp_dispatch: state.agent.mcp_dispatch.clone(),
-            split_client: state.agent.split_client.clone(),
+            flag_client: Arc::clone(&state.agent.flag_client),
             tenant_id: state.agent.tenant_id.clone(),
         };
         &temp_agent
@@ -399,16 +401,19 @@ async fn send_message(
 
 // ── Router ────────────────────────────────────────────────────────────────────
 
-pub fn router(state: ChatAppState) -> Router {
+pub fn router<R: SessionRepository>(state: ChatAppState<R>) -> Router {
     Router::new()
-        .route("/sessions", get(list_sessions).post(create_session))
+        .route(
+            "/sessions",
+            get(list_sessions::<R>).post(create_session::<R>),
+        )
         .route(
             "/sessions/{id}",
-            get(get_session)
-                .patch(update_session)
-                .delete(delete_session),
+            get(get_session::<R>)
+                .patch(update_session::<R>)
+                .delete(delete_session::<R>),
         )
-        .route("/sessions/{id}/messages", post(send_message))
+        .route("/sessions/{id}/messages", post(send_message::<R>))
         .with_state(state)
 }
 
@@ -417,6 +422,10 @@ pub fn router(state: ChatAppState) -> Router {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::session::mock::MockSessionStore;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use tower::util::ServiceExt as _;
 
     #[test]
     fn now_iso8601_has_correct_format() {
@@ -453,5 +462,274 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert("x-tenant-id", "acme".parse().unwrap());
         assert_eq!(tenant_id(&headers).unwrap(), "acme");
+    }
+
+    // ── Handler tests ─────────────────────────────────────────────────────────
+
+    fn make_test_agent() -> Arc<AgentLoop> {
+        use crate::agent_loop::ReqwestAnthropicClient;
+        use crate::flag_client::AlwaysOnFlagClient;
+        use crate::tools::{DefaultToolDispatcher, ToolContext};
+
+        let http = reqwest::Client::new();
+        let tool_ctx = Arc::new(ToolContext {
+            http_client: http.clone(),
+            proxy_url: "http://127.0.0.1:1".to_string(),
+            github_token: String::new(),
+            linear_token: String::new(),
+            slack_token: String::new(),
+        });
+        Arc::new(AgentLoop {
+            anthropic_client: Arc::new(ReqwestAnthropicClient::new(
+                http,
+                "http://127.0.0.1:1".to_string(),
+                String::new(),
+            )),
+            model: "test".to_string(),
+            max_iterations: 1,
+            tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),
+            tool_context: tool_ctx,
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            flag_client: Arc::new(AlwaysOnFlagClient),
+            tenant_id: "test-tenant".to_string(),
+        })
+    }
+
+    fn mock_app(store: MockSessionStore) -> axum::Router {
+        let state = ChatAppState {
+            agent: make_test_agent(),
+            session_store: store,
+        };
+        router(state)
+    }
+
+    fn get_req(path: &str, tenant: &str) -> Request<Body> {
+        Request::builder()
+            .method("GET")
+            .uri(path)
+            .header("x-tenant-id", tenant)
+            .body(Body::empty())
+            .unwrap()
+    }
+
+    fn sample_session(id: &str, tenant: &str) -> ChatSession {
+        ChatSession {
+            id: id.to_string(),
+            tenant_id: tenant.to_string(),
+            name: "Test".to_string(),
+            model: None,
+            tools: vec![],
+            memory_path: None,
+            messages: vec![],
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-02T00:00:00Z".to_string(),
+        }
+    }
+
+    // list_sessions
+
+    #[tokio::test]
+    async fn list_sessions_returns_empty_when_no_sessions() {
+        let app = mock_app(MockSessionStore::new());
+        let resp = app.oneshot(get_req("/sessions", "acme")).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json, serde_json::json!([]));
+    }
+
+    #[tokio::test]
+    async fn list_sessions_returns_sessions_for_tenant() {
+        let store = MockSessionStore::new();
+        store.insert(sample_session("s1", "acme"));
+        store.insert(sample_session("s2", "acme"));
+        store.insert(sample_session("s3", "other-tenant"));
+        let app = mock_app(store);
+        let resp = app.oneshot(get_req("/sessions", "acme")).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json.as_array().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn list_sessions_missing_tenant_returns_400() {
+        let app = mock_app(MockSessionStore::new());
+        let req = Request::builder()
+            .method("GET")
+            .uri("/sessions")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    // create_session
+
+    #[tokio::test]
+    async fn create_session_returns_201_and_persists() {
+        let store = MockSessionStore::new();
+        let app = mock_app(store.clone());
+        let req = Request::builder()
+            .method("POST")
+            .uri("/sessions")
+            .header("x-tenant-id", "acme")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"name":"My Session"}"#))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["name"], "My Session");
+        assert_eq!(json["tenant_id"], "acme");
+        assert_eq!(store.snapshot().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn create_session_uses_default_name_when_omitted() {
+        let app = mock_app(MockSessionStore::new());
+        let req = Request::builder()
+            .method("POST")
+            .uri("/sessions")
+            .header("x-tenant-id", "acme")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{}"#))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["name"], "New Agent");
+    }
+
+    // get_session
+
+    #[tokio::test]
+    async fn get_session_returns_404_when_not_found() {
+        let app = mock_app(MockSessionStore::new());
+        let resp = app
+            .oneshot(get_req("/sessions/does-not-exist", "acme"))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn get_session_returns_session_with_messages() {
+        let store = MockSessionStore::new();
+        let mut s = sample_session("sess-1", "acme");
+        s.messages = vec![Message::user_text("hi")];
+        store.insert(s);
+        let app = mock_app(store);
+        let resp = app
+            .oneshot(get_req("/sessions/sess-1", "acme"))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["id"], "sess-1");
+        assert_eq!(json["messages"].as_array().unwrap().len(), 1);
+    }
+
+    // update_session
+
+    #[tokio::test]
+    async fn update_session_returns_404_when_not_found() {
+        let app = mock_app(MockSessionStore::new());
+        let req = Request::builder()
+            .method("PATCH")
+            .uri("/sessions/no-such-session")
+            .header("x-tenant-id", "acme")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"name":"New Name"}"#))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn update_session_updates_name_and_returns_summary() {
+        let store = MockSessionStore::new();
+        store.insert(sample_session("sess-1", "acme"));
+        let app = mock_app(store.clone());
+        let req = Request::builder()
+            .method("PATCH")
+            .uri("/sessions/sess-1")
+            .header("x-tenant-id", "acme")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"name":"Updated"}"#))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["name"], "Updated");
+        let snap = store.snapshot();
+        assert_eq!(snap["acme.sess-1"].name, "Updated");
+    }
+
+    // delete_session
+
+    #[tokio::test]
+    async fn delete_session_returns_404_when_not_found() {
+        let app = mock_app(MockSessionStore::new());
+        let req = Request::builder()
+            .method("DELETE")
+            .uri("/sessions/no-such")
+            .header("x-tenant-id", "acme")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn delete_session_removes_session_and_returns_204() {
+        let store = MockSessionStore::new();
+        store.insert(sample_session("sess-1", "acme"));
+        let app = mock_app(store.clone());
+        let req = Request::builder()
+            .method("DELETE")
+            .uri("/sessions/sess-1")
+            .header("x-tenant-id", "acme")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+        assert!(store.snapshot().is_empty());
+    }
+
+    // send_message
+
+    #[tokio::test]
+    async fn send_message_returns_404_when_session_not_found() {
+        let app = mock_app(MockSessionStore::new());
+        let req = Request::builder()
+            .method("POST")
+            .uri("/sessions/no-such/messages")
+            .header("x-tenant-id", "acme")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"content":"hello"}"#))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
     }
 }
