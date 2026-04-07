@@ -1,4 +1,5 @@
 use async_nats::jetstream;
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use trogon_agent_core::agent_loop::Message;
 
@@ -57,13 +58,30 @@ pub struct SessionState {
     pub allowed_tools: Vec<String>,
 }
 
+// ── SessionStore trait ────────────────────────────────────────────────────────
+
+/// Persistence interface for ACP session state.
+///
+/// The production implementation (`NatsSessionStore`) is backed by NATS KV.
+/// Tests can use `MemorySessionStore` (behind the `test-helpers` feature) to
+/// avoid any network dependencies.
+#[async_trait(?Send)]
+pub trait SessionStore: Clone {
+    async fn load(&self, session_id: &str) -> anyhow::Result<SessionState>;
+    async fn save(&self, session_id: &str, state: &SessionState) -> anyhow::Result<()>;
+    async fn delete(&self, session_id: &str) -> anyhow::Result<()>;
+    async fn list_ids(&self) -> anyhow::Result<Vec<String>>;
+}
+
+// ── NATS KV implementation ────────────────────────────────────────────────────
+
 /// NATS KV-backed session store.
 #[derive(Clone)]
-pub struct SessionStore {
+pub struct NatsSessionStore {
     kv: jetstream::kv::Store,
 }
 
-impl SessionStore {
+impl NatsSessionStore {
     /// Create or open the `ACP_SESSIONS` KV bucket.
     #[cfg_attr(coverage, coverage(off))]
     pub async fn open(js: &jetstream::Context) -> anyhow::Result<Self> {
@@ -75,10 +93,13 @@ impl SessionStore {
             .await?;
         Ok(Self { kv })
     }
+}
 
+#[async_trait(?Send)]
+impl SessionStore for NatsSessionStore {
     /// Load session history, returning an empty state if the key does not exist.
     #[cfg_attr(coverage, coverage(off))]
-    pub async fn load(&self, session_id: &str) -> anyhow::Result<SessionState> {
+    async fn load(&self, session_id: &str) -> anyhow::Result<SessionState> {
         match self.kv.get(session_id).await? {
             Some(bytes) => Ok(serde_json::from_slice(&bytes)?),
             None => Ok(SessionState::default()),
@@ -87,7 +108,7 @@ impl SessionStore {
 
     /// Persist updated session state.
     #[cfg_attr(coverage, coverage(off))]
-    pub async fn save(&self, session_id: &str, state: &SessionState) -> anyhow::Result<()> {
+    async fn save(&self, session_id: &str, state: &SessionState) -> anyhow::Result<()> {
         let bytes = serde_json::to_vec(state)?;
         self.kv.put(session_id, bytes.into()).await?;
         Ok(())
@@ -95,14 +116,14 @@ impl SessionStore {
 
     /// Delete a session from the store (best-effort).
     #[cfg_attr(coverage, coverage(off))]
-    pub async fn delete(&self, session_id: &str) -> anyhow::Result<()> {
+    async fn delete(&self, session_id: &str) -> anyhow::Result<()> {
         self.kv.delete(session_id).await?;
         Ok(())
     }
 
     /// List all session IDs currently in the store.
     #[cfg_attr(coverage, coverage(off))]
-    pub async fn list_ids(&self) -> anyhow::Result<Vec<String>> {
+    async fn list_ids(&self) -> anyhow::Result<Vec<String>> {
         use futures_util::StreamExt;
         let mut keys = self.kv.keys().await?;
         let mut ids = Vec::new();
@@ -115,6 +136,59 @@ impl SessionStore {
         Ok(ids)
     }
 }
+
+// ── In-memory mock (test-helpers feature) ─────────────────────────────────────
+
+#[cfg(feature = "test-helpers")]
+pub mod mock {
+    use super::*;
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex};
+
+    /// In-memory `SessionStore` for unit tests (no NATS required).
+    #[derive(Clone, Default)]
+    pub struct MemorySessionStore {
+        sessions: Arc<Mutex<HashMap<String, SessionState>>>,
+    }
+
+    impl MemorySessionStore {
+        pub fn new() -> Self {
+            Self::default()
+        }
+    }
+
+    #[async_trait::async_trait(?Send)]
+    impl SessionStore for MemorySessionStore {
+        async fn load(&self, session_id: &str) -> anyhow::Result<SessionState> {
+            Ok(self
+                .sessions
+                .lock()
+                .unwrap()
+                .get(session_id)
+                .cloned()
+                .unwrap_or_default())
+        }
+
+        async fn save(&self, session_id: &str, state: &SessionState) -> anyhow::Result<()> {
+            self.sessions
+                .lock()
+                .unwrap()
+                .insert(session_id.to_string(), state.clone());
+            Ok(())
+        }
+
+        async fn delete(&self, session_id: &str) -> anyhow::Result<()> {
+            self.sessions.lock().unwrap().remove(session_id);
+            Ok(())
+        }
+
+        async fn list_ids(&self) -> anyhow::Result<Vec<String>> {
+            Ok(self.sessions.lock().unwrap().keys().cloned().collect())
+        }
+    }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 /// Returns the current UTC time as an ISO-8601 string (seconds precision).
 pub fn now_iso8601() -> String {

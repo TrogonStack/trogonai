@@ -112,12 +112,16 @@ async fn main() -> anyhow::Result<()> {
 
     // ── Session store ─────────────────────────────────────────────────────────
 
-    let store = trogon_acp_runner::SessionStore::open(&js).await?;
+    let store = trogon_acp_runner::NatsSessionStore::open(&js).await?;
+
+    // ── NATS notifier ─────────────────────────────────────────────────────────
+
+    let notifier = trogon_acp_runner::NatsSessionNotifier::new(nats.clone());
 
     // ── TrogonAgent ───────────────────────────────────────────────────────────
 
     let agent = trogon_acp_runner::TrogonAgent::new(
-        nats.clone(),
+        notifier,
         store,
         agent_loop,
         acp_prefix.clone(),

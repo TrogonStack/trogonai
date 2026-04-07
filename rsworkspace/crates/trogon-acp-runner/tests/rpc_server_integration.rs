@@ -25,7 +25,7 @@ use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::runners::AsyncRunner;
 use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt};
 use tokio::sync::RwLock;
-use trogon_acp_runner::{SessionState, SessionStore, TrogonAgent};
+use trogon_acp_runner::{NatsSessionNotifier, NatsSessionStore, SessionState, SessionStore, TrogonAgent};
 use trogon_agent_core::agent_loop::AgentLoop;
 use trogon_agent_core::tools::ToolContext;
 
@@ -69,18 +69,19 @@ fn make_agent_loop() -> AgentLoop {
     }
 }
 
-/// Start a `TrogonAgent` via `AgentSideNatsConnection`, return the `SessionStore`.
+/// Start a `TrogonAgent` via `AgentSideNatsConnection`, return the `NatsSessionStore`.
 ///
 /// Must be called from within a `LocalSet` (uses `spawn_local` internally).
 async fn start_agent(
     nats: async_nats::Client,
     js: &jetstream::Context,
     prefix: &str,
-) -> SessionStore {
-    let store = SessionStore::open(js).await.unwrap();
+) -> NatsSessionStore {
+    let store = NatsSessionStore::open(js).await.unwrap();
+    let notifier = NatsSessionNotifier::new(nats.clone());
     let gateway_config = Arc::new(RwLock::new(None));
     let agent = TrogonAgent::new(
-        nats.clone(),
+        notifier,
         store.clone(),
         make_agent_loop(),
         prefix,
