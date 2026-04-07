@@ -12,10 +12,10 @@
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::time::Duration;
 
-use futures_util::future::join_all;
 use futures_util::StreamExt as _;
+use futures_util::future::join_all;
 use testcontainers_modules::nats::Nats;
-use testcontainers_modules::testcontainers::{runners::AsyncRunner, ContainerAsync, ImageExt};
+use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
 use tokio::process::{Child, Command};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -60,7 +60,12 @@ fn spawn_proxy(nats_port: u16, proxy_port: u16, mock_base_url: &str) -> Child {
     spawn_proxy_with_timeout(nats_port, proxy_port, mock_base_url, 15)
 }
 
-fn spawn_proxy_with_timeout(nats_port: u16, proxy_port: u16, mock_base_url: &str, timeout_secs: u64) -> Child {
+fn spawn_proxy_with_timeout(
+    nats_port: u16,
+    proxy_port: u16,
+    mock_base_url: &str,
+    timeout_secs: u64,
+) -> Child {
     Command::new(env!("CARGO_BIN_EXE_proxy"))
         .env("NATS_URL", format!("localhost:{}", nats_port))
         .env("PROXY_PORT", proxy_port.to_string())
@@ -127,7 +132,10 @@ async fn binary_vgs_tok_token_never_reaches_ai_provider() {
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     let resp = reqwest::Client::new()
-        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
         .header("Authorization", format!("Bearer {}", token))
         .header("Content-Type", "application/json")
         .body(r#"{"model":"claude-3-5-sonnet","messages":[]}"#)
@@ -139,7 +147,11 @@ async fn binary_vgs_tok_token_never_reaches_ai_provider() {
     assert_eq!(resp.status(), 200, "Request with valid token must succeed");
 
     // The real key mock must have been hit exactly once.
-    assert_eq!(real_key_mock.hits(), 1, "AI provider must receive the real key");
+    assert_eq!(
+        real_key_mock.hits(),
+        1,
+        "AI provider must receive the real key"
+    );
     // The tok_ token must NEVER have reached the provider.
     assert_eq!(
         tok_leak_mock.hits(),
@@ -182,7 +194,10 @@ async fn binary_vgs_real_key_never_leaks_to_caller_in_response_headers() {
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     let resp = reqwest::Client::new()
-        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
         .header("Authorization", format!("Bearer {}", token))
         .header("Content-Type", "application/json")
         .body(r#"{"model":"claude-3-5-sonnet","messages":[]}"#)
@@ -297,8 +312,16 @@ async fn binary_vgs_concurrent_tokens_no_cross_contamination() {
     }
 
     // Each mock received exactly its own 5 requests — no cross-contamination.
-    assert_eq!(mock_a.hits(), 5, "Service A key must be used for exactly 5 requests");
-    assert_eq!(mock_b.hits(), 5, "Service B key must be used for exactly 5 requests");
+    assert_eq!(
+        mock_a.hits(),
+        5,
+        "Service A key must be used for exactly 5 requests"
+    );
+    assert_eq!(
+        mock_b.hits(),
+        5,
+        "Service B key must be used for exactly 5 requests"
+    );
 }
 
 /// VGS property 4: the proxy is transparent — status, headers, and body from
@@ -331,7 +354,10 @@ async fn binary_vgs_proxy_is_transparent_to_caller() {
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     let resp = reqwest::Client::new()
-        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
         .header("Authorization", format!("Bearer {}", token))
         .header("Content-Type", "application/json")
         .body(r#"{"model":"claude-3-5-sonnet","messages":[]}"#)
@@ -341,23 +367,34 @@ async fn binary_vgs_proxy_is_transparent_to_caller() {
         .unwrap();
 
     // Status code forwarded unchanged.
-    assert_eq!(resp.status(), 201, "Provider status 201 must be forwarded to caller");
+    assert_eq!(
+        resp.status(),
+        201,
+        "Provider status 201 must be forwarded to caller"
+    );
 
     // Custom response headers forwarded.
     assert_eq!(
-        resp.headers().get("x-request-id").and_then(|v| v.to_str().ok()),
+        resp.headers()
+            .get("x-request-id")
+            .and_then(|v| v.to_str().ok()),
         Some("req-vgs-004"),
         "x-request-id header must be forwarded"
     );
     assert_eq!(
-        resp.headers().get("x-custom-provider-header").and_then(|v| v.to_str().ok()),
+        resp.headers()
+            .get("x-custom-provider-header")
+            .and_then(|v| v.to_str().ok()),
         Some("provider-value-abc"),
         "Custom provider header must be forwarded"
     );
 
     // Response body forwarded byte-for-byte.
     let body = resp.text().await.unwrap();
-    assert_eq!(body, response_body, "Response body must be forwarded unchanged");
+    assert_eq!(
+        body, response_body,
+        "Response body must be forwarded unchanged"
+    );
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -488,8 +525,18 @@ async fn binary_two_workers_handle_concurrent_requests() {
     wait_for_port(proxy_port, Duration::from_secs(15)).await;
 
     // Two worker instances share the same consumer name → JetStream queue group.
-    let _worker_a = spawn_worker(nats_port, "binary-workers-scaled", token, "sk-ant-bin-realkey");
-    let _worker_b = spawn_worker(nats_port, "binary-workers-scaled", token, "sk-ant-bin-realkey");
+    let _worker_a = spawn_worker(
+        nats_port,
+        "binary-workers-scaled",
+        token,
+        "sk-ant-bin-realkey",
+    );
+    let _worker_b = spawn_worker(
+        nats_port,
+        "binary-workers-scaled",
+        token,
+        "sk-ant-bin-realkey",
+    );
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     // Fire 5 requests simultaneously.
@@ -571,7 +618,11 @@ async fn binary_unknown_token_returns_error() {
         resp.status()
     );
     // Mock was never reached.
-    assert_eq!(_should_not_be_called.hits(), 0, "AI provider should not have been called");
+    assert_eq!(
+        _should_not_be_called.hits(),
+        0,
+        "AI provider should not have been called"
+    );
 }
 
 /// Two different tokens each map to a different real key.
@@ -629,7 +680,10 @@ async fn binary_multiple_tokens_each_resolve_to_correct_key() {
 
     // Request with token A.
     let resp_a = client
-        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
         .header("Authorization", format!("Bearer {}", token_a))
         .header("Content-Type", "application/json")
         .body("{}")
@@ -644,7 +698,10 @@ async fn binary_multiple_tokens_each_resolve_to_correct_key() {
 
     // Request with token B.
     let resp_b = client
-        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
         .header("Authorization", format!("Bearer {}", token_b))
         .header("Content-Type", "application/json")
         .body("{}")
@@ -684,11 +741,19 @@ async fn binary_worker_restart_new_worker_handles_requests() {
     wait_for_port(proxy_port, Duration::from_secs(15)).await;
 
     // Start first worker, send a request, verify it works.
-    let mut worker_1 = spawn_worker(nats_port, "binary-workers-restart", token, "sk-ant-restart-key");
+    let mut worker_1 = spawn_worker(
+        nats_port,
+        "binary-workers-restart",
+        token,
+        "sk-ant-restart-key",
+    );
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     let resp = reqwest::Client::new()
-        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
         .header("Authorization", format!("Bearer {}", token))
         .header("Content-Type", "application/json")
         .body("{}")
@@ -703,12 +768,20 @@ async fn binary_worker_restart_new_worker_handles_requests() {
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     // Start worker 2 — same consumer name picks up the durable subscription.
-    let _worker_2 = spawn_worker(nats_port, "binary-workers-restart", token, "sk-ant-restart-key");
+    let _worker_2 = spawn_worker(
+        nats_port,
+        "binary-workers-restart",
+        token,
+        "sk-ant-restart-key",
+    );
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     // New request after restart must succeed.
     let resp2 = reqwest::Client::new()
-        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
         .header("Authorization", format!("Bearer {}", token))
         .header("Content-Type", "application/json")
         .body("{}")
@@ -799,7 +872,9 @@ async fn binary_response_headers_are_forwarded_to_caller() {
 
     assert_eq!(resp.status(), 200);
     assert_eq!(
-        resp.headers().get("x-request-id").and_then(|v| v.to_str().ok()),
+        resp.headers()
+            .get("x-request-id")
+            .and_then(|v| v.to_str().ok()),
         Some("upstream-req-id-123"),
         "x-request-id header should be forwarded"
     );
@@ -1088,7 +1163,12 @@ async fn binary_openai_provider_routes_correctly() {
     let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
     wait_for_port(proxy_port, Duration::from_secs(15)).await;
 
-    let _worker = spawn_worker(nats_port, "binary-workers-openai", token, "sk-openai-real-key");
+    let _worker = spawn_worker(
+        nats_port,
+        "binary-workers-openai",
+        token,
+        "sk-openai-real-key",
+    );
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     let resp = reqwest::Client::new()
@@ -1123,7 +1203,9 @@ async fn binary_4xx_from_provider_is_not_retried() {
             when.method(httpmock::Method::POST).path("/v1/messages");
             then.status(422)
                 .header("content-type", "application/json")
-                .body(r#"{"error":{"type":"invalid_request_error","message":"max_tokens required"}}"#);
+                .body(
+                    r#"{"error":{"type":"invalid_request_error","message":"max_tokens required"}}"#,
+                );
         })
         .await;
 
@@ -1180,7 +1262,12 @@ async fn binary_missing_auth_header_returns_error() {
     let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
     wait_for_port(proxy_port, Duration::from_secs(15)).await;
 
-    let _worker = spawn_worker(nats_port, "binary-workers-noauth", token, "sk-ant-key-noauth");
+    let _worker = spawn_worker(
+        nats_port,
+        "binary-workers-noauth",
+        token,
+        "sk-ant-key-noauth",
+    );
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     // No Authorization header in the request.
@@ -1234,7 +1321,12 @@ async fn binary_request_headers_are_forwarded_to_provider() {
     let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
     wait_for_port(proxy_port, Duration::from_secs(15)).await;
 
-    let _worker = spawn_worker(nats_port, "binary-workers-reqhdrs", token, "sk-ant-key-hdrs");
+    let _worker = spawn_worker(
+        nats_port,
+        "binary-workers-reqhdrs",
+        token,
+        "sk-ant-key-hdrs",
+    );
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     let resp = reqwest::Client::new()
@@ -1307,7 +1399,8 @@ async fn binary_delete_and_put_methods_pass_through() {
     let mock_server = httpmock::MockServer::start_async().await;
     let mock_delete = mock_server
         .mock_async(|when, then| {
-            when.method(httpmock::Method::DELETE).path("/v1/files/file-abc");
+            when.method(httpmock::Method::DELETE)
+                .path("/v1/files/file-abc");
             then.status(200)
                 .header("content-type", "application/json")
                 .body(r#"{"id":"file-abc","deleted":true}"#);
@@ -1315,7 +1408,8 @@ async fn binary_delete_and_put_methods_pass_through() {
         .await;
     let mock_put = mock_server
         .mock_async(|when, then| {
-            when.method(httpmock::Method::PUT).path("/v1/assistants/asst-xyz");
+            when.method(httpmock::Method::PUT)
+                .path("/v1/assistants/asst-xyz");
             then.status(200)
                 .header("content-type", "application/json")
                 .body(r#"{"id":"asst-xyz","updated":true}"#);
@@ -1328,7 +1422,12 @@ async fn binary_delete_and_put_methods_pass_through() {
     let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
     wait_for_port(proxy_port, Duration::from_secs(15)).await;
 
-    let _worker = spawn_worker(nats_port, "binary-workers-methods", token, "sk-openai-key-meth");
+    let _worker = spawn_worker(
+        nats_port,
+        "binary-workers-methods",
+        token,
+        "sk-openai-key-meth",
+    );
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     let client = reqwest::Client::new();
@@ -1343,7 +1442,12 @@ async fn binary_delete_and_put_methods_pass_through() {
         .send()
         .await
         .unwrap();
-    assert_eq!(resp_delete.status(), 200, "DELETE failed: {}", resp_delete.status());
+    assert_eq!(
+        resp_delete.status(),
+        200,
+        "DELETE failed: {}",
+        resp_delete.status()
+    );
     let body_d: serde_json::Value = resp_delete.json().await.unwrap();
     assert_eq!(body_d["deleted"], true);
 
@@ -1394,7 +1498,10 @@ async fn binary_worker_survives_orphaned_reply_subject() {
 
     // Send request BEFORE worker starts → proxy will time out.
     let timeout_resp = reqwest::Client::new()
-        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
         .header("Authorization", format!("Bearer {}", token))
         .header("Content-Type", "application/json")
         .body("{}")
@@ -1407,12 +1514,20 @@ async fn binary_worker_survives_orphaned_reply_subject() {
     // Now start the worker — it picks up the orphaned message from JetStream,
     // calls the mock, tries to publish to the dead reply subject (ignored),
     // then acks the message and stays healthy.
-    let _worker = spawn_worker(nats_port, "binary-workers-orphan", token, "sk-ant-key-orphan");
+    let _worker = spawn_worker(
+        nats_port,
+        "binary-workers-orphan",
+        token,
+        "sk-ant-key-orphan",
+    );
     tokio::time::sleep(Duration::from_millis(800)).await;
 
     // A fresh request must succeed — worker is still alive.
     let ok_resp = reqwest::Client::new()
-        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
         .header("Authorization", format!("Bearer {}", token))
         .header("Content-Type", "application/json")
         .body("{}")
@@ -1420,7 +1535,11 @@ async fn binary_worker_survives_orphaned_reply_subject() {
         .send()
         .await
         .unwrap();
-    assert_eq!(ok_resp.status(), 200, "Worker should still be alive after orphaned reply");
+    assert_eq!(
+        ok_resp.status(),
+        200,
+        "Worker should still be alive after orphaned reply"
+    );
 
     // Mock was called twice: once for the orphaned message, once for the fresh request.
     assert_eq!(_mock.hits(), 2, "Mock should have been hit exactly twice");
@@ -1453,7 +1572,8 @@ async fn binary_gemini_cohere_mistral_providers_route_correctly() {
         .await;
     let mock_mistral = mock_server
         .mock_async(|when, then| {
-            when.method(httpmock::Method::POST).path("/v1/chat/completions");
+            when.method(httpmock::Method::POST)
+                .path("/v1/chat/completions");
             then.status(200)
                 .header("content-type", "application/json")
                 .body(r#"{"id":"mistral-01","object":"chat.completion"}"#);
@@ -1461,8 +1581,8 @@ async fn binary_gemini_cohere_mistral_providers_route_correctly() {
         .await;
 
     let proxy_port = free_port();
-    let tok_gemini  = "tok_gemini_prod_gem001";
-    let tok_cohere  = "tok_cohere_prod_coh001";
+    let tok_gemini = "tok_gemini_prod_gem001";
+    let tok_cohere = "tok_cohere_prod_coh001";
     let tok_mistral = "tok_mistral_prod_mis001";
 
     let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
@@ -1471,8 +1591,8 @@ async fn binary_gemini_cohere_mistral_providers_route_correctly() {
     let _worker = Command::new(env!("CARGO_BIN_EXE_worker"))
         .env("NATS_URL", format!("localhost:{}", nats_port))
         .env("WORKER_CONSUMER_NAME", "binary-workers-multi-prov")
-        .env(format!("VAULT_TOKEN_{}", tok_gemini),  "sk-gemini-real")
-        .env(format!("VAULT_TOKEN_{}", tok_cohere),  "sk-cohere-real")
+        .env(format!("VAULT_TOKEN_{}", tok_gemini), "sk-gemini-real")
+        .env(format!("VAULT_TOKEN_{}", tok_cohere), "sk-cohere-real")
         .env(format!("VAULT_TOKEN_{}", tok_mistral), "sk-mistral-real")
         .env("RUST_LOG", "warn")
         .kill_on_drop(true)
@@ -1494,13 +1614,15 @@ async fn binary_gemini_cohere_mistral_providers_route_correctly() {
         .send()
         .await
         .unwrap();
-    assert_eq!(resp_gemini.status(), 200, "Gemini failed: {}", resp_gemini.status());
+    assert_eq!(
+        resp_gemini.status(),
+        200,
+        "Gemini failed: {}",
+        resp_gemini.status()
+    );
 
     let resp_cohere = client
-        .post(format!(
-            "http://127.0.0.1:{}/cohere/v1/chat",
-            proxy_port
-        ))
+        .post(format!("http://127.0.0.1:{}/cohere/v1/chat", proxy_port))
         .header("Authorization", format!("Bearer {}", tok_cohere))
         .header("Content-Type", "application/json")
         .body("{}")
@@ -1508,7 +1630,12 @@ async fn binary_gemini_cohere_mistral_providers_route_correctly() {
         .send()
         .await
         .unwrap();
-    assert_eq!(resp_cohere.status(), 200, "Cohere failed: {}", resp_cohere.status());
+    assert_eq!(
+        resp_cohere.status(),
+        200,
+        "Cohere failed: {}",
+        resp_cohere.status()
+    );
 
     let resp_mistral = client
         .post(format!(
@@ -1522,7 +1649,12 @@ async fn binary_gemini_cohere_mistral_providers_route_correctly() {
         .send()
         .await
         .unwrap();
-    assert_eq!(resp_mistral.status(), 200, "Mistral failed: {}", resp_mistral.status());
+    assert_eq!(
+        resp_mistral.status(),
+        200,
+        "Mistral failed: {}",
+        resp_mistral.status()
+    );
 
     mock_gemini.assert_async().await;
     mock_cohere.assert_async().await;
@@ -1604,7 +1736,8 @@ async fn binary_non_200_success_status_forwarded() {
     // 204 No Content — e.g. deleting with no body in response.
     let mock_204 = mock_server
         .mock_async(|when, then| {
-            when.method(httpmock::Method::DELETE).path("/v1/sessions/sess-abc");
+            when.method(httpmock::Method::DELETE)
+                .path("/v1/sessions/sess-abc");
             then.status(204);
         })
         .await;
@@ -1621,26 +1754,35 @@ async fn binary_non_200_success_status_forwarded() {
     let client = reqwest::Client::new();
     let base = format!("http://127.0.0.1:{}/openai", proxy_port);
 
-    let r201 = client.post(format!("{}/v1/files", base))
+    let r201 = client
+        .post(format!("{}/v1/files", base))
         .header("Authorization", format!("Bearer {}", token))
         .header("Content-Type", "application/json")
         .body("{}")
         .timeout(Duration::from_secs(15))
-        .send().await.unwrap();
+        .send()
+        .await
+        .unwrap();
     assert_eq!(r201.status(), 201, "Expected 201, got {}", r201.status());
 
-    let r202 = client.post(format!("{}/v1/batches", base))
+    let r202 = client
+        .post(format!("{}/v1/batches", base))
         .header("Authorization", format!("Bearer {}", token))
         .header("Content-Type", "application/json")
         .body("{}")
         .timeout(Duration::from_secs(15))
-        .send().await.unwrap();
+        .send()
+        .await
+        .unwrap();
     assert_eq!(r202.status(), 202, "Expected 202, got {}", r202.status());
 
-    let r204 = client.delete(format!("{}/v1/sessions/sess-abc", base))
+    let r204 = client
+        .delete(format!("{}/v1/sessions/sess-abc", base))
         .header("Authorization", format!("Bearer {}", token))
         .timeout(Duration::from_secs(15))
-        .send().await.unwrap();
+        .send()
+        .await
+        .unwrap();
     assert_eq!(r204.status(), 204, "Expected 204, got {}", r204.status());
 
     mock_201.assert_async().await;
@@ -1715,7 +1857,7 @@ async fn binary_large_response_body_passes_through() {
 /// minimal axum server that records the X-Request-Id from each incoming call.
 #[tokio::test]
 async fn binary_idempotency_key_sent_to_provider() {
-    use axum::{extract::State, http::Request, body::Body as AxumBody};
+    use axum::{body::Body as AxumBody, extract::State, http::Request};
     use std::sync::{Arc, Mutex};
 
     let (_nats_container, nats_port) = start_nats().await;
@@ -1747,10 +1889,9 @@ async fn binary_idempotency_key_sent_to_provider() {
         .with_state(captured_for_handler);
 
     let provider_port = free_port();
-    let provider_listener =
-        tokio::net::TcpListener::bind(format!("127.0.0.1:{}", provider_port))
-            .await
-            .unwrap();
+    let provider_listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{}", provider_port))
+        .await
+        .unwrap();
     tokio::spawn(async move {
         axum::serve(provider_listener, capture_app).await.unwrap();
     });
@@ -1770,7 +1911,10 @@ async fn binary_idempotency_key_sent_to_provider() {
     let client = reqwest::Client::new();
     for _ in 0..2 {
         let resp = client
-            .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+            .post(format!(
+                "http://127.0.0.1:{}/anthropic/v1/messages",
+                proxy_port
+            ))
             .header("Authorization", format!("Bearer {}", token))
             .header("Content-Type", "application/json")
             .body("{}")
@@ -1785,13 +1929,14 @@ async fn binary_idempotency_key_sent_to_provider() {
     assert_eq!(ids.len(), 2, "Provider should have been called twice");
 
     // Each ID must be a valid UUID.
-    uuid::Uuid::parse_str(&ids[0])
-        .expect("X-Request-Id in first request is not a valid UUID");
-    uuid::Uuid::parse_str(&ids[1])
-        .expect("X-Request-Id in second request is not a valid UUID");
+    uuid::Uuid::parse_str(&ids[0]).expect("X-Request-Id in first request is not a valid UUID");
+    uuid::Uuid::parse_str(&ids[1]).expect("X-Request-Id in second request is not a valid UUID");
 
     // The two requests must carry different idempotency keys.
-    assert_ne!(ids[0], ids[1], "Each request must have a unique X-Request-Id");
+    assert_ne!(
+        ids[0], ids[1],
+        "Each request must have a unique X-Request-Id"
+    );
 }
 
 /// 429 Too Many Requests is treated as a 4xx client error and forwarded
@@ -1817,7 +1962,12 @@ async fn binary_429_rate_limit_is_not_retried() {
     let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
     wait_for_port(proxy_port, Duration::from_secs(15)).await;
 
-    let _worker = spawn_worker(nats_port, "binary-workers-ratelimit", token, "sk-ant-key-rl");
+    let _worker = spawn_worker(
+        nats_port,
+        "binary-workers-ratelimit",
+        token,
+        "sk-ant-key-rl",
+    );
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     let resp = reqwest::Client::new()
@@ -1842,7 +1992,9 @@ async fn binary_429_rate_limit_is_not_retried() {
     );
     // retry-after header forwarded to caller.
     assert_eq!(
-        resp.headers().get("retry-after").and_then(|v| v.to_str().ok()),
+        resp.headers()
+            .get("retry-after")
+            .and_then(|v| v.to_str().ok()),
         Some("60"),
         "retry-after header should be forwarded"
     );
@@ -1860,8 +2012,7 @@ async fn binary_head_method_passes_through() {
     let _mock = mock_server
         .mock_async(|when, then| {
             when.method(httpmock::Method::HEAD).path("/v1/models");
-            then.status(200)
-                .header("x-model-count", "42");
+            then.status(200).header("x-model-count", "42");
         })
         .await;
 
@@ -1885,9 +2036,16 @@ async fn binary_head_method_passes_through() {
         .await
         .unwrap();
 
-    assert_eq!(resp.status(), 200, "HEAD should return 200, got {}", resp.status());
     assert_eq!(
-        resp.headers().get("x-model-count").and_then(|v| v.to_str().ok()),
+        resp.status(),
+        200,
+        "HEAD should return 200, got {}",
+        resp.status()
+    );
+    assert_eq!(
+        resp.headers()
+            .get("x-model-count")
+            .and_then(|v| v.to_str().ok()),
         Some("42"),
         "x-model-count header should be forwarded"
     );
@@ -1920,7 +2078,12 @@ async fn binary_two_proxy_instances_both_serve_requests() {
     wait_for_port(proxy_port_a, Duration::from_secs(15)).await;
     wait_for_port(proxy_port_b, Duration::from_secs(15)).await;
 
-    let _worker = spawn_worker(nats_port, "binary-workers-multiproxy", token, "sk-ant-key-mp");
+    let _worker = spawn_worker(
+        nats_port,
+        "binary-workers-multiproxy",
+        token,
+        "sk-ant-key-mp",
+    );
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     let client = reqwest::Client::new();
@@ -1953,7 +2116,11 @@ async fn binary_two_proxy_instances_both_serve_requests() {
     }
 
     // All 4 requests reached the provider.
-    assert_eq!(_mock.hits(), 4, "All 4 requests should have reached the provider");
+    assert_eq!(
+        _mock.hits(),
+        4,
+        "All 4 requests should have reached the provider"
+    );
 }
 
 /// NATS brief disconnect: pause the NATS container for ~1 second, unpause it,
@@ -1978,12 +2145,20 @@ async fn binary_nats_reconnection_after_brief_disconnect() {
     let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
     wait_for_port(proxy_port, Duration::from_secs(15)).await;
 
-    let _worker = spawn_worker(nats_port, "binary-workers-reconnect", token, "sk-ant-key-rec");
+    let _worker = spawn_worker(
+        nats_port,
+        "binary-workers-reconnect",
+        token,
+        "sk-ant-key-rec",
+    );
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     // Verify pipeline works before disconnect.
     let before = reqwest::Client::new()
-        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
         .header("Authorization", format!("Bearer {}", token))
         .header("Content-Type", "application/json")
         .body("{}")
@@ -2012,7 +2187,10 @@ async fn binary_nats_reconnection_after_brief_disconnect() {
 
     // Pipeline must work again after reconnection.
     let after = reqwest::Client::new()
-        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
         .header("Authorization", format!("Bearer {}", token))
         .header("Content-Type", "application/json")
         .body("{}")
@@ -2022,7 +2200,11 @@ async fn binary_nats_reconnection_after_brief_disconnect() {
         .unwrap();
     assert_eq!(after.status(), 200, "Post-reconnect request failed");
 
-    assert_eq!(_mock.hits(), 2, "Both pre- and post-reconnect requests should reach the provider");
+    assert_eq!(
+        _mock.hits(),
+        2,
+        "Both pre- and post-reconnect requests should reach the provider"
+    );
 }
 
 /// Binary response body (e.g. audio or image generation) passes through the
@@ -2056,7 +2238,12 @@ async fn binary_binary_response_body_passes_through() {
     let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
     wait_for_port(proxy_port, Duration::from_secs(15)).await;
 
-    let _worker = spawn_worker(nats_port, "binary-workers-binresp", token, "sk-openai-key-bin");
+    let _worker = spawn_worker(
+        nats_port,
+        "binary-workers-binresp",
+        token,
+        "sk-openai-key-bin",
+    );
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     let resp = reqwest::Client::new()
@@ -2117,7 +2304,10 @@ async fn binary_authorization_header_case_insensitive() {
 
     // Lowercase "authorization".
     let resp_lower = client
-        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
         .header("authorization", format!("Bearer {}", token))
         .header("content-type", "application/json")
         .body("{}")
@@ -2125,11 +2315,19 @@ async fn binary_authorization_header_case_insensitive() {
         .send()
         .await
         .unwrap();
-    assert_eq!(resp_lower.status(), 200, "lowercase authorization failed: {}", resp_lower.status());
+    assert_eq!(
+        resp_lower.status(),
+        200,
+        "lowercase authorization failed: {}",
+        resp_lower.status()
+    );
 
     // All-caps "AUTHORIZATION".
     let resp_upper = client
-        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
         .header("AUTHORIZATION", format!("Bearer {}", token))
         .header("content-type", "application/json")
         .body("{}")
@@ -2137,9 +2335,18 @@ async fn binary_authorization_header_case_insensitive() {
         .send()
         .await
         .unwrap();
-    assert_eq!(resp_upper.status(), 200, "AUTHORIZATION failed: {}", resp_upper.status());
+    assert_eq!(
+        resp_upper.status(),
+        200,
+        "AUTHORIZATION failed: {}",
+        resp_upper.status()
+    );
 
-    assert_eq!(_mock.hits(), 2, "Both requests should have reached the provider");
+    assert_eq!(
+        _mock.hits(),
+        2,
+        "Both requests should have reached the provider"
+    );
 }
 
 /// Two successive NATS outages: after each pause/unpause cycle the proxy and
@@ -2172,39 +2379,76 @@ async fn binary_multiple_nats_reconnections() {
 
     // Baseline request.
     let r0 = client
-        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
         .header("Authorization", format!("Bearer {}", token))
         .header("Content-Type", "application/json")
-        .body("{}").timeout(Duration::from_secs(15)).send().await.unwrap();
+        .body("{}")
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(r0.status(), 200, "Baseline request failed");
 
     // First disconnect.
-    std::process::Command::new("docker").args(["pause", &container_id]).status().unwrap();
+    std::process::Command::new("docker")
+        .args(["pause", &container_id])
+        .status()
+        .unwrap();
     tokio::time::sleep(Duration::from_millis(800)).await;
-    std::process::Command::new("docker").args(["unpause", &container_id]).status().unwrap();
+    std::process::Command::new("docker")
+        .args(["unpause", &container_id])
+        .status()
+        .unwrap();
     tokio::time::sleep(Duration::from_millis(2_000)).await;
 
     let r1 = client
-        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
         .header("Authorization", format!("Bearer {}", token))
         .header("Content-Type", "application/json")
-        .body("{}").timeout(Duration::from_secs(20)).send().await.unwrap();
+        .body("{}")
+        .timeout(Duration::from_secs(20))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(r1.status(), 200, "Post-first-reconnect request failed");
 
     // Second disconnect.
-    std::process::Command::new("docker").args(["pause", &container_id]).status().unwrap();
+    std::process::Command::new("docker")
+        .args(["pause", &container_id])
+        .status()
+        .unwrap();
     tokio::time::sleep(Duration::from_millis(800)).await;
-    std::process::Command::new("docker").args(["unpause", &container_id]).status().unwrap();
+    std::process::Command::new("docker")
+        .args(["unpause", &container_id])
+        .status()
+        .unwrap();
     tokio::time::sleep(Duration::from_millis(2_000)).await;
 
     let r2 = client
-        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
         .header("Authorization", format!("Bearer {}", token))
         .header("Content-Type", "application/json")
-        .body("{}").timeout(Duration::from_secs(20)).send().await.unwrap();
+        .body("{}")
+        .timeout(Duration::from_secs(20))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(r2.status(), 200, "Post-second-reconnect request failed");
 
-    assert_eq!(_mock.hits(), 3, "All 3 requests should have reached the provider");
+    assert_eq!(
+        _mock.hits(),
+        3,
+        "All 3 requests should have reached the provider"
+    );
 }
 
 /// OPTIONS request (CORS preflight) passes through the full pipeline when
@@ -2220,7 +2464,10 @@ async fn binary_options_request_passes_through() {
             then.status(204)
                 .header("access-control-allow-origin", "*")
                 .header("access-control-allow-methods", "GET, POST, OPTIONS")
-                .header("access-control-allow-headers", "Authorization, Content-Type");
+                .header(
+                    "access-control-allow-headers",
+                    "Authorization, Content-Type",
+                );
         })
         .await;
 
@@ -2246,7 +2493,12 @@ async fn binary_options_request_passes_through() {
         .await
         .unwrap();
 
-    assert_eq!(resp.status(), 204, "OPTIONS should return 204, got {}", resp.status());
+    assert_eq!(
+        resp.status(),
+        204,
+        "OPTIONS should return 204, got {}",
+        resp.status()
+    );
     assert_eq!(
         resp.headers()
             .get("access-control-allow-origin")
@@ -2338,7 +2590,12 @@ async fn binary_custom_prefix_routes_correctly() {
         .await
         .unwrap();
 
-    assert_eq!(resp.status(), 200, "Custom prefix request failed: {}", resp.status());
+    assert_eq!(
+        resp.status(),
+        200,
+        "Custom prefix request failed: {}",
+        resp.status()
+    );
     let body: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(body["id"], "msg_custom_prefix");
     _mock.assert_async().await;
@@ -2371,8 +2628,13 @@ async fn binary_prefix_mismatch_causes_timeout() {
 
     // Worker on prefix "beta" → listens on PROXY_REQUESTS_BETA, never sees
     // messages published to PROXY_REQUESTS_ALPHA.
-    let _worker =
-        spawn_worker_with_prefix(nats_port, "pfx-mismatch-workers", token, "sk-ant-key", "beta");
+    let _worker = spawn_worker_with_prefix(
+        nats_port,
+        "pfx-mismatch-workers",
+        token,
+        "sk-ant-key",
+        "beta",
+    );
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     let resp = reqwest::Client::new()
@@ -2420,8 +2682,7 @@ async fn binary_invalid_jetstream_payload_nacked_worker_continues() {
     let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
     wait_for_port(proxy_port, Duration::from_secs(15)).await;
 
-    let _worker =
-        spawn_worker(nats_port, "binary-workers-nak", token, "sk-ant-key-nak");
+    let _worker = spawn_worker(nats_port, "binary-workers-nak", token, "sk-ant-key-nak");
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     // Connect to NATS from the test and publish garbage directly to the stream.
@@ -2504,7 +2765,11 @@ async fn binary_token_revocation_via_worker_restart() {
         .send()
         .await
         .unwrap();
-    assert_eq!(resp_before.status(), 200, "Pre-revocation request should succeed");
+    assert_eq!(
+        resp_before.status(),
+        200,
+        "Pre-revocation request should succeed"
+    );
 
     // Revoke: kill worker 1, restart WITHOUT the token.
     worker_1.kill().await.unwrap();
@@ -2897,10 +3162,7 @@ async fn binary_invalid_vault_env_var_skipped_valid_token_still_works() {
         // Invalid: hyphen in the token segment — ApiKeyToken::new returns Err.
         .env("VAULT_TOKEN_tok_anthropic_prod_bad-key", "sk-ant-bad")
         // Valid: correct format.
-        .env(
-            format!("VAULT_TOKEN_{}", valid_token),
-            "sk-ant-good-key",
-        )
+        .env(format!("VAULT_TOKEN_{}", valid_token), "sk-ant-good-key")
         .env("RUST_LOG", "warn")
         .kill_on_drop(true)
         .spawn()
@@ -2956,8 +3218,11 @@ async fn binary_bearer_extra_whitespace_returns_502() {
 
     // Two spaces between "Bearer" and the token.
     let resp = reqwest::Client::new()
-        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
-        .header("Authorization", format!("Bearer  {}", token))  // double space
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
+        .header("Authorization", format!("Bearer  {}", token)) // double space
         .header("Content-Type", "application/json")
         .body("{}")
         .timeout(Duration::from_secs(15))
@@ -2971,7 +3236,11 @@ async fn binary_bearer_extra_whitespace_returns_502() {
         "Double-space Bearer must return 401, got {}",
         resp.status()
     );
-    assert_eq!(_should_not_be_called.hits(), 0, "AI provider must not be called");
+    assert_eq!(
+        _should_not_be_called.hits(),
+        0,
+        "AI provider must not be called"
+    );
 }
 
 /// Tokens from different environments (prod vs. staging) stored in the same
@@ -3027,7 +3296,10 @@ async fn binary_staging_and_prod_tokens_resolve_independently() {
 
     // Request with prod token → prod key must be used.
     let resp_prod = client
-        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
         .header("Authorization", format!("Bearer {}", prod_token))
         .header("Content-Type", "application/json")
         .body("{}")
@@ -3041,7 +3313,10 @@ async fn binary_staging_and_prod_tokens_resolve_independently() {
 
     // Request with staging token → staging key must be used.
     let resp_staging = client
-        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
         .header("Authorization", format!("Bearer {}", staging_token))
         .header("Content-Type", "application/json")
         .body("{}")
@@ -3051,7 +3326,10 @@ async fn binary_staging_and_prod_tokens_resolve_independently() {
         .unwrap();
     assert_eq!(resp_staging.status(), 200);
     let body_staging: serde_json::Value = resp_staging.json().await.unwrap();
-    assert_eq!(body_staging["id"], "msg_staging", "Staging token must use staging key");
+    assert_eq!(
+        body_staging["id"], "msg_staging",
+        "Staging token must use staging key"
+    );
 
     mock_prod.assert_async().await;
     mock_staging.assert_async().await;
@@ -3096,7 +3374,10 @@ async fn binary_sse_response_buffered_and_returned_completely() {
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     let resp = reqwest::Client::new()
-        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
         .header("Authorization", format!("Bearer {}", token))
         .header("Content-Type", "application/json")
         .body(r#"{"model":"claude-3","stream":true,"messages":[]}"#)
@@ -3105,13 +3386,27 @@ async fn binary_sse_response_buffered_and_returned_completely() {
         .await
         .unwrap();
 
-    assert_eq!(resp.status(), 200, "SSE response must return 200, got {}", resp.status());
+    assert_eq!(
+        resp.status(),
+        200,
+        "SSE response must return 200, got {}",
+        resp.status()
+    );
 
     // Proxy buffers the full SSE stream and returns it as a single response body.
     let body = resp.text().await.unwrap();
-    assert!(body.contains("Hello"), "First SSE token must be present in buffered body");
-    assert!(body.contains("world"), "Second SSE token must be present in buffered body");
-    assert!(body.contains("[DONE]"), "SSE done sentinel must be present in buffered body");
+    assert!(
+        body.contains("Hello"),
+        "First SSE token must be present in buffered body"
+    );
+    assert!(
+        body.contains("world"),
+        "Second SSE token must be present in buffered body"
+    );
+    assert!(
+        body.contains("[DONE]"),
+        "SSE done sentinel must be present in buffered body"
+    );
 
     ai_mock.assert_async().await;
 }
@@ -3154,7 +3449,12 @@ async fn binary_http_chunked_encoding_body_forwarded_completely() {
     let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
     wait_for_port(proxy_port, Duration::from_secs(15)).await;
 
-    let _worker = spawn_worker(nats_port, "binary-workers-tcpchunk", token, "sk-ant-realkey");
+    let _worker = spawn_worker(
+        nats_port,
+        "binary-workers-tcpchunk",
+        token,
+        "sk-ant-realkey",
+    );
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     // Build raw HTTP/1.1 chunked request manually.
@@ -3239,7 +3539,12 @@ async fn binary_worker_starts_before_proxy_request_succeeds() {
     let token = "tok_anthropic_prod_wfirst01";
 
     // Start worker FIRST — it creates the stream and registers its consumer.
-    let _worker = spawn_worker(nats_port, "binary-workers-wfirst", token, "sk-ant-worker-first");
+    let _worker = spawn_worker(
+        nats_port,
+        "binary-workers-wfirst",
+        token,
+        "sk-ant-worker-first",
+    );
     tokio::time::sleep(Duration::from_millis(800)).await;
 
     // Start proxy AFTER — it must find the stream the worker already created.
@@ -3285,7 +3590,8 @@ async fn binary_hop_by_hop_headers_stripped_before_reaching_provider() {
             when.method(httpmock::Method::POST)
                 .path("/v1/messages")
                 .header("connection", "keep-alive");
-            then.status(500).body("hop-by-hop header reached the provider");
+            then.status(500)
+                .body("hop-by-hop header reached the provider");
         })
         .await;
 
@@ -3311,7 +3617,10 @@ async fn binary_hop_by_hop_headers_stripped_before_reaching_provider() {
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     let resp = reqwest::Client::new()
-        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
         .header("Authorization", format!("Bearer {}", token))
         .header("Connection", "keep-alive")
         .header("Keep-Alive", "timeout=5, max=100")
@@ -3323,7 +3632,11 @@ async fn binary_hop_by_hop_headers_stripped_before_reaching_provider() {
         .await
         .unwrap();
 
-    assert_eq!(resp.status(), 200, "Proxy must strip hop-by-hop headers and return 200");
+    assert_eq!(
+        resp.status(),
+        200,
+        "Proxy must strip hop-by-hop headers and return 200"
+    );
     let body: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(body["id"], "msg_hophop_ok");
     mock_correct.assert_async().await;
@@ -3451,7 +3764,10 @@ async fn binary_304_not_modified_response_forwarded() {
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     let resp = reqwest::Client::new()
-        .get(format!("http://127.0.0.1:{}/anthropic/v1/models", proxy_port))
+        .get(format!(
+            "http://127.0.0.1:{}/anthropic/v1/models",
+            proxy_port
+        ))
         .header("Authorization", format!("Bearer {}", token))
         .timeout(Duration::from_secs(15))
         .send()
@@ -3501,7 +3817,11 @@ async fn binary_query_string_url_encoded_chars_forwarded() {
         .await
         .unwrap();
 
-    assert_eq!(resp.status(), 200, "URL-encoded query string must be forwarded");
+    assert_eq!(
+        resp.status(),
+        200,
+        "URL-encoded query string must be forwarded"
+    );
     ai_mock.assert_async().await;
 }
 
@@ -3534,7 +3854,10 @@ async fn binary_set_cookie_cache_etag_response_headers_forwarded() {
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     let resp = reqwest::Client::new()
-        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
         .header("Authorization", format!("Bearer {}", token))
         .body("{}")
         .timeout(Duration::from_secs(15))
@@ -3543,9 +3866,18 @@ async fn binary_set_cookie_cache_etag_response_headers_forwarded() {
         .unwrap();
 
     assert_eq!(resp.status(), 200);
-    assert!(resp.headers().contains_key("set-cookie"),   "Set-Cookie must be forwarded");
-    assert!(resp.headers().contains_key("cache-control"), "Cache-Control must be forwarded");
-    assert!(resp.headers().contains_key("etag"),          "ETag must be forwarded");
+    assert!(
+        resp.headers().contains_key("set-cookie"),
+        "Set-Cookie must be forwarded"
+    );
+    assert!(
+        resp.headers().contains_key("cache-control"),
+        "Cache-Control must be forwarded"
+    );
+    assert!(
+        resp.headers().contains_key("etag"),
+        "ETag must be forwarded"
+    );
     ai_mock.assert_async().await;
 }
 
@@ -3577,7 +3909,10 @@ async fn binary_token_with_numeric_id_works() {
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     let resp = reqwest::Client::new()
-        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
         .header("Authorization", format!("Bearer {}", token))
         .body("{}")
         .timeout(Duration::from_secs(15))
@@ -3625,7 +3960,10 @@ async fn binary_multiple_set_cookie_headers_forwarded() {
     // reqwest is compiled without the `cookies` feature so Set-Cookie headers
     // are never consumed internally — they appear in response.headers() as-is.
     let resp = reqwest::Client::new()
-        .get(format!("http://127.0.0.1:{}/anthropic/v1/session", proxy_port))
+        .get(format!(
+            "http://127.0.0.1:{}/anthropic/v1/session",
+            proxy_port
+        ))
         .header("Authorization", format!("Bearer {}", token))
         .timeout(Duration::from_secs(15))
         .send()
@@ -3641,9 +3979,20 @@ async fn binary_multiple_set_cookie_headers_forwarded() {
         .iter()
         .map(|v| v.to_str().unwrap().to_string())
         .collect();
-    assert_eq!(cookies.len(), 2, "Both Set-Cookie headers must be forwarded; got: {:?}", cookies);
-    assert!(cookies.iter().any(|c| c.contains("session=abc")), "session cookie must be present");
-    assert!(cookies.iter().any(|c| c.contains("prefs=xyz")), "prefs cookie must be present");
+    assert_eq!(
+        cookies.len(),
+        2,
+        "Both Set-Cookie headers must be forwarded; got: {:?}",
+        cookies
+    );
+    assert!(
+        cookies.iter().any(|c| c.contains("session=abc")),
+        "session cookie must be present"
+    );
+    assert!(
+        cookies.iter().any(|c| c.contains("prefs=xyz")),
+        "prefs cookie must be present"
+    );
     ai_mock.assert_async().await;
 }
 
@@ -3821,8 +4170,7 @@ async fn binary_url_without_path_segment_returns_404() {
         .unwrap();
 
     assert!(
-        resp_trailing_slash.status() == 404
-            || resp_trailing_slash.status().as_u16() >= 400,
+        resp_trailing_slash.status() == 404 || resp_trailing_slash.status().as_u16() >= 400,
         "Trailing-slash request with empty path must return a 4xx; got {}",
         resp_trailing_slash.status()
     );
@@ -3872,7 +4220,10 @@ async fn binary_zero_worker_timeout_returns_504_immediately() {
     // No worker — proxy times out immediately.
     let start = std::time::Instant::now();
     let resp = reqwest::Client::new()
-        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
         .header("Authorization", "Bearer tok_anthropic_prod_ztimeout1")
         .body("{}")
         .timeout(Duration::from_secs(10))
@@ -4092,7 +4443,11 @@ async fn binary_vault_token_empty_value_is_rejected_with_error() {
         "Empty real key in vault must yield 401, not forward to provider"
     );
     // The AI provider must not have received the request.
-    assert_eq!(ai_mock.hits(), 0, "Provider must not be called when vault key is empty");
+    assert_eq!(
+        ai_mock.hits(),
+        0,
+        "Provider must not be called when vault key is empty"
+    );
 }
 
 /// When `WORKER_CONSUMER_NAME` is not set, the worker binary falls back to
@@ -4397,7 +4752,12 @@ async fn binary_provider_307_redirect_not_followed_returns_307_to_caller() {
     let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
     wait_for_port(proxy_port, Duration::from_secs(15)).await;
 
-    let _worker = spawn_worker(nats_port, "binary-workers-redir307", token, "sk-ant-redir-key");
+    let _worker = spawn_worker(
+        nats_port,
+        "binary-workers-redir307",
+        token,
+        "sk-ant-redir-key",
+    );
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     // Use a non-redirecting client so we observe exactly what the proxy returns.
@@ -4430,7 +4790,11 @@ async fn binary_provider_307_redirect_not_followed_returns_307_to_caller() {
     );
 
     // The v1 endpoint was hit once; the v2 redirect target was never called.
-    assert_eq!(redirect_mock.hits(), 1, "v1 endpoint must be called exactly once");
+    assert_eq!(
+        redirect_mock.hits(),
+        1,
+        "v1 endpoint must be called exactly once"
+    );
     assert_eq!(v2_mock.hits(), 0, "v2 redirect target must never be called");
 }
 
@@ -4460,7 +4824,12 @@ async fn binary_418_teapot_response_forwarded() {
     let _proxy = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
     wait_for_port(proxy_port, Duration::from_secs(15)).await;
 
-    let _worker = spawn_worker(nats_port, "binary-workers-teapot", token, "sk-ant-teapot-key");
+    let _worker = spawn_worker(
+        nats_port,
+        "binary-workers-teapot",
+        token,
+        "sk-ant-teapot-key",
+    );
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     let resp = reqwest::Client::new()
@@ -4476,7 +4845,11 @@ async fn binary_418_teapot_response_forwarded() {
         .await
         .unwrap();
 
-    assert_eq!(resp.status(), 418, "Proxy must forward 418 I'm a Teapot to the caller");
+    assert_eq!(
+        resp.status(),
+        418,
+        "Proxy must forward 418 I'm a Teapot to the caller"
+    );
     let body = resp.text().await.unwrap();
     assert_eq!(body, "I'm a teapot");
 
@@ -4554,7 +4927,7 @@ async fn binary_utf8_multibyte_response_body_preserved() {
 /// fires and the caller receives 504.
 #[tokio::test]
 async fn binary_max_deliver_exhausted_with_real_proxy_causes_504() {
-    use async_nats::jetstream::consumer::{pull, AckPolicy};
+    use async_nats::jetstream::consumer::{AckPolicy, pull};
     use futures_util::StreamExt as _;
     use trogon_nats::{NatsAuth, NatsConfig, connect};
     use trogon_secret_proxy::stream;
@@ -4575,7 +4948,9 @@ async fn binary_max_deliver_exhausted_with_real_proxy_causes_504() {
         servers: vec![format!("localhost:{}", nats_port)],
         auth: NatsAuth::None,
     };
-    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
+    let nats = connect(&nats_config, Duration::from_secs(10))
+        .await
+        .unwrap();
     let jetstream = std::sync::Arc::new(async_nats::jetstream::new(nats));
 
     let consumer_name = "binary-maxdeliver-saboteur";
@@ -4705,7 +5080,10 @@ async fn binary_10_sequential_requests_without_degradation() {
     let client = reqwest::Client::new();
     for i in 1..=10 {
         let resp = client
-            .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+            .post(format!(
+                "http://127.0.0.1:{}/anthropic/v1/messages",
+                proxy_port
+            ))
             .header("Authorization", format!("Bearer {}", token))
             .header("Content-Type", "application/json")
             .body(format!(r#"{{"seq":{}}}"#, i))
@@ -4722,7 +5100,11 @@ async fn binary_10_sequential_requests_without_degradation() {
         );
     }
 
-    assert_eq!(ai_mock.hits(), 10, "All 10 requests must reach the AI provider");
+    assert_eq!(
+        ai_mock.hits(),
+        10,
+        "All 10 requests must reach the AI provider"
+    );
 }
 
 /// Provider error body forwarded verbatim: when the AI provider returns a 4xx
@@ -4757,7 +5139,10 @@ async fn binary_provider_error_body_forwarded_verbatim() {
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     let resp = reqwest::Client::new()
-        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
         .header("Authorization", format!("Bearer {}", token))
         .header("Content-Type", "application/json")
         .body(r#"{"model":"claude-3-5-sonnet"}"#)
@@ -4766,7 +5151,11 @@ async fn binary_provider_error_body_forwarded_verbatim() {
         .await
         .unwrap();
 
-    assert_eq!(resp.status(), 400, "Provider 400 must be forwarded to caller");
+    assert_eq!(
+        resp.status(),
+        400,
+        "Provider 400 must be forwarded to caller"
+    );
     let body = resp.text().await.unwrap();
     assert_eq!(
         body, error_body,
@@ -4808,7 +5197,10 @@ async fn binary_request_body_reaches_provider_byte_for_byte() {
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     let resp = reqwest::Client::new()
-        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
         .header("Authorization", format!("Bearer {}", token))
         .header("Content-Type", "application/json")
         .body(exact_body)
@@ -4837,9 +5229,9 @@ async fn binary_anthropic_and_openai_tokens_resolve_to_correct_keys() {
     let mock_server = httpmock::MockServer::start_async().await;
 
     let anthropic_token = "tok_anthropic_prod_mp001";
-    let anthropic_key   = "sk-ant-anthropic-real-key";
-    let openai_token    = "tok_openai_prod_mp001";
-    let openai_key      = "sk-openai-real-key";
+    let anthropic_key = "sk-ant-anthropic-real-key";
+    let openai_token = "tok_openai_prod_mp001";
+    let openai_key = "sk-openai-real-key";
 
     // Anthropic mock: only accepts the Anthropic key.
     let anthropic_mock = mock_server
@@ -4906,16 +5298,34 @@ async fn binary_anthropic_and_openai_tokens_resolve_to_correct_keys() {
         .await
         .unwrap();
 
-    assert_eq!(resp_anthropic.status(), 200, "Anthropic request must succeed");
+    assert_eq!(
+        resp_anthropic.status(),
+        200,
+        "Anthropic request must succeed"
+    );
     assert_eq!(resp_openai.status(), 200, "OpenAI request must succeed");
 
     let body_a: serde_json::Value = resp_anthropic.json().await.unwrap();
     let body_o: serde_json::Value = resp_openai.json().await.unwrap();
-    assert_eq!(body_a["provider"], "anthropic", "Anthropic token must route to Anthropic provider");
-    assert_eq!(body_o["provider"], "openai", "OpenAI token must route to OpenAI provider");
+    assert_eq!(
+        body_a["provider"], "anthropic",
+        "Anthropic token must route to Anthropic provider"
+    );
+    assert_eq!(
+        body_o["provider"], "openai",
+        "OpenAI token must route to OpenAI provider"
+    );
 
-    assert_eq!(anthropic_mock.hits(), 1, "Anthropic key must be used exactly once");
-    assert_eq!(openai_mock.hits(), 1, "OpenAI key must be used exactly once");
+    assert_eq!(
+        anthropic_mock.hits(),
+        1,
+        "Anthropic key must be used exactly once"
+    );
+    assert_eq!(
+        openai_mock.hits(),
+        1,
+        "OpenAI key must be used exactly once"
+    );
 }
 
 /// Concurrency safety: 20 parallel requests using the same token all succeed.
@@ -5064,7 +5474,11 @@ async fn binary_worker_starts_after_messages_queued() {
         "All 5 backlogged requests must be processed when the worker starts; {} succeeded",
         success_count
     );
-    assert_eq!(_ai_mock.hits(), 5, "Provider must receive all 5 backlogged requests");
+    assert_eq!(
+        _ai_mock.hits(),
+        5,
+        "Provider must receive all 5 backlogged requests"
+    );
 }
 
 /// Security: a tok_ token appearing in the URL query string is forwarded
@@ -5079,10 +5493,10 @@ async fn binary_tok_in_query_string_forwarded_unchanged() {
 
     let mock_server = httpmock::MockServer::start_async().await;
     let auth_token = "tok_anthropic_prod_qpauth1";
-    let real_key   = "sk-ant-qparam-real-key";
+    let real_key = "sk-ant-qparam-real-key";
     // A second tok_ that appears only in the query string — it must reach the
     // provider verbatim (not exchanged, not stripped).
-    let query_tok  = "tok_anthropic_prod_inquery1";
+    let query_tok = "tok_anthropic_prod_inquery1";
 
     let _ai_mock = mock_server
         .mock_async(|when, then| {
@@ -5137,7 +5551,7 @@ async fn binary_slow_provider_within_timeout_succeeds() {
     let (_nats_container, nats_port) = start_nats().await;
 
     let mock_server = httpmock::MockServer::start_async().await;
-    let token   = "tok_anthropic_prod_slow001";
+    let token = "tok_anthropic_prod_slow001";
     let real_key = "sk-ant-slow-key";
 
     let _ai_mock = mock_server
@@ -5159,7 +5573,10 @@ async fn binary_slow_provider_within_timeout_succeeds() {
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     let resp = reqwest::Client::new()
-        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
         .header("Authorization", format!("Bearer {}", token))
         .header("Content-Type", "application/json")
         .body(r#"{"model":"claude-3-5-sonnet"}"#)
@@ -5189,11 +5606,36 @@ async fn binary_five_providers_five_tokens_all_route_correctly() {
     let mock_server = httpmock::MockServer::start_async().await;
 
     let providers = [
-        ("anthropic", "/v1/messages",          "tok_anthropic_prod_fp001", "sk-ant-fp-key"),
-        ("openai",    "/v1/chat/completions",   "tok_openai_prod_fp001",    "sk-openai-fp-key"),
-        ("gemini",    "/v1beta/models",         "tok_gemini_prod_fp001",    "sk-gemini-fp-key"),
-        ("cohere",    "/v2/chat",               "tok_cohere_prod_fp001",    "sk-cohere-fp-key"),
-        ("mistral",   "/v1/chat/completions",   "tok_mistral_prod_fp001",   "sk-mistral-fp-key"),
+        (
+            "anthropic",
+            "/v1/messages",
+            "tok_anthropic_prod_fp001",
+            "sk-ant-fp-key",
+        ),
+        (
+            "openai",
+            "/v1/chat/completions",
+            "tok_openai_prod_fp001",
+            "sk-openai-fp-key",
+        ),
+        (
+            "gemini",
+            "/v1beta/models",
+            "tok_gemini_prod_fp001",
+            "sk-gemini-fp-key",
+        ),
+        (
+            "cohere",
+            "/v2/chat",
+            "tok_cohere_prod_fp001",
+            "sk-cohere-fp-key",
+        ),
+        (
+            "mistral",
+            "/v1/chat/completions",
+            "tok_mistral_prod_fp001",
+            "sk-mistral-fp-key",
+        ),
     ];
 
     // One mock per provider path + real key combination.
@@ -5284,7 +5726,7 @@ async fn binary_provider_connection_refused_returns_502() {
     let dead_port = free_port();
     let dead_url = format!("http://127.0.0.1:{}", dead_port);
 
-    let token    = "tok_anthropic_prod_cref001";
+    let token = "tok_anthropic_prod_cref001";
     let real_key = "sk-ant-connref-key";
 
     let proxy_port = free_port();
@@ -5295,7 +5737,10 @@ async fn binary_provider_connection_refused_returns_502() {
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     let resp = reqwest::Client::new()
-        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
         .header("Authorization", format!("Bearer {}", token))
         .header("Content-Type", "application/json")
         .body(r#"{"model":"claude-3-5-sonnet"}"#)
@@ -5390,7 +5835,7 @@ async fn binary_long_nested_path_forwarded_correctly() {
     let (_nats_container, nats_port) = start_nats().await;
 
     let mock_server = httpmock::MockServer::start_async().await;
-    let token    = "tok_openai_prod_nested1";
+    let token = "tok_openai_prod_nested1";
     let real_key = "sk-openai-nested-key";
 
     let nested_path = "/v1/threads/th_abc123XYZ/runs/run_def456ABC/steps";
@@ -5422,7 +5867,11 @@ async fn binary_long_nested_path_forwarded_correctly() {
         .await
         .unwrap();
 
-    assert_eq!(resp.status(), 200, "Nested path must be forwarded correctly");
+    assert_eq!(
+        resp.status(),
+        200,
+        "Nested path must be forwarded correctly"
+    );
     assert_eq!(
         _path_mock.hits(),
         1,
@@ -5441,7 +5890,7 @@ async fn binary_proxy_restart_new_instance_serves_requests() {
     let (_nats_container, nats_port) = start_nats().await;
 
     let mock_server = httpmock::MockServer::start_async().await;
-    let token    = "tok_anthropic_prod_rst001";
+    let token = "tok_anthropic_prod_rst001";
     let real_key = "sk-ant-restart-key";
 
     let _ai_mock = mock_server
@@ -5463,7 +5912,10 @@ async fn binary_proxy_restart_new_instance_serves_requests() {
         tokio::time::sleep(Duration::from_millis(500)).await;
 
         let resp = reqwest::Client::new()
-            .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+            .post(format!(
+                "http://127.0.0.1:{}/anthropic/v1/messages",
+                proxy_port
+            ))
             .header("Authorization", format!("Bearer {}", token))
             .header("Content-Type", "application/json")
             .body(r#"{"req":1}"#)
@@ -5472,7 +5924,11 @@ async fn binary_proxy_restart_new_instance_serves_requests() {
             .await
             .unwrap();
 
-        assert_eq!(resp.status(), 200, "First proxy instance must serve the request");
+        assert_eq!(
+            resp.status(),
+            200,
+            "First proxy instance must serve the request"
+        );
         // _proxy1 and _worker1 dropped here — both killed
     }
 
@@ -5480,13 +5936,16 @@ async fn binary_proxy_restart_new_instance_serves_requests() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     // Second proxy + worker on the same NATS (stream already exists).
-    let _proxy2  = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
+    let _proxy2 = spawn_proxy(nats_port, proxy_port, &mock_server.base_url());
     wait_for_port(proxy_port, Duration::from_secs(15)).await;
     let _worker2 = spawn_worker(nats_port, "restart-workers-001", token, real_key);
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let resp2 = reqwest::Client::new()
-        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
         .header("Authorization", format!("Bearer {}", token))
         .header("Content-Type", "application/json")
         .body(r#"{"req":2}"#)
@@ -5500,7 +5959,11 @@ async fn binary_proxy_restart_new_instance_serves_requests() {
         200,
         "New proxy instance must serve requests immediately after restart"
     );
-    assert_eq!(_ai_mock.hits(), 2, "Provider must receive one request per proxy instance");
+    assert_eq!(
+        _ai_mock.hits(),
+        2,
+        "Provider must receive one request per proxy instance"
+    );
 }
 
 /// High-volume sequential requests: 50 back-to-back requests all return 200.
@@ -5513,7 +5976,7 @@ async fn binary_50_sequential_requests_all_succeed() {
     let (_nats_container, nats_port) = start_nats().await;
 
     let mock_server = httpmock::MockServer::start_async().await;
-    let token    = "tok_anthropic_prod_seq50x";
+    let token = "tok_anthropic_prod_seq50x";
     let real_key = "sk-ant-seq50-key";
 
     let _ai_mock = mock_server
@@ -5535,7 +5998,10 @@ async fn binary_50_sequential_requests_all_succeed() {
     let client = reqwest::Client::new();
     for i in 0..50u32 {
         let resp = client
-            .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+            .post(format!(
+                "http://127.0.0.1:{}/anthropic/v1/messages",
+                proxy_port
+            ))
             .header("Authorization", format!("Bearer {}", token))
             .header("Content-Type", "application/json")
             .body(format!(r#"{{"seq":{}}}"#, i))
@@ -5552,7 +6018,11 @@ async fn binary_50_sequential_requests_all_succeed() {
         );
     }
 
-    assert_eq!(_ai_mock.hits(), 50, "All 50 requests must reach the provider");
+    assert_eq!(
+        _ai_mock.hits(),
+        50,
+        "All 50 requests must reach the provider"
+    );
 }
 
 /// Work-queue exactly-once semantics: two workers share the same consumer
@@ -5567,7 +6037,7 @@ async fn binary_two_workers_no_double_processing() {
     let (_nats_container, nats_port) = start_nats().await;
 
     let mock_server = httpmock::MockServer::start_async().await;
-    let token    = "tok_anthropic_prod_once01";
+    let token = "tok_anthropic_prod_once01";
     let real_key = "sk-ant-once-key";
 
     let _ai_mock = mock_server
@@ -5633,9 +6103,9 @@ async fn binary_nats_prefix_isolation() {
     let mock_b = httpmock::MockServer::start_async().await;
 
     let token_a = "tok_anthropic_prod_piso01";
-    let key_a   = "sk-ant-prefix-a-key";
+    let key_a = "sk-ant-prefix-a-key";
     let token_b = "tok_anthropic_prod_piso02";
-    let key_b   = "sk-ant-prefix-b-key";
+    let key_b = "sk-ant-prefix-b-key";
 
     let hit_a = mock_a
         .mock_async(|when, then| {
@@ -5658,13 +6128,15 @@ async fn binary_nats_prefix_isolation() {
     let port_a = free_port();
     let port_b = free_port();
 
-    let _proxy_a  = spawn_proxy_with_prefix(nats_port, port_a, &mock_a.base_url(), "tenant_a");
-    let _proxy_b  = spawn_proxy_with_prefix(nats_port, port_b, &mock_b.base_url(), "tenant_b");
+    let _proxy_a = spawn_proxy_with_prefix(nats_port, port_a, &mock_a.base_url(), "tenant_a");
+    let _proxy_b = spawn_proxy_with_prefix(nats_port, port_b, &mock_b.base_url(), "tenant_b");
     wait_for_port(port_a, Duration::from_secs(15)).await;
     wait_for_port(port_b, Duration::from_secs(15)).await;
 
-    let _worker_a = spawn_worker_with_prefix(nats_port, "iso-workers-a", token_a, key_a, "tenant_a");
-    let _worker_b = spawn_worker_with_prefix(nats_port, "iso-workers-b", token_b, key_b, "tenant_b");
+    let _worker_a =
+        spawn_worker_with_prefix(nats_port, "iso-workers-a", token_a, key_a, "tenant_a");
+    let _worker_b =
+        spawn_worker_with_prefix(nats_port, "iso-workers-b", token_b, key_b, "tenant_b");
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     let client = reqwest::Client::new();
@@ -5693,8 +6165,16 @@ async fn binary_nats_prefix_isolation() {
     assert_eq!(resp_b.status(), 200, "Proxy-B must serve tenant-B request");
 
     // Critical: each mock must be hit exactly once — no cross-prefix leakage.
-    assert_eq!(hit_a.hits(), 1, "Tenant-A mock must receive exactly 1 request");
-    assert_eq!(hit_b.hits(), 1, "Tenant-B mock must receive exactly 1 request");
+    assert_eq!(
+        hit_a.hits(),
+        1,
+        "Tenant-A mock must receive exactly 1 request"
+    );
+    assert_eq!(
+        hit_b.hits(),
+        1,
+        "Tenant-B mock must receive exactly 1 request"
+    );
 }
 
 /// API key with special characters: real keys may contain dots, dashes,
@@ -5706,7 +6186,7 @@ async fn binary_api_key_with_special_chars_forwarded_correctly() {
     let (_nats_container, nats_port) = start_nats().await;
 
     let mock_server = httpmock::MockServer::start_async().await;
-    let token    = "tok_anthropic_prod_spc001";
+    let token = "tok_anthropic_prod_spc001";
     // Real key with dots and underscores — realistic for some providers.
     let real_key = "sk-ant-v2.0_special.key_value-abc123";
 
@@ -5729,7 +6209,10 @@ async fn binary_api_key_with_special_chars_forwarded_correctly() {
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     let resp = reqwest::Client::new()
-        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
         .header("Authorization", format!("Bearer {}", token))
         .header("Content-Type", "application/json")
         .body(r#"{"model":"claude-3-5-sonnet"}"#)
@@ -5755,7 +6238,7 @@ async fn binary_provider_html_error_body_forwarded_unchanged() {
     let (_nats_container, nats_port) = start_nats().await;
 
     let mock_server = httpmock::MockServer::start_async().await;
-    let token    = "tok_anthropic_prod_html01";
+    let token = "tok_anthropic_prod_html01";
     let real_key = "sk-ant-html-key";
 
     let html_body = "<html><head><title>Service Unavailable</title></head><body><h1>503 Service Unavailable</h1></body></html>";
@@ -5779,7 +6262,10 @@ async fn binary_provider_html_error_body_forwarded_unchanged() {
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     let resp = reqwest::Client::new()
-        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
         .header("Authorization", format!("Bearer {}", token))
         .header("Content-Type", "application/json")
         .body(r#"{"model":"claude-3-5-sonnet"}"#)
@@ -5788,7 +6274,11 @@ async fn binary_provider_html_error_body_forwarded_unchanged() {
         .await
         .unwrap();
 
-    assert_eq!(resp.status(), 503, "HTTP 503 from provider must be forwarded");
+    assert_eq!(
+        resp.status(),
+        503,
+        "HTTP 503 from provider must be forwarded"
+    );
     let body = resp.text().await.unwrap();
     assert_eq!(
         body, html_body,
@@ -5807,7 +6297,7 @@ async fn binary_token_with_long_alphanumeric_id_works() {
 
     let mock_server = httpmock::MockServer::start_async().await;
     // 24-character alphanumeric ID — deliberately long.
-    let token    = "tok_anthropic_prod_abcdefghij0123456789ABCD";
+    let token = "tok_anthropic_prod_abcdefghij0123456789ABCD";
     let real_key = "sk-ant-long-id-key";
 
     let _ai_mock = mock_server
@@ -5829,7 +6319,10 @@ async fn binary_token_with_long_alphanumeric_id_works() {
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     let resp = reqwest::Client::new()
-        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
         .header("Authorization", format!("Bearer {}", token))
         .header("Content-Type", "application/json")
         .body(r#"{"model":"claude-3-5-sonnet"}"#)
@@ -5843,7 +6336,11 @@ async fn binary_token_with_long_alphanumeric_id_works() {
         200,
         "Token with 24-char alphanumeric ID must be accepted and resolved"
     );
-    assert_eq!(_ai_mock.hits(), 1, "Provider must receive the request with the real key");
+    assert_eq!(
+        _ai_mock.hits(),
+        1,
+        "Provider must receive the request with the real key"
+    );
 }
 
 // ── Gap 4: X-Request-Id replacement ───────────────────────────────────────
@@ -5894,7 +6391,10 @@ async fn binary_caller_x_request_id_replaced_by_proxy_uuid() {
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     let resp = reqwest::Client::new()
-        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
         .header("Authorization", format!("Bearer {}", token))
         .header("Content-Type", "application/json")
         .header("X-Request-Id", "custom-caller-id-12345")
@@ -5947,7 +6447,10 @@ async fn binary_hyphenated_prefix_both_binaries_communicate() {
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     let resp = reqwest::Client::new()
-        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
         .header("Authorization", format!("Bearer {}", token))
         .header("Content-Type", "application/json")
         .body(r#"{"model":"claude-3-5-sonnet"}"#)
@@ -5961,7 +6464,11 @@ async fn binary_hyphenated_prefix_both_binaries_communicate() {
         200,
         "Hyphenated PROXY_PREFIX must be accepted and both binaries must communicate"
     );
-    assert_eq!(ai_mock.hits(), 1, "Provider must receive exactly one request");
+    assert_eq!(
+        ai_mock.hits(),
+        1,
+        "Provider must receive exactly one request"
+    );
 }
 
 // ── Gap 9: empty PROXY_BASE_URL_OVERRIDE ──────────────────────────────────
@@ -5986,7 +6493,10 @@ async fn binary_empty_base_url_override_returns_error() {
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     let resp = reqwest::Client::new()
-        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
         .header("Authorization", format!("Bearer {}", token))
         .header("Content-Type", "application/json")
         .body(r#"{"model":"claude-3-5-sonnet"}"#)
@@ -6044,7 +6554,10 @@ async fn binary_invalid_worker_timeout_falls_back_to_default() {
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     let resp = reqwest::Client::new()
-        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
         .header("Authorization", format!("Bearer {}", token))
         .header("Content-Type", "application/json")
         .body(r#"{"model":"claude-3-5-sonnet"}"#)
@@ -6099,7 +6612,10 @@ async fn binary_real_key_in_response_body_reaches_caller_unchanged() {
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     let resp = reqwest::Client::new()
-        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
         .header("Authorization", format!("Bearer {}", token))
         .header("Content-Type", "application/json")
         .body(r#"{"model":"claude-3-5-sonnet"}"#)
@@ -6166,7 +6682,10 @@ async fn binary_worker_default_consumer_name_works() {
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     let resp = reqwest::Client::new()
-        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
         .header("Authorization", format!("Bearer {}", token))
         .header("Content-Type", "application/json")
         .body(r#"{"model":"claude-3-5-sonnet"}"#)
@@ -6180,7 +6699,11 @@ async fn binary_worker_default_consumer_name_works() {
         200,
         "Worker with default WORKER_CONSUMER_NAME must process requests"
     );
-    assert_eq!(ai_mock.hits(), 1, "Provider must receive exactly one request");
+    assert_eq!(
+        ai_mock.hits(),
+        1,
+        "Provider must receive exactly one request"
+    );
 }
 
 // ── Concurrent mixed valid/invalid tokens ─────────────────────────────────
@@ -6250,7 +6773,12 @@ async fn binary_concurrent_mixed_valid_and_invalid_tokens_isolated() {
     // All valid-token requests must succeed.
     for (i, r) in valid_results.iter().enumerate() {
         let resp = r.as_ref().unwrap();
-        assert_eq!(resp.status(), 200, "Valid-token request #{} must succeed", i);
+        assert_eq!(
+            resp.status(),
+            200,
+            "Valid-token request #{} must succeed",
+            i
+        );
     }
 
     // All unknown-token requests must fail with a client error (401).
@@ -6305,7 +6833,10 @@ async fn binary_base_url_override_with_trailing_slash_is_normalized() {
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     let resp = reqwest::Client::new()
-        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", proxy_port))
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            proxy_port
+        ))
         .header("Authorization", format!("Bearer {}", token))
         .header("Content-Type", "application/json")
         .body(r#"{"model":"claude-3-5-sonnet","messages":[]}"#)
@@ -6338,7 +6869,9 @@ async fn binary_base_url_override_with_trailing_slash_is_normalized() {
 async fn binary_invalid_proxy_port_falls_back_to_8080() {
     // Guard: port 8080 must be free for the proxy to bind its fallback address.
     assert!(
-        tokio::net::TcpStream::connect("127.0.0.1:8080").await.is_err(),
+        tokio::net::TcpStream::connect("127.0.0.1:8080")
+            .await
+            .is_err(),
         "Port 8080 is already in use — stop any proxy running on that port before running this test"
     );
 

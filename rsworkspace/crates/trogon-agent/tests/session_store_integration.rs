@@ -3,16 +3,25 @@
 //! Each test spins up a fresh NATS container so there is no state leakage.
 
 use async_nats::jetstream;
-use testcontainers_modules::{nats::Nats, testcontainers::{runners::AsyncRunner, ImageExt}};
+use testcontainers_modules::{
+    nats::Nats,
+    testcontainers::{ImageExt, runners::AsyncRunner},
+};
 use trogon_agent::{
     agent_loop::{ContentBlock, Message},
     session::{ChatSession, SessionStore},
 };
 
 async fn make_store() -> (SessionStore, impl Drop) {
-    let container = Nats::default().with_cmd(["--jetstream"]).start().await.expect("NATS");
+    let container = Nats::default()
+        .with_cmd(["--jetstream"])
+        .start()
+        .await
+        .expect("NATS");
     let port = container.get_host_port_ipv4(4222).await.expect("port");
-    let nats = async_nats::connect(format!("nats://127.0.0.1:{port}")).await.expect("connect");
+    let nats = async_nats::connect(format!("nats://127.0.0.1:{port}"))
+        .await
+        .expect("connect");
     let js = jetstream::new(nats);
     let store = SessionStore::open(&js).await.expect("SessionStore::open");
     (store, container)
@@ -28,7 +37,9 @@ fn sample_session(id: &str, tenant_id: &str) -> ChatSession {
         memory_path: None,
         messages: vec![
             Message::user_text("Hello"),
-            Message::assistant(vec![ContentBlock::Text { text: "Hi!".to_string() }]),
+            Message::assistant(vec![ContentBlock::Text {
+                text: "Hi!".to_string(),
+            }]),
         ],
         created_at: "2026-01-01T00:00:00Z".to_string(),
         updated_at: "2026-01-01T00:00:00Z".to_string(),
@@ -43,7 +54,11 @@ async fn put_and_get_round_trips() {
     let s = sample_session("sess-1", "acme");
     store.put(&s).await.expect("put");
 
-    let got = store.get("acme", "sess-1").await.expect("get").expect("should exist");
+    let got = store
+        .get("acme", "sess-1")
+        .await
+        .expect("get")
+        .expect("should exist");
     assert_eq!(got.id, "sess-1");
     assert_eq!(got.tenant_id, "acme");
     assert_eq!(got.name, "Session sess-1");
@@ -113,7 +128,10 @@ async fn list_tenant_isolation() {
 #[tokio::test]
 async fn delete_removes_session() {
     let (store, _c) = make_store().await;
-    store.put(&sample_session("sess-del", "acme")).await.unwrap();
+    store
+        .put(&sample_session("sess-del", "acme"))
+        .await
+        .unwrap();
 
     // Confirm it exists first.
     assert!(store.get("acme", "sess-del").await.unwrap().is_some());
@@ -156,9 +174,15 @@ async fn messages_are_preserved_across_put_get() {
 /// warning rather than failing, and return the other valid sessions.
 #[tokio::test]
 async fn list_skips_unreadable_entry_and_returns_valid_ones() {
-    let container = Nats::default().with_cmd(["--jetstream"]).start().await.expect("NATS");
+    let container = Nats::default()
+        .with_cmd(["--jetstream"])
+        .start()
+        .await
+        .expect("NATS");
     let port = container.get_host_port_ipv4(4222).await.expect("port");
-    let nats = async_nats::connect(format!("nats://127.0.0.1:{port}")).await.expect("connect");
+    let nats = async_nats::connect(format!("nats://127.0.0.1:{port}"))
+        .await
+        .expect("connect");
     let js = jetstream::new(nats);
     let store = SessionStore::open(&js).await.expect("open");
 
@@ -170,9 +194,12 @@ async fn list_skips_unreadable_entry_and_returns_valid_ones() {
         .get_key_value(trogon_agent::session::SESSIONS_BUCKET)
         .await
         .expect("get KV bucket");
-    kv.put("acme.corrupted", bytes::Bytes::from(b"not valid json" as &[u8]))
-        .await
-        .expect("inject bad bytes");
+    kv.put(
+        "acme.corrupted",
+        bytes::Bytes::from(b"not valid json" as &[u8]),
+    )
+    .await
+    .expect("inject bad bytes");
 
     // list() must return only the valid session and silently skip the corrupt one.
     let result = store.list("acme").await.expect("list");

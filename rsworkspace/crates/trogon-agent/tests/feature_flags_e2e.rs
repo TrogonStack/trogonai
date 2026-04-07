@@ -30,7 +30,10 @@ use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::
 use trogon_agent::{AgentConfig, run};
 use trogon_automations::{Automation, AutomationStore, Visibility};
 use trogon_nats::{NatsAuth, NatsConfig};
-use trogon_secret_proxy::{proxy::{ProxyState, router}, stream, subjects, worker};
+use trogon_secret_proxy::{
+    proxy::{ProxyState, router},
+    stream, subjects, worker,
+};
 use trogon_splitio::mock::MockEvaluator;
 use trogon_vault::{ApiKeyToken, MemoryVault, VaultStore};
 
@@ -98,7 +101,9 @@ async fn start_proxy_and_worker(
     worker_name: &'static str,
 ) -> u16 {
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    stream::ensure_stream(&js, "trogon", &outbound_subject)
+        .await
+        .unwrap();
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -111,14 +116,21 @@ async fn start_proxy_and_worker(
         worker_timeout: Duration::from_secs(15),
         base_url_override: Some(mock_base_url),
     };
-    tokio::spawn(async move { axum::serve(listener, router(proxy_state)).await.ok(); });
+    tokio::spawn(async move {
+        axum::serve(listener, router(proxy_state)).await.ok();
+    });
 
-    let http_client = reqwest::Client::builder().timeout(Duration::from_secs(15)).build().unwrap();
+    let http_client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .unwrap();
     let wjs = Arc::clone(&js);
     let wnats = nats.clone();
     let wstream = stream::stream_name("trogon");
     tokio::spawn(async move {
-        worker::run(wjs, wnats, vault, http_client, worker_name, &wstream).await.ok();
+        worker::run(wjs, wnats, vault, http_client, worker_name, &wstream)
+            .await
+            .ok();
     });
 
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -137,10 +149,13 @@ fn agent_config_with_memory(
     memory_repo: Option<String>,
 ) -> AgentConfig {
     AgentConfig {
-        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
+        nats: NatsConfig::new(
+            vec![format!("nats://127.0.0.1:{nats_port}")],
+            NatsAuth::None,
+        ),
         proxy_url,
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
-        github_token: String::new(),
+        github_token: "tok_github_prod_test01".to_string(),
         linear_token: String::new(),
         slack_token: String::new(),
         model: "claude-opus-4-6".to_string(),
@@ -149,7 +164,7 @@ fn agent_config_with_memory(
         linear_stream_name: None,
         cron_stream_name: None,
         datadog_stream_name: None,
-        incidentio_stream_name: None,
+        incidentio_stream_name: Some("INCIDENTIO".to_string()),
         memory_owner,
         memory_repo,
         memory_path: None,
@@ -193,11 +208,16 @@ async fn split_auth_token_is_forwarded_to_evaluator() {
         })
         .await;
 
-    let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}")).await.unwrap();
+    let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
+        .await
+        .unwrap();
     let js = Arc::new(jetstream::new(nats.clone()));
     let vault = Arc::new(MemoryVault::new());
     vault
-        .store(&ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(), "sk-ant-realkey")
+        .store(
+            &ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(),
+            "sk-ant-realkey",
+        )
         .await
         .unwrap();
     let proxy_port = start_proxy_and_worker(
@@ -216,14 +236,19 @@ async fn split_auth_token_is_forwarded_to_evaluator() {
     );
     cfg.split_auth_token = Some("my-split-secret".to_string());
 
-    tokio::spawn(async move { run(cfg).await.ok(); });
+    tokio::spawn(async move {
+        run(cfg).await.ok();
+    });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     publish_datadog_alert(nats_port).await;
 
     // Evaluator returns "on" only when the correct auth token is sent.
     let hit = wait_for_hit(&anthropic_mock, Duration::from_secs(20)).await;
-    assert!(hit, "Anthropic must be called — evaluator returned 'on' for the correct auth token");
+    assert!(
+        hit,
+        "Anthropic must be called — evaluator returned 'on' for the correct auth token"
+    );
     evaluator_mock.assert_async().await;
 }
 
@@ -243,7 +268,8 @@ async fn handler_skipped_when_evaluator_returns_500() {
     let evaluator_server = MockServer::start_async().await;
     evaluator_server
         .mock_async(|when, then| {
-            when.method(httpmock::Method::GET).path("/client/get-treatment");
+            when.method(httpmock::Method::GET)
+                .path("/client/get-treatment");
             then.status(500).body("internal error");
         })
         .await;
@@ -259,11 +285,16 @@ async fn handler_skipped_when_evaluator_returns_500() {
         })
         .await;
 
-    let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}")).await.unwrap();
+    let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
+        .await
+        .unwrap();
     let js = Arc::new(jetstream::new(nats.clone()));
     let vault = Arc::new(MemoryVault::new());
     vault
-        .store(&ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(), "sk-ant-realkey")
+        .store(
+            &ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(),
+            "sk-ant-realkey",
+        )
         .await
         .unwrap();
     let proxy_port = start_proxy_and_worker(
@@ -280,7 +311,9 @@ async fn handler_skipped_when_evaluator_returns_500() {
         format!("http://127.0.0.1:{proxy_port}"),
         Some(evaluator_url),
     );
-    tokio::spawn(async move { run(cfg).await.ok(); });
+    tokio::spawn(async move {
+        run(cfg).await.ok();
+    });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     publish_datadog_alert(nats_port).await;
@@ -302,8 +335,7 @@ async fn handler_skipped_for_custom_variant_treatment() {
     let (_nats_container, nats_port) = start_nats().await;
 
     // MockEvaluator returns "enabled" — a plausible misconfiguration.
-    let mock_evaluator = MockEvaluator::new()
-        .with_flag("agent_alert_handler_enabled", "enabled");
+    let mock_evaluator = MockEvaluator::new().with_flag("agent_alert_handler_enabled", "enabled");
     let (evaluator_addr, _evaluator_handle) = mock_evaluator.serve().await;
     let evaluator_url = format!("http://{evaluator_addr}");
 
@@ -317,11 +349,16 @@ async fn handler_skipped_for_custom_variant_treatment() {
         })
         .await;
 
-    let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}")).await.unwrap();
+    let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
+        .await
+        .unwrap();
     let js = Arc::new(jetstream::new(nats.clone()));
     let vault = Arc::new(MemoryVault::new());
     vault
-        .store(&ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(), "sk-ant-realkey")
+        .store(
+            &ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(),
+            "sk-ant-realkey",
+        )
         .await
         .unwrap();
     let proxy_port = start_proxy_and_worker(
@@ -338,7 +375,9 @@ async fn handler_skipped_for_custom_variant_treatment() {
         format!("http://127.0.0.1:{proxy_port}"),
         Some(evaluator_url),
     );
-    tokio::spawn(async move { run(cfg).await.ok(); });
+    tokio::spawn(async move {
+        run(cfg).await.ok();
+    });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     publish_datadog_alert(nats_port).await;
@@ -358,8 +397,7 @@ async fn alert_handler_skipped_when_flag_is_off() {
     let (_nats_container, nats_port) = start_nats().await;
 
     // Start MockEvaluator with the flag disabled.
-    let mock_evaluator = MockEvaluator::new()
-        .with_flag("agent_alert_handler_enabled", "off");
+    let mock_evaluator = MockEvaluator::new().with_flag("agent_alert_handler_enabled", "off");
     let (evaluator_addr, _evaluator_handle) = mock_evaluator.serve().await;
     let evaluator_url = format!("http://{evaluator_addr}");
 
@@ -374,12 +412,17 @@ async fn alert_handler_skipped_when_flag_is_off() {
         })
         .await;
 
-    let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}")).await.unwrap();
+    let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
+        .await
+        .unwrap();
     let js = Arc::new(jetstream::new(nats.clone()));
 
     let vault = Arc::new(MemoryVault::new());
     vault
-        .store(&ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(), "sk-ant-realkey")
+        .store(
+            &ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(),
+            "sk-ant-realkey",
+        )
         .await
         .unwrap();
 
@@ -397,7 +440,9 @@ async fn alert_handler_skipped_when_flag_is_off() {
         format!("http://127.0.0.1:{proxy_port}"),
         Some(evaluator_url),
     );
-    tokio::spawn(async move { run(cfg).await.ok(); });
+    tokio::spawn(async move {
+        run(cfg).await.ok();
+    });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     // Publish a Datadog alert — handler should be gated off.
@@ -419,8 +464,7 @@ async fn alert_handler_runs_when_flag_is_on() {
     let (_nats_container, nats_port) = start_nats().await;
 
     // Start MockEvaluator with the flag enabled.
-    let mock_evaluator = MockEvaluator::new()
-        .with_flag("agent_alert_handler_enabled", "on");
+    let mock_evaluator = MockEvaluator::new().with_flag("agent_alert_handler_enabled", "on");
     let (evaluator_addr, _evaluator_handle) = mock_evaluator.serve().await;
     let evaluator_url = format!("http://{evaluator_addr}");
 
@@ -436,12 +480,17 @@ async fn alert_handler_runs_when_flag_is_on() {
         })
         .await;
 
-    let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}")).await.unwrap();
+    let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
+        .await
+        .unwrap();
     let js = Arc::new(jetstream::new(nats.clone()));
 
     let vault = Arc::new(MemoryVault::new());
     vault
-        .store(&ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(), "sk-ant-realkey")
+        .store(
+            &ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(),
+            "sk-ant-realkey",
+        )
         .await
         .unwrap();
 
@@ -459,7 +508,9 @@ async fn alert_handler_runs_when_flag_is_on() {
         format!("http://127.0.0.1:{proxy_port}"),
         Some(evaluator_url),
     );
-    tokio::spawn(async move { run(cfg).await.ok(); });
+    tokio::spawn(async move {
+        run(cfg).await.ok();
+    });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     publish_datadog_alert(nats_port).await;
@@ -495,12 +546,17 @@ async fn handler_skipped_when_evaluator_is_unreachable() {
         })
         .await;
 
-    let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}")).await.unwrap();
+    let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
+        .await
+        .unwrap();
     let js = Arc::new(jetstream::new(nats.clone()));
 
     let vault = Arc::new(MemoryVault::new());
     vault
-        .store(&ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(), "sk-ant-realkey")
+        .store(
+            &ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(),
+            "sk-ant-realkey",
+        )
         .await
         .unwrap();
 
@@ -518,7 +574,9 @@ async fn handler_skipped_when_evaluator_is_unreachable() {
         format!("http://127.0.0.1:{proxy_port}"),
         Some(dead_evaluator_url),
     );
-    tokio::spawn(async move { run(cfg).await.ok(); });
+    tokio::spawn(async move {
+        run(cfg).await.ok();
+    });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     publish_datadog_alert(nats_port).await;
@@ -548,16 +606,23 @@ async fn fail_open_when_split_evaluator_not_configured() {
                 .header("authorization", "Bearer sk-ant-realkey");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Handled."}]}"#);
+                .body(
+                    r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Handled."}]}"#,
+                );
         })
         .await;
 
-    let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}")).await.unwrap();
+    let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
+        .await
+        .unwrap();
     let js = Arc::new(jetstream::new(nats.clone()));
 
     let vault = Arc::new(MemoryVault::new());
     vault
-        .store(&ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(), "sk-ant-realkey")
+        .store(
+            &ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(),
+            "sk-ant-realkey",
+        )
         .await
         .unwrap();
 
@@ -571,12 +636,10 @@ async fn fail_open_when_split_evaluator_not_configured() {
     .await;
 
     // No split_evaluator_url → all flags default to true.
-    let cfg = agent_config(
-        nats_port,
-        format!("http://127.0.0.1:{proxy_port}"),
-        None,
-    );
-    tokio::spawn(async move { run(cfg).await.ok(); });
+    let cfg = agent_config(nats_port, format!("http://127.0.0.1:{proxy_port}"), None);
+    tokio::spawn(async move {
+        run(cfg).await.ok();
+    });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     publish_datadog_alert(nats_port).await;
@@ -617,8 +680,7 @@ async fn register_datadog_automation(js: &jetstream::Context) {
 async fn memory_fetch_skipped_when_flag_is_off() {
     let (_nats_container, nats_port) = start_nats().await;
 
-    let mock_evaluator = MockEvaluator::new()
-        .with_flag("agent_memory_enabled", "off");
+    let mock_evaluator = MockEvaluator::new().with_flag("agent_memory_enabled", "off");
     let (evaluator_addr, _evaluator_handle) = mock_evaluator.serve().await;
     let evaluator_url = format!("http://{evaluator_addr}");
 
@@ -631,10 +693,13 @@ async fn memory_fetch_skipped_when_flag_is_off() {
                 .path("/repos/test-org/test-repo/contents/.trogon/memory.md");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(serde_json::json!({
-                    "content": base64::engine::general_purpose::STANDARD
-                        .encode("This is the agent memory notes.")
-                }).to_string());
+                .body(
+                    serde_json::json!({
+                        "content": base64::engine::general_purpose::STANDARD
+                            .encode("This is the agent memory notes.")
+                    })
+                    .to_string(),
+                );
         })
         .await;
 
@@ -648,12 +713,17 @@ async fn memory_fetch_skipped_when_flag_is_off() {
         })
         .await;
 
-    let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}")).await.unwrap();
+    let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
+        .await
+        .unwrap();
     let js = Arc::new(jetstream::new(nats.clone()));
 
     let vault = Arc::new(MemoryVault::new());
     vault
-        .store(&ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(), "sk-ant-realkey")
+        .store(
+            &ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(),
+            "sk-ant-realkey",
+        )
         .await
         .unwrap();
 
@@ -675,14 +745,19 @@ async fn memory_fetch_skipped_when_flag_is_off() {
         Some("test-org".to_string()),
         Some("test-repo".to_string()),
     );
-    tokio::spawn(async move { run(cfg).await.ok(); });
+    tokio::spawn(async move {
+        run(cfg).await.ok();
+    });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     publish_datadog_alert(nats_port).await;
 
     // Automation must complete (Anthropic called).
     let hit = wait_for_hit(&anthropic_mock, Duration::from_secs(20)).await;
-    assert!(hit, "Anthropic must be called — automation runs even when memory flag is off");
+    assert!(
+        hit,
+        "Anthropic must be called — automation runs even when memory flag is off"
+    );
 
     // GitHub must NOT have been called.
     assert_eq!(
@@ -698,8 +773,7 @@ async fn memory_fetch_skipped_when_flag_is_off() {
 async fn memory_content_included_when_flag_is_on() {
     let (_nats_container, nats_port) = start_nats().await;
 
-    let mock_evaluator = MockEvaluator::new()
-        .with_flag("agent_memory_enabled", "on");
+    let mock_evaluator = MockEvaluator::new().with_flag("agent_memory_enabled", "on");
     let (evaluator_addr, _evaluator_handle) = mock_evaluator.serve().await;
     let evaluator_url = format!("http://{evaluator_addr}");
 
@@ -730,12 +804,24 @@ async fn memory_content_included_when_flag_is_on() {
         })
         .await;
 
-    let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}")).await.unwrap();
+    let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
+        .await
+        .unwrap();
     let js = Arc::new(jetstream::new(nats.clone()));
 
     let vault = Arc::new(MemoryVault::new());
     vault
-        .store(&ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(), "sk-ant-realkey")
+        .store(
+            &ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(),
+            "sk-ant-realkey",
+        )
+        .await
+        .unwrap();
+    vault
+        .store(
+            &ApiKeyToken::new("tok_github_prod_test01").unwrap(),
+            "gh-fake-key",
+        )
         .await
         .unwrap();
 
@@ -757,23 +843,41 @@ async fn memory_content_included_when_flag_is_on() {
         Some("test-org".to_string()),
         Some("test-repo".to_string()),
     );
-    tokio::spawn(async move { run(cfg).await.ok(); });
+    tokio::spawn(async move {
+        run(cfg).await.ok();
+    });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     publish_datadog_alert(nats_port).await;
 
     // GitHub must have been called for memory.
     let hit = wait_for_hit(&github_mock, Duration::from_secs(20)).await;
-    assert!(hit, "GitHub contents endpoint must be hit when agent_memory_enabled = 'on'");
+    assert!(
+        hit,
+        "GitHub contents endpoint must be hit when agent_memory_enabled = 'on'"
+    );
 
     // Anthropic must have been called with memory in the request body.
-    anthropic_mock.assert_async().await;
+    // Wait explicitly so the automation has time to call Anthropic after GitHub.
+    let anthropic_hit = wait_for_hit(&anthropic_mock, Duration::from_secs(20)).await;
+    assert!(
+        anthropic_hit,
+        "Anthropic must be called with memory content when agent_memory_enabled = 'on'"
+    );
 }
 
 // ── Generic publish helper ────────────────────────────────────────────────────
 
-async fn publish_event(nats_port: u16, stream: &'static str, stream_subjects: &'static str, subject: &'static str, payload: serde_json::Value) {
-    let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}")).await.unwrap();
+async fn publish_event(
+    nats_port: u16,
+    stream: &'static str,
+    stream_subjects: &'static str,
+    subject: &'static str,
+    payload: serde_json::Value,
+) {
+    let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
+        .await
+        .unwrap();
     let js = jetstream::new(nats);
     js.get_or_create_stream(jetstream::stream::Config {
         name: stream.to_string(),
@@ -783,7 +887,11 @@ async fn publish_event(nats_port: u16, stream: &'static str, stream_subjects: &'
     .await
     .unwrap();
     let bytes = serde_json::to_vec(&payload).unwrap();
-    js.publish(subject, bytes.into()).await.unwrap().await.unwrap();
+    js.publish(subject, bytes.into())
+        .await
+        .unwrap()
+        .await
+        .unwrap();
 }
 
 // ── Per-handler "off" / "on" test pairs ──────────────────────────────────────

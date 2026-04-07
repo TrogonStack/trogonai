@@ -11,9 +11,12 @@ use std::time::Duration;
 
 use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::{
-    core::ContainerPort, runners::AsyncRunner, ContainerAsync, GenericImage, ImageExt,
+    ContainerAsync, GenericImage, ImageExt, core::ContainerPort, runners::AsyncRunner,
 };
-use trogon_secret_proxy::{proxy::{ProxyState, router}, stream, subjects, vault_admin, worker};
+use trogon_secret_proxy::{
+    proxy::{ProxyState, router},
+    stream, subjects, vault_admin, worker,
+};
 use trogon_vault::{ApiKeyToken, HashicorpVaultConfig, HashicorpVaultStore, VaultAuth, VaultStore};
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -409,9 +412,7 @@ async fn hashicorp_vault_proxy_worker_pipeline_resolves_real_key() {
         .expect("Failed to ensure PROXY_REQUESTS stream");
 
     // Start proxy.
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
 
     let proxy_state = ProxyState {
@@ -453,7 +454,9 @@ async fn hashicorp_vault_proxy_worker_pipeline_resolves_real_key() {
     // Send an HTTP request through the proxy using the opaque token.
     let client = reqwest::Client::new();
     let resp = client
-        .post(format!("http://127.0.0.1:{proxy_port}/anthropic/v1/messages"))
+        .post(format!(
+            "http://127.0.0.1:{proxy_port}/anthropic/v1/messages"
+        ))
         .header("Authorization", "Bearer tok_anthropic_prod_hvpipeline1")
         .header("Content-Type", "application/json")
         .body(r#"{"model":"claude-opus-4-6","max_tokens":10,"messages":[]}"#)

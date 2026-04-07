@@ -61,7 +61,10 @@ async fn create_streams(js: &jetstream::Context) {
 
 fn runner_cfg(nats_port: u16, proxy_url: String, tenant_id: &str) -> AgentConfig {
     AgentConfig {
-        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
+        nats: NatsConfig::new(
+            vec![format!("nats://127.0.0.1:{nats_port}")],
+            NatsAuth::None,
+        ),
         proxy_url,
         anthropic_token: "test-token".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
@@ -165,7 +168,9 @@ async fn action_filtered_trigger_fires_on_matching_action() {
         "pull_request": { "title": "Add feature" }
     }))
     .unwrap();
-    js.publish("github.pull_request", payload.into()).await.expect("publish");
+    js.publish("github.pull_request", payload.into())
+        .await
+        .expect("publish");
 
     assert!(
         wait_for_hits(&anthropic, 1, Duration::from_secs(8)).await,
@@ -203,7 +208,8 @@ async fn action_filtered_trigger_skips_non_matching_action() {
             when.method(httpmock::Method::POST)
                 .path("/anthropic/v1/messages")
                 .body_contains("SHOULD_NOT_APPEAR_IN_REQUEST");
-            then.status(500).body("automation must not fire for non-matching action");
+            then.status(500)
+                .body("automation must not fire for non-matching action");
         })
         .await;
 
@@ -230,13 +236,19 @@ async fn action_filtered_trigger_skips_non_matching_action() {
         "pull_request": { "title": "Old feature" }
     }))
     .unwrap();
-    js.publish("github.pull_request", payload.into()).await.expect("publish");
+    js.publish("github.pull_request", payload.into())
+        .await
+        .expect("publish");
 
     assert!(
         wait_for_hits(&fallback_mock, 1, Duration::from_secs(8)).await,
         "fallback handler was not called when action didn't match automation trigger"
     );
-    assert_eq!(bad_mock.hits_async().await, 0, "automation fired for wrong action");
+    assert_eq!(
+        bad_mock.hits_async().await,
+        0,
+        "automation fired for wrong action"
+    );
 }
 
 /// An automation stored for tenant "acme" must NOT run when the runner
@@ -268,7 +280,8 @@ async fn tenant_isolation_automation_does_not_fire_for_wrong_tenant() {
             when.method(httpmock::Method::POST)
                 .path("/anthropic/v1/messages")
                 .body_contains("ACME_TENANT_PROMPT_XYZ");
-            then.status(500).body("cross-tenant automation must not fire");
+            then.status(500)
+                .body("cross-tenant automation must not fire");
         })
         .await;
 
@@ -294,13 +307,19 @@ async fn tenant_isolation_automation_does_not_fire_for_wrong_tenant() {
         "pull_request": { "title": "Cross-tenant PR" }
     }))
     .unwrap();
-    js.publish("github.pull_request", payload.into()).await.expect("publish");
+    js.publish("github.pull_request", payload.into())
+        .await
+        .expect("publish");
 
     assert!(
         wait_for_hits(&fallback_mock, 1, Duration::from_secs(8)).await,
         "fallback did not run — wrong-tenant automation may have matched"
     );
-    assert_eq!(bad_mock.hits_async().await, 0, "cross-tenant automation fired");
+    assert_eq!(
+        bad_mock.hits_async().await,
+        0,
+        "cross-tenant automation fired"
+    );
 }
 
 /// A Linear Issue event dispatches to a matching automation.
@@ -344,7 +363,9 @@ async fn linear_event_dispatches_to_automation() {
         "data": { "id": "ISS-99", "title": "Bug in login" }
     }))
     .unwrap();
-    js.publish("linear.Issue.create", payload.into()).await.expect("publish");
+    js.publish("linear.Issue.create", payload.into())
+        .await
+        .expect("publish");
 
     assert!(
         wait_for_hits(&anthropic, 1, Duration::from_secs(8)).await,
@@ -364,11 +385,21 @@ async fn two_matching_automations_both_execute() {
 
     let store = AutomationStore::open(&js).await.expect("open store");
     store
-        .put(&make_automation("auto-p1", "default", "github.pull_request", "PARALLEL_PROMPT_ALPHA"))
+        .put(&make_automation(
+            "auto-p1",
+            "default",
+            "github.pull_request",
+            "PARALLEL_PROMPT_ALPHA",
+        ))
         .await
         .expect("put automation 1");
     store
-        .put(&make_automation("auto-p2", "default", "github.pull_request", "PARALLEL_PROMPT_BETA"))
+        .put(&make_automation(
+            "auto-p2",
+            "default",
+            "github.pull_request",
+            "PARALLEL_PROMPT_BETA",
+        ))
         .await
         .expect("put automation 2");
 
@@ -404,7 +435,9 @@ async fn two_matching_automations_both_execute() {
         "pull_request": { "title": "Parallel test" }
     }))
     .unwrap();
-    js.publish("github.pull_request", payload.into()).await.expect("publish");
+    js.publish("github.pull_request", payload.into())
+        .await
+        .expect("publish");
 
     assert!(
         wait_for_hits(&mock_a, 1, Duration::from_secs(8)).await,
@@ -444,7 +477,8 @@ async fn pr_merged_event_dispatches_to_automation_not_hardcoded_handler() {
             when.method(httpmock::Method::POST)
                 .path("/anthropic/v1/messages")
                 .body_contains("was just merged by");
-            then.status(500).body("hardcoded pr_merged handler must not run");
+            then.status(500)
+                .body("hardcoded pr_merged handler must not run");
         })
         .await;
 
@@ -473,7 +507,9 @@ async fn pr_merged_event_dispatches_to_automation_not_hardcoded_handler() {
         }
     }))
     .unwrap();
-    js.publish("github.pull_request", payload.into()).await.expect("publish");
+    js.publish("github.pull_request", payload.into())
+        .await
+        .expect("publish");
 
     assert!(
         wait_for_hits(&auto_mock, 1, Duration::from_secs(8)).await,
@@ -530,7 +566,9 @@ async fn draft_opened_trigger_fires_for_draft_pr() {
         "pull_request": { "title": "WIP feature", "draft": true }
     }))
     .unwrap();
-    js.publish("github.pull_request", payload.into()).await.expect("publish");
+    js.publish("github.pull_request", payload.into())
+        .await
+        .expect("publish");
 
     assert!(
         wait_for_hits(&draft_mock, 1, Duration::from_secs(8)).await,
@@ -565,7 +603,8 @@ async fn draft_opened_trigger_does_not_fire_for_non_draft_pr() {
             when.method(httpmock::Method::POST)
                 .path("/anthropic/v1/messages")
                 .body_contains("SHOULD_NOT_FIRE_FOR_NON_DRAFT");
-            then.status(500).body("draft_opened must not fire for non-draft PR");
+            then.status(500)
+                .body("draft_opened must not fire for non-draft PR");
         })
         .await;
 
@@ -592,13 +631,19 @@ async fn draft_opened_trigger_does_not_fire_for_non_draft_pr() {
         "pull_request": { "title": "Real feature", "draft": false }
     }))
     .unwrap();
-    js.publish("github.pull_request", payload.into()).await.expect("publish");
+    js.publish("github.pull_request", payload.into())
+        .await
+        .expect("publish");
 
     assert!(
         wait_for_hits(&fallback, 1, Duration::from_secs(8)).await,
         "fallback handler not called for non-draft PR"
     );
-    assert_eq!(bad_mock.hits_async().await, 0, "draft_opened fired for non-draft PR");
+    assert_eq!(
+        bad_mock.hits_async().await,
+        0,
+        "draft_opened fired for non-draft PR"
+    );
 }
 
 /// An automation with trigger `github.pull_request:pushed` fires when a PR
@@ -645,7 +690,9 @@ async fn pushed_trigger_fires_on_synchronize_action() {
         "pull_request": { "title": "Add more commits" }
     }))
     .unwrap();
-    js.publish("github.pull_request", payload.into()).await.expect("publish");
+    js.publish("github.pull_request", payload.into())
+        .await
+        .expect("publish");
 
     assert!(
         wait_for_hits(&anthropic, 1, Duration::from_secs(8)).await,
@@ -681,7 +728,8 @@ async fn pushed_trigger_does_not_fire_on_opened_action() {
             when.method(httpmock::Method::POST)
                 .path("/anthropic/v1/messages")
                 .body_contains("PUSHED_SHOULD_NOT_FIRE");
-            then.status(500).body("pushed automation must not fire for opened action");
+            then.status(500)
+                .body("pushed automation must not fire for opened action");
         })
         .await;
 
@@ -707,11 +755,17 @@ async fn pushed_trigger_does_not_fire_on_opened_action() {
         "pull_request": { "title": "New PR" }
     }))
     .unwrap();
-    js.publish("github.pull_request", payload.into()).await.expect("publish");
+    js.publish("github.pull_request", payload.into())
+        .await
+        .expect("publish");
 
     assert!(
         wait_for_hits(&fallback, 1, Duration::from_secs(8)).await,
         "fallback handler not called — pushed automation may have incorrectly fired"
     );
-    assert_eq!(bad_mock.hits_async().await, 0, "pushed automation fired for opened action");
+    assert_eq!(
+        bad_mock.hits_async().await,
+        0,
+        "pushed automation fired for opened action"
+    );
 }

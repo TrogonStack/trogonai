@@ -30,10 +30,10 @@ fn make_agent(proxy_url: &str) -> AgentLoop {
         memory_owner: None,
         memory_repo: None,
         memory_path: None,
-    mcp_tool_defs: vec![],
-    mcp_dispatch: vec![],
-    split_client: None,
-    tenant_id: "test".to_string(),
+        mcp_tool_defs: vec![],
+        mcp_dispatch: vec![],
+        split_client: None,
+        tenant_id: "test".to_string(),
     }
 }
 
@@ -93,7 +93,8 @@ async fn agent_loop_end_turn_empty_content_returns_empty_string() {
     let server = MockServer::start_async().await;
 
     server.mock(|when, then| {
-        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(json!({ "stop_reason": "end_turn", "content": [] }));
@@ -115,7 +116,8 @@ async fn agent_loop_end_turn_with_only_non_text_blocks_returns_empty() {
     let server = MockServer::start_async().await;
 
     server.mock(|when, then| {
-        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(json!({

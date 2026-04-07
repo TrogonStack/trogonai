@@ -471,7 +471,10 @@ mod tests {
             .publish_with_headers("foo", async_nats::HeaderMap::new(), bytes::Bytes::from("x"))
             .await;
 
-        assert!(result.is_ok(), "fail_publish_count(0) must not fail any publish");
+        assert!(
+            result.is_ok(),
+            "fail_publish_count(0) must not fail any publish"
+        );
         assert_eq!(mock.published_messages(), vec!["foo"]);
     }
 
@@ -527,7 +530,10 @@ mod tests {
         let second = mock
             .request_with_headers("sub", async_nats::HeaderMap::new(), bytes::Bytes::new())
             .await;
-        assert!(second.is_ok(), "second request must succeed after the flag is cleared");
+        assert!(
+            second.is_ok(),
+            "second request must succeed after the flag is cleared"
+        );
         assert_eq!(second.unwrap().payload, bytes::Bytes::from("ok"));
     }
 }

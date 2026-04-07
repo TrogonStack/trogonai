@@ -16,7 +16,7 @@ use futures_util::StreamExt as _;
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
 use testcontainers_modules::nats::Nats;
-use testcontainers_modules::testcontainers::{runners::AsyncRunner, ContainerAsync, ImageExt};
+use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
 use trogon_github::{GithubConfig, serve};
 use trogon_std::env::InMemoryEnv;
 
@@ -80,18 +80,12 @@ fn make_config(nats_port: u16, http_port: u16, secret: Option<&str>) -> GithubCo
 }
 
 /// Start the server in a background task; return a connected NATS client for assertions.
-async fn spawn_server(
-    nats_port: u16,
-    http_port: u16,
-    secret: Option<&str>,
-) -> async_nats::Client {
+async fn spawn_server(nats_port: u16, http_port: u16, secret: Option<&str>) -> async_nats::Client {
     let config = make_config(nats_port, http_port, secret);
     let nats_for_server = nats_client(nats_port).await;
 
     tokio::spawn(async move {
-        serve(config, nats_for_server)
-            .await
-            .expect("server error");
+        serve(config, nats_for_server).await.expect("server error");
     });
 
     wait_for_port(http_port, Duration::from_secs(5)).await;
@@ -112,7 +106,10 @@ async fn webhook_push_event_returns_200_and_is_published_to_nats() {
     let nats = spawn_server(nats_port, http_port, Some(secret)).await;
 
     // Subscribe via core NATS before the request so no messages are missed.
-    let mut sub = nats.subscribe("github.push").await.expect("subscribe failed");
+    let mut sub = nats
+        .subscribe("github.push")
+        .await
+        .expect("subscribe failed");
 
     let sig = compute_sig(secret, body);
     let resp = reqwest::Client::new()
@@ -133,7 +130,11 @@ async fn webhook_push_event_returns_200_and_is_published_to_nats() {
         .expect("timed out waiting for NATS message")
         .expect("subscriber closed");
 
-    assert_eq!(msg.payload.as_ref(), body.as_ref(), "NATS payload must match request body");
+    assert_eq!(
+        msg.payload.as_ref(),
+        body.as_ref(),
+        "NATS payload must match request body"
+    );
 }
 
 /// A request with an incorrect HMAC signature is rejected with 401 Unauthorized.
@@ -144,7 +145,10 @@ async fn webhook_invalid_signature_returns_401() {
     let http_port = next_port();
     let nats = spawn_server(nats_port, http_port, Some("correct-secret")).await;
 
-    let mut sub = nats.subscribe("github.push").await.expect("subscribe failed");
+    let mut sub = nats
+        .subscribe("github.push")
+        .await
+        .expect("subscribe failed");
 
     let resp = reqwest::Client::new()
         .post(format!("http://127.0.0.1:{http_port}/webhook"))
@@ -160,7 +164,10 @@ async fn webhook_invalid_signature_returns_401() {
 
     // No message should arrive.
     let result = tokio::time::timeout(Duration::from_millis(200), sub.next()).await;
-    assert!(result.is_err(), "must not publish to NATS on invalid signature");
+    assert!(
+        result.is_err(),
+        "must not publish to NATS on invalid signature"
+    );
 }
 
 /// When a webhook secret is configured but the `X-Hub-Signature-256` header is
@@ -180,7 +187,12 @@ async fn webhook_missing_signature_header_returns_401() {
         .await
         .expect("HTTP request failed");
 
-    assert_eq!(resp.status(), 401, "expected 401 when signature header absent; got {}", resp.status());
+    assert_eq!(
+        resp.status(),
+        401,
+        "expected 401 when signature header absent; got {}",
+        resp.status()
+    );
 }
 
 /// A request without an `X-GitHub-Event` header must be rejected with 400 Bad Request.
@@ -204,7 +216,12 @@ async fn webhook_missing_event_type_header_returns_400() {
         .await
         .expect("HTTP request failed");
 
-    assert_eq!(resp.status(), 400, "expected 400 when X-GitHub-Event absent; got {}", resp.status());
+    assert_eq!(
+        resp.status(),
+        400,
+        "expected 400 when X-GitHub-Event absent; got {}",
+        resp.status()
+    );
 }
 
 /// When no webhook secret is configured, signature validation is skipped
@@ -215,7 +232,10 @@ async fn webhook_no_secret_configured_accepts_any_request() {
     let http_port = next_port();
     let nats = spawn_server(nats_port, http_port, None).await;
 
-    let mut sub = nats.subscribe("github.ping").await.expect("subscribe failed");
+    let mut sub = nats
+        .subscribe("github.ping")
+        .await
+        .expect("subscribe failed");
 
     let resp = reqwest::Client::new()
         .post(format!("http://127.0.0.1:{http_port}/webhook"))
@@ -227,7 +247,12 @@ async fn webhook_no_secret_configured_accepts_any_request() {
         .await
         .expect("HTTP request failed");
 
-    assert_eq!(resp.status(), 200, "expected 200 with no secret configured; got {}", resp.status());
+    assert_eq!(
+        resp.status(),
+        200,
+        "expected 200 with no secret configured; got {}",
+        resp.status()
+    );
 
     let msg = tokio::time::timeout(Duration::from_secs(5), sub.next())
         .await
@@ -286,7 +311,10 @@ async fn webhook_delivery_id_forwarded_in_nats_headers() {
     let delivery_id = "delivery-uuid-xyz-9999";
 
     let nats = spawn_server(nats_port, http_port, None).await;
-    let mut sub = nats.subscribe("github.issues").await.expect("subscribe failed");
+    let mut sub = nats
+        .subscribe("github.issues")
+        .await
+        .expect("subscribe failed");
 
     reqwest::Client::new()
         .post(format!("http://127.0.0.1:{http_port}/webhook"))
@@ -323,7 +351,10 @@ async fn webhook_event_type_forwarded_in_nats_headers() {
     let body = br#"{"stars":42}"#;
 
     let nats = spawn_server(nats_port, http_port, None).await;
-    let mut sub = nats.subscribe("github.star").await.expect("subscribe failed");
+    let mut sub = nats
+        .subscribe("github.star")
+        .await
+        .expect("subscribe failed");
 
     reqwest::Client::new()
         .post(format!("http://127.0.0.1:{http_port}/webhook"))
@@ -345,7 +376,10 @@ async fn webhook_event_type_forwarded_in_nats_headers() {
         .map(|v| v.as_str())
         .unwrap_or("");
 
-    assert_eq!(got_event, "star", "X-GitHub-Event must be forwarded to NATS");
+    assert_eq!(
+        got_event, "star",
+        "X-GitHub-Event must be forwarded to NATS"
+    );
 }
 
 /// Only `POST /webhook` is handled.  A `GET` to the same path must return
@@ -362,7 +396,12 @@ async fn webhook_get_request_returns_405() {
         .await
         .expect("HTTP request failed");
 
-    assert_eq!(resp.status(), 405, "expected 405 Method Not Allowed for GET; got {}", resp.status());
+    assert_eq!(
+        resp.status(),
+        405,
+        "expected 405 Method Not Allowed for GET; got {}",
+        resp.status()
+    );
 }
 
 /// The raw request body is forwarded byte-for-byte to NATS without any
@@ -375,7 +414,10 @@ async fn webhook_raw_body_preserved_in_nats_message() {
     let body = r#"{"message":"héllo wörld 🚀","nested":{"key":"value"}}"#.as_bytes();
 
     let nats = spawn_server(nats_port, http_port, None).await;
-    let mut sub = nats.subscribe("github.release").await.expect("subscribe failed");
+    let mut sub = nats
+        .subscribe("github.release")
+        .await
+        .expect("subscribe failed");
 
     reqwest::Client::new()
         .post(format!("http://127.0.0.1:{http_port}/webhook"))
@@ -406,7 +448,10 @@ async fn webhook_missing_delivery_id_defaults_to_unknown() {
     let http_port = next_port();
 
     let nats = spawn_server(nats_port, http_port, None).await;
-    let mut sub = nats.subscribe("github.workflow_run").await.expect("subscribe failed");
+    let mut sub = nats
+        .subscribe("github.workflow_run")
+        .await
+        .expect("subscribe failed");
 
     reqwest::Client::new()
         .post(format!("http://127.0.0.1:{http_port}/webhook"))
@@ -442,8 +487,14 @@ async fn webhook_different_event_types_use_distinct_nats_subjects() {
     let http_port = next_port();
 
     let nats = spawn_server(nats_port, http_port, None).await;
-    let mut push_sub = nats.subscribe("github.push").await.expect("subscribe failed");
-    let mut tag_sub = nats.subscribe("github.create").await.expect("subscribe failed");
+    let mut push_sub = nats
+        .subscribe("github.push")
+        .await
+        .expect("subscribe failed");
+    let mut tag_sub = nats
+        .subscribe("github.create")
+        .await
+        .expect("subscribe failed");
 
     let push_body = br#"{"ref":"refs/heads/main"}"#;
     let tag_body = br#"{"ref":"v1.0.0","ref_type":"tag"}"#;
@@ -498,7 +549,12 @@ async fn health_endpoint_returns_200() {
         .await
         .expect("HTTP request failed");
 
-    assert_eq!(resp.status(), 200, "expected 200 from /health; got {}", resp.status());
+    assert_eq!(
+        resp.status(),
+        200,
+        "expected 200 from /health; got {}",
+        resp.status()
+    );
 }
 
 /// `POST /health` is not a registered route — axum returns 405 Method Not Allowed.
@@ -514,7 +570,12 @@ async fn health_endpoint_only_accepts_get() {
         .await
         .expect("HTTP request failed");
 
-    assert_eq!(resp.status(), 405, "expected 405 for POST /health; got {}", resp.status());
+    assert_eq!(
+        resp.status(),
+        405,
+        "expected 405 for POST /health; got {}",
+        resp.status()
+    );
 }
 
 // ── New tests ─────────────────────────────────────────────────────────────────
@@ -534,14 +595,22 @@ async fn webhook_custom_subject_prefix_changes_nats_subject() {
 
     let nats_for_server = nats_client(nats_port).await;
     tokio::spawn(async move {
-        trogon_github::serve(config, nats_for_server).await.expect("server error");
+        trogon_github::serve(config, nats_for_server)
+            .await
+            .expect("server error");
     });
     wait_for_port(http_port, Duration::from_secs(5)).await;
 
     let nats = nats_client(nats_port).await;
-    let mut sub = nats.subscribe("mygithub.push").await.expect("subscribe failed");
+    let mut sub = nats
+        .subscribe("mygithub.push")
+        .await
+        .expect("subscribe failed");
     // Make sure nothing leaks onto the default subject.
-    let mut default_sub = nats.subscribe("github.push").await.expect("subscribe failed");
+    let mut default_sub = nats
+        .subscribe("github.push")
+        .await
+        .expect("subscribe failed");
 
     let body = br#"{"ref":"refs/heads/main"}"#;
     reqwest::Client::new()
@@ -562,7 +631,10 @@ async fn webhook_custom_subject_prefix_changes_nats_subject() {
 
     // Nothing should arrive on the default subject.
     let stray = tokio::time::timeout(Duration::from_millis(200), default_sub.next()).await;
-    assert!(stray.is_err(), "must not publish to github.push when prefix is mygithub");
+    assert!(
+        stray.is_err(),
+        "must not publish to github.push when prefix is mygithub"
+    );
 }
 
 /// A large payload (~100 KB) must be forwarded to NATS unchanged.
@@ -572,7 +644,10 @@ async fn webhook_large_payload_is_forwarded() {
     let http_port = next_port();
 
     let nats = spawn_server(nats_port, http_port, None).await;
-    let mut sub = nats.subscribe("github.push").await.expect("subscribe failed");
+    let mut sub = nats
+        .subscribe("github.push")
+        .await
+        .expect("subscribe failed");
 
     // Build a ~100 KB JSON body.
     let large_value = "x".repeat(100_000);
@@ -608,7 +683,10 @@ async fn webhook_empty_body_is_accepted_and_published() {
     let http_port = next_port();
 
     let nats = spawn_server(nats_port, http_port, None).await;
-    let mut sub = nats.subscribe("github.ping").await.expect("subscribe failed");
+    let mut sub = nats
+        .subscribe("github.ping")
+        .await
+        .expect("subscribe failed");
 
     reqwest::Client::new()
         .post(format!("http://127.0.0.1:{http_port}/webhook"))
@@ -624,7 +702,11 @@ async fn webhook_empty_body_is_accepted_and_published() {
         .expect("timed out waiting for NATS message")
         .expect("subscriber closed");
 
-    assert_eq!(msg.payload.as_ref(), b"", "empty body must be forwarded as empty NATS payload");
+    assert_eq!(
+        msg.payload.as_ref(),
+        b"",
+        "empty body must be forwarded as empty NATS payload"
+    );
 }
 
 /// Ten webhooks sent concurrently must all arrive on NATS — no message is dropped.
@@ -634,7 +716,10 @@ async fn webhook_concurrent_requests_all_published() {
     let http_port = next_port();
 
     let nats = spawn_server(nats_port, http_port, None).await;
-    let mut sub = nats.subscribe("github.push").await.expect("subscribe failed");
+    let mut sub = nats
+        .subscribe("github.push")
+        .await
+        .expect("subscribe failed");
 
     let client = reqwest::Client::new();
     let url = format!("http://127.0.0.1:{http_port}/webhook");
@@ -726,7 +811,12 @@ async fn unknown_path_returns_404() {
         .await
         .expect("HTTP request failed");
 
-    assert_eq!(resp.status(), 404, "expected 404 for unknown path; got {}", resp.status());
+    assert_eq!(
+        resp.status(),
+        404,
+        "expected 404 for unknown path; got {}",
+        resp.status()
+    );
 }
 
 // ── Stream max_age ────────────────────────────────────────────────────────────
@@ -748,12 +838,17 @@ async fn webhook_custom_stream_max_age_still_publishes() {
 
     let nats_for_server = nats_client(nats_port).await;
     tokio::spawn(async move {
-        trogon_github::serve(config, nats_for_server).await.expect("server error");
+        trogon_github::serve(config, nats_for_server)
+            .await
+            .expect("server error");
     });
     wait_for_port(http_port, Duration::from_secs(5)).await;
 
     let nats = nats_client(nats_port).await;
-    let mut sub = nats.subscribe("github.push").await.expect("subscribe failed");
+    let mut sub = nats
+        .subscribe("github.push")
+        .await
+        .expect("subscribe failed");
 
     reqwest::Client::new()
         .post(format!("http://127.0.0.1:{http_port}/webhook"))
@@ -788,7 +883,10 @@ async fn server_starts_normally_when_stream_already_exists() {
     // Second server must reuse the existing stream without error.
     let http_port2 = next_port();
     let nats = spawn_server(nats_port, http_port2, None).await;
-    let mut sub = nats.subscribe("github.push").await.expect("subscribe failed");
+    let mut sub = nats
+        .subscribe("github.push")
+        .await
+        .expect("subscribe failed");
 
     let body = br#"{"ref":"refs/heads/main"}"#;
     let resp = reqwest::Client::new()
@@ -800,7 +898,11 @@ async fn server_starts_normally_when_stream_already_exists() {
         .await
         .unwrap();
 
-    assert_eq!(resp.status(), 200, "second server instance must publish normally");
+    assert_eq!(
+        resp.status(),
+        200,
+        "second server instance must publish normally"
+    );
 
     let msg = tokio::time::timeout(Duration::from_secs(5), sub.next())
         .await
@@ -821,7 +923,9 @@ async fn webhook_returns_500_when_jetstream_stream_is_gone() {
     // Delete the stream so the next publish has no stream to land on.
     let admin = nats_client(nats_port).await;
     let js = async_nats::jetstream::new(admin);
-    js.delete_stream("GITHUB").await.expect("failed to delete GITHUB stream");
+    js.delete_stream("GITHUB")
+        .await
+        .expect("failed to delete GITHUB stream");
 
     // Give NATS a moment to propagate the deletion.
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -977,7 +1081,9 @@ async fn webhook_returns_error_when_nats_connection_lost() {
             r.status()
         ),
         Err(e) if e.is_timeout() => {
-            panic!("server hung waiting for NATS — the HTTP handler must not block indefinitely: {e}")
+            panic!(
+                "server hung waiting for NATS — the HTTP handler must not block indefinitely: {e}"
+            )
         }
         Err(e) => panic!("unexpected HTTP error: {e}"),
     }
@@ -1006,7 +1112,10 @@ async fn webhook_custom_stream_name_creates_correct_stream() {
     wait_for_port(http_port, Duration::from_secs(5)).await;
 
     let nats = nats_client(nats_port).await;
-    let mut sub = nats.subscribe("github.push").await.expect("subscribe failed");
+    let mut sub = nats
+        .subscribe("github.push")
+        .await
+        .expect("subscribe failed");
 
     let body = br#"{"ref":"refs/heads/main"}"#;
     let resp = reqwest::Client::new()
@@ -1018,7 +1127,11 @@ async fn webhook_custom_stream_name_creates_correct_stream() {
         .await
         .unwrap();
 
-    assert_eq!(resp.status(), 200, "server with custom stream name must publish normally");
+    assert_eq!(
+        resp.status(),
+        200,
+        "server with custom stream name must publish normally"
+    );
 
     let msg = tokio::time::timeout(Duration::from_secs(5), sub.next())
         .await

@@ -11,7 +11,7 @@ use httpmock::MockServer;
 use reqwest::Client;
 use serde_json::{Value, json};
 use testcontainers_modules::nats::Nats;
-use testcontainers_modules::testcontainers::{runners::AsyncRunner, ImageExt};
+use testcontainers_modules::testcontainers::{ImageExt, runners::AsyncRunner};
 use tokio::net::TcpListener;
 use trogon_agent::{
     agent_loop::AgentLoop,
@@ -76,7 +76,10 @@ async fn start() -> TestEnv {
         tenant_id: "test".to_string(),
     });
 
-    let state = ChatAppState { agent, session_store };
+    let state = ChatAppState {
+        agent,
+        session_store,
+    };
     let app = router(state);
 
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
@@ -96,17 +99,25 @@ async fn start() -> TestEnv {
 #[tokio::test]
 async fn list_sessions_missing_tenant_returns_400() {
     let env = start().await;
-    let res = env.client.get(format!("{}/sessions", env.base_url))
-        .send().await.unwrap();
+    let res = env
+        .client
+        .get(format!("{}/sessions", env.base_url))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(res.status(), 400);
 }
 
 #[tokio::test]
 async fn create_session_missing_tenant_returns_400() {
     let env = start().await;
-    let res = env.client.post(format!("{}/sessions", env.base_url))
+    let res = env
+        .client
+        .post(format!("{}/sessions", env.base_url))
         .json(&json!({"name": "test"}))
-        .send().await.unwrap();
+        .send()
+        .await
+        .unwrap();
     assert_eq!(res.status(), 400);
 }
 
@@ -115,10 +126,14 @@ async fn create_session_missing_tenant_returns_400() {
 #[tokio::test]
 async fn create_session_returns_201_with_id() {
     let env = start().await;
-    let res = env.client.post(format!("{}/sessions", env.base_url))
+    let res = env
+        .client
+        .post(format!("{}/sessions", env.base_url))
         .header("x-tenant-id", "acme")
         .json(&json!({"name": "My Agent"}))
-        .send().await.unwrap();
+        .send()
+        .await
+        .unwrap();
     assert_eq!(res.status(), 201);
     let body: Value = res.json().await.unwrap();
     assert!(!body["id"].as_str().unwrap_or("").is_empty());
@@ -130,24 +145,38 @@ async fn create_session_returns_201_with_id() {
 #[tokio::test]
 async fn create_session_default_name() {
     let env = start().await;
-    let res: Value = env.client.post(format!("{}/sessions", env.base_url))
+    let res: Value = env
+        .client
+        .post(format!("{}/sessions", env.base_url))
         .header("x-tenant-id", "acme")
         .json(&json!({}))
-        .send().await.unwrap().json().await.unwrap();
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
     assert_eq!(res["name"], "New Agent");
 }
 
 #[tokio::test]
 async fn create_session_with_model_and_tools() {
     let env = start().await;
-    let res: Value = env.client.post(format!("{}/sessions", env.base_url))
+    let res: Value = env
+        .client
+        .post(format!("{}/sessions", env.base_url))
         .header("x-tenant-id", "acme")
         .json(&json!({
             "name": "Fast Agent",
             "model": "claude-haiku-4-5-20251001",
             "tools": ["get_pr_diff"]
         }))
-        .send().await.unwrap().json().await.unwrap();
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
     assert_eq!(res["model"], "claude-haiku-4-5-20251001");
     assert_eq!(res["tools"], json!(["get_pr_diff"]));
 }
@@ -157,48 +186,88 @@ async fn create_session_with_model_and_tools() {
 #[tokio::test]
 async fn list_sessions_empty_returns_empty_array() {
     let env = start().await;
-    let res: Value = env.client.get(format!("{}/sessions", env.base_url))
+    let res: Value = env
+        .client
+        .get(format!("{}/sessions", env.base_url))
         .header("x-tenant-id", "acme")
-        .send().await.unwrap().json().await.unwrap();
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
     assert_eq!(res, json!([]));
 }
 
 #[tokio::test]
 async fn list_sessions_returns_created_sessions() {
     let env = start().await;
-    env.client.post(format!("{}/sessions", env.base_url))
+    env.client
+        .post(format!("{}/sessions", env.base_url))
         .header("x-tenant-id", "acme")
         .json(&json!({"name": "A"}))
-        .send().await.unwrap();
-    env.client.post(format!("{}/sessions", env.base_url))
+        .send()
+        .await
+        .unwrap();
+    env.client
+        .post(format!("{}/sessions", env.base_url))
         .header("x-tenant-id", "acme")
         .json(&json!({"name": "B"}))
-        .send().await.unwrap();
+        .send()
+        .await
+        .unwrap();
 
-    let list: Value = env.client.get(format!("{}/sessions", env.base_url))
+    let list: Value = env
+        .client
+        .get(format!("{}/sessions", env.base_url))
         .header("x-tenant-id", "acme")
-        .send().await.unwrap().json().await.unwrap();
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
     assert_eq!(list.as_array().unwrap().len(), 2);
 }
 
 #[tokio::test]
 async fn list_sessions_tenant_isolation() {
     let env = start().await;
-    env.client.post(format!("{}/sessions", env.base_url))
+    env.client
+        .post(format!("{}/sessions", env.base_url))
         .header("x-tenant-id", "acme")
         .json(&json!({"name": "acme session"}))
-        .send().await.unwrap();
-    env.client.post(format!("{}/sessions", env.base_url))
+        .send()
+        .await
+        .unwrap();
+    env.client
+        .post(format!("{}/sessions", env.base_url))
         .header("x-tenant-id", "other")
         .json(&json!({"name": "other session"}))
-        .send().await.unwrap();
+        .send()
+        .await
+        .unwrap();
 
-    let acme_list: Value = env.client.get(format!("{}/sessions", env.base_url))
+    let acme_list: Value = env
+        .client
+        .get(format!("{}/sessions", env.base_url))
         .header("x-tenant-id", "acme")
-        .send().await.unwrap().json().await.unwrap();
-    let other_list: Value = env.client.get(format!("{}/sessions", env.base_url))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let other_list: Value = env
+        .client
+        .get(format!("{}/sessions", env.base_url))
         .header("x-tenant-id", "other")
-        .send().await.unwrap().json().await.unwrap();
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
 
     assert_eq!(acme_list.as_array().unwrap().len(), 1);
     assert_eq!(other_list.as_array().unwrap().len(), 1);
@@ -210,15 +279,29 @@ async fn list_sessions_tenant_isolation() {
 #[tokio::test]
 async fn get_session_returns_200_with_details() {
     let env = start().await;
-    let created: Value = env.client.post(format!("{}/sessions", env.base_url))
+    let created: Value = env
+        .client
+        .post(format!("{}/sessions", env.base_url))
         .header("x-tenant-id", "acme")
         .json(&json!({"name": "My Agent"}))
-        .send().await.unwrap().json().await.unwrap();
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
     let id = created["id"].as_str().unwrap();
 
-    let got: Value = env.client.get(format!("{}/sessions/{id}", env.base_url))
+    let got: Value = env
+        .client
+        .get(format!("{}/sessions/{id}", env.base_url))
         .header("x-tenant-id", "acme")
-        .send().await.unwrap().json().await.unwrap();
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
     assert_eq!(got["id"], id);
     assert_eq!(got["name"], "My Agent");
     // Full session view includes messages array.
@@ -228,9 +311,13 @@ async fn get_session_returns_200_with_details() {
 #[tokio::test]
 async fn get_session_not_found_returns_404() {
     let env = start().await;
-    let res = env.client.get(format!("{}/sessions/does-not-exist", env.base_url))
+    let res = env
+        .client
+        .get(format!("{}/sessions/does-not-exist", env.base_url))
         .header("x-tenant-id", "acme")
-        .send().await.unwrap();
+        .send()
+        .await
+        .unwrap();
     assert_eq!(res.status(), 404);
 }
 
@@ -239,20 +326,34 @@ async fn get_session_not_found_returns_404() {
 #[tokio::test]
 async fn update_session_name_model_tools() {
     let env = start().await;
-    let created: Value = env.client.post(format!("{}/sessions", env.base_url))
+    let created: Value = env
+        .client
+        .post(format!("{}/sessions", env.base_url))
         .header("x-tenant-id", "acme")
         .json(&json!({"name": "Old Name"}))
-        .send().await.unwrap().json().await.unwrap();
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
     let id = created["id"].as_str().unwrap();
 
-    let updated: Value = env.client.patch(format!("{}/sessions/{id}", env.base_url))
+    let updated: Value = env
+        .client
+        .patch(format!("{}/sessions/{id}", env.base_url))
         .header("x-tenant-id", "acme")
         .json(&json!({
             "name": "New Name",
             "model": "claude-haiku-4-5-20251001",
             "tools": ["get_pr_diff"]
         }))
-        .send().await.unwrap().json().await.unwrap();
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
     assert_eq!(updated["name"], "New Name");
     assert_eq!(updated["model"], "claude-haiku-4-5-20251001");
 }
@@ -260,10 +361,14 @@ async fn update_session_name_model_tools() {
 #[tokio::test]
 async fn update_session_not_found_returns_404() {
     let env = start().await;
-    let res = env.client.patch(format!("{}/sessions/ghost", env.base_url))
+    let res = env
+        .client
+        .patch(format!("{}/sessions/ghost", env.base_url))
         .header("x-tenant-id", "acme")
         .json(&json!({"name": "x"}))
-        .send().await.unwrap();
+        .send()
+        .await
+        .unwrap();
     assert_eq!(res.status(), 404);
 }
 
@@ -272,29 +377,48 @@ async fn update_session_not_found_returns_404() {
 #[tokio::test]
 async fn delete_session_returns_204_and_then_404() {
     let env = start().await;
-    let created: Value = env.client.post(format!("{}/sessions", env.base_url))
+    let created: Value = env
+        .client
+        .post(format!("{}/sessions", env.base_url))
         .header("x-tenant-id", "acme")
         .json(&json!({"name": "Doomed"}))
-        .send().await.unwrap().json().await.unwrap();
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
     let id = created["id"].as_str().unwrap();
 
-    let del = env.client.delete(format!("{}/sessions/{id}", env.base_url))
+    let del = env
+        .client
+        .delete(format!("{}/sessions/{id}", env.base_url))
         .header("x-tenant-id", "acme")
-        .send().await.unwrap();
+        .send()
+        .await
+        .unwrap();
     assert_eq!(del.status(), 204);
 
-    let get = env.client.get(format!("{}/sessions/{id}", env.base_url))
+    let get = env
+        .client
+        .get(format!("{}/sessions/{id}", env.base_url))
         .header("x-tenant-id", "acme")
-        .send().await.unwrap();
+        .send()
+        .await
+        .unwrap();
     assert_eq!(get.status(), 404);
 }
 
 #[tokio::test]
 async fn delete_session_not_found_returns_404() {
     let env = start().await;
-    let res = env.client.delete(format!("{}/sessions/ghost", env.base_url))
+    let res = env
+        .client
+        .delete(format!("{}/sessions/ghost", env.base_url))
         .header("x-tenant-id", "acme")
-        .send().await.unwrap();
+        .send()
+        .await
+        .unwrap();
     assert_eq!(res.status(), 404);
 }
 
@@ -306,22 +430,37 @@ async fn send_message_returns_agent_response() {
 
     // Mock Anthropic: immediate end_turn.
     env.mock_server.mock(|when, then| {
-        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(end_turn("Hello from agent"));
     });
 
-    let created: Value = env.client.post(format!("{}/sessions", env.base_url))
+    let created: Value = env
+        .client
+        .post(format!("{}/sessions", env.base_url))
         .header("x-tenant-id", "acme")
         .json(&json!({}))
-        .send().await.unwrap().json().await.unwrap();
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
     let id = created["id"].as_str().unwrap();
 
-    let res: Value = env.client.post(format!("{}/sessions/{id}/messages", env.base_url))
+    let res: Value = env
+        .client
+        .post(format!("{}/sessions/{id}/messages", env.base_url))
         .header("x-tenant-id", "acme")
         .json(&json!({"content": "Hi there"}))
-        .send().await.unwrap().json().await.unwrap();
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
 
     assert_eq!(res["content"], "Hello from agent");
     assert!(res["message_count"].as_u64().unwrap() >= 2); // user + assistant
@@ -332,28 +471,46 @@ async fn send_message_auto_names_session_from_first_message() {
     let env = start().await;
 
     env.mock_server.mock(|when, then| {
-        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(end_turn("ok"));
     });
 
-    let created: Value = env.client.post(format!("{}/sessions", env.base_url))
+    let created: Value = env
+        .client
+        .post(format!("{}/sessions", env.base_url))
         .header("x-tenant-id", "acme")
         .json(&json!({}))
-        .send().await.unwrap().json().await.unwrap();
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
     let id = created["id"].as_str().unwrap();
     assert_eq!(created["name"], "New Agent");
 
-    env.client.post(format!("{}/sessions/{id}/messages", env.base_url))
+    env.client
+        .post(format!("{}/sessions/{id}/messages", env.base_url))
         .header("x-tenant-id", "acme")
         .json(&json!({"content": "What is the capital of France?"}))
-        .send().await.unwrap();
+        .send()
+        .await
+        .unwrap();
 
     // Name should now be set to the first message content.
-    let got: Value = env.client.get(format!("{}/sessions/{id}", env.base_url))
+    let got: Value = env
+        .client
+        .get(format!("{}/sessions/{id}", env.base_url))
         .header("x-tenant-id", "acme")
-        .send().await.unwrap().json().await.unwrap();
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
     assert_eq!(got["name"], "What is the capital of France?");
 }
 
@@ -363,34 +520,59 @@ async fn send_message_history_persisted_for_second_turn() {
 
     // Both turns return end_turn.
     env.mock_server.mock(|when, then| {
-        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(end_turn("Paris"));
     });
 
-    let created: Value = env.client.post(format!("{}/sessions", env.base_url))
+    let created: Value = env
+        .client
+        .post(format!("{}/sessions", env.base_url))
         .header("x-tenant-id", "acme")
         .json(&json!({}))
-        .send().await.unwrap().json().await.unwrap();
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
     let id = created["id"].as_str().unwrap();
 
     // Turn 1.
-    let r1: Value = env.client.post(format!("{}/sessions/{id}/messages", env.base_url))
+    let r1: Value = env
+        .client
+        .post(format!("{}/sessions/{id}/messages", env.base_url))
         .header("x-tenant-id", "acme")
         .json(&json!({"content": "What is the capital of France?"}))
-        .send().await.unwrap().json().await.unwrap();
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
     let count_after_t1 = r1["message_count"].as_u64().unwrap();
 
     // Turn 2.
-    let r2: Value = env.client.post(format!("{}/sessions/{id}/messages", env.base_url))
+    let r2: Value = env
+        .client
+        .post(format!("{}/sessions/{id}/messages", env.base_url))
         .header("x-tenant-id", "acme")
         .json(&json!({"content": "And of Germany?"}))
-        .send().await.unwrap().json().await.unwrap();
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
     let count_after_t2 = r2["message_count"].as_u64().unwrap();
 
     // History must have grown.
-    assert!(count_after_t2 > count_after_t1, "second turn must append to history");
+    assert!(
+        count_after_t2 > count_after_t1,
+        "second turn must append to history"
+    );
     // At least 4 messages: user, assistant, user, assistant.
     assert!(count_after_t2 >= 4);
 }
@@ -398,19 +580,27 @@ async fn send_message_history_persisted_for_second_turn() {
 #[tokio::test]
 async fn send_message_to_missing_session_returns_404() {
     let env = start().await;
-    let res = env.client.post(format!("{}/sessions/ghost/messages", env.base_url))
+    let res = env
+        .client
+        .post(format!("{}/sessions/ghost/messages", env.base_url))
         .header("x-tenant-id", "acme")
         .json(&json!({"content": "hi"}))
-        .send().await.unwrap();
+        .send()
+        .await
+        .unwrap();
     assert_eq!(res.status(), 404);
 }
 
 #[tokio::test]
 async fn send_message_missing_tenant_returns_400() {
     let env = start().await;
-    let res = env.client.post(format!("{}/sessions/any/messages", env.base_url))
+    let res = env
+        .client
+        .post(format!("{}/sessions/any/messages", env.base_url))
         .json(&json!({"content": "hi"}))
-        .send().await.unwrap();
+        .send()
+        .await
+        .unwrap();
     assert_eq!(res.status(), 400);
 }
 
@@ -427,16 +617,30 @@ async fn send_message_with_model_override_uses_override() {
             .json_body(end_turn("haiku says hi"));
     });
 
-    let created: Value = env.client.post(format!("{}/sessions", env.base_url))
+    let created: Value = env
+        .client
+        .post(format!("{}/sessions", env.base_url))
         .header("x-tenant-id", "acme")
         .json(&json!({"model": "claude-haiku-4-5-20251001"}))
-        .send().await.unwrap().json().await.unwrap();
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
     let id = created["id"].as_str().unwrap();
 
-    let res: Value = env.client.post(format!("{}/sessions/{id}/messages", env.base_url))
+    let res: Value = env
+        .client
+        .post(format!("{}/sessions/{id}/messages", env.base_url))
         .header("x-tenant-id", "acme")
         .json(&json!({"content": "hello"}))
-        .send().await.unwrap().json().await.unwrap();
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
 
     assert_eq!(res["content"], "haiku says hi");
     mock.assert_hits_async(1).await;
@@ -448,48 +652,85 @@ async fn send_message_anthropic_500_returns_500() {
 
     // Anthropic proxy always returns 500 — agent gets an HTTP error parsing JSON.
     env.mock_server.mock(|when, then| {
-        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
         then.status(500).body("Internal Server Error");
     });
 
-    let created: Value = env.client.post(format!("{}/sessions", env.base_url))
+    let created: Value = env
+        .client
+        .post(format!("{}/sessions", env.base_url))
         .header("x-tenant-id", "acme")
         .json(&json!({}))
-        .send().await.unwrap().json().await.unwrap();
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
     let id = created["id"].as_str().unwrap();
 
-    let res = env.client.post(format!("{}/sessions/{id}/messages", env.base_url))
+    let res = env
+        .client
+        .post(format!("{}/sessions/{id}/messages", env.base_url))
         .header("x-tenant-id", "acme")
         .json(&json!({"content": "hello"}))
-        .send().await.unwrap();
+        .send()
+        .await
+        .unwrap();
 
-    assert_eq!(res.status(), 500, "Anthropic 500 must propagate as HTTP 500");
+    assert_eq!(
+        res.status(),
+        500,
+        "Anthropic 500 must propagate as HTTP 500"
+    );
 }
 
 #[tokio::test]
 async fn update_session_memory_path_persisted() {
     let env = start().await;
 
-    let created: Value = env.client.post(format!("{}/sessions", env.base_url))
+    let created: Value = env
+        .client
+        .post(format!("{}/sessions", env.base_url))
         .header("x-tenant-id", "acme")
         .json(&json!({"name": "MP Session"}))
-        .send().await.unwrap().json().await.unwrap();
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
     let id = created["id"].as_str().unwrap();
 
     // Initially no memory_path.
     assert!(created["memory_path"].is_null());
 
     // PATCH with memory_path.
-    let updated: Value = env.client.patch(format!("{}/sessions/{id}", env.base_url))
+    let updated: Value = env
+        .client
+        .patch(format!("{}/sessions/{id}", env.base_url))
         .header("x-tenant-id", "acme")
         .json(&json!({"memory_path": "docs/memory.md"}))
-        .send().await.unwrap().json().await.unwrap();
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
     assert_eq!(updated["memory_path"], "docs/memory.md");
 
     // GET to confirm persistence.
-    let got: Value = env.client.get(format!("{}/sessions/{id}", env.base_url))
+    let got: Value = env
+        .client
+        .get(format!("{}/sessions/{id}", env.base_url))
         .header("x-tenant-id", "acme")
-        .send().await.unwrap().json().await.unwrap();
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
     assert_eq!(got["memory_path"], "docs/memory.md");
 }
 
@@ -516,16 +757,30 @@ async fn send_message_tools_filtered_by_session_tools() {
         then.status(500).body("unexpected tool in body");
     });
 
-    let created: Value = env.client.post(format!("{}/sessions", env.base_url))
+    let created: Value = env
+        .client
+        .post(format!("{}/sessions", env.base_url))
         .header("x-tenant-id", "acme")
         .json(&json!({"tools": ["get_pr_diff"]}))
-        .send().await.unwrap().json().await.unwrap();
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
     let id = created["id"].as_str().unwrap();
 
-    let res: Value = env.client.post(format!("{}/sessions/{id}/messages", env.base_url))
+    let res: Value = env
+        .client
+        .post(format!("{}/sessions/{id}/messages", env.base_url))
         .header("x-tenant-id", "acme")
         .json(&json!({"content": "show me the diff"}))
-        .send().await.unwrap().json().await.unwrap();
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
 
     assert_eq!(res["content"], "diff result");
     filtered_mock.assert_hits_async(1).await;
@@ -544,7 +799,8 @@ async fn send_message_completes_after_concurrent_session_delete() {
 
     // Slow mock: Anthropic takes 400 ms to respond, giving us time to delete.
     env.mock_server.mock(|when, then| {
-        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(end_turn("reply after delete"))
@@ -552,12 +808,17 @@ async fn send_message_completes_after_concurrent_session_delete() {
     });
 
     // Create the session.
-    let created: Value = env.client
+    let created: Value = env
+        .client
         .post(format!("{}/sessions", env.base_url))
         .header("x-tenant-id", "acme")
         .json(&json!({"name": "race-test"}))
-        .send().await.unwrap()
-        .json().await.unwrap();
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
     let id = created["id"].as_str().unwrap().to_string();
 
     let base_url = env.base_url.clone();
@@ -577,15 +838,22 @@ async fn send_message_completes_after_concurrent_session_delete() {
 
     // Delete the session while the message is still being processed.
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    let del = env.client
+    let del = env
+        .client
         .delete(format!("{}/sessions/{id}", env.base_url))
         .header("x-tenant-id", "acme")
-        .send().await.unwrap();
+        .send()
+        .await
+        .unwrap();
     assert_eq!(del.status(), 204, "delete must succeed");
 
     // Wait for the message request to complete.
     let resp = send_task.await.unwrap();
-    assert_eq!(resp.status(), 200, "send_message must return 200 even after concurrent delete");
+    assert_eq!(
+        resp.status(),
+        200,
+        "send_message must return 200 even after concurrent delete"
+    );
 
     let body: Value = resp.json().await.unwrap();
     assert_eq!(body["content"], "reply after delete");

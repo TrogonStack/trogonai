@@ -58,9 +58,18 @@ async fn create_streams(js: &jetstream::Context) {
     }
 }
 
-fn runner_cfg_with_cron(nats_port: u16, proxy_url: String, tenant_id: &str, api_port: u16, cron_stream: Option<String>) -> AgentConfig {
+fn runner_cfg_with_cron(
+    nats_port: u16,
+    proxy_url: String,
+    tenant_id: &str,
+    api_port: u16,
+    cron_stream: Option<String>,
+) -> AgentConfig {
     AgentConfig {
-        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
+        nats: NatsConfig::new(
+            vec![format!("nats://127.0.0.1:{nats_port}")],
+            NatsAuth::None,
+        ),
         proxy_url,
         anthropic_token: "test-token".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
@@ -86,7 +95,10 @@ fn runner_cfg_with_cron(nats_port: u16, proxy_url: String, tenant_id: &str, api_
 
 fn runner_cfg(nats_port: u16, proxy_url: String, tenant_id: &str, api_port: u16) -> AgentConfig {
     AgentConfig {
-        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
+        nats: NatsConfig::new(
+            vec![format!("nats://127.0.0.1:{nats_port}")],
+            NatsAuth::None,
+        ),
         proxy_url,
         anthropic_token: "test-token".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
@@ -170,7 +182,12 @@ async fn automation_dispatch_uses_automation_prompt() {
 
     let store = AutomationStore::open(&js).await.expect("open store");
     store
-        .put(&make_automation("auto-1", "default", "github.pull_request", "CUSTOM_AUTOMATION_PROMPT_XYZ"))
+        .put(&make_automation(
+            "auto-1",
+            "default",
+            "github.pull_request",
+            "CUSTOM_AUTOMATION_PROMPT_XYZ",
+        ))
         .await
         .expect("put automation");
 
@@ -185,10 +202,16 @@ async fn automation_dispatch_uses_automation_prompt() {
         })
         .await;
 
-    tokio::spawn(async move { run(runner_cfg(nats_port, mock_url, "default", 0)).await.ok() });
+    tokio::spawn(async move {
+        run(runner_cfg(nats_port, mock_url, "default", 0))
+            .await
+            .ok()
+    });
     tokio::time::sleep(Duration::from_millis(400)).await;
 
-    js.publish("github.pull_request", pr_opened_payload().into()).await.expect("publish");
+    js.publish("github.pull_request", pr_opened_payload().into())
+        .await
+        .expect("publish");
 
     assert!(
         wait_for_hits(&anthropic, 1, Duration::from_secs(8)).await,
@@ -208,7 +231,12 @@ async fn automation_dispatch_overrides_fallback_handler() {
 
     let store = AutomationStore::open(&js).await.expect("open store");
     store
-        .put(&make_automation("auto-2", "default", "github.pull_request", "MY_AUTOMATION_PROMPT"))
+        .put(&make_automation(
+            "auto-2",
+            "default",
+            "github.pull_request",
+            "MY_AUTOMATION_PROMPT",
+        ))
         .await
         .expect("put automation");
 
@@ -224,21 +252,29 @@ async fn automation_dispatch_overrides_fallback_handler() {
 
     // Catch-all for the automation path.
     mock.mock_async(|when, then| {
-        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .body(end_turn_body());
     })
     .await;
 
-    tokio::spawn(async move { run(runner_cfg(nats_port, mock_url, "default", 0)).await.ok() });
+    tokio::spawn(async move {
+        run(runner_cfg(nats_port, mock_url, "default", 0))
+            .await
+            .ok()
+    });
     tokio::time::sleep(Duration::from_millis(400)).await;
 
-    js.publish("github.pull_request", pr_opened_payload().into()).await.expect("publish");
+    js.publish("github.pull_request", pr_opened_payload().into())
+        .await
+        .expect("publish");
     tokio::time::sleep(Duration::from_secs(5)).await;
 
     assert_eq!(
-        fallback_mock.hits_async().await, 0,
+        fallback_mock.hits_async().await,
+        0,
         "fallback handler was called despite matching automation"
     );
 }
@@ -266,10 +302,16 @@ async fn no_automation_falls_back_to_hardcoded_handler() {
         })
         .await;
 
-    tokio::spawn(async move { run(runner_cfg(nats_port, mock_url, "default", 0)).await.ok() });
+    tokio::spawn(async move {
+        run(runner_cfg(nats_port, mock_url, "default", 0))
+            .await
+            .ok()
+    });
     tokio::time::sleep(Duration::from_millis(400)).await;
 
-    js.publish("github.pull_request", pr_opened_payload().into()).await.expect("publish");
+    js.publish("github.pull_request", pr_opened_payload().into())
+        .await
+        .expect("publish");
 
     assert!(
         wait_for_hits(&fallback_mock, 1, Duration::from_secs(8)).await,
@@ -288,7 +330,12 @@ async fn disabled_automation_falls_back_to_hardcoded_handler() {
     create_streams(&js).await;
 
     let store = AutomationStore::open(&js).await.expect("open store");
-    let mut auto = make_automation("auto-disabled", "default", "github.pull_request", "DISABLED_PROMPT");
+    let mut auto = make_automation(
+        "auto-disabled",
+        "default",
+        "github.pull_request",
+        "DISABLED_PROMPT",
+    );
     auto.enabled = false;
     store.put(&auto).await.expect("put disabled automation");
 
@@ -314,16 +361,26 @@ async fn disabled_automation_falls_back_to_hardcoded_handler() {
         })
         .await;
 
-    tokio::spawn(async move { run(runner_cfg(nats_port, mock_url, "default", 0)).await.ok() });
+    tokio::spawn(async move {
+        run(runner_cfg(nats_port, mock_url, "default", 0))
+            .await
+            .ok()
+    });
     tokio::time::sleep(Duration::from_millis(400)).await;
 
-    js.publish("github.pull_request", pr_opened_payload().into()).await.expect("publish");
+    js.publish("github.pull_request", pr_opened_payload().into())
+        .await
+        .expect("publish");
 
     assert!(
         wait_for_hits(&fallback_mock, 1, Duration::from_secs(8)).await,
         "fallback handler was not called for disabled automation"
     );
-    assert_eq!(bad_mock.hits_async().await, 0, "disabled automation must not fire");
+    assert_eq!(
+        bad_mock.hits_async().await,
+        0,
+        "disabled automation must not fire"
+    );
 }
 
 /// The automations HTTP API is reachable on `api_port` while the runner is live.
@@ -342,7 +399,9 @@ async fn api_server_accessible_during_runner_run() {
     drop(listener);
 
     tokio::spawn(async move {
-        run(runner_cfg(nats_port, mock_url, "default", api_port)).await.ok()
+        run(runner_cfg(nats_port, mock_url, "default", api_port))
+            .await
+            .ok()
     });
 
     // Poll until the API server accepts connections (up to 10s).
@@ -378,7 +437,8 @@ async fn automation_mcp_server_tools_forwarded_to_model() {
 
     // MCP initialize handshake.
     mock.mock_async(|when, then| {
-        when.method(httpmock::Method::POST).body_contains("\"initialize\"");
+        when.method(httpmock::Method::POST)
+            .body_contains("\"initialize\"");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(json!({
@@ -390,7 +450,8 @@ async fn automation_mcp_server_tools_forwarded_to_model() {
 
     // MCP tools/list response — advertises one tool.
     mock.mock_async(|when, then| {
-        when.method(httpmock::Method::POST).body_contains("tools/list");
+        when.method(httpmock::Method::POST)
+            .body_contains("tools/list");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(json!({
@@ -419,17 +480,28 @@ async fn automation_mcp_server_tools_forwarded_to_model() {
         .await;
 
     let store = AutomationStore::open(&js).await.expect("open store");
-    let mut auto = make_automation("auto-mcp", "default", "github.pull_request", "MCP_TEST_PROMPT");
+    let mut auto = make_automation(
+        "auto-mcp",
+        "default",
+        "github.pull_request",
+        "MCP_TEST_PROMPT",
+    );
     auto.mcp_servers = vec![McpServer {
         name: "search_mcp".to_string(),
         url: format!("{}/mcp", mock_url),
     }];
     store.put(&auto).await.expect("put automation");
 
-    tokio::spawn(async move { run(runner_cfg(nats_port, mock_url, "default", 0)).await.ok() });
+    tokio::spawn(async move {
+        run(runner_cfg(nats_port, mock_url, "default", 0))
+            .await
+            .ok()
+    });
     tokio::time::sleep(Duration::from_millis(400)).await;
 
-    js.publish("github.pull_request", pr_opened_payload().into()).await.expect("publish");
+    js.publish("github.pull_request", pr_opened_payload().into())
+        .await
+        .expect("publish");
 
     assert!(
         wait_for_hits(&anthropic_mock, 1, Duration::from_secs(8)).await,
@@ -469,10 +541,16 @@ async fn automation_model_override_sent_to_anthropic() {
         })
         .await;
 
-    tokio::spawn(async move { run(runner_cfg(nats_port, mock_url, "default", 0)).await.ok() });
+    tokio::spawn(async move {
+        run(runner_cfg(nats_port, mock_url, "default", 0))
+            .await
+            .ok()
+    });
     tokio::time::sleep(Duration::from_millis(400)).await;
 
-    js.publish("github.pull_request", pr_opened_payload().into()).await.expect("publish");
+    js.publish("github.pull_request", pr_opened_payload().into())
+        .await
+        .expect("publish");
 
     assert!(
         wait_for_hits(&haiku_mock, 1, Duration::from_secs(8)).await,
@@ -526,7 +604,9 @@ async fn cron_tick_dispatches_to_matching_automation() {
     tokio::time::sleep(Duration::from_millis(400)).await;
 
     // Publish a cron tick to the matching subject.
-    nats.publish("cron.daily", b"{}".as_slice().into()).await.expect("publish cron tick");
+    nats.publish("cron.daily", b"{}".as_slice().into())
+        .await
+        .expect("publish cron tick");
 
     assert!(
         wait_for_hits(&anthropic, 1, Duration::from_secs(8)).await,
@@ -556,7 +636,8 @@ async fn dispatch_persists_run_record_accessible_via_api() {
         .expect("put automation");
 
     mock.mock_async(|when, then| {
-        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .body(end_turn_body());
@@ -569,7 +650,9 @@ async fn dispatch_persists_run_record_accessible_via_api() {
     drop(listener);
 
     tokio::spawn(async move {
-        run(runner_cfg(nats_port, mock_url, "default", api_port)).await.ok()
+        run(runner_cfg(nats_port, mock_url, "default", api_port))
+            .await
+            .ok()
     });
 
     // Wait for API to come up.
@@ -577,7 +660,12 @@ async fn dispatch_persists_run_record_accessible_via_api() {
     let runs_url = format!("http://127.0.0.1:{api_port}/runs");
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     loop {
-        match client.get(&runs_url).header("x-tenant-id", "default").send().await {
+        match client
+            .get(&runs_url)
+            .header("x-tenant-id", "default")
+            .send()
+            .await
+        {
             Ok(_) => break,
             Err(_) if tokio::time::Instant::now() < deadline => {
                 tokio::time::sleep(Duration::from_millis(100)).await;
@@ -587,7 +675,9 @@ async fn dispatch_persists_run_record_accessible_via_api() {
     }
 
     // Trigger an automation.
-    js.publish("github.pull_request", pr_opened_payload().into()).await.expect("publish");
+    js.publish("github.pull_request", pr_opened_payload().into())
+        .await
+        .expect("publish");
 
     // Poll until at least one RunRecord appears (up to 10s).
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
@@ -662,7 +752,8 @@ async fn dispatch_records_failed_run_on_agent_error() {
 
     // Anthropic proxy always returns 500 → agent error → RunStatus::Failed.
     mock.mock_async(|when, then| {
-        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
         then.status(500).body("Internal Server Error");
     })
     .await;
@@ -673,7 +764,9 @@ async fn dispatch_records_failed_run_on_agent_error() {
     drop(listener);
 
     tokio::spawn(async move {
-        run(runner_cfg(nats_port, mock_url, "default", api_port)).await.ok()
+        run(runner_cfg(nats_port, mock_url, "default", api_port))
+            .await
+            .ok()
     });
 
     // Wait for API to come up.
@@ -681,7 +774,12 @@ async fn dispatch_records_failed_run_on_agent_error() {
     let runs_url = format!("http://127.0.0.1:{api_port}/runs");
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     loop {
-        match client.get(&runs_url).header("x-tenant-id", "default").send().await {
+        match client
+            .get(&runs_url)
+            .header("x-tenant-id", "default")
+            .send()
+            .await
+        {
             Ok(_) => break,
             Err(_) if tokio::time::Instant::now() < deadline => {
                 tokio::time::sleep(Duration::from_millis(100)).await;
@@ -691,7 +789,9 @@ async fn dispatch_records_failed_run_on_agent_error() {
     }
 
     // Trigger an automation.
-    js.publish("github.pull_request", pr_opened_payload().into()).await.expect("publish");
+    js.publish("github.pull_request", pr_opened_payload().into())
+        .await
+        .expect("publish");
 
     // Poll until a RunRecord with status=failed appears (up to 10s).
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);

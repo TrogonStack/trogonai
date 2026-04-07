@@ -28,10 +28,7 @@ pub async fn get_pr_diff(ctx: &ToolContext, input: &Value) -> Result<String, Str
 
     ctx.http_client
         .get(&url)
-        .header(
-            "Authorization",
-            format!("Bearer {}", ctx.github_token),
-        )
+        .header("Authorization", format!("Bearer {}", ctx.github_token))
         .header("Accept", "application/vnd.github.diff")
         .send()
         .await
@@ -58,10 +55,7 @@ pub async fn list_pr_files(ctx: &ToolContext, input: &Value) -> Result<String, S
     let files: Value = ctx
         .http_client
         .get(&url)
-        .header(
-            "Authorization",
-            format!("Bearer {}", ctx.github_token),
-        )
+        .header("Authorization", format!("Bearer {}", ctx.github_token))
         .header("Accept", "application/vnd.github.v3+json")
         .send()
         .await
@@ -94,10 +88,7 @@ pub async fn get_file_contents(ctx: &ToolContext, input: &Value) -> Result<Strin
     let response: Value = ctx
         .http_client
         .get(&url)
-        .header(
-            "Authorization",
-            format!("Bearer {}", ctx.github_token),
-        )
+        .header("Authorization", format!("Bearer {}", ctx.github_token))
         .header("Accept", "application/vnd.github.v3+json")
         .send()
         .await
@@ -281,10 +272,7 @@ pub async fn post_pr_comment(ctx: &ToolContext, input: &Value) -> Result<String,
     let response: Value = ctx
         .http_client
         .post(&url)
-        .header(
-            "Authorization",
-            format!("Bearer {}", ctx.github_token),
-        )
+        .header("Authorization", format!("Bearer {}", ctx.github_token))
         .header("Accept", "application/vnd.github.v3+json")
         .json(&serde_json::json!({ "body": body }))
         .send()

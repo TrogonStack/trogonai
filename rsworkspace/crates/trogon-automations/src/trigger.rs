@@ -85,14 +85,22 @@ mod tests {
 
     #[test]
     fn matches_exact_subject_no_action_filter() {
-        assert!(matches("github.push", "github.push", &json!({"ref": "refs/heads/main"})));
+        assert!(matches(
+            "github.push",
+            "github.push",
+            &json!({"ref": "refs/heads/main"})
+        ));
         assert!(!matches("github.push", "github.pull_request", &json!({})));
     }
 
     #[test]
     fn matches_with_action_filter() {
         let opened = json!({"action": "opened"});
-        assert!(matches("github.pull_request:opened", "github.pull_request", &opened));
+        assert!(matches(
+            "github.pull_request:opened",
+            "github.pull_request",
+            &opened
+        ));
         assert!(!matches(
             "github.pull_request:opened",
             "github.pull_request",
@@ -102,17 +110,37 @@ mod tests {
 
     #[test]
     fn no_action_in_trigger_matches_any_action() {
-        assert!(matches("github.pull_request", "github.pull_request", &json!({"action": "opened"})));
-        assert!(matches("github.pull_request", "github.pull_request", &json!({"action": "closed"})));
-        assert!(matches("github.pull_request", "github.pull_request", &json!({})));
+        assert!(matches(
+            "github.pull_request",
+            "github.pull_request",
+            &json!({"action": "opened"})
+        ));
+        assert!(matches(
+            "github.pull_request",
+            "github.pull_request",
+            &json!({"action": "closed"})
+        ));
+        assert!(matches(
+            "github.pull_request",
+            "github.pull_request",
+            &json!({})
+        ));
     }
 
     #[test]
     fn matches_linear_prefix_with_action() {
         let payload = json!({"action": "create", "type": "Issue"});
-        assert!(matches("linear.Issue:create", "linear.Issue.create", &payload));
+        assert!(matches(
+            "linear.Issue:create",
+            "linear.Issue.create",
+            &payload
+        ));
         assert!(matches("linear.Issue:create", "linear.Issue", &payload));
-        assert!(!matches("linear.Issue:create", "linear.Issue.create", &json!({"action": "update"})));
+        assert!(!matches(
+            "linear.Issue:create",
+            "linear.Issue.create",
+            &json!({"action": "update"})
+        ));
     }
 
     #[test]
@@ -159,19 +187,31 @@ mod tests {
     #[test]
     fn draft_opened_matches_opened_draft_pr() {
         let payload = json!({"action": "opened", "pull_request": {"draft": true}});
-        assert!(matches("github.pull_request:draft_opened", "github.pull_request", &payload));
+        assert!(matches(
+            "github.pull_request:draft_opened",
+            "github.pull_request",
+            &payload
+        ));
     }
 
     #[test]
     fn draft_opened_does_not_match_non_draft_pr() {
         let payload = json!({"action": "opened", "pull_request": {"draft": false}});
-        assert!(!matches("github.pull_request:draft_opened", "github.pull_request", &payload));
+        assert!(!matches(
+            "github.pull_request:draft_opened",
+            "github.pull_request",
+            &payload
+        ));
     }
 
     #[test]
     fn draft_opened_does_not_match_closed_draft_pr() {
         let payload = json!({"action": "closed", "pull_request": {"draft": true}});
-        assert!(!matches("github.pull_request:draft_opened", "github.pull_request", &payload));
+        assert!(!matches(
+            "github.pull_request:draft_opened",
+            "github.pull_request",
+            &payload
+        ));
     }
 
     // ── pushed synthetic action ────────────────────────────────────────────────
@@ -179,25 +219,41 @@ mod tests {
     #[test]
     fn pushed_matches_synchronize_action() {
         let payload = json!({"action": "synchronize", "pull_request": {"number": 42}});
-        assert!(matches("github.pull_request:pushed", "github.pull_request", &payload));
+        assert!(matches(
+            "github.pull_request:pushed",
+            "github.pull_request",
+            &payload
+        ));
     }
 
     #[test]
     fn pushed_does_not_match_opened_action() {
         let payload = json!({"action": "opened"});
-        assert!(!matches("github.pull_request:pushed", "github.pull_request", &payload));
+        assert!(!matches(
+            "github.pull_request:pushed",
+            "github.pull_request",
+            &payload
+        ));
     }
 
     #[test]
     fn pushed_does_not_match_wrong_subject() {
         let payload = json!({"action": "synchronize"});
-        assert!(!matches("github.pull_request:pushed", "github.push", &payload));
+        assert!(!matches(
+            "github.pull_request:pushed",
+            "github.push",
+            &payload
+        ));
     }
 
     #[test]
     fn draft_opened_does_not_match_missing_draft_field() {
         // If the draft field is absent, it must not match.
         let payload = json!({"action": "opened", "pull_request": {}});
-        assert!(!matches("github.pull_request:draft_opened", "github.pull_request", &payload));
+        assert!(!matches(
+            "github.pull_request:draft_opened",
+            "github.pull_request",
+            &payload
+        ));
     }
 }

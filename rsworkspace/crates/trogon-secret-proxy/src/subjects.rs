@@ -80,7 +80,10 @@ mod tests {
 
     #[test]
     fn reply_empty_prefix_produces_leading_dot() {
-        assert_eq!(reply("", "my-correlation-id"), ".proxy.reply.my-correlation-id");
+        assert_eq!(
+            reply("", "my-correlation-id"),
+            ".proxy.reply.my-correlation-id"
+        );
     }
 
     #[test]

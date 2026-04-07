@@ -96,11 +96,7 @@ mod tests {
         m.record_request("ping", 0.0, true);
         m2.record_error("ping", "test");
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
     use opentelemetry::Value;
     use opentelemetry::metrics::MeterProvider;
     use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
@@ -119,7 +115,7 @@ mod tests {
         (Metrics::new(&meter), exporter, provider)
     }
 
-    /// `record_request` must increment `acp.request.count` with the correct
+    /// `record_request` must increment `acp.requests` with the correct
     /// `method` and `success` attributes.
     #[test]
     fn record_request_increments_counter_with_method_and_success() {
@@ -135,7 +131,7 @@ mod tests {
             .flat_map(|rm| rm.scope_metrics())
             .flat_map(|sm| sm.metrics())
             .any(|m| {
-                if m.name() != "acp.request.count" {
+                if m.name() != "acp.requests" {
                     return false;
                 }
                 let AggregatedMetrics::U64(MetricData::Sum(s)) = m.data() else {
@@ -155,7 +151,10 @@ mod tests {
                 })
             });
 
-        assert!(found, "acp.request.count must be recorded with method=initialize, success=true");
+        assert!(
+            found,
+            "acp.requests must be recorded with method=initialize, success=true"
+        );
         provider.shutdown().unwrap();
     }
 
@@ -205,7 +204,7 @@ mod tests {
         provider.shutdown().unwrap();
     }
 
-    /// `record_error` must increment `acp.errors.total` with the correct
+    /// `record_error` must increment `acp.errors` with the correct
     /// `operation` and `reason` attributes.
     #[test]
     fn record_error_increments_errors_total_with_operation_and_reason() {
@@ -221,7 +220,7 @@ mod tests {
             .flat_map(|rm| rm.scope_metrics())
             .flat_map(|sm| sm.metrics())
             .any(|m| {
-                if m.name() != "acp.errors.total" {
+                if m.name() != "acp.errors" {
                     return false;
                 }
                 let AggregatedMetrics::U64(MetricData::Sum(s)) = m.data() else {
@@ -243,7 +242,7 @@ mod tests {
 
         assert!(
             found,
-            "acp.errors.total must be recorded with operation=session_validate, reason=invalid_session_id"
+            "acp.errors must be recorded with operation=session_validate, reason=invalid_session_id"
         );
         provider.shutdown().unwrap();
     }
@@ -263,7 +262,7 @@ mod tests {
             .iter()
             .flat_map(|rm| rm.scope_metrics())
             .flat_map(|sm| sm.metrics())
-            .filter(|m| m.name() == "acp.errors.total")
+            .filter(|m| m.name() == "acp.errors")
             .flat_map(|m| {
                 if let AggregatedMetrics::U64(MetricData::Sum(s)) = m.data() {
                     s.data_points()
@@ -299,7 +298,7 @@ mod tests {
             .iter()
             .flat_map(|rm| rm.scope_metrics())
             .flat_map(|sm| sm.metrics())
-            .filter(|m| m.name() == "acp.errors.total")
+            .filter(|m| m.name() == "acp.errors")
             .flat_map(|m| {
                 if let AggregatedMetrics::U64(MetricData::Sum(s)) = m.data() {
                     s.data_points()
@@ -343,7 +342,7 @@ mod tests {
             .iter()
             .flat_map(|rm| rm.scope_metrics())
             .flat_map(|sm| sm.metrics())
-            .filter(|m| m.name() == "acp.request.count")
+            .filter(|m| m.name() == "acp.requests")
             .flat_map(|m| {
                 if let AggregatedMetrics::U64(MetricData::Sum(s)) = m.data() {
                     s.data_points()

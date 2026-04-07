@@ -6,11 +6,7 @@
 use std::collections::HashMap;
 
 use serde_json::json;
-use trogon_splitio::{
-    SplitClient, SplitConfig,
-    flags::FeatureFlag,
-    mock::MockEvaluator,
-};
+use trogon_splitio::{SplitClient, SplitConfig, flags::FeatureFlag, mock::MockEvaluator};
 
 // ── Shared flag enum (Spacedrive-inspired typed pattern) ──────────────────────
 
@@ -24,10 +20,10 @@ enum AppFlag {
 impl FeatureFlag for AppFlag {
     fn name(&self) -> &'static str {
         match self {
-            Self::NewCheckout        => "new_checkout",
-            Self::BetaDashboard      => "beta_dashboard",
+            Self::NewCheckout => "new_checkout",
+            Self::BetaDashboard => "beta_dashboard",
             Self::ExperimentalSearch => "experimental_search",
-            Self::ThemeConfig        => "theme_config",
+            Self::ThemeConfig => "theme_config",
         }
     }
 }
@@ -47,7 +43,11 @@ async fn typed_flag_is_enabled_returns_true_when_on() {
     let (addr, _h) = mock.serve().await;
     let client = client_for(addr);
 
-    assert!(client.is_enabled("user-1", &AppFlag::NewCheckout, None).await);
+    assert!(
+        client
+            .is_enabled("user-1", &AppFlag::NewCheckout, None)
+            .await
+    );
 }
 
 #[tokio::test]
@@ -56,7 +56,11 @@ async fn typed_flag_is_enabled_returns_false_when_off() {
     let (addr, _h) = mock.serve().await;
     let client = client_for(addr);
 
-    assert!(!client.is_enabled("user-1", &AppFlag::NewCheckout, None).await);
+    assert!(
+        !client
+            .is_enabled("user-1", &AppFlag::NewCheckout, None)
+            .await
+    );
 }
 
 #[tokio::test]
@@ -66,7 +70,11 @@ async fn typed_flag_is_enabled_returns_false_for_undefined_flag() {
     let (addr, _h) = mock.serve().await;
     let client = client_for(addr);
 
-    assert!(!client.is_enabled("user-1", &AppFlag::ExperimentalSearch, None).await);
+    assert!(
+        !client
+            .is_enabled("user-1", &AppFlag::ExperimentalSearch, None)
+            .await
+    );
 }
 
 #[tokio::test]
@@ -79,7 +87,11 @@ async fn typed_flag_is_enabled_with_attributes() {
     attrs.insert("plan".to_string(), json!("premium"));
 
     // Mock ignores attributes but the request must succeed
-    assert!(client.is_enabled("user-1", &AppFlag::BetaDashboard, Some(&attrs)).await);
+    assert!(
+        client
+            .is_enabled("user-1", &AppFlag::BetaDashboard, Some(&attrs))
+            .await
+    );
 }
 
 // ── all_enabled / any_enabled ─────────────────────────────────────────────────
@@ -140,7 +152,10 @@ async fn treatment_for_returns_custom_variant() {
     let (addr, _h) = mock.serve().await;
     let client = client_for(addr);
 
-    let t = client.treatment_for("user-1", &AppFlag::NewCheckout, None).await.unwrap();
+    let t = client
+        .treatment_for("user-1", &AppFlag::NewCheckout, None)
+        .await
+        .unwrap();
     assert_eq!(t, "blue");
 }
 
@@ -255,7 +270,10 @@ async fn track_event_without_value() {
     let (addr, _h) = mock.serve().await;
     let client = client_for(addr);
 
-    client.track("user-2", "user", "page_view", None, None).await.unwrap();
+    client
+        .track("user-2", "user", "page_view", None, None)
+        .await
+        .unwrap();
 
     let evs = events.lock().unwrap();
     assert_eq!(evs[0].value, None);
@@ -285,6 +303,9 @@ async fn healthcheck_returns_false_when_evaluator_down() {
 
 #[test]
 fn flag_description_defaults_to_name() {
-    assert_eq!(AppFlag::NewCheckout.description(), AppFlag::NewCheckout.name());
+    assert_eq!(
+        AppFlag::NewCheckout.description(),
+        AppFlag::NewCheckout.name()
+    );
     assert_eq!(AppFlag::BetaDashboard.description(), "beta_dashboard");
 }

@@ -8,12 +8,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_nats::jetstream;
+use axum::Router;
 use axum::body::Body;
 use axum::extract::{Path, Request, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::Response;
 use axum::routing::any;
-use axum::Router;
 use bytes::Bytes;
 use futures_util::StreamExt;
 use uuid::Uuid;
@@ -131,8 +131,7 @@ async fn handle_request(
     // Without this second `.await` the durability guarantee of JetStream is lost:
     // the message may be silently dropped if no stream covers the subject, and
     // the proxy would then wait forever for a worker reply that will never come.
-    let payload = serde_json::to_vec(&message)
-        .map_err(|e| ProxyError::Serialize(e.to_string()))?;
+    let payload = serde_json::to_vec(&message).map_err(|e| ProxyError::Serialize(e.to_string()))?;
 
     let mut nats_headers = headers_with_trace_context();
     nats_headers.insert("Reply-To", reply_subject.as_str());
@@ -161,8 +160,8 @@ async fn handle_request(
     let proxy_response: OutboundHttpResponse = serde_json::from_slice(&reply_msg.payload)
         .map_err(|e| ProxyError::Deserialize(e.to_string()))?;
 
-    let status = StatusCode::from_u16(proxy_response.status)
-        .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+    let status =
+        StatusCode::from_u16(proxy_response.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
 
     if let Some(err) = proxy_response.error {
         // Use the worker's status if it is already an error code (4xx/5xx),
@@ -293,7 +292,10 @@ mod tests {
             ProxyError::ReplyChannelClosed,
         ];
         for err in cases {
-            assert_eq!(err.into_response().status(), StatusCode::INTERNAL_SERVER_ERROR);
+            assert_eq!(
+                err.into_response().status(),
+                StatusCode::INTERNAL_SERVER_ERROR
+            );
         }
     }
 
@@ -309,7 +311,11 @@ mod tests {
     fn invalid_upstream_status_code_falls_back_to_500() {
         for invalid in [0u16, 99, 1000] {
             let result = StatusCode::from_u16(invalid);
-            assert!(result.is_err(), "Status {} must be rejected as invalid", invalid);
+            assert!(
+                result.is_err(),
+                "Status {} must be rejected as invalid",
+                invalid
+            );
             let fallback = result.unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
             assert_eq!(
                 fallback,
@@ -468,17 +474,23 @@ mod tests {
 
     #[test]
     fn error_display_includes_context() {
-        assert!(ProxyError::UnknownProvider("fakeai".to_string())
+        assert!(
+            ProxyError::UnknownProvider("fakeai".to_string())
+                .to_string()
+                .contains("fakeai")
+        );
+        assert!(
+            ProxyError::Timeout {
+                correlation_id: "req-1".to_string()
+            }
             .to_string()
-            .contains("fakeai"));
-        assert!(ProxyError::Timeout {
-            correlation_id: "req-1".to_string()
-        }
-        .to_string()
-        .contains("req-1"));
-        assert!(ProxyError::ReadBody("boom".to_string())
-            .to_string()
-            .contains("boom"));
+            .contains("req-1")
+        );
+        assert!(
+            ProxyError::ReadBody("boom".to_string())
+                .to_string()
+                .contains("boom")
+        );
         assert!(!ProxyError::ReplyChannelClosed.to_string().is_empty());
     }
 }

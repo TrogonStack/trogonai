@@ -60,7 +60,10 @@ pub struct McpClient {
 impl McpClient {
     /// Create a new client pointing at `url` (e.g. `http://server/mcp`).
     pub fn new(http: Client, url: impl Into<String>) -> Self {
-        Self { http, url: url.into() }
+        Self {
+            http,
+            url: url.into(),
+        }
     }
 
     /// Perform the MCP `initialize` handshake.
@@ -96,10 +99,8 @@ impl McpClient {
         if let Some(err) = resp.get("error") {
             return Err(format!("MCP tools/list error: {err}"));
         }
-        let result: ListToolsResult = serde_json::from_value(
-            resp["result"].clone(),
-        )
-        .map_err(|e| format!("MCP tools/list deserialize error: {e}"))?;
+        let result: ListToolsResult = serde_json::from_value(resp["result"].clone())
+            .map_err(|e| format!("MCP tools/list deserialize error: {e}"))?;
         debug!(url = %self.url, count = result.tools.len(), "MCP tools listed");
         Ok(result.tools)
     }
@@ -127,11 +128,7 @@ impl McpClient {
             .collect::<Vec<_>>()
             .join("\n");
 
-        if result.is_error {
-            Err(text)
-        } else {
-            Ok(text)
-        }
+        if result.is_error { Err(text) } else { Ok(text) }
     }
 
     async fn rpc(&self, body: Value) -> Result<Value, String> {

@@ -61,7 +61,11 @@ mod tests {
 
     #[test]
     fn generic_fn_uses_trait_bound() {
-        fn has_expired<C: GetNow + GetElapsed>(clock: &C, since: C::Instant, ttl: Duration) -> bool {
+        fn has_expired<C: GetNow + GetElapsed>(
+            clock: &C,
+            since: C::Instant,
+            ttl: Duration,
+        ) -> bool {
             clock.elapsed(since) >= ttl
         }
 

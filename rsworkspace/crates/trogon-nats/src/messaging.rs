@@ -1051,9 +1051,13 @@ mod tests {
             }
         }
 
-        let result: Result<TestResponse, NatsError> =
-            request_with_timeout(&UnreachableClient, "test.subj", &AlwaysFailsSer, Duration::from_secs(5))
-                .await;
+        let result: Result<TestResponse, NatsError> = request_with_timeout(
+            &UnreachableClient,
+            "test.subj",
+            &AlwaysFailsSer,
+            Duration::from_secs(5),
+        )
+        .await;
 
         assert!(
             matches!(result, Err(NatsError::Serialize(_))),

@@ -1,7 +1,7 @@
 //! JetStream stream provisioning for proxy requests.
 
-use async_nats::jetstream::{self, context::CreateStreamError, stream::Config as StreamConfig};
 use async_nats::jetstream::stream::{RetentionPolicy, StorageType};
+use async_nats::jetstream::{self, context::CreateStreamError, stream::Config as StreamConfig};
 
 /// Compute the JetStream stream name for the given prefix.
 ///
@@ -16,10 +16,7 @@ use async_nats::jetstream::stream::{RetentionPolicy, StorageType};
 /// assert_eq!(stream_name("my-company"), "PROXY_REQUESTS_MY_COMPANY");
 /// ```
 pub fn stream_name(prefix: &str) -> String {
-    format!(
-        "PROXY_REQUESTS_{}",
-        prefix.to_uppercase().replace('-', "_")
-    )
+    format!("PROXY_REQUESTS_{}", prefix.to_uppercase().replace('-', "_"))
 }
 
 /// Ensure the JetStream stream for the given prefix exists.

@@ -13,15 +13,14 @@
 use std::net::SocketAddr;
 use std::time::Duration;
 
+use async_nats::jetstream::{self, stream};
 use axum::{
-    Json,
-    Router,
+    Json, Router,
     body::Bytes,
     extract::{Path, State},
     http::{HeaderMap, StatusCode},
     routing::{get, post},
 };
-use async_nats::jetstream::{self, stream};
 use tracing::{info, instrument, warn};
 
 use crate::config::IncidentioConfig;
@@ -48,7 +47,13 @@ pub async fn serve(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let js = jetstream::new(nats);
 
-    ensure_stream(&js, &config.stream_name, &config.subject_prefix, config.stream_max_age).await?;
+    ensure_stream(
+        &js,
+        &config.stream_name,
+        &config.subject_prefix,
+        config.stream_max_age,
+    )
+    .await?;
 
     let incident_store = IncidentStore::open(&js)
         .await
@@ -183,22 +188,20 @@ async fn handle_webhook(
         .publish_with_headers(subject.clone(), nats_headers, body)
         .await
     {
-        Ok(ack_future) => {
-            match tokio::time::timeout(NATS_ACK_TIMEOUT, ack_future).await {
-                Ok(Ok(_)) => {
-                    info!(subject, "Published incident.io event to NATS");
-                    StatusCode::OK
-                }
-                Ok(Err(e)) => {
-                    warn!(error = %e, "NATS ack failed");
-                    StatusCode::INTERNAL_SERVER_ERROR
-                }
-                Err(_) => {
-                    warn!("NATS ack timed out");
-                    StatusCode::INTERNAL_SERVER_ERROR
-                }
+        Ok(ack_future) => match tokio::time::timeout(NATS_ACK_TIMEOUT, ack_future).await {
+            Ok(Ok(_)) => {
+                info!(subject, "Published incident.io event to NATS");
+                StatusCode::OK
             }
-        }
+            Ok(Err(e)) => {
+                warn!(error = %e, "NATS ack failed");
+                StatusCode::INTERNAL_SERVER_ERROR
+            }
+            Err(_) => {
+                warn!("NATS ack timed out");
+                StatusCode::INTERNAL_SERVER_ERROR
+            }
+        },
         Err(e) => {
             warn!(error = %e, "Failed to publish incident.io event to NATS");
             StatusCode::INTERNAL_SERVER_ERROR
@@ -210,14 +213,10 @@ async fn handle_webhook(
 async fn list_incidents(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<serde_json::Value>>, StatusCode> {
-    let raw_list = state
-        .incident_store
-        .list()
-        .await
-        .map_err(|e| {
-            warn!(error = %e, "Failed to list incidents from KV");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+    let raw_list = state.incident_store.list().await.map_err(|e| {
+        warn!(error = %e, "Failed to list incidents from KV");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
     let incidents: Vec<serde_json::Value> = raw_list
         .into_iter()
@@ -234,11 +233,10 @@ async fn get_incident_by_id(
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     match state.incident_store.get(&id).await {
         Ok(Some(bytes)) => {
-            let value: serde_json::Value = serde_json::from_slice(&bytes)
-                .map_err(|e| {
-                    warn!(incident_id = %id, error = %e, "Failed to deserialize incident JSON");
-                    StatusCode::INTERNAL_SERVER_ERROR
-                })?;
+            let value: serde_json::Value = serde_json::from_slice(&bytes).map_err(|e| {
+                warn!(incident_id = %id, error = %e, "Failed to deserialize incident JSON");
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
             Ok(Json(value))
         }
         Ok(None) => Err(StatusCode::NOT_FOUND),

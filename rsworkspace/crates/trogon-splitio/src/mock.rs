@@ -30,7 +30,12 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use axum::{Router, extract::{Query, State}, http::StatusCode, routing::get};
+use axum::{
+    Router,
+    extract::{Query, State},
+    http::StatusCode,
+    routing::get,
+};
 use serde::Deserialize;
 use tokio::task::JoinHandle;
 
@@ -111,11 +116,17 @@ impl MockEvaluator {
         let app = Router::new()
             .route("/client/get-treatment", get(handle_get_treatment))
             .route("/client/get-treatments", get(handle_get_treatments))
-            .route("/client/get-treatment-with-config", get(handle_get_treatment_with_config))
-            .route("/client/track", get({
-                let events = events.clone();
-                move |q| handle_track(q, events)
-            }))
+            .route(
+                "/client/get-treatment-with-config",
+                get(handle_get_treatment_with_config),
+            )
+            .route(
+                "/client/track",
+                get({
+                    let events = events.clone();
+                    move |q| handle_track(q, events)
+                }),
+            )
             .route("/admin/healthcheck", get(handle_health))
             .with_state(state);
 
@@ -157,7 +168,11 @@ async fn handle_get_treatment(
     Query(params): Query<TreatmentParams>,
 ) -> axum::Json<serde_json::Value> {
     let name = params.split_name.as_deref().unwrap_or("");
-    let treatment = state.flags.get(name).cloned().unwrap_or_else(|| "control".to_string());
+    let treatment = state
+        .flags
+        .get(name)
+        .cloned()
+        .unwrap_or_else(|| "control".to_string());
     axum::Json(serde_json::json!({ "splitName": name, "treatment": treatment }))
 }
 
@@ -170,8 +185,15 @@ async fn handle_get_treatments(
         .split(',')
         .filter(|s| !s.is_empty())
         .map(|name| {
-            let treatment = state.flags.get(name).cloned().unwrap_or_else(|| "control".to_string());
-            (name.to_string(), serde_json::json!({ "treatment": treatment }))
+            let treatment = state
+                .flags
+                .get(name)
+                .cloned()
+                .unwrap_or_else(|| "control".to_string());
+            (
+                name.to_string(),
+                serde_json::json!({ "treatment": treatment }),
+            )
         })
         .collect();
     axum::Json(serde_json::Value::Object(result))
@@ -182,7 +204,11 @@ async fn handle_get_treatment_with_config(
     Query(params): Query<TreatmentParams>,
 ) -> axum::Json<serde_json::Value> {
     let name = params.split_name.as_deref().unwrap_or("");
-    let treatment = state.flags.get(name).cloned().unwrap_or_else(|| "control".to_string());
+    let treatment = state
+        .flags
+        .get(name)
+        .cloned()
+        .unwrap_or_else(|| "control".to_string());
     let config = state.configs.get(name).cloned();
     axum::Json(serde_json::json!({
         "splitName": name,
@@ -195,9 +221,7 @@ async fn handle_track(
     Query(params): Query<TrackParams>,
     events: Arc<std::sync::Mutex<Vec<TrackedEvent>>>,
 ) -> StatusCode {
-    if let (Some(key), Some(tt), Some(et)) =
-        (params.key, params.traffic_type, params.event_type)
-    {
+    if let (Some(key), Some(tt), Some(et)) = (params.key, params.traffic_type, params.event_type) {
         events.lock().unwrap().push(TrackedEvent {
             key,
             traffic_type: tt,
@@ -240,7 +264,10 @@ mod tests {
         let (addr, _h) = mock.serve().await;
         let client = client_for(addr);
 
-        let t = client.get_treatment("user-1", "my_flag", None).await.unwrap();
+        let t = client
+            .get_treatment("user-1", "my_flag", None)
+            .await
+            .unwrap();
         assert_eq!(t, "on");
     }
 
@@ -250,7 +277,10 @@ mod tests {
         let (addr, _h) = mock.serve().await;
         let client = client_for(addr);
 
-        let t = client.get_treatment("user-1", "unknown_flag", None).await.unwrap();
+        let t = client
+            .get_treatment("user-1", "unknown_flag", None)
+            .await
+            .unwrap();
         assert_eq!(t, "control");
     }
 
@@ -280,7 +310,10 @@ mod tests {
         let (addr, _h) = mock.serve().await;
         let client = client_for(addr);
 
-        let map = client.get_treatments("u", &["flag_a", "flag_b", "flag_c"], None).await.unwrap();
+        let map = client
+            .get_treatments("u", &["flag_a", "flag_b", "flag_c"], None)
+            .await
+            .unwrap();
         assert_eq!(map["flag_a"], "on");
         assert_eq!(map["flag_b"], "off");
         assert_eq!(map["flag_c"], "control");
@@ -309,7 +342,10 @@ mod tests {
         let (addr, _h) = mock.serve().await;
         let client = client_for(addr);
 
-        let result = client.get_treatment_with_config("user-1", "theme_flag", None).await.unwrap();
+        let result = client
+            .get_treatment_with_config("user-1", "theme_flag", None)
+            .await
+            .unwrap();
         assert_eq!(result.treatment, "on");
         let cfg = result.config.unwrap();
         assert_eq!(cfg["color"], "blue");
@@ -322,7 +358,10 @@ mod tests {
         let (addr, _h) = mock.serve().await;
         let client = client_for(addr);
 
-        let result = client.get_treatment_with_config("user-1", "plain_flag", None).await.unwrap();
+        let result = client
+            .get_treatment_with_config("user-1", "plain_flag", None)
+            .await
+            .unwrap();
         assert_eq!(result.treatment, "on");
         assert!(result.config.is_none());
     }
@@ -334,7 +373,10 @@ mod tests {
         let (addr, _h) = mock.serve().await;
         let client = client_for(addr);
 
-        client.track("user-1", "user", "purchase_completed", Some(49.99), None).await.unwrap();
+        client
+            .track("user-1", "user", "purchase_completed", Some(49.99), None)
+            .await
+            .unwrap();
 
         let evs = events.lock().unwrap();
         assert_eq!(evs.len(), 1);
@@ -351,8 +393,14 @@ mod tests {
         let (addr, _h) = mock.serve().await;
         let client = client_for(addr);
 
-        client.track("user-1", "user", "page_view", None, None).await.unwrap();
-        client.track("user-2", "user", "signup", None, None).await.unwrap();
+        client
+            .track("user-1", "user", "page_view", None, None)
+            .await
+            .unwrap();
+        client
+            .track("user-2", "user", "signup", None, None)
+            .await
+            .unwrap();
 
         let evs = events.lock().unwrap();
         assert_eq!(evs.len(), 2);
@@ -372,7 +420,10 @@ mod tests {
 
         // Pass an empty flag name — equivalent to a missing split-name param.
         let t = client.get_treatment("user-1", "", None).await.unwrap();
-        assert_eq!(t, "control", "empty / missing split-name must return 'control'");
+        assert_eq!(
+            t, "control",
+            "empty / missing split-name must return 'control'"
+        );
     }
 
     /// When required track params (`key`, `traffic-type`, `event-type`) are
@@ -391,7 +442,11 @@ mod tests {
         assert_eq!(resp.status(), 200, "track endpoint must always return 200");
 
         let evs = events.lock().unwrap();
-        assert_eq!(evs.len(), 0, "incomplete track params must not produce a recorded event");
+        assert_eq!(
+            evs.len(),
+            0,
+            "incomplete track params must not produce a recorded event"
+        );
     }
 
     /// `get_treatments` with no flags in the `split-names` param returns an

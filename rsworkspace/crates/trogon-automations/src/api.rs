@@ -40,6 +40,7 @@ pub struct AppState {
 
 // ── Tenant extraction ─────────────────────────────────────────────────────────
 
+#[allow(clippy::result_large_err)]
 fn tenant_id(headers: &HeaderMap) -> Result<String, Response> {
     match headers.get("x-tenant-id").and_then(|v| v.to_str().ok()) {
         Some(t) if !t.is_empty() => Ok(t.to_string()),
@@ -154,14 +155,31 @@ fn epoch_to_parts(secs: u64) -> (u64, u64, u64, u64, u64, u64) {
     let mut remaining = days;
     loop {
         let days_in_year = if is_leap(year) { 366 } else { 365 };
-        if remaining < days_in_year { break; }
+        if remaining < days_in_year {
+            break;
+        }
         remaining -= days_in_year;
         year += 1;
     }
-    let months = [31u64, if is_leap(year) { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let months = [
+        31u64,
+        if is_leap(year) { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
     let mut month = 1u64;
     for &dim in &months {
-        if remaining < dim { break; }
+        if remaining < dim {
+            break;
+        }
         remaining -= dim;
         month += 1;
     }
@@ -169,16 +187,16 @@ fn epoch_to_parts(secs: u64) -> (u64, u64, u64, u64, u64, u64) {
 }
 
 fn is_leap(y: u64) -> bool {
-    (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
+    (y.is_multiple_of(4) && !y.is_multiple_of(100)) || y.is_multiple_of(400)
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
 
-async fn list_automations(
-    headers: HeaderMap,
-    State(state): State<AppState>,
-) -> Response {
-    let tid = match tenant_id(&headers) { Ok(t) => t, Err(r) => return r };
+async fn list_automations(headers: HeaderMap, State(state): State<AppState>) -> Response {
+    let tid = match tenant_id(&headers) {
+        Ok(t) => t,
+        Err(r) => return r,
+    };
     match state.store.list(&tid).await {
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e),
         Ok(automations) => {
@@ -193,7 +211,10 @@ async fn create_automation(
     State(state): State<AppState>,
     axum::Json(body): axum::Json<CreateRequest>,
 ) -> Response {
-    let tid = match tenant_id(&headers) { Ok(t) => t, Err(r) => return r };
+    let tid = match tenant_id(&headers) {
+        Ok(t) => t,
+        Err(r) => return r,
+    };
     let now = now_iso8601();
     let automation = Automation {
         id: uuid::Uuid::new_v4().to_string(),
@@ -212,7 +233,11 @@ async fn create_automation(
     };
     match state.store.put(&automation).await {
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e),
-        Ok(()) => (StatusCode::CREATED, axum::Json(AutomationResponse::from(automation))).into_response(),
+        Ok(()) => (
+            StatusCode::CREATED,
+            axum::Json(AutomationResponse::from(automation)),
+        )
+            .into_response(),
     }
 }
 
@@ -221,7 +246,10 @@ async fn get_automation(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Response {
-    let tid = match tenant_id(&headers) { Ok(t) => t, Err(r) => return r };
+    let tid = match tenant_id(&headers) {
+        Ok(t) => t,
+        Err(r) => return r,
+    };
     match state.store.get(&tid, &id).await {
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e),
         Ok(None) => err(StatusCode::NOT_FOUND, format!("automation {id} not found")),
@@ -235,7 +263,10 @@ async fn update_automation(
     Path(id): Path<String>,
     axum::Json(body): axum::Json<UpdateRequest>,
 ) -> Response {
-    let tid = match tenant_id(&headers) { Ok(t) => t, Err(r) => return r };
+    let tid = match tenant_id(&headers) {
+        Ok(t) => t,
+        Err(r) => return r,
+    };
     let existing = match state.store.get(&tid, &id).await {
         Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, e),
         Ok(None) => return err(StatusCode::NOT_FOUND, format!("automation {id} not found")),
@@ -258,7 +289,11 @@ async fn update_automation(
     };
     match state.store.put(&updated).await {
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e),
-        Ok(()) => (StatusCode::OK, axum::Json(AutomationResponse::from(updated))).into_response(),
+        Ok(()) => (
+            StatusCode::OK,
+            axum::Json(AutomationResponse::from(updated)),
+        )
+            .into_response(),
     }
 }
 
@@ -267,7 +302,10 @@ async fn delete_automation(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Response {
-    let tid = match tenant_id(&headers) { Ok(t) => t, Err(r) => return r };
+    let tid = match tenant_id(&headers) {
+        Ok(t) => t,
+        Err(r) => return r,
+    };
     match state.store.get(&tid, &id).await {
         Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, e),
         Ok(None) => return err(StatusCode::NOT_FOUND, format!("automation {id} not found")),
@@ -296,7 +334,10 @@ async fn disable_automation(
 }
 
 async fn set_enabled(headers: HeaderMap, state: AppState, id: String, enabled: bool) -> Response {
-    let tid = match tenant_id(&headers) { Ok(t) => t, Err(r) => return r };
+    let tid = match tenant_id(&headers) {
+        Ok(t) => t,
+        Err(r) => return r,
+    };
     let mut automation = match state.store.get(&tid, &id).await {
         Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, e),
         Ok(None) => return err(StatusCode::NOT_FOUND, format!("automation {id} not found")),
@@ -306,7 +347,11 @@ async fn set_enabled(headers: HeaderMap, state: AppState, id: String, enabled: b
     automation.updated_at = now_iso8601();
     match state.store.put(&automation).await {
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e),
-        Ok(()) => (StatusCode::OK, axum::Json(AutomationResponse::from(automation))).into_response(),
+        Ok(()) => (
+            StatusCode::OK,
+            axum::Json(AutomationResponse::from(automation)),
+        )
+            .into_response(),
     }
 }
 
@@ -322,7 +367,10 @@ async fn list_runs(
     State(state): State<AppState>,
     Query(q): Query<RunsQuery>,
 ) -> Response {
-    let tid = match tenant_id(&headers) { Ok(t) => t, Err(r) => return r };
+    let tid = match tenant_id(&headers) {
+        Ok(t) => t,
+        Err(r) => return r,
+    };
     match state.run_store.list(&tid, q.automation_id.as_deref()).await {
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e),
         Ok(runs) => (StatusCode::OK, axum::Json(runs)).into_response(),
@@ -334,18 +382,21 @@ async fn list_runs_for_automation(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Response {
-    let tid = match tenant_id(&headers) { Ok(t) => t, Err(r) => return r };
+    let tid = match tenant_id(&headers) {
+        Ok(t) => t,
+        Err(r) => return r,
+    };
     match state.run_store.list(&tid, Some(&id)).await {
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e),
         Ok(runs) => (StatusCode::OK, axum::Json(runs)).into_response(),
     }
 }
 
-async fn get_stats(
-    headers: HeaderMap,
-    State(state): State<AppState>,
-) -> Response {
-    let tid = match tenant_id(&headers) { Ok(t) => t, Err(r) => return r };
+async fn get_stats(headers: HeaderMap, State(state): State<AppState>) -> Response {
+    let tid = match tenant_id(&headers) {
+        Ok(t) => t,
+        Err(r) => return r,
+    };
     match state.run_store.stats(&tid).await {
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e),
         Ok(stats) => (StatusCode::OK, axum::Json(stats)).into_response(),
@@ -356,10 +407,15 @@ async fn get_stats(
 
 pub fn router(state: AppState) -> Router {
     Router::new()
-        .route("/automations", get(list_automations).post(create_automation))
+        .route(
+            "/automations",
+            get(list_automations).post(create_automation),
+        )
         .route(
             "/automations/{id}",
-            get(get_automation).put(update_automation).delete(delete_automation),
+            get(get_automation)
+                .put(update_automation)
+                .delete(delete_automation),
         )
         .route("/automations/{id}/enable", patch(enable_automation))
         .route("/automations/{id}/disable", patch(disable_automation))

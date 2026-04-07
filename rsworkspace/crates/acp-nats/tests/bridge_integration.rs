@@ -5,26 +5,40 @@
 //! Run with:
 //!   cargo test -p acp-nats --test bridge_integration
 
-use std::sync::{Arc, atomic::{AtomicU32, Ordering}};
-use std::time::Duration;
 use std::collections::HashSet;
+use std::sync::{
+    Arc,
+    atomic::{AtomicU32, Ordering},
+};
+use std::time::Duration;
 
-use acp_nats::{AcpPrefix, Bridge, Config, NatsAuth, NatsConfig, AGENT_UNAVAILABLE};
+use acp_nats::{AGENT_UNAVAILABLE, AcpPrefix, Bridge, Config, NatsAuth, NatsConfig};
 use agent_client_protocol::{
     Agent, AuthenticateRequest, AuthenticateResponse, CancelNotification, ErrorCode,
     Implementation, InitializeRequest, InitializeResponse, LoadSessionRequest, LoadSessionResponse,
     NewSessionRequest, NewSessionResponse, ProtocolVersion, SessionId, SetSessionModeRequest,
     SetSessionModeResponse,
 };
+use async_nats::jetstream;
 use futures_util::StreamExt as _;
 use testcontainers_modules::nats::Nats;
-use testcontainers_modules::testcontainers::{runners::AsyncRunner, ContainerAsync};
+use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
+use trogon_nats::jetstream::NatsJetStreamClient;
 use trogon_std::time::SystemClock;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+/// Provision all ACP JetStream streams on a real NATS server.
+async fn setup_streams(js: &jetstream::Context) {
+    let prefix = AcpPrefix::new("acp").unwrap();
+    for config in acp_nats::jetstream::streams::all_configs(&prefix) {
+        js.get_or_create_stream(config).await.unwrap();
+    }
+}
+
 async fn start_nats() -> (ContainerAsync<Nats>, u16) {
     let container = Nats::default()
+        .with_cmd(["-js"])
         .start()
         .await
         .expect("Failed to start NATS container — is Docker running?");
@@ -38,7 +52,11 @@ async fn nats_client(port: u16) -> async_nats::Client {
         .expect("Failed to connect to NATS")
 }
 
-fn make_bridge(nats: async_nats::Client, prefix: &str) -> Bridge<async_nats::Client, SystemClock> {
+fn make_bridge(
+    nats: async_nats::Client,
+    prefix: &str,
+) -> Bridge<async_nats::Client, SystemClock, NatsJetStreamClient> {
+    let js = NatsJetStreamClient::new(jetstream::new(nats.clone()));
     let config = Config::new(
         AcpPrefix::new(prefix).unwrap(),
         NatsConfig {
@@ -49,9 +67,11 @@ fn make_bridge(nats: async_nats::Client, prefix: &str) -> Bridge<async_nats::Cli
     .with_operation_timeout(Duration::from_millis(500));
     Bridge::new(
         nats,
+        js,
         SystemClock,
         &opentelemetry::global::meter("acp-nats-integration-test"),
         config,
+        tokio::sync::mpsc::channel(1).0,
     )
 }
 
@@ -79,7 +99,11 @@ async fn initialize_returns_protocol_version_from_agent() {
         .initialize(InitializeRequest::new(ProtocolVersion::LATEST))
         .await;
 
-    assert!(result.is_ok(), "expected Ok, got: {:?}", result.unwrap_err());
+    assert!(
+        result.is_ok(),
+        "expected Ok, got: {:?}",
+        result.unwrap_err()
+    );
     assert_eq!(result.unwrap().protocol_version, ProtocolVersion::LATEST);
 }
 
@@ -116,7 +140,10 @@ async fn initialize_returns_error_on_invalid_json_response() {
         if let Some(msg) = agent_sub.next().await {
             if let Some(reply) = msg.reply {
                 // Send malformed JSON.
-                nats2.publish(reply, b"{bad json}".as_ref().into()).await.unwrap();
+                nats2
+                    .publish(reply, b"{bad json}".as_ref().into())
+                    .await
+                    .unwrap();
             }
         }
     });
@@ -158,8 +185,14 @@ async fn authenticate_succeeds() {
         }
     });
 
-    let result = bridge.authenticate(AuthenticateRequest::new("password")).await;
-    assert!(result.is_ok(), "expected Ok, got: {:?}", result.unwrap_err());
+    let result = bridge
+        .authenticate(AuthenticateRequest::new("password"))
+        .await;
+    assert!(
+        result.is_ok(),
+        "expected Ok, got: {:?}",
+        result.unwrap_err()
+    );
 }
 
 #[tokio::test]
@@ -198,7 +231,11 @@ async fn new_session_returns_session_id() {
     });
 
     let result = bridge.new_session(NewSessionRequest::new(".")).await;
-    assert!(result.is_ok(), "expected Ok, got: {:?}", result.unwrap_err());
+    assert!(
+        result.is_ok(),
+        "expected Ok, got: {:?}",
+        result.unwrap_err()
+    );
     assert_eq!(result.unwrap().session_id, expected_id);
 }
 
@@ -211,7 +248,7 @@ async fn new_session_publishes_session_ready_after_delay() {
     let session_id = SessionId::from("sess-ready-test");
 
     // Subscribe to the session.ready notification BEFORE calling new_session.
-    let ready_subject = format!("acp.{}.agent.ext.session.ready", session_id);
+    let ready_subject = format!("acp.session.{}.agent.ext.ready", session_id);
     let mut ready_sub = nats.subscribe(ready_subject.clone()).await.unwrap();
 
     // Set up mock agent.
@@ -227,7 +264,10 @@ async fn new_session_publishes_session_ready_after_delay() {
         }
     });
 
-    bridge.new_session(NewSessionRequest::new(".")).await.unwrap();
+    bridge
+        .new_session(NewSessionRequest::new("."))
+        .await
+        .unwrap();
 
     // The session.ready is published ~100ms after new_session returns.
     let msg = tokio::time::timeout(Duration::from_secs(2), ready_sub.next())
@@ -244,31 +284,42 @@ async fn new_session_publishes_session_ready_after_delay() {
 async fn load_session_uses_session_scoped_subject() {
     let (_container, port) = start_nats().await;
     let nats = nats_client(port).await;
+    let js = jetstream::new(nats.clone());
+    setup_streams(&js).await;
     let bridge = make_bridge(nats.clone(), "acp");
 
     let (tx, rx) = tokio::sync::oneshot::channel::<String>();
-    let mut agent_sub = nats.subscribe("acp.s1.agent.session.load").await.unwrap();
-    let nats2 = nats.clone();
+    // JetStream-published messages are also delivered to core NATS subscribers.
+    let mut agent_sub = nats.subscribe("acp.session.s1.agent.load").await.unwrap();
+    let js2 = js.clone();
     tokio::spawn(async move {
         if let Some(msg) = agent_sub.next().await {
             let subject = msg.subject.to_string();
             let _ = tx.send(subject);
-            // Respond so bridge doesn't time out.
+            // Respond via JetStream so the bridge's RESPONSES consumer picks it up.
+            let req_id = msg
+                .headers
+                .as_ref()
+                .and_then(|h| h.get(trogon_nats::REQ_ID_HEADER))
+                .map(|v| v.as_str().to_string())
+                .unwrap_or_default();
+            let resp_subject = format!("acp.session.s1.agent.response.{req_id}");
             let resp = serde_json::to_vec(&LoadSessionResponse::new()).unwrap();
-            if let Some(reply) = msg.reply {
-                nats2.publish(reply, resp.into()).await.unwrap();
-            }
+            let _ = js2.publish(resp_subject, resp.into()).await;
         }
     });
 
-    bridge.load_session(LoadSessionRequest::new("s1", ".")).await.unwrap();
+    bridge
+        .load_session(LoadSessionRequest::new("s1", "."))
+        .await
+        .unwrap();
 
     let subject = tokio::time::timeout(Duration::from_secs(1), rx)
         .await
         .expect("timed out waiting for subject")
         .unwrap();
 
-    assert_eq!(subject, "acp.s1.agent.session.load");
+    assert_eq!(subject, "acp.session.s1.agent.load");
 }
 
 #[tokio::test]
@@ -290,32 +341,41 @@ async fn load_session_invalid_session_id_returns_error_without_nats() {
     assert!(err.to_string().contains("Invalid session ID"));
 
     // No message should have been sent to NATS.
-    let result =
-        tokio::time::timeout(Duration::from_millis(100), should_not_receive.next()).await;
-    assert!(result.is_err(), "no NATS message should be sent for invalid session IDs");
+    let result = tokio::time::timeout(Duration::from_millis(100), should_not_receive.next()).await;
+    assert!(
+        result.is_err(),
+        "no NATS message should be sent for invalid session IDs"
+    );
 }
 
 #[tokio::test]
 async fn load_session_publishes_session_ready() {
     let (_container, port) = start_nats().await;
     let nats = nats_client(port).await;
+    let js = jetstream::new(nats.clone());
+    setup_streams(&js).await;
     let bridge = make_bridge(nats.clone(), "acp");
 
     let session_id = "ls-ready-test";
-    let ready_subject = format!("acp.{}.agent.ext.session.ready", session_id);
+    let ready_subject = format!("acp.session.{}.agent.ext.ready", session_id);
     let mut ready_sub = nats.subscribe(ready_subject.clone()).await.unwrap();
 
     let mut agent_sub = nats
-        .subscribe(format!("acp.{}.agent.session.load", session_id))
+        .subscribe(format!("acp.session.{}.agent.load", session_id))
         .await
         .unwrap();
-    let nats2 = nats.clone();
+    let js2 = js.clone();
     tokio::spawn(async move {
         if let Some(msg) = agent_sub.next().await {
+            let req_id = msg
+                .headers
+                .as_ref()
+                .and_then(|h| h.get(trogon_nats::REQ_ID_HEADER))
+                .map(|v| v.as_str().to_string())
+                .unwrap_or_default();
+            let resp_subject = format!("acp.session.{session_id}.agent.response.{req_id}");
             let resp = serde_json::to_vec(&LoadSessionResponse::new()).unwrap();
-            if let Some(reply) = msg.reply {
-                nats2.publish(reply, resp.into()).await.unwrap();
-            }
+            let _ = js2.publish(resp_subject, resp.into()).await;
         }
     });
 
@@ -338,26 +398,38 @@ async fn load_session_publishes_session_ready() {
 async fn set_session_mode_succeeds() {
     let (_container, port) = start_nats().await;
     let nats = nats_client(port).await;
+    let js = jetstream::new(nats.clone());
+    setup_streams(&js).await;
     let bridge = make_bridge(nats.clone(), "acp");
 
+    // JetStream-published messages are also delivered to core NATS subscribers.
     let mut agent_sub = nats
-        .subscribe("acp.s1.agent.session.set_mode")
+        .subscribe("acp.session.s1.agent.set_mode")
         .await
         .unwrap();
-    let nats2 = nats.clone();
+    let js2 = js.clone();
     tokio::spawn(async move {
         if let Some(msg) = agent_sub.next().await {
+            let req_id = msg
+                .headers
+                .as_ref()
+                .and_then(|h| h.get(trogon_nats::REQ_ID_HEADER))
+                .map(|v| v.as_str().to_string())
+                .unwrap_or_default();
+            let resp_subject = format!("acp.session.s1.agent.response.{req_id}");
             let resp = serde_json::to_vec(&SetSessionModeResponse::new()).unwrap();
-            if let Some(reply) = msg.reply {
-                nats2.publish(reply, resp.into()).await.unwrap();
-            }
+            let _ = js2.publish(resp_subject, resp.into()).await;
         }
     });
 
     let result = bridge
         .set_session_mode(SetSessionModeRequest::new("s1", "edit"))
         .await;
-    assert!(result.is_ok(), "expected Ok, got: {:?}", result.unwrap_err());
+    assert!(
+        result.is_ok(),
+        "expected Ok, got: {:?}",
+        result.unwrap_err()
+    );
 }
 
 // ── cancel ────────────────────────────────────────────────────────────────────
@@ -368,10 +440,7 @@ async fn cancel_publishes_to_correct_subject() {
     let nats = nats_client(port).await;
     let bridge = make_bridge(nats.clone(), "acp");
 
-    let mut sub = nats
-        .subscribe("acp.s1.agent.session.cancel")
-        .await
-        .unwrap();
+    let mut sub = nats.subscribe("acp.session.s1.agent.cancel").await.unwrap();
 
     bridge.cancel(CancelNotification::new("s1")).await.unwrap();
 
@@ -380,7 +449,7 @@ async fn cancel_publishes_to_correct_subject() {
         .expect("timed out waiting for cancel message")
         .expect("subscriber closed");
 
-    assert_eq!(msg.subject.as_str(), "acp.s1.agent.session.cancel");
+    assert_eq!(msg.subject.as_str(), "acp.session.s1.agent.cancel");
 }
 
 #[tokio::test]
@@ -410,9 +479,11 @@ async fn cancel_invalid_session_id_returns_error_before_publish() {
     assert_eq!(err.code, ErrorCode::InvalidParams);
     assert!(err.to_string().contains("Invalid session ID"));
 
-    let result =
-        tokio::time::timeout(Duration::from_millis(100), should_not_receive.next()).await;
-    assert!(result.is_err(), "no NATS message should be published for invalid session IDs");
+    let result = tokio::time::timeout(Duration::from_millis(100), should_not_receive.next()).await;
+    assert!(
+        result.is_err(),
+        "no NATS message should be published for invalid session IDs"
+    );
 }
 
 // ── cross-cutting ─────────────────────────────────────────────────────────────
@@ -527,12 +598,20 @@ async fn concurrent_requests_dont_mix_replies() {
 
     let mut session_ids = HashSet::new();
     for result in [r0, r1, r2, r3, r4] {
-        assert!(result.is_ok(), "concurrent request failed: {:?}", result.unwrap_err());
+        assert!(
+            result.is_ok(),
+            "concurrent request failed: {:?}",
+            result.unwrap_err()
+        );
         let id = result.unwrap().session_id.to_string();
         assert!(!id.is_empty(), "session_id must not be empty");
         session_ids.insert(id);
     }
 
     // All 5 should have received distinct session IDs — no reply cross-mixing.
-    assert_eq!(session_ids.len(), 5, "all 5 concurrent sessions should have distinct IDs");
+    assert_eq!(
+        session_ids.len(),
+        5,
+        "all 5 concurrent sessions should have distinct IDs"
+    );
 }

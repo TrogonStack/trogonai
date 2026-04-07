@@ -15,7 +15,7 @@ fn make_ctx(proxy_url: &str) -> ToolContext {
         proxy_url: proxy_url.to_string(),
         github_token: "tok_github_prod_test01".to_string(),
         linear_token: "tok_linear_prod_test01".to_string(),
-            slack_token: String::new(),
+        slack_token: String::new(),
     }
 }
 
@@ -49,7 +49,11 @@ async fn get_file_contents_strips_newlines_in_base64() {
     let result = dispatch_tool(&ctx, "get_file_contents", &input).await;
 
     let parsed: serde_json::Value = serde_json::from_str(&result).expect("result must be JSON");
-    assert_eq!(parsed["content"].as_str().unwrap(), content, "embedded newlines must be stripped before decoding");
+    assert_eq!(
+        parsed["content"].as_str().unwrap(),
+        content,
+        "embedded newlines must be stripped before decoding"
+    );
     assert_eq!(parsed["sha"].as_str().unwrap(), "sha-chunked");
 }
 
@@ -203,7 +207,12 @@ async fn dispatch_tool_routes_get_pr_diff() {
     });
 
     let ctx = make_ctx(&server.base_url());
-    dispatch_tool(&ctx, "get_pr_diff", &json!({ "owner": "o", "repo": "r", "pr_number": 1 })).await;
+    dispatch_tool(
+        &ctx,
+        "get_pr_diff",
+        &json!({ "owner": "o", "repo": "r", "pr_number": 1 }),
+    )
+    .await;
     mock.assert_hits_async(1).await;
 }
 
@@ -221,7 +230,12 @@ async fn dispatch_tool_routes_list_pr_files() {
     });
 
     let ctx = make_ctx(&server.base_url());
-    dispatch_tool(&ctx, "list_pr_files", &json!({ "owner": "o", "repo": "r", "pr_number": 2 })).await;
+    dispatch_tool(
+        &ctx,
+        "list_pr_files",
+        &json!({ "owner": "o", "repo": "r", "pr_number": 2 }),
+    )
+    .await;
     mock.assert_hits_async(1).await;
 }
 
@@ -239,9 +253,14 @@ async fn dispatch_tool_routes_post_pr_comment() {
     });
 
     let ctx = make_ctx(&server.base_url());
-    dispatch_tool(&ctx, "post_pr_comment", &json!({
-        "owner": "o", "repo": "r", "pr_number": 3, "body": "hi"
-    })).await;
+    dispatch_tool(
+        &ctx,
+        "post_pr_comment",
+        &json!({
+            "owner": "o", "repo": "r", "pr_number": 3, "body": "hi"
+        }),
+    )
+    .await;
     mock.assert_hits_async(1).await;
 }
 
@@ -282,7 +301,12 @@ async fn dispatch_tool_routes_post_linear_comment() {
     });
 
     let ctx = make_ctx(&server.base_url());
-    dispatch_tool(&ctx, "post_linear_comment", &json!({ "issue_id": "I1", "body": "hi" })).await;
+    dispatch_tool(
+        &ctx,
+        "post_linear_comment",
+        &json!({ "issue_id": "I1", "body": "hi" }),
+    )
+    .await;
     mock.assert_hits_async(1).await;
 }
 
@@ -306,6 +330,11 @@ async fn dispatch_tool_routes_update_linear_issue() {
     });
 
     let ctx = make_ctx(&server.base_url());
-    dispatch_tool(&ctx, "update_linear_issue", &json!({ "issue_id": "I2", "state_id": "s1" })).await;
+    dispatch_tool(
+        &ctx,
+        "update_linear_issue",
+        &json!({ "issue_id": "I2", "state_id": "s1" }),
+    )
+    .await;
     mock.assert_hits_async(1).await;
 }

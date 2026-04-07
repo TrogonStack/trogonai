@@ -24,7 +24,7 @@ fn make_tool_ctx(proxy_url: &str) -> Arc<ToolContext> {
         proxy_url: proxy_url.to_string(),
         github_token: "tok_github_prod_test01".to_string(),
         linear_token: "tok_linear_prod_test01".to_string(),
-            slack_token: String::new(),
+        slack_token: String::new(),
     })
 }
 
@@ -176,7 +176,8 @@ async fn mcp_tool_error_is_returned_as_tool_result() {
 
     // Fallback: first call — model requests MCP tool.
     proxy.mock(|when, then| {
-        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(json!({
@@ -231,7 +232,8 @@ async fn unknown_tool_falls_through_to_builtin_dispatcher() {
 
     // Fallback: first call — model requests a tool NOT in MCP dispatch table.
     proxy.mock(|when, then| {
-        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(json!({
@@ -259,7 +261,11 @@ async fn unknown_tool_falls_through_to_builtin_dispatcher() {
 
     // Should complete without error — unknown tool result is fed back as text.
     let result = agent
-        .run(vec![Message::user_text("use a nonexistent tool")], &[], None)
+        .run(
+            vec![Message::user_text("use a nonexistent tool")],
+            &[],
+            None,
+        )
         .await
         .expect("agent should complete");
 
@@ -285,11 +291,16 @@ async fn init_mcp_servers_skips_server_that_fails_initialize() {
         url: bad_server.base_url(),
     };
 
-    let (tool_defs, dispatch) =
-        trogon_agent::runner::init_mcp_servers(&http_client, &[cfg]).await;
+    let (tool_defs, dispatch) = trogon_agent::runner::init_mcp_servers(&http_client, &[cfg]).await;
 
-    assert!(tool_defs.is_empty(), "tool_defs must be empty when MCP server fails initialize");
-    assert!(dispatch.is_empty(), "dispatch must be empty when MCP server fails initialize");
+    assert!(
+        tool_defs.is_empty(),
+        "tool_defs must be empty when MCP server fails initialize"
+    );
+    assert!(
+        dispatch.is_empty(),
+        "dispatch must be empty when MCP server fails initialize"
+    );
 }
 
 /// When `init_mcp_servers` is called with an unreachable server URL, it
@@ -302,11 +313,16 @@ async fn init_mcp_servers_skips_unreachable_server() {
         url: "http://127.0.0.1:1".to_string(), // nothing listens here
     };
 
-    let (tool_defs, dispatch) =
-        trogon_agent::runner::init_mcp_servers(&http_client, &[cfg]).await;
+    let (tool_defs, dispatch) = trogon_agent::runner::init_mcp_servers(&http_client, &[cfg]).await;
 
-    assert!(tool_defs.is_empty(), "tool_defs must be empty for unreachable MCP server");
-    assert!(dispatch.is_empty(), "dispatch must be empty for unreachable MCP server");
+    assert!(
+        tool_defs.is_empty(),
+        "tool_defs must be empty for unreachable MCP server"
+    );
+    assert!(
+        dispatch.is_empty(),
+        "dispatch must be empty for unreachable MCP server"
+    );
 }
 
 /// MCP tool definitions are merged into the tool list sent to Anthropic.
@@ -317,18 +333,20 @@ async fn mcp_tool_defs_appear_in_anthropic_request() {
     let mcp = MockServer::start_async().await;
 
     // Verify the request contains both the built-in tool AND the MCP tool.
-    let mock = proxy.mock_async(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages")
-            .body_contains("builtin_tool")
-            .body_contains("mcp__svc__mcp_tool");
-        then.status(200)
-            .header("content-type", "application/json")
-            .json_body(json!({
-                "stop_reason": "end_turn",
-                "content": [{"type": "text", "text": "All tools present."}]
-            }));
-    }).await;
+    let mock = proxy
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages")
+                .body_contains("builtin_tool")
+                .body_contains("mcp__svc__mcp_tool");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(json!({
+                    "stop_reason": "end_turn",
+                    "content": [{"type": "text", "text": "All tools present."}]
+                }));
+        })
+        .await;
 
     let http_client = reqwest::Client::new();
     let mcp_client = Arc::new(McpClient::new(http_client, mcp.base_url()));

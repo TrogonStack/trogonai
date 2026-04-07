@@ -102,7 +102,7 @@ impl IncidentStore {
 mod tests {
     use super::*;
     use testcontainers_modules::nats::Nats;
-    use testcontainers_modules::testcontainers::{runners::AsyncRunner, ImageExt};
+    use testcontainers_modules::testcontainers::{ImageExt, runners::AsyncRunner};
 
     async fn open_store() -> (impl Drop, IncidentStore) {
         let container = Nats::default()

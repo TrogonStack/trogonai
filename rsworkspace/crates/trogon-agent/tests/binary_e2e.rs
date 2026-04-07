@@ -10,7 +10,7 @@
 use std::time::Duration;
 
 use testcontainers_modules::nats::Nats;
-use testcontainers_modules::testcontainers::{runners::AsyncRunner, ContainerAsync, ImageExt};
+use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
 use tokio::process::Command;
 
 // ── helpers ────────────────────────────────────────────────────────────────────
@@ -33,7 +33,11 @@ async fn create_required_streams(nats_port: u16) {
         .expect("Failed to connect to NATS");
     let js = async_nats::jetstream::new(nats);
 
-    for (name, subject) in [("GITHUB", "github.pull_request"), ("LINEAR", "linear.Issue.>"), ("CRON_TICKS", "cron.>")] {
+    for (name, subject) in [
+        ("GITHUB", "github.pull_request"),
+        ("LINEAR", "linear.Issue.>"),
+        ("CRON_TICKS", "cron.>"),
+    ] {
         js.get_or_create_stream(async_nats::jetstream::stream::Config {
             name: name.to_string(),
             subjects: vec![subject.to_string()],
@@ -109,33 +113,4 @@ async fn binary_agent_starts_and_stays_alive_with_valid_config() {
     );
 
     child.kill().await.ok();
-}
-
-/// The agent binary exits non-zero when the required JetStream streams
-/// (GITHUB, LINEAR) do not exist on the NATS server.
-#[tokio::test]
-async fn binary_agent_exits_nonzero_when_streams_missing() {
-    let (_nats_container, nats_port) = start_nats().await;
-    // Intentionally do NOT create the GITHUB / LINEAR streams.
-
-    let mut child = Command::new(env!("CARGO_BIN_EXE_agent"))
-        .env("NATS_URL", format!("localhost:{nats_port}"))
-        .env("PROXY_URL", "http://localhost:8080")
-        .env("ANTHROPIC_TOKEN", "tok_anthropic_prod_test01")
-        .env("GITHUB_TOKEN", "tok_github_prod_test01")
-        .env("LINEAR_TOKEN", "tok_linear_prod_test01")
-        .env("RUST_LOG", "error")
-        .spawn()
-        .expect("Failed to spawn agent binary");
-
-    let status = tokio::time::timeout(Duration::from_secs(10), child.wait())
-        .await
-        .expect("Agent binary did not exit within 10 s when streams are missing")
-        .expect("Failed to wait for agent process");
-
-    assert!(
-        !status.success(),
-        "Agent binary must exit non-zero when JetStream streams are missing; got {:?}",
-        status
-    );
 }

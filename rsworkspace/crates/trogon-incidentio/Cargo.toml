@@ -11,7 +11,7 @@ name = "trogon-incidentio"
 path = "src/main.rs"
 
 [dependencies]
-async-nats = "0.45.0"
+async-nats = { workspace = true, features = ["jetstream", "kv"] }
 axum = "0.7"
 futures-util = "0.3"
 bytes = "1"

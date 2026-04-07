@@ -223,8 +223,14 @@ mod tests {
     fn mcp_servers_list_survives_round_trip() {
         let mut a = sample();
         a.mcp_servers = vec![
-            McpServer { name: "search".to_string(), url: "http://search.local".to_string() },
-            McpServer { name: "db".to_string(), url: "http://db.local".to_string() },
+            McpServer {
+                name: "search".to_string(),
+                url: "http://search.local".to_string(),
+            },
+            McpServer {
+                name: "db".to_string(),
+                url: "http://db.local".to_string(),
+            },
         ];
         let json = serde_json::to_string(&a).unwrap();
         let b: Automation = serde_json::from_str(&json).unwrap();

@@ -40,7 +40,11 @@ async fn js_client(port: u16) -> (async_nats::Client, jetstream::Context) {
 }
 
 async fn create_streams(js: &jetstream::Context) {
-    for (name, subject) in [("GITHUB", "github.>"), ("LINEAR", "linear.Issue.>"), ("CRON_TICKS", "cron.>")] {
+    for (name, subject) in [
+        ("GITHUB", "github.>"),
+        ("LINEAR", "linear.Issue.>"),
+        ("CRON_TICKS", "cron.>"),
+    ] {
         js.get_or_create_stream(jetstream::stream::Config {
             name: name.to_string(),
             subjects: vec![subject.to_string()],
@@ -53,7 +57,10 @@ async fn create_streams(js: &jetstream::Context) {
 
 fn runner_cfg(nats_port: u16, proxy_url: String) -> AgentConfig {
     AgentConfig {
-        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
+        nats: NatsConfig::new(
+            vec![format!("nats://127.0.0.1:{nats_port}")],
+            NatsAuth::None,
+        ),
         proxy_url,
         anthropic_token: "test-token".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
@@ -126,7 +133,11 @@ async fn push_event_dispatches_to_automation() {
 
     let store = AutomationStore::open(&js).await.expect("open store");
     store
-        .put(&make_automation("auto-push", "github.push", "PUSH_AUTOMATION_PROMPT_XYZ"))
+        .put(&make_automation(
+            "auto-push",
+            "github.push",
+            "PUSH_AUTOMATION_PROMPT_XYZ",
+        ))
         .await
         .expect("put automation");
 
@@ -151,7 +162,9 @@ async fn push_event_dispatches_to_automation() {
         "commits": [{ "id": "abc123", "message": "Fix bug" }]
     }))
     .unwrap();
-    js.publish("github.push", payload.into()).await.expect("publish");
+    js.publish("github.push", payload.into())
+        .await
+        .expect("publish");
 
     assert!(
         wait_for_hits(&anthropic, 1, Duration::from_secs(8)).await,
@@ -193,7 +206,9 @@ async fn push_event_falls_back_to_hardcoded_handler() {
         "commits": [{ "id": "def456", "message": "Add feature" }]
     }))
     .unwrap();
-    js.publish("github.push", payload.into()).await.expect("publish");
+    js.publish("github.push", payload.into())
+        .await
+        .expect("publish");
 
     assert!(
         wait_for_hits(&fallback_mock, 1, Duration::from_secs(8)).await,
@@ -242,7 +257,9 @@ async fn issue_comment_event_dispatches_to_automation() {
         "repository": { "owner": { "login": "acme" }, "name": "api" }
     }))
     .unwrap();
-    js.publish("github.issue_comment", payload.into()).await.expect("publish");
+    js.publish("github.issue_comment", payload.into())
+        .await
+        .expect("publish");
 
     assert!(
         wait_for_hits(&anthropic, 1, Duration::from_secs(8)).await,
@@ -284,7 +301,9 @@ async fn issue_comment_event_falls_back_to_hardcoded_handler() {
         "repository": { "owner": { "login": "acme" }, "name": "api" }
     }))
     .unwrap();
-    js.publish("github.issue_comment", payload.into()).await.expect("publish");
+    js.publish("github.issue_comment", payload.into())
+        .await
+        .expect("publish");
 
     assert!(
         wait_for_hits(&fallback_mock, 1, Duration::from_secs(8)).await,
@@ -336,7 +355,9 @@ async fn check_run_event_dispatches_to_automation() {
         "repository": { "owner": { "login": "acme" }, "name": "api" }
     }))
     .unwrap();
-    js.publish("github.check_run", payload.into()).await.expect("publish");
+    js.publish("github.check_run", payload.into())
+        .await
+        .expect("publish");
 
     assert!(
         wait_for_hits(&anthropic, 1, Duration::from_secs(8)).await,
@@ -381,7 +402,9 @@ async fn check_run_failure_falls_back_to_hardcoded_handler() {
         "repository": { "owner": { "login": "acme" }, "name": "api" }
     }))
     .unwrap();
-    js.publish("github.check_run", payload.into()).await.expect("publish");
+    js.publish("github.check_run", payload.into())
+        .await
+        .expect("publish");
 
     assert!(
         wait_for_hits(&fallback_mock, 1, Duration::from_secs(8)).await,

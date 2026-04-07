@@ -7,7 +7,10 @@
 //! or let the testcontainers setup spin up NATS automatically.
 
 use async_nats::jetstream;
-use testcontainers_modules::{nats::Nats, testcontainers::{runners::AsyncRunner, ImageExt}};
+use testcontainers_modules::{
+    nats::Nats,
+    testcontainers::{ImageExt, runners::AsyncRunner},
+};
 use trogon_automations::{Automation, AutomationStore, McpServer};
 
 fn sample_automation(id: &str, trigger: &str) -> Automation {
@@ -29,7 +32,11 @@ fn sample_automation(id: &str, trigger: &str) -> Automation {
 }
 
 async fn make_store() -> (AutomationStore, impl Drop) {
-    let container = Nats::default().with_cmd(["--jetstream"]).start().await.expect("NATS container");
+    let container = Nats::default()
+        .with_cmd(["--jetstream"])
+        .start()
+        .await
+        .expect("NATS container");
     let port = container.get_host_port_ipv4(4222).await.expect("port");
     let nats = async_nats::connect(format!("nats://127.0.0.1:{port}"))
         .await
@@ -44,7 +51,11 @@ async fn put_and_get_round_trips() {
     let (store, _c) = make_store().await;
     let a = sample_automation("a1", "github.pull_request:opened");
     store.put(&a).await.expect("put");
-    let fetched = store.get("test-tenant", "a1").await.expect("get").expect("should exist");
+    let fetched = store
+        .get("test-tenant", "a1")
+        .await
+        .expect("get")
+        .expect("should exist");
     assert_eq!(fetched, a);
 }
 
@@ -61,7 +72,13 @@ async fn delete_removes_entry() {
     let a = sample_automation("del1", "github.push");
     store.put(&a).await.expect("put");
     store.delete("test-tenant", "del1").await.expect("delete");
-    assert!(store.get("test-tenant", "del1").await.expect("get").is_none());
+    assert!(
+        store
+            .get("test-tenant", "del1")
+            .await
+            .expect("get")
+            .is_none()
+    );
 }
 
 #[tokio::test]
@@ -95,7 +112,11 @@ async fn put_overwrites_existing_entry() {
     a.name = "Updated name".to_string();
     store.put(&a).await.expect("put updated");
 
-    let fetched = store.get("test-tenant", "upd1").await.expect("get").expect("exists");
+    let fetched = store
+        .get("test-tenant", "upd1")
+        .await
+        .expect("get")
+        .expect("exists");
     assert_eq!(fetched.name, "Updated name");
 }
 
@@ -115,7 +136,10 @@ async fn matching_returns_only_enabled_and_triggered() {
     store.put(&push).await.expect("put");
 
     let payload = serde_json::json!({"action": "opened"});
-    let matched = store.matching("test-tenant", "github.pull_request", &payload).await.expect("matching");
+    let matched = store
+        .matching("test-tenant", "github.pull_request", &payload)
+        .await
+        .expect("matching");
 
     let ids: Vec<&str> = matched.iter().map(|a| a.id.as_str()).collect();
     assert!(ids.contains(&"m1"), "m1 should match");
@@ -144,8 +168,14 @@ async fn matching_cron_wildcard_matches_any_cron_subject() {
 #[tokio::test]
 async fn matching_cron_exact_matches_only_that_job() {
     let (store, _c) = make_store().await;
-    store.put(&sample_automation("c2", "cron.my-job")).await.expect("put c2");
-    store.put(&sample_automation("c3", "cron.other-job")).await.expect("put c3");
+    store
+        .put(&sample_automation("c2", "cron.my-job"))
+        .await
+        .expect("put c2");
+    store
+        .put(&sample_automation("c3", "cron.other-job"))
+        .await
+        .expect("put c3");
 
     let matched = store
         .matching("test-tenant", "cron.my-job", &serde_json::json!({}))
@@ -190,7 +220,10 @@ async fn matching_cross_tenant_returns_empty() {
         .await
         .expect("matching");
 
-    assert!(matched.is_empty(), "other-tenant must not match test-tenant's automations");
+    assert!(
+        matched.is_empty(),
+        "other-tenant must not match test-tenant's automations"
+    );
 }
 
 #[tokio::test]
@@ -239,7 +272,10 @@ async fn watch_delivers_delete_as_none() {
     let mut stream = store.watch().await.expect("watch");
 
     // Consume snapshot.
-    timeout(Duration::from_secs(3), stream.next()).await.expect("t").expect("s");
+    timeout(Duration::from_secs(3), stream.next())
+        .await
+        .expect("t")
+        .expect("s");
 
     // Delete and observe the None.
     store.delete("test-tenant", "wd1").await.expect("delete");
@@ -259,7 +295,10 @@ async fn cross_tenant_get_returns_none() {
 
     // A different tenant cannot see tenant-a's automation.
     let result = store.get("other-tenant", "iso1").await.expect("get");
-    assert!(result.is_none(), "other-tenant must not see test-tenant's automation");
+    assert!(
+        result.is_none(),
+        "other-tenant must not see test-tenant's automation"
+    );
 }
 
 #[tokio::test]
@@ -291,11 +330,21 @@ async fn automation_with_mcp_servers_round_trips() {
     let (store, _c) = make_store().await;
     let mut a = sample_automation("mcp1", "github.push");
     a.mcp_servers = vec![
-        McpServer { name: "search".to_string(), url: "http://localhost:3000".to_string() },
-        McpServer { name: "db".to_string(), url: "http://localhost:3001".to_string() },
+        McpServer {
+            name: "search".to_string(),
+            url: "http://localhost:3000".to_string(),
+        },
+        McpServer {
+            name: "db".to_string(),
+            url: "http://localhost:3001".to_string(),
+        },
     ];
     store.put(&a).await.expect("put");
-    let fetched = store.get("test-tenant", "mcp1").await.expect("get").expect("exists");
+    let fetched = store
+        .get("test-tenant", "mcp1")
+        .await
+        .expect("get")
+        .expect("exists");
     assert_eq!(fetched.mcp_servers.len(), 2);
     assert_eq!(fetched.mcp_servers[0].name, "search");
 }
@@ -304,7 +353,11 @@ async fn automation_with_mcp_servers_round_trips() {
 /// warning rather than failing, and return the other valid automations.
 #[tokio::test]
 async fn list_skips_unreadable_entry_and_returns_valid_ones() {
-    let container = Nats::default().with_cmd(["--jetstream"]).start().await.expect("NATS container");
+    let container = Nats::default()
+        .with_cmd(["--jetstream"])
+        .start()
+        .await
+        .expect("NATS container");
     let port = container.get_host_port_ipv4(4222).await.expect("port");
     let nats = async_nats::connect(format!("nats://127.0.0.1:{port}"))
         .await
@@ -321,12 +374,19 @@ async fn list_skips_unreadable_entry_and_returns_valid_ones() {
         .get_key_value(trogon_automations::store::BUCKET)
         .await
         .expect("get KV bucket");
-    kv.put("test-tenant.corrupted", bytes::Bytes::from(b"not valid json" as &[u8]))
-        .await
-        .expect("inject bad bytes");
+    kv.put(
+        "test-tenant.corrupted",
+        bytes::Bytes::from(b"not valid json" as &[u8]),
+    )
+    .await
+    .expect("inject bad bytes");
 
     // list() must return only the valid automation and silently skip the corrupt one.
     let result = store.list("test-tenant").await.expect("list");
-    assert_eq!(result.len(), 1, "only the valid automation should be returned");
+    assert_eq!(
+        result.len(),
+        1,
+        "only the valid automation should be returned"
+    );
     assert_eq!(result[0].id, "good-1");
 }

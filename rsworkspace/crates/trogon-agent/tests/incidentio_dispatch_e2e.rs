@@ -15,8 +15,8 @@
 //! Requires Docker. Run with:
 //!   cargo test -p trogon-agent --test incidentio_dispatch_e2e
 
-use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU16, Ordering};
 use std::time::Duration;
 
 use async_nats::jetstream;
@@ -24,11 +24,14 @@ use hmac::{Hmac, Mac};
 use httpmock::MockServer;
 use sha2::Sha256;
 use testcontainers_modules::nats::Nats;
-use testcontainers_modules::testcontainers::{runners::AsyncRunner, ContainerAsync, ImageExt};
+use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
 use trogon_agent::{AgentConfig, run};
 use trogon_incidentio::{IncidentioConfig, serve as incidentio_serve};
 use trogon_nats::{NatsAuth, NatsConfig};
-use trogon_secret_proxy::{proxy::{ProxyState, router}, stream, subjects, worker};
+use trogon_secret_proxy::{
+    proxy::{ProxyState, router},
+    stream, subjects, worker,
+};
 use trogon_std::env::InMemoryEnv;
 use trogon_vault::{ApiKeyToken, MemoryVault, VaultStore};
 
@@ -90,7 +93,10 @@ async fn wait_for_hit(mock: &httpmock::Mock<'_>, timeout: Duration) -> bool {
 
 fn base_agent_config(nats_port: u16, proxy_url: String) -> AgentConfig {
     AgentConfig {
-        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
+        nats: NatsConfig::new(
+            vec![format!("nats://127.0.0.1:{nats_port}")],
+            NatsAuth::None,
+        ),
         proxy_url,
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: String::new(),
@@ -226,7 +232,9 @@ async fn incidentio_webhook_triggers_full_pipeline_with_real_key() {
 
     // ── 8. Start agent runner ──────────────────────────────────────────────
     let agent_cfg = base_agent_config(nats_port, format!("http://127.0.0.1:{proxy_port}"));
-    tokio::spawn(async move { run(agent_cfg).await.ok(); });
+    tokio::spawn(async move {
+        run(agent_cfg).await.ok();
+    });
 
     tokio::time::sleep(Duration::from_millis(300)).await;
 
@@ -300,11 +308,15 @@ async fn incidentio_resolved_triggers_full_pipeline() {
         .await
         .unwrap();
 
-    let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}")).await.unwrap();
+    let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
+        .await
+        .unwrap();
     let js = Arc::new(jetstream::new(nats.clone()));
 
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    stream::ensure_stream(&js, "trogon", &outbound_subject)
+        .await
+        .unwrap();
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -316,15 +328,29 @@ async fn incidentio_resolved_triggers_full_pipeline() {
         worker_timeout: Duration::from_secs(15),
         base_url_override: Some(mock_server.base_url()),
     };
-    tokio::spawn(async move { axum::serve(listener, router(proxy_state)).await.ok(); });
+    tokio::spawn(async move {
+        axum::serve(listener, router(proxy_state)).await.ok();
+    });
 
-    let http_client = reqwest::Client::builder().timeout(Duration::from_secs(15)).build().unwrap();
+    let http_client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .unwrap();
     let wjs = Arc::clone(&js);
     let wnats = nats.clone();
     let wvault = Arc::clone(&vault);
     let wstream = stream::stream_name("trogon");
     tokio::spawn(async move {
-        worker::run(wjs, wnats, wvault, http_client, "iio-resolved-worker", &wstream).await.ok();
+        worker::run(
+            wjs,
+            wnats,
+            wvault,
+            http_client,
+            "iio-resolved-worker",
+            &wstream,
+        )
+        .await
+        .ok();
     });
 
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -337,12 +363,18 @@ async fn incidentio_resolved_triggers_full_pipeline() {
     env.set("INCIDENTIO_WEBHOOK_SECRET", webhook_secret);
     let incidentio_config = IncidentioConfig::from_env(&env);
 
-    let nats_for_iio = async_nats::connect(format!("nats://127.0.0.1:{nats_port}")).await.unwrap();
-    tokio::spawn(async move { incidentio_serve(incidentio_config, nats_for_iio).await.ok(); });
+    let nats_for_iio = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
+        .await
+        .unwrap();
+    tokio::spawn(async move {
+        incidentio_serve(incidentio_config, nats_for_iio).await.ok();
+    });
     wait_for_port(incidentio_port).await;
 
     let agent_cfg = base_agent_config(nats_port, format!("http://127.0.0.1:{proxy_port}"));
-    tokio::spawn(async move { run(agent_cfg).await.ok(); });
+    tokio::spawn(async move {
+        run(agent_cfg).await.ok();
+    });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let body = serde_json::to_vec(&serde_json::json!({
@@ -371,7 +403,10 @@ async fn incidentio_resolved_triggers_full_pipeline() {
     assert_eq!(resp.status(), 200);
 
     let hit = wait_for_hit(&anthropic_mock, Duration::from_secs(20)).await;
-    assert!(hit, "Mock Anthropic not called for incident.resolved within 20 s");
+    assert!(
+        hit,
+        "Mock Anthropic not called for incident.resolved within 20 s"
+    );
     anthropic_mock.assert_async().await;
 }
 
@@ -405,11 +440,15 @@ async fn incidentio_updated_triggers_full_pipeline() {
         .await
         .unwrap();
 
-    let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}")).await.unwrap();
+    let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
+        .await
+        .unwrap();
     let js = Arc::new(jetstream::new(nats.clone()));
 
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    stream::ensure_stream(&js, "trogon", &outbound_subject)
+        .await
+        .unwrap();
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -421,15 +460,29 @@ async fn incidentio_updated_triggers_full_pipeline() {
         worker_timeout: Duration::from_secs(15),
         base_url_override: Some(mock_server.base_url()),
     };
-    tokio::spawn(async move { axum::serve(listener, router(proxy_state)).await.ok(); });
+    tokio::spawn(async move {
+        axum::serve(listener, router(proxy_state)).await.ok();
+    });
 
-    let http_client = reqwest::Client::builder().timeout(Duration::from_secs(15)).build().unwrap();
+    let http_client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .unwrap();
     let wjs = Arc::clone(&js);
     let wnats = nats.clone();
     let wvault = Arc::clone(&vault);
     let wstream = stream::stream_name("trogon");
     tokio::spawn(async move {
-        worker::run(wjs, wnats, wvault, http_client, "iio-updated-worker", &wstream).await.ok();
+        worker::run(
+            wjs,
+            wnats,
+            wvault,
+            http_client,
+            "iio-updated-worker",
+            &wstream,
+        )
+        .await
+        .ok();
     });
 
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -442,12 +495,18 @@ async fn incidentio_updated_triggers_full_pipeline() {
     env.set("INCIDENTIO_WEBHOOK_SECRET", webhook_secret);
     let incidentio_config = IncidentioConfig::from_env(&env);
 
-    let nats_for_iio = async_nats::connect(format!("nats://127.0.0.1:{nats_port}")).await.unwrap();
-    tokio::spawn(async move { incidentio_serve(incidentio_config, nats_for_iio).await.ok(); });
+    let nats_for_iio = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
+        .await
+        .unwrap();
+    tokio::spawn(async move {
+        incidentio_serve(incidentio_config, nats_for_iio).await.ok();
+    });
     wait_for_port(incidentio_port).await;
 
     let agent_cfg = base_agent_config(nats_port, format!("http://127.0.0.1:{proxy_port}"));
-    tokio::spawn(async move { run(agent_cfg).await.ok(); });
+    tokio::spawn(async move {
+        run(agent_cfg).await.ok();
+    });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let body = serde_json::to_vec(&serde_json::json!({
@@ -476,7 +535,10 @@ async fn incidentio_updated_triggers_full_pipeline() {
     assert_eq!(resp.status(), 200);
 
     let hit = wait_for_hit(&anthropic_mock, Duration::from_secs(20)).await;
-    assert!(hit, "Mock Anthropic not called for incident.updated within 20 s");
+    assert!(
+        hit,
+        "Mock Anthropic not called for incident.updated within 20 s"
+    );
     anthropic_mock.assert_async().await;
 }
 
@@ -501,11 +563,15 @@ async fn incidentio_automation_dispatch_takes_precedence_over_fallback() {
         })
         .await;
 
-    let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}")).await.unwrap();
+    let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
+        .await
+        .unwrap();
     let js = Arc::new(jetstream::new(nats.clone()));
 
     // Register a matching automation.
-    let store = trogon_automations::AutomationStore::open(&js).await.unwrap();
+    let store = trogon_automations::AutomationStore::open(&js)
+        .await
+        .unwrap();
     let auto = trogon_automations::Automation {
         id: "iio-auto-1".to_string(),
         tenant_id: "default".to_string(),
@@ -540,12 +606,18 @@ async fn incidentio_automation_dispatch_takes_precedence_over_fallback() {
     env.set("INCIDENTIO_WEBHOOK_SECRET", webhook_secret);
     let incidentio_config = IncidentioConfig::from_env(&env);
 
-    let nats_for_iio = async_nats::connect(format!("nats://127.0.0.1:{nats_port}")).await.unwrap();
-    tokio::spawn(async move { incidentio_serve(incidentio_config, nats_for_iio).await.ok(); });
+    let nats_for_iio = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
+        .await
+        .unwrap();
+    tokio::spawn(async move {
+        incidentio_serve(incidentio_config, nats_for_iio).await.ok();
+    });
     wait_for_port(incidentio_port).await;
 
     let agent_cfg = base_agent_config(nats_port, mock_server.base_url());
-    tokio::spawn(async move { run(agent_cfg).await.ok(); });
+    tokio::spawn(async move {
+        run(agent_cfg).await.ok();
+    });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let body = serde_json::to_vec(&serde_json::json!({
@@ -573,7 +645,10 @@ async fn incidentio_automation_dispatch_takes_precedence_over_fallback() {
     assert_eq!(resp.status(), 200);
 
     let hit = wait_for_hit(&anthropic_mock, Duration::from_secs(20)).await;
-    assert!(hit, "Automation was not dispatched for incidentio.incident.created within 20 s");
+    assert!(
+        hit,
+        "Automation was not dispatched for incidentio.incident.created within 20 s"
+    );
     anthropic_mock.assert_async().await;
 }
 
@@ -595,7 +670,9 @@ async fn incidentio_stream_name_none_skips_subscription() {
         })
         .await;
 
-    let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}")).await.unwrap();
+    let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
+        .await
+        .unwrap();
     let js = Arc::new(jetstream::new(nats.clone()));
 
     // Manually create the INCIDENTIO stream so we can publish to it.
@@ -610,7 +687,9 @@ async fn incidentio_stream_name_none_skips_subscription() {
     // Start agent runner with incidentio_stream_name = None → must skip subscription.
     let mut agent_cfg = base_agent_config(nats_port, mock_server.base_url());
     agent_cfg.incidentio_stream_name = None;
-    tokio::spawn(async move { run(agent_cfg).await.ok(); });
+    tokio::spawn(async move {
+        run(agent_cfg).await.ok();
+    });
     tokio::time::sleep(Duration::from_millis(400)).await;
 
     // Publish an incidentio event directly onto the stream.
@@ -670,7 +749,9 @@ async fn incidentio_no_automation_falls_back_to_handler() {
         .await
         .unwrap();
 
-    let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}")).await.unwrap();
+    let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
+        .await
+        .unwrap();
     let js = Arc::new(jetstream::new(nats.clone()));
 
     let outbound_subject = trogon_secret_proxy::subjects::outbound("trogon");
@@ -694,14 +775,22 @@ async fn incidentio_no_automation_falls_back_to_handler() {
             .ok();
     });
 
-    let http_client = reqwest::Client::builder().timeout(Duration::from_secs(15)).build().unwrap();
+    let http_client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .unwrap();
     let wjs = Arc::clone(&js);
     let wnats = nats.clone();
     let wvault = Arc::clone(&vault);
     let wstream = trogon_secret_proxy::stream::stream_name("trogon");
     tokio::spawn(async move {
         trogon_secret_proxy::worker::run(
-            wjs, wnats, wvault, http_client, "iio-fallback-worker", &wstream,
+            wjs,
+            wnats,
+            wvault,
+            http_client,
+            "iio-fallback-worker",
+            &wstream,
         )
         .await
         .ok();
@@ -717,15 +806,21 @@ async fn incidentio_no_automation_falls_back_to_handler() {
     env.set("INCIDENTIO_WEBHOOK_SECRET", webhook_secret);
     let incidentio_config = trogon_incidentio::IncidentioConfig::from_env(&env);
 
-    let nats_for_iio = async_nats::connect(format!("nats://127.0.0.1:{nats_port}")).await.unwrap();
+    let nats_for_iio = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
+        .await
+        .unwrap();
     tokio::spawn(async move {
-        trogon_incidentio::serve(incidentio_config, nats_for_iio).await.ok();
+        trogon_incidentio::serve(incidentio_config, nats_for_iio)
+            .await
+            .ok();
     });
     wait_for_port(incidentio_port).await;
 
     // Start agent runner — AutomationStore is empty (no automations registered).
     let agent_cfg = base_agent_config(nats_port, format!("http://127.0.0.1:{proxy_port}"));
-    tokio::spawn(async move { run(agent_cfg).await.ok(); });
+    tokio::spawn(async move {
+        run(agent_cfg).await.ok();
+    });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let body = serde_json::to_vec(&serde_json::json!({

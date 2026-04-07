@@ -9,7 +9,7 @@ use httpmock::MockServer;
 use serde_json::json;
 use trogon_agent::{
     agent_loop::AgentLoop,
-    handlers::{pr_review, issue_triage, pr_merged, comment_added, push_to_branch, ci_completed},
+    handlers::{ci_completed, comment_added, issue_triage, pr_merged, pr_review, push_to_branch},
     tools::ToolContext,
 };
 
@@ -33,10 +33,10 @@ fn make_agent(proxy_url: &str) -> AgentLoop {
         memory_owner: None,
         memory_repo: None,
         memory_path: None,
-    mcp_tool_defs: vec![],
-    mcp_dispatch: vec![],
-    split_client: None,
-    tenant_id: "test".to_string(),
+        mcp_tool_defs: vec![],
+        mcp_dispatch: vec![],
+        split_client: None,
+        tenant_id: "test".to_string(),
     }
 }
 
@@ -55,7 +55,8 @@ async fn pr_review_handle_opened_runs_agent() {
     let server = MockServer::start_async().await;
 
     server.mock(|when, then| {
-        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(end_turn_mock_body("LGTM — clean diff."));
@@ -80,7 +81,8 @@ async fn pr_review_handle_synchronize_runs_agent() {
     let server = MockServer::start_async().await;
 
     server.mock(|when, then| {
-        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(end_turn_mock_body("Reviewed updated push."));
@@ -164,7 +166,8 @@ async fn issue_triage_handle_create_runs_agent() {
     let server = MockServer::start_async().await;
 
     server.mock(|when, then| {
-        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(end_turn_mock_body("Triaged: needs more info."));
@@ -239,7 +242,8 @@ async fn pr_merged_handle_merged_runs_agent() {
     let server = MockServer::start_async().await;
 
     server.mock(|when, then| {
-        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(end_turn_mock_body("Merge acknowledged."));
@@ -305,7 +309,8 @@ async fn comment_added_handle_created_runs_agent() {
     let server = MockServer::start_async().await;
 
     server.mock(|when, then| {
-        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(end_turn_mock_body("Thanks for the comment!"));
@@ -350,7 +355,8 @@ async fn push_to_branch_handle_branch_push_runs_agent() {
     let server = MockServer::start_async().await;
 
     server.mock(|when, then| {
-        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(end_turn_mock_body("Push looks fine."));
@@ -418,7 +424,8 @@ async fn ci_completed_handle_failure_runs_agent() {
     let server = MockServer::start_async().await;
 
     server.mock(|when, then| {
-        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(end_turn_mock_body("Likely a test compilation error."));

@@ -44,8 +44,8 @@ use std::time::Duration;
 use async_nats::jetstream;
 use reqwest::Client as ReqwestClient;
 use trogon_nats::{NatsConfig, connect};
-use trogon_std::SystemEnv;
 use trogon_secret_proxy::{stream, subjects, vault_admin, worker};
+use trogon_std::SystemEnv;
 use trogon_vault::{ApiKeyToken, MemoryVault, VaultStore};
 use trogon_vault::{HashicorpVaultConfig, HashicorpVaultStore, VaultAuth};
 
@@ -71,9 +71,16 @@ async fn run_all<V: VaultStore + 'static>(
         }
     });
 
-    worker::run(jetstream, nats, vault, http_client, consumer_name, stream_name)
-        .await
-        .expect("Worker exited with error");
+    worker::run(
+        jetstream,
+        nats,
+        vault,
+        http_client,
+        consumer_name,
+        stream_name,
+    )
+    .await
+    .expect("Worker exited with error");
 }
 
 async fn build_hashicorp_vault(vault_addr: String) -> HashicorpVaultStore {
@@ -106,8 +113,8 @@ async fn main() {
         .init();
 
     let prefix = std::env::var("PROXY_PREFIX").unwrap_or_else(|_| "trogon".to_string());
-    let consumer_name = std::env::var("WORKER_CONSUMER_NAME")
-        .unwrap_or_else(|_| "proxy-workers".to_string());
+    let consumer_name =
+        std::env::var("WORKER_CONSUMER_NAME").unwrap_or_else(|_| "proxy-workers".to_string());
 
     let nats_config = NatsConfig::from_env(&SystemEnv);
     tracing::info!(servers = ?nats_config.servers, "Connecting to NATS");
@@ -138,7 +145,16 @@ async fn main() {
     if let Ok(vault_addr) = std::env::var("VAULT_ADDR") {
         tracing::info!(addr = %vault_addr, "Using HashiCorp Vault backend");
         let vault = Arc::new(build_hashicorp_vault(vault_addr).await);
-        run_all(nats, jetstream, vault, http_client, &consumer_name, &sname, &prefix).await;
+        run_all(
+            nats,
+            jetstream,
+            vault,
+            http_client,
+            &consumer_name,
+            &sname,
+            &prefix,
+        )
+        .await;
     } else {
         tracing::info!("Using in-memory vault backend");
         let vault = Arc::new(MemoryVault::new());
@@ -162,6 +178,15 @@ async fn main() {
             }
         }
         tracing::info!(seeded, "Vault seeding complete");
-        run_all(nats, jetstream, vault, http_client, &consumer_name, &sname, &prefix).await;
+        run_all(
+            nats,
+            jetstream,
+            vault,
+            http_client,
+            &consumer_name,
+            &sname,
+            &prefix,
+        )
+        .await;
     }
 }

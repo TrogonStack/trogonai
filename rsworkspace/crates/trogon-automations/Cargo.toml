@@ -7,7 +7,7 @@ edition = "2024"
 workspace = true
 
 [dependencies]
-async-nats   = "0.45.0"
+async-nats = { workspace = true, features = ["jetstream", "kv"] }
 axum         = "0.8"
 bytes        = "1"
 futures-util = "0.3"

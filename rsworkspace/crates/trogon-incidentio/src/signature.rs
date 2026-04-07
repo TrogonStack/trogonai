@@ -85,7 +85,13 @@ mod tests {
         let mixed: String = sig
             .chars()
             .enumerate()
-            .map(|(i, c)| if i % 2 == 0 { c.to_ascii_uppercase() } else { c })
+            .map(|(i, c)| {
+                if i % 2 == 0 {
+                    c.to_ascii_uppercase()
+                } else {
+                    c
+                }
+            })
             .collect();
         assert!(verify("secret", b"payload", &mixed));
     }

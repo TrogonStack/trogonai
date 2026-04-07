@@ -130,7 +130,10 @@ mod tests {
         vault.insert(&token, "gemini-realkey");
         // Verify with sync access
         let guard = vault.inner.lock().unwrap();
-        assert_eq!(guard.get("tok_gemini_test_ff9999").map(|s| s.as_str()), Some("gemini-realkey"));
+        assert_eq!(
+            guard.get("tok_gemini_test_ff9999").map(|s| s.as_str()),
+            Some("gemini-realkey")
+        );
     }
 
     #[test]
@@ -153,7 +156,10 @@ mod tests {
 
         let clone = vault.clone();
         let guard = clone.inner.lock().unwrap();
-        assert_eq!(guard.get("tok_openai_prod_bb2222").map(|s| s.as_str()), Some("shared-key"));
+        assert_eq!(
+            guard.get("tok_openai_prod_bb2222").map(|s| s.as_str()),
+            Some("shared-key")
+        );
     }
 
     #[tokio::test]

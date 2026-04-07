@@ -36,7 +36,9 @@ fn runner_error_jetstream_is_std_error() {
 
 #[test]
 fn message_assistant_has_correct_role_and_content() {
-    let blocks = vec![ContentBlock::Text { text: "Hello".to_string() }];
+    let blocks = vec![ContentBlock::Text {
+        text: "Hello".to_string(),
+    }];
     let msg = Message::assistant(blocks.clone());
     // We can verify the message serializes with role=assistant.
     let json = serde_json::to_value(&msg).unwrap();
@@ -77,21 +79,31 @@ fn dummy_ctx() -> ToolContext {
         proxy_url: "http://localhost:9999".to_string(),
         github_token: String::new(),
         linear_token: String::new(),
-            slack_token: String::new(),
+        slack_token: String::new(),
     }
 }
 
 #[tokio::test]
 async fn list_pr_files_missing_owner_returns_error() {
     let ctx = dummy_ctx();
-    let result = dispatch_tool(&ctx, "list_pr_files", &json!({ "repo": "r", "pr_number": 1 })).await;
+    let result = dispatch_tool(
+        &ctx,
+        "list_pr_files",
+        &json!({ "repo": "r", "pr_number": 1 }),
+    )
+    .await;
     assert!(result.contains("Tool error"), "got: {result}");
 }
 
 #[tokio::test]
 async fn list_pr_files_missing_repo_returns_error() {
     let ctx = dummy_ctx();
-    let result = dispatch_tool(&ctx, "list_pr_files", &json!({ "owner": "o", "pr_number": 1 })).await;
+    let result = dispatch_tool(
+        &ctx,
+        "list_pr_files",
+        &json!({ "owner": "o", "pr_number": 1 }),
+    )
+    .await;
     assert!(result.contains("Tool error"), "got: {result}");
 }
 
@@ -105,7 +117,12 @@ async fn list_pr_files_missing_pr_number_returns_error() {
 #[tokio::test]
 async fn get_file_contents_missing_path_returns_error() {
     let ctx = dummy_ctx();
-    let result = dispatch_tool(&ctx, "get_file_contents", &json!({ "owner": "o", "repo": "r" })).await;
+    let result = dispatch_tool(
+        &ctx,
+        "get_file_contents",
+        &json!({ "owner": "o", "repo": "r" }),
+    )
+    .await;
     assert!(result.contains("Tool error"), "got: {result}");
 }
 
@@ -116,7 +133,8 @@ async fn post_pr_comment_missing_body_returns_error() {
         &ctx,
         "post_pr_comment",
         &json!({ "owner": "o", "repo": "r", "pr_number": 1 }),
-    ).await;
+    )
+    .await;
     assert!(result.contains("Tool error"), "got: {result}");
 }
 
