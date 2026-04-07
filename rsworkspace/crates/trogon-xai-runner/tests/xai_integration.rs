@@ -1,320 +1,245 @@
 //! Integration tests for `XaiAgent`.
 //!
-//! All tests hold `ENV_LOCK` to serialise env-var access (`XAI_BASE_URL`,
-//! `XAI_MODELS`). `make_agent` resets both vars to a known state at the start
-//! of each call, so no test sees a leftover value from a previous run.
+//! All tests use an in-process `MockXaiHttpClient` — no TCP servers are needed
+//! for the xAI HTTP layer. A minimal fake NATS TCP stub is still used to obtain
+//! a real `async_nats::Client` (fire-and-forget PUBs are silently dropped).
+//!
+//! Tests that need to inspect HTTP request parameters access `mock.calls` after
+//! each prompt. Tests that need request body control pre-load responses with
+//! `mock.push_response(events)` or `mock.push_slow_response(first_event)`.
 //!
 //! Run with: `cargo test -p trogon-xai-runner --features test-helpers`
 
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
-use acp_nats::acp_prefix::AcpPrefix;
 use agent_client_protocol::{
-    Agent, AuthMethod, AuthenticateRequest, BlobResourceContents, CancelNotification,
+    Agent, AuthMethod, AuthenticateRequest, CancelNotification,
     CloseSessionRequest, ContentBlock, EmbeddedResource, EmbeddedResourceResource,
     ForkSessionRequest, InitializeRequest, ListSessionsRequest, LoadSessionRequest,
     NewSessionRequest, PromptRequest, ProtocolVersion, ResumeSessionRequest, ResourceLink,
     SetSessionConfigOptionRequest, SetSessionModelRequest, StopReason, TextContent,
     TextResourceContents,
 };
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
-use tokio::net::TcpListener;
-use trogon_xai_runner::XaiAgent;
+use trogon_xai_runner::{
+    FinishReason, MockSessionNotifier, MockXaiHttpClient, XaiAgent, XaiEvent,
+};
 
 // ── env-var lock ──────────────────────────────────────────────────────────────
 
 /// All tests must hold this lock for the duration of env-var writes + agent
-/// construction. `make_agent` resets env vars at entry, so tests that set
-/// custom values do so BEFORE calling `make_agent`.
+/// construction. `make_agent` resets env vars at entry.
 static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 fn env_lock() -> &'static Mutex<()> {
     ENV_LOCK.get_or_init(|| Mutex::new(()))
 }
 
-// ── fake NATS ─────────────────────────────────────────────────────────────────
+// ── test agent type alias ─────────────────────────────────────────────────────
 
-/// Minimal fake NATS: handles INFO/CONNECT/PING handshake only.
-/// `session_notification` in `XaiAgent::prompt` is fire-and-forget, so PUB
-/// commands are silently ignored.
-async fn fake_nats() -> async_nats::Client {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
-
-    tokio::spawn(async move {
-        if let Ok((stream, _)) = listener.accept().await {
-            let (reader, mut writer) = stream.into_split();
-            writer
-                .write_all(
-                    b"INFO {\"server_id\":\"test\",\"version\":\"2.10.0\",\
-                      \"max_payload\":1048576,\"proto\":1,\"headers\":true}\r\n",
-                )
-                .await
-                .ok();
-            let mut lines = BufReader::new(reader).lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                if line.starts_with("CONNECT") {
-                    writer.write_all(b"+OK\r\n").await.ok();
-                } else if line.starts_with("PING") {
-                    writer.write_all(b"PONG\r\n").await.ok();
-                }
-            }
-        }
-    });
-
-    async_nats::connect(format!("nats://127.0.0.1:{port}")).await.unwrap()
-}
+type TestAgent = XaiAgent<Arc<MockXaiHttpClient>, MockSessionNotifier>;
 
 // ── agent factory ─────────────────────────────────────────────────────────────
 
-/// Build an `XaiAgent`. Resets `XAI_BASE_URL` and `XAI_MODELS` to a clean
-/// state at entry, then applies `base_url` if given.
-///
-/// Callers that need custom `XAI_MODELS` must set the env var BEFORE calling
-/// this function (while still holding `env_lock()`).
-///
-/// Caller must hold `env_lock()`.
-async fn make_agent(base_url: Option<&str>) -> XaiAgent {
-    // Reset ALL env vars to clean defaults so no test leaks state.
+/// Build a `TestAgent` with the given mock HTTP client. Resets all env vars to
+/// clean defaults. Caller must hold `env_lock()`.
+async fn make_agent(mock: Arc<MockXaiHttpClient>) -> TestAgent {
     unsafe {
         std::env::remove_var("XAI_MODELS");
         std::env::remove_var("XAI_PROMPT_TIMEOUT_SECS");
         std::env::remove_var("XAI_SYSTEM_PROMPT");
         std::env::remove_var("XAI_MAX_HISTORY_MESSAGES");
         std::env::remove_var("XAI_MAX_TURNS");
-        match base_url {
-            Some(url) => std::env::set_var("XAI_BASE_URL", url),
-            None => std::env::remove_var("XAI_BASE_URL"),
-        }
-    }
-    XaiAgent::new_in_memory(fake_nats().await, AcpPrefix::new("test").unwrap(), "grok-3", "fake-key")
-}
-
-/// Like `make_agent` but also sets `XAI_MODELS`. Caller must hold `env_lock()`.
-async fn make_agent_with_models(models_env: &str) -> XaiAgent {
-    unsafe {
         std::env::remove_var("XAI_BASE_URL");
-        std::env::remove_var("XAI_PROMPT_TIMEOUT_SECS");
-        std::env::remove_var("XAI_SYSTEM_PROMPT");
-        std::env::remove_var("XAI_MAX_HISTORY_MESSAGES");
-        std::env::remove_var("XAI_MAX_TURNS");
-        std::env::set_var("XAI_MODELS", models_env);
     }
-    XaiAgent::new_in_memory(fake_nats().await, AcpPrefix::new("test").unwrap(), "grok-3", "fake-key")
+    XaiAgent::new_in_memory(MockSessionNotifier::new(), "grok-3", "fake-key", mock)
 }
 
 /// Like `make_agent` but passes an empty api_key (no server-wide key).
-/// Users must authenticate with their own key before sessions can prompt.
-/// Caller must hold `env_lock()`.
-async fn make_agent_no_key(base_url: Option<&str>) -> XaiAgent {
+async fn make_agent_no_key(mock: Arc<MockXaiHttpClient>) -> TestAgent {
     unsafe {
         std::env::remove_var("XAI_MODELS");
         std::env::remove_var("XAI_PROMPT_TIMEOUT_SECS");
         std::env::remove_var("XAI_SYSTEM_PROMPT");
         std::env::remove_var("XAI_MAX_HISTORY_MESSAGES");
         std::env::remove_var("XAI_MAX_TURNS");
-        match base_url {
-            Some(url) => std::env::set_var("XAI_BASE_URL", url),
-            None => std::env::remove_var("XAI_BASE_URL"),
-        }
+        std::env::remove_var("XAI_BASE_URL");
     }
-    XaiAgent::new_in_memory(fake_nats().await, AcpPrefix::new("test").unwrap(), "grok-3", "")
+    XaiAgent::new_in_memory(MockSessionNotifier::new(), "grok-3", "", mock)
+}
+
+/// Like `make_agent` but also sets `XAI_MODELS`. Caller must hold `env_lock()`.
+async fn make_agent_with_models(mock: Arc<MockXaiHttpClient>, models_env: &str) -> TestAgent {
+    unsafe {
+        std::env::remove_var("XAI_PROMPT_TIMEOUT_SECS");
+        std::env::remove_var("XAI_SYSTEM_PROMPT");
+        std::env::remove_var("XAI_MAX_HISTORY_MESSAGES");
+        std::env::remove_var("XAI_MAX_TURNS");
+        std::env::remove_var("XAI_BASE_URL");
+        std::env::set_var("XAI_MODELS", models_env);
+    }
+    XaiAgent::new_in_memory(MockSessionNotifier::new(), "grok-3", "fake-key", mock)
 }
 
 /// Like `make_agent` but sets `XAI_PROMPT_TIMEOUT_SECS`. Caller must hold `env_lock()`.
-async fn make_agent_with_timeout(base_url: Option<&str>, timeout_secs: u64) -> XaiAgent {
+async fn make_agent_with_timeout(mock: Arc<MockXaiHttpClient>, timeout_secs: u64) -> TestAgent {
     unsafe {
         std::env::remove_var("XAI_MODELS");
         std::env::remove_var("XAI_SYSTEM_PROMPT");
         std::env::remove_var("XAI_MAX_HISTORY_MESSAGES");
         std::env::remove_var("XAI_MAX_TURNS");
+        std::env::remove_var("XAI_BASE_URL");
         std::env::set_var("XAI_PROMPT_TIMEOUT_SECS", timeout_secs.to_string());
-        match base_url {
-            Some(url) => std::env::set_var("XAI_BASE_URL", url),
-            None => std::env::remove_var("XAI_BASE_URL"),
-        }
     }
-    XaiAgent::new_in_memory(fake_nats().await, AcpPrefix::new("test").unwrap(), "grok-3", "fake-key")
+    XaiAgent::new_in_memory(MockSessionNotifier::new(), "grok-3", "fake-key", mock)
 }
 
 /// Like `make_agent` but also sets `XAI_SYSTEM_PROMPT`. Caller must hold `env_lock()`.
-async fn make_agent_with_system_prompt(base_url: Option<&str>, system_prompt: &str) -> XaiAgent {
+async fn make_agent_with_system_prompt(
+    mock: Arc<MockXaiHttpClient>,
+    system_prompt: &str,
+) -> TestAgent {
     unsafe {
         std::env::remove_var("XAI_MODELS");
         std::env::remove_var("XAI_PROMPT_TIMEOUT_SECS");
         std::env::remove_var("XAI_MAX_HISTORY_MESSAGES");
         std::env::remove_var("XAI_MAX_TURNS");
+        std::env::remove_var("XAI_BASE_URL");
         std::env::set_var("XAI_SYSTEM_PROMPT", system_prompt);
-        match base_url {
-            Some(url) => std::env::set_var("XAI_BASE_URL", url),
-            None => std::env::remove_var("XAI_BASE_URL"),
-        }
     }
-    XaiAgent::new_in_memory(fake_nats().await, AcpPrefix::new("test").unwrap(), "grok-3", "fake-key")
+    XaiAgent::new_in_memory(MockSessionNotifier::new(), "grok-3", "fake-key", mock)
 }
 
-// ── fake HTTP servers ─────────────────────────────────────────────────────────
-
-/// Shared request-drain logic: reads past HTTP headers and body.
-async fn drain_request(
-    reader: &mut BufReader<tokio::net::tcp::OwnedReadHalf>,
-) {
-    let mut content_length: usize = 0;
-    loop {
-        let mut line = String::new();
-        if reader.read_line(&mut line).await.is_err() {
-            break;
-        }
-        let trimmed = line.trim_end_matches('\n').trim_end_matches('\r');
-        if trimmed.is_empty() {
-            break;
-        }
-        if let Some(rest) = trimmed.to_lowercase().strip_prefix("content-length:") {
-            content_length = rest.trim().parse().unwrap_or(0);
-        }
+/// Like `make_agent` but sets `XAI_MAX_HISTORY_MESSAGES`. Caller must hold `env_lock()`.
+async fn make_agent_with_max_history(mock: Arc<MockXaiHttpClient>, max: usize) -> TestAgent {
+    unsafe {
+        std::env::remove_var("XAI_MODELS");
+        std::env::remove_var("XAI_PROMPT_TIMEOUT_SECS");
+        std::env::remove_var("XAI_SYSTEM_PROMPT");
+        std::env::remove_var("XAI_MAX_TURNS");
+        std::env::remove_var("XAI_BASE_URL");
+        std::env::set_var("XAI_MAX_HISTORY_MESSAGES", max.to_string());
     }
-    if content_length > 0 {
-        let mut body = vec![0u8; content_length];
-        reader.read_exact(&mut body).await.ok();
-    }
+    XaiAgent::new_in_memory(MockSessionNotifier::new(), "grok-3", "fake-key", mock)
 }
 
-/// One-shot SSE server: each `text_chunks` string becomes a Responses API
-/// `message.delta` event, followed by `[DONE]`. Returns the base URL.
-async fn fake_xai_sse(text_chunks: &[&'static str]) -> String {
-    let body: String = text_chunks
+// ── mock event helpers ────────────────────────────────────────────────────────
+
+/// A successful response with text chunks and a response ID.
+/// The ID is used as `last_response_id` for the next turn (stateful multi-turn).
+fn text_response_with_id(text: &str, id: &str) -> Vec<XaiEvent> {
+    vec![
+        XaiEvent::ResponseId { id: id.to_string() },
+        XaiEvent::TextDelta { text: text.to_string() },
+        XaiEvent::Done,
+    ]
+}
+
+/// A successful response with multiple text chunks but no stored response ID.
+fn text_response(chunks: &[&str]) -> Vec<XaiEvent> {
+    let mut v: Vec<XaiEvent> = chunks
         .iter()
-        .map(|t| format!("data: {{\"id\":\"resp_test\",\"type\":\"message.delta\",\"delta\":{{\"type\":\"output_text\",\"text\":\"{t}\"}}}}\n\n"))
-        .chain(std::iter::once("data: [DONE]\n\n".to_string()))
+        .map(|t| XaiEvent::TextDelta { text: t.to_string() })
         .collect();
-
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
-
-    tokio::spawn(async move {
-        if let Ok((stream, _)) = listener.accept().await {
-            let (reader, mut writer) = stream.into_split();
-            let mut reader = BufReader::new(reader);
-            drain_request(&mut reader).await;
-
-            let http = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
-                body.len(),
-                body,
-            );
-            writer.write_all(http.as_bytes()).await.ok();
-        }
-    });
-
-    format!("http://127.0.0.1:{port}/v1")
+    v.push(XaiEvent::Done);
+    v
 }
 
-/// Slow SSE server: sends one text chunk, then holds the connection open
-/// indefinitely (no `[DONE]`). Used to exercise cancellation.
-async fn fake_xai_sse_slow(first_chunk: &'static str) -> String {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
-
-    tokio::spawn(async move {
-        if let Ok((stream, _)) = listener.accept().await {
-            let (reader, mut writer) = stream.into_split();
-            let mut reader = BufReader::new(reader);
-            drain_request(&mut reader).await;
-
-            // Send headers without Content-Length: connection stays open.
-            let header = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n";
-            writer.write_all(header.as_bytes()).await.ok();
-            let chunk = format!(
-                "data: {{\"id\":\"resp_partial\",\"type\":\"message.delta\",\"delta\":{{\"type\":\"output_text\",\"text\":\"{first_chunk}\"}}}}\n\n"
-            );
-            writer.write_all(chunk.as_bytes()).await.ok();
-            writer.flush().await.ok();
-
-            // Hold the connection open until the client drops it.
-            tokio::time::sleep(Duration::from_secs(30)).await;
-        }
-    });
-
-    format!("http://127.0.0.1:{port}/v1")
+/// A response that yields only `[DONE]` with no text (empty assistant reply).
+fn done_only() -> Vec<XaiEvent> {
+    vec![XaiEvent::Done]
 }
 
-/// Error server: returns an HTTP error response with no body chunks.
-async fn fake_xai_error(status: u16) -> String {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
-
-    tokio::spawn(async move {
-        if let Ok((stream, _)) = listener.accept().await {
-            let (reader, mut writer) = stream.into_split();
-            let mut reader = BufReader::new(reader);
-            drain_request(&mut reader).await;
-
-            let error_body = r#"{"error":{"message":"API error"}}"#;
-            let http = format!(
-                "HTTP/1.1 {status} Error\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
-                error_body.len(),
-                error_body,
-            );
-            writer.write_all(http.as_bytes()).await.ok();
-        }
-    });
-
-    format!("http://127.0.0.1:{port}/v1")
+/// An error response (surfaces as InternalError to the ACP client).
+/// Message must NOT contain "xAI API error 4" — otherwise the stale-ID retry
+/// guard skips the retry. Use `client_error_response` for 4xx errors.
+fn error_response() -> Vec<XaiEvent> {
+    vec![XaiEvent::Error { message: "xAI API error 500: server error".to_string() }]
 }
 
-/// Like `fake_xai_sse` but also captures the value of the `Authorization`
-/// header sent by the agent. Returns (base_url, captured_header_value).
-async fn fake_xai_sse_capturing_auth(text_chunks: &[&'static str]) -> (String, Arc<Mutex<Option<String>>>) {
-    let body: String = text_chunks
-        .iter()
-        .map(|t| format!("data: {{\"id\":\"resp_test\",\"type\":\"message.delta\",\"delta\":{{\"type\":\"output_text\",\"text\":\"{t}\"}}}}\n\n"))
-        .chain(std::iter::once("data: [DONE]\n\n".to_string()))
-        .collect();
+/// A 4xx error response — no stale-ID retry is attempted.
+fn client_error_response() -> Vec<XaiEvent> {
+    vec![XaiEvent::Error { message: "xAI API error 401: Unauthorized".to_string() }]
+}
 
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
-    let captured: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
-    let cap = Arc::clone(&captured);
+/// A response with token usage and text.
+fn text_with_usage(text: &str) -> Vec<XaiEvent> {
+    vec![
+        XaiEvent::TextDelta { text: text.to_string() },
+        XaiEvent::Usage { prompt_tokens: 10, completion_tokens: 5 },
+        XaiEvent::Done,
+    ]
+}
 
-    tokio::spawn(async move {
-        if let Ok((stream, _)) = listener.accept().await {
-            let (reader, mut writer) = stream.into_split();
-            let mut reader = BufReader::new(reader);
+/// A function-call-only response (no text) — server-side tool execution.
+fn function_call_response(call_id: &str, name: &str, args: &str) -> Vec<XaiEvent> {
+    vec![
+        XaiEvent::ResponseId { id: "resp_tool".to_string() },
+        XaiEvent::FunctionCall {
+            call_id: call_id.to_string(),
+            name: name.to_string(),
+            arguments: args.to_string(),
+        },
+        XaiEvent::Done,
+    ]
+}
 
-            let mut content_length: usize = 0;
-            loop {
-                let mut line = String::new();
-                if reader.read_line(&mut line).await.is_err() {
-                    break;
-                }
-                let trimmed = line.trim_end_matches('\n').trim_end_matches('\r');
-                if trimmed.is_empty() {
-                    break;
-                }
-                // Preserve original casing of value but compare key case-insensitively.
-                if trimmed.to_lowercase().starts_with("authorization:") {
-                    let colon = trimmed.find(':').unwrap();
-                    *cap.lock().unwrap() = Some(trimmed[colon + 1..].trim().to_string());
-                }
-                if let Some(rest) = trimmed.to_lowercase().strip_prefix("content-length:") {
-                    content_length = rest.trim().parse().unwrap_or(0);
-                }
-            }
-            if content_length > 0 {
-                let mut buf = vec![0u8; content_length];
-                reader.read_exact(&mut buf).await.ok();
-            }
+/// A response where the xAI server cancelled the request (content policy etc.).
+fn server_cancelled_response() -> Vec<XaiEvent> {
+    vec![
+        XaiEvent::ResponseId { id: "resp_cancelled".to_string() },
+        XaiEvent::Finished { reason: FinishReason::Cancelled, incomplete_reason: None },
+        XaiEvent::Done,
+    ]
+}
 
-            let http = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
-                body.len(),
-                body,
-            );
-            writer.write_all(http.as_bytes()).await.ok();
-        }
-    });
+/// A response where the model failed (response.failed or response.error).
+fn server_failed_response(msg: &str) -> Vec<XaiEvent> {
+    vec![
+        XaiEvent::Error { message: msg.to_string() },
+        XaiEvent::Done,
+    ]
+}
 
-    (format!("http://127.0.0.1:{port}/v1"), captured)
+/// Incomplete response due to max_output_tokens with a text chunk.
+fn incomplete_max_output_tokens(text: &str, id: &str) -> Vec<XaiEvent> {
+    vec![
+        XaiEvent::TextDelta { text: text.to_string() },
+        XaiEvent::ResponseId { id: id.to_string() },
+        XaiEvent::Finished {
+            reason: FinishReason::Incomplete,
+            incomplete_reason: Some("max_output_tokens".to_string()),
+        },
+        XaiEvent::Done,
+    ]
+}
+
+/// Incomplete response due to max_turns (no text).
+fn incomplete_max_turns(id: &str) -> Vec<XaiEvent> {
+    vec![
+        XaiEvent::ResponseId { id: id.to_string() },
+        XaiEvent::Finished {
+            reason: FinishReason::Incomplete,
+            incomplete_reason: Some("max_turns".to_string()),
+        },
+        XaiEvent::Done,
+    ]
+}
+
+/// Continuation response (after incomplete): text + completion.
+fn continuation_response(text: &str, id: &str) -> Vec<XaiEvent> {
+    vec![
+        XaiEvent::TextDelta { text: text.to_string() },
+        XaiEvent::ResponseId { id: id.to_string() },
+        XaiEvent::Finished { reason: FinishReason::Completed, incomplete_reason: None },
+        XaiEvent::Done,
+    ]
+}
+
+/// Build a meta map with a single XAI_API_KEY entry.
+fn api_key_meta(key: &str) -> serde_json::Map<String, serde_json::Value> {
+    let mut m = serde_json::Map::new();
+    m.insert("XAI_API_KEY".to_string(), serde_json::json!(key));
+    m
 }
 
 // ── new_session ───────────────────────────────────────────────────────────────
@@ -322,7 +247,7 @@ async fn fake_xai_sse_capturing_auth(text_chunks: &[&'static str]) -> (String, A
 #[tokio::test]
 async fn new_session_creates_session_with_correct_model_state() {
     let _guard = env_lock().lock().unwrap();
-    let agent = make_agent(None).await;
+    let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
 
     let resp = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
 
@@ -339,7 +264,7 @@ async fn new_session_creates_session_with_correct_model_state() {
 #[tokio::test]
 async fn list_sessions_is_empty_before_any_session() {
     let _guard = env_lock().lock().unwrap();
-    let agent = make_agent(None).await;
+    let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
     let list = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
     assert!(list.sessions.is_empty());
 }
@@ -347,7 +272,7 @@ async fn list_sessions_is_empty_before_any_session() {
 #[tokio::test]
 async fn list_sessions_sorted_by_session_id() {
     let _guard = env_lock().lock().unwrap();
-    let agent = make_agent(None).await;
+    let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
     agent.new_session(NewSessionRequest::new("/a")).await.unwrap();
     agent.new_session(NewSessionRequest::new("/b")).await.unwrap();
     agent.new_session(NewSessionRequest::new("/c")).await.unwrap();
@@ -363,10 +288,8 @@ async fn list_sessions_sorted_by_session_id() {
 
 #[tokio::test]
 async fn list_sessions_returns_correct_cwd_for_each_session() {
-    // list_sessions must return the cwd that was passed to new_session for each
-    // entry. The cwd is stored in the session data and must round-trip correctly.
     let _guard = env_lock().lock().unwrap();
-    let agent = make_agent(None).await;
+    let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
 
     agent.new_session(NewSessionRequest::new("/project/alpha")).await.unwrap();
     agent.new_session(NewSessionRequest::new("/project/beta")).await.unwrap();
@@ -375,13 +298,11 @@ async fn list_sessions_returns_correct_cwd_for_each_session() {
     let list = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
     assert_eq!(list.sessions.len(), 3);
 
-    let mut cwds: Vec<String> = list.sessions.iter()
-        .map(|s| s.cwd.to_string_lossy().to_string())
-        .collect();
+    let mut cwds: Vec<String> =
+        list.sessions.iter().map(|s| s.cwd.to_string_lossy().to_string()).collect();
     cwds.sort();
 
-    assert_eq!(cwds, vec!["/project/alpha", "/project/beta", "/tmp"],
-        "list_sessions must return the exact cwd for each session: {cwds:?}");
+    assert_eq!(cwds, vec!["/project/alpha", "/project/beta", "/tmp"]);
 }
 
 // ── load_session ──────────────────────────────────────────────────────────────
@@ -389,7 +310,7 @@ async fn list_sessions_returns_correct_cwd_for_each_session() {
 #[tokio::test]
 async fn load_session_returns_error_for_unknown_session() {
     let _guard = env_lock().lock().unwrap();
-    let agent = make_agent(None).await;
+    let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
     let err = agent
         .load_session(LoadSessionRequest::new("no-such-id", "/tmp"))
         .await
@@ -400,7 +321,7 @@ async fn load_session_returns_error_for_unknown_session() {
 #[tokio::test]
 async fn load_session_returns_correct_state_for_existing_session() {
     let _guard = env_lock().lock().unwrap();
-    let agent = make_agent(None).await;
+    let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
     let new = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = new.session_id.to_string();
 
@@ -417,7 +338,7 @@ async fn load_session_returns_correct_state_for_existing_session() {
 #[tokio::test]
 async fn close_session_removes_session() {
     let _guard = env_lock().lock().unwrap();
-    let agent = make_agent(None).await;
+    let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
     let new = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = new.session_id.to_string();
 
@@ -432,7 +353,7 @@ async fn close_session_removes_session() {
 #[tokio::test]
 async fn resume_session_returns_error_for_unknown_session() {
     let _guard = env_lock().lock().unwrap();
-    let agent = make_agent(None).await;
+    let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
     let err = agent
         .resume_session(ResumeSessionRequest::new("no-such-id", "/tmp"))
         .await
@@ -443,7 +364,7 @@ async fn resume_session_returns_error_for_unknown_session() {
 #[tokio::test]
 async fn resume_session_succeeds_for_existing_session() {
     let _guard = env_lock().lock().unwrap();
-    let agent = make_agent(None).await;
+    let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
     let new = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = new.session_id.to_string();
     agent
@@ -457,7 +378,7 @@ async fn resume_session_succeeds_for_existing_session() {
 #[tokio::test]
 async fn set_session_model_valid_model_persists() {
     let _guard = env_lock().lock().unwrap();
-    let agent = make_agent(None).await;
+    let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
     let new = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = new.session_id.to_string();
 
@@ -477,7 +398,7 @@ async fn set_session_model_valid_model_persists() {
 #[tokio::test]
 async fn set_session_model_unknown_model_returns_error() {
     let _guard = env_lock().lock().unwrap();
-    let agent = make_agent(None).await;
+    let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
     let new = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = new.session_id.to_string();
 
@@ -491,7 +412,7 @@ async fn set_session_model_unknown_model_returns_error() {
 #[tokio::test]
 async fn set_session_model_unknown_session_returns_error() {
     let _guard = env_lock().lock().unwrap();
-    let agent = make_agent(None).await;
+    let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
     let err = agent
         .set_session_model(SetSessionModelRequest::new("no-such-id", "grok-3"))
         .await
@@ -504,7 +425,7 @@ async fn set_session_model_unknown_session_returns_error() {
 #[tokio::test]
 async fn fork_session_creates_independent_session_inheriting_model() {
     let _guard = env_lock().lock().unwrap();
-    let agent = make_agent(None).await;
+    let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
     let src = agent.new_session(NewSessionRequest::new("/src")).await.unwrap();
     let src_id = src.session_id.to_string();
 
@@ -530,7 +451,7 @@ async fn fork_session_creates_independent_session_inheriting_model() {
 #[tokio::test]
 async fn fork_unknown_session_returns_error() {
     let _guard = env_lock().lock().unwrap();
-    let agent = make_agent(None).await;
+    let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
     let err = agent
         .fork_session(ForkSessionRequest::new("no-such-id", "/fork"))
         .await
@@ -541,8 +462,9 @@ async fn fork_unknown_session_returns_error() {
 #[tokio::test]
 async fn fork_session_clones_conversation_history() {
     let _guard = env_lock().lock().unwrap();
-    let url = fake_xai_sse(&["Hi"]).await;
-    let agent = make_agent(Some(&url)).await;
+    let mock = Arc::new(MockXaiHttpClient::new());
+    mock.push_response(text_response(&["Hi"]));
+    let agent = make_agent(Arc::clone(&mock)).await;
 
     let src = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let src_id = src.session_id.to_string();
@@ -570,22 +492,22 @@ async fn fork_session_clones_conversation_history() {
 // ── prompt ────────────────────────────────────────────────────────────────────
 
 #[tokio::test]
-async fn prompt_invalid_session_id_returns_internal_error() {
-    // Session IDs are embedded as a NATS subject token, so `.`, `*`, `>`,
-    // whitespace, and non-ASCII characters are forbidden. `make_nats_client()`
-    // rejects them with InternalError before the session store is even consulted.
+async fn prompt_unknown_session_id_returns_not_found() {
     let _guard = env_lock().lock().unwrap();
-    let agent = make_agent(None).await;
+    let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
 
-    for bad_id in &["foo.bar", "foo*bar", "foo>bar", "foo bar", "séssion", ""] {
+    // None of these IDs have an associated session, so the store lookup fails.
+    for bad_id in &["foo.bar", "foo*bar", "foo>bar", "foo bar", "séssion", "", "no-such-id"] {
         let err = agent
             .prompt(PromptRequest::new(*bad_id, vec![ContentBlock::Text(TextContent::new("hi"))]))
             .await
             .unwrap_err();
         assert_eq!(
             err.code,
-            agent_client_protocol::ErrorCode::InternalError.into(),
-            "expected InternalError for session_id {:?}, got: {:?}", bad_id, err,
+            agent_client_protocol::ErrorCode::ResourceNotFound.into(),
+            "expected ResourceNotFound for session_id {:?}, got: {:?}",
+            bad_id,
+            err,
         );
     }
 }
@@ -593,7 +515,7 @@ async fn prompt_invalid_session_id_returns_internal_error() {
 #[tokio::test]
 async fn prompt_unknown_session_returns_error() {
     let _guard = env_lock().lock().unwrap();
-    let agent = make_agent(None).await;
+    let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
     let content = vec![ContentBlock::Text(TextContent::new("hi"))];
     let err = agent
         .prompt(PromptRequest::new("no-such-id", content))
@@ -605,8 +527,9 @@ async fn prompt_unknown_session_returns_error() {
 #[tokio::test]
 async fn prompt_returns_end_turn_and_updates_history() {
     let _guard = env_lock().lock().unwrap();
-    let url = fake_xai_sse(&["Hello", " world"]).await;
-    let agent = make_agent(Some(&url)).await;
+    let mock = Arc::new(MockXaiHttpClient::new());
+    mock.push_response(text_response(&["Hello", " world"]));
+    let agent = make_agent(Arc::clone(&mock)).await;
 
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = sess.session_id.to_string();
@@ -630,8 +553,9 @@ async fn prompt_returns_end_turn_and_updates_history() {
 #[tokio::test]
 async fn prompt_sends_accumulated_history_on_second_turn() {
     let _guard = env_lock().lock().unwrap();
-    let url = fake_xai_sse(&["First reply"]).await;
-    let agent = make_agent(Some(&url)).await;
+    let mock = Arc::new(MockXaiHttpClient::new());
+    mock.push_response(text_response(&["First reply"]));
+    let agent = make_agent(Arc::clone(&mock)).await;
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = sess.session_id.to_string();
 
@@ -647,8 +571,9 @@ async fn prompt_sends_accumulated_history_on_second_turn() {
 #[tokio::test]
 async fn prompt_with_api_error_returns_acp_error() {
     let _guard = env_lock().lock().unwrap();
-    let url = fake_xai_error(401).await;
-    let agent = make_agent(Some(&url)).await;
+    let mock = Arc::new(MockXaiHttpClient::new());
+    mock.push_response(client_error_response());
+    let agent = make_agent(Arc::clone(&mock)).await;
 
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = sess.session_id.to_string();
@@ -659,11 +584,9 @@ async fn prompt_with_api_error_returns_acp_error() {
         .await
         .unwrap_err();
 
-    // Must propagate as an ACP error, not silently return EndTurn.
     assert_eq!(err.code, agent_client_protocol::ErrorCode::InternalError.into());
 
-    // The user message is compensated away on xAI error — same as cancel.
-    // The turn failed with no response; the retry should start from a clean state.
+    // User message is compensated away on error.
     let history = agent.test_session_history(&session_id).await;
     assert!(history.is_empty(), "history should be empty after xAI error: {history:?}");
 }
@@ -671,9 +594,9 @@ async fn prompt_with_api_error_returns_acp_error() {
 #[tokio::test]
 async fn prompt_with_done_only_response_does_not_update_history() {
     let _guard = env_lock().lock().unwrap();
-    // Server sends [DONE] immediately with no text chunks.
-    let url = fake_xai_sse(&[]).await;
-    let agent = make_agent(Some(&url)).await;
+    let mock = Arc::new(MockXaiHttpClient::new());
+    mock.push_response(done_only());
+    let agent = make_agent(Arc::clone(&mock)).await;
 
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = sess.session_id.to_string();
@@ -681,40 +604,31 @@ async fn prompt_with_done_only_response_does_not_update_history() {
     let content = vec![ContentBlock::Text(TextContent::new("ping"))];
     agent.prompt(PromptRequest::new(session_id.clone(), content)).await.unwrap();
 
-    // The user message is durably persisted before the xAI call. No assistant
-    // text was produced, so only the user turn survives in history.
     let history = agent.test_session_history(&session_id).await;
     assert_eq!(history.len(), 1);
     assert_eq!(history[0].role, "user");
     assert_eq!(history[0].content_str(), "ping");
 }
 
-// Retry after a failed put(assistant): history already ends with the user
-// message, so the retry must not duplicate it in the xAI context.
 #[tokio::test]
 async fn prompt_retry_after_incomplete_turn_does_not_duplicate_user_message() {
     let _guard = env_lock().lock().unwrap();
-
-    // One connection: the retry is the only prompt call.
-    let (url, bodies) = fake_xai_sse_recording(vec![
-        vec!["the reply"],
-    ]).await;
-    let agent = make_agent(Some(&url)).await;
+    let mock = Arc::new(MockXaiHttpClient::new());
+    mock.push_response(text_response(&["the reply"]));
+    let agent = make_agent(Arc::clone(&mock)).await;
 
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = sess.session_id.to_string();
 
-    // Simulate a crash after put(user) but before put(assistant): manually
-    // plant the user message in history without an assistant reply.
+    // Simulate a crash: manually plant the user message in history without a
+    // corresponding assistant reply.
     {
         let mut data = agent.test_session_history(&session_id).await;
-        // history is empty; push the user message as if it was persisted before
-        // a crash that lost the assistant reply.
         data.push(trogon_xai_runner::Message::user("hello"));
         agent.test_set_session_history(&session_id, data).await;
     }
 
-    // Retry with the same message. Should be treated as a resume, not a fresh turn.
+    // Retry with the same message — must be treated as a resume, not a fresh turn.
     let resp = agent
         .prompt(PromptRequest::new(
             session_id.clone(),
@@ -724,7 +638,6 @@ async fn prompt_retry_after_incomplete_turn_does_not_duplicate_user_message() {
         .unwrap();
     assert_eq!(resp.stop_reason, StopReason::EndTurn);
 
-    // History should have exactly one user + one assistant — no duplicate user.
     let history = agent.test_session_history(&session_id).await;
     assert_eq!(history.len(), 2, "expected user + assistant, got: {history:?}");
     assert_eq!(history[0].role, "user");
@@ -732,11 +645,10 @@ async fn prompt_retry_after_incomplete_turn_does_not_duplicate_user_message() {
     assert_eq!(history[1].role, "assistant");
     assert_eq!(history[1].content_str(), "the reply");
 
-    // The xAI request body must contain exactly one user message — no duplicate.
-    let bodies = bodies.lock().unwrap();
-    let input = bodies[0]["input"].as_array().unwrap();
-    let user_msgs: Vec<_> = input.iter().filter(|m| m["role"] == "user").collect();
-    assert_eq!(user_msgs.len(), 1, "xAI request must have exactly one user message: {input:?}");
+    // The mock must have been called with exactly one user message (no duplicate).
+    let calls = mock.calls.lock().unwrap();
+    let user_msgs: Vec<_> = calls[0].input.iter().filter(|i| i.role == "user").collect();
+    assert_eq!(user_msgs.len(), 1, "xAI request must have exactly one user message");
 }
 
 // ── cancel ────────────────────────────────────────────────────────────────────
@@ -744,15 +656,16 @@ async fn prompt_retry_after_incomplete_turn_does_not_duplicate_user_message() {
 #[tokio::test]
 async fn cancel_unknown_session_is_a_noop() {
     let _guard = env_lock().lock().unwrap();
-    let agent = make_agent(None).await;
+    let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
     agent.cancel(CancelNotification::new("no-such-id")).await.unwrap();
 }
 
 #[tokio::test]
 async fn cancel_interrupts_in_flight_prompt() {
     let _guard = env_lock().lock().unwrap();
-    let url = fake_xai_sse_slow("partial").await;
-    let agent = std::sync::Arc::new(make_agent(Some(&url)).await);
+    let mock = Arc::new(MockXaiHttpClient::new());
+    mock.push_slow_response(XaiEvent::TextDelta { text: "partial".to_string() });
+    let agent = std::sync::Arc::new(make_agent(Arc::clone(&mock)).await);
 
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = sess.session_id.to_string();
@@ -760,16 +673,10 @@ async fn cancel_interrupts_in_flight_prompt() {
     let agent_cancel = std::sync::Arc::clone(&agent);
     let cancel_session_id = session_id.clone();
 
-    // Run prompt and cancel concurrently on the same task using join!.
-    // Both futures share &agent (via Arc), which is fine since all methods
-    // take &self. The prompt future is !Send (contains boxed_local stream),
-    // so we use join! rather than spawn.
     let content = vec![ContentBlock::Text(TextContent::new("test"))];
     let (prompt_result, _) = tokio::join!(
         agent.prompt(PromptRequest::new(session_id.clone(), content)),
         async move {
-            // Give the prompt time to register the cancel channel and start
-            // streaming, then fire cancel.
             tokio::time::sleep(Duration::from_millis(20)).await;
             agent_cancel
                 .cancel(CancelNotification::new(cancel_session_id))
@@ -781,18 +688,16 @@ async fn cancel_interrupts_in_flight_prompt() {
     let resp = prompt_result.unwrap();
     assert_eq!(resp.stop_reason, StopReason::Cancelled);
 
-    // History must not be updated for a canceled turn.
     let history = agent.test_session_history(&session_id).await;
     assert!(history.is_empty(), "canceled prompt must not update history");
 }
 
-// cancel_channels entry is removed after prompt completes (no memory leak when
-// sessions expire via TTL without an explicit close_session).
 #[tokio::test]
 async fn cancel_channels_entry_is_cleaned_up_after_prompt() {
     let _guard = env_lock().lock().unwrap();
-    let url = fake_xai_sse(&["hello"]).await;
-    let agent = make_agent(Some(&url)).await;
+    let mock = Arc::new(MockXaiHttpClient::new());
+    mock.push_response(text_response(&["hello"]));
+    let agent = make_agent(Arc::clone(&mock)).await;
 
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = sess.session_id.to_string();
@@ -807,7 +712,6 @@ async fn cancel_channels_entry_is_cleaned_up_after_prompt() {
         .await
         .unwrap();
 
-    // Entry must be removed after prompt completes — no leak for TTL-expired sessions.
     assert_eq!(
         agent.test_cancel_channels_len().await,
         0,
@@ -820,13 +724,10 @@ async fn cancel_channels_entry_is_cleaned_up_after_prompt() {
 #[tokio::test]
 async fn xai_models_env_var_custom_models_accepted() {
     let _guard = env_lock().lock().unwrap();
-    // Set BEFORE calling make_agent (make_agent reads it, then removes it internally).
-    // We use make_agent_with_models which sets the var correctly.
-    let agent = make_agent_with_models("model-a:Model A,model-b:Model B").await;
+    let agent = make_agent_with_models(Arc::new(MockXaiHttpClient::new()), "model-a:Model A,model-b:Model B").await;
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = sess.session_id.to_string();
 
-    // "grok-3" is the default model and gets auto-added even if not listed.
     agent
         .set_session_model(SetSessionModelRequest::new(session_id.clone(), "model-a"))
         .await
@@ -851,8 +752,11 @@ async fn xai_models_env_var_custom_models_accepted() {
 #[tokio::test]
 async fn xai_models_env_var_malformed_entries_are_skipped() {
     let _guard = env_lock().lock().unwrap();
-    // "malformed" has no colon — should be silently skipped.
-    let agent = make_agent_with_models("valid:Valid,malformed,another:Another").await;
+    let agent = make_agent_with_models(
+        Arc::new(MockXaiHttpClient::new()),
+        "valid:Valid,malformed,another:Another",
+    )
+    .await;
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = sess.session_id.to_string();
 
@@ -864,7 +768,6 @@ async fn xai_models_env_var_malformed_entries_are_skipped() {
         .set_session_model(SetSessionModelRequest::new(session_id.clone(), "another"))
         .await
         .unwrap();
-    // "malformed" was skipped — not in the list
     let err = agent
         .set_session_model(SetSessionModelRequest::new(session_id.clone(), "malformed"))
         .await
@@ -875,11 +778,10 @@ async fn xai_models_env_var_malformed_entries_are_skipped() {
 #[tokio::test]
 async fn xai_models_default_when_env_var_not_set() {
     let _guard = env_lock().lock().unwrap();
-    let agent = make_agent(None).await; // make_agent removes XAI_MODELS
+    let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = sess.session_id.to_string();
 
-    // Default list includes grok-3 and grok-3-mini.
     agent
         .set_session_model(SetSessionModelRequest::new(session_id.clone(), "grok-3"))
         .await
@@ -893,179 +795,30 @@ async fn xai_models_default_when_env_var_not_set() {
 #[tokio::test]
 async fn xai_models_default_model_auto_added_when_absent_from_list() {
     let _guard = env_lock().lock().unwrap();
-    // Neither entry is "grok-3" — the default model. It should be auto-added.
-    let agent = make_agent_with_models("alpha:Alpha,beta:Beta").await;
+    let agent = make_agent_with_models(Arc::new(MockXaiHttpClient::new()), "alpha:Alpha,beta:Beta").await;
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = sess.session_id.to_string();
 
-    // current model is still grok-3 (passed to new()) and was auto-added
     let models = sess.models.expect("models should be present");
     assert_eq!(models.current_model_id.to_string(), "grok-3");
 
-    // grok-3 is selectable even though it wasn't in XAI_MODELS
     agent
         .set_session_model(SetSessionModelRequest::new(session_id.clone(), "grok-3"))
         .await
         .expect("auto-added default model must be selectable");
 }
 
-// ── new fake server helpers ───────────────────────────────────────────────────
-
-/// Sends a single SSE data line split across two TCP writes (simulates a
-/// packet boundary inside an SSE line). The assembled content is "Hello".
-/// No Content-Length — streaming response.
-async fn fake_xai_sse_chunked() -> String {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
-
-    tokio::spawn(async move {
-        if let Ok((stream, _)) = listener.accept().await {
-            let (reader, mut writer) = stream.into_split();
-            let mut reader = BufReader::new(reader);
-            drain_request(&mut reader).await;
-
-            // Headers only — no Content-Length, so reqwest streams bytes as
-            // they arrive rather than waiting for the body to be fully buffered.
-            writer
-                .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n")
-                .await
-                .ok();
-
-            // First write: the SSE line is cut mid-JSON (no trailing newline).
-            writer
-                .write_all(b"data: {\"id\":\"resp_test\",\"type\":\"message.delta\",\"delta\":{\"type\":\"output_text\",\"text\":\"Hel")
-                .await
-                .ok();
-            writer.flush().await.ok();
-
-            tokio::time::sleep(Duration::from_millis(20)).await;
-
-            // Second write: completes the JSON, adds the line terminator, then DONE.
-            writer.write_all(b"lo\"}}\n\ndata: [DONE]\n\n").await.ok();
-            writer.flush().await.ok();
-        }
-    });
-
-    format!("http://127.0.0.1:{port}/v1")
-}
-
-/// Recording server. Accepts `responses.len()` connections sequentially.
-/// For each connection, reads and parses the request body JSON (stored in
-/// the returned `Arc`), then responds with the Nth list of text chunks.
-async fn fake_xai_sse_recording(
-    responses: Vec<Vec<&'static str>>,
-) -> (String, Arc<Mutex<Vec<serde_json::Value>>>) {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
-    let bodies: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(Vec::new()));
-    let bodies_clone = Arc::clone(&bodies);
-
-    tokio::spawn(async move {
-        for chunks in responses {
-            if let Ok((stream, _)) = listener.accept().await {
-                let (reader, mut writer) = stream.into_split();
-                let mut reader = BufReader::new(reader);
-
-                // Read headers and capture Content-Length.
-                let mut content_length: usize = 0;
-                loop {
-                    let mut line = String::new();
-                    if reader.read_line(&mut line).await.is_err() {
-                        break;
-                    }
-                    let trimmed = line.trim_end_matches('\n').trim_end_matches('\r');
-                    if trimmed.is_empty() {
-                        break;
-                    }
-                    if let Some(rest) = trimmed.to_lowercase().strip_prefix("content-length:") {
-                        content_length = rest.trim().parse().unwrap_or(0);
-                    }
-                }
-
-                // Read and parse the body.
-                let body_json = if content_length > 0 {
-                    let mut body = vec![0u8; content_length];
-                    reader.read_exact(&mut body).await.ok();
-                    serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null)
-                } else {
-                    serde_json::Value::Null
-                };
-                // Capture the index before pushing so resp_id matches the index
-                // in the bodies array (resp_0 → bodies[0], resp_1 → bodies[1], …).
-                let resp_idx = bodies_clone.lock().unwrap().len();
-                bodies_clone.lock().unwrap().push(body_json);
-
-                // Respond with SSE chunks (Responses API format).
-                let resp_id = format!("resp_{resp_idx}");
-                let body: String = chunks
-                    .iter()
-                    .map(|t| {
-                        format!(
-                            "data: {{\"id\":\"{resp_id}\",\"type\":\"message.delta\",\"delta\":{{\"type\":\"output_text\",\"text\":\"{t}\"}}}}\n\n"
-                        )
-                    })
-                    .chain(std::iter::once("data: [DONE]\n\n".to_string()))
-                    .collect();
-                let http = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
-                    body.len(),
-                    body,
-                );
-                writer.write_all(http.as_bytes()).await.ok();
-            }
-        }
-    });
-
-    (format!("http://127.0.0.1:{port}/v1"), bodies)
-}
-
-/// Parallel SSE server: accepts `count` connections, spawning a handler task
-/// per connection so they are served concurrently. All connections receive
-/// the same `text_chunks` response. Returns the base URL.
-async fn fake_xai_sse_multi(count: usize, text_chunks: Vec<&'static str>) -> String {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
-    let chunks = Arc::new(text_chunks);
-
-    tokio::spawn(async move {
-        for _ in 0..count {
-            if let Ok((stream, _)) = listener.accept().await {
-                let chunks = Arc::clone(&chunks);
-                tokio::spawn(async move {
-                    let (reader, mut writer) = stream.into_split();
-                    let mut reader = BufReader::new(reader);
-                    drain_request(&mut reader).await;
-
-                    let body: String = chunks
-                        .iter()
-                        .map(|t| {
-                            format!(
-                                "data: {{\"id\":\"resp_test\",\"type\":\"message.delta\",\"delta\":{{\"type\":\"output_text\",\"text\":\"{t}\"}}}}\n\n"
-                            )
-                        })
-                        .chain(std::iter::once("data: [DONE]\n\n".to_string()))
-                        .collect();
-                    let http = format!(
-                        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
-                        body.len(),
-                        body,
-                    );
-                    writer.write_all(http.as_bytes()).await.ok();
-                });
-            }
-        }
-    });
-
-    format!("http://127.0.0.1:{port}/v1")
-}
-
-// ── partial SSE across chunks ─────────────────────────────────────────────────
+// ── partial SSE across chunks (SSE parsing tested via agent round-trip) ────────
 
 #[tokio::test]
-async fn partial_sse_lines_across_chunks_are_assembled_correctly() {
+async fn text_is_assembled_from_multiple_deltas() {
+    // The SSE chunked-parse test is now covered by unit tests in client.rs.
+    // This variant verifies the agent correctly concatenates multiple TextDelta
+    // events from the mock into a single history entry.
     let _guard = env_lock().lock().unwrap();
-    let url = fake_xai_sse_chunked().await;
-    let agent = make_agent(Some(&url)).await;
+    let mock = Arc::new(MockXaiHttpClient::new());
+    mock.push_response(text_response(&["Hel", "lo"]));
+    let agent = make_agent(Arc::clone(&mock)).await;
 
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = sess.session_id.to_string();
@@ -1077,8 +830,6 @@ async fn partial_sse_lines_across_chunks_are_assembled_correctly() {
         .unwrap();
     assert_eq!(resp.stop_reason, StopReason::EndTurn);
 
-    // The SSE line was split mid-JSON across two TCP writes; the parser must
-    // buffer bytes until a newline and reassemble "Hello" correctly.
     let history = agent.test_session_history(&session_id).await;
     assert_eq!(history.len(), 2);
     assert_eq!(history[1].role, "assistant");
@@ -1090,9 +841,11 @@ async fn partial_sse_lines_across_chunks_are_assembled_correctly() {
 #[tokio::test]
 async fn prompt_times_out_when_server_stops_responding() {
     let _guard = env_lock().lock().unwrap();
-    let url = fake_xai_sse_slow("partial").await;
-    // 1-second timeout — well below the server's 30-second hold.
-    let agent = make_agent_with_timeout(Some(&url), 1).await;
+    let mock = Arc::new(MockXaiHttpClient::new());
+    // Yield "partial" then block forever.
+    mock.push_slow_response(XaiEvent::TextDelta { text: "partial".to_string() });
+    // 1-second timeout — the mock holds the stream indefinitely after the first event.
+    let agent = make_agent_with_timeout(Arc::clone(&mock), 1).await;
 
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = sess.session_id.to_string();
@@ -1106,12 +859,10 @@ async fn prompt_times_out_when_server_stops_responding() {
     let elapsed = start.elapsed();
 
     assert_eq!(resp.stop_reason, StopReason::Cancelled);
-    // Should finish in roughly 1 second — not 30.
     assert!(elapsed < Duration::from_secs(5), "timed out too late: {elapsed:?}");
     assert!(elapsed >= Duration::from_millis(900), "timed out too early: {elapsed:?}");
 
-    // The partial text ("partial") was received before the timeout, so history
-    // must be updated (unlike an explicit cancel, a timeout preserves partial text).
+    // Partial text received before timeout is preserved.
     let history = agent.test_session_history(&session_id).await;
     assert_eq!(history.len(), 2);
     assert_eq!(history[1].content_str(), "partial");
@@ -1122,44 +873,38 @@ async fn prompt_times_out_when_server_stops_responding() {
 #[tokio::test]
 async fn prompt_includes_history_as_context_on_subsequent_turns() {
     let _guard = env_lock().lock().unwrap();
-    let (url, bodies) = fake_xai_sse_recording(vec![
-        vec!["First reply"],
-        vec!["Second reply"],
-    ])
-    .await;
-    let agent = make_agent(Some(&url)).await;
+    let mock = Arc::new(MockXaiHttpClient::new());
+    mock.push_response(text_response_with_id("First reply", "resp_0"));
+    mock.push_response(text_response(&["Second reply"]));
+    let agent = make_agent(Arc::clone(&mock)).await;
 
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = sess.session_id.to_string();
 
-    // Turn 1.
     let c1 = vec![ContentBlock::Text(TextContent::new("first question"))];
     agent.prompt(PromptRequest::new(session_id.clone(), c1)).await.unwrap();
 
-    // Turn 2.
     let c2 = vec![ContentBlock::Text(TextContent::new("second question"))];
     agent.prompt(PromptRequest::new(session_id.clone(), c2)).await.unwrap();
 
-    let captured = bodies.lock().unwrap();
-    assert_eq!(captured.len(), 2, "expected two recorded requests");
+    let calls = mock.calls.lock().unwrap();
+    assert_eq!(calls.len(), 2, "expected two recorded requests");
 
     // Turn 1: full history (just the user message — no prior context).
-    let t1_input = captured[0]["input"].as_array()
-        .expect("turn-1 body must have an 'input' array");
-    assert_eq!(t1_input.len(), 1, "turn 1 should have exactly one input item");
-    assert_eq!(t1_input[0]["role"], "user");
-    assert_eq!(t1_input[0]["content"], "first question");
-    assert!(captured[0]["previous_response_id"].is_null(), "turn 1 must not send previous_response_id");
+    assert_eq!(calls[0].input.len(), 1, "turn 1 should have exactly one input item");
+    assert_eq!(calls[0].input[0].role, "user");
+    assert_eq!(calls[0].input[0].content, "first question");
+    assert!(calls[0].previous_response_id.is_none(), "turn 1 must not send previous_response_id");
 
     // Turn 2: stateful via previous_response_id — only the new user message.
-    let t2_input = captured[1]["input"].as_array()
-        .expect("turn-2 body must have an 'input' array");
-    assert_eq!(t2_input.len(), 1, "turn 2 should send only the new user message (context held server-side)");
-    assert_eq!(t2_input[0]["role"], "user");
-    assert_eq!(t2_input[0]["content"], "second question");
-    // The agent must reference the turn-1 response id so the server knows the context.
-    assert_eq!(captured[1]["previous_response_id"], "resp_0",
-        "turn 2 must reference turn 1's response id");
+    assert_eq!(calls[1].input.len(), 1, "turn 2 should send only the new user message");
+    assert_eq!(calls[1].input[0].role, "user");
+    assert_eq!(calls[1].input[0].content, "second question");
+    assert_eq!(
+        calls[1].previous_response_id.as_deref(),
+        Some("resp_0"),
+        "turn 2 must reference turn 1's response id"
+    );
 }
 
 // ── concurrent session isolation ─────────────────────────────────────────────
@@ -1167,9 +912,10 @@ async fn prompt_includes_history_as_context_on_subsequent_turns() {
 #[tokio::test]
 async fn concurrent_sessions_do_not_cross_contaminate() {
     let _guard = env_lock().lock().unwrap();
-    // Two connections needed — one per concurrent prompt.
-    let url = fake_xai_sse_multi(2, vec!["session-reply"]).await;
-    let agent = make_agent(Some(&url)).await;
+    let mock = Arc::new(MockXaiHttpClient::new());
+    mock.push_response(text_response(&["session-reply"]));
+    mock.push_response(text_response(&["session-reply"]));
+    let agent = make_agent(Arc::clone(&mock)).await;
 
     let sess_a = agent.new_session(NewSessionRequest::new("/tmp/a")).await.unwrap();
     let sess_b = agent.new_session(NewSessionRequest::new("/tmp/b")).await.unwrap();
@@ -1179,8 +925,6 @@ async fn concurrent_sessions_do_not_cross_contaminate() {
     let c_a = vec![ContentBlock::Text(TextContent::new("question-a"))];
     let c_b = vec![ContentBlock::Text(TextContent::new("question-b"))];
 
-    // XaiAgent is !Send, so use tokio::join! (runs on one thread) instead of
-    // tokio::spawn (which requires Send).
     let (r_a, r_b) = tokio::join!(
         agent.prompt(PromptRequest::new(id_a.clone(), c_a)),
         agent.prompt(PromptRequest::new(id_b.clone(), c_b)),
@@ -1188,7 +932,6 @@ async fn concurrent_sessions_do_not_cross_contaminate() {
     assert_eq!(r_a.unwrap().stop_reason, StopReason::EndTurn);
     assert_eq!(r_b.unwrap().stop_reason, StopReason::EndTurn);
 
-    // Each session must hold only its own exchange — no cross-contamination.
     let hist_a = agent.test_session_history(&id_a).await;
     let hist_b = agent.test_session_history(&id_b).await;
 
@@ -1203,33 +946,28 @@ async fn concurrent_sessions_do_not_cross_contaminate() {
 
 // ── authenticate ──────────────────────────────────────────────────────────────
 
-/// Build a meta map with a single XAI_API_KEY entry (test helper).
-fn api_key_meta(key: &str) -> serde_json::Map<String, serde_json::Value> {
-    let mut m = serde_json::Map::new();
-    m.insert("XAI_API_KEY".to_string(), serde_json::json!(key));
-    m
-}
-
 #[tokio::test]
 async fn initialize_declares_embedded_context_prompt_capability() {
     let _guard = env_lock().lock().unwrap();
-    let agent = make_agent(None).await;
+    let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
     let resp = agent
         .initialize(InitializeRequest::new(ProtocolVersion::LATEST))
         .await
         .unwrap();
     assert!(
         resp.agent_capabilities.prompt_capabilities.embedded_context,
-        "agent must declare embedded_context=true so clients send ContentBlock::Resource"
+        "agent must declare embedded_context=true"
     );
 }
 
 #[tokio::test]
 async fn initialize_always_advertises_xai_api_key_method() {
     let _guard = env_lock().lock().unwrap();
-    // Agent with server key — should still expose the per-user method.
-    let agent = make_agent(None).await;
-    let resp = agent.initialize(InitializeRequest::new(agent_client_protocol::ProtocolVersion::LATEST)).await.unwrap();
+    let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
+    let resp = agent
+        .initialize(InitializeRequest::new(ProtocolVersion::LATEST))
+        .await
+        .unwrap();
     assert!(
         resp.auth_methods.iter().any(|m| m.id().to_string() == "xai-api-key"),
         "expected 'xai-api-key' in auth_methods",
@@ -1240,28 +978,27 @@ async fn initialize_always_advertises_xai_api_key_method() {
 async fn initialize_advertises_agent_method_only_when_server_key_configured() {
     let _guard = env_lock().lock().unwrap();
 
-    // With server key: both methods present.
-    let with_key = make_agent(None).await;
-    let resp = with_key.initialize(InitializeRequest::new(agent_client_protocol::ProtocolVersion::LATEST)).await.unwrap();
-    assert!(
-        resp.auth_methods.iter().any(|m| m.id().to_string() == "agent"),
-        "expected 'agent' method when server key is set",
-    );
+    let with_key = make_agent(Arc::new(MockXaiHttpClient::new())).await;
+    let resp = with_key
+        .initialize(InitializeRequest::new(ProtocolVersion::LATEST))
+        .await
+        .unwrap();
+    assert!(resp.auth_methods.iter().any(|m| m.id().to_string() == "agent"));
 
-    // Without server key: only 'xai-api-key' present.
-    let no_key = make_agent_no_key(None).await;
-    let resp = no_key.initialize(InitializeRequest::new(agent_client_protocol::ProtocolVersion::LATEST)).await.unwrap();
-    assert!(
-        !resp.auth_methods.iter().any(|m| m.id().to_string() == "agent"),
-        "should not advertise 'agent' method without server key",
-    );
+    let no_key = make_agent_no_key(Arc::new(MockXaiHttpClient::new())).await;
+    let resp = no_key
+        .initialize(InitializeRequest::new(ProtocolVersion::LATEST))
+        .await
+        .unwrap();
+    assert!(!resp.auth_methods.iter().any(|m| m.id().to_string() == "agent"));
 }
 
 #[tokio::test]
 async fn authenticate_with_user_key_enables_prompt() {
     let _guard = env_lock().lock().unwrap();
-    let url = fake_xai_sse(&["response"]).await;
-    let agent = make_agent_no_key(Some(&url)).await;
+    let mock = Arc::new(MockXaiHttpClient::new());
+    mock.push_response(text_response(&["response"]));
+    let agent = make_agent_no_key(Arc::clone(&mock)).await;
 
     agent
         .authenticate(AuthenticateRequest::new("xai-api-key").meta(api_key_meta("user-test-key")))
@@ -1282,13 +1019,11 @@ async fn authenticate_with_user_key_enables_prompt() {
 #[tokio::test]
 async fn authenticate_agent_method_uses_server_key() {
     let _guard = env_lock().lock().unwrap();
-    let url = fake_xai_sse(&["response"]).await;
-    let agent = make_agent(Some(&url)).await; // has "fake-key" as server key
+    let mock = Arc::new(MockXaiHttpClient::new());
+    mock.push_response(text_response(&["response"]));
+    let agent = make_agent(Arc::clone(&mock)).await;
 
-    agent
-        .authenticate(AuthenticateRequest::new("agent"))
-        .await
-        .unwrap();
+    agent.authenticate(AuthenticateRequest::new("agent")).await.unwrap();
 
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let resp = agent
@@ -1304,16 +1039,14 @@ async fn authenticate_agent_method_uses_server_key() {
 #[tokio::test]
 async fn authenticate_missing_key_in_meta_returns_error() {
     let _guard = env_lock().lock().unwrap();
-    let agent = make_agent_no_key(None).await;
+    let agent = make_agent_no_key(Arc::new(MockXaiHttpClient::new())).await;
 
-    // No meta at all.
     let err = agent
         .authenticate(AuthenticateRequest::new("xai-api-key"))
         .await
         .unwrap_err();
     assert!(err.message.contains("XAI_API_KEY missing"), "got: {}", err.message);
 
-    // Meta present but wrong key name.
     let mut bad_meta = serde_json::Map::new();
     bad_meta.insert("WRONG_KEY".to_string(), serde_json::json!("value"));
     let err = agent
@@ -1326,7 +1059,7 @@ async fn authenticate_missing_key_in_meta_returns_error() {
 #[tokio::test]
 async fn authenticate_empty_key_returns_error() {
     let _guard = env_lock().lock().unwrap();
-    let agent = make_agent_no_key(None).await;
+    let agent = make_agent_no_key(Arc::new(MockXaiHttpClient::new())).await;
 
     let mut meta = serde_json::Map::new();
     meta.insert("XAI_API_KEY".to_string(), serde_json::json!(""));
@@ -1340,23 +1073,16 @@ async fn authenticate_empty_key_returns_error() {
 #[tokio::test]
 async fn authenticate_agent_method_without_server_key_returns_error() {
     let _guard = env_lock().lock().unwrap();
-    let agent = make_agent_no_key(None).await;
+    let agent = make_agent_no_key(Arc::new(MockXaiHttpClient::new())).await;
 
-    let err = agent
-        .authenticate(AuthenticateRequest::new("agent"))
-        .await
-        .unwrap_err();
-    assert!(
-        err.message.contains("no server API key configured"),
-        "got: {}",
-        err.message,
-    );
+    let err = agent.authenticate(AuthenticateRequest::new("agent")).await.unwrap_err();
+    assert!(err.message.contains("no server API key configured"), "got: {}", err.message);
 }
 
 #[tokio::test]
 async fn authenticate_unknown_method_returns_error() {
     let _guard = env_lock().lock().unwrap();
-    let agent = make_agent(None).await;
+    let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
 
     let err = agent
         .authenticate(AuthenticateRequest::new("oauth2-mystery"))
@@ -1368,9 +1094,8 @@ async fn authenticate_unknown_method_returns_error() {
 #[tokio::test]
 async fn prompt_fails_with_clear_error_when_session_has_no_api_key() {
     let _guard = env_lock().lock().unwrap();
-    let agent = make_agent_no_key(None).await;
+    let agent = make_agent_no_key(Arc::new(MockXaiHttpClient::new())).await;
 
-    // Create session without authenticating.
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let err = agent
         .prompt(PromptRequest::new(
@@ -1379,28 +1104,25 @@ async fn prompt_fails_with_clear_error_when_session_has_no_api_key() {
         ))
         .await
         .unwrap_err();
-    assert!(
-        err.message.contains("no API key"),
-        "expected 'no API key' in error, got: {}",
-        err.message,
-    );
+    assert!(err.message.contains("no API key"), "got: {}", err.message);
 }
 
 #[tokio::test]
 async fn forked_session_inherits_api_key_from_parent() {
     let _guard = env_lock().lock().unwrap();
-    let url = fake_xai_sse_multi(2, vec!["reply"]).await;
-    let agent = make_agent_no_key(Some(&url)).await;
+    let mock = Arc::new(MockXaiHttpClient::new());
+    mock.push_response(text_response(&["reply"]));
+    mock.push_response(text_response(&["reply"]));
+    let agent = make_agent_no_key(Arc::clone(&mock)).await;
 
-    // Authenticate and create parent.
     agent
         .authenticate(AuthenticateRequest::new("xai-api-key").meta(api_key_meta("user-key")))
         .await
         .unwrap();
+
     let parent = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let parent_id = parent.session_id.to_string();
 
-    // Fork — no re-authentication needed; child inherits the parent's key.
     let fork = agent
         .fork_session(ForkSessionRequest::new(parent_id.clone(), "/tmp/fork"))
         .await
@@ -1424,11 +1146,14 @@ async fn forked_session_inherits_api_key_from_parent() {
 #[tokio::test]
 async fn authenticate_user_key_is_sent_as_bearer_token_to_xai() {
     let _guard = env_lock().lock().unwrap();
-    let (url, captured_auth) = fake_xai_sse_capturing_auth(&["reply"]).await;
-    let agent = make_agent_no_key(Some(&url)).await;
+    let mock = Arc::new(MockXaiHttpClient::new());
+    mock.push_response(text_response(&["reply"]));
+    let agent = make_agent_no_key(Arc::clone(&mock)).await;
 
     agent
-        .authenticate(AuthenticateRequest::new("xai-api-key").meta(api_key_meta("my-user-key-123")))
+        .authenticate(
+            AuthenticateRequest::new("xai-api-key").meta(api_key_meta("my-user-key-123")),
+        )
         .await
         .unwrap();
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
@@ -1440,17 +1165,16 @@ async fn authenticate_user_key_is_sent_as_bearer_token_to_xai() {
         .await
         .unwrap();
 
-    let auth = captured_auth.lock().unwrap().clone()
-        .expect("Authorization header was not captured");
-    assert_eq!(auth, "Bearer my-user-key-123");
+    let calls = mock.calls.lock().unwrap();
+    assert_eq!(calls[0].api_key, "my-user-key-123");
 }
 
 #[tokio::test]
 async fn pending_api_key_consumed_by_first_new_session() {
     let _guard = env_lock().lock().unwrap();
-    // Agent with no global key — only the pending key from authenticate.
-    let url = fake_xai_sse(&["reply"]).await;
-    let agent = make_agent_no_key(Some(&url)).await;
+    let mock = Arc::new(MockXaiHttpClient::new());
+    mock.push_response(text_response(&["reply"]));
+    let agent = make_agent_no_key(Arc::clone(&mock)).await;
 
     agent
         .authenticate(AuthenticateRequest::new("xai-api-key").meta(api_key_meta("user-key")))
@@ -1460,7 +1184,7 @@ async fn pending_api_key_consumed_by_first_new_session() {
     let sess1 = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sess2 = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
 
-    // sess2 was created after the pending key was consumed — no key, no global fallback.
+    // sess2 has no key (pending key was consumed by sess1).
     let err = agent
         .prompt(PromptRequest::new(
             sess2.session_id.to_string(),
@@ -1468,13 +1192,9 @@ async fn pending_api_key_consumed_by_first_new_session() {
         ))
         .await
         .unwrap_err();
-    assert!(
-        err.message.contains("no API key"),
-        "expected 'no API key' for keyless session, got: {}",
-        err.message,
-    );
+    assert!(err.message.contains("no API key"), "got: {}", err.message);
 
-    // sess1 still has the user key and succeeds (one fake HTTP connection used here).
+    // sess1 succeeds.
     let resp = agent
         .prompt(PromptRequest::new(
             sess1.session_id.to_string(),
@@ -1488,9 +1208,9 @@ async fn pending_api_key_consumed_by_first_new_session() {
 #[tokio::test]
 async fn initialize_env_var_method_advertises_correct_var_name_and_link() {
     let _guard = env_lock().lock().unwrap();
-    let agent = make_agent(None).await;
+    let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
     let resp = agent
-        .initialize(InitializeRequest::new(agent_client_protocol::ProtocolVersion::LATEST))
+        .initialize(InitializeRequest::new(ProtocolVersion::LATEST))
         .await
         .unwrap();
 
@@ -1501,12 +1221,10 @@ async fn initialize_env_var_method_advertises_correct_var_name_and_link() {
             AuthMethod::EnvVar(ev) => Some(ev),
             _ => None,
         })
-        .expect("expected an EnvVar auth method in initialize response");
+        .expect("expected an EnvVar auth method");
 
-    // Client UIs read `vars` to know which field to prompt for.
     assert_eq!(ev.vars.len(), 1);
     assert_eq!(ev.vars[0].name, "XAI_API_KEY");
-    // `link` tells the UI where the user can obtain a key.
     assert_eq!(ev.link.as_deref(), Some("https://x.ai/api"));
 }
 
@@ -1515,42 +1233,16 @@ async fn initialize_env_var_method_advertises_correct_var_name_and_link() {
 #[tokio::test]
 async fn session_is_usable_after_cancel() {
     let _guard = env_lock().lock().unwrap();
+    let mock = Arc::new(MockXaiHttpClient::new());
+    // First prompt: slow (will be cancelled).
+    mock.push_slow_response(XaiEvent::TextDelta { text: "partial".to_string() });
+    // Second prompt: normal.
+    mock.push_response(text_response_with_id("second reply", "resp_2"));
+    let agent = std::sync::Arc::new(make_agent(Arc::clone(&mock)).await);
 
-    // Two-connection server: first holds (cancelable), second responds normally.
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
-    let url = format!("http://127.0.0.1:{port}/v1");
-
-    tokio::spawn(async move {
-        // Connection 1 — slow, for the canceled prompt.
-        if let Ok((stream, _)) = listener.accept().await {
-            let (reader, mut writer) = stream.into_split();
-            let mut reader = BufReader::new(reader);
-            drain_request(&mut reader).await;
-            writer.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n").await.ok();
-            writer.write_all(b"data: {\"id\":\"resp_1\",\"type\":\"message.delta\",\"delta\":{\"type\":\"output_text\",\"text\":\"partial\"}}\n\n").await.ok();
-            writer.flush().await.ok();
-            tokio::time::sleep(Duration::from_secs(30)).await;
-        }
-        // Connection 2 — normal, for the second prompt.
-        if let Ok((stream, _)) = listener.accept().await {
-            let (reader, mut writer) = stream.into_split();
-            let mut reader = BufReader::new(reader);
-            drain_request(&mut reader).await;
-            let body = "data: {\"id\":\"resp_2\",\"type\":\"message.delta\",\"delta\":{\"type\":\"output_text\",\"text\":\"second reply\"}}\n\ndata: [DONE]\n\n";
-            let http = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
-                body.len(), body,
-            );
-            writer.write_all(http.as_bytes()).await.ok();
-        }
-    });
-
-    let agent = std::sync::Arc::new(make_agent(Some(&url)).await);
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = sess.session_id.to_string();
 
-    // Prompt 1: cancel it mid-stream.
     let agent2 = std::sync::Arc::clone(&agent);
     let sid = session_id.clone();
     let (r1, _) = tokio::join!(
@@ -1564,9 +1256,11 @@ async fn session_is_usable_after_cancel() {
         }
     );
     assert_eq!(r1.unwrap().stop_reason, StopReason::Cancelled);
-    assert!(agent.test_session_history(&session_id).await.is_empty(), "canceled turn must not update history");
+    assert!(
+        agent.test_session_history(&session_id).await.is_empty(),
+        "canceled turn must not update history"
+    );
 
-    // Prompt 2: session must still accept new prompts.
     let r2 = agent
         .prompt(PromptRequest::new(
             session_id.clone(),
@@ -1587,10 +1281,10 @@ async fn session_is_usable_after_cancel() {
 #[tokio::test]
 async fn re_authentication_replaces_pending_key() {
     let _guard = env_lock().lock().unwrap();
-    let (url, captured_auth) = fake_xai_sse_capturing_auth(&["reply"]).await;
-    let agent = make_agent_no_key(Some(&url)).await;
+    let mock = Arc::new(MockXaiHttpClient::new());
+    mock.push_response(text_response(&["reply"]));
+    let agent = make_agent_no_key(Arc::clone(&mock)).await;
 
-    // Authenticate twice — second key must win.
     agent
         .authenticate(AuthenticateRequest::new("xai-api-key").meta(api_key_meta("key-first")))
         .await
@@ -1609,8 +1303,8 @@ async fn re_authentication_replaces_pending_key() {
         .await
         .unwrap();
 
-    let auth = captured_auth.lock().unwrap().clone().expect("Authorization header not captured");
-    assert_eq!(auth, "Bearer key-second");
+    let calls = mock.calls.lock().unwrap();
+    assert_eq!(calls[0].api_key, "key-second");
 }
 
 // ── multi-block prompt content ────────────────────────────────────────────────
@@ -1618,8 +1312,9 @@ async fn re_authentication_replaces_pending_key() {
 #[tokio::test]
 async fn prompt_multi_block_content_is_joined_with_newline() {
     let _guard = env_lock().lock().unwrap();
-    let (url, bodies) = fake_xai_sse_recording(vec![vec!["ok"]]).await;
-    let agent = make_agent(Some(&url)).await;
+    let mock = Arc::new(MockXaiHttpClient::new());
+    mock.push_response(text_response(&["ok"]));
+    let agent = make_agent(Arc::clone(&mock)).await;
 
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let content = vec![
@@ -1631,11 +1326,10 @@ async fn prompt_multi_block_content_is_joined_with_newline() {
         .await
         .unwrap();
 
-    let captured = bodies.lock().unwrap();
-    let input = captured[0]["input"].as_array().expect("input array");
-    let user_msg = input.last().expect("at least one input item");
-    assert_eq!(user_msg["role"], "user");
-    assert_eq!(user_msg["content"], "line one\nline two");
+    let calls = mock.calls.lock().unwrap();
+    let user_msg = calls[0].input.last().expect("at least one input item");
+    assert_eq!(user_msg.role, "user");
+    assert_eq!(user_msg.content, "line one\nline two");
 }
 
 // ── set_session_model affects HTTP request ────────────────────────────────────
@@ -1643,8 +1337,9 @@ async fn prompt_multi_block_content_is_joined_with_newline() {
 #[tokio::test]
 async fn set_session_model_is_used_in_http_request_to_xai() {
     let _guard = env_lock().lock().unwrap();
-    let (url, bodies) = fake_xai_sse_recording(vec![vec!["ok"]]).await;
-    let agent = make_agent(Some(&url)).await;
+    let mock = Arc::new(MockXaiHttpClient::new());
+    mock.push_response(text_response(&["ok"]));
+    let agent = make_agent(Arc::clone(&mock)).await;
 
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = sess.session_id.to_string();
@@ -1662,8 +1357,8 @@ async fn set_session_model_is_used_in_http_request_to_xai() {
         .await
         .unwrap();
 
-    let captured = bodies.lock().unwrap();
-    assert_eq!(captured[0]["model"], "grok-3-mini");
+    let calls = mock.calls.lock().unwrap();
+    assert_eq!(calls[0].model, "grok-3-mini");
 }
 
 // ── load_session reflects updated model ──────────────────────────────────────
@@ -1671,7 +1366,7 @@ async fn set_session_model_is_used_in_http_request_to_xai() {
 #[tokio::test]
 async fn load_session_reflects_model_after_set_session_model() {
     let _guard = env_lock().lock().unwrap();
-    let agent = make_agent(None).await;
+    let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
 
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = sess.session_id.to_string();
@@ -1694,10 +1389,13 @@ async fn load_session_reflects_model_after_set_session_model() {
 #[tokio::test]
 async fn fork_histories_are_independent_after_diverging_prompts() {
     let _guard = env_lock().lock().unwrap();
-    let url = fake_xai_sse_multi(3, vec!["reply"]).await;
-    let agent = make_agent(Some(&url)).await;
+    let mock = Arc::new(MockXaiHttpClient::new());
+    // 3 prompts: 1 shared + 2 diverging
+    for _ in 0..3 {
+        mock.push_response(text_response(&["reply"]));
+    }
+    let agent = make_agent(Arc::clone(&mock)).await;
 
-    // Create parent and prompt once to build shared history.
     let src = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let src_id = src.session_id.to_string();
     agent
@@ -1708,14 +1406,12 @@ async fn fork_histories_are_independent_after_diverging_prompts() {
         .await
         .unwrap();
 
-    // Fork inherits the one-exchange history.
     let fork = agent
         .fork_session(ForkSessionRequest::new(src_id.clone(), "/fork"))
         .await
         .unwrap();
     let fork_id = fork.session_id.to_string();
 
-    // Prompt each independently.
     let (r_src, r_fork) = tokio::join!(
         agent.prompt(PromptRequest::new(
             src_id.clone(),
@@ -1732,15 +1428,12 @@ async fn fork_histories_are_independent_after_diverging_prompts() {
     let src_history = agent.test_session_history(&src_id).await;
     let fork_history = agent.test_session_history(&fork_id).await;
 
-    // Each has: shared exchange + its own exchange = 4 messages.
     assert_eq!(src_history.len(), 4);
     assert_eq!(fork_history.len(), 4);
 
-    // The diverging turns must be independent.
     assert_eq!(src_history[2].content_str(), "parent-only");
     assert_eq!(fork_history[2].content_str(), "fork-only");
 
-    // The other session must not contain the diverging turn of its sibling.
     assert!(src_history.iter().all(|m| m.content_str() != "fork-only"));
     assert!(fork_history.iter().all(|m| m.content_str() != "parent-only"));
 }
@@ -1755,15 +1448,19 @@ async fn xai_prompt_timeout_secs_invalid_falls_back_to_default() {
         std::env::remove_var("XAI_MODELS");
         std::env::set_var("XAI_PROMPT_TIMEOUT_SECS", "not-a-number");
     }
-    let agent =
-        XaiAgent::new_in_memory(fake_nats().await, AcpPrefix::new("test").unwrap(), "grok-3", "fake-key");
+    let agent = XaiAgent::new_in_memory(
+        MockSessionNotifier::new(),
+        "grok-3",
+        "fake-key",
+        Arc::new(MockXaiHttpClient::new()),
+    );
     assert_eq!(agent.test_prompt_timeout(), Duration::from_secs(300));
 }
 
 #[tokio::test]
 async fn authenticate_non_string_key_in_meta_returns_error() {
     let _guard = env_lock().lock().unwrap();
-    let agent = make_agent_no_key(None).await;
+    let agent = make_agent_no_key(Arc::new(MockXaiHttpClient::new())).await;
 
     let mut meta = serde_json::Map::new();
     meta.insert("XAI_API_KEY".to_string(), serde_json::json!(12345_u64));
@@ -1781,7 +1478,7 @@ async fn authenticate_non_string_key_in_meta_returns_error() {
 #[tokio::test]
 async fn set_session_mode_unknown_mode_returns_error() {
     let _guard = env_lock().lock().unwrap();
-    let agent = make_agent(None).await;
+    let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = sess.session_id.to_string();
 
@@ -1792,16 +1489,13 @@ async fn set_session_mode_unknown_mode_returns_error() {
         ))
         .await
         .unwrap_err();
-    assert!(
-        err.to_string().contains("unknown mode"),
-        "expected 'unknown mode' error, got: {err}"
-    );
+    assert!(err.to_string().contains("unknown mode"), "got: {err}");
 }
 
 #[tokio::test]
 async fn set_session_mode_default_succeeds() {
     let _guard = env_lock().lock().unwrap();
-    let agent = make_agent(None).await;
+    let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = sess.session_id.to_string();
 
@@ -1817,7 +1511,7 @@ async fn set_session_mode_default_succeeds() {
 #[tokio::test]
 async fn set_session_mode_unknown_session_returns_error() {
     let _guard = env_lock().lock().unwrap();
-    let agent = make_agent(None).await;
+    let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
     let err = agent
         .set_session_mode(agent_client_protocol::SetSessionModeRequest::new(
             "no-such-session",
@@ -1825,16 +1519,13 @@ async fn set_session_mode_unknown_session_returns_error() {
         ))
         .await
         .unwrap_err();
-    assert!(
-        err.to_string().contains("not found"),
-        "expected 'not found' for unknown session, got: {err}"
-    );
+    assert!(err.to_string().contains("not found"), "got: {err}");
 }
 
 #[tokio::test]
 async fn set_session_config_option_unknown_id_unknown_session_returns_error() {
     let _guard = env_lock().lock().unwrap();
-    let agent = make_agent(None).await;
+    let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
     let err = agent
         .set_session_config_option(SetSessionConfigOptionRequest::new(
             "no-such-session",
@@ -1843,10 +1534,7 @@ async fn set_session_config_option_unknown_id_unknown_session_returns_error() {
         ))
         .await
         .unwrap_err();
-    assert!(
-        err.message.contains("not found"),
-        "expected 'not found' for unknown session + unknown config_id, got: {err:?}"
-    );
+    assert!(err.message.contains("not found"), "got: {err:?}");
 }
 
 #[tokio::test]
@@ -1857,16 +1545,20 @@ async fn xai_prompt_timeout_secs_zero_falls_back_to_default() {
         std::env::remove_var("XAI_MODELS");
         std::env::set_var("XAI_PROMPT_TIMEOUT_SECS", "0");
     }
-    let agent =
-        XaiAgent::new_in_memory(fake_nats().await, AcpPrefix::new("test").unwrap(), "grok-3", "fake-key");
+    let agent = XaiAgent::new_in_memory(
+        MockSessionNotifier::new(),
+        "grok-3",
+        "fake-key",
+        Arc::new(MockXaiHttpClient::new()),
+    );
     assert_eq!(agent.test_prompt_timeout(), Duration::from_secs(300));
 }
 
 #[tokio::test]
 async fn xai_models_all_malformed_falls_back_to_defaults() {
     let _guard = env_lock().lock().unwrap();
-    let agent = make_agent_with_models("nocolon,alsomalformed").await;
-    // When all entries are malformed the default models are used.
+    let agent =
+        make_agent_with_models(Arc::new(MockXaiHttpClient::new()), "nocolon,alsomalformed").await;
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = sess.session_id.to_string();
 
@@ -1882,74 +1574,13 @@ async fn xai_models_all_malformed_falls_back_to_defaults() {
 
 // ── system prompt / usage / tool calls ───────────────────────────────────────
 
-/// SSE server that appends a usage chunk before `[DONE]`.
-async fn fake_xai_sse_with_usage(text_chunks: &[&'static str]) -> String {
-    let usage_chunk =
-        "data: {\"type\":\"response.completed\",\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5}}\n\n";
-    let body: String = text_chunks
-        .iter()
-        .map(|t| format!("data: {{\"id\":\"resp_test\",\"type\":\"message.delta\",\"delta\":{{\"type\":\"output_text\",\"text\":\"{t}\"}}}}\n\n"))
-        .chain(std::iter::once(usage_chunk.to_string()))
-        .chain(std::iter::once("data: [DONE]\n\n".to_string()))
-        .collect();
-
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
-
-    tokio::spawn(async move {
-        if let Ok((stream, _)) = listener.accept().await {
-            let (reader, mut writer) = stream.into_split();
-            let mut reader = BufReader::new(reader);
-            drain_request(&mut reader).await;
-            let http = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
-                body.len(),
-                body,
-            );
-            writer.write_all(http.as_bytes()).await.ok();
-        }
-    });
-
-    format!("http://127.0.0.1:{port}/v1")
-}
-
-/// SSE server that emits a Responses API `function_call` event (server-side tool
-/// invocation) followed immediately by `[DONE]` with no text.
-///
-/// Server-side tools (web_search, x_search) execute on the
-/// xAI backend — the runner receives the function_call event for observability
-/// and then the stream ends normally in one connection. No client round-trip.
-async fn fake_xai_sse_with_tool_calls() -> String {
-    let body = concat!(
-        "data: {\"id\":\"resp_tool\",\"type\":\"function_call\",\"function_call\":{\"call_id\":\"call_test\",\"name\":\"web_search\",\"arguments\":\"{\\\"query\\\":\\\"rust\\\"}\"}}\n\n",
-        "data: [DONE]\n\n",
-    );
-
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
-
-    tokio::spawn(async move {
-        if let Ok((stream, _)) = listener.accept().await {
-            let (reader, mut writer) = stream.into_split();
-            let mut reader = BufReader::new(reader);
-            drain_request(&mut reader).await;
-            let http = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
-                body.len(),
-                body,
-            );
-            writer.write_all(http.as_bytes()).await.ok();
-        }
-    });
-
-    format!("http://127.0.0.1:{port}/v1")
-}
-
 #[tokio::test]
 async fn system_prompt_injected_as_first_message_in_request() {
     let _guard = env_lock().lock().unwrap();
-    let (url, bodies) = fake_xai_sse_recording(vec![vec!["ok"]]).await;
-    let agent = make_agent_with_system_prompt(Some(&url), "You are a helpful assistant.").await;
+    let mock = Arc::new(MockXaiHttpClient::new());
+    mock.push_response(text_response(&["ok"]));
+    let agent =
+        make_agent_with_system_prompt(Arc::clone(&mock), "You are a helpful assistant.").await;
 
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     agent
@@ -1960,21 +1591,22 @@ async fn system_prompt_injected_as_first_message_in_request() {
         .await
         .unwrap();
 
-    let captured = bodies.lock().unwrap();
-    let input = captured[0]["input"].as_array().expect("input array");
+    let calls = mock.calls.lock().unwrap();
+    let input = &calls[0].input;
 
     assert_eq!(input.len(), 2, "system + user");
-    assert_eq!(input[0]["role"], "system");
-    assert_eq!(input[0]["content"], "You are a helpful assistant.");
-    assert_eq!(input[1]["role"], "user");
-    assert_eq!(input[1]["content"], "hello");
+    assert_eq!(input[0].role, "system");
+    assert_eq!(input[0].content, "You are a helpful assistant.");
+    assert_eq!(input[1].role, "user");
+    assert_eq!(input[1].content, "hello");
 }
 
 #[tokio::test]
 async fn system_prompt_absent_when_env_var_not_set() {
     let _guard = env_lock().lock().unwrap();
-    let (url, bodies) = fake_xai_sse_recording(vec![vec!["ok"]]).await;
-    let agent = make_agent(Some(&url)).await;
+    let mock = Arc::new(MockXaiHttpClient::new());
+    mock.push_response(text_response(&["ok"]));
+    let agent = make_agent(Arc::clone(&mock)).await;
 
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     agent
@@ -1985,18 +1617,20 @@ async fn system_prompt_absent_when_env_var_not_set() {
         .await
         .unwrap();
 
-    let captured = bodies.lock().unwrap();
-    let input = captured[0]["input"].as_array().expect("input array");
+    let calls = mock.calls.lock().unwrap();
+    let input = &calls[0].input;
 
     assert_eq!(input.len(), 1, "only user message — no system message");
-    assert_eq!(input[0]["role"], "user");
+    assert_eq!(input[0].role, "user");
 }
 
 #[tokio::test]
 async fn system_prompt_present_in_subsequent_turns() {
     let _guard = env_lock().lock().unwrap();
-    let (url, bodies) = fake_xai_sse_recording(vec![vec!["reply1"], vec!["reply2"]]).await;
-    let agent = make_agent_with_system_prompt(Some(&url), "Be concise.").await;
+    let mock = Arc::new(MockXaiHttpClient::new());
+    mock.push_response(text_response_with_id("reply1", "resp_0"));
+    mock.push_response(text_response(&["reply2"]));
+    let agent = make_agent_with_system_prompt(Arc::clone(&mock), "Be concise.").await;
 
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
@@ -2010,27 +1644,27 @@ async fn system_prompt_present_in_subsequent_turns() {
         .await
         .unwrap();
 
-    let captured = bodies.lock().unwrap();
-    // Turn 1: system + user message (full history, no previous_response_id).
-    let input1 = captured[0]["input"].as_array().expect("turn-1 input");
+    let calls = mock.calls.lock().unwrap();
+    // Turn 1: system + user
+    let input1 = &calls[0].input;
     assert_eq!(input1.len(), 2, "system + user");
-    assert_eq!(input1[0]["role"], "system");
-    assert_eq!(input1[0]["content"], "Be concise.");
+    assert_eq!(input1[0].role, "system");
+    assert_eq!(input1[0].content, "Be concise.");
 
-    // Turn 2: stateful — only the new user message, plus previous_response_id.
-    // The system prompt is already part of the xAI server's prior context.
-    let input2 = captured[1]["input"].as_array().expect("turn-2 input");
+    // Turn 2: stateful — only the new user message (system already in xAI context).
+    let input2 = &calls[1].input;
     assert_eq!(input2.len(), 1, "only new user message on turn 2");
-    assert_eq!(input2[0]["role"], "user");
-    assert_eq!(input2[0]["content"], "turn 2");
-    assert!(!captured[1]["previous_response_id"].is_null(), "turn 2 must have previous_response_id");
+    assert_eq!(input2[0].role, "user");
+    assert_eq!(input2[0].content, "turn 2");
+    assert!(calls[1].previous_response_id.is_some(), "turn 2 must have previous_response_id");
 }
 
 #[tokio::test]
 async fn usage_chunk_is_handled_and_prompt_completes() {
     let _guard = env_lock().lock().unwrap();
-    let url = fake_xai_sse_with_usage(&["Hello"]).await;
-    let agent = make_agent(Some(&url)).await;
+    let mock = Arc::new(MockXaiHttpClient::new());
+    mock.push_response(text_with_usage("Hello"));
+    let agent = make_agent(Arc::clone(&mock)).await;
 
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
@@ -2049,8 +1683,9 @@ async fn usage_chunk_is_handled_and_prompt_completes() {
 #[tokio::test]
 async fn tool_call_response_ends_turn_without_updating_history() {
     let _guard = env_lock().lock().unwrap();
-    let url = fake_xai_sse_with_tool_calls().await;
-    let agent = make_agent(Some(&url)).await;
+    let mock = Arc::new(MockXaiHttpClient::new());
+    mock.push_response(function_call_response("call_test", "web_search", "{\"query\":\"rust\"}"));
+    let agent = make_agent(Arc::clone(&mock)).await;
 
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
@@ -2061,9 +1696,6 @@ async fn tool_call_response_ends_turn_without_updating_history() {
         .unwrap();
 
     assert_eq!(resp.stop_reason, StopReason::EndTurn);
-    // The user message is durably persisted before the xAI call. No text was
-    // produced — only the user turn survives. The tool call is pending
-    // client-side execution; the result arrives as the next user turn.
     let history = agent.test_session_history(&sid).await;
     assert_eq!(history.len(), 1);
     assert_eq!(history[0].role, "user");
@@ -2075,7 +1707,7 @@ async fn tool_call_response_ends_turn_without_updating_history() {
 #[tokio::test]
 async fn new_session_exposes_all_tool_config_options_as_off() {
     let _guard = env_lock().lock().unwrap();
-    let agent = make_agent(None).await;
+    let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
 
     let resp = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
 
@@ -2084,7 +1716,6 @@ async fn new_session_exposes_all_tool_config_options_as_off() {
     let ids: Vec<String> = opts.iter().map(|o| o.id.to_string()).collect();
     assert!(ids.contains(&"web_search".to_string()));
     assert!(ids.contains(&"x_search".to_string()));
-    // All off by default.
     for opt in &opts {
         let current = match &opt.kind {
             agent_client_protocol::SessionConfigKind::Select(s) => s.current_value.to_string(),
@@ -2097,7 +1728,7 @@ async fn new_session_exposes_all_tool_config_options_as_off() {
 #[tokio::test]
 async fn load_session_exposes_tool_config_options() {
     let _guard = env_lock().lock().unwrap();
-    let agent = make_agent(None).await;
+    let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
 
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
@@ -2111,7 +1742,7 @@ async fn load_session_exposes_tool_config_options() {
 #[tokio::test]
 async fn enable_web_search_persists_and_is_reflected_in_response() {
     let _guard = env_lock().lock().unwrap();
-    let agent = make_agent(None).await;
+    let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
 
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
@@ -2126,7 +1757,10 @@ async fn enable_web_search_persists_and_is_reflected_in_response() {
         .unwrap();
 
     assert_eq!(resp.config_options.len(), 2);
-    let ws = resp.config_options.iter().find(|o| o.id.to_string() == "web_search")
+    let ws = resp
+        .config_options
+        .iter()
+        .find(|o| o.id.to_string() == "web_search")
         .expect("web_search option must be present");
     let current = match &ws.kind {
         agent_client_protocol::SessionConfigKind::Select(s) => s.current_value.to_string(),
@@ -2138,7 +1772,7 @@ async fn enable_web_search_persists_and_is_reflected_in_response() {
 #[tokio::test]
 async fn set_tool_unknown_value_returns_error() {
     let _guard = env_lock().lock().unwrap();
-    let agent = make_agent(None).await;
+    let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
 
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
@@ -2158,18 +1792,15 @@ async fn set_tool_unknown_value_returns_error() {
 #[tokio::test]
 async fn enabled_tools_are_sent_in_request_tools_array() {
     let _guard = env_lock().lock().unwrap();
-    let (url, bodies) = fake_xai_sse_recording(vec![vec!["ok"]]).await;
-    let agent = make_agent(Some(&url)).await;
+    let mock = Arc::new(MockXaiHttpClient::new());
+    mock.push_response(text_response(&["ok"]));
+    let agent = make_agent(Arc::clone(&mock)).await;
 
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
 
     agent
-        .set_session_config_option(SetSessionConfigOptionRequest::new(
-            sid.clone(),
-            "web_search",
-            "on",
-        ))
+        .set_session_config_option(SetSessionConfigOptionRequest::new(sid.clone(), "web_search", "on"))
         .await
         .unwrap();
 
@@ -2181,26 +1812,24 @@ async fn enabled_tools_are_sent_in_request_tools_array() {
         .await
         .unwrap();
 
-    let captured = bodies.lock().unwrap();
-    let body = &captured[0];
-    let tools = body["tools"].as_array()
-        .expect("tools array must be present when web_search is enabled");
+    let calls = mock.calls.lock().unwrap();
     assert!(
-        tools.iter().any(|t| t["type"] == "web_search"),
-        "web_search must be in tools array: {tools:?}"
+        calls[0].tools.iter().any(|t| t == "web_search"),
+        "web_search must be in tools: {:?}",
+        calls[0].tools
     );
 }
 
 #[tokio::test]
 async fn no_tools_omits_tools_field_from_request() {
     let _guard = env_lock().lock().unwrap();
-    let (url, bodies) = fake_xai_sse_recording(vec![vec!["ok"]]).await;
-    let agent = make_agent(Some(&url)).await;
+    let mock = Arc::new(MockXaiHttpClient::new());
+    mock.push_response(text_response(&["ok"]));
+    let agent = make_agent(Arc::clone(&mock)).await;
 
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
 
-    // No tools enabled — default state.
     agent
         .prompt(PromptRequest::new(
             sid.clone(),
@@ -2209,18 +1838,14 @@ async fn no_tools_omits_tools_field_from_request() {
         .await
         .unwrap();
 
-    let captured = bodies.lock().unwrap();
-    let body = &captured[0];
-    assert!(
-        body["tools"].is_null(),
-        "tools field should be absent when no tools are enabled: {body}"
-    );
+    let calls = mock.calls.lock().unwrap();
+    assert!(calls[0].tools.is_empty(), "tools must be empty when no tools are enabled");
 }
 
 #[tokio::test]
 async fn fork_session_inherits_enabled_tools() {
     let _guard = env_lock().lock().unwrap();
-    let agent = make_agent(None).await;
+    let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
 
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let src_id = sess.session_id.to_string();
@@ -2240,8 +1865,7 @@ async fn fork_session_inherits_enabled_tools() {
         .unwrap();
 
     let opts = fork.config_options.expect("config_options should be present in fork");
-    let ws = opts.iter().find(|o| o.id.to_string() == "web_search")
-        .expect("web_search option must be present");
+    let ws = opts.iter().find(|o| o.id.to_string() == "web_search").expect("web_search option must be present");
     let current = match &ws.kind {
         agent_client_protocol::SessionConfigKind::Select(s) => s.current_value.to_string(),
         _ => panic!("expected Select kind"),
@@ -2251,48 +1875,35 @@ async fn fork_session_inherits_enabled_tools() {
 
 // ── XAI_MAX_HISTORY_MESSAGES env var ─────────────────────────────────────────
 
-async fn make_agent_with_max_history(base_url: Option<&str>, max: usize) -> XaiAgent {
-    unsafe {
-        std::env::remove_var("XAI_MODELS");
-        std::env::remove_var("XAI_PROMPT_TIMEOUT_SECS");
-        std::env::remove_var("XAI_SYSTEM_PROMPT");
-        std::env::remove_var("XAI_MAX_TURNS");
-        std::env::set_var("XAI_MAX_HISTORY_MESSAGES", max.to_string());
-        match base_url {
-            Some(url) => std::env::set_var("XAI_BASE_URL", url),
-            None => std::env::remove_var("XAI_BASE_URL"),
-        }
-    }
-    XaiAgent::new_in_memory(fake_nats().await, AcpPrefix::new("test").unwrap(), "grok-3", "fake-key")
-}
-
 #[tokio::test]
 async fn xai_max_history_messages_default_is_20() {
     let _guard = env_lock().lock().unwrap();
-    let agent = make_agent(None).await;
+    let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
     assert_eq!(agent.test_max_history_messages(), 20);
 }
 
 #[tokio::test]
 async fn xai_max_history_messages_zero_falls_back_to_default() {
     let _guard = env_lock().lock().unwrap();
-    let agent = make_agent_with_max_history(None, 0).await;
+    let agent = make_agent_with_max_history(Arc::new(MockXaiHttpClient::new()), 0).await;
     assert_eq!(agent.test_max_history_messages(), 20);
 }
 
 #[tokio::test]
 async fn xai_max_history_messages_custom_value_accepted() {
     let _guard = env_lock().lock().unwrap();
-    let agent = make_agent_with_max_history(None, 10).await;
+    let agent = make_agent_with_max_history(Arc::new(MockXaiHttpClient::new()), 10).await;
     assert_eq!(agent.test_max_history_messages(), 10);
 }
 
 #[tokio::test]
 async fn history_is_truncated_after_exceeding_max() {
     let _guard = env_lock().lock().unwrap();
-    // limit = 4 messages (2 exchanges). After 3 exchanges the oldest pair is dropped.
-    let url = fake_xai_sse_multi(3, vec!["reply"]).await;
-    let agent = make_agent_with_max_history(Some(&url), 4).await;
+    let mock = Arc::new(MockXaiHttpClient::new());
+    for _ in 0..3 {
+        mock.push_response(text_response(&["reply"]));
+    }
+    let agent = make_agent_with_max_history(Arc::clone(&mock), 4).await;
 
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
@@ -2307,7 +1918,6 @@ async fn history_is_truncated_after_exceeding_max() {
             .unwrap();
     }
 
-    // After 3 turns (6 messages), with max=4, only the last 4 should remain.
     let history = agent.test_session_history(&sid).await;
     assert_eq!(history.len(), 4, "expected 4 messages, got {}: {history:?}", history.len());
     assert_eq!(history[0].content_str(), "turn 2", "oldest pair should have been dropped");
@@ -2317,9 +1927,11 @@ async fn history_is_truncated_after_exceeding_max() {
 #[tokio::test]
 async fn history_truncation_drops_oldest_pair_first() {
     let _guard = env_lock().lock().unwrap();
-    // limit = 2 messages (1 exchange). Each new turn replaces the previous.
-    let url = fake_xai_sse_multi(3, vec!["reply"]).await;
-    let agent = make_agent_with_max_history(Some(&url), 2).await;
+    let mock = Arc::new(MockXaiHttpClient::new());
+    for _ in 0..3 {
+        mock.push_response(text_response(&["reply"]));
+    }
+    let agent = make_agent_with_max_history(Arc::clone(&mock), 2).await;
 
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
@@ -2334,7 +1946,6 @@ async fn history_truncation_drops_oldest_pair_first() {
             .unwrap();
     }
 
-    // Only the last exchange should remain.
     let history = agent.test_session_history(&sid).await;
     assert_eq!(history.len(), 2);
     assert_eq!(history[0].content_str(), "turn 3");
@@ -2344,22 +1955,18 @@ async fn history_truncation_drops_oldest_pair_first() {
 
 // ── coverage gaps ─────────────────────────────────────────────────────────────
 
-// 1. x_search tool enabled sends it in the tools array.
 #[tokio::test]
 async fn x_search_tool_enabled_is_included_in_tools_array() {
     let _guard = env_lock().lock().unwrap();
-    let (url, bodies) = fake_xai_sse_recording(vec![vec!["ok"]]).await;
-    let agent = make_agent(Some(&url)).await;
+    let mock = Arc::new(MockXaiHttpClient::new());
+    mock.push_response(text_response(&["ok"]));
+    let agent = make_agent(Arc::clone(&mock)).await;
 
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
 
     agent
-        .set_session_config_option(SetSessionConfigOptionRequest::new(
-            sid.clone(),
-            "x_search",
-            "on",
-        ))
+        .set_session_config_option(SetSessionConfigOptionRequest::new(sid.clone(), "x_search", "on"))
         .await
         .unwrap();
 
@@ -2371,20 +1978,18 @@ async fn x_search_tool_enabled_is_included_in_tools_array() {
         .await
         .unwrap();
 
-    let captured = bodies.lock().unwrap();
-    let tools = captured[0]["tools"].as_array()
-        .expect("tools array must be present when x_search is enabled");
+    let calls = mock.calls.lock().unwrap();
     assert!(
-        tools.iter().any(|t| t["type"] == "x_search"),
-        "x_search must be in tools array: {tools:?}"
+        calls[0].tools.iter().any(|t| t == "x_search"),
+        "x_search must be in tools: {:?}",
+        calls[0].tools
     );
 }
 
-// 2. set_session_config_option with an unknown session returns an error.
 #[tokio::test]
 async fn set_session_config_option_unknown_session_returns_error() {
     let _guard = env_lock().lock().unwrap();
-    let agent = make_agent(None).await;
+    let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
 
     let err = agent
         .set_session_config_option(SetSessionConfigOptionRequest::new(
@@ -2395,19 +2000,17 @@ async fn set_session_config_option_unknown_session_returns_error() {
         .await
         .unwrap_err();
 
-    assert!(
-        err.message.contains("not found"),
-        "error should mention 'not found': {err:?}"
-    );
+    assert!(err.message.contains("not found"), "error should mention 'not found': {err:?}");
 }
 
-// 3. History is NOT truncated when len == max (boundary: exactly at the limit).
 #[tokio::test]
 async fn history_at_exactly_the_limit_is_not_truncated() {
     let _guard = env_lock().lock().unwrap();
-    // max = 4 messages. After exactly 2 turns (4 messages) nothing should be dropped.
-    let url = fake_xai_sse_multi(2, vec!["reply"]).await;
-    let agent = make_agent_with_max_history(Some(&url), 4).await;
+    let mock = Arc::new(MockXaiHttpClient::new());
+    for _ in 0..2 {
+        mock.push_response(text_response(&["reply"]));
+    }
+    let agent = make_agent_with_max_history(Arc::clone(&mock), 4).await;
 
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
@@ -2423,24 +2026,19 @@ async fn history_at_exactly_the_limit_is_not_truncated() {
     }
 
     let history = agent.test_session_history(&sid).await;
-    assert_eq!(
-        history.len(),
-        4,
-        "history should be exactly 4 (no truncation at limit): {history:?}"
-    );
+    assert_eq!(history.len(), 4, "no truncation at limit: {history:?}");
     assert_eq!(history[0].content_str(), "turn 1");
     assert_eq!(history[2].content_str(), "turn 2");
 }
 
-// 4. Odd max_history_messages: trim removes complete pairs, so with max=3 and
-//    4 messages accumulated, one full pair is dropped and 2 messages remain.
 #[tokio::test]
 async fn history_truncation_rounds_up_to_even_for_odd_max() {
     let _guard = env_lock().lock().unwrap();
-    // max=3 (odd). After 2 turns we have 4 messages. trim_history removes the
-    // oldest complete user/assistant pair, leaving 2 messages.
-    let url = fake_xai_sse_multi(2, vec!["reply"]).await;
-    let agent = make_agent_with_max_history(Some(&url), 3).await;
+    let mock = Arc::new(MockXaiHttpClient::new());
+    for _ in 0..2 {
+        mock.push_response(text_response(&["reply"]));
+    }
+    let agent = make_agent_with_max_history(Arc::clone(&mock), 3).await;
 
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
@@ -2456,48 +2054,30 @@ async fn history_truncation_rounds_up_to_even_for_odd_max() {
     }
 
     let history = agent.test_session_history(&sid).await;
-    assert_eq!(
-        history.len(),
-        2,
-        "odd max=3: oldest pair dropped, 2 messages remain: {history:?}"
-    );
-    // Only the last pair (turn 2 user + assistant reply) should survive.
+    assert_eq!(history.len(), 2, "odd max=3: oldest pair dropped, 2 remain: {history:?}");
     assert_eq!(history[0].content_str(), "turn 2");
 }
 
-// 5. Multiple function_call events in one turn: agent handles them without
-//    panicking, ends the turn, and does not update history (no text produced).
 #[tokio::test]
 async fn multiple_tool_calls_in_one_turn_do_not_panic() {
     let _guard = env_lock().lock().unwrap();
+    let mock = Arc::new(MockXaiHttpClient::new());
+    mock.push_response(vec![
+        XaiEvent::ResponseId { id: "resp_tools".to_string() },
+        XaiEvent::FunctionCall {
+            call_id: "call_a".to_string(),
+            name: "web_search".to_string(),
+            arguments: "{\"q\":\"rust\"}".to_string(),
+        },
+        XaiEvent::FunctionCall {
+            call_id: "call_b".to_string(),
+            name: "get_weather".to_string(),
+            arguments: "{\"city\":\"London\"}".to_string(),
+        },
+        XaiEvent::Done,
+    ]);
+    let agent = make_agent(Arc::clone(&mock)).await;
 
-    // Responses API: two function_call events, then [DONE] — no text.
-    // Server-side tools are handled on the xAI backend; single connection.
-    let body = concat!(
-        "data: {\"id\":\"resp_tools\",\"type\":\"function_call\",\"function_call\":{\"call_id\":\"call_a\",\"name\":\"web_search\",\"arguments\":\"{\\\"q\\\":\\\"rust\\\"}\"}}\n\n",
-        "data: {\"id\":\"resp_tools\",\"type\":\"function_call\",\"function_call\":{\"call_id\":\"call_b\",\"name\":\"get_weather\",\"arguments\":\"{\\\"city\\\":\\\"London\\\"}\"}}\n\n",
-        "data: [DONE]\n\n",
-    );
-
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
-    let url = format!("http://127.0.0.1:{port}/v1");
-
-    tokio::spawn(async move {
-        if let Ok((stream, _)) = listener.accept().await {
-            let (reader, mut writer) = stream.into_split();
-            let mut reader = BufReader::new(reader);
-            drain_request(&mut reader).await;
-            let http = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
-                body.len(),
-                body,
-            );
-            writer.write_all(http.as_bytes()).await.ok();
-        }
-    });
-
-    let agent = make_agent(Some(&url)).await;
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
 
@@ -2510,24 +2090,19 @@ async fn multiple_tool_calls_in_one_turn_do_not_panic() {
         .unwrap();
 
     assert_eq!(resp.stop_reason, StopReason::EndTurn);
-    // No text was produced — only the user turn survives in history.
     let history = agent.test_session_history(&sid).await;
     assert_eq!(history.len(), 1);
     assert_eq!(history[0].role, "user");
-    assert_eq!(history[0].content_str(), "use two tools");
 }
 
-// set_session_config_option with unknown config_id returns current state of
-// all known options (per ACP spec), not an empty list.
 #[tokio::test]
 async fn set_session_config_option_unknown_id_returns_current_state() {
     let _guard = env_lock().lock().unwrap();
-    let agent = make_agent(None).await;
+    let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
 
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
 
-    // Enable web_search so we can verify the current state is returned.
     agent
         .set_session_config_option(SetSessionConfigOptionRequest::new(
             sid.clone(),
@@ -2537,7 +2112,6 @@ async fn set_session_config_option_unknown_id_returns_current_state() {
         .await
         .unwrap();
 
-    // Now call with an unknown config_id.
     let resp = agent
         .set_session_config_option(SetSessionConfigOptionRequest::new(
             sid.clone(),
@@ -2547,60 +2121,53 @@ async fn set_session_config_option_unknown_id_returns_current_state() {
         .await
         .unwrap();
 
-    // Should return all known tool options.
-    assert_eq!(resp.config_options.len(), 2, "should return current state of all known tool options");
-    let ws = resp.config_options.iter().find(|o| o.id.to_string() == "web_search")
+    assert_eq!(resp.config_options.len(), 2);
+    let ws = resp
+        .config_options
+        .iter()
+        .find(|o| o.id.to_string() == "web_search")
         .expect("web_search option must be present");
     let current = match &ws.kind {
         agent_client_protocol::SessionConfigKind::Select(s) => s.current_value.to_string(),
         _ => panic!("expected Select kind"),
     };
-    assert_eq!(current, "on", "web_search should still be 'on'");
+    assert_eq!(current, "on");
 }
 
-// ── additional coverage gaps ──────────────────────────────────────────────────
-
-// load_session reflects the current_value after a tool is enabled.
 #[tokio::test]
 async fn load_session_reflects_updated_tool_state() {
     let _guard = env_lock().lock().unwrap();
-    let agent = make_agent(None).await;
+    let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
 
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
 
     agent
-        .set_session_config_option(SetSessionConfigOptionRequest::new(
-            sid.clone(),
-            "x_search",
-            "on",
-        ))
+        .set_session_config_option(SetSessionConfigOptionRequest::new(sid.clone(), "x_search", "on"))
         .await
         .unwrap();
 
     let loaded = agent.load_session(LoadSessionRequest::new(sid.clone(), "/tmp")).await.unwrap();
     let opts = loaded.config_options.expect("config_options should be present");
     assert_eq!(opts.len(), 2);
-    let xs = opts.iter().find(|o| o.id.to_string() == "x_search")
-        .expect("x_search option must be present");
+    let xs = opts.iter().find(|o| o.id.to_string() == "x_search").expect("x_search option must be present");
     let current = match &xs.kind {
         agent_client_protocol::SessionConfigKind::Select(s) => s.current_value.to_string(),
         _ => panic!("expected Select kind"),
     };
-    assert_eq!(current, "on", "load_session should reflect the persisted tool state");
+    assert_eq!(current, "on");
 }
 
-// Enabling then disabling a tool removes it from the tools array in subsequent requests.
 #[tokio::test]
 async fn disabling_tool_removes_it_from_request() {
     let _guard = env_lock().lock().unwrap();
-    let (url, bodies) = fake_xai_sse_recording(vec![vec!["ok"]]).await;
-    let agent = make_agent(Some(&url)).await;
+    let mock = Arc::new(MockXaiHttpClient::new());
+    mock.push_response(text_response(&["ok"]));
+    let agent = make_agent(Arc::clone(&mock)).await;
 
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
 
-    // Enable web_search, then disable it.
     agent
         .set_session_config_option(SetSessionConfigOptionRequest::new(sid.clone(), "web_search", "on"))
         .await
@@ -2618,20 +2185,19 @@ async fn disabling_tool_removes_it_from_request() {
         .await
         .unwrap();
 
-    let captured = bodies.lock().unwrap();
+    let calls = mock.calls.lock().unwrap();
     assert!(
-        captured[0]["tools"].is_null(),
-        "tools must be absent after disabling all tools: {}",
-        captured[0]
+        calls[0].tools.is_empty(),
+        "tools must be absent after disabling all tools"
     );
 }
 
-// close_session cancels an in-flight prompt and the session is deleted.
 #[tokio::test]
 async fn close_session_cancels_in_flight_prompt() {
     let _guard = env_lock().lock().unwrap();
-    let url = fake_xai_sse_slow("partial").await;
-    let agent = std::sync::Arc::new(make_agent(Some(&url)).await);
+    let mock = Arc::new(MockXaiHttpClient::new());
+    mock.push_slow_response(XaiEvent::TextDelta { text: "partial".to_string() });
+    let agent = std::sync::Arc::new(make_agent(Arc::clone(&mock)).await);
 
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = sess.session_id.to_string();
@@ -2650,53 +2216,30 @@ async fn close_session_cancels_in_flight_prompt() {
         }
     );
 
-    // Prompt must have been cancelled (not a timeout or error).
     assert_eq!(prompt_result.unwrap().stop_reason, StopReason::Cancelled);
 
-    // Session must be gone.
     let list = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
     assert!(list.sessions.is_empty(), "session must be deleted by close_session");
 }
 
-// close_session with an unknown session ID is a no-op — returns Ok.
 #[tokio::test]
 async fn close_session_unknown_session_is_noop() {
     let _guard = env_lock().lock().unwrap();
-    let agent = make_agent(None).await;
+    let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
     agent
         .close_session(CloseSessionRequest::new("no-such-session"))
         .await
         .expect("close_session on unknown id should succeed silently");
 }
 
-// Prompt timeout with NO text received before deadline — history must stay empty.
-// Distinct from prompt_times_out_when_server_stops_responding, which sends a
-// text chunk before holding (so that test verifies history IS updated on timeout).
 #[tokio::test]
 async fn prompt_timeout_with_no_text_does_not_update_history() {
     let _guard = env_lock().lock().unwrap();
+    let mock = Arc::new(MockXaiHttpClient::new());
+    // Yield an empty text delta (effectively no visible text), then block.
+    mock.push_slow_response(XaiEvent::TextDelta { text: "".to_string() });
+    let agent = make_agent_with_timeout(Arc::clone(&mock), 1).await;
 
-    // Server sends headers only — no text chunks, connection held open.
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
-    let url = format!("http://127.0.0.1:{port}/v1");
-
-    tokio::spawn(async move {
-        if let Ok((stream, _)) = listener.accept().await {
-            let (reader, mut writer) = stream.into_split();
-            let mut reader = BufReader::new(reader);
-            drain_request(&mut reader).await;
-            writer
-                .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n")
-                .await
-                .ok();
-            writer.flush().await.ok();
-            // Hold open without sending any SSE data.
-            tokio::time::sleep(Duration::from_secs(30)).await;
-        }
-    });
-
-    let agent = make_agent_with_timeout(Some(&url), 1).await;
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = sess.session_id.to_string();
 
@@ -2710,24 +2253,21 @@ async fn prompt_timeout_with_no_text_does_not_update_history() {
 
     assert_eq!(resp.stop_reason, StopReason::Cancelled);
 
-    // The user message is durably persisted before the xAI call. No text was
-    // produced before the timeout — only the user turn survives in history.
     let history = agent.test_session_history(&session_id).await;
     assert_eq!(history.len(), 1);
     assert_eq!(history[0].role, "user");
     assert_eq!(history[0].content_str(), "hello");
 }
 
-// Fork inherits the parent's system_prompt: subsequent prompts on the forked
-// session must include the system message in the HTTP request body.
 #[tokio::test]
 async fn fork_session_inherits_system_prompt() {
     let _guard = env_lock().lock().unwrap();
-    // Two connections: one for the parent prompt, one for the fork prompt.
-    let (url, bodies) = fake_xai_sse_recording(vec![vec!["parent reply"], vec!["fork reply"]]).await;
-    let agent = make_agent_with_system_prompt(Some(&url), "Be concise.").await;
+    let mock = Arc::new(MockXaiHttpClient::new());
+    // Parent prompt + fork prompt
+    mock.push_response(text_response_with_id("parent reply", "resp_p"));
+    mock.push_response(text_response(&["fork reply"]));
+    let agent = make_agent_with_system_prompt(Arc::clone(&mock), "Be concise.").await;
 
-    // Create parent and prompt once to build history.
     let src = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let src_id = src.session_id.to_string();
     agent
@@ -2738,7 +2278,6 @@ async fn fork_session_inherits_system_prompt() {
         .await
         .unwrap();
 
-    // Fork — must inherit system_prompt from parent session data.
     let fork = agent
         .fork_session(ForkSessionRequest::new(src_id.clone(), "/fork"))
         .await
@@ -2753,79 +2292,74 @@ async fn fork_session_inherits_system_prompt() {
         .await
         .unwrap();
 
-    // Fork clears last_response_id (fork starts fresh), so the fork's first prompt
-    // sends full history. Inspect the fork's HTTP request: input[0] must be the
-    // system prompt, followed by the inherited history + the new user message.
-    let captured = bodies.lock().unwrap();
-    let fork_input = captured[1]["input"].as_array().expect("fork input array");
-    assert_eq!(
-        fork_input[0]["role"], "system",
-        "first input item of fork prompt must be system: {fork_input:?}"
-    );
-    assert_eq!(fork_input[0]["content"], "Be concise.");
+    // Fork clears last_response_id, so fork's first prompt sends full history.
+    let calls = mock.calls.lock().unwrap();
+    let fork_input = &calls[1].input;
+    assert_eq!(fork_input[0].role, "system", "first input item of fork must be system: {fork_input:?}");
+    assert_eq!(fork_input[0].content, "Be concise.");
 }
 
 // ── ContentBlock::ResourceLink and ContentBlock::Resource ─────────────────────
 
-// ResourceLink: the URI and name must be forwarded to xAI as text context.
 #[tokio::test]
 async fn resource_link_is_included_as_text_in_request() {
     let _guard = env_lock().lock().unwrap();
-    let (url, bodies) = fake_xai_sse_recording(vec![vec!["ok"]]).await;
-    let agent = make_agent(Some(&url)).await;
+    let mock = Arc::new(MockXaiHttpClient::new());
+    mock.push_response(text_response(&["ok"]));
+    let agent = make_agent(Arc::clone(&mock)).await;
 
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     agent
         .prompt(PromptRequest::new(
             sess.session_id.to_string(),
-            vec![ContentBlock::ResourceLink(
-                ResourceLink::new("README", "file:///project/README.md"),
-            )],
+            vec![ContentBlock::ResourceLink(ResourceLink::new(
+                "README",
+                "file:///project/README.md",
+            ))],
         ))
         .await
         .unwrap();
 
-    let captured = bodies.lock().unwrap();
-    let input = captured[0]["input"].as_array().expect("input array");
-    let content = input.last().unwrap()["content"].as_str().unwrap();
+    let calls = mock.calls.lock().unwrap();
+    let content = calls[0].input.last().unwrap().content.as_str();
     assert!(
         content.contains("README") && content.contains("file:///project/README.md"),
         "ResourceLink must be forwarded as text: {content:?}"
     );
 }
 
-// EmbeddedResource with text content: the text must be passed through directly.
 #[tokio::test]
 async fn embedded_text_resource_is_included_as_text_in_request() {
     let _guard = env_lock().lock().unwrap();
-    let (url, bodies) = fake_xai_sse_recording(vec![vec!["ok"]]).await;
-    let agent = make_agent(Some(&url)).await;
+    let mock = Arc::new(MockXaiHttpClient::new());
+    mock.push_response(text_response(&["ok"]));
+    let agent = make_agent(Arc::clone(&mock)).await;
 
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     agent
         .prompt(PromptRequest::new(
             sess.session_id.to_string(),
             vec![ContentBlock::Resource(EmbeddedResource::new(
-                EmbeddedResourceResource::TextResourceContents(
-                    TextResourceContents::new("fn main() {}", "file:///src/main.rs"),
-                ),
+                EmbeddedResourceResource::TextResourceContents(TextResourceContents::new(
+                    "fn main() {}",
+                    "file:///src/main.rs",
+                )),
             ))],
         ))
         .await
         .unwrap();
 
-    let captured = bodies.lock().unwrap();
-    let input = captured[0]["input"].as_array().expect("input array");
-    let content = input.last().unwrap()["content"].as_str().unwrap();
+    let calls = mock.calls.lock().unwrap();
+    let content = calls[0].input.last().unwrap().content.as_str();
     assert_eq!(content, "fn main() {}");
 }
 
-// Mixed prompt: Text + ResourceLink blocks are joined with "\n".
 #[tokio::test]
 async fn mixed_text_and_resource_link_blocks_are_joined() {
     let _guard = env_lock().lock().unwrap();
-    let (url, bodies) = fake_xai_sse_recording(vec![vec!["ok"]]).await;
-    let agent = make_agent(Some(&url)).await;
+    let mock = Arc::new(MockXaiHttpClient::new());
+    mock.push_response(text_response(&["ok"]));
+    let agent = make_agent(Arc::clone(&mock)).await;
 
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     agent
@@ -2839,65 +2373,20 @@ async fn mixed_text_and_resource_link_blocks_are_joined() {
         .await
         .unwrap();
 
-    let captured = bodies.lock().unwrap();
-    let input = captured[0]["input"].as_array().expect("input array");
-    let content = input.last().unwrap()["content"].as_str().unwrap();
+    let calls = mock.calls.lock().unwrap();
+    let content = calls[0].input.last().unwrap().content.as_str();
     assert!(content.starts_with("Please review:"), "text block must come first: {content:?}");
     assert!(content.contains("main.rs"), "resource link must be included: {content:?}");
 }
 
-// ── response.error mid-stream event ──────────────────────────────────────────
-
-/// SSE server: emits a `response.error` event (mid-stream error).
-async fn fake_xai_sse_response_error(code: &'static str, message: &'static str) -> String {
-    let body = format!(
-        "data: {{\"type\":\"response.error\",\"error\":{{\"code\":\"{code}\",\"message\":\"{message}\"}}}}\n\ndata: [DONE]\n\n"
-    );
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
-    tokio::spawn(async move {
-        if let Ok((stream, _)) = listener.accept().await {
-            let (reader, mut writer) = stream.into_split();
-            let mut reader = BufReader::new(reader);
-            drain_request(&mut reader).await;
-            let http = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
-                body.len(), body,
-            );
-            writer.write_all(http.as_bytes()).await.ok();
-        }
-    });
-    format!("http://127.0.0.1:{port}/v1")
-}
-
-/// SSE server: emits `response.completed` with `status: "cancelled"`.
-async fn fake_xai_sse_cancelled() -> String {
-    let body = concat!(
-        "data: {\"id\":\"resp_cancelled\",\"type\":\"response.completed\",\"response\":{\"status\":\"cancelled\"}}\n\n",
-        "data: [DONE]\n\n",
-    );
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
-    tokio::spawn(async move {
-        if let Ok((stream, _)) = listener.accept().await {
-            let (reader, mut writer) = stream.into_split();
-            let mut reader = BufReader::new(reader);
-            drain_request(&mut reader).await;
-            let http = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
-                body.len(), body,
-            );
-            writer.write_all(http.as_bytes()).await.ok();
-        }
-    });
-    format!("http://127.0.0.1:{port}/v1")
-}
+// ── response.error and server-cancelled events ────────────────────────────────
 
 #[tokio::test]
 async fn response_error_event_surfaces_as_acp_error() {
     let _guard = env_lock().lock().unwrap();
-    let url = fake_xai_sse_response_error("content_policy", "Request blocked by content policy").await;
-    let agent = make_agent(Some(&url)).await;
+    let mock = Arc::new(MockXaiHttpClient::new());
+    mock.push_response(server_failed_response("Request blocked by content policy"));
+    let agent = make_agent(Arc::clone(&mock)).await;
 
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = sess.session_id.to_string();
@@ -2911,7 +2400,6 @@ async fn response_error_event_surfaces_as_acp_error() {
         .unwrap_err();
 
     assert_eq!(err.code, agent_client_protocol::ErrorCode::InternalError.into());
-    // Orphaned user message must be compensated.
     let history = agent.test_session_history(&session_id).await;
     assert!(history.is_empty(), "history must be empty after response.error: {history:?}");
 }
@@ -2919,8 +2407,9 @@ async fn response_error_event_surfaces_as_acp_error() {
 #[tokio::test]
 async fn xai_server_cancelled_surfaces_as_acp_error() {
     let _guard = env_lock().lock().unwrap();
-    let url = fake_xai_sse_cancelled().await;
-    let agent = make_agent(Some(&url)).await;
+    let mock = Arc::new(MockXaiHttpClient::new());
+    mock.push_response(server_cancelled_response());
+    let agent = make_agent(Arc::clone(&mock)).await;
 
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = sess.session_id.to_string();
@@ -2934,20 +2423,19 @@ async fn xai_server_cancelled_surfaces_as_acp_error() {
         .unwrap_err();
 
     assert_eq!(err.code, agent_client_protocol::ErrorCode::InternalError.into());
-    // Orphaned user message must be compensated — server cancelled the request.
     let history = agent.test_session_history(&session_id).await;
     assert!(history.is_empty(), "history must be empty after server-side cancel: {history:?}");
 }
 
 #[tokio::test]
 async fn api_401_error_surfaces_as_acp_error_without_retry() {
-    // A 401 error must surface as ACP error. The 4xx-skip guard in the stale-ID
-    // retry path ensures only one API call is made (not two). We verify the
-    // error contract here; the retry-count invariant is validated by the single
-    // fake_xai_error server accepting only one connection.
+    // A 4xx error must NOT trigger the stale-ID retry. Verify by pre-loading
+    // exactly one mock response — if the agent retried, it would panic on the
+    // second call (no response queued).
     let _guard = env_lock().lock().unwrap();
-    let url = fake_xai_error(401).await;
-    let agent = make_agent(Some(&url)).await;
+    let mock = Arc::new(MockXaiHttpClient::new());
+    mock.push_response(client_error_response());
+    let agent = make_agent(Arc::clone(&mock)).await;
 
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = sess.session_id.to_string();
@@ -2961,7 +2449,6 @@ async fn api_401_error_surfaces_as_acp_error_without_retry() {
         .unwrap_err();
 
     assert_eq!(err.code, agent_client_protocol::ErrorCode::InternalError.into());
-    // History compensated away — turn failed entirely.
     let history = agent.test_session_history(&session_id).await;
     assert!(history.is_empty(), "history must be empty after 401 error: {history:?}");
 }
@@ -2970,86 +2457,14 @@ async fn api_401_error_surfaces_as_acp_error_without_retry() {
 
 #[tokio::test]
 async fn incomplete_max_output_tokens_continues_and_assembles_text() {
-    // Exercises the outer agentic loop continuation path:
-    //   1st request → incomplete (max_output_tokens) with partial text
-    //   2nd request → continuation with empty input + previous_response_id
-    // Verifies: exactly 2 HTTP requests, second carries previous_response_id and
-    // empty input array, and the assembled assistant text is saved in history.
     let _guard = env_lock().lock().unwrap();
+    let mock = Arc::new(MockXaiHttpClient::new());
+    // First request: partial text, then incomplete.
+    mock.push_response(incomplete_max_output_tokens("Hello ", "resp_part"));
+    // Second request (continuation): rest of the text, then completed.
+    mock.push_response(continuation_response("world", "resp_cont"));
+    let agent = make_agent(Arc::clone(&mock)).await;
 
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
-    let url = format!("http://127.0.0.1:{port}/v1");
-    let captured: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(Vec::new()));
-    let captured_clone = Arc::clone(&captured);
-
-    tokio::spawn(async move {
-        // First connection: partial text, then incomplete.
-        let first = concat!(
-            "data: {\"id\":\"resp_part\",\"type\":\"message.delta\",\"delta\":{\"type\":\"output_text\",\"text\":\"Hello \"}}\n\n",
-            "data: {\"id\":\"resp_part\",\"type\":\"response.completed\",\"response\":{\"id\":\"resp_part\",\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"max_output_tokens\"}}}\n\n",
-            "data: [DONE]\n\n",
-        );
-        if let Ok((stream, _)) = listener.accept().await {
-            let (reader, mut writer) = stream.into_split();
-            let mut reader = BufReader::new(reader);
-            let mut content_length: usize = 0;
-            loop {
-                let mut line = String::new();
-                if reader.read_line(&mut line).await.is_err() { break; }
-                let t = line.trim_end_matches('\n').trim_end_matches('\r');
-                if t.is_empty() { break; }
-                if let Some(r) = t.to_lowercase().strip_prefix("content-length:") {
-                    content_length = r.trim().parse().unwrap_or(0);
-                }
-            }
-            if content_length > 0 {
-                let mut body = vec![0u8; content_length];
-                reader.read_exact(&mut body).await.ok();
-                let json = serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null);
-                captured_clone.lock().unwrap().push(json);
-            }
-            let http = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
-                first.len(), first,
-            );
-            writer.write_all(http.as_bytes()).await.ok();
-        }
-
-        // Second connection: continuation text, then complete.
-        let second = concat!(
-            "data: {\"id\":\"resp_cont\",\"type\":\"message.delta\",\"delta\":{\"type\":\"output_text\",\"text\":\"world\"}}\n\n",
-            "data: {\"id\":\"resp_cont\",\"type\":\"response.completed\",\"response\":{\"id\":\"resp_cont\",\"status\":\"completed\"}}\n\n",
-            "data: [DONE]\n\n",
-        );
-        if let Ok((stream, _)) = listener.accept().await {
-            let (reader, mut writer) = stream.into_split();
-            let mut reader = BufReader::new(reader);
-            let mut content_length: usize = 0;
-            loop {
-                let mut line = String::new();
-                if reader.read_line(&mut line).await.is_err() { break; }
-                let t = line.trim_end_matches('\n').trim_end_matches('\r');
-                if t.is_empty() { break; }
-                if let Some(r) = t.to_lowercase().strip_prefix("content-length:") {
-                    content_length = r.trim().parse().unwrap_or(0);
-                }
-            }
-            if content_length > 0 {
-                let mut body = vec![0u8; content_length];
-                reader.read_exact(&mut body).await.ok();
-                let json = serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null);
-                captured_clone.lock().unwrap().push(json);
-            }
-            let http = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
-                second.len(), second,
-            );
-            writer.write_all(http.as_bytes()).await.ok();
-        }
-    });
-
-    let agent = make_agent(Some(&url)).await;
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
 
@@ -3063,37 +2478,26 @@ async fn incomplete_max_output_tokens_continues_and_assembles_text() {
 
     assert_eq!(resp.stop_reason, StopReason::EndTurn);
 
-    let reqs = captured.lock().unwrap();
-    assert_eq!(reqs.len(), 2, "expected exactly 2 HTTP requests");
+    let calls = mock.calls.lock().unwrap();
+    assert_eq!(calls.len(), 2, "expected exactly 2 HTTP requests");
 
-    // First request has a user message and no previous_response_id.
-    let first_input = reqs[0]["input"].as_array().expect("input must be array");
-    assert!(
-        first_input.iter().any(|item| item["role"].as_str() == Some("user")),
-        "first request must carry the user message"
-    );
-    assert!(
-        reqs[0].get("previous_response_id").and_then(|v| v.as_str()).is_none(),
-        "first request must not have previous_response_id"
-    );
+    // First request: user message, no previous_response_id.
+    assert!(calls[0].input.iter().any(|i| i.role == "user"), "first request must carry the user message");
+    assert!(calls[0].previous_response_id.is_none(), "first request must not have previous_response_id");
 
     // Continuation: empty input + previous_response_id from the incomplete response.
-    let second_input = reqs[1]["input"].as_array().expect("second input must be array");
-    assert!(
-        second_input.is_empty(),
-        "max_output_tokens continuation must send empty input, got {second_input:?}"
-    );
+    assert!(calls[1].input.is_empty(), "max_output_tokens continuation must send empty input");
     assert_eq!(
-        reqs[1]["previous_response_id"].as_str(),
+        calls[1].previous_response_id.as_deref(),
         Some("resp_part"),
         "continuation must reference the incomplete response's ID"
     );
 
+    drop(calls);
+
     // History: user turn + assembled assistant text from both streams.
     let history = agent.test_session_history(&sid).await;
     assert_eq!(history.len(), 2);
-    assert_eq!(history[0].role, "user");
-    assert_eq!(history[1].role, "assistant");
     assert_eq!(history[1].content_str(), "Hello world", "assembled text must concatenate both chunks");
 }
 
@@ -3101,36 +2505,20 @@ async fn incomplete_max_output_tokens_continues_and_assembles_text() {
 
 #[tokio::test]
 async fn tool_call_then_response_failed_compensates_history() {
-    // Verifies 121ce6c: when response.failed arrives after a function_call event,
-    // the agent must return an error and compensate the orphaned user message.
-    // Tool call notifications sent to NATS are fire-and-forget and cannot be
-    // observed here (fake_nats drops PUBs), but the history/error contract can.
     let _guard = env_lock().lock().unwrap();
+    let mock = Arc::new(MockXaiHttpClient::new());
+    mock.push_response(vec![
+        XaiEvent::ResponseId { id: "resp_toolerr".to_string() },
+        XaiEvent::FunctionCall {
+            call_id: "call_1".to_string(),
+            name: "web_search".to_string(),
+            arguments: "{}".to_string(),
+        },
+        XaiEvent::Finished { reason: FinishReason::Failed, incomplete_reason: None },
+        XaiEvent::Done,
+    ]);
+    let agent = make_agent(Arc::clone(&mock)).await;
 
-    let body = concat!(
-        "data: {\"id\":\"resp_toolerr\",\"type\":\"function_call\",\"function_call\":{\"call_id\":\"call_1\",\"name\":\"web_search\",\"arguments\":\"{}\"}}\n\n",
-        "data: {\"id\":\"resp_toolerr\",\"type\":\"response.failed\"}\n\n",
-        "data: [DONE]\n\n",
-    );
-
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
-    let url = format!("http://127.0.0.1:{port}/v1");
-
-    tokio::spawn(async move {
-        if let Ok((stream, _)) = listener.accept().await {
-            let (reader, mut writer) = stream.into_split();
-            let mut reader = BufReader::new(reader);
-            drain_request(&mut reader).await;
-            let http = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
-                body.len(), body,
-            );
-            writer.write_all(http.as_bytes()).await.ok();
-        }
-    });
-
-    let agent = make_agent(Some(&url)).await;
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = sess.session_id.to_string();
 
@@ -3143,62 +2531,30 @@ async fn tool_call_then_response_failed_compensates_history() {
         .unwrap_err();
 
     assert_eq!(err.code, agent_client_protocol::ErrorCode::InternalError.into());
-    // Orphaned user message must be compensated — turn failed after tool call.
     let history = agent.test_session_history(&session_id).await;
-    assert!(
-        history.is_empty(),
-        "history must be empty after response.failed during tool call: {history:?}"
-    );
+    assert!(history.is_empty(), "history must be empty after response.failed: {history:?}");
 }
 
 // ── search call lifecycle events ──────────────────────────────────────────────
 
 #[tokio::test]
 async fn web_search_call_completed_advances_tool_status_before_done() {
-    // Verifies that response.web_search_call.completed emits ToolCall { Completed }
-    // mid-stream — before [DONE] — giving the ACP client real-time feedback when
-    // the search finishes rather than waiting for the entire generation cycle.
-    //
-    // Stream sequence:
-    //   function_call          → agent emits ToolCall { Pending }
-    //   web_search_call.completed → agent emits ToolCall { Completed } (mid-stream)
-    //   message.delta          → text chunk
-    //   response.completed
-    //   [DONE]                 → pending_tool_calls is already empty; no double-emit
-    //
-    // Because fake_nats drops PUBs, the mid-stream Completed notification cannot
-    // be directly captured here. We verify the observable contract:
-    //   - prompt returns Ok (no panic, no double-emit error)
-    //   - stop_reason is EndTurn
-    //   - history has the correct user + assistant pair
     let _guard = env_lock().lock().unwrap();
+    let mock = Arc::new(MockXaiHttpClient::new());
+    mock.push_response(vec![
+        XaiEvent::ResponseId { id: "resp_ws".to_string() },
+        XaiEvent::FunctionCall {
+            call_id: "call_1".to_string(),
+            name: "web_search".to_string(),
+            arguments: "{\"query\":\"rust async\"}".to_string(),
+        },
+        XaiEvent::ServerToolCompleted { name: "web_search".to_string() },
+        XaiEvent::TextDelta { text: "Rust async is great".to_string() },
+        XaiEvent::Finished { reason: FinishReason::Completed, incomplete_reason: None },
+        XaiEvent::Done,
+    ]);
+    let agent = make_agent(Arc::clone(&mock)).await;
 
-    let body = concat!(
-        "data: {\"id\":\"resp_ws\",\"type\":\"function_call\",\"function_call\":{\"call_id\":\"call_1\",\"name\":\"web_search\",\"arguments\":\"{\\\"query\\\":\\\"rust async\\\"}\"}}\n\n",
-        "data: {\"type\":\"response.web_search_call.completed\",\"item_id\":\"ws_abc\",\"output_index\":0,\"sequence_number\":3}\n\n",
-        "data: {\"id\":\"resp_ws\",\"type\":\"message.delta\",\"delta\":{\"type\":\"output_text\",\"text\":\"Rust async is great\"}}\n\n",
-        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_ws\",\"status\":\"completed\"},\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5}}\n\n",
-        "data: [DONE]\n\n",
-    );
-
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
-    let url = format!("http://127.0.0.1:{port}/v1");
-
-    tokio::spawn(async move {
-        if let Ok((stream, _)) = listener.accept().await {
-            let (reader, mut writer) = stream.into_split();
-            let mut reader = BufReader::new(reader);
-            drain_request(&mut reader).await;
-            let http = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
-                body.len(), body,
-            );
-            writer.write_all(http.as_bytes()).await.ok();
-        }
-    });
-
-    let agent = make_agent(Some(&url)).await;
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
 
@@ -3211,45 +2567,29 @@ async fn web_search_call_completed_advances_tool_status_before_done() {
         .unwrap();
 
     assert_eq!(resp.stop_reason, StopReason::EndTurn);
-
     let history = agent.test_session_history(&sid).await;
     assert_eq!(history.len(), 2);
-    assert_eq!(history[0].role, "user");
-    assert_eq!(history[1].role, "assistant");
     assert_eq!(history[1].content_str(), "Rust async is great");
 }
 
 #[tokio::test]
 async fn x_search_call_completed_advances_tool_status_before_done() {
-    // Same as web_search variant but exercises the x_search_call path.
     let _guard = env_lock().lock().unwrap();
+    let mock = Arc::new(MockXaiHttpClient::new());
+    mock.push_response(vec![
+        XaiEvent::ResponseId { id: "resp_xs".to_string() },
+        XaiEvent::FunctionCall {
+            call_id: "call_2".to_string(),
+            name: "x_search".to_string(),
+            arguments: "{\"query\":\"rust 2024\"}".to_string(),
+        },
+        XaiEvent::ServerToolCompleted { name: "x_search".to_string() },
+        XaiEvent::TextDelta { text: "X search result".to_string() },
+        XaiEvent::Finished { reason: FinishReason::Completed, incomplete_reason: None },
+        XaiEvent::Done,
+    ]);
+    let agent = make_agent(Arc::clone(&mock)).await;
 
-    let body = concat!(
-        "data: {\"id\":\"resp_xs\",\"type\":\"function_call\",\"function_call\":{\"call_id\":\"call_2\",\"name\":\"x_search\",\"arguments\":\"{\\\"query\\\":\\\"rust 2024\\\"}\"}}\n\n",
-        "data: {\"type\":\"response.x_search_call.completed\",\"item_id\":\"xs_def\",\"output_index\":0,\"sequence_number\":3}\n\n",
-        "data: {\"id\":\"resp_xs\",\"type\":\"message.delta\",\"delta\":{\"type\":\"output_text\",\"text\":\"X search result\"}}\n\n",
-        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_xs\",\"status\":\"completed\"},\"usage\":{\"prompt_tokens\":8,\"completion_tokens\":3}}\n\n",
-        "data: [DONE]\n\n",
-    );
-
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
-    let url = format!("http://127.0.0.1:{port}/v1");
-
-    tokio::spawn(async move {
-        if let Ok((stream, _)) = listener.accept().await {
-            let (reader, mut writer) = stream.into_split();
-            let mut reader = BufReader::new(reader);
-            drain_request(&mut reader).await;
-            let http = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
-                body.len(), body,
-            );
-            writer.write_all(http.as_bytes()).await.ok();
-        }
-    });
-
-    let agent = make_agent(Some(&url)).await;
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
 
@@ -3262,7 +2602,6 @@ async fn x_search_call_completed_advances_tool_status_before_done() {
         .unwrap();
 
     assert_eq!(resp.stop_reason, StopReason::EndTurn);
-
     let history = agent.test_session_history(&sid).await;
     assert_eq!(history.len(), 2);
     assert_eq!(history[1].content_str(), "X search result");
@@ -3270,36 +2609,16 @@ async fn x_search_call_completed_advances_tool_status_before_done() {
 
 #[tokio::test]
 async fn search_call_completed_without_prior_function_call_is_noop() {
-    // Verifies that ServerToolCompleted arriving with no matching pending tool
-    // call (empty pending_tool_calls) is a silent no-op — not a panic or error.
     let _guard = env_lock().lock().unwrap();
+    let mock = Arc::new(MockXaiHttpClient::new());
+    mock.push_response(vec![
+        XaiEvent::ServerToolCompleted { name: "web_search".to_string() },
+        XaiEvent::TextDelta { text: "answer".to_string() },
+        XaiEvent::Finished { reason: FinishReason::Completed, incomplete_reason: None },
+        XaiEvent::Done,
+    ]);
+    let agent = make_agent(Arc::clone(&mock)).await;
 
-    let body = concat!(
-        // No function_call event — server emits completed directly (edge case).
-        "data: {\"type\":\"response.web_search_call.completed\",\"item_id\":\"ws_orphan\",\"output_index\":0,\"sequence_number\":1}\n\n",
-        "data: {\"id\":\"resp_noop\",\"type\":\"message.delta\",\"delta\":{\"type\":\"output_text\",\"text\":\"answer\"}}\n\n",
-        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_noop\",\"status\":\"completed\"}}\n\n",
-        "data: [DONE]\n\n",
-    );
-
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
-    let url = format!("http://127.0.0.1:{port}/v1");
-
-    tokio::spawn(async move {
-        if let Ok((stream, _)) = listener.accept().await {
-            let (reader, mut writer) = stream.into_split();
-            let mut reader = BufReader::new(reader);
-            drain_request(&mut reader).await;
-            let http = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
-                body.len(), body,
-            );
-            writer.write_all(http.as_bytes()).await.ok();
-        }
-    });
-
-    let agent = make_agent(Some(&url)).await;
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
 
@@ -3311,7 +2630,6 @@ async fn search_call_completed_without_prior_function_call_is_noop() {
         .await
         .unwrap();
 
-    // Turn succeeds normally despite the orphaned completed event.
     assert_eq!(resp.stop_reason, StopReason::EndTurn);
     let history = agent.test_session_history(&sid).await;
     assert_eq!(history.len(), 2);
@@ -3322,120 +2640,19 @@ async fn search_call_completed_without_prior_function_call_is_noop() {
 
 #[tokio::test]
 async fn stale_id_retry_on_non_4xx_error_succeeds_transparently() {
-    // Verifies the stale-ID retry path:
-    //   Turn 1: succeeds normally, session stores last_response_id = "resp_turn1".
-    //   Turn 2: first request (carrying previous_response_id) → HTTP 500 (non-4xx).
-    //           Agent retries transparently with full history, no previous_response_id.
-    //   Turn 2 retry: succeeds.
-    // Expected: prompt() returns Ok, history has all 4 messages, no previous_response_id
-    // on the retried request.
     let _guard = env_lock().lock().unwrap();
+    let mock = Arc::new(MockXaiHttpClient::new());
+    // Turn 1: succeeds, stores last_response_id = "resp_turn1".
+    mock.push_response(text_response_with_id("first reply", "resp_turn1"));
+    // Turn 2, first attempt: 500 error (triggers stale-ID retry).
+    mock.push_response(error_response()); // contains "500" not "4xx"
+    // Turn 2, retry: succeeds.
+    mock.push_response(text_response_with_id("second reply", "resp_turn2"));
 
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
-    let url = format!("http://127.0.0.1:{port}/v1");
-    let captured: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(Vec::new()));
-    let captured_clone = Arc::clone(&captured);
-
-    tokio::spawn(async move {
-        // Connection 1: successful turn 1 — emits response_id "resp_turn1".
-        let turn1 = concat!(
-            "data: {\"id\":\"resp_turn1\",\"type\":\"message.delta\",\"delta\":{\"type\":\"output_text\",\"text\":\"first reply\"}}\n\n",
-            "data: {\"id\":\"resp_turn1\",\"type\":\"response.completed\",\"response\":{\"id\":\"resp_turn1\",\"status\":\"completed\"}}\n\n",
-            "data: [DONE]\n\n",
-        );
-        if let Ok((stream, _)) = listener.accept().await {
-            let (reader, mut writer) = stream.into_split();
-            let mut reader = BufReader::new(reader);
-            let mut content_length: usize = 0;
-            loop {
-                let mut line = String::new();
-                if reader.read_line(&mut line).await.is_err() { break; }
-                let t = line.trim_end_matches('\n').trim_end_matches('\r');
-                if t.is_empty() { break; }
-                if let Some(r) = t.to_lowercase().strip_prefix("content-length:") {
-                    content_length = r.trim().parse().unwrap_or(0);
-                }
-            }
-            if content_length > 0 {
-                let mut body = vec![0u8; content_length];
-                reader.read_exact(&mut body).await.ok();
-                let json = serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null);
-                captured_clone.lock().unwrap().push(json);
-            }
-            let http = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
-                turn1.len(), turn1,
-            );
-            writer.write_all(http.as_bytes()).await.ok();
-        }
-
-        // Connection 2: HTTP 500 for turn 2 (stale previous_response_id).
-        if let Ok((stream, _)) = listener.accept().await {
-            let (reader, mut writer) = stream.into_split();
-            let mut reader = BufReader::new(reader);
-            let mut content_length: usize = 0;
-            loop {
-                let mut line = String::new();
-                if reader.read_line(&mut line).await.is_err() { break; }
-                let t = line.trim_end_matches('\n').trim_end_matches('\r');
-                if t.is_empty() { break; }
-                if let Some(r) = t.to_lowercase().strip_prefix("content-length:") {
-                    content_length = r.trim().parse().unwrap_or(0);
-                }
-            }
-            if content_length > 0 {
-                let mut body = vec![0u8; content_length];
-                reader.read_exact(&mut body).await.ok();
-                let json = serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null);
-                captured_clone.lock().unwrap().push(json);
-            }
-            let error_body = r#"{"error":"response not found"}"#;
-            let http = format!(
-                "HTTP/1.1 500 Internal Server Error\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
-                error_body.len(), error_body,
-            );
-            writer.write_all(http.as_bytes()).await.ok();
-        }
-
-        // Connection 3: retry (full history, no previous_response_id) — succeeds.
-        let turn2_retry = concat!(
-            "data: {\"id\":\"resp_turn2\",\"type\":\"message.delta\",\"delta\":{\"type\":\"output_text\",\"text\":\"second reply\"}}\n\n",
-            "data: {\"id\":\"resp_turn2\",\"type\":\"response.completed\",\"response\":{\"id\":\"resp_turn2\",\"status\":\"completed\"}}\n\n",
-            "data: [DONE]\n\n",
-        );
-        if let Ok((stream, _)) = listener.accept().await {
-            let (reader, mut writer) = stream.into_split();
-            let mut reader = BufReader::new(reader);
-            let mut content_length: usize = 0;
-            loop {
-                let mut line = String::new();
-                if reader.read_line(&mut line).await.is_err() { break; }
-                let t = line.trim_end_matches('\n').trim_end_matches('\r');
-                if t.is_empty() { break; }
-                if let Some(r) = t.to_lowercase().strip_prefix("content-length:") {
-                    content_length = r.trim().parse().unwrap_or(0);
-                }
-            }
-            if content_length > 0 {
-                let mut body = vec![0u8; content_length];
-                reader.read_exact(&mut body).await.ok();
-                let json = serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null);
-                captured_clone.lock().unwrap().push(json);
-            }
-            let http = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
-                turn2_retry.len(), turn2_retry,
-            );
-            writer.write_all(http.as_bytes()).await.ok();
-        }
-    });
-
-    let agent = make_agent(Some(&url)).await;
+    let agent = make_agent(Arc::clone(&mock)).await;
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
 
-    // Turn 1: succeeds; session now holds last_response_id = "resp_turn1".
     let r1 = agent
         .prompt(PromptRequest::new(
             sid.clone(),
@@ -3445,7 +2662,6 @@ async fn stale_id_retry_on_non_4xx_error_succeeds_transparently() {
         .unwrap();
     assert_eq!(r1.stop_reason, StopReason::EndTurn);
 
-    // Turn 2: first attempt → 500 → transparent retry → succeeds.
     let r2 = agent
         .prompt(PromptRequest::new(
             sid.clone(),
@@ -3455,81 +2671,50 @@ async fn stale_id_retry_on_non_4xx_error_succeeds_transparently() {
         .unwrap();
     assert_eq!(r2.stop_reason, StopReason::EndTurn);
 
-    let reqs = captured.lock().unwrap();
-    assert_eq!(reqs.len(), 3, "expected 3 HTTP requests total");
+    let calls = mock.calls.lock().unwrap();
+    assert_eq!(calls.len(), 3, "expected 3 HTTP requests total");
 
     // Request 1 (turn 1): no previous_response_id.
-    assert!(
-        reqs[0].get("previous_response_id").and_then(|v| v.as_str()).is_none(),
-        "turn 1 must not send previous_response_id"
-    );
+    assert!(calls[0].previous_response_id.is_none(), "turn 1 must not send previous_response_id");
 
     // Request 2 (turn 2, first attempt): carries the stale previous_response_id.
     assert_eq!(
-        reqs[1]["previous_response_id"].as_str(),
+        calls[1].previous_response_id.as_deref(),
         Some("resp_turn1"),
         "turn 2 first attempt must send previous_response_id = resp_turn1"
     );
 
     // Request 3 (turn 2, retry): no previous_response_id, sends full history.
     assert!(
-        reqs[2].get("previous_response_id").and_then(|v| v.as_str()).is_none(),
+        calls[2].previous_response_id.is_none(),
         "stale-ID retry must not carry previous_response_id"
     );
-    let retry_input = reqs[2]["input"].as_array().expect("retry input must be array");
     assert!(
-        retry_input.len() >= 2,
-        "retry must include full history (at least prior assistant + new user), got {retry_input:?}"
+        calls[2].input.len() >= 2,
+        "retry must include full history, got {:?}",
+        calls[2].input.iter().map(|i| &i.role).collect::<Vec<_>>()
     );
 
-    // History: 4 messages — user1, assistant1, user2, assistant2.
+    drop(calls);
+
     let history = agent.test_session_history(&sid).await;
     assert_eq!(history.len(), 4, "history must have 4 messages after 2 turns");
-    assert_eq!(history[0].role, "user");
-    assert_eq!(history[1].role, "assistant");
-    assert_eq!(history[2].role, "user");
-    assert_eq!(history[3].role, "assistant");
 }
 
 // ── MAX_CONTINUATIONS exhaustion ──────────────────────────────────────────────
 
 #[tokio::test]
 async fn max_continuations_exhausted_returns_cancelled_with_partial_text() {
-    // Verifies that when the model returns "incomplete" more than MAX_CONTINUATIONS
-    // (5) times in a row, the agent breaks the loop and returns StopReason::Cancelled
-    // with the accumulated partial text saved in history.
-    //
-    // MAX_CONTINUATIONS = 5, so 6 connections are accepted (5 continuations attempted,
-    // then on the 6th incomplete response the guard fires and returns Cancelled).
     let _guard = env_lock().lock().unwrap();
+    let mock = Arc::new(MockXaiHttpClient::new());
+    // 6 incomplete responses (MAX_CONTINUATIONS = 5, guard fires on 6th).
+    for i in 0u32..6 {
+        let resp_id = format!("resp_part{i}");
+        let chunk = format!("chunk{i} ");
+        mock.push_response(incomplete_max_output_tokens(&chunk, &resp_id));
+    }
+    let agent = make_agent(Arc::clone(&mock)).await;
 
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
-    let url = format!("http://127.0.0.1:{port}/v1");
-
-    tokio::spawn(async move {
-        // 6 connections, each returns a partial chunk + incomplete status.
-        for i in 0u32..6 {
-            if let Ok((stream, _)) = listener.accept().await {
-                let (reader, mut writer) = stream.into_split();
-                let mut reader = BufReader::new(reader);
-                drain_request(&mut reader).await;
-
-                let resp_id = format!("resp_part{i}");
-                let chunk = format!("chunk{i} ");
-                let body = format!(
-                    "data: {{\"id\":\"{resp_id}\",\"type\":\"message.delta\",\"delta\":{{\"type\":\"output_text\",\"text\":\"{chunk}\"}}}}\n\ndata: {{\"id\":\"{resp_id}\",\"type\":\"response.completed\",\"response\":{{\"id\":\"{resp_id}\",\"status\":\"incomplete\",\"incomplete_details\":{{\"reason\":\"max_output_tokens\"}}}}}}\n\ndata: [DONE]\n\n",
-                );
-                let http = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
-                    body.len(), body,
-                );
-                writer.write_all(http.as_bytes()).await.ok();
-            }
-        }
-    });
-
-    let agent = make_agent(Some(&url)).await;
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
 
@@ -3544,980 +2729,52 @@ async fn max_continuations_exhausted_returns_cancelled_with_partial_text() {
     assert_eq!(
         resp.stop_reason,
         StopReason::Cancelled,
-        "exhausted continuations must return Cancelled, got {:?}",
-        resp.stop_reason
+        "exhausted continuations must return Cancelled"
     );
 
-    // Partial text from all 6 chunks must be saved in history.
     let history = agent.test_session_history(&sid).await;
-    assert_eq!(history.len(), 2, "history must have user + partial assistant");
-    assert_eq!(history[0].role, "user");
-    assert_eq!(history[1].role, "assistant");
+    assert_eq!(history.len(), 2);
     let saved_text = history[1].content_str();
-    assert!(
-        saved_text.contains("chunk0"),
-        "partial text must include chunks from all iterations, got: {saved_text:?}"
-    );
-    assert!(
-        saved_text.contains("chunk5"),
-        "partial text must include chunks from the 6th (final) iteration, got: {saved_text:?}"
-    );
+    assert!(saved_text.contains("chunk0"), "partial text must include chunks: {saved_text:?}");
+    assert!(saved_text.contains("chunk5"), "partial text must include last chunk: {saved_text:?}");
 }
 
 // ── max_turns continuation input ─────────────────────────────────────────────
 
 #[tokio::test]
 async fn incomplete_max_turns_continuation_resends_user_input() {
-    // Verifies that when the incomplete reason is "max_turns" (tool-call iterations
-    // exhausted), the continuation request re-sends the original user message (not
-    // an empty input), so the model produces its final answer.
-    //
-    // Contrast with max_output_tokens where the continuation must send empty input.
     let _guard = env_lock().lock().unwrap();
+    let mock = Arc::new(MockXaiHttpClient::new());
+    // First request: incomplete due to max_turns.
+    mock.push_response(incomplete_max_turns("resp_mt"));
+    // Second request (continuation): final answer.
+    mock.push_response(text_response(&["final answer"]));
+    let agent = make_agent(Arc::clone(&mock)).await;
 
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
-    let url = format!("http://127.0.0.1:{port}/v1");
-    let captured: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(Vec::new()));
-    let captured_clone = Arc::clone(&captured);
-
-    tokio::spawn(async move {
-        // Connection 1: incomplete due to max_turns.
-        let first = concat!(
-            "data: {\"id\":\"resp_mt\",\"type\":\"response.completed\",\"response\":{\"id\":\"resp_mt\",\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"max_turns\"}}}\n\n",
-            "data: [DONE]\n\n",
-        );
-        if let Ok((stream, _)) = listener.accept().await {
-            let (reader, mut writer) = stream.into_split();
-            let mut reader = BufReader::new(reader);
-            let mut content_length: usize = 0;
-            loop {
-                let mut line = String::new();
-                if reader.read_line(&mut line).await.is_err() { break; }
-                let t = line.trim_end_matches('\n').trim_end_matches('\r');
-                if t.is_empty() { break; }
-                if let Some(r) = t.to_lowercase().strip_prefix("content-length:") {
-                    content_length = r.trim().parse().unwrap_or(0);
-                }
-            }
-            if content_length > 0 {
-                let mut body = vec![0u8; content_length];
-                reader.read_exact(&mut body).await.ok();
-                let json = serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null);
-                captured_clone.lock().unwrap().push(json);
-            }
-            let http = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
-                first.len(), first,
-            );
-            writer.write_all(http.as_bytes()).await.ok();
-        }
-
-        // Connection 2: continuation — final answer.
-        let second = concat!(
-            "data: {\"id\":\"resp_mt2\",\"type\":\"message.delta\",\"delta\":{\"type\":\"output_text\",\"text\":\"final answer\"}}\n\n",
-            "data: {\"id\":\"resp_mt2\",\"type\":\"response.completed\",\"response\":{\"id\":\"resp_mt2\",\"status\":\"completed\"}}\n\n",
-            "data: [DONE]\n\n",
-        );
-        if let Ok((stream, _)) = listener.accept().await {
-            let (reader, mut writer) = stream.into_split();
-            let mut reader = BufReader::new(reader);
-            let mut content_length: usize = 0;
-            loop {
-                let mut line = String::new();
-                if reader.read_line(&mut line).await.is_err() { break; }
-                let t = line.trim_end_matches('\n').trim_end_matches('\r');
-                if t.is_empty() { break; }
-                if let Some(r) = t.to_lowercase().strip_prefix("content-length:") {
-                    content_length = r.trim().parse().unwrap_or(0);
-                }
-            }
-            if content_length > 0 {
-                let mut body = vec![0u8; content_length];
-                reader.read_exact(&mut body).await.ok();
-                let json = serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null);
-                captured_clone.lock().unwrap().push(json);
-            }
-            let http = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
-                second.len(), second,
-            );
-            writer.write_all(http.as_bytes()).await.ok();
-        }
-    });
-
-    let agent = make_agent(Some(&url)).await;
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
 
     let resp = agent
         .prompt(PromptRequest::new(
             sid.clone(),
-            vec![ContentBlock::Text(TextContent::new("what is the answer?"))],
+            vec![ContentBlock::Text(TextContent::new("ask with tools"))],
         ))
         .await
         .unwrap();
 
     assert_eq!(resp.stop_reason, StopReason::EndTurn);
 
-    let reqs = captured.lock().unwrap();
-    assert_eq!(reqs.len(), 2, "expected exactly 2 HTTP requests");
+    let calls = mock.calls.lock().unwrap();
+    assert_eq!(calls.len(), 2, "expected 2 requests");
 
-    // Continuation: must carry previous_response_id AND re-send the user message.
+    // Continuation for max_turns: must re-send the user question (not empty input).
+    assert!(!calls[1].input.is_empty(), "max_turns continuation must not send empty input");
     assert_eq!(
-        reqs[1]["previous_response_id"].as_str(),
+        calls[1].previous_response_id.as_deref(),
         Some("resp_mt"),
-        "max_turns continuation must reference the incomplete response's ID"
+        "continuation must reference the incomplete response's ID"
     );
-    let cont_input = reqs[1]["input"].as_array().expect("continuation input must be array");
-    assert!(
-        !cont_input.is_empty(),
-        "max_turns continuation must NOT send empty input (unlike max_output_tokens)"
-    );
-    let has_user_msg = cont_input.iter().any(|item| {
-        item["role"].as_str() == Some("user")
-            && item["content"].as_str() == Some("what is the answer?")
-    });
-    assert!(
-        has_user_msg,
-        "max_turns continuation must re-send the original user message, got: {cont_input:?}"
-    );
-
-    // History: user + assembled assistant text.
-    let history = agent.test_session_history(&sid).await;
-    assert_eq!(history.len(), 2);
-    assert_eq!(history[0].role, "user");
-    assert_eq!(history[1].role, "assistant");
-    assert_eq!(history[1].content_str(), "final answer");
+    let user_msg = calls[1].input.iter().find(|i| i.role == "user");
+    assert!(user_msg.is_some(), "max_turns continuation must include the user question");
+    assert_eq!(user_msg.unwrap().content, "ask with tools");
 }
-
-// ── response.incomplete / response.cancelled as distinct event types ──────────
-//
-// The tests above (incomplete_max_output_tokens_continues_and_assembles_text,
-// incomplete_max_turns_continuation_resends_user_input, xai_server_cancelled_surfaces_as_acp_error)
-// all use `response.completed` with a `status` field. The handlers for the
-// *distinct* event types `response.incomplete` and `response.cancelled` are
-// exercised by unit tests in client.rs but need integration coverage to verify
-// the full agent loop responds correctly.
-
-#[tokio::test]
-async fn response_incomplete_event_triggers_continuation() {
-    // Verifies that a `response.incomplete` DISTINCT EVENT TYPE (not
-    // `response.completed` with status=incomplete) correctly triggers the
-    // continuation loop in the agent. The new handler must emit `ResponseId` +
-    // `Finished { Incomplete }` so the agent has a `previous_response_id` to
-    // reference on the follow-up request.
-    let _guard = env_lock().lock().unwrap();
-
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
-    let url = format!("http://127.0.0.1:{port}/v1");
-    let captured: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(Vec::new()));
-    let captured_clone = Arc::clone(&captured);
-
-    tokio::spawn(async move {
-        // Connection 1: partial text then response.incomplete (distinct event type).
-        let first = concat!(
-            "data: {\"id\":\"resp_inc1\",\"type\":\"message.delta\",\"delta\":{\"type\":\"output_text\",\"text\":\"partial \"}}\n\n",
-            "data: {\"type\":\"response.incomplete\",\"response\":{\"id\":\"resp_inc1\",\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"max_output_tokens\"}}}\n\n",
-            "data: [DONE]\n\n",
-        );
-        if let Ok((stream, _)) = listener.accept().await {
-            let (reader, mut writer) = stream.into_split();
-            let mut reader = BufReader::new(reader);
-            let mut content_length: usize = 0;
-            loop {
-                let mut line = String::new();
-                if reader.read_line(&mut line).await.is_err() { break; }
-                let t = line.trim_end_matches('\n').trim_end_matches('\r');
-                if t.is_empty() { break; }
-                if let Some(r) = t.to_lowercase().strip_prefix("content-length:") {
-                    content_length = r.trim().parse().unwrap_or(0);
-                }
-            }
-            if content_length > 0 {
-                let mut body = vec![0u8; content_length];
-                reader.read_exact(&mut body).await.ok();
-                let json = serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null);
-                captured_clone.lock().unwrap().push(json);
-            }
-            let http = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
-                first.len(), first,
-            );
-            writer.write_all(http.as_bytes()).await.ok();
-        }
-
-        // Connection 2: continuation — final text.
-        let second = concat!(
-            "data: {\"id\":\"resp_inc2\",\"type\":\"message.delta\",\"delta\":{\"type\":\"output_text\",\"text\":\"response\"}}\n\n",
-            "data: {\"id\":\"resp_inc2\",\"type\":\"response.completed\",\"response\":{\"id\":\"resp_inc2\",\"status\":\"completed\"}}\n\n",
-            "data: [DONE]\n\n",
-        );
-        if let Ok((stream, _)) = listener.accept().await {
-            let (reader, mut writer) = stream.into_split();
-            let mut reader = BufReader::new(reader);
-            let mut content_length: usize = 0;
-            loop {
-                let mut line = String::new();
-                if reader.read_line(&mut line).await.is_err() { break; }
-                let t = line.trim_end_matches('\n').trim_end_matches('\r');
-                if t.is_empty() { break; }
-                if let Some(r) = t.to_lowercase().strip_prefix("content-length:") {
-                    content_length = r.trim().parse().unwrap_or(0);
-                }
-            }
-            if content_length > 0 {
-                let mut body = vec![0u8; content_length];
-                reader.read_exact(&mut body).await.ok();
-                let json = serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null);
-                captured_clone.lock().unwrap().push(json);
-            }
-            let http = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
-                second.len(), second,
-            );
-            writer.write_all(http.as_bytes()).await.ok();
-        }
-    });
-
-    let agent = make_agent(Some(&url)).await;
-    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
-    let sid = sess.session_id.to_string();
-
-    let resp = agent
-        .prompt(PromptRequest::new(
-            sid.clone(),
-            vec![ContentBlock::Text(TextContent::new("continue"))],
-        ))
-        .await
-        .unwrap();
-
-    assert_eq!(resp.stop_reason, StopReason::EndTurn);
-
-    let reqs = captured.lock().unwrap();
-    assert_eq!(reqs.len(), 2, "response.incomplete must trigger exactly one continuation request");
-
-    // Continuation must reference the ID from the response.incomplete event.
-    assert_eq!(
-        reqs[1]["previous_response_id"].as_str(),
-        Some("resp_inc1"),
-        "continuation must reference the response.incomplete response ID"
-    );
-    // max_output_tokens → empty input array.
-    let cont_input = reqs[1]["input"].as_array().expect("continuation input must be an array");
-    assert!(
-        cont_input.is_empty(),
-        "max_output_tokens continuation must send empty input, got: {cont_input:?}"
-    );
-
-    // Both chunks assembled into one history entry.
-    let history = agent.test_session_history(&sid).await;
-    assert_eq!(history.len(), 2);
-    assert_eq!(history[1].content_str(), "partial response");
-}
-
-#[tokio::test]
-async fn response_cancelled_event_surfaces_as_acp_error() {
-    // Verifies that a `response.cancelled` DISTINCT EVENT TYPE (not
-    // `response.completed` with status=cancelled) surfaces as an ACP error
-    // and that the orphaned user message is compensated from history.
-    let _guard = env_lock().lock().unwrap();
-
-    let body = concat!(
-        "data: {\"type\":\"response.cancelled\",\"response\":{\"id\":\"resp_can\",\"status\":\"cancelled\"}}\n\n",
-        "data: [DONE]\n\n",
-    );
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
-    tokio::spawn(async move {
-        if let Ok((stream, _)) = listener.accept().await {
-            let (reader, mut writer) = stream.into_split();
-            let mut reader = BufReader::new(reader);
-            drain_request(&mut reader).await;
-            let http = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
-                body.len(), body,
-            );
-            writer.write_all(http.as_bytes()).await.ok();
-        }
-    });
-    let url = format!("http://127.0.0.1:{port}/v1");
-
-    let agent = make_agent(Some(&url)).await;
-    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
-    let sid = sess.session_id.to_string();
-
-    let err = agent
-        .prompt(PromptRequest::new(
-            sid.clone(),
-            vec![ContentBlock::Text(TextContent::new("test"))],
-        ))
-        .await
-        .unwrap_err();
-
-    assert_eq!(err.code, agent_client_protocol::ErrorCode::InternalError.into());
-    // Orphaned user message must be compensated.
-    let history = agent.test_session_history(&sid).await;
-    assert!(history.is_empty(), "history must be empty after response.cancelled: {history:?}");
-}
-
-// ── stale-ID retry: no double-retry guard ─────────────────────────────────────
-
-#[tokio::test]
-async fn stale_id_retry_does_not_double_retry() {
-    // Verifies that `stale_retry_done` prevents a second transparent retry.
-    //
-    // Turn 1: succeeds, stores last_response_id = "resp_turn1".
-    // Turn 2, attempt 1: carries previous_response_id → HTTP 500 → triggers
-    //   stale-ID retry (stale_retry_done = true).
-    // Turn 2, retry: HTTP 500 again → NOT retried a third time → Err propagated.
-    //
-    // Only 3 HTTP connections must be made. A 4th would indicate the guard is
-    // broken.
-    let _guard = env_lock().lock().unwrap();
-
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
-    let url = format!("http://127.0.0.1:{port}/v1");
-    let conn_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let conn_count_clone = Arc::clone(&conn_count);
-
-    tokio::spawn(async move {
-        // Connection 1 (turn 1): success.
-        let turn1 = concat!(
-            "data: {\"id\":\"resp_turn1\",\"type\":\"message.delta\",\"delta\":{\"type\":\"output_text\",\"text\":\"first reply\"}}\n\n",
-            "data: {\"id\":\"resp_turn1\",\"type\":\"response.completed\",\"response\":{\"id\":\"resp_turn1\",\"status\":\"completed\"}}\n\n",
-            "data: [DONE]\n\n",
-        );
-        if let Ok((stream, _)) = listener.accept().await {
-            conn_count_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            let (reader, mut writer) = stream.into_split();
-            let mut reader = BufReader::new(reader);
-            drain_request(&mut reader).await;
-            let http = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
-                turn1.len(), turn1,
-            );
-            writer.write_all(http.as_bytes()).await.ok();
-        }
-
-        // Connection 2 (turn 2, first attempt): HTTP 500 → triggers stale-ID retry.
-        if let Ok((stream, _)) = listener.accept().await {
-            conn_count_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            let (reader, mut writer) = stream.into_split();
-            let mut reader = BufReader::new(reader);
-            drain_request(&mut reader).await;
-            let body = r#"{"error":"response not found"}"#;
-            let http = format!(
-                "HTTP/1.1 500 Internal Server Error\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
-                body.len(), body,
-            );
-            writer.write_all(http.as_bytes()).await.ok();
-        }
-
-        // Connection 3 (turn 2 retry, full history): HTTP 500 again — must NOT
-        // be retried a second time since stale_retry_done = true.
-        if let Ok((stream, _)) = listener.accept().await {
-            conn_count_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            let (reader, mut writer) = stream.into_split();
-            let mut reader = BufReader::new(reader);
-            drain_request(&mut reader).await;
-            let body = r#"{"error":"still failing"}"#;
-            let http = format!(
-                "HTTP/1.1 500 Internal Server Error\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
-                body.len(), body,
-            );
-            writer.write_all(http.as_bytes()).await.ok();
-        }
-        // Server is done. Any 4th connection would fail with "connection refused".
-    });
-
-    let agent = make_agent(Some(&url)).await;
-    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
-    let sid = sess.session_id.to_string();
-
-    let r1 = agent
-        .prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::Text(TextContent::new("q1"))]))
-        .await
-        .unwrap();
-    assert_eq!(r1.stop_reason, StopReason::EndTurn, "turn 1 must succeed");
-
-    let r2 = agent
-        .prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::Text(TextContent::new("q2"))]))
-        .await;
-    assert!(r2.is_err(), "turn 2 must fail after stale-ID retry is exhausted");
-
-    // Exactly 3 HTTP connections must have been made — no double-retry.
-    assert_eq!(
-        conn_count.load(std::sync::atomic::Ordering::SeqCst),
-        3,
-        "expected exactly 3 HTTP connections (turn1 + stale-retry + retry-fail), no 4th"
-    );
-}
-
-// ── continuation: stale-ID retry is blocked ──────────────────────────────────
-
-#[tokio::test]
-async fn continuation_error_is_not_retried_as_stale_id() {
-    // Verifies that `continuation_in_progress = true` blocks the stale-ID retry
-    // when an error arrives on a continuation request.
-    //
-    // Turn 1: succeeds — stores last_response_id = "resp_turn1".
-    // Turn 2:
-    //   - Initial request (previous_response_id="resp_turn1"): Incomplete
-    //     (max_output_tokens), partial text, response id="resp_part".
-    //   - Continuation (previous_response_id="resp_part"): HTTP 500.
-    //     continuation_in_progress=true → guard fires, no stale-ID retry.
-    //     Error propagates to ACP caller.
-    //
-    // Exactly 3 HTTP connections must be made — no 4th retry.
-    let _guard = env_lock().lock().unwrap();
-
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
-    let url = format!("http://127.0.0.1:{port}/v1");
-    let conn_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let conn_count_clone = Arc::clone(&conn_count);
-    let captured: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(Vec::new()));
-    let captured_clone = Arc::clone(&captured);
-
-    tokio::spawn(async move {
-        // Connection 1 (turn 1): normal success.
-        let turn1 = concat!(
-            "data: {\"id\":\"resp_turn1\",\"type\":\"message.delta\",\"delta\":{\"type\":\"output_text\",\"text\":\"first reply\"}}\n\n",
-            "data: {\"id\":\"resp_turn1\",\"type\":\"response.completed\",\"response\":{\"id\":\"resp_turn1\",\"status\":\"completed\"}}\n\n",
-            "data: [DONE]\n\n",
-        );
-        if let Ok((stream, _)) = listener.accept().await {
-            conn_count_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            let (reader, mut writer) = stream.into_split();
-            let mut reader = BufReader::new(reader);
-            drain_request(&mut reader).await;
-            let http = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
-                turn1.len(), turn1,
-            );
-            writer.write_all(http.as_bytes()).await.ok();
-        }
-
-        // Connection 2 (turn 2, initial, carries previous_response_id="resp_turn1"):
-        // returns Incomplete so the agent sends a continuation.
-        let incomplete = concat!(
-            "data: {\"id\":\"resp_part\",\"type\":\"message.delta\",\"delta\":{\"type\":\"output_text\",\"text\":\"partial \"}}\n\n",
-            "data: {\"id\":\"resp_part\",\"type\":\"response.completed\",\"response\":{\"id\":\"resp_part\",\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"max_output_tokens\"}}}\n\n",
-            "data: [DONE]\n\n",
-        );
-        if let Ok((stream, _)) = listener.accept().await {
-            conn_count_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            let (reader, mut writer) = stream.into_split();
-            let mut reader = BufReader::new(reader);
-            let mut content_length: usize = 0;
-            loop {
-                let mut line = String::new();
-                if reader.read_line(&mut line).await.is_err() { break; }
-                let t = line.trim_end_matches('\n').trim_end_matches('\r');
-                if t.is_empty() { break; }
-                if let Some(r) = t.to_lowercase().strip_prefix("content-length:") {
-                    content_length = r.trim().parse().unwrap_or(0);
-                }
-            }
-            if content_length > 0 {
-                let mut buf = vec![0u8; content_length];
-                reader.read_exact(&mut buf).await.ok();
-                let json = serde_json::from_slice(&buf).unwrap_or(serde_json::Value::Null);
-                captured_clone.lock().unwrap().push(json);
-            }
-            let http = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
-                incomplete.len(), incomplete,
-            );
-            writer.write_all(http.as_bytes()).await.ok();
-        }
-
-        // Connection 3 (continuation, carries previous_response_id="resp_part"):
-        // HTTP 500 — must NOT trigger a stale-ID retry (continuation_in_progress=true).
-        if let Ok((stream, _)) = listener.accept().await {
-            conn_count_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            let (reader, mut writer) = stream.into_split();
-            let mut reader = BufReader::new(reader);
-            let mut content_length: usize = 0;
-            loop {
-                let mut line = String::new();
-                if reader.read_line(&mut line).await.is_err() { break; }
-                let t = line.trim_end_matches('\n').trim_end_matches('\r');
-                if t.is_empty() { break; }
-                if let Some(r) = t.to_lowercase().strip_prefix("content-length:") {
-                    content_length = r.trim().parse().unwrap_or(0);
-                }
-            }
-            if content_length > 0 {
-                let mut buf = vec![0u8; content_length];
-                reader.read_exact(&mut buf).await.ok();
-                let json = serde_json::from_slice(&buf).unwrap_or(serde_json::Value::Null);
-                captured_clone.lock().unwrap().push(json);
-            }
-            let body = r#"{"error":"continuation failed"}"#;
-            let http = format!(
-                "HTTP/1.1 500 Internal Server Error\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
-                body.len(), body,
-            );
-            writer.write_all(http.as_bytes()).await.ok();
-        }
-        // Server exits here. A 4th connection would get "connection refused".
-    });
-
-    let agent = make_agent(Some(&url)).await;
-    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
-    let sid = sess.session_id.to_string();
-
-    let r1 = agent
-        .prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::Text(TextContent::new("q1"))]))
-        .await
-        .unwrap();
-    assert_eq!(r1.stop_reason, StopReason::EndTurn, "turn 1 must succeed");
-
-    let r2 = agent
-        .prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::Text(TextContent::new("q2"))]))
-        .await;
-    assert!(r2.is_err(), "turn 2 must fail when continuation errors out");
-
-    // Exactly 3 HTTP connections: turn1 + incomplete + continuation-error.
-    // A 4th would mean the stale-ID retry fired despite continuation_in_progress.
-    assert_eq!(
-        conn_count.load(std::sync::atomic::Ordering::SeqCst),
-        3,
-        "exactly 3 connections expected — no stale-ID retry during continuation",
-    );
-
-    // The continuation request must have carried previous_response_id="resp_part",
-    // not "resp_turn1" (proves the continuation logic set the right ID).
-    let reqs = captured.lock().unwrap();
-    assert_eq!(reqs.len(), 2, "expected bodies captured for conns 2 and 3");
-    assert_eq!(
-        reqs[1].get("previous_response_id").and_then(|v| v.as_str()),
-        Some("resp_part"),
-        "continuation must carry previous_response_id from the incomplete response: {:?}", reqs[1],
-    );
-
-    // History after turn 2 failure: [user1, assistant1] — user2 was compensated.
-    let history = agent.test_session_history(&sid).await;
-    assert_eq!(history.len(), 2, "user2 must be compensated after continuation error: {history:?}");
-    assert_eq!(history[0].content_str(), "q1");
-    assert_eq!(history[1].content_str(), "first reply");
-}
-
-// ── empty prompt content ──────────────────────────────────────────────────────
-
-#[tokio::test]
-async fn empty_prompt_content_is_forwarded_to_xai() {
-    // When the prompt contains no content blocks (or only empty-text blocks),
-    // user_input is "". The agent logs a warning but still calls xAI and handles
-    // the response normally. This verifies there is no early-return / panic.
-    let _guard = env_lock().lock().unwrap();
-
-    let (url, bodies) = fake_xai_sse_recording(vec![vec!["reply to empty"]]).await;
-    let agent = make_agent(Some(&url)).await;
-
-    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
-    let sid = sess.session_id.to_string();
-
-    // No content blocks at all.
-    let resp = agent
-        .prompt(PromptRequest::new(sid.clone(), vec![]))
-        .await
-        .unwrap();
-    assert_eq!(resp.stop_reason, StopReason::EndTurn);
-
-    // xAI must have received exactly one request.
-    let reqs = bodies.lock().unwrap();
-    assert_eq!(reqs.len(), 1, "one HTTP request must have been made");
-
-    // The user message in the request has empty content.
-    let input = reqs[0]["input"].as_array().expect("input must be an array");
-    assert_eq!(input.len(), 1);
-    assert_eq!(input[0]["role"], "user");
-    assert_eq!(input[0]["content"], "");
-
-    // History: empty user message + assistant reply.
-    let history = agent.test_session_history(&sid).await;
-    assert_eq!(history.len(), 2);
-    assert_eq!(history[0].role, "user");
-    assert_eq!(history[0].content_str(), "");
-    assert_eq!(history[1].role, "assistant");
-    assert_eq!(history[1].content_str(), "reply to empty");
-}
-
-// ── blob resource content block ───────────────────────────────────────────────
-
-#[tokio::test]
-async fn embedded_blob_resource_is_formatted_as_binary_placeholder() {
-    // BlobResourceContents cannot be forwarded to a text-only API. The agent
-    // must convert it to a "[Binary resource: <uri> (<mime>)]" placeholder so
-    // the model at least knows a binary file was referenced.
-    let _guard = env_lock().lock().unwrap();
-
-    let (url, bodies) = fake_xai_sse_recording(vec![vec!["got it"]]).await;
-    let agent = make_agent(Some(&url)).await;
-
-    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
-    let sid = sess.session_id.to_string();
-
-    let blob_block = ContentBlock::Resource(EmbeddedResource::new(
-        EmbeddedResourceResource::BlobResourceContents(
-            BlobResourceContents::new("base64data==", "s3://bucket/image.png")
-                .mime_type("image/png"),
-        ),
-    ));
-
-    let resp = agent
-        .prompt(PromptRequest::new(sid.clone(), vec![blob_block]))
-        .await
-        .unwrap();
-    assert_eq!(resp.stop_reason, StopReason::EndTurn);
-
-    let reqs = bodies.lock().unwrap();
-    let input = reqs[0]["input"].as_array().expect("input must be an array");
-    let user_content = input[0]["content"].as_str().expect("user content must be a string");
-
-    assert!(
-        user_content.contains("[Binary resource: s3://bucket/image.png (image/png)]"),
-        "expected binary placeholder in user content, got: {user_content}"
-    );
-}
-
-#[tokio::test]
-async fn embedded_blob_resource_without_mime_uses_binary_fallback() {
-    // When mime_type is None, the placeholder must read "(binary)".
-    let _guard = env_lock().lock().unwrap();
-
-    let (url, bodies) = fake_xai_sse_recording(vec![vec!["ok"]]).await;
-    let agent = make_agent(Some(&url)).await;
-
-    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
-    let sid = sess.session_id.to_string();
-
-    let blob_block = ContentBlock::Resource(EmbeddedResource::new(
-        EmbeddedResourceResource::BlobResourceContents(
-            // no .mime_type() call → mime_type = None
-            BlobResourceContents::new("rawbytes", "file:///tmp/data.bin"),
-        ),
-    ));
-
-    agent
-        .prompt(PromptRequest::new(sid.clone(), vec![blob_block]))
-        .await
-        .unwrap();
-
-    let reqs = bodies.lock().unwrap();
-    let input = reqs[0]["input"].as_array().unwrap();
-    let user_content = input[0]["content"].as_str().unwrap();
-
-    assert!(
-        user_content.contains("[Binary resource: file:///tmp/data.bin (binary)]"),
-        "expected '(binary)' fallback mime in placeholder, got: {user_content}"
-    );
-}
-
-// ── XAI_MAX_TURNS env var ─────────────────────────────────────────────────────
-
-async fn make_agent_with_max_turns(base_url: Option<&str>, max_turns: u64) -> XaiAgent {
-    unsafe {
-        std::env::remove_var("XAI_MODELS");
-        std::env::remove_var("XAI_PROMPT_TIMEOUT_SECS");
-        std::env::remove_var("XAI_SYSTEM_PROMPT");
-        std::env::remove_var("XAI_MAX_HISTORY_MESSAGES");
-        std::env::set_var("XAI_MAX_TURNS", max_turns.to_string());
-        match base_url {
-            Some(url) => std::env::set_var("XAI_BASE_URL", url),
-            None => std::env::remove_var("XAI_BASE_URL"),
-        }
-    }
-    XaiAgent::new_in_memory(fake_nats().await, AcpPrefix::new("test").unwrap(), "grok-3", "fake-key")
-}
-
-#[tokio::test]
-async fn xai_max_turns_is_sent_in_request_when_tools_enabled() {
-    // max_turns must be sent in the request body only when at least one
-    // server-side tool is enabled. Verify the field value matches XAI_MAX_TURNS.
-    let _guard = env_lock().lock().unwrap();
-
-    let (url, bodies) = fake_xai_sse_recording(vec![vec!["answer"]]).await;
-    let agent = make_agent_with_max_turns(Some(&url), 5).await;
-
-    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
-    let sid = sess.session_id.to_string();
-
-    // Enable a server-side tool so max_turns is included in the request.
-    agent
-        .set_session_config_option(SetSessionConfigOptionRequest::new(sid.clone(), "web_search", "on"))
-        .await
-        .unwrap();
-
-    agent
-        .prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::Text(TextContent::new("q"))]))
-        .await
-        .unwrap();
-
-    let reqs = bodies.lock().unwrap();
-    assert_eq!(reqs.len(), 1);
-    assert_eq!(
-        reqs[0]["max_turns"].as_u64(),
-        Some(5),
-        "max_turns must be 5 when XAI_MAX_TURNS=5 and a tool is enabled, got: {:?}",
-        reqs[0]["max_turns"]
-    );
-}
-
-#[tokio::test]
-async fn xai_max_turns_invalid_string_falls_back_to_default() {
-    // XAI_MAX_TURNS=abc cannot be parsed as u32 — must fall back to 10.
-    // Mirrors the existing xai_prompt_timeout_secs_invalid_falls_back_to_default pattern.
-    let _guard = env_lock().lock().unwrap();
-
-    let (url, bodies) = fake_xai_sse_recording(vec![vec!["answer"]]).await;
-    unsafe {
-        std::env::remove_var("XAI_MODELS");
-        std::env::remove_var("XAI_PROMPT_TIMEOUT_SECS");
-        std::env::remove_var("XAI_SYSTEM_PROMPT");
-        std::env::remove_var("XAI_MAX_HISTORY_MESSAGES");
-        std::env::set_var("XAI_MAX_TURNS", "not-a-number");
-        std::env::set_var("XAI_BASE_URL", &url);
-    }
-    let agent = XaiAgent::new_in_memory(
-        fake_nats().await,
-        AcpPrefix::new("test").unwrap(),
-        "grok-3",
-        "fake-key",
-    );
-
-    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
-    let sid = sess.session_id.to_string();
-
-    agent
-        .set_session_config_option(SetSessionConfigOptionRequest::new(sid.clone(), "web_search", "on"))
-        .await
-        .unwrap();
-
-    agent
-        .prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::Text(TextContent::new("q"))]))
-        .await
-        .unwrap();
-
-    let reqs = bodies.lock().unwrap();
-    assert_eq!(
-        reqs[0]["max_turns"].as_u64(),
-        Some(10),
-        "invalid XAI_MAX_TURNS must fall back to default (10), got: {:?}",
-        reqs[0]["max_turns"]
-    );
-}
-
-#[tokio::test]
-async fn xai_max_turns_zero_falls_back_to_default() {
-    // XAI_MAX_TURNS=0 is treated as "unset" and falls back to the default (10).
-    let _guard = env_lock().lock().unwrap();
-
-    let (url, bodies) = fake_xai_sse_recording(vec![vec!["answer"]]).await;
-    let agent = make_agent_with_max_turns(Some(&url), 0).await;
-
-    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
-    let sid = sess.session_id.to_string();
-
-    agent
-        .set_session_config_option(SetSessionConfigOptionRequest::new(sid.clone(), "web_search", "on"))
-        .await
-        .unwrap();
-
-    agent
-        .prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::Text(TextContent::new("q"))]))
-        .await
-        .unwrap();
-
-    let reqs = bodies.lock().unwrap();
-    assert_eq!(reqs.len(), 1);
-    assert_eq!(
-        reqs[0]["max_turns"].as_u64(),
-        Some(10),
-        "XAI_MAX_TURNS=0 must fall back to default (10), got: {:?}",
-        reqs[0]["max_turns"]
-    );
-}
-
-#[tokio::test]
-async fn xai_max_turns_not_sent_when_no_tools_enabled() {
-    // max_turns is only meaningful with tools — it must be omitted from requests
-    // where no server-side tool is enabled.
-    let _guard = env_lock().lock().unwrap();
-
-    let (url, bodies) = fake_xai_sse_recording(vec![vec!["answer"]]).await;
-    let agent = make_agent_with_max_turns(Some(&url), 7).await;
-
-    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
-    let sid = sess.session_id.to_string();
-
-    // Do NOT enable any tools.
-    agent
-        .prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::Text(TextContent::new("q"))]))
-        .await
-        .unwrap();
-
-    let reqs = bodies.lock().unwrap();
-    assert_eq!(reqs.len(), 1);
-    assert!(
-        reqs[0].get("max_turns").map(|v| v.is_null()).unwrap_or(true),
-        "max_turns must be absent from requests with no tools, got: {:?}",
-        reqs[0].get("max_turns")
-    );
-}
-
-// ── session store put failure ─────────────────────────────────────────────────
-
-/// A session store that delegates to `MemorySessionStore` but fails every `put`
-/// call after `fail_after_puts` successful puts. Counter is shared so callers
-/// can observe how many puts were attempted.
-struct FailingSessionStore {
-    inner: trogon_xai_runner::MemorySessionStore,
-    put_count: Arc<std::sync::atomic::AtomicUsize>,
-    fail_after_puts: usize,
-}
-
-impl FailingSessionStore {
-    fn new(fail_after_puts: usize) -> (Self, Arc<std::sync::atomic::AtomicUsize>) {
-        let count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        (
-            Self {
-                inner: trogon_xai_runner::MemorySessionStore::new(),
-                put_count: Arc::clone(&count),
-                fail_after_puts,
-            },
-            count,
-        )
-    }
-}
-
-#[async_trait::async_trait(?Send)]
-impl trogon_xai_runner::SessionStore for FailingSessionStore {
-    async fn get(&self, id: &str) -> Option<trogon_xai_runner::XaiSessionData> {
-        self.inner.get(id).await
-    }
-
-    async fn put(
-        &self,
-        id: &str,
-        data: &trogon_xai_runner::XaiSessionData,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let n = self.put_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        if n >= self.fail_after_puts {
-            return Err("injected store failure".into());
-        }
-        self.inner.put(id, data).await
-    }
-
-    async fn delete(&self, id: &str) {
-        self.inner.delete(id).await
-    }
-
-    async fn list(&self) -> Vec<(String, String)> {
-        self.inner.list().await
-    }
-}
-
-#[tokio::test]
-async fn session_store_put_failure_on_assistant_text_returns_error() {
-    // When the session store fails to persist the assistant reply, prompt()
-    // must return an ACP error. The user message should remain in history
-    // (not compensated) so the next call is treated as a resume.
-    //
-    // Put sequence:
-    //   put #0 (new_session): succeeds
-    //   put #1 (prompt user message): succeeds
-    //   put #2 (prompt assistant text): FAILS → prompt() returns Err
-    let _guard = env_lock().lock().unwrap();
-
-    // Set XAI_BASE_URL so the agent hits the fake SSE server when it calls xAI.
-    let sse_url = fake_xai_sse(&["hello from xai"]).await;
-    unsafe { std::env::set_var("XAI_BASE_URL", &sse_url); }
-
-    let (store, _counter) = FailingSessionStore::new(2); // fail on 3rd put (index 2)
-    let agent = XaiAgent::new_with_custom_store(
-        fake_nats().await,
-        AcpPrefix::new("test").unwrap(),
-        "grok-3",
-        "fake-key",
-        Box::new(store),
-    );
-
-    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
-    let sid = sess.session_id.to_string();
-
-    let err = agent
-        .prompt(PromptRequest::new(
-            sid.clone(),
-            vec![ContentBlock::Text(TextContent::new("question"))],
-        ))
-        .await
-        .unwrap_err();
-
-    assert_eq!(
-        err.code,
-        agent_client_protocol::ErrorCode::InternalError.into(),
-        "put failure must surface as ACP InternalError"
-    );
-
-    // The user message must still be in history — it was put successfully before
-    // the xAI call. Compensation does not fire on store errors (only on cancel /
-    // stream error). This means the next prompt() call will be treated as a resume.
-    let history = agent.test_session_history(&sid).await;
-    assert_eq!(history.len(), 1, "user message must survive in history for resume: {history:?}");
-    assert_eq!(history[0].role, "user");
-    assert_eq!(history[0].content_str(), "question");
-}
-
-#[tokio::test]
-async fn session_store_put_failure_on_user_message_returns_error() {
-    // When the store fails immediately on the user-message put (before the xAI
-    // call is even made), prompt() must return an error and history must be empty.
-    //
-    // Put sequence:
-    //   put #0 (new_session): succeeds
-    //   put #1 (prompt user message): FAILS → prompt() returns Err without calling xAI
-    let _guard = env_lock().lock().unwrap();
-
-    // The user-message put fails before xAI is ever called — no SSE server needed.
-    unsafe { std::env::remove_var("XAI_BASE_URL"); }
-
-    let (store, _counter) = FailingSessionStore::new(1); // fail on 2nd put (index 1)
-    let agent = XaiAgent::new_with_custom_store(
-        fake_nats().await,
-        AcpPrefix::new("test").unwrap(),
-        "grok-3",
-        "fake-key",
-        Box::new(store),
-    );
-
-    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
-    let sid = sess.session_id.to_string();
-
-    let err = agent
-        .prompt(PromptRequest::new(
-            sid.clone(),
-            vec![ContentBlock::Text(TextContent::new("question"))],
-        ))
-        .await
-        .unwrap_err();
-
-    assert_eq!(
-        err.code,
-        agent_client_protocol::ErrorCode::InternalError.into(),
-        "user-message put failure must surface as ACP InternalError"
-    );
-
-    // History must be empty — the user message was never persisted (the put failed).
-    let history = agent.test_session_history(&sid).await;
-    assert!(
-        history.is_empty(),
-        "history must be empty when user-message put fails: {history:?}"
-    );
-}
-

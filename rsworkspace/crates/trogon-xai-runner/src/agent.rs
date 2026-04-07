@@ -3,8 +3,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use acp_nats::acp_prefix::AcpPrefix;
-use acp_nats::client_proxy::NatsClientProxy;
-use acp_nats::session_id::AcpSessionId;
 use agent_client_protocol::{
     AgentCapabilities, AuthEnvVar, AuthMethod, AuthMethodAgent, AuthMethodEnvVar, PromptCapabilities,
     AuthenticateRequest, AuthenticateResponse, CancelNotification, CloseSessionRequest,
@@ -20,7 +18,6 @@ use agent_client_protocol::{
     SetSessionModeRequest, SetSessionModeResponse, SetSessionModelRequest, SetSessionModelResponse,
     StopReason, ToolCall, ToolCallStatus, ToolKind, UsageUpdate,
 };
-use agent_client_protocol::Client as _;
 use async_trait::async_trait;
 use futures_util::StreamExt as _;
 use tokio::sync::{Mutex, oneshot};
@@ -28,6 +25,8 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::client::{FinishReason, InputItem, Message, XaiClient, XaiEvent};
+use crate::http_client::XaiHttpClient;
+use crate::session_notifier::{NatsSessionNotifier, SessionNotifier};
 use crate::session_store::{KvSessionStore, SessionStore, XaiSessionData};
 #[cfg(feature = "test-helpers")]
 use crate::session_store::MemorySessionStore;
@@ -65,12 +64,15 @@ const AVAILABLE_TOOLS: &[(&str, &str)] = &[
 ///
 /// Each `XaiAgent` manages multiple sessions, each holding its own conversation
 /// history persisted in NATS KV. Prompt calls stream chat completions from
-/// `api.x.ai` and forward text chunks to the ACP client via NATS
-/// `SessionNotification`s.
-pub struct XaiAgent {
-    nats: async_nats::Client,
-    acp_prefix: AcpPrefix,
-    client: Arc<XaiClient>,
+/// `api.x.ai` and forward text chunks to the ACP client via `SessionNotification`s.
+///
+/// - `H` abstracts the xAI HTTP client (default: `XaiClient`).
+/// - `N` abstracts the ACP session notification channel (default: `NatsSessionNotifier`).
+///
+/// Production code uses `XaiAgent<XaiClient, NatsSessionNotifier>` (the defaults).
+pub struct XaiAgent<H = XaiClient, N = NatsSessionNotifier> {
+    notifier: Arc<N>,
+    client: Arc<H>,
     session_store: Box<dyn SessionStore>,
     /// In-memory cancel channels — one per active prompt, keyed by session id.
     cancel_channels: Arc<Mutex<HashMap<String, Arc<Mutex<Option<oneshot::Sender<()>>>>>>>,
@@ -118,7 +120,7 @@ pub struct XaiAgent {
     max_turns: Option<u32>,
 }
 
-impl XaiAgent {
+impl XaiAgent<XaiClient, NatsSessionNotifier> {
     /// Create a new `XaiAgent` backed by NATS KV for session persistence.
     ///
     /// The KV bucket name is read from `XAI_SESSION_BUCKET` (default: `XAI_SESSIONS`).
@@ -147,13 +149,33 @@ impl XaiAgent {
         Ok(Self::new_with_store(nats, acp_prefix, default_model, api_key, Box::new(store)))
     }
 
-    /// Internal constructor with an injected session store.
+    /// Internal constructor: KV-backed store + default `XaiClient` + `NatsSessionNotifier`.
     fn new_with_store(
         nats: async_nats::Client,
         acp_prefix: AcpPrefix,
         default_model: impl Into<String>,
         api_key: impl Into<String>,
         session_store: Box<dyn SessionStore>,
+    ) -> Self {
+        let notifier = NatsSessionNotifier::new(nats, acp_prefix);
+        XaiAgent::new_with_client_and_store(
+            notifier, default_model, api_key, session_store, XaiClient::new(),
+        )
+    }
+}
+
+impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
+    /// Generic constructor: takes an explicit HTTP client `H`, session notifier `N`,
+    /// and session store.
+    ///
+    /// This is the single source of truth for initialising all fields. Every
+    /// other constructor ultimately delegates here.
+    pub(crate) fn new_with_client_and_store(
+        notifier: N,
+        default_model: impl Into<String>,
+        api_key: impl Into<String>,
+        session_store: Box<dyn SessionStore>,
+        client: H,
     ) -> Self {
         let default_model: String = default_model.into();
         let api_key_str: String = api_key.into();
@@ -212,9 +234,8 @@ impl XaiAgent {
             .or(Some(10));
 
         Self {
-            nats,
-            acp_prefix,
-            client: Arc::new(XaiClient::new()),
+            notifier: Arc::new(notifier),
+            client: Arc::new(client),
             session_store,
             cancel_channels: Arc::new(Mutex::new(HashMap::new())),
             default_model,
@@ -226,20 +247,6 @@ impl XaiAgent {
             max_history_messages,
             max_turns,
         }
-    }
-
-    fn make_nats_client(
-        &self,
-        session_id: &SessionId,
-    ) -> agent_client_protocol::Result<NatsClientProxy<async_nats::Client>> {
-        let acp_session_id =
-            AcpSessionId::try_from(session_id).map_err(|e| internal_error(e.to_string()))?;
-        Ok(NatsClientProxy::new(
-            self.nats.clone(),
-            acp_session_id,
-            self.acp_prefix.clone(),
-            Duration::from_secs(30),
-        ))
     }
 
     fn session_mode_state(&self) -> SessionModeState {
@@ -280,7 +287,7 @@ impl XaiAgent {
 }
 
 #[async_trait(?Send)]
-impl agent_client_protocol::Agent for XaiAgent {
+impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_protocol::Agent for XaiAgent<H, N> {
     async fn initialize(
         &self,
         _req: InitializeRequest,
@@ -562,7 +569,6 @@ impl agent_client_protocol::Agent for XaiAgent {
         req: PromptRequest,
     ) -> agent_client_protocol::Result<PromptResponse> {
         let session_id = req.session_id.to_string();
-        let nats_client = self.make_nats_client(&req.session_id)?;
 
         let user_input: String = req
             .prompt
@@ -736,9 +742,7 @@ impl agent_client_protocol::Agent for XaiAgent {
                                 ContentBlock::from(text),
                             )),
                         );
-                        if let Err(e) = nats_client.session_notification(notif).await {
-                            warn!(session_id, error = %e, "xai: failed to send text notification");
-                        }
+                        self.notifier.session_notification(notif).await;
                     }
                     XaiEvent::ResponseId { id } => {
                         current_response_id = Some(id);
@@ -757,9 +761,7 @@ impl agent_client_protocol::Agent for XaiAgent {
                             session_id.clone(),
                             SessionUpdate::ToolCall(tool_call),
                         );
-                        if let Err(e) = nats_client.session_notification(notif).await {
-                            warn!(session_id, error = %e, "xai: failed to send tool call notification");
-                        }
+                        self.notifier.session_notification(notif).await;
                     }
                     XaiEvent::ServerToolCompleted { name } => {
                         // A server-side built-in tool finished on xAI's infrastructure.
@@ -787,10 +789,7 @@ impl agent_client_protocol::Agent for XaiAgent {
                                         .kind(ToolKind::Other),
                                 ),
                             );
-                            if let Err(e) = nats_client.session_notification(notif).await {
-                                warn!(session_id, error = %e,
-                                      "xai: failed to advance search tool call to Completed");
-                            }
+                            self.notifier.session_notification(notif).await;
                         }
                     }
                     XaiEvent::Finished { reason, incomplete_reason } => {
@@ -831,9 +830,7 @@ impl agent_client_protocol::Agent for XaiAgent {
                             session_id.clone(),
                             SessionUpdate::UsageUpdate(UsageUpdate::new(prompt_tokens, 0)),
                         );
-                        if let Err(e) = nats_client.session_notification(notif).await {
-                            warn!(session_id, error = %e, "xai: failed to send usage update");
-                        }
+                        self.notifier.session_notification(notif).await;
                     }
                     XaiEvent::Done => {
                         // Close the lifecycle of every tool call opened this turn.
@@ -857,9 +854,7 @@ impl agent_client_protocol::Agent for XaiAgent {
                                         .kind(ToolKind::Other),
                                 ),
                             );
-                            if let Err(e) = nats_client.session_notification(notif).await {
-                                warn!(session_id, error = %e, "xai: failed to resolve tool call");
-                            }
+                            self.notifier.session_notification(notif).await;
                         }
                         break StopReason::EndTurn;
                     }
@@ -929,9 +924,7 @@ impl agent_client_protocol::Agent for XaiAgent {
                             .kind(ToolKind::Other),
                     ),
                 );
-                if let Err(e) = nats_client.session_notification(notif).await {
-                    warn!(session_id, error = %e, "xai: failed to resolve orphaned tool call");
-                }
+                self.notifier.session_notification(notif).await;
             }
 
             // If the model was cut short, send a follow-up request so it
@@ -1249,7 +1242,7 @@ mod tests {
 }
 
 #[cfg(feature = "test-helpers")]
-impl XaiAgent {
+impl XaiAgent<XaiClient, NatsSessionNotifier> {
     /// Creates an `XaiAgent` backed by a specific NATS KV bucket. For tests only.
     pub async fn new_with_kv_bucket(
         nats: async_nats::Client,
@@ -1305,20 +1298,24 @@ impl XaiAgent {
     ) -> Self {
         Self::new_with_store(nats, acp_prefix, default_model, api_key, store)
     }
+}
 
-    /// Creates an `XaiAgent` backed by an in-memory session store. For tests only.
+#[cfg(feature = "test-helpers")]
+impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
+    /// Creates an `XaiAgent` backed by an in-memory session store, an explicit
+    /// HTTP client, and an explicit session notifier. For tests only.
     pub fn new_in_memory(
-        nats: async_nats::Client,
-        acp_prefix: AcpPrefix,
+        notifier: N,
         default_model: impl Into<String>,
         api_key: impl Into<String>,
+        client: H,
     ) -> Self {
-        Self::new_with_store(
-            nats,
-            acp_prefix,
+        Self::new_with_client_and_store(
+            notifier,
             default_model,
             api_key,
             Box::new(MemorySessionStore::new()),
+            client,
         )
     }
 
