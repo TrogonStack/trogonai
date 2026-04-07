@@ -96,11 +96,7 @@ mod tests {
         m.record_request("ping", 0.0, true);
         m2.record_error("ping", "test");
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
     use opentelemetry::Value;
     use opentelemetry::metrics::MeterProvider;
     use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};

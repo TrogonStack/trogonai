@@ -323,9 +323,10 @@ mod tests {
     /// and must be rejected with `InvalidCharacter`.
     #[test]
     fn acp_prefix_rejects_carriage_return() {
+        use trogon_nats::SubjectTokenViolation;
         let err = AcpPrefix::new("acp\rfoo").err().unwrap();
         assert!(
-            matches!(err, ValidationError::InvalidCharacter("acp_prefix", '\r')),
+            matches!(err.0, SubjectTokenViolation::InvalidCharacter('\r')),
             "expected InvalidCharacter('\\r'), got: {:?}",
             err
         );
@@ -335,9 +336,10 @@ mod tests {
     /// and must be rejected with `InvalidCharacter`.
     #[test]
     fn acp_prefix_rejects_form_feed() {
+        use trogon_nats::SubjectTokenViolation;
         let err = AcpPrefix::new("acp\x0Cfoo").err().unwrap();
         assert!(
-            matches!(err, ValidationError::InvalidCharacter("acp_prefix", '\x0C')),
+            matches!(err.0, SubjectTokenViolation::InvalidCharacter('\x0C')),
             "expected InvalidCharacter('\\x0C'), got: {:?}",
             err
         );
@@ -345,21 +347,22 @@ mod tests {
 
     #[test]
     fn acp_prefix_rejects_unicode_whitespace() {
+        use trogon_nats::SubjectTokenViolation;
         let err = AcpPrefix::new("acp\u{00A0}foo").err().unwrap();
         assert!(
-            matches!(err, ValidationError::InvalidCharacter("acp_prefix", '\u{00A0}')),
+            matches!(err.0, SubjectTokenViolation::InvalidCharacter('\u{00A0}')),
             "expected InvalidCharacter with U+00A0, got: {:?}",
             err
         );
     }
 
-    /// Consecutive dots (`..`) are rejected via `has_consecutive_or_boundary_dots`
-    /// and produce `ValidationError::InvalidCharacter(_, '.')`.
+    /// Consecutive dots (`..`) are rejected via `has_consecutive_or_boundary_dots`.
     #[test]
     fn acp_prefix_consecutive_dots_returns_invalid_character_dot() {
+        use trogon_nats::SubjectTokenViolation;
         let err = AcpPrefix::new("acp..foo").err().unwrap();
         assert!(
-            matches!(err, ValidationError::InvalidCharacter("acp_prefix", '.')),
+            matches!(err.0, SubjectTokenViolation::InvalidCharacter('.')),
             "expected InvalidCharacter('.'), got: {:?}",
             err
         );
