@@ -2,8 +2,73 @@ pub mod github;
 pub mod linear;
 pub mod slack;
 
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::Arc;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+/// Trait for dispatching a named tool call.
+pub trait ToolDispatcher: Send + Sync + 'static {
+    fn dispatch<'a>(
+        &'a self,
+        name: &'a str,
+        input: &'a serde_json::Value,
+    ) -> Pin<Box<dyn Future<Output = String> + Send + 'a>>;
+}
+
+/// Concrete [`ToolDispatcher`] that delegates to the built-in [`dispatch_tool`] function.
+pub struct DefaultToolDispatcher {
+    ctx: Arc<ToolContext>,
+}
+
+impl DefaultToolDispatcher {
+    pub fn new(ctx: Arc<ToolContext>) -> Self {
+        Self { ctx }
+    }
+}
+
+impl ToolDispatcher for DefaultToolDispatcher {
+    fn dispatch<'a>(
+        &'a self,
+        name: &'a str,
+        input: &'a serde_json::Value,
+    ) -> Pin<Box<dyn Future<Output = String> + Send + 'a>> {
+        let ctx = Arc::clone(&self.ctx);
+        let name = name.to_string();
+        let input = input.clone();
+        Box::pin(async move { dispatch_tool(&ctx, &name, &input).await })
+    }
+}
+
+#[cfg(test)]
+pub mod mock {
+    use super::*;
+
+    pub struct MockToolDispatcher {
+        pub response: String,
+    }
+
+    impl MockToolDispatcher {
+        pub fn new(response: impl Into<String>) -> Self {
+            Self {
+                response: response.into(),
+            }
+        }
+    }
+
+    impl ToolDispatcher for MockToolDispatcher {
+        fn dispatch<'a>(
+            &'a self,
+            _name: &'a str,
+            _input: &'a serde_json::Value,
+        ) -> Pin<Box<dyn Future<Output = String> + Send + 'a>> {
+            let resp = self.response.clone();
+            Box::pin(async move { resp })
+        }
+    }
+}
 
 /// Anthropic tool definition sent in every request.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -28,6 +93,36 @@ pub struct ToolContext {
     pub linear_token: String,
     /// Opaque proxy token for the Slack API.
     pub slack_token: String,
+}
+
+/// Trait abstracting the agent's HTTP configuration dependencies.
+///
+/// Implemented by [`ToolContext`] for production use.  Tests can provide a
+/// mock implementation to verify behaviour without real HTTP credentials.
+pub trait AgentConfig: Send + Sync + 'static {
+    fn proxy_url(&self) -> &str;
+    fn github_token(&self) -> &str;
+    fn linear_token(&self) -> &str;
+    fn slack_token(&self) -> &str;
+    fn http_client(&self) -> &reqwest::Client;
+}
+
+impl AgentConfig for ToolContext {
+    fn proxy_url(&self) -> &str {
+        &self.proxy_url
+    }
+    fn github_token(&self) -> &str {
+        &self.github_token
+    }
+    fn linear_token(&self) -> &str {
+        &self.linear_token
+    }
+    fn slack_token(&self) -> &str {
+        &self.slack_token
+    }
+    fn http_client(&self) -> &reqwest::Client {
+        &self.http_client
+    }
 }
 
 /// Build a [`ToolDef`] from name, description and a JSON Schema object.

@@ -271,7 +271,73 @@ where
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::Request;
+    use bytes::Bytes;
     use crate::events::nats_subject_suffix;
+    use crate::store::mock::MockIncidentStore;
+    use hmac::{Hmac, Mac};
+    use sha2::Sha256;
+    use tower::ServiceExt as _;
+    use trogon_nats::jetstream::{MockJetStreamContext, MockJetStreamPublisher};
+
+    type HmacSha256 = Hmac<Sha256>;
+
+    const TEST_SECRET: &str = "inc-test-secret";
+
+    fn compute_sig(secret: &str, body: &[u8]) -> String {
+        let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).unwrap();
+        mac.update(body);
+        hex::encode(mac.finalize().into_bytes())
+    }
+
+    fn test_config() -> IncidentioConfig {
+        IncidentioConfig {
+            webhook_secret: Some(TEST_SECRET.to_string()),
+            api_token: None,
+            port: 0,
+            subject_prefix: "incidentio".to_string(),
+            stream_name: "INCIDENTIO".to_string(),
+            stream_max_age: Duration::from_secs(3600),
+            nats: trogon_nats::NatsConfig::from_env(
+                &trogon_std::env::InMemoryEnv::new(),
+            ),
+        }
+    }
+
+    fn mock_app(
+        publisher: MockJetStreamPublisher,
+        store: MockIncidentStore,
+    ) -> Router {
+        let config = test_config();
+        let state = AppState {
+            js: publisher,
+            incident_store: store,
+            webhook_secret: config.webhook_secret,
+            subject_prefix: config.subject_prefix,
+            ack_timeout: Duration::from_secs(10),
+        };
+        Router::new()
+            .route("/webhook", post(handle_webhook::<MockJetStreamPublisher, MockIncidentStore>))
+            .route("/health", get(handle_health))
+            .route("/incidents", get(list_incidents::<MockJetStreamPublisher, MockIncidentStore>))
+            .route("/incidents/:id", get(get_incident_by_id::<MockJetStreamPublisher, MockIncidentStore>))
+            .with_state(state)
+    }
+
+    fn webhook_request(body: &[u8], sig: Option<&str>) -> Request<Body> {
+        let mut builder = Request::builder()
+            .method("POST")
+            .uri("/webhook")
+            .header("x-incident-delivery", "del-1");
+        if let Some(s) = sig {
+            builder = builder.header("x-incident-signature", s);
+        }
+        builder.body(Body::from(body.to_vec())).unwrap()
+    }
+
+    // ── event_type helpers ────────────────────────────────────────────────────
 
     #[test]
     fn incident_created_subject_suffix() {
@@ -283,5 +349,302 @@ mod tests {
     fn incident_resolved_subject_suffix() {
         let body = br#"{"event_type":"incident.resolved","incident":{"id":"inc-1"}}"#;
         assert_eq!(nats_subject_suffix(body), "incident.resolved");
+    }
+
+    // ── handler tests ─────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn health_returns_200() {
+        let app = mock_app(MockJetStreamPublisher::new(), MockIncidentStore::new());
+        let req = Request::builder()
+            .method("GET")
+            .uri("/health")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn valid_webhook_publishes_and_returns_200() {
+        let publisher = MockJetStreamPublisher::new();
+        let store = MockIncidentStore::new();
+        let app = mock_app(publisher.clone(), store.clone());
+        let body = br#"{"event_type":"incident.created","incident":{"id":"inc-42"}}"#;
+        let sig = compute_sig(TEST_SECRET, body);
+
+        let resp = app
+            .oneshot(webhook_request(body, Some(&sig)))
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let msgs = publisher.published_messages();
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0].subject, "incidentio.incident.created");
+        assert_eq!(msgs[0].payload, Bytes::from(body.as_ref()));
+        // KV store also updated
+        assert!(store.snapshot().contains_key("inc-42"));
+    }
+
+    #[tokio::test]
+    async fn invalid_signature_returns_401_and_does_not_publish() {
+        let publisher = MockJetStreamPublisher::new();
+        let app = mock_app(publisher.clone(), MockIncidentStore::new());
+        let resp = app
+            .oneshot(webhook_request(b"{}", Some("deadbeef")))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        assert!(publisher.published_subjects().is_empty());
+    }
+
+    #[tokio::test]
+    async fn missing_signature_returns_401() {
+        let publisher = MockJetStreamPublisher::new();
+        let app = mock_app(publisher.clone(), MockIncidentStore::new());
+        let resp = app
+            .oneshot(webhook_request(b"{}", None))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        assert!(publisher.published_subjects().is_empty());
+    }
+
+    #[tokio::test]
+    async fn no_secret_accepts_without_signature() {
+        let publisher = MockJetStreamPublisher::new();
+        let state = AppState {
+            js: publisher.clone(),
+            incident_store: MockIncidentStore::new(),
+            webhook_secret: None,
+            subject_prefix: "incidentio".to_string(),
+            ack_timeout: Duration::from_secs(10),
+        };
+        let app = Router::new()
+            .route("/webhook", post(handle_webhook::<MockJetStreamPublisher, MockIncidentStore>))
+            .with_state(state);
+        let body = br#"{"event_type":"incident.updated","incident":{"id":"inc-1"}}"#;
+        let req = Request::builder()
+            .method("POST")
+            .uri("/webhook")
+            .body(Body::from(body.as_ref()))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(publisher.published_subjects(), vec!["incidentio.incident.updated"]);
+    }
+
+    #[tokio::test]
+    async fn publish_failure_returns_500() {
+        let publisher = MockJetStreamPublisher::new();
+        publisher.fail_next_js_publish();
+        let app = mock_app(publisher.clone(), MockIncidentStore::new());
+        let body = b"{}";
+        let sig = compute_sig(TEST_SECRET, body);
+        let resp = app
+            .oneshot(webhook_request(body, Some(&sig)))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn list_incidents_returns_stored_incidents() {
+        let publisher = MockJetStreamPublisher::new();
+        let store = MockIncidentStore::new();
+        let body = br#"{"event_type":"incident.created","incident":{"id":"inc-1","name":"db down"}}"#;
+        let sig = compute_sig(TEST_SECRET, body);
+        let app = mock_app(publisher, store);
+
+        // POST — stores the incident
+        app.clone()
+            .oneshot(webhook_request(body, Some(&sig)))
+            .await
+            .unwrap();
+
+        // GET /incidents — same shared store via Arc
+        let req = Request::builder()
+            .method("GET")
+            .uri("/incidents")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let list: Vec<serde_json::Value> = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0]["incident"]["id"], "inc-1");
+    }
+
+    #[tokio::test]
+    async fn get_incident_by_id_returns_404_when_not_found() {
+        let app = mock_app(MockJetStreamPublisher::new(), MockIncidentStore::new());
+        let req = Request::builder()
+            .method("GET")
+            .uri("/incidents/missing-id")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn get_incident_by_id_returns_stored_incident() {
+        let publisher = MockJetStreamPublisher::new();
+        let store = MockIncidentStore::new();
+        let body = br#"{"event_type":"incident.created","incident":{"id":"inc-7","name":"svc down"}}"#;
+        let sig = compute_sig(TEST_SECRET, body);
+        let app = mock_app(publisher, store);
+
+        // POST — stores the incident
+        app.clone()
+            .oneshot(webhook_request(body, Some(&sig)))
+            .await
+            .unwrap();
+
+        // GET /incidents/inc-7
+        let req = Request::builder()
+            .method("GET")
+            .uri("/incidents/inc-7")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let val: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(val["incident"]["id"], "inc-7");
+    }
+
+    // ── ack error / timeout ───────────────────────────────────────────────────
+
+    mod ack_tests {
+        use super::*;
+        use std::future::Future;
+        use std::pin::Pin;
+        use std::sync::{Arc, Mutex};
+        use trogon_nats::mocks::MockError;
+
+        #[derive(Clone)]
+        enum AckBehavior { Fail, Hang }
+
+        #[derive(Clone)]
+        struct AckFailPublisher { behavior: Arc<Mutex<AckBehavior>> }
+
+        impl AckFailPublisher {
+            fn failing() -> Self { Self { behavior: Arc::new(Mutex::new(AckBehavior::Fail)) } }
+            fn hanging() -> Self { Self { behavior: Arc::new(Mutex::new(AckBehavior::Hang)) } }
+        }
+
+        enum AckFuture { Fail, Hang }
+
+        impl IntoFuture for AckFuture {
+            type Output = Result<async_nats::jetstream::publish::PublishAck, MockError>;
+            type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send>>;
+            fn into_future(self) -> Self::IntoFuture {
+                match self {
+                    AckFuture::Fail => Box::pin(async { Err(MockError("ack error".to_string())) }),
+                    AckFuture::Hang => Box::pin(std::future::pending()),
+                }
+            }
+        }
+
+        impl JetStreamPublisher for AckFailPublisher {
+            type PublishError = MockError;
+            type AckFuture = AckFuture;
+            async fn publish_with_headers<S: async_nats::subject::ToSubject + Send>(
+                &self,
+                _subject: S,
+                _headers: async_nats::HeaderMap,
+                _payload: bytes::Bytes,
+            ) -> Result<AckFuture, MockError> {
+                Ok(match *self.behavior.lock().unwrap() {
+                    AckBehavior::Fail => AckFuture::Fail,
+                    AckBehavior::Hang => AckFuture::Hang,
+                })
+            }
+        }
+
+        fn ack_app(publisher: AckFailPublisher) -> Router {
+            let state = AppState {
+                js: publisher,
+                incident_store: MockIncidentStore::new(),
+                webhook_secret: None,
+                subject_prefix: "incidentio".to_string(),
+                ack_timeout: Duration::from_millis(50),
+            };
+            Router::new()
+                .route("/webhook", post(handle_webhook::<AckFailPublisher, MockIncidentStore>))
+                .with_state(state)
+        }
+
+        fn plain_request() -> Request<Body> {
+            Request::builder()
+                .method("POST")
+                .uri("/webhook")
+                .body(Body::from(b"{}".as_ref()))
+                .unwrap()
+        }
+
+        #[tokio::test]
+        async fn ack_failure_returns_500() {
+            let resp = ack_app(AckFailPublisher::failing())
+                .oneshot(plain_request())
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        }
+
+        #[tokio::test]
+        async fn ack_timeout_returns_500() {
+            let resp = ack_app(AckFailPublisher::hanging())
+                .oneshot(plain_request())
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    // ── serve_impl stream-creation failure ────────────────────────────────────
+
+    #[derive(Clone)]
+    struct TestJs {
+        publisher: MockJetStreamPublisher,
+        context: MockJetStreamContext,
+    }
+
+    impl JetStreamPublisher for TestJs {
+        type PublishError = <MockJetStreamPublisher as JetStreamPublisher>::PublishError;
+        type AckFuture = <MockJetStreamPublisher as JetStreamPublisher>::AckFuture;
+        async fn publish_with_headers<S: async_nats::subject::ToSubject + Send>(
+            &self,
+            subject: S,
+            headers: async_nats::HeaderMap,
+            payload: bytes::Bytes,
+        ) -> Result<Self::AckFuture, Self::PublishError> {
+            self.publisher.publish_with_headers(subject, headers, payload).await
+        }
+    }
+
+    impl JetStreamContext for TestJs {
+        type Error = <MockJetStreamContext as JetStreamContext>::Error;
+        type Stream = <MockJetStreamContext as JetStreamContext>::Stream;
+        async fn get_or_create_stream<S: Into<async_nats::jetstream::stream::Config> + Send>(
+            &self,
+            config: S,
+        ) -> Result<Self::Stream, Self::Error> {
+            self.context.get_or_create_stream(config).await
+        }
+    }
+
+    #[tokio::test]
+    async fn serve_impl_returns_error_when_stream_creation_fails() {
+        let js = TestJs {
+            publisher: MockJetStreamPublisher::new(),
+            context: MockJetStreamContext::new(),
+        };
+        js.context.fail_next();
+        let result = serve_impl(test_config(), js, MockIncidentStore::new()).await;
+        assert!(result.is_err());
     }
 }

@@ -115,32 +115,40 @@ mod tests {
         assert_eq!(comment_tools().len(), 5);
     }
 
-    #[tokio::test]
-    async fn handle_skips_non_created_action() {
-        use crate::agent_loop::AgentLoop;
-        use crate::tools::ToolContext;
+    fn make_agent() -> AgentLoop {
+        use crate::agent_loop::ReqwestAnthropicClient;
+        use crate::flag_client::AlwaysOnFlagClient;
+        use crate::tools::{DefaultToolDispatcher, ToolContext};
         use std::sync::Arc;
-        let agent = AgentLoop {
+        let tool_ctx = Arc::new(ToolContext {
             http_client: reqwest::Client::new(),
             proxy_url: "http://localhost:9999".to_string(),
-            anthropic_token: String::new(),
+            github_token: String::new(),
+            linear_token: String::new(),
+            slack_token: String::new(),
+        });
+        AgentLoop {
+            anthropic_client: Arc::new(ReqwestAnthropicClient::new(
+                reqwest::Client::new(),
+                "http://localhost:9999".to_string(),
+                String::new(),
+            )),
             model: "test".to_string(),
             max_iterations: 1,
-            tool_context: Arc::new(ToolContext {
-                http_client: reqwest::Client::new(),
-                proxy_url: "http://localhost:9999".to_string(),
-                github_token: String::new(),
-                linear_token: String::new(),
-                slack_token: String::new(),
-            }),
+            tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),
+            tool_context: tool_ctx,
             memory_owner: None,
             memory_repo: None,
             memory_path: None,
             mcp_tool_defs: vec![],
             mcp_dispatch: vec![],
-            split_client: None,
+            flag_client: Arc::new(AlwaysOnFlagClient),
             tenant_id: "test".to_string(),
-        };
+        }
+    }
+
+    #[tokio::test]
+    async fn handle_skips_non_created_action() {
         let payload = serde_json::json!({
             "action": "deleted",
             "issue": {"number": 1, "pull_request": {}},
@@ -148,36 +156,10 @@ mod tests {
             "repository": {"owner": {"login": "o"}, "name": "r"}
         });
         assert!(
-            handle(&agent, &serde_json::to_vec(&payload).unwrap())
+            handle(&make_agent(), &serde_json::to_vec(&payload).unwrap())
                 .await
                 .is_none()
         );
-    }
-
-    fn make_agent() -> AgentLoop {
-        use crate::tools::ToolContext;
-        use std::sync::Arc;
-        AgentLoop {
-            http_client: reqwest::Client::new(),
-            proxy_url: "http://localhost:9999".to_string(),
-            anthropic_token: String::new(),
-            model: "test".to_string(),
-            max_iterations: 1,
-            tool_context: Arc::new(ToolContext {
-                http_client: reqwest::Client::new(),
-                proxy_url: "http://localhost:9999".to_string(),
-                github_token: String::new(),
-                linear_token: String::new(),
-                slack_token: String::new(),
-            }),
-            memory_owner: None,
-            memory_repo: None,
-            memory_path: None,
-            mcp_tool_defs: vec![],
-            mcp_dispatch: vec![],
-            split_client: None,
-            tenant_id: "test".to_string(),
-        }
     }
 
     #[tokio::test]

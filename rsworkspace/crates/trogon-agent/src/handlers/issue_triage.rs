@@ -163,99 +163,56 @@ mod tests {
         let bytes = serde_json::to_vec(&payload).unwrap();
 
         // Build a stub AgentLoop (it must never be called for non-create actions).
-        use crate::agent_loop::AgentLoop;
-        use crate::tools::ToolContext;
+        let result = handle(&make_stub_agent(), &bytes).await;
+        assert!(result.is_none(), "update action should be skipped");
+    }
+
+    fn make_stub_agent() -> AgentLoop {
+        use crate::agent_loop::ReqwestAnthropicClient;
+        use crate::flag_client::AlwaysOnFlagClient;
+        use crate::tools::{DefaultToolDispatcher, ToolContext};
         use std::sync::Arc;
-        let agent = AgentLoop {
+        let tool_ctx = Arc::new(ToolContext {
             http_client: reqwest::Client::new(),
             proxy_url: "http://localhost:9999".to_string(),
-            anthropic_token: String::new(),
+            github_token: String::new(),
+            linear_token: String::new(),
+            slack_token: String::new(),
+        });
+        AgentLoop {
+            anthropic_client: Arc::new(ReqwestAnthropicClient::new(
+                reqwest::Client::new(),
+                "http://localhost:9999".to_string(),
+                String::new(),
+            )),
             model: "test".to_string(),
             max_iterations: 1,
-            tool_context: Arc::new(ToolContext {
-                http_client: reqwest::Client::new(),
-                proxy_url: "http://localhost:9999".to_string(),
-                github_token: String::new(),
-                linear_token: String::new(),
-                slack_token: String::new(),
-            }),
+            tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),
+            tool_context: tool_ctx,
             memory_owner: None,
             memory_repo: None,
             memory_path: None,
             mcp_tool_defs: vec![],
             mcp_dispatch: vec![],
-            split_client: None,
+            flag_client: Arc::new(AlwaysOnFlagClient),
             tenant_id: "test".to_string(),
-        };
-
-        let result = handle(&agent, &bytes).await;
-        assert!(result.is_none(), "update action should be skipped");
+        }
     }
 
     #[tokio::test]
     async fn handle_skips_non_issue_type() {
-        use crate::agent_loop::AgentLoop;
-        use crate::tools::ToolContext;
-        use std::sync::Arc;
-        let agent = AgentLoop {
-            http_client: reqwest::Client::new(),
-            proxy_url: "http://localhost:9999".to_string(),
-            anthropic_token: String::new(),
-            model: "test".to_string(),
-            max_iterations: 1,
-            tool_context: Arc::new(ToolContext {
-                http_client: reqwest::Client::new(),
-                proxy_url: "http://localhost:9999".to_string(),
-                github_token: String::new(),
-                linear_token: String::new(),
-                slack_token: String::new(),
-            }),
-            memory_owner: None,
-            memory_repo: None,
-            memory_path: None,
-            mcp_tool_defs: vec![],
-            mcp_dispatch: vec![],
-            split_client: None,
-            tenant_id: "test".to_string(),
-        };
-
         let payload = serde_json::json!({
             "action": "create",
             "type": "Comment",
             "data": { "id": "c1" }
         });
         let bytes = serde_json::to_vec(&payload).unwrap();
-        assert!(handle(&agent, &bytes).await.is_none());
+        assert!(handle(&make_stub_agent(), &bytes).await.is_none());
     }
 
     #[tokio::test]
     async fn handle_returns_error_on_invalid_json() {
-        use crate::agent_loop::AgentLoop;
-        use crate::tools::ToolContext;
-        use std::sync::Arc;
-        let agent = AgentLoop {
-            http_client: reqwest::Client::new(),
-            proxy_url: "http://localhost:9999".to_string(),
-            anthropic_token: String::new(),
-            model: "test".to_string(),
-            max_iterations: 1,
-            tool_context: Arc::new(ToolContext {
-                http_client: reqwest::Client::new(),
-                proxy_url: "http://localhost:9999".to_string(),
-                github_token: String::new(),
-                linear_token: String::new(),
-                slack_token: String::new(),
-            }),
-            memory_owner: None,
-            memory_repo: None,
-            memory_path: None,
-            mcp_tool_defs: vec![],
-            mcp_dispatch: vec![],
-            split_client: None,
-            tenant_id: "test".to_string(),
-        };
-
-        let result = handle(&agent, b"not json").await;
+        let result = handle(&make_stub_agent(), b"not json").await;
         assert!(matches!(result, Some(Err(_))));
     }
 }
