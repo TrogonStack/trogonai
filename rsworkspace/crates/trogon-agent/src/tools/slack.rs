@@ -9,7 +9,7 @@
 
 use serde_json::Value;
 
-use super::{ToolContext, ToolDef, tool_def};
+use super::{HttpClient, ToolContext, ToolDef, tool_def};
 
 /// Return the Slack tool definitions to include in a handler's tool list.
 pub fn slack_tool_defs() -> Vec<ToolDef> {
@@ -42,24 +42,17 @@ pub fn slack_tool_defs() -> Vec<ToolDef> {
 }
 
 /// Send a message to a Slack channel.
-pub async fn send_message(ctx: &ToolContext, input: &Value) -> Result<String, String> {
+pub async fn send_message(ctx: &ToolContext<impl HttpClient>, input: &Value) -> Result<String, String> {
     let channel = input["channel"].as_str().ok_or("missing channel")?;
     let text = input["text"].as_str().ok_or("missing text")?;
 
     let url = format!("{}/slack/chat.postMessage", ctx.proxy_url);
 
-    let response: Value = ctx
-        .http_client
-        .post(&url)
-        .header("Authorization", format!("Bearer {}", ctx.slack_token))
-        .header("Content-Type", "application/json")
-        .json(&serde_json::json!({ "channel": channel, "text": text }))
-        .send()
-        .await
-        .map_err(|e| e.to_string())?
-        .json()
-        .await
-        .map_err(|e| e.to_string())?;
+    let resp = ctx.http_client.post(&url, vec![
+        ("Authorization".to_string(), format!("Bearer {}", ctx.slack_token)),
+        ("Content-Type".to_string(), "application/json".to_string()),
+    ], serde_json::json!({ "channel": channel, "text": text })).await.map_err(|e| e)?;
+    let response: Value = serde_json::from_str(&resp.body).map_err(|e| e.to_string())?;
 
     if response["ok"].as_bool() == Some(true) {
         let ts = response["ts"].as_str().unwrap_or("unknown");
@@ -71,7 +64,7 @@ pub async fn send_message(ctx: &ToolContext, input: &Value) -> Result<String, St
 }
 
 /// Read recent messages from a public Slack channel.
-pub async fn read_channel(ctx: &ToolContext, input: &Value) -> Result<String, String> {
+pub async fn read_channel(ctx: &ToolContext<impl HttpClient>, input: &Value) -> Result<String, String> {
     let channel = input["channel"].as_str().ok_or("missing channel")?;
     let limit = input["limit"].as_u64().unwrap_or(20);
 
@@ -80,16 +73,10 @@ pub async fn read_channel(ctx: &ToolContext, input: &Value) -> Result<String, St
         ctx.proxy_url,
     );
 
-    let response: Value = ctx
-        .http_client
-        .get(&url)
-        .header("Authorization", format!("Bearer {}", ctx.slack_token))
-        .send()
-        .await
-        .map_err(|e| e.to_string())?
-        .json()
-        .await
-        .map_err(|e| e.to_string())?;
+    let resp = ctx.http_client.get(&url, vec![
+        ("Authorization".to_string(), format!("Bearer {}", ctx.slack_token)),
+    ]).await.map_err(|e| e)?;
+    let response: Value = serde_json::from_str(&resp.body).map_err(|e| e.to_string())?;
 
     if response["ok"].as_bool() != Some(true) {
         let error = response["error"].as_str().unwrap_or("unknown error");

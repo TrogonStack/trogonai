@@ -55,13 +55,13 @@ async fn start() -> TestEnv {
     let mock_server = MockServer::start_async().await;
 
     let http_client = reqwest::Client::new();
-    let tool_ctx = Arc::new(ToolContext {
-        http_client: http_client.clone(),
-        proxy_url: mock_server.base_url(),
-        github_token: "tok_github_prod_test01".to_string(),
-        linear_token: "tok_linear_prod_test01".to_string(),
-        slack_token: String::new(),
-    });
+    let tool_ctx = Arc::new(ToolContext::new(
+        http_client.clone(),
+        mock_server.base_url(),
+        "tok_github_prod_test01".to_string(),
+        "tok_linear_prod_test01".to_string(),
+        String::new(),
+    ));
     let agent = Arc::new(AgentLoop {
         anthropic_client: Arc::new(ReqwestAnthropicClient::new(
             http_client,
