@@ -408,7 +408,7 @@ async fn hashicorp_vault_proxy_worker_pipeline_resolves_real_key() {
     let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
 
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(jetstream.context(), "trogon", &outbound_subject)
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
         .expect("Failed to ensure PROXY_REQUESTS stream");
 
