@@ -44,6 +44,16 @@ mod tests {
     }
 
     #[test]
+    fn system_time_returns_recent_epoch() {
+        let clock = SystemClock;
+        let st = clock.system_time();
+        let elapsed = st
+            .duration_since(std::time::SystemTime::UNIX_EPOCH)
+            .expect("system time before UNIX epoch");
+        assert!(elapsed.as_secs() > 1_700_000_000);
+    }
+
+    #[test]
     fn test_generic_function_with_system_clock() {
         fn is_expired<C: GetNow + GetElapsed>(
             clock: &C,

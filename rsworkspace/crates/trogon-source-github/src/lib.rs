@@ -37,7 +37,5 @@ pub mod server;
 pub mod signature;
 
 pub use config::GithubConfig;
-#[cfg(not(coverage))]
-pub use server::{ServeError, serve};
 pub use server::{provision, router};
 pub use signature::SignatureError;

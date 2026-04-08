@@ -1,6 +1,7 @@
 use std::fmt;
 use std::time::Duration;
 
+use crate::config::GitLabWebhookSecret;
 use crate::config::GitlabConfig;
 use crate::constants::{
     HEADER_EVENT, HEADER_EVENT_UUID, HEADER_IDEMPOTENCY_KEY, HEADER_INSTANCE, HEADER_TOKEN,
@@ -8,12 +9,9 @@ use crate::constants::{
     NATS_HEADER_INSTANCE, NATS_HEADER_REJECT_REASON, NATS_HEADER_WEBHOOK_UUID,
 };
 use crate::signature;
-use crate::webhook_secret::WebhookSecret;
-#[cfg(not(coverage))]
-use async_nats::jetstream::context::CreateStreamError;
 use axum::{
     Router, body::Bytes, extract::DefaultBodyLimit, extract::State, http::HeaderMap,
-    http::StatusCode, routing::get, routing::post,
+    http::StatusCode, routing::post,
 };
 use std::future::Future;
 use std::pin::Pin;
@@ -22,41 +20,7 @@ use trogon_nats::NatsToken;
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut, PublishOutcome,
 };
-
-#[cfg(not(coverage))]
-#[derive(Debug)]
-#[non_exhaustive]
-pub enum ServeError {
-    Provision(CreateStreamError),
-    Io(std::io::Error),
-}
-
-#[cfg(not(coverage))]
-impl fmt::Display for ServeError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ServeError::Provision(e) => write!(f, "stream provisioning failed: {e}"),
-            ServeError::Io(e) => write!(f, "server IO error: {e}"),
-        }
-    }
-}
-
-#[cfg(not(coverage))]
-impl std::error::Error for ServeError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            ServeError::Provision(e) => Some(e),
-            ServeError::Io(e) => Some(e),
-        }
-    }
-}
-
-#[cfg(not(coverage))]
-impl From<std::io::Error> for ServeError {
-    fn from(e: std::io::Error) -> Self {
-        ServeError::Io(e)
-    }
-}
+use trogon_std::NonZeroDuration;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RejectReason {
@@ -78,14 +42,14 @@ async fn publish_unroutable<P: JetStreamPublisher, S: ObjectStorePut>(
     subject_prefix: &NatsToken,
     reason: RejectReason,
     body: Bytes,
-    ack_timeout: Duration,
+    ack_timeout: NonZeroDuration,
 ) -> StatusCode {
     let subject = format!("{subject_prefix}.unroutable");
     let mut headers = async_nats::HeaderMap::new();
     headers.insert(NATS_HEADER_REJECT_REASON, reason.as_str());
 
     let outcome = publisher
-        .publish_event(subject, headers, body, ack_timeout)
+        .publish_event(subject, headers, body, ack_timeout.into())
         .await;
     if outcome.is_ok() {
         // Return 200 so GitLab doesn't count this as a failure and
@@ -110,22 +74,22 @@ fn outcome_to_status<E: fmt::Display>(outcome: PublishOutcome<E>) -> StatusCode 
 #[derive(Clone)]
 struct AppState<P: JetStreamPublisher, S: ObjectStorePut> {
     publisher: ClaimCheckPublisher<P, S>,
-    webhook_secret: WebhookSecret,
+    webhook_secret: GitLabWebhookSecret,
     subject_prefix: NatsToken,
-    nats_ack_timeout: Duration,
+    nats_ack_timeout: NonZeroDuration,
 }
 
 pub async fn provision<C: JetStreamContext>(js: &C, config: &GitlabConfig) -> Result<(), C::Error> {
     js.get_or_create_stream(async_nats::jetstream::stream::Config {
         name: config.stream_name.as_str().to_owned(),
         subjects: vec![format!("{}.>", config.subject_prefix)],
-        max_age: config.stream_max_age,
+        max_age: config.stream_max_age.into(),
         ..Default::default()
     })
     .await?;
 
     let stream = config.stream_name.as_str();
-    let max_age_secs = config.stream_max_age.as_secs();
+    let max_age_secs = Duration::from(config.stream_max_age).as_secs();
     info!(stream, max_age_secs, "JetStream stream ready");
     Ok(())
 }
@@ -143,41 +107,8 @@ pub fn router<P: JetStreamPublisher, S: ObjectStorePut>(
 
     Router::new()
         .route("/webhook", post(handle_webhook::<P, S>))
-        .route("/health", get(handle_health))
         .layer(DefaultBodyLimit::max(HTTP_BODY_SIZE_MAX.as_usize()))
         .with_state(state)
-}
-
-#[cfg(not(coverage))]
-pub async fn serve<C, P, S>(
-    context: C,
-    publisher: ClaimCheckPublisher<P, S>,
-    config: GitlabConfig,
-) -> Result<(), ServeError>
-where
-    C: JetStreamContext<Error = CreateStreamError>,
-    P: JetStreamPublisher,
-    S: ObjectStorePut,
-{
-    provision(&context, &config)
-        .await
-        .map_err(ServeError::Provision)?;
-
-    let app = router(publisher, &config);
-    let addr = std::net::SocketAddr::from(([0, 0, 0, 0], config.port));
-    info!(addr = %addr, "GitLab webhook server listening");
-
-    let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app)
-        .with_graceful_shutdown(acp_telemetry::signal::shutdown_signal())
-        .await?;
-
-    info!("GitLab webhook server shut down");
-    Ok(())
-}
-
-async fn handle_health() -> StatusCode {
-    StatusCode::OK
 }
 
 fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
@@ -280,7 +211,7 @@ async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut>(
 
     let outcome = state
         .publisher
-        .publish_event(subject, nats_headers, body, state.nats_ack_timeout)
+        .publish_event(subject, nats_headers, body, state.nats_ack_timeout.into())
         .await;
 
     outcome_to_status(outcome)
@@ -289,10 +220,13 @@ async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
+
     use axum::body::Body;
     use axum::http::Request;
     use tower::ServiceExt;
     use tracing_subscriber::util::SubscriberInitExt;
+    use trogon_nats::jetstream::StreamMaxAge;
     use trogon_nats::jetstream::{
         ClaimCheckPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher,
         MockObjectStore,
@@ -313,13 +247,11 @@ mod tests {
 
     fn test_config() -> GitlabConfig {
         GitlabConfig {
-            webhook_secret: WebhookSecret::new(TEST_SECRET).unwrap(),
-            port: 0,
+            webhook_secret: GitLabWebhookSecret::new(TEST_SECRET).unwrap(),
             subject_prefix: NatsToken::new("gitlab").unwrap(),
             stream_name: NatsToken::new("GITLAB").unwrap(),
-            stream_max_age: Duration::from_secs(3600),
-            nats_ack_timeout: Duration::from_secs(10),
-            nats: trogon_nats::NatsConfig::from_env(&trogon_std::env::InMemoryEnv::new()),
+            stream_max_age: StreamMaxAge::from_secs(3600).unwrap(),
+            nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),
         }
     }
 
@@ -346,28 +278,6 @@ mod tests {
         }
 
         builder.body(Body::from(body.to_vec())).unwrap()
-    }
-
-    #[cfg(not(coverage))]
-    #[test]
-    fn serve_error_display_and_source() {
-        use async_nats::jetstream::context::{CreateStreamError, CreateStreamErrorKind};
-
-        let io_err = ServeError::Io(std::io::Error::new(
-            std::io::ErrorKind::AddrInUse,
-            "port taken",
-        ));
-        assert_eq!(io_err.to_string(), "server IO error: port taken");
-        assert!(std::error::Error::source(&io_err).is_some());
-
-        let prov_err = ServeError::Provision(CreateStreamError::new(
-            CreateStreamErrorKind::EmptyStreamName,
-        ));
-        assert!(prov_err.to_string().contains("stream provisioning failed"));
-        assert!(std::error::Error::source(&prov_err).is_some());
-
-        let io_err: ServeError = std::io::Error::other("boom").into();
-        assert!(matches!(io_err, ServeError::Io(_)));
     }
 
     #[test]
@@ -558,9 +468,9 @@ mod tests {
 
         let state = AppState {
             publisher: wrap_publisher(publisher.clone()),
-            webhook_secret: WebhookSecret::new(TEST_SECRET).unwrap(),
+            webhook_secret: GitLabWebhookSecret::new(TEST_SECRET).unwrap(),
             subject_prefix: NatsToken::new("custom").unwrap(),
-            nats_ack_timeout: Duration::from_secs(10),
+            nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),
         };
 
         let app = Router::new()
@@ -578,21 +488,6 @@ mod tests {
 
         assert_eq!(resp.status(), StatusCode::OK);
         assert_eq!(publisher.published_subjects(), vec!["custom.issues"]);
-    }
-
-    #[tokio::test]
-    async fn health_endpoint_returns_200() {
-        let _guard = tracing_guard();
-        let app = mock_app(MockJetStreamPublisher::new());
-
-        let req = Request::builder()
-            .method("GET")
-            .uri("/health")
-            .body(Body::empty())
-            .unwrap();
-
-        let resp = app.oneshot(req).await.unwrap();
-        assert_eq!(resp.status(), StatusCode::OK);
     }
 
     #[tokio::test]
@@ -617,9 +512,9 @@ mod tests {
 
         let state = AppState {
             publisher: wrap_publisher(publisher.clone()),
-            webhook_secret: WebhookSecret::new(TEST_SECRET).unwrap(),
+            webhook_secret: GitLabWebhookSecret::new(TEST_SECRET).unwrap(),
             subject_prefix: NatsToken::new("gitlab").unwrap(),
-            nats_ack_timeout: Duration::from_secs(10),
+            nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),
         };
 
         let app = Router::new()
@@ -777,9 +672,9 @@ mod tests {
                 "test-bucket".to_string(),
                 MaxPayload::from_server_limit(usize::MAX),
             ),
-            webhook_secret: WebhookSecret::new(TEST_SECRET).unwrap(),
+            webhook_secret: GitLabWebhookSecret::new(TEST_SECRET).unwrap(),
             subject_prefix: NatsToken::new("gitlab").unwrap(),
-            nats_ack_timeout: Duration::from_secs(10),
+            nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),
         };
 
         let app = Router::new()
@@ -810,9 +705,9 @@ mod tests {
                 "test-bucket".to_string(),
                 MaxPayload::from_server_limit(usize::MAX),
             ),
-            webhook_secret: WebhookSecret::new(TEST_SECRET).unwrap(),
+            webhook_secret: GitLabWebhookSecret::new(TEST_SECRET).unwrap(),
             subject_prefix: NatsToken::new("gitlab").unwrap(),
-            nats_ack_timeout: Duration::from_millis(10),
+            nats_ack_timeout: NonZeroDuration::from_millis(10).unwrap(),
         };
 
         let app = Router::new()

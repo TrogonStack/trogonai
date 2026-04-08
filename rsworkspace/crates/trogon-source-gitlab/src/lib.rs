@@ -39,11 +39,6 @@ pub mod config;
 pub mod constants;
 pub mod server;
 pub mod signature;
-pub mod webhook_secret;
-
 pub use config::GitlabConfig;
-#[cfg(not(coverage))]
-pub use server::{ServeError, serve};
 pub use server::{provision, router};
 pub use signature::SignatureError;
-pub use webhook_secret::WebhookSecret;

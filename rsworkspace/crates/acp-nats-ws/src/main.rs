@@ -78,7 +78,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         error!("Connection thread panicked: {e:?}");
     }
 
-    acp_telemetry::shutdown_otel();
+    if let Err(e) = acp_telemetry::shutdown_otel() {
+        error!(error = %e, "OpenTelemetry shutdown failed");
+    }
 
     result.map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
 }
