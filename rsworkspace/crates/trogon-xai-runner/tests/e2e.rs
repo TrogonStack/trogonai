@@ -52,6 +52,7 @@ enum TestResponse {
 /// Parameters recorded for each `chat_stream` call.
 #[derive(Clone)]
 struct HttpCall {
+    pub model: String,
     pub input_len: usize,
     pub previous_response_id: Option<String>,
 }
@@ -88,7 +89,7 @@ impl TestHttpClient {
 impl XaiHttpClient for TestHttpClient {
     async fn chat_stream(
         &self,
-        _model: &str,
+        model: &str,
         input: &[InputItem],
         _api_key: &str,
         _tools: &[String],
@@ -96,6 +97,7 @@ impl XaiHttpClient for TestHttpClient {
         _max_turns: Option<u32>,
     ) -> LocalBoxStream<'static, XaiEvent> {
         self.calls.lock().unwrap().push(HttpCall {
+            model: model.to_string(),
             input_len: input.len(),
             previous_response_id: previous_response_id.map(str::to_string),
         });
@@ -1611,6 +1613,248 @@ async fn fork_first_prompt_replays_full_history() {
             assert_eq!(
                 call.input_len, 3,
                 "input must be: user msg1 + assistant reply + follow-up = 3 items"
+            );
+        })
+        .await;
+}
+
+// ── second authenticate overwrites the first pending key ─────────────────────
+
+// ── close_session: unknown session is a no-op ─────────────────────────────────
+
+/// Closing a session that does not exist must return `Ok` (not an error).
+/// `sessions.remove()` on a missing key is a silent no-op in Rust.
+#[tokio::test]
+async fn close_session_unknown_session_is_noop() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            h.session_req(
+                "acp.session.no-such-session.agent.close",
+                CloseSessionRequest::new("no-such-session"),
+                "r.close",
+            );
+            let payloads = h.expect_n_publishes(1).await;
+            let _: CloseSessionResponse = serde_json::from_slice(&payloads[0]).unwrap();
+        })
+        .await;
+}
+
+// ── prompt: Error event preserves previous ResponseId ────────────────────────
+
+/// Three-turn chain: turn₁ returns a `ResponseId`, turn₂ returns an `Error`
+/// (no new `ResponseId`), turn₃ must still use the cached ID from turn₁.
+/// The guard `if new_response_id.is_some()` must leave the old ID intact on
+/// a stream error.
+#[tokio::test]
+async fn prompt_error_event_preserves_previous_response_id() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+
+            // Turn 1 — gets a ResponseId.
+            h.http.push(vec![
+                XaiEvent::ResponseId { id: "cached-id".to_string() },
+                XaiEvent::Done,
+            ]);
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("q1")]),
+                "r.p1",
+            );
+            h.expect_n_publishes(2).await;
+
+            // Turn 2 — stream error, no new ResponseId emitted.
+            h.http.push(vec![XaiEvent::Error { message: "upstream failure".to_string() }]);
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("q2")]),
+                "r.p2",
+            );
+            h.expect_n_publishes(3).await;
+
+            // Turn 3 — must still use "cached-id" from turn 1.
+            h.http.push(vec![XaiEvent::Done]);
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("q3")]),
+                "r.p3",
+            );
+            h.expect_n_publishes(4).await;
+
+            let call = h.http.last_call().unwrap();
+            assert_eq!(
+                call.previous_response_id.as_deref(),
+                Some("cached-id"),
+                "stream error must not clear the cached ResponseId"
+            );
+            assert_eq!(call.input_len, 1, "ResponseId still valid — only new message sent");
+        })
+        .await;
+}
+
+// ── prompt: no TextDelta → no assistant entry in history ─────────────────────
+
+/// When a turn produces no `TextDelta` events, `assistant_text` is empty and
+/// the `if !assistant_text.is_empty()` guard prevents adding an assistant
+/// message to history. The next prompt must send 2 items (user₁ + user₂),
+/// not 3.
+#[tokio::test]
+async fn prompt_no_text_delta_skips_assistant_history() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+
+            // Turn 1 — no TextDelta, only Done. No assistant entry added to history.
+            h.http.push(vec![XaiEvent::Done]);
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("q1")]),
+                "r.p1",
+            );
+            h.expect_n_publishes(2).await;
+
+            // Turn 2 — must replay history: only user₁ + user₂ = 2 items (no assistant₁).
+            h.http.push(vec![XaiEvent::Done]);
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("q2")]),
+                "r.p2",
+            );
+            h.expect_n_publishes(3).await;
+
+            let call = h.http.last_call().unwrap();
+            assert_eq!(
+                call.previous_response_id, None,
+                "no ResponseId — must replay history"
+            );
+            assert_eq!(
+                call.input_len, 2,
+                "history must contain only user₁ + user₂ (no empty assistant entry)"
+            );
+        })
+        .await;
+}
+
+// ── set_session_mode / set_session_config_option: always succeed ──────────────
+
+/// `set_session_mode` ignores the session ID entirely — it must return `Ok`
+/// even for a non-existent session (intentional "always accept" contract).
+#[tokio::test]
+async fn set_session_mode_unknown_session_succeeds() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            h.session_req(
+                "acp.session.no-such-session.agent.set_mode",
+                SetSessionModeRequest::new("no-such-session", "any-mode"),
+                "r.set_mode",
+            );
+            let payloads = h.expect_n_publishes(1).await;
+            let _: SetSessionModeResponse = serde_json::from_slice(&payloads[0]).unwrap();
+        })
+        .await;
+}
+
+/// `set_session_config_option` also ignores the session ID — same "always
+/// accept" contract as `set_session_mode`.
+#[tokio::test]
+async fn set_session_config_option_unknown_session_succeeds() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            h.session_req(
+                "acp.session.no-such-session.agent.set_config_option",
+                SetSessionConfigOptionRequest::new("no-such-session", "opt", "val"),
+                "r.cfg",
+            );
+            let payloads = h.expect_n_publishes(1).await;
+            let _: SetSessionConfigOptionResponse = serde_json::from_slice(&payloads[0]).unwrap();
+        })
+        .await;
+}
+
+// ── authenticate: empty key does not override the global key ──────────────────
+
+/// Sending `XAI_API_KEY: ""` in the authenticate meta must not overwrite the
+/// existing global key — the `.filter(|s| !s.is_empty())` guard must prevent
+/// it. The subsequent prompt must still succeed using the global key.
+#[tokio::test]
+async fn authenticate_empty_key_does_not_override_global_key() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            // Agent has a valid global key.
+            let h = Harness::new(); // key = "test-key"
+
+            // Authenticate with an empty key — must be ignored.
+            let mut meta = serde_json::Map::new();
+            meta.insert("XAI_API_KEY".to_string(), serde_json::json!(""));
+            h.global(
+                "acp.agent.authenticate",
+                AuthenticateRequest::new("api-key").meta(meta),
+                "r.auth",
+            );
+            h.expect_n_publishes(1).await;
+
+            // Create a session — must pick up the global key, not None.
+            let sid = create_session(&h).await;
+
+            // Prompt must succeed (global key still in effect).
+            h.http.push(vec![XaiEvent::TextDelta { text: "ok".to_string() }, XaiEvent::Done]);
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("hi")]),
+                "r.prompt",
+            );
+            let payloads = h.expect_n_publishes(3).await; // auth + session + prompt
+            let val: serde_json::Value = serde_json::from_slice(&payloads[2]).unwrap();
+            assert!(
+                val.get("code").is_none(),
+                "prompt must succeed — empty authenticate must not clear the global key: {val}"
+            );
+        })
+        .await;
+}
+
+// ── prompt: session model override passed to HTTP client ──────────────────────
+
+/// After `set_session_model`, the overridden model ID must be passed to
+/// `chat_stream` — not the agent's default model.
+#[tokio::test]
+async fn prompt_uses_session_model_override() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new(); // default model = "grok-3"
+            let sid = create_session(&h).await;
+
+            // Override the model for this session.
+            let set_model_subj = format!("acp.session.{sid}.agent.set_model");
+            h.session_req(
+                &set_model_subj,
+                SetSessionModelRequest::new(sid.clone(), "grok-3-mini"),
+                "r.set_model",
+            );
+            h.expect_n_publishes(2).await;
+
+            // Prompt — the HTTP client must receive "grok-3-mini", not "grok-3".
+            h.http.push(vec![XaiEvent::Done]);
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("hello")]),
+                "r.prompt",
+            );
+            h.expect_n_publishes(3).await;
+
+            let call = h.http.last_call().unwrap();
+            assert_eq!(
+                call.model, "grok-3-mini",
+                "set_session_model must cause the overridden model to be used in chat_stream"
             );
         })
         .await;
