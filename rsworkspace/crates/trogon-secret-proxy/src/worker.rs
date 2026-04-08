@@ -8,6 +8,8 @@
 //! 5. Publishes an [`OutboundHttpResponse`] to the Core NATS reply subject.
 //! 6. Acknowledges the JetStream message.
 
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -16,13 +18,89 @@ use async_nats::jetstream::AckKind;
 use async_nats::jetstream::consumer::pull;
 use async_nats::jetstream::consumer::{AckPolicy, DeliverPolicy};
 use futures_util::StreamExt;
-use reqwest::Client as ReqwestClient;
 use trogon_nats::PublishClient;
 use trogon_nats::jetstream::{JetStreamConsumer, JetStreamCreateConsumer, JetStreamGetStream, JsMessageOf};
 use trogon_nats::jetstream::message::{JsAck, JsAckWith, JsMessageRef, JsRequestMessage};
 use trogon_vault::VaultStore;
 
 use crate::messages::{OutboundHttpRequest, OutboundHttpResponse};
+
+/// Upstream HTTP response returned by [`HttpClient::send`].
+pub struct HttpResponse {
+    pub status: u16,
+    pub headers: Vec<(String, String)>,
+    pub body: Vec<u8>,
+}
+
+/// Abstraction over an HTTP client used to forward detokenized requests.
+///
+/// The sole concrete implementation is [`reqwest::Client`]; tests use
+/// `MockHttpClient` to avoid real network I/O.
+pub trait HttpClient: Send + Sync + 'static {
+    fn send(
+        &self,
+        method: &str,
+        url: &str,
+        headers: &[(String, String)],
+        body: &[u8],
+    ) -> Pin<Box<dyn Future<Output = Result<HttpResponse, String>> + Send + '_>>;
+}
+
+impl HttpClient for reqwest::Client {
+    fn send(
+        &self,
+        method: &str,
+        url: &str,
+        headers: &[(String, String)],
+        body: &[u8],
+    ) -> Pin<Box<dyn Future<Output = Result<HttpResponse, String>> + Send + '_>> {
+        let method = method.to_string();
+        let url = url.to_string();
+        let headers = headers.to_vec();
+        let body = body.to_vec();
+        let client = self.clone();
+        Box::pin(async move {
+            let method = method
+                .parse::<reqwest::Method>()
+                .map_err(|e| format!("Invalid HTTP method: {}", e))?;
+
+            let mut builder = client.request(method, &url);
+            for (k, v) in &headers {
+                builder = builder.header(k, v);
+            }
+            if !body.is_empty() {
+                builder = builder.body(body);
+            }
+
+            let upstream_resp = builder
+                .send()
+                .await
+                .map_err(|e| format!("HTTP request failed: {}", e))?;
+
+            let status = upstream_resp.status().as_u16();
+            let resp_headers: Vec<(String, String)> = upstream_resp
+                .headers()
+                .iter()
+                .filter_map(|(k, v)| {
+                    v.to_str()
+                        .ok()
+                        .map(|v_str| (k.as_str().to_string(), v_str.to_string()))
+                })
+                .collect();
+            let body = upstream_resp
+                .bytes()
+                .await
+                .map_err(|e| format!("Failed to read upstream body: {}", e))?
+                .to_vec();
+
+            Ok(HttpResponse {
+                status,
+                headers: resp_headers,
+                body,
+            })
+        })
+    }
+}
 
 const BEARER_PREFIX: &str = "Bearer ";
 
@@ -35,11 +113,11 @@ const HTTP_INITIAL_RETRY_DELAY: Duration = Duration::from_millis(100);
 ///
 /// Pull messages from JetStream, resolve tokens, forward to AI providers.
 /// Runs until the process exits or NATS disconnects.
-pub async fn run<J, N, V>(
+pub async fn run<J, N, V, H>(
     jetstream: J,
     nats: N,
     vault: Arc<V>,
-    http_client: ReqwestClient,
+    http_client: H,
     consumer_name: &str,
     stream_name: &str,
 ) -> Result<(), WorkerError>
@@ -49,6 +127,7 @@ where
     N: PublishClient,
     V: VaultStore + 'static,
     V::Error: std::fmt::Display,
+    H: HttpClient,
 {
     let stream = jetstream
         .get_stream(stream_name)
@@ -141,14 +220,15 @@ where
 }
 
 /// Process a single outbound request: detokenize and call the AI provider.
-async fn process_request<V>(
+async fn process_request<V, H>(
     request: &OutboundHttpRequest,
     vault: &V,
-    http_client: &ReqwestClient,
+    http_client: &H,
 ) -> OutboundHttpResponse
 where
     V: VaultStore,
     V::Error: std::fmt::Display,
+    H: HttpClient,
 {
     let real_key = match resolve_token(vault, &request.headers).await {
         Ok(key) => key,
@@ -245,8 +325,8 @@ where
 /// - 5xx responses from the upstream provider (transient server errors)
 ///
 /// Does **not** retry on 4xx responses (client errors — retrying won't help).
-async fn forward_request_with_retry(
-    http_client: &ReqwestClient,
+async fn forward_request_with_retry<H: HttpClient>(
+    http_client: &H,
     request: &OutboundHttpRequest,
     headers: &[(String, String)],
 ) -> Result<OutboundHttpResponse, String> {
@@ -299,55 +379,18 @@ async fn forward_request_with_retry(
 }
 
 /// Send the HTTP request to the upstream AI provider.
-async fn forward_request(
-    http_client: &ReqwestClient,
+async fn forward_request<H: HttpClient>(
+    http_client: &H,
     request: &OutboundHttpRequest,
     headers: &[(String, String)],
 ) -> Result<OutboundHttpResponse, String> {
-    let method = request
-        .method
-        .parse::<reqwest::Method>()
-        .map_err(|e| format!("Invalid HTTP method: {}", e))?;
-
-    let mut builder = http_client.request(method, &request.url);
-
-    for (k, v) in headers {
-        builder = builder.header(k, v);
-    }
-
-    if !request.body.is_empty() {
-        builder = builder.body(request.body.clone());
-    }
-
-    let upstream_resp = builder
-        .send()
-        .await
-        .map_err(|e| format!("HTTP request failed: {}", e))?;
-
-    let status = upstream_resp.status().as_u16();
-
-    // Collect response headers as an ordered list of (name, value) pairs so
-    // that duplicate headers (e.g. multiple Set-Cookie) are preserved.
-    let resp_headers: Vec<(String, String)> = upstream_resp
-        .headers()
-        .iter()
-        .filter_map(|(k, v)| {
-            v.to_str()
-                .ok()
-                .map(|v_str| (k.as_str().to_string(), v_str.to_string()))
-        })
-        .collect();
-
-    let body = upstream_resp
-        .bytes()
-        .await
-        .map_err(|e| format!("Failed to read upstream body: {}", e))?
-        .to_vec();
-
+    let resp = http_client
+        .send(&request.method, &request.url, headers, &request.body)
+        .await?;
     Ok(OutboundHttpResponse {
-        status,
-        headers: resp_headers,
-        body,
+        status: resp.status,
+        headers: resp.headers,
+        body: resp.body,
         error: None,
     })
 }
@@ -370,6 +413,10 @@ impl std::error::Error for WorkerError {}
 
 #[cfg(test)]
 mod tests {
+    use std::collections::VecDeque;
+    use std::future::Future;
+    use std::pin::Pin;
+    use std::sync::Mutex;
     use std::time::Duration;
 
     use reqwest::Client as ReqwestClient;
@@ -378,9 +425,57 @@ mod tests {
     use crate::messages::OutboundHttpRequest;
 
     use super::{
-        HTTP_INITIAL_RETRY_DELAY, forward_request, forward_request_with_retry, process_request,
-        resolve_token,
+        HTTP_INITIAL_RETRY_DELAY, HttpClient, HttpResponse, forward_request,
+        forward_request_with_retry, process_request, resolve_token,
     };
+
+    // ── MockHttpClient ────────────────────────────────────────────────────────
+
+    /// In-memory mock HTTP client.  Pre-load responses with [`enqueue`] and they
+    /// are returned in FIFO order.  Returns an error when the queue is empty.
+    struct MockHttpClient {
+        responses: Mutex<VecDeque<Result<HttpResponse, String>>>,
+    }
+
+    impl MockHttpClient {
+        fn new() -> Self {
+            Self {
+                responses: Mutex::new(VecDeque::new()),
+            }
+        }
+
+        fn enqueue_ok(&self, status: u16, headers: Vec<(String, String)>, body: Vec<u8>) {
+            self.responses
+                .lock()
+                .unwrap()
+                .push_back(Ok(HttpResponse { status, headers, body }));
+        }
+
+        fn enqueue_err(&self, msg: impl Into<String>) {
+            self.responses
+                .lock()
+                .unwrap()
+                .push_back(Err(msg.into()));
+        }
+    }
+
+    impl HttpClient for MockHttpClient {
+        fn send(
+            &self,
+            _method: &str,
+            _url: &str,
+            _headers: &[(String, String)],
+            _body: &[u8],
+        ) -> Pin<Box<dyn Future<Output = Result<HttpResponse, String>> + Send + '_>> {
+            let result = self
+                .responses
+                .lock()
+                .unwrap()
+                .pop_front()
+                .unwrap_or_else(|| Err("MockHttpClient: no more responses enqueued".to_string()));
+            Box::pin(async move { result })
+        }
+    }
 
     fn make_headers(auth: &str) -> Vec<(String, String)> {
         vec![("Authorization".to_string(), auth.to_string())]
@@ -507,7 +602,65 @@ mod tests {
         assert_eq!(key, "sk-ant-value");
     }
 
-    // ── process_request tests ─────────────────────────────────────────────────
+    // ── MockHttpClient-based process_request tests ────────────────────────────
+
+    /// Happy path using MockHttpClient: verifies that process_request replaces
+    /// the proxy token with the real key and forwards the request, without
+    /// touching a real HTTP server.
+    #[tokio::test]
+    async fn process_request_mock_http_happy_path() {
+        let vault = MemoryVault::new();
+        let token = ApiKeyToken::new("tok_anthropic_prod_mock001").unwrap();
+        vault.store(&token, "sk-ant-mocksecret").await.unwrap();
+
+        let http = MockHttpClient::new();
+        http.enqueue_ok(
+            200,
+            vec![("content-type".to_string(), "application/json".to_string())],
+            br#"{"id":"msg_mock"}"#.to_vec(),
+        );
+
+        let request = make_request("https://api.anthropic.com/v1/messages", "Bearer tok_anthropic_prod_mock001", "idem-mock-001");
+        let resp = process_request(&request, &vault, &http).await;
+
+        assert_eq!(resp.status, 200);
+        assert!(resp.error.is_none());
+    }
+
+    /// When the vault does not contain the token, process_request returns 401
+    /// and MockHttpClient should not be called (queue stays empty → no panic).
+    #[tokio::test]
+    async fn process_request_mock_http_missing_token_returns_401() {
+        let vault = MemoryVault::new(); // empty
+        let http = MockHttpClient::new(); // no responses enqueued
+
+        let request = make_request("https://api.anthropic.com/v1/messages", "Bearer tok_openai_prod_absent1", "idem-mock-002");
+        let resp = process_request(&request, &vault, &http).await;
+
+        assert_eq!(resp.status, 401);
+        assert!(resp.error.is_some());
+        assert!(resp.error.unwrap().contains("not found"));
+    }
+
+    /// When the HTTP client returns an error (transport failure), process_request
+    /// returns a 502 error response.
+    #[tokio::test]
+    async fn process_request_mock_http_transport_error_returns_502() {
+        let vault = MemoryVault::new();
+        let token = ApiKeyToken::new("tok_anthropic_prod_mock003").unwrap();
+        vault.store(&token, "sk-ant-realkey").await.unwrap();
+
+        let http = MockHttpClient::new();
+        http.enqueue_err("HTTP request failed: connection refused");
+
+        let request = make_request("https://api.anthropic.com/v1/messages", "Bearer tok_anthropic_prod_mock003", "idem-mock-003");
+        let resp = process_request(&request, &vault, &http).await;
+
+        assert_eq!(resp.status, 502);
+        assert!(resp.error.is_some());
+    }
+
+    // ── process_request tests (httpmock-based) ────────────────────────────────
 
     /// Happy path: real key replaces token in Authorization, idempotency_key
     /// is forwarded as X-Request-Id. The mock only matches when both headers
