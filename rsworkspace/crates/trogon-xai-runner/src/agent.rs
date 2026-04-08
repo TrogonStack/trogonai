@@ -1363,6 +1363,32 @@ mod tests {
             .unwrap();
     }
 
+    #[tokio::test]
+    async fn prompt_stream_error_preserves_last_response_id() {
+        // When a stream error occurs and no ResponseId event was received,
+        // `new_response_id` stays None. The guard at agent.rs:573 must keep
+        // the old `last_response_id` so the next turn can still use it as
+        // `previous_response_id`.
+        let agent = make_agent();
+        agent
+            .test_insert_session_with_response_id("err2", "/tmp", None, Some("old-resp-id".to_string()))
+            .await;
+        agent.client.push_response(vec![
+            XaiEvent::Error { message: "backend failed".to_string() },
+        ]);
+
+        agent
+            .prompt(PromptRequest::new("err2", vec![ContentBlock::from("hi")]))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            agent.test_last_response_id("err2").await.as_deref(),
+            Some("old-resp-id"),
+            "last_response_id must not be cleared when stream error produced no ResponseId"
+        );
+    }
+
     // ── prompt: no text response → only user in history ──────────────────────
 
     #[tokio::test]
