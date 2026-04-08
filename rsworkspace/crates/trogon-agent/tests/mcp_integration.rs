@@ -19,14 +19,13 @@ use trogon_mcp::{McpCallTool, McpClient};
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 fn make_tool_ctx(proxy_url: &str) -> Arc<ToolContext> {
-    let http_client = reqwest::Client::new();
-    Arc::new(ToolContext {
-        http_client,
-        proxy_url: proxy_url.to_string(),
-        github_token: "tok_github_prod_test01".to_string(),
-        linear_token: "tok_linear_prod_test01".to_string(),
-        slack_token: String::new(),
-    })
+    Arc::new(ToolContext::new(
+        reqwest::Client::new(),
+        proxy_url.to_string(),
+        "tok_github_prod_test01".to_string(),
+        "tok_linear_prod_test01".to_string(),
+        String::new(),
+    ))
 }
 
 fn mcp_tool_def(name: &str, description: &str) -> ToolDef {

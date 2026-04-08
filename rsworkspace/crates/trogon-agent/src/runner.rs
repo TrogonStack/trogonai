@@ -79,7 +79,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
 
     let http_client = reqwest::Client::new();
 
-    let tool_ctx: Arc<ToolContext> = make_tool_context(
+    let tool_ctx: Arc<ToolContext<reqwest::Client>> = make_tool_context(
         http_client.clone(),
         cfg.proxy_url.clone(),
         cfg.github_token.clone(),
@@ -641,15 +641,14 @@ mod tests {
     fn make_agent(proxy_url: &str) -> Arc<crate::agent_loop::AgentLoop> {
         use crate::agent_loop::ReqwestAnthropicClient;
         use crate::flag_client::AlwaysOnFlagClient;
-        use crate::tools::DefaultToolDispatcher;
+        use crate::tools::{DefaultToolDispatcher, ToolContext};
         let http_client = reqwest::Client::new();
-        let tool_ctx = Arc::new(crate::tools::ToolContext {
-            http_client: http_client.clone(),
-            proxy_url: proxy_url.to_string(),
-            github_token: "tok_github_prod_test01".to_string(),
-            linear_token: String::new(),
-            slack_token: String::new(),
-        });
+        let tool_ctx = Arc::new(ToolContext::for_test(
+            proxy_url,
+            "tok_github_prod_test01",
+            "",
+            "",
+        ));
         Arc::new(crate::agent_loop::AgentLoop {
             anthropic_client: Arc::new(ReqwestAnthropicClient::new(
                 http_client,

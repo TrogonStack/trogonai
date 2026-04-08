@@ -30,6 +30,7 @@ use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::
 use trogon_agent::{AgentConfig, run};
 use trogon_automations::{Automation, AutomationStore, Visibility};
 use trogon_nats::{NatsAuth, NatsConfig};
+use trogon_nats::jetstream::NatsJetStreamClient;
 use trogon_secret_proxy::{
     proxy::{ProxyState, router},
     stream, subjects, worker,
@@ -95,7 +96,7 @@ async fn publish_datadog_alert(nats_port: u16) {
 
 async fn start_proxy_and_worker(
     nats: &async_nats::Client,
-    js: Arc<jetstream::Context>,
+    js: NatsJetStreamClient,
     mock_base_url: String,
     vault: Arc<MemoryVault>,
     worker_name: &'static str,
@@ -110,7 +111,7 @@ async fn start_proxy_and_worker(
 
     let proxy_state = ProxyState {
         nats: nats.clone(),
-        jetstream: Arc::clone(&js),
+        jetstream: js.clone(),
         prefix: "trogon".to_string(),
         outbound_subject: outbound_subject.clone(),
         worker_timeout: Duration::from_secs(15),
@@ -124,7 +125,7 @@ async fn start_proxy_and_worker(
         .timeout(Duration::from_secs(15))
         .build()
         .unwrap();
-    let wjs = Arc::clone(&js);
+    let wjs = js.clone();
     let wnats = nats.clone();
     let wstream = stream::stream_name("trogon");
     tokio::spawn(async move {
@@ -211,7 +212,7 @@ async fn split_auth_token_is_forwarded_to_evaluator() {
     let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
         .await
         .unwrap();
-    let js = Arc::new(jetstream::new(nats.clone()));
+    let js = NatsJetStreamClient::new(jetstream::new(nats.clone()));
     let vault = Arc::new(MemoryVault::new());
     vault
         .store(
@@ -222,7 +223,7 @@ async fn split_auth_token_is_forwarded_to_evaluator() {
         .unwrap();
     let proxy_port = start_proxy_and_worker(
         &nats,
-        Arc::clone(&js),
+        js.clone(),
         mock_server.base_url(),
         Arc::clone(&vault),
         "auth-token-worker",
@@ -288,7 +289,7 @@ async fn handler_skipped_when_evaluator_returns_500() {
     let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
         .await
         .unwrap();
-    let js = Arc::new(jetstream::new(nats.clone()));
+    let js = NatsJetStreamClient::new(jetstream::new(nats.clone()));
     let vault = Arc::new(MemoryVault::new());
     vault
         .store(
@@ -299,7 +300,7 @@ async fn handler_skipped_when_evaluator_returns_500() {
         .unwrap();
     let proxy_port = start_proxy_and_worker(
         &nats,
-        Arc::clone(&js),
+        js.clone(),
         mock_server.base_url(),
         Arc::clone(&vault),
         "eval-500-worker",
@@ -352,7 +353,7 @@ async fn handler_skipped_for_custom_variant_treatment() {
     let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
         .await
         .unwrap();
-    let js = Arc::new(jetstream::new(nats.clone()));
+    let js = NatsJetStreamClient::new(jetstream::new(nats.clone()));
     let vault = Arc::new(MemoryVault::new());
     vault
         .store(
@@ -363,7 +364,7 @@ async fn handler_skipped_for_custom_variant_treatment() {
         .unwrap();
     let proxy_port = start_proxy_and_worker(
         &nats,
-        Arc::clone(&js),
+        js.clone(),
         mock_server.base_url(),
         Arc::clone(&vault),
         "custom-variant-worker",
@@ -415,7 +416,7 @@ async fn alert_handler_skipped_when_flag_is_off() {
     let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
         .await
         .unwrap();
-    let js = Arc::new(jetstream::new(nats.clone()));
+    let js = NatsJetStreamClient::new(jetstream::new(nats.clone()));
 
     let vault = Arc::new(MemoryVault::new());
     vault
@@ -428,7 +429,7 @@ async fn alert_handler_skipped_when_flag_is_off() {
 
     let proxy_port = start_proxy_and_worker(
         &nats,
-        Arc::clone(&js),
+        js.clone(),
         mock_server.base_url(),
         Arc::clone(&vault),
         "flag-off-worker",
@@ -483,7 +484,7 @@ async fn alert_handler_runs_when_flag_is_on() {
     let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
         .await
         .unwrap();
-    let js = Arc::new(jetstream::new(nats.clone()));
+    let js = NatsJetStreamClient::new(jetstream::new(nats.clone()));
 
     let vault = Arc::new(MemoryVault::new());
     vault
@@ -496,7 +497,7 @@ async fn alert_handler_runs_when_flag_is_on() {
 
     let proxy_port = start_proxy_and_worker(
         &nats,
-        Arc::clone(&js),
+        js.clone(),
         mock_server.base_url(),
         Arc::clone(&vault),
         "flag-on-worker",
@@ -549,7 +550,7 @@ async fn handler_skipped_when_evaluator_is_unreachable() {
     let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
         .await
         .unwrap();
-    let js = Arc::new(jetstream::new(nats.clone()));
+    let js = NatsJetStreamClient::new(jetstream::new(nats.clone()));
 
     let vault = Arc::new(MemoryVault::new());
     vault
@@ -562,7 +563,7 @@ async fn handler_skipped_when_evaluator_is_unreachable() {
 
     let proxy_port = start_proxy_and_worker(
         &nats,
-        Arc::clone(&js),
+        js.clone(),
         mock_server.base_url(),
         Arc::clone(&vault),
         "flag-dead-worker",
@@ -615,7 +616,7 @@ async fn fail_open_when_split_evaluator_not_configured() {
     let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
         .await
         .unwrap();
-    let js = Arc::new(jetstream::new(nats.clone()));
+    let js = NatsJetStreamClient::new(jetstream::new(nats.clone()));
 
     let vault = Arc::new(MemoryVault::new());
     vault
@@ -628,7 +629,7 @@ async fn fail_open_when_split_evaluator_not_configured() {
 
     let proxy_port = start_proxy_and_worker(
         &nats,
-        Arc::clone(&js),
+        js.clone(),
         mock_server.base_url(),
         Arc::clone(&vault),
         "fail-open-worker",
@@ -655,7 +656,7 @@ async fn fail_open_when_split_evaluator_not_configured() {
 /// Helper: register a `datadog.alert` automation in the NATS KV store so the
 /// runner takes the `dispatch_automations` path (where `MemoryEnabled` is checked).
 async fn register_datadog_automation(js: &jetstream::Context) {
-    let store = AutomationStore::open(&Arc::new(js.clone())).await.unwrap();
+    let store = AutomationStore::open(js).await.unwrap();
     let auto = Automation {
         id: "mem-test-auto".to_string(),
         tenant_id: "default".to_string(),
@@ -716,7 +717,7 @@ async fn memory_fetch_skipped_when_flag_is_off() {
     let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
         .await
         .unwrap();
-    let js = Arc::new(jetstream::new(nats.clone()));
+    let js = NatsJetStreamClient::new(jetstream::new(nats.clone()));
 
     let vault = Arc::new(MemoryVault::new());
     vault
@@ -729,14 +730,14 @@ async fn memory_fetch_skipped_when_flag_is_off() {
 
     let proxy_port = start_proxy_and_worker(
         &nats,
-        Arc::clone(&js),
+        js.clone(),
         mock_server.base_url(),
         Arc::clone(&vault),
         "mem-off-worker",
     )
     .await;
 
-    register_datadog_automation(&js).await;
+    register_datadog_automation(js.context()).await;
 
     let cfg = agent_config_with_memory(
         nats_port,
@@ -807,7 +808,7 @@ async fn memory_content_included_when_flag_is_on() {
     let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
         .await
         .unwrap();
-    let js = Arc::new(jetstream::new(nats.clone()));
+    let js = NatsJetStreamClient::new(jetstream::new(nats.clone()));
 
     let vault = Arc::new(MemoryVault::new());
     vault
@@ -827,14 +828,14 @@ async fn memory_content_included_when_flag_is_on() {
 
     let proxy_port = start_proxy_and_worker(
         &nats,
-        Arc::clone(&js),
+        js.clone(),
         mock_server.base_url(),
         Arc::clone(&vault),
         "mem-on-worker",
     )
     .await;
 
-    register_datadog_automation(&js).await;
+    register_datadog_automation(js.context()).await;
 
     let cfg = agent_config_with_memory(
         nats_port,
@@ -924,14 +925,14 @@ macro_rules! flag_tests {
                 .await;
 
             let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}")).await.unwrap();
-            let js = Arc::new(jetstream::new(nats.clone()));
+            let js = NatsJetStreamClient::new(jetstream::new(nats.clone()));
             let vault = Arc::new(MemoryVault::new());
             vault
                 .store(&ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(), "sk-ant-realkey")
                 .await
                 .unwrap();
             let proxy_port = start_proxy_and_worker(
-                &nats, Arc::clone(&js), mock_server.base_url(),
+                &nats, js.clone(), mock_server.base_url(),
                 Arc::clone(&vault), concat!(stringify!($off_name), "-worker"),
             )
             .await;
@@ -969,14 +970,14 @@ macro_rules! flag_tests {
                 .await;
 
             let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}")).await.unwrap();
-            let js = Arc::new(jetstream::new(nats.clone()));
+            let js = NatsJetStreamClient::new(jetstream::new(nats.clone()));
             let vault = Arc::new(MemoryVault::new());
             vault
                 .store(&ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(), "sk-ant-realkey")
                 .await
                 .unwrap();
             let proxy_port = start_proxy_and_worker(
-                &nats, Arc::clone(&js), mock_server.base_url(),
+                &nats, js.clone(), mock_server.base_url(),
                 Arc::clone(&vault), concat!(stringify!($on_name), "-worker"),
             )
             .await;

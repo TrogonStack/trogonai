@@ -108,13 +108,7 @@ mod tests {
         use crate::flag_client::AlwaysOnFlagClient;
         use crate::tools::{DefaultToolDispatcher, ToolContext};
         use std::sync::Arc;
-        let tool_ctx = Arc::new(ToolContext {
-            http_client: reqwest::Client::new(),
-            proxy_url: proxy_url.to_string(),
-            github_token: String::new(),
-            linear_token: String::new(),
-            slack_token: String::new(),
-        });
+        let tool_ctx = Arc::new(ToolContext::for_test(proxy_url, "", "", ""));
         AgentLoop {
             anthropic_client: Arc::new(ReqwestAnthropicClient::new(
                 reqwest::Client::new(),
@@ -223,13 +217,13 @@ mod tests {
         use crate::tools::{DefaultToolDispatcher, ToolContext};
         use std::sync::Arc;
         let http_client = reqwest::Client::new();
-        let tool_ctx = Arc::new(ToolContext {
-            http_client: http_client.clone(),
-            proxy_url: server.base_url(),
-            github_token: "tok_github_prod_test01".to_string(),
-            linear_token: String::new(),
-            slack_token: String::new(),
-        });
+        let tool_ctx = Arc::new(ToolContext::new(
+            http_client.clone(),
+            server.base_url(),
+            "tok_github_prod_test01".to_string(),
+            String::new(),
+            String::new(),
+        ));
         let agent = AgentLoop {
             anthropic_client: Arc::new(ReqwestAnthropicClient::new(
                 http_client,

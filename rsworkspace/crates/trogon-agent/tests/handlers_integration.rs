@@ -18,13 +18,13 @@ use trogon_agent::{
 
 fn make_agent(proxy_url: &str) -> AgentLoop {
     let http_client = reqwest::Client::new();
-    let tool_ctx = Arc::new(ToolContext {
-        http_client: http_client.clone(),
-        proxy_url: proxy_url.to_string(),
-        github_token: "tok_github_prod_test01".to_string(),
-        linear_token: "tok_linear_prod_test01".to_string(),
-        slack_token: String::new(),
-    });
+    let tool_ctx = Arc::new(ToolContext::new(
+        http_client.clone(),
+        proxy_url.to_string(),
+        "tok_github_prod_test01".to_string(),
+        "tok_linear_prod_test01".to_string(),
+        String::new(),
+    ));
     AgentLoop {
         anthropic_client: Arc::new(ReqwestAnthropicClient::new(
             http_client,

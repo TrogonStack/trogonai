@@ -662,13 +662,7 @@ mod tests {
         use std::sync::Arc;
 
         let http = reqwest::Client::new();
-        let tool_ctx = Arc::new(ToolContext {
-            http_client: http.clone(),
-            proxy_url: "http://127.0.0.1:1".to_string(),
-            github_token: String::new(),
-            linear_token: String::new(),
-            slack_token: String::new(),
-        });
+        let tool_ctx = Arc::new(ToolContext::for_test("http://127.0.0.1:1", "", "", ""));
 
         let flag_client: Arc<dyn crate::flag_client::FeatureFlagClient> = match split_client {
             Some(c) => Arc::new(SplitFlagClient::new(c)),
