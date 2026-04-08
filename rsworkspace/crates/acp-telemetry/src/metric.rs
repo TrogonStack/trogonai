@@ -32,12 +32,13 @@ pub(crate) fn force_flush() {
     }
 }
 
-pub(crate) fn shutdown() {
+pub(crate) fn shutdown() -> Result<(), String> {
     if let Some(provider) = METER_PROVIDER.get()
         && let Err(e) = provider.shutdown()
     {
-        eprintln!("Failed to shutdown meter provider: {e}");
+        return Err(format!("failed to shutdown meter provider: {e}"));
     }
+    Ok(())
 }
 
 #[cfg(test)]

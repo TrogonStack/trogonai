@@ -4,6 +4,7 @@ pub mod client;
 pub mod message;
 pub mod object_store;
 pub mod publish;
+pub mod stream_max_age;
 pub mod traits;
 
 #[cfg(feature = "test-support")]
@@ -26,6 +27,7 @@ pub use message::{
 pub use object_store::NatsObjectStore;
 pub use object_store::{ObjectStoreGet, ObjectStorePut};
 pub use publish::{PublishOutcome, publish_event};
+pub use stream_max_age::StreamMaxAge;
 pub use traits::{
     JetStreamConsumer, JetStreamContext, JetStreamCreateConsumer, JetStreamGetStream,
     JetStreamPublisher, JsMessageOf,

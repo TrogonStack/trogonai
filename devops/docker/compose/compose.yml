@@ -17,156 +17,63 @@ services:
       start_period: 5s
       retries: 3
 
-  trogon-source-github:
+  trogon-gateway:
     build:
       context: ../../../rsworkspace
-      dockerfile: ../devops/docker/compose/services/trogon-source-github/Dockerfile
+      dockerfile: ../devops/docker/compose/services/trogon-gateway/Dockerfile
     environment:
       NATS_URL: "nats:4222"
-      GITHUB_WEBHOOK_SECRET: "${GITHUB_WEBHOOK_SECRET:-}"
-      GITHUB_WEBHOOK_PORT: "${GITHUB_WEBHOOK_PORT:-8080}"
-      GITHUB_SUBJECT_PREFIX: "${GITHUB_SUBJECT_PREFIX:-github}"
-      GITHUB_STREAM_NAME: "${GITHUB_STREAM_NAME:-GITHUB}"
-      GITHUB_STREAM_MAX_AGE_SECS: "${GITHUB_STREAM_MAX_AGE_SECS:-604800}"
-      GITHUB_NATS_ACK_TIMEOUT_SECS: "${GITHUB_NATS_ACK_TIMEOUT_SECS:-10}"
       RUST_LOG: "${RUST_LOG:-info}"
-    depends_on:
-      nats:
-        condition: service_healthy
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:${GITHUB_WEBHOOK_PORT:-8080}/health"]
-      interval: 10s
-      timeout: 3s
-      start_period: 10s
-      retries: 3
+      TROGON_GATEWAY_PORT: "${TROGON_GATEWAY_PORT:-8080}"
 
-  trogon-source-linear:
-    build:
-      context: ../../../rsworkspace
-      dockerfile: ../devops/docker/compose/services/trogon-source-linear/Dockerfile
-    environment:
-      NATS_URL: "nats:4222"
-      LINEAR_WEBHOOK_SECRET: "${LINEAR_WEBHOOK_SECRET}"
-      LINEAR_WEBHOOK_PORT: "${LINEAR_WEBHOOK_PORT:-8080}"
-      LINEAR_SUBJECT_PREFIX: "${LINEAR_SUBJECT_PREFIX:-linear}"
-      LINEAR_STREAM_NAME: "${LINEAR_STREAM_NAME:-LINEAR}"
-      LINEAR_STREAM_MAX_AGE_SECS: "${LINEAR_STREAM_MAX_AGE_SECS:-604800}"
-      LINEAR_WEBHOOK_TIMESTAMP_TOLERANCE_SECS: "${LINEAR_WEBHOOK_TIMESTAMP_TOLERANCE_SECS:-60}"
-      LINEAR_NATS_ACK_TIMEOUT_MS: "${LINEAR_NATS_ACK_TIMEOUT_MS:-10000}"
-      RUST_LOG: "${RUST_LOG:-info}"
-    depends_on:
-      nats:
-        condition: service_healthy
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:${LINEAR_WEBHOOK_PORT:-8080}/health"]
-      interval: 10s
-      timeout: 3s
-      start_period: 10s
-      retries: 3
+      TROGON_SOURCE_GITHUB_WEBHOOK_SECRET: "${TROGON_SOURCE_GITHUB_WEBHOOK_SECRET:-}"
+      TROGON_SOURCE_GITHUB_SUBJECT_PREFIX: "${TROGON_SOURCE_GITHUB_SUBJECT_PREFIX:-github}"
+      TROGON_SOURCE_GITHUB_STREAM_NAME: "${TROGON_SOURCE_GITHUB_STREAM_NAME:-GITHUB}"
+      TROGON_SOURCE_GITHUB_STREAM_MAX_AGE_SECS: "${TROGON_SOURCE_GITHUB_STREAM_MAX_AGE_SECS:-604800}"
+      TROGON_SOURCE_GITHUB_NATS_ACK_TIMEOUT_SECS: "${TROGON_SOURCE_GITHUB_NATS_ACK_TIMEOUT_SECS:-10}"
 
-  trogon-source-discord:
-    build:
-      context: ../../../rsworkspace
-      dockerfile: ../devops/docker/compose/services/trogon-source-discord/Dockerfile
-    environment:
-      NATS_URL: "nats:4222"
-      DISCORD_MODE: "${DISCORD_MODE:-gateway}"
-      DISCORD_BOT_TOKEN: "${DISCORD_BOT_TOKEN:-}"
-      DISCORD_GATEWAY_INTENTS: "${DISCORD_GATEWAY_INTENTS:-}"
-      DISCORD_PUBLIC_KEY: "${DISCORD_PUBLIC_KEY:-}"
-      DISCORD_WEBHOOK_PORT: "${DISCORD_WEBHOOK_PORT:-8080}"
-      DISCORD_SUBJECT_PREFIX: "${DISCORD_SUBJECT_PREFIX:-discord}"
-      DISCORD_STREAM_NAME: "${DISCORD_STREAM_NAME:-DISCORD}"
-      DISCORD_STREAM_MAX_AGE_SECS: "${DISCORD_STREAM_MAX_AGE_SECS:-604800}"
-      DISCORD_NATS_ACK_TIMEOUT_SECS: "${DISCORD_NATS_ACK_TIMEOUT_SECS:-10}"
-      DISCORD_NATS_REQUEST_TIMEOUT_SECS: "${DISCORD_NATS_REQUEST_TIMEOUT_SECS:-2}"
-      DISCORD_MAX_BODY_SIZE: "${DISCORD_MAX_BODY_SIZE:-4194304}"
-      RUST_LOG: "${RUST_LOG:-info}"
-    depends_on:
-      nats:
-        condition: service_healthy
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:${DISCORD_WEBHOOK_PORT:-8080}/health"]
-      interval: 10s
-      timeout: 3s
-      start_period: 10s
-      retries: 3
-    profiles:
-      - discord
+      TROGON_SOURCE_DISCORD_MODE: "${TROGON_SOURCE_DISCORD_MODE:-}"
+      TROGON_SOURCE_DISCORD_BOT_TOKEN: "${TROGON_SOURCE_DISCORD_BOT_TOKEN:-}"
+      TROGON_SOURCE_DISCORD_GATEWAY_INTENTS: "${TROGON_SOURCE_DISCORD_GATEWAY_INTENTS:-}"
+      TROGON_SOURCE_DISCORD_PUBLIC_KEY: "${TROGON_SOURCE_DISCORD_PUBLIC_KEY:-}"
+      TROGON_SOURCE_DISCORD_SUBJECT_PREFIX: "${TROGON_SOURCE_DISCORD_SUBJECT_PREFIX:-discord}"
+      TROGON_SOURCE_DISCORD_STREAM_NAME: "${TROGON_SOURCE_DISCORD_STREAM_NAME:-DISCORD}"
+      TROGON_SOURCE_DISCORD_STREAM_MAX_AGE_SECS: "${TROGON_SOURCE_DISCORD_STREAM_MAX_AGE_SECS:-604800}"
+      TROGON_SOURCE_DISCORD_NATS_ACK_TIMEOUT_SECS: "${TROGON_SOURCE_DISCORD_NATS_ACK_TIMEOUT_SECS:-10}"
+      TROGON_SOURCE_DISCORD_NATS_REQUEST_TIMEOUT_SECS: "${TROGON_SOURCE_DISCORD_NATS_REQUEST_TIMEOUT_SECS:-2}"
 
-  trogon-source-gitlab:
-    build:
-      context: ../../../rsworkspace
-      dockerfile: ../devops/docker/compose/services/trogon-source-gitlab/Dockerfile
-    environment:
-      NATS_URL: "nats:4222"
-      GITLAB_WEBHOOK_SECRET: "${GITLAB_WEBHOOK_SECRET:-}"
-      GITLAB_WEBHOOK_PORT: "${GITLAB_WEBHOOK_PORT:-8080}"
-      GITLAB_SUBJECT_PREFIX: "${GITLAB_SUBJECT_PREFIX:-gitlab}"
-      GITLAB_STREAM_NAME: "${GITLAB_STREAM_NAME:-GITLAB}"
-      GITLAB_STREAM_MAX_AGE_SECS: "${GITLAB_STREAM_MAX_AGE_SECS:-604800}"
-      GITLAB_NATS_ACK_TIMEOUT_MS: "${GITLAB_NATS_ACK_TIMEOUT_MS:-10000}"
-      RUST_LOG: "${RUST_LOG:-info}"
-    depends_on:
-      nats:
-        condition: service_healthy
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:${GITLAB_WEBHOOK_PORT:-8080}/health"]
-      interval: 10s
-      timeout: 3s
-      start_period: 10s
-      retries: 3
+      TROGON_SOURCE_SLACK_SIGNING_SECRET: "${TROGON_SOURCE_SLACK_SIGNING_SECRET:-}"
+      TROGON_SOURCE_SLACK_SUBJECT_PREFIX: "${TROGON_SOURCE_SLACK_SUBJECT_PREFIX:-slack}"
+      TROGON_SOURCE_SLACK_STREAM_NAME: "${TROGON_SOURCE_SLACK_STREAM_NAME:-SLACK}"
+      TROGON_SOURCE_SLACK_STREAM_MAX_AGE_SECS: "${TROGON_SOURCE_SLACK_STREAM_MAX_AGE_SECS:-604800}"
+      TROGON_SOURCE_SLACK_NATS_ACK_TIMEOUT_SECS: "${TROGON_SOURCE_SLACK_NATS_ACK_TIMEOUT_SECS:-10}"
+      TROGON_SOURCE_SLACK_TIMESTAMP_MAX_DRIFT_SECS: "${TROGON_SOURCE_SLACK_TIMESTAMP_MAX_DRIFT_SECS:-300}"
 
-  trogon-source-telegram:
-    build:
-      context: ../../../rsworkspace
-      dockerfile: ../devops/docker/compose/services/trogon-source-telegram/Dockerfile
-    environment:
-      NATS_URL: "nats:4222"
-      TELEGRAM_WEBHOOK_SECRET: "${TELEGRAM_WEBHOOK_SECRET}"
-      TELEGRAM_SOURCE_PORT: "${TELEGRAM_SOURCE_PORT:-8080}"
-      TELEGRAM_SUBJECT_PREFIX: "${TELEGRAM_SUBJECT_PREFIX:-telegram}"
-      TELEGRAM_STREAM_NAME: "${TELEGRAM_STREAM_NAME:-TELEGRAM}"
-      TELEGRAM_STREAM_MAX_AGE_SECS: "${TELEGRAM_STREAM_MAX_AGE_SECS:-604800}"
-      TELEGRAM_NATS_ACK_TIMEOUT_SECS: "${TELEGRAM_NATS_ACK_TIMEOUT_SECS:-10}"
-      TELEGRAM_MAX_BODY_SIZE: "${TELEGRAM_MAX_BODY_SIZE:-10485760}"
-      RUST_LOG: "${RUST_LOG:-info}"
-    depends_on:
-      nats:
-        condition: service_healthy
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:${TELEGRAM_SOURCE_PORT:-8080}/health"]
-      interval: 10s
-      timeout: 3s
-      start_period: 10s
-      retries: 3
+      TROGON_SOURCE_TELEGRAM_WEBHOOK_SECRET: "${TROGON_SOURCE_TELEGRAM_WEBHOOK_SECRET:-}"
+      TROGON_SOURCE_TELEGRAM_SUBJECT_PREFIX: "${TROGON_SOURCE_TELEGRAM_SUBJECT_PREFIX:-telegram}"
+      TROGON_SOURCE_TELEGRAM_STREAM_NAME: "${TROGON_SOURCE_TELEGRAM_STREAM_NAME:-TELEGRAM}"
+      TROGON_SOURCE_TELEGRAM_STREAM_MAX_AGE_SECS: "${TROGON_SOURCE_TELEGRAM_STREAM_MAX_AGE_SECS:-604800}"
+      TROGON_SOURCE_TELEGRAM_NATS_ACK_TIMEOUT_SECS: "${TROGON_SOURCE_TELEGRAM_NATS_ACK_TIMEOUT_SECS:-10}"
 
-  trogon-source-slack:
-    build:
-      context: ../../../rsworkspace
-      dockerfile: ../devops/docker/compose/services/trogon-source-slack/Dockerfile
-    environment:
-      NATS_URL: "nats:4222"
-      SLACK_SIGNING_SECRET: "${SLACK_SIGNING_SECRET:-}"
-      SLACK_WEBHOOK_PORT: "${SLACK_WEBHOOK_PORT:-3000}"
-      SLACK_SUBJECT_PREFIX: "${SLACK_SUBJECT_PREFIX:-slack}"
-      SLACK_STREAM_NAME: "${SLACK_STREAM_NAME:-SLACK}"
-      SLACK_STREAM_MAX_AGE_SECS: "${SLACK_STREAM_MAX_AGE_SECS:-604800}"
-      SLACK_NATS_ACK_TIMEOUT_SECS: "${SLACK_NATS_ACK_TIMEOUT_SECS:-10}"
-      SLACK_TIMESTAMP_MAX_DRIFT_SECS: "${SLACK_TIMESTAMP_MAX_DRIFT_SECS:-300}"
-      RUST_LOG: "${RUST_LOG:-info}"
+      TROGON_SOURCE_GITLAB_WEBHOOK_SECRET: "${TROGON_SOURCE_GITLAB_WEBHOOK_SECRET:-}"
+      TROGON_SOURCE_GITLAB_SUBJECT_PREFIX: "${TROGON_SOURCE_GITLAB_SUBJECT_PREFIX:-gitlab}"
+      TROGON_SOURCE_GITLAB_STREAM_NAME: "${TROGON_SOURCE_GITLAB_STREAM_NAME:-GITLAB}"
+      TROGON_SOURCE_GITLAB_STREAM_MAX_AGE_SECS: "${TROGON_SOURCE_GITLAB_STREAM_MAX_AGE_SECS:-604800}"
+      TROGON_SOURCE_GITLAB_NATS_ACK_TIMEOUT_SECS: "${TROGON_SOURCE_GITLAB_NATS_ACK_TIMEOUT_SECS:-10}"
+
+      TROGON_SOURCE_LINEAR_WEBHOOK_SECRET: "${TROGON_SOURCE_LINEAR_WEBHOOK_SECRET:-}"
+      TROGON_SOURCE_LINEAR_SUBJECT_PREFIX: "${TROGON_SOURCE_LINEAR_SUBJECT_PREFIX:-linear}"
+      TROGON_SOURCE_LINEAR_STREAM_NAME: "${TROGON_SOURCE_LINEAR_STREAM_NAME:-LINEAR}"
+      TROGON_SOURCE_LINEAR_STREAM_MAX_AGE_SECS: "${TROGON_SOURCE_LINEAR_STREAM_MAX_AGE_SECS:-604800}"
+      TROGON_SOURCE_LINEAR_NATS_ACK_TIMEOUT_SECS: "${TROGON_SOURCE_LINEAR_NATS_ACK_TIMEOUT_SECS:-10}"
+      TROGON_SOURCE_LINEAR_TIMESTAMP_TOLERANCE_SECS: "${TROGON_SOURCE_LINEAR_TIMESTAMP_TOLERANCE_SECS:-60}"
     depends_on:
       nats:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:${SLACK_WEBHOOK_PORT:-3000}/health"]
-      interval: 10s
+      test: ["CMD", "curl", "-sf", "http://localhost:${TROGON_GATEWAY_PORT:-8080}/-/liveness"]
+      interval: 5s
       timeout: 3s
       start_period: 10s
       retries: 3
@@ -175,12 +82,7 @@ services:
     image: ngrok/ngrok:alpine
     environment:
       NGROK_AUTHTOKEN: "${NGROK_AUTHTOKEN:-}"
-      DISCORD_ADDR: "trogon-source-discord:${DISCORD_WEBHOOK_PORT:-8080}"
-      GITHUB_ADDR: "trogon-source-github:${GITHUB_WEBHOOK_PORT:-8080}"
-      GITLAB_ADDR: "trogon-source-gitlab:${GITLAB_WEBHOOK_PORT:-8080}"
-      LINEAR_ADDR: "trogon-source-linear:${LINEAR_WEBHOOK_PORT:-8080}"
-      SLACK_ADDR: "trogon-source-slack:${SLACK_WEBHOOK_PORT:-3000}"
-      TELEGRAM_ADDR: "trogon-source-telegram:${TELEGRAM_SOURCE_PORT:-8080}"
+      GATEWAY_ADDR: "trogon-gateway:${TROGON_GATEWAY_PORT:-8080}"
     entrypoint:
       - /bin/sh
       - -c
@@ -188,39 +90,13 @@ services:
         cat > /tmp/ngrok.yml <<EOF
         version: 3
         tunnels:
-          discord:
-            addr: $${DISCORD_ADDR}
-            proto: http
-          github:
-            addr: $${GITHUB_ADDR}
-            proto: http
-          gitlab:
-            addr: $${GITLAB_ADDR}
-            proto: http
-          linear:
-            addr: $${LINEAR_ADDR}
-            proto: http
-          slack:
-            addr: $${SLACK_ADDR}
-            proto: http
-          telegram:
-            addr: $${TELEGRAM_ADDR}
+          gateway:
+            addr: $${GATEWAY_ADDR}
             proto: http
         EOF
         exec ngrok start --all --config /tmp/ngrok.yml
     depends_on:
-      trogon-source-discord:
-        condition: service_healthy
-        required: false
-      trogon-source-github:
-        condition: service_healthy
-      trogon-source-gitlab:
-        condition: service_healthy
-      trogon-source-linear:
-        condition: service_healthy
-      trogon-source-slack:
-        condition: service_healthy
-      trogon-source-telegram:
+      trogon-gateway:
         condition: service_healthy
     restart: unless-stopped
     profiles:

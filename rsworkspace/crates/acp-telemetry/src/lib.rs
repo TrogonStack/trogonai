@@ -19,6 +19,23 @@ use tracing_subscriber::util::SubscriberInitExt;
 use trogon_std::env::ReadEnv;
 use trogon_std::fs::{CreateDirAll, OpenAppendFile};
 
+#[derive(Debug)]
+pub struct TelemetryShutdownError {
+    errors: Vec<String>,
+}
+
+impl std::fmt::Display for TelemetryShutdownError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "failed to shutdown OpenTelemetry providers:")?;
+        for error in &self.errors {
+            writeln!(f, "  - {error}")?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for TelemetryShutdownError {}
+
 fn try_open_log_file<F: CreateDirAll + OpenAppendFile>(
     service_name: ServiceName,
     env: &impl ReadEnv,
@@ -145,16 +162,29 @@ fn try_init_otel(
     Ok((tracer_provider, meter_provider, logger_provider))
 }
 
-pub fn shutdown_otel() {
+pub fn shutdown_otel() -> Result<(), TelemetryShutdownError> {
     tracing::info!("Shutting down OpenTelemetry providers");
 
     trace::force_flush();
     metric::force_flush();
     log::force_flush();
 
-    trace::shutdown();
-    metric::shutdown();
-    log::shutdown();
+    let mut errors = Vec::new();
+    if let Err(e) = trace::shutdown() {
+        errors.push(e);
+    }
+    if let Err(e) = metric::shutdown() {
+        errors.push(e);
+    }
+    if let Err(e) = log::shutdown() {
+        errors.push(e);
+    }
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(TelemetryShutdownError { errors })
+    }
 }
 
 pub fn meter(name: &'static str) -> opentelemetry::metrics::Meter {

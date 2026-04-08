@@ -27,11 +27,11 @@
 pub mod config;
 pub mod constants;
 pub mod gateway;
+#[cfg(not(coverage))]
+pub mod gateway_runner;
 pub mod server;
 pub mod signature;
 
 pub use config::{DiscordConfig, SourceMode};
-#[cfg(not(coverage))]
-pub use server::{ServeError, serve};
 pub use server::{provision, router};
 pub use signature::SignatureError;
