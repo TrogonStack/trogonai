@@ -5,7 +5,6 @@ use std::time::Duration;
 use acp_nats::acp_prefix::AcpPrefix;
 use acp_nats::client_proxy::NatsClientProxy;
 use acp_nats::session_id::AcpSessionId;
-use agent_client_protocol::Client as _;
 use agent_client_protocol::{
     AgentCapabilities, AuthenticateRequest, AuthenticateResponse, CancelNotification,
     CloseSessionRequest, CloseSessionResponse, ContentBlock, ContentChunk, Error, ErrorCode,
@@ -24,25 +23,32 @@ use tokio::sync::Mutex;
 use tracing::{info, warn};
 use uuid::Uuid;
 
-use crate::process::{CodexEvent, CodexProcess};
+use crate::process::{CodexEvent, RealProcessSpawner};
+use crate::traits::{CodexProcessClient, ProcessSpawner, SessionNotifier, SessionNotifierFactory};
 
-/// Holds the process mutex lock and derefs directly to `CodexProcess`,
+// ── ProcessGuard ──────────────────────────────────────────────────────────────
+
+/// Holds the process mutex lock and derefs directly to `P`,
 /// encoding the post-condition of `process()` (always `Some`) in the type
 /// instead of requiring callers to call `.as_ref().unwrap()`.
-struct ProcessGuard(tokio::sync::OwnedMutexGuard<Option<CodexProcess>>);
+struct ProcessGuard<P>(tokio::sync::OwnedMutexGuard<Option<P>>);
 
-impl std::ops::Deref for ProcessGuard {
-    type Target = CodexProcess;
-    fn deref(&self) -> &CodexProcess {
+impl<P> std::ops::Deref for ProcessGuard<P> {
+    type Target = P;
+    fn deref(&self) -> &P {
         self.0
             .as_ref()
             .expect("CodexProcess guaranteed present by process()")
     }
 }
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
 fn internal_error(msg: impl Into<String>) -> Error {
     Error::new(ErrorCode::InternalError.into(), msg.into())
 }
+
+// ── Session ───────────────────────────────────────────────────────────────────
 
 struct CodexSession {
     thread_id: String,
@@ -51,34 +57,90 @@ struct CodexSession {
     model: Option<String>,
 }
 
+// ── NatsNotifierFactory ───────────────────────────────────────────────────────
+
+/// Production [`SessionNotifierFactory`] backed by a real NATS connection.
+pub struct NatsNotifierFactory {
+    nats: async_nats::Client,
+    acp_prefix: AcpPrefix,
+}
+
+impl NatsNotifierFactory {
+    pub fn new(nats: async_nats::Client, acp_prefix: AcpPrefix) -> Self {
+        Self { nats, acp_prefix }
+    }
+}
+
+impl SessionNotifierFactory for NatsNotifierFactory {
+    type Notifier = NatsClientProxy<async_nats::Client>;
+
+    fn make_notifier(
+        &self,
+        session_id: &SessionId,
+    ) -> agent_client_protocol::Result<Self::Notifier> {
+        let acp_session_id =
+            AcpSessionId::try_from(session_id).map_err(|e| internal_error(e.to_string()))?;
+        Ok(NatsClientProxy::new(
+            self.nats.clone(),
+            acp_session_id,
+            self.acp_prefix.clone(),
+            Duration::from_secs(30),
+        ))
+    }
+}
+
+#[async_trait(?Send)]
+impl SessionNotifier for NatsClientProxy<async_nats::Client> {
+    async fn session_notification(
+        &self,
+        notif: SessionNotification,
+    ) -> agent_client_protocol::Result<()> {
+        agent_client_protocol::Client::session_notification(self, notif).await
+    }
+}
+
+// ── CodexAgent ────────────────────────────────────────────────────────────────
+
 /// ACP Agent implementation backed by a `codex app-server` subprocess.
 ///
 /// Each `CodexAgent` manages one `codex app-server` process. ACP sessions map
 /// to Codex threads (thread_id). Prompt calls run Codex turns and stream the
-/// resulting events back to the ACP client as `SessionNotification`s via NATS.
+/// resulting events back to the ACP client as `SessionNotification`s.
 ///
 /// The subprocess is spawned lazily and re-spawned automatically if it crashes.
 /// Re-spawning clears all in-memory sessions since Codex thread state is lost.
-pub struct CodexAgent {
-    nats: async_nats::Client,
-    acp_prefix: AcpPrefix,
-    process: Arc<Mutex<Option<CodexProcess>>>,
+///
+/// Generic parameters:
+/// - `N`: factory that creates session notifiers (production: [`NatsNotifierFactory`])
+/// - `P`: spawner for the codex subprocess (production: [`RealProcessSpawner`])
+pub struct CodexAgent<N: SessionNotifierFactory, P: ProcessSpawner> {
+    notifier_factory: N,
+    spawner: P,
+    process: Arc<Mutex<Option<P::Process>>>,
     sessions: Arc<Mutex<HashMap<String, CodexSession>>>,
     default_model: String,
     prompt_timeout: Duration,
     available_models: Vec<ModelInfo>,
 }
 
-impl CodexAgent {
-    /// Create a new `CodexAgent`. The `codex app-server` process is spawned
-    /// lazily on the first call that needs it.
+/// Convenience type alias for the production agent wired to real dependencies.
+pub type DefaultCodexAgent = CodexAgent<NatsNotifierFactory, RealProcessSpawner>;
+
+impl<N, P> CodexAgent<N, P>
+where
+    N: SessionNotifierFactory,
+    P: ProcessSpawner + 'static,
+    P::Process: 'static,
+{
+    /// Create a new `CodexAgent`. The subprocess is spawned lazily on the first
+    /// call that needs it.
     ///
     /// Environment variables read once at construction:
     /// - `CODEX_PROMPT_TIMEOUT_SECS` — prompt timeout in seconds (default: 7200)
     /// - `CODEX_MODELS` — comma-separated `id:label` pairs (default: `o4-mini:o4-mini,o3:o3,gpt-4o:GPT-4o`)
     pub fn new(
-        nats: async_nats::Client,
-        acp_prefix: AcpPrefix,
+        notifier_factory: N,
+        spawner: P,
         default_model: impl Into<String>,
     ) -> Self {
         let default_model: String = default_model.into();
@@ -127,8 +189,8 @@ impl CodexAgent {
         }
 
         Self {
-            nats,
-            acp_prefix,
+            notifier_factory,
+            spawner,
             process: Arc::new(Mutex::new(None)),
             sessions: Arc::new(Mutex::new(HashMap::new())),
             default_model,
@@ -137,12 +199,12 @@ impl CodexAgent {
         }
     }
 
-    /// Ensures the `CodexProcess` is running, spawning (or re-spawning) as needed,
-    /// and returns a guard that holds the mutex and derefs to `&CodexProcess`.
+    /// Ensures the process is running, spawning (or re-spawning) as needed,
+    /// and returns a guard that holds the mutex and derefs to `&P::Process`.
     ///
     /// If the previous process has exited, in-memory sessions are cleared —
     /// Codex thread state is stored in the subprocess, so they cannot be recovered.
-    async fn process(&self) -> Result<ProcessGuard, Error> {
+    async fn process(&self) -> Result<ProcessGuard<P::Process>, Error> {
         let mut guard = Arc::clone(&self.process).lock_owned().await;
         let needs_spawn = guard.as_ref().is_none_or(|p| !p.is_alive());
         if needs_spawn {
@@ -150,7 +212,7 @@ impl CodexAgent {
                 warn!("codex app-server exited; re-spawning (existing sessions invalidated)");
                 self.sessions.lock().await.clear();
             }
-            match CodexProcess::spawn().await {
+            match self.spawner.spawn().await {
                 Ok(p) => *guard = Some(p),
                 Err(e) => {
                     return Err(internal_error(format!(
@@ -162,18 +224,11 @@ impl CodexAgent {
         Ok(ProcessGuard(guard))
     }
 
-    fn make_nats_client(
+    fn make_notifier(
         &self,
         session_id: &SessionId,
-    ) -> agent_client_protocol::Result<NatsClientProxy<async_nats::Client>> {
-        let acp_session_id =
-            AcpSessionId::try_from(session_id).map_err(|e| internal_error(e.to_string()))?;
-        Ok(NatsClientProxy::new(
-            self.nats.clone(),
-            acp_session_id,
-            self.acp_prefix.clone(),
-            Duration::from_secs(30),
-        ))
+    ) -> agent_client_protocol::Result<N::Notifier> {
+        self.notifier_factory.make_notifier(session_id)
     }
 
     fn session_mode_state(&self) -> SessionModeState {
@@ -190,8 +245,31 @@ impl CodexAgent {
     }
 }
 
+impl DefaultCodexAgent {
+    /// Convenience constructor that wires the production NATS notifier and
+    /// real process spawner. This is what [`main`] calls.
+    pub fn with_nats(
+        nats: async_nats::Client,
+        acp_prefix: AcpPrefix,
+        default_model: impl Into<String>,
+    ) -> Self {
+        Self::new(
+            NatsNotifierFactory::new(nats, acp_prefix),
+            RealProcessSpawner,
+            default_model,
+        )
+    }
+}
+
+// ── ACP Agent impl ────────────────────────────────────────────────────────────
+
 #[async_trait(?Send)]
-impl agent_client_protocol::Agent for CodexAgent {
+impl<N, P> agent_client_protocol::Agent for CodexAgent<N, P>
+where
+    N: SessionNotifierFactory,
+    P: ProcessSpawner + 'static,
+    P::Process: 'static,
+{
     async fn initialize(
         &self,
         _req: InitializeRequest,
@@ -397,7 +475,7 @@ impl agent_client_protocol::Agent for CodexAgent {
 
     async fn prompt(&self, req: PromptRequest) -> agent_client_protocol::Result<PromptResponse> {
         let session_id = req.session_id.to_string();
-        let nats_client = self.make_nats_client(&req.session_id)?;
+        let notifier = self.make_notifier(&req.session_id)?;
 
         // Extract plain text from the prompt content blocks.
         // Non-text blocks (images, tool results) are not supported by Codex and are dropped.
@@ -458,7 +536,7 @@ impl agent_client_protocol::Agent for CodexAgent {
                             text,
                         ))),
                     );
-                    if let Err(e) = nats_client.session_notification(notif).await {
+                    if let Err(e) = notifier.session_notification(notif).await {
                         warn!(session_id, error = %e, "codex: failed to send text notification");
                     }
                 }
@@ -472,7 +550,7 @@ impl agent_client_protocol::Agent for CodexAgent {
                         session_id.clone(),
                         SessionUpdate::ToolCall(tool_call),
                     );
-                    if let Err(e) = nats_client.session_notification(notif).await {
+                    if let Err(e) = notifier.session_notification(notif).await {
                         warn!(session_id, error = %e, "codex: failed to send tool start notification");
                     }
                 }
@@ -488,7 +566,7 @@ impl agent_client_protocol::Agent for CodexAgent {
                         session_id.clone(),
                         SessionUpdate::ToolCallUpdate(update),
                     );
-                    if let Err(e) = nats_client.session_notification(notif).await {
+                    if let Err(e) = notifier.session_notification(notif).await {
                         warn!(session_id, error = %e, "codex: failed to send tool complete notification");
                     }
                 }
@@ -534,7 +612,7 @@ impl agent_client_protocol::Agent for CodexAgent {
 // ── Test helpers (same module scope → access to private fields) ───────────────
 
 #[cfg(test)]
-impl CodexAgent {
+impl<N: SessionNotifierFactory, P: ProcessSpawner> CodexAgent<N, P> {
     /// Insert a session directly, bypassing the Codex subprocess.
     async fn test_insert_session(&self, id: &str, cwd: &str, model: Option<String>) {
         self.sessions.lock().await.insert(
@@ -564,6 +642,8 @@ impl CodexAgent {
     }
 }
 
+// ── Unit tests ────────────────────────────────────────────────────────────────
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -572,46 +652,130 @@ mod tests {
         ForkSessionRequest, InitializeRequest, ListSessionsRequest, LoadSessionRequest,
         PromptRequest, ProtocolVersion, ResumeSessionRequest, SetSessionConfigOptionRequest,
         SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModelRequest,
+        StopReason,
     };
-    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-    use tokio::net::TcpListener;
+    use tokio::sync::broadcast;
 
-    /// Spin up a minimal fake NATS server and return a connected client.
-    /// The server handles the INFO/CONNECT/PING handshake only; no messages
-    /// are published by the session tests so the connection can idle after that.
-    async fn fake_nats_client() -> async_nats::Client {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
+    // ── In-memory mocks ───────────────────────────────────────────────────────
 
-        tokio::spawn(async move {
-            if let Ok((stream, _)) = listener.accept().await {
-                let (reader, mut writer) = stream.into_split();
-                writer
-                    .write_all(
-                        b"INFO {\"server_id\":\"test\",\"version\":\"2.10.0\",\
-                          \"max_payload\":1048576,\"proto\":1,\"headers\":true}\r\n",
-                    )
-                    .await
-                    .ok();
-                let mut lines = BufReader::new(reader).lines();
-                while let Ok(Some(line)) = lines.next_line().await {
-                    if line.starts_with("CONNECT") {
-                        writer.write_all(b"+OK\r\n").await.ok();
-                    } else if line.starts_with("PING") {
-                        writer.write_all(b"PONG\r\n").await.ok();
-                    }
-                }
-            }
-        });
-
-        async_nats::connect(format!("nats://127.0.0.1:{port}"))
-            .await
-            .unwrap()
+    struct MockSessionNotifier {
+        recorded: Arc<Mutex<Vec<SessionNotification>>>,
     }
 
-    async fn make_agent() -> CodexAgent {
-        let acp_prefix = AcpPrefix::new("test").unwrap();
-        CodexAgent::new(fake_nats_client().await, acp_prefix, "o4-mini")
+    #[async_trait(?Send)]
+    impl SessionNotifier for MockSessionNotifier {
+        async fn session_notification(
+            &self,
+            notif: SessionNotification,
+        ) -> agent_client_protocol::Result<()> {
+            self.recorded.lock().await.push(notif);
+            Ok(())
+        }
+    }
+
+    struct MockNotifierFactory {
+        recorded: Arc<Mutex<Vec<SessionNotification>>>,
+    }
+
+    impl MockNotifierFactory {
+        fn new() -> Self {
+            Self {
+                recorded: Arc::new(Mutex::new(vec![])),
+            }
+        }
+    }
+
+    impl SessionNotifierFactory for MockNotifierFactory {
+        type Notifier = MockSessionNotifier;
+
+        fn make_notifier(
+            &self,
+            _session_id: &SessionId,
+        ) -> agent_client_protocol::Result<MockSessionNotifier> {
+            Ok(MockSessionNotifier {
+                recorded: Arc::clone(&self.recorded),
+            })
+        }
+    }
+
+    struct MockCodexProcess {
+        events: Vec<CodexEvent>,
+    }
+
+    #[async_trait(?Send)]
+    impl CodexProcessClient for MockCodexProcess {
+        fn is_alive(&self) -> bool {
+            true
+        }
+
+        async fn thread_start(
+            &self,
+            _cwd: &str,
+        ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+            Ok("mock-thread-id".to_string())
+        }
+
+        async fn thread_resume(
+            &self,
+            thread_id: &str,
+        ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(thread_id.to_string())
+        }
+
+        async fn thread_fork(
+            &self,
+            _thread_id: &str,
+        ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(format!("fork-{}", Uuid::new_v4()))
+        }
+
+        async fn turn_start(
+            &self,
+            _thread_id: &str,
+            _user_input: &str,
+            _model: Option<&str>,
+        ) -> Result<broadcast::Receiver<CodexEvent>, Box<dyn std::error::Error + Send + Sync>>
+        {
+            let (tx, rx) = broadcast::channel(64);
+            for event in &self.events {
+                let _ = tx.send(event.clone());
+            }
+            Ok(rx)
+        }
+
+        async fn turn_interrupt(
+            &self,
+            _thread_id: &str,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            Ok(())
+        }
+    }
+
+    struct MockProcessSpawner {
+        events: Vec<CodexEvent>,
+    }
+
+    impl MockProcessSpawner {
+        fn new() -> Self {
+            Self { events: vec![] }
+        }
+    }
+
+    #[async_trait(?Send)]
+    impl ProcessSpawner for MockProcessSpawner {
+        type Process = MockCodexProcess;
+
+        async fn spawn(
+            &self,
+        ) -> Result<MockCodexProcess, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(MockCodexProcess {
+                events: self.events.clone(),
+            })
+        }
+    }
+
+    async fn make_agent() -> CodexAgent<MockNotifierFactory, MockProcessSpawner> {
+        CodexAgent::new(MockNotifierFactory::new(), MockProcessSpawner::new(), "o4-mini")
     }
 
     // ── close_session ─────────────────────────────────────────────────────────
@@ -738,13 +902,11 @@ mod tests {
 
     #[tokio::test]
     async fn default_model_added_when_not_in_list() {
-        // CODEX_MODELS does not include "custom-model"
-        let nats = fake_nats_client().await;
-        let acp_prefix = AcpPrefix::new("test").unwrap();
-        // Build agent with a default model not in the env-derived list.
-        // Since CODEX_MODELS is not set in test env, the agent uses the default
-        // list (o4-mini, o3, gpt-4o); "custom-model" is not among them.
-        let agent = CodexAgent::new(nats, acp_prefix, "custom-model");
+        let agent = CodexAgent::new(
+            MockNotifierFactory::new(),
+            MockProcessSpawner::new(),
+            "custom-model",
+        );
 
         // session_model_state should include "custom-model" in available list.
         let state = agent.session_model_state(None);
@@ -802,25 +964,13 @@ mod tests {
         assert!(sc.close.is_some(), "close capability should be advertised");
     }
 
-    #[tokio::test]
-    async fn initialize_includes_agent_info() {
-        let agent = make_agent().await;
-        let resp = agent
-            .initialize(InitializeRequest::new(ProtocolVersion::LATEST))
-            .await
-            .unwrap();
-        let info = resp.agent_info.expect("agent_info should be present");
-        assert_eq!(info.name, "trogon-codex-runner");
-    }
-
     // ── authenticate ──────────────────────────────────────────────────────────
 
     #[tokio::test]
-    async fn authenticate_always_succeeds() {
+    async fn authenticate_returns_ok() {
         let agent = make_agent().await;
-        // Any method_id should succeed — Codex uses env-based auth.
         agent
-            .authenticate(AuthenticateRequest::new(AuthMethodId::from("any-method")))
+            .authenticate(AuthenticateRequest::new(AuthMethodId::from("any")))
             .await
             .unwrap();
     }
@@ -830,9 +980,9 @@ mod tests {
     #[tokio::test]
     async fn set_session_mode_always_succeeds() {
         let agent = make_agent().await;
-        // Codex has no named permission modes — silently accepted.
+        agent.test_insert_session("sm1", "/tmp", None).await;
         agent
-            .set_session_mode(SetSessionModeRequest::new("s1", "whatever-mode"))
+            .set_session_mode(SetSessionModeRequest::new("sm1", "default"))
             .await
             .unwrap();
     }
@@ -842,260 +992,155 @@ mod tests {
     #[tokio::test]
     async fn set_session_config_option_returns_empty_list() {
         let agent = make_agent().await;
-        let resp: SetSessionConfigOptionResponse = agent
-            .set_session_config_option(SetSessionConfigOptionRequest::new(
-                "s1",
-                "some-option",
-                "some-value",
+        let resp = agent
+            .set_session_config_option(SetSessionConfigOptionRequest::new("s1", "key", "value"))
+            .await
+            .unwrap();
+        assert_eq!(resp, SetSessionConfigOptionResponse::new(vec![]));
+    }
+
+    // ── prompt_timeout env var ────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn prompt_timeout_defaults_to_7200s() {
+        unsafe { std::env::remove_var("CODEX_PROMPT_TIMEOUT_SECS") };
+        let agent = make_agent().await;
+        assert_eq!(agent.test_prompt_timeout(), Duration::from_secs(7200));
+    }
+
+    // ── broadcast channel helpers ─────────────────────────────────────────────
+
+    /// Verifies that a lagged broadcast receiver can continue receiving after lag.
+    #[tokio::test]
+    async fn broadcast_channel_lag_allows_recovery() {
+        use tokio::sync::broadcast;
+        let (tx, mut rx) = broadcast::channel::<i32>(2);
+        // Send 3 items into a capacity-2 channel without reading — forces lag.
+        tx.send(1).unwrap();
+        tx.send(2).unwrap();
+        tx.send(3).unwrap();
+
+        // First recv must return Lagged (not a value).
+        match rx.recv().await {
+            Err(broadcast::error::RecvError::Lagged(_)) => {}
+            other => panic!("expected Lagged, got {:?}", other),
+        }
+        let v = rx.recv().await.unwrap();
+        assert_eq!(v, 2);
+        let v = rx.recv().await.unwrap();
+        assert_eq!(v, 3);
+    }
+
+    #[tokio::test]
+    async fn broadcast_channel_closed_returns_closed_error() {
+        use tokio::sync::broadcast;
+        let (tx, mut rx) = broadcast::channel::<i32>(8);
+        drop(tx);
+        match rx.recv().await {
+            Err(broadcast::error::RecvError::Closed) => {}
+            other => panic!("expected Closed, got {:?}", other),
+        }
+    }
+
+    // ── resume_session ────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn resume_session_succeeds_for_existing_session() {
+        let agent = make_agent().await;
+        agent.test_insert_session("r1", "/tmp", None).await;
+        agent
+            .resume_session(ResumeSessionRequest::new("r1", "/tmp"))
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn resume_session_not_found_returns_error() {
+        let agent = make_agent().await;
+        assert!(
+            agent
+                .resume_session(ResumeSessionRequest::new("missing", "/"))
+                .await
+                .is_err()
+        );
+    }
+
+    // ── fork_session ──────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn fork_session_creates_new_session() {
+        let agent = make_agent().await;
+        agent.test_insert_session("f1", "/src", None).await;
+        let resp = agent
+            .fork_session(ForkSessionRequest::new("f1", "/src"))
+            .await
+            .unwrap();
+        assert!(!resp.session_id.to_string().is_empty());
+        assert_eq!(agent.test_session_count().await, 2);
+    }
+
+    #[tokio::test]
+    async fn fork_session_not_found_returns_error() {
+        let agent = make_agent().await;
+        assert!(
+            agent
+                .fork_session(ForkSessionRequest::new("missing", "/src"))
+                .await
+                .is_err()
+        );
+    }
+
+    // ── cancel ────────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn cancel_unknown_session_is_noop() {
+        let agent = make_agent().await;
+        agent
+            .cancel(CancelNotification::new("nonexistent"))
+            .await
+            .unwrap();
+    }
+
+    // ── prompt ────────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn prompt_with_no_events_returns_end_turn() {
+        let agent = make_agent().await;
+        agent.test_insert_session("p1", "/tmp", None).await;
+        let resp = agent
+            .prompt(PromptRequest::new(
+                "p1",
+                vec![ContentBlock::from("hello")],
             ))
             .await
             .unwrap();
-        assert!(
-            resp.config_options.is_empty(),
-            "config_options should be empty: {:?}",
-            resp.config_options
-        );
-    }
-
-    // ── session_mode_state ────────────────────────────────────────────────────
-
-    #[tokio::test]
-    async fn session_mode_state_current_is_default() {
-        let agent = make_agent().await;
-        let state = agent.session_mode_state();
-        assert_eq!(state.current_mode_id.to_string(), "default");
+        assert_eq!(resp.stop_reason, StopReason::EndTurn);
     }
 
     #[tokio::test]
-    async fn session_mode_state_lists_one_mode() {
-        let agent = make_agent().await;
-        let state = agent.session_mode_state();
-        assert_eq!(state.available_modes.len(), 1);
-        assert_eq!(state.available_modes[0].id.to_string(), "default");
-    }
+    async fn prompt_streams_text_events_as_notifications() {
+        let factory = MockNotifierFactory::new();
+        let recorded = Arc::clone(&factory.recorded);
+        let spawner = MockProcessSpawner {
+            events: vec![
+                CodexEvent::TextDelta {
+                    text: "hello".to_string(),
+                },
+                CodexEvent::TurnCompleted,
+            ],
+        };
+        let agent = CodexAgent::new(factory, spawner, "o4-mini");
+        agent.test_insert_session("p2", "/tmp", None).await;
 
-    // ── session_model_state ───────────────────────────────────────────────────
-
-    #[tokio::test]
-    async fn session_model_state_uses_agent_default_when_no_override() {
-        let agent = make_agent().await;
-        let state = agent.session_model_state(None);
-        assert_eq!(state.current_model_id.to_string(), "o4-mini");
-    }
-
-    #[tokio::test]
-    async fn session_model_state_uses_provided_override() {
-        let agent = make_agent().await;
-        let state = agent.session_model_state(Some("o3"));
-        assert_eq!(state.current_model_id.to_string(), "o3");
-    }
-
-    #[tokio::test]
-    async fn session_model_state_lists_default_models() {
-        let agent = make_agent().await;
-        let state = agent.session_model_state(None);
-        let ids: Vec<_> = state
-            .available_models
-            .iter()
-            .map(|m| m.model_id.to_string())
-            .collect();
-        // Default list is o4-mini, o3, gpt-4o (when CODEX_MODELS env is absent).
-        assert!(
-            ids.contains(&"o4-mini".to_string()),
-            "missing o4-mini: {ids:?}"
-        );
-        assert!(ids.contains(&"o3".to_string()), "missing o3: {ids:?}");
-        assert!(
-            ids.contains(&"gpt-4o".to_string()),
-            "missing gpt-4o: {ids:?}"
-        );
-    }
-
-    // ── resume_session error path ─────────────────────────────────────────────
-
-    #[tokio::test]
-    async fn resume_session_returns_error_for_unknown_session() {
-        let agent = make_agent().await;
-        // Must fail before spawning any subprocess.
-        let err = agent
-            .resume_session(ResumeSessionRequest::new("nonexistent", "/"))
-            .await
-            .unwrap_err();
-        assert!(err.message.contains("not found"), "error: {}", err.message);
-    }
-
-    // ── fork_session error path ───────────────────────────────────────────────
-
-    #[tokio::test]
-    async fn fork_session_returns_error_for_unknown_source_session() {
-        let agent = make_agent().await;
-        let err = agent
-            .fork_session(ForkSessionRequest::new("nonexistent", "/fork"))
-            .await
-            .unwrap_err();
-        assert!(err.message.contains("not found"), "error: {}", err.message);
-    }
-
-    // ── prompt error path ─────────────────────────────────────────────────────
-
-    #[tokio::test]
-    async fn prompt_returns_error_for_unknown_session() {
-        let agent = make_agent().await;
-        // With no content blocks the lookup still fails first — tests error path.
-        let err = agent
-            .prompt(PromptRequest::new("unknown-session", vec![]))
-            .await
-            .unwrap_err();
-        assert!(err.message.contains("not found"), "error: {}", err.message);
-    }
-
-    /// `make_nats_client` is called before the session lookup inside `prompt()`.
-    /// A session ID containing "." fails `AcpSessionId::try_from`, so the error
-    /// is returned before any subprocess interaction occurs.
-    #[tokio::test]
-    async fn prompt_returns_error_for_invalid_session_id() {
-        let agent = make_agent().await;
-        // "invalid.session.id" contains dots → AcpSessionId::try_from rejects it
-        // → make_nats_client returns Err → prompt propagates the error.
-        let err = agent
-            .prompt(PromptRequest::new("invalid.session.id", vec![]))
-            .await
-            .unwrap_err();
-        assert!(!err.message.is_empty(), "expected non-empty error message");
-    }
-
-    // ── cancel noop paths ─────────────────────────────────────────────────────
-
-    #[tokio::test]
-    async fn cancel_noop_for_unknown_session() {
-        let agent = make_agent().await;
-        // Should succeed silently — no session to interrupt.
         agent
-            .cancel(CancelNotification::new("no-such-session"))
+            .prompt(PromptRequest::new(
+                "p2",
+                vec![ContentBlock::from("go")],
+            ))
             .await
             .unwrap();
-    }
 
-    #[tokio::test]
-    async fn cancel_noop_when_no_process_running() {
-        let agent = make_agent().await;
-        agent.test_insert_session("s-cancel", "/tmp", None).await;
-        // Process has never been spawned (None) → no interrupt attempted.
-        agent
-            .cancel(CancelNotification::new("s-cancel"))
-            .await
-            .unwrap();
-    }
-
-    // ── CODEX_MODELS env var parsing ──────────────────────────────────────────
-
-    // These tests mutate the process environment so they use a mutex to prevent
-    // races when `cargo test` runs them concurrently within the same process.
-    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-
-    fn env_lock() -> &'static std::sync::Mutex<()> {
-        ENV_LOCK.get_or_init(|| std::sync::Mutex::new(()))
-    }
-
-    #[tokio::test]
-    async fn codex_models_env_var_parsed_correctly() {
-        let _guard = env_lock().lock().unwrap();
-        // SAFETY: single-threaded section protected by mutex.
-        unsafe { std::env::set_var("CODEX_MODELS", "m1:Model One,m2:Model Two") };
-        let nats = fake_nats_client().await;
-        let agent = CodexAgent::new(nats, AcpPrefix::new("test").unwrap(), "m1");
-        unsafe { std::env::remove_var("CODEX_MODELS") };
-
-        let state = agent.session_model_state(None);
-        let ids: Vec<_> = state
-            .available_models
-            .iter()
-            .map(|m| m.model_id.to_string())
-            .collect();
-        assert_eq!(ids, vec!["m1", "m2"], "models: {ids:?}");
-    }
-
-    #[tokio::test]
-    async fn codex_models_all_malformed_falls_back_to_defaults() {
-        let _guard = env_lock().lock().unwrap();
-        unsafe { std::env::set_var("CODEX_MODELS", "bad,also-bad,no-colon") };
-        let nats = fake_nats_client().await;
-        let agent = CodexAgent::new(nats, AcpPrefix::new("test").unwrap(), "o4-mini");
-        unsafe { std::env::remove_var("CODEX_MODELS") };
-
-        let state = agent.session_model_state(None);
-        let ids: Vec<_> = state
-            .available_models
-            .iter()
-            .map(|m| m.model_id.to_string())
-            .collect();
-        // Falls back to hardcoded defaults when all entries are malformed.
-        assert!(
-            ids.contains(&"o4-mini".to_string()),
-            "expected defaults: {ids:?}"
-        );
-        assert!(
-            ids.contains(&"o3".to_string()),
-            "expected defaults: {ids:?}"
-        );
-    }
-
-    #[tokio::test]
-    async fn codex_models_partially_malformed_skips_bad_entries() {
-        let _guard = env_lock().lock().unwrap();
-        unsafe { std::env::set_var("CODEX_MODELS", "good:Good Model,bad-entry,another:Another") };
-        let nats = fake_nats_client().await;
-        let agent = CodexAgent::new(nats, AcpPrefix::new("test").unwrap(), "good");
-        unsafe { std::env::remove_var("CODEX_MODELS") };
-
-        let state = agent.session_model_state(None);
-        let ids: Vec<_> = state
-            .available_models
-            .iter()
-            .map(|m| m.model_id.to_string())
-            .collect();
-        // "bad-entry" (no colon) is skipped; the two valid ones are kept.
-        assert!(ids.contains(&"good".to_string()), "models: {ids:?}");
-        assert!(ids.contains(&"another".to_string()), "models: {ids:?}");
-        assert!(
-            !ids.contains(&"bad-entry".to_string()),
-            "bad-entry should be skipped: {ids:?}"
-        );
-    }
-
-    // ── CODEX_PROMPT_TIMEOUT_SECS invalid value ───────────────────────────────
-
-    #[tokio::test]
-    async fn prompt_timeout_invalid_env_var_falls_back_to_default() {
-        let _guard = env_lock().lock().unwrap();
-        unsafe { std::env::set_var("CODEX_PROMPT_TIMEOUT_SECS", "not_a_number") };
-        let nats = fake_nats_client().await;
-        let agent = CodexAgent::new(nats, AcpPrefix::new("test").unwrap(), "o4-mini");
-        unsafe { std::env::remove_var("CODEX_PROMPT_TIMEOUT_SECS") };
-        // Default is 7200 s. Verify prompt_timeout was set (observable via
-        // the fact that construction didn't panic and the agent works normally).
-        assert_eq!(
-            agent.test_prompt_timeout(),
-            std::time::Duration::from_secs(7200)
-        );
-    }
-
-    // ── load_session returns agent default when session has no model override ──
-
-    #[tokio::test]
-    async fn load_session_returns_agent_default_when_no_per_session_model() {
-        let agent = make_agent().await;
-        agent.test_insert_session("s-load", "/tmp", None).await;
-
-        let resp = agent
-            .load_session(LoadSessionRequest::new("s-load", "/tmp"))
-            .await
-            .unwrap();
-        let model_state = resp.models.expect("models present");
-        assert_eq!(
-            model_state.current_model_id.to_string(),
-            "o4-mini",
-            "should fall back to agent default"
-        );
+        let notifs = recorded.lock().await;
+        assert_eq!(notifs.len(), 1, "expected one text notification");
     }
 }

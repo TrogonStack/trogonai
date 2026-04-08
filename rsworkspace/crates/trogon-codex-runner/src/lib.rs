@@ -1,5 +1,7 @@
+pub mod traits;
+
 mod agent;
 mod process;
 
-pub use agent::CodexAgent;
-pub use process::CodexProcess;
+pub use agent::{CodexAgent, DefaultCodexAgent, NatsNotifierFactory};
+pub use process::{CodexProcess, RealProcessSpawner};

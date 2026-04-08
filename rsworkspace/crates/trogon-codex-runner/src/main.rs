@@ -1,7 +1,7 @@
 use acp_nats::acp_prefix::AcpPrefix;
 use acp_nats_agent::AgentSideNatsConnection;
 use tracing::{error, info};
-use trogon_codex_runner::CodexAgent;
+use trogon_codex_runner::DefaultCodexAgent;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -18,7 +18,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let nats = async_nats::connect(&nats_url).await?;
 
     let acp_prefix = AcpPrefix::new(&prefix)?;
-    let agent = CodexAgent::new(nats.clone(), acp_prefix.clone(), default_model);
+    let agent = DefaultCodexAgent::with_nats(nats.clone(), acp_prefix.clone(), default_model);
 
     let local = tokio::task::LocalSet::new();
     let result = local
