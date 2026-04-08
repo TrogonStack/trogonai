@@ -1245,4 +1245,145 @@ mod tests {
             .unwrap_err();
         assert!(err.message.contains("not found"), "error: {}", err.message);
     }
+
+    // ── resume_session: success path ──────────────────────────────────────────
+
+    #[tokio::test]
+    async fn resume_session_returns_ok_for_known_session() {
+        let agent = make_agent();
+        agent.test_insert_session("rs1", "/tmp", None).await;
+        agent.resume_session(ResumeSessionRequest::new("rs1", "/tmp")).await.unwrap();
+    }
+
+    // ── fork_session: inherits API key ────────────────────────────────────────
+
+    #[tokio::test]
+    async fn fork_session_inherits_api_key() {
+        let agent = make_agent();
+        // test_insert_session sets api_key = "test-key".
+        agent.test_insert_session("src5", "/tmp", None).await;
+
+        let resp = agent.fork_session(ForkSessionRequest::new("src5", "/fork5")).await.unwrap();
+        let fork_id = resp.session_id.to_string();
+
+        assert_eq!(
+            agent.test_session_api_key(&fork_id).await.as_deref(),
+            Some("test-key"),
+            "fork must inherit the source session's API key"
+        );
+    }
+
+    // ── authenticate: ignores empty key ──────────────────────────────────────
+
+    #[tokio::test]
+    async fn authenticate_ignores_empty_api_key() {
+        let mock_http = Arc::new(MockXaiHttpClient::new());
+        let mock_notifier = Arc::new(MockSessionNotifier::new());
+        let agent: TestAgent =
+            XaiAgent::with_deps(Arc::clone(&mock_notifier), "grok-3", "", Arc::clone(&mock_http));
+
+        let mut meta = serde_json::Map::new();
+        meta.insert("XAI_API_KEY".to_string(), serde_json::json!(""));
+        agent.authenticate(AuthenticateRequest::new("api-key").meta(meta)).await.unwrap();
+
+        assert_eq!(
+            agent.test_pending_api_key().await,
+            None,
+            "empty API key in meta must not be stored"
+        );
+    }
+
+    // ── prompt: session model override ────────────────────────────────────────
+
+    #[tokio::test]
+    async fn prompt_uses_session_model_override() {
+        let agent = make_agent(); // default_model = "grok-3"
+        agent.test_insert_session("mo1", "/tmp", Some("grok-3-mini".to_string())).await;
+        agent.client.push_response(vec![XaiEvent::Done]);
+
+        agent
+            .prompt(PromptRequest::new("mo1", vec![ContentBlock::from("hi")]))
+            .await
+            .unwrap();
+
+        let calls = agent.client.calls.lock().unwrap();
+        assert_eq!(calls.last().unwrap().model, "grok-3-mini");
+    }
+
+    // ── prompt: system prompt prepended ──────────────────────────────────────
+
+    #[tokio::test]
+    async fn prompt_prepends_system_prompt_when_set() {
+        let _guard = env_lock().lock().unwrap();
+        unsafe { std::env::set_var("XAI_SYSTEM_PROMPT", "You are a helpful assistant.") };
+        let mock_http = Arc::new(MockXaiHttpClient::new());
+        let mock_notifier = Arc::new(MockSessionNotifier::new());
+        let agent: TestAgent = XaiAgent::with_deps(
+            Arc::clone(&mock_notifier),
+            "grok-3",
+            "test-key",
+            Arc::clone(&mock_http),
+        );
+        unsafe { std::env::remove_var("XAI_SYSTEM_PROMPT") };
+
+        agent.test_insert_session("sp1", "/tmp", None).await;
+        mock_http.push_response(vec![XaiEvent::Done]);
+
+        agent
+            .prompt(PromptRequest::new("sp1", vec![ContentBlock::from("hi")]))
+            .await
+            .unwrap();
+
+        let calls = mock_http.calls.lock().unwrap();
+        let input = &calls.last().unwrap().input;
+        assert_eq!(input[0].role, "system", "first input item must be the system prompt");
+        assert_eq!(input[0].content, "You are a helpful assistant.");
+    }
+
+    // ── prompt: stream error event ────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn prompt_stream_error_returns_normally() {
+        let agent = make_agent();
+        agent.test_insert_session("err1", "/tmp", None).await;
+        agent.client.push_response(vec![
+            XaiEvent::Error { message: "server exploded".to_string() },
+        ]);
+
+        // Error event must cause the loop to break gracefully, not propagate as Err.
+        agent
+            .prompt(PromptRequest::new("err1", vec![ContentBlock::from("hi")]))
+            .await
+            .unwrap();
+    }
+
+    // ── prompt: non-text events silently ignored ──────────────────────────────
+
+    #[tokio::test]
+    async fn prompt_ignores_function_call_server_tool_and_usage_events() {
+        let agent = make_agent();
+        agent.test_insert_session("ign1", "/tmp", None).await;
+        agent.client.push_response(vec![
+            XaiEvent::FunctionCall {
+                call_id: "c1".to_string(),
+                name: "web_search".to_string(),
+                arguments: "{}".to_string(),
+            },
+            XaiEvent::ServerToolCompleted { name: "web_search".to_string() },
+            XaiEvent::Usage { prompt_tokens: 10, completion_tokens: 5 },
+            XaiEvent::TextDelta { text: "answer".to_string() },
+            XaiEvent::Done,
+        ]);
+
+        agent
+            .prompt(PromptRequest::new("ign1", vec![ContentBlock::from("search for rust")]))
+            .await
+            .unwrap();
+
+        // Ignored events must not corrupt history — only user + assistant recorded.
+        assert_eq!(agent.test_history_len("ign1").await, 2);
+        // Exactly one notification sent (for the TextDelta only).
+        let notifs = agent.notifier.notifications.lock().unwrap();
+        assert_eq!(notifs.len(), 1);
+    }
 }
