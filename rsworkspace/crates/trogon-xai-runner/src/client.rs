@@ -1189,4 +1189,81 @@ mod tests {
         );
     }
 
+    #[test]
+    fn function_call_arguments_delta_empty_call_id_is_ignored() {
+        // `call_id` is empty string — the guard `!call_id.is_empty()` rejects it,
+        // so the delta must be silently discarded without panicking.
+        let delta = r#"data: {"type":"response.function_call_arguments.delta","call_id":"","delta":"{\"q\":"}"#;
+        assert!(
+            parse_line(delta).is_none(),
+            "delta with empty call_id must produce no event"
+        );
+    }
+
+    // ── parse_sse: streaming state machine ────────────────────────────────────
+
+    #[tokio::test]
+    async fn parse_sse_trailing_buffer_without_newline() {
+        use futures_util::stream::{self, StreamExt as _};
+
+        // Simulate a stream that ends without a trailing newline.
+        // The `None` branch in parse_sse trims and processes the remaining buffer.
+        let bytes = Bytes::from("data: [DONE]"); // no \n
+        let s = stream::iter(vec![Ok::<_, reqwest::Error>(bytes)]);
+        let events: Vec<_> = parse_sse(s).collect().await;
+        assert!(
+            events.iter().any(|e| matches!(e, XaiEvent::Done)),
+            "parse_sse must process a trailing buffer that has no newline: {events:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn parse_sse_data_split_across_chunks() {
+        use futures_util::stream::{self, StreamExt as _};
+
+        // The SSE parser must accumulate partial byte chunks until it finds a
+        // newline delimiter, then process the complete line.
+        let chunk1 = Bytes::from("data: {\"type\":\"message.delta\",\"delta\":{\"text\":\"hel");
+        let chunk2 = Bytes::from("lo\"}}\n");
+        let s = stream::iter(vec![
+            Ok::<_, reqwest::Error>(chunk1),
+            Ok::<_, reqwest::Error>(chunk2),
+        ]);
+        let events: Vec<_> = parse_sse(s).collect().await;
+        assert!(
+            events.iter().any(|e| matches!(e, XaiEvent::TextDelta { text } if text == "hello")),
+            "parse_sse must reassemble lines split across multiple byte chunks: {events:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn parse_sse_crlf_line_endings_stripped() {
+        use futures_util::stream::{self, StreamExt as _};
+
+        // SSE spec allows \r\n line endings. The parser strips the trailing \r.
+        let bytes = Bytes::from("data: [DONE]\r\n");
+        let s = stream::iter(vec![Ok::<_, reqwest::Error>(bytes)]);
+        let events: Vec<_> = parse_sse(s).collect().await;
+        assert!(
+            events.iter().any(|e| matches!(e, XaiEvent::Done)),
+            "parse_sse must strip \\r from CRLF lines: {events:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn parse_sse_response_id_emitted_once_across_multiple_chunks() {
+        use futures_util::stream::{self, StreamExt as _};
+
+        // Two chunks both carry an `id` field. ResponseId must be emitted only once.
+        let line1 = Bytes::from("data: {\"id\":\"resp_x\",\"type\":\"message.delta\",\"delta\":{\"text\":\"a\"}}\n");
+        let line2 = Bytes::from("data: {\"id\":\"resp_x\",\"type\":\"message.delta\",\"delta\":{\"text\":\"b\"}}\n");
+        let s = stream::iter(vec![
+            Ok::<_, reqwest::Error>(line1),
+            Ok::<_, reqwest::Error>(line2),
+        ]);
+        let events: Vec<_> = parse_sse(s).collect().await;
+        let id_count = events.iter().filter(|e| matches!(e, XaiEvent::ResponseId { .. })).count();
+        assert_eq!(id_count, 1, "ResponseId must be emitted exactly once per stream, got {id_count}: {events:?}");
+    }
+
 }
