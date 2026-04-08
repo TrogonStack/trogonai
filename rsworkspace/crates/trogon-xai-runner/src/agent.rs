@@ -1510,6 +1510,82 @@ mod tests {
         assert!(!ids.iter().any(|id| id == "malformed-no-colon"), "malformed entry must be skipped");
     }
 
+    #[tokio::test]
+    async fn xai_models_env_var_all_malformed_falls_back_to_defaults() {
+        let _guard = env_lock().lock().unwrap();
+        unsafe {
+            // All entries lack a colon — none parse as id:label, vec is empty after
+            // collect, so filter(!is_empty) rejects it and unwrap_or_else fires.
+            std::env::set_var("XAI_MODELS", "no-colon-here,also-no-colon");
+        }
+        let mock_http = Arc::new(MockXaiHttpClient::new());
+        let mock_notifier = Arc::new(MockSessionNotifier::new());
+        let agent: TestAgent =
+            XaiAgent::with_deps(Arc::clone(&mock_notifier), "grok-3", "key", Arc::clone(&mock_http));
+        unsafe { std::env::remove_var("XAI_MODELS") };
+
+        let state = agent.session_model_state(None);
+        let ids: Vec<_> = state.available_models.iter().map(|m| m.model_id.to_string()).collect();
+        // Should fall back to the hard-coded defaults.
+        assert!(ids.contains(&"grok-3".to_string()), "default grok-3 must be present");
+        assert!(ids.contains(&"grok-3-mini".to_string()), "default grok-3-mini must be present");
+    }
+
+    #[tokio::test]
+    async fn xai_system_prompt_empty_string_treated_as_none() {
+        let _guard = env_lock().lock().unwrap();
+        unsafe { std::env::set_var("XAI_SYSTEM_PROMPT", "") };
+        let mock_http = Arc::new(MockXaiHttpClient::new());
+        let mock_notifier = Arc::new(MockSessionNotifier::new());
+        let agent: TestAgent =
+            XaiAgent::with_deps(Arc::clone(&mock_notifier), "grok-3", "key", Arc::clone(&mock_http));
+        unsafe { std::env::remove_var("XAI_SYSTEM_PROMPT") };
+
+        // An empty env var is filtered out — no system InputItem is prepended.
+        // Verify by running a prompt and checking the first input item is "user".
+        agent.test_insert_session("spe1", "/tmp", None).await;
+        mock_http.push_response(vec![XaiEvent::Done]);
+        agent
+            .prompt(PromptRequest::new("spe1", vec![ContentBlock::from("hello")]))
+            .await
+            .unwrap();
+
+        let calls = mock_http.calls.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        let input = &calls[0].input;
+        assert!(
+            input[0].role != "system",
+            "empty XAI_SYSTEM_PROMPT must not prepend a system input item"
+        );
+    }
+
+    #[tokio::test]
+    async fn xai_max_turns_zero_falls_back_to_default() {
+        let _guard = env_lock().lock().unwrap();
+        unsafe { std::env::set_var("XAI_MAX_TURNS", "0") };
+        let mock_http = Arc::new(MockXaiHttpClient::new());
+        let mock_notifier = Arc::new(MockSessionNotifier::new());
+        let agent: TestAgent =
+            XaiAgent::with_deps(Arc::clone(&mock_notifier), "grok-3", "key", Arc::clone(&mock_http));
+        unsafe { std::env::remove_var("XAI_MAX_TURNS") };
+
+        // `filter(|&n| n > 0)` rejects 0, so `.or(Some(10))` must fire.
+        // Run a prompt and check that max_turns=Some(10) was forwarded to chat_stream.
+        agent.test_insert_session("mtz1", "/tmp", None).await;
+        mock_http.push_response(vec![XaiEvent::Done]);
+        agent
+            .prompt(PromptRequest::new("mtz1", vec![ContentBlock::from("hi")]))
+            .await
+            .unwrap();
+
+        let calls = mock_http.calls.lock().unwrap();
+        assert_eq!(
+            calls.last().unwrap().max_turns,
+            Some(10),
+            "XAI_MAX_TURNS=0 must fall back to the default of 10"
+        );
+    }
+
     // ── prompt: non-text events silently ignored ──────────────────────────────
 
     #[tokio::test]
