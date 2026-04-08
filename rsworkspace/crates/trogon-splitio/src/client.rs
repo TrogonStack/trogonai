@@ -1,6 +1,8 @@
 //! [`SplitClient`] — HTTP thin client for the Split Evaluator service.
 
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
 
 use serde::Deserialize;
 use serde_json::Value;
@@ -8,20 +10,50 @@ use tracing::{debug, instrument, warn};
 
 use crate::{CONTROL, SplitConfig, error::SplitError};
 
-/// Thin HTTP client that delegates feature-flag evaluation to a running
-/// [Split Evaluator] sidecar.
+// ── HTTP abstraction ──────────────────────────────────────────────────────────
+
+/// Raw HTTP response from the transport layer.
+pub struct HttpResponse {
+    /// HTTP status code.
+    pub status: u16,
+    /// Response body as text.
+    pub body: String,
+}
+
+/// Abstraction over the HTTP GET transport used by [`SplitClient`].
 ///
-/// All methods are `async` and return `Result<_, SplitError>`.  On any
-/// error or when the evaluator is unavailable, prefer returning
-/// [`CONTROL`] to blocking the caller — feature flags should never be
-/// on the critical path.
-///
-/// [Split Evaluator]: https://help.split.io/hc/en-us/articles/360020037072-Split-Evaluator
-#[derive(Clone)]
-pub struct SplitClient {
-    base_url: String,
-    auth_token: String,
-    http: reqwest::Client,
+/// All Split Evaluator calls are GET requests, so a single `get` method is
+/// sufficient.  The trait is object-safe enough for monomorphization and is
+/// implemented for [`reqwest::Client`] in production and [`MockHttpClient`]
+/// in tests.
+pub trait HttpClient: Clone + Send + Sync + 'static {
+    fn get(
+        &self,
+        url: &str,
+        auth_token: &str,
+        query: Vec<(String, String)>,
+    ) -> Pin<Box<dyn Future<Output = Result<HttpResponse, String>> + Send + '_>>;
+}
+
+impl HttpClient for reqwest::Client {
+    fn get(
+        &self,
+        url: &str,
+        auth_token: &str,
+        query: Vec<(String, String)>,
+    ) -> Pin<Box<dyn Future<Output = Result<HttpResponse, String>> + Send + '_>> {
+        let ref_params: Vec<(&str, &str)> =
+            query.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+        let builder = reqwest::Client::get(self, url)
+            .header("Authorization", auth_token.to_string())
+            .query(&ref_params);
+        Box::pin(async move {
+            let resp = builder.send().await.map_err(|e| e.to_string())?;
+            let status = resp.status().as_u16();
+            let body = resp.text().await.unwrap_or_default();
+            Ok(HttpResponse { status, body })
+        })
+    }
 }
 
 // ── Wire types ────────────────────────────────────────────────────────────────
@@ -46,21 +78,36 @@ pub struct TreatmentWithConfig {
     pub config: Option<Value>,
 }
 
-// ── Implementation ────────────────────────────────────────────────────────────
+// ── SplitClient ───────────────────────────────────────────────────────────────
 
-impl SplitClient {
-    /// Create a new client from [`SplitConfig`].
-    pub fn new(config: SplitConfig) -> Self {
-        Self {
-            base_url: config.evaluator_url.trim_end_matches('/').to_string(),
-            auth_token: config.auth_token,
-            http: reqwest::Client::new(),
-        }
-    }
+/// Thin HTTP client that delegates feature-flag evaluation to a running
+/// [Split Evaluator] sidecar.
+///
+/// The type parameter `H` is the HTTP transport.  In production `H =
+/// reqwest::Client`; in tests any [`HttpClient`] implementation can be
+/// supplied, including [`MockHttpClient`].
+///
+/// All methods are `async` and return `Result<_, SplitError>`.  On any
+/// error or when the evaluator is unavailable, prefer returning
+/// [`CONTROL`] to blocking the caller — feature flags should never be
+/// on the critical path.
+///
+/// [Split Evaluator]: https://help.split.io/hc/en-us/articles/360020037072-Split-Evaluator
+#[derive(Clone)]
+pub struct SplitClient<H = reqwest::Client> {
+    base_url: String,
+    auth_token: String,
+    http: H,
+}
 
-    /// Create a new client using an existing [`reqwest::Client`] (useful for
-    /// sharing connection pools in tests).
-    pub fn with_http_client(config: SplitConfig, http: reqwest::Client) -> Self {
+// ── Generic constructor (any HttpClient backend) ──────────────────────────────
+
+impl<H: HttpClient> SplitClient<H> {
+    /// Create a client with an explicit HTTP transport implementation.
+    ///
+    /// Use this in tests with [`MockHttpClient`].  In production code prefer
+    /// [`SplitClient::new`] which uses `reqwest::Client` automatically.
+    pub fn new_with(config: SplitConfig, http: H) -> Self {
         Self {
             base_url: config.evaluator_url.trim_end_matches('/').to_string(),
             auth_token: config.auth_token,
@@ -89,36 +136,37 @@ impl SplitClient {
     ) -> Result<String, SplitError> {
         let url = format!("{}/client/get-treatment", self.base_url);
 
-        let mut req = self
-            .http
-            .get(&url)
-            .header("Authorization", &self.auth_token)
-            .query(&[("key", key), ("split-name", flag)]);
-
+        let mut query = vec![
+            ("key".to_string(), key.to_string()),
+            ("split-name".to_string(), flag.to_string()),
+        ];
         if let Some(attrs) = attributes {
-            req = req.query(&[(
-                "attributes",
-                &serde_json::to_string(attrs).unwrap_or_default(),
-            )]);
+            query.push((
+                "attributes".to_string(),
+                serde_json::to_string(attrs).unwrap_or_default(),
+            ));
         }
 
         debug!(flag, key, "Evaluating treatment");
 
-        let resp = req.send().await?;
-        let status = resp.status();
+        let resp = self
+            .http
+            .get(&url, &self.auth_token, query)
+            .await
+            .map_err(SplitError::Http)?;
 
-        if !status.is_success() {
-            let body = resp.text().await.unwrap_or_default();
-            warn!(flag, key, %status, "Evaluator returned error");
+        if resp.status < 200 || resp.status >= 300 {
+            warn!(flag, key, status = resp.status, "Evaluator returned error");
             return Err(SplitError::EvaluatorError {
-                status: status.as_u16(),
-                body,
+                status: resp.status,
+                body: resp.body,
             });
         }
 
-        let body: TreatmentResponse = resp.json().await?;
-        debug!(flag, key, treatment = %body.treatment, "Treatment evaluated");
-        Ok(body.treatment)
+        let parsed: TreatmentResponse = serde_json::from_str(&resp.body)
+            .map_err(|e| SplitError::UnexpectedResponse(e.to_string()))?;
+        debug!(flag, key, treatment = %parsed.treatment, "Treatment evaluated");
+        Ok(parsed.treatment)
     }
 
     /// Evaluate multiple feature flags in a single request.
@@ -140,35 +188,36 @@ impl SplitClient {
         let url = format!("{}/client/get-treatments", self.base_url);
         let split_names = flags.join(",");
 
-        let mut req = self
-            .http
-            .get(&url)
-            .header("Authorization", &self.auth_token)
-            .query(&[("key", key), ("split-names", &split_names)]);
-
+        let mut query = vec![
+            ("key".to_string(), key.to_string()),
+            ("split-names".to_string(), split_names),
+        ];
         if let Some(attrs) = attributes {
-            req = req.query(&[(
-                "attributes",
-                &serde_json::to_string(attrs).unwrap_or_default(),
-            )]);
+            query.push((
+                "attributes".to_string(),
+                serde_json::to_string(attrs).unwrap_or_default(),
+            ));
         }
 
         debug!(key, flags = ?flags, "Evaluating multiple treatments");
 
-        let resp = req.send().await?;
-        let status = resp.status();
+        let resp = self
+            .http
+            .get(&url, &self.auth_token, query)
+            .await
+            .map_err(SplitError::Http)?;
 
-        if !status.is_success() {
-            let body = resp.text().await.unwrap_or_default();
-            warn!(key, %status, "Evaluator returned error for get-treatments");
+        if resp.status < 200 || resp.status >= 300 {
+            warn!(key, status = resp.status, "Evaluator returned error for get-treatments");
             return Err(SplitError::EvaluatorError {
-                status: status.as_u16(),
-                body,
+                status: resp.status,
+                body: resp.body,
             });
         }
 
         // Response shape: { "FLAG_1": { "treatment": "on" }, "FLAG_2": { "treatment": "off" } }
-        let raw: HashMap<String, TreatmentResponse> = resp.json().await?;
+        let raw: HashMap<String, TreatmentResponse> = serde_json::from_str(&resp.body)
+            .map_err(|e| SplitError::UnexpectedResponse(e.to_string()))?;
         Ok(raw.into_iter().map(|(k, v)| (k, v.treatment)).collect())
     }
 
@@ -191,42 +240,43 @@ impl SplitClient {
     ) -> Result<TreatmentWithConfig, SplitError> {
         let url = format!("{}/client/get-treatment-with-config", self.base_url);
 
-        let mut req = self
-            .http
-            .get(&url)
-            .header("Authorization", &self.auth_token)
-            .query(&[("key", key), ("split-name", flag)]);
-
+        let mut query = vec![
+            ("key".to_string(), key.to_string()),
+            ("split-name".to_string(), flag.to_string()),
+        ];
         if let Some(attrs) = attributes {
-            req = req.query(&[(
-                "attributes",
-                &serde_json::to_string(attrs).unwrap_or_default(),
-            )]);
+            query.push((
+                "attributes".to_string(),
+                serde_json::to_string(attrs).unwrap_or_default(),
+            ));
         }
 
         debug!(flag, key, "Evaluating treatment with config");
 
-        let resp = req.send().await?;
-        let status = resp.status();
+        let resp = self
+            .http
+            .get(&url, &self.auth_token, query)
+            .await
+            .map_err(SplitError::Http)?;
 
-        if !status.is_success() {
-            let body = resp.text().await.unwrap_or_default();
-            warn!(flag, key, %status, "Evaluator returned error for get-treatment-with-config");
+        if resp.status < 200 || resp.status >= 300 {
+            warn!(flag, key, status = resp.status, "Evaluator returned error for get-treatment-with-config");
             return Err(SplitError::EvaluatorError {
-                status: status.as_u16(),
-                body,
+                status: resp.status,
+                body: resp.body,
             });
         }
 
-        let body: TreatmentWithConfigResponse = resp.json().await?;
+        let parsed: TreatmentWithConfigResponse = serde_json::from_str(&resp.body)
+            .map_err(|e| SplitError::UnexpectedResponse(e.to_string()))?;
 
-        let config = body
+        let config = parsed
             .config
             .as_deref()
             .and_then(|s| serde_json::from_str(s).ok());
 
         Ok(TreatmentWithConfig {
-            treatment: body.treatment,
+            treatment: parsed.treatment,
             config,
         })
     }
@@ -253,16 +303,16 @@ impl SplitClient {
         let url = format!("{}/client/track", self.base_url);
 
         let mut query = vec![
-            ("key", key.to_string()),
-            ("traffic-type", traffic_type.to_string()),
-            ("event-type", event_type.to_string()),
+            ("key".to_string(), key.to_string()),
+            ("traffic-type".to_string(), traffic_type.to_string()),
+            ("event-type".to_string(), event_type.to_string()),
         ];
         if let Some(v) = value {
-            query.push(("value", v.to_string()));
+            query.push(("value".to_string(), v.to_string()));
         }
         if let Some(props) = properties {
             query.push((
-                "properties",
+                "properties".to_string(),
                 serde_json::to_string(props).unwrap_or_default(),
             ));
         }
@@ -271,19 +321,15 @@ impl SplitClient {
 
         let resp = self
             .http
-            .get(&url)
-            .header("Authorization", &self.auth_token)
-            .query(&query)
-            .send()
-            .await?;
+            .get(&url, &self.auth_token, query)
+            .await
+            .map_err(SplitError::Http)?;
 
-        let status = resp.status();
-        if !status.is_success() {
-            let body = resp.text().await.unwrap_or_default();
-            warn!(key, event_type, %status, "Evaluator returned error for track");
+        if resp.status < 200 || resp.status >= 300 {
+            warn!(key, event_type, status = resp.status, "Evaluator returned error for track");
             return Err(SplitError::EvaluatorError {
-                status: status.as_u16(),
-                body,
+                status: resp.status,
+                body: resp.body,
             });
         }
 
@@ -297,11 +343,9 @@ impl SplitClient {
     pub async fn is_healthy(&self) -> bool {
         let url = format!("{}/admin/healthcheck", self.base_url);
         self.http
-            .get(&url)
-            .header("Authorization", &self.auth_token)
-            .send()
+            .get(&url, &self.auth_token, vec![])
             .await
-            .map(|r| r.status().is_success())
+            .map(|r| r.status >= 200 && r.status < 300)
             .unwrap_or(false)
     }
 
@@ -325,19 +369,228 @@ impl SplitClient {
     }
 }
 
+// ── reqwest::Client convenience constructors ──────────────────────────────────
+
+impl SplitClient<reqwest::Client> {
+    /// Create a new client from [`SplitConfig`] using a fresh `reqwest::Client`.
+    pub fn new(config: SplitConfig) -> Self {
+        Self::new_with(config, reqwest::Client::new())
+    }
+
+    /// Create a new client using an existing [`reqwest::Client`] (useful for
+    /// sharing connection pools).
+    pub fn with_http_client(config: SplitConfig, http: reqwest::Client) -> Self {
+        Self::new_with(config, http)
+    }
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+pub mod mock {
+    //! In-process mock HTTP client for unit tests.
+    //!
+    //! Use [`MockHttpClient`] to test [`SplitClient`] business logic without
+    //! spinning up a real HTTP server.
+
+    use std::collections::VecDeque;
+    use std::sync::{Arc, Mutex};
+
+    use super::*;
+
+    /// Queued response entry: `(status_code, body_text)`.
+    type QueueEntry = Result<(u16, String), String>;
+
+    /// Mock [`HttpClient`] that returns pre-programmed responses in FIFO order.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let mock = MockHttpClient::new()
+    ///     .enqueue_ok(200, r#"{"treatment":"on"}"#);
+    /// let client = SplitClient::new_with(config, mock);
+    /// assert_eq!(client.get_treatment("u", "flag", None).await.unwrap(), "on");
+    /// ```
+    #[derive(Default)]
+    pub struct MockHttpClient {
+        queue: Arc<Mutex<VecDeque<QueueEntry>>>,
+    }
+
+    impl MockHttpClient {
+        pub fn new() -> Self {
+            Self::default()
+        }
+
+        /// Enqueue a successful response.
+        pub fn enqueue_ok(self, status: u16, body: impl Into<String>) -> Self {
+            self.queue
+                .lock()
+                .unwrap()
+                .push_back(Ok((status, body.into())));
+            self
+        }
+
+        /// Enqueue a transport-level error (connection refused, timeout, etc.).
+        pub fn enqueue_err(self, message: impl Into<String>) -> Self {
+            self.queue.lock().unwrap().push_back(Err(message.into()));
+            self
+        }
+    }
+
+    impl Clone for MockHttpClient {
+        fn clone(&self) -> Self {
+            Self {
+                queue: Arc::clone(&self.queue),
+            }
+        }
+    }
+
+    impl HttpClient for MockHttpClient {
+        fn get(
+            &self,
+            _url: &str,
+            _auth_token: &str,
+            _query: Vec<(String, String)>,
+        ) -> Pin<Box<dyn Future<Output = Result<HttpResponse, String>> + Send + '_>> {
+            let entry = self
+                .queue
+                .lock()
+                .unwrap()
+                .pop_front()
+                .expect("MockHttpClient: no response queued");
+            Box::pin(async move {
+                entry.map(|(status, body)| HttpResponse { status, body })
+            })
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use httpmock::MockServer;
+    use mock::MockHttpClient;
 
-    fn make_client(base_url: &str) -> SplitClient {
-        SplitClient::new(SplitConfig {
+    fn make_config(base_url: &str) -> SplitConfig {
+        SplitConfig {
             evaluator_url: base_url.to_string(),
             auth_token: "test-token".to_string(),
-        })
+        }
     }
 
-    // ── get_treatment ─────────────────────────────────────────────────────────
+    fn make_client(base_url: &str) -> SplitClient {
+        SplitClient::new(make_config(base_url))
+    }
+
+    // ── MockHttpClient unit tests ─────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn mock_get_treatment_happy_path() {
+        let mock_http = MockHttpClient::new()
+            .enqueue_ok(200, r#"{"splitName":"flag","treatment":"on"}"#);
+        let client = SplitClient::new_with(make_config("http://unused"), mock_http);
+        let t = client.get_treatment("u", "flag", None).await.unwrap();
+        assert_eq!(t, "on");
+    }
+
+    #[tokio::test]
+    async fn mock_get_treatment_evaluator_error_maps_to_evaluator_error() {
+        let mock_http = MockHttpClient::new().enqueue_ok(500, "internal error");
+        let client = SplitClient::new_with(make_config("http://unused"), mock_http);
+        let result = client.get_treatment("u", "flag", None).await;
+        assert!(matches!(
+            result,
+            Err(SplitError::EvaluatorError { status: 500, .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn mock_get_treatment_transport_error_maps_to_http_error() {
+        let mock_http = MockHttpClient::new().enqueue_err("connection refused");
+        let client = SplitClient::new_with(make_config("http://unused"), mock_http);
+        let result = client.get_treatment("u", "flag", None).await;
+        assert!(matches!(result, Err(SplitError::Http(_))));
+    }
+
+    #[tokio::test]
+    async fn mock_get_treatment_or_control_returns_control_on_transport_error() {
+        let mock_http = MockHttpClient::new().enqueue_err("timeout");
+        let client = SplitClient::new_with(make_config("http://unused"), mock_http);
+        let t = client.get_treatment_or_control("u", "flag", None).await;
+        assert_eq!(t, CONTROL);
+    }
+
+    #[tokio::test]
+    async fn mock_is_healthy_returns_true_on_200() {
+        let mock_http = MockHttpClient::new().enqueue_ok(200, "");
+        let client = SplitClient::new_with(make_config("http://unused"), mock_http);
+        assert!(client.is_healthy().await);
+    }
+
+    #[tokio::test]
+    async fn mock_is_healthy_returns_false_on_500() {
+        let mock_http = MockHttpClient::new().enqueue_ok(500, "");
+        let client = SplitClient::new_with(make_config("http://unused"), mock_http);
+        assert!(!client.is_healthy().await);
+    }
+
+    #[tokio::test]
+    async fn mock_is_healthy_returns_false_on_transport_error() {
+        let mock_http = MockHttpClient::new().enqueue_err("refused");
+        let client = SplitClient::new_with(make_config("http://unused"), mock_http);
+        assert!(!client.is_healthy().await);
+    }
+
+    #[tokio::test]
+    async fn mock_track_returns_ok_on_200() {
+        let mock_http = MockHttpClient::new().enqueue_ok(200, "Successfully queued event");
+        let client = SplitClient::new_with(make_config("http://unused"), mock_http);
+        let result = client.track("u", "user", "purchase", None, None).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn mock_track_returns_err_on_400() {
+        let mock_http = MockHttpClient::new().enqueue_ok(400, "bad request");
+        let client = SplitClient::new_with(make_config("http://unused"), mock_http);
+        let result = client.track("u", "user", "purchase", None, None).await;
+        assert!(matches!(
+            result,
+            Err(SplitError::EvaluatorError { status: 400, .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn mock_get_treatments_happy_path() {
+        let mock_http = MockHttpClient::new().enqueue_ok(
+            200,
+            r#"{"flag_a":{"treatment":"on"},"flag_b":{"treatment":"off"}}"#,
+        );
+        let client = SplitClient::new_with(make_config("http://unused"), mock_http);
+        let map = client
+            .get_treatments("u", &["flag_a", "flag_b"], None)
+            .await
+            .unwrap();
+        assert_eq!(map.get("flag_a").map(String::as_str), Some("on"));
+        assert_eq!(map.get("flag_b").map(String::as_str), Some("off"));
+    }
+
+    #[tokio::test]
+    async fn mock_get_treatment_with_config_parses_json_config() {
+        let mock_http = MockHttpClient::new().enqueue_ok(
+            200,
+            r#"{"treatment":"on","config":"{\"color\":\"blue\"}"}"#,
+        );
+        let client = SplitClient::new_with(make_config("http://unused"), mock_http);
+        let result = client
+            .get_treatment_with_config("u", "flag", None)
+            .await
+            .unwrap();
+        assert_eq!(result.treatment, "on");
+        assert_eq!(result.config.as_ref().unwrap()["color"], "blue");
+    }
+
+    // ── httpmock integration tests (reqwest::Client backend) ─────────────────
 
     #[tokio::test]
     async fn get_treatment_returns_on() {
@@ -718,8 +971,6 @@ mod tests {
 
     // ── get_treatments edge cases ─────────────────────────────────────────────
 
-    /// Empty flags slice → `flags.join(",")` produces `""` →
-    /// the mock filters out empty tokens → empty map returned.
     #[tokio::test]
     async fn get_treatments_with_empty_flags_returns_empty_map() {
         let server = MockServer::start_async().await;
@@ -740,9 +991,6 @@ mod tests {
 
     // ── get_treatment_with_config edge cases ──────────────────────────────────
 
-    /// When the evaluator returns a `config` field that is not valid JSON,
-    /// the client silently discards it and returns `config: None` rather than
-    /// propagating an error — flags must never block the calling path.
     #[tokio::test]
     async fn get_treatment_with_config_invalid_json_is_silently_discarded() {
         let server = MockServer::start_async().await;
@@ -779,7 +1027,6 @@ mod tests {
                 .json_body(serde_json::json!({ "treatment": "on" }));
         });
 
-        // URL with trailing slash — must not produce double slash in path.
         let client = make_client(&format!("{}/", server.base_url()));
         client.get_treatment("u", "f", None).await.unwrap();
         mock.assert_async().await;

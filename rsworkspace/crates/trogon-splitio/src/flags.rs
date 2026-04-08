@@ -46,7 +46,7 @@
 use serde_json::Value;
 use std::collections::HashMap;
 
-use crate::{CONTROL, SplitClient, error::SplitError};
+use crate::{CONTROL, SplitClient, client::HttpClient, error::SplitError};
 
 /// A type-safe feature flag definition.
 ///
@@ -67,7 +67,7 @@ pub trait FeatureFlag: Send + Sync {
     }
 }
 
-impl SplitClient {
+impl<H: HttpClient> SplitClient<H> {
     /// Return `true` if the flag treatment is `"on"` for the given user.
     ///
     /// Any treatment other than `"on"` — including `"off"`, `"control"`, or
