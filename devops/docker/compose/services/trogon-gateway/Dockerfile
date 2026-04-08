@@ -17,13 +17,13 @@ RUN cargo chef prepare --recipe-path recipe.json
 FROM chef AS builder
 
 COPY --from=planner /build/recipe.json recipe.json
-RUN cargo chef cook --release --recipe-path recipe.json -p trogon-source-slack
+RUN cargo chef cook --release --recipe-path recipe.json -p trogon-gateway
 
 COPY Cargo.toml Cargo.lock ./
 COPY crates/ crates/
 
-RUN cargo build --release -p trogon-source-slack && \
-    strip target/release/trogon-source-slack
+RUN cargo build --release -p trogon-gateway && \
+    strip target/release/trogon-gateway
 
 # ── Stage 4: runtime ────────────────────────────────────────────────────────
 FROM debian:bookworm-20250317-slim AS runtime
@@ -34,12 +34,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN useradd --no-create-home --shell /usr/sbin/nologin trogon
 
-COPY --from=builder /build/target/release/trogon-source-slack /usr/local/bin/trogon-source-slack
+COPY --from=builder /build/target/release/trogon-gateway /usr/local/bin/trogon-gateway
 
 USER trogon
 
-EXPOSE 3000
+EXPOSE 8080
 
 STOPSIGNAL SIGTERM
 
-ENTRYPOINT ["/usr/local/bin/trogon-source-slack"]
+ENTRYPOINT ["/usr/local/bin/trogon-gateway", "serve"]

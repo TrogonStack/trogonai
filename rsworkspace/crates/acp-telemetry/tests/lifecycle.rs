@@ -15,5 +15,5 @@ fn init_logger_creates_log_dir_and_shuts_down_cleanly() {
         "init_logger should create the configured log directory"
     );
 
-    acp_telemetry::shutdown_otel();
+    assert!(acp_telemetry::shutdown_otel().is_ok());
 }

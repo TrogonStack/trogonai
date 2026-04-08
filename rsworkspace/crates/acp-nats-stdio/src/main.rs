@@ -53,7 +53,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         info!("ACP bridge stopped");
     }
 
-    acp_telemetry::shutdown_otel();
+    if let Err(e) = acp_telemetry::shutdown_otel() {
+        error!(error = %e, "OpenTelemetry shutdown failed");
+    }
 
     result
 }

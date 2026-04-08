@@ -82,9 +82,14 @@ impl<E: fmt::Display> fmt::Display for ClaimResolveError<E> {
     }
 }
 
-impl<E: fmt::Display + fmt::Debug + Send + Sync + 'static> std::error::Error
-    for ClaimResolveError<E>
-{
+impl<E: std::error::Error + Send + Sync + 'static> std::error::Error for ClaimResolveError<E> {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::MissingKey => None,
+            Self::StoreFailed(e) => Some(e),
+            Self::ReadFailed(e) => Some(e),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -263,6 +268,29 @@ mod tests {
         let err: ClaimResolveError<String> = ClaimResolveError::ReadFailed(io_err);
         let msg = err.to_string();
         assert!(msg.contains("pipe broke"));
+    }
+
+    #[test]
+    fn claim_resolve_error_source_missing_key() {
+        use std::error::Error;
+        let err: ClaimResolveError<std::io::Error> = ClaimResolveError::MissingKey;
+        assert!(err.source().is_none());
+    }
+
+    #[test]
+    fn claim_resolve_error_source_store_failed() {
+        use std::error::Error;
+        let inner = std::io::Error::other("boom");
+        let err: ClaimResolveError<std::io::Error> = ClaimResolveError::StoreFailed(inner);
+        assert!(err.source().is_some());
+    }
+
+    #[test]
+    fn claim_resolve_error_source_read_failed() {
+        use std::error::Error;
+        let inner = std::io::Error::new(std::io::ErrorKind::BrokenPipe, "pipe broke");
+        let err: ClaimResolveError<std::io::Error> = ClaimResolveError::ReadFailed(inner);
+        assert!(err.source().is_some());
     }
 }
 
