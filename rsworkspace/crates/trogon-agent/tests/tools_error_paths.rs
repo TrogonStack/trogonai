@@ -9,13 +9,13 @@ use serde_json::json;
 use trogon_agent::tools::{ToolContext, dispatch_tool};
 
 fn make_ctx(proxy_url: &str) -> ToolContext {
-    ToolContext {
-        http_client: reqwest::Client::new(),
-        proxy_url: proxy_url.to_string(),
-        github_token: "tok_github_prod_test01".to_string(),
-        linear_token: "tok_linear_prod_test01".to_string(),
-        slack_token: "tok_slack_prod_test01".to_string(),
-    }
+    ToolContext::new(
+        reqwest::Client::new(),
+        proxy_url.to_string(),
+        "tok_github_prod_test01".to_string(),
+        "tok_linear_prod_test01".to_string(),
+        "tok_slack_prod_test01".to_string(),
+    )
 }
 
 // ── send_slack_message ────────────────────────────────────────────────────────

@@ -34,6 +34,7 @@ use trogon_agent::{AgentConfig, run};
 use trogon_github::{GithubConfig, serve as github_serve};
 use trogon_linear::{LinearConfig, serve as linear_serve};
 use trogon_nats::{NatsAuth, NatsConfig};
+use trogon_nats::jetstream::NatsJetStreamClient;
 use trogon_secret_proxy::{
     proxy::{ProxyState, router},
     stream, subjects, worker,
@@ -139,7 +140,7 @@ async fn webhook_http_triggers_full_pipeline_with_real_key() {
     let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
         .await
         .expect("Failed to connect to NATS");
-    let js = Arc::new(jetstream::new(nats.clone()));
+    let js = NatsJetStreamClient::new(jetstream::new(nats.clone()));
 
     // ── 5. Ensure PROXY_REQUESTS stream ────────────────────────────────────
     let outbound_subject = subjects::outbound("trogon");
@@ -153,7 +154,7 @@ async fn webhook_http_triggers_full_pipeline_with_real_key() {
 
     let proxy_state = ProxyState {
         nats: nats.clone(),
-        jetstream: Arc::clone(&js),
+        jetstream: js.clone(),
         prefix: "trogon".to_string(),
         outbound_subject: outbound_subject.clone(),
         worker_timeout: Duration::from_secs(15),
@@ -169,7 +170,7 @@ async fn webhook_http_triggers_full_pipeline_with_real_key() {
         .timeout(Duration::from_secs(15))
         .build()
         .unwrap();
-    let worker_js = Arc::clone(&js);
+    let worker_js = js.clone();
     let worker_nats = nats.clone();
     let worker_vault = Arc::clone(&vault);
     let worker_stream = stream::stream_name("trogon");
@@ -213,14 +214,14 @@ async fn webhook_http_triggers_full_pipeline_with_real_key() {
 
     // The agent runner requires GITHUB, LINEAR, and CRON_TICKS streams to exist.
     // The GitHub server created GITHUB above; create the others manually.
-    js.get_or_create_stream(jetstream::stream::Config {
+    js.context().get_or_create_stream(jetstream::stream::Config {
         name: "LINEAR".to_string(),
         subjects: vec!["linear.Issue.>".to_string()],
         ..Default::default()
     })
     .await
     .expect("Failed to create LINEAR stream");
-    js.get_or_create_stream(jetstream::stream::Config {
+    js.context().get_or_create_stream(jetstream::stream::Config {
         name: "CRON_TICKS".to_string(),
         subjects: vec!["cron.>".to_string()],
         ..Default::default()
@@ -338,7 +339,7 @@ async fn linear_webhook_http_triggers_full_pipeline_with_real_key() {
     let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
         .await
         .expect("Failed to connect to NATS");
-    let js = Arc::new(jetstream::new(nats.clone()));
+    let js = NatsJetStreamClient::new(jetstream::new(nats.clone()));
 
     // ── 5. Ensure PROXY_REQUESTS stream ────────────────────────────────────
     let outbound_subject = subjects::outbound("trogon");
@@ -352,7 +353,7 @@ async fn linear_webhook_http_triggers_full_pipeline_with_real_key() {
 
     let proxy_state = ProxyState {
         nats: nats.clone(),
-        jetstream: Arc::clone(&js),
+        jetstream: js.clone(),
         prefix: "trogon".to_string(),
         outbound_subject: outbound_subject.clone(),
         worker_timeout: Duration::from_secs(15),
@@ -368,7 +369,7 @@ async fn linear_webhook_http_triggers_full_pipeline_with_real_key() {
         .timeout(Duration::from_secs(15))
         .build()
         .unwrap();
-    let worker_js = Arc::clone(&js);
+    let worker_js = js.clone();
     let worker_nats = nats.clone();
     let worker_vault = Arc::clone(&vault);
     let worker_stream = stream::stream_name("trogon");
@@ -413,14 +414,14 @@ async fn linear_webhook_http_triggers_full_pipeline_with_real_key() {
 
     // The agent runner requires GITHUB, LINEAR, and CRON_TICKS streams to exist.
     // The Linear server created LINEAR above; create the others manually.
-    js.get_or_create_stream(jetstream::stream::Config {
+    js.context().get_or_create_stream(jetstream::stream::Config {
         name: "GITHUB".to_string(),
         subjects: vec!["github.pull_request".to_string()],
         ..Default::default()
     })
     .await
     .expect("Failed to create GITHUB stream");
-    js.get_or_create_stream(jetstream::stream::Config {
+    js.context().get_or_create_stream(jetstream::stream::Config {
         name: "CRON_TICKS".to_string(),
         subjects: vec!["cron.>".to_string()],
         ..Default::default()

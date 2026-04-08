@@ -74,13 +74,13 @@ fn make_tool_context_stores_all_fields() {
 // ── Missing field errors for remaining tools ──────────────────────────────────
 
 fn dummy_ctx() -> ToolContext {
-    ToolContext {
-        http_client: reqwest::Client::new(),
-        proxy_url: "http://localhost:9999".to_string(),
-        github_token: String::new(),
-        linear_token: String::new(),
-        slack_token: String::new(),
-    }
+    ToolContext::new(
+        reqwest::Client::new(),
+        "http://localhost:9999".to_string(),
+        String::new(),
+        String::new(),
+        String::new(),
+    )
 }
 
 #[tokio::test]
@@ -174,13 +174,13 @@ async fn get_file_contents_missing_content_field_returns_error() {
             .json_body(json!({ "encoding": "base64" })); // no "content" key
     });
 
-    let ctx = ToolContext {
-        http_client: reqwest::Client::new(),
-        proxy_url: server.base_url(),
-        github_token: "tok_github_prod_test01".to_string(),
-        linear_token: String::new(),
-        slack_token: String::new(),
-    };
+    let ctx = ToolContext::new(
+        reqwest::Client::new(),
+        server.base_url(),
+        "tok_github_prod_test01".to_string(),
+        String::new(),
+        String::new(),
+    );
     let input = json!({ "owner": "o", "repo": "r", "path": "f.txt" });
     let result = dispatch_tool(&ctx, "get_file_contents", &input).await;
     assert!(result.contains("Tool error"), "got: {result}");
@@ -199,13 +199,13 @@ async fn get_file_contents_invalid_base64_returns_error() {
             .json_body(json!({ "content": "!!!not-valid-base64!!!" }));
     });
 
-    let ctx = ToolContext {
-        http_client: reqwest::Client::new(),
-        proxy_url: server.base_url(),
-        github_token: "tok_github_prod_test01".to_string(),
-        linear_token: String::new(),
-        slack_token: String::new(),
-    };
+    let ctx = ToolContext::new(
+        reqwest::Client::new(),
+        server.base_url(),
+        "tok_github_prod_test01".to_string(),
+        String::new(),
+        String::new(),
+    );
     let input = json!({ "owner": "o", "repo": "r", "path": "f.txt" });
     let result = dispatch_tool(&ctx, "get_file_contents", &input).await;
     assert!(result.contains("Tool error"), "got: {result}");
@@ -228,13 +228,13 @@ async fn get_file_contents_non_utf8_bytes_returns_error() {
             .json_body(json!({ "content": encoded }));
     });
 
-    let ctx = ToolContext {
-        http_client: reqwest::Client::new(),
-        proxy_url: server.base_url(),
-        github_token: "tok_github_prod_test01".to_string(),
-        linear_token: String::new(),
-        slack_token: String::new(),
-    };
+    let ctx = ToolContext::new(
+        reqwest::Client::new(),
+        server.base_url(),
+        "tok_github_prod_test01".to_string(),
+        String::new(),
+        String::new(),
+    );
     let input = json!({ "owner": "o", "repo": "r", "path": "binary.bin" });
     let result = dispatch_tool(&ctx, "get_file_contents", &input).await;
     assert!(result.contains("Tool error"), "got: {result}");

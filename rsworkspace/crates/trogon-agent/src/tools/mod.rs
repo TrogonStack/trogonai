@@ -10,6 +10,101 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use trogon_mcp::McpCallTool;
 
+/// Raw HTTP response returned by the transport layer.
+#[derive(Debug, Clone)]
+pub struct HttpResponse {
+    pub status: u16,
+    pub body: String,
+}
+
+/// Trait abstracting the HTTP transport used by tool functions.
+/// Production implementation is `reqwest::Client`; tests use `MockHttpClient`.
+pub trait HttpClient: Send + Sync + Clone + 'static {
+    fn get(
+        &self,
+        url: &str,
+        headers: Vec<(String, String)>,
+    ) -> Pin<Box<dyn Future<Output = Result<HttpResponse, String>> + Send + '_>>;
+
+    fn post(
+        &self,
+        url: &str,
+        headers: Vec<(String, String)>,
+        body: serde_json::Value,
+    ) -> Pin<Box<dyn Future<Output = Result<HttpResponse, String>> + Send + '_>>;
+
+    fn put(
+        &self,
+        url: &str,
+        headers: Vec<(String, String)>,
+        body: serde_json::Value,
+    ) -> Pin<Box<dyn Future<Output = Result<HttpResponse, String>> + Send + '_>>;
+}
+
+impl HttpClient for reqwest::Client {
+    fn get(
+        &self,
+        url: &str,
+        headers: Vec<(String, String)>,
+    ) -> Pin<Box<dyn Future<Output = Result<HttpResponse, String>> + Send + '_>> {
+        let url = url.to_string();
+        let me = self.clone();
+        Box::pin(async move {
+            let mut req = me.get(&url);
+            for (k, v) in headers {
+                req = req.header(k.as_str(), v.as_str());
+            }
+            let resp = req.send().await.map_err(|e| e.to_string())?;
+            let status = resp.status().as_u16();
+            let body = resp.text().await.map_err(|e| e.to_string())?;
+            Ok(HttpResponse { status, body })
+        })
+    }
+
+    fn post(
+        &self,
+        url: &str,
+        headers: Vec<(String, String)>,
+        body: serde_json::Value,
+    ) -> Pin<Box<dyn Future<Output = Result<HttpResponse, String>> + Send + '_>> {
+        let url = url.to_string();
+        let me = self.clone();
+        Box::pin(async move {
+            let mut req = me.post(&url).json(&body);
+            for (k, v) in headers {
+                req = req.header(k.as_str(), v.as_str());
+            }
+            let resp = req.send().await.map_err(|e| e.to_string())?;
+            let status = resp.status().as_u16();
+            let body = resp.text().await.map_err(|e| e.to_string())?;
+            Ok(HttpResponse { status, body })
+        })
+    }
+
+    fn put(
+        &self,
+        url: &str,
+        headers: Vec<(String, String)>,
+        body: serde_json::Value,
+    ) -> Pin<Box<dyn Future<Output = Result<HttpResponse, String>> + Send + '_>> {
+        let url = url.to_string();
+        let me = self.clone();
+        Box::pin(async move {
+            let mut req = me.put(&url).json(&body);
+            for (k, v) in headers {
+                req = req.header(k.as_str(), v.as_str());
+            }
+            let resp = req.send().await.map_err(|e| e.to_string())?;
+            let status = resp.status().as_u16();
+            let body = resp.text().await.map_err(|e| e.to_string())?;
+            Ok(HttpResponse { status, body })
+        })
+    }
+}
+
+type McpInitResult = (Vec<ToolDef>, Vec<(String, String, std::sync::Arc<dyn trogon_mcp::McpCallTool>)>);
+type McpFactory = dyn Fn(Vec<crate::config::McpServerConfig>) -> Pin<Box<dyn Future<Output = McpInitResult> + Send>> + Send + Sync;
+
 /// Trait for dispatching a named tool call.
 pub trait ToolDispatcher: Send + Sync + 'static {
     fn dispatch<'a>(
@@ -20,17 +115,17 @@ pub trait ToolDispatcher: Send + Sync + 'static {
 }
 
 /// Concrete [`ToolDispatcher`] that delegates to the built-in [`dispatch_tool`] function.
-pub struct DefaultToolDispatcher {
-    ctx: Arc<ToolContext>,
+pub struct DefaultToolDispatcher<H = reqwest::Client> {
+    ctx: Arc<ToolContext<H>>,
 }
 
-impl DefaultToolDispatcher {
-    pub fn new(ctx: Arc<ToolContext>) -> Self {
+impl<H: HttpClient> DefaultToolDispatcher<H> {
+    pub fn new(ctx: Arc<ToolContext<H>>) -> Self {
         Self { ctx }
     }
 }
 
-impl ToolDispatcher for DefaultToolDispatcher {
+impl<H: HttpClient> ToolDispatcher for DefaultToolDispatcher<H> {
     fn dispatch<'a>(
         &'a self,
         name: &'a str,
@@ -46,6 +141,8 @@ impl ToolDispatcher for DefaultToolDispatcher {
 #[cfg(test)]
 pub mod mock {
     use super::*;
+    use std::collections::VecDeque;
+    use std::sync::Mutex;
 
     pub struct MockToolDispatcher {
         pub response: String,
@@ -126,6 +223,91 @@ pub mod mock {
             Box::pin(async move { (vec![], vec![]) })
         }
     }
+
+    #[derive(Clone, Default)]
+    pub struct MockHttpClient {
+        responses: Arc<Mutex<VecDeque<Result<HttpResponse, String>>>>,
+    }
+
+    impl MockHttpClient {
+        pub fn new() -> Self {
+            Self::default()
+        }
+
+        pub fn enqueue_ok(&self, status: u16, body: impl Into<String>) {
+            self.responses
+                .lock()
+                .unwrap()
+                .push_back(Ok(HttpResponse { status, body: body.into() }));
+        }
+
+        pub fn enqueue_err(&self, msg: impl Into<String>) {
+            self.responses.lock().unwrap().push_back(Err(msg.into()));
+        }
+
+        fn next(&self) -> Result<HttpResponse, String> {
+            self.responses
+                .lock()
+                .unwrap()
+                .pop_front()
+                .unwrap_or_else(|| Err("MockHttpClient: no response enqueued".to_string()))
+        }
+    }
+
+    impl HttpClient for MockHttpClient {
+        fn get(
+            &self,
+            _url: &str,
+            _headers: Vec<(String, String)>,
+        ) -> Pin<Box<dyn Future<Output = Result<HttpResponse, String>> + Send + '_>> {
+            let r = self.next();
+            Box::pin(async move { r })
+        }
+
+        fn post(
+            &self,
+            _url: &str,
+            _headers: Vec<(String, String)>,
+            _body: serde_json::Value,
+        ) -> Pin<Box<dyn Future<Output = Result<HttpResponse, String>> + Send + '_>> {
+            let r = self.next();
+            Box::pin(async move { r })
+        }
+
+        fn put(
+            &self,
+            _url: &str,
+            _headers: Vec<(String, String)>,
+            _body: serde_json::Value,
+        ) -> Pin<Box<dyn Future<Output = Result<HttpResponse, String>> + Send + '_>> {
+            let r = self.next();
+            Box::pin(async move { r })
+        }
+    }
+
+    /// Returns a no-op MCP factory (returns empty vecs).
+    pub fn no_mcp_factory() -> Arc<McpFactory> {
+        Arc::new(|_servers| Box::pin(async { (vec![], vec![]) }))
+    }
+
+    impl ToolContext<MockHttpClient> {
+        /// Convenience constructor for unit tests.
+        pub fn for_test(
+            proxy_url: impl Into<String>,
+            github_token: impl Into<String>,
+            linear_token: impl Into<String>,
+            slack_token: impl Into<String>,
+        ) -> Self {
+            Self {
+                http_client: MockHttpClient::new(),
+                proxy_url: proxy_url.into(),
+                github_token: github_token.into(),
+                linear_token: linear_token.into(),
+                slack_token: slack_token.into(),
+                mcp_factory: no_mcp_factory(),
+            }
+        }
+    }
 }
 
 /// Anthropic tool definition sent in every request.
@@ -141,8 +323,8 @@ pub struct ToolDef {
 }
 
 /// Shared HTTP context available to every tool implementation.
-pub struct ToolContext {
-    pub http_client: reqwest::Client,
+pub struct ToolContext<H = reqwest::Client> {
+    pub http_client: H,
     /// Base URL of the running `trogon-secret-proxy`.
     pub proxy_url: String,
     /// Opaque proxy token for the GitHub API.
@@ -151,6 +333,31 @@ pub struct ToolContext {
     pub linear_token: String,
     /// Opaque proxy token for the Slack API.
     pub slack_token: String,
+    mcp_factory: std::sync::Arc<McpFactory>,
+}
+
+impl ToolContext<reqwest::Client> {
+    /// Production constructor that wires the real MCP server initializer.
+    pub fn new(
+        http_client: reqwest::Client,
+        proxy_url: String,
+        github_token: String,
+        linear_token: String,
+        slack_token: String,
+    ) -> Self {
+        let http_for_mcp = http_client.clone();
+        Self {
+            http_client,
+            proxy_url,
+            github_token,
+            linear_token,
+            slack_token,
+            mcp_factory: std::sync::Arc::new(move |servers| {
+                let http = http_for_mcp.clone();
+                Box::pin(async move { crate::runner::init_mcp_servers(&http, &servers).await })
+            }),
+        }
+    }
 }
 
 /// Trait abstracting the agent's HTTP configuration dependencies.
@@ -184,50 +391,38 @@ pub trait AgentConfig: Send + Sync + 'static {
     ) -> Pin<Box<dyn Future<Output = (Vec<ToolDef>, Vec<(String, String, Arc<dyn McpCallTool>)>)> + Send + 'a>>;
 }
 
-impl AgentConfig for ToolContext {
-    fn proxy_url(&self) -> &str {
-        &self.proxy_url
-    }
-    fn github_token(&self) -> &str {
-        &self.github_token
-    }
-    fn linear_token(&self) -> &str {
-        &self.linear_token
-    }
-    fn slack_token(&self) -> &str {
-        &self.slack_token
-    }
+impl<H: HttpClient> AgentConfig for ToolContext<H> {
+    fn proxy_url(&self) -> &str { &self.proxy_url }
+    fn github_token(&self) -> &str { &self.github_token }
+    fn linear_token(&self) -> &str { &self.linear_token }
+    fn slack_token(&self) -> &str { &self.slack_token }
 
     fn fetch_github_contents<'a>(
         &'a self,
         url: &'a str,
         token: &'a str,
     ) -> Pin<Box<dyn Future<Output = Option<Value>> + Send + 'a>> {
-        let http = self.http_client.clone();
-        let url = url.to_string();
-        let token = token.to_string();
+        let headers = vec![
+            ("Authorization".to_string(), format!("Bearer {token}")),
+            ("Accept".to_string(), "application/vnd.github.v3+json".to_string()),
+        ];
+        let fut = self.http_client.get(url, headers);
         Box::pin(async move {
-            let resp = http
-                .get(&url)
-                .header("Authorization", format!("Bearer {}", token))
-                .header("Accept", "application/vnd.github.v3+json")
-                .send()
-                .await
-                .ok()?;
-            if !resp.status().is_success() {
+            let resp = fut.await.ok()?;
+            if resp.status < 200 || resp.status >= 300 {
                 return None;
             }
-            resp.json().await.ok()
+            serde_json::from_str(&resp.body).ok()
         })
     }
 
     fn init_mcp_clients<'a>(
         &'a self,
         servers: &'a [crate::config::McpServerConfig],
-    ) -> Pin<Box<dyn Future<Output = (Vec<ToolDef>, Vec<(String, String, Arc<dyn McpCallTool>)>)> + Send + 'a>> {
-        let http = self.http_client.clone();
-        let servers: Vec<crate::config::McpServerConfig> = servers.to_vec();
-        Box::pin(async move { crate::runner::init_mcp_servers(&http, &servers).await })
+    ) -> Pin<Box<dyn Future<Output = McpInitResult> + Send + 'a>> {
+        let servers = servers.to_vec();
+        let factory = std::sync::Arc::clone(&self.mcp_factory);
+        Box::pin(async move { (factory)(servers).await })
     }
 }
 
@@ -244,7 +439,7 @@ pub fn tool_def(name: &str, description: &str, schema: Value) -> ToolDef {
 /// Dispatch a tool call by name and return the string output to feed back to
 /// the model.  Unknown tool names return an error string instead of panicking
 /// so the agent can recover gracefully.
-pub async fn dispatch_tool(ctx: &ToolContext, name: &str, input: &Value) -> String {
+pub async fn dispatch_tool<H: HttpClient>(ctx: &ToolContext<H>, name: &str, input: &Value) -> String {
     let result = match name {
         "get_pr_diff" => github::get_pr_diff(ctx, input).await,
         "get_file_contents" => github::get_file_contents(ctx, input).await,
@@ -283,13 +478,12 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_unknown_tool_returns_error_string() {
-        let ctx = ToolContext {
-            http_client: reqwest::Client::new(),
-            proxy_url: "http://localhost:8080".to_string(),
-            github_token: "tok_github_prod_test01".to_string(),
-            linear_token: "tok_linear_prod_test01".to_string(),
-            slack_token: String::new(),
-        };
+        let ctx = ToolContext::for_test(
+            "http://localhost:8080",
+            "tok_github_prod_test01",
+            "tok_linear_prod_test01",
+            "",
+        );
         let result = dispatch_tool(&ctx, "nonexistent_tool", &json!({})).await;
         assert!(result.contains("Unknown tool"));
     }
@@ -298,13 +492,12 @@ mod tests {
     /// when required inputs are missing — confirms the route exists.
     #[tokio::test]
     async fn dispatch_get_pr_comments_routes_correctly() {
-        let ctx = ToolContext {
-            http_client: reqwest::Client::new(),
-            proxy_url: "http://localhost:8080".to_string(),
-            github_token: "tok_github_prod_test01".to_string(),
-            linear_token: "tok_linear_prod_test01".to_string(),
-            slack_token: String::new(),
-        };
+        let ctx = ToolContext::for_test(
+            "http://localhost:8080",
+            "tok_github_prod_test01",
+            "tok_linear_prod_test01",
+            "",
+        );
         let result = dispatch_tool(&ctx, "get_pr_comments", &json!({})).await;
         assert!(result.starts_with("Tool error:"), "got: {result}");
         assert!(!result.contains("Unknown tool"));
@@ -313,13 +506,12 @@ mod tests {
     /// `update_file` is routed and returns a Tool error when inputs are missing.
     #[tokio::test]
     async fn dispatch_update_file_routes_correctly() {
-        let ctx = ToolContext {
-            http_client: reqwest::Client::new(),
-            proxy_url: "http://localhost:8080".to_string(),
-            github_token: "tok_github_prod_test01".to_string(),
-            linear_token: "tok_linear_prod_test01".to_string(),
-            slack_token: String::new(),
-        };
+        let ctx = ToolContext::for_test(
+            "http://localhost:8080",
+            "tok_github_prod_test01",
+            "tok_linear_prod_test01",
+            "",
+        );
         let result = dispatch_tool(&ctx, "update_file", &json!({})).await;
         assert!(result.starts_with("Tool error:"), "got: {result}");
         assert!(!result.contains("Unknown tool"));
@@ -328,13 +520,12 @@ mod tests {
     /// `create_pull_request` is routed and returns a Tool error when inputs are missing.
     #[tokio::test]
     async fn dispatch_create_pull_request_routes_correctly() {
-        let ctx = ToolContext {
-            http_client: reqwest::Client::new(),
-            proxy_url: "http://localhost:8080".to_string(),
-            github_token: "tok_github_prod_test01".to_string(),
-            linear_token: "tok_linear_prod_test01".to_string(),
-            slack_token: String::new(),
-        };
+        let ctx = ToolContext::for_test(
+            "http://localhost:8080",
+            "tok_github_prod_test01",
+            "tok_linear_prod_test01",
+            "",
+        );
         let result = dispatch_tool(&ctx, "create_pull_request", &json!({})).await;
         assert!(result.starts_with("Tool error:"), "got: {result}");
         assert!(!result.contains("Unknown tool"));
@@ -343,13 +534,12 @@ mod tests {
     /// `get_linear_comments` is routed and returns a Tool error when inputs are missing.
     #[tokio::test]
     async fn dispatch_get_linear_comments_routes_correctly() {
-        let ctx = ToolContext {
-            http_client: reqwest::Client::new(),
-            proxy_url: "http://localhost:8080".to_string(),
-            github_token: "tok_github_prod_test01".to_string(),
-            linear_token: "tok_linear_prod_test01".to_string(),
-            slack_token: String::new(),
-        };
+        let ctx = ToolContext::for_test(
+            "http://localhost:8080",
+            "tok_github_prod_test01",
+            "tok_linear_prod_test01",
+            "",
+        );
         let result = dispatch_tool(&ctx, "get_linear_comments", &json!({})).await;
         assert!(result.starts_with("Tool error:"), "got: {result}");
         assert!(!result.contains("Unknown tool"));
@@ -358,13 +548,12 @@ mod tests {
     /// `request_reviewers` is routed and returns a Tool error when inputs are missing.
     #[tokio::test]
     async fn dispatch_request_reviewers_routes_correctly() {
-        let ctx = ToolContext {
-            http_client: reqwest::Client::new(),
-            proxy_url: "http://localhost:8080".to_string(),
-            github_token: "tok_github_prod_test01".to_string(),
-            linear_token: "tok_linear_prod_test01".to_string(),
-            slack_token: String::new(),
-        };
+        let ctx = ToolContext::for_test(
+            "http://localhost:8080",
+            "tok_github_prod_test01",
+            "tok_linear_prod_test01",
+            "",
+        );
         let result = dispatch_tool(&ctx, "request_reviewers", &json!({})).await;
         assert!(result.starts_with("Tool error:"), "got: {result}");
         assert!(!result.contains("Unknown tool"));
@@ -372,13 +561,12 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_send_slack_message_routes_correctly() {
-        let ctx = ToolContext {
-            http_client: reqwest::Client::new(),
-            proxy_url: "http://localhost:8080".to_string(),
-            github_token: String::new(),
-            linear_token: String::new(),
-            slack_token: "tok_slack_prod_test01".to_string(),
-        };
+        let ctx = ToolContext::for_test(
+            "http://localhost:8080",
+            "",
+            "",
+            "tok_slack_prod_test01",
+        );
         let result = dispatch_tool(&ctx, "send_slack_message", &json!({})).await;
         assert!(result.starts_with("Tool error:"), "got: {result}");
         assert!(!result.contains("Unknown tool"));
@@ -386,13 +574,12 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_read_slack_channel_routes_correctly() {
-        let ctx = ToolContext {
-            http_client: reqwest::Client::new(),
-            proxy_url: "http://localhost:8080".to_string(),
-            github_token: String::new(),
-            linear_token: String::new(),
-            slack_token: "tok_slack_prod_test01".to_string(),
-        };
+        let ctx = ToolContext::for_test(
+            "http://localhost:8080",
+            "",
+            "",
+            "tok_slack_prod_test01",
+        );
         let result = dispatch_tool(&ctx, "read_slack_channel", &json!({})).await;
         assert!(result.starts_with("Tool error:"), "got: {result}");
         assert!(!result.contains("Unknown tool"));

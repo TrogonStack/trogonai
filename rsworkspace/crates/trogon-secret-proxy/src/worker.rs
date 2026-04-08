@@ -186,16 +186,34 @@ where
             }
         };
 
-        if let Err(e) = nats
-            .publish_with_headers(reply_to.clone(), HeaderMap::new(), payload.into())
-            .await
-        {
+        // `publish_with_headers` does not check max_payload client-side (unlike
+        // `publish`), so oversized messages are silently dropped by the server
+        // and the error is only reported via the async event callback.  We
+        // pre-check the size here so we can publish a compact error response
+        // immediately instead of letting the proxy time out with 504.
+        let payload_len = payload.len();
+        let max_payload = nats.max_payload();
+        let publish_err: Option<String> = if payload_len > max_payload {
+            Some(format!(
+                "payload size {} exceeds NATS max_payload {}",
+                payload_len, max_payload
+            ))
+        } else {
+            match nats
+                .publish_with_headers(reply_to.clone(), HeaderMap::new(), payload.into())
+                .await
+            {
+                Ok(()) => None,
+                Err(e) => Some(e.to_string()),
+            }
+        };
+
+        if let Some(e) = publish_err {
             tracing::error!(
                 reply_to = %reply_to,
                 error = %e,
                 "Failed to publish reply to Core NATS"
             );
-            // The original payload was too large (or the connection dropped).
             // Publish a compact error response so the proxy returns a
             // descriptive error to the caller instead of timing out with 504.
             let error_response = OutboundHttpResponse {

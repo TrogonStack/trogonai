@@ -472,13 +472,7 @@ mod tests {
         use crate::tools::{DefaultToolDispatcher, ToolContext};
 
         let http = reqwest::Client::new();
-        let tool_ctx = Arc::new(ToolContext {
-            http_client: http.clone(),
-            proxy_url: "http://127.0.0.1:1".to_string(),
-            github_token: String::new(),
-            linear_token: String::new(),
-            slack_token: String::new(),
-        });
+        let tool_ctx = Arc::new(ToolContext::for_test("http://127.0.0.1:1", "", "", ""));
         Arc::new(AgentLoop {
             anthropic_client: Arc::new(ReqwestAnthropicClient::new(
                 http,

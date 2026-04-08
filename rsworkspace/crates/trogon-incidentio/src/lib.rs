@@ -37,7 +37,7 @@ pub mod server;
 pub mod signature;
 pub mod store;
 
-pub use client::IncidentioClient;
+pub use client::{HttpClient, HttpResponse, IncidentioClient};
 pub use config::IncidentioConfig;
 #[cfg(not(coverage))]
 pub use server::serve;

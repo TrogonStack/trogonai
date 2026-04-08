@@ -201,13 +201,13 @@ mod tests {
         use crate::flag_client::AlwaysOnFlagClient;
         use crate::tools::DefaultToolDispatcher;
         let http_client = reqwest::Client::new();
-        let tool_ctx = Arc::new(crate::tools::ToolContext {
-            http_client: http_client.clone(),
-            proxy_url: server.base_url(),
-            github_token: "tok_github_prod_test01".to_string(),
-            linear_token: String::new(),
-            slack_token: String::new(),
-        });
+        let tool_ctx = Arc::new(crate::tools::ToolContext::new(
+            http_client.clone(),
+            server.base_url(),
+            "tok_github_prod_test01".to_string(),
+            String::new(),
+            String::new(),
+        ));
         let agent = AgentLoop {
             anthropic_client: Arc::new(ReqwestAnthropicClient::new(
                 http_client,
@@ -238,13 +238,13 @@ mod tests {
         use crate::flag_client::AlwaysOnFlagClient;
         use crate::tools::DefaultToolDispatcher;
         let http_client = reqwest::Client::new();
-        let tool_ctx = Arc::new(ToolContext {
-            http_client: http_client.clone(),
-            proxy_url: proxy_url.to_string(),
-            github_token: "tok_github_prod_test01".to_string(),
-            linear_token: String::new(),
-            slack_token: String::new(),
-        });
+        let tool_ctx = Arc::new(ToolContext::new(
+            http_client.clone(),
+            proxy_url.to_string(),
+            "tok_github_prod_test01".to_string(),
+            String::new(),
+            String::new(),
+        ));
         AgentLoop {
             anthropic_client: Arc::new(ReqwestAnthropicClient::new(
                 http_client,
@@ -462,14 +462,8 @@ pub fn make_tool_context(
     github_token: String,
     linear_token: String,
     slack_token: String,
-) -> Arc<ToolContext> {
-    Arc::new(ToolContext {
-        http_client,
-        proxy_url,
-        github_token,
-        linear_token,
-        slack_token,
-    })
+) -> Arc<ToolContext<reqwest::Client>> {
+    Arc::new(ToolContext::new(http_client, proxy_url, github_token, linear_token, slack_token))
 }
 
 /// Run a single automation against a raw NATS event payload.

@@ -35,6 +35,12 @@ pub trait PublishClient: Send + Sync + Clone + 'static {
         headers: HeaderMap,
         payload: Bytes,
     ) -> impl Future<Output = Result<(), Self::PublishError>> + Send;
+
+    /// Returns the server's maximum message payload size in bytes.
+    /// Defaults to 1 MiB (the NATS server default).
+    fn max_payload(&self) -> usize {
+        1024 * 1024
+    }
 }
 
 pub trait FlushClient: Send + Sync + Clone + 'static {
@@ -78,6 +84,10 @@ impl PublishClient for NatsAsyncClient {
         payload: Bytes,
     ) -> Result<(), Self::PublishError> {
         self.publish_with_headers(subject, headers, payload).await
+    }
+
+    fn max_payload(&self) -> usize {
+        self.server_info().max_payload
     }
 }
 

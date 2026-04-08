@@ -1055,7 +1055,16 @@ async fn e2e_nacked_message_redelivered_to_second_worker() {
             )
             .await
             .unwrap();
-        let mut bad_messages = bad_consumer.messages().await.unwrap();
+        // Use fetch(1) instead of messages() so the server-side batch request
+        // is satisfied after pulling 1 message.  Using messages() would leave a
+        // dangling server-side batch request (batch=200, expires=30s) that
+        // consumes the redelivery before the real worker can pull it.
+        let mut bad_messages = bad_consumer
+            .fetch()
+            .max_messages(1)
+            .messages()
+            .await
+            .unwrap();
 
         // Pull the message but do NOT ack — simulates crash mid-request.
         let _bad_msg = tokio::time::timeout(Duration::from_secs(5), bad_messages.next())

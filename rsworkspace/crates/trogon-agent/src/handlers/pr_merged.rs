@@ -158,13 +158,7 @@ mod tests {
         use crate::flag_client::AlwaysOnFlagClient;
         use crate::tools::{DefaultToolDispatcher, ToolContext};
         use std::sync::Arc;
-        let tool_ctx = Arc::new(ToolContext {
-            http_client: reqwest::Client::new(),
-            proxy_url: "http://localhost:9999".to_string(),
-            github_token: String::new(),
-            linear_token: String::new(),
-            slack_token: String::new(),
-        });
+        let tool_ctx = Arc::new(ToolContext::for_test("http://localhost:9999", "", "", ""));
         AgentLoop {
             anthropic_client: Arc::new(ReqwestAnthropicClient::new(
                 reqwest::Client::new(),
