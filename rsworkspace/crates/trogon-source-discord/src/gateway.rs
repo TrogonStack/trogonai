@@ -4,11 +4,54 @@ use async_nats::HeaderMap;
 use bytes::Bytes;
 use serde::Deserialize;
 use serde_json::value::RawValue;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 use trogon_nats::NatsToken;
 use trogon_nats::jetstream::{ClaimCheckPublisher, JetStreamPublisher, ObjectStorePut};
 
 use crate::constants::{NATS_HEADER_EVENT_NAME, NATS_HEADER_GUILD_ID};
+
+// ── DiscordGateway trait ──────────────────────────────────────────────────────
+
+type DynError = Box<dyn std::error::Error + Send + Sync>;
+
+/// An event received from the Discord gateway connection.
+pub enum GatewayEvent {
+    /// A JSON text frame from Discord.
+    Text(String),
+    /// The connection is being closed.
+    Close,
+}
+
+/// Abstraction over a live Discord gateway connection.
+///
+/// The production implementation wraps [`twilight_gateway::Shard`].
+/// Tests use [`MockDiscordGateway`].
+pub trait DiscordGateway {
+    fn next_event(
+        &mut self,
+    ) -> impl std::future::Future<Output = Option<Result<GatewayEvent, DynError>>> + Send + '_;
+}
+
+// Production implementation — only compiled when not running under coverage
+// (same guard used by the rest of the twilight integration in main.rs).
+#[cfg(not(coverage))]
+impl DiscordGateway for twilight_gateway::Shard {
+    async fn next_event(&mut self) -> Option<Result<GatewayEvent, DynError>> {
+        use futures_core::Stream;
+        use std::future::poll_fn;
+        use std::pin::Pin;
+
+        let msg = poll_fn(|cx| Pin::new(&mut *self).poll_next(cx)).await;
+        match msg {
+            Some(Ok(twilight_gateway::Message::Text(text))) => {
+                Some(Ok(GatewayEvent::Text(text)))
+            }
+            Some(Ok(twilight_gateway::Message::Close(_))) => Some(Ok(GatewayEvent::Close)),
+            Some(Err(e)) => Some(Err(Box::new(e))),
+            None => None,
+        }
+    }
+}
 
 const GATEWAY_OP_DISPATCH: u8 = 0;
 
@@ -103,6 +146,28 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> GatewayBridge<P, S> {
             debug!(event = event_name, "published gateway event to NATS");
         } else {
             outcome.log_on_error(event_name);
+        }
+    }
+
+    /// Drive the gateway event loop until the connection closes or the stream ends.
+    ///
+    /// Receives events from `gateway`, dispatches text frames to NATS via
+    /// `dispatch`, logs errors, and returns when the connection is closed or
+    /// the stream is exhausted.
+    pub async fn run<G: DiscordGateway>(&self, gateway: &mut G) {
+        loop {
+            match gateway.next_event().await {
+                Some(Ok(GatewayEvent::Text(text))) => self.dispatch(&text).await,
+                Some(Ok(GatewayEvent::Close)) => {
+                    info!("gateway connection closed");
+                    break;
+                }
+                Some(Err(e)) => {
+                    warn!(error = ?e, "error receiving gateway message");
+                    continue;
+                }
+                None => break,
+            }
         }
     }
 
@@ -632,6 +697,104 @@ mod tests {
         assert_eq!(
             extract_dedup_id("message_create", br#"{"content":"hi"}"#),
             None
+        );
+    }
+
+    // ── MockDiscordGateway ────────────────────────────────────────────────────
+
+    struct MockDiscordGateway {
+        events: std::collections::VecDeque<Result<GatewayEvent, DynError>>,
+    }
+
+    impl MockDiscordGateway {
+        fn from_events(events: Vec<Result<GatewayEvent, DynError>>) -> Self {
+            Self {
+                events: events.into(),
+            }
+        }
+    }
+
+    impl DiscordGateway for MockDiscordGateway {
+        async fn next_event(&mut self) -> Option<Result<GatewayEvent, DynError>> {
+            self.events.pop_front()
+        }
+    }
+
+    // ── GatewayBridge::run tests ──────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn run_dispatches_text_messages_to_bridge() {
+        let (b, mock) = bridge_with_mock();
+        let mut gw = MockDiscordGateway::from_events(vec![
+            Ok(GatewayEvent::Text(
+                r#"{"op":0,"t":"MESSAGE_CREATE","s":1,"d":{"id":"1","channel_id":"2"}}"#
+                    .to_string(),
+            )),
+            Ok(GatewayEvent::Close),
+        ]);
+        b.run(&mut gw).await;
+        assert_eq!(mock.published_subjects(), vec!["discord.message_create"]);
+    }
+
+    #[tokio::test]
+    async fn run_stops_on_close_event() {
+        let (b, mock) = bridge_with_mock();
+        let mut gw = MockDiscordGateway::from_events(vec![
+            Ok(GatewayEvent::Close),
+            // This message must not be processed
+            Ok(GatewayEvent::Text(
+                r#"{"op":0,"t":"READY","s":1,"d":{}}"#.to_string(),
+            )),
+        ]);
+        b.run(&mut gw).await;
+        assert!(mock.published_subjects().is_empty());
+    }
+
+    #[tokio::test]
+    async fn run_stops_when_stream_ends() {
+        let (b, _mock) = bridge_with_mock();
+        // Empty queue → next_event returns None immediately → run exits
+        let mut gw = MockDiscordGateway::from_events(vec![]);
+        b.run(&mut gw).await; // must not hang
+    }
+
+    #[tokio::test]
+    async fn run_continues_after_error_and_dispatches_next() {
+        let (b, mock) = bridge_with_mock();
+        let mut gw = MockDiscordGateway::from_events(vec![
+            Err(Box::from("transient network error")),
+            Ok(GatewayEvent::Text(
+                r#"{"op":0,"t":"MESSAGE_CREATE","s":1,"d":{"id":"2"}}"#.to_string(),
+            )),
+            Ok(GatewayEvent::Close),
+        ]);
+        b.run(&mut gw).await;
+        assert_eq!(mock.published_subjects(), vec!["discord.message_create"]);
+    }
+
+    #[tokio::test]
+    async fn run_dispatches_multiple_events_in_order() {
+        let (b, mock) = bridge_with_mock();
+        let mut gw = MockDiscordGateway::from_events(vec![
+            Ok(GatewayEvent::Text(
+                r#"{"op":0,"t":"MESSAGE_CREATE","s":1,"d":{"id":"1"}}"#.to_string(),
+            )),
+            Ok(GatewayEvent::Text(
+                r#"{"op":0,"t":"GUILD_CREATE","s":2,"d":{"id":"2"}}"#.to_string(),
+            )),
+            Ok(GatewayEvent::Text(
+                r#"{"op":0,"t":"MESSAGE_DELETE","s":3,"d":{"id":"3"}}"#.to_string(),
+            )),
+            Ok(GatewayEvent::Close),
+        ]);
+        b.run(&mut gw).await;
+        assert_eq!(
+            mock.published_subjects(),
+            vec![
+                "discord.message_create",
+                "discord.guild_create",
+                "discord.message_delete",
+            ]
         );
     }
 }
