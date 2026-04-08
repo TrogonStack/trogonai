@@ -2,10 +2,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use acp_nats::acp_prefix::AcpPrefix;
-use acp_nats::client_proxy::NatsClientProxy;
-use acp_nats::session_id::AcpSessionId;
-use agent_client_protocol::Client as _;
 use agent_client_protocol::{
     AgentCapabilities, AuthenticateRequest, AuthenticateResponse, CancelNotification,
     CloseSessionRequest, CloseSessionResponse, ContentBlock, ContentChunk, Error, ErrorCode,
@@ -27,6 +23,7 @@ use uuid::Uuid;
 
 use crate::client::{InputItem, Message, XaiClient, XaiEvent};
 use crate::http_client::XaiHttpClient;
+use crate::session_notifier::{NatsSessionNotifier, SessionNotifier};
 
 fn internal_error(msg: impl Into<String>) -> Error {
     Error::new(ErrorCode::InternalError.into(), msg.into())
@@ -67,11 +64,14 @@ struct XaiSession {
 /// subprocess (`codex app-server`) with an HTTP client — making the core logic
 /// WASM-friendly since it has no OS process or signal dependencies.
 ///
-/// `H` abstracts the xAI HTTP client (default: `XaiClient`) so tests can inject
-/// a mock without spinning up a TCP server.
-pub struct XaiAgent<H = XaiClient> {
-    nats: async_nats::Client,
-    acp_prefix: AcpPrefix,
+/// Every external dependency is abstracted behind a trait:
+/// - `H: XaiHttpClient` — the xAI API HTTP client
+/// - `N: SessionNotifier` — the ACP session notification channel
+///
+/// Production uses `XaiAgent<XaiClient, NatsSessionNotifier>` (the defaults).
+/// Tests inject `MockXaiHttpClient` and `MockSessionNotifier` without any network.
+pub struct XaiAgent<H = XaiClient, N = NatsSessionNotifier> {
+    notifier: Arc<N>,
     client: Arc<H>,
     sessions: Arc<Mutex<HashMap<String, XaiSession>>>,
     /// In-flight cancel channels, one per active prompt. Sending `()` stops the
@@ -98,8 +98,8 @@ pub struct XaiAgent<H = XaiClient> {
     max_turns: Option<u32>,
 }
 
-impl XaiAgent<XaiClient> {
-    /// Create a new `XaiAgent` backed by the real xAI HTTP API.
+impl XaiAgent<XaiClient, NatsSessionNotifier> {
+    /// Create a new `XaiAgent` backed by the real xAI HTTP API and NATS notifications.
     ///
     /// Environment variables read at construction:
     /// - `XAI_PROMPT_TIMEOUT_SECS` — per-chunk timeout (default: 300; 0 = default)
@@ -109,20 +109,18 @@ impl XaiAgent<XaiClient> {
     /// - `XAI_SYSTEM_PROMPT` — optional system prompt
     /// - `XAI_MAX_TURNS` — max tool-call turns (default: 10; 0 = server default)
     pub fn new(
-        nats: async_nats::Client,
-        acp_prefix: AcpPrefix,
+        notifier: NatsSessionNotifier,
         default_model: impl Into<String>,
         api_key: impl Into<String>,
     ) -> Self {
-        Self::with_client(nats, acp_prefix, default_model, api_key, XaiClient::new())
+        Self::with_deps(notifier, default_model, api_key, XaiClient::new())
     }
 }
 
-impl<H: XaiHttpClient> XaiAgent<H> {
-    /// Create an `XaiAgent` with a custom HTTP client. Used in tests.
-    pub fn with_client(
-        nats: async_nats::Client,
-        acp_prefix: AcpPrefix,
+impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
+    /// Create an `XaiAgent` with explicit dependencies. Used in tests to inject mocks.
+    pub fn with_deps(
+        notifier: N,
         default_model: impl Into<String>,
         api_key: impl Into<String>,
         client: H,
@@ -190,8 +188,7 @@ impl<H: XaiHttpClient> XaiAgent<H> {
             .or(Some(10));
 
         Self {
-            nats,
-            acp_prefix,
+            notifier: Arc::new(notifier),
             client: Arc::new(client),
             sessions: Arc::new(Mutex::new(HashMap::new())),
             cancel_senders: Arc::new(Mutex::new(HashMap::new())),
@@ -204,20 +201,6 @@ impl<H: XaiHttpClient> XaiAgent<H> {
             max_history,
             max_turns,
         }
-    }
-
-    fn make_nats_client(
-        &self,
-        session_id: &SessionId,
-    ) -> agent_client_protocol::Result<NatsClientProxy<async_nats::Client>> {
-        let acp_session_id =
-            AcpSessionId::try_from(session_id).map_err(|e| internal_error(e.to_string()))?;
-        Ok(NatsClientProxy::new(
-            self.nats.clone(),
-            acp_session_id,
-            self.acp_prefix.clone(),
-            Duration::from_secs(30),
-        ))
     }
 
     fn session_mode_state(&self) -> SessionModeState {
@@ -251,7 +234,9 @@ impl<H: XaiHttpClient> XaiAgent<H> {
 }
 
 #[async_trait(?Send)]
-impl<H: XaiHttpClient + 'static> agent_client_protocol::Agent for XaiAgent<H> {
+impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_protocol::Agent
+    for XaiAgent<H, N>
+{
     async fn initialize(
         &self,
         _req: InitializeRequest,
@@ -303,7 +288,11 @@ impl<H: XaiHttpClient + 'static> agent_client_protocol::Agent for XaiAgent<H> {
 
         // Consume any pending API key from a preceding authenticate() call;
         // fall back to the agent-wide key.
-        let api_key = self.pending_api_key.lock().await.take()
+        let api_key = self
+            .pending_api_key
+            .lock()
+            .await
+            .take()
             .or_else(|| self.global_api_key.clone());
 
         self.sessions.lock().await.insert(
@@ -455,7 +444,6 @@ impl<H: XaiHttpClient + 'static> agent_client_protocol::Agent for XaiAgent<H> {
 
     async fn prompt(&self, req: PromptRequest) -> agent_client_protocol::Result<PromptResponse> {
         let session_id = req.session_id.to_string();
-        let nats_client = self.make_nats_client(&req.session_id)?;
 
         let user_input: String = req
             .prompt
@@ -542,9 +530,7 @@ impl<H: XaiHttpClient + 'static> agent_client_protocol::Agent for XaiAgent<H> {
                                         ContentBlock::from(text),
                                     )),
                                 );
-                                if let Err(e) = nats_client.session_notification(notif).await {
-                                    warn!(session_id, error = %e, "xai: failed to send text notification");
-                                }
+                                self.notifier.notify(notif).await;
                             }
                             XaiEvent::ResponseId { id } => {
                                 new_response_id = Some(id);
@@ -607,7 +593,7 @@ impl<H: XaiHttpClient + 'static> agent_client_protocol::Agent for XaiAgent<H> {
 // ── Test helpers ──────────────────────────────────────────────────────────────
 
 #[cfg(test)]
-impl<H: XaiHttpClient> XaiAgent<H> {
+impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
     async fn test_insert_session(&self, id: &str, cwd: &str, model: Option<String>) {
         self.sessions.lock().await.insert(
             id.to_string(),
@@ -645,66 +631,34 @@ impl<H: XaiHttpClient> XaiAgent<H> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::sync::Arc;
+
     use agent_client_protocol::{
         Agent, AuthMethodId, AuthenticateRequest, CancelNotification, CloseSessionRequest,
-        ForkSessionRequest, InitializeRequest, ListSessionsRequest, LoadSessionRequest,
-        PromptRequest, ProtocolVersion, ResumeSessionRequest, SetSessionConfigOptionRequest,
-        SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModelRequest,
+        ContentBlock, ForkSessionRequest, InitializeRequest, ListSessionsRequest,
+        LoadSessionRequest, PromptRequest, ProtocolVersion, ResumeSessionRequest,
+        SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModeRequest,
+        SetSessionModelRequest,
     };
-    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-    use tokio::net::TcpListener;
 
+    use super::*;
     use crate::client::XaiEvent;
     use crate::http_client::mock::MockXaiHttpClient;
+    use crate::session_notifier::MockSessionNotifier;
 
-    async fn fake_nats_client() -> async_nats::Client {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
+    type TestAgent = XaiAgent<Arc<MockXaiHttpClient>, Arc<MockSessionNotifier>>;
 
-        tokio::spawn(async move {
-            if let Ok((stream, _)) = listener.accept().await {
-                let (reader, mut writer) = stream.into_split();
-                writer
-                    .write_all(
-                        b"INFO {\"server_id\":\"test\",\"version\":\"2.10.0\",\
-                          \"max_payload\":1048576,\"proto\":1,\"headers\":true}\r\n",
-                    )
-                    .await
-                    .ok();
-                let mut lines = BufReader::new(reader).lines();
-                while let Ok(Some(line)) = lines.next_line().await {
-                    if line.starts_with("CONNECT") {
-                        writer.write_all(b"+OK\r\n").await.ok();
-                    } else if line.starts_with("PING") {
-                        writer.write_all(b"PONG\r\n").await.ok();
-                    }
-                }
-            }
-        });
-
-        async_nats::connect(format!("nats://127.0.0.1:{port}"))
-            .await
-            .unwrap()
-    }
-
-    type TestAgent = XaiAgent<std::sync::Arc<MockXaiHttpClient>>;
-
-    fn make_mock_agent(nats: async_nats::Client) -> TestAgent {
-        let mock = std::sync::Arc::new(MockXaiHttpClient::new());
-        let acp_prefix = AcpPrefix::new("test").unwrap();
-        XaiAgent::with_client(nats, acp_prefix, "grok-3", "test-key", mock)
-    }
-
-    async fn make_agent() -> TestAgent {
-        make_mock_agent(fake_nats_client().await)
+    fn make_agent() -> TestAgent {
+        let mock_http = Arc::new(MockXaiHttpClient::new());
+        let mock_notifier = Arc::new(MockSessionNotifier::new());
+        XaiAgent::with_deps(mock_notifier, "grok-3", "test-key", mock_http)
     }
 
     // ── close_session ─────────────────────────────────────────────────────────
 
     #[tokio::test]
     async fn close_session_removes_session() {
-        let agent = make_agent().await;
+        let agent = make_agent();
         agent.test_insert_session("s1", "/tmp", None).await;
         assert_eq!(agent.test_session_count().await, 1);
         agent.close_session(CloseSessionRequest::new("s1")).await.unwrap();
@@ -713,7 +667,7 @@ mod tests {
 
     #[tokio::test]
     async fn close_session_unknown_id_is_noop() {
-        let agent = make_agent().await;
+        let agent = make_agent();
         agent.close_session(CloseSessionRequest::new("nonexistent")).await.unwrap();
     }
 
@@ -721,8 +675,10 @@ mod tests {
 
     #[tokio::test]
     async fn load_session_returns_state() {
-        let agent = make_agent().await;
-        agent.test_insert_session("s2", "/home/user", Some("grok-3-mini".to_string())).await;
+        let agent = make_agent();
+        agent
+            .test_insert_session("s2", "/home/user", Some("grok-3-mini".to_string()))
+            .await;
         let resp = agent
             .load_session(LoadSessionRequest::new("s2", "/home/user"))
             .await
@@ -732,7 +688,7 @@ mod tests {
 
     #[tokio::test]
     async fn load_session_not_found_returns_error() {
-        let agent = make_agent().await;
+        let agent = make_agent();
         assert!(agent.load_session(LoadSessionRequest::new("missing", "/")).await.is_err());
     }
 
@@ -740,7 +696,7 @@ mod tests {
 
     #[tokio::test]
     async fn resume_session_returns_error_for_unknown_session() {
-        let agent = make_agent().await;
+        let agent = make_agent();
         let err = agent
             .resume_session(ResumeSessionRequest::new("nonexistent", "/"))
             .await
@@ -752,19 +708,24 @@ mod tests {
 
     #[tokio::test]
     async fn fork_session_inherits_model() {
-        let agent = make_agent().await;
-        agent.test_insert_session("src", "/tmp", Some("grok-3-mini".to_string())).await;
+        let agent = make_agent();
+        agent
+            .test_insert_session("src", "/tmp", Some("grok-3-mini".to_string()))
+            .await;
         let resp = agent
             .fork_session(ForkSessionRequest::new("src", "/fork"))
             .await
             .unwrap();
         let new_id = resp.session_id.to_string();
-        assert_eq!(agent.test_session_model(&new_id).await.as_deref(), Some("grok-3-mini"));
+        assert_eq!(
+            agent.test_session_model(&new_id).await.as_deref(),
+            Some("grok-3-mini")
+        );
     }
 
     #[tokio::test]
     async fn fork_session_returns_error_for_unknown_source() {
-        let agent = make_agent().await;
+        let agent = make_agent();
         let err = agent
             .fork_session(ForkSessionRequest::new("nonexistent", "/fork"))
             .await
@@ -776,15 +737,21 @@ mod tests {
 
     #[tokio::test]
     async fn set_session_model_updates_model() {
-        let agent = make_agent().await;
+        let agent = make_agent();
         agent.test_insert_session("s3", "/tmp", None).await;
-        agent.set_session_model(SetSessionModelRequest::new("s3", "grok-3-mini")).await.unwrap();
-        assert_eq!(agent.test_session_model("s3").await.as_deref(), Some("grok-3-mini"));
+        agent
+            .set_session_model(SetSessionModelRequest::new("s3", "grok-3-mini"))
+            .await
+            .unwrap();
+        assert_eq!(
+            agent.test_session_model("s3").await.as_deref(),
+            Some("grok-3-mini")
+        );
     }
 
     #[tokio::test]
     async fn set_session_model_rejects_unknown_model() {
-        let agent = make_agent().await;
+        let agent = make_agent();
         agent.test_insert_session("s4", "/tmp", None).await;
         let err = agent
             .set_session_model(SetSessionModelRequest::new("s4", "gpt-99"))
@@ -797,18 +764,22 @@ mod tests {
 
     #[tokio::test]
     async fn list_sessions_returns_sorted() {
-        let agent = make_agent().await;
+        let agent = make_agent();
         agent.test_insert_session("zzz", "/c", None).await;
         agent.test_insert_session("aaa", "/a", None).await;
         agent.test_insert_session("mmm", "/b", None).await;
         let resp = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
-        let ids: Vec<_> = resp.sessions.iter().map(|s| s.session_id.to_string()).collect();
+        let ids: Vec<_> = resp
+            .sessions
+            .iter()
+            .map(|s| s.session_id.to_string())
+            .collect();
         assert_eq!(ids, vec!["aaa", "mmm", "zzz"]);
     }
 
     #[tokio::test]
     async fn list_sessions_empty() {
-        let agent = make_agent().await;
+        let agent = make_agent();
         let resp = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
         assert!(resp.sessions.is_empty());
     }
@@ -817,15 +788,21 @@ mod tests {
 
     #[tokio::test]
     async fn initialize_returns_latest_protocol_version() {
-        let agent = make_agent().await;
-        let resp = agent.initialize(InitializeRequest::new(ProtocolVersion::LATEST)).await.unwrap();
+        let agent = make_agent();
+        let resp = agent
+            .initialize(InitializeRequest::new(ProtocolVersion::LATEST))
+            .await
+            .unwrap();
         assert_eq!(resp.protocol_version, ProtocolVersion::LATEST);
     }
 
     #[tokio::test]
     async fn initialize_advertises_session_capabilities() {
-        let agent = make_agent().await;
-        let resp = agent.initialize(InitializeRequest::new(ProtocolVersion::LATEST)).await.unwrap();
+        let agent = make_agent();
+        let resp = agent
+            .initialize(InitializeRequest::new(ProtocolVersion::LATEST))
+            .await
+            .unwrap();
         let sc = resp.agent_capabilities.session_capabilities;
         assert!(sc.fork.is_some());
         assert!(sc.list.is_some());
@@ -835,8 +812,11 @@ mod tests {
 
     #[tokio::test]
     async fn initialize_includes_agent_info() {
-        let agent = make_agent().await;
-        let resp = agent.initialize(InitializeRequest::new(ProtocolVersion::LATEST)).await.unwrap();
+        let agent = make_agent();
+        let resp = agent
+            .initialize(InitializeRequest::new(ProtocolVersion::LATEST))
+            .await
+            .unwrap();
         let info = resp.agent_info.expect("agent_info should be present");
         assert_eq!(info.name, "trogon-xai-runner");
     }
@@ -845,7 +825,7 @@ mod tests {
 
     #[tokio::test]
     async fn authenticate_always_succeeds() {
-        let agent = make_agent().await;
+        let agent = make_agent();
         agent
             .authenticate(AuthenticateRequest::new(AuthMethodId::from("any-method")))
             .await
@@ -856,7 +836,7 @@ mod tests {
 
     #[tokio::test]
     async fn set_session_mode_always_succeeds() {
-        let agent = make_agent().await;
+        let agent = make_agent();
         agent
             .set_session_mode(SetSessionModeRequest::new("s1", "whatever-mode"))
             .await
@@ -867,7 +847,7 @@ mod tests {
 
     #[tokio::test]
     async fn set_session_config_option_returns_empty_list() {
-        let agent = make_agent().await;
+        let agent = make_agent();
         let resp: SetSessionConfigOptionResponse = agent
             .set_session_config_option(SetSessionConfigOptionRequest::new(
                 "s1",
@@ -883,7 +863,7 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_returns_error_for_unknown_session() {
-        let agent = make_agent().await;
+        let agent = make_agent();
         let err = agent
             .prompt(PromptRequest::new("unknown-session", vec![]))
             .await
@@ -892,28 +872,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn prompt_returns_error_for_invalid_session_id() {
-        let agent = make_agent().await;
-        let err = agent
-            .prompt(PromptRequest::new("invalid.session.id", vec![]))
-            .await
-            .unwrap_err();
-        assert!(!err.message.is_empty());
-    }
-
-    #[tokio::test]
     async fn prompt_appends_history_after_turn() {
-        let agent = make_agent().await;
+        let agent = make_agent();
         agent.test_insert_session("h1", "/tmp", None).await;
 
-        // Queue a response: text delta + done
         agent.client.push_response(vec![
             XaiEvent::TextDelta { text: "hello".to_string() },
             XaiEvent::Done,
         ]);
 
         agent
-            .prompt(PromptRequest::new("h1", vec![ContentBlock::from("hi".to_string())]))
+            .prompt(PromptRequest::new(
+                "h1",
+                vec![ContentBlock::from("hi".to_string())],
+            ))
             .await
             .unwrap();
 
@@ -921,11 +893,33 @@ mod tests {
         assert_eq!(agent.test_history_len("h1").await, 2);
     }
 
+    #[tokio::test]
+    async fn prompt_sends_notification_for_text_delta() {
+        let agent = make_agent();
+        agent.test_insert_session("n1", "/tmp", None).await;
+
+        agent.client.push_response(vec![
+            XaiEvent::TextDelta { text: "world".to_string() },
+            XaiEvent::Done,
+        ]);
+
+        agent
+            .prompt(PromptRequest::new(
+                "n1",
+                vec![ContentBlock::from("hi".to_string())],
+            ))
+            .await
+            .unwrap();
+
+        let notifs = agent.notifier.notifications.lock().unwrap();
+        assert_eq!(notifs.len(), 1, "expected one notification");
+    }
+
     // ── cancel ────────────────────────────────────────────────────────────────
 
     #[tokio::test]
     async fn cancel_noop_for_unknown_session() {
-        let agent = make_agent().await;
+        let agent = make_agent();
         agent.cancel(CancelNotification::new("no-such-session")).await.unwrap();
     }
 
@@ -933,12 +927,12 @@ mod tests {
 
     #[tokio::test]
     async fn default_model_added_when_not_in_list() {
-        let nats = fake_nats_client().await;
-        let mock = std::sync::Arc::new(MockXaiHttpClient::new());
-        let acp_prefix = AcpPrefix::new("test").unwrap();
-        let agent = XaiAgent::with_client(nats, acp_prefix, "custom-model", "key", mock);
+        let mock_http = Arc::new(MockXaiHttpClient::new());
+        let mock_notifier = Arc::new(MockSessionNotifier::new());
+        let agent = XaiAgent::with_deps(mock_notifier, "custom-model", "key", mock_http);
         let state = agent.session_model_state(None);
-        let ids: Vec<_> = state.available_models.iter().map(|m| m.model_id.to_string()).collect();
+        let ids: Vec<_> =
+            state.available_models.iter().map(|m| m.model_id.to_string()).collect();
         assert!(ids.contains(&"custom-model".to_string()), "available: {ids:?}");
         assert_eq!(state.current_model_id.to_string(), "custom-model");
     }
@@ -947,7 +941,7 @@ mod tests {
 
     #[tokio::test]
     async fn session_mode_state_current_is_default() {
-        let agent = make_agent().await;
+        let agent = make_agent();
         let state = agent.session_mode_state();
         assert_eq!(state.current_mode_id.to_string(), "default");
     }
@@ -963,10 +957,9 @@ mod tests {
     async fn prompt_timeout_invalid_env_var_falls_back_to_default() {
         let _guard = env_lock().lock().unwrap();
         unsafe { std::env::set_var("XAI_PROMPT_TIMEOUT_SECS", "not_a_number") };
-        let nats = fake_nats_client().await;
-        let mock = std::sync::Arc::new(MockXaiHttpClient::new());
-        let agent =
-            XaiAgent::with_client(nats, AcpPrefix::new("test").unwrap(), "grok-3", "key", mock);
+        let mock_http = Arc::new(MockXaiHttpClient::new());
+        let mock_notifier = Arc::new(MockSessionNotifier::new());
+        let agent = XaiAgent::with_deps(mock_notifier, "grok-3", "key", mock_http);
         unsafe { std::env::remove_var("XAI_PROMPT_TIMEOUT_SECS") };
         assert_eq!(agent.test_prompt_timeout(), Duration::from_secs(300));
     }

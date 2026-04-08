@@ -1,7 +1,7 @@
 use acp_nats::acp_prefix::AcpPrefix;
 use acp_nats_agent::AgentSideNatsConnection;
 use tracing::{error, info};
-use trogon_xai_runner::XaiAgent;
+use trogon_xai_runner::{NatsSessionNotifier, XaiAgent};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -18,7 +18,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let nats = async_nats::connect(&nats_url).await?;
     let acp_prefix = AcpPrefix::new(&prefix)?;
-    let agent = XaiAgent::new(nats.clone(), acp_prefix.clone(), default_model, api_key);
+    let notifier = NatsSessionNotifier::new(nats.clone(), acp_prefix.clone());
+    let agent = XaiAgent::new(notifier, default_model, api_key);
 
     let local = tokio::task::LocalSet::new();
     let result = local
