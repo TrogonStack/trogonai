@@ -1125,6 +1125,44 @@ mod tests {
         );
     }
 
+    // ── response.completed with non-completed status ──────────────────────────
+
+    #[test]
+    fn response_completed_with_failed_status_emits_finished_failed() {
+        // response.completed can carry any status — "failed" hits FinishReason::Failed
+        // via the same path as response.completed/status=completed, distinct from the
+        // dedicated response.failed event handler.
+        let line = r#"data: {"type":"response.completed","response":{"status":"failed"}}"#;
+        let events = parse_line_all(line);
+        assert!(
+            events.iter().any(|e| matches!(e, XaiEvent::Finished { reason, .. } if *reason == FinishReason::Failed)),
+            "response.completed with status=failed must emit Finished(Failed): {events:?}"
+        );
+    }
+
+    #[test]
+    fn response_completed_with_cancelled_status_emits_finished_cancelled() {
+        let line = r#"data: {"type":"response.completed","response":{"status":"cancelled"}}"#;
+        let events = parse_line_all(line);
+        assert!(
+            events.iter().any(|e| matches!(e, XaiEvent::Finished { reason, .. } if *reason == FinishReason::Cancelled)),
+            "response.completed with status=cancelled must emit Finished(Cancelled): {events:?}"
+        );
+    }
+
+    // ── function_call empty guard ─────────────────────────────────────────────
+
+    #[test]
+    fn function_call_with_empty_call_id_and_name_emits_nothing() {
+        // Both call_id and name empty — the guard `!call_id.is_empty() || !name.is_empty()`
+        // is false, so no FunctionCall event must be emitted.
+        let line = r#"data: {"type":"function_call","function_call":{"call_id":"","name":"","arguments":"{}"}}"#;
+        assert!(
+            parse_line(line).is_none(),
+            "function_call with empty call_id and name must produce no event"
+        );
+    }
+
     // ── function_call_arguments.delta for unknown call_id ─────────────────────
 
     #[test]
