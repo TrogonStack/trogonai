@@ -2,8 +2,8 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum SplitError {
-    #[error("HTTP request failed: {0}")]
-    Http(#[from] reqwest::Error),
+    #[error("HTTP transport error: {0}")]
+    Http(String),
 
     #[error("Evaluator returned status {status}: {body}")]
     EvaluatorError { status: u16, body: String },

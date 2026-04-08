@@ -47,7 +47,7 @@ pub mod error;
 pub mod flags;
 pub mod mock;
 
-pub use client::SplitClient;
+pub use client::{HttpClient, HttpResponse, SplitClient};
 pub use config::SplitConfig;
 pub use error::SplitError;
 pub use flags::FeatureFlag;
