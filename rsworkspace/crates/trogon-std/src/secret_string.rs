@@ -4,9 +4,16 @@ use std::sync::Arc;
 #[derive(Clone)]
 pub struct SecretString(Arc<str>);
 
-#[derive(Debug, PartialEq, Eq, thiserror::Error)]
-#[error("secret must not be empty")]
+#[derive(Debug, PartialEq, Eq)]
 pub struct EmptySecret;
+
+impl fmt::Display for EmptySecret {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("secret must not be empty")
+    }
+}
+
+impl std::error::Error for EmptySecret {}
 
 impl SecretString {
     pub fn new(s: impl AsRef<str>) -> Result<Self, EmptySecret> {

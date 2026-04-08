@@ -2,7 +2,6 @@
 name = "trogon-gateway"
 version = "0.1.0"
 edition = "2024"
-license = "Apache-2.0"
 
 [lints]
 workspace = true
@@ -12,39 +11,23 @@ name = "trogon-gateway"
 path = "src/main.rs"
 
 [dependencies]
-anyhow = { workspace = true }
-thiserror = { workspace = true }
-trogon-telemetry = { workspace = true }
-async-nats = { workspace = true, features = ["ring", "jetstream"] }
+acp-telemetry = { workspace = true }
+async-nats = { workspace = true, features = ["jetstream"] }
 axum = { workspace = true }
-base64 = "0.22"
-bytes = { workspace = true }
 clap = { workspace = true }
 confique = { workspace = true }
-form_urlencoded = "1"
-futures-core = "0.3"
-futures-util = { workspace = true }
-hex = "0.4"
-hmac = "0.13"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde = { workspace = true }
-serde_json = { workspace = true }
-sha2 = "0.11"
-subtle = "2.6"
 tokio = { workspace = true, features = ["full"] }
-tokio-tungstenite = { workspace = true, features = ["rustls-tls-native-roots"] }
 tracing = { workspace = true }
-twilight-gateway = { workspace = true }
-twilight-model = { workspace = true }
 trogon-nats = { workspace = true }
-trogon-service-config = { workspace = true }
-trogon-std = { workspace = true, features = ["clap", "signal", "telemetry-http"] }
-url = "2.5"
+trogon-source-discord = { workspace = true }
+trogon-source-github = { workspace = true }
+trogon-source-gitlab = { workspace = true }
+trogon-source-linear = { workspace = true }
+trogon-source-slack = { workspace = true }
+trogon-source-telegram = { workspace = true }
+trogon-std = { workspace = true, features = ["clap"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }
-time = { workspace = true }
-tower = "0.5"
-tracing-subscriber = { workspace = true }
 trogon-nats = { workspace = true, features = ["test-support"] }
-trogon-std = { workspace = true, features = ["test-support"] }

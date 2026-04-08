@@ -2,66 +2,29 @@ use std::fmt;
 use std::time::Duration;
 
 use crate::config::SlackConfig;
+use crate::config::SlackSigningSecret;
 use crate::constants::{
     CONTENT_TYPE_FORM, HEADER_SIGNATURE, HEADER_TIMESTAMP, HTTP_BODY_SIZE_MAX,
     NATS_HEADER_EVENT_ID, NATS_HEADER_EVENT_TYPE, NATS_HEADER_PAYLOAD_KIND,
     NATS_HEADER_REJECT_REASON, NATS_HEADER_TEAM_ID,
 };
 use crate::signature;
+use trogon_std::NonZeroDuration;
 use trogon_std::SystemClock;
 use trogon_std::time::EpochClock;
 
-#[cfg(not(coverage))]
-use async_nats::jetstream::context::CreateStreamError;
 use axum::{
     Router, body::Bytes, extract::DefaultBodyLimit, extract::State, http::HeaderMap,
-    http::StatusCode, routing::get, routing::post,
+    http::StatusCode, routing::post,
 };
 use form_urlencoded;
 use std::future::Future;
 use std::pin::Pin;
 use tracing::{info, instrument, warn};
 use trogon_nats::NatsToken;
-#[cfg(not(coverage))]
-use trogon_nats::jetstream::JetStreamContext;
 use trogon_nats::jetstream::{
-    ClaimCheckPublisher, JetStreamPublisher, ObjectStorePut, PublishOutcome,
+    ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut, PublishOutcome,
 };
-
-#[cfg(not(coverage))]
-#[derive(Debug)]
-#[non_exhaustive]
-pub enum ServeError {
-    Provision(CreateStreamError),
-    Io(std::io::Error),
-}
-
-#[cfg(not(coverage))]
-impl fmt::Display for ServeError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ServeError::Provision(e) => write!(f, "stream provisioning failed: {e}"),
-            ServeError::Io(e) => write!(f, "server IO error: {e}"),
-        }
-    }
-}
-
-#[cfg(not(coverage))]
-impl std::error::Error for ServeError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            ServeError::Provision(e) => Some(e),
-            ServeError::Io(e) => Some(e),
-        }
-    }
-}
-
-#[cfg(not(coverage))]
-impl From<std::io::Error> for ServeError {
-    fn from(e: std::io::Error) -> Self {
-        ServeError::Io(e)
-    }
-}
 
 fn outcome_to_status<E: fmt::Display>(outcome: PublishOutcome<E>) -> StatusCode {
     if outcome.is_ok() {
@@ -78,7 +41,7 @@ async fn publish_unroutable<P: JetStreamPublisher, S: ObjectStorePut>(
     subject_prefix: &NatsToken,
     reason: &str,
     body: Bytes,
-    ack_timeout: Duration,
+    ack_timeout: NonZeroDuration,
 ) {
     let subject = format!("{}.unroutable", subject_prefix);
     let mut headers = async_nats::HeaderMap::new();
@@ -86,7 +49,7 @@ async fn publish_unroutable<P: JetStreamPublisher, S: ObjectStorePut>(
     headers.insert(NATS_HEADER_PAYLOAD_KIND, "unroutable");
 
     let outcome = publisher
-        .publish_event(subject, headers, body, ack_timeout)
+        .publish_event(subject, headers, body, ack_timeout.into())
         .await;
     outcome.log_on_error("slack.unroutable");
 }
@@ -95,27 +58,24 @@ async fn publish_unroutable<P: JetStreamPublisher, S: ObjectStorePut>(
 struct AppState<P: JetStreamPublisher, S: ObjectStorePut, C: EpochClock> {
     publisher: ClaimCheckPublisher<P, S>,
     clock: C,
-    signing_secret: String,
+    signing_secret: SlackSigningSecret,
     subject_prefix: NatsToken,
-    nats_ack_timeout: Duration,
-    timestamp_max_drift: Duration,
+    nats_ack_timeout: NonZeroDuration,
+    timestamp_max_drift: NonZeroDuration,
 }
 
-#[cfg(not(coverage))]
 pub async fn provision<C: JetStreamContext>(js: &C, config: &SlackConfig) -> Result<(), C::Error> {
     js.get_or_create_stream(async_nats::jetstream::stream::Config {
         name: config.stream_name.to_string(),
         subjects: vec![format!("{}.>", config.subject_prefix)],
-        max_age: config.stream_max_age,
+        max_age: config.stream_max_age.into(),
         ..Default::default()
     })
     .await?;
 
-    let max_age_secs = config.stream_max_age.as_secs();
-    info!(
-        stream = config.stream_name.as_str(),
-        max_age_secs, "JetStream stream ready"
-    );
+    let max_age_secs = Duration::from(config.stream_max_age).as_secs();
+    let stream_name = config.stream_name.as_str();
+    info!(stream = stream_name, max_age_secs, "JetStream stream ready");
     Ok(())
 }
 
@@ -142,41 +102,8 @@ fn router_with_clock<P: JetStreamPublisher, S: ObjectStorePut, C: EpochClock>(
 
     Router::new()
         .route("/webhook", post(handle_webhook::<P, S, C>))
-        .route("/health", get(handle_health))
         .layer(DefaultBodyLimit::max(HTTP_BODY_SIZE_MAX.as_usize()))
         .with_state(state)
-}
-
-#[cfg(not(coverage))]
-pub async fn serve<C, P, S>(
-    context: C,
-    publisher: ClaimCheckPublisher<P, S>,
-    config: SlackConfig,
-) -> Result<(), ServeError>
-where
-    C: JetStreamContext<Error = CreateStreamError>,
-    P: JetStreamPublisher,
-    S: ObjectStorePut,
-{
-    provision(&context, &config)
-        .await
-        .map_err(ServeError::Provision)?;
-
-    let app = router(publisher, &config);
-    let addr = std::net::SocketAddr::from(([0, 0, 0, 0], config.port));
-    info!(addr = %addr, "Slack webhook server listening");
-
-    let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app)
-        .with_graceful_shutdown(acp_telemetry::signal::shutdown_signal())
-        .await?;
-
-    info!("Slack webhook server shut down");
-    Ok(())
-}
-
-async fn handle_health() -> StatusCode {
-    StatusCode::OK
 }
 
 fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut, C: EpochClock>(
@@ -218,7 +145,7 @@ async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut, C: Epoch
         .unwrap_or_default()
         .as_secs();
     let drift = now.abs_diff(ts);
-    if drift > state.timestamp_max_drift.as_secs() {
+    if drift > Duration::from(state.timestamp_max_drift).as_secs() {
         warn!(drift_secs = drift, "Slack request timestamp too old");
         return (StatusCode::UNAUTHORIZED, String::new());
     }
@@ -228,7 +155,7 @@ async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut, C: Epoch
         return (StatusCode::UNAUTHORIZED, String::new());
     };
 
-    if let Err(e) = signature::verify(&state.signing_secret, timestamp, &body, sig) {
+    if let Err(e) = signature::verify(state.signing_secret.as_str(), timestamp, &body, sig) {
         warn!(reason = %e, "Slack signature validation failed");
         return (StatusCode::UNAUTHORIZED, String::new());
     }
@@ -347,7 +274,12 @@ async fn handle_json_payload<P: JetStreamPublisher, S: ObjectStorePut>(
 
     let outcome = state
         .publisher
-        .publish_event(subject, nats_headers, body.clone(), state.nats_ack_timeout)
+        .publish_event(
+            subject,
+            nats_headers,
+            body.clone(),
+            state.nats_ack_timeout.into(),
+        )
         .await;
 
     (outcome_to_status(outcome), String::new())
@@ -478,7 +410,7 @@ async fn handle_interaction<P: JetStreamPublisher, S: ObjectStorePut>(
             subject,
             nats_headers,
             Bytes::from(payload_json.to_owned()),
-            state.nats_ack_timeout,
+            state.nats_ack_timeout.into(),
         )
         .await;
 
@@ -537,7 +469,7 @@ async fn handle_slash_command<P: JetStreamPublisher, S: ObjectStorePut>(
             subject,
             nats_headers,
             raw_body.clone(),
-            state.nats_ack_timeout,
+            state.nats_ack_timeout.into(),
         )
         .await;
 
@@ -553,11 +485,12 @@ mod tests {
     use sha2::Sha256;
     use tower::ServiceExt;
     use tracing_subscriber::util::SubscriberInitExt;
-    #[cfg(not(coverage))]
-    use trogon_nats::jetstream::MockJetStreamContext;
+    use trogon_nats::jetstream::StreamMaxAge;
     use trogon_nats::jetstream::{
-        ClaimCheckPublisher, MaxPayload, MockJetStreamPublisher, MockObjectStore,
+        ClaimCheckPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher,
+        MockObjectStore,
     };
+    use trogon_std::NonZeroDuration;
 
     type HmacSha256 = Hmac<Sha256>;
 
@@ -593,14 +526,12 @@ mod tests {
 
     fn test_config() -> SlackConfig {
         SlackConfig {
-            signing_secret: TEST_SECRET.to_string(),
-            port: 0,
+            signing_secret: SlackSigningSecret::new(TEST_SECRET).unwrap(),
             subject_prefix: NatsToken::new("slack").unwrap(),
             stream_name: NatsToken::new("SLACK").unwrap(),
-            stream_max_age: Duration::from_secs(3600),
-            nats_ack_timeout: Duration::from_secs(10),
-            timestamp_max_drift: Duration::from_secs(300),
-            nats: trogon_nats::NatsConfig::from_env(&trogon_std::env::InMemoryEnv::new()),
+            stream_max_age: StreamMaxAge::from_secs(3600).unwrap(),
+            nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),
+            timestamp_max_drift: NonZeroDuration::from_secs(300).unwrap(),
         }
     }
 
@@ -662,29 +593,6 @@ mod tests {
         builder.body(Body::from(body.to_vec())).unwrap()
     }
 
-    #[cfg(not(coverage))]
-    #[test]
-    fn serve_error_display_and_source() {
-        use async_nats::jetstream::context::{CreateStreamError, CreateStreamErrorKind};
-
-        let io_err = ServeError::Io(std::io::Error::new(
-            std::io::ErrorKind::AddrInUse,
-            "port taken",
-        ));
-        assert_eq!(io_err.to_string(), "server IO error: port taken");
-        assert!(std::error::Error::source(&io_err).is_some());
-
-        let prov_err = ServeError::Provision(CreateStreamError::new(
-            CreateStreamErrorKind::EmptyStreamName,
-        ));
-        assert!(prov_err.to_string().contains("stream provisioning failed"));
-        assert!(std::error::Error::source(&prov_err).is_some());
-
-        let io_err: ServeError = std::io::Error::other("boom").into();
-        assert!(matches!(io_err, ServeError::Io(_)));
-    }
-
-    #[cfg(not(coverage))]
     #[tokio::test]
     async fn provision_creates_stream() {
         let _guard = tracing_guard();
@@ -700,7 +608,6 @@ mod tests {
         assert_eq!(streams[0].max_age, Duration::from_secs(3600));
     }
 
-    #[cfg(not(coverage))]
     #[tokio::test]
     async fn provision_propagates_error() {
         let _guard = tracing_guard();
@@ -710,6 +617,26 @@ mod tests {
 
         let result = provision(&js, &config).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn router_wrapper_mounts_webhook_route() {
+        let _guard = tracing_guard();
+        let publisher = MockJetStreamPublisher::new();
+        let app = router(wrap_publisher(publisher), &test_config());
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/webhook")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_ne!(response.status(), StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]
@@ -936,10 +863,10 @@ mod tests {
         let state = AppState {
             publisher: wrap_publisher(publisher.clone()),
             clock: FixedEpochClock::from_secs(TEST_NOW),
-            signing_secret: TEST_SECRET.to_string(),
+            signing_secret: SlackSigningSecret::new(TEST_SECRET).unwrap(),
             subject_prefix: NatsToken::new("custom").unwrap(),
-            nats_ack_timeout: Duration::from_secs(10),
-            timestamp_max_drift: Duration::from_secs(300),
+            nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),
+            timestamp_max_drift: NonZeroDuration::from_secs(300).unwrap(),
         };
 
         let app = Router::new()
@@ -963,21 +890,6 @@ mod tests {
             publisher.published_subjects(),
             vec!["custom.event.app_mention"]
         );
-    }
-
-    #[tokio::test]
-    async fn health_endpoint_returns_200() {
-        let _guard = tracing_guard();
-        let app = mock_app(MockJetStreamPublisher::new());
-
-        let req = Request::builder()
-            .method("GET")
-            .uri("/health")
-            .body(Body::empty())
-            .unwrap();
-
-        let resp = app.oneshot(req).await.unwrap();
-        assert_eq!(resp.status(), StatusCode::OK);
     }
 
     #[tokio::test]
@@ -1113,10 +1025,10 @@ mod tests {
                 MaxPayload::from_server_limit(usize::MAX),
             ),
             clock: FixedEpochClock::from_secs(TEST_NOW),
-            signing_secret: TEST_SECRET.to_string(),
+            signing_secret: SlackSigningSecret::new(TEST_SECRET).unwrap(),
             subject_prefix: NatsToken::new("slack").unwrap(),
-            nats_ack_timeout: Duration::from_secs(10),
-            timestamp_max_drift: Duration::from_secs(300),
+            nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),
+            timestamp_max_drift: NonZeroDuration::from_secs(300).unwrap(),
         };
 
         let app = Router::new()
@@ -1151,10 +1063,10 @@ mod tests {
                 MaxPayload::from_server_limit(usize::MAX),
             ),
             clock: FixedEpochClock::from_secs(TEST_NOW),
-            signing_secret: TEST_SECRET.to_string(),
+            signing_secret: SlackSigningSecret::new(TEST_SECRET).unwrap(),
             subject_prefix: NatsToken::new("slack").unwrap(),
-            nats_ack_timeout: Duration::from_millis(10),
-            timestamp_max_drift: Duration::from_secs(300),
+            nats_ack_timeout: NonZeroDuration::from_millis(10).unwrap(),
+            timestamp_max_drift: NonZeroDuration::from_secs(300).unwrap(),
         };
 
         let app = Router::new()
@@ -1430,23 +1342,5 @@ mod tests {
 
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
         assert_unroutable(&publisher, "missing_interaction_type");
-    }
-
-    #[tokio::test]
-    async fn router_with_system_clock_responds_to_health() {
-        let publisher = MockJetStreamPublisher::new();
-        let app = router(wrap_publisher(publisher), &test_config());
-
-        let resp = app
-            .oneshot(
-                Request::builder()
-                    .uri("/health")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(resp.status(), StatusCode::OK);
     }
 }

@@ -4,56 +4,19 @@ use std::pin::Pin;
 use std::time::Duration;
 
 use crate::config::LinearConfig;
+use crate::config::LinearWebhookSecret;
 use crate::constants::{HTTP_BODY_SIZE_MAX, NATS_HEADER_REJECT_REASON};
 use crate::signature;
-#[cfg(not(coverage))]
-use async_nats::jetstream::context::CreateStreamError;
 use axum::{
     Router, body::Bytes, extract::DefaultBodyLimit, extract::State, http::HeaderMap,
-    http::StatusCode, routing::get, routing::post,
+    http::StatusCode, routing::post,
 };
 use tracing::{info, instrument, warn};
 use trogon_nats::NatsToken;
-#[cfg(not(coverage))]
-use trogon_nats::jetstream::JetStreamContext;
 use trogon_nats::jetstream::{
-    ClaimCheckPublisher, JetStreamPublisher, ObjectStorePut, PublishOutcome,
+    ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut, PublishOutcome,
 };
-
-#[cfg(not(coverage))]
-#[derive(Debug)]
-#[non_exhaustive]
-pub enum ServeError {
-    Provision(CreateStreamError),
-    Io(std::io::Error),
-}
-
-#[cfg(not(coverage))]
-impl fmt::Display for ServeError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Provision(e) => write!(f, "stream provisioning failed: {e}"),
-            Self::Io(e) => write!(f, "IO error: {e}"),
-        }
-    }
-}
-
-#[cfg(not(coverage))]
-impl std::error::Error for ServeError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Provision(e) => Some(e),
-            Self::Io(e) => Some(e),
-        }
-    }
-}
-
-#[cfg(not(coverage))]
-impl From<std::io::Error> for ServeError {
-    fn from(e: std::io::Error) -> Self {
-        ServeError::Io(e)
-    }
-}
+use trogon_std::NonZeroDuration;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RejectReason {
@@ -95,14 +58,14 @@ async fn publish_unroutable<P: JetStreamPublisher, S: ObjectStorePut>(
     subject_prefix: &NatsToken,
     reason: RejectReason,
     body: Bytes,
-    ack_timeout: Duration,
+    ack_timeout: NonZeroDuration,
 ) -> StatusCode {
     let subject = format!("{subject_prefix}.unroutable");
     let mut headers = async_nats::HeaderMap::new();
     headers.insert(NATS_HEADER_REJECT_REASON, reason.as_str());
 
     let outcome = publisher
-        .publish_event(subject, headers, body, ack_timeout)
+        .publish_event(subject, headers, body, ack_timeout.into())
         .await;
     if outcome.is_ok() {
         StatusCode::BAD_REQUEST
@@ -115,27 +78,24 @@ async fn publish_unroutable<P: JetStreamPublisher, S: ObjectStorePut>(
 #[derive(Clone)]
 struct AppState<P: JetStreamPublisher, S: ObjectStorePut> {
     publisher: ClaimCheckPublisher<P, S>,
-    webhook_secret: String,
+    webhook_secret: LinearWebhookSecret,
     subject_prefix: NatsToken,
-    timestamp_tolerance: Option<Duration>,
-    nats_ack_timeout: Duration,
+    timestamp_tolerance: Option<NonZeroDuration>,
+    nats_ack_timeout: NonZeroDuration,
 }
 
-#[cfg(not(coverage))]
 pub async fn provision<C: JetStreamContext>(js: &C, config: &LinearConfig) -> Result<(), C::Error> {
     js.get_or_create_stream(async_nats::jetstream::stream::Config {
         name: config.stream_name.to_string(),
         subjects: vec![format!("{}.>", config.subject_prefix)],
-        max_age: config.stream_max_age,
+        max_age: config.stream_max_age.into(),
         ..Default::default()
     })
     .await?;
 
-    let max_age_secs = config.stream_max_age.as_secs();
-    info!(
-        stream = config.stream_name.as_str(),
-        max_age_secs, "JetStream stream ready"
-    );
+    let max_age_secs = Duration::from(config.stream_max_age).as_secs();
+    let stream_name = config.stream_name.as_str();
+    info!(stream = stream_name, max_age_secs, "JetStream stream ready");
     Ok(())
 }
 
@@ -153,41 +113,8 @@ pub fn router<P: JetStreamPublisher, S: ObjectStorePut>(
 
     Router::new()
         .route("/webhook", post(handle_webhook::<P, S>))
-        .route("/health", get(handle_health))
         .layer(DefaultBodyLimit::max(HTTP_BODY_SIZE_MAX.as_usize()))
         .with_state(state)
-}
-
-#[cfg(not(coverage))]
-pub async fn serve<C, P, S>(
-    context: C,
-    publisher: ClaimCheckPublisher<P, S>,
-    config: LinearConfig,
-) -> Result<(), ServeError>
-where
-    C: JetStreamContext<Error = CreateStreamError>,
-    P: JetStreamPublisher,
-    S: ObjectStorePut,
-{
-    provision(&context, &config)
-        .await
-        .map_err(ServeError::Provision)?;
-
-    let app = router(publisher, &config);
-    let addr = std::net::SocketAddr::from(([0, 0, 0, 0], config.port));
-    info!(addr = %addr, "Linear webhook server listening");
-
-    let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app)
-        .with_graceful_shutdown(acp_telemetry::signal::shutdown_signal())
-        .await?;
-
-    info!("Linear webhook server shut down");
-    Ok(())
-}
-
-async fn handle_health() -> StatusCode {
-    StatusCode::OK
 }
 
 fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
@@ -218,7 +145,7 @@ async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut>(
         .and_then(|v| v.to_str().ok());
 
     match sig {
-        Some(sig) if signature::verify(&state.webhook_secret, &body, sig) => {}
+        Some(sig) if signature::verify(state.webhook_secret.as_str(), &body, sig) => {}
         Some(_) => {
             warn!("Invalid Linear webhook signature");
             return StatusCode::UNAUTHORIZED;
@@ -261,10 +188,10 @@ async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut>(
             .unwrap_or_default()
             .as_millis() as u64;
         let age_ms = now_ms.saturating_sub(ts_ms);
-        if age_ms > tolerance.as_millis() as u64 {
+        if age_ms > Duration::from(tolerance).as_millis() as u64 {
             warn!(
                 age_ms,
-                tolerance_ms = tolerance.as_millis() as u64,
+                tolerance_ms = Duration::from(tolerance).as_millis() as u64,
                 "Stale webhookTimestamp — potential replay attack"
             );
             return publish_unroutable(
@@ -343,7 +270,7 @@ async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut>(
 
     let outcome = state
         .publisher
-        .publish_event(subject, nats_headers, body, state.nats_ack_timeout)
+        .publish_event(subject, nats_headers, body, state.nats_ack_timeout.into())
         .await;
 
     outcome_to_status(outcome)
@@ -358,8 +285,10 @@ mod tests {
     use sha2::Sha256;
     use tower::ServiceExt;
     use tracing_subscriber::util::SubscriberInitExt;
+    use trogon_nats::jetstream::StreamMaxAge;
     use trogon_nats::jetstream::{
-        ClaimCheckPublisher, MaxPayload, MockJetStreamPublisher, MockObjectStore,
+        ClaimCheckPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher,
+        MockObjectStore,
     };
 
     type HmacSha256 = Hmac<Sha256>;
@@ -385,14 +314,12 @@ mod tests {
 
     fn test_config() -> LinearConfig {
         LinearConfig {
-            webhook_secret: TEST_SECRET.to_string(),
-            port: 0,
+            webhook_secret: LinearWebhookSecret::new(TEST_SECRET).unwrap(),
             subject_prefix: NatsToken::new("linear").expect("valid token"),
             stream_name: NatsToken::new("LINEAR").expect("valid token"),
-            stream_max_age: Duration::from_secs(3600),
-            timestamp_tolerance: Some(Duration::from_secs(60)),
-            nats_ack_timeout: Duration::from_secs(10),
-            nats: trogon_nats::NatsConfig::from_env(&trogon_std::env::InMemoryEnv::new()),
+            stream_max_age: StreamMaxAge::from_secs(3600).unwrap(),
+            timestamp_tolerance: NonZeroDuration::from_secs(60).ok(),
+            nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),
         }
     }
 
@@ -469,6 +396,32 @@ mod tests {
         let messages = publisher.published_messages();
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].subject, "linear.Issue.create");
+    }
+
+    #[tokio::test]
+    async fn provision_creates_stream() {
+        let _guard = tracing_guard();
+        let js = MockJetStreamContext::new();
+        let config = test_config();
+
+        provision(&js, &config).await.unwrap();
+
+        let streams = js.created_streams();
+        assert_eq!(streams.len(), 1);
+        assert_eq!(streams[0].name, "LINEAR");
+        assert_eq!(streams[0].subjects, vec!["linear.>"]);
+        assert_eq!(streams[0].max_age, Duration::from_secs(3600));
+    }
+
+    #[tokio::test]
+    async fn provision_propagates_error() {
+        let _guard = tracing_guard();
+        let js = MockJetStreamContext::new();
+        js.fail_next();
+        let config = test_config();
+
+        let result = provision(&js, &config).await;
+        assert!(result.is_err());
     }
 
     #[tokio::test]
@@ -680,37 +633,6 @@ mod tests {
             .expect("request should succeed");
 
         assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
-    }
-
-    #[cfg(not(coverage))]
-    #[test]
-    fn serve_error_display_and_source() {
-        use async_nats::jetstream::context::{CreateStreamError, CreateStreamErrorKind};
-
-        let io_err = ServeError::Io(std::io::Error::new(
-            std::io::ErrorKind::AddrInUse,
-            "port taken",
-        ));
-        assert_eq!(
-            io_err.to_string(),
-            "stream provisioning failed: port taken"
-                .replace("stream provisioning failed", "IO error")
-        );
-        assert!(std::error::Error::source(&io_err).is_some());
-
-        let prov_err =
-            ServeError::Provision(CreateStreamError::new(CreateStreamErrorKind::TimedOut));
-        let display = prov_err.to_string();
-        assert!(display.contains("stream provisioning failed"), "{display}");
-        assert!(std::error::Error::source(&prov_err).is_some());
-    }
-
-    #[cfg(not(coverage))]
-    #[test]
-    fn serve_error_from_io() {
-        let io = std::io::Error::other("boom");
-        let err: ServeError = io.into();
-        assert!(matches!(err, ServeError::Io(_)));
     }
 
     #[tokio::test]

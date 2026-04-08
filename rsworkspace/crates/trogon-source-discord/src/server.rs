@@ -7,11 +7,9 @@ use crate::constants::{
     NATS_HEADER_INTERACTION_TYPE, NATS_HEADER_PAYLOAD_KIND, NATS_HEADER_REJECT_REASON,
 };
 use crate::signature;
-#[cfg(not(coverage))]
-use async_nats::jetstream::context::CreateStreamError;
 use axum::{
     Json, Router, body::Bytes, extract::DefaultBodyLimit, extract::State, http::HeaderMap,
-    http::StatusCode, response::IntoResponse, response::Response, routing::get, routing::post,
+    http::StatusCode, response::IntoResponse, response::Response, routing::post,
 };
 use ed25519_dalek::VerifyingKey;
 use std::future::Future;
@@ -21,41 +19,7 @@ use trogon_nats::jetstream::{
     ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut, PublishOutcome,
 };
 use trogon_nats::{NatsToken, RequestClient};
-
-#[cfg(not(coverage))]
-#[derive(Debug)]
-#[non_exhaustive]
-pub enum ServeError {
-    Provision(CreateStreamError),
-    Io(std::io::Error),
-}
-
-#[cfg(not(coverage))]
-impl fmt::Display for ServeError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ServeError::Provision(e) => write!(f, "stream provisioning failed: {e}"),
-            ServeError::Io(e) => write!(f, "server IO error: {e}"),
-        }
-    }
-}
-
-#[cfg(not(coverage))]
-impl std::error::Error for ServeError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            ServeError::Provision(e) => Some(e),
-            ServeError::Io(e) => Some(e),
-        }
-    }
-}
-
-#[cfg(not(coverage))]
-impl From<std::io::Error> for ServeError {
-    fn from(e: std::io::Error) -> Self {
-        ServeError::Io(e)
-    }
-}
+use trogon_std::NonZeroDuration;
 
 fn outcome_to_status<E: fmt::Display>(outcome: PublishOutcome<E>) -> StatusCode {
     if outcome.is_ok() {
@@ -72,7 +36,7 @@ async fn publish_unroutable<P: JetStreamPublisher, S: ObjectStorePut>(
     subject_prefix: &str,
     reason: &str,
     body: Bytes,
-    ack_timeout: Duration,
+    ack_timeout: NonZeroDuration,
 ) {
     let subject = format!("{subject_prefix}.unroutable");
     let mut headers = async_nats::HeaderMap::new();
@@ -80,7 +44,7 @@ async fn publish_unroutable<P: JetStreamPublisher, S: ObjectStorePut>(
     headers.insert(NATS_HEADER_PAYLOAD_KIND, "unroutable");
 
     let outcome = publisher
-        .publish_event(subject, headers, body, ack_timeout)
+        .publish_event(subject, headers, body, ack_timeout.into())
         .await;
     outcome.log_on_error("discord.unroutable");
 }
@@ -101,8 +65,8 @@ struct AppState<P: JetStreamPublisher, S: ObjectStorePut, R: RequestClient> {
     nats: R,
     public_key: VerifyingKey,
     subject_prefix: NatsToken,
-    nats_ack_timeout: Duration,
-    nats_request_timeout: Duration,
+    nats_ack_timeout: NonZeroDuration,
+    nats_request_timeout: NonZeroDuration,
 }
 
 pub async fn provision<C: JetStreamContext>(
@@ -112,12 +76,12 @@ pub async fn provision<C: JetStreamContext>(
     js.get_or_create_stream(async_nats::jetstream::stream::Config {
         name: config.stream_name.to_string(),
         subjects: vec![format!("{}.>", config.subject_prefix)],
-        max_age: config.stream_max_age,
+        max_age: config.stream_max_age.into(),
         ..Default::default()
     })
     .await?;
 
-    let max_age_secs = config.stream_max_age.as_secs();
+    let max_age_secs = Duration::from(config.stream_max_age).as_secs();
     info!(
         stream = %config.stream_name,
         max_age_secs, "JetStream stream ready"
@@ -142,44 +106,8 @@ pub fn router<P: JetStreamPublisher, S: ObjectStorePut, R: RequestClient>(
 
     Router::new()
         .route("/webhook", post(handle_webhook::<P, S, R>))
-        .route("/health", get(handle_health))
         .layer(DefaultBodyLimit::max(HTTP_BODY_SIZE_MAX.as_usize()))
         .with_state(state)
-}
-
-#[cfg(not(coverage))]
-pub async fn serve<C, P, S, R>(
-    context: C,
-    publisher: ClaimCheckPublisher<P, S>,
-    nats: R,
-    public_key: VerifyingKey,
-    config: DiscordConfig,
-) -> Result<(), ServeError>
-where
-    C: JetStreamContext<Error = CreateStreamError>,
-    P: JetStreamPublisher,
-    S: ObjectStorePut,
-    R: RequestClient,
-{
-    provision(&context, &config)
-        .await
-        .map_err(ServeError::Provision)?;
-
-    let app = router(publisher, nats, public_key, &config);
-    let addr = std::net::SocketAddr::from(([0, 0, 0, 0], config.port));
-    info!(addr = %addr, "Discord webhook server listening");
-
-    let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app)
-        .with_graceful_shutdown(acp_telemetry::signal::shutdown_signal())
-        .await?;
-
-    info!("Discord webhook server shut down");
-    Ok(())
-}
-
-async fn handle_health() -> StatusCode {
-    StatusCode::OK
 }
 
 fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut, R: RequestClient>(
@@ -287,14 +215,14 @@ async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut, R: Reque
             subject,
             nats_headers,
             body,
-            state.nats_request_timeout,
+            state.nats_request_timeout.into(),
         )
         .await;
     }
 
     let outcome = state
         .publisher
-        .publish_event(subject, nats_headers, body, state.nats_ack_timeout)
+        .publish_event(subject, nats_headers, body, state.nats_ack_timeout.into())
         .await;
 
     let status = outcome_to_status(outcome);
@@ -345,12 +273,14 @@ fn empty_autocomplete_response() -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use axum::body::Body;
     use axum::http::Request;
     use ed25519_dalek::{Signer, SigningKey};
     use tower::ServiceExt;
     use tracing_subscriber::util::SubscriberInitExt;
     use trogon_nats::AdvancedMockNatsClient;
+    use trogon_nats::jetstream::StreamMaxAge;
     use trogon_nats::jetstream::{
         ClaimCheckPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher,
         MockObjectStore,
@@ -374,13 +304,11 @@ mod tests {
     fn test_config(vk: VerifyingKey) -> DiscordConfig {
         DiscordConfig {
             mode: crate::config::SourceMode::Webhook { public_key: vk },
-            port: 0,
             subject_prefix: NatsToken::new("discord").unwrap(),
             stream_name: NatsToken::new("DISCORD").unwrap(),
-            stream_max_age: Duration::from_secs(3600),
-            nats_ack_timeout: Duration::from_secs(10),
-            nats_request_timeout: Duration::from_secs(2),
-            nats: trogon_nats::NatsConfig::from_env(&trogon_std::env::InMemoryEnv::new()),
+            stream_max_age: StreamMaxAge::from_secs(3600).unwrap(),
+            nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),
+            nats_request_timeout: NonZeroDuration::from_secs(2).unwrap(),
         }
     }
 
@@ -429,28 +357,6 @@ mod tests {
             .await
             .unwrap();
         String::from_utf8(body_bytes.to_vec()).unwrap()
-    }
-
-    #[cfg(not(coverage))]
-    #[test]
-    fn serve_error_display_and_source() {
-        use async_nats::jetstream::context::{CreateStreamError, CreateStreamErrorKind};
-
-        let io_err = ServeError::Io(std::io::Error::new(
-            std::io::ErrorKind::AddrInUse,
-            "port taken",
-        ));
-        assert_eq!(io_err.to_string(), "server IO error: port taken");
-        assert!(std::error::Error::source(&io_err).is_some());
-
-        let prov_err = ServeError::Provision(CreateStreamError::new(
-            CreateStreamErrorKind::EmptyStreamName,
-        ));
-        assert!(prov_err.to_string().contains("stream provisioning failed"));
-        assert!(std::error::Error::source(&prov_err).is_some());
-
-        let io_err: ServeError = std::io::Error::other("boom").into();
-        assert!(matches!(io_err, ServeError::Io(_)));
     }
 
     #[tokio::test]
@@ -615,7 +521,7 @@ mod tests {
         nats.hang_next_request();
 
         let mut config = test_config(vk);
-        config.nats_request_timeout = Duration::from_millis(10);
+        config.nats_request_timeout = NonZeroDuration::from_millis(10).unwrap();
 
         let app = router(wrap_publisher(publisher.clone()), nats, vk, &config);
         let body = br#"{"type":4,"id":"auto-1","data":{"name":"cmd"}}"#;
@@ -838,8 +744,8 @@ mod tests {
             nats: AdvancedMockNatsClient::new(),
             public_key: vk,
             subject_prefix: NatsToken::new("custom").unwrap(),
-            nats_ack_timeout: Duration::from_secs(10),
-            nats_request_timeout: Duration::from_secs(2),
+            nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),
+            nats_request_timeout: NonZeroDuration::from_secs(2).unwrap(),
         };
 
         let app =
@@ -869,22 +775,6 @@ mod tests {
             publisher.published_subjects(),
             vec!["custom.application_command"]
         );
-    }
-
-    #[tokio::test]
-    async fn health_endpoint_returns_200() {
-        let _guard = tracing_guard();
-        let (_, vk) = test_keypair();
-        let app = mock_app(MockJetStreamPublisher::new(), vk);
-
-        let req = Request::builder()
-            .method("GET")
-            .uri("/health")
-            .body(Body::empty())
-            .unwrap();
-
-        let resp = app.oneshot(req).await.unwrap();
-        assert_eq!(resp.status(), StatusCode::OK);
     }
 
     #[tokio::test]
@@ -924,8 +814,8 @@ mod tests {
             nats: AdvancedMockNatsClient::new(),
             public_key: vk,
             subject_prefix: NatsToken::new("discord").unwrap(),
-            nats_ack_timeout: Duration::from_secs(10),
-            nats_request_timeout: Duration::from_secs(2),
+            nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),
+            nats_request_timeout: NonZeroDuration::from_secs(2).unwrap(),
         };
 
         let app =
@@ -1043,8 +933,8 @@ mod tests {
                 nats: AdvancedMockNatsClient::new(),
                 public_key: vk,
                 subject_prefix: NatsToken::new("discord").unwrap(),
-                nats_ack_timeout: Duration::from_secs(10),
-                nats_request_timeout: Duration::from_secs(2),
+                nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),
+                nats_request_timeout: NonZeroDuration::from_secs(2).unwrap(),
             };
 
             Router::new()
@@ -1069,8 +959,8 @@ mod tests {
                 nats: AdvancedMockNatsClient::new(),
                 public_key: vk,
                 subject_prefix: NatsToken::new("discord").unwrap(),
-                nats_ack_timeout: Duration::from_millis(10),
-                nats_request_timeout: Duration::from_secs(2),
+                nats_ack_timeout: NonZeroDuration::from_millis(10).unwrap(),
+                nats_request_timeout: NonZeroDuration::from_secs(2).unwrap(),
             };
 
             Router::new()
