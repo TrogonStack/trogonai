@@ -23,7 +23,7 @@ use agent_client_protocol::{
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
 use tokio::task::LocalSet;
-use trogon_codex_runner::CodexAgent;
+use trogon_codex_runner::DefaultCodexAgent;
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -70,17 +70,13 @@ async fn fake_nats() -> async_nats::Client {
         .unwrap()
 }
 
-/// Build a `CodexAgent` whose `CodexProcess` will spawn the mock server.
+/// Build a `DefaultCodexAgent` whose `CodexProcess` will spawn the mock server.
 ///
 /// The caller must hold `bin_env_lock()` for the duration of the test so that
 /// concurrent tests don't clobber each other's `CODEX_BIN` value.
-async fn make_agent() -> CodexAgent {
+async fn make_agent() -> DefaultCodexAgent {
     unsafe { std::env::set_var("CODEX_BIN", MOCK_BIN) };
-    CodexAgent::new(
-        fake_nats().await,
-        AcpPrefix::new("test").unwrap(),
-        "o4-mini",
-    )
+    DefaultCodexAgent::with_nats(fake_nats().await, AcpPrefix::new("test").unwrap(), "o4-mini")
 }
 
 // ── new_session ───────────────────────────────────────────────────────────────
