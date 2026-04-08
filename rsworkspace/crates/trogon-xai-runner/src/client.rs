@@ -1125,4 +1125,18 @@ mod tests {
         );
     }
 
+    // ── function_call_arguments.delta for unknown call_id ─────────────────────
+
+    #[test]
+    fn function_call_arguments_delta_unknown_call_id_is_ignored() {
+        // A delta that arrives without a preceding output_item.added for its
+        // call_id must not panic or produce any event — the entry is simply absent
+        // from pending_fc so the delta is a no-op.
+        let delta = r#"data: {"type":"response.function_call_arguments.delta","call_id":"ghost_id","delta":"{\"q\":"}"#;
+        assert!(
+            parse_line(delta).is_none(),
+            "delta for unknown call_id must produce no event"
+        );
+    }
+
 }
