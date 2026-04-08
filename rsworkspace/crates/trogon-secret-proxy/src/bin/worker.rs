@@ -123,13 +123,12 @@ async fn main() {
         .await
         .expect("Failed to connect to NATS");
 
-    let js_context = async_nats::jetstream::new(nats.clone());
     let outbound_subject = subjects::outbound(&prefix);
     let sname = stream::stream_name(&prefix);
-    stream::ensure_stream(&js_context, &prefix, &outbound_subject)
+    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    stream::ensure_stream(&jetstream, &prefix, &outbound_subject)
         .await
         .expect("Failed to ensure JetStream stream");
-    let jetstream = NatsJetStreamClient::new(js_context);
 
     let http_client = reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
