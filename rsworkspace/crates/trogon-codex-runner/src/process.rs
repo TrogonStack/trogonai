@@ -3,12 +3,15 @@ use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::{Mutex, broadcast, oneshot};
 use tracing::{debug, trace, warn};
+
+use crate::traits::{CodexProcessClient, ProcessSpawner};
 
 // ── JSON-RPC wire types ────────────────────────────────────────────────────────
 
@@ -449,6 +452,54 @@ impl CodexProcess {
             }
             _ => None,
         }
+    }
+}
+
+// ── Trait implementations ─────────────────────────────────────────────────────
+
+type DynError = Box<dyn std::error::Error + Send + Sync>;
+
+#[async_trait(?Send)]
+impl CodexProcessClient for CodexProcess {
+    fn is_alive(&self) -> bool {
+        self.alive.load(Ordering::Relaxed)
+    }
+
+    async fn thread_start(&self, cwd: &str) -> Result<String, DynError> {
+        self.thread_start(cwd).await
+    }
+
+    async fn thread_resume(&self, thread_id: &str) -> Result<String, DynError> {
+        self.thread_resume(thread_id).await
+    }
+
+    async fn thread_fork(&self, thread_id: &str) -> Result<String, DynError> {
+        self.thread_fork(thread_id).await
+    }
+
+    async fn turn_start(
+        &self,
+        thread_id: &str,
+        user_input: &str,
+        model: Option<&str>,
+    ) -> Result<broadcast::Receiver<CodexEvent>, DynError> {
+        self.turn_start(thread_id, user_input, model).await
+    }
+
+    async fn turn_interrupt(&self, thread_id: &str) -> Result<(), DynError> {
+        self.turn_interrupt(thread_id).await
+    }
+}
+
+/// Spawns the real `codex app-server` subprocess.
+pub struct RealProcessSpawner;
+
+#[async_trait(?Send)]
+impl ProcessSpawner for RealProcessSpawner {
+    type Process = CodexProcess;
+
+    async fn spawn(&self) -> Result<CodexProcess, DynError> {
+        CodexProcess::spawn().await
     }
 }
 
