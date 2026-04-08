@@ -539,7 +539,7 @@ async fn new_session_returns_error_when_codex_not_found() {
     let local = LocalSet::new();
     local
         .run_until(async {
-            let agent = CodexAgent::new(
+            let agent = DefaultCodexAgent::with_nats(
                 fake_nats().await,
                 AcpPrefix::new("test").unwrap(),
                 "o4-mini",
@@ -1422,7 +1422,7 @@ async fn nats_publish_failure_during_prompt_is_non_fatal() {
             // and exhaust its single reconnect attempt before calling prompt().
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-            let agent = CodexAgent::new(nats, AcpPrefix::new("test").unwrap(), "o4-mini");
+            let agent = DefaultCodexAgent::with_nats(nats, AcpPrefix::new("test").unwrap(), "o4-mini");
 
             let sess = agent
                 .new_session(NewSessionRequest::new("/tmp"))
@@ -1546,7 +1546,7 @@ async fn nats_publish_failure_for_tool_events_is_non_fatal() {
             // Yield to let the NATS background task notice the dropped connection.
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-            let agent = CodexAgent::new(nats, AcpPrefix::new("test").unwrap(), "o4-mini");
+            let agent = DefaultCodexAgent::with_nats(nats, AcpPrefix::new("test").unwrap(), "o4-mini");
 
             let sess = agent
                 .new_session(NewSessionRequest::new("/tmp"))
