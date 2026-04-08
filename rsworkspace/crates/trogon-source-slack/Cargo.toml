@@ -6,10 +6,6 @@ edition = "2024"
 [lints]
 workspace = true
 
-[[bin]]
-name = "trogon-source-slack"
-path = "src/main.rs"
-
 [dependencies]
 acp-telemetry = { workspace = true }
 async-nats = { workspace = true, features = ["jetstream"] }

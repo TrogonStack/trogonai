@@ -39,7 +39,5 @@ pub mod server;
 pub mod signature;
 
 pub use config::SlackConfig;
-pub use server::router;
-#[cfg(not(coverage))]
-pub use server::{ServeError, provision, serve};
+pub use server::{provision, router};
 pub use signature::SignatureError;

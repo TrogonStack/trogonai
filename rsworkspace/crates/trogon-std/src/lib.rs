@@ -32,10 +32,12 @@
 
 pub mod args;
 pub mod dirs;
+pub mod duration;
 pub mod env;
 pub mod fs;
 pub mod http;
 pub mod json;
+pub mod secret_string;
 pub mod time;
 
 #[cfg(all(feature = "clap", not(coverage)))]
@@ -44,10 +46,12 @@ pub use args::CliArgs;
 pub use args::FixedArgs;
 pub use args::ParseArgs;
 pub use dirs::{CacheDir, ConfigDir, DataDir, DataLocalDir, HomeDir, StateDir, SystemDirs};
+pub use duration::{NonZeroDuration, ZeroDuration};
 pub use env::{ReadEnv, SystemEnv};
 pub use fs::{CreateDirAll, ExistsFile, OpenAppendFile, ReadFile, SystemFs, WriteFile};
 pub use http::{ByteSize, HttpBodySizeMax};
 #[cfg(any(test, feature = "test-support"))]
 pub use json::FailNextSerialize;
 pub use json::{JsonSerialize, StdJsonSerialize};
+pub use secret_string::{EmptySecret, SecretString};
 pub use time::{EpochClock, GetElapsed, GetNow, SystemClock};

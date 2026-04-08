@@ -6,7 +6,9 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 #[cfg(target_os = "macos")]
 use trogon_std::dirs::HomeDir;
-use trogon_std::dirs::{StateDir, SystemDirs};
+#[cfg(not(target_os = "macos"))]
+use trogon_std::dirs::StateDir;
+use trogon_std::dirs::SystemDirs;
 use trogon_std::env::ReadEnv;
 use trogon_std::fs::CreateDirAll;
 
@@ -33,12 +35,13 @@ pub(crate) fn force_flush() {
     }
 }
 
-pub(crate) fn shutdown() {
-    if let Some(provider) = LOGGER_PROVIDER.get()
-        && let Err(e) = provider.shutdown()
-    {
-        eprintln!("Failed to shutdown logger provider: {e}");
+pub(crate) fn shutdown() -> Result<(), String> {
+    if let Some(provider) = LOGGER_PROVIDER.get() {
+        provider
+            .shutdown()
+            .map_err(|e| format!("failed to shutdown logger provider: {e}"))?;
     }
+    Ok(())
 }
 
 pub(crate) fn ensure_log_dir<E: ReadEnv, F: CreateDirAll>(
@@ -59,17 +62,13 @@ pub(crate) fn ensure_log_dir<E: ReadEnv, F: CreateDirAll>(
 
 #[cfg(target_os = "macos")]
 fn platform_log_dir(service_name: ServiceName) -> Result<PathBuf, Box<dyn std::error::Error>> {
-    if let Some(home) = SystemDirs.home_dir() {
-        Ok(home
-            .join("Library")
-            .join("Logs")
-            .join(service_name.as_str()))
-    } else {
-        Ok(SystemDirs
-            .state_dir()
-            .ok_or("could not determine home or state directory")?
-            .join(service_name.as_str()))
-    }
+    let home = SystemDirs
+        .home_dir()
+        .ok_or("could not determine home directory")?;
+    Ok(home
+        .join("Library")
+        .join("Logs")
+        .join(service_name.as_str()))
 }
 
 #[cfg(not(target_os = "macos"))]
