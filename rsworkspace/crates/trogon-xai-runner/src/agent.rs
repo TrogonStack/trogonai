@@ -698,6 +698,10 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
     async fn test_session_history(&self, id: &str) -> Vec<Message> {
         self.sessions.lock().await.get(id).map(|s| s.history.clone()).unwrap_or_default()
     }
+
+    fn test_max_history(&self) -> usize {
+        self.max_history
+    }
 }
 
 #[cfg(test)]
@@ -808,6 +812,8 @@ mod tests {
 
     #[tokio::test]
     async fn set_session_model_updates_model() {
+        // Hold env_lock so XAI_MODELS changes in other tests don't remove grok-3-mini.
+        let _guard = env_lock().lock().unwrap();
         let agent = make_agent();
         agent.test_insert_session("s3", "/tmp", None).await;
         agent
@@ -1414,6 +1420,53 @@ mod tests {
 
         let calls = agent.client.calls.lock().unwrap();
         assert_eq!(calls.last().unwrap().max_turns, Some(10));
+    }
+
+    // ── prompt: multiple text blocks joined ───────────────────────────────────
+
+    #[tokio::test]
+    async fn prompt_joins_multiple_text_blocks_with_newline() {
+        let agent = make_agent();
+        agent.test_insert_session("mb1", "/tmp", None).await;
+        agent.client.push_response(vec![XaiEvent::Done]);
+
+        agent
+            .prompt(PromptRequest::new(
+                "mb1",
+                vec![ContentBlock::from("block one"), ContentBlock::from("block two")],
+            ))
+            .await
+            .unwrap();
+
+        let calls = agent.client.calls.lock().unwrap();
+        let user_item = calls.last().unwrap().input.last().unwrap();
+        assert_eq!(user_item.content, "block one\nblock two");
+    }
+
+    // ── XAI_MAX_HISTORY_MESSAGES env var ──────────────────────────────────────
+
+    #[tokio::test]
+    async fn max_history_env_var_parsed_correctly() {
+        let _guard = env_lock().lock().unwrap();
+        unsafe { std::env::set_var("XAI_MAX_HISTORY_MESSAGES", "5") };
+        let mock_http = Arc::new(MockXaiHttpClient::new());
+        let mock_notifier = Arc::new(MockSessionNotifier::new());
+        let agent: TestAgent =
+            XaiAgent::with_deps(Arc::clone(&mock_notifier), "grok-3", "key", Arc::clone(&mock_http));
+        unsafe { std::env::remove_var("XAI_MAX_HISTORY_MESSAGES") };
+        assert_eq!(agent.test_max_history(), 5);
+    }
+
+    #[tokio::test]
+    async fn max_history_invalid_env_var_falls_back_to_default() {
+        let _guard = env_lock().lock().unwrap();
+        unsafe { std::env::set_var("XAI_MAX_HISTORY_MESSAGES", "not_a_number") };
+        let mock_http = Arc::new(MockXaiHttpClient::new());
+        let mock_notifier = Arc::new(MockSessionNotifier::new());
+        let agent: TestAgent =
+            XaiAgent::with_deps(Arc::clone(&mock_notifier), "grok-3", "key", Arc::clone(&mock_http));
+        unsafe { std::env::remove_var("XAI_MAX_HISTORY_MESSAGES") };
+        assert_eq!(agent.test_max_history(), 20);
     }
 
     // ── XAI_MODELS env var parsing ────────────────────────────────────────────
