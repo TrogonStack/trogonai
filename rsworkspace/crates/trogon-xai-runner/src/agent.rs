@@ -1357,6 +1357,106 @@ mod tests {
             .unwrap();
     }
 
+    // ── prompt: no text response → only user in history ──────────────────────
+
+    #[tokio::test]
+    async fn prompt_without_text_response_only_records_user_message() {
+        let agent = make_agent();
+        agent.test_insert_session("notxt", "/tmp", None).await;
+        // Only Done — no TextDelta — so assistant_text stays empty.
+        agent.client.push_response(vec![XaiEvent::Done]);
+
+        agent
+            .prompt(PromptRequest::new("notxt", vec![ContentBlock::from("hi")]))
+            .await
+            .unwrap();
+
+        // Only the user message is recorded; no empty assistant entry created.
+        assert_eq!(agent.test_history_len("notxt").await, 1);
+    }
+
+    // ── prompt: full history sent when no previous_response_id ───────────────
+
+    #[tokio::test]
+    async fn prompt_sends_full_history_when_no_previous_response_id() {
+        let agent = make_agent();
+        let history = vec![
+            Message::user("first question"),
+            Message::assistant_text("first answer"),
+        ];
+        agent.test_insert_session_with_history("hist1", "/tmp", history).await;
+        agent.client.push_response(vec![XaiEvent::Done]);
+
+        agent
+            .prompt(PromptRequest::new("hist1", vec![ContentBlock::from("second question")]))
+            .await
+            .unwrap();
+
+        let calls = agent.client.calls.lock().unwrap();
+        let call = calls.last().unwrap();
+        // 2 history items + 1 new user message = 3 input items; no shortcut.
+        assert_eq!(call.previous_response_id, None);
+        assert_eq!(call.input.len(), 3, "full history + new message sent when no previous_response_id");
+    }
+
+    // ── prompt: max_turns passed to chat_stream ───────────────────────────────
+
+    #[tokio::test]
+    async fn prompt_passes_max_turns_to_chat_stream() {
+        let agent = make_agent(); // max_turns defaults to Some(10)
+        agent.test_insert_session("mt1", "/tmp", None).await;
+        agent.client.push_response(vec![XaiEvent::Done]);
+
+        agent
+            .prompt(PromptRequest::new("mt1", vec![ContentBlock::from("hi")]))
+            .await
+            .unwrap();
+
+        let calls = agent.client.calls.lock().unwrap();
+        assert_eq!(calls.last().unwrap().max_turns, Some(10));
+    }
+
+    // ── XAI_MODELS env var parsing ────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn xai_models_env_var_parsed_correctly() {
+        let _guard = env_lock().lock().unwrap();
+        unsafe {
+            std::env::set_var("XAI_MODELS", "grok-3:Grok 3,grok-3-mini:Grok 3 Mini,custom:Custom Model");
+        }
+        let mock_http = Arc::new(MockXaiHttpClient::new());
+        let mock_notifier = Arc::new(MockSessionNotifier::new());
+        let agent: TestAgent =
+            XaiAgent::with_deps(Arc::clone(&mock_notifier), "grok-3", "key", Arc::clone(&mock_http));
+        unsafe { std::env::remove_var("XAI_MODELS") };
+
+        let state = agent.session_model_state(None);
+        let ids: Vec<_> = state.available_models.iter().map(|m| m.model_id.to_string()).collect();
+        assert!(ids.contains(&"grok-3".to_string()));
+        assert!(ids.contains(&"grok-3-mini".to_string()));
+        assert!(ids.contains(&"custom".to_string()));
+        assert_eq!(ids.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn xai_models_env_var_skips_malformed_entries() {
+        let _guard = env_lock().lock().unwrap();
+        unsafe {
+            std::env::set_var("XAI_MODELS", "grok-3:Grok 3,malformed-no-colon,another:Another");
+        }
+        let mock_http = Arc::new(MockXaiHttpClient::new());
+        let mock_notifier = Arc::new(MockSessionNotifier::new());
+        let agent: TestAgent =
+            XaiAgent::with_deps(Arc::clone(&mock_notifier), "grok-3", "key", Arc::clone(&mock_http));
+        unsafe { std::env::remove_var("XAI_MODELS") };
+
+        let state = agent.session_model_state(None);
+        let ids: Vec<_> = state.available_models.iter().map(|m| m.model_id.to_string()).collect();
+        assert!(ids.contains(&"grok-3".to_string()), "valid entry must be present");
+        assert!(ids.contains(&"another".to_string()), "valid entry must be present");
+        assert!(!ids.iter().any(|id| id == "malformed-no-colon"), "malformed entry must be skipped");
+    }
+
     // ── prompt: non-text events silently ignored ──────────────────────────────
 
     #[tokio::test]
