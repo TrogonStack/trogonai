@@ -2,7 +2,7 @@
 //!
 //! These tests wire `XaiAgent` through `AgentSideNatsConnection` using
 //! `MockNatsClient` as the NATS transport and inline mock implementations of
-//! `XaiHttpClient` and `SessionNotifier`.  No real network, no real NATS.
+//! `XaiHttpClient` and `SessionNotifier`. No real network, no real NATS.
 //!
 //! Each test body runs inside `LocalSet::run_until(...)` because
 //! `AgentSideNatsConnection` spawns local tasks internally.
@@ -18,8 +18,13 @@ use std::time::Duration;
 use acp_nats::acp_prefix::AcpPrefix;
 use acp_nats_agent::AgentSideNatsConnection;
 use agent_client_protocol::{
-    CloseSessionRequest, CloseSessionResponse, ContentBlock, InitializeRequest, InitializeResponse,
-    NewSessionRequest, PromptRequest, PromptResponse, ProtocolVersion, SessionNotification,
+    AuthenticateRequest, AuthenticateResponse, CancelNotification, CloseSessionRequest,
+    CloseSessionResponse, ContentBlock, ForkSessionRequest, InitializeRequest,
+    InitializeResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionRequest,
+    LoadSessionResponse, NewSessionRequest, PromptRequest, PromptResponse, ProtocolVersion,
+    ResumeSessionRequest, ResumeSessionResponse, SessionNotification,
+    SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModeRequest,
+    SetSessionModeResponse, SetSessionModelRequest, SetSessionModelResponse,
 };
 use async_nats::Message;
 use async_trait::async_trait;
@@ -27,27 +32,55 @@ use futures::channel::mpsc::UnboundedSender;
 use futures_util::stream::{self, LocalBoxStream};
 use futures_util::StreamExt as _;
 use trogon_nats::mocks::MockNatsClient;
-use trogon_xai_runner::{InputItem, SessionNotifier, XaiAgent, XaiEvent, XaiHttpClient};
+use trogon_xai_runner::{FinishReason, InputItem, SessionNotifier, XaiAgent, XaiEvent, XaiHttpClient};
 
 // ── Inline mock: xAI HTTP client ─────────────────────────────────────────────
 //
 // Implements `XaiHttpClient` for the local type directly (required by orphan
 // rules — we cannot implement a foreign trait for `Arc<LocalType>`).
 // The inner `Arc<Mutex<_>>` state is cheap to clone, so `Harness` keeps its
-// own clone to push responses after the agent takes ownership.
+// own clone to push responses and inspect call parameters after the agent
+// takes ownership.
+
+enum TestResponse {
+    Events(Vec<XaiEvent>),
+    /// Yields `first` then blocks forever — used to simulate a hung connection
+    /// so that cancellation tests can interrupt an in-flight prompt.
+    Slow(XaiEvent),
+}
+
+/// Parameters recorded for each `chat_stream` call.
+#[derive(Clone)]
+struct HttpCall {
+    pub input_len: usize,
+    pub previous_response_id: Option<String>,
+}
 
 #[derive(Clone)]
 struct TestHttpClient {
-    queue: Arc<Mutex<VecDeque<Vec<XaiEvent>>>>,
+    queue: Arc<Mutex<VecDeque<TestResponse>>>,
+    calls: Arc<Mutex<Vec<HttpCall>>>,
 }
 
 impl TestHttpClient {
     fn new() -> Self {
-        Self { queue: Arc::new(Mutex::new(VecDeque::new())) }
+        Self {
+            queue: Arc::new(Mutex::new(VecDeque::new())),
+            calls: Arc::new(Mutex::new(Vec::new())),
+        }
     }
 
     fn push(&self, events: Vec<XaiEvent>) {
-        self.queue.lock().unwrap().push_back(events);
+        self.queue.lock().unwrap().push_back(TestResponse::Events(events));
+    }
+
+    /// Enqueue a slow response — yields `first`, then blocks indefinitely.
+    fn push_slow(&self, first: XaiEvent) {
+        self.queue.lock().unwrap().push_back(TestResponse::Slow(first));
+    }
+
+    fn last_call(&self) -> Option<HttpCall> {
+        self.calls.lock().unwrap().last().cloned()
     }
 }
 
@@ -56,14 +89,25 @@ impl XaiHttpClient for TestHttpClient {
     async fn chat_stream(
         &self,
         _model: &str,
-        _input: &[InputItem],
+        input: &[InputItem],
         _api_key: &str,
         _tools: &[String],
-        _previous_response_id: Option<&str>,
+        previous_response_id: Option<&str>,
         _max_turns: Option<u32>,
     ) -> LocalBoxStream<'static, XaiEvent> {
-        let events = self.queue.lock().unwrap().pop_front().unwrap_or_default();
-        stream::iter(events).boxed_local()
+        self.calls.lock().unwrap().push(HttpCall {
+            input_len: input.len(),
+            previous_response_id: previous_response_id.map(str::to_string),
+        });
+
+        let response =
+            self.queue.lock().unwrap().pop_front().unwrap_or(TestResponse::Events(vec![]));
+        match response {
+            TestResponse::Events(events) => stream::iter(events).boxed_local(),
+            TestResponse::Slow(first) => stream::once(async move { first })
+                .chain(stream::pending::<XaiEvent>())
+                .boxed_local(),
+        }
     }
 }
 
@@ -95,7 +139,7 @@ impl SessionNotifier for TestNotifier {
 
 struct Harness {
     nats: MockNatsClient,
-    /// Cloned handle used to push HTTP responses from test bodies.
+    /// Cloned handle used to push HTTP responses and inspect calls.
     http: TestHttpClient,
     /// Cloned handle used to read notifications from test bodies.
     notifier: TestNotifier,
@@ -106,26 +150,29 @@ struct Harness {
 }
 
 impl Harness {
-    /// Build the harness and start the agent connection task.
-    ///
-    /// Must be called inside a `LocalSet` (spawns local tasks).
+    /// Build with the default test API key (`"test-key"`).
     fn new() -> Self {
+        Self::with_api_key("test-key")
+    }
+
+    /// Build with an explicit API key. Pass `""` to simulate a keyless agent
+    /// that requires `authenticate` before it can prompt.
+    fn with_api_key(key: &str) -> Self {
         let nats = MockNatsClient::new();
         let http = TestHttpClient::new();
         let notifier = TestNotifier::new();
 
-        // `AgentSideNatsConnection` calls `nats.subscribe()` twice when first polled:
-        //   1st call → global subscription stream  (`acp.agent.>`)
-        //   2nd call → session subscription stream (`acp.session.*.agent.>`)
+        // `AgentSideNatsConnection::new` → `serve()` calls `nats.subscribe()` twice:
+        //   1st call → global wildcard  (`acp.agent.>`)
+        //   2nd call → session wildcard (`acp.session.*.agent.>`)
         // Pre-register both senders so the subscribe calls succeed immediately.
         let global_tx = nats.inject_messages();
         let session_tx = nats.inject_messages();
 
-        // Clone the handles before the agent takes ownership.
         let http_clone = http.clone();
         let notifier_clone = notifier.clone();
 
-        let agent = XaiAgent::with_deps(notifier_clone, "grok-3", "test-key", http_clone);
+        let agent = XaiAgent::with_deps(notifier_clone, "grok-3", key, http_clone);
         let prefix = AcpPrefix::new("acp").unwrap();
         let (_, io_task) = AgentSideNatsConnection::new(agent, nats.clone(), prefix, |fut| {
             tokio::task::spawn_local(fut);
@@ -137,14 +184,38 @@ impl Harness {
         Self { nats, http, notifier, global_tx, session_tx }
     }
 
-    /// Inject a request on the global stream (e.g. `initialize`, `session.new`).
+    /// Inject a serialized request on the global stream with a reply subject.
     fn global(&self, subject: &str, payload: impl serde::Serialize, reply: &str) {
         self.inject(&self.global_tx, subject, payload, Some(reply));
     }
 
-    /// Inject a request on the session stream (e.g. `prompt`, `close`).
+    /// Inject a serialized request on the session stream with a reply subject.
     fn session_req(&self, subject: &str, payload: impl serde::Serialize, reply: &str) {
         self.inject(&self.session_tx, subject, payload, Some(reply));
+    }
+
+    /// Inject a serialized notification on the global stream (no reply subject).
+    fn global_notify(&self, subject: &str, payload: impl serde::Serialize) {
+        self.inject(&self.global_tx, subject, payload, None);
+    }
+
+    /// Inject a serialized notification on the session stream (no reply subject).
+    fn session_notify(&self, subject: &str, payload: impl serde::Serialize) {
+        self.inject(&self.session_tx, subject, payload, None);
+    }
+
+    /// Inject raw bytes on the global stream — useful for malformed-JSON tests.
+    fn global_raw(&self, subject: &str, payload: &[u8], reply: &str) {
+        let msg = Message {
+            subject: subject.into(),
+            reply: Some(reply.into()),
+            payload: bytes::Bytes::copy_from_slice(payload),
+            headers: None,
+            length: 0,
+            status: None,
+            description: None,
+        };
+        self.global_tx.unbounded_send(msg).unwrap();
     }
 
     fn inject(
@@ -167,7 +238,7 @@ impl Harness {
         tx.unbounded_send(msg).unwrap();
     }
 
-    /// Spin-yield until at least `n` messages have been published, then return them.
+    /// Spin-yield until at least `n` messages have been published, then return them all.
     async fn expect_n_publishes(&self, n: usize) -> Vec<bytes::Bytes> {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
         loop {
@@ -177,8 +248,7 @@ impl Harness {
             }
             assert!(
                 tokio::time::Instant::now() < deadline,
-                "timeout: expected {} published messages, got {}",
-                n,
+                "timeout: expected {n} published messages, got {}",
                 p.len()
             );
             tokio::task::yield_now().await;
@@ -194,26 +264,45 @@ impl Harness {
             }
             assert!(
                 tokio::time::Instant::now() < deadline,
-                "timeout: expected {} notifications, got {}",
-                n,
+                "timeout: expected {n} notifications, got {}",
                 self.notifier.count()
             );
             tokio::task::yield_now().await;
         }
     }
+
+    /// Yield many times then assert the publish count has not grown past `before`.
+    /// Used to verify that no response is published (e.g., no-reply-subject case).
+    async fn expect_no_new_publishes(&self, before: usize) {
+        for _ in 0..30 {
+            tokio::task::yield_now().await;
+        }
+        let after = self.nats.published_payloads().len();
+        assert_eq!(
+            after, before,
+            "expected no new publishes after {before}, but count grew to {after}"
+        );
+    }
+
+    /// Return the subjects of all published messages so far.
+    fn published_subjects(&self) -> Vec<String> {
+        self.nats.published_messages()
+    }
 }
 
-// ── Shared helper ─────────────────────────────────────────────────────────────
+// ── Shared helpers ────────────────────────────────────────────────────────────
 
 /// Send `new_session` and return the created session ID.
+/// Accounts for prior publishes so it can be called multiple times per test.
 async fn create_session(h: &Harness) -> String {
+    let before = h.nats.published_payloads().len();
     h.global("acp.agent.session.new", NewSessionRequest::new("/tmp"), "r.new");
-    let payloads = h.expect_n_publishes(1).await;
-    let val: serde_json::Value = serde_json::from_slice(&payloads[0]).unwrap();
+    let payloads = h.expect_n_publishes(before + 1).await;
+    let val: serde_json::Value = serde_json::from_slice(payloads.last().unwrap()).unwrap();
     val["sessionId"].as_str().unwrap().to_string()
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────────────
+// ── Original tests ────────────────────────────────────────────────────────────
 
 /// `initialize` dispatches through NATS and returns valid protocol capabilities.
 #[tokio::test]
@@ -264,14 +353,13 @@ async fn prompt_via_nats_returns_prompt_response() {
                 XaiEvent::TextDelta { text: "hello".to_string() },
                 XaiEvent::Done,
             ]);
-            let prompt_subj = format!("acp.session.{}.agent.prompt", sid);
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
             h.session_req(
                 &prompt_subj,
                 PromptRequest::new(sid.clone(), vec![ContentBlock::from("ping")]),
                 "r.prompt",
             );
             let payloads = h.expect_n_publishes(2).await;
-            // Second published payload is the PromptResponse.
             let _: PromptResponse = serde_json::from_slice(&payloads[1]).unwrap();
         })
         .await;
@@ -290,13 +378,12 @@ async fn prompt_via_nats_sends_session_notifications() {
                 XaiEvent::TextDelta { text: "chunk2".to_string() },
                 XaiEvent::Done,
             ]);
-            let prompt_subj = format!("acp.session.{}.agent.prompt", sid);
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
             h.session_req(
                 &prompt_subj,
                 PromptRequest::new(sid.clone(), vec![ContentBlock::from("hi")]),
                 "r.prompt",
             );
-            // Wait for prompt to complete, then verify notification count.
             h.expect_n_publishes(2).await;
             h.expect_n_notifications(2).await;
             assert_eq!(h.notifier.count(), 2);
@@ -312,7 +399,7 @@ async fn close_session_via_nats_returns_ok() {
             let h = Harness::new();
             let sid = create_session(&h).await;
 
-            let close_subj = format!("acp.session.{}.agent.close", sid);
+            let close_subj = format!("acp.session.{sid}.agent.close");
             h.session_req(&close_subj, CloseSessionRequest::new(sid.clone()), "r.close");
 
             let payloads = h.expect_n_publishes(2).await;
@@ -321,13 +408,12 @@ async fn close_session_via_nats_returns_ok() {
         .await;
 }
 
-/// Prompting a non-existent session returns an ACP protocol error (`code` field present).
+/// Prompting a non-existent session returns an ACP protocol error.
 #[tokio::test]
 async fn prompt_unknown_session_returns_acp_error() {
     tokio::task::LocalSet::new()
         .run_until(async {
             let h = Harness::new();
-
             h.session_req(
                 "acp.session.no-such-session.agent.prompt",
                 PromptRequest::new("no-such-session", vec![ContentBlock::from("hi")]),
@@ -337,8 +423,695 @@ async fn prompt_unknown_session_returns_acp_error() {
             let val: serde_json::Value = serde_json::from_slice(&payloads[0]).unwrap();
             assert!(
                 val.get("code").is_some(),
-                "expected ACP error with 'code' field, got: {}",
-                val
+                "expected ACP error with 'code' field, got: {val}"
+            );
+        })
+        .await;
+}
+
+// ── authenticate ──────────────────────────────────────────────────────────────
+
+/// `authenticate` dispatches through NATS and returns a valid response.
+#[tokio::test]
+async fn authenticate_via_nats_succeeds() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let mut meta = serde_json::Map::new();
+            meta.insert("XAI_API_KEY".to_string(), serde_json::json!("user-key-123"));
+            h.global(
+                "acp.agent.authenticate",
+                AuthenticateRequest::new("api-key").meta(meta),
+                "r.auth",
+            );
+            let payloads = h.expect_n_publishes(1).await;
+            let _: AuthenticateResponse = serde_json::from_slice(&payloads[0]).unwrap();
+        })
+        .await;
+}
+
+/// `authenticate` stores the API key so the next `new_session` can use it.
+/// An agent with no global key must fail without authenticate; with authenticate
+/// it should succeed and the subsequent prompt must not return "no API key".
+#[tokio::test]
+async fn authenticate_then_new_session_uses_pending_key() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            // No global key — any prompt without authenticate should fail.
+            let h = Harness::with_api_key("");
+
+            // Authenticate to store the pending key.
+            let mut meta = serde_json::Map::new();
+            meta.insert("XAI_API_KEY".to_string(), serde_json::json!("user-key-123"));
+            h.global(
+                "acp.agent.authenticate",
+                AuthenticateRequest::new("api-key").meta(meta),
+                "r.auth",
+            );
+            h.expect_n_publishes(1).await;
+
+            // Create session — must consume the pending key.
+            let sid = create_session(&h).await;
+
+            // Prompt must succeed (key is now attached to the session).
+            h.http.push(vec![XaiEvent::TextDelta { text: "ok".to_string() }, XaiEvent::Done]);
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("hi")]),
+                "r.prompt",
+            );
+            let payloads = h.expect_n_publishes(3).await; // auth + session + prompt
+            let val: serde_json::Value = serde_json::from_slice(&payloads[2]).unwrap();
+            assert!(
+                val.get("code").is_none(),
+                "prompt must succeed after authenticate, got: {val}"
+            );
+        })
+        .await;
+}
+
+// ── cancel ────────────────────────────────────────────────────────────────────
+
+/// `cancel` sent through NATS fires the in-flight prompt's cancel channel,
+/// causing it to return a `PromptResponse` instead of blocking forever.
+#[tokio::test]
+async fn cancel_via_nats_interrupts_prompt() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            // Slow response: emits one event, then blocks indefinitely.
+            h.http.push_slow(XaiEvent::TextDelta { text: "partial".to_string() });
+
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("hi")]),
+                "r.prompt",
+            );
+
+            // Yield to let the prompt task start and enter the streaming loop.
+            for _ in 0..5 {
+                tokio::task::yield_now().await;
+            }
+
+            // Cancel is a notification (no reply subject) — fires the oneshot.
+            let cancel_subj = format!("acp.session.{sid}.agent.cancel");
+            h.session_notify(&cancel_subj, CancelNotification::new(sid.clone()));
+
+            // The prompt must complete and publish a response within 2 s.
+            // Without cancel the slow stream would block it forever.
+            let payloads = h.expect_n_publishes(2).await;
+            let _: PromptResponse = serde_json::from_slice(&payloads[1]).unwrap();
+        })
+        .await;
+}
+
+/// Cancelling a session that has no in-flight prompt is a no-op — no publish.
+#[tokio::test]
+async fn cancel_noop_for_unknown_session_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            h.session_notify(
+                "acp.session.no-such-session.agent.cancel",
+                CancelNotification::new("no-such-session"),
+            );
+            h.expect_no_new_publishes(0).await;
+        })
+        .await;
+}
+
+// ── reply subject routing ─────────────────────────────────────────────────────
+
+/// The response to a request must be published to the exact reply subject
+/// provided in the request — not a wildcard or default subject.
+#[tokio::test]
+async fn reply_subject_routing_is_correct() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            h.global(
+                "acp.agent.initialize",
+                InitializeRequest::new(ProtocolVersion::LATEST),
+                "reply.unique.subject.99999",
+            );
+            h.expect_n_publishes(1).await;
+
+            let subjects = h.published_subjects();
+            assert!(
+                subjects.contains(&"reply.unique.subject.99999".to_string()),
+                "response must be published to the exact reply subject; got: {subjects:?}"
+            );
+        })
+        .await;
+}
+
+// ── malformed / no-reply edge cases ──────────────────────────────────────────
+
+/// A request with a malformed JSON body must produce an ACP error response
+/// (dispatch layer wraps it in `InvalidParams`).
+#[tokio::test]
+async fn malformed_request_returns_acp_error() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            h.global_raw("acp.agent.initialize", b"not valid json", "r.malformed");
+            let payloads = h.expect_n_publishes(1).await;
+            let val: serde_json::Value = serde_json::from_slice(&payloads[0]).unwrap();
+            assert!(
+                val.get("code").is_some(),
+                "malformed request must produce an ACP error with 'code' field: {val}"
+            );
+        })
+        .await;
+}
+
+/// A request without a reply subject must be silently dropped — no publish.
+#[tokio::test]
+async fn request_without_reply_subject_does_not_publish() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            // `global_notify` injects without a reply subject.
+            h.global_notify(
+                "acp.agent.initialize",
+                InitializeRequest::new(ProtocolVersion::LATEST),
+            );
+            h.expect_no_new_publishes(0).await;
+        })
+        .await;
+}
+
+// ── load_session ──────────────────────────────────────────────────────────────
+
+/// `load_session` returns a valid `LoadSessionResponse` for an existing session.
+#[tokio::test]
+async fn load_session_via_nats_returns_state() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            let load_subj = format!("acp.session.{sid}.agent.load");
+            h.session_req(&load_subj, LoadSessionRequest::new(sid.clone(), "/tmp"), "r.load");
+
+            let payloads = h.expect_n_publishes(2).await;
+            let _: LoadSessionResponse = serde_json::from_slice(&payloads[1]).unwrap();
+        })
+        .await;
+}
+
+// ── resume_session ────────────────────────────────────────────────────────────
+
+/// `resume_session` returns a valid `ResumeSessionResponse` for an existing session.
+#[tokio::test]
+async fn resume_session_via_nats_returns_ok() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            let resume_subj = format!("acp.session.{sid}.agent.resume");
+            h.session_req(
+                &resume_subj,
+                ResumeSessionRequest::new(sid.clone(), "/tmp"),
+                "r.resume",
+            );
+
+            let payloads = h.expect_n_publishes(2).await;
+            let _: ResumeSessionResponse = serde_json::from_slice(&payloads[1]).unwrap();
+        })
+        .await;
+}
+
+// ── fork_session ──────────────────────────────────────────────────────────────
+
+/// Fork an existing session and verify the forked session can be prompted
+/// independently of the source.
+#[tokio::test]
+async fn fork_session_via_nats_and_prompt() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            // Prompt the source session.
+            h.http.push(vec![
+                XaiEvent::TextDelta { text: "from src".to_string() },
+                XaiEvent::Done,
+            ]);
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("hi")]),
+                "r.prompt1",
+            );
+            h.expect_n_publishes(2).await;
+
+            // Fork the session.
+            let fork_subj = format!("acp.session.{sid}.agent.fork");
+            h.session_req(
+                &fork_subj,
+                ForkSessionRequest::new(sid.clone(), "/fork"),
+                "r.fork",
+            );
+            let payloads = h.expect_n_publishes(3).await;
+            let fork_val: serde_json::Value = serde_json::from_slice(&payloads[2]).unwrap();
+            let fork_id = fork_val["sessionId"].as_str().unwrap().to_string();
+            assert!(!fork_id.is_empty(), "fork must return a non-empty session ID");
+            assert_ne!(fork_id, sid, "fork session ID must differ from source");
+
+            // Prompt the forked session — must succeed independently.
+            h.http.push(vec![
+                XaiEvent::TextDelta { text: "from fork".to_string() },
+                XaiEvent::Done,
+            ]);
+            let fork_prompt_subj = format!("acp.session.{fork_id}.agent.prompt");
+            h.session_req(
+                &fork_prompt_subj,
+                PromptRequest::new(fork_id.clone(), vec![ContentBlock::from("follow-up")]),
+                "r.prompt2",
+            );
+            let payloads = h.expect_n_publishes(4).await;
+            let _: PromptResponse = serde_json::from_slice(&payloads[3]).unwrap();
+        })
+        .await;
+}
+
+// ── list_sessions ─────────────────────────────────────────────────────────────
+
+/// `list_sessions` returns all active sessions sorted by ID.
+#[tokio::test]
+async fn list_sessions_via_nats_returns_sorted() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+
+            // Create two sessions (IDs are random UUIDs).
+            create_session(&h).await;
+            create_session(&h).await;
+
+            h.global("acp.agent.session.list", ListSessionsRequest::new(), "r.list");
+            let payloads = h.expect_n_publishes(3).await;
+
+            let resp: ListSessionsResponse = serde_json::from_slice(&payloads[2]).unwrap();
+            assert_eq!(resp.sessions.len(), 2, "must list both sessions");
+
+            let ids: Vec<_> =
+                resp.sessions.iter().map(|s| s.session_id.to_string()).collect();
+            let mut sorted = ids.clone();
+            sorted.sort();
+            assert_eq!(ids, sorted, "sessions must be sorted by ID: {ids:?}");
+        })
+        .await;
+}
+
+// ── set_session_model ─────────────────────────────────────────────────────────
+
+/// `set_session_model` updates the session model and the change is visible
+/// through a subsequent `load_session`.
+#[tokio::test]
+async fn set_session_model_via_nats_updates_model() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            let set_model_subj = format!("acp.session.{sid}.agent.set_model");
+            h.session_req(
+                &set_model_subj,
+                SetSessionModelRequest::new(sid.clone(), "grok-3-mini"),
+                "r.set_model",
+            );
+            let payloads = h.expect_n_publishes(2).await;
+            let _: SetSessionModelResponse = serde_json::from_slice(&payloads[1]).unwrap();
+
+            // Verify via load_session that the model change persisted.
+            let load_subj = format!("acp.session.{sid}.agent.load");
+            h.session_req(&load_subj, LoadSessionRequest::new(sid.clone(), "/tmp"), "r.load");
+            let payloads = h.expect_n_publishes(3).await;
+            let resp: LoadSessionResponse = serde_json::from_slice(&payloads[2]).unwrap();
+            let current =
+                resp.models.expect("load must return model state").current_model_id.to_string();
+            assert_eq!(current, "grok-3-mini", "model must be updated to grok-3-mini");
+        })
+        .await;
+}
+
+// ── set_session_mode ──────────────────────────────────────────────────────────
+
+/// `set_session_mode` is a no-op that always succeeds — verify the round-trip.
+#[tokio::test]
+async fn set_session_mode_via_nats_succeeds() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            let set_mode_subj = format!("acp.session.{sid}.agent.set_mode");
+            h.session_req(
+                &set_mode_subj,
+                SetSessionModeRequest::new(sid.clone(), "any-mode"),
+                "r.set_mode",
+            );
+            let payloads = h.expect_n_publishes(2).await;
+            let _: SetSessionModeResponse = serde_json::from_slice(&payloads[1]).unwrap();
+        })
+        .await;
+}
+
+// ── set_session_config_option ─────────────────────────────────────────────────
+
+/// `set_session_config_option` returns an empty config-options list.
+#[tokio::test]
+async fn set_session_config_option_via_nats_returns_empty() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            let set_config_subj = format!("acp.session.{sid}.agent.set_config_option");
+            h.session_req(
+                &set_config_subj,
+                SetSessionConfigOptionRequest::new(sid.clone(), "some-option", "some-value"),
+                "r.config",
+            );
+            let payloads = h.expect_n_publishes(2).await;
+            let resp: SetSessionConfigOptionResponse =
+                serde_json::from_slice(&payloads[1]).unwrap();
+            assert!(resp.config_options.is_empty(), "config options must be empty");
+        })
+        .await;
+}
+
+// ── session isolation ─────────────────────────────────────────────────────────
+
+/// Closing session A must not affect session B — session B remains fully
+/// operational after A is closed.
+#[tokio::test]
+async fn two_sessions_are_isolated() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid_a = create_session(&h).await;
+            let sid_b = create_session(&h).await;
+
+            // Close session A.
+            let close_subj = format!("acp.session.{sid_a}.agent.close");
+            h.session_req(&close_subj, CloseSessionRequest::new(sid_a.clone()), "r.close");
+            h.expect_n_publishes(3).await; // session A + session B + close response
+
+            // Prompt closed session A — must return an ACP error.
+            let prompt_a_subj = format!("acp.session.{sid_a}.agent.prompt");
+            h.session_req(
+                &prompt_a_subj,
+                PromptRequest::new(sid_a.clone(), vec![ContentBlock::from("hello?")]),
+                "r.prompt.a",
+            );
+            let payloads = h.expect_n_publishes(4).await;
+            let val: serde_json::Value = serde_json::from_slice(&payloads[3]).unwrap();
+            assert!(
+                val.get("code").is_some(),
+                "closed session must return ACP error: {val}"
+            );
+
+            // Prompt session B — must still work.
+            h.http.push(vec![
+                XaiEvent::TextDelta { text: "b alive".to_string() },
+                XaiEvent::Done,
+            ]);
+            let prompt_b_subj = format!("acp.session.{sid_b}.agent.prompt");
+            h.session_req(
+                &prompt_b_subj,
+                PromptRequest::new(sid_b.clone(), vec![ContentBlock::from("still alive?")]),
+                "r.prompt.b",
+            );
+            let payloads = h.expect_n_publishes(5).await;
+            let _: PromptResponse = serde_json::from_slice(&payloads[4]).unwrap();
+        })
+        .await;
+}
+
+// ── previous_response_id shortcut ────────────────────────────────────────────
+
+/// After a turn that returns a `ResponseId`, the next prompt must pass
+/// `previous_response_id` to the HTTP client and send only the new user
+/// message (not the full history).
+#[tokio::test]
+async fn response_id_reuse_on_second_prompt() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            // First prompt — response includes a ResponseId for the agent to cache.
+            h.http.push(vec![
+                XaiEvent::ResponseId { id: "resp-cache-abc".to_string() },
+                XaiEvent::TextDelta { text: "first answer".to_string() },
+                XaiEvent::Done,
+            ]);
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("question 1")]),
+                "r.prompt1",
+            );
+            h.expect_n_publishes(2).await;
+
+            // Second prompt — agent must use the cached ResponseId.
+            h.http.push(vec![
+                XaiEvent::TextDelta { text: "second answer".to_string() },
+                XaiEvent::Done,
+            ]);
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("question 2")]),
+                "r.prompt2",
+            );
+            h.expect_n_publishes(3).await;
+
+            let call = h.http.last_call().expect("HTTP client must have recorded a call");
+            assert_eq!(
+                call.previous_response_id.as_deref(),
+                Some("resp-cache-abc"),
+                "second prompt must pass previous_response_id to avoid replaying history"
+            );
+            assert_eq!(
+                call.input_len, 1,
+                "with previous_response_id, only the new user message is sent"
+            );
+        })
+        .await;
+}
+
+// ── Finished variants break the streaming loop ────────────────────────────────
+
+/// A stream that ends with `Finished { Incomplete }` (no `Done`) must still
+/// publish a `PromptResponse` — the agent treats all `Finished` variants as
+/// end-of-turn.
+#[tokio::test]
+async fn prompt_finished_incomplete_breaks_loop() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            h.http.push(vec![
+                XaiEvent::TextDelta { text: "partial".to_string() },
+                XaiEvent::Finished {
+                    reason: FinishReason::Incomplete,
+                    incomplete_reason: Some("max_output_tokens".to_string()),
+                },
+            ]);
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("hello")]),
+                "r.prompt",
+            );
+            let payloads = h.expect_n_publishes(2).await;
+            let _: PromptResponse = serde_json::from_slice(&payloads[1]).unwrap();
+        })
+        .await;
+}
+
+/// A stream that ends with `Finished { Failed }` must publish a `PromptResponse`.
+#[tokio::test]
+async fn prompt_finished_failed_breaks_loop() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            h.http.push(vec![
+                XaiEvent::Finished { reason: FinishReason::Failed, incomplete_reason: None },
+            ]);
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("hello")]),
+                "r.prompt",
+            );
+            let payloads = h.expect_n_publishes(2).await;
+            let _: PromptResponse = serde_json::from_slice(&payloads[1]).unwrap();
+        })
+        .await;
+}
+
+/// A stream that ends with `Finished { Cancelled }` must publish a `PromptResponse`.
+#[tokio::test]
+async fn prompt_finished_cancelled_breaks_loop() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            h.http.push(vec![
+                XaiEvent::Finished { reason: FinishReason::Cancelled, incomplete_reason: None },
+            ]);
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("hello")]),
+                "r.prompt",
+            );
+            let payloads = h.expect_n_publishes(2).await;
+            let _: PromptResponse = serde_json::from_slice(&payloads[1]).unwrap();
+        })
+        .await;
+}
+
+// ── Full event sequence: ResponseId + Usage + Finished (no Done) ──────────────
+
+/// A realistic stream — `ResponseId`, `TextDelta`, `Usage`, `Finished { Completed }` —
+/// must publish a `PromptResponse` and cache the `ResponseId` so the next prompt
+/// uses `previous_response_id`.
+#[tokio::test]
+async fn prompt_full_event_sequence_response_id_usage_finished() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            // First prompt — realistic sequence without a trailing Done.
+            h.http.push(vec![
+                XaiEvent::ResponseId { id: "resp-full-seq".to_string() },
+                XaiEvent::TextDelta { text: "answer".to_string() },
+                XaiEvent::Usage { prompt_tokens: 10, completion_tokens: 5 },
+                XaiEvent::Finished { reason: FinishReason::Completed, incomplete_reason: None },
+            ]);
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("q1")]),
+                "r.prompt1",
+            );
+            h.expect_n_publishes(2).await;
+
+            // Second prompt — must reuse the cached ResponseId.
+            h.http.push(vec![XaiEvent::Done]);
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("q2")]),
+                "r.prompt2",
+            );
+            h.expect_n_publishes(3).await;
+
+            let call = h.http.last_call().unwrap();
+            assert_eq!(
+                call.previous_response_id.as_deref(),
+                Some("resp-full-seq"),
+                "second prompt must reuse the ResponseId from the Finished-terminated turn"
+            );
+            assert_eq!(call.input_len, 1, "only the new user message should be sent");
+        })
+        .await;
+}
+
+// ── Silent events: ServerToolCompleted and FunctionCall ───────────────────────
+
+/// `ServerToolCompleted` in the stream must be silently ignored — the agent must
+/// not publish extra notifications for it. Only the final `PromptResponse` and
+/// the one `TextDelta` notification are expected.
+#[tokio::test]
+async fn prompt_server_tool_completed_is_silently_ignored() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            h.http.push(vec![
+                XaiEvent::ServerToolCompleted { name: "web_search".to_string() },
+                XaiEvent::TextDelta { text: "result".to_string() },
+                XaiEvent::Done,
+            ]);
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("search something")]),
+                "r.prompt",
+            );
+            h.expect_n_publishes(2).await;
+            // Exactly one notification (for the TextDelta), not two.
+            h.expect_n_notifications(1).await;
+            assert_eq!(h.notifier.count(), 1, "ServerToolCompleted must not emit a notification");
+        })
+        .await;
+}
+
+/// `FunctionCall` in the stream must be silently ignored — same reasoning as
+/// `ServerToolCompleted`: the agent does not expose tool calls to the ACP layer.
+#[tokio::test]
+async fn prompt_function_call_is_silently_ignored() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            h.http.push(vec![
+                XaiEvent::FunctionCall {
+                    call_id: "call-1".to_string(),
+                    name: "some_tool".to_string(),
+                    arguments: "{}".to_string(),
+                },
+                XaiEvent::TextDelta { text: "done".to_string() },
+                XaiEvent::Done,
+            ]);
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("call a tool")]),
+                "r.prompt",
+            );
+            h.expect_n_publishes(2).await;
+            // Exactly one notification (for the TextDelta), not two.
+            h.expect_n_notifications(1).await;
+            assert_eq!(h.notifier.count(), 1, "FunctionCall must not emit a notification");
+        })
+        .await;
+}
+
+// ── set_session_model edge case ───────────────────────────────────────────────
+
+/// `set_session_model` for a non-existent session must return an ACP error.
+#[tokio::test]
+async fn set_session_model_unknown_session_returns_acp_error() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            h.session_req(
+                "acp.session.no-such-session.agent.set_model",
+                SetSessionModelRequest::new("no-such-session", "grok-3-mini"),
+                "r.set_model",
+            );
+            let payloads = h.expect_n_publishes(1).await;
+            let val: serde_json::Value = serde_json::from_slice(&payloads[0]).unwrap();
+            assert!(
+                val.get("code").is_some(),
+                "set_model on unknown session must return ACP error with 'code' field: {val}"
             );
         })
         .await;
