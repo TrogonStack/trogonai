@@ -3634,6 +3634,7 @@ dependencies = [
  "async-nats",
  "async-trait",
  "bytes",
+ "futures",
  "futures-util",
  "reqwest",
  "serde",
@@ -3641,6 +3642,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "trogon-nats",
  "uuid",
 ]
 
