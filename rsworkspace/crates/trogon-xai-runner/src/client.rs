@@ -1072,4 +1072,57 @@ mod tests {
         );
     }
 
+    // ── reasoning content ─────────────────────────────────────────────────────
+
+    #[test]
+    fn reasoning_content_delta_emits_nothing() {
+        // Reasoning models (e.g. grok-3-mini) emit delta.reasoning_content.
+        // This must NOT produce a TextDelta — reasoning is not forwarded to the ACP client.
+        let line = r#"data: {"type":"message.delta","delta":{"reasoning_content":"Let me think..."}}"#;
+        assert!(
+            parse_line(line).is_none(),
+            "reasoning_content-only delta must not produce any event"
+        );
+    }
+
+    #[test]
+    fn reasoning_summary_text_delta_emits_nothing() {
+        // OpenAI Responses API reasoning summary events are logged and discarded.
+        let line = r#"data: {"type":"response.reasoning_summary_text.delta","delta":"Summary so far."}"#;
+        assert!(
+            parse_line(line).is_none(),
+            "response.reasoning_summary_text.delta must produce no event"
+        );
+    }
+
+    // ── response.done event type ──────────────────────────────────────────────
+
+    #[test]
+    fn response_done_event_same_as_completed() {
+        // "response.done" shares the same match arm as "response.completed".
+        let line = r#"data: {"type":"response.done","response":{"status":"completed"},"usage":{"prompt_tokens":5,"completion_tokens":3}}"#;
+        let events = parse_line_all(line);
+        assert!(
+            events.iter().any(|e| matches!(e, XaiEvent::Finished { reason, .. } if *reason == FinishReason::Completed)),
+            "response.done must emit Finished(Completed) just like response.completed: {events:?}"
+        );
+    }
+
+    // ── usage nested inside response object ───────────────────────────────────
+
+    #[test]
+    fn usage_nested_in_response_object() {
+        // When top-level "usage" is absent (null), the parser must fall back to
+        // response.usage per the OpenAI Responses API spec.
+        let line = r#"data: {"type":"response.completed","response":{"id":"r1","status":"completed","usage":{"prompt_tokens":10,"completion_tokens":20}}}"#;
+        let events = parse_line_all(line);
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                XaiEvent::Usage { prompt_tokens: 10, completion_tokens: 20 }
+            )),
+            "usage nested in response object must be extracted: {events:?}"
+        );
+    }
+
 }
