@@ -78,7 +78,7 @@ async fn vault_admin_store_then_proxy_request_succeeds() {
 
     // ── 5. Ensure PROXY_REQUESTS stream ────────────────────────────────────
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(jetstream.context(), "trogon", &outbound_subject)
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
         .expect("Failed to ensure PROXY_REQUESTS stream");
 
@@ -204,7 +204,7 @@ async fn vault_admin_revoke_then_proxy_request_fails() {
     let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
 
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(jetstream.context(), "trogon", &outbound_subject)
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
         .unwrap();
 
@@ -351,7 +351,7 @@ async fn vault_admin_rotate_then_proxy_uses_new_key() {
     let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
 
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(jetstream.context(), "trogon", &outbound_subject)
+    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
         .expect("Failed to ensure PROXY_REQUESTS stream");
 
