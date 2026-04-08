@@ -627,6 +627,77 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
     fn test_prompt_timeout(&self) -> Duration {
         self.prompt_timeout
     }
+
+    fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.prompt_timeout = timeout;
+        self
+    }
+
+    fn with_max_history(mut self, max_history: usize) -> Self {
+        self.max_history = max_history;
+        self
+    }
+
+    async fn test_insert_session_with_response_id(
+        &self,
+        id: &str,
+        cwd: &str,
+        model: Option<String>,
+        response_id: Option<String>,
+    ) {
+        self.sessions.lock().await.insert(
+            id.to_string(),
+            XaiSession {
+                cwd: cwd.to_string(),
+                model,
+                api_key: Some("test-key".to_string()),
+                history: Vec::new(),
+                last_response_id: response_id,
+            },
+        );
+    }
+
+    async fn test_insert_session_no_key(&self, id: &str, cwd: &str) {
+        self.sessions.lock().await.insert(
+            id.to_string(),
+            XaiSession {
+                cwd: cwd.to_string(),
+                model: None,
+                api_key: None,
+                history: Vec::new(),
+                last_response_id: None,
+            },
+        );
+    }
+
+    async fn test_insert_session_with_history(&self, id: &str, cwd: &str, history: Vec<Message>) {
+        self.sessions.lock().await.insert(
+            id.to_string(),
+            XaiSession {
+                cwd: cwd.to_string(),
+                model: None,
+                api_key: Some("test-key".to_string()),
+                history,
+                last_response_id: None,
+            },
+        );
+    }
+
+    async fn test_last_response_id(&self, id: &str) -> Option<String> {
+        self.sessions.lock().await.get(id).and_then(|s| s.last_response_id.clone())
+    }
+
+    async fn test_pending_api_key(&self) -> Option<String> {
+        self.pending_api_key.lock().await.clone()
+    }
+
+    async fn test_session_api_key(&self, id: &str) -> Option<String> {
+        self.sessions.lock().await.get(id).and_then(|s| s.api_key.clone())
+    }
+
+    async fn test_session_history(&self, id: &str) -> Vec<Message> {
+        self.sessions.lock().await.get(id).map(|s| s.history.clone()).unwrap_or_default()
+    }
 }
 
 #[cfg(test)]
@@ -636,7 +707,7 @@ mod tests {
     use agent_client_protocol::{
         Agent, AuthMethodId, AuthenticateRequest, CancelNotification, CloseSessionRequest,
         ContentBlock, ForkSessionRequest, InitializeRequest, ListSessionsRequest,
-        LoadSessionRequest, PromptRequest, ProtocolVersion, ResumeSessionRequest,
+        LoadSessionRequest, NewSessionRequest, PromptRequest, ProtocolVersion, ResumeSessionRequest,
         SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModeRequest,
         SetSessionModelRequest,
     };
@@ -962,5 +1033,216 @@ mod tests {
         let agent = XaiAgent::with_deps(mock_notifier, "grok-3", "key", mock_http);
         unsafe { std::env::remove_var("XAI_PROMPT_TIMEOUT_SECS") };
         assert_eq!(agent.test_prompt_timeout(), Duration::from_secs(300));
+    }
+
+    // ── new_session ───────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn new_session_creates_session() {
+        let agent = make_agent();
+        agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+        assert_eq!(agent.test_session_count().await, 1);
+    }
+
+    #[tokio::test]
+    async fn new_session_falls_back_to_global_api_key() {
+        // make_agent passes "test-key" as the global API key.
+        let agent = make_agent();
+        let resp = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+        let session_id = resp.session_id.to_string();
+        assert_eq!(agent.test_session_api_key(&session_id).await.as_deref(), Some("test-key"));
+    }
+
+    #[tokio::test]
+    async fn new_session_uses_pending_api_key() {
+        // Agent with no global key; key must come from authenticate().
+        let mock_http = Arc::new(MockXaiHttpClient::new());
+        let mock_notifier = Arc::new(MockSessionNotifier::new());
+        let agent: TestAgent =
+            XaiAgent::with_deps(Arc::clone(&mock_notifier), "grok-3", "", Arc::clone(&mock_http));
+
+        let mut meta = serde_json::Map::new();
+        meta.insert("XAI_API_KEY".to_string(), serde_json::json!("user-key"));
+        agent.authenticate(AuthenticateRequest::new("api-key").meta(meta)).await.unwrap();
+
+        let resp = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+        let session_id = resp.session_id.to_string();
+
+        assert_eq!(agent.test_session_api_key(&session_id).await.as_deref(), Some("user-key"));
+        assert_eq!(agent.test_pending_api_key().await, None, "pending key must be consumed by new_session");
+    }
+
+    // ── authenticate stores key ───────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn authenticate_stores_pending_api_key() {
+        let mock_http = Arc::new(MockXaiHttpClient::new());
+        let mock_notifier = Arc::new(MockSessionNotifier::new());
+        let agent: TestAgent =
+            XaiAgent::with_deps(Arc::clone(&mock_notifier), "grok-3", "", Arc::clone(&mock_http));
+
+        let mut meta = serde_json::Map::new();
+        meta.insert("XAI_API_KEY".to_string(), serde_json::json!("my-key"));
+        agent.authenticate(AuthenticateRequest::new("api-key").meta(meta)).await.unwrap();
+
+        assert_eq!(agent.test_pending_api_key().await.as_deref(), Some("my-key"));
+    }
+
+    // ── prompt: missing API key ───────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn prompt_fails_when_no_api_key() {
+        let mock_http = Arc::new(MockXaiHttpClient::new());
+        let mock_notifier = Arc::new(MockSessionNotifier::new());
+        let agent: TestAgent =
+            XaiAgent::with_deps(Arc::clone(&mock_notifier), "grok-3", "", Arc::clone(&mock_http));
+        agent.test_insert_session_no_key("nokey", "/tmp").await;
+
+        let err = agent
+            .prompt(PromptRequest::new("nokey", vec![ContentBlock::from("hi")]))
+            .await
+            .unwrap_err();
+        assert!(err.message.contains("no API key"), "error: {}", err.message);
+    }
+
+    // ── prompt: previous_response_id shortcut ─────────────────────────────────
+
+    #[tokio::test]
+    async fn prompt_uses_previous_response_id() {
+        let agent = make_agent();
+        agent
+            .test_insert_session_with_response_id("p1", "/tmp", None, Some("prev-id".to_string()))
+            .await;
+        agent.client.push_response(vec![XaiEvent::Done]);
+
+        agent
+            .prompt(PromptRequest::new("p1", vec![ContentBlock::from("follow-up")]))
+            .await
+            .unwrap();
+
+        let calls = agent.client.calls.lock().unwrap();
+        let call = calls.last().unwrap();
+        assert_eq!(call.previous_response_id.as_deref(), Some("prev-id"));
+        // Only the new user message is sent — no history replay.
+        assert_eq!(call.input.len(), 1, "only new user message when previous_response_id is set");
+    }
+
+    // ── prompt: response ID stored after turn ─────────────────────────────────
+
+    #[tokio::test]
+    async fn prompt_stores_response_id_after_turn() {
+        let agent = make_agent();
+        agent.test_insert_session("r1", "/tmp", None).await;
+        agent.client.push_response(vec![
+            XaiEvent::ResponseId { id: "resp-abc".to_string() },
+            XaiEvent::Done,
+        ]);
+
+        agent
+            .prompt(PromptRequest::new("r1", vec![ContentBlock::from("hi")]))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            agent.test_last_response_id("r1").await.as_deref(),
+            Some("resp-abc"),
+            "last_response_id must be updated after a turn"
+        );
+    }
+
+    // ── prompt: history trimming ──────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn prompt_trims_history_when_max_exceeded() {
+        let mock_http = Arc::new(MockXaiHttpClient::new());
+        let mock_notifier = Arc::new(MockSessionNotifier::new());
+        let agent: TestAgent =
+            XaiAgent::with_deps(Arc::clone(&mock_notifier), "grok-3", "test-key", Arc::clone(&mock_http))
+                .with_max_history(4);
+        agent.test_insert_session("trim", "/tmp", None).await;
+
+        // 3 turns produce 6 history entries (user + assistant each); must be trimmed to 4.
+        for _ in 0..3 {
+            mock_http.push_response(vec![
+                XaiEvent::TextDelta { text: "reply".to_string() },
+                XaiEvent::Done,
+            ]);
+            agent
+                .prompt(PromptRequest::new("trim", vec![ContentBlock::from("hi")]))
+                .await
+                .unwrap();
+        }
+
+        let len = agent.test_history_len("trim").await;
+        assert!(len <= 4, "history ({len}) should be trimmed to max_history=4");
+    }
+
+    // ── prompt: timeout ───────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn prompt_timeout_fires() {
+        let mock_http = Arc::new(MockXaiHttpClient::new());
+        let mock_notifier = Arc::new(MockSessionNotifier::new());
+        let agent: TestAgent =
+            XaiAgent::with_deps(Arc::clone(&mock_notifier), "grok-3", "test-key", Arc::clone(&mock_http))
+                .with_timeout(Duration::from_millis(50));
+        agent.test_insert_session("slow", "/tmp", None).await;
+
+        // Yields one event then blocks forever — agent timeout must fire and return.
+        mock_http.push_slow_response(XaiEvent::TextDelta { text: "partial".to_string() });
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(2),
+            agent.prompt(PromptRequest::new("slow", vec![ContentBlock::from("hi")])),
+        )
+        .await;
+
+        assert!(result.is_ok(), "prompt must return after timeout, not hang indefinitely");
+    }
+
+    // ── fork_session: copies history and clears response id ──────────────────
+
+    #[tokio::test]
+    async fn fork_session_copies_history() {
+        let agent = make_agent();
+        let history = vec![Message::user("hello"), Message::assistant_text("hi there")];
+        agent.test_insert_session_with_history("src3", "/a", history).await;
+
+        let resp = agent.fork_session(ForkSessionRequest::new("src3", "/b")).await.unwrap();
+        let fork_id = resp.session_id.to_string();
+
+        let fork_history = agent.test_session_history(&fork_id).await;
+        assert_eq!(fork_history.len(), 2);
+        assert_eq!(fork_history[0].role, "user");
+        assert_eq!(fork_history[1].role, "assistant");
+    }
+
+    #[tokio::test]
+    async fn fork_session_clears_response_id() {
+        let agent = make_agent();
+        agent
+            .test_insert_session_with_response_id("src4", "/c", None, Some("old-id".to_string()))
+            .await;
+
+        let resp = agent.fork_session(ForkSessionRequest::new("src4", "/d")).await.unwrap();
+        let fork_id = resp.session_id.to_string();
+
+        assert_eq!(
+            agent.test_last_response_id(&fork_id).await,
+            None,
+            "fork must start without previous_response_id"
+        );
+    }
+
+    // ── set_session_model: unknown session ────────────────────────────────────
+
+    #[tokio::test]
+    async fn set_session_model_unknown_session_returns_error() {
+        let agent = make_agent();
+        let err = agent
+            .set_session_model(SetSessionModelRequest::new("nonexistent", "grok-3"))
+            .await
+            .unwrap_err();
+        assert!(err.message.contains("not found"), "error: {}", err.message);
     }
 }
