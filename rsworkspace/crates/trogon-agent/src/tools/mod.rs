@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use trogon_mcp::McpCallTool;
 
 /// Trait for dispatching a named tool call.
 pub trait ToolDispatcher: Send + Sync + 'static {
@@ -68,6 +69,63 @@ pub mod mock {
             Box::pin(async move { resp })
         }
     }
+
+    /// Mock implementation of [`AgentConfig`] for unit tests.
+    ///
+    /// Pre-load `github_contents` to control what `fetch_github_contents`
+    /// returns without any real HTTP calls.
+    pub struct MockAgentConfig {
+        pub proxy_url: String,
+        pub github_token: String,
+        pub linear_token: String,
+        pub slack_token: String,
+        /// Value returned by `fetch_github_contents`. `None` simulates a
+        /// 404 / unreachable host.
+        pub github_contents: Option<Value>,
+    }
+
+    impl Default for MockAgentConfig {
+        fn default() -> Self {
+            Self {
+                proxy_url: "http://proxy.test".to_string(),
+                github_token: "tok_github_prod_mock001".to_string(),
+                linear_token: String::new(),
+                slack_token: String::new(),
+                github_contents: None,
+            }
+        }
+    }
+
+    impl AgentConfig for MockAgentConfig {
+        fn proxy_url(&self) -> &str {
+            &self.proxy_url
+        }
+        fn github_token(&self) -> &str {
+            &self.github_token
+        }
+        fn linear_token(&self) -> &str {
+            &self.linear_token
+        }
+        fn slack_token(&self) -> &str {
+            &self.slack_token
+        }
+
+        fn fetch_github_contents<'a>(
+            &'a self,
+            _url: &'a str,
+            _token: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Option<Value>> + Send + 'a>> {
+            let body = self.github_contents.clone();
+            Box::pin(async move { body })
+        }
+
+        fn init_mcp_clients<'a>(
+            &'a self,
+            _servers: &'a [crate::config::McpServerConfig],
+        ) -> Pin<Box<dyn Future<Output = (Vec<ToolDef>, Vec<(String, String, Arc<dyn McpCallTool>)>)> + Send + 'a>> {
+            Box::pin(async move { (vec![], vec![]) })
+        }
+    }
 }
 
 /// Anthropic tool definition sent in every request.
@@ -97,14 +155,33 @@ pub struct ToolContext {
 
 /// Trait abstracting the agent's HTTP configuration dependencies.
 ///
-/// Implemented by [`ToolContext`] for production use.  Tests can provide a
-/// mock implementation to verify behaviour without real HTTP credentials.
+/// Implemented by [`ToolContext`] for production use.  Tests provide
+/// [`mock::MockAgentConfig`] to verify behaviour without real HTTP calls.
 pub trait AgentConfig: Send + Sync + 'static {
     fn proxy_url(&self) -> &str;
     fn github_token(&self) -> &str;
     fn linear_token(&self) -> &str;
     fn slack_token(&self) -> &str;
-    fn http_client(&self) -> &reqwest::Client;
+
+    /// Fetch a resource from the GitHub Contents API via the proxy.
+    ///
+    /// Returns the parsed JSON body on success, `None` on HTTP error or
+    /// non-2xx status.  The concrete implementation uses `reqwest`; tests
+    /// can return any pre-canned value without touching the network.
+    fn fetch_github_contents<'a>(
+        &'a self,
+        url: &'a str,
+        token: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Option<Value>> + Send + 'a>>;
+
+    /// Initialise MCP server connections defined in an automation config.
+    ///
+    /// Returns tool definitions and dispatch entries ready to merge into
+    /// an [`AgentLoop`].  Returns empty vecs when no servers are reachable.
+    fn init_mcp_clients<'a>(
+        &'a self,
+        servers: &'a [crate::config::McpServerConfig],
+    ) -> Pin<Box<dyn Future<Output = (Vec<ToolDef>, Vec<(String, String, Arc<dyn McpCallTool>)>)> + Send + 'a>>;
 }
 
 impl AgentConfig for ToolContext {
@@ -120,8 +197,37 @@ impl AgentConfig for ToolContext {
     fn slack_token(&self) -> &str {
         &self.slack_token
     }
-    fn http_client(&self) -> &reqwest::Client {
-        &self.http_client
+
+    fn fetch_github_contents<'a>(
+        &'a self,
+        url: &'a str,
+        token: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Option<Value>> + Send + 'a>> {
+        let http = self.http_client.clone();
+        let url = url.to_string();
+        let token = token.to_string();
+        Box::pin(async move {
+            let resp = http
+                .get(&url)
+                .header("Authorization", format!("Bearer {}", token))
+                .header("Accept", "application/vnd.github.v3+json")
+                .send()
+                .await
+                .ok()?;
+            if !resp.status().is_success() {
+                return None;
+            }
+            resp.json().await.ok()
+        })
+    }
+
+    fn init_mcp_clients<'a>(
+        &'a self,
+        servers: &'a [crate::config::McpServerConfig],
+    ) -> Pin<Box<dyn Future<Output = (Vec<ToolDef>, Vec<(String, String, Arc<dyn McpCallTool>)>)> + Send + 'a>> {
+        let http = self.http_client.clone();
+        let servers: Vec<crate::config::McpServerConfig> = servers.to_vec();
+        Box::pin(async move { crate::runner::init_mcp_servers(&http, &servers).await })
     }
 }
 

@@ -56,25 +56,9 @@ pub async fn fetch_memory(
         agent.tool_context.proxy_url(),
     );
 
-    let response = agent
-        .tool_context
-        .http_client()
-        .get(&url)
-        .header(
-            "Authorization",
-            format!("Bearer {}", agent.tool_context.github_token()),
-        )
-        .header("Accept", "application/vnd.github.v3+json")
-        .send()
-        .await
-        .ok()?;
+    let token = agent.tool_context.github_token().to_string();
+    let body = agent.tool_context.fetch_github_contents(&url, &token).await?;
 
-    if !response.status().is_success() {
-        debug!(owner, repo, status = %response.status(), ".trogon/memory.md not found — starting without memory");
-        return None;
-    }
-
-    let body: serde_json::Value = response.json().await.ok()?;
     let raw = body["content"].as_str()?.replace('\n', "");
     let bytes = general_purpose::STANDARD.decode(&raw).ok()?;
     String::from_utf8(bytes).ok()
@@ -281,6 +265,67 @@ mod tests {
         }
     }
 
+    // ── MockAgentConfig-based fetch_memory tests (no network) ────────────────
+
+    fn make_agent_with_mock_config(cfg: crate::tools::mock::MockAgentConfig) -> AgentLoop {
+        use crate::agent_loop::ReqwestAnthropicClient;
+        use crate::flag_client::AlwaysOnFlagClient;
+        use crate::tools::mock::MockToolDispatcher;
+        AgentLoop {
+            anthropic_client: Arc::new(ReqwestAnthropicClient::new(
+                reqwest::Client::new(),
+                "http://unused.test".to_string(),
+                String::new(),
+            )),
+            model: "test".to_string(),
+            max_iterations: 1,
+            tool_dispatcher: Arc::new(MockToolDispatcher::new("ok")),
+            tool_context: Arc::new(cfg),
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            flag_client: Arc::new(AlwaysOnFlagClient),
+            tenant_id: "test".to_string(),
+        }
+    }
+
+    /// MockAgentConfig returning None → fetch_memory returns None without HTTP.
+    #[tokio::test]
+    async fn fetch_memory_mock_returns_none_when_config_has_no_contents() {
+        let cfg = crate::tools::mock::MockAgentConfig::default(); // github_contents: None
+        let agent = make_agent_with_mock_config(cfg);
+        let result = fetch_memory(&agent, "owner", "repo", DEFAULT_MEMORY_PATH).await;
+        assert!(result.is_none());
+    }
+
+    /// MockAgentConfig returning valid base64 JSON → fetch_memory decodes it.
+    #[tokio::test]
+    async fn fetch_memory_mock_decodes_base64_from_config() {
+        use base64::engine::general_purpose;
+        let encoded = general_purpose::STANDARD.encode("# Notes\nsome memory\n");
+        let cfg = crate::tools::mock::MockAgentConfig {
+            github_contents: Some(serde_json::json!({ "content": encoded })),
+            ..Default::default()
+        };
+        let agent = make_agent_with_mock_config(cfg);
+        let result = fetch_memory(&agent, "owner", "repo", DEFAULT_MEMORY_PATH).await;
+        assert_eq!(result.as_deref(), Some("# Notes\nsome memory\n"));
+    }
+
+    /// MockAgentConfig returning JSON without a `content` field → returns None.
+    #[tokio::test]
+    async fn fetch_memory_mock_returns_none_when_content_field_absent() {
+        let cfg = crate::tools::mock::MockAgentConfig {
+            github_contents: Some(serde_json::json!({ "sha": "abc123" })),
+            ..Default::default()
+        };
+        let agent = make_agent_with_mock_config(cfg);
+        let result = fetch_memory(&agent, "owner", "repo", DEFAULT_MEMORY_PATH).await;
+        assert!(result.is_none());
+    }
+
     /// 404 response → fetch_memory returns None.
     #[tokio::test]
     async fn fetch_memory_returns_none_on_404() {
@@ -461,7 +506,7 @@ pub async fn run_automation(
         })
         .collect();
     let (auto_mcp_defs, auto_mcp_dispatch) =
-        crate::runner::init_mcp_servers(agent.tool_context.http_client(), &auto_mcp_configs).await;
+        agent.tool_context.init_mcp_clients(&auto_mcp_configs).await;
     tools.extend(auto_mcp_defs);
 
     // Build a temporary AgentLoop when the automation overrides model or MCP dispatch.
