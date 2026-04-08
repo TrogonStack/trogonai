@@ -1075,6 +1075,18 @@ mod tests {
     // ── reasoning content ─────────────────────────────────────────────────────
 
     #[test]
+    fn text_delta_with_reasoning_content_emits_text_delta() {
+        // grok-3-mini sends both fields in the same delta object.
+        // The text must be forwarded; reasoning_content must be discarded silently.
+        let line = r#"data: {"type":"message.delta","delta":{"text":"hello","reasoning_content":"Let me think..."}}"#;
+        let event = parse_line(line).unwrap();
+        assert!(
+            matches!(event, XaiEvent::TextDelta { ref text } if text == "hello"),
+            "text field must produce TextDelta even when reasoning_content is also present: {event:?}"
+        );
+    }
+
+    #[test]
     fn reasoning_content_delta_emits_nothing() {
         // Reasoning models (e.g. grok-3-mini) emit delta.reasoning_content.
         // This must NOT produce a TextDelta — reasoning is not forwarded to the ACP client.
