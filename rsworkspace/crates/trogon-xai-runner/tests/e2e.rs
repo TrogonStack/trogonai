@@ -21,8 +21,8 @@ use agent_client_protocol::{
     AuthenticateRequest, AuthenticateResponse, CancelNotification, CloseSessionRequest,
     CloseSessionResponse, ContentBlock, ForkSessionRequest, InitializeRequest,
     InitializeResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionRequest,
-    LoadSessionResponse, NewSessionRequest, PromptRequest, PromptResponse, ProtocolVersion,
-    ResumeSessionRequest, ResumeSessionResponse, SessionNotification,
+    LoadSessionResponse, NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse,
+    ProtocolVersion, ResumeSessionRequest, ResumeSessionResponse, SessionNotification,
     SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModeRequest,
     SetSessionModeResponse, SetSessionModelRequest, SetSessionModelResponse,
 };
@@ -1393,6 +1393,225 @@ async fn fork_inherits_source_model() {
             let current =
                 resp.models.expect("load must return model state").current_model_id.to_string();
             assert_eq!(current, "grok-3-mini", "fork must inherit the source session's model");
+        })
+        .await;
+}
+
+// ── second authenticate overwrites the first pending key ─────────────────────
+
+// ── list_sessions: closed session excluded ────────────────────────────────────
+
+/// After closing a session, `list_sessions` must not include it.
+#[tokio::test]
+async fn list_sessions_excludes_closed_session() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid_a = create_session(&h).await;
+            let sid_b = create_session(&h).await;
+
+            // Close session A.
+            let close_subj = format!("acp.session.{sid_a}.agent.close");
+            h.session_req(&close_subj, CloseSessionRequest::new(sid_a.clone()), "r.close");
+            h.expect_n_publishes(3).await; // session_a + session_b + close
+
+            // List — must contain only session B.
+            h.global("acp.agent.session.list", ListSessionsRequest::new(), "r.list");
+            let payloads = h.expect_n_publishes(4).await;
+            let resp: ListSessionsResponse = serde_json::from_slice(&payloads[3]).unwrap();
+            assert_eq!(resp.sessions.len(), 1, "closed session must be removed from the list");
+            assert_eq!(
+                resp.sessions[0].session_id.to_string(),
+                sid_b,
+                "only session B must remain"
+            );
+        })
+        .await;
+}
+
+// ── list_sessions: cwd is returned ───────────────────────────────────────────
+
+/// The `cwd` passed to `new_session` must appear in the `list_sessions` response.
+#[tokio::test]
+async fn list_sessions_returns_cwd() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+
+            h.global(
+                "acp.agent.session.new",
+                NewSessionRequest::new("/my-special-cwd"),
+                "r.new",
+            );
+            let payloads = h.expect_n_publishes(1).await;
+            let val: serde_json::Value = serde_json::from_slice(&payloads[0]).unwrap();
+            let sid = val["sessionId"].as_str().unwrap().to_string();
+
+            h.global("acp.agent.session.list", ListSessionsRequest::new(), "r.list");
+            let payloads = h.expect_n_publishes(2).await;
+            let resp: ListSessionsResponse = serde_json::from_slice(&payloads[1]).unwrap();
+
+            let info =
+                resp.sessions.iter().find(|s| s.session_id.to_string() == sid).expect("session must be listed");
+            assert_eq!(
+                info.cwd.to_string_lossy(),
+                "/my-special-cwd",
+                "list_sessions must return the cwd from new_session"
+            );
+        })
+        .await;
+}
+
+// ── new_session response includes available models ────────────────────────────
+
+/// The `new_session` response must include the `models` field with a non-empty
+/// list of available models and the correct default model ID.
+#[tokio::test]
+async fn new_session_response_includes_available_models() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            h.global(
+                "acp.agent.session.new",
+                NewSessionRequest::new("/workspace"),
+                "r.new",
+            );
+            let payloads = h.expect_n_publishes(1).await;
+            let resp: NewSessionResponse = serde_json::from_slice(&payloads[0]).unwrap();
+            let models = resp.models.expect("new_session must include a models field");
+            assert!(
+                !models.available_models.is_empty(),
+                "available_models must not be empty"
+            );
+            assert_eq!(
+                models.current_model_id.to_string(),
+                "grok-3",
+                "default model must be grok-3"
+            );
+        })
+        .await;
+}
+
+// ── fork cwd is independent from source ──────────────────────────────────────
+
+/// The cwd of a forked session is the one passed to `fork_session`, not the
+/// source session's cwd.
+#[tokio::test]
+async fn fork_cwd_is_independent_from_source() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+
+            h.global(
+                "acp.agent.session.new",
+                NewSessionRequest::new("/source-cwd"),
+                "r.new",
+            );
+            let payloads = h.expect_n_publishes(1).await;
+            let val: serde_json::Value = serde_json::from_slice(&payloads[0]).unwrap();
+            let sid = val["sessionId"].as_str().unwrap().to_string();
+
+            let fork_subj = format!("acp.session.{sid}.agent.fork");
+            h.session_req(
+                &fork_subj,
+                ForkSessionRequest::new(sid.clone(), "/fork-cwd"),
+                "r.fork",
+            );
+            let payloads = h.expect_n_publishes(2).await;
+            let val: serde_json::Value = serde_json::from_slice(&payloads[1]).unwrap();
+            let fork_id = val["sessionId"].as_str().unwrap().to_string();
+
+            h.global("acp.agent.session.list", ListSessionsRequest::new(), "r.list");
+            let payloads = h.expect_n_publishes(3).await;
+            let resp: ListSessionsResponse = serde_json::from_slice(&payloads[2]).unwrap();
+
+            let src = resp.sessions.iter().find(|s| s.session_id.to_string() == sid).unwrap();
+            let fork = resp.sessions.iter().find(|s| s.session_id.to_string() == fork_id).unwrap();
+            assert_eq!(src.cwd.to_string_lossy(), "/source-cwd");
+            assert_eq!(fork.cwd.to_string_lossy(), "/fork-cwd");
+        })
+        .await;
+}
+
+// ── prompt: empty stream returns PromptResponse ───────────────────────────────
+
+/// A stream that yields no events (closes immediately) must still publish a
+/// `PromptResponse` — the `Ok(None)` arm in the select hits EndTurn.
+#[tokio::test]
+async fn prompt_empty_stream_returns_response() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            h.http.push(vec![]); // empty — stream closes immediately
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("hello")]),
+                "r.prompt",
+            );
+            let payloads = h.expect_n_publishes(2).await;
+            let _: PromptResponse = serde_json::from_slice(&payloads[1]).unwrap();
+        })
+        .await;
+}
+
+// ── fork: first prompt replays inherited history ──────────────────────────────
+
+/// A fork inherits the source's history but has no `last_response_id`. The
+/// first prompt on the fork must replay the full history — user₁ + assistant₁
+/// + user₂ = 3 input items.
+#[tokio::test]
+async fn fork_first_prompt_replays_full_history() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            // Prompt source — no ResponseId, so history is stored.
+            h.http.push(vec![
+                XaiEvent::TextDelta { text: "assistant reply".to_string() },
+                XaiEvent::Done,
+            ]);
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("user question")]),
+                "r.prompt1",
+            );
+            h.expect_n_publishes(2).await;
+
+            // Fork the session.
+            let fork_subj = format!("acp.session.{sid}.agent.fork");
+            h.session_req(
+                &fork_subj,
+                ForkSessionRequest::new(sid.clone(), "/fork"),
+                "r.fork",
+            );
+            let payloads = h.expect_n_publishes(3).await;
+            let val: serde_json::Value = serde_json::from_slice(&payloads[2]).unwrap();
+            let fork_id = val["sessionId"].as_str().unwrap().to_string();
+
+            // Prompt the fork — must replay inherited history.
+            h.http.push(vec![XaiEvent::Done]);
+            let fork_prompt_subj = format!("acp.session.{fork_id}.agent.prompt");
+            h.session_req(
+                &fork_prompt_subj,
+                PromptRequest::new(fork_id.clone(), vec![ContentBlock::from("follow-up")]),
+                "r.prompt2",
+            );
+            h.expect_n_publishes(4).await;
+
+            let call = h.http.last_call().unwrap();
+            assert_eq!(
+                call.previous_response_id, None,
+                "fork has no last_response_id — must replay full history"
+            );
+            assert_eq!(
+                call.input_len, 3,
+                "input must be: user msg1 + assistant reply + follow-up = 3 items"
+            );
         })
         .await;
 }
