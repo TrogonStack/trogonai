@@ -196,7 +196,7 @@ impl<H: HttpClient> IncidentioClient<H> {
                 body,
             )
             .await
-            .map_err(|e| IncidentioError(e))?;
+            .map_err(IncidentioError)?;
 
         if resp.status < 200 || resp.status >= 300 {
             return Err(IncidentioError(format!(
@@ -205,8 +205,8 @@ impl<H: HttpClient> IncidentioClient<H> {
             )));
         }
 
-        let json: serde_json::Value = serde_json::from_str(&resp.body)
-            .map_err(|e| IncidentioError(e.to_string()))?;
+        let json: serde_json::Value =
+            serde_json::from_str(&resp.body).map_err(|e| IncidentioError(e.to_string()))?;
         serde_json::from_value(json["incident"].clone())
             .map_err(|e| IncidentioError(format!("Failed to parse incident: {e}")))
     }
@@ -245,7 +245,7 @@ impl<H: HttpClient> IncidentioClient<H> {
                 body,
             )
             .await
-            .map_err(|e| IncidentioError(e))?;
+            .map_err(IncidentioError)?;
 
         if resp.status < 200 || resp.status >= 300 {
             return Err(IncidentioError(format!(
@@ -272,7 +272,7 @@ impl<H: HttpClient> IncidentioClient<H> {
                 &self.api_token,
             )
             .await
-            .map_err(|e| IncidentioError(e))?;
+            .map_err(IncidentioError)?;
 
         if resp.status < 200 || resp.status >= 300 {
             return Err(IncidentioError(format!(
@@ -281,8 +281,8 @@ impl<H: HttpClient> IncidentioClient<H> {
             )));
         }
 
-        let json: serde_json::Value = serde_json::from_str(&resp.body)
-            .map_err(|e| IncidentioError(e.to_string()))?;
+        let json: serde_json::Value =
+            serde_json::from_str(&resp.body).map_err(|e| IncidentioError(e.to_string()))?;
         serde_json::from_value(json["incident"].clone())
             .map_err(|e| IncidentioError(format!("Failed to parse incident: {e}")))
     }
@@ -315,10 +315,10 @@ pub mod mock {
         }
 
         pub fn enqueue_ok(&self, status: u16, body: impl Into<String>) {
-            self.responses
-                .lock()
-                .unwrap()
-                .push_back(Ok(HttpResponse { status, body: body.into() }));
+            self.responses.lock().unwrap().push_back(Ok(HttpResponse {
+                status,
+                body: body.into(),
+            }));
         }
 
         pub fn enqueue_err(&self, msg: impl Into<String>) {
@@ -387,7 +387,11 @@ mod tests {
     }
 
     fn make_client(mock: MockHttpClient) -> IncidentioClient<MockHttpClient> {
-        IncidentioClient::with_http_client(mock, "test-token".to_string(), "http://mock".to_string())
+        IncidentioClient::with_http_client(
+            mock,
+            "test-token".to_string(),
+            "http://mock".to_string(),
+        )
     }
 
     #[tokio::test]
@@ -531,9 +535,18 @@ mod tests {
             .unwrap();
         let calls = mock.calls.lock().unwrap();
         let body = calls[0].body.as_ref().unwrap();
-        assert!(body.get("summary").is_none(), "summary must be absent when None");
-        assert!(body.get("severity_id").is_none(), "severity_id must be absent when None");
-        assert!(body.get("idempotency_key").is_none(), "idempotency_key must be absent when None");
+        assert!(
+            body.get("summary").is_none(),
+            "summary must be absent when None"
+        );
+        assert!(
+            body.get("severity_id").is_none(),
+            "severity_id must be absent when None"
+        );
+        assert!(
+            body.get("idempotency_key").is_none(),
+            "idempotency_key must be absent when None"
+        );
     }
 
     #[tokio::test]
@@ -557,8 +570,14 @@ mod tests {
             .unwrap();
         let calls = mock.calls.lock().unwrap();
         let body = calls[0].body.as_ref().unwrap();
-        assert!(body.get("new_status").is_none(), "new_status must be absent when None");
-        assert!(body.get("new_severity_id").is_none(), "new_severity_id must be absent when None");
+        assert!(
+            body.get("new_status").is_none(),
+            "new_status must be absent when None"
+        );
+        assert!(
+            body.get("new_severity_id").is_none(),
+            "new_severity_id must be absent when None"
+        );
     }
 
     #[tokio::test]

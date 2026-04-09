@@ -578,11 +578,9 @@ mod tests {
         use serde_json::json;
 
         // Simulate what AgentLoop::run does with cached_tools.
-        let mut cached_tools = vec![
-            tool_def("tool_a", "first tool", json!({"type": "object"})),
+        let mut cached_tools = [tool_def("tool_a", "first tool", json!({"type": "object"})),
             tool_def("tool_b", "second tool", json!({"type": "object"})),
-            tool_def("tool_c", "last tool", json!({"type": "object"})),
-        ];
+            tool_def("tool_c", "last tool", json!({"type": "object"}))];
         if let Some(last) = cached_tools.last_mut() {
             last.cache_control = Some(json!({"type": "ephemeral"}));
         }
@@ -609,7 +607,7 @@ mod tests {
         use crate::tools::tool_def;
         use serde_json::json;
 
-        let mut cached_tools = vec![tool_def("only", "only tool", json!({"type": "object"}))];
+        let mut cached_tools = [tool_def("only", "only tool", json!({"type": "object"}))];
         if let Some(last) = cached_tools.last_mut() {
             last.cache_control = Some(json!({"type": "ephemeral"}));
         }

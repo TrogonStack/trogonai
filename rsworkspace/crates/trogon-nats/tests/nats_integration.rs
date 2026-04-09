@@ -104,12 +104,11 @@ async fn request_reply_roundtrip() {
     let mut sub = nats.subscribe("request.subject").await.unwrap();
     let nats2 = nats.clone();
     tokio::spawn(async move {
-        if let Some(msg) = sub.next().await {
-            if let Some(reply) = msg.reply {
+        if let Some(msg) = sub.next().await
+            && let Some(reply) = msg.reply {
                 let resp = serde_json::to_vec(&serde_json::json!({ "status": "ok" })).unwrap();
                 nats2.publish(reply, resp.into()).await.unwrap();
             }
-        }
     });
 
     let result: Result<serde_json::Value, _> = request_with_timeout(
