@@ -43,9 +43,7 @@ impl DiscordGateway for twilight_gateway::Shard {
 
         let msg = poll_fn(|cx| Pin::new(&mut *self).poll_next(cx)).await;
         match msg {
-            Some(Ok(twilight_gateway::Message::Text(text))) => {
-                Some(Ok(GatewayEvent::Text(text)))
-            }
+            Some(Ok(twilight_gateway::Message::Text(text))) => Some(Ok(GatewayEvent::Text(text))),
             Some(Ok(twilight_gateway::Message::Close(_))) => Some(Ok(GatewayEvent::Close)),
             Some(Err(e)) => Some(Err(Box::new(e))),
             None => None,

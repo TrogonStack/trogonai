@@ -57,9 +57,10 @@ fn main() {
         .unwrap_or(1);
     let emit_stray_thread_event = std::env::var("MOCK_EMIT_STRAY_THREAD_EVENT").is_ok();
     let send_tool_event = std::env::var("MOCK_SEND_TOOL_EVENT").is_ok();
-    let broadcast_error_after_turns: Option<usize> = std::env::var("MOCK_BROADCAST_ERROR_AFTER_TURNS")
-        .ok()
-        .and_then(|s| s.parse().ok());
+    let broadcast_error_after_turns: Option<usize> =
+        std::env::var("MOCK_BROADCAST_ERROR_AFTER_TURNS")
+            .ok()
+            .and_then(|s| s.parse().ok());
 
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
