@@ -1551,4 +1551,25 @@ mod tests {
         assert_eq!(id_count, 1, "ResponseId must be emitted exactly once per stream, got {id_count}: {events:?}");
     }
 
+    // ── response.cancelled: no ResponseId extraction ──────────────────────────
+
+    #[test]
+    fn response_cancelled_does_not_extract_response_id() {
+        // Unlike `response.completed` (which extracts the nested `response.id`
+        // as a fallback), the `response.cancelled` handler only emits
+        // `Finished(Cancelled)`. A ResponseId is NOT extracted even when
+        // `response.id` is present in the payload — documenting the intentional
+        // asymmetry between the two handlers.
+        let line = r#"data: {"type":"response.cancelled","response":{"id":"resp-cancelled","status":"cancelled"}}"#;
+        let events = parse_line_all(line);
+        assert!(
+            !events.iter().any(|e| matches!(e, XaiEvent::ResponseId { .. })),
+            "response.cancelled must not emit ResponseId: {events:?}"
+        );
+        assert!(
+            events.iter().any(|e| matches!(e, XaiEvent::Finished { reason, .. } if *reason == FinishReason::Cancelled)),
+            "response.cancelled must emit Finished(Cancelled): {events:?}"
+        );
+    }
+
 }
