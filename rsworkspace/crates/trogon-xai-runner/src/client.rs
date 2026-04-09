@@ -1250,6 +1250,88 @@ mod tests {
         );
     }
 
+    // ── multiple concurrent function calls in a single stream ────────────────
+
+    #[test]
+    fn multiple_concurrent_function_calls_emitted_independently() {
+        // Two function calls are interleaved in a single stream. The parser must
+        // track both in `pending_fc` by call_id and emit each FunctionCall event
+        // independently when its own `done` event arrives.
+        //
+        // Stream sequence:
+        //   added(call_1, search)
+        //   added(call_2, lookup)
+        //   delta(call_1, first fragment)
+        //   delta(call_2, first fragment)
+        //   delta(call_1, second fragment)
+        //   done(call_1)  → FunctionCall { call_1, search, '{"q":"rust"}' }
+        //   delta(call_2, second fragment)
+        //   done(call_2)  → FunctionCall { call_2, lookup, '{"id":"42"}' }
+        let lines = [
+            r#"data: {"type":"response.output_item.added","item":{"type":"function_call","call_id":"call_1","name":"search"}}"#,
+            r#"data: {"type":"response.output_item.added","item":{"type":"function_call","call_id":"call_2","name":"lookup"}}"#,
+            r#"data: {"type":"response.function_call_arguments.delta","call_id":"call_1","delta":"{\"q\":"}"#,
+            r#"data: {"type":"response.function_call_arguments.delta","call_id":"call_2","delta":"{\"id\":"}"#,
+            r#"data: {"type":"response.function_call_arguments.delta","call_id":"call_1","delta":"\"rust\"}"}"#,
+            r#"data: {"type":"response.function_call_arguments.done","call_id":"call_1","name":"search","arguments":"{\"q\":\"rust\"}"}"#,
+            r#"data: {"type":"response.function_call_arguments.delta","call_id":"call_2","delta":"\"42\"}"}"#,
+            r#"data: {"type":"response.function_call_arguments.done","call_id":"call_2","name":"lookup","arguments":"{\"id\":\"42\"}"}"#,
+        ];
+
+        let mut emitted = false;
+        let mut pending = VecDeque::new();
+        let mut pending_fc = HashMap::new();
+        for line in &lines {
+            process_sse_line(line, &mut emitted, &mut pending, &mut pending_fc);
+        }
+
+        let events: Vec<_> = pending.drain(..).collect();
+        assert_eq!(events.len(), 2, "must emit exactly 2 FunctionCall events, got: {events:?}");
+        assert!(
+            matches!(&events[0], XaiEvent::FunctionCall { call_id, name, arguments }
+                if call_id == "call_1" && name == "search" && arguments == r#"{"q":"rust"}"#),
+            "first event must be call_1/search with correct arguments: {:?}", events[0]
+        );
+        assert!(
+            matches!(&events[1], XaiEvent::FunctionCall { call_id, name, arguments }
+                if call_id == "call_2" && name == "lookup" && arguments == r#"{"id":"42"}"#),
+            "second event must be call_2/lookup with correct arguments: {:?}", events[1]
+        );
+        assert!(pending_fc.is_empty(), "pending_fc must be empty after all done events");
+    }
+
+    // ── response.completed: top-level incomplete_details fallback ─────────────
+
+    #[test]
+    fn response_completed_with_top_level_incomplete_status_and_reason() {
+        // When "status" and "incomplete_details" appear at the top level of the
+        // event (no "response" wrapper), both fallback paths must fire:
+        //   val["response"]["status"] → null → falls back to val["status"]
+        //   val["response"]["incomplete_details"]["reason"] → null → falls back to val["incomplete_details"]["reason"]
+        //
+        // Some xAI deviations from the OpenAI Responses API spec place fields at
+        // the event root rather than nested under a "response" object.
+        let line = r#"data: {"type":"response.completed","status":"incomplete","incomplete_details":{"reason":"max_output_tokens"}}"#;
+        let events = parse_line_all(line);
+
+        let finished = events.iter().find_map(|e| {
+            if let XaiEvent::Finished { reason, incomplete_reason } = e {
+                Some((reason, incomplete_reason))
+            } else {
+                None
+            }
+        });
+
+        let (reason, incomplete_reason) =
+            finished.expect("response.completed with status=incomplete must emit a Finished event");
+        assert_eq!(*reason, FinishReason::Incomplete, "top-level status=incomplete must map to Incomplete");
+        assert_eq!(
+            incomplete_reason.as_deref(),
+            Some("max_output_tokens"),
+            "incomplete_reason must be extracted from top-level incomplete_details.reason"
+        );
+    }
+
     #[tokio::test]
     async fn parse_sse_response_id_emitted_once_across_multiple_chunks() {
         use futures_util::stream::{self, StreamExt as _};
