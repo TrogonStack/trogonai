@@ -23,8 +23,8 @@ use agent_client_protocol::{
     InitializeResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionRequest,
     LoadSessionResponse, NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse,
     ProtocolVersion, ResumeSessionRequest, ResumeSessionResponse, SessionNotification,
-    SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModeRequest,
-    SetSessionModeResponse, SetSessionModelRequest, SetSessionModelResponse,
+    SessionUpdate, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse,
+    SetSessionModeRequest, SetSessionModeResponse, SetSessionModelRequest, SetSessionModelResponse,
 };
 use async_nats::Message;
 use async_trait::async_trait;
@@ -2840,6 +2840,47 @@ async fn max_turns_env_var_forwarded_to_http_client() {
                 Some(7),
                 "XAI_MAX_TURNS=7 must be forwarded to chat_stream as Some(7)"
             );
+        })
+        .await;
+}
+
+// ── session notification carries AgentMessageChunk with correct text ──────────
+
+/// Each `TextDelta` event must produce a `SessionNotification` whose `update`
+/// field is `SessionUpdate::AgentMessageChunk` containing the exact text from
+/// the delta. Verifies the wiring at agent.rs lines 527-532.
+#[tokio::test]
+async fn session_notification_carries_agent_message_chunk_with_text() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            h.http.push(vec![
+                XaiEvent::TextDelta { text: "hello world".to_string() },
+                XaiEvent::Done,
+            ]);
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("hi")]),
+                "r.prompt",
+            );
+            h.expect_n_notifications(1).await;
+
+            let notifications = h.notifier.notifications.lock().unwrap();
+            assert_eq!(notifications.len(), 1);
+
+            match &notifications[0].update {
+                SessionUpdate::AgentMessageChunk(chunk) => match &chunk.content {
+                    ContentBlock::Text(t) => assert_eq!(
+                        t.text, "hello world",
+                        "TextDelta text must be forwarded verbatim in the notification"
+                    ),
+                    other => panic!("expected ContentBlock::Text, got {other:?}"),
+                },
+                other => panic!("expected SessionUpdate::AgentMessageChunk, got {other:?}"),
+            }
         })
         .await;
 }
