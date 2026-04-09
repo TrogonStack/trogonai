@@ -2480,3 +2480,92 @@ async fn authenticate_new_session_twice_each_session_uses_its_own_key() {
         })
         .await;
 }
+
+// ── SessionNotification: carries the correct session_id ───────────────────────
+
+/// The `SessionNotification` emitted for each `TextDelta` must carry the
+/// session_id of the session being prompted — not a stale or default value.
+/// `prompt_via_nats_sends_session_notifications` only checks the count; this
+/// test inspects the actual session_id field inside the notification.
+#[tokio::test]
+async fn session_notification_carries_correct_session_id() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            h.http.push(vec![
+                XaiEvent::TextDelta { text: "hello".to_string() },
+                XaiEvent::Done,
+            ]);
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("hi")]),
+                "r.prompt",
+            );
+            h.expect_n_notifications(1).await;
+
+            let notifications = h.notifier.notifications.lock().unwrap();
+            assert_eq!(notifications.len(), 1);
+            assert_eq!(
+                notifications[0].session_id.to_string(),
+                sid,
+                "notification must carry the session_id of the prompting session"
+            );
+        })
+        .await;
+}
+
+// ── prompt: empty input + cached ResponseId uses shortcut with one empty item ─
+
+/// When `last_response_id` is cached the shortcut path always constructs
+/// `vec![InputItem::user(&user_input)]` — exactly 1 item — regardless of
+/// whether `user_input` is empty. Even with empty content blocks, one empty
+/// user item must be sent (not zero). `prompt_with_empty_content_blocks_completes`
+/// exercises the full-history path (no cached id); this test covers the
+/// shortcut path specifically.
+#[tokio::test]
+async fn prompt_empty_input_with_cached_response_id_sends_single_empty_user_item() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+
+            // Turn 1: cache a ResponseId.
+            h.http.push(vec![
+                XaiEvent::ResponseId { id: "resp-x".to_string() },
+                XaiEvent::Done,
+            ]);
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("hi")]),
+                "r.p1",
+            );
+            h.expect_n_publishes(2).await;
+
+            // Turn 2: empty content blocks + cached id → shortcut path.
+            h.http.push(vec![XaiEvent::Done]);
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![]),
+                "r.p2",
+            );
+            h.expect_n_publishes(3).await;
+
+            let call = h.http.last_call().unwrap();
+            assert_eq!(
+                call.previous_response_id.as_deref(),
+                Some("resp-x"),
+                "shortcut path must be active"
+            );
+            assert_eq!(
+                call.input_len, 1,
+                "shortcut path with empty input must send exactly one user item"
+            );
+            assert_eq!(call.inputs[0].role, "user", "the single item must be role 'user'");
+            assert_eq!(call.inputs[0].content, "", "empty content blocks produce empty content");
+        })
+        .await;
+}
