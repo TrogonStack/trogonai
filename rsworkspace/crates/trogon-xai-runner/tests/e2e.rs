@@ -56,6 +56,7 @@ struct HttpCall {
     pub input_len: usize,
     pub inputs: Vec<InputItem>,
     pub previous_response_id: Option<String>,
+    pub max_turns: Option<u32>,
 }
 
 #[derive(Clone)]
@@ -95,13 +96,14 @@ impl XaiHttpClient for TestHttpClient {
         _api_key: &str,
         _tools: &[String],
         previous_response_id: Option<&str>,
-        _max_turns: Option<u32>,
+        max_turns: Option<u32>,
     ) -> LocalBoxStream<'static, XaiEvent> {
         self.calls.lock().unwrap().push(HttpCall {
             model: model.to_string(),
             input_len: input.len(),
             inputs: input.to_vec(),
             previous_response_id: previous_response_id.map(str::to_string),
+            max_turns,
         });
 
         let response =
@@ -2799,6 +2801,44 @@ async fn history_trimming_caps_input_at_max_history() {
             assert_eq!(
                 call.input_len, 3,
                 "after trimming to max_history=2, turn 3 must send [u2, a2, u3] = 3 items"
+            );
+        })
+        .await;
+}
+
+// ── XAI_MAX_TURNS passed to HTTP client ───────────────────────────────────────
+
+/// `XAI_MAX_TURNS` env var is read at agent construction and must be forwarded
+/// as-is to every `chat_stream` call so the xAI Responses API enforces the
+/// configured tool-call turn limit.
+#[tokio::test]
+async fn max_turns_env_var_forwarded_to_http_client() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = {
+                let _guard = env_lock().lock().unwrap();
+                unsafe { std::env::set_var("XAI_MAX_TURNS", "7") };
+                let h = Harness::new();
+                unsafe { std::env::remove_var("XAI_MAX_TURNS") };
+                h
+            };
+
+            let sid = create_session(&h).await;
+
+            h.http.push(vec![XaiEvent::Done]);
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("hi")]),
+                "r.prompt",
+            );
+            h.expect_n_publishes(2).await;
+
+            let call = h.http.last_call().unwrap();
+            assert_eq!(
+                call.max_turns,
+                Some(7),
+                "XAI_MAX_TURNS=7 must be forwarded to chat_stream as Some(7)"
             );
         })
         .await;
