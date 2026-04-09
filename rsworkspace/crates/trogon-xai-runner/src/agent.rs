@@ -1078,6 +1078,102 @@ mod tests {
         assert_eq!(agent.test_pending_api_key().await, None, "pending key must be consumed by new_session");
     }
 
+    // ── fork: last_response_id is NOT inherited ───────────────────────────────
+
+    #[tokio::test]
+    async fn fork_does_not_inherit_last_response_id() {
+        // The fork inserts XaiSession { last_response_id: None, .. } unconditionally.
+        // Even if the source session has a cached response ID, the fork must reset it
+        // so its first prompt replays the full history rather than sending a stale
+        // `previous_response_id` from the source session's server-side context.
+        let agent = make_agent();
+        agent
+            .test_insert_session_with_response_id("src", "/tmp", None, Some("src-resp-id".to_string()))
+            .await;
+
+        let resp = agent.fork_session(ForkSessionRequest::new("src", "/fork")).await.unwrap();
+        let fork_id = resp.session_id.to_string();
+
+        assert_eq!(
+            agent.test_last_response_id(&fork_id).await,
+            None,
+            "fork must reset last_response_id to None even when source had one"
+        );
+    }
+
+    // ── authenticate: no meta does not set pending key ────────────────────────
+
+    #[tokio::test]
+    async fn authenticate_with_no_meta_does_not_set_pending_key() {
+        // `req.meta.as_ref()` returns None when meta is absent — the entire
+        // `.and_then` chain short-circuits and pending_api_key stays None.
+        let mock_http = Arc::new(MockXaiHttpClient::new());
+        let mock_notifier = Arc::new(MockSessionNotifier::new());
+        let agent: TestAgent =
+            XaiAgent::with_deps(Arc::clone(&mock_notifier), "grok-3", "", Arc::clone(&mock_http));
+
+        agent.authenticate(AuthenticateRequest::new("api-key")).await.unwrap();
+
+        assert_eq!(
+            agent.test_pending_api_key().await,
+            None,
+            "authenticate without meta must not set pending_api_key"
+        );
+    }
+
+    // ── authenticate: non-string XAI_API_KEY is ignored ─────────────────────
+
+    #[tokio::test]
+    async fn authenticate_with_non_string_xai_api_key_does_not_set_pending_key() {
+        // `.and_then(|v| v.as_str())` only succeeds for JSON strings.
+        // A numeric value (e.g. `{"XAI_API_KEY": 42}`) must be silently rejected.
+        let mock_http = Arc::new(MockXaiHttpClient::new());
+        let mock_notifier = Arc::new(MockSessionNotifier::new());
+        let agent: TestAgent =
+            XaiAgent::with_deps(Arc::clone(&mock_notifier), "grok-3", "", Arc::clone(&mock_http));
+
+        let mut meta = serde_json::Map::new();
+        meta.insert("XAI_API_KEY".to_string(), serde_json::json!(42));
+        agent.authenticate(AuthenticateRequest::new("api-key").meta(meta)).await.unwrap();
+
+        assert_eq!(
+            agent.test_pending_api_key().await,
+            None,
+            "non-string XAI_API_KEY must be rejected by .as_str() filter"
+        );
+    }
+
+    #[tokio::test]
+    async fn new_session_second_call_falls_back_to_global_key_after_pending_consumed() {
+        // `pending_api_key` is consumed via `.take()` on the first `new_session`.
+        // A second `new_session` without a fresh `authenticate` must fall back to
+        // `global_api_key`, not panic or silently use None.
+        let mock_http = Arc::new(MockXaiHttpClient::new());
+        let mock_notifier = Arc::new(MockSessionNotifier::new());
+        let agent: TestAgent =
+            XaiAgent::with_deps(Arc::clone(&mock_notifier), "grok-3", "global-key", Arc::clone(&mock_http));
+
+        // Authenticate to set a pending key.
+        let mut meta = serde_json::Map::new();
+        meta.insert("XAI_API_KEY".to_string(), serde_json::json!("pending-key"));
+        agent.authenticate(AuthenticateRequest::new("api-key").meta(meta)).await.unwrap();
+
+        // First new_session — consumes the pending key.
+        let resp1 = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+        let sid1 = resp1.session_id.to_string();
+        assert_eq!(agent.test_session_api_key(&sid1).await.as_deref(), Some("pending-key"));
+        assert_eq!(agent.test_pending_api_key().await, None, "pending key must be consumed");
+
+        // Second new_session — no pending key; must fall back to global_api_key.
+        let resp2 = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+        let sid2 = resp2.session_id.to_string();
+        assert_eq!(
+            agent.test_session_api_key(&sid2).await.as_deref(),
+            Some("global-key"),
+            "second new_session must use global_api_key after pending key is consumed"
+        );
+    }
+
     // ── authenticate stores key ───────────────────────────────────────────────
 
     #[tokio::test]
@@ -1493,6 +1589,24 @@ mod tests {
             XaiAgent::with_deps(Arc::clone(&mock_notifier), "grok-3", "key", Arc::clone(&mock_http));
         unsafe { std::env::remove_var("XAI_MAX_HISTORY_MESSAGES") };
         assert_eq!(agent.test_max_history(), 20);
+    }
+
+    #[tokio::test]
+    async fn max_history_zero_falls_back_to_default() {
+        // `.filter(|&n| n > 0)` rejects 0, so `.unwrap_or(20)` fires — the same
+        // guard pattern used by XAI_PROMPT_TIMEOUT_SECS and XAI_MAX_TURNS.
+        let _guard = env_lock().lock().unwrap();
+        unsafe { std::env::set_var("XAI_MAX_HISTORY_MESSAGES", "0") };
+        let mock_http = Arc::new(MockXaiHttpClient::new());
+        let mock_notifier = Arc::new(MockSessionNotifier::new());
+        let agent: TestAgent =
+            XaiAgent::with_deps(Arc::clone(&mock_notifier), "grok-3", "key", Arc::clone(&mock_http));
+        unsafe { std::env::remove_var("XAI_MAX_HISTORY_MESSAGES") };
+        assert_eq!(
+            agent.test_max_history(),
+            20,
+            "XAI_MAX_HISTORY_MESSAGES=0 must fall back to the 20-entry default"
+        );
     }
 
     // ── XAI_MODELS env var parsing ────────────────────────────────────────────
