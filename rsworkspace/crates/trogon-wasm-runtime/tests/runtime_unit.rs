@@ -118,10 +118,12 @@ impl Fs for MockFs {
     async fn read_to_string(&self, path: &Path) -> io::Result<String> {
         let files = self.files.lock().unwrap();
         let data = files.get(path).ok_or_else(|| {
-            io::Error::new(io::ErrorKind::NotFound, format!("file not found: {}", path.display()))
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("file not found: {}", path.display()),
+            )
         })?;
-        String::from_utf8(data.clone())
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+        String::from_utf8(data.clone()).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
     }
 
     async fn remove_dir_all(&self, path: &Path) -> io::Result<()> {
@@ -129,10 +131,7 @@ impl Fs for MockFs {
             .lock()
             .unwrap()
             .retain(|p, _| !p.starts_with(path));
-        self.dirs
-            .lock()
-            .unwrap()
-            .retain(|p| !p.starts_with(path));
+        self.dirs.lock().unwrap().retain(|p| !p.starts_with(path));
         Ok(())
     }
 
@@ -249,10 +248,7 @@ impl ProcessSpawner for MockProcessSpawner {
         _home: &Path,
         _tmpdir: &Path,
     ) -> io::Result<Self::Handle> {
-        self.spawned
-            .lock()
-            .unwrap()
-            .push(command.to_string());
+        self.spawned.lock().unwrap().push(command.to_string());
         Ok(MockProcessHandle::new(
             self.exit_code,
             self.stdout_content.clone(),
@@ -287,11 +283,12 @@ impl MockWasmExecutor {
 }
 
 impl<N: NatsBroker + Send + Sync> WasmExecutor<N> for MockWasmExecutor {
-    async fn run(
-        &self,
-        config: WasmRunConfig<N>,
-    ) -> Result<TerminalExitStatus, anyhow::Error> {
-        config.output_buf.lock().unwrap().extend_from_slice(&self.stdout);
+    async fn run(&self, config: WasmRunConfig<N>) -> Result<TerminalExitStatus, anyhow::Error> {
+        config
+            .output_buf
+            .lock()
+            .unwrap()
+            .extend_from_slice(&self.stdout);
         Ok(TerminalExitStatus::new().exit_code(Some(self.exit_code as u32)))
     }
 }
@@ -473,8 +470,7 @@ async fn write_and_read_file_uses_mock_fs() {
     assert_eq!(content, b"Hello, mock!");
 
     // Also verify reading back through the runtime works.
-    let read_req =
-        ReadTextFileRequest::new(SessionId::from(SESSION), PathBuf::from("/hello.txt"));
+    let read_req = ReadTextFileRequest::new(SessionId::from(SESSION), PathBuf::from("/hello.txt"));
     let resp = runtime
         .handle_read_text_file(SESSION, read_req)
         .await
@@ -499,15 +495,9 @@ async fn ensure_session_dir_creates_in_mock_fs() {
     .unwrap();
 
     // Trigger session dir creation via a write.
-    let req = WriteTextFileRequest::new(
-        SessionId::from(SESSION),
-        PathBuf::from("/any.txt"),
-        "data",
-    );
-    runtime
-        .handle_write_text_file(SESSION, req)
-        .await
-        .unwrap();
+    let req =
+        WriteTextFileRequest::new(SessionId::from(SESSION), PathBuf::from("/any.txt"), "data");
+    runtime.handle_write_text_file(SESSION, req).await.unwrap();
 
     let session_dir = root.join(SESSION);
     assert!(
@@ -658,7 +648,10 @@ async fn wasm_only_rejects_native_without_touching_spawner() {
         .run_until(async {
             let req = CreateTerminalRequest::new(SessionId::from(SESSION), "/bin/echo");
             let result = runtime.handle_create_terminal(SESSION, req).await;
-            assert!(result.is_err(), "native command should be rejected in wasm_only mode");
+            assert!(
+                result.is_err(),
+                "native command should be rejected in wasm_only mode"
+            );
             assert!(
                 spawner.spawned.lock().unwrap().is_empty(),
                 "spawner should not be called when command is rejected"
@@ -836,10 +829,7 @@ async fn mock_id_generator_produces_predictable_terminal_ids() {
             )
             .unwrap();
 
-            let req = CreateTerminalRequest::new(
-                SessionId::from(SESSION),
-                "/bin/echo",
-            );
+            let req = CreateTerminalRequest::new(SessionId::from(SESSION), "/bin/echo");
             let resp = runtime
                 .handle_create_terminal(SESSION, req)
                 .await

@@ -62,7 +62,6 @@ impl<H: ChildProcessHandle> WasmTerminal<H> {
         TerminalOutputResponse::new(output, truncated).exit_status(exit_status)
     }
 
-
     /// Writes bytes to the stdin pipe of a native process.
     /// Returns `true` on success, `false` for WASM terminals (no stdin) or on error.
     pub async fn write_stdin(&mut self, data: &[u8]) -> bool {
