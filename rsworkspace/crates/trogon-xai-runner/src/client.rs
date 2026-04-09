@@ -1200,6 +1200,87 @@ mod tests {
         );
     }
 
+    // ── response.error event → XaiEvent::Error ───────────────────────────────
+
+    #[test]
+    fn response_error_emits_xai_error_with_nested_message() {
+        // Primary path: message lives under error.message (OpenAI Responses API spec).
+        let line = r#"data: {"type":"response.error","error":{"message":"content policy violation"}}"#;
+        let event = parse_line(line).expect("response.error must emit an event");
+        assert!(
+            matches!(&event, XaiEvent::Error { message } if message == "content policy violation"),
+            "must carry the nested error message: {event:?}"
+        );
+    }
+
+    #[test]
+    fn response_error_falls_back_to_top_level_message() {
+        // Fallback: message at top level (xAI deviation from spec).
+        // `val["error"]["message"]` is absent, `.or_else(|| val["message"])` fires.
+        let line = r#"data: {"type":"response.error","message":"rate limit exceeded"}"#;
+        let event = parse_line(line).expect("response.error must emit an event");
+        assert!(
+            matches!(&event, XaiEvent::Error { message } if message == "rate limit exceeded"),
+            "must fall back to top-level message field: {event:?}"
+        );
+    }
+
+    #[test]
+    fn response_error_uses_default_message_when_no_field_present() {
+        // Both fallback paths absent — `.unwrap_or("xAI stream error")` fires.
+        let line = r#"data: {"type":"response.error"}"#;
+        let event = parse_line(line).expect("response.error must emit an event even without a message");
+        assert!(
+            matches!(&event, XaiEvent::Error { message } if message == "xAI stream error"),
+            "must use the default message when no message field present: {event:?}"
+        );
+    }
+
+    // ── FinishReason::Other for unknown status ────────────────────────────────
+
+    #[test]
+    fn response_completed_with_unknown_status_emits_finished_other() {
+        // The `from_status` catch-all arm: any unrecognised status string must
+        // produce `FinishReason::Other(status)` rather than panicking or defaulting
+        // to Completed. The agent treats all `Finished` variants as end-of-turn, so
+        // the loop will break correctly for any future xAI status extensions.
+        let line = r#"data: {"type":"response.completed","response":{"status":"in_progress"}}"#;
+        let events = parse_line_all(line);
+        let finished = events.iter().find_map(|e| {
+            if let XaiEvent::Finished { reason, .. } = e { Some(reason) } else { None }
+        });
+        assert!(
+            matches!(finished, Some(FinishReason::Other(s)) if s == "in_progress"),
+            "unknown status must map to FinishReason::Other(status), got: {finished:?}"
+        );
+    }
+
+    // ── response.output_item.added: non-function-call type ignored ────────────
+
+    #[test]
+    fn output_item_added_with_text_type_produces_no_event() {
+        // When the server announces a text output item (type != "function_call"),
+        // the inner `if item.type == "function_call"` guard must reject it and
+        // produce no event. Without the guard a stale entry would be left in
+        // `pending_fc` and the next delta for an unrelated call_id could be
+        // mis-attributed.
+        let line = r#"data: {"type":"response.output_item.added","item":{"type":"text","id":"item_abc"}}"#;
+        assert!(
+            parse_line(line).is_none(),
+            "output_item.added with type=text must produce no event"
+        );
+    }
+
+    #[test]
+    fn output_item_added_with_message_type_produces_no_event() {
+        // Same guard, different non-function-call item type.
+        let line = r#"data: {"type":"response.output_item.added","item":{"type":"message","id":"msg_1"}}"#;
+        assert!(
+            parse_line(line).is_none(),
+            "output_item.added with type=message must produce no event"
+        );
+    }
+
     // ── parse_sse: streaming state machine ────────────────────────────────────
 
     #[tokio::test]

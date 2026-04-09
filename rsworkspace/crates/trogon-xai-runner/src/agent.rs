@@ -1641,4 +1641,97 @@ mod tests {
         let notifs = agent.notifier.notifications.lock().unwrap();
         assert_eq!(notifs.len(), 1);
     }
+
+    // ── build_input: system prompt precedes history and new user message ──────
+
+    #[tokio::test]
+    async fn system_prompt_placed_before_history_and_new_user_message() {
+        // When a system prompt is set AND the session already has history,
+        // `build_input` must produce items in this exact order:
+        //   [0] system   ← system prompt
+        //   [1] user     ← history turn 1 (user)
+        //   [2] assistant← history turn 1 (assistant)
+        //   [3] user     ← new user message
+        //
+        // `prompt_prepends_system_prompt_when_set` only tests a fresh session
+        // (no history). This test locks in the guarantee with history present.
+        let _guard = env_lock().lock().unwrap();
+        unsafe { std::env::set_var("XAI_SYSTEM_PROMPT", "You are concise.") };
+        let mock_http = Arc::new(MockXaiHttpClient::new());
+        let mock_notifier = Arc::new(MockSessionNotifier::new());
+        let agent: TestAgent =
+            XaiAgent::with_deps(Arc::clone(&mock_notifier), "grok-3", "test-key", Arc::clone(&mock_http));
+        unsafe { std::env::remove_var("XAI_SYSTEM_PROMPT") };
+
+        let history = vec![
+            Message::user("previous question"),
+            Message::assistant_text("previous answer"),
+        ];
+        agent.test_insert_session_with_history("sp2", "/tmp", history).await;
+        mock_http.push_response(vec![XaiEvent::Done]);
+
+        agent
+            .prompt(PromptRequest::new("sp2", vec![ContentBlock::from("follow-up")]))
+            .await
+            .unwrap();
+
+        let calls = mock_http.calls.lock().unwrap();
+        let input = &calls.last().unwrap().input;
+        assert_eq!(input.len(), 4, "system + user + assistant + new_user = 4 items");
+        assert_eq!(input[0].role, "system",     "item[0] must be the system prompt");
+        assert_eq!(input[0].content, "You are concise.");
+        assert_eq!(input[1].role, "user",       "item[1] must be history user message");
+        assert_eq!(input[2].role, "assistant",  "item[2] must be history assistant message");
+        assert_eq!(input[3].role, "user",       "item[3] must be the new user message");
+        assert_eq!(input[3].content, "follow-up");
+    }
+
+    // ── prompt: non-text ContentBlocks silently dropped ───────────────────────
+
+    #[tokio::test]
+    async fn prompt_with_only_non_text_blocks_is_empty_but_does_not_panic() {
+        // ACP clients may send ResourceLink, Image, or other non-Text content blocks.
+        // The agent filters for Text only via `filter_map`. When ALL blocks are non-text,
+        // `user_input` is empty. The agent must log a warning and complete normally —
+        // no panic, no error response, and history records the (empty) user turn.
+        use agent_client_protocol::ResourceLink;
+
+        let agent = make_agent();
+        agent.test_insert_session("ntb1", "/tmp", None).await;
+        agent.client.push_response(vec![XaiEvent::Done]);
+
+        // ResourceLink is a non-Text ContentBlock variant with a simple constructor.
+        let resource_block =
+            ContentBlock::ResourceLink(ResourceLink::new("context.md", "file:///workspace/context.md"));
+
+        let result = agent
+            .prompt(PromptRequest::new("ntb1", vec![resource_block]))
+            .await;
+
+        assert!(result.is_ok(), "prompt with only non-text blocks must not return an error");
+        // Only the (empty) user message is recorded in history — no assistant entry
+        // since no TextDelta arrived.
+        assert_eq!(agent.test_history_len("ntb1").await, 1);
+    }
+
+    // ── XAI_PROMPT_TIMEOUT_SECS=0 falls back to default ──────────────────────
+
+    #[tokio::test]
+    async fn prompt_timeout_zero_falls_back_to_default() {
+        // `.filter(|&n| n > 0)` rejects 0, so `.unwrap_or(Duration::from_secs(300))`
+        // must fire — same as the "not_a_number" case but via the filter guard,
+        // not the parse error guard.
+        let _guard = env_lock().lock().unwrap();
+        unsafe { std::env::set_var("XAI_PROMPT_TIMEOUT_SECS", "0") };
+        let mock_http = Arc::new(MockXaiHttpClient::new());
+        let mock_notifier = Arc::new(MockSessionNotifier::new());
+        let agent: TestAgent =
+            XaiAgent::with_deps(Arc::clone(&mock_notifier), "grok-3", "key", Arc::clone(&mock_http));
+        unsafe { std::env::remove_var("XAI_PROMPT_TIMEOUT_SECS") };
+        assert_eq!(
+            agent.test_prompt_timeout(),
+            Duration::from_secs(300),
+            "XAI_PROMPT_TIMEOUT_SECS=0 must fall back to the 300s default"
+        );
+    }
 }
