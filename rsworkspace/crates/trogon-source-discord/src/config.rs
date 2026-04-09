@@ -159,6 +159,30 @@ mod tests {
     }
 
     #[test]
+    fn parse_intents_is_case_insensitive_and_trimmed() {
+        let intents =
+            parse_gateway_intents("  GUILDS , Guild_Members , direct_message_reactions ").unwrap();
+        assert!(intents.contains(Intents::GUILDS));
+        assert!(intents.contains(Intents::GUILD_MEMBERS));
+        assert!(intents.contains(Intents::DIRECT_MESSAGE_REACTIONS));
+    }
+
+    #[test]
+    fn parse_intents_accepts_all_supported_keywords() {
+        let intents = parse_gateway_intents(
+            "guilds,guild_members,guild_moderation,guild_emojis_and_stickers,\
+             guild_integrations,guild_webhooks,guild_invites,guild_voice_states,\
+             guild_presences,guild_messages,guild_message_reactions,guild_message_typing,\
+             direct_messages,direct_message_reactions,direct_message_typing,message_content,\
+             guild_scheduled_events,auto_moderation_configuration,auto_moderation_execution,\
+             guild_message_polls,direct_message_polls,all,non_privileged",
+        )
+        .unwrap();
+
+        assert_eq!(intents, Intents::all());
+    }
+
+    #[test]
     fn discord_bot_token_roundtrips() {
         let token = DiscordBotToken::new("Bot token").unwrap();
         assert_eq!(token.as_str(), "Bot token");
