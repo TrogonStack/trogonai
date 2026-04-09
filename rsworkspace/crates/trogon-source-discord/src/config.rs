@@ -168,14 +168,14 @@ mod tests {
     }
 
     #[test]
-    fn parse_intents_accepts_all_supported_keywords() {
+    fn parse_intents_union_of_individual_keywords_is_all() {
         let intents = parse_gateway_intents(
             "guilds,guild_members,guild_moderation,guild_emojis_and_stickers,\
              guild_integrations,guild_webhooks,guild_invites,guild_voice_states,\
              guild_presences,guild_messages,guild_message_reactions,guild_message_typing,\
              direct_messages,direct_message_reactions,direct_message_typing,message_content,\
              guild_scheduled_events,auto_moderation_configuration,auto_moderation_execution,\
-             guild_message_polls,direct_message_polls,all,non_privileged",
+             guild_message_polls,direct_message_polls",
         )
         .unwrap();
 
