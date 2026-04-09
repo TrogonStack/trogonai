@@ -54,6 +54,7 @@ enum TestResponse {
 struct HttpCall {
     pub model: String,
     pub input_len: usize,
+    pub inputs: Vec<InputItem>,
     pub previous_response_id: Option<String>,
 }
 
@@ -99,6 +100,7 @@ impl XaiHttpClient for TestHttpClient {
         self.calls.lock().unwrap().push(HttpCall {
             model: model.to_string(),
             input_len: input.len(),
+            inputs: input.to_vec(),
             previous_response_id: previous_response_id.map(str::to_string),
         });
 
@@ -1898,6 +1900,168 @@ async fn second_authenticate_overwrites_first() {
             assert!(
                 val.get("code").is_none(),
                 "prompt must succeed after second authenticate: {val}"
+            );
+        })
+        .await;
+}
+
+// ── ENV_MUTEX: serialize tests that touch environment variables ───────────────
+//
+// `std::env::set_var` is not thread-safe when tests run in parallel. This mutex
+// serializes any test that reads or writes env vars so only one such test runs
+// at a time within this binary. The lock is held only during `Harness::new()`,
+// which is where `XaiAgent::with_deps` reads env vars into struct fields.
+static ENV_MUTEX: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+fn env_mutex() -> &'static std::sync::Mutex<()> {
+    ENV_MUTEX.get_or_init(|| std::sync::Mutex::new(()))
+}
+
+// ── system prompt: prepended to input on every full-history turn ──────────────
+
+/// When `XAI_SYSTEM_PROMPT` is set, `build_input` must prepend a system-role
+/// item before history and the user message. The item must use role "system"
+/// and carry the exact prompt text.
+#[tokio::test]
+async fn system_prompt_prepended_to_input() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            // Hold env mutex only during agent construction so the env var is
+            // read by `XaiAgent::with_deps` before any other test can clear it.
+            let h = {
+                let _env_guard = env_mutex().lock().unwrap();
+                // SAFETY: guarded by ENV_MUTEX; only read during with_deps().
+                unsafe { std::env::set_var("XAI_SYSTEM_PROMPT", "You are a pirate.") };
+                let h = Harness::new();
+                unsafe { std::env::remove_var("XAI_SYSTEM_PROMPT") };
+                h
+            };
+
+            let sid = create_session(&h).await;
+            h.http.push(vec![XaiEvent::Done]);
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("ahoy!")]),
+                "r.prompt",
+            );
+            h.expect_n_publishes(2).await;
+
+            let call = h.http.last_call().unwrap();
+            assert_eq!(
+                call.input_len, 2,
+                "first turn with system prompt: input must be [system, user] = 2 items"
+            );
+            assert_eq!(call.inputs[0].role, "system", "first item must have role 'system'");
+            assert_eq!(
+                call.inputs[0].content, "You are a pirate.",
+                "system item content must match XAI_SYSTEM_PROMPT"
+            );
+            assert_eq!(call.inputs[1].role, "user", "second item must be the user message");
+        })
+        .await;
+}
+
+// ── system prompt: NOT sent when previous_response_id shortcut is active ──────
+
+/// When the agent has a cached `previous_response_id`, `prompt()` skips
+/// `build_input` entirely and sends only the new user message. The system
+/// prompt must not appear in that single-item input array.
+#[tokio::test]
+async fn system_prompt_not_sent_when_previous_response_id_cached() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = {
+                let _env_guard = env_mutex().lock().unwrap();
+                unsafe { std::env::set_var("XAI_SYSTEM_PROMPT", "Always be brief.") };
+                let h = Harness::new();
+                unsafe { std::env::remove_var("XAI_SYSTEM_PROMPT") };
+                h
+            };
+
+            let sid = create_session(&h).await;
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+
+            // Turn 1: server returns a ResponseId; agent caches it.
+            h.http.push(vec![
+                XaiEvent::ResponseId { id: "resp-abc".to_string() },
+                XaiEvent::Done,
+            ]);
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("first")]),
+                "r.p1",
+            );
+            h.expect_n_publishes(2).await;
+
+            // Turn 2: previous_response_id shortcut — build_input is skipped.
+            // Input must be exactly one user item; no system item.
+            h.http.push(vec![XaiEvent::Done]);
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("second")]),
+                "r.p2",
+            );
+            h.expect_n_publishes(3).await;
+
+            let call = h.http.last_call().unwrap();
+            assert_eq!(
+                call.previous_response_id.as_deref(),
+                Some("resp-abc"),
+                "turn 2 must use the cached response ID"
+            );
+            assert_eq!(
+                call.input_len, 1,
+                "with previous_response_id, only the new user message is sent"
+            );
+            assert_eq!(
+                call.inputs[0].role, "user",
+                "the single input item must be the user message — not the system prompt"
+            );
+        })
+        .await;
+}
+
+// ── close_session mid-stream: session is permanently removed ─────────────────
+
+/// After `close_session` fires while a prompt is streaming, the session must be
+/// permanently gone. A subsequent `load_session` on the same ID must return an
+/// ACP error — not stale state left behind by the cancel path.
+#[tokio::test]
+async fn close_session_mid_stream_removes_session_permanently() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            // Slow stream — blocks until cancelled.
+            h.http.push_slow(XaiEvent::TextDelta { text: "partial".to_string() });
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("hi")]),
+                "r.prompt",
+            );
+
+            // Let the prompt enter its streaming loop before closing.
+            for _ in 0..5 {
+                tokio::task::yield_now().await;
+            }
+
+            // Close while streaming — sends cancel + removes session from state.
+            let close_subj = format!("acp.session.{sid}.agent.close");
+            h.session_req(&close_subj, CloseSessionRequest::new(sid.clone()), "r.close");
+
+            // Both prompt response and close response must be published.
+            h.expect_n_publishes(3).await;
+
+            // The session must be permanently gone: load_session must return an error.
+            let load_subj = format!("acp.session.{sid}.agent.load");
+            h.session_req(&load_subj, LoadSessionRequest::new(sid.clone(), "/tmp"), "r.load");
+            let payloads = h.expect_n_publishes(4).await;
+            let val: serde_json::Value = serde_json::from_slice(payloads.last().unwrap()).unwrap();
+            assert!(
+                val.get("code").is_some(),
+                "load_session after close must return ACP error — session must be fully removed: {val}"
             );
         })
         .await;
