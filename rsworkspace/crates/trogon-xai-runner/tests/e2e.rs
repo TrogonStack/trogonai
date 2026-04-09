@@ -2569,3 +2569,126 @@ async fn prompt_empty_input_with_cached_response_id_sends_single_empty_user_item
         })
         .await;
 }
+
+// ── resume_session then prompt ────────────────────────────────────────────────
+
+/// After `resume_session` the session must remain fully functional:
+/// a subsequent `prompt` must complete successfully.
+#[tokio::test]
+async fn resume_session_then_prompt_succeeds() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            // Resume the session.
+            let resume_subj = format!("acp.session.{sid}.agent.resume");
+            h.session_req(
+                &resume_subj,
+                ResumeSessionRequest::new(sid.clone(), "/tmp"),
+                "r.resume",
+            );
+            h.expect_n_publishes(2).await;
+            let payloads = h.nats.published_payloads();
+            let _: ResumeSessionResponse = serde_json::from_slice(&payloads[1]).unwrap();
+
+            // Now prompt the session — it must still work.
+            h.http.push(vec![
+                XaiEvent::TextDelta { text: "after resume".to_string() },
+                XaiEvent::Done,
+            ]);
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("hello after resume")]),
+                "r.prompt",
+            );
+            h.expect_n_publishes(3).await;
+            let payloads = h.nats.published_payloads();
+            // Successful deserialization as PromptResponse (not an ACP error object) is sufficient.
+            let _: PromptResponse = serde_json::from_slice(&payloads[2]).unwrap();
+        })
+        .await;
+}
+
+// ── shortcut turns still accumulate history ───────────────────────────────────
+
+/// When `last_response_id` is cached (shortcut path), the HTTP request only
+/// sends the new user message — but the history-update block fires regardless.
+/// After two shortcut turns the session history should contain all four
+/// messages (u1, a1, u2, a2). Forking the session resets `last_response_id` to
+/// `None`, so the fork's first prompt uses the full history-replay path.
+/// Asserting `input_len == 5` (u1 + a1 + u2 + a2 + new_user) confirms that
+/// shortcut turns accumulated history correctly.
+#[tokio::test]
+async fn prompt_shortcut_turns_still_accumulate_history() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+
+            // Turn 1: TextDelta + ResponseId → history: [u1, a1], shortcut active.
+            h.http.push(vec![
+                XaiEvent::TextDelta { text: "a1".to_string() },
+                XaiEvent::ResponseId { id: "id1".to_string() },
+                XaiEvent::Done,
+            ]);
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("u1")]),
+                "r.p1",
+            );
+            h.expect_n_publishes(2).await;
+
+            // Turn 2 (shortcut): shortcut sends only new user item to HTTP.
+            // History update still fires → history: [u1, a1, u2, a2].
+            h.http.push(vec![
+                XaiEvent::TextDelta { text: "a2".to_string() },
+                XaiEvent::Done,
+            ]);
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("u2")]),
+                "r.p2",
+            );
+            h.expect_n_publishes(3).await;
+            // Verify turn 2 used the shortcut path (sent 1 item).
+            let call2 = h.http.last_call().unwrap();
+            assert_eq!(call2.input_len, 1, "turn 2 must use shortcut (1 item)");
+
+            // Fork the source → resets last_response_id to None.
+            let fork_subj = format!("acp.session.{sid}.agent.fork");
+            h.session_req(
+                &fork_subj,
+                ForkSessionRequest::new(sid.clone(), "/fork"),
+                "r.fork",
+            );
+            h.expect_n_publishes(4).await;
+            let payloads = h.nats.published_payloads();
+            let fork_val: serde_json::Value = serde_json::from_slice(&payloads[3]).unwrap();
+            let fork_id = fork_val["sessionId"].as_str().unwrap().to_string();
+
+            // Prompt the fork — must use full history-replay path.
+            // Expected input: [u1, a1, u2, a2, new_user] = 5 items.
+            h.http.push(vec![XaiEvent::Done]);
+            let fork_prompt_subj = format!("acp.session.{fork_id}.agent.prompt");
+            h.session_req(
+                &fork_prompt_subj,
+                PromptRequest::new(fork_id.clone(), vec![ContentBlock::from("u3")]),
+                "r.p3",
+            );
+            h.expect_n_publishes(5).await;
+
+            let call3 = h.http.last_call().unwrap();
+            assert_eq!(
+                call3.previous_response_id, None,
+                "fork resets last_response_id — full-replay path must be used"
+            );
+            assert_eq!(
+                call3.input_len, 5,
+                "fork prompt must include all 4 history items from shortcut turns plus the new user item"
+            );
+        })
+        .await;
+}
