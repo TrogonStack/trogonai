@@ -2884,3 +2884,38 @@ async fn session_notification_carries_agent_message_chunk_with_text() {
         })
         .await;
 }
+
+// ── multiple ContentBlocks joined with newline ────────────────────────────────
+
+/// When a `PromptRequest` contains multiple `ContentBlock::Text` items they
+/// must be joined with `"\n"` before being forwarded to `chat_stream`
+/// (agent.rs lines 448-456). Verifies the observable HTTP call parameter.
+#[tokio::test]
+async fn prompt_with_multiple_content_blocks_joins_text_with_newline() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            h.http.push(vec![XaiEvent::Done]);
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(
+                    sid.clone(),
+                    vec![ContentBlock::from("hello"), ContentBlock::from("world")],
+                ),
+                "r.prompt",
+            );
+            h.expect_n_publishes(2).await;
+
+            let call = h.http.last_call().unwrap();
+            // Full-history path: [user_item] — the user item content must be "hello\nworld".
+            let user_item = call.inputs.last().unwrap();
+            assert_eq!(
+                user_item.content, "hello\nworld",
+                "multiple text blocks must be joined with '\\n'"
+            );
+        })
+        .await;
+}
