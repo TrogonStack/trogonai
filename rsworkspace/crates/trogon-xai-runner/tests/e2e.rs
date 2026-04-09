@@ -2353,3 +2353,130 @@ async fn fork_with_no_model_override_uses_agent_default_on_prompt() {
         })
         .await;
 }
+
+// ── prompt: partial text before Error is saved in history ────────────────────
+
+/// When `XaiEvent::Error` arrives mid-stream after text has already been
+/// accumulated, the partial assistant text must be recorded in history.
+/// The agent's `if !assistant_text.is_empty()` guard fires even on the
+/// error path because the history update runs after the streaming loop exits.
+#[tokio::test]
+async fn prompt_error_mid_stream_partial_text_saved_in_history() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+
+            // Stream yields partial text then an error.
+            h.http.push(vec![
+                XaiEvent::TextDelta { text: "partial answer".to_string() },
+                XaiEvent::Error { message: "upstream failure".to_string() },
+            ]);
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("question")]),
+                "r.prompt",
+            );
+            h.expect_n_publishes(2).await;
+
+            // On the next turn the agent must replay full history (no ResponseId
+            // was cached after an error). Input must be: user₁ + assistant₁ + user₂ = 3.
+            h.http.push(vec![XaiEvent::Done]);
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("follow-up")]),
+                "r.p2",
+            );
+            h.expect_n_publishes(3).await;
+
+            let call = h.http.last_call().unwrap();
+            assert_eq!(
+                call.input_len, 3,
+                "history must contain user₁ + partial_assistant₁ + user₂ = 3 items after mid-stream error"
+            );
+        })
+        .await;
+}
+
+// ── load_session: modes field is populated ────────────────────────────────────
+
+/// `load_session` must return a `modes` field with the current mode ID.
+/// Existing tests only verify the `models` field; this locks in that `modes`
+/// is also present and populated with the "default" mode.
+#[tokio::test]
+async fn load_session_returns_modes_field_with_default_mode() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            let load_subj = format!("acp.session.{sid}.agent.load");
+            h.session_req(&load_subj, LoadSessionRequest::new(sid.clone(), "/tmp"), "r.load");
+            let payloads = h.expect_n_publishes(2).await;
+            let resp: LoadSessionResponse = serde_json::from_slice(&payloads[1]).unwrap();
+
+            let modes = resp.modes.expect("load_session must return a modes field");
+            assert_eq!(
+                modes.current_mode_id.to_string(),
+                "default",
+                "current mode must be 'default'"
+            );
+            assert!(
+                !modes.available_modes.is_empty(),
+                "available_modes must be non-empty"
+            );
+        })
+        .await;
+}
+
+// ── authenticate → session → authenticate → session: each session gets its key
+
+/// Full double-auth lifecycle: auth(key1) → session1 consumes key1 →
+/// auth(key2) → session2 consumes key2. Both sessions must be able to prompt
+/// successfully, proving each consumed the correct pending key.
+#[tokio::test]
+async fn authenticate_new_session_twice_each_session_uses_its_own_key() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            // No global key — each session must carry a per-session key.
+            let h = Harness::with_api_key("");
+
+            // First auth + session.
+            let mut meta1 = serde_json::Map::new();
+            meta1.insert("XAI_API_KEY".to_string(), serde_json::json!("key-for-session-1"));
+            h.global("acp.agent.authenticate", AuthenticateRequest::new("api-key").meta(meta1), "r.auth1");
+            h.expect_n_publishes(1).await;
+            let sid1 = create_session(&h).await; // consumes key-for-session-1
+
+            // Second auth + session.
+            let mut meta2 = serde_json::Map::new();
+            meta2.insert("XAI_API_KEY".to_string(), serde_json::json!("key-for-session-2"));
+            h.global("acp.agent.authenticate", AuthenticateRequest::new("api-key").meta(meta2), "r.auth2");
+            h.expect_n_publishes(3).await; // auth1 + session1 + auth2
+            let sid2 = create_session(&h).await; // consumes key-for-session-2
+
+            // Prompt session1 — must succeed (has key-for-session-1).
+            h.http.push(vec![XaiEvent::Done]);
+            h.session_req(
+                &format!("acp.session.{sid1}.agent.prompt"),
+                PromptRequest::new(sid1.clone(), vec![ContentBlock::from("hi")]),
+                "r.p1",
+            );
+            let payloads = h.expect_n_publishes(5).await; // +session2 +prompt1
+            let val1: serde_json::Value = serde_json::from_slice(&payloads[4]).unwrap();
+            assert!(val1.get("code").is_none(), "session1 prompt must succeed: {val1}");
+
+            // Prompt session2 — must also succeed (has key-for-session-2).
+            h.http.push(vec![XaiEvent::Done]);
+            h.session_req(
+                &format!("acp.session.{sid2}.agent.prompt"),
+                PromptRequest::new(sid2.clone(), vec![ContentBlock::from("hi")]),
+                "r.p2",
+            );
+            let payloads = h.expect_n_publishes(6).await;
+            let val2: serde_json::Value = serde_json::from_slice(&payloads[5]).unwrap();
+            assert!(val2.get("code").is_none(), "session2 prompt must succeed: {val2}");
+        })
+        .await;
+}

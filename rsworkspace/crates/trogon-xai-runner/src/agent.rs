@@ -1078,6 +1078,39 @@ mod tests {
         assert_eq!(agent.test_pending_api_key().await, None, "pending key must be consumed by new_session");
     }
 
+    // ── fork: api_key inherited from source ──────────────────────────────────
+
+    #[tokio::test]
+    async fn fork_inherits_session_api_key_from_source() {
+        // `fork_session` clones `s.api_key` (line 352) so forked sessions carry
+        // the same per-session key as the source. If the fork silently dropped the
+        // key, prompts on the fork would fall back to the global key — or fail
+        // entirely for keyless agents.
+        let mock_http = Arc::new(MockXaiHttpClient::new());
+        let mock_notifier = Arc::new(MockSessionNotifier::new());
+        // Agent with no global key — every session must carry its own key.
+        let agent: TestAgent =
+            XaiAgent::with_deps(Arc::clone(&mock_notifier), "grok-3", "", Arc::clone(&mock_http));
+
+        // Authenticate to set a pending key, then create the source session.
+        let mut meta = serde_json::Map::new();
+        meta.insert("XAI_API_KEY".to_string(), serde_json::json!("session-key"));
+        agent.authenticate(AuthenticateRequest::new("api-key").meta(meta)).await.unwrap();
+        let resp = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+        let src_id = resp.session_id.to_string();
+        assert_eq!(agent.test_session_api_key(&src_id).await.as_deref(), Some("session-key"));
+
+        // Fork the source session.
+        let fork_resp = agent.fork_session(ForkSessionRequest::new(src_id.clone(), "/fork")).await.unwrap();
+        let fork_id = fork_resp.session_id.to_string();
+
+        assert_eq!(
+            agent.test_session_api_key(&fork_id).await.as_deref(),
+            Some("session-key"),
+            "fork must inherit the source session's per-session api_key"
+        );
+    }
+
     // ── fork: last_response_id is NOT inherited ───────────────────────────────
 
     #[tokio::test]
