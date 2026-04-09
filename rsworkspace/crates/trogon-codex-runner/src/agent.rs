@@ -138,11 +138,7 @@ where
     /// Environment variables read once at construction:
     /// - `CODEX_PROMPT_TIMEOUT_SECS` — prompt timeout in seconds (default: 7200)
     /// - `CODEX_MODELS` — comma-separated `id:label` pairs (default: `o4-mini:o4-mini,o3:o3,gpt-4o:GPT-4o`)
-    pub fn new(
-        notifier_factory: N,
-        spawner: P,
-        default_model: impl Into<String>,
-    ) -> Self {
+    pub fn new(notifier_factory: N, spawner: P, default_model: impl Into<String>) -> Self {
         let default_model: String = default_model.into();
         let prompt_timeout = std::env::var("CODEX_PROMPT_TIMEOUT_SECS")
             .ok()
@@ -224,10 +220,7 @@ where
         Ok(ProcessGuard(guard))
     }
 
-    fn make_notifier(
-        &self,
-        session_id: &SessionId,
-    ) -> agent_client_protocol::Result<N::Notifier> {
+    fn make_notifier(&self, session_id: &SessionId) -> agent_client_protocol::Result<N::Notifier> {
         self.notifier_factory.make_notifier(session_id)
     }
 
@@ -651,8 +644,7 @@ mod tests {
         Agent, AuthMethodId, AuthenticateRequest, CancelNotification, CloseSessionRequest,
         ForkSessionRequest, InitializeRequest, ListSessionsRequest, LoadSessionRequest,
         PromptRequest, ProtocolVersion, ResumeSessionRequest, SetSessionConfigOptionRequest,
-        SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModelRequest,
-        StopReason,
+        SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModelRequest, StopReason,
     };
     use tokio::sync::broadcast;
 
@@ -775,7 +767,11 @@ mod tests {
     }
 
     async fn make_agent() -> CodexAgent<MockNotifierFactory, MockProcessSpawner> {
-        CodexAgent::new(MockNotifierFactory::new(), MockProcessSpawner::new(), "o4-mini")
+        CodexAgent::new(
+            MockNotifierFactory::new(),
+            MockProcessSpawner::new(),
+            "o4-mini",
+        )
     }
 
     // ── close_session ─────────────────────────────────────────────────────────
@@ -1108,10 +1104,7 @@ mod tests {
         let agent = make_agent().await;
         agent.test_insert_session("p1", "/tmp", None).await;
         let resp = agent
-            .prompt(PromptRequest::new(
-                "p1",
-                vec![ContentBlock::from("hello")],
-            ))
+            .prompt(PromptRequest::new("p1", vec![ContentBlock::from("hello")]))
             .await
             .unwrap();
         assert_eq!(resp.stop_reason, StopReason::EndTurn);
@@ -1133,10 +1126,7 @@ mod tests {
         agent.test_insert_session("p2", "/tmp", None).await;
 
         agent
-            .prompt(PromptRequest::new(
-                "p2",
-                vec![ContentBlock::from("go")],
-            ))
+            .prompt(PromptRequest::new("p2", vec![ContentBlock::from("go")]))
             .await
             .unwrap();
 

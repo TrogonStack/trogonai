@@ -76,7 +76,11 @@ async fn fake_nats() -> async_nats::Client {
 /// concurrent tests don't clobber each other's `CODEX_BIN` value.
 async fn make_agent() -> DefaultCodexAgent {
     unsafe { std::env::set_var("CODEX_BIN", MOCK_BIN) };
-    DefaultCodexAgent::with_nats(fake_nats().await, AcpPrefix::new("test").unwrap(), "o4-mini")
+    DefaultCodexAgent::with_nats(
+        fake_nats().await,
+        AcpPrefix::new("test").unwrap(),
+        "o4-mini",
+    )
 }
 
 // ── new_session ───────────────────────────────────────────────────────────────
@@ -1283,7 +1287,10 @@ async fn process_death_clears_all_sessions_on_next_call() {
                 .await
                 .unwrap();
             assert_eq!(list.sessions.len(), 1);
-            assert_eq!(list.sessions[0].session_id.to_string(), s3.session_id.to_string());
+            assert_eq!(
+                list.sessions[0].session_id.to_string(),
+                s3.session_id.to_string()
+            );
 
             // s2 must no longer be loadable.
             assert!(
@@ -1422,7 +1429,8 @@ async fn nats_publish_failure_during_prompt_is_non_fatal() {
             // and exhaust its single reconnect attempt before calling prompt().
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-            let agent = DefaultCodexAgent::with_nats(nats, AcpPrefix::new("test").unwrap(), "o4-mini");
+            let agent =
+                DefaultCodexAgent::with_nats(nats, AcpPrefix::new("test").unwrap(), "o4-mini");
 
             let sess = agent
                 .new_session(NewSessionRequest::new("/tmp"))
@@ -1546,7 +1554,8 @@ async fn nats_publish_failure_for_tool_events_is_non_fatal() {
             // Yield to let the NATS background task notice the dropped connection.
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-            let agent = DefaultCodexAgent::with_nats(nats, AcpPrefix::new("test").unwrap(), "o4-mini");
+            let agent =
+                DefaultCodexAgent::with_nats(nats, AcpPrefix::new("test").unwrap(), "o4-mini");
 
             let sess = agent
                 .new_session(NewSessionRequest::new("/tmp"))
@@ -1696,10 +1705,7 @@ async fn set_session_mode_is_accepted_for_real_session() {
 
             // Session must still be loadable after the mode change.
             agent
-                .load_session(LoadSessionRequest::new(
-                    sess.session_id.to_string(),
-                    "/tmp",
-                ))
+                .load_session(LoadSessionRequest::new(sess.session_id.to_string(), "/tmp"))
                 .await
                 .unwrap();
         })
@@ -1737,10 +1743,7 @@ async fn set_session_config_option_returns_empty_and_session_survives() {
 
             // Session must still be loadable.
             agent
-                .load_session(LoadSessionRequest::new(
-                    sess.session_id.to_string(),
-                    "/tmp",
-                ))
+                .load_session(LoadSessionRequest::new(sess.session_id.to_string(), "/tmp"))
                 .await
                 .unwrap();
         })
