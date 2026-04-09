@@ -27,8 +27,8 @@ use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
 use trogon_agent::{AgentConfig, run};
 use trogon_incidentio::{IncidentioConfig, serve as incidentio_serve};
-use trogon_nats::{NatsAuth, NatsConfig};
 use trogon_nats::jetstream::NatsJetStreamClient;
+use trogon_nats::{NatsAuth, NatsConfig};
 use trogon_secret_proxy::{
     proxy::{ProxyState, router},
     stream, subjects, worker,
@@ -591,13 +591,14 @@ async fn incidentio_automation_dispatch_takes_precedence_over_fallback() {
     store.put(&auto).await.unwrap();
 
     // Pre-create the INCIDENTIO stream so trogon-incidentio can publish.
-    js.context().get_or_create_stream(jetstream::stream::Config {
-        name: "INCIDENTIO".to_string(),
-        subjects: vec!["incidentio.>".to_string()],
-        ..Default::default()
-    })
-    .await
-    .unwrap();
+    js.context()
+        .get_or_create_stream(jetstream::stream::Config {
+            name: "INCIDENTIO".to_string(),
+            subjects: vec!["incidentio.>".to_string()],
+            ..Default::default()
+        })
+        .await
+        .unwrap();
 
     let incidentio_port = next_port();
     let webhook_secret = "test-iio-auto-secret";
@@ -677,13 +678,14 @@ async fn incidentio_stream_name_none_skips_subscription() {
     let js = NatsJetStreamClient::new(jetstream::new(nats.clone()));
 
     // Manually create the INCIDENTIO stream so we can publish to it.
-    js.context().get_or_create_stream(jetstream::stream::Config {
-        name: "INCIDENTIO".to_string(),
-        subjects: vec!["incidentio.>".to_string()],
-        ..Default::default()
-    })
-    .await
-    .unwrap();
+    js.context()
+        .get_or_create_stream(jetstream::stream::Config {
+            name: "INCIDENTIO".to_string(),
+            subjects: vec!["incidentio.>".to_string()],
+            ..Default::default()
+        })
+        .await
+        .unwrap();
 
     // Start agent runner with incidentio_stream_name = None → must skip subscription.
     let mut agent_cfg = base_agent_config(nats_port, mock_server.base_url());

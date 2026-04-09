@@ -428,10 +428,7 @@ pub fn router<A: AutomationRepository, R: RunRepository>(state: AppState<A, R>) 
                 .put(update_automation::<A, R>)
                 .delete(delete_automation::<A, R>),
         )
-        .route(
-            "/automations/{id}/enable",
-            patch(enable_automation::<A, R>),
-        )
+        .route("/automations/{id}/enable", patch(enable_automation::<A, R>))
         .route(
             "/automations/{id}/disable",
             patch(disable_automation::<A, R>),

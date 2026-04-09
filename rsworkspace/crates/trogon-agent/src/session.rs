@@ -214,7 +214,8 @@ impl SessionRepository for SessionStore {
     fn list<'a>(
         &'a self,
         tenant_id: &'a str,
-    ) -> Pin<Box<dyn Future<Output = Result<Vec<ChatSession>, SessionStoreError>> + Send + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<ChatSession>, SessionStoreError>> + Send + 'a>>
+    {
         Box::pin(async move { self.list(tenant_id).await })
     }
 }
@@ -268,9 +269,8 @@ pub mod mock {
             &'a self,
             tenant_id: &'a str,
             id: &'a str,
-        ) -> Pin<
-            Box<dyn Future<Output = Result<Option<ChatSession>, SessionStoreError>> + Send + 'a>,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<Option<ChatSession>, SessionStoreError>> + Send + 'a>>
+        {
             let data = Arc::clone(&self.data);
             let key = format!("{tenant_id}.{id}");
             Box::pin(async move { Ok(data.lock().unwrap().get(&key).cloned()) })

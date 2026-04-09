@@ -96,13 +96,12 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
 
     let (mcp_tool_defs, mcp_dispatch) = init_mcp_servers(&http_client, &cfg.mcp_servers).await;
 
-    let anthropic_client: Arc<dyn crate::agent_loop::AnthropicClient> = Arc::new(
-        ReqwestAnthropicClient::new(
+    let anthropic_client: Arc<dyn crate::agent_loop::AnthropicClient> =
+        Arc::new(ReqwestAnthropicClient::new(
             http_client.clone(),
             cfg.proxy_url.clone(),
             cfg.anthropic_token.clone(),
-        ),
-    );
+        ));
 
     let tool_dispatcher: Arc<dyn crate::tools::ToolDispatcher> =
         Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx)));
@@ -612,7 +611,11 @@ pub async fn init_mcp_servers(
                         input_schema: tool.input_schema.clone(),
                         cache_control: None,
                     });
-                    dispatch.push((prefixed, tool.name, Arc::clone(&client) as Arc<dyn trogon_mcp::McpCallTool>));
+                    dispatch.push((
+                        prefixed,
+                        tool.name,
+                        Arc::clone(&client) as Arc<dyn trogon_mcp::McpCallTool>,
+                    ));
                 }
             }
         }
@@ -631,6 +634,78 @@ pub(crate) fn sanitize_name(s: &str) -> String {
             }
         })
         .collect()
+}
+
+async fn ensure_stream(
+    js: &jetstream::Context,
+    stream_name: &str,
+    subjects: &[&str],
+    max_age: Duration,
+) -> Result<(), RunnerError> {
+    let result = js
+        .get_or_create_stream(async_nats::jetstream::stream::Config {
+            name: stream_name.to_string(),
+            subjects: subjects.iter().map(|s| s.to_string()).collect(),
+            max_age,
+            ..Default::default()
+        })
+        .await;
+
+    match result {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            // If the stream already exists with a different config (e.g. narrower subjects),
+            // fall back to using the existing stream rather than failing.
+            if js.get_stream(stream_name).await.is_ok() {
+                tracing::debug!(stream = stream_name, error = %e, "Stream exists with different config — using as-is");
+                Ok(())
+            } else {
+                Err(RunnerError::JetStream(format!(
+                    "ensure stream {stream_name}: {e}"
+                )))
+            }
+        }
+    }
+}
+
+async fn bind_consumer(
+    js: &jetstream::Context,
+    stream_name: &str,
+    consumer_name: &str,
+    filter_subject: &str,
+) -> Result<
+    impl futures_util::Stream<
+        Item = Result<
+            jetstream::Message,
+            async_nats::error::Error<jetstream::consumer::pull::MessagesErrorKind>,
+        >,
+    >,
+    RunnerError,
+> {
+    let stream = js
+        .get_stream(stream_name)
+        .await
+        .map_err(|e| RunnerError::JetStream(format!("get stream {stream_name}: {e}")))?;
+
+    let consumer: jetstream::consumer::Consumer<pull::Config> = stream
+        .get_or_create_consumer(
+            consumer_name,
+            pull::Config {
+                durable_name: Some(consumer_name.to_string()),
+                filter_subject: filter_subject.to_string(),
+                ack_policy: AckPolicy::Explicit,
+                deliver_policy: DeliverPolicy::All,
+                max_deliver: 3,
+                ..Default::default()
+            },
+        )
+        .await
+        .map_err(|e| RunnerError::JetStream(format!("create consumer {consumer_name}: {e}")))?;
+
+    consumer
+        .messages()
+        .await
+        .map_err(|e| RunnerError::JetStream(format!("messages stream {consumer_name}: {e}")))
 }
 
 #[cfg(test)]
@@ -825,76 +900,4 @@ mod tests {
         assert!(tools.is_empty(), "no tools expected when list_tools fails");
         assert!(dispatch.is_empty(), "no dispatch entries expected");
     }
-}
-
-async fn ensure_stream(
-    js: &jetstream::Context,
-    stream_name: &str,
-    subjects: &[&str],
-    max_age: Duration,
-) -> Result<(), RunnerError> {
-    let result = js
-        .get_or_create_stream(async_nats::jetstream::stream::Config {
-            name: stream_name.to_string(),
-            subjects: subjects.iter().map(|s| s.to_string()).collect(),
-            max_age,
-            ..Default::default()
-        })
-        .await;
-
-    match result {
-        Ok(_) => Ok(()),
-        Err(e) => {
-            // If the stream already exists with a different config (e.g. narrower subjects),
-            // fall back to using the existing stream rather than failing.
-            if js.get_stream(stream_name).await.is_ok() {
-                tracing::debug!(stream = stream_name, error = %e, "Stream exists with different config — using as-is");
-                Ok(())
-            } else {
-                Err(RunnerError::JetStream(format!(
-                    "ensure stream {stream_name}: {e}"
-                )))
-            }
-        }
-    }
-}
-
-async fn bind_consumer(
-    js: &jetstream::Context,
-    stream_name: &str,
-    consumer_name: &str,
-    filter_subject: &str,
-) -> Result<
-    impl futures_util::Stream<
-        Item = Result<
-            jetstream::Message,
-            async_nats::error::Error<jetstream::consumer::pull::MessagesErrorKind>,
-        >,
-    >,
-    RunnerError,
-> {
-    let stream = js
-        .get_stream(stream_name)
-        .await
-        .map_err(|e| RunnerError::JetStream(format!("get stream {stream_name}: {e}")))?;
-
-    let consumer: jetstream::consumer::Consumer<pull::Config> = stream
-        .get_or_create_consumer(
-            consumer_name,
-            pull::Config {
-                durable_name: Some(consumer_name.to_string()),
-                filter_subject: filter_subject.to_string(),
-                ack_policy: AckPolicy::Explicit,
-                deliver_policy: DeliverPolicy::All,
-                max_deliver: 3,
-                ..Default::default()
-            },
-        )
-        .await
-        .map_err(|e| RunnerError::JetStream(format!("create consumer {consumer_name}: {e}")))?;
-
-    consumer
-        .messages()
-        .await
-        .map_err(|e| RunnerError::JetStream(format!("messages stream {consumer_name}: {e}")))
 }

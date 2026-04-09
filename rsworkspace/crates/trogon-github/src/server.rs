@@ -223,9 +223,7 @@ mod tests {
             subject_prefix: "github".to_string(),
             stream_name: "GITHUB".to_string(),
             stream_max_age: Duration::from_secs(3600),
-            nats: trogon_nats::NatsConfig::from_env(
-                &trogon_std::env::InMemoryEnv::new(),
-            ),
+            nats: trogon_nats::NatsConfig::from_env(&trogon_std::env::InMemoryEnv::new()),
         }
     }
 
@@ -304,7 +302,12 @@ mod tests {
         let publisher = MockJetStreamPublisher::new();
         let app = mock_app(publisher.clone());
         let resp = app
-            .oneshot(webhook_request(b"{}", "push", "del-2", Some("sha256=deadbeef")))
+            .oneshot(webhook_request(
+                b"{}",
+                "push",
+                "del-2",
+                Some("sha256=deadbeef"),
+            ))
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
@@ -431,23 +434,30 @@ mod tests {
 
         impl AckFailPublisher {
             fn failing() -> Self {
-                Self { behavior: Arc::new(Mutex::new(AckBehavior::Fail)) }
+                Self {
+                    behavior: Arc::new(Mutex::new(AckBehavior::Fail)),
+                }
             }
             fn hanging() -> Self {
-                Self { behavior: Arc::new(Mutex::new(AckBehavior::Hang)) }
+                Self {
+                    behavior: Arc::new(Mutex::new(AckBehavior::Hang)),
+                }
             }
         }
 
-        enum AckFuture { Fail, Hang }
+        enum AckFuture {
+            Fail,
+            Hang,
+        }
 
         impl IntoFuture for AckFuture {
             type Output = Result<async_nats::jetstream::publish::PublishAck, MockError>;
             type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send>>;
             fn into_future(self) -> Self::IntoFuture {
                 match self {
-                    AckFuture::Fail => Box::pin(async {
-                        Err(MockError("simulated ack failure".to_string()))
-                    }),
+                    AckFuture::Fail => {
+                        Box::pin(async { Err(MockError("simulated ack failure".to_string())) })
+                    }
                     AckFuture::Hang => Box::pin(std::future::pending()),
                 }
             }
@@ -523,7 +533,9 @@ mod tests {
             headers: async_nats::HeaderMap,
             payload: bytes::Bytes,
         ) -> Result<Self::AckFuture, Self::PublishError> {
-            self.publisher.publish_with_headers(subject, headers, payload).await
+            self.publisher
+                .publish_with_headers(subject, headers, payload)
+                .await
         }
     }
 
@@ -548,5 +560,4 @@ mod tests {
         let result = serve_impl(test_config(), js).await;
         assert!(result.is_err());
     }
-
 }

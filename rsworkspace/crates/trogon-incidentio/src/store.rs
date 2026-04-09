@@ -40,11 +40,13 @@ pub trait IncidentRepository: Clone + Send + Sync + 'static {
         json: &'a [u8],
     ) -> Pin<Box<dyn Future<Output = Result<(), StoreError>> + Send + 'a>>;
 
+    #[allow(clippy::type_complexity)]
     fn get<'a>(
         &'a self,
         id: &'a str,
     ) -> Pin<Box<dyn Future<Output = Result<Option<Vec<u8>>, StoreError>> + Send + 'a>>;
 
+    #[allow(clippy::type_complexity)]
     fn list<'a>(
         &'a self,
     ) -> Pin<Box<dyn Future<Output = Result<Vec<Vec<u8>>, StoreError>> + Send + 'a>>;
@@ -184,7 +186,8 @@ pub mod mock {
         fn get<'a>(
             &'a self,
             id: &'a str,
-        ) -> Pin<Box<dyn Future<Output = Result<Option<Vec<u8>>, StoreError>> + Send + 'a>> {
+        ) -> Pin<Box<dyn Future<Output = Result<Option<Vec<u8>>, StoreError>> + Send + 'a>>
+        {
             let data = Arc::clone(&self.data);
             let id = id.to_string();
             Box::pin(async move { Ok(data.lock().unwrap().get(&id).cloned()) })

@@ -137,15 +137,14 @@ async fn initialize_returns_error_on_invalid_json_response() {
     let mut agent_sub = nats.subscribe("acp.agent.initialize").await.unwrap();
     let nats2 = nats.clone();
     tokio::spawn(async move {
-        if let Some(msg) = agent_sub.next().await {
-            if let Some(reply) = msg.reply {
+        if let Some(msg) = agent_sub.next().await
+            && let Some(reply) = msg.reply {
                 // Send malformed JSON.
                 nats2
                     .publish(reply, b"{bad json}".as_ref().into())
                     .await
                     .unwrap();
             }
-        }
     });
 
     let err = bridge

@@ -42,8 +42,10 @@ impl HttpClient for reqwest::Client {
         auth_token: &str,
         query: Vec<(String, String)>,
     ) -> Pin<Box<dyn Future<Output = Result<HttpResponse, String>> + Send + '_>> {
-        let ref_params: Vec<(&str, &str)> =
-            query.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+        let ref_params: Vec<(&str, &str)> = query
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
         let builder = reqwest::Client::get(self, url)
             .header("Authorization", auth_token.to_string())
             .query(&ref_params);
@@ -208,7 +210,11 @@ impl<H: HttpClient> SplitClient<H> {
             .map_err(SplitError::Http)?;
 
         if resp.status < 200 || resp.status >= 300 {
-            warn!(key, status = resp.status, "Evaluator returned error for get-treatments");
+            warn!(
+                key,
+                status = resp.status,
+                "Evaluator returned error for get-treatments"
+            );
             return Err(SplitError::EvaluatorError {
                 status: resp.status,
                 body: resp.body,
@@ -260,7 +266,12 @@ impl<H: HttpClient> SplitClient<H> {
             .map_err(SplitError::Http)?;
 
         if resp.status < 200 || resp.status >= 300 {
-            warn!(flag, key, status = resp.status, "Evaluator returned error for get-treatment-with-config");
+            warn!(
+                flag,
+                key,
+                status = resp.status,
+                "Evaluator returned error for get-treatment-with-config"
+            );
             return Err(SplitError::EvaluatorError {
                 status: resp.status,
                 body: resp.body,
@@ -326,7 +337,12 @@ impl<H: HttpClient> SplitClient<H> {
             .map_err(SplitError::Http)?;
 
         if resp.status < 200 || resp.status >= 300 {
-            warn!(key, event_type, status = resp.status, "Evaluator returned error for track");
+            warn!(
+                key,
+                event_type,
+                status = resp.status,
+                "Evaluator returned error for track"
+            );
             return Err(SplitError::EvaluatorError {
                 status: resp.status,
                 body: resp.body,
@@ -458,9 +474,7 @@ pub mod mock {
                 .unwrap()
                 .pop_front()
                 .expect("MockHttpClient: no response queued");
-            Box::pin(async move {
-                entry.map(|(status, body)| HttpResponse { status, body })
-            })
+            Box::pin(async move { entry.map(|(status, body)| HttpResponse { status, body }) })
         }
     }
 }
@@ -486,8 +500,8 @@ mod tests {
 
     #[tokio::test]
     async fn mock_get_treatment_happy_path() {
-        let mock_http = MockHttpClient::new()
-            .enqueue_ok(200, r#"{"splitName":"flag","treatment":"on"}"#);
+        let mock_http =
+            MockHttpClient::new().enqueue_ok(200, r#"{"splitName":"flag","treatment":"on"}"#);
         let client = SplitClient::new_with(make_config("http://unused"), mock_http);
         let t = client.get_treatment("u", "flag", None).await.unwrap();
         assert_eq!(t, "on");
@@ -577,10 +591,8 @@ mod tests {
 
     #[tokio::test]
     async fn mock_get_treatment_with_config_parses_json_config() {
-        let mock_http = MockHttpClient::new().enqueue_ok(
-            200,
-            r#"{"treatment":"on","config":"{\"color\":\"blue\"}"}"#,
-        );
+        let mock_http = MockHttpClient::new()
+            .enqueue_ok(200, r#"{"treatment":"on","config":"{\"color\":\"blue\"}"}"#);
         let client = SplitClient::new_with(make_config("http://unused"), mock_http);
         let result = client
             .get_treatment_with_config("u", "flag", None)

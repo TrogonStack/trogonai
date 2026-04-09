@@ -293,7 +293,8 @@ pub mod mock {
             &'a self,
             tenant_id: &'a str,
             id: &'a str,
-        ) -> Pin<Box<dyn Future<Output = Result<Option<Automation>, StoreError>> + Send + 'a>> {
+        ) -> Pin<Box<dyn Future<Output = Result<Option<Automation>, StoreError>> + Send + 'a>>
+        {
             let data = Arc::clone(&self.data);
             let key = format!("{tenant_id}.{id}");
             Box::pin(async move { Ok(data.lock().unwrap().get(&key).cloned()) })
@@ -315,7 +316,8 @@ pub mod mock {
         fn list<'a>(
             &'a self,
             tenant_id: &'a str,
-        ) -> Pin<Box<dyn Future<Output = Result<Vec<Automation>, StoreError>> + Send + 'a>> {
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<Automation>, StoreError>> + Send + 'a>>
+        {
             let data = Arc::clone(&self.data);
             let prefix = format!("{tenant_id}.");
             Box::pin(async move {
@@ -333,7 +335,8 @@ pub mod mock {
             tenant_id: &'a str,
             nats_subject: &'a str,
             payload: &'a serde_json::Value,
-        ) -> Pin<Box<dyn Future<Output = Result<Vec<Automation>, StoreError>> + Send + 'a>> {
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<Automation>, StoreError>> + Send + 'a>>
+        {
             let data = Arc::clone(&self.data);
             let prefix = format!("{tenant_id}.");
             let nats_subject = nats_subject.to_string();
@@ -345,8 +348,7 @@ pub mod mock {
                     .filter(|(k, _)| k.starts_with(&prefix))
                     .map(|(_, v)| v.clone())
                     .filter(|a| {
-                        a.enabled
-                            && crate::trigger::matches(&a.trigger, &nats_subject, &payload)
+                        a.enabled && crate::trigger::matches(&a.trigger, &nats_subject, &payload)
                     })
                     .collect())
             })

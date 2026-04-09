@@ -218,7 +218,7 @@ async fn update_file_no_sha_omits_sha_field_in_body() {
         0,
         "sha must not appear in body when not provided"
     );
-    drop(ok_mock);
+    let _ = ok_mock;
 }
 
 // ── create_pull_request ───────────────────────────────────────────────────────

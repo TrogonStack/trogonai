@@ -120,6 +120,90 @@ pub(crate) fn event_type(body: &[u8]) -> String {
     }
 }
 
+#[instrument(
+    name = "datadog.webhook",
+    skip_all,
+    fields(
+        event_type = tracing::field::Empty,
+        request_id = tracing::field::Empty,
+        subject = tracing::field::Empty,
+    )
+)]
+async fn handle_webhook<J>(
+    State(state): State<AppState<J>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> StatusCode
+where
+    J: JetStreamPublisher + Clone + Send + Sync + 'static,
+{
+    if let Some(secret) = &state.webhook_secret {
+        let sig = headers
+            .get("x-datadog-signature")
+            .and_then(|v| v.to_str().ok());
+
+        match sig {
+            Some(sig) if signature::verify(secret, &body, sig) => {}
+            Some(_) => {
+                warn!("Invalid Datadog webhook signature");
+                return StatusCode::UNAUTHORIZED;
+            }
+            None => {
+                warn!("Missing X-Datadog-Signature header");
+                return StatusCode::UNAUTHORIZED;
+            }
+        }
+    }
+
+    let request_id = headers
+        .get("dd-request-id")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("unknown")
+        .to_owned();
+
+    let ev_type = event_type(&body);
+    let subject = format!("{}.{}", state.subject_prefix, ev_type);
+
+    let span = tracing::Span::current();
+    span.record("event_type", &ev_type);
+    span.record("request_id", &request_id);
+    span.record("subject", &subject);
+
+    let mut nats_headers = async_nats::HeaderMap::new();
+    nats_headers.insert("X-Datadog-Event-Type", ev_type.as_str());
+    nats_headers.insert("DD-Request-ID", request_id.as_str());
+
+    match state
+        .js
+        .publish_with_headers(subject.clone(), nats_headers, body)
+        .await
+    {
+        Ok(ack_future) => {
+            match tokio::time::timeout(state.ack_timeout, ack_future.into_future()).await {
+                Ok(Ok(_)) => {
+                    info!("Published Datadog event to NATS");
+                    StatusCode::OK
+                }
+                Ok(Err(e)) => {
+                    warn!(error = %e, "NATS ack failed");
+                    StatusCode::INTERNAL_SERVER_ERROR
+                }
+                Err(_) => {
+                    warn!(
+                        ack_timeout_ms = state.ack_timeout.as_millis(),
+                        "NATS ack timed out"
+                    );
+                    StatusCode::INTERNAL_SERVER_ERROR
+                }
+            }
+        }
+        Err(e) => {
+            warn!(error = %e, "Failed to publish Datadog event to NATS");
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -196,9 +280,7 @@ mod tests {
             subject_prefix: "datadog".to_string(),
             stream_name: "DATADOG".to_string(),
             stream_max_age: Duration::from_secs(3600),
-            nats: trogon_nats::NatsConfig::from_env(
-                &trogon_std::env::InMemoryEnv::new(),
-            ),
+            nats: trogon_nats::NatsConfig::from_env(&trogon_std::env::InMemoryEnv::new()),
         }
     }
 
@@ -256,7 +338,10 @@ mod tests {
         assert_eq!(msgs.len(), 1);
         assert_eq!(msgs[0].subject, "datadog.alert");
         assert_eq!(
-            msgs[0].headers.get("X-Datadog-Event-Type").map(|v| v.as_str()),
+            msgs[0]
+                .headers
+                .get("X-Datadog-Event-Type")
+                .map(|v| v.as_str()),
             Some("alert")
         );
     }
@@ -272,7 +357,10 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        assert_eq!(publisher.published_subjects(), vec!["datadog.alert.recovered"]);
+        assert_eq!(
+            publisher.published_subjects(),
+            vec!["datadog.alert.recovered"]
+        );
     }
 
     #[tokio::test]
@@ -291,10 +379,7 @@ mod tests {
     async fn missing_signature_returns_401() {
         let publisher = MockJetStreamPublisher::new();
         let app = mock_app(publisher.clone());
-        let resp = app
-            .oneshot(webhook_request(b"{}", None))
-            .await
-            .unwrap();
+        let resp = app.oneshot(webhook_request(b"{}", None)).await.unwrap();
         assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
         assert!(publisher.published_subjects().is_empty());
     }
@@ -345,17 +430,33 @@ mod tests {
         use trogon_nats::mocks::MockError;
 
         #[derive(Clone)]
-        enum AckBehavior { Fail, Hang }
-
-        #[derive(Clone)]
-        struct AckFailPublisher { behavior: Arc<Mutex<AckBehavior>> }
-
-        impl AckFailPublisher {
-            fn failing() -> Self { Self { behavior: Arc::new(Mutex::new(AckBehavior::Fail)) } }
-            fn hanging() -> Self { Self { behavior: Arc::new(Mutex::new(AckBehavior::Hang)) } }
+        enum AckBehavior {
+            Fail,
+            Hang,
         }
 
-        enum AckFuture { Fail, Hang }
+        #[derive(Clone)]
+        struct AckFailPublisher {
+            behavior: Arc<Mutex<AckBehavior>>,
+        }
+
+        impl AckFailPublisher {
+            fn failing() -> Self {
+                Self {
+                    behavior: Arc::new(Mutex::new(AckBehavior::Fail)),
+                }
+            }
+            fn hanging() -> Self {
+                Self {
+                    behavior: Arc::new(Mutex::new(AckBehavior::Hang)),
+                }
+            }
+        }
+
+        enum AckFuture {
+            Fail,
+            Hang,
+        }
 
         impl IntoFuture for AckFuture {
             type Output = Result<async_nats::jetstream::publish::PublishAck, MockError>;
@@ -440,7 +541,9 @@ mod tests {
             headers: async_nats::HeaderMap,
             payload: bytes::Bytes,
         ) -> Result<Self::AckFuture, Self::PublishError> {
-            self.publisher.publish_with_headers(subject, headers, payload).await
+            self.publisher
+                .publish_with_headers(subject, headers, payload)
+                .await
         }
     }
 
@@ -464,89 +567,5 @@ mod tests {
         js.context.fail_next();
         let result = serve_impl(test_config(), js).await;
         assert!(result.is_err());
-    }
-}
-
-#[instrument(
-    name = "datadog.webhook",
-    skip_all,
-    fields(
-        event_type = tracing::field::Empty,
-        request_id = tracing::field::Empty,
-        subject = tracing::field::Empty,
-    )
-)]
-async fn handle_webhook<J>(
-    State(state): State<AppState<J>>,
-    headers: HeaderMap,
-    body: Bytes,
-) -> StatusCode
-where
-    J: JetStreamPublisher + Clone + Send + Sync + 'static,
-{
-    if let Some(secret) = &state.webhook_secret {
-        let sig = headers
-            .get("x-datadog-signature")
-            .and_then(|v| v.to_str().ok());
-
-        match sig {
-            Some(sig) if signature::verify(secret, &body, sig) => {}
-            Some(_) => {
-                warn!("Invalid Datadog webhook signature");
-                return StatusCode::UNAUTHORIZED;
-            }
-            None => {
-                warn!("Missing X-Datadog-Signature header");
-                return StatusCode::UNAUTHORIZED;
-            }
-        }
-    }
-
-    let request_id = headers
-        .get("dd-request-id")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("unknown")
-        .to_owned();
-
-    let ev_type = event_type(&body);
-    let subject = format!("{}.{}", state.subject_prefix, ev_type);
-
-    let span = tracing::Span::current();
-    span.record("event_type", &ev_type);
-    span.record("request_id", &request_id);
-    span.record("subject", &subject);
-
-    let mut nats_headers = async_nats::HeaderMap::new();
-    nats_headers.insert("X-Datadog-Event-Type", ev_type.as_str());
-    nats_headers.insert("DD-Request-ID", request_id.as_str());
-
-    match state
-        .js
-        .publish_with_headers(subject.clone(), nats_headers, body)
-        .await
-    {
-        Ok(ack_future) => {
-            match tokio::time::timeout(state.ack_timeout, ack_future.into_future()).await {
-                Ok(Ok(_)) => {
-                    info!("Published Datadog event to NATS");
-                    StatusCode::OK
-                }
-                Ok(Err(e)) => {
-                    warn!(error = %e, "NATS ack failed");
-                    StatusCode::INTERNAL_SERVER_ERROR
-                }
-                Err(_) => {
-                    warn!(
-                        ack_timeout_ms = state.ack_timeout.as_millis(),
-                        "NATS ack timed out"
-                    );
-                    StatusCode::INTERNAL_SERVER_ERROR
-                }
-            }
-        }
-        Err(e) => {
-            warn!(error = %e, "Failed to publish Datadog event to NATS");
-            StatusCode::INTERNAL_SERVER_ERROR
-        }
     }
 }

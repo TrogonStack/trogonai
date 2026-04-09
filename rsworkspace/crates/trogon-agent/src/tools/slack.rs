@@ -42,16 +42,29 @@ pub fn slack_tool_defs() -> Vec<ToolDef> {
 }
 
 /// Send a message to a Slack channel.
-pub async fn send_message(ctx: &ToolContext<impl HttpClient>, input: &Value) -> Result<String, String> {
+pub async fn send_message(
+    ctx: &ToolContext<impl HttpClient>,
+    input: &Value,
+) -> Result<String, String> {
     let channel = input["channel"].as_str().ok_or("missing channel")?;
     let text = input["text"].as_str().ok_or("missing text")?;
 
     let url = format!("{}/slack/chat.postMessage", ctx.proxy_url);
 
-    let resp = ctx.http_client.post(&url, vec![
-        ("Authorization".to_string(), format!("Bearer {}", ctx.slack_token)),
-        ("Content-Type".to_string(), "application/json".to_string()),
-    ], serde_json::json!({ "channel": channel, "text": text })).await.map_err(|e| e)?;
+    let resp = ctx
+        .http_client
+        .post(
+            &url,
+            vec![
+                (
+                    "Authorization".to_string(),
+                    format!("Bearer {}", ctx.slack_token),
+                ),
+                ("Content-Type".to_string(), "application/json".to_string()),
+            ],
+            serde_json::json!({ "channel": channel, "text": text }),
+        )
+        .await?;
     let response: Value = serde_json::from_str(&resp.body).map_err(|e| e.to_string())?;
 
     if response["ok"].as_bool() == Some(true) {
@@ -64,7 +77,10 @@ pub async fn send_message(ctx: &ToolContext<impl HttpClient>, input: &Value) -> 
 }
 
 /// Read recent messages from a public Slack channel.
-pub async fn read_channel(ctx: &ToolContext<impl HttpClient>, input: &Value) -> Result<String, String> {
+pub async fn read_channel(
+    ctx: &ToolContext<impl HttpClient>,
+    input: &Value,
+) -> Result<String, String> {
     let channel = input["channel"].as_str().ok_or("missing channel")?;
     let limit = input["limit"].as_u64().unwrap_or(20);
 
@@ -73,9 +89,16 @@ pub async fn read_channel(ctx: &ToolContext<impl HttpClient>, input: &Value) -> 
         ctx.proxy_url,
     );
 
-    let resp = ctx.http_client.get(&url, vec![
-        ("Authorization".to_string(), format!("Bearer {}", ctx.slack_token)),
-    ]).await.map_err(|e| e)?;
+    let resp = ctx
+        .http_client
+        .get(
+            &url,
+            vec![(
+                "Authorization".to_string(),
+                format!("Bearer {}", ctx.slack_token),
+            )],
+        )
+        .await?;
     let response: Value = serde_json::from_str(&resp.body).map_err(|e| e.to_string())?;
 
     if response["ok"].as_bool() != Some(true) {

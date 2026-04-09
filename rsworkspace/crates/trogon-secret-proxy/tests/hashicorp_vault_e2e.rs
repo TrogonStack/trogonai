@@ -13,11 +13,11 @@ use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::{
     ContainerAsync, GenericImage, ImageExt, core::ContainerPort, runners::AsyncRunner,
 };
+use trogon_nats::jetstream::NatsJetStreamClient;
 use trogon_secret_proxy::{
     proxy::{ProxyState, router},
     stream, subjects, vault_admin, worker,
 };
-use trogon_nats::jetstream::NatsJetStreamClient;
 use trogon_vault::{ApiKeyToken, HashicorpVaultConfig, HashicorpVaultStore, VaultAuth, VaultStore};
 
 // ── Constants ─────────────────────────────────────────────────────────────────

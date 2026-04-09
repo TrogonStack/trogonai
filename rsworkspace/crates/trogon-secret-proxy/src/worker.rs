@@ -19,8 +19,10 @@ use async_nats::jetstream::consumer::pull;
 use async_nats::jetstream::consumer::{AckPolicy, DeliverPolicy};
 use futures_util::StreamExt;
 use trogon_nats::PublishClient;
-use trogon_nats::jetstream::{JetStreamConsumer, JetStreamCreateConsumer, JetStreamGetStream, JsMessageOf};
 use trogon_nats::jetstream::message::{JsAck, JsAckWith, JsMessageRef, JsRequestMessage};
+use trogon_nats::jetstream::{
+    JetStreamConsumer, JetStreamCreateConsumer, JetStreamGetStream, JsMessageOf,
+};
 use trogon_vault::VaultStore;
 
 use crate::messages::{OutboundHttpRequest, OutboundHttpResponse};
@@ -463,17 +465,15 @@ mod tests {
         }
 
         fn enqueue_ok(&self, status: u16, headers: Vec<(String, String)>, body: Vec<u8>) {
-            self.responses
-                .lock()
-                .unwrap()
-                .push_back(Ok(HttpResponse { status, headers, body }));
+            self.responses.lock().unwrap().push_back(Ok(HttpResponse {
+                status,
+                headers,
+                body,
+            }));
         }
 
         fn enqueue_err(&self, msg: impl Into<String>) {
-            self.responses
-                .lock()
-                .unwrap()
-                .push_back(Err(msg.into()));
+            self.responses.lock().unwrap().push_back(Err(msg.into()));
         }
     }
 
@@ -638,7 +638,11 @@ mod tests {
             br#"{"id":"msg_mock"}"#.to_vec(),
         );
 
-        let request = make_request("https://api.anthropic.com/v1/messages", "Bearer tok_anthropic_prod_mock001", "idem-mock-001");
+        let request = make_request(
+            "https://api.anthropic.com/v1/messages",
+            "Bearer tok_anthropic_prod_mock001",
+            "idem-mock-001",
+        );
         let resp = process_request(&request, &vault, &http).await;
 
         assert_eq!(resp.status, 200);
@@ -652,7 +656,11 @@ mod tests {
         let vault = MemoryVault::new(); // empty
         let http = MockHttpClient::new(); // no responses enqueued
 
-        let request = make_request("https://api.anthropic.com/v1/messages", "Bearer tok_openai_prod_absent1", "idem-mock-002");
+        let request = make_request(
+            "https://api.anthropic.com/v1/messages",
+            "Bearer tok_openai_prod_absent1",
+            "idem-mock-002",
+        );
         let resp = process_request(&request, &vault, &http).await;
 
         assert_eq!(resp.status, 401);
@@ -671,7 +679,11 @@ mod tests {
         let http = MockHttpClient::new();
         http.enqueue_err("HTTP request failed: connection refused");
 
-        let request = make_request("https://api.anthropic.com/v1/messages", "Bearer tok_anthropic_prod_mock003", "idem-mock-003");
+        let request = make_request(
+            "https://api.anthropic.com/v1/messages",
+            "Bearer tok_anthropic_prod_mock003",
+            "idem-mock-003",
+        );
         let resp = process_request(&request, &vault, &http).await;
 
         assert_eq!(resp.status, 502);
@@ -1005,8 +1017,7 @@ mod tests {
             ) -> impl std::future::Future<Output = Result<Option<String>, Self::Error>> + Send
             {
                 async {
-                    Err(std::io::Error::new(
-                        std::io::ErrorKind::Other,
+                    Err(std::io::Error::other(
                         "vault backend unavailable",
                     ))
                 }
@@ -1464,8 +1475,7 @@ mod tests {
             ) -> impl std::future::Future<Output = Result<Option<String>, Self::Error>> + Send
             {
                 async {
-                    Err(std::io::Error::new(
-                        std::io::ErrorKind::Other,
+                    Err(std::io::Error::other(
                         "simulated backend failure",
                     ))
                 }
@@ -1543,6 +1553,7 @@ mod tests {
         tokio::spawn(async move {
             let (mut stream, _) = listener.accept().await.unwrap();
             let mut buf = vec![0u8; 4096];
+            #[allow(clippy::unused_io_amount)]
             stream.read(&mut buf).await.ok();
             // x-invalid: has byte 0xFF (valid Latin-1, invalid UTF-8)
             // x-valid:   has plain ASCII value — must survive
@@ -1606,6 +1617,7 @@ mod tests {
                 let (mut stream, _) = listener.accept().await.unwrap();
                 let n = counter.fetch_add(1, Ordering::SeqCst) + 1;
                 let mut buf = vec![0u8; 4096];
+                #[allow(clippy::unused_io_amount)]
                 stream.read(&mut buf).await.ok();
 
                 if n == 1 {

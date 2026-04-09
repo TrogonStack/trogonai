@@ -211,6 +211,9 @@ mod tests {
 
     #[tokio::test]
     async fn handle_returns_error_on_invalid_json() {
-        assert!(matches!(handle(&make_stub_agent(), b"not json").await, Some(Err(_))));
+        assert!(matches!(
+            handle(&make_stub_agent(), b"not json").await,
+            Some(Err(_))
+        ));
     }
 }

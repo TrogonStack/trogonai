@@ -65,10 +65,16 @@ mod tests {
 
     impl MockJetStreamContext {
         fn new() -> Self {
-            Self { configs: Mutex::new(vec![]), fail: false }
+            Self {
+                configs: Mutex::new(vec![]),
+                fail: false,
+            }
         }
         fn failing() -> Self {
-            Self { configs: Mutex::new(vec![]), fail: true }
+            Self {
+                configs: Mutex::new(vec![]),
+                fail: true,
+            }
         }
         fn captured_names(&self) -> Vec<String> {
             self.configs.lock().unwrap().clone()
@@ -97,15 +103,13 @@ mod tests {
             let fail = self.fail;
             async move {
                 if fail {
-                    Err(std::io::Error::new(
-                        std::io::ErrorKind::Other,
+                    Err(std::io::Error::other(
                         "mock stream error",
                     ))
                 } else {
                     // Returning a real stream is not possible in unit tests;
                     // ensure_stream maps it to () so we never need the value.
-                    Err(std::io::Error::new(
-                        std::io::ErrorKind::Other,
+                    Err(std::io::Error::other(
                         "mock always returns Err — ensure_stream maps Ok to ()",
                     ))
                 }

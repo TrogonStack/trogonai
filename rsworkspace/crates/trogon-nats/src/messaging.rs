@@ -1162,7 +1162,7 @@ mod tests {
         // In the execute loop: on the first failure `attempts == 1`, so
         //   exp = (attempts - 1).min(31) = 0
         //   delay = initial * (1 << 0) = initial * 1 = initial
-        let exp: u32 = (1u32 - 1).min(31);
+        let exp: u32 = 1u32 - 1;
         let delay = policy.initial_retry_delay * (1u32 << exp);
         assert_eq!(delay, initial);
     }
@@ -1177,12 +1177,12 @@ mod tests {
         };
 
         // attempt=2 (second failure) → exp=(2-1)=1 → delay = initial * 2
-        let exp1: u32 = (2u32 - 1).min(31);
+        let exp1: u32 = 2u32 - 1;
         let delay1 = policy.initial_retry_delay * (1u32 << exp1);
         assert_eq!(delay1, initial * 2, "second attempt should double delay");
 
         // attempt=3 → exp=2 → delay = initial * 4
-        let exp2: u32 = (3u32 - 1).min(31);
+        let exp2: u32 = 3u32 - 1;
         let delay2 = policy.initial_retry_delay * (1u32 << exp2);
         assert_eq!(delay2, initial * 4, "third attempt should quadruple delay");
 

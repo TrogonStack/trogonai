@@ -13,7 +13,10 @@ use super::{HttpClient, ToolContext};
 const GRAPHQL_PATH: &str = "/linear/graphql";
 
 /// Fetch a Linear issue by ID.
-pub async fn get_issue(ctx: &ToolContext<impl HttpClient>, input: &Value) -> Result<String, String> {
+pub async fn get_issue(
+    ctx: &ToolContext<impl HttpClient>,
+    input: &Value,
+) -> Result<String, String> {
     let issue_id = input["issue_id"].as_str().ok_or("missing issue_id")?;
 
     let query = json!({
@@ -36,7 +39,10 @@ pub async fn get_issue(ctx: &ToolContext<impl HttpClient>, input: &Value) -> Res
 }
 
 /// Post a comment on a Linear issue.
-pub async fn post_comment(ctx: &ToolContext<impl HttpClient>, input: &Value) -> Result<String, String> {
+pub async fn post_comment(
+    ctx: &ToolContext<impl HttpClient>,
+    input: &Value,
+) -> Result<String, String> {
     let issue_id = input["issue_id"].as_str().ok_or("missing issue_id")?;
     let body = input["body"].as_str().ok_or("missing body")?;
 
@@ -70,7 +76,10 @@ pub async fn post_comment(ctx: &ToolContext<impl HttpClient>, input: &Value) -> 
 /// Get all comments on a Linear issue.
 ///
 /// Returns a JSON array of comments — suitable for injecting as prior-conversation memory.
-pub async fn get_comments(ctx: &ToolContext<impl HttpClient>, input: &Value) -> Result<String, String> {
+pub async fn get_comments(
+    ctx: &ToolContext<impl HttpClient>,
+    input: &Value,
+) -> Result<String, String> {
     let issue_id = input["issue_id"].as_str().ok_or("missing issue_id")?;
 
     let query = json!({
@@ -94,7 +103,10 @@ pub async fn get_comments(ctx: &ToolContext<impl HttpClient>, input: &Value) -> 
 
 /// Update a Linear issue — accepts `state_id`, `assignee_id`, and/or
 /// `priority` fields; any omitted field is left unchanged.
-pub async fn update_issue(ctx: &ToolContext<impl HttpClient>, input: &Value) -> Result<String, String> {
+pub async fn update_issue(
+    ctx: &ToolContext<impl HttpClient>,
+    input: &Value,
+) -> Result<String, String> {
     let issue_id = input["issue_id"].as_str().ok_or("missing issue_id")?;
 
     let mut patch = serde_json::Map::new();
@@ -133,11 +145,24 @@ pub async fn update_issue(ctx: &ToolContext<impl HttpClient>, input: &Value) -> 
     }
 }
 
-async fn graphql_request<H: HttpClient>(ctx: &ToolContext<H>, body: &Value) -> Result<Value, String> {
+async fn graphql_request<H: HttpClient>(
+    ctx: &ToolContext<H>,
+    body: &Value,
+) -> Result<Value, String> {
     let url = format!("{}{GRAPHQL_PATH}", ctx.proxy_url);
-    let resp = ctx.http_client.post(&url, vec![
-        ("Authorization".to_string(), format!("Bearer {}", ctx.linear_token)),
-        ("Content-Type".to_string(), "application/json".to_string()),
-    ], body.clone()).await.map_err(|e| e)?;
+    let resp = ctx
+        .http_client
+        .post(
+            &url,
+            vec![
+                (
+                    "Authorization".to_string(),
+                    format!("Bearer {}", ctx.linear_token),
+                ),
+                ("Content-Type".to_string(), "application/json".to_string()),
+            ],
+            body.clone(),
+        )
+        .await?;
     serde_json::from_str::<Value>(&resp.body).map_err(|e| e.to_string())
 }

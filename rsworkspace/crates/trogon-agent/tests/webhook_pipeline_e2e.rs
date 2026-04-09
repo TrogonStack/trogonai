@@ -33,8 +33,8 @@ use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::
 use trogon_agent::{AgentConfig, run};
 use trogon_github::{GithubConfig, serve as github_serve};
 use trogon_linear::{LinearConfig, serve as linear_serve};
-use trogon_nats::{NatsAuth, NatsConfig};
 use trogon_nats::jetstream::NatsJetStreamClient;
+use trogon_nats::{NatsAuth, NatsConfig};
 use trogon_secret_proxy::{
     proxy::{ProxyState, router},
     stream, subjects, worker,
@@ -214,20 +214,22 @@ async fn webhook_http_triggers_full_pipeline_with_real_key() {
 
     // The agent runner requires GITHUB, LINEAR, and CRON_TICKS streams to exist.
     // The GitHub server created GITHUB above; create the others manually.
-    js.context().get_or_create_stream(jetstream::stream::Config {
-        name: "LINEAR".to_string(),
-        subjects: vec!["linear.Issue.>".to_string()],
-        ..Default::default()
-    })
-    .await
-    .expect("Failed to create LINEAR stream");
-    js.context().get_or_create_stream(jetstream::stream::Config {
-        name: "CRON_TICKS".to_string(),
-        subjects: vec!["cron.>".to_string()],
-        ..Default::default()
-    })
-    .await
-    .expect("Failed to create CRON_TICKS stream");
+    js.context()
+        .get_or_create_stream(jetstream::stream::Config {
+            name: "LINEAR".to_string(),
+            subjects: vec!["linear.Issue.>".to_string()],
+            ..Default::default()
+        })
+        .await
+        .expect("Failed to create LINEAR stream");
+    js.context()
+        .get_or_create_stream(jetstream::stream::Config {
+            name: "CRON_TICKS".to_string(),
+            subjects: vec!["cron.>".to_string()],
+            ..Default::default()
+        })
+        .await
+        .expect("Failed to create CRON_TICKS stream");
 
     // ── 8. Start agent runner ──────────────────────────────────────────────
     let agent_cfg = AgentConfig {
@@ -414,20 +416,22 @@ async fn linear_webhook_http_triggers_full_pipeline_with_real_key() {
 
     // The agent runner requires GITHUB, LINEAR, and CRON_TICKS streams to exist.
     // The Linear server created LINEAR above; create the others manually.
-    js.context().get_or_create_stream(jetstream::stream::Config {
-        name: "GITHUB".to_string(),
-        subjects: vec!["github.pull_request".to_string()],
-        ..Default::default()
-    })
-    .await
-    .expect("Failed to create GITHUB stream");
-    js.context().get_or_create_stream(jetstream::stream::Config {
-        name: "CRON_TICKS".to_string(),
-        subjects: vec!["cron.>".to_string()],
-        ..Default::default()
-    })
-    .await
-    .expect("Failed to create CRON_TICKS stream");
+    js.context()
+        .get_or_create_stream(jetstream::stream::Config {
+            name: "GITHUB".to_string(),
+            subjects: vec!["github.pull_request".to_string()],
+            ..Default::default()
+        })
+        .await
+        .expect("Failed to create GITHUB stream");
+    js.context()
+        .get_or_create_stream(jetstream::stream::Config {
+            name: "CRON_TICKS".to_string(),
+            subjects: vec!["cron.>".to_string()],
+            ..Default::default()
+        })
+        .await
+        .expect("Failed to create CRON_TICKS stream");
 
     // ── 8. Start agent runner ──────────────────────────────────────────────
     let agent_cfg = AgentConfig {

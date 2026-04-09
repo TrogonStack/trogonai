@@ -16,7 +16,10 @@ use super::{HttpClient, ToolContext};
 ///
 /// GitHub returns a plain-text diff when `Accept: application/vnd.github.diff`
 /// is set.
-pub async fn get_pr_diff(ctx: &ToolContext<impl HttpClient>, input: &Value) -> Result<String, String> {
+pub async fn get_pr_diff(
+    ctx: &ToolContext<impl HttpClient>,
+    input: &Value,
+) -> Result<String, String> {
     let owner = input["owner"].as_str().ok_or("missing owner")?;
     let repo = input["repo"].as_str().ok_or("missing repo")?;
     let pr_number = input["pr_number"].as_u64().ok_or("missing pr_number")?;
@@ -26,10 +29,22 @@ pub async fn get_pr_diff(ctx: &ToolContext<impl HttpClient>, input: &Value) -> R
         ctx.proxy_url,
     );
 
-    let resp = ctx.http_client.get(&url, vec![
-        ("Authorization".to_string(), format!("Bearer {}", ctx.github_token)),
-        ("Accept".to_string(), "application/vnd.github.diff".to_string()),
-    ]).await.map_err(|e| e)?;
+    let resp = ctx
+        .http_client
+        .get(
+            &url,
+            vec![
+                (
+                    "Authorization".to_string(),
+                    format!("Bearer {}", ctx.github_token),
+                ),
+                (
+                    "Accept".to_string(),
+                    "application/vnd.github.diff".to_string(),
+                ),
+            ],
+        )
+        .await?;
     Ok(resp.body)
 }
 
@@ -37,7 +52,10 @@ pub async fn get_pr_diff(ctx: &ToolContext<impl HttpClient>, input: &Value) -> R
 ///
 /// Returns a JSON array of file objects including `filename`, `status`, and
 /// `patch` fields.
-pub async fn list_pr_files(ctx: &ToolContext<impl HttpClient>, input: &Value) -> Result<String, String> {
+pub async fn list_pr_files(
+    ctx: &ToolContext<impl HttpClient>,
+    input: &Value,
+) -> Result<String, String> {
     let owner = input["owner"].as_str().ok_or("missing owner")?;
     let repo = input["repo"].as_str().ok_or("missing repo")?;
     let pr_number = input["pr_number"].as_u64().ok_or("missing pr_number")?;
@@ -47,10 +65,22 @@ pub async fn list_pr_files(ctx: &ToolContext<impl HttpClient>, input: &Value) ->
         ctx.proxy_url,
     );
 
-    let resp = ctx.http_client.get(&url, vec![
-        ("Authorization".to_string(), format!("Bearer {}", ctx.github_token)),
-        ("Accept".to_string(), "application/vnd.github.v3+json".to_string()),
-    ]).await.map_err(|e| e)?;
+    let resp = ctx
+        .http_client
+        .get(
+            &url,
+            vec![
+                (
+                    "Authorization".to_string(),
+                    format!("Bearer {}", ctx.github_token),
+                ),
+                (
+                    "Accept".to_string(),
+                    "application/vnd.github.v3+json".to_string(),
+                ),
+            ],
+        )
+        .await?;
     let files: Value = serde_json::from_str(&resp.body).map_err(|e| e.to_string())?;
     serde_json::to_string_pretty(&files).map_err(|e| e.to_string())
 }
@@ -62,7 +92,10 @@ pub async fn list_pr_files(ctx: &ToolContext<impl HttpClient>, input: &Value) ->
 ///
 /// - `"sha"` — the blob SHA (store this; required by `update_file` when the file already exists)
 /// - `"content"` — the decoded UTF-8 text
-pub async fn get_file_contents(ctx: &ToolContext<impl HttpClient>, input: &Value) -> Result<String, String> {
+pub async fn get_file_contents(
+    ctx: &ToolContext<impl HttpClient>,
+    input: &Value,
+) -> Result<String, String> {
     let owner = input["owner"].as_str().ok_or("missing owner")?;
     let repo = input["repo"].as_str().ok_or("missing repo")?;
     let path = input["path"].as_str().ok_or("missing path")?;
@@ -73,10 +106,22 @@ pub async fn get_file_contents(ctx: &ToolContext<impl HttpClient>, input: &Value
         ctx.proxy_url,
     );
 
-    let resp = ctx.http_client.get(&url, vec![
-        ("Authorization".to_string(), format!("Bearer {}", ctx.github_token)),
-        ("Accept".to_string(), "application/vnd.github.v3+json".to_string()),
-    ]).await.map_err(|e| e)?;
+    let resp = ctx
+        .http_client
+        .get(
+            &url,
+            vec![
+                (
+                    "Authorization".to_string(),
+                    format!("Bearer {}", ctx.github_token),
+                ),
+                (
+                    "Accept".to_string(),
+                    "application/vnd.github.v3+json".to_string(),
+                ),
+            ],
+        )
+        .await?;
     let response: Value = serde_json::from_str(&resp.body).map_err(|e| e.to_string())?;
 
     // GitHub embeds base64 content with embedded newlines — strip them first.
@@ -99,7 +144,10 @@ pub async fn get_file_contents(ctx: &ToolContext<impl HttpClient>, input: &Value
 /// Get all comments on a pull request (uses the Issues comments endpoint).
 ///
 /// Returns a JSON array of comments — suitable for injecting as prior-conversation memory.
-pub async fn get_pr_comments(ctx: &ToolContext<impl HttpClient>, input: &Value) -> Result<String, String> {
+pub async fn get_pr_comments(
+    ctx: &ToolContext<impl HttpClient>,
+    input: &Value,
+) -> Result<String, String> {
     let owner = input["owner"].as_str().ok_or("missing owner")?;
     let repo = input["repo"].as_str().ok_or("missing repo")?;
     let pr_number = input["pr_number"].as_u64().ok_or("missing pr_number")?;
@@ -109,10 +157,22 @@ pub async fn get_pr_comments(ctx: &ToolContext<impl HttpClient>, input: &Value) 
         ctx.proxy_url,
     );
 
-    let resp = ctx.http_client.get(&url, vec![
-        ("Authorization".to_string(), format!("Bearer {}", ctx.github_token)),
-        ("Accept".to_string(), "application/vnd.github.v3+json".to_string()),
-    ]).await.map_err(|e| e)?;
+    let resp = ctx
+        .http_client
+        .get(
+            &url,
+            vec![
+                (
+                    "Authorization".to_string(),
+                    format!("Bearer {}", ctx.github_token),
+                ),
+                (
+                    "Accept".to_string(),
+                    "application/vnd.github.v3+json".to_string(),
+                ),
+            ],
+        )
+        .await?;
     let comments: Value = serde_json::from_str(&resp.body).map_err(|e| e.to_string())?;
     serde_json::to_string_pretty(&comments).map_err(|e| e.to_string())
 }
@@ -121,7 +181,10 @@ pub async fn get_pr_comments(ctx: &ToolContext<impl HttpClient>, input: &Value) 
 ///
 /// If the file already exists, `sha` (the current blob SHA) must be provided.
 /// The `content` field must be plain UTF-8 text — this function base64-encodes it.
-pub async fn update_file(ctx: &ToolContext<impl HttpClient>, input: &Value) -> Result<String, String> {
+pub async fn update_file(
+    ctx: &ToolContext<impl HttpClient>,
+    input: &Value,
+) -> Result<String, String> {
     let owner = input["owner"].as_str().ok_or("missing owner")?;
     let repo = input["repo"].as_str().ok_or("missing repo")?;
     let path = input["path"].as_str().ok_or("missing path")?;
@@ -146,10 +209,23 @@ pub async fn update_file(ctx: &ToolContext<impl HttpClient>, input: &Value) -> R
         ctx.proxy_url,
     );
 
-    let resp = ctx.http_client.put(&url, vec![
-        ("Authorization".to_string(), format!("Bearer {}", ctx.github_token)),
-        ("Accept".to_string(), "application/vnd.github.v3+json".to_string()),
-    ], body).await.map_err(|e| e)?;
+    let resp = ctx
+        .http_client
+        .put(
+            &url,
+            vec![
+                (
+                    "Authorization".to_string(),
+                    format!("Bearer {}", ctx.github_token),
+                ),
+                (
+                    "Accept".to_string(),
+                    "application/vnd.github.v3+json".to_string(),
+                ),
+            ],
+            body,
+        )
+        .await?;
     let response: Value = serde_json::from_str(&resp.body).map_err(|e| e.to_string())?;
 
     let commit_sha = response["commit"]["sha"].as_str().unwrap_or("(no sha)");
@@ -157,7 +233,10 @@ pub async fn update_file(ctx: &ToolContext<impl HttpClient>, input: &Value) -> R
 }
 
 /// Open a pull request.
-pub async fn create_pull_request(ctx: &ToolContext<impl HttpClient>, input: &Value) -> Result<String, String> {
+pub async fn create_pull_request(
+    ctx: &ToolContext<impl HttpClient>,
+    input: &Value,
+) -> Result<String, String> {
     let owner = input["owner"].as_str().ok_or("missing owner")?;
     let repo = input["repo"].as_str().ok_or("missing repo")?;
     let title = input["title"].as_str().ok_or("missing title")?;
@@ -167,15 +246,28 @@ pub async fn create_pull_request(ctx: &ToolContext<impl HttpClient>, input: &Val
 
     let url = format!("{}/github/repos/{owner}/{repo}/pulls", ctx.proxy_url);
 
-    let resp = ctx.http_client.post(&url, vec![
-        ("Authorization".to_string(), format!("Bearer {}", ctx.github_token)),
-        ("Accept".to_string(), "application/vnd.github.v3+json".to_string()),
-    ], serde_json::json!({
-        "title": title,
-        "head": head,
-        "base": base,
-        "body": body,
-    })).await.map_err(|e| e)?;
+    let resp = ctx
+        .http_client
+        .post(
+            &url,
+            vec![
+                (
+                    "Authorization".to_string(),
+                    format!("Bearer {}", ctx.github_token),
+                ),
+                (
+                    "Accept".to_string(),
+                    "application/vnd.github.v3+json".to_string(),
+                ),
+            ],
+            serde_json::json!({
+                "title": title,
+                "head": head,
+                "base": base,
+                "body": body,
+            }),
+        )
+        .await?;
     let response: Value = serde_json::from_str(&resp.body).map_err(|e| e.to_string())?;
 
     let html_url = response["html_url"].as_str().unwrap_or("(no url)");
@@ -184,7 +276,10 @@ pub async fn create_pull_request(ctx: &ToolContext<impl HttpClient>, input: &Val
 }
 
 /// Request reviewers on a pull request.
-pub async fn request_reviewers(ctx: &ToolContext<impl HttpClient>, input: &Value) -> Result<String, String> {
+pub async fn request_reviewers(
+    ctx: &ToolContext<impl HttpClient>,
+    input: &Value,
+) -> Result<String, String> {
     let owner = input["owner"].as_str().ok_or("missing owner")?;
     let repo = input["repo"].as_str().ok_or("missing repo")?;
     let pr_number = input["pr_number"].as_u64().ok_or("missing pr_number")?;
@@ -201,10 +296,23 @@ pub async fn request_reviewers(ctx: &ToolContext<impl HttpClient>, input: &Value
         ctx.proxy_url,
     );
 
-    let resp = ctx.http_client.post(&url, vec![
-        ("Authorization".to_string(), format!("Bearer {}", ctx.github_token)),
-        ("Accept".to_string(), "application/vnd.github.v3+json".to_string()),
-    ], serde_json::json!({ "reviewers": reviewers })).await.map_err(|e| e)?;
+    let resp = ctx
+        .http_client
+        .post(
+            &url,
+            vec![
+                (
+                    "Authorization".to_string(),
+                    format!("Bearer {}", ctx.github_token),
+                ),
+                (
+                    "Accept".to_string(),
+                    "application/vnd.github.v3+json".to_string(),
+                ),
+            ],
+            serde_json::json!({ "reviewers": reviewers }),
+        )
+        .await?;
     let response: Value = serde_json::from_str(&resp.body).map_err(|e| e.to_string())?;
 
     let number = response["number"].as_u64().unwrap_or(pr_number);
@@ -212,7 +320,10 @@ pub async fn request_reviewers(ctx: &ToolContext<impl HttpClient>, input: &Value
 }
 
 /// Post a comment on a pull request (uses the Issues comments endpoint).
-pub async fn post_pr_comment(ctx: &ToolContext<impl HttpClient>, input: &Value) -> Result<String, String> {
+pub async fn post_pr_comment(
+    ctx: &ToolContext<impl HttpClient>,
+    input: &Value,
+) -> Result<String, String> {
     let owner = input["owner"].as_str().ok_or("missing owner")?;
     let repo = input["repo"].as_str().ok_or("missing repo")?;
     let pr_number = input["pr_number"].as_u64().ok_or("missing pr_number")?;
@@ -223,10 +334,23 @@ pub async fn post_pr_comment(ctx: &ToolContext<impl HttpClient>, input: &Value) 
         ctx.proxy_url,
     );
 
-    let resp = ctx.http_client.post(&url, vec![
-        ("Authorization".to_string(), format!("Bearer {}", ctx.github_token)),
-        ("Accept".to_string(), "application/vnd.github.v3+json".to_string()),
-    ], serde_json::json!({ "body": body })).await.map_err(|e| e)?;
+    let resp = ctx
+        .http_client
+        .post(
+            &url,
+            vec![
+                (
+                    "Authorization".to_string(),
+                    format!("Bearer {}", ctx.github_token),
+                ),
+                (
+                    "Accept".to_string(),
+                    "application/vnd.github.v3+json".to_string(),
+                ),
+            ],
+            serde_json::json!({ "body": body }),
+        )
+        .await?;
     let response: Value = serde_json::from_str(&resp.body).map_err(|e| e.to_string())?;
 
     let url_str = response["html_url"].as_str().unwrap_or("(no url)");

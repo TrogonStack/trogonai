@@ -255,7 +255,7 @@ pub mod mock {
                     .filter(|r| {
                         automation_id
                             .as_deref()
-                            .map_or(true, |aid| r.automation_id == aid)
+                            .is_none_or(|aid| r.automation_id == aid)
                     })
                     .cloned()
                     .collect();
@@ -279,15 +279,11 @@ pub mod mock {
                 let total = runs.len() as u64;
                 let successful_7d = runs
                     .iter()
-                    .filter(|r| {
-                        r.started_at >= seven_days_ago && r.status == RunStatus::Success
-                    })
+                    .filter(|r| r.started_at >= seven_days_ago && r.status == RunStatus::Success)
                     .count() as u64;
                 let failed_7d = runs
                     .iter()
-                    .filter(|r| {
-                        r.started_at >= seven_days_ago && r.status == RunStatus::Failed
-                    })
+                    .filter(|r| r.started_at >= seven_days_ago && r.status == RunStatus::Failed)
                     .count() as u64;
                 Ok(RunStats {
                     total,
@@ -345,7 +341,7 @@ mod tests {
     #[test]
     fn stats_counts_correctly() {
         let now = now_unix();
-        let runs = vec![
+        let runs = [
             sample_run("r1", RunStatus::Success, now - 3600), // 1h ago — in 7d window
             sample_run("r2", RunStatus::Failed, now - 3600),  // 1h ago — in 7d window
             sample_run("r3", RunStatus::Success, now - 8 * 86_400), // 8d ago — outside window

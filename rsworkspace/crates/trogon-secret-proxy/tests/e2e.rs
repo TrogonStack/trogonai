@@ -541,7 +541,8 @@ async fn e2e_invalid_payload_is_nacked_and_worker_continues() {
         .unwrap();
 
     // Inject garbage bytes directly into the stream — bypasses the proxy.
-    jetstream.context()
+    jetstream
+        .context()
         .publish(
             outbound_subject.clone(),
             b"this is not valid json !!!".to_vec().into(),
@@ -786,7 +787,8 @@ async fn e2e_invalid_response_headers_silently_dropped() {
         .unwrap();
 
     // Register an inline worker that will reply with crafted headers.
-    let js_stream = jetstream.context()
+    let js_stream = jetstream
+        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -890,7 +892,8 @@ async fn e2e_worker_error_field_with_status_200_returns_502() {
         .await
         .unwrap();
 
-    let js_stream = jetstream.context()
+    let js_stream = jetstream
+        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -1039,7 +1042,8 @@ async fn e2e_nacked_message_redelivered_to_second_worker() {
     use futures_util::StreamExt as _;
     let consumer_name = "e2e-redeliver-workers";
     {
-        let js_stream = jetstream.context()
+        let js_stream = jetstream
+            .context()
             .get_stream(&stream::stream_name("trogon"))
             .await
             .unwrap();
@@ -1137,7 +1141,8 @@ async fn e2e_worker_invalid_status_code_falls_back_to_500() {
         .unwrap();
 
     // Register an inline worker that will reply with status 1000 (out of range).
-    let js_stream = jetstream.context()
+    let js_stream = jetstream
+        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -1248,7 +1253,8 @@ async fn e2e_max_deliver_exhausted_proxy_returns_504() {
     let consumer_name = "e2e-maxdeliver-workers";
     let saboteur_js = jetstream.clone();
     tokio::spawn(async move {
-        let js_stream = saboteur_js.context()
+        let js_stream = saboteur_js
+            .context()
             .get_stream(&stream::stream_name("trogon"))
             .await
             .unwrap();
@@ -1323,7 +1329,8 @@ async fn e2e_hop_by_hop_headers_stripped_from_jetstream_message() {
         .unwrap();
 
     // Inline consumer — inspects the raw JetStream message headers.
-    let js_stream = jetstream.context()
+    let js_stream = jetstream
+        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -1531,7 +1538,8 @@ async fn e2e_duplicate_request_headers_both_values_forwarded() {
         .await
         .unwrap();
 
-    let js_stream = jetstream.context()
+    let js_stream = jetstream
+        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -1630,7 +1638,8 @@ async fn e2e_non_utf8_request_header_silently_dropped() {
         .await
         .unwrap();
 
-    let js_stream = jetstream.context()
+    let js_stream = jetstream
+        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -1737,7 +1746,8 @@ async fn e2e_large_request_header_value_forwarded() {
         .await
         .unwrap();
 
-    let js_stream = jetstream.context()
+    let js_stream = jetstream
+        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -1905,7 +1915,8 @@ async fn e2e_non_utf8_upstream_response_header_silently_dropped() {
         idempotency_key: "nonutf8-corr-001".to_string(),
     };
 
-    jetstream.context()
+    jetstream
+        .context()
         .publish(
             outbound_subject,
             serde_json::to_vec(&message).unwrap().into(),
@@ -2008,7 +2019,8 @@ async fn e2e_invalid_http_method_in_outbound_request_returns_worker_error() {
         idempotency_key: "invmth-corr-001".to_string(),
     };
 
-    jetstream.context()
+    jetstream
+        .context()
         .publish(
             outbound_subject,
             serde_json::to_vec(&message).unwrap().into(),
@@ -2065,7 +2077,8 @@ async fn e2e_corrupted_worker_reply_returns_500() {
         .unwrap();
 
     // Set up a consumer to intercept the JetStream message.
-    let js_stream = jetstream.context()
+    let js_stream = jetstream
+        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -2208,7 +2221,8 @@ async fn e2e_trailing_slash_in_base_url_override_is_normalized() {
         .await
         .unwrap();
 
-    let js_stream = jetstream.context()
+    let js_stream = jetstream
+        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -2305,7 +2319,8 @@ async fn e2e_stream_config_has_work_queue_retention_and_memory_storage() {
         .await
         .unwrap();
 
-    let js_stream = jetstream.context()
+    let js_stream = jetstream
+        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -2552,7 +2567,8 @@ async fn e2e_duplicate_authorization_headers_first_value_used() {
         idempotency_key: "dupauth-corr-001".to_string(),
     };
 
-    jetstream.context()
+    jetstream
+        .context()
         .publish(
             outbound_subject,
             serde_json::to_vec(&message).unwrap().into(),
@@ -2609,7 +2625,8 @@ async fn e2e_transfer_encoding_header_stripped_from_outbound_request() {
         .unwrap();
 
     // Intercept consumer — reads the raw JetStream message and checks headers.
-    let js_stream = jetstream.context()
+    let js_stream = jetstream
+        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -2713,7 +2730,8 @@ async fn e2e_worker_reply_to_wrong_subject_causes_proxy_timeout() {
         .unwrap();
 
     // Intercept consumer plays the role of a misbehaving worker.
-    let js_stream = jetstream.context()
+    let js_stream = jetstream
+        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -2854,7 +2872,8 @@ async fn e2e_empty_reply_to_field_worker_handles_gracefully() {
         reply_to: "".to_string(), // EMPTY — nats.publish will fail
         idempotency_key: "emprep-corr-001".to_string(),
     };
-    jetstream.context()
+    jetstream
+        .context()
         .publish(
             outbound_subject.clone(),
             serde_json::to_vec(&msg1).unwrap().into(),
@@ -2880,7 +2899,8 @@ async fn e2e_empty_reply_to_field_worker_handles_gracefully() {
         reply_to: reply_subject.clone(),
         idempotency_key: "emprep-corr-002".to_string(),
     };
-    jetstream.context()
+    jetstream
+        .context()
         .publish(outbound_subject, serde_json::to_vec(&msg2).unwrap().into())
         .await
         .unwrap();
@@ -2940,7 +2960,8 @@ async fn e2e_wrong_retention_policy_messages_survive_ack() {
     let sname = stream::stream_name(prefix);
 
     // Step 1: Pre-create the stream with the WRONG retention policy.
-    jetstream.context()
+    jetstream
+        .context()
         .get_or_create_stream(async_nats::jetstream::stream::Config {
             name: sname.clone(),
             subjects: vec![outbound_subject.clone()],
@@ -2957,7 +2978,8 @@ async fn e2e_wrong_retention_policy_messages_survive_ack() {
         .unwrap();
 
     // Verify the bug: stream still has Limits retention, NOT WorkQueue.
-    let info = jetstream.context()
+    let info = jetstream
+        .context()
         .get_stream(&sname)
         .await
         .unwrap()
@@ -2970,7 +2992,8 @@ async fn e2e_wrong_retention_policy_messages_survive_ack() {
     );
 
     // Step 3: Publish a test message.
-    jetstream.context()
+    jetstream
+        .context()
         .publish(outbound_subject.clone(), b"test-payload".to_vec().into())
         .await
         .unwrap()
@@ -3103,7 +3126,8 @@ async fn e2e_invalid_url_in_outbound_request_returns_worker_error() {
         idempotency_key: "invurl-corr-001".to_string(),
     };
 
-    jetstream.context()
+    jetstream
+        .context()
         .publish(
             outbound_subject,
             serde_json::to_vec(&message).unwrap().into(),
@@ -3153,7 +3177,8 @@ async fn e2e_nats_reply_to_header_injected_in_jetstream_message() {
         .unwrap();
 
     // Intercept consumer — reads the raw JetStream message and checks NATS headers.
-    let js_stream = jetstream.context()
+    let js_stream = jetstream
+        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -3276,7 +3301,8 @@ async fn e2e_worker_error_with_4xx_status_preserves_status_code() {
         .await
         .unwrap();
 
-    let js_stream = jetstream.context()
+    let js_stream = jetstream
+        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -3381,7 +3407,8 @@ async fn e2e_hop_by_hop_headers_stripped_in_outbound_request() {
         .await
         .unwrap();
 
-    let js_stream = jetstream.context()
+    let js_stream = jetstream
+        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -3494,7 +3521,8 @@ async fn e2e_multiple_transfer_encoding_headers_all_stripped() {
         .await
         .unwrap();
 
-    let js_stream = jetstream.context()
+    let js_stream = jetstream
+        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -3618,7 +3646,8 @@ async fn e2e_empty_query_string_appended_as_bare_question_mark() {
         .await
         .unwrap();
 
-    let js_stream = jetstream.context()
+    let js_stream = jetstream
+        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -3722,7 +3751,8 @@ async fn e2e_request_header_with_invalid_utf8_silently_dropped() {
         .await
         .unwrap();
 
-    let js_stream = jetstream.context()
+    let js_stream = jetstream
+        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -3834,7 +3864,8 @@ async fn e2e_query_string_encoded_chars_preserved() {
         .await
         .unwrap();
 
-    let js_stream = jetstream.context()
+    let js_stream = jetstream
+        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -3939,7 +3970,8 @@ async fn e2e_duplicate_set_cookie_headers_both_forwarded() {
         .await
         .unwrap();
 
-    let js_stream = jetstream.context()
+    let js_stream = jetstream
+        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -4051,7 +4083,8 @@ async fn e2e_invalid_status_code_in_worker_response_falls_back_to_500() {
         .await
         .unwrap();
 
-    let js_stream = jetstream.context()
+    let js_stream = jetstream
+        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -4146,7 +4179,8 @@ async fn e2e_corrupted_reply_json_returns_500() {
         .await
         .unwrap();
 
-    let js_stream = jetstream.context()
+    let js_stream = jetstream
+        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -4233,7 +4267,8 @@ async fn e2e_empty_valued_request_header_is_preserved() {
         .await
         .unwrap();
 
-    let js_stream = jetstream.context()
+    let js_stream = jetstream
+        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -4345,7 +4380,8 @@ async fn e2e_whitespace_only_base_url_override_produces_leading_space_in_url() {
         .await
         .unwrap();
 
-    let js_stream = jetstream.context()
+    let js_stream = jetstream
+        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -4495,7 +4531,8 @@ async fn e2e_real_key_in_response_body_is_not_stripped() {
         .await
         .unwrap();
 
-    let js_stream = jetstream.context()
+    let js_stream = jetstream
+        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -4600,7 +4637,8 @@ async fn e2e_error_field_with_4xx_status_uses_that_status_not_502() {
         .await
         .unwrap();
 
-    let js_stream = jetstream.context()
+    let js_stream = jetstream
+        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -4746,7 +4784,8 @@ async fn e2e_response_header_with_invalid_name_is_silently_dropped() {
         .await
         .unwrap();
 
-    let js_stream = jetstream.context()
+    let js_stream = jetstream
+        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -4859,7 +4898,8 @@ async fn e2e_response_header_with_invalid_value_is_silently_dropped() {
         .await
         .unwrap();
 
-    let js_stream = jetstream.context()
+    let js_stream = jetstream
+        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -4968,7 +5008,8 @@ async fn e2e_hop_by_hop_headers_are_stripped_before_forwarding() {
         .await
         .unwrap();
 
-    let js_stream = jetstream.context()
+    let js_stream = jetstream
+        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -5097,7 +5138,8 @@ async fn e2e_error_field_with_5xx_status_uses_that_5xx_not_502() {
         .await
         .unwrap();
 
-    let js_stream = jetstream.context()
+    let js_stream = jetstream
+        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -5225,7 +5267,8 @@ async fn e2e_worker_run_exits_ok_when_jetstream_stream_is_deleted() {
     // Delete the stream — this terminates the JetStream Messages iterator.
     // The async_nats internal pull task detects the consumer/stream is gone and
     // closes the channel, causing messages.next() to return None.
-    jetstream.context()
+    jetstream
+        .context()
         .delete_stream(&stream_name_val)
         .await
         .expect("Failed to delete stream");
