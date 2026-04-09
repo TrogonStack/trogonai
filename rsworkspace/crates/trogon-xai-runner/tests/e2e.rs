@@ -2066,3 +2066,290 @@ async fn close_session_mid_stream_removes_session_permanently() {
         })
         .await;
 }
+
+// ── cancel: no-op after prompt already completed ──────────────────────────────
+
+/// `cancel` sent after a prompt has already finished and published its response
+/// is a no-op. The cancel_senders entry is removed when `prompt()` completes,
+/// so the cancel notification finds nothing to fire and must not trigger any
+/// new publishes.
+#[tokio::test]
+async fn cancel_after_prompt_completed_is_noop() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            // Complete a normal prompt.
+            h.http.push(vec![XaiEvent::TextDelta { text: "done".to_string() }, XaiEvent::Done]);
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("hi")]),
+                "r.prompt",
+            );
+            h.expect_n_publishes(2).await; // session + prompt
+
+            // Cancel the same session after the prompt has already finished.
+            let cancel_subj = format!("acp.session.{sid}.agent.cancel");
+            h.session_notify(&cancel_subj, CancelNotification::new(sid.clone()));
+
+            // Must not trigger any new publishes — the cancel sender is already gone.
+            h.expect_no_new_publishes(2).await;
+        })
+        .await;
+}
+
+// ── prompt: empty ContentBlock array completes without error ─────────────────
+
+/// `PromptRequest` with a completely empty `ContentBlock` array must not panic.
+/// `user_input` resolves to an empty string, the agent logs a warning and
+/// proceeds — a valid `PromptResponse` must be published.
+#[tokio::test]
+async fn prompt_with_empty_content_blocks_completes() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            h.http.push(vec![XaiEvent::Done]);
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![]),
+                "r.prompt",
+            );
+
+            let payloads = h.expect_n_publishes(2).await;
+            let val: serde_json::Value = serde_json::from_slice(&payloads[1]).unwrap();
+            assert!(
+                val.get("code").is_none(),
+                "empty content blocks must produce a valid PromptResponse, not an ACP error: {val}"
+            );
+        })
+        .await;
+}
+
+// ── fork: prompt on closed fork returns ACP error ────────────────────────────
+
+/// After a forked session is immediately closed, prompting it must return an
+/// ACP error — the session was removed from state by `close_session`.
+#[tokio::test]
+async fn prompt_on_closed_fork_returns_acp_error() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            // Fork the session.
+            let fork_subj = format!("acp.session.{sid}.agent.fork");
+            h.session_req(
+                &fork_subj,
+                ForkSessionRequest::new(sid.clone(), "/fork"),
+                "r.fork",
+            );
+            let payloads = h.expect_n_publishes(2).await;
+            let fork_val: serde_json::Value = serde_json::from_slice(&payloads[1]).unwrap();
+            let fork_id = fork_val["sessionId"].as_str().unwrap().to_string();
+
+            // Close the fork immediately.
+            let close_subj = format!("acp.session.{fork_id}.agent.close");
+            h.session_req(
+                &close_subj,
+                CloseSessionRequest::new(fork_id.clone()),
+                "r.close",
+            );
+            h.expect_n_publishes(3).await;
+
+            // Prompt the now-closed fork — must return an ACP error.
+            let prompt_subj = format!("acp.session.{fork_id}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(fork_id.clone(), vec![ContentBlock::from("hi")]),
+                "r.prompt",
+            );
+            let payloads = h.expect_n_publishes(4).await;
+            let val: serde_json::Value = serde_json::from_slice(&payloads[3]).unwrap();
+            assert!(
+                val.get("code").is_some(),
+                "prompt on closed fork must return ACP error, got: {val}"
+            );
+        })
+        .await;
+}
+
+// ── authenticate: meta without XAI_API_KEY does not set pending key ───────────
+
+/// `authenticate` with meta that does NOT contain `XAI_API_KEY` must leave
+/// `pending_api_key` as `None`. The subsequent `new_session` must fall back to
+/// the agent-wide global key, and prompts must succeed normally.
+#[tokio::test]
+async fn authenticate_with_meta_without_xai_api_key_does_not_set_pending_key() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new(); // global key = "test-key"
+
+            // Authenticate with meta that has a different field — NOT XAI_API_KEY.
+            let mut meta = serde_json::Map::new();
+            meta.insert("SOME_OTHER_FIELD".to_string(), serde_json::json!("irrelevant"));
+            h.global(
+                "acp.agent.authenticate",
+                AuthenticateRequest::new("api-key").meta(meta),
+                "r.auth",
+            );
+            h.expect_n_publishes(1).await;
+
+            // Create session — global key must be used (pending was never set).
+            let sid = create_session(&h).await;
+
+            // Prompt must succeed — global key is in effect.
+            h.http.push(vec![XaiEvent::TextDelta { text: "ok".to_string() }, XaiEvent::Done]);
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("hi")]),
+                "r.prompt",
+            );
+            let payloads = h.expect_n_publishes(3).await; // auth + session + prompt
+            let val: serde_json::Value = serde_json::from_slice(&payloads[2]).unwrap();
+            assert!(
+                val.get("code").is_none(),
+                "prompt must succeed — global key must be used when meta lacks XAI_API_KEY: {val}"
+            );
+        })
+        .await;
+}
+
+// ── three-turn ResponseId caching: id updated each turn ──────────────────────
+
+/// After each turn that returns a new ResponseId, the cached id must be updated
+/// so the NEXT turn uses the LATEST id — not the one from the first turn.
+/// Turn 1 → caches "resp-1"; Turn 2 uses "resp-1", returns "resp-2";
+/// Turn 3 must use "resp-2" (not "resp-1").
+#[tokio::test]
+async fn three_turn_sequence_response_id_updated_each_turn() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+
+            // Turn 1: returns resp-1.
+            h.http.push(vec![
+                XaiEvent::ResponseId { id: "resp-1".to_string() },
+                XaiEvent::Done,
+            ]);
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("q1")]),
+                "r.p1",
+            );
+            h.expect_n_publishes(2).await;
+
+            // Turn 2: must use resp-1, returns resp-2.
+            h.http.push(vec![
+                XaiEvent::ResponseId { id: "resp-2".to_string() },
+                XaiEvent::Done,
+            ]);
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("q2")]),
+                "r.p2",
+            );
+            h.expect_n_publishes(3).await;
+            assert_eq!(
+                h.http.last_call().unwrap().previous_response_id.as_deref(),
+                Some("resp-1"),
+                "turn 2 must use resp-1"
+            );
+
+            // Turn 3: must use resp-2 (the updated id), not resp-1.
+            h.http.push(vec![XaiEvent::Done]);
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("q3")]),
+                "r.p3",
+            );
+            h.expect_n_publishes(4).await;
+            assert_eq!(
+                h.http.last_call().unwrap().previous_response_id.as_deref(),
+                Some("resp-2"),
+                "turn 3 must use the updated resp-2, not stale resp-1"
+            );
+        })
+        .await;
+}
+
+// ── fork: source closed before fork returns ACP error ────────────────────────
+
+/// Attempting to fork a session that has already been closed must return an
+/// ACP error. Only the reverse (fork then close) was previously tested.
+#[tokio::test]
+async fn fork_of_closed_session_returns_acp_error() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            // Close the session first.
+            let close_subj = format!("acp.session.{sid}.agent.close");
+            h.session_req(&close_subj, CloseSessionRequest::new(sid.clone()), "r.close");
+            h.expect_n_publishes(2).await;
+
+            // Attempt to fork the now-closed session.
+            let fork_subj = format!("acp.session.{sid}.agent.fork");
+            h.session_req(
+                &fork_subj,
+                ForkSessionRequest::new(sid.clone(), "/fork"),
+                "r.fork",
+            );
+            let payloads = h.expect_n_publishes(3).await;
+            let val: serde_json::Value = serde_json::from_slice(&payloads[2]).unwrap();
+            assert!(
+                val.get("code").is_some(),
+                "fork of a closed session must return an ACP error, got: {val}"
+            );
+        })
+        .await;
+}
+
+// ── fork: no model override falls back to agent default on prompt ─────────────
+
+/// A fork of a session with no model override (model = None) must also have
+/// no override. When prompted, the agent default model ("grok-3") must be used.
+#[tokio::test]
+async fn fork_with_no_model_override_uses_agent_default_on_prompt() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new(); // default model = "grok-3"
+            let sid = create_session(&h).await; // no model override
+
+            // Fork the session (source has no override).
+            let fork_subj = format!("acp.session.{sid}.agent.fork");
+            h.session_req(
+                &fork_subj,
+                ForkSessionRequest::new(sid.clone(), "/fork"),
+                "r.fork",
+            );
+            let payloads = h.expect_n_publishes(2).await;
+            let fork_val: serde_json::Value = serde_json::from_slice(&payloads[1]).unwrap();
+            let fork_id = fork_val["sessionId"].as_str().unwrap().to_string();
+
+            // Prompt the fork — agent default model must be used.
+            h.http.push(vec![XaiEvent::Done]);
+            let prompt_subj = format!("acp.session.{fork_id}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(fork_id.clone(), vec![ContentBlock::from("hi")]),
+                "r.prompt",
+            );
+            h.expect_n_publishes(3).await;
+
+            assert_eq!(
+                h.http.last_call().unwrap().model,
+                "grok-3",
+                "fork with no model override must use the agent default model"
+            );
+        })
+        .await;
+}

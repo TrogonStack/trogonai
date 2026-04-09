@@ -1413,6 +1413,128 @@ mod tests {
         );
     }
 
+    // ── usage: asymmetric tokens still emits ─────────────────────────────────
+
+    #[test]
+    fn usage_with_only_prompt_tokens_nonzero_emits_usage() {
+        // `p > 0 || c > 0` — when completion_tokens is zero but prompt_tokens > 0
+        // the guard must pass and Usage must be emitted.
+        let line = r#"data: {"type":"response.completed","response":{"status":"completed"},"usage":{"prompt_tokens":5,"completion_tokens":0}}"#;
+        let events = parse_line_all(line);
+        assert!(
+            events.iter().any(|e| matches!(e, XaiEvent::Usage { prompt_tokens: 5, completion_tokens: 0 })),
+            "asymmetric usage (p=5, c=0) must still be emitted: {events:?}"
+        );
+    }
+
+    // ── function_call done: empty arguments emits with empty string ───────────
+
+    #[test]
+    fn function_call_done_with_missing_arguments_emits_empty_string() {
+        // `val["arguments"].as_str().unwrap_or("")` returns "" when the field is
+        // absent. The event must still be emitted — not suppressed — so callers
+        // can observe a function call with no argument data.
+        let done = r#"data: {"type":"response.function_call_arguments.done","call_id":"call_1","name":"my_tool"}"#;
+        let event = parse_line(done).expect("done without arguments must still emit FunctionCall");
+        match event {
+            XaiEvent::FunctionCall { call_id, name, arguments } => {
+                assert_eq!(call_id, "call_1");
+                assert_eq!(name, "my_tool");
+                assert_eq!(arguments, "", "absent arguments field must produce empty string");
+            }
+            other => panic!("expected FunctionCall, got {other:?}"),
+        }
+    }
+
+    // ── output_item.added: re-announced call_id overwrites name ──────────────
+
+    #[test]
+    fn output_item_added_reannounce_same_call_id_overwrites_name() {
+        // When the server sends two `output_item.added` events for the same
+        // call_id (re-announcement with a corrected name), the second insert into
+        // `pending_fc` overwrites the first. The `done` event must use the last name.
+        let added1 = r#"data: {"type":"response.output_item.added","item":{"type":"function_call","call_id":"call_r","name":"wrong_name"}}"#;
+        let added2 = r#"data: {"type":"response.output_item.added","item":{"type":"function_call","call_id":"call_r","name":"correct_name"}}"#;
+        let done = r#"data: {"type":"response.function_call_arguments.done","call_id":"call_r","arguments":"{}"}"#;
+        let events = parse_lines(&[added1, added2, done]);
+        assert_eq!(events.len(), 1, "only the done event must emit: {events:?}");
+        match &events[0] {
+            XaiEvent::FunctionCall { name, .. } => {
+                assert_eq!(name, "correct_name", "second output_item.added must overwrite the name");
+            }
+            other => panic!("expected FunctionCall, got {other:?}"),
+        }
+    }
+
+    // ── parse_sse: event split across chunk boundary ──────────────────────────
+
+    #[tokio::test]
+    async fn parse_sse_event_split_across_chunk_boundary() {
+        use futures_util::stream::{self, StreamExt as _};
+
+        // A single SSE line split into two chunks at an arbitrary byte boundary.
+        // The buffer accumulation logic must reassemble before parsing.
+        let part1 = Bytes::from("data: {\"type\":\"message.delta\",\"delta\":{\"type\":\"output");
+        let part2 = Bytes::from("_text\",\"text\":\"hello\"}}\n");
+        let s = stream::iter(vec![
+            Ok::<_, reqwest::Error>(part1),
+            Ok::<_, reqwest::Error>(part2),
+        ]);
+        let events: Vec<_> = parse_sse(s).collect().await;
+        assert!(
+            events.iter().any(|e| matches!(e, XaiEvent::TextDelta { text } if text == "hello")),
+            "SSE event split across chunk boundary must be reassembled: {events:?}"
+        );
+    }
+
+    // ── response.completed: zero-token usage guard ───────────────────────────
+
+    #[test]
+    fn response_completed_zero_usage_emits_no_usage_event() {
+        // The emission guard `if p > 0 || c > 0` must skip Usage when both
+        // tokens are zero — a stream that returned no content must not emit a
+        // spurious Usage event with all-zero counts.
+        let line = r#"data: {"type":"response.completed","response":{"id":"r1","status":"completed"},"usage":{"prompt_tokens":0,"completion_tokens":0}}"#;
+        let events = parse_line_all(line);
+        assert!(
+            !events.iter().any(|e| matches!(e, XaiEvent::Usage { .. })),
+            "zero-token usage must not be emitted: {events:?}"
+        );
+    }
+
+    // ── response.output_item.added: empty call_id rejected ───────────────────
+
+    #[test]
+    fn output_item_added_empty_call_id_does_not_register_entry() {
+        // `output_item.added` with an empty call_id must be silently rejected by
+        // `if !call_id.is_empty()` — no entry is inserted into pending_fc.
+        // A subsequent delta for the same empty key finds nothing and is also
+        // a no-op (both guards reject empty call_id).
+        let added = r#"data: {"type":"response.output_item.added","item":{"type":"function_call","call_id":"","name":""}}"#;
+        let delta = r#"data: {"type":"response.function_call_arguments.delta","call_id":"","delta":"partial"}"#;
+        let events = parse_lines(&[added, delta]);
+        assert!(
+            events.is_empty(),
+            "added + delta with empty call_id must produce no events: {events:?}"
+        );
+    }
+
+    // ── response.completed: missing status field — no panic, no events ────────
+
+    #[test]
+    fn response_completed_without_status_field_emits_nothing() {
+        // A response.completed with no status, no usage, and no response.id
+        // (malformed or minimal payload) must not panic and must emit no events.
+        // Every extraction path returns None, so no Finished, Usage, or ResponseId
+        // is pushed onto the pending queue.
+        let line = r#"data: {"type":"response.completed"}"#;
+        let events = parse_line_all(line);
+        assert!(
+            events.is_empty(),
+            "response.completed with no fields must emit nothing: {events:?}"
+        );
+    }
+
     #[tokio::test]
     async fn parse_sse_response_id_emitted_once_across_multiple_chunks() {
         use futures_util::stream::{self, StreamExt as _};
