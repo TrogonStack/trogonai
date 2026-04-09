@@ -146,7 +146,9 @@ pub struct MemorySessionStore {
 #[cfg(feature = "test-helpers")]
 impl MemorySessionStore {
     pub fn new() -> Self {
-        Self { map: tokio::sync::Mutex::new(std::collections::HashMap::new()) }
+        Self {
+            map: tokio::sync::Mutex::new(std::collections::HashMap::new()),
+        }
     }
 }
 
@@ -172,8 +174,10 @@ impl SessionStore for MemorySessionStore {
 
     async fn list(&self) -> Vec<(String, String)> {
         let map = self.map.lock().await;
-        let mut result: Vec<_> =
-            map.iter().map(|(k, v)| (k.clone(), v.cwd.clone())).collect();
+        let mut result: Vec<_> = map
+            .iter()
+            .map(|(k, v)| (k.clone(), v.cwd.clone()))
+            .collect();
         result.sort_by(|a, b| a.0.cmp(&b.0));
         result
     }
