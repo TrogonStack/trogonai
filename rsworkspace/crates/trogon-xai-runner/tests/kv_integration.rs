@@ -17,10 +17,10 @@ use agent_client_protocol::{
     ListSessionsRequest, LoadSessionRequest, NewSessionRequest, PromptRequest,
     SetSessionConfigOptionRequest, SetSessionModelRequest, TextContent,
 };
-use trogon_xai_runner::Message;
 use futures_util::StreamExt as _;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
+use trogon_xai_runner::Message;
 use trogon_xai_runner::XaiAgent;
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -61,19 +61,25 @@ async fn kv_session_persists_across_agent_instances() {
     let nats_b = real_nats(&url).await;
     let prefix = AcpPrefix::new("test").unwrap();
 
-    let agent_a = XaiAgent::new_with_kv_bucket(
-        nats_a, prefix.clone(), "grok-3", "key", &bucket,
-    ).await.unwrap();
+    let agent_a = XaiAgent::new_with_kv_bucket(nats_a, prefix.clone(), "grok-3", "key", &bucket)
+        .await
+        .unwrap();
 
-    let sess = agent_a.new_session(NewSessionRequest::new("/workspace")).await.unwrap();
+    let sess = agent_a
+        .new_session(NewSessionRequest::new("/workspace"))
+        .await
+        .unwrap();
     let session_id = sess.session_id.clone();
 
     // Second agent, same bucket — should see the session.
-    let agent_b = XaiAgent::new_with_kv_bucket(
-        nats_b, prefix, "grok-3", "key", &bucket,
-    ).await.unwrap();
+    let agent_b = XaiAgent::new_with_kv_bucket(nats_b, prefix, "grok-3", "key", &bucket)
+        .await
+        .unwrap();
 
-    agent_b.load_session(LoadSessionRequest::new(session_id, "/workspace")).await.unwrap();
+    agent_b
+        .load_session(LoadSessionRequest::new(session_id, "/workspace"))
+        .await
+        .unwrap();
 
     cleanup(&url, &bucket).await;
 }
@@ -88,21 +94,27 @@ async fn kv_model_change_persists_across_agent_instances() {
     let nats_b = real_nats(&url).await;
     let prefix = AcpPrefix::new("test").unwrap();
 
-    let agent_a = XaiAgent::new_with_kv_bucket(
-        nats_a, prefix.clone(), "grok-3", "key", &bucket,
-    ).await.unwrap();
-
-    let sess = agent_a.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
-    let session_id = sess.session_id.clone();
-
-    agent_a
-        .set_session_model(SetSessionModelRequest::new(session_id.to_string(), "grok-3-mini"))
+    let agent_a = XaiAgent::new_with_kv_bucket(nats_a, prefix.clone(), "grok-3", "key", &bucket)
         .await
         .unwrap();
 
-    let agent_b = XaiAgent::new_with_kv_bucket(
-        nats_b, prefix, "grok-3", "key", &bucket,
-    ).await.unwrap();
+    let sess = agent_a
+        .new_session(NewSessionRequest::new("/tmp"))
+        .await
+        .unwrap();
+    let session_id = sess.session_id.clone();
+
+    agent_a
+        .set_session_model(SetSessionModelRequest::new(
+            session_id.to_string(),
+            "grok-3-mini",
+        ))
+        .await
+        .unwrap();
+
+    let agent_b = XaiAgent::new_with_kv_bucket(nats_b, prefix, "grok-3", "key", &bucket)
+        .await
+        .unwrap();
 
     let model = agent_b.test_session_model(&session_id.to_string()).await;
     assert_eq!(model.as_deref(), Some("grok-3-mini"));
@@ -121,11 +133,14 @@ async fn kv_close_session_removes_from_kv() {
     let nats_b = real_nats(&url).await;
     let prefix = AcpPrefix::new("test").unwrap();
 
-    let agent_a = XaiAgent::new_with_kv_bucket(
-        nats_a, prefix.clone(), "grok-3", "key", &bucket,
-    ).await.unwrap();
+    let agent_a = XaiAgent::new_with_kv_bucket(nats_a, prefix.clone(), "grok-3", "key", &bucket)
+        .await
+        .unwrap();
 
-    let sess = agent_a.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let sess = agent_a
+        .new_session(NewSessionRequest::new("/tmp"))
+        .await
+        .unwrap();
     let session_id = sess.session_id.clone();
 
     agent_a
@@ -133,9 +148,9 @@ async fn kv_close_session_removes_from_kv() {
         .await
         .unwrap();
 
-    let agent_b = XaiAgent::new_with_kv_bucket(
-        nats_b, prefix, "grok-3", "key", &bucket,
-    ).await.unwrap();
+    let agent_b = XaiAgent::new_with_kv_bucket(nats_b, prefix, "grok-3", "key", &bucket)
+        .await
+        .unwrap();
 
     agent_b
         .load_session(LoadSessionRequest::new(session_id, "/tmp"))
@@ -155,15 +170,21 @@ async fn kv_list_sessions_across_agent_instances() {
     let nats_b = real_nats(&url).await;
     let prefix = AcpPrefix::new("test").unwrap();
 
-    let agent_a = XaiAgent::new_with_kv_bucket(
-        nats_a, prefix.clone(), "grok-3", "key", &bucket,
-    ).await.unwrap();
-    let agent_b = XaiAgent::new_with_kv_bucket(
-        nats_b, prefix, "grok-3", "key", &bucket,
-    ).await.unwrap();
+    let agent_a = XaiAgent::new_with_kv_bucket(nats_a, prefix.clone(), "grok-3", "key", &bucket)
+        .await
+        .unwrap();
+    let agent_b = XaiAgent::new_with_kv_bucket(nats_b, prefix, "grok-3", "key", &bucket)
+        .await
+        .unwrap();
 
-    agent_a.new_session(NewSessionRequest::new("/a")).await.unwrap();
-    agent_b.new_session(NewSessionRequest::new("/b")).await.unwrap();
+    agent_a
+        .new_session(NewSessionRequest::new("/a"))
+        .await
+        .unwrap();
+    agent_b
+        .new_session(NewSessionRequest::new("/b"))
+        .await
+        .unwrap();
 
     // Each agent should see both sessions when listing.
     let list_a = agent_a
@@ -191,13 +212,19 @@ async fn kv_forked_session_persists_across_agent_instances() {
     let nats_b = real_nats(&url).await;
     let prefix = AcpPrefix::new("test").unwrap();
 
-    let agent_a = XaiAgent::new_with_kv_bucket(
-        nats_a, prefix.clone(), "grok-3", "key", &bucket,
-    ).await.unwrap();
+    let agent_a = XaiAgent::new_with_kv_bucket(nats_a, prefix.clone(), "grok-3", "key", &bucket)
+        .await
+        .unwrap();
 
-    let sess = agent_a.new_session(NewSessionRequest::new("/src")).await.unwrap();
+    let sess = agent_a
+        .new_session(NewSessionRequest::new("/src"))
+        .await
+        .unwrap();
     agent_a
-        .set_session_model(SetSessionModelRequest::new(sess.session_id.to_string(), "grok-3-mini"))
+        .set_session_model(SetSessionModelRequest::new(
+            sess.session_id.to_string(),
+            "grok-3-mini",
+        ))
         .await
         .unwrap();
 
@@ -207,9 +234,9 @@ async fn kv_forked_session_persists_across_agent_instances() {
         .unwrap();
     let fork_id = fork.session_id.to_string();
 
-    let agent_b = XaiAgent::new_with_kv_bucket(
-        nats_b, prefix, "grok-3", "key", &bucket,
-    ).await.unwrap();
+    let agent_b = XaiAgent::new_with_kv_bucket(nats_b, prefix, "grok-3", "key", &bucket)
+        .await
+        .unwrap();
 
     // Fork should exist and inherit the model.
     let model = agent_b.test_session_model(&fork_id).await;
@@ -229,31 +256,48 @@ async fn kv_tool_config_persists_across_agent_instances() {
     let nats_b = real_nats(&url).await;
     let prefix = AcpPrefix::new("test").unwrap();
 
-    let agent_a = XaiAgent::new_with_kv_bucket(
-        nats_a, prefix.clone(), "grok-3", "key", &bucket,
-    ).await.unwrap();
+    let agent_a = XaiAgent::new_with_kv_bucket(nats_a, prefix.clone(), "grok-3", "key", &bucket)
+        .await
+        .unwrap();
 
-    let sess = agent_a.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let sess = agent_a
+        .new_session(NewSessionRequest::new("/tmp"))
+        .await
+        .unwrap();
     let sid = sess.session_id.to_string();
 
     // Enable two server-side tools via agent A.
     agent_a
-        .set_session_config_option(SetSessionConfigOptionRequest::new(sid.clone(), "web_search", "on"))
+        .set_session_config_option(SetSessionConfigOptionRequest::new(
+            sid.clone(),
+            "web_search",
+            "on",
+        ))
         .await
         .unwrap();
     agent_a
-        .set_session_config_option(SetSessionConfigOptionRequest::new(sid.clone(), "x_search", "on"))
+        .set_session_config_option(SetSessionConfigOptionRequest::new(
+            sid.clone(),
+            "x_search",
+            "on",
+        ))
         .await
         .unwrap();
 
     // Agent B opens the same bucket ("restart") — must see both tools enabled.
-    let agent_b = XaiAgent::new_with_kv_bucket(
-        nats_b, prefix, "grok-3", "key", &bucket,
-    ).await.unwrap();
+    let agent_b = XaiAgent::new_with_kv_bucket(nats_b, prefix, "grok-3", "key", &bucket)
+        .await
+        .unwrap();
 
     let tools = agent_b.test_session_enabled_tools(&sid).await;
-    assert!(tools.contains(&"web_search".to_string()), "web_search must persist: {tools:?}");
-    assert!(tools.contains(&"x_search".to_string()), "x_search must persist: {tools:?}");
+    assert!(
+        tools.contains(&"web_search".to_string()),
+        "web_search must persist: {tools:?}"
+    );
+    assert!(
+        tools.contains(&"x_search".to_string()),
+        "x_search must persist: {tools:?}"
+    );
     assert_eq!(tools.len(), 2, "exactly 2 tools must be enabled: {tools:?}");
 
     cleanup(&url, &bucket).await;
@@ -271,21 +315,26 @@ async fn kv_last_response_id_persists_across_agent_instances() {
     let nats_b = real_nats(&url).await;
     let prefix = AcpPrefix::new("test").unwrap();
 
-    let agent_a = XaiAgent::new_with_kv_bucket(
-        nats_a, prefix.clone(), "grok-3", "key", &bucket,
-    ).await.unwrap();
+    let agent_a = XaiAgent::new_with_kv_bucket(nats_a, prefix.clone(), "grok-3", "key", &bucket)
+        .await
+        .unwrap();
 
-    let sess = agent_a.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let sess = agent_a
+        .new_session(NewSessionRequest::new("/tmp"))
+        .await
+        .unwrap();
     let sid = sess.session_id.to_string();
 
     // Simulate what prompt() stores after a successful xAI turn.
-    agent_a.test_set_last_response_id(&sid, Some("resp_abc123".to_string())).await;
+    agent_a
+        .test_set_last_response_id(&sid, Some("resp_abc123".to_string()))
+        .await;
 
     // Agent B opens the same bucket ("restart") — must read back the response ID
     // so it can resume stateful multi-turn without re-sending full history.
-    let agent_b = XaiAgent::new_with_kv_bucket(
-        nats_b, prefix, "grok-3", "key", &bucket,
-    ).await.unwrap();
+    let agent_b = XaiAgent::new_with_kv_bucket(nats_b, prefix, "grok-3", "key", &bucket)
+        .await
+        .unwrap();
 
     let resp_id = agent_b.test_session_last_response_id(&sid).await;
     assert_eq!(
@@ -311,32 +360,52 @@ async fn kv_session_expires_after_ttl() {
 
     // 1-second TTL bucket.
     let ttl = std::time::Duration::from_secs(1);
-    let agent_a = XaiAgent::new_with_kv_bucket_ttl(
-        nats_a, prefix.clone(), "grok-3", "key", &bucket, ttl,
-    ).await.unwrap();
+    let agent_a =
+        XaiAgent::new_with_kv_bucket_ttl(nats_a, prefix.clone(), "grok-3", "key", &bucket, ttl)
+            .await
+            .unwrap();
 
-    let sess = agent_a.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let sess = agent_a
+        .new_session(NewSessionRequest::new("/tmp"))
+        .await
+        .unwrap();
     let sid = sess.session_id.to_string();
 
     // Session must be visible immediately.
-    let before = agent_a.list_sessions(ListSessionsRequest::new()).await.unwrap();
-    assert_eq!(before.sessions.len(), 1, "session must exist before TTL expires");
+    let before = agent_a
+        .list_sessions(ListSessionsRequest::new())
+        .await
+        .unwrap();
+    assert_eq!(
+        before.sessions.len(),
+        1,
+        "session must exist before TTL expires"
+    );
 
     // Wait comfortably past the 1-second TTL.
     tokio::time::sleep(std::time::Duration::from_secs(3)).await;
 
     // A new agent instance opens the same bucket — the expired entry must be gone.
-    let agent_b = XaiAgent::new_with_kv_bucket_ttl(
-        nats_b, prefix, "grok-3", "key", &bucket, ttl,
-    ).await.unwrap();
+    let agent_b = XaiAgent::new_with_kv_bucket_ttl(nats_b, prefix, "grok-3", "key", &bucket, ttl)
+        .await
+        .unwrap();
 
-    let after = agent_b.list_sessions(ListSessionsRequest::new()).await.unwrap();
-    assert!(after.sessions.is_empty(), "session must be gone after TTL: {after:?}");
+    let after = agent_b
+        .list_sessions(ListSessionsRequest::new())
+        .await
+        .unwrap();
+    assert!(
+        after.sessions.is_empty(),
+        "session must be gone after TTL: {after:?}"
+    );
 
     let load_result = agent_b
         .load_session(LoadSessionRequest::new(sid.clone(), "/tmp"))
         .await;
-    assert!(load_result.is_err(), "loading an expired session must return an error");
+    assert!(
+        load_result.is_err(),
+        "loading an expired session must return an error"
+    );
 
     cleanup(&url, &bucket).await;
 }
@@ -408,10 +477,8 @@ async fn fake_xai_recording_two(
     let bodies: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(Vec::new()));
     let bodies_clone = Arc::clone(&bodies);
 
-    let all_chunks: Vec<(Vec<&'static str>, &'static str)> = vec![
-        (chunks_0, "resp_kv_0"),
-        (chunks_1, "resp_kv_1"),
-    ];
+    let all_chunks: Vec<(Vec<&'static str>, &'static str)> =
+        vec![(chunks_0, "resp_kv_0"), (chunks_1, "resp_kv_1")];
 
     tokio::spawn(async move {
         for (chunks, resp_id) in all_chunks {
@@ -440,7 +507,8 @@ async fn fake_xai_recording_two(
                     .collect();
                 let http = format!(
                     "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
-                    sse_body.len(), sse_body,
+                    sse_body.len(),
+                    sse_body,
                 );
                 writer.write_all(http.as_bytes()).await.ok();
             }
@@ -462,21 +530,48 @@ async fn kv_prompt_persists_history_and_response_id() {
     let xai_url = fake_xai_sse_kv("resp_kv_0", &["Hello from KV"]).await;
 
     let agent_a = XaiAgent::new_with_kv_bucket_and_xai_url(
-        nats_a, prefix.clone(), "grok-3", "key", &bucket, &xai_url,
-    ).await.unwrap();
-    let sess = agent_a.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+        nats_a,
+        prefix.clone(),
+        "grok-3",
+        "key",
+        &bucket,
+        &xai_url,
+    )
+    .await
+    .unwrap();
+    let sess = agent_a
+        .new_session(NewSessionRequest::new("/tmp"))
+        .await
+        .unwrap();
     let sid = sess.session_id.to_string();
-    agent_a.prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::Text(TextContent::new("ping"))])).await.unwrap();
+    agent_a
+        .prompt(PromptRequest::new(
+            sid.clone(),
+            vec![ContentBlock::Text(TextContent::new("ping"))],
+        ))
+        .await
+        .unwrap();
 
     let agent_b = XaiAgent::new_with_kv_bucket_and_xai_url(
-        nats_b, prefix, "grok-3", "key", &bucket, "http://localhost:1",
-    ).await.unwrap();
+        nats_b,
+        prefix,
+        "grok-3",
+        "key",
+        &bucket,
+        "http://localhost:1",
+    )
+    .await
+    .unwrap();
     let history = agent_b.test_session_history(&sid).await;
     assert_eq!(history.len(), 2, "history must persist to KV: {history:?}");
     assert_eq!(history[0].role, "user");
     assert_eq!(history[1].role, "assistant");
     let resp_id = agent_b.test_session_last_response_id(&sid).await;
-    assert_eq!(resp_id.as_deref(), Some("resp_kv_0"), "last_response_id must persist: {resp_id:?}");
+    assert_eq!(
+        resp_id.as_deref(),
+        Some("resp_kv_0"),
+        "last_response_id must persist: {resp_id:?}"
+    );
 
     cleanup(&url, &bucket).await;
 }
@@ -493,26 +588,57 @@ async fn kv_stateful_multi_turn_uses_previous_response_id() {
     let (xai_url, bodies) = fake_xai_recording_two(vec!["First reply"], vec!["Second reply"]).await;
 
     let agent_a = XaiAgent::new_with_kv_bucket_and_xai_url(
-        nats_a, prefix.clone(), "grok-3", "key", &bucket, &xai_url,
-    ).await.unwrap();
-    let sess = agent_a.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+        nats_a,
+        prefix.clone(),
+        "grok-3",
+        "key",
+        &bucket,
+        &xai_url,
+    )
+    .await
+    .unwrap();
+    let sess = agent_a
+        .new_session(NewSessionRequest::new("/tmp"))
+        .await
+        .unwrap();
     let sid = sess.session_id.to_string();
-    agent_a.prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::Text(TextContent::new("first"))])).await.unwrap();
+    agent_a
+        .prompt(PromptRequest::new(
+            sid.clone(),
+            vec![ContentBlock::Text(TextContent::new("first"))],
+        ))
+        .await
+        .unwrap();
 
     let resp_id = agent_a.test_session_last_response_id(&sid).await;
-    assert_eq!(resp_id.as_deref(), Some("resp_kv_0"), "resp_id after turn 1: {resp_id:?}");
+    assert_eq!(
+        resp_id.as_deref(),
+        Some("resp_kv_0"),
+        "resp_id after turn 1: {resp_id:?}"
+    );
 
     let agent_b = XaiAgent::new_with_kv_bucket_and_xai_url(
         nats_b, prefix, "grok-3", "key", &bucket, &xai_url,
-    ).await.unwrap();
-    agent_b.prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::Text(TextContent::new("second"))])).await.unwrap();
+    )
+    .await
+    .unwrap();
+    agent_b
+        .prompt(PromptRequest::new(
+            sid.clone(),
+            vec![ContentBlock::Text(TextContent::new("second"))],
+        ))
+        .await
+        .unwrap();
 
     let bodies = bodies.lock().unwrap();
     assert_eq!(bodies.len(), 2, "expected two HTTP requests");
     assert_eq!(
-        bodies[1].get("previous_response_id").and_then(|v| v.as_str()),
+        bodies[1]
+            .get("previous_response_id")
+            .and_then(|v| v.as_str()),
         Some("resp_kv_0"),
-        "second turn must carry previous_response_id from KV: {:?}", bodies[1],
+        "second turn must carry previous_response_id from KV: {:?}",
+        bodies[1],
     );
 
     cleanup(&url, &bucket).await;
@@ -529,15 +655,31 @@ async fn kv_prompt_publishes_session_notifications_to_nats() {
     let xai_url = fake_xai_sse_kv("resp_kv_notif", &["Notification test"]).await;
 
     let agent = XaiAgent::new_with_kv_bucket_and_xai_url(
-        nats_agent, prefix.clone(), "grok-3", "key", &bucket, &xai_url,
-    ).await.unwrap();
-    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+        nats_agent,
+        prefix.clone(),
+        "grok-3",
+        "key",
+        &bucket,
+        &xai_url,
+    )
+    .await
+    .unwrap();
+    let sess = agent
+        .new_session(NewSessionRequest::new("/tmp"))
+        .await
+        .unwrap();
     let sid = sess.session_id.to_string();
 
     let notify_subject = format!("test.session.{sid}.client.session.update");
     let mut sub = nats_sub.subscribe(notify_subject).await.unwrap();
 
-    agent.prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::Text(TextContent::new("hello"))])).await.unwrap();
+    agent
+        .prompt(PromptRequest::new(
+            sid.clone(),
+            vec![ContentBlock::Text(TextContent::new("hello"))],
+        ))
+        .await
+        .unwrap();
 
     let msg = tokio::time::timeout(std::time::Duration::from_secs(2), sub.next())
         .await
@@ -566,27 +708,46 @@ async fn kv_user_api_key_persists_across_agent_restart() {
 
     // Agent A: no global key ("").
     let agent_a = XaiAgent::new_with_kv_bucket_and_xai_url(
-        nats_a, prefix.clone(), "grok-3", "", &bucket, "http://localhost:1",
-    ).await.unwrap();
+        nats_a,
+        prefix.clone(),
+        "grok-3",
+        "",
+        &bucket,
+        "http://localhost:1",
+    )
+    .await
+    .unwrap();
 
     // Authenticate with a user key, then create a session — key is stored in KV.
     let mut meta = serde_json::Map::new();
     meta.insert("XAI_API_KEY".to_string(), serde_json::json!("user-key-kv"));
-    agent_a.authenticate(AuthenticateRequest::new("xai-api-key").meta(meta)).await.unwrap();
-    let sess = agent_a.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    agent_a
+        .authenticate(AuthenticateRequest::new("xai-api-key").meta(meta))
+        .await
+        .unwrap();
+    let sess = agent_a
+        .new_session(NewSessionRequest::new("/tmp"))
+        .await
+        .unwrap();
     let sid = sess.session_id.to_string();
 
     // Agent B: also no global key. Opens the same KV bucket (simulates restart).
-    let agent_b = XaiAgent::new_with_kv_bucket_and_xai_url(
-        nats_b, prefix, "grok-3", "", &bucket, &xai_url,
-    ).await.unwrap();
+    let agent_b =
+        XaiAgent::new_with_kv_bucket_and_xai_url(nats_b, prefix, "grok-3", "", &bucket, &xai_url)
+            .await
+            .unwrap();
 
     // Must be able to prompt without re-authenticating — uses key from KV.
-    let resp = agent_b.prompt(PromptRequest::new(
-        sid.clone(),
-        vec![ContentBlock::Text(TextContent::new("hello after restart"))],
-    )).await;
-    assert!(resp.is_ok(), "prompt must succeed with KV-stored api_key: {resp:?}");
+    let resp = agent_b
+        .prompt(PromptRequest::new(
+            sid.clone(),
+            vec![ContentBlock::Text(TextContent::new("hello after restart"))],
+        ))
+        .await;
+    assert!(
+        resp.is_ok(),
+        "prompt must succeed with KV-stored api_key: {resp:?}"
+    );
 
     cleanup(&url, &bucket).await;
 }
@@ -605,27 +766,54 @@ async fn kv_fork_clears_last_response_id() {
     let xai_url = fake_xai_sse_kv("resp_kv_parent", &["parent reply"]).await;
 
     let agent_a = XaiAgent::new_with_kv_bucket_and_xai_url(
-        nats_a, prefix.clone(), "grok-3", "key", &bucket, &xai_url,
-    ).await.unwrap();
-    let sess = agent_a.new_session(NewSessionRequest::new("/src")).await.unwrap();
+        nats_a,
+        prefix.clone(),
+        "grok-3",
+        "key",
+        &bucket,
+        &xai_url,
+    )
+    .await
+    .unwrap();
+    let sess = agent_a
+        .new_session(NewSessionRequest::new("/src"))
+        .await
+        .unwrap();
     let parent_id = sess.session_id.to_string();
 
     // Prompt so the parent session accumulates a last_response_id in KV.
-    agent_a.prompt(PromptRequest::new(
-        parent_id.clone(),
-        vec![ContentBlock::Text(TextContent::new("parent turn"))],
-    )).await.unwrap();
+    agent_a
+        .prompt(PromptRequest::new(
+            parent_id.clone(),
+            vec![ContentBlock::Text(TextContent::new("parent turn"))],
+        ))
+        .await
+        .unwrap();
     let parent_resp_id = agent_a.test_session_last_response_id(&parent_id).await;
-    assert_eq!(parent_resp_id.as_deref(), Some("resp_kv_parent"), "parent must have resp_id");
+    assert_eq!(
+        parent_resp_id.as_deref(),
+        Some("resp_kv_parent"),
+        "parent must have resp_id"
+    );
 
     // Fork via agent A — fork data is written to KV.
-    let fork = agent_a.fork_session(ForkSessionRequest::new(parent_id.clone(), "/fork")).await.unwrap();
+    let fork = agent_a
+        .fork_session(ForkSessionRequest::new(parent_id.clone(), "/fork"))
+        .await
+        .unwrap();
     let fork_id = fork.session_id.to_string();
 
     // Agent B opens the same bucket and reads the fork from KV.
     let agent_b = XaiAgent::new_with_kv_bucket_and_xai_url(
-        nats_b, prefix, "grok-3", "key", &bucket, "http://localhost:1",
-    ).await.unwrap();
+        nats_b,
+        prefix,
+        "grok-3",
+        "key",
+        &bucket,
+        "http://localhost:1",
+    )
+    .await
+    .unwrap();
 
     let fork_resp_id = agent_b.test_session_last_response_id(&fork_id).await;
     assert!(
@@ -646,18 +834,32 @@ async fn kv_list_sessions_returns_correct_cwd() {
     let nats_a = real_nats(&url).await;
     let prefix = AcpPrefix::new("test").unwrap();
 
-    let agent = XaiAgent::new_with_kv_bucket(
-        nats_a, prefix, "grok-3", "key", &bucket,
-    ).await.unwrap();
+    let agent = XaiAgent::new_with_kv_bucket(nats_a, prefix, "grok-3", "key", &bucket)
+        .await
+        .unwrap();
 
-    agent.new_session(NewSessionRequest::new("/project/alpha")).await.unwrap();
-    agent.new_session(NewSessionRequest::new("/project/beta")).await.unwrap();
-    agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    agent
+        .new_session(NewSessionRequest::new("/project/alpha"))
+        .await
+        .unwrap();
+    agent
+        .new_session(NewSessionRequest::new("/project/beta"))
+        .await
+        .unwrap();
+    agent
+        .new_session(NewSessionRequest::new("/tmp"))
+        .await
+        .unwrap();
 
-    let list = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
+    let list = agent
+        .list_sessions(ListSessionsRequest::new())
+        .await
+        .unwrap();
     assert_eq!(list.sessions.len(), 3);
 
-    let mut cwds: Vec<String> = list.sessions.iter()
+    let mut cwds: Vec<String> = list
+        .sessions
+        .iter()
         .map(|s| s.cwd.to_string_lossy().to_string())
         .collect();
     cwds.sort();
@@ -692,7 +894,9 @@ async fn fake_xai_recording_one(
                 let mut buf = vec![0u8; cl];
                 reader.read_exact(&mut buf).await.ok();
                 serde_json::from_slice(&buf).unwrap_or(serde_json::Value::Null)
-            } else { serde_json::Value::Null };
+            } else {
+                serde_json::Value::Null
+            };
             *slot_clone.lock().unwrap() = Some(json);
 
             let sse: String = chunks.iter()
@@ -701,7 +905,8 @@ async fn fake_xai_recording_one(
                 .collect();
             let http = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
-                sse.len(), sse,
+                sse.len(),
+                sse,
             );
             writer.write_all(http.as_bytes()).await.ok();
         }
@@ -727,7 +932,8 @@ async fn fake_xai_multi_sse(responses: Vec<(&'static str, Vec<&'static str>)>) -
                     .collect();
                 let http = format!(
                     "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
-                    sse.len(), sse,
+                    sse.len(),
+                    sse,
                 );
                 writer.write_all(http.as_bytes()).await.ok();
             }
@@ -754,39 +960,65 @@ async fn kv_crash_recovery_idempotency_check() {
     // Agent A creates a session then "crashes" — simulate by manually writing
     // the user message into KV without an assistant reply.
     let agent_a = XaiAgent::new_with_kv_bucket_and_xai_url(
-        nats_a, prefix.clone(), "grok-3", "key", &bucket, "http://localhost:1",
-    ).await.unwrap();
-    let sess = agent_a.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+        nats_a,
+        prefix.clone(),
+        "grok-3",
+        "key",
+        &bucket,
+        "http://localhost:1",
+    )
+    .await
+    .unwrap();
+    let sess = agent_a
+        .new_session(NewSessionRequest::new("/tmp"))
+        .await
+        .unwrap();
     let sid = sess.session_id.to_string();
     // Inject the dangling user message directly into KV.
-    agent_a.test_set_session_history(&sid, vec![Message::user("hello from kv")]).await;
+    agent_a
+        .test_set_session_history(&sid, vec![Message::user("hello from kv")])
+        .await;
 
     // Agent B opens the same bucket (simulates restart after crash).
     let (xai_url, body) = fake_xai_recording_one("resp_recovery", vec!["recovery reply"]).await;
     let agent_b = XaiAgent::new_with_kv_bucket_and_xai_url(
         nats_b, prefix, "grok-3", "key", &bucket, &xai_url,
-    ).await.unwrap();
+    )
+    .await
+    .unwrap();
 
     // Prompt with the same user message — idempotency check must fire.
-    let resp = agent_b.prompt(PromptRequest::new(
-        sid.clone(),
-        vec![ContentBlock::Text(TextContent::new("hello from kv"))],
-    )).await;
-    assert!(resp.is_ok(), "prompt must succeed after crash recovery: {resp:?}");
+    let resp = agent_b
+        .prompt(PromptRequest::new(
+            sid.clone(),
+            vec![ContentBlock::Text(TextContent::new("hello from kv"))],
+        ))
+        .await;
+    assert!(
+        resp.is_ok(),
+        "prompt must succeed after crash recovery: {resp:?}"
+    );
 
     // xAI must have received exactly ONE user message — no duplicate.
     let captured = body.lock().unwrap();
     let body_val = captured.as_ref().expect("xAI must have been called");
-    let input = body_val["input"].as_array().expect("input must be an array");
-    let user_msgs: Vec<_> = input.iter()
-        .filter(|m| m["role"] == "user")
-        .collect();
-    assert_eq!(user_msgs.len(), 1,
-        "xAI request must contain exactly one user message (no duplicate): {input:?}");
+    let input = body_val["input"]
+        .as_array()
+        .expect("input must be an array");
+    let user_msgs: Vec<_> = input.iter().filter(|m| m["role"] == "user").collect();
+    assert_eq!(
+        user_msgs.len(),
+        1,
+        "xAI request must contain exactly one user message (no duplicate): {input:?}"
+    );
 
     // History: user + assistant (clean recovery, no duplicate).
     let history = agent_b.test_session_history(&sid).await;
-    assert_eq!(history.len(), 2, "history must be user+assistant after recovery: {history:?}");
+    assert_eq!(
+        history.len(),
+        2,
+        "history must be user+assistant after recovery: {history:?}"
+    );
     assert_eq!(history[0].role, "user");
     assert_eq!(history[1].role, "assistant");
 
@@ -810,47 +1042,92 @@ async fn kv_history_trimming_round_trips_through_kv() {
         ("resp_2", vec!["reply2"]),
         ("resp_3", vec!["reply3"]),
         ("resp_4", vec!["reply4"]),
-    ]).await;
+    ])
+    .await;
 
     // Agent A with max_history_messages=4 (keeps at most 2 turns).
     let agent_a = XaiAgent::new_with_kv_bucket_and_xai_url(
-        nats_a, prefix.clone(), "grok-3", "key", &bucket, &xai_url,
-    ).await.unwrap().with_max_history_messages(4);
+        nats_a,
+        prefix.clone(),
+        "grok-3",
+        "key",
+        &bucket,
+        &xai_url,
+    )
+    .await
+    .unwrap()
+    .with_max_history_messages(4);
 
-    let sess = agent_a.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let sess = agent_a
+        .new_session(NewSessionRequest::new("/tmp"))
+        .await
+        .unwrap();
     let sid = sess.session_id.to_string();
 
     // Turn 1 → [user1, assistant1] — 2 msgs, under limit.
-    agent_a.prompt(PromptRequest::new(sid.clone(),
-        vec![ContentBlock::Text(TextContent::new("turn1"))])).await.unwrap();
+    agent_a
+        .prompt(PromptRequest::new(
+            sid.clone(),
+            vec![ContentBlock::Text(TextContent::new("turn1"))],
+        ))
+        .await
+        .unwrap();
     // Turn 2 → [user1, assistant1, user2, assistant2] — 4 msgs, at limit.
-    agent_a.prompt(PromptRequest::new(sid.clone(),
-        vec![ContentBlock::Text(TextContent::new("turn2"))])).await.unwrap();
+    agent_a
+        .prompt(PromptRequest::new(
+            sid.clone(),
+            vec![ContentBlock::Text(TextContent::new("turn2"))],
+        ))
+        .await
+        .unwrap();
     // Turn 3 → trim fires: [user2, assistant2, user3, assistant3] — 4 msgs in KV.
-    agent_a.prompt(PromptRequest::new(sid.clone(),
-        vec![ContentBlock::Text(TextContent::new("turn3"))])).await.unwrap();
+    agent_a
+        .prompt(PromptRequest::new(
+            sid.clone(),
+            vec![ContentBlock::Text(TextContent::new("turn3"))],
+        ))
+        .await
+        .unwrap();
 
     let history_a = agent_a.test_session_history(&sid).await;
-    assert_eq!(history_a.len(), 4, "agent_a must have 4 messages after trim: {history_a:?}");
+    assert_eq!(
+        history_a.len(),
+        4,
+        "agent_a must have 4 messages after trim: {history_a:?}"
+    );
     assert_eq!(history_a[0].content_str(), "turn2");
     assert_eq!(history_a[2].content_str(), "turn3");
 
     // Agent B opens the same bucket — loads trimmed history from KV.
     let agent_b = XaiAgent::new_with_kv_bucket_and_xai_url(
         nats_b, prefix, "grok-3", "key", &bucket, &xai_url,
-    ).await.unwrap().with_max_history_messages(4);
+    )
+    .await
+    .unwrap()
+    .with_max_history_messages(4);
 
     let history_b_before = agent_b.test_session_history(&sid).await;
-    assert_eq!(history_b_before.len(), 4,
-        "agent_b must load 4 messages (trimmed) from KV: {history_b_before:?}");
+    assert_eq!(
+        history_b_before.len(),
+        4,
+        "agent_b must load 4 messages (trimmed) from KV: {history_b_before:?}"
+    );
 
     // Turn 4 via agent_b → trim fires again: [user3, assistant3, user4, assistant4].
-    agent_b.prompt(PromptRequest::new(sid.clone(),
-        vec![ContentBlock::Text(TextContent::new("turn4"))])).await.unwrap();
+    agent_b
+        .prompt(PromptRequest::new(
+            sid.clone(),
+            vec![ContentBlock::Text(TextContent::new("turn4"))],
+        ))
+        .await
+        .unwrap();
 
     let history_b_after = agent_b.test_session_history(&sid).await;
-    assert_eq!(history_b_after.len(), 4,
-        "after turn4 history must still be 4 (trimmed): {history_b_after:?}");
+    assert_eq!(
+        history_b_after.len(),
+        4,
+        "after turn4 history must still be 4 (trimmed): {history_b_after:?}"
+    );
     assert_eq!(history_b_after[0].content_str(), "turn3");
     assert_eq!(history_b_after[2].content_str(), "turn4");
 

@@ -4,19 +4,20 @@ use std::time::Duration;
 
 use acp_nats::acp_prefix::AcpPrefix;
 use agent_client_protocol::{
-    AgentCapabilities, AuthEnvVar, AuthMethod, AuthMethodAgent, AuthMethodEnvVar, PromptCapabilities,
+    AgentCapabilities, AuthEnvVar, AuthMethod, AuthMethodAgent, AuthMethodEnvVar,
     AuthenticateRequest, AuthenticateResponse, CancelNotification, CloseSessionRequest,
     CloseSessionResponse, ContentBlock, ContentChunk, EmbeddedResourceResource, Error, ErrorCode,
     ForkSessionRequest, ForkSessionResponse, Implementation, InitializeRequest, InitializeResponse,
     ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse, ModelInfo,
-    NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse, ProtocolVersion,
-    ResumeSessionRequest, ResumeSessionResponse, SessionCapabilities, SessionCloseCapabilities,
-    SessionConfigOption, SessionConfigOptionValue, SessionConfigSelectOption,
-    SessionForkCapabilities, SessionId, SessionInfo, SessionListCapabilities, SessionMode,
-    SessionModeState, SessionModelState, SessionNotification, SessionResumeCapabilities,
-    SessionUpdate, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse,
-    SetSessionModeRequest, SetSessionModeResponse, SetSessionModelRequest, SetSessionModelResponse,
-    StopReason, ToolCall, ToolCallStatus, ToolKind, UsageUpdate,
+    NewSessionRequest, NewSessionResponse, PromptCapabilities, PromptRequest, PromptResponse,
+    ProtocolVersion, ResumeSessionRequest, ResumeSessionResponse, SessionCapabilities,
+    SessionCloseCapabilities, SessionConfigOption, SessionConfigOptionValue,
+    SessionConfigSelectOption, SessionForkCapabilities, SessionId, SessionInfo,
+    SessionListCapabilities, SessionMode, SessionModeState, SessionModelState, SessionNotification,
+    SessionResumeCapabilities, SessionUpdate, SetSessionConfigOptionRequest,
+    SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse,
+    SetSessionModelRequest, SetSessionModelResponse, StopReason, ToolCall, ToolCallStatus,
+    ToolKind, UsageUpdate,
 };
 use async_trait::async_trait;
 use futures_util::StreamExt as _;
@@ -28,6 +29,8 @@ use crate::client::{FinishReason, InputItem, Message, XaiClient, XaiEvent};
 use crate::http_client::XaiHttpClient;
 use crate::session_notifier::{NatsSessionNotifier, SessionNotifier};
 use crate::session_store::{KvSessionStore, SessionStore, XaiSessionData};
+
+type CancelChannels = Arc<Mutex<HashMap<String, Arc<Mutex<Option<oneshot::Sender<()>>>>>>>;
 #[cfg(feature = "test-helpers")]
 use crate::session_store::MemorySessionStore;
 
@@ -55,10 +58,7 @@ fn store_error(e: impl std::fmt::Display) -> Error {
 ///
 /// Each entry is `(tool_id, display_label)`. The `tool_id` is sent verbatim in
 /// the Responses API `tools` array; the label is shown in the ACP UI.
-const AVAILABLE_TOOLS: &[(&str, &str)] = &[
-    ("web_search", "Web Search"),
-    ("x_search", "X Search"),
-];
+const AVAILABLE_TOOLS: &[(&str, &str)] = &[("web_search", "Web Search"), ("x_search", "X Search")];
 
 /// ACP Agent implementation backed by xAI's Grok API (Responses API).
 ///
@@ -75,7 +75,7 @@ pub struct XaiAgent<H = XaiClient, N = NatsSessionNotifier> {
     client: Arc<H>,
     session_store: Box<dyn SessionStore>,
     /// In-memory cancel channels — one per active prompt, keyed by session id.
-    cancel_channels: Arc<Mutex<HashMap<String, Arc<Mutex<Option<oneshot::Sender<()>>>>>>>,
+    cancel_channels: CancelChannels,
     default_model: String,
     /// Per-chunk inactivity timeout for streaming responses.
     ///
@@ -136,8 +136,8 @@ impl XaiAgent<XaiClient, NatsSessionNotifier> {
         default_model: impl Into<String>,
         api_key: impl Into<String>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        let bucket = std::env::var("XAI_SESSION_BUCKET")
-            .unwrap_or_else(|_| "XAI_SESSIONS".to_string());
+        let bucket =
+            std::env::var("XAI_SESSION_BUCKET").unwrap_or_else(|_| "XAI_SESSIONS".to_string());
         let session_ttl = std::env::var("XAI_SESSION_TTL_SECS")
             .ok()
             .and_then(|s| s.parse::<u64>().ok())
@@ -146,7 +146,13 @@ impl XaiAgent<XaiClient, NatsSessionNotifier> {
             .unwrap_or(Duration::from_secs(7 * 24 * 3600));
         let js = async_nats::jetstream::new(nats.clone());
         let store = KvSessionStore::open(js, bucket, session_ttl).await?;
-        Ok(Self::new_with_store(nats, acp_prefix, default_model, api_key, Box::new(store)))
+        Ok(Self::new_with_store(
+            nats,
+            acp_prefix,
+            default_model,
+            api_key,
+            Box::new(store),
+        ))
     }
 
     /// Internal constructor: KV-backed store + default `XaiClient` + `NatsSessionNotifier`.
@@ -159,7 +165,11 @@ impl XaiAgent<XaiClient, NatsSessionNotifier> {
     ) -> Self {
         let notifier = NatsSessionNotifier::new(nats, acp_prefix);
         XaiAgent::new_with_client_and_store(
-            notifier, default_model, api_key, session_store, XaiClient::new(),
+            notifier,
+            default_model,
+            api_key,
+            session_store,
+            XaiClient::new(),
         )
     }
 }
@@ -179,7 +189,11 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
     ) -> Self {
         let default_model: String = default_model.into();
         let api_key_str: String = api_key.into();
-        let global_api_key = if api_key_str.is_empty() { None } else { Some(api_key_str) };
+        let global_api_key = if api_key_str.is_empty() {
+            None
+        } else {
+            Some(api_key_str)
+        };
 
         let prompt_timeout = std::env::var("XAI_PROMPT_TIMEOUT_SECS")
             .ok()
@@ -192,15 +206,17 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
             .ok()
             .map(|s| {
                 s.split(',')
-                    .filter_map(|entry| {
-                        match entry.split_once(':') {
-                            Some((id, label)) => {
-                                Some(ModelInfo::new(id.trim().to_string(), label.trim().to_string()))
-                            }
-                            None => {
-                                warn!(entry, "XAI_MODELS: skipping malformed entry (expected 'id:label')");
-                                None
-                            }
+                    .filter_map(|entry| match entry.split_once(':') {
+                        Some((id, label)) => Some(ModelInfo::new(
+                            id.trim().to_string(),
+                            label.trim().to_string(),
+                        )),
+                        None => {
+                            warn!(
+                                entry,
+                                "XAI_MODELS: skipping malformed entry (expected 'id:label')"
+                            );
+                            None
                         }
                     })
                     .collect()
@@ -213,12 +229,16 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
                 ]
             });
 
-        if !available_models.iter().any(|m| m.model_id.0.as_ref() == default_model.as_str()) {
+        if !available_models
+            .iter()
+            .any(|m| m.model_id.0.as_ref() == default_model.as_str())
+        {
             warn!(model = %default_model, "default model not in available list; adding it");
             available_models.push(ModelInfo::new(default_model.clone(), default_model.clone()));
         }
 
-        let system_prompt = std::env::var("XAI_SYSTEM_PROMPT").ok()
+        let system_prompt = std::env::var("XAI_SYSTEM_PROMPT")
+            .ok()
             .filter(|s| !s.is_empty());
 
         let max_history_messages = std::env::var("XAI_MAX_HISTORY_MESSAGES")
@@ -287,7 +307,9 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
 }
 
 #[async_trait(?Send)]
-impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_protocol::Agent for XaiAgent<H, N> {
+impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_protocol::Agent
+    for XaiAgent<H, N>
+{
     async fn initialize(
         &self,
         _req: InitializeRequest,
@@ -313,9 +335,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
             .agent_capabilities(
                 AgentCapabilities::new()
                     .load_session(true)
-                    .prompt_capabilities(
-                        PromptCapabilities::new().embedded_context(true),
-                    )
+                    .prompt_capabilities(PromptCapabilities::new().embedded_context(true))
                     .session_capabilities(
                         SessionCapabilities::new()
                             .fork(SessionForkCapabilities::new())
@@ -349,9 +369,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
                         )
                     })?;
                 if key.is_empty() {
-                    return Err(auth_required(
-                        "authenticate: XAI_API_KEY must not be empty",
-                    ));
+                    return Err(auth_required("authenticate: XAI_API_KEY must not be empty"));
                 }
                 info!("xai: user authenticated with their own API key");
                 *self.pending_api_key.lock().await = Some(key);
@@ -365,7 +383,9 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
                 info!("xai: client authenticated using server key");
             }
             other => {
-                return Err(invalid_params(format!("authenticate: unknown method '{other}'")));
+                return Err(invalid_params(format!(
+                    "authenticate: unknown method '{other}'"
+                )));
             }
         }
         Ok(AuthenticateResponse::new())
@@ -378,18 +398,28 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
         let cwd = req.cwd.to_string_lossy().into_owned();
         let session_id = Uuid::new_v4().to_string();
 
-        let api_key = self.pending_api_key.lock().await.take()
+        let api_key = self
+            .pending_api_key
+            .lock()
+            .await
+            .take()
             .or_else(|| self.global_api_key.clone());
 
-        self.session_store.put(&session_id, &XaiSessionData {
-            cwd,
-            model: None,
-            history: Vec::new(),
-            api_key,
-            system_prompt: self.system_prompt.clone(),
-            enabled_tools: Vec::new(),
-            last_response_id: None,
-        }).await.map_err(store_error)?;
+        self.session_store
+            .put(
+                &session_id,
+                &XaiSessionData {
+                    cwd,
+                    model: None,
+                    history: Vec::new(),
+                    api_key,
+                    system_prompt: self.system_prompt.clone(),
+                    enabled_tools: Vec::new(),
+                    last_response_id: None,
+                },
+            )
+            .await
+            .map_err(store_error)?;
 
         info!(session_id, "xai: new session");
         Ok(NewSessionResponse::new(SessionId::from(session_id))
@@ -403,7 +433,10 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
         req: LoadSessionRequest,
     ) -> agent_client_protocol::Result<LoadSessionResponse> {
         let session_id = req.session_id.to_string();
-        let session = self.session_store.get(&session_id).await
+        let session = self
+            .session_store
+            .get(&session_id)
+            .await
             .ok_or_else(|| not_found(format!("session {session_id} not found")))?;
         let model = session.model.as_deref();
         Ok(LoadSessionResponse::new()
@@ -417,7 +450,9 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
         req: ResumeSessionRequest,
     ) -> agent_client_protocol::Result<ResumeSessionResponse> {
         let session_id = req.session_id.to_string();
-        self.session_store.get(&session_id).await
+        self.session_store
+            .get(&session_id)
+            .await
             .ok_or_else(|| not_found(format!("session {session_id} not found")))?;
         Ok(ResumeSessionResponse::new())
     }
@@ -429,22 +464,31 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
         let source_id = req.session_id.to_string();
         let cwd = req.cwd.to_string_lossy().into_owned();
 
-        let source = self.session_store.get(&source_id).await
+        let source = self
+            .session_store
+            .get(&source_id)
+            .await
             .ok_or_else(|| not_found(format!("session {source_id} not found")))?;
 
         let new_session_id = Uuid::new_v4().to_string();
         let inherited_model = source.model.clone();
         let inherited_tools = source.enabled_tools.clone();
-        self.session_store.put(&new_session_id, &XaiSessionData {
-            cwd,
-            model: inherited_model.clone(),
-            history: source.history,
-            api_key: source.api_key,
-            system_prompt: source.system_prompt,
-            enabled_tools: inherited_tools.clone(),
-            // Clear last_response_id — fork starts without prior xAI response context.
-            last_response_id: None,
-        }).await.map_err(store_error)?;
+        self.session_store
+            .put(
+                &new_session_id,
+                &XaiSessionData {
+                    cwd,
+                    model: inherited_model.clone(),
+                    history: source.history,
+                    api_key: source.api_key,
+                    system_prompt: source.system_prompt,
+                    enabled_tools: inherited_tools.clone(),
+                    // Clear last_response_id — fork starts without prior xAI response context.
+                    last_response_id: None,
+                },
+            )
+            .await
+            .map_err(store_error)?;
 
         Ok(ForkSessionResponse::new(new_session_id)
             .modes(self.session_mode_state())
@@ -461,10 +505,10 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
         // task unblocks promptly. The prompt's compensation path will find no
         // session (already deleted) and skip silently — no corruption.
         let cancel_arc = self.cancel_channels.lock().await.remove(&session_id);
-        if let Some(arc) = cancel_arc {
-            if let Some(tx) = arc.lock().await.take() {
-                let _ = tx.send(());
-            }
+        if let Some(arc) = cancel_arc
+            && let Some(tx) = arc.lock().await.take()
+        {
+            let _ = tx.send(());
         }
         self.session_store.delete(&session_id).await;
         info!(session_id, "xai: session closed");
@@ -475,7 +519,10 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
         &self,
         _req: ListSessionsRequest,
     ) -> agent_client_protocol::Result<ListSessionsResponse> {
-        let list = self.session_store.list().await
+        let list = self
+            .session_store
+            .list()
+            .await
             .into_iter()
             .map(|(id, cwd)| SessionInfo::new(id, cwd))
             .collect();
@@ -487,7 +534,9 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
         req: SetSessionModeRequest,
     ) -> agent_client_protocol::Result<SetSessionModeResponse> {
         let session_id = req.session_id.to_string();
-        self.session_store.get(&session_id).await
+        self.session_store
+            .get(&session_id)
+            .await
             .ok_or_else(|| not_found(format!("session {session_id} not found")))?;
         let mode_id = req.mode_id.to_string();
         if mode_id != "default" {
@@ -503,17 +552,27 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
         let session_id = req.session_id.to_string();
         let model_id = req.model_id.to_string();
 
-        if !self.available_models.iter().any(|m| m.model_id.0.as_ref() == model_id) {
+        if !self
+            .available_models
+            .iter()
+            .any(|m| m.model_id.0.as_ref() == model_id)
+        {
             return Err(invalid_params(format!("unknown model: {model_id}")));
         }
 
-        let mut session = self.session_store.get(&session_id).await
+        let mut session = self
+            .session_store
+            .get(&session_id)
+            .await
             .ok_or_else(|| not_found(format!("session {session_id} not found")))?;
         session.model = Some(model_id.clone());
         // response IDs are model-specific — a stale ID from the previous model
         // would always trigger a retry on the next prompt. Clear it proactively.
         session.last_response_id = None;
-        self.session_store.put(&session_id, &session).await.map_err(store_error)?;
+        self.session_store
+            .put(&session_id, &session)
+            .await
+            .map_err(store_error)?;
 
         info!(session_id, model = %model_id, "xai: set_session_model");
         Ok(SetSessionModelResponse::new())
@@ -527,7 +586,9 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
         let session_id = req.session_id.to_string();
 
         // Check if this is one of the known server-side tool toggles.
-        let is_known_tool = AVAILABLE_TOOLS.iter().any(|(id, _)| *id == config_id.as_str());
+        let is_known_tool = AVAILABLE_TOOLS
+            .iter()
+            .any(|(id, _)| *id == config_id.as_str());
 
         if is_known_tool {
             let SessionConfigOptionValue::ValueId { value } = req.value else {
@@ -541,7 +602,10 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
                     "unknown value '{val}' for {config_id}; expected: on, off"
                 )));
             }
-            let mut session = self.session_store.get(&session_id).await
+            let mut session = self
+                .session_store
+                .get(&session_id)
+                .await
                 .ok_or_else(|| not_found(format!("session {session_id} not found")))?;
             if val == "on" {
                 if !session.enabled_tools.iter().any(|t| t == &config_id) {
@@ -550,24 +614,31 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
             } else {
                 session.enabled_tools.retain(|t| t != &config_id);
             }
-            self.session_store.put(&session_id, &session).await.map_err(store_error)?;
+            self.session_store
+                .put(&session_id, &session)
+                .await
+                .map_err(store_error)?;
             info!(session_id, tool = %config_id, enabled = (val == "on"), "xai: tool toggled");
-            Ok(SetSessionConfigOptionResponse::new(Self::all_tool_config_options(&session.enabled_tools)))
+            Ok(SetSessionConfigOptionResponse::new(
+                Self::all_tool_config_options(&session.enabled_tools),
+            ))
         } else {
             warn!(config_id = %config_id, "xai: set_session_config_option called for unknown option — ignored");
             // Per ACP spec, return the current state of all known options
             // even when the requested config_id is unknown — but the session
             // must still exist.
-            let session = self.session_store.get(&session_id).await
+            let session = self
+                .session_store
+                .get(&session_id)
+                .await
                 .ok_or_else(|| not_found(format!("session {session_id} not found")))?;
-            Ok(SetSessionConfigOptionResponse::new(Self::all_tool_config_options(&session.enabled_tools)))
+            Ok(SetSessionConfigOptionResponse::new(
+                Self::all_tool_config_options(&session.enabled_tools),
+            ))
         }
     }
 
-    async fn prompt(
-        &self,
-        req: PromptRequest,
-    ) -> agent_client_protocol::Result<PromptResponse> {
+    async fn prompt(&self, req: PromptRequest) -> agent_client_protocol::Result<PromptResponse> {
         let session_id = req.session_id.to_string();
 
         let user_input: String = req
@@ -596,11 +667,17 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
             .join("\n");
 
         if user_input.is_empty() {
-            warn!(session_id, "xai: prompt contains no text or resource blocks");
+            warn!(
+                session_id,
+                "xai: prompt contains no text or resource blocks"
+            );
         }
 
         // Read session state.
-        let session = self.session_store.get(&session_id).await
+        let session = self
+            .session_store
+            .get(&session_id)
+            .await
             .ok_or_else(|| not_found(format!("session {session_id} not found")))?;
 
         let api_key = session.api_key.clone().ok_or_else(|| {
@@ -609,7 +686,11 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
             )
         })?;
 
-        let model = session.model.as_deref().unwrap_or(&self.default_model).to_string();
+        let model = session
+            .model
+            .as_deref()
+            .unwrap_or(&self.default_model)
+            .to_string();
         let enabled_tools = session.enabled_tools.clone();
 
         // Install a fresh cancel channel for this prompt. Each prompt owns its
@@ -617,13 +698,18 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
         // from a concurrent prompt that may have replaced the HashMap entry.
         let (cancel_tx, mut cancel_rx) = oneshot::channel::<()>();
         let cancel_arc = Arc::new(Mutex::new(Some(cancel_tx)));
-        self.cancel_channels.lock().await.insert(session_id.clone(), cancel_arc.clone());
+        self.cancel_channels
+            .lock()
+            .await
+            .insert(session_id.clone(), cancel_arc.clone());
 
         // Idempotency check: if history already ends with the exact user message,
         // we are resuming after a crash or a failed put(assistant) from a previous
         // attempt. Skip the write and do not duplicate the message in the xAI
         // context — history already carries it as the last entry.
-        let resuming = session.history.last()
+        let resuming = session
+            .history
+            .last()
             .map(|m| m.role == "user" && m.content_str() == user_input)
             == Some(true);
 
@@ -632,7 +718,10 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
             // the request and the response cannot silently discard the user's input.
             let mut snapshot = session.clone();
             snapshot.history.push(Message::user(user_input.clone()));
-            self.session_store.put(&session_id, &snapshot).await.map_err(store_error)?;
+            self.session_store
+                .put(&session_id, &snapshot)
+                .await
+                .map_err(store_error)?;
         }
 
         // Build the Responses API `input` array and choose `previous_response_id`.
@@ -649,11 +738,17 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
         let (mut current_input, mut current_prev_response_id) =
             if let Some(prev_id) = &session.last_response_id {
                 // Stateful path: one item for this turn + server-held context.
-                (vec![InputItem::user(user_input.clone())], Some(prev_id.clone()))
+                (
+                    vec![InputItem::user(user_input.clone())],
+                    Some(prev_id.clone()),
+                )
             } else {
                 // Full-history path: reconstruct the Responses API input from
                 // the stored Message history.
-                (build_full_history_input(&session, &user_input, resuming), None)
+                (
+                    build_full_history_input(&session, &user_input, resuming),
+                    None,
+                )
             };
 
         let client = Arc::clone(&self.client);
@@ -747,7 +842,11 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
                     XaiEvent::ResponseId { id } => {
                         current_response_id = Some(id);
                     }
-                    XaiEvent::FunctionCall { call_id, name, arguments } => {
+                    XaiEvent::FunctionCall {
+                        call_id,
+                        name,
+                        arguments,
+                    } => {
                         info!(session_id, call_id = %call_id, tool_name = %name, "xai: tool call");
                         // Track for resolution at stream end (see XaiEvent::Done).
                         pending_tool_calls.push((call_id.clone(), name.clone()));
@@ -792,7 +891,10 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
                             self.notifier.session_notification(notif).await;
                         }
                     }
-                    XaiEvent::Finished { reason, incomplete_reason } => {
+                    XaiEvent::Finished {
+                        reason,
+                        incomplete_reason,
+                    } => {
                         info!(session_id, reason = ?reason, incomplete_reason = ?incomplete_reason, "xai: finish reason");
                         match reason {
                             FinishReason::Incomplete => {
@@ -820,8 +922,14 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
                             }
                         }
                     }
-                    XaiEvent::Usage { prompt_tokens, completion_tokens } => {
-                        info!(session_id, prompt_tokens, completion_tokens, "xai: token usage");
+                    XaiEvent::Usage {
+                        prompt_tokens,
+                        completion_tokens,
+                    } => {
+                        info!(
+                            session_id,
+                            prompt_tokens, completion_tokens, "xai: token usage"
+                        );
                         // UsageUpdate(used, size): used = tokens currently in context
                         // (prompt_tokens from xAI = full input sent this turn);
                         // size = 0 because the model's context window limit is not
@@ -850,7 +958,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
                                 session_id.clone(),
                                 SessionUpdate::ToolCall(
                                     ToolCall::new(call_id, name)
-                                        .status(tool_status.clone())
+                                        .status(tool_status)
                                         .kind(ToolKind::Other),
                                 ),
                             );
@@ -893,7 +1001,8 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
                             // value (forces full-history rebuild on the next prompt).
                             current_response_id = None;
                             current_prev_response_id = None;
-                            current_input = build_full_history_input(&session, &user_input, resuming);
+                            current_input =
+                                build_full_history_input(&session, &user_input, resuming);
                             continue 'outer;
                         }
                         tracing::error!(session_id, error = %message, "xai: stream error");
@@ -920,7 +1029,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
                     session_id.clone(),
                     SessionUpdate::ToolCall(
                         ToolCall::new(call_id, name)
-                            .status(fallback_tool_status.clone())
+                            .status(fallback_tool_status)
                             .kind(ToolKind::Other),
                     ),
                 );
@@ -988,14 +1097,15 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
         // that crashed — this call did not write it, so popping it would silently
         // discard a message that belongs to the previous turn.
         let needs_compensation = !resuming && (canceled || stream_error.is_some());
-        if needs_compensation {
-            if let Some(mut current) = self.session_store.get(&session_id).await {
-                if current.history.last().map(|m| m.role == "user" && m.content_str() == user_input)
-                    == Some(true)
-                {
-                    current.history.pop();
-                    let _ = self.session_store.put(&session_id, &current).await;
-                }
+        if needs_compensation && let Some(mut current) = self.session_store.get(&session_id).await {
+            if current
+                .history
+                .last()
+                .map(|m| m.role == "user" && m.content_str() == user_input)
+                == Some(true)
+            {
+                current.history.pop();
+                let _ = self.session_store.put(&session_id, &current).await;
             }
         } else if !assistant_text.is_empty() || current_response_id.is_some() {
             // Re-read to preserve any concurrent model/config changes, then:
@@ -1013,13 +1123,18 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
             // assistant text lives in memory until this write completes.
             if let Some(mut current) = self.session_store.get(&session_id).await {
                 if !assistant_text.is_empty() {
-                    current.history.push(Message::assistant_text(assistant_text));
+                    current
+                        .history
+                        .push(Message::assistant_text(assistant_text));
                     trim_history(&mut current.history, self.max_history_messages);
                 }
                 if let Some(resp_id) = current_response_id {
                     current.last_response_id = Some(resp_id);
                 }
-                self.session_store.put(&session_id, &current).await.map_err(store_error)?;
+                self.session_store
+                    .put(&session_id, &current)
+                    .await
+                    .map_err(store_error)?;
             }
         }
 
@@ -1028,7 +1143,8 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
         // but possible) that already replaced our Arc is not accidentally removed.
         {
             let mut channels = self.cancel_channels.lock().await;
-            if channels.get(&session_id)
+            if channels
+                .get(&session_id)
                 .map(|a| Arc::ptr_eq(a, &cancel_arc))
                 .unwrap_or(false)
             {
@@ -1043,15 +1159,12 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
         Ok(PromptResponse::new(stop_reason))
     }
 
-    async fn cancel(
-        &self,
-        req: CancelNotification,
-    ) -> agent_client_protocol::Result<()> {
+    async fn cancel(&self, req: CancelNotification) -> agent_client_protocol::Result<()> {
         let session_id = req.session_id.to_string();
-        if let Some(cancel_arc) = self.cancel_channels.lock().await.get(&session_id).cloned() {
-            if let Some(tx) = cancel_arc.lock().await.take() {
-                let _ = tx.send(());
-            }
+        if let Some(cancel_arc) = self.cancel_channels.lock().await.get(&session_id).cloned()
+            && let Some(tx) = cancel_arc.lock().await.take()
+        {
+            let _ = tx.send(());
         }
         Ok(())
     }
@@ -1153,7 +1266,10 @@ mod tests {
     // ── trim_history ──────────────────────────────────────────────────────────
 
     fn msg(role: &str, content: &str) -> Message {
-        Message { role: role.to_string(), content: Some(content.to_string()) }
+        Message {
+            role: role.to_string(),
+            content: Some(content.to_string()),
+        }
     }
 
     fn roles(history: &[Message]) -> Vec<&str> {
@@ -1173,26 +1289,31 @@ mod tests {
     fn trim_history_removes_oldest_pair() {
         // [u1,a1, u2,a2, u3,a3], max=4 → remove first pair → [u2,a2, u3,a3]
         let mut h = vec![
-            msg("user","u1"), msg("assistant","a1"),
-            msg("user","u2"), msg("assistant","a2"),
-            msg("user","u3"), msg("assistant","a3"),
+            msg("user", "u1"),
+            msg("assistant", "a1"),
+            msg("user", "u2"),
+            msg("assistant", "a2"),
+            msg("user", "u3"),
+            msg("assistant", "a3"),
         ];
         trim_history(&mut h, 4);
         assert_eq!(h.len(), 4);
-        assert_eq!(h[0].content_str(),"u2");
+        assert_eq!(h[0].content_str(), "u2");
     }
 
     #[test]
     fn trim_history_odd_max_removes_full_pair() {
         // max=3, 4 messages → excess=1 → remove one pair → 2 remain (not 3)
         let mut h = vec![
-            msg("user","u1"), msg("assistant","a1"),
-            msg("user","u2"), msg("assistant","a2"),
+            msg("user", "u1"),
+            msg("assistant", "a1"),
+            msg("user", "u2"),
+            msg("assistant", "a2"),
         ];
         trim_history(&mut h, 3);
         assert_eq!(h.len(), 2);
-        assert_eq!(h[0].content_str(),"u2");
-        assert_eq!(h[1].content_str(),"a2");
+        assert_eq!(h[0].content_str(), "u2");
+        assert_eq!(h[1].content_str(), "a2");
     }
 
     #[test]
@@ -1200,14 +1321,14 @@ mod tests {
         // [user_orphan, user_new, assistant_new], max=2
         // → remove orphan → [user_new, assistant_new]
         let mut h = vec![
-            msg("user","orphan"),
-            msg("user","new"),
-            msg("assistant","reply"),
+            msg("user", "orphan"),
+            msg("user", "new"),
+            msg("assistant", "reply"),
         ];
         trim_history(&mut h, 2);
         assert_eq!(h.len(), 2);
-        assert_eq!(h[0].content_str(),"new");
-        assert_eq!(h[1].content_str(),"reply");
+        assert_eq!(h[0].content_str(), "new");
+        assert_eq!(h[1].content_str(), "reply");
     }
 
     #[test]
@@ -1215,20 +1336,20 @@ mod tests {
         // [orphan1, orphan2, user, assistant], max=2
         // → remove orphan1 → remove orphan2 → [user, assistant]
         let mut h = vec![
-            msg("user","orphan1"),
-            msg("user","orphan2"),
-            msg("user","new"),
-            msg("assistant","reply"),
+            msg("user", "orphan1"),
+            msg("user", "orphan2"),
+            msg("user", "new"),
+            msg("assistant", "reply"),
         ];
         trim_history(&mut h, 2);
         assert_eq!(roles(&h), vec!["user", "assistant"]);
-        assert_eq!(h[0].content_str(),"new");
+        assert_eq!(h[0].content_str(), "new");
     }
 
     #[test]
     fn trim_history_stops_on_unexpected_leading_role() {
         // assistant at front (malformed) — do not touch
-        let mut h = vec![msg("assistant","a"), msg("user","u")];
+        let mut h = vec![msg("assistant", "a"), msg("user", "u")];
         trim_history(&mut h, 1);
         assert_eq!(h.len(), 2, "should not trim malformed leading assistant");
     }
@@ -1253,7 +1374,13 @@ impl XaiAgent<XaiClient, NatsSessionNotifier> {
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let js = async_nats::jetstream::new(nats.clone());
         let store = KvSessionStore::open(js, bucket, Duration::from_secs(7 * 24 * 3600)).await?;
-        Ok(Self::new_with_store(nats, acp_prefix, default_model, api_key, Box::new(store)))
+        Ok(Self::new_with_store(
+            nats,
+            acp_prefix,
+            default_model,
+            api_key,
+            Box::new(store),
+        ))
     }
 
     /// Like `new_with_kv_bucket` but points the xAI client at a custom base URL
@@ -1269,7 +1396,8 @@ impl XaiAgent<XaiClient, NatsSessionNotifier> {
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let js = async_nats::jetstream::new(nats.clone());
         let store = KvSessionStore::open(js, bucket, Duration::from_secs(7 * 24 * 3600)).await?;
-        let mut agent = Self::new_with_store(nats, acp_prefix, default_model, api_key, Box::new(store));
+        let mut agent =
+            Self::new_with_store(nats, acp_prefix, default_model, api_key, Box::new(store));
         agent.client = Arc::new(crate::client::XaiClient::with_base_url(xai_base_url));
         Ok(agent)
     }
@@ -1285,7 +1413,13 @@ impl XaiAgent<XaiClient, NatsSessionNotifier> {
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let js = async_nats::jetstream::new(nats.clone());
         let store = KvSessionStore::open(js, bucket, ttl).await?;
-        Ok(Self::new_with_store(nats, acp_prefix, default_model, api_key, Box::new(store)))
+        Ok(Self::new_with_store(
+            nats,
+            acp_prefix,
+            default_model,
+            api_key,
+            Box::new(store),
+        ))
     }
 
     /// Creates an `XaiAgent` with a caller-supplied session store. For tests only.
@@ -1320,13 +1454,20 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
     }
 
     pub async fn test_session_history(&self, id: &str) -> Vec<Message> {
-        self.session_store.get(id).await.map(|s| s.history).unwrap_or_default()
+        self.session_store
+            .get(id)
+            .await
+            .map(|s| s.history)
+            .unwrap_or_default()
     }
 
     pub async fn test_set_session_history(&self, id: &str, history: Vec<Message>) {
         if let Some(mut data) = self.session_store.get(id).await {
             data.history = history;
-            self.session_store.put(id, &data).await.expect("test_set_session_history: put failed");
+            self.session_store
+                .put(id, &data)
+                .await
+                .expect("test_set_session_history: put failed");
         }
     }
 
@@ -1335,17 +1476,27 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
     }
 
     pub async fn test_session_enabled_tools(&self, id: &str) -> Vec<String> {
-        self.session_store.get(id).await.map(|s| s.enabled_tools).unwrap_or_default()
+        self.session_store
+            .get(id)
+            .await
+            .map(|s| s.enabled_tools)
+            .unwrap_or_default()
     }
 
     pub async fn test_session_last_response_id(&self, id: &str) -> Option<String> {
-        self.session_store.get(id).await.and_then(|s| s.last_response_id)
+        self.session_store
+            .get(id)
+            .await
+            .and_then(|s| s.last_response_id)
     }
 
     pub async fn test_set_last_response_id(&self, id: &str, response_id: Option<String>) {
         if let Some(mut data) = self.session_store.get(id).await {
             data.last_response_id = response_id;
-            self.session_store.put(id, &data).await.expect("test_set_last_response_id: put failed");
+            self.session_store
+                .put(id, &data)
+                .await
+                .expect("test_set_last_response_id: put failed");
         }
     }
 

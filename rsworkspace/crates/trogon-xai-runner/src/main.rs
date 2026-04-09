@@ -10,8 +10,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let nats_url =
         std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
     let prefix = std::env::var("ACP_PREFIX").unwrap_or_else(|_| "acp".to_string());
-    let default_model =
-        std::env::var("XAI_DEFAULT_MODEL").unwrap_or_else(|_| "grok-3".to_string());
+    let default_model = std::env::var("XAI_DEFAULT_MODEL").unwrap_or_else(|_| "grok-3".to_string());
     let api_key = std::env::var("XAI_API_KEY").unwrap_or_else(|_| {
         info!("XAI_API_KEY not set; users must authenticate with their own key via 'xai-api-key'");
         String::new()
