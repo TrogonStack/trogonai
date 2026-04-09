@@ -296,6 +296,14 @@ impl Harness {
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
+/// Serialize access to `std::env::set_var` / `remove_var` across tests in this
+/// binary, which run in parallel by default. Hold the returned guard for the
+/// duration of both the env mutation AND the `Harness::new()` call that reads it.
+static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+fn env_lock() -> &'static std::sync::Mutex<()> {
+    ENV_LOCK.get_or_init(|| std::sync::Mutex::new(()))
+}
+
 /// Send `new_session` and return the created session ID.
 /// Accounts for prior publishes so it can be called multiple times per test.
 async fn create_session(h: &Harness) -> String {
@@ -2688,6 +2696,109 @@ async fn prompt_shortcut_turns_still_accumulate_history() {
             assert_eq!(
                 call3.input_len, 5,
                 "fork prompt must include all 4 history items from shortcut turns plus the new user item"
+            );
+        })
+        .await;
+}
+
+// ── stream timeout returns PromptResponse via NATS ────────────────────────────
+
+/// When the per-chunk inactivity timeout fires the streaming loop must break
+/// and publish a valid `PromptResponse` through NATS (not stall forever).
+/// Uses `XAI_PROMPT_TIMEOUT_SECS=1` so the test completes in ~1 s.
+#[tokio::test]
+async fn prompt_stream_timeout_returns_response_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            // Set a 1-second per-chunk timeout so the test doesn't run for 300 s.
+            let h = {
+                let _guard = env_lock().lock().unwrap();
+                unsafe { std::env::set_var("XAI_PROMPT_TIMEOUT_SECS", "1") };
+                let h = Harness::new();
+                unsafe { std::env::remove_var("XAI_PROMPT_TIMEOUT_SECS") };
+                h
+            };
+
+            let sid = create_session(&h).await;
+
+            // Slow response: emits one TextDelta then blocks indefinitely.
+            // The per-chunk timeout must fire and break the loop.
+            h.http.push_slow(XaiEvent::TextDelta { text: "partial".to_string() });
+
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("hi")]),
+                "r.prompt",
+            );
+
+            // The agent must publish a PromptResponse after the 1-second timeout.
+            let payloads = h.expect_n_publishes(2).await;
+            let _: PromptResponse = serde_json::from_slice(&payloads[1]).unwrap();
+        })
+        .await;
+}
+
+// ── history trimming caps input at max_history ────────────────────────────────
+
+/// When history exceeds `max_history`, oldest entries are dropped. After two
+/// turns with `max_history=2` the history is trimmed to [u2, a2]. The third
+/// prompt's `input_len` must be 3 (u2 + a2 + new_user), proving trimming works
+/// end-to-end through the NATS/HTTP flow.
+#[tokio::test]
+async fn history_trimming_caps_input_at_max_history() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            // Build agent with max_history=2.
+            let h = {
+                let _guard = env_lock().lock().unwrap();
+                unsafe { std::env::set_var("XAI_MAX_HISTORY_MESSAGES", "2") };
+                let h = Harness::new();
+                unsafe { std::env::remove_var("XAI_MAX_HISTORY_MESSAGES") };
+                h
+            };
+
+            let sid = create_session(&h).await;
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+
+            // Turn 1 → history: [u1, a1] (len=2, no trim yet).
+            h.http.push(vec![
+                XaiEvent::TextDelta { text: "a1".to_string() },
+                XaiEvent::Done,
+            ]);
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("u1")]),
+                "r.p1",
+            );
+            h.expect_n_publishes(2).await;
+
+            // Turn 2 → history grows to [u1, a1, u2, a2] then trimmed to [u2, a2].
+            h.http.push(vec![
+                XaiEvent::TextDelta { text: "a2".to_string() },
+                XaiEvent::Done,
+            ]);
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("u2")]),
+                "r.p2",
+            );
+            h.expect_n_publishes(3).await;
+
+            // Turn 3: full-history path builds input from trimmed history.
+            // Expected: [u2, a2, u3] = 3 items.
+            h.http.push(vec![XaiEvent::Done]);
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("u3")]),
+                "r.p3",
+            );
+            h.expect_n_publishes(4).await;
+
+            let call = h.http.last_call().unwrap();
+            assert_eq!(
+                call.input_len, 3,
+                "after trimming to max_history=2, turn 3 must send [u2, a2, u3] = 3 items"
             );
         })
         .await;
