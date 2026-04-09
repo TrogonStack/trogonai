@@ -70,15 +70,24 @@ pub struct Message {
 
 impl Message {
     pub fn user(text: impl Into<String>) -> Self {
-        Self { role: "user".to_string(), content: Some(text.into()) }
+        Self {
+            role: "user".to_string(),
+            content: Some(text.into()),
+        }
     }
 
     pub fn system(text: impl Into<String>) -> Self {
-        Self { role: "system".to_string(), content: Some(text.into()) }
+        Self {
+            role: "system".to_string(),
+            content: Some(text.into()),
+        }
     }
 
     pub fn assistant_text(text: impl Into<String>) -> Self {
-        Self { role: "assistant".to_string(), content: Some(text.into()) }
+        Self {
+            role: "assistant".to_string(),
+            content: Some(text.into()),
+        }
     }
 
     /// Returns the text content of this message, or `""` if none.
@@ -99,15 +108,24 @@ pub struct InputItem {
 
 impl InputItem {
     pub fn user(content: impl Into<String>) -> Self {
-        Self { role: "user".to_string(), content: content.into() }
+        Self {
+            role: "user".to_string(),
+            content: content.into(),
+        }
     }
 
     pub fn system(content: impl Into<String>) -> Self {
-        Self { role: "system".to_string(), content: content.into() }
+        Self {
+            role: "system".to_string(),
+            content: content.into(),
+        }
     }
 
     pub fn assistant(content: impl Into<String>) -> Self {
-        Self { role: "assistant".to_string(), content: content.into() }
+        Self {
+            role: "assistant".to_string(),
+            content: content.into(),
+        }
     }
 }
 
@@ -149,17 +167,27 @@ pub enum XaiEvent {
     ///
     /// In the Responses API, function calls are delivered as a complete chunk
     /// (not streamed in deltas like Chat Completions).
-    FunctionCall { call_id: String, name: String, arguments: String },
+    FunctionCall {
+        call_id: String,
+        name: String,
+        arguments: String,
+    },
     /// The `id` of this response — used as `previous_response_id` next turn.
     ResponseId { id: String },
     /// Token usage from the `response.completed` event.
-    Usage { prompt_tokens: u64, completion_tokens: u64 },
+    Usage {
+        prompt_tokens: u64,
+        completion_tokens: u64,
+    },
     /// Why the model stopped — included in the `response.completed` event.
     ///
     /// `incomplete_reason` is set when `reason == Incomplete` and carries the
     /// value of `incomplete_details.reason` from the API (e.g. `"max_output_tokens"`
     /// or `"max_turns"`). Used by the agent to choose the right continuation strategy.
-    Finished { reason: FinishReason, incomplete_reason: Option<String> },
+    Finished {
+        reason: FinishReason,
+        incomplete_reason: Option<String>,
+    },
     /// A server-side tool call (web_search, x_search) finished on xAI's
     /// infrastructure. Emitted from `response.*_call.completed`.
     ///
@@ -187,10 +215,16 @@ pub struct XaiClient {
     request_timeout: Duration,
 }
 
+impl Default for XaiClient {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl XaiClient {
     pub fn new() -> Self {
-        let base_url = std::env::var("XAI_BASE_URL")
-            .unwrap_or_else(|_| "https://api.x.ai/v1".to_string());
+        let base_url =
+            std::env::var("XAI_BASE_URL").unwrap_or_else(|_| "https://api.x.ai/v1".to_string());
         let request_timeout = std::env::var("XAI_PROMPT_TIMEOUT_SECS")
             .ok()
             .and_then(|s| s.parse::<u64>().ok())
@@ -201,7 +235,11 @@ impl XaiClient {
             .connect_timeout(Duration::from_secs(30))
             .build()
             .expect("failed to build HTTP client");
-        Self { http, base_url, request_timeout }
+        Self {
+            http,
+            base_url,
+            request_timeout,
+        }
     }
 
     /// Construct with an explicit base URL. Useful for tests and custom proxies.
@@ -231,7 +269,16 @@ impl XaiClient {
             "xai: starting responses stream"
         );
 
-        let result = self.start_request(model, input, api_key, tools, previous_response_id, max_turns).await;
+        let result = self
+            .start_request(
+                model,
+                input,
+                api_key,
+                tools,
+                previous_response_id,
+                max_turns,
+            )
+            .await;
         match result {
             Ok(response) => parse_sse(response.bytes_stream()).boxed_local(),
             Err(e) => {
@@ -272,10 +319,10 @@ impl XaiClient {
         // max_turns is only meaningful when tools are present — the server uses
         // it to cap tool-calling iterations. Skip it for tool-less requests to
         // avoid sending a parameter that has no effect.
-        if !tools.is_empty() {
-            if let Some(turns) = max_turns {
-                body["max_turns"] = serde_json::Value::Number(turns.into());
-            }
+        if !tools.is_empty()
+            && let Some(turns) = max_turns
+        {
+            body["max_turns"] = serde_json::Value::Number(turns.into());
         }
 
         let response = tokio::time::timeout(
@@ -287,7 +334,12 @@ impl XaiClient {
                 .send(),
         )
         .await
-        .map_err(|_| format!("xAI request timed out after {}s (no response headers received)", self.request_timeout.as_secs()))?
+        .map_err(|_| {
+            format!(
+                "xAI request timed out after {}s (no response headers received)",
+                self.request_timeout.as_secs()
+            )
+        })?
         .map_err(|e| e.to_string())?;
 
         if !response.status().is_success() {
@@ -312,7 +364,15 @@ impl XaiHttpClient for XaiClient {
         previous_response_id: Option<&str>,
         max_turns: Option<u32>,
     ) -> LocalBoxStream<'static, XaiEvent> {
-        self.do_chat_stream(model, input, api_key, tools, previous_response_id, max_turns).await
+        self.do_chat_stream(
+            model,
+            input,
+            api_key,
+            tools,
+            previous_response_id,
+            max_turns,
+        )
+        .await
     }
 }
 
@@ -354,7 +414,12 @@ fn parse_sse(
                 if let Some(nl) = state.buf.find('\n') {
                     let line = state.buf[..nl].trim_end_matches('\r').to_string();
                     state.buf = state.buf[nl + 1..].to_string();
-                    process_sse_line(&line, &mut state.response_id_emitted, &mut state.pending, &mut state.pending_fc);
+                    process_sse_line(
+                        &line,
+                        &mut state.response_id_emitted,
+                        &mut state.pending,
+                        &mut state.pending_fc,
+                    );
                     continue;
                 }
 
@@ -363,14 +428,21 @@ fn parse_sse(
                         state.buf.push_str(&String::from_utf8_lossy(&chunk));
                     }
                     Some(Err(e)) => {
-                        state.pending.push_back(XaiEvent::Error { message: e.to_string() });
+                        state.pending.push_back(XaiEvent::Error {
+                            message: e.to_string(),
+                        });
                         return state.pending.pop_front().map(|ev| (ev, state));
                     }
                     None => {
                         let remaining = std::mem::take(&mut state.buf);
                         let line = remaining.trim();
                         if !line.is_empty() {
-                            process_sse_line(line, &mut state.response_id_emitted, &mut state.pending, &mut state.pending_fc);
+                            process_sse_line(
+                                line,
+                                &mut state.response_id_emitted,
+                                &mut state.pending,
+                                &mut state.pending_fc,
+                            );
                         }
                         return state.pending.pop_front().map(|ev| (ev, state));
                     }
@@ -435,11 +507,9 @@ fn process_sse_line(
     };
 
     // Emit the response ID once (the first chunk that carries it).
-    if !*response_id_emitted {
-        if let Some(id) = val["id"].as_str() {
-            pending.push_back(XaiEvent::ResponseId { id: id.to_string() });
-            *response_id_emitted = true;
-        }
+    if !*response_id_emitted && let Some(id) = val["id"].as_str() {
+        pending.push_back(XaiEvent::ResponseId { id: id.to_string() });
+        *response_id_emitted = true;
     }
 
     let event_type = val["type"].as_str().unwrap_or("");
@@ -452,24 +522,32 @@ fn process_sse_line(
         // "reasoning_content" field in the same delta object; it is logged and
         // discarded since the ACP protocol has no dedicated reasoning block type.
         "message.delta" | "response.output_text.delta" => {
-            if let Some(text) = val["delta"]["text"].as_str()
+            if let Some(text) = val["delta"]["text"]
+                .as_str()
                 .or_else(|| val["delta"].as_str())
+                && !text.is_empty()
             {
-                if !text.is_empty() {
-                    pending.push_back(XaiEvent::TextDelta { text: text.to_string() });
-                }
+                pending.push_back(XaiEvent::TextDelta {
+                    text: text.to_string(),
+                });
             }
-            if let Some(rc) = val["delta"]["reasoning_content"].as_str() {
-                if !rc.is_empty() {
-                    debug!(reasoning_len = rc.len(), "xai: reasoning_content chunk (not forwarded to client)");
-                }
+            if let Some(rc) = val["delta"]["reasoning_content"].as_str()
+                && !rc.is_empty()
+            {
+                debug!(
+                    reasoning_len = rc.len(),
+                    "xai: reasoning_content chunk (not forwarded to client)"
+                );
             }
         }
         // OpenAI Responses API reasoning summary events — log and discard.
         "response.reasoning_summary_text.delta" => {
             let rc = val["delta"].as_str().unwrap_or("");
             if !rc.is_empty() {
-                debug!(reasoning_len = rc.len(), "xai: reasoning summary chunk (not forwarded to client)");
+                debug!(
+                    reasoning_len = rc.len(),
+                    "xai: reasoning summary chunk (not forwarded to client)"
+                );
             }
         }
         "function_call" => {
@@ -480,7 +558,11 @@ fn process_sse_line(
             let name = fc["name"].as_str().unwrap_or("").to_string();
             let arguments = fc["arguments"].as_str().unwrap_or("").to_string();
             if !call_id.is_empty() || !name.is_empty() {
-                pending.push_back(XaiEvent::FunctionCall { call_id, name, arguments });
+                pending.push_back(XaiEvent::FunctionCall {
+                    call_id,
+                    name,
+                    arguments,
+                });
             }
         }
         // ── OpenAI Responses API function-call streaming events ───────────────
@@ -506,10 +588,11 @@ fn process_sse_line(
             // Partial arguments fragment — append to the in-flight buffer.
             let call_id = val["call_id"].as_str().unwrap_or("");
             let delta = val["delta"].as_str().unwrap_or("");
-            if !call_id.is_empty() && !delta.is_empty() {
-                if let Some(entry) = pending_fc.get_mut(call_id) {
-                    entry.1.push_str(delta);
-                }
+            if !call_id.is_empty()
+                && !delta.is_empty()
+                && let Some(entry) = pending_fc.get_mut(call_id)
+            {
+                entry.1.push_str(delta);
             }
         }
         "response.function_call_arguments.done" => {
@@ -517,13 +600,18 @@ fn process_sse_line(
             // Name falls back to what was recorded in output_item.added.
             let call_id = val["call_id"].as_str().unwrap_or("").to_string();
             let arguments = val["arguments"].as_str().unwrap_or("").to_string();
-            let name = val["name"].as_str()
+            let name = val["name"]
+                .as_str()
                 .map(str::to_string)
                 .or_else(|| pending_fc.get(&call_id).map(|(n, _)| n.clone()))
                 .unwrap_or_default();
             pending_fc.remove(&call_id);
             if !call_id.is_empty() || !name.is_empty() {
-                pending.push_back(XaiEvent::FunctionCall { call_id, name, arguments });
+                pending.push_back(XaiEvent::FunctionCall {
+                    call_id,
+                    name,
+                    arguments,
+                });
             }
         }
         // ── Server-side tool call lifecycle events ───────────────────────────
@@ -538,10 +626,14 @@ fn process_sse_line(
         // carry no actionable data for the agent so they are dropped explicitly
         // (preferred over falling through to `_ => {}` for clarity).
         "response.web_search_call.completed" => {
-            pending.push_back(XaiEvent::ServerToolCompleted { name: "web_search".to_string() });
+            pending.push_back(XaiEvent::ServerToolCompleted {
+                name: "web_search".to_string(),
+            });
         }
         "response.x_search_call.completed" => {
-            pending.push_back(XaiEvent::ServerToolCompleted { name: "x_search".to_string() });
+            pending.push_back(XaiEvent::ServerToolCompleted {
+                name: "x_search".to_string(),
+            });
         }
         "response.web_search_call.in_progress"
         | "response.web_search_call.searching"
@@ -569,19 +661,25 @@ fn process_sse_line(
             // Extract the response ID (same fallback as response.completed) so
             // that the continuation request can reference this partial response
             // via `previous_response_id` without re-sending the full history.
-            if !*response_id_emitted {
-                if let Some(id) = val["response"]["id"].as_str() {
-                    pending.push_back(XaiEvent::ResponseId { id: id.to_string() });
-                    *response_id_emitted = true;
-                }
+            if !*response_id_emitted && let Some(id) = val["response"]["id"].as_str() {
+                pending.push_back(XaiEvent::ResponseId { id: id.to_string() });
+                *response_id_emitted = true;
             }
-            let usage = if val["usage"].is_null() { &val["response"]["usage"] } else { &val["usage"] };
+            let usage = if val["usage"].is_null() {
+                &val["response"]["usage"]
+            } else {
+                &val["usage"]
+            };
             let p = usage["prompt_tokens"].as_u64().unwrap_or(0);
             let c = usage["completion_tokens"].as_u64().unwrap_or(0);
             if p > 0 || c > 0 {
-                pending.push_back(XaiEvent::Usage { prompt_tokens: p, completion_tokens: c });
+                pending.push_back(XaiEvent::Usage {
+                    prompt_tokens: p,
+                    completion_tokens: c,
+                });
             }
-            let incomplete_reason = val["response"]["incomplete_details"]["reason"].as_str()
+            let incomplete_reason = val["response"]["incomplete_details"]["reason"]
+                .as_str()
                 .or_else(|| val["incomplete_details"]["reason"].as_str())
                 .map(str::to_string);
             pending.push_back(XaiEvent::Finished {
@@ -608,7 +706,8 @@ fn process_sse_line(
             // Map to XaiEvent::Error so the agent's stream_error path fires and the
             // orphaned user message is compensated — without this the stream ends
             // silently and the client sees an empty successful response.
-            let message = val["error"]["message"].as_str()
+            let message = val["error"]["message"]
+                .as_str()
                 .or_else(|| val["message"].as_str())
                 .unwrap_or("xAI stream error")
                 .to_string();
@@ -624,30 +723,37 @@ fn process_sse_line(
             // continuation — would never see a top-level id and would leave
             // current_response_id as None, forcing full-history fallback on the
             // next turn. Extract the nested id here as a fallback.
-            if !*response_id_emitted {
-                if let Some(id) = val["response"]["id"].as_str() {
-                    pending.push_back(XaiEvent::ResponseId { id: id.to_string() });
-                    *response_id_emitted = true;
-                }
+            if !*response_id_emitted && let Some(id) = val["response"]["id"].as_str() {
+                pending.push_back(XaiEvent::ResponseId { id: id.to_string() });
+                *response_id_emitted = true;
             }
             // Usage may be top-level (xAI extension) or nested inside the
             // response object (per OpenAI Responses API spec).
-            let usage = if val["usage"].is_null() { &val["response"]["usage"] } else { &val["usage"] };
+            let usage = if val["usage"].is_null() {
+                &val["response"]["usage"]
+            } else {
+                &val["usage"]
+            };
             let p = usage["prompt_tokens"].as_u64().unwrap_or(0);
             let c = usage["completion_tokens"].as_u64().unwrap_or(0);
             if p > 0 || c > 0 {
-                pending.push_back(XaiEvent::Usage { prompt_tokens: p, completion_tokens: c });
+                pending.push_back(XaiEvent::Usage {
+                    prompt_tokens: p,
+                    completion_tokens: c,
+                });
             }
             // Emit the finish reason from response.status (Responses API field).
             // Falls back to checking top-level status for xAI-specific deviations.
             // When status is "incomplete", also extract incomplete_details.reason
             // (e.g. "max_output_tokens" or "max_turns") so the agent can choose
             // the right continuation strategy.
-            let status = val["response"]["status"].as_str()
+            let status = val["response"]["status"]
+                .as_str()
                 .or_else(|| val["status"].as_str());
             if let Some(s) = status {
                 let incomplete_reason = if s == "incomplete" {
-                    val["response"]["incomplete_details"]["reason"].as_str()
+                    val["response"]["incomplete_details"]["reason"]
+                        .as_str()
                         .or_else(|| val["incomplete_details"]["reason"].as_str())
                         .map(str::to_string)
                 } else {
@@ -717,7 +823,8 @@ mod tests {
 
     #[test]
     fn text_delta_responses_api() {
-        let line = r#"data: {"type":"message.delta","delta":{"type":"output_text","text":"hello"}}"#;
+        let line =
+            r#"data: {"type":"message.delta","delta":{"type":"output_text","text":"hello"}}"#;
         let event = parse_line(line).unwrap();
         assert!(matches!(event, XaiEvent::TextDelta { text } if text == "hello"));
     }
@@ -759,7 +866,9 @@ mod tests {
         process_sse_line(line, &mut emitted, &mut pending, &mut pending_fc);
         let events2: Vec<_> = pending.into_iter().collect();
         assert!(
-            !events2.iter().any(|e| matches!(e, XaiEvent::ResponseId { .. })),
+            !events2
+                .iter()
+                .any(|e| matches!(e, XaiEvent::ResponseId { .. })),
             "ResponseId must not be emitted twice: {events2:?}"
         );
     }
@@ -769,7 +878,11 @@ mod tests {
         let line = r#"data: {"type":"function_call","function_call":{"call_id":"call_1","name":"web_search","arguments":"{\"q\":\"test\"}"}}"#;
         let event = parse_line(line).unwrap();
         match event {
-            XaiEvent::FunctionCall { call_id, name, arguments } => {
+            XaiEvent::FunctionCall {
+                call_id,
+                name,
+                arguments,
+            } => {
                 assert_eq!(call_id, "call_1");
                 assert_eq!(name, "web_search");
                 assert_eq!(arguments, r#"{"q":"test"}"#);
@@ -783,7 +896,13 @@ mod tests {
         let line = r#"data: {"type":"response.completed","usage":{"prompt_tokens":42,"completion_tokens":7}}"#;
         let event = parse_line(line).unwrap();
         assert!(
-            matches!(event, XaiEvent::Usage { prompt_tokens: 42, completion_tokens: 7 }),
+            matches!(
+                event,
+                XaiEvent::Usage {
+                    prompt_tokens: 42,
+                    completion_tokens: 7
+                }
+            ),
             "unexpected event: {event:?}"
         );
     }
@@ -868,7 +987,11 @@ mod tests {
         let line = r#"data: {"type":"response.function_call_arguments.done","call_id":"call_abc","name":"web_search","arguments":"{\"q\":\"rust\"}"}"#;
         let event = parse_line(line).unwrap();
         match event {
-            XaiEvent::FunctionCall { call_id, name, arguments } => {
+            XaiEvent::FunctionCall {
+                call_id,
+                name,
+                arguments,
+            } => {
                 assert_eq!(call_id, "call_abc");
                 assert_eq!(name, "web_search");
                 assert_eq!(arguments, r#"{"q":"rust"}"#);
@@ -887,9 +1010,17 @@ mod tests {
 
         let events = parse_lines(&[added, delta1, delta2, done]);
         // Only the done event emits a FunctionCall (added/delta are stateful, no events).
-        assert_eq!(events.len(), 1, "expected exactly one FunctionCall: {events:?}");
+        assert_eq!(
+            events.len(),
+            1,
+            "expected exactly one FunctionCall: {events:?}"
+        );
         match &events[0] {
-            XaiEvent::FunctionCall { call_id, name, arguments } => {
+            XaiEvent::FunctionCall {
+                call_id,
+                name,
+                arguments,
+            } => {
                 assert_eq!(call_id, "call_1");
                 assert_eq!(name, "web_search");
                 assert_eq!(arguments, r#"{"q":"test"}"#);
@@ -909,7 +1040,8 @@ mod tests {
     #[test]
     fn output_item_added_non_function_call_emits_nothing() {
         // output_item.added for text items must not emit any event.
-        let line = r#"data: {"type":"response.output_item.added","item":{"type":"message","id":"msg_1"}}"#;
+        let line =
+            r#"data: {"type":"response.output_item.added","item":{"type":"message","id":"msg_1"}}"#;
         assert!(parse_line(line).is_none());
     }
 
@@ -927,15 +1059,25 @@ mod tests {
     fn response_incomplete_event_emits_finished_incomplete() {
         let line = r#"data: {"type":"response.incomplete","response":{"id":"resp_trunc","status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"usage":{"prompt_tokens":10,"completion_tokens":50}}}"#;
         let events = parse_line_all(line);
-        let id_events: Vec<_> = events.iter().filter_map(|e| match e {
-            XaiEvent::ResponseId { id } => Some(id.as_str()),
-            _ => None,
-        }).collect();
-        assert_eq!(id_events, vec!["resp_trunc"], "response.incomplete must emit ResponseId");
+        let id_events: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                XaiEvent::ResponseId { id } => Some(id.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            id_events,
+            vec!["resp_trunc"],
+            "response.incomplete must emit ResponseId"
+        );
         let usage_event = events.iter().find(|e| matches!(e, XaiEvent::Usage { .. }));
         assert!(usage_event.is_some(), "response.incomplete must emit Usage");
         let finished = events.iter().find_map(|e| match e {
-            XaiEvent::Finished { reason, incomplete_reason } => Some((reason.clone(), incomplete_reason.clone())),
+            XaiEvent::Finished {
+                reason,
+                incomplete_reason,
+            } => Some((reason.clone(), incomplete_reason.clone())),
             _ => None,
         });
         let (reason, inc_reason) = finished.expect("response.incomplete must emit Finished");
@@ -948,7 +1090,10 @@ mod tests {
         let line = r#"data: {"type":"response.incomplete","response":{"id":"resp_2","status":"incomplete"}}"#;
         let events = parse_line_all(line);
         let finished = events.iter().find_map(|e| match e {
-            XaiEvent::Finished { reason, incomplete_reason } => Some((reason.clone(), incomplete_reason.clone())),
+            XaiEvent::Finished {
+                reason,
+                incomplete_reason,
+            } => Some((reason.clone(), incomplete_reason.clone())),
             _ => None,
         });
         let (reason, inc_reason) = finished.expect("response.incomplete must emit Finished");
@@ -973,7 +1118,10 @@ mod tests {
         let event = parse_line(line).unwrap();
         match event {
             XaiEvent::Error { message } => {
-                assert!(message.contains("content policy"), "unexpected message: {message}");
+                assert!(
+                    message.contains("content policy"),
+                    "unexpected message: {message}"
+                );
             }
             other => panic!("expected Error, got {other:?}"),
         }
@@ -984,7 +1132,10 @@ mod tests {
         // Fallback when error object is absent or oddly shaped.
         let line = r#"data: {"type":"response.error","message":"unexpected failure"}"#;
         let event = parse_line(line).unwrap();
-        assert!(matches!(event, XaiEvent::Error { .. }), "expected Error, got {event:?}");
+        assert!(
+            matches!(event, XaiEvent::Error { .. }),
+            "expected Error, got {event:?}"
+        );
     }
 
     #[test]
@@ -994,11 +1145,18 @@ mod tests {
         // can use previous_response_id on the next turn.
         let line = r#"data: {"type":"response.completed","response":{"id":"resp_nested","status":"completed"}}"#;
         let events = parse_lines(&[line]);
-        let id_events: Vec<_> = events.iter().filter_map(|e| match e {
-            XaiEvent::ResponseId { id } => Some(id.as_str()),
-            _ => None,
-        }).collect();
-        assert_eq!(id_events, vec!["resp_nested"], "nested response.id must be emitted as ResponseId");
+        let id_events: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                XaiEvent::ResponseId { id } => Some(id.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            id_events,
+            vec!["resp_nested"],
+            "nested response.id must be emitted as ResponseId"
+        );
     }
 
     #[test]
@@ -1010,10 +1168,13 @@ mod tests {
             r#"data: {"type":"response.completed","response":{"id":"resp_nested","status":"completed"}}"#,
         ];
         let events = parse_lines(lines);
-        let id_events: Vec<_> = events.iter().filter_map(|e| match e {
-            XaiEvent::ResponseId { id } => Some(id.as_str()),
-            _ => None,
-        }).collect();
+        let id_events: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                XaiEvent::ResponseId { id } => Some(id.as_str()),
+                _ => None,
+            })
+            .collect();
         // Only the top-level id from message.delta; the nested one is suppressed.
         assert_eq!(id_events, vec!["resp_toplevel"]);
     }
@@ -1075,5 +1236,4 @@ mod tests {
             "x_search_call.searching must produce no event"
         );
     }
-
 }

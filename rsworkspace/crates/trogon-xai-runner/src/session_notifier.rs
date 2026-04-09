@@ -63,7 +63,9 @@ pub struct MockSessionNotifier {
 #[cfg(feature = "test-helpers")]
 impl MockSessionNotifier {
     pub fn new() -> Self {
-        Self { notifications: std::sync::Mutex::new(Vec::new()) }
+        Self {
+            notifications: std::sync::Mutex::new(Vec::new()),
+        }
     }
 }
 
