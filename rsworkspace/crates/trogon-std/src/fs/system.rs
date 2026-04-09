@@ -47,9 +47,28 @@ impl OpenAppendFile for SystemFs {
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
+    use std::io::Write;
+    use std::path::{Path, PathBuf};
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::*;
+
+    fn test_path(name: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should be after unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "trogon_std_system_fs_{name}_{}_{}",
+            std::process::id(),
+            nanos
+        ))
+    }
+
+    fn cleanup(path: &Path) {
+        let _ = std::fs::remove_file(path);
+        let _ = std::fs::remove_dir_all(path);
+    }
 
     #[test]
     fn test_system_fs_nonexistent_file() {
@@ -65,5 +84,91 @@ mod tests {
 
         let fs = SystemFs;
         assert_eq!(read_config(&fs, Path::new("/nonexistent_12345")), "{}");
+    }
+
+    #[test]
+    fn write_read_and_exists_roundtrip() {
+        let fs = SystemFs;
+        let dir = test_path("roundtrip");
+        let path = dir.join("config.json");
+        cleanup(&dir);
+
+        std::fs::create_dir_all(&dir).expect("test dir should be created");
+        assert!(!fs.exists(&path));
+
+        fs.write(&path, r#"{"port":8080}"#)
+            .expect("write should succeed");
+        assert!(fs.exists(&path));
+        assert_eq!(
+            fs.read_to_string(&path).expect("read should succeed"),
+            r#"{"port":8080}"#
+        );
+
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn create_dir_all_creates_nested_directories() {
+        let fs = SystemFs;
+        let dir = test_path("nested");
+        let nested = dir.join("a/b/c");
+        cleanup(&dir);
+
+        fs.create_dir_all(&nested)
+            .expect("create_dir_all should succeed");
+        assert!(nested.exists());
+
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn create_dir_all_fails_when_path_is_existing_file() {
+        let fs = SystemFs;
+        let dir = test_path("create_dir_error");
+        let file = dir.join("existing_file");
+        cleanup(&dir);
+
+        std::fs::create_dir_all(&dir).expect("test dir should be created");
+        std::fs::write(&file, "x").expect("test file should be created");
+
+        assert!(fs.create_dir_all(&file).is_err());
+
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn open_append_creates_and_appends_file() {
+        let fs = SystemFs;
+        let dir = test_path("append");
+        let file = dir.join("log.txt");
+        cleanup(&dir);
+
+        std::fs::create_dir_all(&dir).expect("test dir should be created");
+
+        let mut w1 = fs.open_append(&file).expect("first open should succeed");
+        w1.write_all(b"hello").expect("first write should succeed");
+        drop(w1);
+
+        let mut w2 = fs.open_append(&file).expect("second open should succeed");
+        w2.write_all(b" world")
+            .expect("second write should succeed");
+        drop(w2);
+
+        assert_eq!(
+            std::fs::read_to_string(&file).expect("file should be readable"),
+            "hello world"
+        );
+
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn open_append_fails_when_parent_directory_is_missing() {
+        let fs = SystemFs;
+        let dir = test_path("append_missing_parent");
+        let file = dir.join("subdir/log.txt");
+        cleanup(&dir);
+
+        assert!(fs.open_append(&file).is_err());
     }
 }
