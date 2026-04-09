@@ -8,7 +8,9 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tokio::io::AsyncReadExt;
-use wasmtime::{Caller, Engine, Extern, InstancePre, Linker, Module, ResourceLimiter, Store, ValType};
+use wasmtime::{
+    Caller, Engine, Extern, InstancePre, Linker, Module, ResourceLimiter, Store, ValType,
+};
 use wasmtime_wasi::pipe::AsyncWriteStream;
 use wasmtime_wasi::preview1::{self, WasiP1Ctx};
 use wasmtime_wasi::{AsyncStdoutStream, DirPerms, FilePerms, WasiCtxBuilder};
@@ -298,7 +300,8 @@ fn add_trogon_host_functions<N: NatsBroker + Send + Sync + 'static>(
                     None => {
                         results[0] = wasmtime::Val::I32(-1);
                     }
-                    Some(nc) => match NatsBroker::publish(&nc, subject.into(), payload_bytes).await {
+                    Some(nc) => match NatsBroker::publish(&nc, subject.into(), payload_bytes).await
+                    {
                         Ok(_) => {
                             results[0] = wasmtime::Val::I32(0);
                         }
@@ -398,14 +401,18 @@ fn add_trogon_host_functions<N: NatsBroker + Send + Sync + 'static>(
                 } else {
                     std::time::Duration::from_millis(timeout_ms as u64)
                 };
-                let response =
-                    match tokio::time::timeout(timeout, NatsBroker::request(&nats, subject, payload)).await {
-                        Ok(Ok(msg)) => msg.payload,
-                        _ => {
-                            results[0] = wasmtime::Val::I32(-1);
-                            return Ok(());
-                        }
-                    };
+                let response = match tokio::time::timeout(
+                    timeout,
+                    NatsBroker::request(&nats, subject, payload),
+                )
+                .await
+                {
+                    Ok(Ok(msg)) => msg.payload,
+                    _ => {
+                        results[0] = wasmtime::Val::I32(-1);
+                        return Ok(());
+                    }
+                };
 
                 // Write response into WASM memory.
                 let to_write = response.len().min(out_max);
@@ -843,7 +850,7 @@ pub(crate) type CachedModuleEntry<N> = (
 /// compiling (or loading from cache) a `.wasm` file and running it via
 /// `run_module_compiled`.
 pub struct RealWasmExecutor<
-    N:  NatsBroker + Send + Sync = async_nats::Client,
+    N: NatsBroker + Send + Sync = async_nats::Client,
     CL: Clock = StdClock,
     SF: SyncFs = StdSyncFs,
 > {
@@ -1042,18 +1049,19 @@ impl<N: NatsBroker + Send + Sync + 'static, CL: Clock, SF: SyncFs> RealWasmExecu
                     cache.remove(&lru);
                 }
             }
-            cache.insert(
-                abs_path,
-                (pre.clone(), current_mtime, self.clock.now()),
-            );
+            cache.insert(abs_path, (pre.clone(), current_mtime, self.clock.now()));
         }
         Ok(pre)
     }
 }
 
-impl<N: NatsBroker + Send + Sync + 'static, CL: Clock, SF: SyncFs> WasmExecutor<N> for RealWasmExecutor<N, CL, SF> {
+impl<N: NatsBroker + Send + Sync + 'static, CL: Clock, SF: SyncFs> WasmExecutor<N>
+    for RealWasmExecutor<N, CL, SF>
+{
     fn validate(&self, wasm_path: &std::path::Path) -> Result<(), anyhow::Error> {
-        let meta = self.sync_fs.metadata(wasm_path)
+        let meta = self
+            .sync_fs
+            .metadata(wasm_path)
             .map_err(|e| anyhow::anyhow!("{}: {e}", wasm_path.display()))?;
         let max_size = self.wasm_max_module_size_bytes;
         if max_size > 0 && meta.len as usize > max_size {
@@ -1066,10 +1074,7 @@ impl<N: NatsBroker + Send + Sync + 'static, CL: Clock, SF: SyncFs> WasmExecutor<
         Ok(())
     }
 
-    async fn run(
-        &self,
-        config: WasmRunConfig<N>,
-    ) -> Result<TerminalExitStatus, anyhow::Error> {
+    async fn run(&self, config: WasmRunConfig<N>) -> Result<TerminalExitStatus, anyhow::Error> {
         let instance_pre = self.get_or_compile_module(&config.wasm_path).await?;
         let cwd = if config.cwd.as_deref().unwrap_or(&config.sandbox_dir) != config.sandbox_dir {
             config.cwd
@@ -1210,7 +1215,9 @@ pub(crate) async fn run_module_compiled<N: NatsBroker + Send + Sync + 'static>(
         loop {
             match stdout_reader.read(&mut chunk).await {
                 Ok(0) | Err(_) => break,
-                Ok(n) => crate::terminal::append_output(&buf_out, &trunc_out, limit_out, &chunk[..n]),
+                Ok(n) => {
+                    crate::terminal::append_output(&buf_out, &trunc_out, limit_out, &chunk[..n])
+                }
             }
         }
     });
@@ -1222,7 +1229,9 @@ pub(crate) async fn run_module_compiled<N: NatsBroker + Send + Sync + 'static>(
         loop {
             match stderr_reader.read(&mut chunk).await {
                 Ok(0) | Err(_) => break,
-                Ok(n) => crate::terminal::append_output(&buf_err, &trunc_err, limit_out, &chunk[..n]),
+                Ok(n) => {
+                    crate::terminal::append_output(&buf_err, &trunc_err, limit_out, &chunk[..n])
+                }
             }
         }
     });

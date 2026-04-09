@@ -59,7 +59,7 @@ twilight-gateway = { version = "=0.17.1", default-features = false, features = [
 twilight-model = "=0.17.1"
 
 # Misc
-tempfile = "=3.19.1"
+tempfile = "=3.27.0"
 uuid = { version = "=1.23.0", features = ["v4", "v7"] }
 
 [profile.release]

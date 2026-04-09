@@ -37,10 +37,7 @@ pub trait Runtime {
         data: &[u8],
     ) -> impl std::future::Future<Output = agent_client_protocol::Result<()>>;
 
-    fn handle_close_terminal_stdin(
-        &self,
-        terminal_id: &str,
-    ) -> agent_client_protocol::Result<()>;
+    fn handle_close_terminal_stdin(&self, terminal_id: &str) -> agent_client_protocol::Result<()>;
 
     fn handle_release_terminal(
         &self,
@@ -50,9 +47,7 @@ pub trait Runtime {
     fn handle_wait_for_terminal_exit(
         &self,
         req: WaitForTerminalExitRequest,
-    ) -> impl std::future::Future<
-        Output = agent_client_protocol::Result<WaitForTerminalExitResponse>,
-    >;
+    ) -> impl std::future::Future<Output = agent_client_protocol::Result<WaitForTerminalExitResponse>>;
 
     fn handle_write_text_file(
         &self,
@@ -146,7 +141,9 @@ pub trait WasmExecutor<N: NatsBroker + Send + Sync>: Clone + 'static {
     fn run(
         &self,
         config: WasmRunConfig<N>,
-    ) -> impl std::future::Future<Output = Result<agent_client_protocol::TerminalExitStatus, anyhow::Error>>;
+    ) -> impl std::future::Future<
+        Output = Result<agent_client_protocol::TerminalExitStatus, anyhow::Error>,
+    >;
 }
 
 // ── NatsBroker trait ──────────────────────────────────────────────────────────
@@ -171,16 +168,14 @@ pub trait NatsBroker: Clone + Send + Sync + 'static {
     fn subscribe(
         &self,
         subject: &str,
-    ) -> impl std::future::Future<
-        Output = Result<Self::Sub, Box<dyn std::error::Error + Send + Sync>>,
-    > + Send;
+    ) -> impl std::future::Future<Output = Result<Self::Sub, Box<dyn std::error::Error + Send + Sync>>>
+           + Send;
 
     fn publish(
         &self,
         subject: async_nats::Subject,
         payload: bytes::Bytes,
-    ) -> impl std::future::Future<Output = Result<(), Box<dyn std::error::Error + Send + Sync>>>
-    + Send;
+    ) -> impl std::future::Future<Output = Result<(), Box<dyn std::error::Error + Send + Sync>>> + Send;
 
     /// Sends a request and awaits one reply.
     fn request(
@@ -234,37 +229,17 @@ impl NatsBroker for async_nats::Client {
 /// Implemented by `TokioFs` for production and `MockFs` for tests, enabling
 /// pure unit tests of file-handling logic without touching the real filesystem.
 pub trait Fs: Clone + 'static {
-    fn create_dir_all(
-        &self,
-        path: &Path,
-    ) -> impl std::future::Future<Output = io::Result<()>>;
+    fn create_dir_all(&self, path: &Path) -> impl std::future::Future<Output = io::Result<()>>;
 
-    fn write(
-        &self,
-        path: &Path,
-        data: &[u8],
-    ) -> impl std::future::Future<Output = io::Result<()>>;
+    fn write(&self, path: &Path, data: &[u8]) -> impl std::future::Future<Output = io::Result<()>>;
 
-    fn rename(
-        &self,
-        from: &Path,
-        to: &Path,
-    ) -> impl std::future::Future<Output = io::Result<()>>;
+    fn rename(&self, from: &Path, to: &Path) -> impl std::future::Future<Output = io::Result<()>>;
 
-    fn read_to_string(
-        &self,
-        path: &Path,
-    ) -> impl std::future::Future<Output = io::Result<String>>;
+    fn read_to_string(&self, path: &Path) -> impl std::future::Future<Output = io::Result<String>>;
 
-    fn remove_dir_all(
-        &self,
-        path: &Path,
-    ) -> impl std::future::Future<Output = io::Result<()>>;
+    fn remove_dir_all(&self, path: &Path) -> impl std::future::Future<Output = io::Result<()>>;
 
-    fn remove_file(
-        &self,
-        path: &Path,
-    ) -> impl std::future::Future<Output = io::Result<()>>;
+    fn remove_file(&self, path: &Path) -> impl std::future::Future<Output = io::Result<()>>;
 
     /// Returns all immediate child directories of `path`.
     fn list_subdirs(
@@ -332,9 +307,7 @@ pub trait ChildProcessHandle: 'static {
     fn take_stdout(&mut self) -> Option<Self::Stdout>;
     fn take_stderr(&mut self) -> Option<Self::Stderr>;
 
-    fn wait(
-        &mut self,
-    ) -> impl std::future::Future<Output = io::Result<std::process::ExitStatus>>;
+    fn wait(&mut self) -> impl std::future::Future<Output = io::Result<std::process::ExitStatus>>;
 
     fn kill(&mut self) -> impl std::future::Future<Output = io::Result<()>>;
 }
