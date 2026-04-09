@@ -27,8 +27,8 @@ use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
 use trogon_agent::{AgentConfig, run};
 use trogon_datadog::{DatadogConfig, serve as datadog_serve};
-use trogon_nats::{NatsAuth, NatsConfig};
 use trogon_nats::jetstream::NatsJetStreamClient;
+use trogon_nats::{NatsAuth, NatsConfig};
 use trogon_secret_proxy::{
     proxy::{ProxyState, router},
     stream, subjects, worker,
@@ -485,13 +485,14 @@ async fn datadog_automation_dispatch_takes_precedence_over_fallback() {
 
     // Ensure DATADOG stream exists (the runner will also ensure it, but
     // we need it before the datadog server can publish to it).
-    js.context().get_or_create_stream(jetstream::stream::Config {
-        name: "DATADOG".to_string(),
-        subjects: vec!["datadog.>".to_string()],
-        ..Default::default()
-    })
-    .await
-    .unwrap();
+    js.context()
+        .get_or_create_stream(jetstream::stream::Config {
+            name: "DATADOG".to_string(),
+            subjects: vec!["datadog.>".to_string()],
+            ..Default::default()
+        })
+        .await
+        .unwrap();
 
     let datadog_port = next_port();
     let webhook_secret = "test-dd-auto-secret";
@@ -744,13 +745,14 @@ async fn datadog_handler_error_still_acks_and_continues() {
         .unwrap();
     let js = NatsJetStreamClient::new(jetstream::new(nats.clone()));
 
-    js.context().get_or_create_stream(jetstream::stream::Config {
-        name: "DATADOG".to_string(),
-        subjects: vec!["datadog.>".to_string()],
-        ..Default::default()
-    })
-    .await
-    .unwrap();
+    js.context()
+        .get_or_create_stream(jetstream::stream::Config {
+            name: "DATADOG".to_string(),
+            subjects: vec!["datadog.>".to_string()],
+            ..Default::default()
+        })
+        .await
+        .unwrap();
 
     let datadog_port = next_port();
     let webhook_secret = "test-dd-err-secret";
@@ -886,13 +888,14 @@ async fn datadog_event_automation_dispatch() {
     };
     store.put(&auto).await.unwrap();
 
-    js.context().get_or_create_stream(jetstream::stream::Config {
-        name: "DATADOG".to_string(),
-        subjects: vec!["datadog.>".to_string()],
-        ..Default::default()
-    })
-    .await
-    .unwrap();
+    js.context()
+        .get_or_create_stream(jetstream::stream::Config {
+            name: "DATADOG".to_string(),
+            subjects: vec!["datadog.>".to_string()],
+            ..Default::default()
+        })
+        .await
+        .unwrap();
 
     let datadog_port = next_port();
     let webhook_secret = "test-dd-event-auto-secret";

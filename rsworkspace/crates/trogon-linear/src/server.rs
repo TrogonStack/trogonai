@@ -344,8 +344,9 @@ mod tests {
     // ── Test JetStream client ─────────────────────────────────────────────────
 
     type BoxFut<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
-    type PublishCallFn =
-        Arc<dyn Fn() -> Result<BoxFut<Result<PublishAck, PublishError>>, PublishError> + Send + Sync>;
+    type PublishCallFn = Arc<
+        dyn Fn() -> Result<BoxFut<Result<PublishAck, PublishError>>, PublishError> + Send + Sync,
+    >;
     type EnsureCallFn = Arc<dyn Fn() -> BoxFut<Result<(), CreateStreamError>> + Send + Sync>;
 
     /// Newtype wrapper so we can name `AckFuture` concretely as an associated type.
@@ -393,9 +394,9 @@ mod tests {
 
     fn make_js(
         publish: impl Fn() -> Result<BoxFut<Result<PublishAck, PublishError>>, PublishError>
-            + Send
-            + Sync
-            + 'static,
+        + Send
+        + Sync
+        + 'static,
         ensure: impl Fn() -> BoxFut<Result<(), CreateStreamError>> + Send + Sync + 'static,
     ) -> TestJs {
         TestJs {
@@ -709,7 +710,11 @@ mod tests {
         let js = make_js(
             move || {
                 let n = calls.fetch_add(1, AOrdering::SeqCst);
-                if n == 0 { Ok(error_ack()) } else { Ok(hanging_ack()) }
+                if n == 0 {
+                    Ok(error_ack())
+                } else {
+                    Ok(hanging_ack())
+                }
             },
             || ok_ensure(),
         );

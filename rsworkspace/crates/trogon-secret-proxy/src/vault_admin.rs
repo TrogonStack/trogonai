@@ -85,11 +85,7 @@ impl std::error::Error for VaultAdminError {}
 
 /// Subscribe to vault admin subjects and serve requests until the NATS client
 /// is closed or an unrecoverable error occurs.
-pub async fn run<N, V>(
-    nats: N,
-    vault: Arc<V>,
-    prefix: &str,
-) -> Result<(), VaultAdminError>
+pub async fn run<N, V>(nats: N, vault: Arc<V>, prefix: &str) -> Result<(), VaultAdminError>
 where
     N: SubscribeClient + PublishClient,
     V: VaultStore + 'static,
@@ -99,29 +95,29 @@ where
     let rotate_subject = subjects::vault_rotate(prefix);
     let revoke_subject = subjects::vault_revoke(prefix);
 
-    let mut store_sub = nats
-        .subscribe(store_subject.clone())
-        .await
-        .map_err(|e| VaultAdminError::Subscribe {
-            subject: store_subject.clone(),
-            source: e.to_string(),
-        })?;
+    let mut store_sub =
+        nats.subscribe(store_subject.clone())
+            .await
+            .map_err(|e| VaultAdminError::Subscribe {
+                subject: store_subject.clone(),
+                source: e.to_string(),
+            })?;
 
-    let mut rotate_sub = nats
-        .subscribe(rotate_subject.clone())
-        .await
-        .map_err(|e| VaultAdminError::Subscribe {
-            subject: rotate_subject.clone(),
-            source: e.to_string(),
-        })?;
+    let mut rotate_sub =
+        nats.subscribe(rotate_subject.clone())
+            .await
+            .map_err(|e| VaultAdminError::Subscribe {
+                subject: rotate_subject.clone(),
+                source: e.to_string(),
+            })?;
 
-    let mut revoke_sub = nats
-        .subscribe(revoke_subject.clone())
-        .await
-        .map_err(|e| VaultAdminError::Subscribe {
-            subject: revoke_subject.clone(),
-            source: e.to_string(),
-        })?;
+    let mut revoke_sub =
+        nats.subscribe(revoke_subject.clone())
+            .await
+            .map_err(|e| VaultAdminError::Subscribe {
+                subject: revoke_subject.clone(),
+                source: e.to_string(),
+            })?;
 
     tracing::info!(
         store = %store_subject,

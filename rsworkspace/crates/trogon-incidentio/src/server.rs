@@ -55,8 +55,8 @@ pub async fn serve(
     config: IncidentioConfig,
     nats: async_nats::Client,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    use async_nats::jetstream;
     use crate::store::IncidentStore;
+    use async_nats::jetstream;
     use trogon_nats::jetstream::NatsJetStreamClient;
 
     let js = NatsJetStreamClient::new(jetstream::new(nats));
@@ -272,11 +272,11 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::events::nats_subject_suffix;
+    use crate::store::mock::MockIncidentStore;
     use axum::body::Body;
     use axum::http::Request;
     use bytes::Bytes;
-    use crate::events::nats_subject_suffix;
-    use crate::store::mock::MockIncidentStore;
     use hmac::{Hmac, Mac};
     use sha2::Sha256;
     use tower::ServiceExt as _;
@@ -300,16 +300,11 @@ mod tests {
             subject_prefix: "incidentio".to_string(),
             stream_name: "INCIDENTIO".to_string(),
             stream_max_age: Duration::from_secs(3600),
-            nats: trogon_nats::NatsConfig::from_env(
-                &trogon_std::env::InMemoryEnv::new(),
-            ),
+            nats: trogon_nats::NatsConfig::from_env(&trogon_std::env::InMemoryEnv::new()),
         }
     }
 
-    fn mock_app(
-        publisher: MockJetStreamPublisher,
-        store: MockIncidentStore,
-    ) -> Router {
+    fn mock_app(publisher: MockJetStreamPublisher, store: MockIncidentStore) -> Router {
         let config = test_config();
         let state = AppState {
             js: publisher,
@@ -319,10 +314,19 @@ mod tests {
             ack_timeout: Duration::from_secs(10),
         };
         Router::new()
-            .route("/webhook", post(handle_webhook::<MockJetStreamPublisher, MockIncidentStore>))
+            .route(
+                "/webhook",
+                post(handle_webhook::<MockJetStreamPublisher, MockIncidentStore>),
+            )
             .route("/health", get(handle_health))
-            .route("/incidents", get(list_incidents::<MockJetStreamPublisher, MockIncidentStore>))
-            .route("/incidents/:id", get(get_incident_by_id::<MockJetStreamPublisher, MockIncidentStore>))
+            .route(
+                "/incidents",
+                get(list_incidents::<MockJetStreamPublisher, MockIncidentStore>),
+            )
+            .route(
+                "/incidents/:id",
+                get(get_incident_by_id::<MockJetStreamPublisher, MockIncidentStore>),
+            )
             .with_state(state)
     }
 
@@ -403,10 +407,7 @@ mod tests {
     async fn missing_signature_returns_401() {
         let publisher = MockJetStreamPublisher::new();
         let app = mock_app(publisher.clone(), MockIncidentStore::new());
-        let resp = app
-            .oneshot(webhook_request(b"{}", None))
-            .await
-            .unwrap();
+        let resp = app.oneshot(webhook_request(b"{}", None)).await.unwrap();
         assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
         assert!(publisher.published_subjects().is_empty());
     }
@@ -422,7 +423,10 @@ mod tests {
             ack_timeout: Duration::from_secs(10),
         };
         let app = Router::new()
-            .route("/webhook", post(handle_webhook::<MockJetStreamPublisher, MockIncidentStore>))
+            .route(
+                "/webhook",
+                post(handle_webhook::<MockJetStreamPublisher, MockIncidentStore>),
+            )
             .with_state(state);
         let body = br#"{"event_type":"incident.updated","incident":{"id":"inc-1"}}"#;
         let req = Request::builder()
@@ -432,7 +436,10 @@ mod tests {
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        assert_eq!(publisher.published_subjects(), vec!["incidentio.incident.updated"]);
+        assert_eq!(
+            publisher.published_subjects(),
+            vec!["incidentio.incident.updated"]
+        );
     }
 
     #[tokio::test]
@@ -453,7 +460,8 @@ mod tests {
     async fn list_incidents_returns_stored_incidents() {
         let publisher = MockJetStreamPublisher::new();
         let store = MockIncidentStore::new();
-        let body = br#"{"event_type":"incident.created","incident":{"id":"inc-1","name":"db down"}}"#;
+        let body =
+            br#"{"event_type":"incident.created","incident":{"id":"inc-1","name":"db down"}}"#;
         let sig = compute_sig(TEST_SECRET, body);
         let app = mock_app(publisher, store);
 
@@ -471,7 +479,9 @@ mod tests {
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let list: Vec<serde_json::Value> = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0]["incident"]["id"], "inc-1");
@@ -493,7 +503,8 @@ mod tests {
     async fn get_incident_by_id_returns_stored_incident() {
         let publisher = MockJetStreamPublisher::new();
         let store = MockIncidentStore::new();
-        let body = br#"{"event_type":"incident.created","incident":{"id":"inc-7","name":"svc down"}}"#;
+        let body =
+            br#"{"event_type":"incident.created","incident":{"id":"inc-7","name":"svc down"}}"#;
         let sig = compute_sig(TEST_SECRET, body);
         let app = mock_app(publisher, store);
 
@@ -511,7 +522,9 @@ mod tests {
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let val: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(val["incident"]["id"], "inc-7");
     }
@@ -526,17 +539,33 @@ mod tests {
         use trogon_nats::mocks::MockError;
 
         #[derive(Clone)]
-        enum AckBehavior { Fail, Hang }
-
-        #[derive(Clone)]
-        struct AckFailPublisher { behavior: Arc<Mutex<AckBehavior>> }
-
-        impl AckFailPublisher {
-            fn failing() -> Self { Self { behavior: Arc::new(Mutex::new(AckBehavior::Fail)) } }
-            fn hanging() -> Self { Self { behavior: Arc::new(Mutex::new(AckBehavior::Hang)) } }
+        enum AckBehavior {
+            Fail,
+            Hang,
         }
 
-        enum AckFuture { Fail, Hang }
+        #[derive(Clone)]
+        struct AckFailPublisher {
+            behavior: Arc<Mutex<AckBehavior>>,
+        }
+
+        impl AckFailPublisher {
+            fn failing() -> Self {
+                Self {
+                    behavior: Arc::new(Mutex::new(AckBehavior::Fail)),
+                }
+            }
+            fn hanging() -> Self {
+                Self {
+                    behavior: Arc::new(Mutex::new(AckBehavior::Hang)),
+                }
+            }
+        }
+
+        enum AckFuture {
+            Fail,
+            Hang,
+        }
 
         impl IntoFuture for AckFuture {
             type Output = Result<async_nats::jetstream::publish::PublishAck, MockError>;
@@ -574,7 +603,10 @@ mod tests {
                 ack_timeout: Duration::from_millis(50),
             };
             Router::new()
-                .route("/webhook", post(handle_webhook::<AckFailPublisher, MockIncidentStore>))
+                .route(
+                    "/webhook",
+                    post(handle_webhook::<AckFailPublisher, MockIncidentStore>),
+                )
                 .with_state(state)
         }
 
@@ -622,7 +654,9 @@ mod tests {
             headers: async_nats::HeaderMap,
             payload: bytes::Bytes,
         ) -> Result<Self::AckFuture, Self::PublishError> {
-            self.publisher.publish_with_headers(subject, headers, payload).await
+            self.publisher
+                .publish_with_headers(subject, headers, payload)
+                .await
         }
     }
 

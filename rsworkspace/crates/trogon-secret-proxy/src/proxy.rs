@@ -166,7 +166,7 @@ where
         .map_err(|_| ProxyError::Timeout {
             correlation_id: correlation_id.clone(),
         })?
-        .ok_or_else(|| ProxyError::ReplyChannelClosed)?;
+        .ok_or(ProxyError::ReplyChannelClosed)?;
 
     let proxy_response: OutboundHttpResponse = serde_json::from_slice(&reply_msg.payload)
         .map_err(|e| ProxyError::Deserialize(e.to_string()))?;
@@ -542,7 +542,10 @@ mod tests {
 
             let resp = app.oneshot(req).await.unwrap();
             assert_eq!(resp.status(), StatusCode::BAD_GATEWAY);
-            assert!(nats.subscribed_to().is_empty(), "no subscribe on unknown provider");
+            assert!(
+                nats.subscribed_to().is_empty(),
+                "no subscribe on unknown provider"
+            );
         }
 
         #[tokio::test]

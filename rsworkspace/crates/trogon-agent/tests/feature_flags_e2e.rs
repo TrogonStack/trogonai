@@ -29,8 +29,8 @@ use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
 use trogon_agent::{AgentConfig, run};
 use trogon_automations::{Automation, AutomationStore, Visibility};
-use trogon_nats::{NatsAuth, NatsConfig};
 use trogon_nats::jetstream::NatsJetStreamClient;
+use trogon_nats::{NatsAuth, NatsConfig};
 use trogon_secret_proxy::{
     proxy::{ProxyState, router},
     stream, subjects, worker,

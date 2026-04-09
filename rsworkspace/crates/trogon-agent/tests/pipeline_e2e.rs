@@ -29,8 +29,8 @@ use testcontainers_modules::testcontainers::{
 use trogon_agent::{AgentConfig, run};
 use trogon_github::GithubConfig;
 use trogon_linear::LinearConfig;
-use trogon_nats::{NatsAuth, NatsConfig};
 use trogon_nats::jetstream::NatsJetStreamClient;
+use trogon_nats::{NatsAuth, NatsConfig};
 use trogon_secret_proxy::{
     proxy::{ProxyState, router},
     stream, subjects, worker,
@@ -173,9 +173,9 @@ async fn pipeline_pr_event_reaches_anthropic_with_real_key() {
         .expect("Failed to ensure PROXY_REQUESTS stream");
 
     // ── 6. Create GITHUB + LINEAR streams (used by agent runner) ───────────
-    create_stream(js.context(),"GITHUB", &["github.pull_request"]).await;
-    create_stream(js.context(),"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(js.context(),"CRON_TICKS", &["cron.>"]).await;
+    create_stream(js.context(), "GITHUB", &["github.pull_request"]).await;
+    create_stream(js.context(), "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(js.context(), "CRON_TICKS", &["cron.>"]).await;
 
     // ── 7. Start proxy HTTP server on a random port ────────────────────────
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -260,7 +260,8 @@ async fn pipeline_pr_event_reaches_anthropic_with_real_key() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     // ── 10. Publish a GitHub PR opened event ───────────────────────────────
-    js.context().publish("github.pull_request", pr_opened_payload())
+    js.context()
+        .publish("github.pull_request", pr_opened_payload())
         .await
         .expect("Failed to publish PR event");
 
@@ -373,9 +374,9 @@ async fn pipeline_tool_use_github_api_detokenized() {
     stream::ensure_stream(&js, "trogon", &outbound_subject)
         .await
         .unwrap();
-    create_stream(js.context(),"GITHUB", &["github.pull_request"]).await;
-    create_stream(js.context(),"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(js.context(),"CRON_TICKS", &["cron.>"]).await;
+    create_stream(js.context(), "GITHUB", &["github.pull_request"]).await;
+    create_stream(js.context(), "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(js.context(), "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -447,7 +448,8 @@ async fn pipeline_tool_use_github_api_detokenized() {
 
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js.context().publish("github.pull_request", pr_opened_payload())
+    js.context()
+        .publish("github.pull_request", pr_opened_payload())
         .await
         .expect("Failed to publish PR event");
 
@@ -497,9 +499,9 @@ async fn pipeline_linear_issue_event_reaches_anthropic_with_real_key() {
         .await
         .unwrap();
 
-    create_stream(js.context(),"GITHUB", &["github.pull_request"]).await;
-    create_stream(js.context(),"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(js.context(),"CRON_TICKS", &["cron.>"]).await;
+    create_stream(js.context(), "GITHUB", &["github.pull_request"]).await;
+    create_stream(js.context(), "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(js.context(), "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -583,12 +585,13 @@ async fn pipeline_linear_issue_event_reaches_anthropic_with_real_key() {
             "team": { "name": "Backend" }
         }
     });
-    js.context().publish(
-        "linear.Issue.create",
-        bytes::Bytes::from(serde_json::to_vec(&payload).unwrap()),
-    )
-    .await
-    .expect("Failed to publish Linear issue event");
+    js.context()
+        .publish(
+            "linear.Issue.create",
+            bytes::Bytes::from(serde_json::to_vec(&payload).unwrap()),
+        )
+        .await
+        .expect("Failed to publish Linear issue event");
 
     let hit = wait_for_hit(&anthropic_mock, Duration::from_secs(20)).await;
     assert!(
@@ -688,9 +691,9 @@ async fn pipeline_tool_use_linear_api_detokenized() {
     stream::ensure_stream(&js, "trogon", &outbound_subject)
         .await
         .unwrap();
-    create_stream(js.context(),"GITHUB", &["github.pull_request"]).await;
-    create_stream(js.context(),"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(js.context(),"CRON_TICKS", &["cron.>"]).await;
+    create_stream(js.context(), "GITHUB", &["github.pull_request"]).await;
+    create_stream(js.context(), "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(js.context(), "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -763,24 +766,25 @@ async fn pipeline_tool_use_linear_api_detokenized() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     // Publish a Linear Issue create event to trigger the issue_triage handler.
-    js.context().publish(
-        "linear.Issue.create",
-        bytes::Bytes::from(
-            serde_json::to_vec(&json!({
-                "action": "create",
-                "type": "Issue",
-                "data": {
-                    "id": "issue-linear-123",
-                    "title": "Performance degradation in prod",
-                    "priority": 1,
-                    "team": { "name": "Platform" }
-                }
-            }))
-            .unwrap(),
-        ),
-    )
-    .await
-    .expect("Failed to publish Linear Issue event");
+    js.context()
+        .publish(
+            "linear.Issue.create",
+            bytes::Bytes::from(
+                serde_json::to_vec(&json!({
+                    "action": "create",
+                    "type": "Issue",
+                    "data": {
+                        "id": "issue-linear-123",
+                        "title": "Performance degradation in prod",
+                        "priority": 1,
+                        "team": { "name": "Platform" }
+                    }
+                }))
+                .unwrap(),
+            ),
+        )
+        .await
+        .expect("Failed to publish Linear Issue event");
 
     // Wait for the full agentic loop to complete (end_turn received).
     let end_turn_hit = wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await;
@@ -882,9 +886,9 @@ async fn pipeline_tool_failure_sends_error_as_tool_result_then_end_turn() {
     stream::ensure_stream(&js, "trogon", &outbound_subject)
         .await
         .unwrap();
-    create_stream(js.context(),"GITHUB", &["github.pull_request"]).await;
-    create_stream(js.context(),"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(js.context(),"CRON_TICKS", &["cron.>"]).await;
+    create_stream(js.context(), "GITHUB", &["github.pull_request"]).await;
+    create_stream(js.context(), "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(js.context(), "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -956,7 +960,8 @@ async fn pipeline_tool_failure_sends_error_as_tool_result_then_end_turn() {
 
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js.context().publish("github.pull_request", pr_opened_payload())
+    js.context()
+        .publish("github.pull_request", pr_opened_payload())
         .await
         .expect("Failed to publish PR event");
 
@@ -1043,9 +1048,9 @@ async fn pipeline_max_iterations_terminates_loop_at_cap() {
     stream::ensure_stream(&js, "trogon", &outbound_subject)
         .await
         .unwrap();
-    create_stream(js.context(),"GITHUB", &["github.pull_request"]).await;
-    create_stream(js.context(),"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(js.context(),"CRON_TICKS", &["cron.>"]).await;
+    create_stream(js.context(), "GITHUB", &["github.pull_request"]).await;
+    create_stream(js.context(), "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(js.context(), "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -1119,7 +1124,8 @@ async fn pipeline_max_iterations_terminates_loop_at_cap() {
 
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js.context().publish("github.pull_request", pr_opened_payload())
+    js.context()
+        .publish("github.pull_request", pr_opened_payload())
         .await
         .expect("Failed to publish PR event");
 
@@ -1195,9 +1201,9 @@ async fn pipeline_concurrent_events_processed_independently() {
     stream::ensure_stream(&js, "trogon", &outbound_subject)
         .await
         .unwrap();
-    create_stream(js.context(),"GITHUB", &["github.pull_request"]).await;
-    create_stream(js.context(),"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(js.context(),"CRON_TICKS", &["cron.>"]).await;
+    create_stream(js.context(), "GITHUB", &["github.pull_request"]).await;
+    create_stream(js.context(), "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(js.context(), "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -1271,10 +1277,12 @@ async fn pipeline_concurrent_events_processed_independently() {
 
     // Publish two PR events back-to-back (minimal delay — runner processes them
     // concurrently via tokio::spawn).
-    js.context().publish("github.pull_request", pr_opened_payload())
+    js.context()
+        .publish("github.pull_request", pr_opened_payload())
         .await
         .expect("Failed to publish first PR event");
-    js.context().publish("github.pull_request", pr_opened_payload())
+    js.context()
+        .publish("github.pull_request", pr_opened_payload())
         .await
         .expect("Failed to publish second PR event");
 
@@ -1403,9 +1411,9 @@ async fn pipeline_get_pr_diff_tool_detokenized() {
     stream::ensure_stream(&js, "trogon", &outbound_subject)
         .await
         .unwrap();
-    create_stream(js.context(),"GITHUB", &["github.pull_request"]).await;
-    create_stream(js.context(),"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(js.context(),"CRON_TICKS", &["cron.>"]).await;
+    create_stream(js.context(), "GITHUB", &["github.pull_request"]).await;
+    create_stream(js.context(), "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(js.context(), "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -1474,7 +1482,8 @@ async fn pipeline_get_pr_diff_tool_detokenized() {
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js.context().publish("github.pull_request", pr_payload("opened"))
+    js.context()
+        .publish("github.pull_request", pr_payload("opened"))
         .await
         .unwrap();
 
@@ -1557,9 +1566,9 @@ async fn pipeline_get_file_contents_tool_base64_decode() {
     stream::ensure_stream(&js, "trogon", &outbound_subject)
         .await
         .unwrap();
-    create_stream(js.context(),"GITHUB", &["github.pull_request"]).await;
-    create_stream(js.context(),"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(js.context(),"CRON_TICKS", &["cron.>"]).await;
+    create_stream(js.context(), "GITHUB", &["github.pull_request"]).await;
+    create_stream(js.context(), "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(js.context(), "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -1628,7 +1637,8 @@ async fn pipeline_get_file_contents_tool_base64_decode() {
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js.context().publish("github.pull_request", pr_payload("opened"))
+    js.context()
+        .publish("github.pull_request", pr_payload("opened"))
         .await
         .unwrap();
 
@@ -1706,9 +1716,9 @@ async fn pipeline_post_pr_comment_tool_detokenized() {
     stream::ensure_stream(&js, "trogon", &outbound_subject)
         .await
         .unwrap();
-    create_stream(js.context(),"GITHUB", &["github.pull_request"]).await;
-    create_stream(js.context(),"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(js.context(),"CRON_TICKS", &["cron.>"]).await;
+    create_stream(js.context(), "GITHUB", &["github.pull_request"]).await;
+    create_stream(js.context(), "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(js.context(), "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -1777,7 +1787,8 @@ async fn pipeline_post_pr_comment_tool_detokenized() {
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js.context().publish("github.pull_request", pr_payload("opened"))
+    js.context()
+        .publish("github.pull_request", pr_payload("opened"))
         .await
         .unwrap();
 
@@ -1830,9 +1841,9 @@ async fn pipeline_synchronize_and_reopened_actions_trigger_review() {
     stream::ensure_stream(&js, "trogon", &outbound_subject)
         .await
         .unwrap();
-    create_stream(js.context(),"GITHUB", &["github.pull_request"]).await;
-    create_stream(js.context(),"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(js.context(),"CRON_TICKS", &["cron.>"]).await;
+    create_stream(js.context(), "GITHUB", &["github.pull_request"]).await;
+    create_stream(js.context(), "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(js.context(), "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -1902,10 +1913,12 @@ async fn pipeline_synchronize_and_reopened_actions_trigger_review() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     // Both actions are in REVIEW_ACTIONS — each should trigger one agent run.
-    js.context().publish("github.pull_request", pr_payload("synchronize"))
+    js.context()
+        .publish("github.pull_request", pr_payload("synchronize"))
         .await
         .unwrap();
-    js.context().publish("github.pull_request", pr_payload("reopened"))
+    js.context()
+        .publish("github.pull_request", pr_payload("reopened"))
         .await
         .unwrap();
 
@@ -1997,9 +2010,9 @@ async fn pipeline_get_linear_issue_tool_detokenized() {
     stream::ensure_stream(&js, "trogon", &outbound_subject)
         .await
         .unwrap();
-    create_stream(js.context(),"GITHUB", &["github.pull_request"]).await;
-    create_stream(js.context(),"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(js.context(),"CRON_TICKS", &["cron.>"]).await;
+    create_stream(js.context(), "GITHUB", &["github.pull_request"]).await;
+    create_stream(js.context(), "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(js.context(), "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -2068,7 +2081,8 @@ async fn pipeline_get_linear_issue_tool_detokenized() {
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js.context().publish("linear.Issue.create", linear_issue_payload())
+    js.context()
+        .publish("linear.Issue.create", linear_issue_payload())
         .await
         .unwrap();
 
@@ -2146,9 +2160,9 @@ async fn pipeline_post_linear_comment_tool_detokenized() {
     stream::ensure_stream(&js, "trogon", &outbound_subject)
         .await
         .unwrap();
-    create_stream(js.context(),"GITHUB", &["github.pull_request"]).await;
-    create_stream(js.context(),"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(js.context(),"CRON_TICKS", &["cron.>"]).await;
+    create_stream(js.context(), "GITHUB", &["github.pull_request"]).await;
+    create_stream(js.context(), "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(js.context(), "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -2217,7 +2231,8 @@ async fn pipeline_post_linear_comment_tool_detokenized() {
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js.context().publish("linear.Issue.create", linear_issue_payload())
+    js.context()
+        .publish("linear.Issue.create", linear_issue_payload())
         .await
         .unwrap();
 
@@ -2300,9 +2315,9 @@ async fn pipeline_graphql_failure_wrapped_as_tool_error() {
     stream::ensure_stream(&js, "trogon", &outbound_subject)
         .await
         .unwrap();
-    create_stream(js.context(),"GITHUB", &["github.pull_request"]).await;
-    create_stream(js.context(),"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(js.context(),"CRON_TICKS", &["cron.>"]).await;
+    create_stream(js.context(), "GITHUB", &["github.pull_request"]).await;
+    create_stream(js.context(), "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(js.context(), "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -2371,7 +2386,8 @@ async fn pipeline_graphql_failure_wrapped_as_tool_error() {
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js.context().publish("linear.Issue.create", linear_issue_payload())
+    js.context()
+        .publish("linear.Issue.create", linear_issue_payload())
         .await
         .unwrap();
 
@@ -2422,9 +2438,9 @@ async fn pipeline_unexpected_stop_reason_runner_acks_and_continues() {
     stream::ensure_stream(&js, "trogon", &outbound_subject)
         .await
         .unwrap();
-    create_stream(js.context(),"GITHUB", &["github.pull_request"]).await;
-    create_stream(js.context(),"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(js.context(),"CRON_TICKS", &["cron.>"]).await;
+    create_stream(js.context(), "GITHUB", &["github.pull_request"]).await;
+    create_stream(js.context(), "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(js.context(), "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -2494,10 +2510,12 @@ async fn pipeline_unexpected_stop_reason_runner_acks_and_continues() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     // Two events — each triggers one Anthropic call before UnexpectedStopReason.
-    js.context().publish("github.pull_request", pr_payload("opened"))
+    js.context()
+        .publish("github.pull_request", pr_payload("opened"))
         .await
         .unwrap();
-    js.context().publish("github.pull_request", pr_payload("opened"))
+    js.context()
+        .publish("github.pull_request", pr_payload("opened"))
         .await
         .unwrap();
 
@@ -2614,9 +2632,9 @@ async fn pipeline_multiple_tool_use_blocks_all_executed() {
     stream::ensure_stream(&js, "trogon", &outbound_subject)
         .await
         .unwrap();
-    create_stream(js.context(),"GITHUB", &["github.pull_request"]).await;
-    create_stream(js.context(),"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(js.context(),"CRON_TICKS", &["cron.>"]).await;
+    create_stream(js.context(), "GITHUB", &["github.pull_request"]).await;
+    create_stream(js.context(), "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(js.context(), "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -2685,7 +2703,8 @@ async fn pipeline_multiple_tool_use_blocks_all_executed() {
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js.context().publish("github.pull_request", pr_payload("opened"))
+    js.context()
+        .publish("github.pull_request", pr_payload("opened"))
         .await
         .unwrap();
 
@@ -2739,9 +2758,9 @@ async fn pipeline_ignored_pr_action_acked_without_agent_run() {
     stream::ensure_stream(&js, "trogon", &outbound_subject)
         .await
         .unwrap();
-    create_stream(js.context(),"GITHUB", &["github.pull_request"]).await;
-    create_stream(js.context(),"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(js.context(),"CRON_TICKS", &["cron.>"]).await;
+    create_stream(js.context(), "GITHUB", &["github.pull_request"]).await;
+    create_stream(js.context(), "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(js.context(), "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -2811,7 +2830,8 @@ async fn pipeline_ignored_pr_action_acked_without_agent_run() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     // "closed" is not in REVIEW_ACTIONS — handler returns None, no agent run.
-    js.context().publish("github.pull_request", pr_payload("closed"))
+    js.context()
+        .publish("github.pull_request", pr_payload("closed"))
         .await
         .unwrap();
 
@@ -2823,7 +2843,8 @@ async fn pipeline_ignored_pr_action_acked_without_agent_run() {
     );
 
     // Runner must still be alive — valid event should reach Anthropic.
-    js.context().publish("github.pull_request", pr_payload("opened"))
+    js.context()
+        .publish("github.pull_request", pr_payload("opened"))
         .await
         .unwrap();
     assert!(
@@ -2869,9 +2890,9 @@ async fn pipeline_ignored_linear_event_acked_without_agent_run() {
     stream::ensure_stream(&js, "trogon", &outbound_subject)
         .await
         .unwrap();
-    create_stream(js.context(),"GITHUB", &["github.pull_request"]).await;
-    create_stream(js.context(),"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(js.context(),"CRON_TICKS", &["cron.>"]).await;
+    create_stream(js.context(), "GITHUB", &["github.pull_request"]).await;
+    create_stream(js.context(), "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(js.context(), "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -2949,7 +2970,8 @@ async fn pipeline_ignored_linear_event_acked_without_agent_run() {
         }))
         .unwrap(),
     );
-    js.context().publish("linear.Issue.update", ignored_payload)
+    js.context()
+        .publish("linear.Issue.update", ignored_payload)
         .await
         .unwrap();
 
@@ -2961,7 +2983,8 @@ async fn pipeline_ignored_linear_event_acked_without_agent_run() {
     );
 
     // Runner still alive — valid create event must be processed.
-    js.context().publish("linear.Issue.create", linear_issue_payload())
+    js.context()
+        .publish("linear.Issue.create", linear_issue_payload())
         .await
         .unwrap();
     assert!(
@@ -3007,9 +3030,9 @@ async fn pipeline_invalid_json_payload_acked_without_crash() {
     stream::ensure_stream(&js, "trogon", &outbound_subject)
         .await
         .unwrap();
-    create_stream(js.context(),"GITHUB", &["github.pull_request"]).await;
-    create_stream(js.context(),"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(js.context(),"CRON_TICKS", &["cron.>"]).await;
+    create_stream(js.context(), "GITHUB", &["github.pull_request"]).await;
+    create_stream(js.context(), "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(js.context(), "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -3079,12 +3102,13 @@ async fn pipeline_invalid_json_payload_acked_without_crash() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     // Publish garbage bytes — serde_json::from_slice will fail.
-    js.context().publish(
-        "github.pull_request",
-        bytes::Bytes::from("not json at all }{"),
-    )
-    .await
-    .unwrap();
+    js.context()
+        .publish(
+            "github.pull_request",
+            bytes::Bytes::from("not json at all }{"),
+        )
+        .await
+        .unwrap();
 
     tokio::time::sleep(Duration::from_secs(2)).await;
     assert_eq!(
@@ -3094,7 +3118,8 @@ async fn pipeline_invalid_json_payload_acked_without_crash() {
     );
 
     // Runner must still be alive — valid event must be processed.
-    js.context().publish("github.pull_request", pr_payload("opened"))
+    js.context()
+        .publish("github.pull_request", pr_payload("opened"))
         .await
         .unwrap();
     assert!(
@@ -3171,9 +3196,9 @@ async fn pipeline_update_linear_issue_failure_wrapped_as_tool_error() {
     stream::ensure_stream(&js, "trogon", &outbound_subject)
         .await
         .unwrap();
-    create_stream(js.context(),"GITHUB", &["github.pull_request"]).await;
-    create_stream(js.context(),"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(js.context(),"CRON_TICKS", &["cron.>"]).await;
+    create_stream(js.context(), "GITHUB", &["github.pull_request"]).await;
+    create_stream(js.context(), "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(js.context(), "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -3242,7 +3267,8 @@ async fn pipeline_update_linear_issue_failure_wrapped_as_tool_error() {
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js.context().publish("linear.Issue.create", linear_issue_payload())
+    js.context()
+        .publish("linear.Issue.create", linear_issue_payload())
         .await
         .unwrap();
 
@@ -3294,10 +3320,10 @@ async fn pipeline_custom_stream_names_route_correctly() {
         .unwrap();
 
     // Use custom stream names — do NOT create the default "GITHUB"/"LINEAR".
-    create_stream(js.context(),"MY_GITHUB", &["github.pull_request"]).await;
-    create_stream(js.context(),"MY_LINEAR", &["linear.Issue.>"]).await;
+    create_stream(js.context(), "MY_GITHUB", &["github.pull_request"]).await;
+    create_stream(js.context(), "MY_LINEAR", &["linear.Issue.>"]).await;
     // CRON_TICKS must always exist (runner binds it unconditionally).
-    create_stream(js.context(),"CRON_TICKS", &["cron.>"]).await;
+    create_stream(js.context(), "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -3367,7 +3393,8 @@ async fn pipeline_custom_stream_names_route_correctly() {
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js.context().publish("github.pull_request", pr_payload("opened"))
+    js.context()
+        .publish("github.pull_request", pr_payload("opened"))
         .await
         .unwrap();
 
@@ -3445,9 +3472,9 @@ async fn pipeline_get_file_contents_missing_content_field_tool_error() {
     stream::ensure_stream(&js, "trogon", &outbound_subject)
         .await
         .unwrap();
-    create_stream(js.context(),"GITHUB", &["github.pull_request"]).await;
-    create_stream(js.context(),"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(js.context(),"CRON_TICKS", &["cron.>"]).await;
+    create_stream(js.context(), "GITHUB", &["github.pull_request"]).await;
+    create_stream(js.context(), "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(js.context(), "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -3516,7 +3543,8 @@ async fn pipeline_get_file_contents_missing_content_field_tool_error() {
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js.context().publish("github.pull_request", pr_payload("opened"))
+    js.context()
+        .publish("github.pull_request", pr_payload("opened"))
         .await
         .unwrap();
 
@@ -3597,9 +3625,9 @@ async fn pipeline_get_file_contents_invalid_base64_tool_error() {
     stream::ensure_stream(&js, "trogon", &outbound_subject)
         .await
         .unwrap();
-    create_stream(js.context(),"GITHUB", &["github.pull_request"]).await;
-    create_stream(js.context(),"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(js.context(),"CRON_TICKS", &["cron.>"]).await;
+    create_stream(js.context(), "GITHUB", &["github.pull_request"]).await;
+    create_stream(js.context(), "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(js.context(), "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -3668,7 +3696,8 @@ async fn pipeline_get_file_contents_invalid_base64_tool_error() {
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js.context().publish("github.pull_request", pr_payload("opened"))
+    js.context()
+        .publish("github.pull_request", pr_payload("opened"))
         .await
         .unwrap();
 
@@ -3751,9 +3780,9 @@ async fn pipeline_get_file_contents_non_utf8_bytes_tool_error() {
     stream::ensure_stream(&js, "trogon", &outbound_subject)
         .await
         .unwrap();
-    create_stream(js.context(),"GITHUB", &["github.pull_request"]).await;
-    create_stream(js.context(),"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(js.context(),"CRON_TICKS", &["cron.>"]).await;
+    create_stream(js.context(), "GITHUB", &["github.pull_request"]).await;
+    create_stream(js.context(), "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(js.context(), "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -3822,7 +3851,8 @@ async fn pipeline_get_file_contents_non_utf8_bytes_tool_error() {
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js.context().publish("github.pull_request", pr_payload("opened"))
+    js.context()
+        .publish("github.pull_request", pr_payload("opened"))
         .await
         .unwrap();
 
@@ -3900,9 +3930,9 @@ async fn pipeline_post_pr_comment_no_url_fallback() {
     stream::ensure_stream(&js, "trogon", &outbound_subject)
         .await
         .unwrap();
-    create_stream(js.context(),"GITHUB", &["github.pull_request"]).await;
-    create_stream(js.context(),"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(js.context(),"CRON_TICKS", &["cron.>"]).await;
+    create_stream(js.context(), "GITHUB", &["github.pull_request"]).await;
+    create_stream(js.context(), "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(js.context(), "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -3971,7 +4001,8 @@ async fn pipeline_post_pr_comment_no_url_fallback() {
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js.context().publish("github.pull_request", pr_payload("opened"))
+    js.context()
+        .publish("github.pull_request", pr_payload("opened"))
         .await
         .unwrap();
 
@@ -4049,9 +4080,9 @@ async fn pipeline_post_linear_comment_no_url_fallback() {
     stream::ensure_stream(&js, "trogon", &outbound_subject)
         .await
         .unwrap();
-    create_stream(js.context(),"GITHUB", &["github.pull_request"]).await;
-    create_stream(js.context(),"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(js.context(),"CRON_TICKS", &["cron.>"]).await;
+    create_stream(js.context(), "GITHUB", &["github.pull_request"]).await;
+    create_stream(js.context(), "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(js.context(), "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -4120,7 +4151,8 @@ async fn pipeline_post_linear_comment_no_url_fallback() {
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js.context().publish("linear.Issue.create", linear_issue_payload())
+    js.context()
+        .publish("linear.Issue.create", linear_issue_payload())
         .await
         .unwrap();
 
@@ -4170,9 +4202,9 @@ async fn pipeline_pr_payload_missing_number_acked_silently() {
     stream::ensure_stream(&js, "trogon", &outbound_subject)
         .await
         .unwrap();
-    create_stream(js.context(),"GITHUB", &["github.pull_request"]).await;
-    create_stream(js.context(),"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(js.context(),"CRON_TICKS", &["cron.>"]).await;
+    create_stream(js.context(), "GITHUB", &["github.pull_request"]).await;
+    create_stream(js.context(), "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(js.context(), "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -4249,7 +4281,10 @@ async fn pipeline_pr_payload_missing_number_acked_silently() {
         }))
         .unwrap(),
     );
-    js.context().publish("github.pull_request", no_number).await.unwrap();
+    js.context()
+        .publish("github.pull_request", no_number)
+        .await
+        .unwrap();
 
     tokio::time::sleep(Duration::from_secs(2)).await;
     assert_eq!(
@@ -4259,7 +4294,8 @@ async fn pipeline_pr_payload_missing_number_acked_silently() {
     );
 
     // Runner must still be alive.
-    js.context().publish("github.pull_request", pr_payload("opened"))
+    js.context()
+        .publish("github.pull_request", pr_payload("opened"))
         .await
         .unwrap();
     assert!(
@@ -4306,9 +4342,9 @@ async fn pipeline_linear_payload_missing_id_acked_silently() {
     stream::ensure_stream(&js, "trogon", &outbound_subject)
         .await
         .unwrap();
-    create_stream(js.context(),"GITHUB", &["github.pull_request"]).await;
-    create_stream(js.context(),"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(js.context(),"CRON_TICKS", &["cron.>"]).await;
+    create_stream(js.context(), "GITHUB", &["github.pull_request"]).await;
+    create_stream(js.context(), "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(js.context(), "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -4386,7 +4422,10 @@ async fn pipeline_linear_payload_missing_id_acked_silently() {
         }))
         .unwrap(),
     );
-    js.context().publish("linear.Issue.create", no_id).await.unwrap();
+    js.context()
+        .publish("linear.Issue.create", no_id)
+        .await
+        .unwrap();
 
     tokio::time::sleep(Duration::from_secs(2)).await;
     assert_eq!(
@@ -4396,7 +4435,8 @@ async fn pipeline_linear_payload_missing_id_acked_silently() {
     );
 
     // Runner must still be alive.
-    js.context().publish("linear.Issue.create", linear_issue_payload())
+    js.context()
+        .publish("linear.Issue.create", linear_issue_payload())
         .await
         .unwrap();
     assert!(
@@ -4454,9 +4494,9 @@ async fn pipeline_unknown_tool_name_returns_error_as_tool_result() {
     stream::ensure_stream(&js, "trogon", &outbound_subject)
         .await
         .unwrap();
-    create_stream(js.context(),"GITHUB", &["github.pull_request"]).await;
-    create_stream(js.context(),"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(js.context(),"CRON_TICKS", &["cron.>"]).await;
+    create_stream(js.context(), "GITHUB", &["github.pull_request"]).await;
+    create_stream(js.context(), "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(js.context(), "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -4525,7 +4565,8 @@ async fn pipeline_unknown_tool_name_returns_error_as_tool_result() {
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js.context().publish("github.pull_request", pr_payload("opened"))
+    js.context()
+        .publish("github.pull_request", pr_payload("opened"))
         .await
         .unwrap();
 
@@ -4572,9 +4613,9 @@ async fn pipeline_anthropic_http_error_runner_acks_and_continues() {
     stream::ensure_stream(&js, "trogon", &outbound_subject)
         .await
         .unwrap();
-    create_stream(js.context(),"GITHUB", &["github.pull_request"]).await;
-    create_stream(js.context(),"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(js.context(),"CRON_TICKS", &["cron.>"]).await;
+    create_stream(js.context(), "GITHUB", &["github.pull_request"]).await;
+    create_stream(js.context(), "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(js.context(), "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -4644,10 +4685,12 @@ async fn pipeline_anthropic_http_error_runner_acks_and_continues() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     // Two events — both trigger AgentError::Http but must be acked (not redelivered).
-    js.context().publish("github.pull_request", pr_payload("opened"))
+    js.context()
+        .publish("github.pull_request", pr_payload("opened"))
         .await
         .unwrap();
-    js.context().publish("github.pull_request", pr_payload("opened"))
+    js.context()
+        .publish("github.pull_request", pr_payload("opened"))
         .await
         .unwrap();
 
@@ -4773,9 +4816,9 @@ async fn pipeline_update_linear_issue_with_state_and_assignee() {
     stream::ensure_stream(&js, "trogon", &outbound_subject)
         .await
         .unwrap();
-    create_stream(js.context(),"GITHUB", &["github.pull_request"]).await;
-    create_stream(js.context(),"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(js.context(),"CRON_TICKS", &["cron.>"]).await;
+    create_stream(js.context(), "GITHUB", &["github.pull_request"]).await;
+    create_stream(js.context(), "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(js.context(), "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -4844,7 +4887,8 @@ async fn pipeline_update_linear_issue_with_state_and_assignee() {
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js.context().publish("linear.Issue.create", linear_issue_payload())
+    js.context()
+        .publish("linear.Issue.create", linear_issue_payload())
         .await
         .unwrap();
 
@@ -4927,9 +4971,9 @@ async fn pipeline_get_file_contents_with_explicit_ref() {
     stream::ensure_stream(&js, "trogon", &outbound_subject)
         .await
         .unwrap();
-    create_stream(js.context(),"GITHUB", &["github.pull_request"]).await;
-    create_stream(js.context(),"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(js.context(),"CRON_TICKS", &["cron.>"]).await;
+    create_stream(js.context(), "GITHUB", &["github.pull_request"]).await;
+    create_stream(js.context(), "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(js.context(), "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -4998,7 +5042,8 @@ async fn pipeline_get_file_contents_with_explicit_ref() {
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js.context().publish("github.pull_request", pr_payload("opened"))
+    js.context()
+        .publish("github.pull_request", pr_payload("opened"))
         .await
         .unwrap();
 
@@ -5048,9 +5093,9 @@ async fn pipeline_issue_triage_missing_title_uses_fallback() {
     stream::ensure_stream(&js, "trogon", &outbound_subject)
         .await
         .unwrap();
-    create_stream(js.context(),"GITHUB", &["github.pull_request"]).await;
-    create_stream(js.context(),"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(js.context(),"CRON_TICKS", &["cron.>"]).await;
+    create_stream(js.context(), "GITHUB", &["github.pull_request"]).await;
+    create_stream(js.context(), "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(js.context(), "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -5128,7 +5173,10 @@ async fn pipeline_issue_triage_missing_title_uses_fallback() {
         }))
         .unwrap(),
     );
-    js.context().publish("linear.Issue.create", no_title).await.unwrap();
+    js.context()
+        .publish("linear.Issue.create", no_title)
+        .await
+        .unwrap();
 
     assert!(
         wait_for_hit(&anthropic_mock, Duration::from_secs(20)).await,
@@ -5199,8 +5247,8 @@ async fn pipeline_github_webhook_to_agent_cross_crate_e2e() {
         .await
         .unwrap();
     // trogon-github created GITHUB stream; agent needs LINEAR too.
-    create_stream(js.context(),"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(js.context(),"CRON_TICKS", &["cron.>"]).await;
+    create_stream(js.context(), "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(js.context(), "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -5365,8 +5413,8 @@ async fn pipeline_linear_webhook_to_agent_cross_crate_e2e() {
         .await
         .unwrap();
     // trogon-linear created LINEAR stream; agent needs GITHUB too.
-    create_stream(js.context(),"GITHUB", &["github.pull_request"]).await;
-    create_stream(js.context(),"CRON_TICKS", &["cron.>"]).await;
+    create_stream(js.context(), "GITHUB", &["github.pull_request"]).await;
+    create_stream(js.context(), "CRON_TICKS", &["cron.>"]).await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
     let proxy_state = ProxyState {
@@ -5558,9 +5606,9 @@ async fn pipeline_tool_missing_required_input_returns_error_as_tool_result() {
     stream::ensure_stream(&js, "trogon", &outbound_subject)
         .await
         .unwrap();
-    create_stream(js.context(),"GITHUB", &["github.pull_request"]).await;
-    create_stream(js.context(),"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(js.context(),"CRON_TICKS", &["cron.>"]).await;
+    create_stream(js.context(), "GITHUB", &["github.pull_request"]).await;
+    create_stream(js.context(), "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(js.context(), "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -5629,7 +5677,8 @@ async fn pipeline_tool_missing_required_input_returns_error_as_tool_result() {
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js.context().publish("github.pull_request", pr_payload("opened"))
+    js.context()
+        .publish("github.pull_request", pr_payload("opened"))
         .await
         .unwrap();
 
@@ -5687,9 +5736,9 @@ async fn pipeline_proxy_worker_timeout_acks_and_runner_continues() {
     stream::ensure_stream(&js, "trogon", &outbound_subject)
         .await
         .unwrap();
-    create_stream(js.context(),"GITHUB", &["github.pull_request"]).await;
-    create_stream(js.context(),"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(js.context(),"CRON_TICKS", &["cron.>"]).await;
+    create_stream(js.context(), "GITHUB", &["github.pull_request"]).await;
+    create_stream(js.context(), "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(js.context(), "CRON_TICKS", &["cron.>"]).await;
 
     // Proxy with a very short worker_timeout — NO worker started yet.
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -5740,7 +5789,8 @@ async fn pipeline_proxy_worker_timeout_acks_and_runner_continues() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     // ── Event 1: no worker → proxy times out → AgentError::Http → acked.
-    js.context().publish("github.pull_request", pr_payload("opened"))
+    js.context()
+        .publish("github.pull_request", pr_payload("opened"))
         .await
         .unwrap();
 
@@ -5775,7 +5825,8 @@ async fn pipeline_proxy_worker_timeout_acks_and_runner_continues() {
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     // ── Event 2: worker now running → reaches Anthropic.
-    js.context().publish("github.pull_request", pr_payload("opened"))
+    js.context()
+        .publish("github.pull_request", pr_payload("opened"))
         .await
         .unwrap();
 
@@ -5836,9 +5887,9 @@ async fn pipeline_hashicorp_vault_token_resolution() {
     stream::ensure_stream(&js, "trogon", &outbound_subject)
         .await
         .unwrap();
-    create_stream(js.context(),"GITHUB", &["github.pull_request"]).await;
-    create_stream(js.context(),"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(js.context(),"CRON_TICKS", &["cron.>"]).await;
+    create_stream(js.context(), "GITHUB", &["github.pull_request"]).await;
+    create_stream(js.context(), "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(js.context(), "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -5907,7 +5958,8 @@ async fn pipeline_hashicorp_vault_token_resolution() {
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js.context().publish("github.pull_request", pr_opened_payload())
+    js.context()
+        .publish("github.pull_request", pr_opened_payload())
         .await
         .unwrap();
 
@@ -5997,9 +6049,9 @@ async fn pipeline_get_pr_comments_tool_detokenized() {
     stream::ensure_stream(&js, "trogon", &outbound)
         .await
         .unwrap();
-    create_stream(js.context(),"GITHUB", &["github.pull_request"]).await;
-    create_stream(js.context(),"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(js.context(),"CRON_TICKS", &["cron.>"]).await;
+    create_stream(js.context(), "GITHUB", &["github.pull_request"]).await;
+    create_stream(js.context(), "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(js.context(), "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -6075,7 +6127,8 @@ async fn pipeline_get_pr_comments_tool_detokenized() {
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js.context().publish("github.pull_request", pr_opened_payload())
+    js.context()
+        .publish("github.pull_request", pr_opened_payload())
         .await
         .unwrap();
 
@@ -6168,9 +6221,9 @@ async fn pipeline_update_file_tool_detokenized() {
     stream::ensure_stream(&js, "trogon", &outbound)
         .await
         .unwrap();
-    create_stream(js.context(),"GITHUB", &["github.pull_request"]).await;
-    create_stream(js.context(),"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(js.context(),"CRON_TICKS", &["cron.>"]).await;
+    create_stream(js.context(), "GITHUB", &["github.pull_request"]).await;
+    create_stream(js.context(), "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(js.context(), "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -6246,7 +6299,8 @@ async fn pipeline_update_file_tool_detokenized() {
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js.context().publish("github.pull_request", pr_opened_payload())
+    js.context()
+        .publish("github.pull_request", pr_opened_payload())
         .await
         .unwrap();
 
@@ -6341,9 +6395,9 @@ async fn pipeline_create_pull_request_tool_detokenized() {
     stream::ensure_stream(&js, "trogon", &outbound)
         .await
         .unwrap();
-    create_stream(js.context(),"GITHUB", &["github.pull_request"]).await;
-    create_stream(js.context(),"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(js.context(),"CRON_TICKS", &["cron.>"]).await;
+    create_stream(js.context(), "GITHUB", &["github.pull_request"]).await;
+    create_stream(js.context(), "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(js.context(), "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -6419,7 +6473,8 @@ async fn pipeline_create_pull_request_tool_detokenized() {
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js.context().publish("github.pull_request", pr_opened_payload())
+    js.context()
+        .publish("github.pull_request", pr_opened_payload())
         .await
         .unwrap();
 
@@ -6508,9 +6563,9 @@ async fn pipeline_get_linear_comments_tool_detokenized() {
     stream::ensure_stream(&js, "trogon", &outbound)
         .await
         .unwrap();
-    create_stream(js.context(),"GITHUB", &["github.pull_request"]).await;
-    create_stream(js.context(),"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(js.context(),"CRON_TICKS", &["cron.>"]).await;
+    create_stream(js.context(), "GITHUB", &["github.pull_request"]).await;
+    create_stream(js.context(), "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(js.context(), "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -6595,7 +6650,8 @@ async fn pipeline_get_linear_comments_tool_detokenized() {
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js.context().publish("linear.Issue.create", linear_payload)
+    js.context()
+        .publish("linear.Issue.create", linear_payload)
         .await
         .unwrap();
 
@@ -6631,9 +6687,9 @@ async fn setup_full_pipeline(
         .await
         .unwrap();
     // Use github.> so all GitHub consumers (PR, comment, push, check_run) can bind.
-    create_stream(js.context(),"GITHUB", &["github.>"]).await;
-    create_stream(js.context(),"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(js.context(),"CRON_TICKS", &["cron.>"]).await;
+    create_stream(js.context(), "GITHUB", &["github.>"]).await;
+    create_stream(js.context(), "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(js.context(), "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -6726,7 +6782,8 @@ async fn pipeline_pr_merged_event_reaches_anthropic() {
         "pull_request": { "merged": true, "title": "Add feature", "merged_by": { "login": "alice" } },
         "repository": { "owner": { "login": "org" }, "name": "repo" }
     })).unwrap();
-    js.context().publish("github.pull_request", bytes::Bytes::from(payload))
+    js.context()
+        .publish("github.pull_request", bytes::Bytes::from(payload))
         .await
         .unwrap();
 
@@ -6762,7 +6819,8 @@ async fn pipeline_issue_comment_event_reaches_anthropic() {
         "repository": { "owner": { "login": "org" }, "name": "repo" }
     }))
     .unwrap();
-    js.context().publish("github.issue_comment", bytes::Bytes::from(payload))
+    js.context()
+        .publish("github.issue_comment", bytes::Bytes::from(payload))
         .await
         .unwrap();
 
@@ -6796,7 +6854,8 @@ async fn pipeline_push_to_branch_event_reaches_anthropic() {
         "repository": { "owner": { "login": "org" }, "name": "repo" }
     }))
     .unwrap();
-    js.context().publish("github.push", bytes::Bytes::from(payload))
+    js.context()
+        .publish("github.push", bytes::Bytes::from(payload))
         .await
         .unwrap();
 
@@ -6832,7 +6891,8 @@ async fn pipeline_ci_failure_event_reaches_anthropic() {
         "repository": { "owner": { "login": "org" }, "name": "repo" }
     }))
     .unwrap();
-    js.context().publish("github.check_run", bytes::Bytes::from(payload))
+    js.context()
+        .publish("github.check_run", bytes::Bytes::from(payload))
         .await
         .unwrap();
 
