@@ -1551,6 +1551,29 @@ mod tests {
         assert_eq!(id_count, 1, "ResponseId must be emitted exactly once per stream, got {id_count}: {events:?}");
     }
 
+    // ── response.done: nested response.id extracted ──────────────────────────
+
+    #[test]
+    fn response_done_event_extracts_nested_response_id() {
+        // `response.done` shares the match arm with `response.completed` and has
+        // the same nested id extraction logic (lines 623-627). When no prior
+        // top-level id has been emitted, the nested `response.id` must be
+        // extracted and emitted as `ResponseId`. The existing
+        // `response_done_event_same_as_completed` test omits the id field, so
+        // this extraction path was untested for `response.done`.
+        let line = r#"data: {"type":"response.done","response":{"id":"resp-done-123","status":"completed"}}"#;
+        let events = parse_lines(&[line]);
+        let id_events: Vec<_> = events.iter().filter_map(|e| match e {
+            XaiEvent::ResponseId { id } => Some(id.as_str()),
+            _ => None,
+        }).collect();
+        assert_eq!(
+            id_events,
+            vec!["resp-done-123"],
+            "response.done must extract nested response.id when not yet emitted: {events:?}"
+        );
+    }
+
     // ── response.cancelled: no ResponseId extraction ──────────────────────────
 
     #[test]
