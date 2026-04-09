@@ -18,8 +18,8 @@ use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
-use trogon_wasm_runtime::traits::{NatsBroker, Runtime};
 use trogon_wasm_runtime::dispatcher;
+use trogon_wasm_runtime::traits::{NatsBroker, Runtime};
 
 // ── MockStream ────────────────────────────────────────────────────────────────
 
@@ -220,10 +220,7 @@ impl Runtime for MockRuntime {
         Ok(())
     }
 
-    fn handle_close_terminal_stdin(
-        &self,
-        terminal_id: &str,
-    ) -> agent_client_protocol::Result<()> {
+    fn handle_close_terminal_stdin(&self, terminal_id: &str) -> agent_client_protocol::Result<()> {
         self.calls.borrow_mut().push(Call::CloseTerminalStdin {
             terminal_id: terminal_id.to_string(),
         });
@@ -387,20 +384,23 @@ async fn routes_terminal_create() {
     let payload = serde_json::to_vec(&req).unwrap();
 
     let (calls, published) = run_dispatcher(|broker, _rt| async move {
-        broker.send(&subject("terminal.create"), "reply.terminal.create", payload);
+        broker.send(
+            &subject("terminal.create"),
+            "reply.terminal.create",
+            payload,
+        );
         tokio::task::yield_now().await;
     })
     .await;
 
     assert!(
-        calls.iter().any(|c| matches!(c, Call::CreateTerminal { session_id, command }
+        calls
+            .iter()
+            .any(|c| matches!(c, Call::CreateTerminal { session_id, command }
             if session_id == SESSION && command == "test.wasm")),
         "expected CreateTerminal call, got: {calls:?}"
     );
-    assert!(
-        !published.is_empty(),
-        "expected a reply to be published"
-    );
+    assert!(!published.is_empty(), "expected a reply to be published");
     let reply_body: serde_json::Value =
         serde_json::from_slice(&published[0].1).expect("reply should be valid JSON");
     // ACP serializes with camelCase.
@@ -480,9 +480,9 @@ async fn routes_terminal_wait_for_exit() {
     .await;
 
     assert!(
-        calls.iter().any(
-            |c| matches!(c, Call::WaitForTerminalExit { terminal_id } if terminal_id == "t4")
-        ),
+        calls
+            .iter()
+            .any(|c| matches!(c, Call::WaitForTerminalExit { terminal_id } if terminal_id == "t4")),
         "expected WaitForTerminalExit call, got: {calls:?}"
     );
     assert!(!published.is_empty(), "expected a reply");
@@ -504,7 +504,9 @@ async fn routes_fs_write_text_file() {
     .await;
 
     assert!(
-        calls.iter().any(|c| matches!(c, Call::WriteTextFile { session_id, path }
+        calls
+            .iter()
+            .any(|c| matches!(c, Call::WriteTextFile { session_id, path }
             if session_id == SESSION && path == &PathBuf::from("/hello.txt"))),
         "expected WriteTextFile call, got: {calls:?}"
     );
@@ -522,7 +524,9 @@ async fn routes_fs_read_text_file() {
     .await;
 
     assert!(
-        calls.iter().any(|c| matches!(c, Call::ReadTextFile { session_id, path }
+        calls
+            .iter()
+            .any(|c| matches!(c, Call::ReadTextFile { session_id, path }
             if session_id == SESSION && path == &PathBuf::from("/hello.txt"))),
         "expected ReadTextFile call, got: {calls:?}"
     );
@@ -569,9 +573,9 @@ async fn routes_session_update_fire_and_forget() {
     .await;
 
     assert!(
-        calls
-            .iter()
-            .any(|c| matches!(c, Call::SessionNotification { session_id } if session_id == SESSION)),
+        calls.iter().any(
+            |c| matches!(c, Call::SessionNotification { session_id } if session_id == SESSION)
+        ),
         "expected SessionNotification call, got: {calls:?}"
     );
     // Fire-and-forget — no reply expected.
@@ -609,7 +613,11 @@ async fn returns_error_for_invalid_json() {
 #[tokio::test]
 async fn ignores_unparseable_subject() {
     let (calls, published) = run_dispatcher(|broker, _rt| async move {
-        broker.send("garbage.subject", "reply.garbage", Bytes::from_static(b"{}"));
+        broker.send(
+            "garbage.subject",
+            "reply.garbage",
+            Bytes::from_static(b"{}"),
+        );
         tokio::task::yield_now().await;
     })
     .await;

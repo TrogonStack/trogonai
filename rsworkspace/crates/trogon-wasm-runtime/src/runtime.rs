@@ -34,16 +34,15 @@ use tracing::{debug, info};
 pub struct WasmRuntime<
     FS = TokioFs,
     PS = TokioProcessSpawner,
-    N  = async_nats::Client,
+    N = async_nats::Client,
     WE = RealWasmExecutor<async_nats::Client, StdClock, StdSyncFs>,
     CL = StdClock,
     IG = UuidGenerator,
     TL = SemaphoreTaskLimiter,
->
-where
+> where
     FS: Fs,
     PS: ProcessSpawner,
-    N:  NatsBroker + Send + Sync,
+    N: NatsBroker + Send + Sync,
     WE: WasmExecutor<N>,
     CL: Clock,
     IG: IdGenerator,
@@ -131,7 +130,7 @@ impl<FS, PS, N, WE, CL, IG, TL> WasmRuntime<FS, PS, N, WE, CL, IG, TL>
 where
     FS: Fs,
     PS: ProcessSpawner,
-    N:  NatsBroker + Send + Sync,
+    N: NatsBroker + Send + Sync,
     WE: WasmExecutor<N>,
     CL: Clock,
     IG: IdGenerator,
@@ -140,6 +139,7 @@ where
     /// Creates a runtime with fully injectable dependencies.
     ///
     /// Production code uses [`WasmRuntime::new`] or [`WasmRuntime::with_nats`].
+    #[allow(clippy::too_many_arguments)]
     pub fn with_services(
         config: &Config,
         nats_client: Option<N>,
@@ -187,7 +187,10 @@ where
             return s.dir.clone();
         }
         let dir = self.session_root.join(session_id);
-        sessions.insert(session_id.to_string(), WasmSession::new(dir.clone(), self.clock.now()));
+        sessions.insert(
+            session_id.to_string(),
+            WasmSession::new(dir.clone(), self.clock.now()),
+        );
         dir
     }
 
@@ -1003,17 +1006,14 @@ where
             })?;
         let tmp_dest_clone = tmp_dest.clone();
         let fs = self.fs.clone();
-        self.fs
-            .rename(&tmp_dest, &dest)
-            .await
-            .map_err(|e| {
-                // Clean up temp file on failure (best-effort).
-                let fs2 = fs.clone();
-                tokio::task::spawn_local(async move {
-                    let _ = fs2.remove_file(&tmp_dest_clone).await;
-                });
-                agent_client_protocol::Error::new(-32603, format!("Failed to finalize file write: {e}"))
-            })?;
+        self.fs.rename(&tmp_dest, &dest).await.map_err(|e| {
+            // Clean up temp file on failure (best-effort).
+            let fs2 = fs.clone();
+            tokio::task::spawn_local(async move {
+                let _ = fs2.remove_file(&tmp_dest_clone).await;
+            });
+            agent_client_protocol::Error::new(-32603, format!("Failed to finalize file write: {e}"))
+        })?;
 
         debug!(
             session_id,
@@ -1112,7 +1112,7 @@ impl<FS, PS, N, WE, CL, IG, TL> Runtime for WasmRuntime<FS, PS, N, WE, CL, IG, T
 where
     FS: Fs,
     PS: ProcessSpawner,
-    N:  NatsBroker + Send + Sync,
+    N: NatsBroker + Send + Sync,
     WE: WasmExecutor<N>,
     CL: Clock,
     IG: IdGenerator,
@@ -1148,10 +1148,7 @@ where
         WasmRuntime::handle_write_to_terminal(self, terminal_id, data).await
     }
 
-    fn handle_close_terminal_stdin(
-        &self,
-        terminal_id: &str,
-    ) -> agent_client_protocol::Result<()> {
+    fn handle_close_terminal_stdin(&self, terminal_id: &str) -> agent_client_protocol::Result<()> {
         WasmRuntime::handle_close_terminal_stdin(self, terminal_id)
     }
 
