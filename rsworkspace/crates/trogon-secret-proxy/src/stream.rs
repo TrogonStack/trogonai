@@ -103,9 +103,7 @@ mod tests {
             let fail = self.fail;
             async move {
                 if fail {
-                    Err(std::io::Error::other(
-                        "mock stream error",
-                    ))
+                    Err(std::io::Error::other("mock stream error"))
                 } else {
                     // Returning a real stream is not possible in unit tests;
                     // ensure_stream maps it to () so we never need the value.
