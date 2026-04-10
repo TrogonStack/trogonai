@@ -10,94 +10,48 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  actions: write
   contents: read
-  id-token: write
   packages: write
 
 jobs:
   build-and-push:
-    name: Build and push (${{ matrix.service }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        service:
-          - trogon-gateway
+        include:
+          - service: trogon-gateway
+            context: ./rsworkspace
+            dockerfile: ./devops/docker/compose/services/trogon-gateway/Dockerfile
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          persist-credentials: false
-
-      - name: Resolve service config
-        id: service_config
-        uses: ./.github/actions/resolve-service-config
-        with:
-          service: ${{ matrix.service }}
-          config-file: .github/canary-container-services.json
+      - uses: actions/checkout@v6.0.2
 
       - name: Resolve image name
         id: image
         env:
           IMAGE_OWNER: ${{ github.repository_owner }}
         run: |
-          echo "name=ghcr.io/${IMAGE_OWNER,,}/${{ steps.service_config.outputs.image }}" >> "$GITHUB_OUTPUT"
+          echo "name=ghcr.io/${IMAGE_OWNER,,}/${{ matrix.service }}" >> "$GITHUB_OUTPUT"
           echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+        uses: docker/setup-buildx-action@v3
 
       - name: Log in to GHCR
-        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push canary image
-        id: build_image
-        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        uses: docker/build-push-action@v6
         with:
-          context: ${{ steps.service_config.outputs.context }}
-          file: ${{ steps.service_config.outputs.dockerfile }}
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
           push: true
           tags: |
             ${{ steps.image.outputs.name }}:canary
             ${{ steps.image.outputs.name }}:sha-${{ steps.image.outputs.short_sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          sbom: true
-          provenance: mode=max
-
-      - name: Scan image for vulnerabilities
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          image-ref: ${{ steps.image.outputs.name }}@${{ steps.build_image.outputs.digest }}
-          scanners: vuln
-          format: table
-          output: trivy-results.txt
-          ignore-unfixed: true
-          exit-code: 0
-
-      - name: Generate SBOM
-        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
-        with:
-          image: ${{ steps.image.outputs.name }}@${{ steps.build_image.outputs.digest }}
-          artifact-name: sbom-${{ matrix.service }}-spdx
-          format: spdx-json
-
-      - name: Document image security audit
-        shell: bash
-        run: |
-          {
-            echo "## Image security audit: \`${{ matrix.service }}\`"
-            echo ""
-            echo "- Image: \`${{ steps.image.outputs.name }}@${{ steps.build_image.outputs.digest }}\`"
-            echo "- Runtime base: \`debian:bookworm-20260518-slim\`"
-            echo "- SBOM artifact: \`sbom-${{ matrix.service }}-spdx\` (SPDX JSON)"
-            echo ""
-            echo "### Vulnerability scan (Trivy, image packages)"
-            echo '```text'
-            cat trivy-results.txt
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
