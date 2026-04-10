@@ -295,6 +295,15 @@ async fn request_reviewers_calls_correct_proxy_path() {
 async fn send_slack_message_calls_correct_proxy_path() {
     let server = MockServer::start_async().await;
 
+    // Idempotency check: history returns no matching message.
+    server.mock(|when, then| {
+        when.method(httpmock::Method::GET)
+            .path("/slack/conversations.history");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(json!({ "ok": true, "messages": [] }));
+    });
+
     server.mock(|when, then| {
         when.method(httpmock::Method::POST)
             .path("/slack/chat.postMessage")
@@ -318,6 +327,15 @@ async fn send_slack_message_calls_correct_proxy_path() {
 async fn send_slack_message_returns_error_on_slack_error() {
     let server = MockServer::start_async().await;
 
+    // Idempotency check: history returns no matching message.
+    server.mock(|when, then| {
+        when.method(httpmock::Method::GET)
+            .path("/slack/conversations.history");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(json!({ "ok": true, "messages": [] }));
+    });
+
     server.mock(|when, then| {
         when.method(httpmock::Method::POST)
             .path("/slack/chat.postMessage");
@@ -336,6 +354,104 @@ async fn send_slack_message_returns_error_on_slack_error() {
     );
     assert!(
         result.contains("channel_not_found"),
+        "unexpected result: {result}"
+    );
+}
+
+/// Duplicate detection: identical text already in channel history → skip send.
+#[tokio::test]
+async fn send_slack_message_skips_duplicate_when_same_text_in_history() {
+    let server = MockServer::start_async().await;
+
+    // History returns a message with the exact same text.
+    let history_mock = server.mock(|when, then| {
+        when.method(httpmock::Method::GET)
+            .path("/slack/conversations.history");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(json!({
+                "ok": true,
+                "messages": [
+                    { "ts": "1700000001.000001", "user": "U123", "text": "PR #42 reviewed." }
+                ]
+            }));
+    });
+
+    // POST should NOT be called — no mock registered for it.
+    let ctx = make_ctx(&server.base_url());
+    let input = json!({ "channel": "#engineering", "text": "PR #42 reviewed." });
+    let result = dispatch_tool(&ctx, "send_slack_message", &input).await;
+
+    history_mock.assert_hits_async(1).await;
+    assert!(
+        result.contains("skipped duplicate"),
+        "unexpected result: {result}"
+    );
+}
+
+/// If history check returns ok:false, send proceeds normally.
+#[tokio::test]
+async fn send_slack_message_sends_when_history_check_returns_error() {
+    let server = MockServer::start_async().await;
+
+    server.mock(|when, then| {
+        when.method(httpmock::Method::GET)
+            .path("/slack/conversations.history");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(json!({ "ok": false, "error": "not_in_channel" }));
+    });
+
+    server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/slack/chat.postMessage");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(json!({ "ok": true, "ts": "1700000002.000002" }));
+    });
+
+    let ctx = make_ctx(&server.base_url());
+    let input = json!({ "channel": "#engineering", "text": "Deploy done." });
+    let result = dispatch_tool(&ctx, "send_slack_message", &input).await;
+
+    assert!(
+        result.contains("Message sent"),
+        "unexpected result: {result}"
+    );
+}
+
+/// Different text in history → send proceeds normally.
+#[tokio::test]
+async fn send_slack_message_sends_when_no_matching_text_in_history() {
+    let server = MockServer::start_async().await;
+
+    server.mock(|when, then| {
+        when.method(httpmock::Method::GET)
+            .path("/slack/conversations.history");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(json!({
+                "ok": true,
+                "messages": [
+                    { "ts": "1700000001.000001", "user": "U123", "text": "Some other message." }
+                ]
+            }));
+    });
+
+    server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/slack/chat.postMessage");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(json!({ "ok": true, "ts": "1700000003.000003" }));
+    });
+
+    let ctx = make_ctx(&server.base_url());
+    let input = json!({ "channel": "#engineering", "text": "New unique message." });
+    let result = dispatch_tool(&ctx, "send_slack_message", &input).await;
+
+    assert!(
+        result.contains("Message sent"),
         "unexpected result: {result}"
     );
 }
