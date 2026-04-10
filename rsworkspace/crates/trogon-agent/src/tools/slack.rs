@@ -42,17 +42,67 @@ pub fn slack_tool_defs() -> Vec<ToolDef> {
 }
 
 /// Send a message to a Slack channel.
+///
+/// Performs an idempotency check before posting: if a message with the same
+/// text already exists in the channel within the last 10 minutes, the send
+/// is skipped and a "skipped duplicate" result is returned. This prevents
+/// duplicate messages on crash recovery — the non-atomic window between tool
+/// execution and the KV write in the promise store.
+///
+/// If the history check itself fails (missing scope, network error), the send
+/// proceeds rather than blocking on it.
 pub async fn send_message(
     ctx: &ToolContext<impl HttpClient>,
     input: &Value,
 ) -> Result<String, String> {
-    // Slack has no native Idempotency-Key support. Duplicate sends in the
-    // non-atomic window between execute and kv.put are accepted as a known
-    // limitation. The tool result cache in the promise store prevents re-runs
-    // in normal recovery scenarios.
     let channel = input["channel"].as_str().ok_or("missing channel")?;
     let text = input["text"].as_str().ok_or("missing text")?;
 
+    // ── Idempotency check: scan last 10 min for identical message ────────────
+    let oldest = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+        .saturating_sub(600);
+
+    let history_url = format!(
+        "{}/slack/conversations.history?channel={channel}&oldest={oldest}&limit=50",
+        ctx.proxy_url,
+    );
+
+    match ctx
+        .http_client
+        .get(
+            &history_url,
+            vec![(
+                "Authorization".to_string(),
+                format!("Bearer {}", ctx.slack_token),
+            )],
+        )
+        .await
+    {
+        Ok(resp) => {
+            if let Ok(body) = serde_json::from_str::<Value>(&resp.body)
+                && body["ok"].as_bool() == Some(true)
+            {
+                let already_sent = body["messages"]
+                    .as_array()
+                    .map(|msgs| msgs.iter().any(|m| m["text"].as_str() == Some(text)))
+                    .unwrap_or(false);
+                if already_sent {
+                    return Ok(format!(
+                        "Message already sent to {channel} (skipped duplicate)"
+                    ));
+                }
+            }
+            // History check failed or returned ok:false — proceed with send.
+        }
+        Err(_) => {
+            // Network error on history check — proceed with send.
+        }
+    }
+
+    // ── Post the message ─────────────────────────────────────────────────────
     let url = format!("{}/slack/chat.postMessage", ctx.proxy_url);
 
     let resp = ctx
