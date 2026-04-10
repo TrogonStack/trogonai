@@ -439,6 +439,7 @@ impl AgentLoop {
                     {
                         p.messages = messages.clone();
                         p.iteration = iteration + 1;
+                        p.claimed_at = trogon_automations::now_unix(); // refresh ownership lease
                         match store.update_promise(&self.tenant_id, pid, p, *rev).await {
                             Ok(new_rev) => *rev = new_rev,
                             Err(e) => {
