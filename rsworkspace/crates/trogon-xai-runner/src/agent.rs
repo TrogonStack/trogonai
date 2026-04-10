@@ -611,6 +611,10 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
         self.sessions.lock().await.get(id).and_then(|s| s.model.clone())
     }
 
+    async fn test_session_cwd(&self, id: &str) -> Option<String> {
+        self.sessions.lock().await.get(id).map(|s| s.cwd.clone())
+    }
+
     async fn test_session_count(&self) -> usize {
         self.sessions.lock().await.len()
     }
@@ -1904,6 +1908,90 @@ mod tests {
         // input: [history-item (role=user), new user item] — no system prompt set
         assert_eq!(calls[0].input[0].role, "user", "non-assistant role must be mapped to 'user'");
         assert_eq!(calls[0].input[0].content, "injected");
+    }
+
+    // ── with_deps: empty api_key sets global_api_key to None ─────────────────
+
+    #[tokio::test]
+    async fn with_deps_empty_api_key_sets_global_api_key_to_none() {
+        // Lines 127-130: empty string is filtered out — global_api_key must be None.
+        let mock_http = Arc::new(MockXaiHttpClient::new());
+        let mock_notifier = Arc::new(MockSessionNotifier::new());
+        let agent: TestAgent = XaiAgent::with_deps(mock_notifier, "grok-3", "", mock_http);
+        assert!(
+            agent.global_api_key.is_none(),
+            "empty api_key string must produce global_api_key = None"
+        );
+    }
+
+    // ── build_input: system prompt with empty history ─────────────────────────
+
+    #[tokio::test]
+    async fn build_input_system_prompt_with_empty_history() {
+        // When system_prompt is set and history is empty, input must be exactly
+        // [system_item, user_item] — no history items in between.
+        let _guard = env_lock().lock().unwrap();
+        unsafe { std::env::set_var("XAI_SYSTEM_PROMPT", "Be concise.") };
+        let mock_http = Arc::new(MockXaiHttpClient::new());
+        let mock_notifier = Arc::new(MockSessionNotifier::new());
+        let agent: TestAgent =
+            XaiAgent::with_deps(Arc::clone(&mock_notifier), "grok-3", "key", Arc::clone(&mock_http));
+        unsafe { std::env::remove_var("XAI_SYSTEM_PROMPT") };
+
+        agent.test_insert_session("sp_eh", "/tmp", None).await;
+        mock_http.push_response(vec![XaiEvent::Done]);
+        agent
+            .prompt(PromptRequest::new("sp_eh", vec![ContentBlock::from("hi")]))
+            .await
+            .unwrap();
+
+        let calls = mock_http.calls.lock().unwrap();
+        let input = &calls[0].input;
+        assert_eq!(input.len(), 2, "system prompt + user item only (no history)");
+        assert_eq!(input[0].role, "system");
+        assert_eq!(input[0].content, "Be concise.");
+        assert_eq!(input[1].role, "user");
+    }
+
+    // ── new_session stores cwd ────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn new_session_stores_cwd() {
+        use agent_client_protocol::Agent as _;
+        let agent = make_agent();
+        let resp = agent
+            .new_session(NewSessionRequest::new("/my/workspace"))
+            .await
+            .unwrap();
+        let sid = resp.session_id.to_string();
+        let stored_cwd = agent.test_session_cwd(&sid).await;
+        assert_eq!(stored_cwd.as_deref(), Some("/my/workspace"));
+    }
+
+    // ── fork_session stores new cwd ───────────────────────────────────────────
+
+    #[tokio::test]
+    async fn fork_session_stores_new_cwd() {
+        use agent_client_protocol::Agent as _;
+        let agent = make_agent();
+        let src = agent
+            .new_session(NewSessionRequest::new("/src/cwd"))
+            .await
+            .unwrap();
+        let src_id = src.session_id.to_string();
+
+        let fork = agent
+            .fork_session(ForkSessionRequest::new(src_id.clone(), "/fork/cwd"))
+            .await
+            .unwrap();
+        let fork_id = fork.session_id.to_string();
+
+        let fork_cwd = agent.test_session_cwd(&fork_id).await;
+        assert_eq!(fork_cwd.as_deref(), Some("/fork/cwd"), "fork must store its own cwd");
+
+        // Source cwd must remain unchanged.
+        let src_cwd = agent.test_session_cwd(&src_id).await;
+        assert_eq!(src_cwd.as_deref(), Some("/src/cwd"), "source cwd must not be modified");
     }
 
     // ── XAI_MAX_TURNS invalid env var ─────────────────────────────────────────

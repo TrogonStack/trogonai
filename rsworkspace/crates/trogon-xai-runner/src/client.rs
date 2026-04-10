@@ -1595,6 +1595,22 @@ mod tests {
         );
     }
 
+    // ── Message constructors ──────────────────────────────────────────────────
+
+    #[test]
+    fn message_user_constructor_sets_role_and_content() {
+        let msg = Message::user("hello");
+        assert_eq!(msg.role, "user");
+        assert_eq!(msg.content, Some("hello".to_string()));
+    }
+
+    #[test]
+    fn message_assistant_text_constructor_sets_role_and_content() {
+        let msg = Message::assistant_text("reply");
+        assert_eq!(msg.role, "assistant");
+        assert_eq!(msg.content, Some("reply".to_string()));
+    }
+
     // ── Message::content_str ──────────────────────────────────────────────────
 
     #[test]
