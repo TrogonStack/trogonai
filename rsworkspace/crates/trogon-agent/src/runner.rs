@@ -303,7 +303,10 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                         let tenant_id = Arc::clone(&tenant_id);
                         tokio::spawn(async move {
                             let subject = "github.pull_request";
-                            let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
+                            let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_else(|e| {
+                                warn!(error = %e, "Failed to parse NATS message payload as JSON — processing with empty value");
+                                serde_json::Value::default()
+                            });
                             let stream_seq = match msg.info() {
                                 Ok(info) => info.stream_sequence,
                                 Err(_) => {
@@ -366,7 +369,10 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                         let tenant_id = Arc::clone(&tenant_id);
                         tokio::spawn(async move {
                             let subject = "github.issue_comment";
-                            let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
+                            let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_else(|e| {
+                                warn!(error = %e, "Failed to parse NATS message payload as JSON — processing with empty value");
+                                serde_json::Value::default()
+                            });
                             let stream_seq = match msg.info() {
                                 Ok(info) => info.stream_sequence,
                                 Err(_) => {
@@ -421,7 +427,10 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                         let tenant_id = Arc::clone(&tenant_id);
                         tokio::spawn(async move {
                             let subject = "github.push";
-                            let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
+                            let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_else(|e| {
+                                warn!(error = %e, "Failed to parse NATS message payload as JSON — processing with empty value");
+                                serde_json::Value::default()
+                            });
                             let stream_seq = match msg.info() {
                                 Ok(info) => info.stream_sequence,
                                 Err(_) => {
@@ -476,7 +485,10 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                         let tenant_id = Arc::clone(&tenant_id);
                         tokio::spawn(async move {
                             let subject = "github.check_run";
-                            let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
+                            let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_else(|e| {
+                                warn!(error = %e, "Failed to parse NATS message payload as JSON — processing with empty value");
+                                serde_json::Value::default()
+                            });
                             let stream_seq = match msg.info() {
                                 Ok(info) => info.stream_sequence,
                                 Err(_) => {
@@ -531,7 +543,10 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                         let tenant_id = Arc::clone(&tenant_id);
                         tokio::spawn(async move {
                             let subject = "linear.Issue";
-                            let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
+                            let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_else(|e| {
+                                warn!(error = %e, "Failed to parse NATS message payload as JSON — processing with empty value");
+                                serde_json::Value::default()
+                            });
                             let stream_seq = match msg.info() {
                                 Ok(info) => info.stream_sequence,
                                 Err(_) => {
@@ -586,7 +601,10 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                         let tenant_id = Arc::clone(&tenant_id);
                         let nats_subject = msg.subject.to_string();
                         tokio::spawn(async move {
-                            let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
+                            let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_else(|e| {
+                                warn!(error = %e, "Failed to parse NATS message payload as JSON — processing with empty value");
+                                serde_json::Value::default()
+                            });
                             let stream_seq = match msg.info() {
                                 Ok(info) => info.stream_sequence,
                                 Err(_) => {
@@ -631,7 +649,10 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                         let tenant_id = Arc::clone(&tenant_id);
                         let nats_subject = msg.subject.to_string();
                         tokio::spawn(async move {
-                            let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
+                            let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_else(|e| {
+                                warn!(error = %e, "Failed to parse NATS message payload as JSON — processing with empty value");
+                                serde_json::Value::default()
+                            });
                             let stream_seq = match msg.info() {
                                 Ok(info) => info.stream_sequence,
                                 Err(_) => {
@@ -691,7 +712,10 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                         let tenant_id = Arc::clone(&tenant_id);
                         let nats_subject = msg.subject.to_string();
                         tokio::spawn(async move {
-                            let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
+                            let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_else(|e| {
+                                warn!(error = %e, "Failed to parse NATS message payload as JSON — processing with empty value");
+                                serde_json::Value::default()
+                            });
                             let stream_seq = match msg.info() {
                                 Ok(info) => info.stream_sequence,
                                 Err(_) => {
@@ -942,6 +966,30 @@ async fn recover_stale_promises(
                     };
                     if let Err(e) = run_store.record(&run).await {
                         warn!(error = %e, "Startup recovery: failed to persist run record");
+                    }
+                } else {
+                    // Automation was deleted between the crash and this recovery.
+                    // Mark the promise as Failed so it is not picked up on future
+                    // restarts — a Running promise with no active worker is noise.
+                    warn!(
+                        promise_id = %promise.id,
+                        automation_id = %promise.automation_id,
+                        "Startup recovery: automation no longer exists — marking promise as Failed"
+                    );
+                    if let Ok(Some((mut current, rev))) =
+                        promise_store.get_promise(&tenant_id, &promise.id).await
+                    {
+                        current.status = PromiseStatus::Failed;
+                        if let Err(e) = promise_store
+                            .update_promise(&tenant_id, &promise.id, &current, rev)
+                            .await
+                        {
+                            warn!(
+                                promise_id = %promise.id,
+                                error = %e,
+                                "Startup recovery: failed to mark orphaned promise as Failed"
+                            );
+                        }
                     }
                 }
             } else {
