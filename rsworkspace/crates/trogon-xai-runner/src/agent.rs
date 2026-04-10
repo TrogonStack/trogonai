@@ -190,6 +190,7 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
             .filter(|v: &Vec<ModelInfo>| !v.is_empty())
             .unwrap_or_else(|| {
                 vec![
+                    ModelInfo::new("grok-4", "Grok 4"),
                     ModelInfo::new("grok-3", "Grok 3"),
                     ModelInfo::new("grok-3-mini", "Grok 3 Mini"),
                 ]
