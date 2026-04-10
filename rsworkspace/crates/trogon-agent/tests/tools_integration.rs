@@ -291,19 +291,12 @@ async fn request_reviewers_calls_correct_proxy_path() {
 
 // ── Slack tools ────────────────────────────────────────────────────────────────
 
+/// Without `_idempotency_key` the tool posts directly — no history check.
 #[tokio::test]
 async fn send_slack_message_calls_correct_proxy_path() {
     let server = MockServer::start_async().await;
 
-    // Idempotency check: history returns no matching message.
-    server.mock(|when, then| {
-        when.method(httpmock::Method::GET)
-            .path("/slack/conversations.history");
-        then.status(200)
-            .header("content-type", "application/json")
-            .json_body(json!({ "ok": true, "messages": [] }));
-    });
-
+    // No history mock: the tool must NOT call conversations.history.
     server.mock(|when, then| {
         when.method(httpmock::Method::POST)
             .path("/slack/chat.postMessage")
@@ -314,6 +307,7 @@ async fn send_slack_message_calls_correct_proxy_path() {
     });
 
     let ctx = make_ctx(&server.base_url());
+    // No _idempotency_key → skip dedup check entirely.
     let input = json!({ "channel": "#engineering", "text": "CI failed on main" });
     let result = dispatch_tool(&ctx, "send_slack_message", &input).await;
 
@@ -327,15 +321,7 @@ async fn send_slack_message_calls_correct_proxy_path() {
 async fn send_slack_message_returns_error_on_slack_error() {
     let server = MockServer::start_async().await;
 
-    // Idempotency check: history returns no matching message.
-    server.mock(|when, then| {
-        when.method(httpmock::Method::GET)
-            .path("/slack/conversations.history");
-        then.status(200)
-            .header("content-type", "application/json")
-            .json_body(json!({ "ok": true, "messages": [] }));
-    });
-
+    // No history mock: no _idempotency_key in input, so no check is done.
     server.mock(|when, then| {
         when.method(httpmock::Method::POST)
             .path("/slack/chat.postMessage");
@@ -358,12 +344,56 @@ async fn send_slack_message_returns_error_on_slack_error() {
     );
 }
 
-/// Duplicate detection: identical text already in channel history → skip send.
+/// Primary dedup path: history contains a message whose `metadata` carries the
+/// exact same idempotency key → skip send.
 #[tokio::test]
-async fn send_slack_message_skips_duplicate_when_same_text_in_history() {
+async fn send_slack_message_skips_duplicate_by_metadata_key() {
     let server = MockServer::start_async().await;
 
-    // History returns a message with the exact same text.
+    // History returns a message with matching metadata key (different text to
+    // confirm that the metadata check fires before the text fallback).
+    let history_mock = server.mock(|when, then| {
+        when.method(httpmock::Method::GET)
+            .path("/slack/conversations.history");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(json!({
+                "ok": true,
+                "messages": [{
+                    "ts": "1700000001.000001",
+                    "user": "U123",
+                    "text": "slightly different wording",
+                    "metadata": {
+                        "event_type": "trogon_agent_msg",
+                        "event_payload": { "idempotency_key": "42.toolu_abc" }
+                    }
+                }]
+            }));
+    });
+
+    // POST must NOT be called.
+    let ctx = make_ctx(&server.base_url());
+    let input = json!({
+        "channel": "#engineering",
+        "text": "PR #42 reviewed.",
+        "_idempotency_key": "42.toolu_abc"
+    });
+    let result = dispatch_tool(&ctx, "send_slack_message", &input).await;
+
+    history_mock.assert_hits_async(1).await;
+    assert!(
+        result.contains("skipped duplicate"),
+        "unexpected result: {result}"
+    );
+}
+
+/// Fallback dedup path: metadata scope unavailable (no `metadata` field in
+/// history messages) but text matches → skip send.
+#[tokio::test]
+async fn send_slack_message_skips_duplicate_by_text_fallback_when_no_metadata() {
+    let server = MockServer::start_async().await;
+
+    // History has matching text but no metadata field (missing scope).
     let history_mock = server.mock(|when, then| {
         when.method(httpmock::Method::GET)
             .path("/slack/conversations.history");
@@ -377,9 +407,13 @@ async fn send_slack_message_skips_duplicate_when_same_text_in_history() {
             }));
     });
 
-    // POST should NOT be called — no mock registered for it.
+    // POST must NOT be called.
     let ctx = make_ctx(&server.base_url());
-    let input = json!({ "channel": "#engineering", "text": "PR #42 reviewed." });
+    let input = json!({
+        "channel": "#engineering",
+        "text": "PR #42 reviewed.",
+        "_idempotency_key": "42.toolu_abc"
+    });
     let result = dispatch_tool(&ctx, "send_slack_message", &input).await;
 
     history_mock.assert_hits_async(1).await;
@@ -389,7 +423,8 @@ async fn send_slack_message_skips_duplicate_when_same_text_in_history() {
     );
 }
 
-/// If history check returns ok:false, send proceeds normally.
+/// Graceful degradation: history returns ok:false (e.g. missing channel scope)
+/// → dedup check is skipped, send proceeds.
 #[tokio::test]
 async fn send_slack_message_sends_when_history_check_returns_error() {
     let server = MockServer::start_async().await;
@@ -411,7 +446,12 @@ async fn send_slack_message_sends_when_history_check_returns_error() {
     });
 
     let ctx = make_ctx(&server.base_url());
-    let input = json!({ "channel": "#engineering", "text": "Deploy done." });
+    // Key present → triggers history check; history fails → proceeds.
+    let input = json!({
+        "channel": "#engineering",
+        "text": "Deploy done.",
+        "_idempotency_key": "99.toolu_xyz"
+    });
     let result = dispatch_tool(&ctx, "send_slack_message", &input).await;
 
     assert!(
@@ -420,9 +460,9 @@ async fn send_slack_message_sends_when_history_check_returns_error() {
     );
 }
 
-/// Different text in history → send proceeds normally.
+/// Neither metadata nor text matches → send proceeds normally.
 #[tokio::test]
-async fn send_slack_message_sends_when_no_matching_text_in_history() {
+async fn send_slack_message_sends_when_no_matching_message_in_history() {
     let server = MockServer::start_async().await;
 
     server.mock(|when, then| {
@@ -447,7 +487,11 @@ async fn send_slack_message_sends_when_no_matching_text_in_history() {
     });
 
     let ctx = make_ctx(&server.base_url());
-    let input = json!({ "channel": "#engineering", "text": "New unique message." });
+    let input = json!({
+        "channel": "#engineering",
+        "text": "New unique message.",
+        "_idempotency_key": "55.toolu_new"
+    });
     let result = dispatch_tool(&ctx, "send_slack_message", &input).await;
 
     assert!(
