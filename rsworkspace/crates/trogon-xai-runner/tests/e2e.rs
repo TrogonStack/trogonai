@@ -1045,13 +1045,13 @@ async fn prompt_full_event_sequence_response_id_usage_finished() {
         .await;
 }
 
-// ── Silent events: ServerToolCompleted and FunctionCall ───────────────────────
+// ── Tool call notifications ───────────────────────────────────────────────────
 
-/// `ServerToolCompleted` in the stream must be silently ignored — the agent must
-/// not publish extra notifications for it. Only the final `PromptResponse` and
-/// the one `TextDelta` notification are expected.
+/// `ServerToolCompleted` without a preceding `FunctionCall` is a no-op — the
+/// agent has no pending call to resolve, so no notification is emitted for it.
+/// Only the `TextDelta` notification is expected.
 #[tokio::test]
-async fn prompt_server_tool_completed_is_silently_ignored() {
+async fn prompt_server_tool_completed_without_prior_call_is_ignored() {
     tokio::task::LocalSet::new()
         .run_until(async {
             let h = Harness::new();
@@ -1069,17 +1069,18 @@ async fn prompt_server_tool_completed_is_silently_ignored() {
                 "r.prompt",
             );
             h.expect_n_publishes(2).await;
-            // Exactly one notification (for the TextDelta), not two.
+            // Only the TextDelta notification — no ToolCall(Completed) without a prior FunctionCall.
             h.expect_n_notifications(1).await;
-            assert_eq!(h.notifier.count(), 1, "ServerToolCompleted must not emit a notification");
         })
         .await;
 }
 
-/// `FunctionCall` in the stream must be silently ignored — same reasoning as
-/// `ServerToolCompleted`: the agent does not expose tool calls to the ACP layer.
+/// `FunctionCall` emits a `ToolCall(Pending)` notification; a matching
+/// `ServerToolCompleted` emits a `ToolCall(Completed)` notification.
+/// Total: 3 notifications — Pending + TextDelta + Completed (in stream order,
+/// but Completed arrives before Done which triggers the PromptResponse reply).
 #[tokio::test]
-async fn prompt_function_call_is_silently_ignored() {
+async fn prompt_function_call_emits_tool_call_notifications() {
     tokio::task::LocalSet::new()
         .run_until(async {
             let h = Harness::new();
@@ -1088,22 +1089,23 @@ async fn prompt_function_call_is_silently_ignored() {
             h.http.push(vec![
                 XaiEvent::FunctionCall {
                     call_id: "call-1".to_string(),
-                    name: "some_tool".to_string(),
-                    arguments: "{}".to_string(),
+                    name: "web_search".to_string(),
+                    arguments: r#"{"query":"test"}"#.to_string(),
                 },
+                XaiEvent::ServerToolCompleted { name: "web_search".to_string() },
                 XaiEvent::TextDelta { text: "done".to_string() },
                 XaiEvent::Done,
             ]);
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
             h.session_req(
                 &prompt_subj,
-                PromptRequest::new(sid.clone(), vec![ContentBlock::from("call a tool")]),
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("search for something")]),
                 "r.prompt",
             );
+            // create_session reply + PromptResponse reply = 2 NATS publishes
             h.expect_n_publishes(2).await;
-            // Exactly one notification (for the TextDelta), not two.
-            h.expect_n_notifications(1).await;
-            assert_eq!(h.notifier.count(), 1, "FunctionCall must not emit a notification");
+            // 3 notifications via TestNotifier: ToolCall(Pending), ToolCall(Completed), AgentMessageChunk
+            h.expect_n_notifications(3).await;
         })
         .await;
 }
