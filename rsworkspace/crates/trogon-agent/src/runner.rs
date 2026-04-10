@@ -854,7 +854,25 @@ async fn recover_stale_promises(
 
             if !promise.automation_id.is_empty() {
                 // Automation run
-                let autos = automation_store.list(&tenant_id).await.unwrap_or_default();
+                //
+                // Propagate list() errors instead of using unwrap_or_default().
+                // An empty vec from a transient failure looks identical to "no
+                // automations exist", which would cause the else branch below to
+                // permanently mark the promise as Failed — losing valid work.
+                // On error we skip this promise; it stays Running and will be
+                // picked up on the next restart once the store is available.
+                let autos = match automation_store.list(&tenant_id).await {
+                    Ok(list) => list,
+                    Err(e) => {
+                        error!(
+                            error = %e,
+                            promise_id = %promise.id,
+                            automation_id = %promise.automation_id,
+                            "Startup recovery: failed to list automations — skipping promise, will retry on next restart"
+                        );
+                        continue;
+                    }
+                };
                 if let Some(auto) = autos.into_iter().find(|a| a.id == promise.automation_id) {
                     let started_at = trogon_automations::now_unix();
                     let result =
