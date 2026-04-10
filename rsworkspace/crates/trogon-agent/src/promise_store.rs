@@ -110,6 +110,23 @@ pub struct PromiseStore {
 impl PromiseStore {
     /// Open (or create) the `AGENT_PROMISES` and `AGENT_TOOL_RESULTS` KV buckets.
     pub async fn open(js: &jetstream::Context) -> Result<Self, PromiseStoreError> {
+        // OS crash durability note: `async-nats` 0.47.0 does not expose the
+        // `sync_always` field on `kv::Config` or the underlying `stream::Config`,
+        // so we cannot set it programmatically here. The NATS server must be
+        // configured at the cluster level:
+        //
+        //   jetstream {
+        //       sync_always: true
+        //   }
+        //
+        // Without this, NATS fsyncs every ~2 minutes by default. A write
+        // acknowledged by NATS but not yet fsynced can be lost on a kernel
+        // panic or power failure (process crashes are not affected). Setting
+        // `sync_always: true` server-side closes this gap.
+        //
+        // Alternative: run a 3-node NATS cluster — quorum writes require
+        // acknowledgement from a majority of replicas, giving WAL-equivalent
+        // durability without the per-write fsync overhead.
         let promises = js
             .create_or_update_key_value(kv::Config {
                 bucket: AGENT_PROMISES_BUCKET.to_string(),
