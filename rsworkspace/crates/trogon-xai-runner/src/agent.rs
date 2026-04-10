@@ -605,7 +605,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
         }
 
         // Snapshot session state — release lock before streaming.
-        let (model, api_key, history, last_response_id, enabled_tools) = {
+        let (model, api_key, history, last_response_id, enabled_tools, session_system_prompt) = {
             let sessions = self.sessions.lock().await;
             let s = sessions
                 .get(&session_id)
@@ -616,6 +616,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
                 s.history.clone(),
                 s.last_response_id.clone(),
                 s.enabled_tools.clone(),
+                s.system_prompt.clone(),
             )
         };
 
@@ -643,7 +644,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
             } else {
                 (
                     build_full_history_input(
-                        self.system_prompt.as_deref(),
+                        session_system_prompt.as_deref(),
                         &history,
                         &user_input,
                     ),
@@ -827,7 +828,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
                             current_response_id = None;
                             current_prev_response_id = None;
                             current_input = build_full_history_input(
-                                self.system_prompt.as_deref(),
+                                session_system_prompt.as_deref(),
                                 &history,
                                 &user_input,
                             );
@@ -995,7 +996,7 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
                 history: Vec::new(),
                 last_response_id: None,
                 enabled_tools: Vec::new(),
-                system_prompt: None,
+                system_prompt: self.system_prompt.clone(),
                 created_at: Instant::now(),
             },
         );
@@ -1052,7 +1053,7 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
                 history: Vec::new(),
                 last_response_id: response_id,
                 enabled_tools: Vec::new(),
-                system_prompt: None,
+                system_prompt: self.system_prompt.clone(),
                 created_at: Instant::now(),
             },
         );
@@ -1068,7 +1069,7 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
                 history: Vec::new(),
                 last_response_id: None,
                 enabled_tools: Vec::new(),
-                system_prompt: None,
+                system_prompt: self.system_prompt.clone(),
                 created_at: Instant::now(),
             },
         );
@@ -1084,7 +1085,7 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
                 history,
                 last_response_id: None,
                 enabled_tools: Vec::new(),
-                system_prompt: None,
+                system_prompt: self.system_prompt.clone(),
                 created_at: Instant::now(),
             },
         );
