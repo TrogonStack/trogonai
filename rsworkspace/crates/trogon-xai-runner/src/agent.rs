@@ -821,6 +821,8 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
                             stale_retry_done = true;
                             // Clear any text accumulated before the error.
                             assistant_text.clear();
+                            // Clear any pending tool calls from the failed attempt.
+                            pending_tool_calls.clear();
                             // Clear response ID from the failed request.
                             current_response_id = None;
                             current_prev_response_id = None;
