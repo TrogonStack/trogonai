@@ -1,0 +1,57 @@
+name: cd / canary container images
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: canary-container-images-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: trogon-gateway
+            context: ./rsworkspace
+            dockerfile: ./devops/docker/compose/services/trogon-gateway/Dockerfile
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - name: Resolve image name
+        id: image
+        env:
+          IMAGE_OWNER: ${{ github.repository_owner }}
+        run: |
+          echo "name=ghcr.io/${IMAGE_OWNER,,}/${{ matrix.service }}" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push canary image
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: |
+            ${{ steps.image.outputs.name }}:canary
+            ${{ steps.image.outputs.name }}:sha-${{ steps.image.outputs.short_sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
