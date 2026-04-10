@@ -1595,4 +1595,18 @@ mod tests {
         );
     }
 
+    // ── Message::content_str ──────────────────────────────────────────────────
+
+    #[test]
+    fn message_content_str_some_returns_text() {
+        let msg = Message::user("hello");
+        assert_eq!(msg.content_str(), "hello");
+    }
+
+    #[test]
+    fn message_content_str_none_returns_empty_str() {
+        let msg = Message { role: "user".to_string(), content: None };
+        assert_eq!(msg.content_str(), "");
+    }
+
 }
