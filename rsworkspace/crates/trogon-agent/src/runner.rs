@@ -319,7 +319,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                 }
                             });
                             if autos.is_empty() {
-                                let promise_id = format!("{tenant_id}.{stream_seq}");
+                                let promise_id = format!("{stream_seq}");
                                 let agent = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id, "", subject, &pv).await;
                                 let is_merged = pv["action"].as_str() == Some("closed")
                                     && pv["pull_request"]["merged"].as_bool() == Some(true);
@@ -375,7 +375,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                 }
                             });
                             if autos.is_empty() {
-                                let promise_id = format!("{tenant_id}.{stream_seq}");
+                                let promise_id = format!("{stream_seq}");
                                 let agent = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id, "", subject, &pv).await;
                                 if !agent.is_flag_enabled(&crate::flags::AgentFlag::CommentHandlerEnabled).await {
                                     info!(flag = "agent_comment_handler_enabled", "Comment handler disabled by feature flag");
@@ -423,7 +423,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                 }
                             });
                             if autos.is_empty() {
-                                let promise_id = format!("{tenant_id}.{stream_seq}");
+                                let promise_id = format!("{stream_seq}");
                                 let agent = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id, "", subject, &pv).await;
                                 if !agent.is_flag_enabled(&crate::flags::AgentFlag::PushHandlerEnabled).await {
                                     info!(flag = "agent_push_handler_enabled", "Push handler disabled by feature flag");
@@ -471,7 +471,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                 }
                             });
                             if autos.is_empty() {
-                                let promise_id = format!("{tenant_id}.{stream_seq}");
+                                let promise_id = format!("{stream_seq}");
                                 let agent = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id, "", subject, &pv).await;
                                 if !agent.is_flag_enabled(&crate::flags::AgentFlag::CiHandlerEnabled).await {
                                     info!(flag = "agent_ci_handler_enabled", "CI handler disabled by feature flag");
@@ -519,7 +519,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                 }
                             });
                             if autos.is_empty() {
-                                let promise_id = format!("{tenant_id}.{stream_seq}");
+                                let promise_id = format!("{stream_seq}");
                                 let agent = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id, "", subject, &pv).await;
                                 if !agent.is_flag_enabled(&crate::flags::AgentFlag::IssueTriageEnabled).await {
                                     info!(flag = "agent_issue_triage_enabled", "Issue triage handler disabled by feature flag");
@@ -605,7 +605,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                 }
                             });
                             if autos.is_empty() {
-                                let promise_id = format!("{tenant_id}.{stream_seq}");
+                                let promise_id = format!("{stream_seq}");
                                 let agent = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id, "", &nats_subject, &pv).await;
                                 if !agent.is_flag_enabled(&crate::flags::AgentFlag::AlertHandlerEnabled).await {
                                     info!(flag = "agent_alert_handler_enabled", "Alert handler disabled by feature flag");
@@ -658,7 +658,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                 }
                             });
                             if autos.is_empty() {
-                                let promise_id = format!("{tenant_id}.{stream_seq}");
+                                let promise_id = format!("{stream_seq}");
                                 let agent = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id, "", &nats_subject, &pv).await;
                                 if !agent.is_flag_enabled(&crate::flags::AgentFlag::IncidentioHandlerEnabled).await {
                                     info!(flag = "agent_incidentio_handler_enabled", "incident.io handler disabled by feature flag");
