@@ -164,5 +164,23 @@ async fn graphql_request<H: HttpClient>(
         headers.push(("Idempotency-Key".to_string(), key.to_string()));
     }
     let resp = ctx.http_client.post(&url, headers, body.clone()).await?;
-    serde_json::from_str::<Value>(&resp.body).map_err(|e| e.to_string())
+    let response = serde_json::from_str::<Value>(&resp.body).map_err(|e| e.to_string())?;
+
+    // Surface request-level errors (auth failure, rate limit, schema error)
+    // before callers read data fields. Without this, a failed request where
+    // "data" is null looks identical to a mutation that returned success:false,
+    // making it impossible to distinguish a network/auth error from a rejected
+    // mutation.
+    if let Some(errors) = response["errors"].as_array()
+        && !errors.is_empty()
+    {
+        let msg = errors
+            .iter()
+            .filter_map(|e| e["message"].as_str())
+            .collect::<Vec<_>>()
+            .join("; ");
+        return Err(format!("GraphQL error: {msg}"));
+    }
+
+    Ok(response)
 }
