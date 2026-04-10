@@ -764,84 +764,106 @@ async fn recover_stale_promises(
         }
     };
 
-    for promise in promises {
-        if now.saturating_sub(promise.claimed_at) < STALE_AFTER_SECS {
-            continue; // still fresh — another worker may be handling it
-        }
+    let stale: Vec<_> = promises
+        .into_iter()
+        .filter(|p| now.saturating_sub(p.claimed_at) >= STALE_AFTER_SECS)
+        .collect();
 
-        info!(
-            promise_id = %promise.id,
-            subject = %promise.nats_subject,
-            iteration = promise.iteration,
-            "Startup recovery: resuming stale promise"
-        );
-
-        let payload: bytes::Bytes = serde_json::to_vec(&promise.trigger)
-            .unwrap_or_default()
-            .into();
-
-        let agent = prepare_agent_with_promise(
-            agent,
-            promise_store,
-            tenant_id,
-            &promise.id,
-            &promise.automation_id,
-            &promise.nats_subject,
-            &promise.trigger,
-        )
-        .await;
-
-        if !promise.automation_id.is_empty() {
-            // Automation run
-            let autos = automation_store.list(tenant_id).await.unwrap_or_default();
-            if let Some(auto) = autos.into_iter().find(|a| a.id == promise.automation_id) {
-                let started_at = trogon_automations::now_unix();
-                let result =
-                    handlers::run_automation(&agent, &auto, &promise.nats_subject, &payload).await;
-                let finished_at = trogon_automations::now_unix();
-                let (status, output) = match &result {
-                    Ok(o) => (RunStatus::Success, o.clone()),
-                    Err(e) => (RunStatus::Failed, e.clone()),
-                };
-                let run = RunRecord {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    automation_id: auto.id.clone(),
-                    automation_name: auto.name.clone(),
-                    tenant_id: tenant_id.to_string(),
-                    nats_subject: promise.nats_subject.clone(),
-                    started_at,
-                    finished_at,
-                    status,
-                    output,
-                };
-                if let Err(e) = run_store.record(&run).await {
-                    warn!(error = %e, "Startup recovery: failed to persist run record");
-                }
-            }
-        } else {
-            // Built-in handler dispatch based on NATS subject
-            match promise.nats_subject.as_str() {
-                s if s.starts_with("github.pull_request") => {
-                    handlers::pr_review::handle(&agent, &payload).await;
-                }
-                s if s.starts_with("github.check_run") => {
-                    handlers::ci_completed::handle(&agent, &payload).await;
-                }
-                s if s.starts_with("github.push") => {
-                    handlers::push_to_branch::handle(&agent, &payload).await;
-                }
-                s if s.starts_with("github.issue_comment") => {
-                    handlers::comment_added::handle(&agent, &payload).await;
-                }
-                s if s.starts_with("linear.") => {
-                    handlers::issue_triage::handle(&agent, &payload).await;
-                }
-                other => {
-                    warn!(subject = %other, "Startup recovery: unknown subject, skipping");
-                }
-            }
-        }
+    if stale.is_empty() {
+        return;
     }
+
+    // Recovery runs in the background so the consumer loop can start accepting
+    // new messages immediately. Each stale promise is resumed sequentially to
+    // avoid hammering the Anthropic API with concurrent runs.
+    info!(
+        count = stale.len(),
+        "Startup recovery: resuming stale promises in background"
+    );
+
+    let agent = Arc::clone(agent);
+    let promise_store = Arc::clone(promise_store);
+    let automation_store = Arc::clone(automation_store);
+    let run_store = Arc::clone(run_store);
+    let tenant_id = tenant_id.to_string();
+
+    tokio::spawn(async move {
+        for promise in stale {
+            info!(
+                promise_id = %promise.id,
+                subject = %promise.nats_subject,
+                iteration = promise.iteration,
+                "Startup recovery: resuming stale promise"
+            );
+
+            let payload: bytes::Bytes = serde_json::to_vec(&promise.trigger)
+                .unwrap_or_default()
+                .into();
+
+            let agent = prepare_agent_with_promise(
+                &agent,
+                &promise_store,
+                &tenant_id,
+                &promise.id,
+                &promise.automation_id,
+                &promise.nats_subject,
+                &promise.trigger,
+            )
+            .await;
+
+            if !promise.automation_id.is_empty() {
+                // Automation run
+                let autos = automation_store.list(&tenant_id).await.unwrap_or_default();
+                if let Some(auto) = autos.into_iter().find(|a| a.id == promise.automation_id) {
+                    let started_at = trogon_automations::now_unix();
+                    let result =
+                        handlers::run_automation(&agent, &auto, &promise.nats_subject, &payload)
+                            .await;
+                    let finished_at = trogon_automations::now_unix();
+                    let (status, output) = match &result {
+                        Ok(o) => (RunStatus::Success, o.clone()),
+                        Err(e) => (RunStatus::Failed, e.clone()),
+                    };
+                    let run = RunRecord {
+                        id: uuid::Uuid::new_v4().to_string(),
+                        automation_id: auto.id.clone(),
+                        automation_name: auto.name.clone(),
+                        tenant_id: tenant_id.clone(),
+                        nats_subject: promise.nats_subject.clone(),
+                        started_at,
+                        finished_at,
+                        status,
+                        output,
+                    };
+                    if let Err(e) = run_store.record(&run).await {
+                        warn!(error = %e, "Startup recovery: failed to persist run record");
+                    }
+                }
+            } else {
+                // Built-in handler dispatch based on NATS subject
+                match promise.nats_subject.as_str() {
+                    s if s.starts_with("github.pull_request") => {
+                        handlers::pr_review::handle(&agent, &payload).await;
+                    }
+                    s if s.starts_with("github.check_run") => {
+                        handlers::ci_completed::handle(&agent, &payload).await;
+                    }
+                    s if s.starts_with("github.push") => {
+                        handlers::push_to_branch::handle(&agent, &payload).await;
+                    }
+                    s if s.starts_with("github.issue_comment") => {
+                        handlers::comment_added::handle(&agent, &payload).await;
+                    }
+                    s if s.starts_with("linear.") => {
+                        handlers::issue_triage::handle(&agent, &payload).await;
+                    }
+                    other => {
+                        warn!(subject = %other, "Startup recovery: unknown subject, skipping");
+                    }
+                }
+            }
+        }
+    });
 }
 
 /// Spawn one task per automation and wait for all to finish.
