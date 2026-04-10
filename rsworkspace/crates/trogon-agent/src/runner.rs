@@ -304,7 +304,14 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                         tokio::spawn(async move {
                             let subject = "github.pull_request";
                             let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
-                            let stream_seq = msg.info().map(|i| i.stream_sequence).unwrap_or(0);
+                            let stream_seq = match msg.info() {
+                                Ok(info) => info.stream_sequence,
+                                Err(_) => {
+                                    error!("JetStream message missing sequence info — promise_id cannot be derived, acking to prevent infinite redelivery");
+                                    let _ = msg.ack().await;
+                                    return;
+                                }
+                            };
                             let autos = store.matching(&tenant_id, subject, &pv).await.unwrap_or_default();
                             // Heartbeat: send Progress every 15s to prevent spurious redelivery
                             let msg_for_heartbeat = msg.clone();
@@ -360,7 +367,14 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                         tokio::spawn(async move {
                             let subject = "github.issue_comment";
                             let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
-                            let stream_seq = msg.info().map(|i| i.stream_sequence).unwrap_or(0);
+                            let stream_seq = match msg.info() {
+                                Ok(info) => info.stream_sequence,
+                                Err(_) => {
+                                    error!("JetStream message missing sequence info — promise_id cannot be derived, acking to prevent infinite redelivery");
+                                    let _ = msg.ack().await;
+                                    return;
+                                }
+                            };
                             let autos = store.matching(&tenant_id, subject, &pv).await.unwrap_or_default();
                             // Heartbeat: send Progress every 15s to prevent spurious redelivery
                             let msg_for_heartbeat = msg.clone();
@@ -408,7 +422,14 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                         tokio::spawn(async move {
                             let subject = "github.push";
                             let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
-                            let stream_seq = msg.info().map(|i| i.stream_sequence).unwrap_or(0);
+                            let stream_seq = match msg.info() {
+                                Ok(info) => info.stream_sequence,
+                                Err(_) => {
+                                    error!("JetStream message missing sequence info — promise_id cannot be derived, acking to prevent infinite redelivery");
+                                    let _ = msg.ack().await;
+                                    return;
+                                }
+                            };
                             let autos = store.matching(&tenant_id, subject, &pv).await.unwrap_or_default();
                             // Heartbeat: send Progress every 15s to prevent spurious redelivery
                             let msg_for_heartbeat = msg.clone();
@@ -456,7 +477,14 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                         tokio::spawn(async move {
                             let subject = "github.check_run";
                             let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
-                            let stream_seq = msg.info().map(|i| i.stream_sequence).unwrap_or(0);
+                            let stream_seq = match msg.info() {
+                                Ok(info) => info.stream_sequence,
+                                Err(_) => {
+                                    error!("JetStream message missing sequence info — promise_id cannot be derived, acking to prevent infinite redelivery");
+                                    let _ = msg.ack().await;
+                                    return;
+                                }
+                            };
                             let autos = store.matching(&tenant_id, subject, &pv).await.unwrap_or_default();
                             // Heartbeat: send Progress every 15s to prevent spurious redelivery
                             let msg_for_heartbeat = msg.clone();
@@ -504,7 +532,14 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                         tokio::spawn(async move {
                             let subject = "linear.Issue";
                             let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
-                            let stream_seq = msg.info().map(|i| i.stream_sequence).unwrap_or(0);
+                            let stream_seq = match msg.info() {
+                                Ok(info) => info.stream_sequence,
+                                Err(_) => {
+                                    error!("JetStream message missing sequence info — promise_id cannot be derived, acking to prevent infinite redelivery");
+                                    let _ = msg.ack().await;
+                                    return;
+                                }
+                            };
                             let autos = store.matching(&tenant_id, subject, &pv).await.unwrap_or_default();
                             // Heartbeat: send Progress every 15s to prevent spurious redelivery
                             let msg_for_heartbeat = msg.clone();
@@ -552,7 +587,14 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                         let nats_subject = msg.subject.to_string();
                         tokio::spawn(async move {
                             let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
-                            let stream_seq = msg.info().map(|i| i.stream_sequence).unwrap_or(0);
+                            let stream_seq = match msg.info() {
+                                Ok(info) => info.stream_sequence,
+                                Err(_) => {
+                                    error!("JetStream message missing sequence info — promise_id cannot be derived, acking to prevent infinite redelivery");
+                                    let _ = msg.ack().await;
+                                    return;
+                                }
+                            };
                             let autos = store.matching(&tenant_id, &nats_subject, &pv).await.unwrap_or_default();
                             // Heartbeat: send Progress every 15s to prevent spurious redelivery
                             let msg_for_heartbeat = msg.clone();
@@ -590,7 +632,14 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                         let nats_subject = msg.subject.to_string();
                         tokio::spawn(async move {
                             let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
-                            let stream_seq = msg.info().map(|i| i.stream_sequence).unwrap_or(0);
+                            let stream_seq = match msg.info() {
+                                Ok(info) => info.stream_sequence,
+                                Err(_) => {
+                                    error!("JetStream message missing sequence info — promise_id cannot be derived, acking to prevent infinite redelivery");
+                                    let _ = msg.ack().await;
+                                    return;
+                                }
+                            };
                             let autos = store.matching(&tenant_id, &nats_subject, &pv).await.unwrap_or_default();
                             // Heartbeat: send Progress every 15s to prevent spurious redelivery
                             let msg_for_heartbeat = msg.clone();
@@ -643,7 +692,14 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                         let nats_subject = msg.subject.to_string();
                         tokio::spawn(async move {
                             let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
-                            let stream_seq = msg.info().map(|i| i.stream_sequence).unwrap_or(0);
+                            let stream_seq = match msg.info() {
+                                Ok(info) => info.stream_sequence,
+                                Err(_) => {
+                                    error!("JetStream message missing sequence info — promise_id cannot be derived, acking to prevent infinite redelivery");
+                                    let _ = msg.ack().await;
+                                    return;
+                                }
+                            };
                             let autos = store.matching(&tenant_id, &nats_subject, &pv).await.unwrap_or_default();
                             // Heartbeat: send Progress every 15s to prevent spurious redelivery
                             let msg_for_heartbeat = msg.clone();
@@ -789,6 +845,55 @@ async fn recover_stale_promises(
 
     tokio::spawn(async move {
         for promise in stale {
+            // Re-fetch to get the current revision and verify the promise is
+            // still Running. Between `list_running` and here, another worker
+            // (concurrent restart) may have already claimed or completed it.
+            let rev = match promise_store.get_promise(&tenant_id, &promise.id).await {
+                Ok(Some((current, rev))) => {
+                    if current.status != PromiseStatus::Running {
+                        info!(
+                            promise_id = %promise.id,
+                            status = ?current.status,
+                            "Startup recovery: promise already completed, skipping"
+                        );
+                        continue;
+                    }
+                    rev
+                }
+                Ok(None) => {
+                    info!(
+                        promise_id = %promise.id,
+                        "Startup recovery: promise vanished before claim, skipping"
+                    );
+                    continue;
+                }
+                Err(e) => {
+                    warn!(
+                        promise_id = %promise.id,
+                        error = %e,
+                        "Startup recovery: failed to fetch promise for CAS claim, skipping"
+                    );
+                    continue;
+                }
+            };
+
+            // CAS-claim: update worker_id + claimed_at under the current revision.
+            // If two workers race, only one wins the CAS write; the other skips.
+            let mut claimed = promise.clone();
+            claimed.worker_id = worker_id();
+            claimed.claimed_at = trogon_automations::now_unix();
+            if let Err(e) = promise_store
+                .update_promise(&tenant_id, &promise.id, &claimed, rev)
+                .await
+            {
+                info!(
+                    promise_id = %promise.id,
+                    error = %e,
+                    "Startup recovery: CAS claim lost — another worker took this promise"
+                );
+                continue;
+            }
+
             info!(
                 promise_id = %promise.id,
                 subject = %promise.nats_subject,
