@@ -67,6 +67,8 @@ pub struct AgentPromise {
     pub claimed_at: u64,
     /// Original trigger payload (NATS message body).
     pub trigger: serde_json::Value,
+    /// Original NATS message subject — used to re-dispatch on startup recovery.
+    pub nats_subject: String,
 }
 
 // ── PromiseStoreError ─────────────────────────────────────────────────────────
@@ -204,6 +206,37 @@ impl PromiseStore {
         Ok(())
     }
 
+    /// Return all promises for `tenant_id` that are currently in [`PromiseStatus::Running`].
+    async fn list_running_inner(
+        &self,
+        tenant_id: &str,
+    ) -> Result<Vec<AgentPromise>, PromiseStoreError> {
+        use futures_util::TryStreamExt;
+        let prefix = format!("{tenant_id}.");
+        let mut keys = self
+            .promises
+            .keys()
+            .await
+            .map_err(|e| PromiseStoreError(e.to_string()))?;
+        let mut result = Vec::new();
+        while let Some(key) = keys
+            .try_next()
+            .await
+            .map_err(|e| PromiseStoreError(e.to_string()))?
+        {
+            if !key.starts_with(&prefix) {
+                continue;
+            }
+            let promise_id = &key[prefix.len()..];
+            if let Some((p, _)) = self.get_promise(tenant_id, promise_id).await?
+                && p.status == PromiseStatus::Running
+            {
+                result.push(p);
+            }
+        }
+        Ok(result)
+    }
+
     /// Return a cached tool result if it exists.
     pub async fn get_tool_result(
         &self,
@@ -275,6 +308,11 @@ pub trait PromiseRepository: Send + Sync + 'static {
         tool_use_id: &'a str,
         result: &'a str,
     ) -> Pin<Box<dyn Future<Output = Result<(), PromiseStoreError>> + Send + 'a>>;
+
+    fn list_running<'a>(
+        &'a self,
+        tenant_id: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<AgentPromise>, PromiseStoreError>> + Send + 'a>>;
 }
 
 impl PromiseRepository for PromiseStore {
@@ -330,6 +368,14 @@ impl PromiseRepository for PromiseStore {
             self.put_tool_result(tenant_id, promise_id, tool_use_id, result)
                 .await
         })
+    }
+
+    fn list_running<'a>(
+        &'a self,
+        tenant_id: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<AgentPromise>, PromiseStoreError>> + Send + 'a>>
+    {
+        Box::pin(async move { self.list_running_inner(tenant_id).await })
     }
 }
 
@@ -445,6 +491,25 @@ pub mod mock {
                 Ok(())
             })
         }
+
+        fn list_running<'a>(
+            &'a self,
+            tenant_id: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<AgentPromise>, PromiseStoreError>> + Send + 'a>>
+        {
+            let data = Arc::clone(&self.promises);
+            let prefix = format!("{tenant_id}.");
+            Box::pin(async move {
+                let guard = data.lock().unwrap();
+                let result = guard
+                    .iter()
+                    .filter(|(k, _)| k.starts_with(&prefix))
+                    .filter(|(_, (p, _))| p.status == PromiseStatus::Running)
+                    .map(|(_, (p, _))| p.clone())
+                    .collect();
+                Ok(result)
+            })
+        }
     }
 }
 
@@ -466,6 +531,7 @@ mod tests {
             worker_id: "worker-1".to_string(),
             claimed_at: 1_700_000_000,
             trigger: serde_json::json!({"action": "opened"}),
+            nats_subject: "github.pull_request".to_string(),
         }
     }
 

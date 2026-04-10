@@ -26,7 +26,9 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use async_nats::jetstream::{self, consumer::AckPolicy, consumer::DeliverPolicy, consumer::pull};
+use async_nats::jetstream::{
+    self, AckKind, consumer::AckPolicy, consumer::DeliverPolicy, consumer::pull,
+};
 use futures_util::StreamExt;
 use tracing::{error, info, warn};
 use trogon_automations::{AutomationStore, RunRecord, RunStatus, RunStore};
@@ -168,6 +170,9 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
     );
     let tenant_id = Arc::new(cfg.tenant_id.clone());
 
+    // Recover any stale promises from a previous process run.
+    recover_stale_promises(&agent, &promise_store, &store, &run_store, &tenant_id).await;
+
     // Start the combined HTTP API server unless disabled (port == 0).
     // Automations + run history + interactive chat sessions are all on the same port.
     if cfg.api_port != 0 {
@@ -301,9 +306,21 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                             let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
                             let stream_seq = msg.info().map(|i| i.stream_sequence).unwrap_or(0);
                             let autos = store.matching(&tenant_id, subject, &pv).await.unwrap_or_default();
+                            // Heartbeat: send Progress every 15s to prevent spurious redelivery
+                            let msg_for_heartbeat = msg.clone();
+                            let heartbeat = tokio::spawn(async move {
+                                let mut interval = tokio::time::interval(std::time::Duration::from_secs(15));
+                                interval.tick().await; // skip immediate first tick
+                                loop {
+                                    interval.tick().await;
+                                    if msg_for_heartbeat.ack_with(AckKind::Progress).await.is_err() {
+                                        break;
+                                    }
+                                }
+                            });
                             if autos.is_empty() {
                                 let promise_id = format!("{tenant_id}.{stream_seq}");
-                                let agent = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id, "", &pv).await;
+                                let agent = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id, "", subject, &pv).await;
                                 let is_merged = pv["action"].as_str() == Some("closed")
                                     && pv["pull_request"]["merged"].as_bool() == Some(true);
                                 if !agent.is_flag_enabled(&crate::flags::AgentFlag::PrReviewEnabled).await {
@@ -324,6 +341,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                             } else {
                                 dispatch_automations(&agent, &run_store, &promise_store, stream_seq, autos, subject, &msg.payload).await;
                             }
+                            heartbeat.abort();
                             if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack PR message"); }
                         });
                     }
@@ -344,9 +362,21 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                             let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
                             let stream_seq = msg.info().map(|i| i.stream_sequence).unwrap_or(0);
                             let autos = store.matching(&tenant_id, subject, &pv).await.unwrap_or_default();
+                            // Heartbeat: send Progress every 15s to prevent spurious redelivery
+                            let msg_for_heartbeat = msg.clone();
+                            let heartbeat = tokio::spawn(async move {
+                                let mut interval = tokio::time::interval(std::time::Duration::from_secs(15));
+                                interval.tick().await; // skip immediate first tick
+                                loop {
+                                    interval.tick().await;
+                                    if msg_for_heartbeat.ack_with(AckKind::Progress).await.is_err() {
+                                        break;
+                                    }
+                                }
+                            });
                             if autos.is_empty() {
                                 let promise_id = format!("{tenant_id}.{stream_seq}");
-                                let agent = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id, "", &pv).await;
+                                let agent = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id, "", subject, &pv).await;
                                 if !agent.is_flag_enabled(&crate::flags::AgentFlag::CommentHandlerEnabled).await {
                                     info!(flag = "agent_comment_handler_enabled", "Comment handler disabled by feature flag");
                                 } else {
@@ -359,6 +389,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                             } else {
                                 dispatch_automations(&agent, &run_store, &promise_store, stream_seq, autos, subject, &msg.payload).await;
                             }
+                            heartbeat.abort();
                             if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack comment message"); }
                         });
                     }
@@ -379,9 +410,21 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                             let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
                             let stream_seq = msg.info().map(|i| i.stream_sequence).unwrap_or(0);
                             let autos = store.matching(&tenant_id, subject, &pv).await.unwrap_or_default();
+                            // Heartbeat: send Progress every 15s to prevent spurious redelivery
+                            let msg_for_heartbeat = msg.clone();
+                            let heartbeat = tokio::spawn(async move {
+                                let mut interval = tokio::time::interval(std::time::Duration::from_secs(15));
+                                interval.tick().await; // skip immediate first tick
+                                loop {
+                                    interval.tick().await;
+                                    if msg_for_heartbeat.ack_with(AckKind::Progress).await.is_err() {
+                                        break;
+                                    }
+                                }
+                            });
                             if autos.is_empty() {
                                 let promise_id = format!("{tenant_id}.{stream_seq}");
-                                let agent = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id, "", &pv).await;
+                                let agent = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id, "", subject, &pv).await;
                                 if !agent.is_flag_enabled(&crate::flags::AgentFlag::PushHandlerEnabled).await {
                                     info!(flag = "agent_push_handler_enabled", "Push handler disabled by feature flag");
                                 } else {
@@ -394,6 +437,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                             } else {
                                 dispatch_automations(&agent, &run_store, &promise_store, stream_seq, autos, subject, &msg.payload).await;
                             }
+                            heartbeat.abort();
                             if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack push message"); }
                         });
                     }
@@ -414,9 +458,21 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                             let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
                             let stream_seq = msg.info().map(|i| i.stream_sequence).unwrap_or(0);
                             let autos = store.matching(&tenant_id, subject, &pv).await.unwrap_or_default();
+                            // Heartbeat: send Progress every 15s to prevent spurious redelivery
+                            let msg_for_heartbeat = msg.clone();
+                            let heartbeat = tokio::spawn(async move {
+                                let mut interval = tokio::time::interval(std::time::Duration::from_secs(15));
+                                interval.tick().await; // skip immediate first tick
+                                loop {
+                                    interval.tick().await;
+                                    if msg_for_heartbeat.ack_with(AckKind::Progress).await.is_err() {
+                                        break;
+                                    }
+                                }
+                            });
                             if autos.is_empty() {
                                 let promise_id = format!("{tenant_id}.{stream_seq}");
-                                let agent = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id, "", &pv).await;
+                                let agent = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id, "", subject, &pv).await;
                                 if !agent.is_flag_enabled(&crate::flags::AgentFlag::CiHandlerEnabled).await {
                                     info!(flag = "agent_ci_handler_enabled", "CI handler disabled by feature flag");
                                 } else {
@@ -429,6 +485,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                             } else {
                                 dispatch_automations(&agent, &run_store, &promise_store, stream_seq, autos, subject, &msg.payload).await;
                             }
+                            heartbeat.abort();
                             if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack CI message"); }
                         });
                     }
@@ -449,9 +506,21 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                             let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
                             let stream_seq = msg.info().map(|i| i.stream_sequence).unwrap_or(0);
                             let autos = store.matching(&tenant_id, subject, &pv).await.unwrap_or_default();
+                            // Heartbeat: send Progress every 15s to prevent spurious redelivery
+                            let msg_for_heartbeat = msg.clone();
+                            let heartbeat = tokio::spawn(async move {
+                                let mut interval = tokio::time::interval(std::time::Duration::from_secs(15));
+                                interval.tick().await; // skip immediate first tick
+                                loop {
+                                    interval.tick().await;
+                                    if msg_for_heartbeat.ack_with(AckKind::Progress).await.is_err() {
+                                        break;
+                                    }
+                                }
+                            });
                             if autos.is_empty() {
                                 let promise_id = format!("{tenant_id}.{stream_seq}");
-                                let agent = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id, "", &pv).await;
+                                let agent = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id, "", subject, &pv).await;
                                 if !agent.is_flag_enabled(&crate::flags::AgentFlag::IssueTriageEnabled).await {
                                     info!(flag = "agent_issue_triage_enabled", "Issue triage handler disabled by feature flag");
                                 } else {
@@ -464,6 +533,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                             } else {
                                 dispatch_automations(&agent, &run_store, &promise_store, stream_seq, autos, subject, &msg.payload).await;
                             }
+                            heartbeat.abort();
                             if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack issue message"); }
                         });
                     }
@@ -484,11 +554,24 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                             let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
                             let stream_seq = msg.info().map(|i| i.stream_sequence).unwrap_or(0);
                             let autos = store.matching(&tenant_id, &nats_subject, &pv).await.unwrap_or_default();
+                            // Heartbeat: send Progress every 15s to prevent spurious redelivery
+                            let msg_for_heartbeat = msg.clone();
+                            let heartbeat = tokio::spawn(async move {
+                                let mut interval = tokio::time::interval(std::time::Duration::from_secs(15));
+                                interval.tick().await; // skip immediate first tick
+                                loop {
+                                    interval.tick().await;
+                                    if msg_for_heartbeat.ack_with(AckKind::Progress).await.is_err() {
+                                        break;
+                                    }
+                                }
+                            });
                             if autos.is_empty() {
                                 info!(subject = %nats_subject, "Cron tick with no matching automations — skipping");
                             } else {
                                 dispatch_automations(&agent, &run_store, &promise_store, stream_seq, autos, &nats_subject, &msg.payload).await;
                             }
+                            heartbeat.abort();
                             if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack cron message"); }
                         });
                     }
@@ -509,9 +592,21 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                             let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
                             let stream_seq = msg.info().map(|i| i.stream_sequence).unwrap_or(0);
                             let autos = store.matching(&tenant_id, &nats_subject, &pv).await.unwrap_or_default();
+                            // Heartbeat: send Progress every 15s to prevent spurious redelivery
+                            let msg_for_heartbeat = msg.clone();
+                            let heartbeat = tokio::spawn(async move {
+                                let mut interval = tokio::time::interval(std::time::Duration::from_secs(15));
+                                interval.tick().await; // skip immediate first tick
+                                loop {
+                                    interval.tick().await;
+                                    if msg_for_heartbeat.ack_with(AckKind::Progress).await.is_err() {
+                                        break;
+                                    }
+                                }
+                            });
                             if autos.is_empty() {
                                 let promise_id = format!("{tenant_id}.{stream_seq}");
-                                let agent = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id, "", &pv).await;
+                                let agent = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id, "", &nats_subject, &pv).await;
                                 if !agent.is_flag_enabled(&crate::flags::AgentFlag::AlertHandlerEnabled).await {
                                     info!(flag = "agent_alert_handler_enabled", "Alert handler disabled by feature flag");
                                 } else {
@@ -524,6 +619,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                             } else {
                                 dispatch_automations(&agent, &run_store, &promise_store, stream_seq, autos, &nats_subject, &msg.payload).await;
                             }
+                            heartbeat.abort();
                             if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack Datadog message"); }
                         });
                     }
@@ -549,9 +645,21 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                             let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
                             let stream_seq = msg.info().map(|i| i.stream_sequence).unwrap_or(0);
                             let autos = store.matching(&tenant_id, &nats_subject, &pv).await.unwrap_or_default();
+                            // Heartbeat: send Progress every 15s to prevent spurious redelivery
+                            let msg_for_heartbeat = msg.clone();
+                            let heartbeat = tokio::spawn(async move {
+                                let mut interval = tokio::time::interval(std::time::Duration::from_secs(15));
+                                interval.tick().await; // skip immediate first tick
+                                loop {
+                                    interval.tick().await;
+                                    if msg_for_heartbeat.ack_with(AckKind::Progress).await.is_err() {
+                                        break;
+                                    }
+                                }
+                            });
                             if autos.is_empty() {
                                 let promise_id = format!("{tenant_id}.{stream_seq}");
-                                let agent = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id, "", &pv).await;
+                                let agent = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id, "", &nats_subject, &pv).await;
                                 if !agent.is_flag_enabled(&crate::flags::AgentFlag::IncidentioHandlerEnabled).await {
                                     info!(flag = "agent_incidentio_handler_enabled", "incident.io handler disabled by feature flag");
                                 } else {
@@ -564,6 +672,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                             } else {
                                 dispatch_automations(&agent, &run_store, &promise_store, stream_seq, autos, &nats_subject, &msg.payload).await;
                             }
+                            heartbeat.abort();
                             if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack incident.io message"); }
                         });
                     }
@@ -588,6 +697,7 @@ async fn prepare_agent_with_promise(
     tenant_id: &str,
     promise_id: &str,
     automation_id: &str,
+    nats_subject: &str,
     trigger: &serde_json::Value,
 ) -> Arc<AgentLoop> {
     let wid = worker_id();
@@ -611,6 +721,7 @@ async fn prepare_agent_with_promise(
                 worker_id: wid,
                 claimed_at: trogon_automations::now_unix(),
                 trigger: trigger.clone(),
+                nats_subject: nats_subject.to_string(),
             };
             if let Err(e) = promise_store.put_promise(&promise).await {
                 warn!(promise_id = %promise_id, error = %e, "Failed to create promise");
@@ -627,6 +738,110 @@ async fn prepare_agent_with_promise(
     agent_with_promise.promise_store = Some(Arc::clone(promise_store));
     agent_with_promise.promise_id = Some(promise_id.to_string());
     Arc::new(agent_with_promise)
+}
+
+/// On startup, resume any agent runs that were left in `Running` state by a
+/// previous process instance that crashed before completing.
+///
+/// Only recovers promises that are owned by this tenant and have been running
+/// for more than `stale_after` seconds without completing — indicating the
+/// original process is gone.
+async fn recover_stale_promises(
+    agent: &Arc<AgentLoop>,
+    promise_store: &Arc<dyn PromiseRepository>,
+    automation_store: &Arc<AutomationStore>,
+    run_store: &Arc<RunStore>,
+    tenant_id: &str,
+) {
+    const STALE_AFTER_SECS: u64 = 5 * 60;
+    let now = trogon_automations::now_unix();
+
+    let promises = match promise_store.list_running(tenant_id).await {
+        Ok(p) => p,
+        Err(e) => {
+            warn!(error = %e, "Startup recovery: failed to list running promises");
+            return;
+        }
+    };
+
+    for promise in promises {
+        if now.saturating_sub(promise.claimed_at) < STALE_AFTER_SECS {
+            continue; // still fresh — another worker may be handling it
+        }
+
+        info!(
+            promise_id = %promise.id,
+            subject = %promise.nats_subject,
+            iteration = promise.iteration,
+            "Startup recovery: resuming stale promise"
+        );
+
+        let payload: bytes::Bytes = serde_json::to_vec(&promise.trigger)
+            .unwrap_or_default()
+            .into();
+
+        let agent = prepare_agent_with_promise(
+            agent,
+            promise_store,
+            tenant_id,
+            &promise.id,
+            &promise.automation_id,
+            &promise.nats_subject,
+            &promise.trigger,
+        )
+        .await;
+
+        if !promise.automation_id.is_empty() {
+            // Automation run
+            let autos = automation_store.list(tenant_id).await.unwrap_or_default();
+            if let Some(auto) = autos.into_iter().find(|a| a.id == promise.automation_id) {
+                let started_at = trogon_automations::now_unix();
+                let result =
+                    handlers::run_automation(&agent, &auto, &promise.nats_subject, &payload).await;
+                let finished_at = trogon_automations::now_unix();
+                let (status, output) = match &result {
+                    Ok(o) => (RunStatus::Success, o.clone()),
+                    Err(e) => (RunStatus::Failed, e.clone()),
+                };
+                let run = RunRecord {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    automation_id: auto.id.clone(),
+                    automation_name: auto.name.clone(),
+                    tenant_id: tenant_id.to_string(),
+                    nats_subject: promise.nats_subject.clone(),
+                    started_at,
+                    finished_at,
+                    status,
+                    output,
+                };
+                if let Err(e) = run_store.record(&run).await {
+                    warn!(error = %e, "Startup recovery: failed to persist run record");
+                }
+            }
+        } else {
+            // Built-in handler dispatch based on NATS subject
+            match promise.nats_subject.as_str() {
+                s if s.starts_with("github.pull_request") => {
+                    handlers::pr_review::handle(&agent, &payload).await;
+                }
+                s if s.starts_with("github.check_run") => {
+                    handlers::ci_completed::handle(&agent, &payload).await;
+                }
+                s if s.starts_with("github.push") => {
+                    handlers::push_to_branch::handle(&agent, &payload).await;
+                }
+                s if s.starts_with("github.issue_comment") => {
+                    handlers::comment_added::handle(&agent, &payload).await;
+                }
+                s if s.starts_with("linear.") => {
+                    handlers::issue_triage::handle(&agent, &payload).await;
+                }
+                other => {
+                    warn!(subject = %other, "Startup recovery: unknown subject, skipping");
+                }
+            }
+        }
+    }
 }
 
 /// Spawn one task per automation and wait for all to finish.
@@ -662,6 +877,7 @@ pub(crate) async fn dispatch_automations(
                     &tenant_id,
                     &promise_id,
                     &auto.id,
+                    &subject,
                     &trigger,
                 )
                 .await;
