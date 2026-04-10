@@ -10,6 +10,9 @@ inputs:
     required: true
 
 outputs:
+  image:
+    description: Image path segment under ghcr.io/<owner>
+    value: ${{ steps.resolve.outputs.image }}
   context:
     description: Docker build context path
     value: ${{ steps.resolve.outputs.context }}
@@ -26,11 +29,13 @@ runs:
         INPUT_SERVICE: ${{ inputs.service }}
         INPUT_CONFIG_FILE: ${{ inputs.config-file }}
       run: |
+        image=$(jq -r --arg service "$INPUT_SERVICE" '.[$service].image // $service' "$INPUT_CONFIG_FILE")
         context=$(jq -r --arg service "$INPUT_SERVICE" '.[$service].context // empty' "$INPUT_CONFIG_FILE")
         dockerfile=$(jq -r --arg service "$INPUT_SERVICE" '.[$service].dockerfile // empty' "$INPUT_CONFIG_FILE")
-        if [ -z "$context" ] || [ -z "$dockerfile" ]; then
+        if [ -z "$image" ] || [ -z "$context" ] || [ -z "$dockerfile" ]; then
           echo "Missing config for service '$INPUT_SERVICE' in $INPUT_CONFIG_FILE" >&2
           exit 1
         fi
+        echo "image=$image" >> "$GITHUB_OUTPUT"
         echo "context=$context" >> "$GITHUB_OUTPUT"
         echo "dockerfile=$dockerfile" >> "$GITHUB_OUTPUT"

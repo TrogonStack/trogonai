@@ -25,20 +25,20 @@ jobs:
     steps:
       - uses: actions/checkout@v6.0.2
 
-      - name: Resolve image name
-        id: image
-        env:
-          IMAGE_OWNER: ${{ github.repository_owner }}
-        run: |
-          echo "name=ghcr.io/${IMAGE_OWNER,,}/${{ matrix.service }}" >> "$GITHUB_OUTPUT"
-          echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
-
       - name: Resolve service config
         id: service_config
         uses: ./.github/actions/resolve-service-config
         with:
           service: ${{ matrix.service }}
           config-file: .github/canary-container-services.json
+
+      - name: Resolve image name
+        id: image
+        env:
+          IMAGE_OWNER: ${{ github.repository_owner }}
+        run: |
+          echo "name=ghcr.io/${IMAGE_OWNER,,}/${{ steps.service_config.outputs.image }}" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
