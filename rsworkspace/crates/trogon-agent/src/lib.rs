@@ -34,6 +34,7 @@ pub mod config;
 pub mod flag_client;
 pub mod flags;
 pub mod handlers;
+pub mod promise_store;
 pub mod runner;
 pub mod session;
 pub mod tools;

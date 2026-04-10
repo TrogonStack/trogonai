@@ -42,6 +42,8 @@ fn make_agent(proxy_url: &str) -> AgentLoop {
         mcp_dispatch: vec![],
         flag_client: Arc::new(AlwaysOnFlagClient),
         tenant_id: "test".to_string(),
+        promise_store: None,
+        promise_id: None,
     }
 }
 
@@ -217,6 +219,8 @@ async fn agent_loop_max_iterations_reached() {
         mcp_dispatch: vec![],
         flag_client: Arc::new(AlwaysOnFlagClient),
         tenant_id: "test".to_string(),
+        promise_store: None,
+        promise_id: None,
     };
 
     let result = agent
@@ -480,6 +484,8 @@ async fn run_chat_max_iterations_reached() {
         mcp_dispatch: vec![],
         flag_client: Arc::new(AlwaysOnFlagClient),
         tenant_id: "test".to_string(),
+        promise_store: None,
+        promise_id: None,
     };
 
     let result = agent

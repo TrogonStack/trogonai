@@ -357,6 +357,8 @@ async fn send_message<R: SessionRepository>(
             mcp_dispatch: state.agent.mcp_dispatch.clone(),
             flag_client: Arc::clone(&state.agent.flag_client),
             tenant_id: state.agent.tenant_id.clone(),
+            promise_store: None,
+            promise_id: None,
         };
         &temp_agent
     };
@@ -490,6 +492,8 @@ mod tests {
             mcp_dispatch: vec![],
             flag_client: Arc::new(AlwaysOnFlagClient),
             tenant_id: "test-tenant".to_string(),
+            promise_store: None,
+            promise_id: None,
         })
     }
 
