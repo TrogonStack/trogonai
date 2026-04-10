@@ -1657,4 +1657,14 @@ mod tests {
         assert_eq!(client.request_timeout, Duration::from_secs(300));
     }
 
+    #[test]
+    fn xai_client_new_timeout_zero_falls_back_to_default() {
+        let _guard = env_lock().lock().unwrap();
+        // `.filter(|&n| n > 0)` rejects 0, so the default 300 s must be used.
+        unsafe { std::env::set_var("XAI_PROMPT_TIMEOUT_SECS", "0") };
+        let client = XaiClient::new();
+        unsafe { std::env::remove_var("XAI_PROMPT_TIMEOUT_SECS") };
+        assert_eq!(client.request_timeout, Duration::from_secs(300));
+    }
+
 }
