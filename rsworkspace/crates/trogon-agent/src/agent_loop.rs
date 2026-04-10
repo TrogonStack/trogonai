@@ -386,7 +386,9 @@ impl AgentLoop {
                         && let Some((ref mut p, ref mut rev)) = checkpoint
                     {
                         p.status = crate::promise_store::PromiseStatus::Failed;
-                        let _ = store.update_promise(&self.tenant_id, pid, p, *rev).await;
+                        if let Err(e) = store.update_promise(&self.tenant_id, pid, p, *rev).await {
+                            warn!(error = %e, "Failed to mark promise Failed after Anthropic HTTP error");
+                        }
                     }
                     return Err(AgentError::Http(e));
                 }
