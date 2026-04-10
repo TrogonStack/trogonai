@@ -752,7 +752,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
                         info!(session_id, prompt_tokens, completion_tokens, "xai: token usage");
                         let notif = SessionNotification::new(
                             session_id.clone(),
-                            SessionUpdate::UsageUpdate(UsageUpdate::new(prompt_tokens, 0)),
+                            SessionUpdate::UsageUpdate(UsageUpdate::new(prompt_tokens, completion_tokens)),
                         );
                         self.notifier.notify(notif).await;
                     }
@@ -2776,10 +2776,8 @@ mod tests {
             SessionUpdate::UsageUpdate(ref u) => u,
             _ => unreachable!(),
         };
-        assert_eq!(
-            update.used, 42,
-            "UsageUpdate.used must equal the prompt_tokens from the Usage event"
-        );
+        assert_eq!(update.used, 42, "UsageUpdate.used must equal prompt_tokens");
+        assert_eq!(update.size, 10, "UsageUpdate.size must equal completion_tokens");
     }
 
     // ── FinishReason::Other is treated as end-of-turn ────────────────────────
