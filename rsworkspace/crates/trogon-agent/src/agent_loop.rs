@@ -630,7 +630,13 @@ impl AgentLoop {
                     if let Some(map) = v.as_object_mut() {
                         map.insert(
                             "_idempotency_key".to_string(),
-                            serde_json::Value::String(format!("{pid}.{id}")),
+                            // Use the content-based cache key (SHA-256 of name+input)
+                            // rather than the ephemeral tool_use_id so the key is
+                            // stable across retries: on recovery the LLM regenerates
+                            // a fresh tool_use_id for the same call, but the content
+                            // hash is identical — meaning Slack/Linear dedup checks
+                            // will match the original key and block duplicate effects.
+                            serde_json::Value::String(format!("{pid}.{}", tool_cache_key(name, input))),
                         );
                     }
                     v
