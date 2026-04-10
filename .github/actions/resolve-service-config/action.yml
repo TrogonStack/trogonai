@@ -1,0 +1,36 @@
+name: Resolve service config
+description: Resolve service-specific build settings from a JSON config file
+
+inputs:
+  service:
+    description: Service key to resolve
+    required: true
+  config-file:
+    description: Path to JSON config file
+    required: true
+
+outputs:
+  context:
+    description: Docker build context path
+    value: ${{ steps.resolve.outputs.context }}
+  dockerfile:
+    description: Dockerfile path
+    value: ${{ steps.resolve.outputs.dockerfile }}
+
+runs:
+  using: composite
+  steps:
+    - id: resolve
+      shell: bash
+      env:
+        INPUT_SERVICE: ${{ inputs.service }}
+        INPUT_CONFIG_FILE: ${{ inputs.config-file }}
+      run: |
+        context=$(jq -r --arg service "$INPUT_SERVICE" '.[$service].context // empty' "$INPUT_CONFIG_FILE")
+        dockerfile=$(jq -r --arg service "$INPUT_SERVICE" '.[$service].dockerfile // empty' "$INPUT_CONFIG_FILE")
+        if [ -z "$context" ] || [ -z "$dockerfile" ]; then
+          echo "Missing config for service '$INPUT_SERVICE' in $INPUT_CONFIG_FILE" >&2
+          exit 1
+        fi
+        echo "context=$context" >> "$GITHUB_OUTPUT"
+        echo "dockerfile=$dockerfile" >> "$GITHUB_OUTPUT"
