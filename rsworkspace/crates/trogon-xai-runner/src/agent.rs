@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use agent_client_protocol::{
     AgentCapabilities, AuthEnvVar, AuthMethod, AuthMethodAgent, AuthMethodEnvVar,
@@ -45,6 +45,13 @@ const AVAILABLE_TOOLS: &[(&str, &str)] = &[
     ("x_search", "X Search"),
 ];
 
+/// Maximum number of sessions held in memory simultaneously.
+///
+/// When a new session would exceed this limit, the oldest session (by
+/// `created_at`) is evicted with a warning. This prevents unbounded growth in
+/// long-running deployments where clients never call `close_session`.
+const MAX_SESSIONS: usize = 100;
+
 /// Per-session state held in memory.
 ///
 /// Unlike the Codex runner (which delegates state to the subprocess), xAI is a
@@ -73,6 +80,9 @@ struct XaiSession {
     /// Optional system prompt prepended to every conversation.
     /// Copied from the agent-wide `system_prompt` at session creation time.
     system_prompt: Option<String>,
+    /// Wall-clock time at which this session was created. Used for LRU eviction
+    /// when the session count reaches `MAX_SESSIONS`.
+    created_at: Instant,
 }
 
 /// ACP Agent implementation backed by xAI's Grok API (Responses API).
@@ -250,6 +260,25 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
         )
     }
 
+    /// Evict the oldest session if the map is at capacity.
+    ///
+    /// Called before inserting a new session so the map never exceeds
+    /// `MAX_SESSIONS`. The evicted session is logged as a warning.
+    fn maybe_evict_oldest(sessions: &mut HashMap<String, XaiSession>) {
+        if sessions.len() < MAX_SESSIONS {
+            return;
+        }
+        if let Some(oldest_id) = sessions
+            .iter()
+            .min_by_key(|(_, s)| s.created_at)
+            .map(|(id, _)| id.clone())
+        {
+            warn!(session_id = %oldest_id, max = MAX_SESSIONS,
+                  "xai: session limit reached — evicting oldest session");
+            sessions.remove(&oldest_id);
+        }
+    }
+
     /// Build `SessionConfigOption`s for all known server-side tools.
     fn all_tool_config_options(enabled_tools: &[String]) -> Vec<SessionConfigOption> {
         AVAILABLE_TOOLS
@@ -343,7 +372,9 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
             .take()
             .or_else(|| self.global_api_key.clone());
 
-        self.sessions.lock().await.insert(
+        let mut sessions = self.sessions.lock().await;
+        Self::maybe_evict_oldest(&mut sessions);
+        sessions.insert(
             session_id.clone(),
             XaiSession {
                 cwd,
@@ -353,8 +384,10 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
                 last_response_id: None,
                 enabled_tools: Vec::new(),
                 system_prompt: self.system_prompt.clone(),
+                created_at: Instant::now(),
             },
         );
+        drop(sessions);
 
         info!(session_id, "xai: new session");
         Ok(NewSessionResponse::new(SessionId::from(session_id))
@@ -411,7 +444,9 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
         };
 
         let new_session_id = Uuid::new_v4().to_string();
-        self.sessions.lock().await.insert(
+        let mut sessions = self.sessions.lock().await;
+        Self::maybe_evict_oldest(&mut sessions);
+        sessions.insert(
             new_session_id.clone(),
             XaiSession {
                 cwd,
@@ -423,8 +458,10 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
                 last_response_id: None,
                 enabled_tools: inherited_tools.clone(),
                 system_prompt: inherited_system_prompt,
+                created_at: Instant::now(),
             },
         );
+        drop(sessions);
 
         Ok(ForkSessionResponse::new(new_session_id)
             .modes(self.session_mode_state())
@@ -697,6 +734,11 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
                         current_response_id = Some(id);
                     }
                     XaiEvent::FunctionCall { call_id, name, arguments } => {
+                        // NOTE: grok-4 (the default model) executes server-side tools
+                        // transparently without emitting FunctionCall SSE events. This
+                        // branch fires only with models that do surface tool calls in the
+                        // stream (e.g. custom function calling). The ToolCall(Pending)
+                        // notification will therefore not fire in the typical xAI deployment.
                         info!(session_id, call_id = %call_id, tool_name = %name, "xai: tool call");
                         let tool_call = ToolCall::new(call_id.clone(), name.clone())
                             .status(ToolCallStatus::Pending)
@@ -710,6 +752,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
                         pending_tool_calls.push((call_id, name));
                     }
                     XaiEvent::ServerToolCompleted { name } => {
+                        // NOTE: grok-4 does not emit this event — see FunctionCall note above.
                         if let Some(pos) = pending_tool_calls.iter().position(|(_, n)| *n == name) {
                             let (call_id, tc_name) = pending_tool_calls.remove(pos);
                             info!(session_id, call_id = %call_id, tool_name = %tc_name,
@@ -950,6 +993,7 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
                 last_response_id: None,
                 enabled_tools: Vec::new(),
                 system_prompt: None,
+                created_at: Instant::now(),
             },
         );
     }
@@ -1006,6 +1050,7 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
                 last_response_id: response_id,
                 enabled_tools: Vec::new(),
                 system_prompt: None,
+                created_at: Instant::now(),
             },
         );
     }
@@ -1021,6 +1066,7 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
                 last_response_id: None,
                 enabled_tools: Vec::new(),
                 system_prompt: None,
+                created_at: Instant::now(),
             },
         );
     }
@@ -1036,6 +1082,7 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
                 last_response_id: None,
                 enabled_tools: Vec::new(),
                 system_prompt: None,
+                created_at: Instant::now(),
             },
         );
     }
