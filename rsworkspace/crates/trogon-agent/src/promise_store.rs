@@ -37,8 +37,17 @@ pub enum PromiseStatus {
     Running,
     /// The run completed successfully.
     Resolved,
-    /// The run failed with an error.
+    /// The run failed with a transient error (e.g. HTTP timeout).
+    ///
+    /// On NATS redelivery the run is retried from its checkpoint.
     Failed,
+    /// The run failed with a deterministic error that retrying cannot fix
+    /// (e.g. `max_tokens`, `MaxIterationsReached`, unknown stop_reason).
+    ///
+    /// Neither startup recovery nor NATS redelivery will re-run this promise.
+    /// Treated the same as `Resolved` in `prepare_agent_with_promise` and
+    /// `AgentLoop::run`.
+    PermanentFailed,
 }
 
 // ── AgentPromise ──────────────────────────────────────────────────────────────
@@ -69,6 +78,14 @@ pub struct AgentPromise {
     pub trigger: serde_json::Value,
     /// Original NATS message subject — used to re-dispatch on startup recovery.
     pub nats_subject: String,
+    /// System prompt captured at the first checkpoint of this run.
+    ///
+    /// Stored so that crash recovery resumes with the identical LLM context
+    /// rather than a potentially-changed `memory.md` fetched at restart time.
+    /// `None` for promises written before this field was introduced —
+    /// `#[serde(default)]` deserializes them gracefully.
+    #[serde(default)]
+    pub system_prompt: Option<String>,
 }
 
 // ── PromiseStoreError ─────────────────────────────────────────────────────────
@@ -182,6 +199,13 @@ impl PromiseStore {
         {
             None => Ok(None),
             Some(entry) => {
+                // `entry()` returns tombstones (Delete / Purge operations) as
+                // well as live entries. Treat them as "not found" rather than
+                // trying to deserialize empty bytes, which would produce a JSON
+                // parse error and fail the entire `list_running` scan.
+                if entry.operation != kv::Operation::Put {
+                    return Ok(None);
+                }
                 let p = serde_json::from_slice::<AgentPromise>(&entry.value)
                     .map_err(|e| PromiseStoreError(e.to_string()))?;
                 Ok(Some((p, entry.revision)))
@@ -560,6 +584,7 @@ mod tests {
             claimed_at: 1_700_000_000,
             trigger: serde_json::json!({"action": "opened"}),
             nats_subject: "github.pull_request".to_string(),
+            system_prompt: None,
         }
     }
 
@@ -581,6 +606,7 @@ mod tests {
             PromiseStatus::Running,
             PromiseStatus::Resolved,
             PromiseStatus::Failed,
+            PromiseStatus::PermanentFailed,
         ] {
             let json = serde_json::to_string(&status).unwrap();
             let back: PromiseStatus = serde_json::from_str(&json).unwrap();
