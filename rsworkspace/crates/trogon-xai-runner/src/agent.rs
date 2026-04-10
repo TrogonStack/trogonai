@@ -548,28 +548,38 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
         let config_id = req.config_id.to_string();
         let session_id = req.session_id.to_string();
 
-        // If this is a known server-side tool toggle and the session exists, apply it.
         let is_known_tool = AVAILABLE_TOOLS.iter().any(|(id, _)| *id == config_id.as_str());
-        if is_known_tool {
-            if let SessionConfigOptionValue::ValueId { value } = &req.value {
-                let val = value.to_string();
-                let mut sessions = self.sessions.lock().await;
-                if let Some(s) = sessions.get_mut(&session_id) {
-                    if val == "on" {
-                        if !s.enabled_tools.iter().any(|t| t == &config_id) {
-                            s.enabled_tools.push(config_id.clone());
-                        }
-                    } else {
-                        s.enabled_tools.retain(|t| t != &config_id);
-                    }
-                    info!(session_id, tool = %config_id, enabled = (val == "on"), "xai: tool toggled");
-                }
-            }
-        } else {
-            warn!(config_id = %config_id, "xai: set_session_config_option called for unknown option — ignored");
-        }
 
-        Ok(SetSessionConfigOptionResponse::new(vec![]))
+        // Apply the toggle (if applicable) and read back the session's enabled tools
+        // under a single lock so the returned config_options reflect the new state.
+        let config_options = {
+            let mut sessions = self.sessions.lock().await;
+            if is_known_tool {
+                if let SessionConfigOptionValue::ValueId { value } = &req.value {
+                    let val = value.to_string();
+                    if let Some(s) = sessions.get_mut(&session_id) {
+                        if val == "on" {
+                            if !s.enabled_tools.iter().any(|t| t == &config_id) {
+                                s.enabled_tools.push(config_id.clone());
+                            }
+                        } else {
+                            s.enabled_tools.retain(|t| t != &config_id);
+                        }
+                        info!(session_id, tool = %config_id, enabled = (val == "on"), "xai: tool toggled");
+                    }
+                }
+            } else {
+                warn!(config_id = %config_id, "xai: set_session_config_option called for unknown option — ignored");
+            }
+            // ACP spec: response must include the full set of config options and
+            // their current values. Return empty only when the session is unknown.
+            sessions
+                .get(&session_id)
+                .map(|s| Self::all_tool_config_options(&s.enabled_tools))
+                .unwrap_or_default()
+        };
+
+        Ok(SetSessionConfigOptionResponse::new(config_options))
     }
 
     async fn prompt(&self, req: PromptRequest) -> agent_client_protocol::Result<PromptResponse> {
@@ -1369,8 +1379,9 @@ mod tests {
     // ── set_session_config_option ─────────────────────────────────────────────
 
     #[tokio::test]
-    async fn set_session_config_option_unknown_option_returns_empty() {
-        // An unknown config option is ignored and returns empty config_options.
+    async fn set_session_config_option_unknown_option_returns_full_config_options() {
+        // An unknown config option is ignored; the response still returns the full
+        // set of known config options with their current values (per ACP spec).
         let agent = make_agent();
         agent.test_insert_session("cfg1", "/tmp", None).await;
         let resp: SetSessionConfigOptionResponse = agent
@@ -1381,7 +1392,11 @@ mod tests {
             ))
             .await
             .unwrap();
-        assert!(resp.config_options.is_empty(), "unknown option must return empty config_options");
+        assert_eq!(
+            resp.config_options.len(),
+            AVAILABLE_TOOLS.len(),
+            "response must include all known config options even for unknown option ids"
+        );
     }
 
     #[tokio::test]

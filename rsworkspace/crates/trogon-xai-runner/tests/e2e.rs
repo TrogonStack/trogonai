@@ -801,7 +801,9 @@ async fn set_session_mode_via_nats_succeeds() {
 
 /// `set_session_config_option` returns an empty config-options list.
 #[tokio::test]
-async fn set_session_config_option_via_nats_returns_empty() {
+async fn set_session_config_option_via_nats_returns_full_config_options() {
+    // Per ACP spec, set_config_option must return the full set of config options
+    // with current values, even when the option id is unknown.
     tokio::task::LocalSet::new()
         .run_until(async {
             let h = Harness::new();
@@ -816,7 +818,7 @@ async fn set_session_config_option_via_nats_returns_empty() {
             let payloads = h.expect_n_publishes(2).await;
             let resp: SetSessionConfigOptionResponse =
                 serde_json::from_slice(&payloads[1]).unwrap();
-            assert!(resp.config_options.is_empty(), "config options must be empty");
+            assert!(!resp.config_options.is_empty(), "response must include the full set of config options");
         })
         .await;
 }
