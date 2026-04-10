@@ -81,7 +81,7 @@ pub async fn send_message(
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs()
-            .saturating_sub(600);
+            .saturating_sub(3600); // 1-hour window — covers recoveries delayed up to an hour
 
         let history_url = format!(
             "{}/slack/conversations.history?channel={channel}&oldest={oldest}&limit=50&include_all_metadata=true",
