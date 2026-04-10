@@ -64,6 +64,8 @@ fn make_agent_with_mcp(
         )],
         flag_client: Arc::new(AlwaysOnFlagClient),
         tenant_id: "test".to_string(),
+        promise_store: None,
+        promise_id: None,
     }
 }
 

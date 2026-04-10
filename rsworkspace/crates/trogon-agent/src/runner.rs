@@ -36,10 +36,29 @@ use crate::chat_api::{ChatAppState, router as chat_router};
 use crate::config::{AgentConfig, McpServerConfig};
 use crate::flag_client::{AlwaysOnFlagClient, SplitFlagClient};
 use crate::handlers::{self, make_tool_context};
+use crate::promise_store::{AgentPromise, PromiseRepository, PromiseStatus, PromiseStore};
 use crate::session::SessionStore;
 use crate::tools::{DefaultToolDispatcher, ToolContext, ToolDef};
 
 const NATS_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// `ack_wait` for all consumers.
+///
+/// Set to 10 minutes so that most agent runs complete before NATS redelivers the
+/// message. Runs that exceed this window are handled by the durable promise store:
+/// on redelivery, the runner finds the existing checkpoint and resumes from it.
+///
+/// TODO: Replace with per-message `AckKind::Progress` heartbeats (every 15s) once
+/// the heartbeat helper is added — that will let us keep a shorter ack_wait while
+/// never triggering spurious redelivery during active runs.
+const CONSUMER_ACK_WAIT: Duration = Duration::from_secs(10 * 60);
+
+/// Worker identifier for promise ownership — hostname + PID.
+fn worker_id() -> String {
+    let hostname = std::env::var("HOSTNAME").unwrap_or_else(|_| "unknown".to_string());
+    let pid = std::process::id();
+    format!("{hostname}:{pid}")
+}
 
 const GITHUB_CONSUMER: &str = "trogon-agent-pr-review";
 const COMMENT_CONSUMER: &str = "trogon-agent-comment-added";
@@ -124,6 +143,9 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
         mcp_dispatch,
         flag_client,
         tenant_id: cfg.tenant_id.clone(),
+        // Promise fields are set per-run by `prepare_agent_with_promise`.
+        promise_store: None,
+        promise_id: None,
     });
 
     let store = Arc::new(
@@ -139,6 +161,11 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
     let session_store = SessionStore::open(&js)
         .await
         .map_err(|e| RunnerError::JetStream(format!("SessionStore: {e}")))?;
+    let promise_store: Arc<dyn PromiseRepository> = Arc::new(
+        PromiseStore::open(&js)
+            .await
+            .map_err(|e| RunnerError::JetStream(format!("PromiseStore: {e}")))?,
+    );
     let tenant_id = Arc::new(cfg.tenant_id.clone());
 
     // Start the combined HTTP API server unless disabled (port == 0).
@@ -267,12 +294,16 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                         let agent = Arc::clone(&agent);
                         let store = Arc::clone(&store);
                         let run_store = Arc::clone(&run_store);
+                        let promise_store = Arc::clone(&promise_store);
                         let tenant_id = Arc::clone(&tenant_id);
                         tokio::spawn(async move {
                             let subject = "github.pull_request";
                             let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
+                            let stream_seq = msg.info().map(|i| i.stream_sequence).unwrap_or(0);
                             let autos = store.matching(&tenant_id, subject, &pv).await.unwrap_or_default();
                             if autos.is_empty() {
+                                let promise_id = format!("{tenant_id}.{stream_seq}");
+                                let agent = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id, "", &pv).await;
                                 let is_merged = pv["action"].as_str() == Some("closed")
                                     && pv["pull_request"]["merged"].as_bool() == Some(true);
                                 if !agent.is_flag_enabled(&crate::flags::AgentFlag::PrReviewEnabled).await {
@@ -291,7 +322,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     }
                                 }
                             } else {
-                                dispatch_automations(&agent, &run_store, autos, subject, &msg.payload).await;
+                                dispatch_automations(&agent, &run_store, &promise_store, stream_seq, autos, subject, &msg.payload).await;
                             }
                             if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack PR message"); }
                         });
@@ -306,12 +337,16 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                         let agent = Arc::clone(&agent);
                         let store = Arc::clone(&store);
                         let run_store = Arc::clone(&run_store);
+                        let promise_store = Arc::clone(&promise_store);
                         let tenant_id = Arc::clone(&tenant_id);
                         tokio::spawn(async move {
                             let subject = "github.issue_comment";
                             let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
+                            let stream_seq = msg.info().map(|i| i.stream_sequence).unwrap_or(0);
                             let autos = store.matching(&tenant_id, subject, &pv).await.unwrap_or_default();
                             if autos.is_empty() {
+                                let promise_id = format!("{tenant_id}.{stream_seq}");
+                                let agent = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id, "", &pv).await;
                                 if !agent.is_flag_enabled(&crate::flags::AgentFlag::CommentHandlerEnabled).await {
                                     info!(flag = "agent_comment_handler_enabled", "Comment handler disabled by feature flag");
                                 } else {
@@ -322,7 +357,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     }
                                 }
                             } else {
-                                dispatch_automations(&agent, &run_store, autos, subject, &msg.payload).await;
+                                dispatch_automations(&agent, &run_store, &promise_store, stream_seq, autos, subject, &msg.payload).await;
                             }
                             if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack comment message"); }
                         });
@@ -337,12 +372,16 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                         let agent = Arc::clone(&agent);
                         let store = Arc::clone(&store);
                         let run_store = Arc::clone(&run_store);
+                        let promise_store = Arc::clone(&promise_store);
                         let tenant_id = Arc::clone(&tenant_id);
                         tokio::spawn(async move {
                             let subject = "github.push";
                             let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
+                            let stream_seq = msg.info().map(|i| i.stream_sequence).unwrap_or(0);
                             let autos = store.matching(&tenant_id, subject, &pv).await.unwrap_or_default();
                             if autos.is_empty() {
+                                let promise_id = format!("{tenant_id}.{stream_seq}");
+                                let agent = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id, "", &pv).await;
                                 if !agent.is_flag_enabled(&crate::flags::AgentFlag::PushHandlerEnabled).await {
                                     info!(flag = "agent_push_handler_enabled", "Push handler disabled by feature flag");
                                 } else {
@@ -353,7 +392,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     }
                                 }
                             } else {
-                                dispatch_automations(&agent, &run_store, autos, subject, &msg.payload).await;
+                                dispatch_automations(&agent, &run_store, &promise_store, stream_seq, autos, subject, &msg.payload).await;
                             }
                             if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack push message"); }
                         });
@@ -368,12 +407,16 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                         let agent = Arc::clone(&agent);
                         let store = Arc::clone(&store);
                         let run_store = Arc::clone(&run_store);
+                        let promise_store = Arc::clone(&promise_store);
                         let tenant_id = Arc::clone(&tenant_id);
                         tokio::spawn(async move {
                             let subject = "github.check_run";
                             let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
+                            let stream_seq = msg.info().map(|i| i.stream_sequence).unwrap_or(0);
                             let autos = store.matching(&tenant_id, subject, &pv).await.unwrap_or_default();
                             if autos.is_empty() {
+                                let promise_id = format!("{tenant_id}.{stream_seq}");
+                                let agent = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id, "", &pv).await;
                                 if !agent.is_flag_enabled(&crate::flags::AgentFlag::CiHandlerEnabled).await {
                                     info!(flag = "agent_ci_handler_enabled", "CI handler disabled by feature flag");
                                 } else {
@@ -384,7 +427,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     }
                                 }
                             } else {
-                                dispatch_automations(&agent, &run_store, autos, subject, &msg.payload).await;
+                                dispatch_automations(&agent, &run_store, &promise_store, stream_seq, autos, subject, &msg.payload).await;
                             }
                             if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack CI message"); }
                         });
@@ -399,12 +442,16 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                         let agent = Arc::clone(&agent);
                         let store = Arc::clone(&store);
                         let run_store = Arc::clone(&run_store);
+                        let promise_store = Arc::clone(&promise_store);
                         let tenant_id = Arc::clone(&tenant_id);
                         tokio::spawn(async move {
                             let subject = "linear.Issue";
                             let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
+                            let stream_seq = msg.info().map(|i| i.stream_sequence).unwrap_or(0);
                             let autos = store.matching(&tenant_id, subject, &pv).await.unwrap_or_default();
                             if autos.is_empty() {
+                                let promise_id = format!("{tenant_id}.{stream_seq}");
+                                let agent = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id, "", &pv).await;
                                 if !agent.is_flag_enabled(&crate::flags::AgentFlag::IssueTriageEnabled).await {
                                     info!(flag = "agent_issue_triage_enabled", "Issue triage handler disabled by feature flag");
                                 } else {
@@ -415,7 +462,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     }
                                 }
                             } else {
-                                dispatch_automations(&agent, &run_store, autos, subject, &msg.payload).await;
+                                dispatch_automations(&agent, &run_store, &promise_store, stream_seq, autos, subject, &msg.payload).await;
                             }
                             if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack issue message"); }
                         });
@@ -430,15 +477,17 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                         let agent = Arc::clone(&agent);
                         let store = Arc::clone(&store);
                         let run_store = Arc::clone(&run_store);
+                        let promise_store = Arc::clone(&promise_store);
                         let tenant_id = Arc::clone(&tenant_id);
                         let nats_subject = msg.subject.to_string();
                         tokio::spawn(async move {
                             let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
+                            let stream_seq = msg.info().map(|i| i.stream_sequence).unwrap_or(0);
                             let autos = store.matching(&tenant_id, &nats_subject, &pv).await.unwrap_or_default();
                             if autos.is_empty() {
                                 info!(subject = %nats_subject, "Cron tick with no matching automations — skipping");
                             } else {
-                                dispatch_automations(&agent, &run_store, autos, &nats_subject, &msg.payload).await;
+                                dispatch_automations(&agent, &run_store, &promise_store, stream_seq, autos, &nats_subject, &msg.payload).await;
                             }
                             if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack cron message"); }
                         });
@@ -453,12 +502,16 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                         let agent = Arc::clone(&agent);
                         let store = Arc::clone(&store);
                         let run_store = Arc::clone(&run_store);
+                        let promise_store = Arc::clone(&promise_store);
                         let tenant_id = Arc::clone(&tenant_id);
                         let nats_subject = msg.subject.to_string();
                         tokio::spawn(async move {
                             let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
+                            let stream_seq = msg.info().map(|i| i.stream_sequence).unwrap_or(0);
                             let autos = store.matching(&tenant_id, &nats_subject, &pv).await.unwrap_or_default();
                             if autos.is_empty() {
+                                let promise_id = format!("{tenant_id}.{stream_seq}");
+                                let agent = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id, "", &pv).await;
                                 if !agent.is_flag_enabled(&crate::flags::AgentFlag::AlertHandlerEnabled).await {
                                     info!(flag = "agent_alert_handler_enabled", "Alert handler disabled by feature flag");
                                 } else {
@@ -469,7 +522,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     }
                                 }
                             } else {
-                                dispatch_automations(&agent, &run_store, autos, &nats_subject, &msg.payload).await;
+                                dispatch_automations(&agent, &run_store, &promise_store, stream_seq, autos, &nats_subject, &msg.payload).await;
                             }
                             if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack Datadog message"); }
                         });
@@ -489,12 +542,16 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                         let agent = Arc::clone(&agent);
                         let store = Arc::clone(&store);
                         let run_store = Arc::clone(&run_store);
+                        let promise_store = Arc::clone(&promise_store);
                         let tenant_id = Arc::clone(&tenant_id);
                         let nats_subject = msg.subject.to_string();
                         tokio::spawn(async move {
                             let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
+                            let stream_seq = msg.info().map(|i| i.stream_sequence).unwrap_or(0);
                             let autos = store.matching(&tenant_id, &nats_subject, &pv).await.unwrap_or_default();
                             if autos.is_empty() {
+                                let promise_id = format!("{tenant_id}.{stream_seq}");
+                                let agent = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id, "", &pv).await;
                                 if !agent.is_flag_enabled(&crate::flags::AgentFlag::IncidentioHandlerEnabled).await {
                                     info!(flag = "agent_incidentio_handler_enabled", "incident.io handler disabled by feature flag");
                                 } else {
@@ -505,7 +562,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     }
                                 }
                             } else {
-                                dispatch_automations(&agent, &run_store, autos, &nats_subject, &msg.payload).await;
+                                dispatch_automations(&agent, &run_store, &promise_store, stream_seq, autos, &nats_subject, &msg.payload).await;
                             }
                             if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack incident.io message"); }
                         });
@@ -519,11 +576,66 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
     Ok(())
 }
 
+/// Create or find an existing promise for a run, then return a clone of `agent`
+/// with `promise_store` and `promise_id` set so the agentic loop can checkpoint.
+///
+/// If a promise already exists in KV (from a previous attempt on the same
+/// redelivered NATS message), the agent will resume from its checkpointed state
+/// when it calls `run()`. If no promise exists, a new one is created.
+async fn prepare_agent_with_promise(
+    agent: &Arc<AgentLoop>,
+    promise_store: &Arc<dyn PromiseRepository>,
+    tenant_id: &str,
+    promise_id: &str,
+    automation_id: &str,
+    trigger: &serde_json::Value,
+) -> Arc<AgentLoop> {
+    let wid = worker_id();
+    match promise_store.get_promise(tenant_id, promise_id).await {
+        Ok(Some((existing, _))) => {
+            info!(
+                promise_id = %promise_id,
+                status = ?existing.status,
+                iteration = existing.iteration,
+                "Found existing promise — resuming"
+            );
+        }
+        Ok(None) => {
+            let promise = AgentPromise {
+                id: promise_id.to_string(),
+                tenant_id: tenant_id.to_string(),
+                automation_id: automation_id.to_string(),
+                status: PromiseStatus::Running,
+                messages: vec![],
+                iteration: 0,
+                worker_id: wid,
+                claimed_at: trogon_automations::now_unix(),
+                trigger: trigger.clone(),
+            };
+            if let Err(e) = promise_store.put_promise(&promise).await {
+                warn!(promise_id = %promise_id, error = %e, "Failed to create promise");
+            }
+        }
+        Err(e) => {
+            warn!(promise_id = %promise_id, error = %e, "Failed to check promise — continuing without durability");
+            // Fall through: run without promise fields so the agent works as before.
+            return Arc::clone(agent);
+        }
+    }
+
+    let mut agent_with_promise = (**agent).clone();
+    agent_with_promise.promise_store = Some(Arc::clone(promise_store));
+    agent_with_promise.promise_id = Some(promise_id.to_string());
+    Arc::new(agent_with_promise)
+}
+
 /// Spawn one task per automation and wait for all to finish.
 /// Persists a [`RunRecord`] in `run_store` after each execution.
 pub(crate) async fn dispatch_automations(
     agent: &Arc<AgentLoop>,
     run_store: &Arc<RunStore>,
+    promise_store: &Arc<dyn PromiseRepository>,
+    stream_seq: u64,
     automations: Vec<trogon_automations::Automation>,
     nats_subject: &str,
     payload: &bytes::Bytes,
@@ -533,9 +645,27 @@ pub(crate) async fn dispatch_automations(
         .map(|auto| {
             let agent = Arc::clone(agent);
             let run_store = Arc::clone(run_store);
+            let promise_store = Arc::clone(promise_store);
             let payload = payload.clone();
             let subject = nats_subject.to_string();
+            let trigger: serde_json::Value = serde_json::from_slice(&payload).unwrap_or_default();
             tokio::spawn(async move {
+                // Each automation gets its own promise so concurrent automations
+                // triggered by the same NATS message checkpoint independently.
+                // KV key = {tenant_id}.{promise_id} so promise_id must NOT
+                // include tenant_id again.
+                let promise_id = format!("{stream_seq}.{}", auto.id);
+                let tenant_id = agent.tenant_id.clone();
+                let agent = prepare_agent_with_promise(
+                    &agent,
+                    &promise_store,
+                    &tenant_id,
+                    &promise_id,
+                    &auto.id,
+                    &trigger,
+                )
+                .await;
+
                 info!(automation = %auto.name, "Running automation");
                 let started_at = trogon_automations::now_unix();
                 let result = handlers::run_automation(&agent, &auto, &subject, &payload).await;
@@ -696,6 +826,7 @@ async fn bind_consumer(
                 ack_policy: AckPolicy::Explicit,
                 deliver_policy: DeliverPolicy::All,
                 max_deliver: 3,
+                ack_wait: CONSUMER_ACK_WAIT,
                 ..Default::default()
             },
         )
@@ -741,6 +872,8 @@ mod tests {
             mcp_dispatch: vec![],
             flag_client: Arc::new(AlwaysOnFlagClient),
             tenant_id: "test".to_string(),
+            promise_store: None,
+            promise_id: None,
         })
     }
 
@@ -786,6 +919,8 @@ mod tests {
     /// dispatch_automations runs every automation and waits for all tasks.
     #[tokio::test]
     async fn dispatch_automations_runs_all() {
+        use crate::promise_store::mock::MockPromiseStore;
+
         let server = httpmock::MockServer::start_async().await;
         let mock = server.mock(|when, then| {
             when.method(httpmock::Method::POST)
@@ -802,8 +937,19 @@ mod tests {
         let agent = make_agent(&server.base_url());
         let automations = vec![make_automation("auto-1"), make_automation("auto-2")];
         let payload = bytes::Bytes::from_static(b"{}");
+        let promise_store: Arc<dyn crate::promise_store::PromiseRepository> =
+            Arc::new(MockPromiseStore::new());
 
-        dispatch_automations(&agent, &Arc::new(rs), automations, "github.push", &payload).await;
+        dispatch_automations(
+            &agent,
+            &Arc::new(rs),
+            &promise_store,
+            42,
+            automations,
+            "github.push",
+            &payload,
+        )
+        .await;
 
         mock.assert_hits_async(2).await;
     }
@@ -811,10 +957,24 @@ mod tests {
     /// dispatch_automations with an empty list completes immediately without errors.
     #[tokio::test]
     async fn dispatch_automations_empty_list_is_noop() {
+        use crate::promise_store::mock::MockPromiseStore;
+
         let (rs, _container) = make_run_store().await;
         let agent = make_agent("http://127.0.0.1:1");
         let payload = bytes::Bytes::from_static(b"{}");
-        dispatch_automations(&agent, &Arc::new(rs), vec![], "github.push", &payload).await;
+        let promise_store: Arc<dyn crate::promise_store::PromiseRepository> =
+            Arc::new(MockPromiseStore::new());
+
+        dispatch_automations(
+            &agent,
+            &Arc::new(rs),
+            &promise_store,
+            0,
+            vec![],
+            "github.push",
+            &payload,
+        )
+        .await;
     }
 
     #[test]

@@ -144,6 +144,10 @@ pub async fn run_automation(
             mcp_dispatch: merged_dispatch,
             flag_client: Arc::clone(&agent.flag_client),
             tenant_id: agent.tenant_id.clone(),
+            // Inherit the promise context so checkpointing continues to work
+            // even when the automation overrides the model or MCP dispatch.
+            promise_store: agent.promise_store.clone(),
+            promise_id: agent.promise_id.clone(),
         };
         &merged
     };
@@ -346,6 +350,8 @@ mod tests {
             mcp_dispatch: vec![],
             flag_client: Arc::new(AlwaysOnFlagClient),
             tenant_id: "test".to_string(),
+            promise_store: None,
+            promise_id: None,
         };
         let mut automation = make_automation(vec![]);
         automation.memory_path = Some("custom/notes.md".to_string()); // override
@@ -383,6 +389,8 @@ mod tests {
             mcp_dispatch: vec![],
             flag_client: Arc::new(AlwaysOnFlagClient),
             tenant_id: "test".to_string(),
+            promise_store: None,
+            promise_id: None,
         }
     }
 
@@ -409,6 +417,8 @@ mod tests {
             mcp_dispatch: vec![],
             flag_client: Arc::new(AlwaysOnFlagClient),
             tenant_id: "test".to_string(),
+            promise_store: None,
+            promise_id: None,
         }
     }
 

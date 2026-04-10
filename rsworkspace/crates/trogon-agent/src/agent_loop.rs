@@ -16,6 +16,7 @@ use serde_json::Value;
 use tracing::{debug, info, warn};
 
 use crate::flag_client::FeatureFlagClient;
+use crate::promise_store::PromiseRepository;
 use crate::tools::{ToolDef, ToolDispatcher};
 
 // ── AnthropicClient trait ──────────────────────────────────────────────────────
@@ -227,6 +228,7 @@ impl std::error::Error for AgentError {
 // ── AgentLoop ─────────────────────────────────────────────────────────────────
 
 /// Runs the Anthropic tool-use loop, routing all AI calls through the proxy.
+#[derive(Clone)]
 pub struct AgentLoop {
     /// Client for calling the Anthropic messages API (via proxy).
     pub anthropic_client: Arc<dyn AnthropicClient>,
@@ -253,6 +255,12 @@ pub struct AgentLoop {
     pub flag_client: Arc<dyn FeatureFlagClient>,
     /// Tenant identifier used as the feature flag evaluation key.
     pub tenant_id: String,
+    /// Durable promise store for checkpointing run state across process restarts.
+    /// `None` disables durability (backward-compatible default).
+    pub promise_store: Option<Arc<dyn PromiseRepository>>,
+    /// Unique identifier for the current run, used as the KV checkpoint key.
+    /// `None` when `promise_store` is `None`.
+    pub promise_id: Option<String>,
 }
 
 impl AgentLoop {
@@ -282,6 +290,35 @@ impl AgentLoop {
         system_prompt: Option<&str>,
     ) -> Result<String, AgentError> {
         let mut messages = initial_messages;
+
+        // ── Durable promise: load checkpoint ─────────────────────────────────
+        // If a promise store and promise ID are configured, check KV for an
+        // existing checkpoint. If one exists with a non-empty message history,
+        // resume from it rather than starting from scratch.
+        let mut checkpoint: Option<(crate::promise_store::AgentPromise, u64)> = None;
+        // `recovering` is true only when we loaded a checkpoint — used to gate
+        // the tool-result cache replay in `execute_tools`.
+        let mut recovering = false;
+        if let (Some(store), Some(pid)) = (&self.promise_store, &self.promise_id) {
+            match store.get_promise(&self.tenant_id, pid).await {
+                Ok(Some((p, rev))) => {
+                    if !p.messages.is_empty() {
+                        info!(
+                            promise_id = %pid,
+                            iteration = p.iteration,
+                            "Resuming agent run from checkpoint"
+                        );
+                        messages = p.messages.clone();
+                        recovering = true;
+                    }
+                    checkpoint = Some((p, rev));
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    warn!(error = %e, "Failed to read promise checkpoint — starting fresh")
+                }
+            }
+        }
 
         // Merge caller-supplied tools with MCP tool definitions.
         let mut all_tools: Vec<ToolDef> = tools.to_vec();
@@ -346,9 +383,24 @@ impl AgentLoop {
                     return Ok(text);
                 }
                 "tool_use" => {
-                    let results = self.execute_tools(&response.content).await;
+                    let results = self.execute_tools(&response.content, recovering).await;
                     messages.push(Message::assistant(response.content));
                     messages.push(Message::tool_results(results));
+                    // Once we've executed a tool turn, we've caught up with the
+                    // checkpoint and are back in normal forward execution.
+                    recovering = false;
+
+                    // ── Durable promise: checkpoint after tool turn ───────────
+                    if let (Some(store), Some(pid)) = (&self.promise_store, &self.promise_id)
+                        && let Some((ref mut p, ref mut rev)) = checkpoint
+                    {
+                        p.messages = messages.clone();
+                        p.iteration = iteration + 1;
+                        match store.update_promise(&self.tenant_id, pid, p, *rev).await {
+                            Ok(new_rev) => *rev = new_rev,
+                            Err(e) => warn!(error = %e, "Promise checkpoint update failed"),
+                        }
+                    }
                 }
                 other => {
                     return Err(AgentError::UnexpectedStopReason(other.to_string()));
@@ -431,7 +483,7 @@ impl AgentLoop {
                     return Ok((text, messages));
                 }
                 "tool_use" => {
-                    let results = self.execute_tools(&response.content).await;
+                    let results = self.execute_tools(&response.content, false).await;
                     messages.push(Message::assistant(response.content));
                     messages.push(Message::tool_results(results));
                 }
@@ -445,12 +497,43 @@ impl AgentLoop {
         Err(AgentError::MaxIterationsReached)
     }
 
-    async fn execute_tools(&self, content: &[ContentBlock]) -> Vec<ToolResult> {
+    /// Execute tool calls from an Anthropic response.
+    ///
+    /// `recovering` is `true` when the caller is replaying a turn from a
+    /// checkpointed message history after a process restart. In that state,
+    /// tool results that were already persisted to KV are replayed without
+    /// re-executing the side effect. Once we are back in normal forward
+    /// execution (`recovering = false`), the KV cache is never consulted —
+    /// Anthropic generates unique tool_use IDs per request, so there is no
+    /// risk of replaying a fresh call as a cached one.
+    async fn execute_tools(&self, content: &[ContentBlock], recovering: bool) -> Vec<ToolResult> {
         let mut results = Vec::new();
 
         for block in content {
             if let ContentBlock::ToolUse { id, name, input } = block {
                 debug!(tool = %name, "Executing tool");
+
+                // ── Durable promise: replay cached result (recovery only) ────
+                // Only consult the KV cache when we are recovering from a
+                // checkpoint. During normal forward execution Anthropic always
+                // generates a fresh tool_use_id, so a cache hit here would
+                // indicate a stale entry — not a replay scenario.
+                if recovering
+                    && let (Some(store), Some(pid)) = (&self.promise_store, &self.promise_id)
+                {
+                    match store.get_tool_result(&self.tenant_id, pid, id).await {
+                        Ok(Some(cached)) => {
+                            info!(tool = %name, tool_use_id = %id, "Replaying cached tool result");
+                            results.push(ToolResult {
+                                tool_use_id: id.clone(),
+                                content: cached,
+                            });
+                            continue;
+                        }
+                        Ok(None) => {}
+                        Err(e) => warn!(error = %e, "Failed to read tool result cache"),
+                    }
+                }
 
                 // Check MCP dispatch first, then fall back to built-in tools.
                 let output = if let Some((_, original, client)) = self
@@ -465,6 +548,18 @@ impl AgentLoop {
                 } else {
                     self.tool_dispatcher.dispatch(name, input).await
                 };
+
+                // ── Durable promise: persist tool result ─────────────────────
+                // Store the result so that if the process crashes before the
+                // next checkpoint write, the result can be replayed on restart
+                // rather than re-executing the tool.
+                if let (Some(store), Some(pid)) = (&self.promise_store, &self.promise_id)
+                    && let Err(e) = store
+                        .put_tool_result(&self.tenant_id, pid, id, &output)
+                        .await
+                {
+                    warn!(error = %e, "Failed to cache tool result");
+                }
 
                 results.push(ToolResult {
                     tool_use_id: id.clone(),
@@ -686,6 +781,8 @@ mod tests {
             mcp_dispatch: vec![],
             flag_client,
             tenant_id: "test-tenant".to_string(),
+            promise_store: None,
+            promise_id: None,
         }
     }
 

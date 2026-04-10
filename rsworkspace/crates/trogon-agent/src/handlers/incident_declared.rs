@@ -149,6 +149,8 @@ mod tests {
             mcp_dispatch: vec![],
             flag_client: Arc::new(AlwaysOnFlagClient),
             tenant_id: "test".to_string(),
+            promise_store: None,
+            promise_id: None,
         }
     }
 
@@ -431,6 +433,8 @@ mod tests {
             mcp_dispatch: vec![],
             flag_client: Arc::new(AlwaysOnFlagClient),
             tenant_id: "test".to_string(),
+            promise_store: None,
+            promise_id: None,
         };
 
         let payload = serde_json::json!({
@@ -517,6 +521,8 @@ mod tests {
             mcp_dispatch: vec![],
             flag_client: Arc::new(AlwaysOnFlagClient),
             tenant_id: "test".to_string(),
+            promise_store: None,
+            promise_id: None,
         };
 
         let payload = serde_json::json!({
@@ -587,6 +593,8 @@ mod tests {
             mcp_dispatch: vec![],
             flag_client: Arc::new(AlwaysOnFlagClient),
             tenant_id: "test".to_string(),
+            promise_store: None,
+            promise_id: None,
         };
 
         let payload = serde_json::json!({
