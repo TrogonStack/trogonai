@@ -35,7 +35,11 @@ pub async fn get_issue(
     });
 
     let response: Value = graphql_request(ctx, &query, None).await?;
-    serde_json::to_string_pretty(&response["data"]["issue"]).map_err(|e| e.to_string())
+    let issue = &response["data"]["issue"];
+    if issue.is_null() {
+        return Err(format!("Issue {issue_id} not found"));
+    }
+    serde_json::to_string_pretty(issue).map_err(|e| e.to_string())
 }
 
 /// Post a comment on a Linear issue.
@@ -98,6 +102,9 @@ pub async fn get_comments(
     });
 
     let response: Value = graphql_request(ctx, &query, None).await?;
+    if response["data"]["issue"].is_null() {
+        return Err(format!("Issue {issue_id} not found"));
+    }
     let comments = &response["data"]["issue"]["comments"]["nodes"];
     serde_json::to_string_pretty(comments).map_err(|e| e.to_string())
 }
