@@ -267,23 +267,43 @@ pub struct AgentLoop {
     pub promise_id: Option<String>,
 }
 
+/// Recursively sort JSON object keys so that serialization is order-independent.
+///
+/// `serde_json::Value` preserves insertion order (IndexMap). The LLM can produce
+/// the same logical input with different key ordering across requests — in
+/// particular on crash recovery, when it regenerates a fresh request from the
+/// same context. Sorting object keys before hashing makes the cache key identical
+/// for semantically equivalent inputs regardless of key order.
+fn sort_json_keys(v: &Value) -> Value {
+    match v {
+        Value::Object(map) => {
+            // BTreeMap iterates in sorted key order; collect back into a
+            // serde_json::Map (IndexMap) which preserves insertion order, so
+            // to_string() will emit keys alphabetically.
+            let sorted: serde_json::Map<String, Value> = map
+                .iter()
+                .map(|(k, v)| (k.clone(), sort_json_keys(v)))
+                .collect::<std::collections::BTreeMap<_, _>>()
+                .into_iter()
+                .collect();
+            Value::Object(sorted)
+        }
+        Value::Array(arr) => Value::Array(arr.iter().map(sort_json_keys).collect()),
+        other => other.clone(),
+    }
+}
+
 /// Compute a stable cache key for a tool call from its name and input.
 ///
-/// Uses SHA-256 of `"{tool_name}:{canonical_json(input)}"` so the key is
-/// independent of Anthropic's ephemeral `tool_use_id`. On crash recovery the
-/// LLM re-generates a fresh `tool_use_id` for the same call, but the name and
-/// input are identical — so the hash matches and the cached result is replayed
-/// without re-executing the tool.
-///
-/// `serde_json` serialises object keys in insertion order, which is stable for
-/// values parsed from JSON (the case here — inputs come from the Anthropic API
-/// response). Tools that construct inputs programmatically with differing key
-/// orders would produce different hashes; that is acceptable because a different
-/// order implies a semantically different call.
+/// Uses SHA-256 of `"{tool_name}:{canonical_json(input)}"` where
+/// `canonical_json` sorts all object keys alphabetically before serializing.
+/// This makes the key order-independent: the LLM can regenerate the same
+/// logical call with different key ordering on crash recovery and the hash
+/// will still match, replaying the cached result without re-executing the tool.
 fn tool_cache_key(tool_name: &str, input: &Value) -> String {
     let canonical = format!(
         "{tool_name}:{}",
-        serde_json::to_string(input).unwrap_or_default()
+        serde_json::to_string(&sort_json_keys(input)).unwrap_or_default()
     );
     let digest = Sha256::digest(canonical.as_bytes());
     format!("{digest:x}")
@@ -328,6 +348,19 @@ impl AgentLoop {
         if let (Some(store), Some(pid)) = (&self.promise_store, &self.promise_id) {
             match store.get_promise(&self.tenant_id, pid).await {
                 Ok(Some((p, rev))) => {
+                    // If the promise is already Resolved, the run completed
+                    // successfully on a previous attempt. This path is hit when
+                    // the final msg.ack() fails after the agent finishes and NATS
+                    // redelivers the message. Skip re-running to avoid duplicate
+                    // outputs and unnecessary Anthropic API calls.
+                    if p.status == crate::promise_store::PromiseStatus::Resolved {
+                        info!(
+                            promise_id = %pid,
+                            iteration = p.iteration,
+                            "Promise already Resolved — skipping re-run"
+                        );
+                        return Ok(String::new());
+                    }
                     if !p.messages.is_empty() {
                         info!(
                             promise_id = %pid,
