@@ -572,8 +572,8 @@ fn process_sse_line(
                 }
             }
             let usage = if val["usage"].is_null() { &val["response"]["usage"] } else { &val["usage"] };
-            let p = usage["prompt_tokens"].as_u64().unwrap_or(0);
-            let c = usage["completion_tokens"].as_u64().unwrap_or(0);
+            let p = usage["input_tokens"].as_u64().or_else(|| usage["prompt_tokens"].as_u64()).unwrap_or(0);
+            let c = usage["output_tokens"].as_u64().or_else(|| usage["completion_tokens"].as_u64()).unwrap_or(0);
             if p > 0 || c > 0 {
                 pending.push_back(XaiEvent::Usage { prompt_tokens: p, completion_tokens: c });
             }
@@ -628,9 +628,12 @@ fn process_sse_line(
             }
             // Usage may be top-level (xAI extension) or nested inside the
             // response object (per OpenAI Responses API spec).
+            // Field names: Responses API uses input_tokens/output_tokens;
+            // Chat Completions API uses prompt_tokens/completion_tokens.
+            // Accept both for forward compatibility.
             let usage = if val["usage"].is_null() { &val["response"]["usage"] } else { &val["usage"] };
-            let p = usage["prompt_tokens"].as_u64().unwrap_or(0);
-            let c = usage["completion_tokens"].as_u64().unwrap_or(0);
+            let p = usage["input_tokens"].as_u64().or_else(|| usage["prompt_tokens"].as_u64()).unwrap_or(0);
+            let c = usage["output_tokens"].as_u64().or_else(|| usage["completion_tokens"].as_u64()).unwrap_or(0);
             if p > 0 || c > 0 {
                 pending.push_back(XaiEvent::Usage { prompt_tokens: p, completion_tokens: c });
             }
@@ -775,11 +778,23 @@ mod tests {
     }
 
     #[test]
-    fn usage_event_from_response_completed() {
+    fn usage_event_from_response_completed_legacy_fields() {
+        // Chat Completions API field names (prompt_tokens / completion_tokens)
         let line = r#"data: {"type":"response.completed","usage":{"prompt_tokens":42,"completion_tokens":7}}"#;
         let event = parse_line(line).unwrap();
         assert!(
             matches!(event, XaiEvent::Usage { prompt_tokens: 42, completion_tokens: 7 }),
+            "unexpected event: {event:?}"
+        );
+    }
+
+    #[test]
+    fn usage_event_from_response_completed_responses_api_fields() {
+        // Responses API field names (input_tokens / output_tokens) used by grok-4+
+        let line = r#"data: {"type":"response.completed","usage":{"input_tokens":100,"output_tokens":50}}"#;
+        let event = parse_line(line).unwrap();
+        assert!(
+            matches!(event, XaiEvent::Usage { prompt_tokens: 100, completion_tokens: 50 }),
             "unexpected event: {event:?}"
         );
     }
