@@ -43,67 +43,114 @@ pub fn slack_tool_defs() -> Vec<ToolDef> {
 
 /// Send a message to a Slack channel.
 ///
-/// Performs an idempotency check before posting: if a message with the same
-/// text already exists in the channel within the last 10 minutes, the send
-/// is skipped and a "skipped duplicate" result is returned. This prevents
-/// duplicate messages on crash recovery — the non-atomic window between tool
-/// execution and the KV write in the promise store.
+/// ## Idempotency — Option B with graceful degradation
 ///
-/// If the history check itself fails (missing scope, network error), the send
-/// proceeds rather than blocking on it.
+/// When `_idempotency_key` is present in the tool input (injected by the agent
+/// loop during crash recovery), this function:
+///
+/// 1. Fetches the last 10 minutes of channel history with
+///    `include_all_metadata=true`.
+/// 2. **Primary check** — exact metadata match:
+///    `metadata.event_type == "trogon_agent_msg"` AND
+///    `metadata.event_payload.idempotency_key == key`.
+///    Zero false positives: each key encodes the promise ID and tool-use ID.
+/// 3. **Fallback check** — text equality.
+///    Covers the case where the Slack bot token lacks the `metadata:read` scope
+///    and the API omits `metadata` fields from history responses.
+/// 4. If the history fetch itself fails (network error, `ok:false`), proceeds
+///    with the send rather than blocking on the check.
+///
+/// When `_idempotency_key` is absent (normal first-time execution, not a
+/// recovery path), the check is skipped entirely.
+///
+/// When posting, the idempotency key is embedded as Slack message metadata so
+/// future recovery checks can match by key without relying on text equality:
+/// `{ "metadata": { "event_type": "trogon_agent_msg",
+///                  "event_payload": { "idempotency_key": "…" } } }`
 pub async fn send_message(
     ctx: &ToolContext<impl HttpClient>,
     input: &Value,
 ) -> Result<String, String> {
     let channel = input["channel"].as_str().ok_or("missing channel")?;
     let text = input["text"].as_str().ok_or("missing text")?;
+    let idempotency_key = input["_idempotency_key"].as_str();
 
-    // ── Idempotency check: scan last 10 min for identical message ────────────
-    let oldest = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
-        .saturating_sub(600);
+    // ── Idempotency check (only when recovering — key present) ───────────────
+    if let Some(key) = idempotency_key {
+        let oldest = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
+            .saturating_sub(600);
 
-    let history_url = format!(
-        "{}/slack/conversations.history?channel={channel}&oldest={oldest}&limit=50",
-        ctx.proxy_url,
-    );
+        let history_url = format!(
+            "{}/slack/conversations.history?channel={channel}&oldest={oldest}&limit=50&include_all_metadata=true",
+            ctx.proxy_url,
+        );
 
-    match ctx
-        .http_client
-        .get(
-            &history_url,
-            vec![(
-                "Authorization".to_string(),
-                format!("Bearer {}", ctx.slack_token),
-            )],
-        )
-        .await
-    {
-        Ok(resp) => {
-            if let Ok(body) = serde_json::from_str::<Value>(&resp.body)
-                && body["ok"].as_bool() == Some(true)
-            {
-                let already_sent = body["messages"]
-                    .as_array()
-                    .map(|msgs| msgs.iter().any(|m| m["text"].as_str() == Some(text)))
-                    .unwrap_or(false);
-                if already_sent {
-                    return Ok(format!(
-                        "Message already sent to {channel} (skipped duplicate)"
-                    ));
+        match ctx
+            .http_client
+            .get(
+                &history_url,
+                vec![(
+                    "Authorization".to_string(),
+                    format!("Bearer {}", ctx.slack_token),
+                )],
+            )
+            .await
+        {
+            Ok(resp) => {
+                if let Ok(body) = serde_json::from_str::<Value>(&resp.body)
+                    && body["ok"].as_bool() == Some(true)
+                {
+                    let messages = body["messages"].as_array();
+
+                    // Primary: exact metadata key match — no false positives.
+                    let metadata_match = messages
+                        .map(|msgs| {
+                            msgs.iter().any(|m| {
+                                m["metadata"]["event_type"].as_str() == Some("trogon_agent_msg")
+                                    && m["metadata"]["event_payload"]["idempotency_key"].as_str()
+                                        == Some(key)
+                            })
+                        })
+                        .unwrap_or(false);
+
+                    if metadata_match {
+                        return Ok(format!(
+                            "Message already sent to {channel} (skipped duplicate)"
+                        ));
+                    }
+
+                    // Fallback: text equality — handles missing metadata:read scope.
+                    let text_match = messages
+                        .map(|msgs| msgs.iter().any(|m| m["text"].as_str() == Some(text)))
+                        .unwrap_or(false);
+
+                    if text_match {
+                        return Ok(format!(
+                            "Message already sent to {channel} (skipped duplicate)"
+                        ));
+                    }
                 }
+                // History ok:false (e.g. missing scope) — proceed with send.
             }
-            // History check failed or returned ok:false — proceed with send.
-        }
-        Err(_) => {
-            // Network error on history check — proceed with send.
+            Err(_) => {
+                // Network error on history check — proceed with send.
+            }
         }
     }
 
     // ── Post the message ─────────────────────────────────────────────────────
     let url = format!("{}/slack/chat.postMessage", ctx.proxy_url);
+
+    let mut body = serde_json::json!({ "channel": channel, "text": text });
+    if let Some(key) = idempotency_key {
+        body["metadata"] = serde_json::json!({
+            "event_type": "trogon_agent_msg",
+            "event_payload": { "idempotency_key": key }
+        });
+    }
 
     let resp = ctx
         .http_client
@@ -116,7 +163,7 @@ pub async fn send_message(
                 ),
                 ("Content-Type".to_string(), "application/json".to_string()),
             ],
-            serde_json::json!({ "channel": channel, "text": text }),
+            body,
         )
         .await?;
     let response: Value = serde_json::from_str(&resp.body).map_err(|e| e.to_string())?;
