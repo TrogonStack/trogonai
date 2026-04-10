@@ -524,7 +524,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
             .iter()
             .any(|m| m.model_id.0.as_ref() == model_id)
         {
-            return Err(internal_error(format!("unknown model: {model_id}")));
+            return Err(invalid_params(format!("unknown model: {model_id}")));
         }
 
         let mut sessions = self.sessions.lock().await;
