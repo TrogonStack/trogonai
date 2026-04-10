@@ -7,7 +7,7 @@ How to run the unified ingress gateway that receives source events and publishes
 `trogon-gateway` starts:
 
 - One HTTP server for webhook-based sources
-- Optional Discord Gateway (WebSocket) runner when Discord is enabled
+- Optional Discord Gateway (WebSocket) runner when Discord is configured in `gateway` mode
 - JetStream stream provisioning for every enabled source
 - Health probes at `GET /-/liveness` and `GET /-/readiness`
 
@@ -29,47 +29,30 @@ cargo run -p trogon-gateway -- serve --config ./gateway.toml
 
 ## Webhook routes
 
-All webhook sources share one HTTP port (`TROGON_GATEWAY_PORT`, default `8080`). Every webhook source is
-configured as a named integration and mounted at its integration path.
+All webhook sources share one HTTP port (`TROGON_GATEWAY_PORT`, default `8080`) and are mounted by prefix:
 
 | Source | Route |
 |---|---|
-| GitHub | `/sources/github/{integration}/webhook` |
-| Slack | `/sources/slack/{integration}/webhook` |
-| Telegram | `/sources/telegram/{integration}/webhook` |
-| Twitter/X | `/sources/twitter/{integration}/webhook` |
-| GitLab | `/sources/gitlab/{integration}/webhook` |
-| incident.io | `/sources/incidentio/{integration}/webhook` |
-| Linear | `/sources/linear/{integration}/webhook` |
-| Microsoft Graph change notifications | `/sources/microsoft-graph/{integration}/webhook` |
-| Notion | `/sources/notion/{integration}/webhook` |
-| Sentry | `/sources/sentry/{integration}/webhook` |
-
-Integration IDs must contain only ASCII letters, numbers, `_`, or `-`. They cannot be empty, contain path
-separators, or exceed 64 characters.
+| GitHub | `/github/webhook` |
+| Discord (webhook mode) | `/discord/webhook` |
+| Slack | `/slack/webhook` |
+| Telegram | `/telegram/webhook` |
+| GitLab | `/gitlab/webhook` |
+| Linear | `/linear/webhook` |
 
 ## Source enablement
 
-Webhook sources require TOML entries under `[sources.<source>.integrations.<integration>.webhook]`. Source-level
-webhook secrets and implicit source-specific environment variables are not supported.
-Webhook credential fields accept either a literal string or an explicit environment reference such as
-`webhook_secret = { env = "GITHUB_ACME_MAIN_WEBHOOK_SECRET" }`.
-Discord is also configured in TOML under `[sources.discord]`; its `bot_token` field accepts the same literal
-or explicit environment reference shape.
+A source is enabled only when its required setting is present:
 
 | Source | Required setting |
 |---|---|
-| GitHub | `webhook_secret` |
-| Discord | `bot_token` |
-| Slack | `signing_secret` |
-| Telegram | `webhook_secret` |
-| Twitter/X | `consumer_secret` |
-| GitLab | `signing_token` |
-| incident.io | `signing_secret` |
-| Linear | `webhook_secret` |
-| Microsoft Graph change notifications | `client_state` |
-| Notion | `verification_token` |
-| Sentry | `client_secret` |
+| GitHub | `TROGON_SOURCE_GITHUB_WEBHOOK_SECRET` |
+| Discord (`gateway`) | `TROGON_SOURCE_DISCORD_MODE=gateway` and `TROGON_SOURCE_DISCORD_BOT_TOKEN` |
+| Discord (`webhook`) | `TROGON_SOURCE_DISCORD_MODE=webhook` and `TROGON_SOURCE_DISCORD_PUBLIC_KEY` |
+| Slack | `TROGON_SOURCE_SLACK_SIGNING_SECRET` |
+| Telegram | `TROGON_SOURCE_TELEGRAM_WEBHOOK_SECRET` |
+| GitLab | `TROGON_SOURCE_GITLAB_WEBHOOK_SECRET` |
+| Linear | `TROGON_SOURCE_LINEAR_WEBHOOK_SECRET` |
 
 ## Core configuration
 
@@ -85,28 +68,23 @@ NATS auth is resolved in this priority order:
 3. `NATS_USER` + `NATS_PASSWORD`
 4. `NATS_TOKEN`
 
-Discord optional tuning is configured in TOML under `[sources.discord]`:
+Per-source optional tuning (with defaults):
 
-- `gateway_intents`
-- `subject_prefix` (default: `discord`)
-- `stream_name` (default: `DISCORD`)
-- `stream_max_age_secs` (default: `604800`)
-- `nats_ack_timeout_secs` (default: `10`)
-
-Integration-level optional tuning is configured in TOML with `subject_prefix`, `stream_name`,
-`stream_max_age_secs`, and `nats_ack_timeout_secs`.
+- `TROGON_SOURCE_<SOURCE>_SUBJECT_PREFIX` (defaults: `github`, `discord`, `slack`, `telegram`, `gitlab`, `linear`)
+- `TROGON_SOURCE_<SOURCE>_STREAM_NAME` (defaults: `GITHUB`, `DISCORD`, `SLACK`, `TELEGRAM`, `GITLAB`, `LINEAR`)
+- `TROGON_SOURCE_<SOURCE>_STREAM_MAX_AGE_SECS` (default: `604800`)
+- `TROGON_SOURCE_<SOURCE>_NATS_ACK_TIMEOUT_SECS` (default: `10`)
 
 Source-specific extras:
 
-- Microsoft Graph `client_state` must match the `clientState` used when creating Microsoft Graph subscriptions
-- Slack `timestamp_max_drift_secs` (default: `300`)
-- Telegram `webhook_registration_mode = "startup"` attempts registration on startup and requires `bot_token` plus `public_webhook_url`
-- Linear `timestamp_tolerance_secs` (default: `60`, `0` disables tolerance)
-- Twitter/X `consumer_secret` is used for both CRC responses and `x-twitter-webhooks-signature` validation
+- `TROGON_SOURCE_DISCORD_GATEWAY_INTENTS`
+- `TROGON_SOURCE_DISCORD_NATS_REQUEST_TIMEOUT_SECS` (default: `2`)
+- `TROGON_SOURCE_SLACK_TIMESTAMP_MAX_DRIFT_SECS` (default: `300`)
+- `TROGON_SOURCE_LINEAR_TIMESTAMP_TOLERANCE_SECS` (default: `60`, `0` disables tolerance)
 
 ## Config file shape
 
-Source configuration lives in TOML. Secret fields can reference environment variables explicitly:
+Environment variables can be replaced (or mixed) with a TOML config file:
 
 ```toml
 [http_server]
@@ -120,60 +98,24 @@ url = "localhost:4222"
 # password = "my-pass"
 # token = "my-token"
 
-[sources.github.integrations.acme-main.webhook]
-webhook_secret = { env = "GITHUB_ACME_MAIN_WEBHOOK_SECRET" }
-
-[sources.github.integrations.other-org]
-# subject_prefix defaults to "github-other-org"
-# stream_name defaults to "GITHUB_OTHER-ORG"
-
-[sources.github.integrations.other-org.webhook]
-webhook_secret = "other-org-secret"
+[sources.github]
+webhook_secret = "gh-secret"
 
 [sources.discord]
-bot_token = { env = "DISCORD_BOT_TOKEN" }
+mode = "webhook"
+public_key = "<discord-public-key-hex>"
+# mode = "gateway"
+# bot_token = "<discord-bot-token>"
 
-[sources.slack.integrations.primary.webhook]
+[sources.slack]
 signing_secret = "slack-secret"
 
-[sources.telegram.integrations.primary.webhook]
+[sources.telegram]
 webhook_secret = "telegram-secret"
-# webhook_registration_mode = "startup"
-# bot_token = { env = "TELEGRAM_PRIMARY_BOT_TOKEN" }
-# public_webhook_url = "https://example.com/sources/telegram/primary/webhook"
 
-[sources.twitter.integrations.primary.webhook]
-consumer_secret = "twitter-consumer-secret"
+[sources.gitlab]
+webhook_secret = "gitlab-secret"
 
-[sources.gitlab.integrations.primary.webhook]
-signing_token = "whsec_<base64-encoded-32-byte-secret>"
-timestamp_tolerance_secs = 300
-
-[sources.incidentio.integrations.primary.webhook]
-signing_secret = "whsec_dGVzdC1zZWNyZXQ="
-
-[sources.linear.integrations.primary.webhook]
+[sources.linear]
 webhook_secret = "linear-secret"
-
-[sources.microsoft_graph.integrations.primary.webhook]
-client_state = "microsoft-graph-client-state"
-
-[sources.notion.integrations.primary.webhook]
-verification_token = "notion-verification-token-example"
-
-[sources.sentry.integrations.primary.webhook]
-client_secret = "sentry-client-secret"
 ```
-
-## Microsoft Graph change notifications
-
-This source receives Microsoft Graph change notifications. It does not implement
-Bot Framework conversations or send replies.
-
-Create Microsoft Graph subscriptions, then use `/sources/microsoft-graph/{integration}/webhook` as the
-subscription `notificationUrl`.
-The gateway responds to Graph's
-`validationToken` challenge, validates each notification's `clientState`, and
-publishes the Graph `changeNotificationCollection` to NATS on
-`{subject_prefix}.change_notification_collection`, for example
-`microsoft-graph.change_notification_collection`.
