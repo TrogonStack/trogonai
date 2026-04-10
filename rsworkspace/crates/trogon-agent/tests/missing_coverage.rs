@@ -376,10 +376,10 @@ async fn get_pr_diff_server_error_returns_body_text() {
 
 // ── get_linear_issue — null issue in response ─────────────────────────────────
 
-/// When the GraphQL response has `data.issue: null`, the tool serializes it
-/// as the string `"null"`.
+/// When the GraphQL response has `data.issue: null`, the tool returns a
+/// descriptive "not found" error rather than serializing `null` as a string.
 #[tokio::test]
-async fn get_linear_issue_null_returns_null_string() {
+async fn get_linear_issue_null_returns_not_found_error() {
     let server = MockServer::start_async().await;
 
     server.mock(|when, then| {
@@ -397,7 +397,10 @@ async fn get_linear_issue_null_returns_null_string() {
     )
     .await;
 
-    assert_eq!(result, "null", "got: {result}");
+    assert!(
+        result.starts_with("Tool error:") && result.contains("not found"),
+        "got: {result}"
+    );
 }
 
 // ── issue_triage::handle — invalid json returns Some(Err) ────────────────────
