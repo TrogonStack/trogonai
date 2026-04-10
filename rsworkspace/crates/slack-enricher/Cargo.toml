@@ -1,0 +1,23 @@
+[package]
+name = "slack-enricher"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "slack-enricher"
+path = "src/main.rs"
+
+[dependencies]
+async-nats = { workspace = true, features = ["ring", "jetstream"] }
+base64 = "0.22"
+form_urlencoded = "1"
+futures = "0.3"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+serde_json = "1.0.149"
+slack-nats = { path = "../slack-nats" }
+slack-types = { path = "../slack-types" }
+tokio = { version = "1.49.0", features = ["full"] }
+trogon-nats = { path = "../trogon-nats" }
+trogon-std = { path = "../trogon-std" }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

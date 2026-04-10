@@ -1,0 +1,2815 @@
+use async_nats::Client as NatsClient;
+use async_nats::jetstream::Context as JsContext;
+use slack_nats::publisher::{
+    publish_delete_file, publish_ephemeral_message, publish_outbound, publish_reaction_action,
+    publish_response_url, publish_set_status, publish_set_suggested_prompts,
+    publish_stream_append, publish_stream_stop, publish_upload_request, publish_view_open,
+    publish_view_publish,
+};
+use slack_types::events::{
+    PinEventKind, SessionType, SlackAppHomeOpenedEvent, SlackAttachment, SlackBlockActionEvent,
+    SlackChannelEvent, SlackDeleteFile, SlackEphemeralMessage, SlackFile, SlackInboundMessage,
+    SlackMemberEvent, SlackMessageChangedEvent, SlackMessageDeletedEvent, SlackOutboundMessage,
+    SlackPinEvent, SlackReactionAction, SlackReactionEvent, SlackReadRepliesRequest,
+    SlackResponseUrlMessage, SlackSetStatusRequest, SlackSetSuggestedPromptsRequest,
+    SlackSlashCommandEvent, SlackStreamAppendMessage, SlackStreamStartRequest,
+    SlackStreamStartResponse, SlackStreamStopMessage, SlackThreadBroadcastEvent,
+    SlackUploadRequest, SlackViewClosedEvent, SlackViewOpenRequest, SlackViewPublishRequest,
+    SlackViewSubmissionEvent,
+};
+use slack_types::subjects::{for_account, SLACK_OUTBOUND_STREAM_START};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+use crate::config::{DmPolicy, ReplyToMode, SlackAgentConfig, SlashCommandOption, StreamMode};
+use crate::llm::LlmNatsClient;
+use crate::memory::{ConversationMemory, ConversationMessage};
+use crate::user_settings::{UserSettings, UserSettingsStore};
+use crate::views::{build_app_home_view, build_settings_modal};
+
+/// Timeout for the `stream.start` Core NATS request/reply round-trip.
+const STREAM_START_TIMEOUT: Duration = Duration::from_secs(10);
+
+// ── Per-user rate limiter ─────────────────────────────────────────────────────
+
+/// Tracks per-user message counts within a sliding 60-second window.
+pub struct UserRateLimiter {
+    limit: u32, // 0 = disabled
+    /// Maps user_id -> list of Instant timestamps within the current window.
+    window: Mutex<HashMap<String, Vec<Instant>>>,
+}
+
+impl UserRateLimiter {
+    pub fn new(limit: u32) -> Self {
+        Self {
+            limit,
+            window: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Returns true if the user is allowed (within limit), false if rate-limited.
+    /// Also cleans up timestamps older than 60 seconds.
+    fn check_and_record(&self, user_id: &str) -> bool {
+        if self.limit == 0 {
+            return true;
+        }
+        let now = Instant::now();
+        let window = Duration::from_secs(60);
+        let mut map = self.window.lock().unwrap();
+        let timestamps = map.entry(user_id.to_string()).or_default();
+        // Remove entries older than 60 seconds.
+        timestamps.retain(|t| now.duration_since(*t) < window);
+        if timestamps.len() >= self.limit as usize {
+            return false;
+        }
+        timestamps.push(now);
+        true
+    }
+}
+
+/// Shared state passed to every handler call.
+pub struct AgentContext {
+    pub js: Arc<JsContext>,
+    /// Raw Core NATS client — used for request/reply (stream.start).
+    pub nats: NatsClient,
+    pub claude: Option<LlmNatsClient>,
+    pub memory: ConversationMemory,
+    /// Per-user settings (model, system prompt) backed by NATS KV.
+    pub user_settings: UserSettingsStore,
+    pub config: SlackAgentConfig,
+    /// Resolved system prompt (file contents take precedence over inline text).
+    pub base_system_prompt: Option<String>,
+    /// Per-session mutex to serialise history read/write for the same session.
+    pub session_locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    /// Per-user sliding-window rate limiter for inbound messages.
+    pub user_rate_limiter: UserRateLimiter,
+    /// Debounce window in milliseconds (0 = disabled).
+    pub debounce_ms: u64,
+    /// Per-session pending debounce task handles; keyed by session key.
+    pub session_debounce: tokio::sync::Mutex<HashMap<String, tokio::task::AbortHandle>>,
+    /// Semaphore limiting concurrent Claude calls. `None` = unlimited.
+    pub claude_semaphore: Option<Arc<tokio::sync::Semaphore>>,
+    /// Cache mapping channel:thread_ts -> file_id for uploaded responses.
+    /// Used to delete the file on regenerate (arrows_counterclockwise).
+    pub file_id_cache: Arc<tokio::sync::Mutex<std::collections::HashMap<String, String>>>,
+    /// KV store for DM pairing codes. Only populated when dm_policy == Pairing.
+    pub pairing_store: Option<async_nats::jetstream::kv::Store>,
+    /// Optional account identifier. When set, all NATS subjects are namespaced
+    /// as `slack.<account_id>.<rest>` to support multi-workspace deployments.
+    pub account_id: Option<String>,
+}
+
+// ── Helper: resolve thread_ts ─────────────────────────────────────────────────
+
+pub fn resolve_reply_thread_ts(
+    mode: &ReplyToMode,
+    message_ts: &str,
+    incoming_thread_ts: Option<&str>,
+) -> Option<String> {
+    match mode {
+        ReplyToMode::Off => None,
+        ReplyToMode::First => incoming_thread_ts
+            .map(str::to_string)
+            .or_else(|| Some(message_ts.to_string())),
+        ReplyToMode::All => Some(message_ts.to_string()),
+    }
+}
+
+// ── Helper: ack reaction ──────────────────────────────────────────────────────
+
+async fn ack_reaction(js: &JsContext, account_id: Option<&str>, channel: &str, ts: &str, emoji: &str, add: bool) {
+    let action = SlackReactionAction {
+        channel: channel.to_string(),
+        ts: ts.to_string(),
+        reaction: emoji.to_string(),
+        add,
+    };
+    if let Err(e) = publish_reaction_action(js, account_id, &action).await {
+        tracing::warn!(error = %e, add, emoji, "Failed to publish ack reaction");
+    }
+}
+
+// ── Helper: request stream.start via Core NATS request/reply ─────────────────
+
+async fn request_stream_start(
+    nats: &NatsClient,
+    account_id: Option<&str>,
+    channel: &str,
+    thread_ts: Option<&str>,
+) -> Result<SlackStreamStartResponse, String> {
+    let req = SlackStreamStartRequest {
+        channel: channel.to_string(),
+        thread_ts: thread_ts.map(str::to_string),
+        initial_text: Some("…".to_string()),
+    };
+    let payload = serde_json::to_vec(&req).map_err(|e| format!("serialize: {e}"))?;
+    let subject = for_account(SLACK_OUTBOUND_STREAM_START, account_id);
+    let msg = nats
+        .request(subject, payload.into())
+        .await
+        .map_err(|e| format!("request: {e}"))?;
+    serde_json::from_slice::<SlackStreamStartResponse>(&msg.payload)
+        .map_err(|e| format!("deserialize reply: {e}"))
+}
+
+// ── Helper: get or create per-session lock ────────────────────────────────────
+
+fn get_session_lock(ctx: &AgentContext, session_key: &str) -> Arc<tokio::sync::Mutex<()>> {
+    let mut locks = ctx.session_locks.lock().unwrap();
+    locks
+        .entry(session_key.to_string())
+        .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+        .clone()
+}
+
+// ── Helper: publish a fresh App Home view ────────────────────────────────────
+
+async fn refresh_app_home(ctx: &AgentContext, user_id: &str) {
+    let settings = ctx.user_settings.load(user_id).await;
+    let session_key = format!("slack:dm:{}", user_id);
+    let history = ctx.memory.load(&session_key).await;
+    let effective_model = settings.model.as_deref().unwrap_or(&ctx.config.claude_model);
+    let view = build_app_home_view(
+        effective_model,
+        history.len(),
+        settings.system_prompt.as_deref(),
+    );
+    let req = SlackViewPublishRequest {
+        user_id: user_id.to_string(),
+        view,
+    };
+    let account_id = ctx.account_id.as_deref();
+    if let Err(e) = publish_view_publish(&ctx.js, account_id, &req).await {
+        tracing::warn!(error = %e, user = %user_id, "Failed to refresh App Home view");
+    }
+}
+
+// ── Main inbound handler ──────────────────────────────────────────────────────
+
+/// Core processing logic for an inbound message.
+///
+/// Contains all Claude call + history management after the early checks.
+/// Invoked either directly (debounce disabled) or after the debounce delay.
+async fn process_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
+    tracing::info!(
+        channel = %msg.channel,
+        user = %msg.user,
+        text = %msg.text,
+        session_key = ?msg.session_key,
+        "Processing inbound message"
+    );
+
+    let base_session_key = msg.session_key.as_deref().unwrap_or(&msg.channel);
+    let session_key = compute_session_key_chain(
+        base_session_key,
+        &msg.session_type,
+        msg.thread_ts.as_deref(),
+        ctx.config.dm_pair_channel.as_deref(),
+        ctx.config.history_scope_parent,
+        ctx.config.dm_scope_main,
+    );
+
+    // Prune session locks whose Arc is held only by the map (no task is using them).
+    {
+        let mut locks = ctx.session_locks.lock().unwrap();
+        locks.retain(|_, arc| Arc::strong_count(arc) > 1);
+    }
+
+    // Extract manual reply-target directive; compute effective thread_ts.
+    let (effective_text, reply_target_override) = extract_reply_target(&msg.text, &msg.ts);
+    let effective_reply_mode = match msg.session_type {
+        SessionType::Direct => ctx
+            .config
+            .reply_to_mode_dm
+            .as_ref()
+            .unwrap_or(&ctx.config.reply_to_mode),
+        SessionType::Group => ctx
+            .config
+            .reply_to_mode_group
+            .as_ref()
+            .unwrap_or(&ctx.config.reply_to_mode),
+        SessionType::Channel => ctx
+            .config
+            .reply_to_mode_channel
+            .as_ref()
+            .unwrap_or(&ctx.config.reply_to_mode),
+    };
+    let effective_thread_ts = reply_target_override.or_else(|| {
+        resolve_reply_thread_ts(effective_reply_mode, &msg.ts, msg.thread_ts.as_deref())
+    });
+
+    // Load per-user settings to optionally override model / system prompt.
+    let user_settings = ctx.user_settings.load(&msg.user).await;
+
+    // Per-channel system prompt: takes precedence over global base, but not user setting.
+    let channel_prompt: Option<String> = ctx.config.channel_system_prompts.get(&msg.channel).cloned();
+
+    let user_claude: Option<LlmNatsClient> =
+        if user_settings.model.is_some() || user_settings.system_prompt.is_some() || channel_prompt.is_some() {
+            ctx.claude.as_ref().map(|base| {
+                let model = user_settings.model.clone();
+                let prompt = user_settings
+                    .system_prompt
+                    .clone()
+                    .or(channel_prompt)
+                    .or_else(|| ctx.base_system_prompt.clone());
+                base.with_overrides(model, Some(prompt))
+            })
+        } else {
+            None
+        };
+    let claude = user_claude.as_ref().or(ctx.claude.as_ref());
+
+    // 1. Add ack reaction.
+    // Resolve effective ack reaction: channel-specific > global > "robot_face" fallback
+    let effective_ack = ctx.config.channel_ack_reactions
+        .get(&msg.channel)
+        .or(ctx.config.ack_reaction.as_ref())
+        .map(|s| s.as_str())
+        .unwrap_or("robot_face");
+    let account_id = ctx.account_id.as_deref();
+    ack_reaction(&ctx.js, account_id, &msg.channel, &msg.ts, effective_ack, true).await;
+
+    // 2. Acquire per-session lock so parallel messages don't corrupt history.
+    let session_lock = get_session_lock(&ctx, &session_key);
+    let _session_guard = session_lock.lock().await;
+
+    // 3. Load conversation history.
+    let mut history = ctx.memory.load(&session_key).await;
+
+    // 3a. Seed thread history from parent channel session when starting a new thread.
+    if history.is_empty()
+        && msg.thread_ts.is_some()
+        && ctx.config.thread_initial_history_limit > 0
+    {
+        let parent_key = format!("slack:channel:{}", msg.channel);
+        let parent_history = ctx.memory.load(&parent_key).await;
+        if !parent_history.is_empty() {
+            let limit = ctx.config.thread_initial_history_limit;
+            let start = parent_history.len().saturating_sub(limit);
+            history = parent_history[start..].to_vec();
+            tracing::debug!(
+                count = history.len(),
+                "Seeded thread history from parent channel session"
+            );
+        }
+    }
+
+    // 3aa. inherit_parent — seed fresh thread session with the full parent channel history.
+    if history.is_empty()
+        && msg.thread_ts.is_some()
+        && ctx.config.inherit_parent
+    {
+        let parent_key = format!("slack:channel:{}", msg.channel);
+        let parent_history = ctx.memory.load(&parent_key).await;
+        if !parent_history.is_empty() {
+            history = parent_history;
+            tracing::debug!(
+                count = history.len(),
+                "inherit_parent: seeded thread with full parent channel history"
+            );
+        }
+    }
+
+    // 3b. Seed initial context from Slack history if session is fresh.
+    let history = if history.is_empty()
+        && ctx.config.slack_seed_history_on_start > 0
+        && matches!(msg.session_type, SessionType::Channel | SessionType::Group)
+    {
+        // Determine whether this message is inside a thread (thread_ts set and
+        // different from ts).  Thread messages use conversations.replies; channel
+        // root messages use conversations.history.
+        let is_thread_reply = msg
+            .thread_ts
+            .as_deref()
+            .map(|tts| tts != msg.ts.as_str())
+            .unwrap_or(false);
+
+        let messages_result: Result<Vec<slack_types::events::SlackReadMessage>, String> =
+            if is_thread_reply {
+                use slack_nats::publisher::request_read_replies;
+                let thread_ts = msg.thread_ts.as_deref().unwrap(); // safe: is_thread_reply=true
+                let req = SlackReadRepliesRequest {
+                    channel: msg.channel.clone(),
+                    ts: thread_ts.to_string(),
+                    limit: Some(ctx.config.slack_seed_history_on_start as u32),
+                    oldest: None,
+                    latest: Some(msg.ts.clone()), // only messages before current
+                };
+                match request_read_replies(&ctx.nats, account_id, &req).await {
+                    Ok(resp) if resp.ok => Ok(resp.messages),
+                    Ok(resp) => Err(resp.error.unwrap_or_else(|| "unknown error".to_string())),
+                    Err(e) => Err(e.to_string()),
+                }
+            } else {
+                use slack_nats::publisher::request_read_messages;
+                use slack_types::events::SlackReadMessagesRequest;
+                let req = SlackReadMessagesRequest {
+                    channel: msg.channel.clone(),
+                    limit: Some(ctx.config.slack_seed_history_on_start as u32),
+                    oldest: None,
+                    latest: Some(msg.ts.clone()), // only messages before current
+                };
+                match request_read_messages(&ctx.nats, account_id, &req).await {
+                    Ok(resp) if resp.ok => Ok(resp.messages),
+                    Ok(resp) => Err(resp.error.unwrap_or_else(|| "unknown error".to_string())),
+                    Err(e) => Err(e.to_string()),
+                }
+            };
+
+        match messages_result {
+            Ok(messages) if !messages.is_empty() => {
+                let seeded: Vec<ConversationMessage> = messages
+                    .iter()
+                    .rev() // API returns newest-first; reverse to chronological
+                    .filter_map(|m| {
+                        m.text.as_ref().filter(|t| !t.is_empty()).map(|text| {
+                            let role = if m.bot_id.is_some() {
+                                "assistant"
+                            } else {
+                                "user"
+                            };
+                            ConversationMessage {
+                                role: role.to_string(),
+                                content: text.clone(),
+                                ts: Some(m.ts.clone()),
+                                images: vec![],
+                            }
+                        })
+                    })
+                    .collect();
+                tracing::debug!(
+                    count = seeded.len(),
+                    channel = %msg.channel,
+                    is_thread_reply,
+                    "Seeded session history from Slack"
+                );
+                seeded
+            }
+            Ok(_) => history, // empty messages list
+            Err(e) => {
+                tracing::warn!(error = %e, "Failed to seed history from Slack");
+                history
+            }
+        }
+    } else {
+        history
+    };
+    let mut history = history;
+
+    // Track whether the session is fresh (no prior turns) before appending the new message.
+    let history_was_empty = history.is_empty();
+
+    // Prefix message with the user's display name so Claude knows who's speaking.
+    let content_text = match msg.display_name.as_deref() {
+        Some(name) if !name.is_empty() => format!("[{name}]: {effective_text}"),
+        _ => effective_text.to_string(),
+    };
+    // Collect base64 images from attached files for Claude vision.
+    let images: Vec<crate::memory::ImageData> = msg
+        .files
+        .iter()
+        .filter_map(|f| {
+            let base64 = f.base64_content.as_ref()?.clone();
+            let media_type = f.mimetype.as_deref()?.to_string();
+            Some(crate::memory::ImageData { base64, media_type })
+        })
+        .collect();
+
+    history.push(ConversationMessage {
+        role: "user".to_string(),
+        content: build_message_content(&content_text, &msg.files, &msg.attachments),
+        ts: Some(msg.ts.clone()),
+        images,
+    });
+
+    // 3c. Set "is thinking…" typing status (best-effort, only for threaded messages).
+    if !ctx.config.no_typing_channels.contains(&msg.channel) {
+        if let Some(ref ts) = effective_thread_ts {
+            let _ = publish_set_status(
+                &ctx.js,
+                account_id,
+                &SlackSetStatusRequest {
+                    channel_id: msg.channel.clone(),
+                    thread_ts: ts.clone(),
+                    status: Some("is thinking\u{2026}".to_string()),
+                },
+            )
+            .await;
+        }
+    }
+
+    // 4. Determine the response text (streaming or fallback).
+    let response_text = if let Some(claude) = claude {
+        match ctx.config.stream_mode {
+            StreamMode::Off => {
+                // Skip streaming entirely — call Claude and post via chat.postMessage.
+                // Acquire concurrency permit when configured.
+                let _permit = if let Some(ref sem) = ctx.claude_semaphore {
+                    Some(sem.acquire().await.expect("semaphore closed"))
+                } else {
+                    None
+                };
+                fallback_claude_response(
+                    claude,
+                    &history,
+                    &ctx.js,
+                    account_id,
+                    &msg.channel,
+                    effective_thread_ts.as_deref(),
+                    ctx.config.upload_threshold_chars,
+                )
+                .await
+            }
+            StreamMode::Block => {
+                // Open stream.start (shows placeholder), wait for full Claude response,
+                // then finalize with stream.stop (no interim appends).
+                let stream_ref = match tokio::time::timeout(
+                    STREAM_START_TIMEOUT,
+                    request_stream_start(&ctx.nats, account_id, &msg.channel, effective_thread_ts.as_deref()),
+                )
+                .await
+                {
+                    Ok(result) => result,
+                    Err(_elapsed) => {
+                        tracing::warn!("stream.start timed out after {STREAM_START_TIMEOUT:?}");
+                        Err("stream.start timed out".to_string())
+                    }
+                };
+
+                // Publish suggested prompts for fresh sessions (non-DM only).
+                if !ctx.config.suggested_prompts.is_empty()
+                    && history_was_empty
+                    && !matches!(msg.session_type, SessionType::Direct)
+                {
+                    let req = SlackSetSuggestedPromptsRequest {
+                        channel_id: msg.channel.clone(),
+                        thread_ts: effective_thread_ts
+                            .clone()
+                            .unwrap_or_else(|| msg.ts.clone()),
+                        title: None,
+                        prompts: ctx.config.suggested_prompts.clone(),
+                    };
+                    if let Err(e) = publish_set_suggested_prompts(&ctx.js, account_id, &req).await {
+                        tracing::warn!(error = %e, "Failed to publish suggested prompts");
+                    }
+                }
+
+                // Acquire concurrency permit when configured.
+                let _permit = if let Some(ref sem) = ctx.claude_semaphore {
+                    Some(sem.acquire().await.expect("semaphore closed"))
+                } else {
+                    None
+                };
+
+                // Call Claude and wait for full response.
+                let max_attempts = (ctx.config.claude_retry_attempts + 1).max(1);
+                let mut attempt = 0u32;
+                let call_result = loop {
+                    attempt += 1;
+                    match claude.stream_response(history.clone()).await {
+                        Ok(result) => break Ok(result),
+                        Err(e) => {
+                            if attempt >= max_attempts {
+                                tracing::error!(error = %e, attempt, "Claude API call failed after all retries");
+                                break Err(e);
+                            }
+                            let backoff_ms = 500u64 * (1u64 << (attempt - 1).min(4));
+                            tracing::warn!(error = %e, attempt, backoff_ms, "Claude API call failed, retrying...");
+                            tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
+                        }
+                    }
+                };
+
+                match stream_ref {
+                    Ok(stream_start) => {
+                        match call_result {
+                            Ok((mut rx, handle)) => {
+                                // Drain the stream (runs in background task) — no interim appends.
+                                while rx.recv().await.is_some() {}
+                                let final_text = match handle.await {
+                                    Ok(Ok(text)) => text,
+                                    Ok(Err(e)) => {
+                                        tracing::error!(error = %e, "Claude stream task error");
+                                        format!("Sorry, I encountered an error: {e}")
+                                    }
+                                    Err(e) => {
+                                        tracing::error!(error = %e, "Claude stream task panicked");
+                                        "Sorry, I encountered an error.".to_string()
+                                    }
+                                };
+                                let stop_text = maybe_upload_response(
+                                    &ctx.js, account_id, &final_text, ctx.config.upload_threshold_chars,
+                                    &msg.channel, effective_thread_ts.as_deref(),
+                                ).await;
+                                let stop = SlackStreamStopMessage {
+                                    channel: stream_start.channel.clone(),
+                                    ts: stream_start.ts.clone(),
+                                    final_text: stop_text,
+                                    blocks: None,
+                                };
+                                if let Err(e) = publish_stream_stop(&ctx.js, account_id, &stop).await {
+                                    tracing::error!(error = %e, "Failed to publish stream.stop");
+                                }
+                                final_text
+                            }
+                            Err(e) => {
+                                tracing::error!(error = %e, "Claude streaming failed");
+                                let fallback = format!("Sorry, I encountered an error: {e}");
+                                let stop = SlackStreamStopMessage {
+                                    channel: stream_start.channel.clone(),
+                                    ts: stream_start.ts.clone(),
+                                    final_text: fallback.clone(),
+                                    blocks: None,
+                                };
+                                let _ = publish_stream_stop(&ctx.js, account_id, &stop).await;
+                                fallback
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "stream.start failed — falling back to chat.postMessage");
+                        let _permit = None::<tokio::sync::SemaphorePermit<'_>>;
+                        fallback_claude_response(
+                            claude, &history, &ctx.js, account_id, &msg.channel,
+                            effective_thread_ts.as_deref(), ctx.config.upload_threshold_chars,
+                        ).await
+                    }
+                }
+            }
+            StreamMode::Partial => {
+                // Current behavior: live streaming (stream.start → append → stop).
+                // 4a. Open a streaming placeholder on Slack (with timeout).
+                let stream_ref = match tokio::time::timeout(
+                    STREAM_START_TIMEOUT,
+                    request_stream_start(&ctx.nats, account_id, &msg.channel, effective_thread_ts.as_deref()),
+                )
+                .await
+                {
+                    Ok(result) => result,
+                    Err(_elapsed) => {
+                        tracing::warn!("stream.start timed out after {STREAM_START_TIMEOUT:?}");
+                        Err("stream.start timed out".to_string())
+                    }
+                };
+
+                // Acquire concurrency permit when configured.
+                let _permit = if let Some(ref sem) = ctx.claude_semaphore {
+                    Some(sem.acquire().await.expect("semaphore closed"))
+                } else {
+                    None
+                };
+
+                // Retry loop with exponential backoff for transient Claude errors.
+                let max_attempts = (ctx.config.claude_retry_attempts + 1).max(1);
+                let mut _last_error = String::new();
+                let mut attempt = 0u32;
+                let call_result = loop {
+                    attempt += 1;
+                    match claude.stream_response(history.clone()).await {
+                        Ok(result) => break Ok(result),
+                        Err(e) => {
+                            _last_error = e.to_string();
+                            if attempt >= max_attempts {
+                                tracing::error!(
+                                    error = %e,
+                                    attempt,
+                                    "Claude API call failed after all retries"
+                                );
+                                break Err(e);
+                            }
+                            let backoff_ms = 500u64 * (1u64 << (attempt - 1).min(4));
+                            tracing::warn!(
+                                error = %e,
+                                attempt,
+                                backoff_ms,
+                                "Claude API call failed, retrying..."
+                            );
+                            tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
+                        }
+                    }
+                };
+
+                match stream_ref {
+                    Ok(stream_start) => {
+                        // Publish suggested prompts for fresh sessions (non-DM only).
+                        if !ctx.config.suggested_prompts.is_empty()
+                            && history_was_empty
+                            && !matches!(msg.session_type, SessionType::Direct)
+                        {
+                            let req = SlackSetSuggestedPromptsRequest {
+                                channel_id: msg.channel.clone(),
+                                thread_ts: effective_thread_ts
+                                    .clone()
+                                    .unwrap_or_else(|| msg.ts.clone()),
+                                title: None,
+                                prompts: ctx.config.suggested_prompts.clone(),
+                            };
+                            if let Err(e) = publish_set_suggested_prompts(&ctx.js, account_id, &req).await {
+                                tracing::warn!(error = %e, "Failed to publish suggested prompts");
+                            }
+                        }
+
+                        // 4b. Stream Claude response; publish stream.append periodically.
+                        match call_result {
+                            Ok((mut rx, handle)) => {
+                                let mut accumulated = String::new();
+                                let mut last_published_len: usize = 0;
+
+                                while let Some(chunk) = rx.recv().await {
+                                    accumulated.push_str(&chunk);
+
+                                    // Publish stream.append every 80 new chars or on sentence end.
+                                    let new_len = accumulated.len();
+                                    let is_sentence_end = chunk.ends_with('.')
+                                        || chunk.ends_with('!')
+                                        || chunk.ends_with('?')
+                                        || chunk.ends_with('\n');
+
+                                    if new_len - last_published_len >= 80 || is_sentence_end {
+                                        let delta = accumulated[last_published_len..].to_string();
+                                        let append = SlackStreamAppendMessage {
+                                            channel: stream_start.channel.clone(),
+                                            ts: stream_start.ts.clone(),
+                                            text: delta,
+                                        };
+                                        if let Err(e) = publish_stream_append(&ctx.js, account_id, &append).await {
+                                            tracing::warn!(error = %e, "Failed to publish stream.append");
+                                        }
+                                        last_published_len = new_len;
+                                    }
+                                }
+
+                                // Await the handle to get the full text (and propagate errors).
+                                let final_text = match handle.await {
+                                    Ok(Ok(text)) => text,
+                                    Ok(Err(e)) => {
+                                        tracing::error!(error = %e, "Claude stream task error");
+                                        accumulated
+                                    }
+                                    Err(e) => {
+                                        tracing::error!(error = %e, "Claude stream task panicked");
+                                        accumulated
+                                    }
+                                };
+
+                                // 4c. If upload threshold exceeded, upload as file and replace
+                                //     the streamed message with a short notice.
+                                let stop_text =
+                                    maybe_upload_response(&ctx.js, account_id, &final_text, ctx.config.upload_threshold_chars, &msg.channel, effective_thread_ts.as_deref()).await;
+
+                                // Finalize with stream.stop.
+                                let stop = SlackStreamStopMessage {
+                                    channel: stream_start.channel.clone(),
+                                    ts: stream_start.ts.clone(),
+                                    final_text: stop_text,
+                                    blocks: None,
+                                };
+                                if let Err(e) = publish_stream_stop(&ctx.js, account_id, &stop).await {
+                                    tracing::error!(error = %e, "Failed to publish stream.stop");
+                                }
+
+                                final_text
+                            }
+                            Err(e) => {
+                                tracing::error!(error = %e, "Claude streaming failed");
+                                let fallback = format!("Sorry, I encountered an error: {e}");
+                                // Still close the stream gracefully.
+                                let stop = SlackStreamStopMessage {
+                                    channel: stream_start.channel.clone(),
+                                    ts: stream_start.ts.clone(),
+                                    final_text: fallback.clone(),
+                                    blocks: None,
+                                };
+                                let _ = publish_stream_stop(&ctx.js, account_id, &stop).await;
+                                fallback
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            error = %e,
+                            "stream.start failed — falling back to chat.postMessage"
+                        );
+                        // Fallback: call Claude without streaming.
+                        fallback_claude_response(
+                            claude,
+                            &history,
+                            &ctx.js,
+                            account_id,
+                            &msg.channel,
+                            effective_thread_ts.as_deref(),
+                            ctx.config.upload_threshold_chars,
+                        )
+                        .await
+                    }
+                }
+            }
+        }
+    } else {
+        // No Claude configured — echo back to Slack.
+        tracing::warn!("ANTHROPIC_API_KEY not set — echoing message");
+        let echo = format!("Echo: {}", msg.text);
+        let outbound = SlackOutboundMessage {
+            channel: msg.channel.clone(),
+            text: echo.clone(),
+            thread_ts: effective_thread_ts.clone(),
+            blocks: None,
+            media_url: None,
+            username: None,
+            icon_url: None,
+            icon_emoji: None,
+        };
+        if let Err(e) = publish_outbound(&ctx.js, account_id, &outbound).await {
+            tracing::error!(error = %e, "Failed to publish echo outbound");
+        }
+        echo
+    };
+
+    // 4d. Clear typing status (best-effort).
+    if !ctx.config.no_typing_channels.contains(&msg.channel) {
+        if let Some(ref ts) = effective_thread_ts {
+            let _ = publish_set_status(
+                &ctx.js,
+                account_id,
+                &SlackSetStatusRequest {
+                    channel_id: msg.channel.clone(),
+                    thread_ts: ts.clone(),
+                    status: None,
+                },
+            )
+            .await;
+        }
+    }
+
+    // 5. Persist updated history (only if we got a real response).
+    if !response_text.is_empty() {
+        let mut updated = history;
+        updated.push(ConversationMessage {
+            role: "assistant".to_string(),
+            content: response_text.clone(),
+            ts: None,
+            images: vec![],
+        });
+        ctx.memory.save(&session_key, &updated).await;
+    }
+
+    // 6. Remove ack reaction.
+    ack_reaction(&ctx.js, account_id, &msg.channel, &msg.ts, effective_ack, false).await;
+}
+
+/// Handles a regular inbound message.
+///
+/// Performs early checks (DM policy, channel allowlist, user rate limit), then
+/// either debounces or calls `process_inbound` directly.
+// ── Pure gate-check helpers ───────────────────────────────────────────────────
+
+pub fn passes_dm_policy(policy: &DmPolicy, session_type: &SessionType) -> bool {
+    !(policy == &DmPolicy::Disabled && matches!(session_type, SessionType::Direct))
+}
+
+pub fn passes_channel_allowlist(
+    allowlist: &[String],
+    session_type: &SessionType,
+    channel: &str,
+) -> bool {
+    allowlist.is_empty()
+        || matches!(session_type, SessionType::Direct)
+        || allowlist.iter().any(|c| c == channel)
+}
+
+pub fn passes_group_dm_allowlist(
+    allowed: Option<&std::collections::HashSet<String>>,
+    session_type: &SessionType,
+    channel: &str,
+) -> bool {
+    if !matches!(session_type, SessionType::Group) {
+        return true;
+    }
+    allowed.map_or(true, |set| set.contains(channel))
+}
+
+pub fn passes_user_blocklist(blocklist: &[String], user: &str) -> bool {
+    !blocklist.iter().any(|id| id == user)
+}
+
+pub fn passes_user_allowlist(allowlist: &[String], user: &str) -> bool {
+    allowlist.is_empty() || allowlist.iter().any(|id| id == user)
+}
+
+pub fn passes_per_channel_user_allowlist(
+    channel_user_allowlists: &HashMap<String, Vec<String>>,
+    channel: &str,
+    user: &str,
+) -> bool {
+    match channel_user_allowlists.get(channel) {
+        Some(allowed) => allowed.iter().any(|id| id == user),
+        None => true,
+    }
+}
+
+pub fn passes_require_mention(
+    require: bool,
+    session_type: &SessionType,
+    bot_user_id: Option<&str>,
+    text: &str,
+) -> bool {
+    if !require || matches!(session_type, SessionType::Direct) {
+        return true;
+    }
+    bot_user_id
+        .map(|id| text.contains(&format!("<@{}>", id)))
+        .unwrap_or(false)
+}
+
+/// Applies DM-pair, history_scope_parent, and dm_scope_main transformations
+/// to a raw session key.
+pub fn compute_session_key_chain(
+    base: &str,
+    session_type: &SessionType,
+    thread_ts: Option<&str>,
+    dm_pair_channel: Option<&str>,
+    history_scope_parent: bool,
+    dm_scope_main: bool,
+) -> String {
+    // DM pairing: override session_key to share history with the paired channel.
+    let key = if matches!(session_type, SessionType::Direct) {
+        if let Some(pair) = dm_pair_channel {
+            format!("slack:channel:{}", pair)
+        } else {
+            base.to_string()
+        }
+    } else {
+        base.to_string()
+    };
+
+    // history_scope_parent: collapse thread key to parent channel key.
+    let key = if history_scope_parent && thread_ts.is_some() && key.contains(":thread:") {
+        key[..key.find(":thread:").unwrap()].to_string()
+    } else {
+        key
+    };
+
+    // dm_scope_main: collapse all DMs to a single shared session.
+    if matches!(session_type, SessionType::Direct) && dm_scope_main {
+        "slack:dm:main".to_string()
+    } else {
+        key
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+pub async fn handle_inbound(msg: SlackInboundMessage, ctx: Arc<AgentContext>) {
+    // DM policy check — silently ignore direct messages when disabled.
+    if !passes_dm_policy(&ctx.config.dm_policy, &msg.session_type) {
+        tracing::debug!(user = %msg.user, "DM disabled by policy, dropping message");
+        return;
+    }
+
+    // DM pairing check — new users must be approved before chatting.
+    if ctx.config.dm_policy == DmPolicy::Pairing
+        && matches!(msg.session_type, SessionType::Direct)
+    {
+        if let Some(ref store) = ctx.pairing_store {
+            match store.get(&msg.user).await {
+                Ok(Some(entry)) => {
+                    let value = String::from_utf8_lossy(&entry).to_string();
+                    if value == "approved" {
+                        // User is approved — proceed normally.
+                    } else if let Some(code) = value.strip_prefix("pending:") {
+                        // User has a pending code — remind them.
+                        let reply = format!(
+                            "Your pairing code `{}` is still pending admin approval.",
+                            code
+                        );
+                        let outbound = SlackOutboundMessage {
+                            channel: msg.channel.clone(),
+                            text: reply,
+                            thread_ts: None,
+                            blocks: None,
+                            media_url: None,
+                            username: None,
+                            icon_url: None,
+                            icon_emoji: None,
+                        };
+                        let _ = publish_outbound(&ctx.js, ctx.account_id.as_deref(), &outbound).await;
+                        return;
+                    } else {
+                        // Unknown state — treat as unapproved, drop silently.
+                        return;
+                    }
+                }
+                Ok(None) => {
+                    // New user — generate a pairing code.
+                    let code = generate_pairing_code(&msg.user);
+                    let kv_value = format!("pending:{}", code);
+                    let _ = store
+                        .put(&msg.user, kv_value.clone().into())
+                        .await;
+                    let reply = format!(
+                        "To start chatting, share this pairing code with an admin: `{}`
+
+Once approved, you'll be able to use me normally.",
+                        code
+                    );
+                    let outbound = SlackOutboundMessage {
+                        channel: msg.channel.clone(),
+                        text: reply,
+                        thread_ts: None,
+                        blocks: None,
+                        media_url: None,
+                        username: None,
+                        icon_url: None,
+                        icon_emoji: None,
+                    };
+                    let _ = publish_outbound(&ctx.js, ctx.account_id.as_deref(), &outbound).await;
+                    return;
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, user = %msg.user, "Failed to look up pairing status, dropping DM");
+                    return;
+                }
+            }
+        }
+    }
+
+    // Channel allowlist check (DMs bypass this).
+    if !passes_channel_allowlist(&ctx.config.channel_allowlist, &msg.session_type, &msg.channel) {
+        tracing::debug!(channel = %msg.channel, "Channel not in allowlist, dropping message");
+        return;
+    }
+
+    // Group DM channel allowlist
+    if !passes_group_dm_allowlist(ctx.config.group_dm_channels.as_ref(), &msg.session_type, &msg.channel) {
+        tracing::debug!(channel = %msg.channel, "Ignoring group DM (not in group_dm_channels allowlist)");
+        return;
+    }
+
+    // User blocklist — silently drop blocked users.
+    if !passes_user_blocklist(&ctx.config.user_blocklist, &msg.user) {
+        tracing::debug!(user = %msg.user, "User is blocklisted, dropping message");
+        return;
+    }
+
+    // User allowlist — only process listed users when the list is non-empty.
+    if !passes_user_allowlist(&ctx.config.user_allowlist, &msg.user) {
+        tracing::debug!(user = %msg.user, "User not in allowlist, dropping message");
+        return;
+    }
+
+    // Per-channel user allowlist — if the channel has an entry, only those users can interact.
+    if !passes_per_channel_user_allowlist(&ctx.config.channel_user_allowlists, &msg.channel, &msg.user) {
+        tracing::debug!(
+            channel = %msg.channel,
+            user = %msg.user,
+            "User not in per-channel allowlist, dropping message"
+        );
+        return;
+    }
+
+    // requireMention: only respond in channels/groups when the bot is @mentioned.
+    if !passes_require_mention(
+        ctx.config.require_mention,
+        &msg.session_type,
+        ctx.config.bot_user_id.as_deref(),
+        &msg.text,
+    ) {
+        tracing::debug!(
+            channel = %msg.channel,
+            user = %msg.user,
+            "require_mention: bot not mentioned, dropping message"
+        );
+        return;
+    }
+
+    // Per-user rate limit check.
+    if !ctx.user_rate_limiter.check_and_record(&msg.user) {
+        tracing::warn!(user = %msg.user, "Rate limit exceeded, dropping message");
+        return;
+    }
+
+    if ctx.debounce_ms > 0 {
+        // Derive session key for debounce grouping (reuse msg.session_key if present,
+        // otherwise fall back to the channel).
+        let session_key = msg
+            .session_key
+            .clone()
+            .unwrap_or_else(|| msg.channel.clone());
+
+        // Cancel existing pending debounce for this session.
+        {
+            let mut map = ctx.session_debounce.lock().await;
+            if let Some(handle) = map.remove(&session_key) {
+                handle.abort();
+            }
+        }
+
+        // Spawn debounced processing.
+        let key = session_key.clone();
+        let ctx2 = ctx.clone();
+        let msg2 = msg;
+        let ms = ctx.debounce_ms;
+        let handle = tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
+            ctx2.session_debounce.lock().await.remove(&key);
+            process_inbound(msg2, ctx2).await;
+        });
+        ctx.session_debounce
+            .lock()
+            .await
+            .insert(session_key, handle.abort_handle());
+        return;
+    }
+
+    process_inbound(msg, ctx).await;
+}
+
+/// If `threshold` is set and `text` exceeds it, publishes a `SlackUploadRequest`
+/// and returns a short notice string. Otherwise returns `text` unchanged.
+async fn maybe_upload_response(
+    js: &JsContext,
+    account_id: Option<&str>,
+    text: &str,
+    threshold: Option<usize>,
+    channel: &str,
+    thread_ts: Option<&str>,
+) -> String {
+    let Some(limit) = threshold else {
+        return text.to_string();
+    };
+    if text.len() < limit {
+        return text.to_string();
+    }
+    let upload = SlackUploadRequest {
+        channel: channel.to_string(),
+        thread_ts: thread_ts.map(str::to_string),
+        filename: "response.md".to_string(),
+        content: text.to_string(),
+        title: None,
+    };
+    match publish_upload_request(js, account_id, &upload).await {
+        Ok(_) => "_(Response is too long — see attached file)_".to_string(),
+        Err(e) => {
+            tracing::warn!(error = %e, "Failed to publish upload request — sending inline");
+            text.to_string()
+        }
+    }
+}
+
+/// Fallback: call Claude without streaming, send response as a regular message.
+async fn fallback_claude_response(
+    claude: &LlmNatsClient,
+    history: &[ConversationMessage],
+    js: &JsContext,
+    account_id: Option<&str>,
+    channel: &str,
+    thread_ts: Option<&str>,
+    upload_threshold_chars: Option<usize>,
+) -> String {
+    match claude.stream_response(history.to_vec()).await {
+        Ok((mut rx, handle)) => {
+            // Drain the channel (stream runs in background task).
+            while rx.recv().await.is_some() {}
+            match handle.await {
+                Ok(Ok(text)) => {
+                    let send_text = maybe_upload_response(js, account_id, &text, upload_threshold_chars, channel, thread_ts).await;
+                    let outbound = SlackOutboundMessage {
+                        channel: channel.to_string(),
+                        text: send_text,
+                        thread_ts: thread_ts.map(str::to_string),
+                        blocks: None,
+                        media_url: None,
+                        username: None,
+                        icon_url: None,
+                        icon_emoji: None,
+                    };
+                    if let Err(e) = publish_outbound(js, account_id, &outbound).await {
+                        tracing::error!(error = %e, "Failed to publish fallback outbound");
+                    }
+                    text
+                }
+                Ok(Err(e)) => {
+                    tracing::error!(error = %e, "Claude task error in fallback");
+                    "Sorry, I encountered an error. Please try again.".to_string()
+                }
+                Err(e) => {
+                    tracing::error!(error = %e, "Claude task panicked in fallback");
+                    "Sorry, I encountered an error. Please try again.".to_string()
+                }
+            }
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "Claude stream_response failed in fallback");
+            "Sorry, I encountered an error. Please try again.".to_string()
+        }
+    }
+}
+
+// ── Slash command handler ─────────────────────────────────────────────────────
+
+/// Handles a slash command.
+///
+/// Calls Claude with the command text, then POSTs the response to the Slack
+/// `response_url` (webhook) — this avoids needing an active session for
+/// commands triggered outside a channel context.
+pub async fn handle_slash_command(ev: SlackSlashCommandEvent, ctx: Arc<AgentContext>) {
+    // Single-mode: ignore commands that don't match the configured slash command name.
+    if let Some(ref name) = ctx.config.slash_command_name {
+        // ev.command is like "/openclaw" — strip the leading slash to compare
+        let cmd = ev.command.trim_start_matches('/');
+        if !cmd.eq_ignore_ascii_case(name) {
+            tracing::debug!(command = %ev.command, "Ignoring slash command (not configured name)");
+            return;
+        }
+    }
+
+    tracing::info!(
+        command = %ev.command,
+        user_id = %ev.user_id,
+        channel_id = %ev.channel_id,
+        text = ?ev.text,
+        "Received slash command"
+    );
+
+    let text = ev.text.as_deref().unwrap_or("").trim().to_string();
+
+    // If options are configured and command text is empty, show argument menu.
+    if text.is_empty() && !ctx.config.slash_command_options.is_empty() {
+        let options = &ctx.config.slash_command_options;
+        let blocks = build_slash_menu_blocks(options);
+        let msg = SlackResponseUrlMessage {
+            response_url: ev.response_url.clone(),
+            text: "Choose an option:".to_string(),
+            ephemeral: ctx.config.slash_command_ephemeral,
+            blocks: Some(blocks),
+        };
+        if let Err(e) = publish_response_url(&ctx.js, ctx.account_id.as_deref(), &msg).await {
+            tracing::warn!(error = %e, "Failed to publish response_url blocks to NATS");
+        }
+        return;
+    }
+
+    // Special built-in: /command clear — wipe conversation history for this session.
+    // `/reset` is an alias for `/clear` — both wipe the conversation history.
+    if text.eq_ignore_ascii_case("clear") || text.eq_ignore_ascii_case("reset") {
+        // Derive session key from channel_id prefix (standard Slack conventions):
+        //   D… = IM / direct message  → keyed by user
+        //   G… = group DM (MPIM)      → keyed by channel
+        //   C… = regular channel      → keyed by channel
+        let session_key = if ev.channel_id.starts_with('D') {
+            format!("slack:dm:{}", ev.user_id)
+        } else if ev.channel_id.starts_with('G') {
+            format!("slack:group:{}", ev.channel_id)
+        } else {
+            format!("slack:channel:{}", ev.channel_id)
+        };
+        ctx.memory.clear(&session_key).await;
+        // Also evict the per-session lock so memory is fully reset.
+        ctx.session_locks.lock().unwrap().remove(&session_key);
+        tracing::info!(channel = %ev.channel_id, "Conversation history cleared via slash command");
+        let msg = SlackResponseUrlMessage {
+            response_url: ev.response_url.clone(),
+            text: "Conversation history cleared.".to_string(),
+            ephemeral: ctx.config.slash_command_ephemeral,
+            blocks: None,
+        };
+        if let Err(e) = publish_response_url(&ctx.js, ctx.account_id.as_deref(), &msg).await {
+            tracing::warn!(error = %e, "Failed to publish response_url to NATS");
+        }
+        return;
+    } else if text.eq_ignore_ascii_case("new") {
+        // Clear both possible session keys for this user/channel.
+        let channel_key = format!("slack:channel:{}", ev.channel_id);
+        let dm_key = format!("slack:dm:{}", ev.user_id);
+        ctx.memory.clear(&channel_key).await;
+        ctx.memory.clear(&dm_key).await;
+        {
+            let mut locks = ctx.session_locks.lock().unwrap();
+            locks.remove(&channel_key);
+            locks.remove(&dm_key);
+        }
+        let greeting = "History cleared. Ready for a new conversation! How can I help you?".to_string();
+        let msg = SlackResponseUrlMessage {
+            response_url: ev.response_url.clone(),
+            text: greeting,
+            ephemeral: ctx.config.slash_command_ephemeral,
+            blocks: None,
+        };
+        if let Err(e) = publish_response_url(&ctx.js, ctx.account_id.as_deref(), &msg).await {
+            tracing::warn!(error = %e, "Failed to publish response_url to NATS");
+        }
+        return;
+    }
+
+    // Pairing management: pair approve <code> / pair reject <code>
+    if text.starts_with("pair approve ") || text.starts_with("pair reject ") {
+        if let Some(ref store) = ctx.pairing_store {
+            let is_approve = text.starts_with("pair approve ");
+            let code = if is_approve {
+                text["pair approve ".len()..].trim().to_string()
+            } else {
+                text["pair reject ".len()..].trim().to_string()
+            };
+
+            if is_approve {
+                // Scan KV for a user with pending:<code>
+                let target_value = format!("pending:{}", code);
+                match store.keys().await {
+                    Ok(mut keys_stream) => {
+                        use futures::StreamExt as _;
+                        let mut found_user: Option<String> = None;
+                        while let Some(key_result) = keys_stream.next().await {
+                            if let Ok(key) = key_result {
+                                if let Ok(Some(val)) = store.get(&key).await {
+                                    let val_str = String::from_utf8_lossy(&val).to_string();
+                                    if val_str == target_value {
+                                        found_user = Some(key);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        let reply_text = if let Some(user_id) = found_user {
+                            let _ = store.put(&user_id, "approved".into()).await;
+                            "User approved.".to_string()
+                        } else {
+                            "No user found with that code.".to_string()
+                        };
+                        let msg = SlackResponseUrlMessage {
+                            response_url: ev.response_url.clone(),
+                            text: reply_text,
+                            ephemeral: ctx.config.slash_command_ephemeral,
+                            blocks: None,
+                        };
+                        if let Err(e) = publish_response_url(&ctx.js, ctx.account_id.as_deref(), &msg).await {
+                            tracing::warn!(error = %e, "Failed to publish response_url to NATS");
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "Failed to list pairing store keys");
+                        let msg = SlackResponseUrlMessage {
+                            response_url: ev.response_url.clone(),
+                            text: "Error accessing pairing store.".to_string(),
+                            ephemeral: ctx.config.slash_command_ephemeral,
+                            blocks: None,
+                        };
+                        if let Err(e2) = publish_response_url(&ctx.js, ctx.account_id.as_deref(), &msg).await {
+                            tracing::warn!(error = %e2, "Failed to publish response_url to NATS");
+                        }
+                    }
+                }
+            } else {
+                // Reject: find and delete the entry with this code
+                let target_value = format!("pending:{}", code);
+                match store.keys().await {
+                    Ok(mut keys_stream) => {
+                        use futures::StreamExt as _;
+                        let mut found_user: Option<String> = None;
+                        while let Some(key_result) = keys_stream.next().await {
+                            if let Ok(key) = key_result {
+                                if let Ok(Some(val)) = store.get(&key).await {
+                                    let val_str = String::from_utf8_lossy(&val).to_string();
+                                    if val_str == target_value {
+                                        found_user = Some(key);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        let reply_text = if let Some(user_id) = found_user {
+                            let _ = store.delete(&user_id).await;
+                            "User rejected.".to_string()
+                        } else {
+                            "No user found with that code.".to_string()
+                        };
+                        let msg = SlackResponseUrlMessage {
+                            response_url: ev.response_url.clone(),
+                            text: reply_text,
+                            ephemeral: ctx.config.slash_command_ephemeral,
+                            blocks: None,
+                        };
+                        if let Err(e) = publish_response_url(&ctx.js, ctx.account_id.as_deref(), &msg).await {
+                            tracing::warn!(error = %e, "Failed to publish response_url to NATS");
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "Failed to list pairing store keys");
+                        let msg = SlackResponseUrlMessage {
+                            response_url: ev.response_url.clone(),
+                            text: "Error accessing pairing store.".to_string(),
+                            ephemeral: ctx.config.slash_command_ephemeral,
+                            blocks: None,
+                        };
+                        if let Err(e2) = publish_response_url(&ctx.js, ctx.account_id.as_deref(), &msg).await {
+                            tracing::warn!(error = %e2, "Failed to publish response_url to NATS");
+                        }
+                    }
+                }
+            }
+        } else {
+            let msg = SlackResponseUrlMessage {
+                response_url: ev.response_url.clone(),
+                text: "Pairing is not enabled.".to_string(),
+                ephemeral: ctx.config.slash_command_ephemeral,
+                blocks: None,
+            };
+            if let Err(e) = publish_response_url(&ctx.js, ctx.account_id.as_deref(), &msg).await {
+                tracing::warn!(error = %e, "Failed to publish response_url to NATS");
+            }
+        }
+        return;
+    }
+
+    // /help: post an ephemeral usage message visible only to the invoking user.
+    if text.eq_ignore_ascii_case("help") {
+        let help_text = format!(
+            "Available commands:\n• `{cmd} clear` / `{cmd} reset` — clear conversation history\n• `{cmd} new` — start a new conversation\n• `{cmd} help` — show this help\n• `{cmd} <question>` — ask the assistant anything",
+            cmd = ev.command,
+        );
+        let ephemeral = SlackEphemeralMessage {
+            channel: ev.channel_id.clone(),
+            user: ev.user_id.clone(),
+            text: help_text,
+            thread_ts: None,
+            blocks: None,
+        };
+        if let Err(e) = publish_ephemeral_message(&ctx.js, ctx.account_id.as_deref(), &ephemeral).await {
+            tracing::warn!(error = %e, "Failed to publish ephemeral help message");
+        }
+        return;
+    }
+
+    let prompt = format!("{} {}", ev.command, text).trim().to_string();
+
+    let response_text = if let Some(claude) = &ctx.claude {
+        let messages = vec![ConversationMessage {
+            role: "user".to_string(),
+            content: prompt,
+            ts: None,
+            images: vec![],
+        }];
+        match claude.stream_response(messages).await {
+            Ok((mut rx, handle)) => {
+                while rx.recv().await.is_some() {}
+                match handle.await {
+                    Ok(Ok(text)) => text,
+                    Ok(Err(e)) => {
+                        tracing::error!(error = %e, "Claude error for slash command");
+                        format!("Error processing command: {e}")
+                    }
+                    Err(e) => {
+                        tracing::error!(error = %e, "Claude task panicked");
+                        "Internal error.".to_string()
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "Claude unavailable for slash command");
+                format!("Error: {e}")
+            }
+        }
+    } else {
+        format!("Command `{}` received: {}", ev.command, text)
+    };
+
+    // Publish the response to NATS — the bot will POST to the Slack response_url webhook.
+    let msg = SlackResponseUrlMessage {
+        response_url: ev.response_url.clone(),
+        text: response_text,
+        ephemeral: ctx.config.slash_command_ephemeral,
+        blocks: None,
+    };
+    if let Err(e) = publish_response_url(&ctx.js, ctx.account_id.as_deref(), &msg).await {
+        tracing::warn!(error = %e, "Failed to publish response_url to NATS");
+    }
+}
+
+// ── Slash command menu helpers ────────────────────────────────────────────────
+
+/// Build Block Kit JSON for a slash command argument menu.
+/// Renders as buttons (≤5 options) or a static select (>5 options).
+fn build_slash_menu_blocks(options: &[crate::config::SlashCommandOption]) -> String {
+    if options.len() <= 5 {
+        // Render as buttons
+        let elements: Vec<serde_json::Value> = options.iter().enumerate().map(|(i, opt)| {
+            serde_json::json!({
+                "type": "button",
+                "text": {"type": "plain_text", "text": opt.label, "emoji": true},
+                "value": opt.payload,
+                "action_id": format!("slash_option_{}", i)
+            })
+        }).collect();
+        serde_json::json!([{"type": "actions", "elements": elements}]).to_string()
+    } else {
+        // Render as static select
+        let select_options: Vec<serde_json::Value> = options.iter().map(|opt| {
+            serde_json::json!({
+                "text": {"type": "plain_text", "text": opt.label, "emoji": true},
+                "value": opt.payload
+            })
+        }).collect();
+        serde_json::json!([{
+            "type": "actions",
+            "elements": [{
+                "type": "static_select",
+                "placeholder": {"type": "plain_text", "text": "Choose an option", "emoji": true},
+                "options": select_options,
+                "action_id": "slash_option_select"
+            }]
+        }]).to_string()
+    }
+}
+
+// ── Session key derivation from raw channel/user fields ──────────────────────
+
+/// Derive a session key from a raw Slack channel ID and optional user/thread
+/// fields. Returns `None` when the key cannot be determined (e.g. a DM event
+/// without a user_id).
+fn derive_session_key_for_event(
+    channel: &str,
+    user: Option<&str>,
+    thread_ts: Option<&str>,
+) -> Option<String> {
+    if channel.starts_with('D') {
+        // DM: session is per-user, not per-channel
+        Some(format!("slack:dm:{}", user?))
+    } else if channel.starts_with('G') {
+        Some(match thread_ts {
+            Some(tts) => format!("slack:group:{}:thread:{}", channel, tts),
+            None => format!("slack:group:{}", channel),
+        })
+    } else {
+        Some(match thread_ts {
+            Some(tts) => format!("slack:channel:{}:thread:{}", channel, tts),
+            None => format!("slack:channel:{}", channel),
+        })
+    }
+}
+
+// ── Remaining event handlers ──────────────────────────────────────────────────
+
+pub async fn handle_reaction(ev: SlackReactionEvent, ctx: Arc<AgentContext>) {
+    if !ctx.config.actions_reactions {
+        tracing::debug!("actions_reactions disabled, skipping reaction event");
+        return;
+    }
+    tracing::info!(
+        reaction = %ev.reaction,
+        user = %ev.user,
+        added = %ev.added,
+        channel = ?ev.channel,
+        item_ts = ?ev.item_ts,
+        "Received reaction event"
+    );
+    match ev.reaction.as_str() {
+        // Regenerate the last bot response.
+        "arrows_counterclockwise" if ev.added => {
+            let Some(channel) = ev.channel.as_deref() else { return };
+            let session_key =
+                derive_session_key_for_event(channel, Some(ev.user.as_str()), None)
+                    .unwrap_or_else(|| format!("slack:channel:{}", channel));
+
+            let mut history = ctx.memory.load(&session_key).await;
+            // Remove the last assistant turn so it gets re-generated cleanly.
+            while history.last().map(|m| m.role.as_str()) == Some("assistant") {
+                history.pop();
+            }
+            let last_user_text = match history.last() {
+                Some(m) if m.role == "user" => m.content.clone(),
+                _ => {
+                    tracing::debug!(
+                        session_key = %session_key,
+                        "Regenerate: no user message in history"
+                    );
+                    return;
+                }
+            };
+            // Remove the user turn too — handle_inbound will re-add it.
+            history.pop();
+            ctx.memory.save(&session_key, &history).await;
+
+            let session_type = if channel.starts_with('D') {
+                SessionType::Direct
+            } else if channel.starts_with('G') {
+                SessionType::Group
+            } else {
+                SessionType::Channel
+            };
+
+            // If the previous response was uploaded as a file, delete it before regenerating.
+            let cache_key = match ev.item_ts.as_deref() {
+                Some(ts) => format!("{}:{}", channel, ts),
+                None => channel.to_string(),
+            };
+            if let Some(file_id) = ctx.file_id_cache.lock().await.remove(&cache_key) {
+                let del = SlackDeleteFile { file_id };
+                if let Err(e) = publish_delete_file(&ctx.js, ctx.account_id.as_deref(), &del).await {
+                    tracing::warn!(error = %e, "Failed to publish delete_file on regenerate");
+                }
+            }
+
+            let inbound = SlackInboundMessage {
+                channel: channel.to_string(),
+                user: ev.user.clone(),
+                text: last_user_text,
+                ts: ev.event_ts.clone(),
+                event_ts: None,
+                thread_ts: None,
+                parent_user_id: None,
+                session_type,
+                source: Some("regenerate".to_string()),
+                session_key: Some(session_key),
+                files: vec![],
+                attachments: vec![],
+                display_name: None,
+            };
+            handle_inbound(inbound, ctx).await;
+        }
+
+        // Remove the reacted-to message (and its paired response) from history.
+        "wastebasket" if ev.added => {
+            let Some(channel) = ev.channel.as_deref() else { return };
+            let session_key =
+                derive_session_key_for_event(channel, Some(ev.user.as_str()), None)
+                    .unwrap_or_else(|| format!("slack:channel:{}", channel));
+
+            let mut history = ctx.memory.load(&session_key).await;
+            let item_ts = ev.item_ts.as_deref();
+
+            // Try to find the matching user turn by ts.
+            let idx = item_ts
+                .and_then(|ts| history.iter().position(|m| m.ts.as_deref() == Some(ts)));
+
+            if let Some(idx) = idx {
+                // Remove the user turn and the assistant turn that immediately follows.
+                if idx + 1 < history.len() && history[idx + 1].role == "assistant" {
+                    history.remove(idx + 1);
+                }
+                history.remove(idx);
+                tracing::info!(
+                    session_key = %session_key,
+                    ts = ?item_ts,
+                    "Removed message pair from history"
+                );
+            } else {
+                // No exact match — remove the most recent pair.
+                if history.last().map(|m| m.role.as_str()) == Some("assistant") {
+                    history.pop();
+                }
+                if history.last().map(|m| m.role.as_str()) == Some("user") {
+                    history.pop();
+                }
+                tracing::info!(
+                    session_key = %session_key,
+                    "Removed last message pair from history (no ts match)"
+                );
+            }
+            ctx.memory.save(&session_key, &history).await;
+        }
+
+        // Positive feedback.
+        "thumbsup" | "+1" if ev.added => {
+            tracing::info!(
+                user = %ev.user,
+                ts = ?ev.item_ts,
+                "Positive feedback received"
+            );
+            // Only ack reactions on the bot's own messages when bot_user_id is configured.
+            let on_bot_message = ctx.config.bot_user_id.as_deref()
+                .map(|bot_id| ev.item_user.as_deref() == Some(bot_id))
+                .unwrap_or(true); // if not configured, ack any message
+
+            if ctx.config.reaction_notifications && on_bot_message {
+                if let (Some(channel), Some(ts)) = (&ev.channel, &ev.item_ts) {
+                    let ack = SlackOutboundMessage {
+                        channel: channel.clone(),
+                        text: ":thumbsup: Thanks for the positive feedback!".to_string(),
+                        thread_ts: Some(ts.clone()),
+                        blocks: None,
+                        media_url: None,
+                        username: None,
+                        icon_url: None,
+                        icon_emoji: None,
+                    };
+                    let _ = publish_outbound(&ctx.js, ctx.account_id.as_deref(), &ack).await;
+                }
+            }
+        }
+
+        // Negative feedback.
+        "thumbsdown" | "-1" if ev.added => {
+            tracing::info!(
+                user = %ev.user,
+                ts = ?ev.item_ts,
+                "Negative feedback received"
+            );
+            // Only ack reactions on the bot's own messages when bot_user_id is configured.
+            let on_bot_message = ctx.config.bot_user_id.as_deref()
+                .map(|bot_id| ev.item_user.as_deref() == Some(bot_id))
+                .unwrap_or(true); // if not configured, ack any message
+
+            if ctx.config.reaction_notifications && on_bot_message {
+                if let (Some(channel), Some(ts)) = (&ev.channel, &ev.item_ts) {
+                    let ack = SlackOutboundMessage {
+                        channel: channel.clone(),
+                        text: ":thumbsdown: Thanks for the feedback — I'll try to do better!".to_string(),
+                        thread_ts: Some(ts.clone()),
+                        blocks: None,
+                        media_url: None,
+                        username: None,
+                        icon_url: None,
+                        icon_emoji: None,
+                    };
+                    let _ = publish_outbound(&ctx.js, ctx.account_id.as_deref(), &ack).await;
+                }
+            }
+        }
+
+        _ => {}
+    }
+}
+
+pub async fn handle_message_changed(ev: SlackMessageChangedEvent, ctx: Arc<AgentContext>) {
+    tracing::info!(
+        channel = %ev.channel,
+        ts = %ev.ts,
+        new_text = ?ev.new_text,
+        "Received message_changed event"
+    );
+
+    let new_text = match ev.new_text.as_deref() {
+        Some(t) if !t.is_empty() => t.to_string(),
+        _ => return,
+    };
+
+    let Some(session_key) =
+        derive_session_key_for_event(&ev.channel, ev.user.as_deref(), ev.thread_ts.as_deref())
+    else {
+        tracing::debug!(
+            channel = %ev.channel,
+            "message_changed: cannot derive session key (DM without user_id?), skipping"
+        );
+        return;
+    };
+
+    let mut history = ctx.memory.load(&session_key).await;
+    if let Some(entry) = history
+        .iter_mut()
+        .find(|m| m.role == "user" && m.ts.as_deref() == Some(ev.ts.as_str()))
+    {
+        entry.content = new_text;
+        ctx.memory.save(&session_key, &history).await;
+        tracing::debug!(session_key = %session_key, ts = %ev.ts, "Updated history entry for edited message");
+    } else {
+        tracing::debug!(session_key = %session_key, ts = %ev.ts, "message_changed: no matching history entry");
+    }
+}
+
+pub async fn handle_message_deleted(ev: SlackMessageDeletedEvent, ctx: Arc<AgentContext>) {
+    tracing::info!(
+        channel = %ev.channel,
+        deleted_ts = %ev.deleted_ts,
+        "Received message_deleted event"
+    );
+
+    // DM session keys require the user_id, which is absent from delete events.
+    if ev.channel.starts_with('D') {
+        tracing::debug!(channel = %ev.channel, "message_deleted in DM — skipping (no user_id in event)");
+        return;
+    }
+
+    let Some(session_key) =
+        derive_session_key_for_event(&ev.channel, None, ev.thread_ts.as_deref())
+    else {
+        return;
+    };
+
+    let mut history = ctx.memory.load(&session_key).await;
+    let before = history.len();
+    history.retain(|m| m.ts.as_deref() != Some(ev.deleted_ts.as_str()));
+
+    if history.len() < before {
+        ctx.memory.save(&session_key, &history).await;
+        tracing::debug!(session_key = %session_key, ts = %ev.deleted_ts, "Removed deleted message from history");
+    } else {
+        tracing::debug!(session_key = %session_key, ts = %ev.deleted_ts, "message_deleted: no matching history entry");
+    }
+}
+
+pub async fn handle_thread_broadcast(ev: SlackThreadBroadcastEvent, ctx: Arc<AgentContext>) {
+    tracing::info!(
+        channel = %ev.channel,
+        user = %ev.user,
+        thread_ts = %ev.thread_ts,
+        "Received thread_broadcast event — routing to inbound handler"
+    );
+    // A thread broadcast is a thread reply also sent to the channel.
+    // Route it through the normal inbound pipeline so Claude can respond.
+    let session_key = format!("slack:channel:{}:thread:{}", ev.channel, ev.thread_ts);
+    let inbound = SlackInboundMessage {
+        channel: ev.channel,
+        user: ev.user,
+        text: ev.text,
+        ts: ev.ts,
+        event_ts: ev.event_ts,
+        thread_ts: Some(ev.thread_ts),
+        parent_user_id: None,
+        session_type: SessionType::Channel,
+        source: Some("thread_broadcast".to_string()),
+        session_key: Some(session_key),
+        files: vec![],
+        attachments: vec![],
+        display_name: None,
+    };
+    handle_inbound(inbound, ctx).await;
+}
+
+pub async fn handle_block_action(ev: SlackBlockActionEvent, ctx: Arc<AgentContext>) {
+    tracing::info!(
+        action_id = %ev.action_id,
+        user_id = %ev.user_id,
+        channel_id = ?ev.channel_id,
+        message_ts = ?ev.message_ts,
+        "Received block action"
+    );
+    match ev.action_id.as_str() {
+        "clear_history" => {
+            let session_key = match ev.channel_id.as_deref() {
+                Some(ch) if ch.starts_with('D') => format!("slack:dm:{}", ev.user_id),
+                Some(ch) if ch.starts_with('G') => format!("slack:group:{}", ch),
+                Some(ch) => format!("slack:channel:{}", ch),
+                None => format!("slack:dm:{}", ev.user_id), // triggered from App Home
+            };
+            ctx.memory.clear(&session_key).await;
+            ctx.session_locks.lock().unwrap().remove(&session_key);
+            tracing::info!(
+                session_key = %session_key,
+                user = %ev.user_id,
+                "History cleared via block action"
+            );
+            if ev.channel_id.is_none() {
+                refresh_app_home(&ctx, &ev.user_id).await;
+            }
+        }
+        "open_settings" => {
+            let trigger_id = match ev.trigger_id {
+                Some(t) => t,
+                None => {
+                    tracing::warn!(user = %ev.user_id, "open_settings without trigger_id");
+                    return;
+                }
+            };
+            let settings = ctx.user_settings.load(&ev.user_id).await;
+            let view = build_settings_modal(&settings, &ctx.config.claude_model);
+            let req = SlackViewOpenRequest { trigger_id, view };
+            if let Err(e) = publish_view_open(&ctx.js, ctx.account_id.as_deref(), &req).await {
+                tracing::error!(error = %e, "Failed to publish views.open for settings");
+            }
+        }
+        "feedback_positive" | "feedback_negative" => {
+            let positive = ev.action_id == "feedback_positive";
+            tracing::info!(
+                user = %ev.user_id,
+                message_ts = ?ev.message_ts,
+                positive,
+                "Response feedback received"
+            );
+            // Future: persist feedback to a dedicated NATS KV bucket.
+        }
+        _ if ev.action_id.starts_with("slash_option_") => {
+            let selected_text = ev.value.clone().unwrap_or_default();
+            if !selected_text.is_empty() {
+                let channel = ev.channel_id.clone().unwrap_or_default();
+                if !channel.is_empty() {
+                    let session_type = if channel.starts_with('D') {
+                        SessionType::Direct
+                    } else if channel.starts_with('G') {
+                        SessionType::Group
+                    } else {
+                        SessionType::Channel
+                    };
+                    let synthetic = SlackInboundMessage {
+                        channel: channel.clone(),
+                        user: ev.user_id.clone(),
+                        text: selected_text,
+                        ts: ev.message_ts.clone().unwrap_or_default(),
+                        event_ts: None,
+                        thread_ts: None,
+                        parent_user_id: None,
+                        session_type,
+                        source: Some("slash_menu".to_string()),
+                        session_key: None,
+                        files: vec![],
+                        attachments: vec![],
+                        display_name: None,
+                    };
+                    handle_inbound(synthetic, ctx).await;
+                } else {
+                    tracing::warn!(action_id = %ev.action_id, "slash_option action missing channel_id");
+                }
+            }
+        }
+        _ => {
+            tracing::debug!(action_id = %ev.action_id, "Unhandled block action");
+        }
+    }
+}
+
+pub async fn handle_member(ev: SlackMemberEvent, ctx: Arc<AgentContext>) {
+    tracing::info!(
+        user = %ev.user,
+        channel = %ev.channel,
+        joined = %ev.joined,
+        "Received member event"
+    );
+    if ev.joined
+        && let Some(ref msg) = ctx.config.welcome_message
+    {
+        let outbound = SlackOutboundMessage {
+            channel: ev.channel.clone(),
+            text: msg.clone(),
+            thread_ts: None,
+            blocks: None,
+            media_url: None,
+            username: None,
+            icon_url: None,
+            icon_emoji: None,
+        };
+        if let Err(e) = publish_outbound(&ctx.js, ctx.account_id.as_deref(), &outbound).await {
+            tracing::warn!(
+                error = %e,
+                channel = %ev.channel,
+                "Failed to publish welcome message"
+            );
+        }
+    }
+}
+
+pub async fn handle_channel(ev: SlackChannelEvent) {
+    tracing::info!(
+        channel_id = %ev.channel_id,
+        channel_name = ?ev.channel_name,
+        kind = ?ev.kind,
+        "Received channel event"
+    );
+}
+
+pub async fn handle_app_home(ev: SlackAppHomeOpenedEvent, ctx: Arc<AgentContext>) {
+    tracing::info!(
+        user = %ev.user,
+        tab = %ev.tab,
+        "Received app_home_opened event"
+    );
+    // Only render the Home tab, not the Messages tab.
+    if ev.tab == "messages" {
+        return;
+    }
+    refresh_app_home(&ctx, &ev.user).await;
+}
+
+pub async fn handle_view_submission(ev: SlackViewSubmissionEvent, ctx: Arc<AgentContext>) {
+    tracing::info!(
+        user_id = %ev.user_id,
+        view_id = %ev.view_id,
+        callback_id = ?ev.callback_id,
+        "Received view_submission event"
+    );
+    match ev.callback_id.as_deref() {
+        Some("user_settings") => {
+            let model = ev
+                .values
+                .pointer("/values/model_block/model_select/selected_option/value")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(str::to_string);
+            let system_prompt = ev
+                .values
+                .pointer("/values/system_prompt_block/system_prompt_input/value")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(str::to_string);
+            let settings = UserSettings { model, system_prompt };
+            ctx.user_settings.save(&ev.user_id, &settings).await;
+            tracing::info!(user = %ev.user_id, model = ?settings.model, "User settings saved");
+            refresh_app_home(&ctx, &ev.user_id).await;
+        }
+        other => {
+            tracing::debug!(callback_id = ?other, "Unhandled view submission");
+        }
+    }
+}
+
+pub async fn handle_view_closed(ev: SlackViewClosedEvent, _ctx: Arc<AgentContext>) {
+    tracing::info!(
+        user_id = %ev.user_id,
+        view_id = %ev.view_id,
+        callback_id = ?ev.callback_id,
+        "View closed without submission"
+    );
+    // No action needed — just log. Future: could clean up pending state.
+}
+
+pub async fn handle_pin(ev: SlackPinEvent, ctx: Arc<AgentContext>) {
+    if !ctx.config.actions_pins {
+        tracing::debug!("actions_pins disabled, skipping pin event");
+        return;
+    }
+    let add = matches!(ev.kind, PinEventKind::Added);
+    tracing::info!(channel = %ev.channel, item_ts = ?ev.item_ts, added = add, "Pin event");
+    if let Some(ref ts) = ev.item_ts {
+        let action = SlackReactionAction {
+            channel: ev.channel.clone(),
+            ts: ts.clone(),
+            reaction: "pushpin".to_string(),
+            add,
+        };
+        if let Err(e) = publish_reaction_action(&ctx.js, ctx.account_id.as_deref(), &action).await {
+            tracing::warn!(error = %e, "Failed to publish pin reaction action");
+        }
+    }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/// Build the content string sent to Claude.
+///
+/// For text-like files where slack-bot was able to download the content, the
+/// full text is embedded between fences so Claude can read and reason about it.
+/// For binary or oversized files, only metadata (name + MIME type) is included.
+///
+/// Non-empty attachments are appended as an `[Attachments: ...]` block. Each
+/// attachment contributes its `text` field if present, or its `fallback` if
+/// `text` is absent. Attachments with neither field are skipped.
+fn build_message_content(text: &str, files: &[SlackFile], attachments: &[SlackAttachment]) -> String {
+    let mut content = text.to_string();
+
+    if !files.is_empty() {
+        content.push_str("\n\n[Attached files:");
+        for f in files {
+            let name = f.name.as_deref().unwrap_or("unknown");
+            let mime = f.mimetype.as_deref().unwrap_or("unknown type");
+            if let Some(ref file_text) = f.content {
+                content.push_str(&format!(
+                    "\n- {} ({}):\n```\n{}\n```",
+                    name, mime, file_text
+                ));
+            } else {
+                content.push_str(&format!("\n- {} ({})", name, mime));
+            }
+        }
+        content.push(']');
+    }
+
+    // Build the attachments block, skipping entries with no displayable text.
+    let attachment_lines: Vec<&str> = attachments
+        .iter()
+        .filter_map(|a| {
+            a.text
+                .as_deref()
+                .or_else(|| a.fallback.as_deref())
+                .filter(|s| !s.is_empty())
+        })
+        .collect();
+
+    if !attachment_lines.is_empty() {
+        content.push_str("\n\n[Attachments:");
+        for line in attachment_lines {
+            content.push_str(&format!("\n- {}", line));
+        }
+        content.push(']');
+    }
+
+    content
+}
+
+/// Generate a 6-character uppercase alphanumeric pairing code from user_id + timestamp.
+/// Uses DefaultHasher to avoid a `rand` dependency.
+fn generate_pairing_code(user_id: &str) -> String {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+
+    let mut hasher = DefaultHasher::new();
+    user_id.hash(&mut hasher);
+    ts.hash(&mut hasher);
+    let hash = hasher.finish();
+
+    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    let mut code = String::with_capacity(6);
+    let mut h = hash;
+    for _ in 0..6 {
+        code.push(ALPHABET[(h as usize) % ALPHABET.len()] as char);
+        h = h.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+    }
+    code
+}
+
+/// Parse manual reply-targeting directives from the message text.
+///
+/// Directives are stripped from the returned text:
+/// - `[[reply_to_current]]`    — thread the reply under the message's own `ts`
+/// - `[[reply_to:<ts>]]`       — thread the reply under a specific `ts`
+fn extract_reply_target(text: &str, current_ts: &str) -> (String, Option<String>) {
+    if let Some(idx) = text.find("[[reply_to_current]]") {
+        let cleaned = (text[..idx].to_string() + &text[idx + "[[reply_to_current]]".len()..])
+            .trim()
+            .to_string();
+        return (cleaned, Some(current_ts.to_string()));
+    }
+    if let Some(start) = text.find("[[reply_to:") {
+        let after = &text[start + "[[reply_to:".len()..];
+        if let Some(end) = after.find("]]") {
+            let ts = after[..end].to_string();
+            let full_tag = format!("[[reply_to:{ts}]]");
+            let cleaned = text.replacen(&full_tag, "", 1).trim().to_string();
+            return (cleaned, Some(ts));
+        }
+    }
+    (text.to_string(), None)
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::ReplyToMode;
+
+    // ── UserRateLimiter ───────────────────────────────────────────────────────
+
+    #[test]
+    fn rate_limiter_disabled_when_zero() {
+        let rl = UserRateLimiter::new(0);
+        for _ in 0..100 {
+            assert!(rl.check_and_record("U1"), "limit=0 should always allow");
+        }
+    }
+
+    #[test]
+    fn rate_limiter_allows_within_limit() {
+        let rl = UserRateLimiter::new(3);
+        assert!(rl.check_and_record("U1"));
+        assert!(rl.check_and_record("U1"));
+        assert!(rl.check_and_record("U1"));
+    }
+
+    #[test]
+    fn rate_limiter_blocks_when_over_limit() {
+        let rl = UserRateLimiter::new(3);
+        assert!(rl.check_and_record("U1"));
+        assert!(rl.check_and_record("U1"));
+        assert!(rl.check_and_record("U1"));
+        assert!(!rl.check_and_record("U1"), "4th call should be blocked");
+    }
+
+    #[test]
+    fn rate_limiter_different_users_independent() {
+        let rl = UserRateLimiter::new(2);
+        assert!(rl.check_and_record("A"));
+        assert!(rl.check_and_record("A"));
+        // A is now at limit.
+        assert!(!rl.check_and_record("A"), "A should be blocked");
+        // B should still be allowed.
+        assert!(rl.check_and_record("B"), "B should be unaffected by A's limit");
+        assert!(rl.check_and_record("B"), "B's 2nd call should be allowed");
+        assert!(!rl.check_and_record("B"), "B's 3rd call should be blocked");
+    }
+
+    // ── derive_session_key_for_event ──────────────────────────────────────────
+
+    #[test]
+    fn session_key_dm_with_user() {
+        assert_eq!(
+            derive_session_key_for_event("D123", Some("U1"), None),
+            Some("slack:dm:U1".to_string())
+        );
+    }
+
+    #[test]
+    fn session_key_dm_without_user_returns_none() {
+        assert_eq!(derive_session_key_for_event("D123", None, None), None);
+    }
+
+    #[test]
+    fn session_key_group_no_thread() {
+        assert_eq!(
+            derive_session_key_for_event("G123", Some("U1"), None),
+            Some("slack:group:G123".to_string())
+        );
+    }
+
+    #[test]
+    fn session_key_group_with_thread() {
+        assert_eq!(
+            derive_session_key_for_event("G123", None, Some("1.0")),
+            Some("slack:group:G123:thread:1.0".to_string())
+        );
+    }
+
+    #[test]
+    fn session_key_channel_no_thread() {
+        assert_eq!(
+            derive_session_key_for_event("C123", None, None),
+            Some("slack:channel:C123".to_string())
+        );
+    }
+
+    #[test]
+    fn session_key_channel_with_thread() {
+        assert_eq!(
+            derive_session_key_for_event("C123", None, Some("9.0")),
+            Some("slack:channel:C123:thread:9.0".to_string())
+        );
+    }
+
+    // ── resolve_reply_thread_ts ───────────────────────────────────────────────
+
+    #[test]
+    fn reply_to_off_returns_none() {
+        assert_eq!(
+            resolve_reply_thread_ts(&ReplyToMode::Off, "1.0", Some("2.0")),
+            None
+        );
+    }
+
+    #[test]
+    fn reply_to_first_uses_incoming_thread_ts() {
+        assert_eq!(
+            resolve_reply_thread_ts(&ReplyToMode::First, "1.0", Some("2.0")),
+            Some("2.0".to_string())
+        );
+    }
+
+    #[test]
+    fn reply_to_first_falls_back_to_message_ts() {
+        assert_eq!(
+            resolve_reply_thread_ts(&ReplyToMode::First, "1.0", None),
+            Some("1.0".to_string())
+        );
+    }
+
+    #[test]
+    fn reply_to_all_always_uses_message_ts() {
+        assert_eq!(
+            resolve_reply_thread_ts(&ReplyToMode::All, "1.0", Some("2.0")),
+            Some("1.0".to_string())
+        );
+        assert_eq!(
+            resolve_reply_thread_ts(&ReplyToMode::All, "1.0", None),
+            Some("1.0".to_string())
+        );
+    }
+
+    // ── build_message_content ─────────────────────────────────────────────────
+
+    fn make_attachment(text: Option<&str>, fallback: Option<&str>) -> SlackAttachment {
+        SlackAttachment {
+            text: text.map(str::to_string),
+            fallback: fallback.map(str::to_string),
+            pretext: None,
+            author_name: None,
+            from_url: None,
+            image_url: None,
+            thumb_url: None,
+            channel_id: None,
+            channel_name: None,
+            ts: None,
+            files: vec![],
+        }
+    }
+
+    #[test]
+    fn no_files_returns_text_unchanged() {
+        assert_eq!(build_message_content("hello", &[], &[]), "hello");
+    }
+
+    #[test]
+    fn files_appended_to_content() {
+        let files = vec![SlackFile {
+            id: Some("F1".into()),
+            name: Some("photo.png".into()),
+            mimetype: Some("image/png".into()),
+            url_private: None,
+            url_private_download: None,
+            size: None,
+            content: None,
+            base64_content: None,
+        }];
+        let result = build_message_content("look at this", &files, &[]);
+        assert!(result.starts_with("look at this"));
+        assert!(result.contains("photo.png"));
+        assert!(result.contains("image/png"));
+    }
+
+    #[test]
+    fn files_with_unknown_fields_use_fallback() {
+        let files = vec![SlackFile {
+            id: None,
+            name: None,
+            mimetype: None,
+            url_private: None,
+            url_private_download: None,
+            size: None,
+            content: None,
+            base64_content: None,
+        }];
+        let result = build_message_content("hi", &files, &[]);
+        assert!(result.contains("unknown"));
+        assert!(result.contains("unknown type"));
+    }
+
+    #[test]
+    fn attachments_with_text_are_included() {
+        let attachments = vec![make_attachment(Some("This is the attachment text"), None)];
+        let result = build_message_content("msg", &[], &attachments);
+        assert!(result.contains("[Attachments:"));
+        assert!(result.contains("- This is the attachment text"));
+    }
+
+    #[test]
+    fn attachments_with_fallback_only_are_included() {
+        let attachments = vec![make_attachment(None, Some("fallback text here"))];
+        let result = build_message_content("msg", &[], &attachments);
+        assert!(result.contains("[Attachments:"));
+        assert!(result.contains("- fallback text here"));
+    }
+
+    #[test]
+    fn attachments_with_text_prefer_text_over_fallback() {
+        let attachments = vec![make_attachment(
+            Some("primary text"),
+            Some("fallback text"),
+        )];
+        let result = build_message_content("msg", &[], &attachments);
+        assert!(result.contains("- primary text"));
+        assert!(!result.contains("fallback text"));
+    }
+
+    #[test]
+    fn attachments_with_neither_text_nor_fallback_are_skipped() {
+        let attachments = vec![make_attachment(None, None)];
+        let result = build_message_content("msg", &[], &attachments);
+        assert!(!result.contains("[Attachments:"));
+        assert_eq!(result, "msg");
+    }
+
+    #[test]
+    fn empty_attachments_vec_appends_no_block() {
+        let result = build_message_content("hello", &[], &[]);
+        assert!(!result.contains("[Attachments:"));
+        assert_eq!(result, "hello");
+    }
+
+    #[test]
+    fn mix_of_files_and_attachments() {
+        let files = vec![SlackFile {
+            id: Some("F2".into()),
+            name: Some("doc.txt".into()),
+            mimetype: Some("text/plain".into()),
+            url_private: None,
+            url_private_download: None,
+            size: None,
+            content: Some("file contents".into()),
+            base64_content: None,
+        }];
+        let attachments = vec![make_attachment(Some("attachment body"), None)];
+        let result = build_message_content("base text", &files, &attachments);
+        assert!(result.starts_with("base text"));
+        assert!(result.contains("[Attached files:"));
+        assert!(result.contains("doc.txt"));
+        assert!(result.contains("file contents"));
+        assert!(result.contains("[Attachments:"));
+        assert!(result.contains("- attachment body"));
+        // Files block must come before Attachments block.
+        let files_pos = result.find("[Attached files:").unwrap();
+        let attachments_pos = result.find("[Attachments:").unwrap();
+        assert!(files_pos < attachments_pos);
+    }
+
+    // ── generate_pairing_code ─────────────────────────────────────────────────
+
+    #[test]
+    fn pairing_code_is_six_chars() {
+        let code = generate_pairing_code("U1");
+        assert_eq!(code.len(), 6);
+    }
+
+    #[test]
+    fn pairing_code_chars_are_uppercase_alphanumeric() {
+        let code = generate_pairing_code("U123");
+        assert!(
+            code.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit()),
+            "unexpected character in code: {code}"
+        );
+    }
+
+    #[test]
+    fn pairing_code_different_users_produce_different_codes() {
+        let a = generate_pairing_code("U_alice");
+        let b = generate_pairing_code("U_bob");
+        // Two different users must not share the same deterministic code.
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn pairing_code_is_stable_for_same_input_within_same_ns() {
+        // The code includes a nanosecond timestamp so it changes over time —
+        // we just verify it returns a 6-character uppercase string consistently.
+        let code = generate_pairing_code("U_test");
+        assert_eq!(code.len(), 6);
+        assert!(code.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit()));
+    }
+
+    // ── build_slash_menu_blocks ───────────────────────────────────────────────
+
+    fn make_slash_options(n: usize) -> Vec<crate::config::SlashCommandOption> {
+        (0..n)
+            .map(|i| crate::config::SlashCommandOption {
+                label: format!("Option {i}"),
+                payload: format!("payload_{i}"),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn slash_menu_with_few_options_renders_buttons() {
+        let options = make_slash_options(3);
+        let json = build_slash_menu_blocks(&options);
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let block = &parsed[0];
+        assert_eq!(block["type"], "actions");
+        let elements = block["elements"].as_array().unwrap();
+        assert_eq!(elements.len(), 3);
+        assert_eq!(elements[0]["type"], "button");
+    }
+
+    #[test]
+    fn slash_menu_with_exactly_five_options_renders_buttons() {
+        let options = make_slash_options(5);
+        let json = build_slash_menu_blocks(&options);
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let elements = parsed[0]["elements"].as_array().unwrap();
+        assert_eq!(elements[0]["type"], "button");
+    }
+
+    #[test]
+    fn slash_menu_with_six_options_renders_static_select() {
+        let options = make_slash_options(6);
+        let json = build_slash_menu_blocks(&options);
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let elements = parsed[0]["elements"].as_array().unwrap();
+        assert_eq!(elements[0]["type"], "static_select");
+    }
+
+    #[test]
+    fn slash_menu_buttons_have_correct_labels_and_values() {
+        let options = make_slash_options(2);
+        let json = build_slash_menu_blocks(&options);
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let elements = parsed[0]["elements"].as_array().unwrap();
+        assert_eq!(elements[0]["text"]["text"], "Option 0");
+        assert_eq!(elements[0]["value"], "payload_0");
+        assert_eq!(elements[1]["text"]["text"], "Option 1");
+        assert_eq!(elements[1]["value"], "payload_1");
+    }
+
+    #[test]
+    fn slash_menu_select_contains_all_options() {
+        let options = make_slash_options(7);
+        let json = build_slash_menu_blocks(&options);
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let elements = parsed[0]["elements"].as_array().unwrap();
+        let select_options = elements[0]["options"].as_array().unwrap();
+        assert_eq!(select_options.len(), 7);
+        assert_eq!(select_options[0]["text"]["text"], "Option 0");
+        assert_eq!(select_options[6]["text"]["text"], "Option 6");
+    }
+
+    #[test]
+    fn slash_menu_buttons_have_sequential_action_ids() {
+        let options = make_slash_options(3);
+        let json = build_slash_menu_blocks(&options);
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let elements = parsed[0]["elements"].as_array().unwrap();
+        assert_eq!(elements[0]["action_id"], "slash_option_0");
+        assert_eq!(elements[1]["action_id"], "slash_option_1");
+        assert_eq!(elements[2]["action_id"], "slash_option_2");
+    }
+
+    #[test]
+    fn slash_menu_select_has_correct_action_id() {
+        let options = make_slash_options(6);
+        let json = build_slash_menu_blocks(&options);
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let elements = parsed[0]["elements"].as_array().unwrap();
+        assert_eq!(elements[0]["action_id"], "slash_option_select");
+    }
+
+    // ── passes_dm_policy ─────────────────────────────────────────────────────
+
+    #[test]
+    fn dm_policy_disabled_blocks_direct() {
+        assert!(!passes_dm_policy(&DmPolicy::Disabled, &SessionType::Direct));
+    }
+
+    #[test]
+    fn dm_policy_disabled_allows_channel() {
+        assert!(passes_dm_policy(&DmPolicy::Disabled, &SessionType::Channel));
+    }
+
+    #[test]
+    fn dm_policy_disabled_allows_group() {
+        assert!(passes_dm_policy(&DmPolicy::Disabled, &SessionType::Group));
+    }
+
+    #[test]
+    fn dm_policy_open_allows_direct() {
+        assert!(passes_dm_policy(&DmPolicy::Open, &SessionType::Direct));
+    }
+
+    #[test]
+    fn dm_policy_pairing_allows_direct() {
+        // The pairing check is async (KV lookup); the pure policy gate just allows it.
+        assert!(passes_dm_policy(&DmPolicy::Pairing, &SessionType::Direct));
+    }
+
+    // ── passes_channel_allowlist ──────────────────────────────────────────────
+
+    #[test]
+    fn channel_allowlist_empty_always_passes() {
+        assert!(passes_channel_allowlist(&[], &SessionType::Channel, "C1"));
+        assert!(passes_channel_allowlist(&[], &SessionType::Group, "G1"));
+    }
+
+    #[test]
+    fn channel_allowlist_dm_bypasses_check() {
+        let list = vec!["C2".to_string()];
+        assert!(passes_channel_allowlist(&list, &SessionType::Direct, "D999"));
+    }
+
+    #[test]
+    fn channel_allowlist_allows_matching_channel() {
+        let list = vec!["C1".to_string(), "C2".to_string()];
+        assert!(passes_channel_allowlist(&list, &SessionType::Channel, "C1"));
+        assert!(passes_channel_allowlist(&list, &SessionType::Channel, "C2"));
+    }
+
+    #[test]
+    fn channel_allowlist_blocks_unlisted_channel() {
+        let list = vec!["C1".to_string()];
+        assert!(!passes_channel_allowlist(&list, &SessionType::Channel, "C999"));
+    }
+
+    // ── passes_group_dm_allowlist ─────────────────────────────────────────────
+
+    #[test]
+    fn group_dm_allowlist_non_group_always_passes() {
+        let set: std::collections::HashSet<String> = ["G1".to_string()].into();
+        assert!(passes_group_dm_allowlist(Some(&set), &SessionType::Channel, "C1"));
+        assert!(passes_group_dm_allowlist(Some(&set), &SessionType::Direct, "D1"));
+    }
+
+    #[test]
+    fn group_dm_allowlist_none_allows_all_groups() {
+        assert!(passes_group_dm_allowlist(None, &SessionType::Group, "G999"));
+    }
+
+    #[test]
+    fn group_dm_allowlist_allows_listed_group() {
+        let set: std::collections::HashSet<String> = ["G1".to_string(), "G2".to_string()].into();
+        assert!(passes_group_dm_allowlist(Some(&set), &SessionType::Group, "G1"));
+        assert!(passes_group_dm_allowlist(Some(&set), &SessionType::Group, "G2"));
+    }
+
+    #[test]
+    fn group_dm_allowlist_blocks_unlisted_group() {
+        let set: std::collections::HashSet<String> = ["G1".to_string()].into();
+        assert!(!passes_group_dm_allowlist(Some(&set), &SessionType::Group, "G999"));
+    }
+
+    // ── passes_user_blocklist ─────────────────────────────────────────────────
+
+    #[test]
+    fn user_blocklist_empty_allows_all() {
+        assert!(passes_user_blocklist(&[], "U1"));
+    }
+
+    #[test]
+    fn user_blocklist_blocks_listed_user() {
+        let list = vec!["U1".to_string(), "U2".to_string()];
+        assert!(!passes_user_blocklist(&list, "U1"));
+        assert!(!passes_user_blocklist(&list, "U2"));
+    }
+
+    #[test]
+    fn user_blocklist_allows_unlisted_user() {
+        let list = vec!["U1".to_string()];
+        assert!(passes_user_blocklist(&list, "U999"));
+    }
+
+    // ── passes_user_allowlist ─────────────────────────────────────────────────
+
+    #[test]
+    fn user_allowlist_empty_allows_all() {
+        assert!(passes_user_allowlist(&[], "U1"));
+        assert!(passes_user_allowlist(&[], "anyone"));
+    }
+
+    #[test]
+    fn user_allowlist_allows_listed_user() {
+        let list = vec!["U1".to_string(), "U2".to_string()];
+        assert!(passes_user_allowlist(&list, "U1"));
+        assert!(passes_user_allowlist(&list, "U2"));
+    }
+
+    #[test]
+    fn user_allowlist_blocks_unlisted_user() {
+        let list = vec!["U1".to_string()];
+        assert!(!passes_user_allowlist(&list, "U999"));
+    }
+
+    // ── passes_per_channel_user_allowlist ─────────────────────────────────────
+
+    #[test]
+    fn per_channel_user_allowlist_no_entry_allows_all() {
+        let map: HashMap<String, Vec<String>> = HashMap::new();
+        assert!(passes_per_channel_user_allowlist(&map, "C1", "U1"));
+    }
+
+    #[test]
+    fn per_channel_user_allowlist_allows_listed_user() {
+        let mut map: HashMap<String, Vec<String>> = HashMap::new();
+        map.insert("C1".to_string(), vec!["U1".to_string(), "U2".to_string()]);
+        assert!(passes_per_channel_user_allowlist(&map, "C1", "U1"));
+        assert!(passes_per_channel_user_allowlist(&map, "C1", "U2"));
+    }
+
+    #[test]
+    fn per_channel_user_allowlist_blocks_unlisted_user() {
+        let mut map: HashMap<String, Vec<String>> = HashMap::new();
+        map.insert("C1".to_string(), vec!["U1".to_string()]);
+        assert!(!passes_per_channel_user_allowlist(&map, "C1", "U999"));
+    }
+
+    #[test]
+    fn per_channel_user_allowlist_other_channel_unaffected() {
+        let mut map: HashMap<String, Vec<String>> = HashMap::new();
+        map.insert("C1".to_string(), vec!["U1".to_string()]);
+        // C2 has no entry → allow everyone in C2.
+        assert!(passes_per_channel_user_allowlist(&map, "C2", "U999"));
+    }
+
+    // ── passes_require_mention ────────────────────────────────────────────────
+
+    #[test]
+    fn require_mention_false_always_passes() {
+        assert!(passes_require_mention(false, &SessionType::Channel, Some("UBOT"), "hello"));
+        assert!(passes_require_mention(false, &SessionType::Channel, None, "hello"));
+    }
+
+    #[test]
+    fn require_mention_dm_bypasses_check() {
+        assert!(passes_require_mention(true, &SessionType::Direct, Some("UBOT"), "hello"));
+    }
+
+    #[test]
+    fn require_mention_with_mention_passes() {
+        assert!(passes_require_mention(
+            true,
+            &SessionType::Channel,
+            Some("UBOT"),
+            "hey <@UBOT> help me",
+        ));
+    }
+
+    #[test]
+    fn require_mention_without_mention_blocked() {
+        assert!(!passes_require_mention(
+            true,
+            &SessionType::Channel,
+            Some("UBOT"),
+            "hello everyone",
+        ));
+    }
+
+    #[test]
+    fn require_mention_no_bot_user_id_blocks() {
+        // If require_mention=true but bot_user_id unknown, can't detect mention → block.
+        assert!(!passes_require_mention(true, &SessionType::Channel, None, "hello <@anyone>"));
+    }
+
+    #[test]
+    fn require_mention_group_requires_mention() {
+        assert!(!passes_require_mention(true, &SessionType::Group, Some("UBOT"), "plain text"));
+        assert!(passes_require_mention(true, &SessionType::Group, Some("UBOT"), "<@UBOT> hi"));
+    }
+
+    // ── compute_session_key_chain ─────────────────────────────────────────────
+
+    #[test]
+    fn session_key_chain_passthrough_channel() {
+        let key = compute_session_key_chain(
+            "slack:channel:C1",
+            &SessionType::Channel,
+            None,
+            None,
+            false,
+            false,
+        );
+        assert_eq!(key, "slack:channel:C1");
+    }
+
+    #[test]
+    fn session_key_chain_dm_no_transforms() {
+        let key = compute_session_key_chain(
+            "slack:dm:U1",
+            &SessionType::Direct,
+            None,
+            None,
+            false,
+            false,
+        );
+        assert_eq!(key, "slack:dm:U1");
+    }
+
+    #[test]
+    fn session_key_chain_dm_pair_channel_override() {
+        let key = compute_session_key_chain(
+            "slack:dm:U1",
+            &SessionType::Direct,
+            None,
+            Some("C_PAIRED"),
+            false,
+            false,
+        );
+        assert_eq!(key, "slack:channel:C_PAIRED");
+    }
+
+    #[test]
+    fn session_key_chain_dm_pair_does_not_affect_channel_session() {
+        // dm_pair_channel only applies to DMs
+        let key = compute_session_key_chain(
+            "slack:channel:C1",
+            &SessionType::Channel,
+            None,
+            Some("C_PAIRED"),
+            false,
+            false,
+        );
+        assert_eq!(key, "slack:channel:C1");
+    }
+
+    #[test]
+    fn session_key_chain_history_scope_parent_strips_thread_suffix() {
+        let key = compute_session_key_chain(
+            "slack:channel:C1:thread:1.0",
+            &SessionType::Channel,
+            Some("1.0"),
+            None,
+            true,
+            false,
+        );
+        assert_eq!(key, "slack:channel:C1");
+    }
+
+    #[test]
+    fn session_key_chain_history_scope_parent_no_thread_ts_no_change() {
+        let key = compute_session_key_chain(
+            "slack:channel:C1:thread:1.0",
+            &SessionType::Channel,
+            None, // thread_ts absent → no strip
+            None,
+            true,
+            false,
+        );
+        assert_eq!(key, "slack:channel:C1:thread:1.0");
+    }
+
+    #[test]
+    fn session_key_chain_history_scope_parent_false_no_change() {
+        let key = compute_session_key_chain(
+            "slack:channel:C1:thread:1.0",
+            &SessionType::Channel,
+            Some("1.0"),
+            None,
+            false, // disabled
+            false,
+        );
+        assert_eq!(key, "slack:channel:C1:thread:1.0");
+    }
+
+    #[test]
+    fn session_key_chain_dm_scope_main_collapses_dms() {
+        let key = compute_session_key_chain(
+            "slack:dm:U1",
+            &SessionType::Direct,
+            None,
+            None,
+            false,
+            true,
+        );
+        assert_eq!(key, "slack:dm:main");
+    }
+
+    #[test]
+    fn session_key_chain_dm_scope_main_does_not_affect_channel() {
+        let key = compute_session_key_chain(
+            "slack:channel:C1",
+            &SessionType::Channel,
+            None,
+            None,
+            false,
+            true, // dm_scope_main only applies to DMs
+        );
+        assert_eq!(key, "slack:channel:C1");
+    }
+
+    #[test]
+    fn session_key_chain_all_transforms_dm() {
+        // dm_pair_channel is applied first, then history_scope_parent, then dm_scope_main.
+        // dm_pair makes it a channel key → dm_scope_main won't trigger (not Direct after).
+        // But the type is still Direct, so dm_scope_main checks session_type.
+        let key = compute_session_key_chain(
+            "slack:dm:U1",
+            &SessionType::Direct,
+            None,
+            Some("C_PAIRED"),
+            false,
+            true, // dm_scope_main — but session_type is Direct, so this wins?
+        );
+        // After dm_pair: "slack:channel:C_PAIRED"
+        // history_scope_parent: no :thread: in key and thread_ts=None → no change
+        // dm_scope_main: session_type == Direct → "slack:dm:main"
+        assert_eq!(key, "slack:dm:main");
+    }
+
+    // ── extract_reply_target ──────────────────────────────────────────────────
+
+    #[test]
+    fn reply_target_current_directive() {
+        let (text, ts) = extract_reply_target("hello [[reply_to_current]]", "1234.0");
+        assert_eq!(text, "hello");
+        assert_eq!(ts, Some("1234.0".to_string()));
+    }
+
+    #[test]
+    fn reply_target_specific_ts() {
+        let (text, ts) = extract_reply_target("hi [[reply_to:9999.1]]", "1234.0");
+        assert_eq!(text, "hi");
+        assert_eq!(ts, Some("9999.1".to_string()));
+    }
+
+    #[test]
+    fn reply_target_none_when_no_directive() {
+        let (text, ts) = extract_reply_target("hello world", "1234.0");
+        assert_eq!(text, "hello world");
+        assert_eq!(ts, None);
+    }
+}
