@@ -147,7 +147,8 @@ impl<H: HttpClient> ToolDispatcher for DefaultToolDispatcher<H> {
 pub mod mock {
     use super::*;
     use std::collections::VecDeque;
-    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::{Arc, Mutex};
 
     pub struct MockToolDispatcher {
         pub response: String,
@@ -167,6 +168,40 @@ pub mod mock {
             _name: &'a str,
             _input: &'a serde_json::Value,
         ) -> Pin<Box<dyn Future<Output = String> + Send + 'a>> {
+            let resp = self.response.clone();
+            Box::pin(async move { resp })
+        }
+    }
+
+    /// Mock dispatcher that counts how many times `dispatch` is called.
+    ///
+    /// Used in recovery tests to verify that cached tool results are replayed
+    /// from NATS KV rather than re-executing the tool after a crash.
+    pub struct CountingMockToolDispatcher {
+        pub call_count: Arc<AtomicU32>,
+        pub response: String,
+    }
+
+    impl CountingMockToolDispatcher {
+        /// Returns `(dispatcher, counter)`. Read `counter.load(Ordering::SeqCst)`
+        /// after the run to assert how many times the tool was actually executed.
+        pub fn new(response: impl Into<String>) -> (Self, Arc<AtomicU32>) {
+            let count = Arc::new(AtomicU32::new(0));
+            let dispatcher = Self {
+                call_count: Arc::clone(&count),
+                response: response.into(),
+            };
+            (dispatcher, count)
+        }
+    }
+
+    impl ToolDispatcher for CountingMockToolDispatcher {
+        fn dispatch<'a>(
+            &'a self,
+            _name: &'a str,
+            _input: &'a serde_json::Value,
+        ) -> Pin<Box<dyn Future<Output = String> + Send + 'a>> {
+            self.call_count.fetch_add(1, Ordering::SeqCst);
             let resp = self.response.clone();
             Box::pin(async move { resp })
         }

@@ -324,12 +324,14 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                             let heartbeat = spawn_heartbeat(msg.clone());
                             if autos.is_empty() {
                                 'handler: {
+                                    if !agent.is_flag_enabled(&crate::flags::AgentFlag::PrReviewEnabled).await {
+                                        info!(flag = "agent_pr_review_enabled", "PR handler disabled by feature flag — skipping");
+                                        break 'handler;
+                                    }
                                     let Some(agent) = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id_prefix, "", subject, &pv).await else { break 'handler; };
                                     let is_merged = pv["action"].as_str() == Some("closed")
                                         && pv["pull_request"]["merged"].as_bool() == Some(true);
-                                    if !agent.is_flag_enabled(&crate::flags::AgentFlag::PrReviewEnabled).await {
-                                        info!(flag = "agent_pr_review_enabled", "PR handler disabled by feature flag");
-                                    } else if is_merged {
+                                    if is_merged {
                                         match handlers::pr_merged::handle(&agent, &msg.payload).await {
                                             Some(Ok(o)) => info!(output = %o, "PR merged done"),
                                             Some(Err(e)) => error!(error = %e, "PR merged error"),
@@ -387,15 +389,15 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                             let heartbeat = spawn_heartbeat(msg.clone());
                             if autos.is_empty() {
                                 'handler: {
-                                    let Some(agent) = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id_prefix, "", subject, &pv).await else { break 'handler; };
                                     if !agent.is_flag_enabled(&crate::flags::AgentFlag::CommentHandlerEnabled).await {
-                                        info!(flag = "agent_comment_handler_enabled", "Comment handler disabled by feature flag");
-                                    } else {
-                                        match handlers::comment_added::handle(&agent, &msg.payload).await {
-                                            Some(Ok(o)) => info!(output = %o, "Comment-added done"),
-                                            Some(Err(e)) => error!(error = %e, "Comment-added error"),
-                                            None => {}
-                                        }
+                                        info!(flag = "agent_comment_handler_enabled", "Comment handler disabled by feature flag — skipping");
+                                        break 'handler;
+                                    }
+                                    let Some(agent) = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id_prefix, "", subject, &pv).await else { break 'handler; };
+                                    match handlers::comment_added::handle(&agent, &msg.payload).await {
+                                        Some(Ok(o)) => info!(output = %o, "Comment-added done"),
+                                        Some(Err(e)) => error!(error = %e, "Comment-added error"),
+                                        None => {}
                                     }
                                 }
                             } else {
@@ -442,15 +444,15 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                             let heartbeat = spawn_heartbeat(msg.clone());
                             if autos.is_empty() {
                                 'handler: {
-                                    let Some(agent) = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id_prefix, "", subject, &pv).await else { break 'handler; };
                                     if !agent.is_flag_enabled(&crate::flags::AgentFlag::PushHandlerEnabled).await {
-                                        info!(flag = "agent_push_handler_enabled", "Push handler disabled by feature flag");
-                                    } else {
-                                        match handlers::push_to_branch::handle(&agent, &msg.payload).await {
-                                            Some(Ok(o)) => info!(output = %o, "Push-to-branch done"),
-                                            Some(Err(e)) => error!(error = %e, "Push-to-branch error"),
-                                            None => {}
-                                        }
+                                        info!(flag = "agent_push_handler_enabled", "Push handler disabled by feature flag — skipping");
+                                        break 'handler;
+                                    }
+                                    let Some(agent) = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id_prefix, "", subject, &pv).await else { break 'handler; };
+                                    match handlers::push_to_branch::handle(&agent, &msg.payload).await {
+                                        Some(Ok(o)) => info!(output = %o, "Push-to-branch done"),
+                                        Some(Err(e)) => error!(error = %e, "Push-to-branch error"),
+                                        None => {}
                                     }
                                 }
                             } else {
@@ -497,15 +499,15 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                             let heartbeat = spawn_heartbeat(msg.clone());
                             if autos.is_empty() {
                                 'handler: {
-                                    let Some(agent) = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id_prefix, "", subject, &pv).await else { break 'handler; };
                                     if !agent.is_flag_enabled(&crate::flags::AgentFlag::CiHandlerEnabled).await {
-                                        info!(flag = "agent_ci_handler_enabled", "CI handler disabled by feature flag");
-                                    } else {
-                                        match handlers::ci_completed::handle(&agent, &msg.payload).await {
-                                            Some(Ok(o)) => info!(output = %o, "CI-completed done"),
-                                            Some(Err(e)) => error!(error = %e, "CI-completed error"),
-                                            None => {}
-                                        }
+                                        info!(flag = "agent_ci_handler_enabled", "CI handler disabled by feature flag — skipping");
+                                        break 'handler;
+                                    }
+                                    let Some(agent) = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id_prefix, "", subject, &pv).await else { break 'handler; };
+                                    match handlers::ci_completed::handle(&agent, &msg.payload).await {
+                                        Some(Ok(o)) => info!(output = %o, "CI-completed done"),
+                                        Some(Err(e)) => error!(error = %e, "CI-completed error"),
+                                        None => {}
                                     }
                                 }
                             } else {
@@ -552,15 +554,15 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                             let heartbeat = spawn_heartbeat(msg.clone());
                             if autos.is_empty() {
                                 'handler: {
-                                    let Some(agent) = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id_prefix, "", subject, &pv).await else { break 'handler; };
                                     if !agent.is_flag_enabled(&crate::flags::AgentFlag::IssueTriageEnabled).await {
-                                        info!(flag = "agent_issue_triage_enabled", "Issue triage handler disabled by feature flag");
-                                    } else {
-                                        match handlers::issue_triage::handle(&agent, &msg.payload).await {
-                                            Some(Ok(o)) => info!(output = %o, "Issue triage done"),
-                                            Some(Err(e)) => error!(error = %e, "Issue triage error"),
-                                            None => {}
-                                        }
+                                        info!(flag = "agent_issue_triage_enabled", "Issue triage handler disabled by feature flag — skipping");
+                                        break 'handler;
+                                    }
+                                    let Some(agent) = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id_prefix, "", subject, &pv).await else { break 'handler; };
+                                    match handlers::issue_triage::handle(&agent, &msg.payload).await {
+                                        Some(Ok(o)) => info!(output = %o, "Issue triage done"),
+                                        Some(Err(e)) => error!(error = %e, "Issue triage error"),
+                                        None => {}
                                     }
                                 }
                             } else {
@@ -651,15 +653,15 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                             let heartbeat = spawn_heartbeat(msg.clone());
                             if autos.is_empty() {
                                 'handler: {
-                                    let Some(agent) = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id_prefix, "", &nats_subject, &pv).await else { break 'handler; };
                                     if !agent.is_flag_enabled(&crate::flags::AgentFlag::AlertHandlerEnabled).await {
-                                        info!(flag = "agent_alert_handler_enabled", "Alert handler disabled by feature flag");
-                                    } else {
-                                        match handlers::alert_triggered::handle(&agent, &nats_subject, &msg.payload).await {
-                                            Some(Ok(o)) => info!(output = %o, "Datadog alert handled"),
-                                            Some(Err(e)) => error!(error = %e, "Datadog alert handler error"),
-                                            None => {}
-                                        }
+                                        info!(flag = "agent_alert_handler_enabled", "Alert handler disabled by feature flag — skipping");
+                                        break 'handler;
+                                    }
+                                    let Some(agent) = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id_prefix, "", &nats_subject, &pv).await else { break 'handler; };
+                                    match handlers::alert_triggered::handle(&agent, &nats_subject, &msg.payload).await {
+                                        Some(Ok(o)) => info!(output = %o, "Datadog alert handled"),
+                                        Some(Err(e)) => error!(error = %e, "Datadog alert handler error"),
+                                        None => {}
                                     }
                                 }
                             } else {
@@ -711,15 +713,15 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                             let heartbeat = spawn_heartbeat(msg.clone());
                             if autos.is_empty() {
                                 'handler: {
-                                    let Some(agent) = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id_prefix, "", &nats_subject, &pv).await else { break 'handler; };
                                     if !agent.is_flag_enabled(&crate::flags::AgentFlag::IncidentioHandlerEnabled).await {
-                                        info!(flag = "agent_incidentio_handler_enabled", "incident.io handler disabled by feature flag");
-                                    } else {
-                                        match handlers::incident_declared::handle(&agent, &nats_subject, &msg.payload).await {
-                                            Some(Ok(o)) => info!(output = %o, "incident.io event handled"),
-                                            Some(Err(e)) => error!(error = %e, "incident.io handler error"),
-                                            None => {}
-                                        }
+                                        info!(flag = "agent_incidentio_handler_enabled", "incident.io handler disabled by feature flag — skipping");
+                                        break 'handler;
+                                    }
+                                    let Some(agent) = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id_prefix, "", &nats_subject, &pv).await else { break 'handler; };
+                                    match handlers::incident_declared::handle(&agent, &nats_subject, &msg.payload).await {
+                                        Some(Ok(o)) => info!(output = %o, "incident.io event handled"),
+                                        Some(Err(e)) => error!(error = %e, "incident.io handler error"),
+                                        None => {}
                                     }
                                 }
                             } else {
@@ -752,9 +754,10 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
 /// updating `worker_id` + `claimed_at` under the current KV revision. Only one
 /// concurrent caller wins the CAS write; the other receives `None`.
 ///
-/// Terminal promises (Resolved, Failed) are never CAS-claimed: concurrent
-/// access is harmless because `run()` will return early for Resolved promises
-/// and retry for Failed ones.
+/// `Resolved` and `PermanentFailed` promises are never CAS-claimed — `run()`
+/// returns early for both without executing any LLM call. `Failed` promises ARE
+/// CAS-claimed: their failure may have been transient (e.g. HTTP error) and NATS
+/// redelivery is a legitimate retry opportunity.
 async fn prepare_agent_with_promise(
     agent: &Arc<AgentLoop>,
     promise_store: &Arc<dyn PromiseRepository>,
@@ -765,20 +768,52 @@ async fn prepare_agent_with_promise(
     trigger: &serde_json::Value,
 ) -> Option<Arc<AgentLoop>> {
     let wid = worker_id();
-    match promise_store.get_promise(tenant_id, promise_id).await {
+    let get_result = match tokio::time::timeout(
+        crate::agent_loop::NATS_KV_TIMEOUT,
+        promise_store.get_promise(tenant_id, promise_id),
+    )
+    .await
+    {
+        Ok(r) => r,
+        Err(_) => {
+            warn!(promise_id = %promise_id, "NATS KV get_promise timed out — continuing without durability");
+            return Some(Arc::clone(agent));
+        }
+    };
+    match get_result {
         Ok(Some((existing, rev))) => {
-            if existing.status == PromiseStatus::Running {
+            if existing.status == PromiseStatus::Running
+                || existing.status == PromiseStatus::Failed
+            {
                 // CAS-claim: take ownership so no other worker runs this
-                // promise concurrently. If two workers race (startup recovery +
-                // redelivery, or two concurrent restarts), only the one that
-                // wins the CAS proceeds; the loser returns None and skips.
+                // promise concurrently. `Running` promises are claimed on both
+                // the normal NATS dispatch path and startup recovery.
+                // `Failed` promises (transient errors — currently only HTTP)
+                // are also re-claimed: a crash in the narrow window between
+                // marking Failed and calling msg.ack() causes NATS redelivery,
+                // and re-claiming ensures at most one worker retries the run.
+                // `PermanentFailed` and `Resolved` fall through without a claim
+                // — `run()` returns early for both without any LLM call.
+                // Note: startup recovery only scans `Running` promises via
+                // `list_running`, so `Failed` promises are only ever re-claimed
+                // by the NATS redelivery path, not by startup recovery.
                 let mut claimed = existing.clone();
+                claimed.status = PromiseStatus::Running; // re-activate so list_running finds it if we crash mid-run
                 claimed.worker_id = wid;
                 claimed.claimed_at = trogon_automations::now_unix();
-                if let Err(e) = promise_store
-                    .update_promise(tenant_id, promise_id, &claimed, rev)
-                    .await
+                let claim_result = match tokio::time::timeout(
+                    crate::agent_loop::NATS_KV_TIMEOUT,
+                    promise_store.update_promise(tenant_id, promise_id, &claimed, rev),
+                )
+                .await
                 {
+                    Ok(r) => r,
+                    Err(_) => {
+                        warn!(promise_id = %promise_id, "NATS KV update_promise timed out during CAS claim — treating as claim lost, skipping");
+                        return None;
+                    }
+                };
+                if let Err(e) = claim_result {
                     info!(
                         promise_id = %promise_id,
                         error = %e,
@@ -806,9 +841,17 @@ async fn prepare_agent_with_promise(
                 claimed_at: trogon_automations::now_unix(),
                 trigger: trigger.clone(),
                 nats_subject: nats_subject.to_string(),
+                system_prompt: None, // populated at first checkpoint in agent_loop::run
             };
-            if let Err(e) = promise_store.put_promise(&promise).await {
-                warn!(promise_id = %promise_id, error = %e, "Failed to create promise");
+            match tokio::time::timeout(
+                crate::agent_loop::NATS_KV_TIMEOUT,
+                promise_store.put_promise(&promise),
+            )
+            .await
+            {
+                Ok(Ok(_)) => {}
+                Ok(Err(e)) => warn!(promise_id = %promise_id, error = %e, "Failed to create promise — run will proceed without durability"),
+                Err(_) => warn!(promise_id = %promise_id, "NATS KV put_promise timed out — run will proceed without durability"),
             }
         }
         Err(e) => {
@@ -849,10 +892,19 @@ async fn recover_stale_promises(
 
     let now = trogon_automations::now_unix();
 
-    let promises = match promise_store.list_running(tenant_id).await {
-        Ok(p) => p,
-        Err(e) => {
+    let promises = match tokio::time::timeout(
+        crate::agent_loop::NATS_KV_TIMEOUT,
+        promise_store.list_running(tenant_id),
+    )
+    .await
+    {
+        Ok(Ok(p)) => p,
+        Ok(Err(e)) => {
             warn!(error = %e, "Startup recovery: failed to list running promises");
+            return;
+        }
+        Err(_) => {
+            warn!("Startup recovery: list_running timed out — skipping recovery this startup");
             return;
         }
     };
@@ -894,14 +946,23 @@ async fn recover_stale_promises(
     let run_store = Arc::clone(run_store);
     let tenant_id = tenant_id.to_string();
 
+    // Intentionally sequential: spawning all recoveries concurrently would
+    // flood the Anthropic API with simultaneous requests after an outage when
+    // many promises are stale. Sequential execution keeps the load profile
+    // predictable and avoids triggering rate limits.
     tokio::spawn(async move {
         for promise in stale {
             // Re-fetch to verify the promise is still Running. Between
             // `list_running` and here, another worker may have already claimed
             // or completed it. We don't CAS-claim here — prepare_agent_with_promise
             // handles claiming so both paths share the same mechanism.
-            match promise_store.get_promise(&tenant_id, &promise.id).await {
-                Ok(Some((current, _))) => {
+            match tokio::time::timeout(
+                crate::agent_loop::NATS_KV_TIMEOUT,
+                promise_store.get_promise(&tenant_id, &promise.id),
+            )
+            .await
+            {
+                Ok(Ok(Some((current, _)))) => {
                     if current.status != PromiseStatus::Running {
                         info!(
                             promise_id = %promise.id,
@@ -912,18 +973,86 @@ async fn recover_stale_promises(
                     }
                     // Running — fall through to prepare_agent_with_promise
                 }
-                Ok(None) => {
+                Ok(Ok(None)) => {
                     info!(
                         promise_id = %promise.id,
                         "Startup recovery: promise vanished before claim, skipping"
                     );
                     continue;
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     warn!(
                         promise_id = %promise.id,
                         error = %e,
                         "Startup recovery: failed to fetch promise, skipping"
+                    );
+                    continue;
+                }
+                Err(_) => {
+                    warn!(
+                        promise_id = %promise.id,
+                        "Startup recovery: get_promise timed out, skipping"
+                    );
+                    continue;
+                }
+            }
+
+            // For built-in handlers, check the feature flag BEFORE claiming the
+            // promise. Without this, prepare_agent_with_promise would refresh
+            // claimed_at even when the handler is disabled, causing the promise
+            // to appear stale again every 5 minutes and cycle until the 24-hour
+            // TTL — wasting KV writes and cluttering the log with spurious
+            // "resuming stale promise" entries.
+            //
+            // Automation runs do not have per-handler feature flags at the runner
+            // level, so only built-in handler runs (automation_id is empty) need
+            // this pre-check.
+            if promise.automation_id.is_empty() {
+                let flag_enabled = match promise.nats_subject.as_str() {
+                    s if s.starts_with("github.pull_request") => {
+                        agent
+                            .is_flag_enabled(&crate::flags::AgentFlag::PrReviewEnabled)
+                            .await
+                    }
+                    s if s.starts_with("github.check_run") => {
+                        agent
+                            .is_flag_enabled(&crate::flags::AgentFlag::CiHandlerEnabled)
+                            .await
+                    }
+                    s if s.starts_with("github.push") => {
+                        agent
+                            .is_flag_enabled(&crate::flags::AgentFlag::PushHandlerEnabled)
+                            .await
+                    }
+                    s if s.starts_with("github.issue_comment") => {
+                        agent
+                            .is_flag_enabled(&crate::flags::AgentFlag::CommentHandlerEnabled)
+                            .await
+                    }
+                    s if s.starts_with("linear.") => {
+                        agent
+                            .is_flag_enabled(&crate::flags::AgentFlag::IssueTriageEnabled)
+                            .await
+                    }
+                    s if s.starts_with("datadog.") => {
+                        agent
+                            .is_flag_enabled(&crate::flags::AgentFlag::AlertHandlerEnabled)
+                            .await
+                    }
+                    s if s.starts_with("incidentio.") => {
+                        agent
+                            .is_flag_enabled(&crate::flags::AgentFlag::IncidentioHandlerEnabled)
+                            .await
+                    }
+                    // Unknown subjects pass through to the warning branch in the
+                    // dispatch match below.
+                    _ => true,
+                };
+                if !flag_enabled {
+                    info!(
+                        promise_id = %promise.id,
+                        subject = %promise.nats_subject,
+                        "Startup recovery: handler disabled by feature flag — skipping without claiming"
                     );
                     continue;
                 }
@@ -1015,27 +1144,53 @@ async fn recover_stale_promises(
                         automation_id = %promise.automation_id,
                         "Startup recovery: automation no longer exists — marking promise as Failed"
                     );
-                    if let Ok(Some((mut current, rev))) =
-                        promise_store.get_promise(&tenant_id, &promise.id).await
+                    match tokio::time::timeout(
+                        crate::agent_loop::NATS_KV_TIMEOUT,
+                        promise_store.get_promise(&tenant_id, &promise.id),
+                    )
+                    .await
                     {
-                        current.status = PromiseStatus::Failed;
-                        if let Err(e) = promise_store
-                            .update_promise(&tenant_id, &promise.id, &current, rev)
+                        Ok(Ok(Some((mut current, rev)))) => {
+                            current.status = PromiseStatus::Failed;
+                            match tokio::time::timeout(
+                                crate::agent_loop::NATS_KV_TIMEOUT,
+                                promise_store.update_promise(
+                                    &tenant_id,
+                                    &promise.id,
+                                    &current,
+                                    rev,
+                                ),
+                            )
                             .await
-                        {
-                            warn!(
-                                promise_id = %promise.id,
-                                error = %e,
-                                "Startup recovery: failed to mark orphaned promise as Failed"
-                            );
+                            {
+                                Ok(Ok(_)) => {}
+                                Ok(Err(e)) => warn!(
+                                    promise_id = %promise.id,
+                                    error = %e,
+                                    "Startup recovery: failed to mark orphaned promise as Failed"
+                                ),
+                                Err(_) => warn!(
+                                    promise_id = %promise.id,
+                                    "Startup recovery: update_promise timed out marking orphaned promise as Failed"
+                                ),
+                            }
                         }
+                        Ok(Ok(None)) => {}
+                        Ok(Err(e)) => warn!(
+                            promise_id = %promise.id,
+                            error = %e,
+                            "Startup recovery: get_promise failed for orphaned promise"
+                        ),
+                        Err(_) => warn!(
+                            promise_id = %promise.id,
+                            "Startup recovery: get_promise timed out for orphaned promise"
+                        ),
                     }
                 }
             } else {
                 // Built-in handler dispatch based on NATS subject.
-                // Must mirror the is_merged / handler-selection logic in the
-                // normal consumer dispatch loop so recovery runs the same
-                // handler that was originally triggered.
+                // Feature flags were already checked before the CAS-claim above,
+                // so no per-arm flag check is needed here.
                 match promise.nats_subject.as_str() {
                     s if s.starts_with("github.pull_request") => {
                         let pv: serde_json::Value =
@@ -1060,8 +1215,66 @@ async fn recover_stale_promises(
                     s if s.starts_with("linear.") => {
                         handlers::issue_triage::handle(&agent, &payload).await;
                     }
+                    s if s.starts_with("datadog.") => {
+                        handlers::alert_triggered::handle(&agent, &promise.nats_subject, &payload)
+                            .await;
+                    }
+                    s if s.starts_with("incidentio.") => {
+                        handlers::incident_declared::handle(
+                            &agent,
+                            &promise.nats_subject,
+                            &payload,
+                        )
+                        .await;
+                    }
                     other => {
-                        warn!(subject = %other, "Startup recovery: unknown subject, skipping");
+                        // The subject is no longer handled by any built-in dispatcher
+                        // (renamed, removed, or a deployment artifact). Mark the promise
+                        // PermanentFailed so neither startup recovery nor NATS redelivery
+                        // picks it up again — retrying with an unknown subject will always
+                        // reach this arm and cycle until the 24 h TTL.
+                        warn!(
+                            subject = %other,
+                            promise_id = %promise.id,
+                            "Startup recovery: unknown subject — marking promise PermanentFailed"
+                        );
+                        match tokio::time::timeout(
+                            crate::agent_loop::NATS_KV_TIMEOUT,
+                            promise_store.get_promise(&tenant_id, &promise.id),
+                        )
+                        .await
+                        {
+                            Ok(Ok(Some((mut current, rev)))) => {
+                                current.status = PromiseStatus::PermanentFailed;
+                                match tokio::time::timeout(
+                                    crate::agent_loop::NATS_KV_TIMEOUT,
+                                    promise_store.update_promise(&tenant_id, &promise.id, &current, rev),
+                                )
+                                .await
+                                {
+                                    Ok(Ok(_)) => {}
+                                    Ok(Err(e)) => warn!(
+                                        promise_id = %promise.id,
+                                        error = %e,
+                                        "Startup recovery: failed to mark unknown-subject promise as PermanentFailed"
+                                    ),
+                                    Err(_) => warn!(
+                                        promise_id = %promise.id,
+                                        "Startup recovery: update_promise timed out marking unknown-subject promise as PermanentFailed"
+                                    ),
+                                }
+                            }
+                            Ok(Ok(None)) => {}
+                            Ok(Err(e)) => warn!(
+                                promise_id = %promise.id,
+                                error = %e,
+                                "Startup recovery: get_promise failed for unknown-subject promise"
+                            ),
+                            Err(_) => warn!(
+                                promise_id = %promise.id,
+                                "Startup recovery: get_promise timed out for unknown-subject promise"
+                            ),
+                        }
                     }
                 }
             }
@@ -1301,7 +1514,13 @@ async fn bind_consumer(
                 filter_subject: filter_subject.to_string(),
                 ack_policy: AckPolicy::Explicit,
                 deliver_policy: DeliverPolicy::All,
-                max_deliver: 3,
+                // 20 redeliveries before NATS gives up. With durable promises,
+                // every redelivery is safe — the agent resumes from the KV
+                // checkpoint rather than starting from scratch. 20 absorbs any
+                // realistic crash/restart sequence while still bounding retries
+                // for genuinely broken events (bad payload, persistent bug)
+                // so they don't consume Anthropic credits indefinitely.
+                max_deliver: 20,
                 ack_wait: CONSUMER_ACK_WAIT,
                 ..Default::default()
             },
