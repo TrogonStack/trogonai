@@ -81,7 +81,7 @@ pub async fn send_message(
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs()
-            .saturating_sub(3600); // 1-hour window — covers recoveries delayed up to an hour
+            .saturating_sub(24 * 3600); // 24-hour window — matches PROMISE_TTL in promise_store.rs
 
         let history_url = format!(
             "{}/slack/conversations.history?channel={channel}&oldest={oldest}&limit=50&include_all_metadata=true",

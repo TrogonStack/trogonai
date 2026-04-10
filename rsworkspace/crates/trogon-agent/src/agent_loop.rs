@@ -13,6 +13,7 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use tracing::{debug, error, info, warn};
 
 use crate::flag_client::FeatureFlagClient;
@@ -264,6 +265,28 @@ pub struct AgentLoop {
     /// Unique identifier for the current run, used as the KV checkpoint key.
     /// `None` when `promise_store` is `None`.
     pub promise_id: Option<String>,
+}
+
+/// Compute a stable cache key for a tool call from its name and input.
+///
+/// Uses SHA-256 of `"{tool_name}:{canonical_json(input)}"` so the key is
+/// independent of Anthropic's ephemeral `tool_use_id`. On crash recovery the
+/// LLM re-generates a fresh `tool_use_id` for the same call, but the name and
+/// input are identical — so the hash matches and the cached result is replayed
+/// without re-executing the tool.
+///
+/// `serde_json` serialises object keys in insertion order, which is stable for
+/// values parsed from JSON (the case here — inputs come from the Anthropic API
+/// response). Tools that construct inputs programmatically with differing key
+/// orders would produce different hashes; that is acceptable because a different
+/// order implies a semantically different call.
+fn tool_cache_key(tool_name: &str, input: &Value) -> String {
+    let canonical = format!(
+        "{tool_name}:{}",
+        serde_json::to_string(input).unwrap_or_default()
+    );
+    let digest = Sha256::digest(canonical.as_bytes());
+    format!("{digest:x}")
 }
 
 impl AgentLoop {
@@ -560,13 +583,18 @@ impl AgentLoop {
 
                 // ── Durable promise: replay cached result (recovery only) ────
                 // Only consult the KV cache when we are recovering from a
-                // checkpoint. During normal forward execution Anthropic always
-                // generates a fresh tool_use_id, so a cache hit here would
-                // indicate a stale entry — not a replay scenario.
+                // checkpoint. The cache key is derived from (tool_name, input)
+                // rather than tool_use_id, because Anthropic generates a fresh
+                // tool_use_id on every request — meaning the old ID would never
+                // match after a restart. The content-based key survives the
+                // restart: the LLM re-generates the same call with the same
+                // name and input, so the hash is identical and the cached result
+                // is replayed without re-executing the tool.
                 if recovering
                     && let (Some(store), Some(pid)) = (&self.promise_store, &self.promise_id)
                 {
-                    match store.get_tool_result(&self.tenant_id, pid, id).await {
+                    let ck = tool_cache_key(name, input);
+                    match store.get_tool_result(&self.tenant_id, pid, &ck).await {
                         Ok(Some(cached)) => {
                             info!(tool = %name, tool_use_id = %id, "Replaying cached tool result");
                             results.push(ToolResult {
@@ -609,12 +637,13 @@ impl AgentLoop {
                 };
 
                 // ── Durable promise: persist tool result ─────────────────────
-                // Store the result so that if the process crashes before the
-                // next checkpoint write, the result can be replayed on restart
-                // rather than re-executing the tool.
+                // Store the result keyed by (tool_name, input) so that on crash
+                // recovery — when Anthropic re-generates a fresh tool_use_id for
+                // the same call — the cache still matches and the tool is not
+                // re-executed.
                 if let (Some(store), Some(pid)) = (&self.promise_store, &self.promise_id)
                     && let Err(e) = store
-                        .put_tool_result(&self.tenant_id, pid, id, &output)
+                        .put_tool_result(&self.tenant_id, pid, &tool_cache_key(name, input), &output)
                         .await
                 {
                     error!(error = %e, "Failed to cache tool result — if process crashes before next checkpoint, this tool will be re-executed on recovery");

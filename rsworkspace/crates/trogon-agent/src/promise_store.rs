@@ -91,11 +91,13 @@ fn promise_key(tenant_id: &str, promise_id: &str) -> String {
     format!("{tenant_id}.{promise_id}")
 }
 
-fn tool_result_key(tenant_id: &str, promise_id: &str, tool_use_id: &str) -> String {
-    // Replace dots in tool_use_id with underscores — NATS KV uses dots as
-    // hierarchical delimiters, so dots inside key segments must be escaped.
-    let safe_id = tool_use_id.replace('.', "_");
-    format!("{tenant_id}.{promise_id}.{safe_id}")
+/// Build a NATS KV key for a cached tool result.
+///
+/// `cache_key` is a hex SHA-256 digest computed by the caller from
+/// `(tool_name, canonical_json(input))` — see `agent_loop::tool_cache_key`.
+/// Hex strings never contain dots, so no escaping is needed.
+fn tool_result_key(tenant_id: &str, promise_id: &str, cache_key: &str) -> String {
+    format!("{tenant_id}.{promise_id}.{cache_key}")
 }
 
 // ── PromiseStore ──────────────────────────────────────────────────────────────
@@ -208,14 +210,21 @@ impl PromiseStore {
     }
 
     /// Cache a tool result so it can be replayed on restart without re-executing the tool.
+    ///
+    /// `cache_key` must be the SHA-256 hex digest of `(tool_name, input)` — see
+    /// `agent_loop::tool_cache_key`. Using a content-based key (rather than
+    /// Anthropic's ephemeral `tool_use_id`) means the cached result survives a
+    /// process restart: the LLM re-generates a fresh `tool_use_id` on recovery,
+    /// but the name and input are identical, so the hash matches and the tool
+    /// is not re-executed.
     pub async fn put_tool_result(
         &self,
         tenant_id: &str,
         promise_id: &str,
-        tool_use_id: &str,
+        cache_key: &str,
         result: &str,
     ) -> Result<(), PromiseStoreError> {
-        let key = tool_result_key(tenant_id, promise_id, tool_use_id);
+        let key = tool_result_key(tenant_id, promise_id, cache_key);
         self.tool_results
             .put(&key, Bytes::from(result.as_bytes().to_vec()))
             .await
@@ -255,13 +264,15 @@ impl PromiseStore {
     }
 
     /// Return a cached tool result if it exists.
+    ///
+    /// `cache_key` must be the same SHA-256 hex digest passed to [`put_tool_result`].
     pub async fn get_tool_result(
         &self,
         tenant_id: &str,
         promise_id: &str,
-        tool_use_id: &str,
+        cache_key: &str,
     ) -> Result<Option<String>, PromiseStoreError> {
-        let key = tool_result_key(tenant_id, promise_id, tool_use_id);
+        let key = tool_result_key(tenant_id, promise_id, cache_key);
         match self
             .tool_results
             .get(&key)
@@ -315,14 +326,14 @@ pub trait PromiseRepository: Send + Sync + 'static {
         &'a self,
         tenant_id: &'a str,
         promise_id: &'a str,
-        tool_use_id: &'a str,
+        cache_key: &'a str,
     ) -> Pin<Box<dyn Future<Output = Result<Option<String>, PromiseStoreError>> + Send + 'a>>;
 
     fn put_tool_result<'a>(
         &'a self,
         tenant_id: &'a str,
         promise_id: &'a str,
-        tool_use_id: &'a str,
+        cache_key: &'a str,
         result: &'a str,
     ) -> Pin<Box<dyn Future<Output = Result<(), PromiseStoreError>> + Send + 'a>>;
 
@@ -366,10 +377,10 @@ impl PromiseRepository for PromiseStore {
         &'a self,
         tenant_id: &'a str,
         promise_id: &'a str,
-        tool_use_id: &'a str,
+        cache_key: &'a str,
     ) -> Pin<Box<dyn Future<Output = Result<Option<String>, PromiseStoreError>> + Send + 'a>> {
         Box::pin(async move {
-            self.get_tool_result(tenant_id, promise_id, tool_use_id)
+            self.get_tool_result(tenant_id, promise_id, cache_key)
                 .await
         })
     }
@@ -378,11 +389,11 @@ impl PromiseRepository for PromiseStore {
         &'a self,
         tenant_id: &'a str,
         promise_id: &'a str,
-        tool_use_id: &'a str,
+        cache_key: &'a str,
         result: &'a str,
     ) -> Pin<Box<dyn Future<Output = Result<(), PromiseStoreError>> + Send + 'a>> {
         Box::pin(async move {
-            self.put_tool_result(tenant_id, promise_id, tool_use_id, result)
+            self.put_tool_result(tenant_id, promise_id, cache_key, result)
                 .await
         })
     }
@@ -485,10 +496,10 @@ pub mod mock {
             &'a self,
             tenant_id: &'a str,
             promise_id: &'a str,
-            tool_use_id: &'a str,
+            cache_key: &'a str,
         ) -> Pin<Box<dyn Future<Output = Result<Option<String>, PromiseStoreError>> + Send + 'a>>
         {
-            let key = tool_result_key(tenant_id, promise_id, tool_use_id);
+            let key = tool_result_key(tenant_id, promise_id, cache_key);
             let data = Arc::clone(&self.tool_results);
             Box::pin(async move { Ok(data.lock().unwrap().get(&key).cloned()) })
         }
@@ -497,10 +508,10 @@ pub mod mock {
             &'a self,
             tenant_id: &'a str,
             promise_id: &'a str,
-            tool_use_id: &'a str,
+            cache_key: &'a str,
             result: &'a str,
         ) -> Pin<Box<dyn Future<Output = Result<(), PromiseStoreError>> + Send + 'a>> {
-            let key = tool_result_key(tenant_id, promise_id, tool_use_id);
+            let key = tool_result_key(tenant_id, promise_id, cache_key);
             let data = Arc::clone(&self.tool_results);
             let result = result.to_string();
             Box::pin(async move {
@@ -558,10 +569,10 @@ mod tests {
     }
 
     #[test]
-    fn tool_result_key_sanitizes_dots() {
-        // Dots in tool_use_id are replaced with underscores.
-        let key = tool_result_key("acme", "abc123", "toolu_01abc.xyz");
-        assert_eq!(key, "acme.abc123.toolu_01abc_xyz");
+    fn tool_result_key_format() {
+        // cache_key is a hex SHA-256 digest — no dots, no escaping needed.
+        let key = tool_result_key("acme", "abc123", "deadbeef");
+        assert_eq!(key, "acme.abc123.deadbeef");
     }
 
     #[test]
@@ -627,12 +638,14 @@ mod tests {
     #[tokio::test]
     async fn mock_tool_result_round_trip() {
         let store = MockPromiseStore::new();
+        // cache_key is a SHA-256 hex digest in production; use an opaque string here.
+        let cache_key = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2";
         store
-            .put_tool_result("acme", "run-1", "toolu_01abc", "result text")
+            .put_tool_result("acme", "run-1", cache_key, "result text")
             .await
             .unwrap();
         let cached = store
-            .get_tool_result("acme", "run-1", "toolu_01abc")
+            .get_tool_result("acme", "run-1", cache_key)
             .await
             .unwrap();
         assert_eq!(cached, Some("result text".to_string()));
@@ -649,7 +662,7 @@ mod tests {
     async fn mock_get_missing_tool_result_returns_none() {
         let store = MockPromiseStore::new();
         let result = store
-            .get_tool_result("acme", "run-1", "toolu_nope")
+            .get_tool_result("acme", "run-1", "0000000000000000000000000000000000000000000000000000000000000000")
             .await
             .unwrap();
         assert!(result.is_none());
