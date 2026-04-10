@@ -1881,4 +1881,44 @@ mod tests {
             "XAI_PROMPT_TIMEOUT_SECS=0 must fall back to the 300s default"
         );
     }
+
+    // ── XAI_MAX_TURNS invalid env var ─────────────────────────────────────────
+
+    #[tokio::test]
+    async fn xai_max_turns_invalid_env_var_falls_back_to_default() {
+        let _guard = env_lock().lock().unwrap();
+        // `and_then(|s| s.parse::<u32>().ok())` returns None for non-numeric
+        // values, so `.or(Some(10))` must fire and produce the default.
+        unsafe { std::env::set_var("XAI_MAX_TURNS", "not_a_number") };
+        let mock_http = Arc::new(MockXaiHttpClient::new());
+        let mock_notifier = Arc::new(MockSessionNotifier::new());
+        let agent: TestAgent =
+            XaiAgent::with_deps(Arc::clone(&mock_notifier), "grok-3", "key", Arc::clone(&mock_http));
+        unsafe { std::env::remove_var("XAI_MAX_TURNS") };
+        assert_eq!(
+            agent.max_turns,
+            Some(10),
+            "XAI_MAX_TURNS with non-numeric value must fall back to Some(10)"
+        );
+    }
+
+    // ── XAI_MODELS whitespace-only entries fall back to defaults ─────────────
+
+    #[tokio::test]
+    async fn xai_models_whitespace_only_entries_falls_back_to_defaults() {
+        let _guard = env_lock().lock().unwrap();
+        // Each entry is just spaces — `split_once(':')` returns None for all of
+        // them, so the collected vec is empty, `filter(!is_empty)` rejects it,
+        // and `unwrap_or_else` falls back to the hardcoded model list.
+        unsafe { std::env::set_var("XAI_MODELS", "   ,   ") };
+        let mock_http = Arc::new(MockXaiHttpClient::new());
+        let mock_notifier = Arc::new(MockSessionNotifier::new());
+        let agent: TestAgent =
+            XaiAgent::with_deps(Arc::clone(&mock_notifier), "grok-3", "key", Arc::clone(&mock_http));
+        unsafe { std::env::remove_var("XAI_MODELS") };
+        let ids: Vec<_> =
+            agent.available_models.iter().map(|m| m.model_id.to_string()).collect();
+        assert!(ids.contains(&"grok-3".to_string()), "default grok-3 must be present");
+        assert!(ids.contains(&"grok-3-mini".to_string()), "default grok-3-mini must be present");
+    }
 }
