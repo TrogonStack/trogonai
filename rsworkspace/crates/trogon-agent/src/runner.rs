@@ -44,16 +44,14 @@ use crate::tools::{DefaultToolDispatcher, ToolContext, ToolDef};
 
 const NATS_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// `ack_wait` for all consumers.
+/// `ack_wait` for all consumers — set to 3× the heartbeat interval.
 ///
-/// Set to 10 minutes so that most agent runs complete before NATS redelivers the
-/// message. Runs that exceed this window are handled by the durable promise store:
-/// on redelivery, the runner finds the existing checkpoint and resumes from it.
-///
-/// TODO: Replace with per-message `AckKind::Progress` heartbeats (every 15s) once
-/// the heartbeat helper is added — that will let us keep a shorter ack_wait while
-/// never triggering spurious redelivery during active runs.
-const CONSUMER_ACK_WAIT: Duration = Duration::from_secs(10 * 60);
+/// `spawn_heartbeat` sends `AckKind::Progress` every 15s, which resets the
+/// ack timer on the server. Redelivery only triggers if the process actually
+/// dies (the heartbeat stops). 45s = 3× 15s gives three missed beats before
+/// NATS redelivers — enough to absorb transient GC pauses without being so
+/// long that a real crash goes undetected for minutes.
+const CONSUMER_ACK_WAIT: Duration = Duration::from_secs(45);
 
 /// Worker identifier for promise ownership — hostname + PID.
 fn worker_id() -> String {
@@ -315,11 +313,17 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     return;
                                 }
                             };
-                            let autos = store.matching(&tenant_id, subject, &pv).await.unwrap_or_default();
+                            let promise_id_prefix = format!("github.{stream_seq}");
+                            let autos = match store.matching(&tenant_id, subject, &pv).await {
+                                Ok(list) => list,
+                                Err(e) => {
+                                    error!(error = %e, subject, "Automation lookup failed — falling back to built-in handler");
+                                    vec![]
+                                }
+                            };
                             let heartbeat = spawn_heartbeat(msg.clone());
                             if autos.is_empty() {
-                                let promise_id = format!("{stream_seq}");
-                                let agent = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id, "", subject, &pv).await;
+                                let agent = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id_prefix, "", subject, &pv).await;
                                 let is_merged = pv["action"].as_str() == Some("closed")
                                     && pv["pull_request"]["merged"].as_bool() == Some(true);
                                 if !agent.is_flag_enabled(&crate::flags::AgentFlag::PrReviewEnabled).await {
@@ -338,7 +342,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     }
                                 }
                             } else {
-                                dispatch_automations(&agent, &run_store, &promise_store, stream_seq, autos, subject, &msg.payload).await;
+                                dispatch_automations(&agent, &run_store, &promise_store, &promise_id_prefix, autos, subject, &msg.payload).await;
                             }
                             heartbeat.abort();
                             if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack PR message"); }
@@ -370,11 +374,17 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     return;
                                 }
                             };
-                            let autos = store.matching(&tenant_id, subject, &pv).await.unwrap_or_default();
+                            let promise_id_prefix = format!("github.{stream_seq}");
+                            let autos = match store.matching(&tenant_id, subject, &pv).await {
+                                Ok(list) => list,
+                                Err(e) => {
+                                    error!(error = %e, subject, "Automation lookup failed — falling back to built-in handler");
+                                    vec![]
+                                }
+                            };
                             let heartbeat = spawn_heartbeat(msg.clone());
                             if autos.is_empty() {
-                                let promise_id = format!("{stream_seq}");
-                                let agent = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id, "", subject, &pv).await;
+                                let agent = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id_prefix, "", subject, &pv).await;
                                 if !agent.is_flag_enabled(&crate::flags::AgentFlag::CommentHandlerEnabled).await {
                                     info!(flag = "agent_comment_handler_enabled", "Comment handler disabled by feature flag");
                                 } else {
@@ -385,7 +395,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     }
                                 }
                             } else {
-                                dispatch_automations(&agent, &run_store, &promise_store, stream_seq, autos, subject, &msg.payload).await;
+                                dispatch_automations(&agent, &run_store, &promise_store, &promise_id_prefix, autos, subject, &msg.payload).await;
                             }
                             heartbeat.abort();
                             if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack comment message"); }
@@ -417,11 +427,17 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     return;
                                 }
                             };
-                            let autos = store.matching(&tenant_id, subject, &pv).await.unwrap_or_default();
+                            let promise_id_prefix = format!("github.{stream_seq}");
+                            let autos = match store.matching(&tenant_id, subject, &pv).await {
+                                Ok(list) => list,
+                                Err(e) => {
+                                    error!(error = %e, subject, "Automation lookup failed — falling back to built-in handler");
+                                    vec![]
+                                }
+                            };
                             let heartbeat = spawn_heartbeat(msg.clone());
                             if autos.is_empty() {
-                                let promise_id = format!("{stream_seq}");
-                                let agent = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id, "", subject, &pv).await;
+                                let agent = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id_prefix, "", subject, &pv).await;
                                 if !agent.is_flag_enabled(&crate::flags::AgentFlag::PushHandlerEnabled).await {
                                     info!(flag = "agent_push_handler_enabled", "Push handler disabled by feature flag");
                                 } else {
@@ -432,7 +448,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     }
                                 }
                             } else {
-                                dispatch_automations(&agent, &run_store, &promise_store, stream_seq, autos, subject, &msg.payload).await;
+                                dispatch_automations(&agent, &run_store, &promise_store, &promise_id_prefix, autos, subject, &msg.payload).await;
                             }
                             heartbeat.abort();
                             if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack push message"); }
@@ -464,11 +480,17 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     return;
                                 }
                             };
-                            let autos = store.matching(&tenant_id, subject, &pv).await.unwrap_or_default();
+                            let promise_id_prefix = format!("github.{stream_seq}");
+                            let autos = match store.matching(&tenant_id, subject, &pv).await {
+                                Ok(list) => list,
+                                Err(e) => {
+                                    error!(error = %e, subject, "Automation lookup failed — falling back to built-in handler");
+                                    vec![]
+                                }
+                            };
                             let heartbeat = spawn_heartbeat(msg.clone());
                             if autos.is_empty() {
-                                let promise_id = format!("{stream_seq}");
-                                let agent = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id, "", subject, &pv).await;
+                                let agent = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id_prefix, "", subject, &pv).await;
                                 if !agent.is_flag_enabled(&crate::flags::AgentFlag::CiHandlerEnabled).await {
                                     info!(flag = "agent_ci_handler_enabled", "CI handler disabled by feature flag");
                                 } else {
@@ -479,7 +501,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     }
                                 }
                             } else {
-                                dispatch_automations(&agent, &run_store, &promise_store, stream_seq, autos, subject, &msg.payload).await;
+                                dispatch_automations(&agent, &run_store, &promise_store, &promise_id_prefix, autos, subject, &msg.payload).await;
                             }
                             heartbeat.abort();
                             if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack CI message"); }
@@ -511,11 +533,17 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     return;
                                 }
                             };
-                            let autos = store.matching(&tenant_id, subject, &pv).await.unwrap_or_default();
+                            let promise_id_prefix = format!("linear.{stream_seq}");
+                            let autos = match store.matching(&tenant_id, subject, &pv).await {
+                                Ok(list) => list,
+                                Err(e) => {
+                                    error!(error = %e, subject, "Automation lookup failed — falling back to built-in handler");
+                                    vec![]
+                                }
+                            };
                             let heartbeat = spawn_heartbeat(msg.clone());
                             if autos.is_empty() {
-                                let promise_id = format!("{stream_seq}");
-                                let agent = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id, "", subject, &pv).await;
+                                let agent = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id_prefix, "", subject, &pv).await;
                                 if !agent.is_flag_enabled(&crate::flags::AgentFlag::IssueTriageEnabled).await {
                                     info!(flag = "agent_issue_triage_enabled", "Issue triage handler disabled by feature flag");
                                 } else {
@@ -526,7 +554,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     }
                                 }
                             } else {
-                                dispatch_automations(&agent, &run_store, &promise_store, stream_seq, autos, subject, &msg.payload).await;
+                                dispatch_automations(&agent, &run_store, &promise_store, &promise_id_prefix, autos, subject, &msg.payload).await;
                             }
                             heartbeat.abort();
                             if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack issue message"); }
@@ -558,12 +586,19 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     return;
                                 }
                             };
-                            let autos = store.matching(&tenant_id, &nats_subject, &pv).await.unwrap_or_default();
+                            let promise_id_prefix = format!("cron.{stream_seq}");
+                            let autos = match store.matching(&tenant_id, &nats_subject, &pv).await {
+                                Ok(list) => list,
+                                Err(e) => {
+                                    error!(error = %e, subject = %nats_subject, "Automation lookup failed — cron tick skipped");
+                                    vec![]
+                                }
+                            };
                             let heartbeat = spawn_heartbeat(msg.clone());
                             if autos.is_empty() {
                                 info!(subject = %nats_subject, "Cron tick with no matching automations — skipping");
                             } else {
-                                dispatch_automations(&agent, &run_store, &promise_store, stream_seq, autos, &nats_subject, &msg.payload).await;
+                                dispatch_automations(&agent, &run_store, &promise_store, &promise_id_prefix, autos, &nats_subject, &msg.payload).await;
                             }
                             heartbeat.abort();
                             if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack cron message"); }
@@ -595,11 +630,17 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     return;
                                 }
                             };
-                            let autos = store.matching(&tenant_id, &nats_subject, &pv).await.unwrap_or_default();
+                            let promise_id_prefix = format!("datadog.{stream_seq}");
+                            let autos = match store.matching(&tenant_id, &nats_subject, &pv).await {
+                                Ok(list) => list,
+                                Err(e) => {
+                                    error!(error = %e, subject = %nats_subject, "Automation lookup failed — falling back to built-in handler");
+                                    vec![]
+                                }
+                            };
                             let heartbeat = spawn_heartbeat(msg.clone());
                             if autos.is_empty() {
-                                let promise_id = format!("{stream_seq}");
-                                let agent = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id, "", &nats_subject, &pv).await;
+                                let agent = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id_prefix, "", &nats_subject, &pv).await;
                                 if !agent.is_flag_enabled(&crate::flags::AgentFlag::AlertHandlerEnabled).await {
                                     info!(flag = "agent_alert_handler_enabled", "Alert handler disabled by feature flag");
                                 } else {
@@ -610,7 +651,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     }
                                 }
                             } else {
-                                dispatch_automations(&agent, &run_store, &promise_store, stream_seq, autos, &nats_subject, &msg.payload).await;
+                                dispatch_automations(&agent, &run_store, &promise_store, &promise_id_prefix, autos, &nats_subject, &msg.payload).await;
                             }
                             heartbeat.abort();
                             if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack Datadog message"); }
@@ -647,11 +688,17 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     return;
                                 }
                             };
-                            let autos = store.matching(&tenant_id, &nats_subject, &pv).await.unwrap_or_default();
+                            let promise_id_prefix = format!("incidentio.{stream_seq}");
+                            let autos = match store.matching(&tenant_id, &nats_subject, &pv).await {
+                                Ok(list) => list,
+                                Err(e) => {
+                                    error!(error = %e, subject = %nats_subject, "Automation lookup failed — falling back to built-in handler");
+                                    vec![]
+                                }
+                            };
                             let heartbeat = spawn_heartbeat(msg.clone());
                             if autos.is_empty() {
-                                let promise_id = format!("{stream_seq}");
-                                let agent = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id, "", &nats_subject, &pv).await;
+                                let agent = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id_prefix, "", &nats_subject, &pv).await;
                                 if !agent.is_flag_enabled(&crate::flags::AgentFlag::IncidentioHandlerEnabled).await {
                                     info!(flag = "agent_incidentio_handler_enabled", "incident.io handler disabled by feature flag");
                                 } else {
@@ -662,7 +709,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     }
                                 }
                             } else {
-                                dispatch_automations(&agent, &run_store, &promise_store, stream_seq, autos, &nats_subject, &msg.payload).await;
+                                dispatch_automations(&agent, &run_store, &promise_store, &promise_id_prefix, autos, &nats_subject, &msg.payload).await;
                             }
                             heartbeat.abort();
                             if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack incident.io message"); }
@@ -746,6 +793,15 @@ async fn recover_stale_promises(
     tenant_id: &str,
 ) {
     const STALE_AFTER_SECS: u64 = 5 * 60;
+    /// Maximum number of stale promises to recover on a single startup.
+    ///
+    /// Each recovery re-runs the full agent (potentially multiple LLM calls),
+    /// so recovering an unbounded number sequentially would delay fresh event
+    /// processing when many promises are stale (e.g. after a long outage).
+    /// Cap at 10 most-recent by claimed_at; the rest stay Running and are
+    /// picked up on the next restart once the backlog has drained.
+    const MAX_RECOVERY_AT_STARTUP: usize = 10;
+
     let now = trogon_automations::now_unix();
 
     let promises = match promise_store.list_running(tenant_id).await {
@@ -756,13 +812,27 @@ async fn recover_stale_promises(
         }
     };
 
-    let stale: Vec<_> = promises
+    let mut stale: Vec<_> = promises
         .into_iter()
         .filter(|p| now.saturating_sub(p.claimed_at) >= STALE_AFTER_SECS)
         .collect();
 
     if stale.is_empty() {
         return;
+    }
+
+    // Recover the most recently active first (those closest to completion
+    // are most likely to succeed quickly). Truncate to cap.
+    stale.sort_by(|a, b| b.claimed_at.cmp(&a.claimed_at));
+    if stale.len() > MAX_RECOVERY_AT_STARTUP {
+        warn!(
+            total = stale.len(),
+            recovering = MAX_RECOVERY_AT_STARTUP,
+            "Startup recovery: capping to {} most recent stale promises — {} deferred to next restart",
+            MAX_RECOVERY_AT_STARTUP,
+            stale.len() - MAX_RECOVERY_AT_STARTUP,
+        );
+        stale.truncate(MAX_RECOVERY_AT_STARTUP);
     }
 
     // Recovery runs in the background so the consumer loop can start accepting
@@ -973,7 +1043,7 @@ pub(crate) async fn dispatch_automations(
     agent: &Arc<AgentLoop>,
     run_store: &Arc<RunStore>,
     promise_store: &Arc<dyn PromiseRepository>,
-    stream_seq: u64,
+    promise_id_prefix: &str,
     automations: Vec<trogon_automations::Automation>,
     nats_subject: &str,
     payload: &bytes::Bytes,
@@ -987,12 +1057,16 @@ pub(crate) async fn dispatch_automations(
             let payload = payload.clone();
             let subject = nats_subject.to_string();
             let trigger: serde_json::Value = serde_json::from_slice(&payload).unwrap_or_default();
+            let promise_id_prefix = promise_id_prefix.to_string();
             tokio::spawn(async move {
                 // Each automation gets its own promise so concurrent automations
                 // triggered by the same NATS message checkpoint independently.
                 // KV key = {tenant_id}.{promise_id} so promise_id must NOT
-                // include tenant_id again.
-                let promise_id = format!("{stream_seq}.{}", auto.id);
+                // include tenant_id again. The prefix encodes the stream name
+                // (e.g. "github.42") to avoid collisions with same-seq events
+                // from different streams (GITHUB, LINEAR, CRON, DATADOG each
+                // have independent sequence counters starting from 1).
+                let promise_id = format!("{promise_id_prefix}.{}", auto.id);
                 let tenant_id = agent.tenant_id.clone();
                 let agent = prepare_agent_with_promise(
                     &agent,
@@ -1289,7 +1363,7 @@ mod tests {
             &agent,
             &Arc::new(rs),
             &promise_store,
-            42,
+            "github.42",
             automations,
             "github.push",
             &payload,
@@ -1314,7 +1388,7 @@ mod tests {
             &agent,
             &Arc::new(rs),
             &promise_store,
-            0,
+            "github.0",
             vec![],
             "github.push",
             &payload,
