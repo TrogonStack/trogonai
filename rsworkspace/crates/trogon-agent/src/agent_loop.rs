@@ -448,15 +448,28 @@ impl AgentLoop {
                                 warn!(error = %e, "Promise checkpoint CAS conflict — reloading revision");
                                 match store.get_promise(&self.tenant_id, pid).await {
                                     Ok(Some((_, new_rev))) => *rev = new_rev,
-                                    Ok(None) => error!(
-                                        promise_id = %pid,
-                                        "Promise disappeared during CAS reload — checkpointing disabled for this run"
-                                    ),
-                                    Err(e) => error!(
-                                        error = %e,
-                                        promise_id = %pid,
-                                        "CAS reload failed — checkpointing disabled for this run; crash recovery will replay from last successful checkpoint"
-                                    ),
+                                    Ok(None) => {
+                                        error!(
+                                            promise_id = %pid,
+                                            "Promise disappeared during CAS reload — checkpointing disabled for this run"
+                                        );
+                                        // Disable further checkpoint attempts: the
+                                        // promise is gone so every subsequent write
+                                        // would fail too, and the misleading
+                                        // "CAS conflict" log would repeat each turn.
+                                        checkpoint = None;
+                                    }
+                                    Err(e) => {
+                                        error!(
+                                            error = %e,
+                                            promise_id = %pid,
+                                            "CAS reload failed — checkpointing disabled for this run; crash recovery will replay from last successful checkpoint"
+                                        );
+                                        // Same: stop attempting checkpoints so
+                                        // future turns don't log spurious
+                                        // "CAS conflict" errors for a stale revision.
+                                        checkpoint = None;
+                                    }
                                 }
                             }
                         }
