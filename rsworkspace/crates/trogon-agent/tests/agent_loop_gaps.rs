@@ -39,6 +39,8 @@ fn make_agent(proxy_url: &str) -> AgentLoop {
         mcp_dispatch: vec![],
         flag_client: Arc::new(AlwaysOnFlagClient),
         tenant_id: "test".to_string(),
+        promise_store: None,
+        promise_id: None,
     }
 }
 

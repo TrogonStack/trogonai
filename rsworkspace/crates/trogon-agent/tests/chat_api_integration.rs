@@ -79,6 +79,8 @@ async fn start() -> TestEnv {
         mcp_dispatch: vec![],
         flag_client: Arc::new(AlwaysOnFlagClient),
         tenant_id: "test".to_string(),
+        promise_store: None,
+        promise_id: None,
     });
 
     let state = ChatAppState {
