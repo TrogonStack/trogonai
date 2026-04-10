@@ -15,14 +15,13 @@ permissions:
 
 jobs:
   build-and-push:
+    name: Build and push (${{ matrix.service }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - service: trogon-gateway
-            context: ./rsworkspace
-            dockerfile: ./devops/docker/compose/services/trogon-gateway/Dockerfile
+        service:
+          - trogon-gateway
     steps:
       - uses: actions/checkout@v6.0.2
 
@@ -33,6 +32,13 @@ jobs:
         run: |
           echo "name=ghcr.io/${IMAGE_OWNER,,}/${{ matrix.service }}" >> "$GITHUB_OUTPUT"
           echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve service config
+        id: service_config
+        uses: ./.github/actions/resolve-service-config
+        with:
+          service: ${{ matrix.service }}
+          config-file: .github/canary-container-services.json
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -47,8 +53,8 @@ jobs:
       - name: Build and push canary image
         uses: docker/build-push-action@v6
         with:
-          context: ${{ matrix.context }}
-          file: ${{ matrix.dockerfile }}
+          context: ${{ steps.service_config.outputs.context }}
+          file: ${{ steps.service_config.outputs.dockerfile }}
           push: true
           tags: |
             ${{ steps.image.outputs.name }}:canary
