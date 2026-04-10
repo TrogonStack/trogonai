@@ -1882,6 +1882,30 @@ mod tests {
         );
     }
 
+    // ── build_input: non-assistant role treated as user ──────────────────────
+
+    #[tokio::test]
+    async fn build_input_non_assistant_role_treated_as_user() {
+        // Any history message whose role is not "assistant" falls into the else
+        // branch (agent.rs lines 227-229) and becomes an InputItem with role
+        // "user". Verify with an artificial "system" role history entry.
+        let agent = make_agent();
+        let history = vec![
+            Message { role: "system".to_string(), content: Some("injected".to_string()) },
+        ];
+        agent.test_insert_session_with_history("bi1", "/tmp", history).await;
+        agent.client.push_response(vec![XaiEvent::Done]);
+        agent
+            .prompt(PromptRequest::new("bi1", vec![ContentBlock::from("hi")]))
+            .await
+            .unwrap();
+
+        let calls = agent.client.calls.lock().unwrap();
+        // input: [history-item (role=user), new user item] — no system prompt set
+        assert_eq!(calls[0].input[0].role, "user", "non-assistant role must be mapped to 'user'");
+        assert_eq!(calls[0].input[0].content, "injected");
+    }
+
     // ── XAI_MAX_TURNS invalid env var ─────────────────────────────────────────
 
     #[tokio::test]
