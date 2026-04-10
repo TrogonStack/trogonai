@@ -1092,7 +1092,9 @@ pub(crate) async fn dispatch_automations(
         .collect();
 
     for h in handles {
-        h.await.ok();
+        if let Err(e) = h.await {
+            warn!(error = ?e, "Automation task panicked or was cancelled");
+        }
     }
 }
 
