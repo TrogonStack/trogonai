@@ -46,6 +46,10 @@ pub async fn send_message(
     ctx: &ToolContext<impl HttpClient>,
     input: &Value,
 ) -> Result<String, String> {
+    // Slack has no native Idempotency-Key support. Duplicate sends in the
+    // non-atomic window between execute and kv.put are accepted as a known
+    // limitation. The tool result cache in the promise store prevents re-runs
+    // in normal recovery scenarios.
     let channel = input["channel"].as_str().ok_or("missing channel")?;
     let text = input["text"].as_str().ok_or("missing text")?;
 

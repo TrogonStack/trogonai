@@ -353,11 +353,18 @@ impl AgentLoop {
 
             let body =
                 serde_json::to_value(&request).expect("AnthropicRequest is always serializable");
-            let raw = self
-                .anthropic_client
-                .complete(body)
-                .await
-                .map_err(AgentError::Http)?;
+            let raw = match self.anthropic_client.complete(body).await {
+                Ok(v) => v,
+                Err(e) => {
+                    if let (Some(store), Some(pid)) = (&self.promise_store, &self.promise_id)
+                        && let Some((ref mut p, ref mut rev)) = checkpoint
+                    {
+                        p.status = crate::promise_store::PromiseStatus::Failed;
+                        let _ = store.update_promise(&self.tenant_id, pid, p, *rev).await;
+                    }
+                    return Err(AgentError::Http(e));
+                }
+            };
             let response = serde_json::from_value::<AnthropicResponse>(raw).map_err(|e| {
                 AgentError::UnexpectedStopReason(format!("Deserialization error: {e}"))
             })?;
@@ -380,6 +387,14 @@ impl AgentLoop {
                         .join("\n");
 
                     info!(iterations = iteration + 1, "Agent completed");
+                    if let (Some(store), Some(pid)) = (&self.promise_store, &self.promise_id)
+                        && let Some((ref mut p, ref mut rev)) = checkpoint
+                    {
+                        p.status = crate::promise_store::PromiseStatus::Resolved;
+                        if let Err(e) = store.update_promise(&self.tenant_id, pid, p, *rev).await {
+                            warn!(error = %e, "Failed to mark promise Resolved");
+                        }
+                    }
                     return Ok(text);
                 }
                 "tool_use" => {
@@ -409,6 +424,14 @@ impl AgentLoop {
         }
 
         warn!(max = self.max_iterations, "Agent reached max iterations");
+        if let (Some(store), Some(pid)) = (&self.promise_store, &self.promise_id)
+            && let Some((ref mut p, ref mut rev)) = checkpoint
+        {
+            p.status = crate::promise_store::PromiseStatus::Failed;
+            if let Err(e) = store.update_promise(&self.tenant_id, pid, p, *rev).await {
+                warn!(error = %e, "Failed to mark promise Failed");
+            }
+        }
         Err(AgentError::MaxIterationsReached)
     }
 
@@ -535,18 +558,32 @@ impl AgentLoop {
                     }
                 }
 
+                // Build effective input — inject idempotency key for write tools when available.
+                let call_input = if let Some(pid) = &self.promise_id {
+                    let mut v = input.clone();
+                    if let Some(map) = v.as_object_mut() {
+                        map.insert(
+                            "_idempotency_key".to_string(),
+                            serde_json::Value::String(format!("{pid}.{id}")),
+                        );
+                    }
+                    v
+                } else {
+                    input.clone()
+                };
+
                 // Check MCP dispatch first, then fall back to built-in tools.
                 let output = if let Some((_, original, client)) = self
                     .mcp_dispatch
                     .iter()
                     .find(|(prefixed, _, _)| prefixed == name)
                 {
-                    match client.call_tool(original, input).await {
+                    match client.call_tool(original, &call_input).await {
                         Ok(out) => out,
                         Err(e) => format!("Tool error: {e}"),
                     }
                 } else {
-                    self.tool_dispatcher.dispatch(name, input).await
+                    self.tool_dispatcher.dispatch(name, &call_input).await
                 };
 
                 // ── Durable promise: persist tool result ─────────────────────

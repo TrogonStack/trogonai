@@ -34,7 +34,7 @@ pub async fn get_issue(
         "variables": { "id": issue_id }
     });
 
-    let response: Value = graphql_request(ctx, &query).await?;
+    let response: Value = graphql_request(ctx, &query, None).await?;
     serde_json::to_string_pretty(&response["data"]["issue"]).map_err(|e| e.to_string())
 }
 
@@ -45,6 +45,7 @@ pub async fn post_comment(
 ) -> Result<String, String> {
     let issue_id = input["issue_id"].as_str().ok_or("missing issue_id")?;
     let body = input["body"].as_str().ok_or("missing body")?;
+    let idempotency_key = input["_idempotency_key"].as_str();
 
     let mutation = json!({
         "query": "mutation($input: CommentCreateInput!) {
@@ -58,7 +59,7 @@ pub async fn post_comment(
         }
     });
 
-    let response: Value = graphql_request(ctx, &mutation).await?;
+    let response: Value = graphql_request(ctx, &mutation, idempotency_key).await?;
     let ok = response["data"]["commentCreate"]["success"]
         .as_bool()
         .unwrap_or(false);
@@ -96,7 +97,7 @@ pub async fn get_comments(
         "variables": { "id": issue_id }
     });
 
-    let response: Value = graphql_request(ctx, &query).await?;
+    let response: Value = graphql_request(ctx, &query, None).await?;
     let comments = &response["data"]["issue"]["comments"]["nodes"];
     serde_json::to_string_pretty(comments).map_err(|e| e.to_string())
 }
@@ -108,6 +109,7 @@ pub async fn update_issue(
     input: &Value,
 ) -> Result<String, String> {
     let issue_id = input["issue_id"].as_str().ok_or("missing issue_id")?;
+    let idempotency_key = input["_idempotency_key"].as_str();
 
     let mut patch = serde_json::Map::new();
     if let Some(state_id) = input["state_id"].as_str() {
@@ -130,7 +132,7 @@ pub async fn update_issue(
         "variables": { "id": issue_id, "input": patch }
     });
 
-    let response: Value = graphql_request(ctx, &mutation).await?;
+    let response: Value = graphql_request(ctx, &mutation, idempotency_key).await?;
     let ok = response["data"]["issueUpdate"]["success"]
         .as_bool()
         .unwrap_or(false);
@@ -148,21 +150,19 @@ pub async fn update_issue(
 async fn graphql_request<H: HttpClient>(
     ctx: &ToolContext<H>,
     body: &Value,
+    idempotency_key: Option<&str>,
 ) -> Result<Value, String> {
     let url = format!("{}{GRAPHQL_PATH}", ctx.proxy_url);
-    let resp = ctx
-        .http_client
-        .post(
-            &url,
-            vec![
-                (
-                    "Authorization".to_string(),
-                    format!("Bearer {}", ctx.linear_token),
-                ),
-                ("Content-Type".to_string(), "application/json".to_string()),
-            ],
-            body.clone(),
-        )
-        .await?;
+    let mut headers = vec![
+        (
+            "Authorization".to_string(),
+            format!("Bearer {}", ctx.linear_token),
+        ),
+        ("Content-Type".to_string(), "application/json".to_string()),
+    ];
+    if let Some(key) = idempotency_key {
+        headers.push(("Idempotency-Key".to_string(), key.to_string()));
+    }
+    let resp = ctx.http_client.post(&url, headers, body.clone()).await?;
     serde_json::from_str::<Value>(&resp.body).map_err(|e| e.to_string())
 }

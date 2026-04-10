@@ -191,6 +191,7 @@ pub async fn update_file(
     let message = input["message"].as_str().ok_or("missing message")?;
     let content = input["content"].as_str().ok_or("missing content")?;
     let branch = input["branch"].as_str().unwrap_or("main");
+    let idempotency_key = input["_idempotency_key"].as_str();
 
     let encoded = general_purpose::STANDARD.encode(content.as_bytes());
 
@@ -209,23 +210,21 @@ pub async fn update_file(
         ctx.proxy_url,
     );
 
-    let resp = ctx
-        .http_client
-        .put(
-            &url,
-            vec![
-                (
-                    "Authorization".to_string(),
-                    format!("Bearer {}", ctx.github_token),
-                ),
-                (
-                    "Accept".to_string(),
-                    "application/vnd.github.v3+json".to_string(),
-                ),
-            ],
-            body,
-        )
-        .await?;
+    let mut headers = vec![
+        (
+            "Authorization".to_string(),
+            format!("Bearer {}", ctx.github_token),
+        ),
+        (
+            "Accept".to_string(),
+            "application/vnd.github.v3+json".to_string(),
+        ),
+    ];
+    if let Some(key) = idempotency_key {
+        headers.push(("Idempotency-Key".to_string(), key.to_string()));
+    }
+
+    let resp = ctx.http_client.put(&url, headers, body).await?;
     let response: Value = serde_json::from_str(&resp.body).map_err(|e| e.to_string())?;
 
     let commit_sha = response["commit"]["sha"].as_str().unwrap_or("(no sha)");
@@ -243,23 +242,29 @@ pub async fn create_pull_request(
     let head = input["head"].as_str().ok_or("missing head")?;
     let base = input["base"].as_str().unwrap_or("main");
     let body = input["body"].as_str().unwrap_or("");
+    let idempotency_key = input["_idempotency_key"].as_str();
 
     let url = format!("{}/github/repos/{owner}/{repo}/pulls", ctx.proxy_url);
+
+    let mut headers = vec![
+        (
+            "Authorization".to_string(),
+            format!("Bearer {}", ctx.github_token),
+        ),
+        (
+            "Accept".to_string(),
+            "application/vnd.github.v3+json".to_string(),
+        ),
+    ];
+    if let Some(key) = idempotency_key {
+        headers.push(("Idempotency-Key".to_string(), key.to_string()));
+    }
 
     let resp = ctx
         .http_client
         .post(
             &url,
-            vec![
-                (
-                    "Authorization".to_string(),
-                    format!("Bearer {}", ctx.github_token),
-                ),
-                (
-                    "Accept".to_string(),
-                    "application/vnd.github.v3+json".to_string(),
-                ),
-            ],
+            headers,
             serde_json::json!({
                 "title": title,
                 "head": head,
@@ -283,6 +288,7 @@ pub async fn request_reviewers(
     let owner = input["owner"].as_str().ok_or("missing owner")?;
     let repo = input["repo"].as_str().ok_or("missing repo")?;
     let pr_number = input["pr_number"].as_u64().ok_or("missing pr_number")?;
+    let idempotency_key = input["_idempotency_key"].as_str();
 
     let reviewers: Vec<&str> = input["reviewers"]
         .as_array()
@@ -296,22 +302,23 @@ pub async fn request_reviewers(
         ctx.proxy_url,
     );
 
+    let mut headers = vec![
+        (
+            "Authorization".to_string(),
+            format!("Bearer {}", ctx.github_token),
+        ),
+        (
+            "Accept".to_string(),
+            "application/vnd.github.v3+json".to_string(),
+        ),
+    ];
+    if let Some(key) = idempotency_key {
+        headers.push(("Idempotency-Key".to_string(), key.to_string()));
+    }
+
     let resp = ctx
         .http_client
-        .post(
-            &url,
-            vec![
-                (
-                    "Authorization".to_string(),
-                    format!("Bearer {}", ctx.github_token),
-                ),
-                (
-                    "Accept".to_string(),
-                    "application/vnd.github.v3+json".to_string(),
-                ),
-            ],
-            serde_json::json!({ "reviewers": reviewers }),
-        )
+        .post(&url, headers, serde_json::json!({ "reviewers": reviewers }))
         .await?;
     let response: Value = serde_json::from_str(&resp.body).map_err(|e| e.to_string())?;
 
@@ -328,28 +335,30 @@ pub async fn post_pr_comment(
     let repo = input["repo"].as_str().ok_or("missing repo")?;
     let pr_number = input["pr_number"].as_u64().ok_or("missing pr_number")?;
     let body = input["body"].as_str().ok_or("missing body")?;
+    let idempotency_key = input["_idempotency_key"].as_str();
 
     let url = format!(
         "{}/github/repos/{owner}/{repo}/issues/{pr_number}/comments",
         ctx.proxy_url,
     );
 
+    let mut headers = vec![
+        (
+            "Authorization".to_string(),
+            format!("Bearer {}", ctx.github_token),
+        ),
+        (
+            "Accept".to_string(),
+            "application/vnd.github.v3+json".to_string(),
+        ),
+    ];
+    if let Some(key) = idempotency_key {
+        headers.push(("Idempotency-Key".to_string(), key.to_string()));
+    }
+
     let resp = ctx
         .http_client
-        .post(
-            &url,
-            vec![
-                (
-                    "Authorization".to_string(),
-                    format!("Bearer {}", ctx.github_token),
-                ),
-                (
-                    "Accept".to_string(),
-                    "application/vnd.github.v3+json".to_string(),
-                ),
-            ],
-            serde_json::json!({ "body": body }),
-        )
+        .post(&url, headers, serde_json::json!({ "body": body }))
         .await?;
     let response: Value = serde_json::from_str(&resp.body).map_err(|e| e.to_string())?;
 
