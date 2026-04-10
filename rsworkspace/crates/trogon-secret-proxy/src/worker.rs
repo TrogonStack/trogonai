@@ -1016,11 +1016,7 @@ mod tests {
                 _token: &VaultToken,
             ) -> impl std::future::Future<Output = Result<Option<String>, Self::Error>> + Send
             {
-                async {
-                    Err(std::io::Error::other(
-                        "vault backend unavailable",
-                    ))
-                }
+                async { Err(std::io::Error::other("vault backend unavailable")) }
             }
 
             fn revoke(
@@ -1474,11 +1470,7 @@ mod tests {
                 _token: &VaultToken,
             ) -> impl std::future::Future<Output = Result<Option<String>, Self::Error>> + Send
             {
-                async {
-                    Err(std::io::Error::other(
-                        "simulated backend failure",
-                    ))
-                }
+                async { Err(std::io::Error::other("simulated backend failure")) }
             }
 
             fn revoke(
