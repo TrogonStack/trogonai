@@ -316,18 +316,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                 }
                             };
                             let autos = store.matching(&tenant_id, subject, &pv).await.unwrap_or_default();
-                            // Heartbeat: send Progress every 15s to prevent spurious redelivery
-                            let msg_for_heartbeat = msg.clone();
-                            let heartbeat = tokio::spawn(async move {
-                                let mut interval = tokio::time::interval(std::time::Duration::from_secs(15));
-                                interval.tick().await; // skip immediate first tick
-                                loop {
-                                    interval.tick().await;
-                                    if msg_for_heartbeat.ack_with(AckKind::Progress).await.is_err() {
-                                        break;
-                                    }
-                                }
-                            });
+                            let heartbeat = spawn_heartbeat(msg.clone());
                             if autos.is_empty() {
                                 let promise_id = format!("{stream_seq}");
                                 let agent = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id, "", subject, &pv).await;
@@ -382,18 +371,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                 }
                             };
                             let autos = store.matching(&tenant_id, subject, &pv).await.unwrap_or_default();
-                            // Heartbeat: send Progress every 15s to prevent spurious redelivery
-                            let msg_for_heartbeat = msg.clone();
-                            let heartbeat = tokio::spawn(async move {
-                                let mut interval = tokio::time::interval(std::time::Duration::from_secs(15));
-                                interval.tick().await; // skip immediate first tick
-                                loop {
-                                    interval.tick().await;
-                                    if msg_for_heartbeat.ack_with(AckKind::Progress).await.is_err() {
-                                        break;
-                                    }
-                                }
-                            });
+                            let heartbeat = spawn_heartbeat(msg.clone());
                             if autos.is_empty() {
                                 let promise_id = format!("{stream_seq}");
                                 let agent = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id, "", subject, &pv).await;
@@ -440,18 +418,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                 }
                             };
                             let autos = store.matching(&tenant_id, subject, &pv).await.unwrap_or_default();
-                            // Heartbeat: send Progress every 15s to prevent spurious redelivery
-                            let msg_for_heartbeat = msg.clone();
-                            let heartbeat = tokio::spawn(async move {
-                                let mut interval = tokio::time::interval(std::time::Duration::from_secs(15));
-                                interval.tick().await; // skip immediate first tick
-                                loop {
-                                    interval.tick().await;
-                                    if msg_for_heartbeat.ack_with(AckKind::Progress).await.is_err() {
-                                        break;
-                                    }
-                                }
-                            });
+                            let heartbeat = spawn_heartbeat(msg.clone());
                             if autos.is_empty() {
                                 let promise_id = format!("{stream_seq}");
                                 let agent = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id, "", subject, &pv).await;
@@ -498,18 +465,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                 }
                             };
                             let autos = store.matching(&tenant_id, subject, &pv).await.unwrap_or_default();
-                            // Heartbeat: send Progress every 15s to prevent spurious redelivery
-                            let msg_for_heartbeat = msg.clone();
-                            let heartbeat = tokio::spawn(async move {
-                                let mut interval = tokio::time::interval(std::time::Duration::from_secs(15));
-                                interval.tick().await; // skip immediate first tick
-                                loop {
-                                    interval.tick().await;
-                                    if msg_for_heartbeat.ack_with(AckKind::Progress).await.is_err() {
-                                        break;
-                                    }
-                                }
-                            });
+                            let heartbeat = spawn_heartbeat(msg.clone());
                             if autos.is_empty() {
                                 let promise_id = format!("{stream_seq}");
                                 let agent = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id, "", subject, &pv).await;
@@ -556,18 +512,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                 }
                             };
                             let autos = store.matching(&tenant_id, subject, &pv).await.unwrap_or_default();
-                            // Heartbeat: send Progress every 15s to prevent spurious redelivery
-                            let msg_for_heartbeat = msg.clone();
-                            let heartbeat = tokio::spawn(async move {
-                                let mut interval = tokio::time::interval(std::time::Duration::from_secs(15));
-                                interval.tick().await; // skip immediate first tick
-                                loop {
-                                    interval.tick().await;
-                                    if msg_for_heartbeat.ack_with(AckKind::Progress).await.is_err() {
-                                        break;
-                                    }
-                                }
-                            });
+                            let heartbeat = spawn_heartbeat(msg.clone());
                             if autos.is_empty() {
                                 let promise_id = format!("{stream_seq}");
                                 let agent = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id, "", subject, &pv).await;
@@ -614,18 +559,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                 }
                             };
                             let autos = store.matching(&tenant_id, &nats_subject, &pv).await.unwrap_or_default();
-                            // Heartbeat: send Progress every 15s to prevent spurious redelivery
-                            let msg_for_heartbeat = msg.clone();
-                            let heartbeat = tokio::spawn(async move {
-                                let mut interval = tokio::time::interval(std::time::Duration::from_secs(15));
-                                interval.tick().await; // skip immediate first tick
-                                loop {
-                                    interval.tick().await;
-                                    if msg_for_heartbeat.ack_with(AckKind::Progress).await.is_err() {
-                                        break;
-                                    }
-                                }
-                            });
+                            let heartbeat = spawn_heartbeat(msg.clone());
                             if autos.is_empty() {
                                 info!(subject = %nats_subject, "Cron tick with no matching automations — skipping");
                             } else {
@@ -662,18 +596,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                 }
                             };
                             let autos = store.matching(&tenant_id, &nats_subject, &pv).await.unwrap_or_default();
-                            // Heartbeat: send Progress every 15s to prevent spurious redelivery
-                            let msg_for_heartbeat = msg.clone();
-                            let heartbeat = tokio::spawn(async move {
-                                let mut interval = tokio::time::interval(std::time::Duration::from_secs(15));
-                                interval.tick().await; // skip immediate first tick
-                                loop {
-                                    interval.tick().await;
-                                    if msg_for_heartbeat.ack_with(AckKind::Progress).await.is_err() {
-                                        break;
-                                    }
-                                }
-                            });
+                            let heartbeat = spawn_heartbeat(msg.clone());
                             if autos.is_empty() {
                                 let promise_id = format!("{stream_seq}");
                                 let agent = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id, "", &nats_subject, &pv).await;
@@ -725,18 +648,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                 }
                             };
                             let autos = store.matching(&tenant_id, &nats_subject, &pv).await.unwrap_or_default();
-                            // Heartbeat: send Progress every 15s to prevent spurious redelivery
-                            let msg_for_heartbeat = msg.clone();
-                            let heartbeat = tokio::spawn(async move {
-                                let mut interval = tokio::time::interval(std::time::Duration::from_secs(15));
-                                interval.tick().await; // skip immediate first tick
-                                loop {
-                                    interval.tick().await;
-                                    if msg_for_heartbeat.ack_with(AckKind::Progress).await.is_err() {
-                                        break;
-                                    }
-                                }
-                            });
+                            let heartbeat = spawn_heartbeat(msg.clone());
                             if autos.is_empty() {
                                 let promise_id = format!("{stream_seq}");
                                 let agent = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id, "", &nats_subject, &pv).await;
@@ -1017,6 +929,24 @@ async fn recover_stale_promises(
             }
         }
     });
+}
+
+/// Spawn a background task that sends [`AckKind::Progress`] every 15 seconds
+/// to prevent JetStream from redelivering the message while the agent is active.
+///
+/// The returned handle **must** be aborted once processing finishes so the task
+/// stops sending progress acks after the message has been explicitly acked.
+fn spawn_heartbeat(msg: async_nats::jetstream::Message) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(15));
+        interval.tick().await; // skip immediate first tick
+        loop {
+            interval.tick().await;
+            if msg.ack_with(AckKind::Progress).await.is_err() {
+                break;
+            }
+        }
+    })
 }
 
 /// Spawn one task per automation and wait for all to finish.

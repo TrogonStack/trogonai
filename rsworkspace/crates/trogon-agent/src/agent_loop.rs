@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::flag_client::FeatureFlagClient;
 use crate::promise_store::PromiseRepository;
@@ -423,10 +423,17 @@ impl AgentLoop {
                                 // Without this reload, every subsequent checkpoint in
                                 // this run fails silently with a stale revision.
                                 warn!(error = %e, "Promise checkpoint CAS conflict — reloading revision");
-                                if let Ok(Some((_, new_rev))) =
-                                    store.get_promise(&self.tenant_id, pid).await
-                                {
-                                    *rev = new_rev;
+                                match store.get_promise(&self.tenant_id, pid).await {
+                                    Ok(Some((_, new_rev))) => *rev = new_rev,
+                                    Ok(None) => error!(
+                                        promise_id = %pid,
+                                        "Promise disappeared during CAS reload — checkpointing disabled for this run"
+                                    ),
+                                    Err(e) => error!(
+                                        error = %e,
+                                        promise_id = %pid,
+                                        "CAS reload failed — checkpointing disabled for this run; crash recovery will replay from last successful checkpoint"
+                                    ),
                                 }
                             }
                         }
@@ -610,7 +617,7 @@ impl AgentLoop {
                         .put_tool_result(&self.tenant_id, pid, id, &output)
                         .await
                 {
-                    warn!(error = %e, "Failed to cache tool result");
+                    error!(error = %e, "Failed to cache tool result — if process crashes before next checkpoint, this tool will be re-executed on recovery");
                 }
 
                 results.push(ToolResult {
@@ -625,6 +632,15 @@ impl AgentLoop {
 }
 
 // ── Unit tests ────────────────────────────────────────────────────────────────
+//
+// TODO: Add an integration test for the full checkpoint → crash → recovery cycle:
+//   1. Build an AgentLoop with a mock PromiseStore and mock AnthropicClient.
+//   2. Run the agent through one tool turn so a checkpoint and tool-result cache
+//      entry are written.
+//   3. Drop the AgentLoop (simulating a crash).
+//   4. Construct a new AgentLoop pointing at the same mock store.
+//   5. Call `run_with_history` seeded from the checkpoint.
+//   6. Assert the tool is NOT re-executed (cache replay) and the run completes.
 
 #[cfg(test)]
 mod tests {

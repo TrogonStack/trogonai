@@ -232,6 +232,16 @@ pub async fn update_file(
 }
 
 /// Open a pull request.
+///
+/// ## Idempotency limitation
+///
+/// GitHub does not honour the `Idempotency-Key` header — it is forwarded but
+/// silently ignored. If the tool result was not cached and the process crashes
+/// after this call, recovery will attempt a second `POST /pulls`. GitHub will
+/// reject the duplicate with a 422 ("A pull request already exists") error if a
+/// PR for the same `head` → `base` pair is still open, so a duplicate PR is
+/// unlikely in practice. However, if the original PR was closed or merged
+/// between the crash and recovery, a second PR **will** be created.
 pub async fn create_pull_request(
     ctx: &ToolContext<impl HttpClient>,
     input: &Value,
@@ -327,6 +337,16 @@ pub async fn request_reviewers(
 }
 
 /// Post a comment on a pull request (uses the Issues comments endpoint).
+///
+/// ## Idempotency limitation
+///
+/// GitHub does not honour the `Idempotency-Key` header. Unlike
+/// `create_pull_request`, GitHub has no duplicate-rejection mechanism for
+/// issue/PR comments — a second POST will always create a second comment.
+/// Protection relies entirely on the durable promise tool-result cache: if the
+/// cache write succeeded before the crash, recovery replays the cached result
+/// and never calls this function again. If the cache write also failed, a
+/// duplicate comment will appear on recovery.
 pub async fn post_pr_comment(
     ctx: &ToolContext<impl HttpClient>,
     input: &Value,
