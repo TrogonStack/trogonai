@@ -56,6 +56,9 @@ impl AnthropicClient for ReqwestAnthropicClient {
                 .post(format!("{}/anthropic/v1/messages", self.proxy_url))
                 .header("Authorization", format!("Bearer {}", self.anthropic_token))
                 .header("anthropic-version", "2023-06-01")
+                // Hard cap per LLM call. Without this, a hung Anthropic API keeps
+                // the heartbeat alive indefinitely and the run never completes.
+                .timeout(std::time::Duration::from_secs(5 * 60))
                 .json(&body)
                 .send()
                 .await?
