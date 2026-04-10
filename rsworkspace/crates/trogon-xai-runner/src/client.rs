@@ -1609,4 +1609,52 @@ mod tests {
         assert_eq!(msg.content_str(), "");
     }
 
+    // ── XaiClient constructors ────────────────────────────────────────────────
+
+    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    fn env_lock() -> &'static std::sync::Mutex<()> {
+        ENV_LOCK.get_or_init(|| std::sync::Mutex::new(()))
+    }
+
+    #[test]
+    fn xai_client_new_uses_default_base_url_when_env_not_set() {
+        let _guard = env_lock().lock().unwrap();
+        unsafe { std::env::remove_var("XAI_BASE_URL") };
+        let client = XaiClient::new();
+        assert_eq!(client.base_url, "https://api.x.ai/v1");
+    }
+
+    #[test]
+    fn xai_client_new_reads_base_url_from_env() {
+        let _guard = env_lock().lock().unwrap();
+        unsafe { std::env::set_var("XAI_BASE_URL", "https://custom.example.com/v2") };
+        let client = XaiClient::new();
+        unsafe { std::env::remove_var("XAI_BASE_URL") };
+        assert_eq!(client.base_url, "https://custom.example.com/v2");
+    }
+
+    #[test]
+    fn xai_client_new_uses_default_timeout_when_env_not_set() {
+        let _guard = env_lock().lock().unwrap();
+        unsafe { std::env::remove_var("XAI_PROMPT_TIMEOUT_SECS") };
+        let client = XaiClient::new();
+        assert_eq!(client.request_timeout, Duration::from_secs(300));
+    }
+
+    #[test]
+    fn xai_client_new_reads_timeout_from_env() {
+        let _guard = env_lock().lock().unwrap();
+        unsafe { std::env::set_var("XAI_PROMPT_TIMEOUT_SECS", "60") };
+        let client = XaiClient::new();
+        unsafe { std::env::remove_var("XAI_PROMPT_TIMEOUT_SECS") };
+        assert_eq!(client.request_timeout, Duration::from_secs(60));
+    }
+
+    #[test]
+    fn xai_client_with_base_url_sets_url_and_default_timeout() {
+        let client = XaiClient::with_base_url("https://proxy.internal/v1");
+        assert_eq!(client.base_url, "https://proxy.internal/v1");
+        assert_eq!(client.request_timeout, Duration::from_secs(300));
+    }
+
 }
