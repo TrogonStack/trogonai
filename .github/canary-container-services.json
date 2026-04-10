@@ -1,5 +1,6 @@
 {
   "trogon-gateway": {
+    "image": "trogonai/trogon-gateway",
     "context": "./rsworkspace",
     "dockerfile": "./devops/docker/compose/services/trogon-gateway/Dockerfile"
   }
