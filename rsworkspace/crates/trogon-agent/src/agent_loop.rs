@@ -416,7 +416,19 @@ impl AgentLoop {
                         p.iteration = iteration + 1;
                         match store.update_promise(&self.tenant_id, pid, p, *rev).await {
                             Ok(new_rev) => *rev = new_rev,
-                            Err(e) => warn!(error = %e, "Promise checkpoint update failed"),
+                            Err(e) => {
+                                // CAS conflict: another process wrote to this promise
+                                // between our last read and now. Reload the current
+                                // revision so future checkpoints can succeed.
+                                // Without this reload, every subsequent checkpoint in
+                                // this run fails silently with a stale revision.
+                                warn!(error = %e, "Promise checkpoint CAS conflict — reloading revision");
+                                if let Ok(Some((_, new_rev))) =
+                                    store.get_promise(&self.tenant_id, pid).await
+                                {
+                                    *rev = new_rev;
+                                }
+                            }
                         }
                     }
                 }
