@@ -3461,6 +3461,7 @@ dependencies = [
  "tokio",
  "tracing",
  "trogon-nats",
+ "trogon-service-config",
  "trogon-source-discord",
  "trogon-source-github",
  "trogon-source-gitlab",
@@ -3487,6 +3488,16 @@ dependencies = [
  "tracing-subscriber",
  "trogon-std",
  "uuid",
+]
+
+[[package]]
+name = "trogon-service-config"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "confique",
+ "tempfile",
+ "trogon-nats",
 ]
 
 [[package]]

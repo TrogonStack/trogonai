@@ -1,16 +1,16 @@
-use std::path::PathBuf;
+use trogon_service_config::RuntimeConfigArgs;
 
 #[derive(clap::Parser, Clone)]
 #[command(name = "trogon-gateway", about = "Unified gateway ingestion binary")]
 pub struct Cli {
+    #[command(flatten)]
+    pub runtime: RuntimeConfigArgs,
+
     #[command(subcommand)]
     pub command: Command,
 }
 
 #[derive(clap::Subcommand, Clone)]
 pub enum Command {
-    Serve {
-        #[arg(long, short)]
-        config: Option<PathBuf>,
-    },
+    Serve,
 }
