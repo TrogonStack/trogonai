@@ -1,0 +1,15 @@
+[package]
+name = "trogon-service-config"
+version = "0.1.0"
+edition = "2024"
+
+[lints]
+workspace = true
+
+[dependencies]
+clap = { workspace = true, features = ["derive"] }
+confique = { workspace = true }
+trogon-nats = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
