@@ -1,13 +1,14 @@
-use std::error::Error;
-use std::future::{Future, IntoFuture};
-
 use async_nats::HeaderMap;
 use async_nats::jetstream::consumer::pull;
+use async_nats::jetstream::kv;
 use async_nats::jetstream::publish::PublishAck;
 use async_nats::jetstream::stream;
+use async_nats::jetstream::{self, context};
 use async_nats::subject::ToSubject;
 use bytes::Bytes;
 use futures::Stream;
+use std::error::Error;
+use std::future::{Future, IntoFuture};
 
 pub trait JetStreamContext: Send + Sync + Clone + 'static {
     type Error: Error + Send + Sync;
@@ -17,6 +18,70 @@ pub trait JetStreamContext: Send + Sync + Clone + 'static {
         &self,
         config: S,
     ) -> impl Future<Output = Result<Self::Stream, Self::Error>> + Send;
+}
+
+pub trait JetStreamKeyValueStatus: Send + Sync + Clone + 'static {
+    fn status(
+        &self,
+    ) -> impl Future<Output = Result<async_nats::jetstream::kv::bucket::Status, kv::StatusError>> + Send;
+}
+
+pub trait JetStreamKeyValueCreateWithTtl: Send + Sync + Clone + 'static {
+    fn create_with_ttl(
+        &self,
+        key: &str,
+        value: Bytes,
+        ttl: std::time::Duration,
+    ) -> impl Future<Output = Result<u64, kv::CreateError>> + Send;
+}
+
+pub trait JetStreamKeyValueUpdate: Send + Sync + Clone + 'static {
+    fn update(
+        &self,
+        key: &str,
+        value: Bytes,
+        revision: u64,
+    ) -> impl Future<Output = Result<u64, kv::UpdateError>> + Send;
+}
+
+pub trait JetStreamKeyValueDeleteExpectRevision: Send + Sync + Clone + 'static {
+    fn delete_expect_revision(
+        &self,
+        key: &str,
+        revision: Option<u64>,
+    ) -> impl Future<Output = Result<(), kv::DeleteError>> + Send;
+}
+
+pub trait JetStreamCreateKeyValue: Send + Sync + Clone + 'static {
+    type Store: JetStreamKeyValueStatus
+        + JetStreamKeyValueCreateWithTtl
+        + JetStreamKeyValueUpdate
+        + JetStreamKeyValueDeleteExpectRevision
+        + Clone
+        + Send
+        + Sync
+        + 'static;
+
+    fn create_key_value(
+        &self,
+        config: kv::Config,
+    ) -> impl Future<Output = Result<Self::Store, context::CreateKeyValueError>> + Send;
+}
+
+pub trait JetStreamGetKeyValue: Send + Sync + Clone + 'static {
+    type Store: JetStreamKeyValueStatus
+        + JetStreamKeyValueCreateWithTtl
+        + JetStreamKeyValueUpdate
+        + JetStreamKeyValueDeleteExpectRevision
+        + Clone
+        + Send
+        + Sync
+        + 'static;
+
+    fn get_key_value<T: Into<String> + Send>(
+        &self,
+        bucket: T,
+    ) -> impl Future<Output = Result<Self::Store, context::KeyValueError>> + Send;
 }
 
 pub trait JetStreamPublisher: Send + Sync + Clone + 'static {
@@ -70,3 +135,75 @@ pub trait JetStreamConsumer: Send + Sync + 'static {
 /// `J → Stream → Consumer → Message` chain.
 pub type JsMessageOf<J> =
     <<<J as JetStreamGetStream>::Stream as JetStreamCreateConsumer>::Consumer as JetStreamConsumer>::Message;
+
+impl JetStreamKeyValueStatus for jetstream::kv::Store {
+    fn status(
+        &self,
+    ) -> impl Future<Output = Result<async_nats::jetstream::kv::bucket::Status, kv::StatusError>> + Send
+    {
+        jetstream::kv::Store::status(self)
+    }
+}
+
+impl JetStreamKeyValueCreateWithTtl for jetstream::kv::Store {
+    async fn create_with_ttl(
+        &self,
+        key: &str,
+        value: Bytes,
+        ttl: std::time::Duration,
+    ) -> Result<u64, kv::CreateError> {
+        self.create_with_ttl(key, value, ttl).await
+    }
+}
+
+impl JetStreamKeyValueUpdate for jetstream::kv::Store {
+    async fn update(&self, key: &str, value: Bytes, revision: u64) -> Result<u64, kv::UpdateError> {
+        self.update(key, value, revision).await
+    }
+}
+
+impl JetStreamKeyValueDeleteExpectRevision for jetstream::kv::Store {
+    async fn delete_expect_revision(
+        &self,
+        key: &str,
+        revision: Option<u64>,
+    ) -> Result<(), kv::DeleteError> {
+        self.delete_expect_revision(key, revision).await
+    }
+}
+
+impl JetStreamCreateKeyValue for jetstream::Context {
+    type Store = kv::Store;
+
+    fn create_key_value(
+        &self,
+        config: kv::Config,
+    ) -> impl Future<Output = Result<Self::Store, context::CreateKeyValueError>> + Send {
+        jetstream::Context::create_key_value(self, config)
+    }
+}
+
+impl JetStreamGetKeyValue for jetstream::Context {
+    type Store = kv::Store;
+
+    fn get_key_value<T: Into<String> + Send>(
+        &self,
+        bucket: T,
+    ) -> impl Future<Output = Result<Self::Store, context::KeyValueError>> + Send {
+        jetstream::Context::get_key_value(self, bucket)
+    }
+}
+
+impl JetStreamPublisher for jetstream::Context {
+    type PublishError = context::PublishError;
+    type AckFuture = context::PublishAckFuture;
+
+    fn publish_with_headers<S: ToSubject + Send>(
+        &self,
+        subject: S,
+        headers: HeaderMap,
+        payload: Bytes,
+    ) -> impl Future<Output = Result<Self::AckFuture, Self::PublishError>> + Send {
+        jetstream::Context::publish_with_headers(self, subject, headers, payload)
+    }
+}
