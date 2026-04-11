@@ -27,6 +27,10 @@ pub(crate) async fn provision<C: JetStreamContext>(
         trogon_source_gitlab::provision(client, cfg).await?;
         info!(source = "gitlab", "stream provisioned");
     }
+    if let Some(ref cfg) = config.incidentio {
+        trogon_source_incidentio::provision(client, cfg).await?;
+        info!(source = "incidentio", "stream provisioned");
+    }
     if let Some(ref cfg) = config.linear {
         trogon_source_linear::provision(client, cfg).await?;
         info!(source = "linear", "stream provisioned");
@@ -74,6 +78,9 @@ webhook_secret = "tg-secret"
 [sources.gitlab]
 webhook_secret = "gl-secret"
 
+[sources.incidentio]
+signing_secret = "whsec_dGVzdC1zZWNyZXQ="
+
 [sources.linear]
 webhook_secret = "linear-secret"
 "#
@@ -102,6 +109,6 @@ webhook_secret = "linear-secret"
             .await
             .expect("provision should succeed");
 
-        assert_eq!(js.created_streams().len(), 6);
+        assert_eq!(js.created_streams().len(), 7);
     }
 }

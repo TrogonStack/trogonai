@@ -3,19 +3,143 @@ use std::path::Path;
 
 use confique::Config;
 use trogon_nats::jetstream::StreamMaxAge;
-use trogon_nats::{NatsAuth, NatsToken};
+use trogon_nats::{NatsAuth, NatsToken, SubjectTokenViolation};
 use trogon_source_discord::config::DiscordBotToken;
 use trogon_source_github::config::GitHubWebhookSecret;
 use trogon_source_gitlab::config::GitLabWebhookSecret;
+use trogon_source_incidentio::config::IncidentioConfig as IncidentioSourceConfig;
+use trogon_source_incidentio::incidentio_signing_secret::IncidentioSigningSecret;
 use trogon_source_linear::config::LinearWebhookSecret;
 use trogon_source_slack::config::SlackSigningSecret;
 use trogon_source_telegram::config::TelegramWebhookSecret;
-use trogon_std::NonZeroDuration;
+use trogon_std::{NonZeroDuration, ZeroDuration};
+
+#[derive(Debug)]
+pub enum ConfigValidationError {
+    InvalidField {
+        source: &'static str,
+        field: &'static str,
+        error: Box<dyn std::error::Error + 'static>,
+    },
+    InvalidSubjectToken {
+        source: &'static str,
+        field: &'static str,
+        violation: SubjectTokenViolation,
+    },
+    MissingRequiredField {
+        source: &'static str,
+        field: &'static str,
+        required_when: &'static str,
+    },
+    InvalidFieldValue {
+        source: &'static str,
+        field: &'static str,
+        expected: &'static str,
+        actual: String,
+    },
+}
+
+impl ConfigValidationError {
+    fn invalid<E>(source: &'static str, field: &'static str, error: E) -> Self
+    where
+        E: std::error::Error + 'static,
+    {
+        Self::InvalidField {
+            source,
+            field,
+            error: Box::new(error),
+        }
+    }
+
+    fn required(source: &'static str, field: &'static str, required_when: &'static str) -> Self {
+        Self::MissingRequiredField {
+            source,
+            field,
+            required_when,
+        }
+    }
+
+    fn invalid_value(
+        source: &'static str,
+        field: &'static str,
+        expected: &'static str,
+        actual: impl Into<String>,
+    ) -> Self {
+        Self::InvalidFieldValue {
+            source,
+            field,
+            expected,
+            actual: actual.into(),
+        }
+    }
+
+    fn invalid_subject_token(
+        source: &'static str,
+        field: &'static str,
+        violation: SubjectTokenViolation,
+    ) -> Self {
+        Self::InvalidSubjectToken {
+            source,
+            field,
+            violation,
+        }
+    }
+
+    #[cfg(test)]
+    fn contains(&self, needle: &str) -> bool {
+        self.to_string().contains(needle)
+    }
+}
+
+impl fmt::Display for ConfigValidationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidField {
+                source,
+                field,
+                error,
+            } => {
+                if error.downcast_ref::<ZeroDuration>().is_some() {
+                    write!(f, "{source}: {field} must not be zero")
+                } else {
+                    write!(f, "{source}: invalid {field}: {error}")
+                }
+            }
+            Self::InvalidSubjectToken {
+                source,
+                field,
+                violation,
+            } => write!(f, "{source}: invalid {field}: {violation:?}"),
+            Self::MissingRequiredField {
+                source,
+                field,
+                required_when,
+            } => write!(f, "{source}: {field} is required when {required_when}"),
+            Self::InvalidFieldValue {
+                source,
+                field,
+                expected,
+                actual,
+            } => write!(f, "{source}: {field} must be {expected}, got '{actual}'"),
+        }
+    }
+}
+
+impl std::error::Error for ConfigValidationError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::InvalidField { error, .. } => Some(error.as_ref()),
+            Self::InvalidSubjectToken { .. }
+            | Self::MissingRequiredField { .. }
+            | Self::InvalidFieldValue { .. } => None,
+        }
+    }
+}
 
 #[derive(Debug)]
 pub enum ConfigError {
     Load(confique::Error),
-    Validation(Vec<String>),
+    Validation(Vec<ConfigValidationError>),
 }
 
 impl fmt::Display for ConfigError {
@@ -79,6 +203,8 @@ struct SourcesConfig {
     telegram: TelegramConfig,
     #[config(nested)]
     gitlab: GitlabConfig,
+    #[config(nested)]
+    incidentio: IncidentioConfig,
     #[config(nested)]
     linear: LinearConfig,
 }
@@ -179,6 +305,31 @@ struct LinearConfig {
     timestamp_tolerance_secs: u64,
 }
 
+#[derive(Config)]
+struct IncidentioConfig {
+    #[config(env = "TROGON_SOURCE_INCIDENTIO_SIGNING_SECRET")]
+    signing_secret: Option<String>,
+    #[config(
+        env = "TROGON_SOURCE_INCIDENTIO_SUBJECT_PREFIX",
+        default = "incidentio"
+    )]
+    subject_prefix: String,
+    #[config(env = "TROGON_SOURCE_INCIDENTIO_STREAM_NAME", default = "INCIDENTIO")]
+    stream_name: String,
+    #[config(
+        env = "TROGON_SOURCE_INCIDENTIO_STREAM_MAX_AGE_SECS",
+        default = 604_800
+    )]
+    stream_max_age_secs: u64,
+    #[config(env = "TROGON_SOURCE_INCIDENTIO_NATS_ACK_TIMEOUT_SECS", default = 10)]
+    nats_ack_timeout_secs: u64,
+    #[config(
+        env = "TROGON_SOURCE_INCIDENTIO_TIMESTAMP_TOLERANCE_SECS",
+        default = 300
+    )]
+    timestamp_tolerance_secs: u64,
+}
+
 pub struct ResolvedHttpServerConfig {
     pub port: u16,
 }
@@ -191,6 +342,7 @@ pub struct ResolvedConfig {
     pub slack: Option<trogon_source_slack::SlackConfig>,
     pub telegram: Option<trogon_source_telegram::TelegramSourceConfig>,
     pub gitlab: Option<trogon_source_gitlab::GitlabConfig>,
+    pub incidentio: Option<trogon_source_incidentio::IncidentioConfig>,
     pub linear: Option<trogon_source_linear::LinearConfig>,
 }
 
@@ -201,6 +353,7 @@ impl ResolvedConfig {
             || self.slack.is_some()
             || self.telegram.is_some()
             || self.gitlab.is_some()
+            || self.incidentio.is_some()
             || self.linear.is_some()
     }
 }
@@ -223,6 +376,7 @@ fn resolve(cfg: GatewayConfig) -> Result<ResolvedConfig, ConfigError> {
     let slack = resolve_slack(cfg.sources.slack, &mut errors);
     let telegram = resolve_telegram(cfg.sources.telegram, &mut errors);
     let gitlab = resolve_gitlab(cfg.sources.gitlab, &mut errors);
+    let incidentio = resolve_incidentio(cfg.sources.incidentio, &mut errors);
     let linear = resolve_linear(cfg.sources.linear, &mut errors);
 
     if !errors.is_empty() {
@@ -239,6 +393,7 @@ fn resolve(cfg: GatewayConfig) -> Result<ResolvedConfig, ConfigError> {
         slack,
         telegram,
         gitlab,
+        incidentio,
         linear,
     })
 }
@@ -277,13 +432,17 @@ fn resolve_nats(section: &NatsConfig) -> trogon_nats::NatsConfig {
 
 fn resolve_github(
     section: GithubConfig,
-    errors: &mut Vec<String>,
+    errors: &mut Vec<ConfigValidationError>,
 ) -> Option<trogon_source_github::GithubConfig> {
     let secret_str = section.webhook_secret?;
     let webhook_secret = match GitHubWebhookSecret::new(secret_str) {
         Ok(s) => s,
         Err(e) => {
-            errors.push(format!("github: invalid webhook_secret: {e}"));
+            errors.push(ConfigValidationError::invalid(
+                "github",
+                "webhook_secret",
+                e,
+            ));
             return None;
         }
     };
@@ -291,7 +450,11 @@ fn resolve_github(
     let subject_prefix = match NatsToken::new(section.subject_prefix) {
         Ok(t) => t,
         Err(e) => {
-            errors.push(format!("github: invalid subject_prefix: {e:?}"));
+            errors.push(ConfigValidationError::invalid_subject_token(
+                "github",
+                "subject_prefix",
+                e,
+            ));
             return None;
         }
     };
@@ -299,23 +462,35 @@ fn resolve_github(
     let stream_name = match NatsToken::new(section.stream_name) {
         Ok(t) => t,
         Err(e) => {
-            errors.push(format!("github: invalid stream_name: {e:?}"));
+            errors.push(ConfigValidationError::invalid_subject_token(
+                "github",
+                "stream_name",
+                e,
+            ));
             return None;
         }
     };
 
     let nats_ack_timeout = match NonZeroDuration::from_secs(section.nats_ack_timeout_secs) {
         Ok(d) => d,
-        Err(_) => {
-            errors.push("github: nats_ack_timeout_secs must not be zero".to_string());
+        Err(err) => {
+            errors.push(ConfigValidationError::invalid(
+                "github",
+                "nats_ack_timeout_secs",
+                err,
+            ));
             return None;
         }
     };
 
     let stream_max_age = match StreamMaxAge::from_secs(section.stream_max_age_secs) {
         Ok(age) => age,
-        Err(_) => {
-            errors.push("github: stream_max_age_secs must not be zero".to_string());
+        Err(err) => {
+            errors.push(ConfigValidationError::invalid(
+                "github",
+                "stream_max_age_secs",
+                err,
+            ));
             return None;
         }
     };
@@ -331,7 +506,7 @@ fn resolve_github(
 
 fn resolve_discord(
     section: DiscordConfig,
-    errors: &mut Vec<String>,
+    errors: &mut Vec<ConfigValidationError>,
 ) -> Option<trogon_source_discord::DiscordConfig> {
     let mode_str = section.mode.as_deref().filter(|s| !s.is_empty())?;
 
@@ -340,7 +515,11 @@ fn resolve_discord(
     let subject_prefix = match NatsToken::new(section.subject_prefix) {
         Ok(t) => t,
         Err(e) => {
-            errors.push(format!("discord: invalid subject_prefix: {e:?}"));
+            errors.push(ConfigValidationError::invalid_subject_token(
+                "discord",
+                "subject_prefix",
+                e,
+            ));
             return None;
         }
     };
@@ -348,31 +527,47 @@ fn resolve_discord(
     let stream_name = match NatsToken::new(section.stream_name) {
         Ok(t) => t,
         Err(e) => {
-            errors.push(format!("discord: invalid stream_name: {e:?}"));
+            errors.push(ConfigValidationError::invalid_subject_token(
+                "discord",
+                "stream_name",
+                e,
+            ));
             return None;
         }
     };
 
     let nats_ack_timeout = match NonZeroDuration::from_secs(section.nats_ack_timeout_secs) {
         Ok(d) => d,
-        Err(_) => {
-            errors.push("discord: nats_ack_timeout_secs must not be zero".to_string());
+        Err(err) => {
+            errors.push(ConfigValidationError::invalid(
+                "discord",
+                "nats_ack_timeout_secs",
+                err,
+            ));
             return None;
         }
     };
 
     let nats_request_timeout = match NonZeroDuration::from_secs(section.nats_request_timeout_secs) {
         Ok(d) => d,
-        Err(_) => {
-            errors.push("discord: nats_request_timeout_secs must not be zero".to_string());
+        Err(err) => {
+            errors.push(ConfigValidationError::invalid(
+                "discord",
+                "nats_request_timeout_secs",
+                err,
+            ));
             return None;
         }
     };
 
     let stream_max_age = match StreamMaxAge::from_secs(section.stream_max_age_secs) {
         Ok(age) => age,
-        Err(_) => {
-            errors.push("discord: stream_max_age_secs must not be zero".to_string());
+        Err(err) => {
+            errors.push(ConfigValidationError::invalid(
+                "discord",
+                "stream_max_age_secs",
+                err,
+            ));
             return None;
         }
     };
@@ -390,18 +585,22 @@ fn resolve_discord(
 fn resolve_discord_mode(
     section: &DiscordConfig,
     mode_str: &str,
-    errors: &mut Vec<String>,
+    errors: &mut Vec<ConfigValidationError>,
 ) -> Option<trogon_source_discord::config::SourceMode> {
     match mode_str.to_ascii_lowercase().as_str() {
         "gateway" => {
             let Some(token_str) = section.bot_token.as_deref() else {
-                errors.push("discord: bot_token is required when mode=gateway".to_string());
+                errors.push(ConfigValidationError::required(
+                    "discord",
+                    "bot_token",
+                    "mode=gateway",
+                ));
                 return None;
             };
             let bot_token = match DiscordBotToken::new(token_str) {
                 Ok(s) => s,
                 Err(e) => {
-                    errors.push(format!("discord: invalid bot_token: {e}"));
+                    errors.push(ConfigValidationError::invalid("discord", "bot_token", e));
                     return None;
                 }
             };
@@ -411,7 +610,11 @@ fn resolve_discord_mode(
                     match trogon_source_discord::config::parse_gateway_intents(s) {
                         Ok(i) => i,
                         Err(e) => {
-                            errors.push(format!("discord: invalid gateway_intents: {e}"));
+                            errors.push(ConfigValidationError::invalid(
+                                "discord",
+                                "gateway_intents",
+                                e,
+                            ));
                             return None;
                         }
                     }
@@ -424,7 +627,11 @@ fn resolve_discord_mode(
         "webhook" => {
             let Some(public_key_hex) = section.public_key.as_deref().filter(|s| !s.is_empty())
             else {
-                errors.push("discord: public_key is required when mode=webhook".to_string());
+                errors.push(ConfigValidationError::required(
+                    "discord",
+                    "public_key",
+                    "mode=webhook",
+                ));
                 return None;
             };
 
@@ -432,7 +639,7 @@ fn resolve_discord_mode(
                 match trogon_source_discord::signature::parse_public_key(public_key_hex) {
                     Ok(pk) => pk,
                     Err(e) => {
-                        errors.push(format!("discord: invalid public_key: {e}"));
+                        errors.push(ConfigValidationError::invalid("discord", "public_key", e));
                         return None;
                     }
                 };
@@ -440,8 +647,11 @@ fn resolve_discord_mode(
             Some(trogon_source_discord::config::SourceMode::Webhook { public_key })
         }
         other => {
-            errors.push(format!(
-                "discord: mode must be 'gateway' or 'webhook', got '{other}'"
+            errors.push(ConfigValidationError::invalid_value(
+                "discord",
+                "mode",
+                "'gateway' or 'webhook'",
+                other,
             ));
             None
         }
@@ -450,13 +660,13 @@ fn resolve_discord_mode(
 
 fn resolve_slack(
     section: SlackConfig,
-    errors: &mut Vec<String>,
+    errors: &mut Vec<ConfigValidationError>,
 ) -> Option<trogon_source_slack::SlackConfig> {
     let secret_str = section.signing_secret?;
     let signing_secret = match SlackSigningSecret::new(secret_str) {
         Ok(s) => s,
         Err(e) => {
-            errors.push(format!("slack: invalid signing_secret: {e}"));
+            errors.push(ConfigValidationError::invalid("slack", "signing_secret", e));
             return None;
         }
     };
@@ -464,7 +674,11 @@ fn resolve_slack(
     let subject_prefix = match NatsToken::new(section.subject_prefix) {
         Ok(t) => t,
         Err(e) => {
-            errors.push(format!("slack: invalid subject_prefix: {e:?}"));
+            errors.push(ConfigValidationError::invalid_subject_token(
+                "slack",
+                "subject_prefix",
+                e,
+            ));
             return None;
         }
     };
@@ -472,31 +686,47 @@ fn resolve_slack(
     let stream_name = match NatsToken::new(section.stream_name) {
         Ok(t) => t,
         Err(e) => {
-            errors.push(format!("slack: invalid stream_name: {e:?}"));
+            errors.push(ConfigValidationError::invalid_subject_token(
+                "slack",
+                "stream_name",
+                e,
+            ));
             return None;
         }
     };
 
     let nats_ack_timeout = match NonZeroDuration::from_secs(section.nats_ack_timeout_secs) {
         Ok(d) => d,
-        Err(_) => {
-            errors.push("slack: nats_ack_timeout_secs must not be zero".to_string());
+        Err(err) => {
+            errors.push(ConfigValidationError::invalid(
+                "slack",
+                "nats_ack_timeout_secs",
+                err,
+            ));
             return None;
         }
     };
 
     let timestamp_max_drift = match NonZeroDuration::from_secs(section.timestamp_max_drift_secs) {
         Ok(d) => d,
-        Err(_) => {
-            errors.push("slack: timestamp_max_drift_secs must not be zero".to_string());
+        Err(err) => {
+            errors.push(ConfigValidationError::invalid(
+                "slack",
+                "timestamp_max_drift_secs",
+                err,
+            ));
             return None;
         }
     };
 
     let stream_max_age = match StreamMaxAge::from_secs(section.stream_max_age_secs) {
         Ok(age) => age,
-        Err(_) => {
-            errors.push("slack: stream_max_age_secs must not be zero".to_string());
+        Err(err) => {
+            errors.push(ConfigValidationError::invalid(
+                "slack",
+                "stream_max_age_secs",
+                err,
+            ));
             return None;
         }
     };
@@ -513,13 +743,17 @@ fn resolve_slack(
 
 fn resolve_telegram(
     section: TelegramConfig,
-    errors: &mut Vec<String>,
+    errors: &mut Vec<ConfigValidationError>,
 ) -> Option<trogon_source_telegram::TelegramSourceConfig> {
     let secret_str = section.webhook_secret?;
     let webhook_secret = match TelegramWebhookSecret::new(secret_str) {
         Ok(s) => s,
         Err(e) => {
-            errors.push(format!("telegram: invalid webhook_secret: {e}"));
+            errors.push(ConfigValidationError::invalid(
+                "telegram",
+                "webhook_secret",
+                e,
+            ));
             return None;
         }
     };
@@ -527,7 +761,11 @@ fn resolve_telegram(
     let subject_prefix = match NatsToken::new(section.subject_prefix) {
         Ok(t) => t,
         Err(e) => {
-            errors.push(format!("telegram: invalid subject_prefix: {e:?}"));
+            errors.push(ConfigValidationError::invalid_subject_token(
+                "telegram",
+                "subject_prefix",
+                e,
+            ));
             return None;
         }
     };
@@ -535,23 +773,35 @@ fn resolve_telegram(
     let stream_name = match NatsToken::new(section.stream_name) {
         Ok(t) => t,
         Err(e) => {
-            errors.push(format!("telegram: invalid stream_name: {e:?}"));
+            errors.push(ConfigValidationError::invalid_subject_token(
+                "telegram",
+                "stream_name",
+                e,
+            ));
             return None;
         }
     };
 
     let nats_ack_timeout = match NonZeroDuration::from_secs(section.nats_ack_timeout_secs) {
         Ok(d) => d,
-        Err(_) => {
-            errors.push("telegram: nats_ack_timeout_secs must not be zero".to_string());
+        Err(err) => {
+            errors.push(ConfigValidationError::invalid(
+                "telegram",
+                "nats_ack_timeout_secs",
+                err,
+            ));
             return None;
         }
     };
 
     let stream_max_age = match StreamMaxAge::from_secs(section.stream_max_age_secs) {
         Ok(age) => age,
-        Err(_) => {
-            errors.push("telegram: stream_max_age_secs must not be zero".to_string());
+        Err(err) => {
+            errors.push(ConfigValidationError::invalid(
+                "telegram",
+                "stream_max_age_secs",
+                err,
+            ));
             return None;
         }
     };
@@ -567,13 +817,17 @@ fn resolve_telegram(
 
 fn resolve_gitlab(
     section: GitlabConfig,
-    errors: &mut Vec<String>,
+    errors: &mut Vec<ConfigValidationError>,
 ) -> Option<trogon_source_gitlab::GitlabConfig> {
     let webhook_secret_str = section.webhook_secret?;
     let webhook_secret = match GitLabWebhookSecret::new(webhook_secret_str) {
         Ok(s) => s,
         Err(e) => {
-            errors.push(format!("gitlab: invalid webhook_secret: {e}"));
+            errors.push(ConfigValidationError::invalid(
+                "gitlab",
+                "webhook_secret",
+                e,
+            ));
             return None;
         }
     };
@@ -581,7 +835,11 @@ fn resolve_gitlab(
     let subject_prefix = match NatsToken::new(section.subject_prefix) {
         Ok(t) => t,
         Err(e) => {
-            errors.push(format!("gitlab: invalid subject_prefix: {e:?}"));
+            errors.push(ConfigValidationError::invalid_subject_token(
+                "gitlab",
+                "subject_prefix",
+                e,
+            ));
             return None;
         }
     };
@@ -589,23 +847,35 @@ fn resolve_gitlab(
     let stream_name = match NatsToken::new(section.stream_name) {
         Ok(t) => t,
         Err(e) => {
-            errors.push(format!("gitlab: invalid stream_name: {e:?}"));
+            errors.push(ConfigValidationError::invalid_subject_token(
+                "gitlab",
+                "stream_name",
+                e,
+            ));
             return None;
         }
     };
 
     let nats_ack_timeout = match NonZeroDuration::from_secs(section.nats_ack_timeout_secs) {
         Ok(d) => d,
-        Err(_) => {
-            errors.push("gitlab: nats_ack_timeout_secs must not be zero".to_string());
+        Err(err) => {
+            errors.push(ConfigValidationError::invalid(
+                "gitlab",
+                "nats_ack_timeout_secs",
+                err,
+            ));
             return None;
         }
     };
 
     let stream_max_age = match StreamMaxAge::from_secs(section.stream_max_age_secs) {
         Ok(age) => age,
-        Err(_) => {
-            errors.push("gitlab: stream_max_age_secs must not be zero".to_string());
+        Err(err) => {
+            errors.push(ConfigValidationError::invalid(
+                "gitlab",
+                "stream_max_age_secs",
+                err,
+            ));
             return None;
         }
     };
@@ -621,13 +891,17 @@ fn resolve_gitlab(
 
 fn resolve_linear(
     section: LinearConfig,
-    errors: &mut Vec<String>,
+    errors: &mut Vec<ConfigValidationError>,
 ) -> Option<trogon_source_linear::LinearConfig> {
     let secret_str = section.webhook_secret?;
     let webhook_secret = match LinearWebhookSecret::new(secret_str) {
         Ok(s) => s,
         Err(e) => {
-            errors.push(format!("linear: invalid webhook_secret: {e}"));
+            errors.push(ConfigValidationError::invalid(
+                "linear",
+                "webhook_secret",
+                e,
+            ));
             return None;
         }
     };
@@ -635,7 +909,11 @@ fn resolve_linear(
     let subject_prefix = match NatsToken::new(section.subject_prefix) {
         Ok(t) => t,
         Err(e) => {
-            errors.push(format!("linear: invalid subject_prefix: {e:?}"));
+            errors.push(ConfigValidationError::invalid_subject_token(
+                "linear",
+                "subject_prefix",
+                e,
+            ));
             return None;
         }
     };
@@ -643,23 +921,35 @@ fn resolve_linear(
     let stream_name = match NatsToken::new(section.stream_name) {
         Ok(t) => t,
         Err(e) => {
-            errors.push(format!("linear: invalid stream_name: {e:?}"));
+            errors.push(ConfigValidationError::invalid_subject_token(
+                "linear",
+                "stream_name",
+                e,
+            ));
             return None;
         }
     };
 
     let nats_ack_timeout = match NonZeroDuration::from_secs(section.nats_ack_timeout_secs) {
         Ok(d) => d,
-        Err(_) => {
-            errors.push("linear: nats_ack_timeout_secs must not be zero".to_string());
+        Err(err) => {
+            errors.push(ConfigValidationError::invalid(
+                "linear",
+                "nats_ack_timeout_secs",
+                err,
+            ));
             return None;
         }
     };
 
     let stream_max_age = match StreamMaxAge::from_secs(section.stream_max_age_secs) {
         Ok(age) => age,
-        Err(_) => {
-            errors.push("linear: stream_max_age_secs must not be zero".to_string());
+        Err(err) => {
+            errors.push(ConfigValidationError::invalid(
+                "linear",
+                "stream_max_age_secs",
+                err,
+            ));
             return None;
         }
     };
@@ -674,9 +964,98 @@ fn resolve_linear(
     })
 }
 
+fn resolve_incidentio(
+    section: IncidentioConfig,
+    errors: &mut Vec<ConfigValidationError>,
+) -> Option<IncidentioSourceConfig> {
+    let signing_secret_str = section.signing_secret?;
+    let signing_secret = match IncidentioSigningSecret::new(signing_secret_str) {
+        Ok(secret) => secret,
+        Err(err) => {
+            errors.push(ConfigValidationError::invalid(
+                "incidentio",
+                "signing_secret",
+                err,
+            ));
+            return None;
+        }
+    };
+
+    let subject_prefix = match NatsToken::new(section.subject_prefix) {
+        Ok(token) => token,
+        Err(err) => {
+            errors.push(ConfigValidationError::invalid_subject_token(
+                "incidentio",
+                "subject_prefix",
+                err,
+            ));
+            return None;
+        }
+    };
+
+    let stream_name = match NatsToken::new(section.stream_name) {
+        Ok(token) => token,
+        Err(err) => {
+            errors.push(ConfigValidationError::invalid_subject_token(
+                "incidentio",
+                "stream_name",
+                err,
+            ));
+            return None;
+        }
+    };
+
+    let nats_ack_timeout = match NonZeroDuration::from_secs(section.nats_ack_timeout_secs) {
+        Ok(duration) => duration,
+        Err(err) => {
+            errors.push(ConfigValidationError::invalid(
+                "incidentio",
+                "nats_ack_timeout_secs",
+                err,
+            ));
+            return None;
+        }
+    };
+
+    let timestamp_tolerance = match NonZeroDuration::from_secs(section.timestamp_tolerance_secs) {
+        Ok(duration) => duration,
+        Err(err) => {
+            errors.push(ConfigValidationError::invalid(
+                "incidentio",
+                "timestamp_tolerance_secs",
+                err,
+            ));
+            return None;
+        }
+    };
+
+    let stream_max_age = match StreamMaxAge::from_secs(section.stream_max_age_secs) {
+        Ok(age) => age,
+        Err(err) => {
+            errors.push(ConfigValidationError::invalid(
+                "incidentio",
+                "stream_max_age_secs",
+                err,
+            ));
+            return None;
+        }
+    };
+
+    Some(IncidentioSourceConfig {
+        signing_secret,
+        subject_prefix,
+        stream_name,
+        stream_max_age,
+        nats_ack_timeout,
+        timestamp_tolerance,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::error::Error;
+    use std::fmt;
     use std::io::Write;
 
     const VALID_ED25519_PUB_KEY: &str =
@@ -761,6 +1140,30 @@ webhook_secret = "{secret}"
 "#
         )
     }
+
+    fn incidentio_toml(secret: &str) -> String {
+        format!(
+            r#"
+[sources.incidentio]
+signing_secret = "{secret}"
+"#
+        )
+    }
+
+    fn incidentio_valid_test_secret() -> String {
+        ["whsec_", "dGVzdC1zZWNyZXQ="].concat()
+    }
+
+    #[derive(Debug)]
+    struct DummyConfigError;
+
+    impl fmt::Display for DummyConfigError {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("dummy config error")
+        }
+    }
+
+    impl Error for DummyConfigError {}
 
     fn nats_toml_with_creds(creds: &str) -> String {
         format!(
@@ -960,6 +1363,13 @@ public_key = ""
         let f = write_toml(&linear_toml("linear-webhook-secret"));
         let cfg = load(Some(f.path())).expect("load failed");
         assert!(cfg.linear.is_some());
+    }
+
+    #[test]
+    fn incidentio_resolves_with_valid_secret() {
+        let f = write_toml(&incidentio_toml(&incidentio_valid_test_secret()));
+        let cfg = load(Some(f.path())).expect("load failed");
+        assert!(cfg.incidentio.is_some());
     }
 
     #[test]
@@ -1340,16 +1750,65 @@ token = "mytoken"
 
     #[test]
     fn config_error_display_validation() {
-        let err = ConfigError::Validation(vec!["error one".to_string(), "error two".to_string()]);
+        let err = ConfigError::Validation(vec![
+            ConfigValidationError::invalid("github", "stream_max_age_secs", ZeroDuration),
+            ConfigValidationError::required("discord", "bot_token", "mode=gateway"),
+        ]);
         let display = format!("{err}");
         assert!(display.contains("config validation errors:"));
-        assert!(display.contains("error one"));
-        assert!(display.contains("error two"));
+        assert!(display.contains("github: stream_max_age_secs must not be zero"));
+        assert!(display.contains("discord: bot_token is required when mode=gateway"));
+    }
+
+    #[test]
+    fn config_validation_error_invalid_field_preserves_source() {
+        let err = ConfigValidationError::invalid("incidentio", "signing_secret", DummyConfigError);
+
+        assert_eq!(
+            err.to_string(),
+            "incidentio: invalid signing_secret: dummy config error"
+        );
+        assert!(err.source().is_some());
+    }
+
+    #[test]
+    fn config_validation_error_invalid_subject_token_has_no_source() {
+        let err = ConfigValidationError::invalid_subject_token(
+            "incidentio",
+            "subject_prefix",
+            SubjectTokenViolation::InvalidCharacter('.'),
+        );
+
+        assert_eq!(
+            err.to_string(),
+            "incidentio: invalid subject_prefix: InvalidCharacter('.')"
+        );
+        assert!(err.source().is_none());
+    }
+
+    #[test]
+    fn config_validation_error_invalid_field_value_has_no_source() {
+        let err = ConfigValidationError::invalid_value(
+            "discord",
+            "mode",
+            "'gateway' or 'webhook'",
+            "unknown",
+        );
+
+        assert_eq!(
+            err.to_string(),
+            "discord: mode must be 'gateway' or 'webhook', got 'unknown'"
+        );
+        assert!(err.source().is_none());
     }
 
     #[test]
     fn config_error_is_std_error() {
-        let err = ConfigError::Validation(vec!["test".to_string()]);
+        let err = ConfigError::Validation(vec![ConfigValidationError::invalid(
+            "github",
+            "stream_max_age_secs",
+            ZeroDuration,
+        )]);
         let _: &dyn std::error::Error = &err;
     }
 
@@ -1413,6 +1872,33 @@ port = 9090
         let result = load(Some(f.path()));
         assert!(
             matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("linear: invalid webhook_secret")))
+        );
+    }
+
+    #[test]
+    fn incidentio_empty_secret_is_invalid() {
+        let f = write_toml(&incidentio_toml(""));
+        let result = load(Some(f.path()));
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("incidentio: invalid signing_secret")))
+        );
+    }
+
+    #[test]
+    fn incidentio_invalid_secret_is_invalid() {
+        let f = write_toml(&incidentio_toml("whsec_not-base64!"));
+        let result = load(Some(f.path()));
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("incidentio: invalid signing_secret")))
+        );
+    }
+
+    #[test]
+    fn incidentio_secret_without_prefix_is_invalid() {
+        let f = write_toml(&incidentio_toml("dGVzdC1zZWNyZXQ="));
+        let result = load(Some(f.path()));
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("incidentio: invalid signing_secret")))
         );
     }
 
@@ -1503,6 +1989,23 @@ subject_prefix = "has.dots"
     }
 
     #[test]
+    fn incidentio_invalid_subject_prefix() {
+        let toml = format!(
+            r#"
+[sources.incidentio]
+signing_secret = "{}"
+subject_prefix = "has.dots"
+"#,
+            incidentio_valid_test_secret()
+        );
+        let f = write_toml(&toml);
+        let result = load(Some(f.path()));
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("incidentio: invalid subject_prefix")))
+        );
+    }
+
+    #[test]
     fn slack_invalid_stream_name() {
         let toml = r#"
 [sources.slack]
@@ -1555,6 +2058,74 @@ stream_name = "has.dots"
         let result = load(Some(f.path()));
         assert!(
             matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("stream_name")))
+        );
+    }
+
+    #[test]
+    fn incidentio_invalid_stream_name() {
+        let toml = format!(
+            r#"
+[sources.incidentio]
+signing_secret = "{}"
+stream_name = "has.dots"
+"#,
+            incidentio_valid_test_secret()
+        );
+        let f = write_toml(&toml);
+        let result = load(Some(f.path()));
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("incidentio: invalid stream_name")))
+        );
+    }
+
+    #[test]
+    fn incidentio_zero_nats_ack_timeout_is_error() {
+        let toml = format!(
+            r#"
+[sources.incidentio]
+signing_secret = "{}"
+nats_ack_timeout_secs = 0
+"#,
+            incidentio_valid_test_secret()
+        );
+        let f = write_toml(&toml);
+        let result = load(Some(f.path()));
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("incidentio: nats_ack_timeout_secs must not be zero")))
+        );
+    }
+
+    #[test]
+    fn incidentio_zero_stream_max_age_is_error() {
+        let toml = format!(
+            r#"
+[sources.incidentio]
+signing_secret = "{}"
+stream_max_age_secs = 0
+"#,
+            incidentio_valid_test_secret()
+        );
+        let f = write_toml(&toml);
+        let result = load(Some(f.path()));
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("incidentio: stream_max_age_secs must not be zero")))
+        );
+    }
+
+    #[test]
+    fn incidentio_zero_timestamp_tolerance_is_error() {
+        let toml = format!(
+            r#"
+[sources.incidentio]
+signing_secret = "{}"
+timestamp_tolerance_secs = 0
+"#,
+            incidentio_valid_test_secret()
+        );
+        let f = write_toml(&toml);
+        let result = load(Some(f.path()));
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("incidentio: timestamp_tolerance_secs must not be zero")))
         );
     }
 

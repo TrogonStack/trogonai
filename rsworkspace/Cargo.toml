@@ -17,6 +17,7 @@ trogon-nats = { path = "crates/trogon-nats" }
 trogon-source-discord = { path = "crates/trogon-source-discord" }
 trogon-source-github = { path = "crates/trogon-source-github" }
 trogon-source-gitlab = { path = "crates/trogon-source-gitlab" }
+trogon-source-incidentio = { path = "crates/trogon-source-incidentio" }
 trogon-source-linear = { path = "crates/trogon-source-linear" }
 trogon-source-slack = { path = "crates/trogon-source-slack" }
 trogon-source-telegram = { path = "crates/trogon-source-telegram" }

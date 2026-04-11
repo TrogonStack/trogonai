@@ -65,6 +65,14 @@ where
         info!(source = "gitlab", "mounted at /gitlab");
     }
 
+    if let Some(ref cfg) = config.incidentio {
+        app = app.nest(
+            "/incidentio",
+            trogon_source_incidentio::router(publisher.clone(), cfg),
+        );
+        info!(source = "incidentio", "mounted at /incidentio");
+    }
+
     if let Some(ref cfg) = config.linear {
         app = app.nest(
             "/linear",
@@ -129,6 +137,9 @@ webhook_secret = "tg-secret"
 
 [sources.gitlab]
 webhook_secret = "gl-secret"
+
+[sources.incidentio]
+signing_secret = "whsec_dGVzdC1zZWNyZXQ="
 
 [sources.linear]
 webhook_secret = "linear-secret"
