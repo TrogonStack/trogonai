@@ -214,11 +214,14 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
             .filter(|&n| n > 0)
             .unwrap_or(20);
 
-        let max_turns = std::env::var("XAI_MAX_TURNS")
-            .ok()
-            .and_then(|s| s.parse::<u32>().ok())
-            .filter(|&n| n > 0)
-            .or(Some(10));
+        let max_turns = match std::env::var("XAI_MAX_TURNS") {
+            Ok(s) => match s.parse::<u32>() {
+                Ok(0) => None,       // 0 = server default: omit max_turns field
+                Ok(n) => Some(n),    // explicit positive value
+                Err(_) => Some(10),  // invalid value: fall back to app default
+            },
+            Err(_) => Some(10),      // unset: use app default
+        };
 
         Self {
             notifier: Arc::new(notifier),
@@ -2285,7 +2288,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn xai_max_turns_zero_falls_back_to_default() {
+    async fn xai_max_turns_zero_means_server_default() {
+        // XAI_MAX_TURNS=0 means "use server default": max_turns must be None
+        // so the field is omitted from the request.
         let _guard = env_lock().lock().unwrap();
         unsafe { std::env::set_var("XAI_MAX_TURNS", "0") };
         let mock_http = Arc::new(MockXaiHttpClient::new());
@@ -2294,19 +2299,7 @@ mod tests {
             XaiAgent::with_deps(Arc::clone(&mock_notifier), "grok-3", "key", Arc::clone(&mock_http));
         unsafe { std::env::remove_var("XAI_MAX_TURNS") };
 
-        agent.test_insert_session("mtz1", "/tmp", None).await;
-        mock_http.push_response(vec![XaiEvent::Done]);
-        agent
-            .prompt(PromptRequest::new("mtz1", vec![ContentBlock::from("hi")]))
-            .await
-            .unwrap();
-
-        let calls = mock_http.calls.lock().unwrap();
-        assert_eq!(
-            calls.last().unwrap().max_turns,
-            Some(10),
-            "XAI_MAX_TURNS=0 must fall back to the default of 10"
-        );
+        assert_eq!(agent.max_turns, None, "XAI_MAX_TURNS=0 must produce None (server default)");
     }
 
     // ── prompt: usage events emit notifications; tool events do not ──────────────
