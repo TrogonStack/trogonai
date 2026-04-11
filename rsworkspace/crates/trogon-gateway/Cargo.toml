@@ -20,6 +20,7 @@ serde = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tracing = { workspace = true }
 trogon-nats = { workspace = true }
+trogon-service-config = { workspace = true }
 trogon-source-discord = { workspace = true }
 trogon-source-github = { workspace = true }
 trogon-source-gitlab = { workspace = true }

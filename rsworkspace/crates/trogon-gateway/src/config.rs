@@ -2,8 +2,11 @@ use std::fmt;
 use std::path::Path;
 
 use confique::Config;
+#[cfg(test)]
+use trogon_nats::NatsAuth;
 use trogon_nats::jetstream::StreamMaxAge;
-use trogon_nats::{NatsAuth, NatsToken, SubjectTokenViolation};
+use trogon_nats::{NatsToken, SubjectTokenViolation};
+use trogon_service_config::{NatsArgs, NatsConfigSection, load_config, resolve_nats};
 use trogon_source_discord::config::DiscordBotToken;
 use trogon_source_github::config::GitHubWebhookSecret;
 use trogon_source_gitlab::config::GitLabWebhookSecret;
@@ -164,7 +167,7 @@ struct GatewayConfig {
     #[config(nested)]
     http_server: HttpServerConfig,
     #[config(nested)]
-    nats: NatsConfig,
+    nats: NatsConfigSection,
     #[config(nested)]
     sources: SourcesConfig,
 }
@@ -173,22 +176,6 @@ struct GatewayConfig {
 struct HttpServerConfig {
     #[config(env = "TROGON_GATEWAY_PORT", default = 8080)]
     port: u16,
-}
-
-#[derive(Config)]
-struct NatsConfig {
-    #[config(env = "NATS_URL", default = "localhost:4222")]
-    url: String,
-    #[config(env = "NATS_CREDS")]
-    creds: Option<String>,
-    #[config(env = "NATS_NKEY")]
-    nkey: Option<String>,
-    #[config(env = "NATS_USER")]
-    user: Option<String>,
-    #[config(env = "NATS_PASSWORD")]
-    password: Option<String>,
-    #[config(env = "NATS_TOKEN")]
-    token: Option<String>,
 }
 
 #[derive(Config)]
@@ -358,17 +345,21 @@ impl ResolvedConfig {
     }
 }
 
+#[cfg(test)]
 pub fn load(config_path: Option<&Path>) -> Result<ResolvedConfig, ConfigError> {
-    let mut builder = GatewayConfig::builder();
-    if let Some(path) = config_path {
-        builder = builder.file(path);
-    }
-    let cfg = builder.env().load().map_err(ConfigError::Load)?;
-    resolve(cfg)
+    load_with_overrides(config_path, &NatsArgs::default())
 }
 
-fn resolve(cfg: GatewayConfig) -> Result<ResolvedConfig, ConfigError> {
-    let nats = resolve_nats(&cfg.nats);
+pub fn load_with_overrides(
+    config_path: Option<&Path>,
+    nats_overrides: &NatsArgs,
+) -> Result<ResolvedConfig, ConfigError> {
+    let cfg = load_config::<GatewayConfig>(config_path).map_err(ConfigError::Load)?;
+    resolve(cfg, nats_overrides)
+}
+
+fn resolve(cfg: GatewayConfig, nats_overrides: &NatsArgs) -> Result<ResolvedConfig, ConfigError> {
+    let nats = resolve_nats(&cfg.nats, nats_overrides);
     let mut errors = Vec::new();
 
     let github = resolve_github(cfg.sources.github, &mut errors);
@@ -396,38 +387,6 @@ fn resolve(cfg: GatewayConfig) -> Result<ResolvedConfig, ConfigError> {
         incidentio,
         linear,
     })
-}
-
-fn non_empty(opt: &Option<String>) -> Option<&String> {
-    opt.as_ref().filter(|s| !s.is_empty())
-}
-
-fn resolve_nats(section: &NatsConfig) -> trogon_nats::NatsConfig {
-    let auth = if let Some(creds) = non_empty(&section.creds) {
-        NatsAuth::Credentials(creds.clone().into())
-    } else if let Some(nkey) = non_empty(&section.nkey) {
-        NatsAuth::NKey(nkey.clone())
-    } else if let (Some(user), Some(password)) =
-        (non_empty(&section.user), non_empty(&section.password))
-    {
-        NatsAuth::UserPassword {
-            user: user.clone(),
-            password: password.clone(),
-        }
-    } else if let Some(token) = non_empty(&section.token) {
-        NatsAuth::Token(token.clone())
-    } else {
-        NatsAuth::None
-    };
-
-    let servers: Vec<String> = section
-        .url
-        .split(',')
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect();
-
-    trogon_nats::NatsConfig::new(servers, auth)
 }
 
 fn resolve_github(
@@ -1721,21 +1680,47 @@ token = "mytoken"
     }
 
     #[test]
-    fn non_empty_filters_none() {
-        let val: Option<String> = None;
-        assert!(non_empty(&val).is_none());
+    fn load_with_overrides_prefers_cli_nats_values() {
+        let toml = r#"
+[nats]
+url = "file1:4222,file2:4222"
+token = "file-token"
+"#;
+        let f = write_toml(toml);
+        let cfg = load_with_overrides(
+            Some(f.path()),
+            &NatsArgs {
+                nats_url: Some("override:4222".to_string()),
+                nats_token: Some("override-token".to_string()),
+                ..Default::default()
+            },
+        )
+        .expect("load failed");
+
+        assert_eq!(cfg.nats.servers, vec!["override:4222"]);
+        assert!(matches!(cfg.nats.auth, NatsAuth::Token(ref token) if token == "override-token"));
     }
 
     #[test]
-    fn non_empty_filters_empty_string() {
-        let val = Some(String::new());
-        assert!(non_empty(&val).is_none());
-    }
+    fn load_with_overrides_keeps_auth_priority() {
+        let toml = r#"
+[nats]
+token = "file-token"
+"#;
+        let f = write_toml(toml);
+        let cfg = load_with_overrides(
+            Some(f.path()),
+            &NatsArgs {
+                nats_creds: Some("/path/to/override.creds".to_string()),
+                nats_token: Some("override-token".to_string()),
+                ..Default::default()
+            },
+        )
+        .expect("load failed");
 
-    #[test]
-    fn non_empty_passes_through_nonempty() {
-        let val = Some("hello".to_string());
-        assert_eq!(non_empty(&val), Some(&"hello".to_string()));
+        assert!(
+            matches!(cfg.nats.auth, NatsAuth::Credentials(ref path) if path == std::path::Path::new("/path/to/override.creds"))
+        );
     }
 
     #[test]
