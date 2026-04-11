@@ -2,7 +2,7 @@ name: trogonai
 
 services:
   nats:
-    image: nats:alpine
+    image: nats:2.11-alpine
     command:
       - "--jetstream"
       - "--store_dir=/data"
