@@ -41,12 +41,7 @@ type SourceResult = (&'static str, Result<(), String>);
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = CliArgs::<cli::Cli>::new().parse_args();
-
-    let config_path = match cli.command {
-        cli::Command::Serve { ref config } => config.as_deref(),
-    };
-
-    let resolved = config::load(config_path)?;
+    let resolved = config::load_with_overrides(cli.runtime.config.as_deref(), &cli.runtime.nats)?;
 
     if !resolved.has_any_source() {
         return Err("no sources configured — provide a config file or set source env vars".into());
