@@ -7,7 +7,7 @@ pub mod publish;
 pub mod stream_max_age;
 pub mod traits;
 
-#[cfg(feature = "test-support")]
+#[cfg(any(test, feature = "test-support"))]
 pub mod mocks;
 
 pub use claim_check::{
@@ -29,13 +29,15 @@ pub use object_store::{ObjectStoreGet, ObjectStorePut};
 pub use publish::{PublishOutcome, publish_event};
 pub use stream_max_age::StreamMaxAge;
 pub use traits::{
-    JetStreamConsumer, JetStreamContext, JetStreamCreateConsumer, JetStreamGetStream,
+    JetStreamConsumer, JetStreamContext, JetStreamCreateConsumer, JetStreamCreateKeyValue,
+    JetStreamGetKeyValue, JetStreamGetStream, JetStreamKeyValueCreateWithTtl,
+    JetStreamKeyValueDeleteExpectRevision, JetStreamKeyValueStatus, JetStreamKeyValueUpdate,
     JetStreamPublisher, JsMessageOf,
 };
 
-#[cfg(feature = "test-support")]
+#[cfg(any(test, feature = "test-support"))]
 pub use mocks::{
     AckKindSnapshot, AckKindValue, MockJetStreamConsumer, MockJetStreamConsumerFactory,
-    MockJetStreamContext, MockJetStreamPublisher, MockJetStreamStream, MockJsMessage,
-    MockObjectStore,
+    MockJetStreamContext, MockJetStreamKvClient, MockJetStreamKvStore, MockJetStreamPublisher,
+    MockJetStreamStream, MockJsMessage, MockObjectStore,
 };
