@@ -2298,6 +2298,53 @@ async fn xai_max_history_messages_custom_value_accepted() {
     assert_eq!(agent.test_max_history_messages(), 10);
 }
 
+// ── XAI_MAX_TURNS env var ─────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn xai_max_turns_zero_means_server_default() {
+    // XAI_MAX_TURNS=0 must produce None — the field is omitted from the request
+    // so xAI uses its own server-side default rather than our app default of 10.
+    let _guard = env_lock().lock().unwrap();
+    unsafe {
+        std::env::remove_var("XAI_MODELS");
+        std::env::remove_var("XAI_PROMPT_TIMEOUT_SECS");
+        std::env::remove_var("XAI_SYSTEM_PROMPT");
+        std::env::remove_var("XAI_MAX_HISTORY_MESSAGES");
+        std::env::remove_var("XAI_BASE_URL");
+        std::env::set_var("XAI_MAX_TURNS", "0");
+    }
+    let agent = XaiAgent::new_in_memory(
+        MockSessionNotifier::new(), "grok-3", "fake-key",
+        Arc::new(MockXaiHttpClient::new()),
+    );
+    assert_eq!(agent.test_max_turns(), None, "XAI_MAX_TURNS=0 must produce None (server default)");
+}
+
+#[tokio::test]
+async fn xai_max_turns_default_is_ten() {
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
+    assert_eq!(agent.test_max_turns(), Some(10));
+}
+
+#[tokio::test]
+async fn xai_max_turns_custom_value_accepted() {
+    let _guard = env_lock().lock().unwrap();
+    unsafe {
+        std::env::remove_var("XAI_MODELS");
+        std::env::remove_var("XAI_PROMPT_TIMEOUT_SECS");
+        std::env::remove_var("XAI_SYSTEM_PROMPT");
+        std::env::remove_var("XAI_MAX_HISTORY_MESSAGES");
+        std::env::remove_var("XAI_BASE_URL");
+        std::env::set_var("XAI_MAX_TURNS", "5");
+    }
+    let agent = XaiAgent::new_in_memory(
+        MockSessionNotifier::new(), "grok-3", "fake-key",
+        Arc::new(MockXaiHttpClient::new()),
+    );
+    assert_eq!(agent.test_max_turns(), Some(5));
+}
+
 #[tokio::test]
 async fn history_is_truncated_after_exceeding_max() {
     let _guard = env_lock().lock().unwrap();

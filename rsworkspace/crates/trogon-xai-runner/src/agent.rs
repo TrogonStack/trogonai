@@ -247,11 +247,14 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
             .filter(|&n| n > 0)
             .unwrap_or(20);
 
-        let max_turns = std::env::var("XAI_MAX_TURNS")
-            .ok()
-            .and_then(|s| s.parse::<u32>().ok())
-            .filter(|&n| n > 0)
-            .or(Some(10));
+        let max_turns = match std::env::var("XAI_MAX_TURNS") {
+            Ok(s) => match s.parse::<u32>() {
+                Ok(0) => None,       // 0 = server default: omit max_turns field
+                Ok(n) => Some(n),    // explicit positive value
+                Err(_) => Some(10),  // invalid → app default
+            },
+            Err(_) => Some(10),      // unset → app default
+        };
 
         Self {
             notifier: Arc::new(notifier),
@@ -1506,6 +1509,10 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
 
     pub fn test_max_history_messages(&self) -> usize {
         self.max_history_messages
+    }
+
+    pub fn test_max_turns(&self) -> Option<u32> {
+        self.max_turns
     }
 
     pub async fn test_cancel_channels_len(&self) -> usize {
