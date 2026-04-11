@@ -34,11 +34,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .unwrap_or(300);
     let models = std::env::var("XAI_MODELS")
         .unwrap_or_else(|_| "grok-3:Grok 3,grok-3-mini:Grok 3 Mini".to_string());
-    let max_turns = std::env::var("XAI_MAX_TURNS")
-        .ok()
-        .and_then(|s| s.parse::<u32>().ok())
-        .filter(|&n| n > 0)
-        .unwrap_or(10);
+    let max_turns: Option<u32> = match std::env::var("XAI_MAX_TURNS") {
+        Ok(s) => match s.parse::<u32>() {
+            Ok(0) => None,
+            Ok(n) => Some(n),
+            Err(_) => Some(10),
+        },
+        Err(_) => Some(10),
+    };
     info!(
         nats_url,
         prefix,
