@@ -53,20 +53,130 @@ impl AnthropicClient for ReqwestAnthropicClient {
         body: serde_json::Value,
     ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, reqwest::Error>> + Send + 'a>> {
         Box::pin(async move {
-            self.http
-                .post(format!("{}/anthropic/v1/messages", self.proxy_url))
-                .header("Authorization", format!("Bearer {}", self.anthropic_token))
-                .header("anthropic-version", "2023-06-01")
-                // Hard cap per LLM call. Without this, a hung Anthropic API keeps
-                // the heartbeat alive indefinitely and the run never completes.
-                .timeout(std::time::Duration::from_secs(5 * 60))
-                .json(&body)
-                .send()
-                .await?
-                .json::<serde_json::Value>()
-                .await
+            // Retry up to 3 times on transient errors. Backoff: 2s → 4s → 8s.
+            //
+            // Two classes of retryable error:
+            // - Transport errors (`reqwest::Error`): connection reset, timeout,
+            //   DNS failure, incomplete response body.
+            // - HTTP 429 (rate limit): handled explicitly before
+            //   `error_for_status()` — reads the `Retry-After` header and
+            //   waits that many seconds (default: 60 s) before retrying.
+            // - HTTP 5xx (server error): `error_for_status()` converts to
+            //   `reqwest::Error` so they flow through the same retry path as
+            //   transport errors.
+            //
+            // Non-retryable 4xx (400, 401, 403) also become `reqwest::Error`
+            // via `error_for_status()` but `is_retryable_error` returns false
+            // for those status codes, so they propagate immediately to the caller.
+            let mut attempts = 0u32;
+            loop {
+                let send_result = self
+                    .http
+                    .post(format!("{}/anthropic/v1/messages", self.proxy_url))
+                    .header("Authorization", format!("Bearer {}", self.anthropic_token))
+                    .header("anthropic-version", "2023-06-01")
+                    // Hard cap per LLM call. Without this, a hung Anthropic API
+                    // keeps the heartbeat alive indefinitely and the run never
+                    // completes.
+                    .timeout(std::time::Duration::from_secs(5 * 60))
+                    .json(&body)
+                    .send()
+                    .await;
+
+                let response = match send_result {
+                    Ok(r) => r,
+                    Err(e) if attempts < 3 && is_retryable_error(&e) => {
+                        attempts += 1;
+                        tracing::warn!(
+                            attempt = attempts,
+                            error = %e,
+                            "Anthropic request failed with retryable error — retrying"
+                        );
+                        tokio::time::sleep(std::time::Duration::from_secs(1 << attempts)).await;
+                        continue;
+                    }
+                    Err(e) => return Err(e),
+                };
+
+                // 429: respect Retry-After header (default: 60 s).
+                // Handled before error_for_status() so the header is still
+                // accessible on the response.
+                if response.status() == 429 && attempts < 3 {
+                    let delay = retry_after_delay(response.headers());
+                    attempts += 1;
+                    tracing::warn!(
+                        attempt = attempts,
+                        delay_secs = delay,
+                        "Anthropic rate limited (429) — waiting Retry-After before retrying"
+                    );
+                    tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+                    continue;
+                }
+
+                // Convert 4xx/5xx HTTP status codes to errors so the retry
+                // machinery can handle server errors (5xx).
+                let response = match response.error_for_status() {
+                    Ok(r) => r,
+                    Err(e) if attempts < 3 && is_retryable_error(&e) => {
+                        attempts += 1;
+                        tracing::warn!(
+                            attempt = attempts,
+                            error = %e,
+                            "Anthropic returned retryable HTTP status — retrying"
+                        );
+                        tokio::time::sleep(std::time::Duration::from_secs(1 << attempts)).await;
+                        continue;
+                    }
+                    Err(e) => return Err(e),
+                };
+
+                match response.json::<serde_json::Value>().await {
+                    Ok(v) => return Ok(v),
+                    Err(e) if attempts < 3 && is_retryable_error(&e) => {
+                        attempts += 1;
+                        tracing::warn!(
+                            attempt = attempts,
+                            error = %e,
+                            "Anthropic response read failed with retryable error — retrying"
+                        );
+                        tokio::time::sleep(std::time::Duration::from_secs(1 << attempts)).await;
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
         })
     }
+}
+
+/// Returns `true` for errors that are safe to retry.
+///
+/// Covers two categories:
+/// - Transport errors: connection failures, timeouts, incomplete responses.
+/// - HTTP 5xx (server error): transient Anthropic-side conditions that resolve
+///   without code changes. Converted to `reqwest::Error` by `error_for_status()`
+///   before reaching this function.
+///
+/// HTTP 429 (rate limit) is handled separately — before `error_for_status()` is
+/// called — so it never reaches this function. Non-retryable 4xx (400, 401, 403)
+/// return `false`: those indicate a broken request that won't be fixed by retrying.
+fn is_retryable_error(e: &reqwest::Error) -> bool {
+    e.is_connect()
+        || e.is_timeout()
+        || e.is_request()
+        || e.status().map(|s| s.is_server_error()).unwrap_or(false)
+}
+
+/// Parse the `Retry-After` header value as a number of seconds.
+///
+/// Anthropic uses integer-seconds format (e.g. `Retry-After: 30`). If the
+/// header is absent, unparseable, or contains an HTTP-date string, returns
+/// `60` as a conservative default.
+fn retry_after_delay(headers: &reqwest::header::HeaderMap) -> u64 {
+    headers
+        .get("retry-after")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(60)
 }
 
 #[cfg(test)]
@@ -531,8 +641,22 @@ impl AgentLoop {
                     if let (Some(store), Some(pid)) = (&self.promise_store, &self.promise_id)
                         && let Some((ref mut p, ref mut rev)) = checkpoint
                     {
-                        // Transient: NATS redelivery may retry after a network blip.
-                        write_promise_terminal(store.as_ref(), &self.tenant_id, pid, p, *rev, crate::promise_store::PromiseStatus::Failed, "HTTP error").await;
+                        // Non-retryable 4xx (400, 401, 403): the request is broken;
+                        // retrying will always produce the same error. Mark
+                        // PermanentFailed so neither startup recovery nor NATS
+                        // redelivery wastes Anthropic credits on a hopeless run.
+                        // Exhausted 429 retries and 5xx / transport errors use
+                        // Failed — NATS redelivery may succeed.
+                        let terminal_status = if e
+                            .status()
+                            .map(|s| s.is_client_error() && s != 429)
+                            .unwrap_or(false)
+                        {
+                            crate::promise_store::PromiseStatus::PermanentFailed
+                        } else {
+                            crate::promise_store::PromiseStatus::Failed
+                        };
+                        write_promise_terminal(store.as_ref(), &self.tenant_id, pid, p, *rev, terminal_status, "HTTP error").await;
                     }
                     return Err(AgentError::Http(e));
                 }
@@ -885,12 +1009,21 @@ impl AgentLoop {
                 };
 
                 // Check MCP dispatch first, then fall back to built-in tools.
+                //
+                // MCP servers receive the original `input` — not `call_input`.
+                // `_idempotency_key` is an internal contract between the agent
+                // loop and the built-in handlers (GitHub, Slack, Linear). MCP
+                // servers are external code that do not consume the field, and a
+                // server that declares its tool schema with
+                // `additionalProperties: false` would reject the call with an
+                // unknown-field error. Built-in tools receive `call_input` which
+                // includes the key so their dedup logic fires correctly.
                 let output = if let Some((_, original, client)) = self
                     .mcp_dispatch
                     .iter()
                     .find(|(prefixed, _, _)| prefixed == name)
                 {
-                    match client.call_tool(original, &call_input).await {
+                    match client.call_tool(original, input).await {
                         Ok(out) => out,
                         Err(e) => format!("Tool error: {e}"),
                     }
@@ -1651,5 +1784,41 @@ mod tests {
             PromiseStatus::PermanentFailed,
             "promise must be PermanentFailed after unexpected stop_reason — deterministic, retry cannot succeed"
         );
+    }
+
+    // ── retry_after_delay ─────────────────────────────────────────────────────
+
+    /// Valid integer-seconds value → parsed directly.
+    #[test]
+    fn retry_after_delay_parses_integer_seconds() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert("retry-after", "30".parse().unwrap());
+        assert_eq!(retry_after_delay(&headers), 30);
+    }
+
+    /// Header absent → falls back to 60 s default.
+    #[test]
+    fn retry_after_delay_defaults_to_60_when_header_absent() {
+        let headers = reqwest::header::HeaderMap::new();
+        assert_eq!(retry_after_delay(&headers), 60);
+    }
+
+    /// HTTP-date value (not an integer) → unparseable, falls back to 60 s.
+    #[test]
+    fn retry_after_delay_defaults_to_60_for_http_date() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            "retry-after",
+            "Wed, 21 Oct 2015 07:28:00 GMT".parse().unwrap(),
+        );
+        assert_eq!(retry_after_delay(&headers), 60);
+    }
+
+    /// Zero is a valid parsed value — callers must handle a zero delay.
+    #[test]
+    fn retry_after_delay_allows_zero() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert("retry-after", "0".parse().unwrap());
+        assert_eq!(retry_after_delay(&headers), 0);
     }
 }

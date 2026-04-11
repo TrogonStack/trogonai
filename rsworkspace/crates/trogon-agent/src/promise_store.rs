@@ -257,6 +257,20 @@ impl PromiseStore {
     }
 
     /// Return all promises for `tenant_id` that are currently in [`PromiseStatus::Running`].
+    ///
+    /// ## Performance note: N+1 KV reads
+    ///
+    /// This method does one `keys()` scan followed by one `get_promise` call per
+    /// matching key. The `async-nats` KV API does not expose a bulk-read primitive
+    /// (e.g. `values()` or `entries()`), so this N+1 pattern is the best available
+    /// without dropping to the lower-level JetStream stream API.
+    ///
+    /// This is acceptable because `list_running` is only called once at startup.
+    /// The bucket is bounded by the 24-hour TTL, so the total number of entries
+    /// is proportional to one day's worth of trigger events — not unbounded.
+    /// If startup latency from this scan becomes observable, consider switching to
+    /// the raw JetStream direct-get API or maintaining a secondary `Running` index
+    /// in a separate KV key.
     async fn list_running_inner(
         &self,
         tenant_id: &str,

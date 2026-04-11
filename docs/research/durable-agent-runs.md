@@ -182,18 +182,30 @@ here causes the tool to re-execute on the next attempt.
 
 **Resolution: idempotency keys on all write tool calls**
 
-Every write tool call includes a stable idempotency key derived from `{promise_id}.{tool_use_id}`.
-On a second execution with the same key, the external API returns the original result without
-performing the action again:
+Every write tool call includes a stable idempotency key derived from
+`{promise_id}.{sha256(tool_name:canonical_json(input))}`. The key is content-based rather than
+derived from Anthropic's ephemeral `tool_use_id` so that it survives a process restart — on
+recovery the LLM re-generates a fresh `tool_use_id` for the same call, but the name and input
+are identical, so the hash matches and the external API dedup check fires correctly.
 
-- **GitHub** — supports `Idempotency-Key` header on REST API mutations. A duplicate
-  `post_pr_comment` with the same key returns the existing comment without creating a new one.
-- **Linear** — supports `Idempotency-Key` header on GraphQL mutations.
-- **Slack** — no native idempotency key support. Mitigation: before sending, check whether a
-  recent message from the bot with identical content already exists in the channel. If found, skip.
+Per-API idempotency support:
 
-With idempotency keys, the consequence of a crash in the non-atomic window changes from "action
-duplicated" to "extra API call that returns the already-known result" — safe in all cases.
+- **GitHub (`update_file`, `create_pull_request`, `request_reviewers`)** — the `Idempotency-Key`
+  header is forwarded but its behaviour is API-method-specific. `create_pull_request` benefits
+  from GitHub's natural duplicate rejection (422 if a PR for the same head→base already exists).
+  **`post_pr_comment` is not protected by the header** — GitHub silently ignores
+  `Idempotency-Key` for issue/PR comments. A duplicate comment can appear if the process crashes
+  in the non-atomic window between tool execution and the KV cache write. The window is
+  milliseconds wide; the risk is low but non-zero. The only full fix would be a pre-post dedup
+  read (fetch existing comments, skip if identical content found), which is not implemented.
+- **Linear** — supports `Idempotency-Key` header on GraphQL mutations. Duplicate mutations with
+  the same key return the original result.
+- **Slack** — no native idempotency key support. Mitigation: before sending, check channel
+  history for a message with a matching metadata key or identical text. If found, skip.
+
+For tools covered by native idempotency (Linear, Slack with dedup check), a crash in the
+non-atomic window is fully safe — the re-execution returns the original result. For
+`post_pr_comment`, the risk is bounded by the narrowness of the window and is accepted.
 
 ### Limitation 2: NATS KV Durability on OS Crash
 
