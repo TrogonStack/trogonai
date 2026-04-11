@@ -14,6 +14,7 @@ all = "deny"
 acp-nats = { path = "crates/acp-nats" }
 acp-telemetry = { path = "crates/acp-telemetry" }
 trogon-nats = { path = "crates/trogon-nats" }
+trogon-service-config = { path = "crates/trogon-service-config" }
 trogon-source-discord = { path = "crates/trogon-source-discord" }
 trogon-source-github = { path = "crates/trogon-source-github" }
 trogon-source-gitlab = { path = "crates/trogon-source-gitlab" }
