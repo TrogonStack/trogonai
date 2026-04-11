@@ -41,12 +41,13 @@ pub mod client;
 pub mod connect;
 pub mod constants;
 pub mod jetstream;
+pub mod lease;
 pub mod messaging;
 pub mod nats_token;
 pub mod subject_token_violation;
 pub(crate) mod token;
 
-#[cfg(feature = "test-support")]
+#[cfg(any(test, feature = "test-support"))]
 pub mod mocks;
 
 pub use async_nats::subject::ToSubject;
@@ -54,6 +55,12 @@ pub use auth::{NatsAuth, NatsConfig};
 pub use client::{FlushClient, PublishClient, RequestClient, SubscribeClient};
 pub use connect::{ConnectError, connect};
 pub use constants::REQ_ID_HEADER;
+pub use lease::{
+    EnsureLeaderError, IncompatibleLeaseBucketConfig, LeaderElection, LeaseBucket,
+    LeaseConfigError, LeaseError, LeaseKey, LeaseProvisionError, LeaseRenewInterval,
+    LeaseRenewIntervalError, LeaseTiming, LeaseTtl, LeaseTtlError, NatsKvLease, NatsKvLeaseConfig,
+    ReleaseLease, RenewLease, TryAcquireLease,
+};
 pub use messaging::{
     FlushPolicy, NatsError, PublishOperationError, PublishOptions, PublishOptionsBuilder,
     RetryPolicy, build_request_headers, headers_with_trace_context, inject_trace_context, publish,
@@ -62,5 +69,5 @@ pub use messaging::{
 pub use nats_token::{DottedNatsToken, NatsToken};
 pub use subject_token_violation::SubjectTokenViolation;
 
-#[cfg(feature = "test-support")]
+#[cfg(any(test, feature = "test-support"))]
 pub use mocks::{AdvancedMockNatsClient, MockNatsClient};
