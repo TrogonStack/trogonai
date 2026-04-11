@@ -1,11 +1,14 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use async_nats::HeaderMap;
-use async_nats::jetstream::AckKind;
 use async_nats::jetstream::consumer::pull;
+use async_nats::jetstream::context::{self, CreateKeyValueError, CreateKeyValueErrorKind};
+use async_nats::jetstream::kv;
 use async_nats::jetstream::publish::PublishAck;
 use async_nats::jetstream::stream;
+use async_nats::jetstream::{self, AckKind};
 use async_nats::subject::ToSubject;
 use bytes::Bytes;
 use futures::channel::mpsc;
@@ -14,7 +17,9 @@ use futures::stream::BoxStream;
 use super::message::{JsAck, JsAckWith, JsDoubleAck, JsDoubleAckWith, JsMessageRef};
 use super::object_store::{ObjectStoreGet, ObjectStorePut};
 use super::traits::{
-    JetStreamConsumer, JetStreamContext, JetStreamCreateConsumer, JetStreamGetStream,
+    JetStreamConsumer, JetStreamContext, JetStreamCreateConsumer, JetStreamCreateKeyValue,
+    JetStreamGetKeyValue, JetStreamGetStream, JetStreamKeyValueCreateWithTtl,
+    JetStreamKeyValueDeleteExpectRevision, JetStreamKeyValueStatus, JetStreamKeyValueUpdate,
     JetStreamPublisher,
 };
 use crate::mocks::MockError;
@@ -297,6 +302,298 @@ impl JetStreamPublisher for MockJetStreamPublisher {
             duplicate: false,
             value: None,
         })))
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct MockJetStreamKvStore {
+    settings: Arc<Mutex<Result<MockKeyValueSettings, kv::StatusErrorKind>>>,
+    create_with_ttl_result: Arc<Mutex<Result<u64, kv::CreateErrorKind>>>,
+    update_result: Arc<Mutex<Result<u64, kv::UpdateErrorKind>>>,
+    delete_result: Arc<Mutex<Result<(), kv::DeleteErrorKind>>>,
+    create_with_ttl_calls: Arc<Mutex<CreateWithTtlCalls>>,
+    update_calls: Arc<Mutex<UpdateCalls>>,
+    delete_calls: Arc<Mutex<DeleteCalls>>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct MockKeyValueSettings {
+    history: i64,
+    max_age: Duration,
+    allow_message_ttl: bool,
+    subject_delete_marker_ttl: Option<Duration>,
+}
+
+type CreateWithTtlCalls = Vec<(String, Bytes, Duration)>;
+type UpdateCalls = Vec<(String, Bytes, u64)>;
+type DeleteCalls = Vec<(String, Option<u64>)>;
+
+impl MockJetStreamKvStore {
+    pub fn new() -> Self {
+        Self {
+            settings: Arc::new(Mutex::new(Ok(MockKeyValueSettings {
+                history: 1,
+                max_age: Duration::ZERO,
+                allow_message_ttl: true,
+                subject_delete_marker_ttl: None,
+            }))),
+            create_with_ttl_result: Arc::new(Mutex::new(Ok(1))),
+            update_result: Arc::new(Mutex::new(Ok(1))),
+            delete_result: Arc::new(Mutex::new(Ok(()))),
+            create_with_ttl_calls: Arc::new(Mutex::new(Vec::new())),
+            update_calls: Arc::new(Mutex::new(Vec::new())),
+            delete_calls: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    pub fn set_settings(
+        &self,
+        history: i64,
+        max_age: Duration,
+        allow_message_ttl: bool,
+        subject_delete_marker_ttl: Option<Duration>,
+    ) {
+        *self.settings.lock().unwrap() = Ok(MockKeyValueSettings {
+            history,
+            max_age,
+            allow_message_ttl,
+            subject_delete_marker_ttl,
+        });
+    }
+
+    pub fn fail_status(&self, kind: kv::StatusErrorKind) {
+        *self.settings.lock().unwrap() = Err(kind);
+    }
+
+    pub fn set_create_with_ttl_result(&self, result: Result<u64, kv::CreateErrorKind>) {
+        *self.create_with_ttl_result.lock().unwrap() = result;
+    }
+
+    pub fn set_update_result(&self, result: Result<u64, kv::UpdateErrorKind>) {
+        *self.update_result.lock().unwrap() = result;
+    }
+
+    pub fn set_delete_result(&self, result: Result<(), kv::DeleteErrorKind>) {
+        *self.delete_result.lock().unwrap() = result;
+    }
+
+    pub fn create_with_ttl_calls(&self) -> Vec<(String, Bytes, Duration)> {
+        self.create_with_ttl_calls.lock().unwrap().clone()
+    }
+
+    pub fn update_calls(&self) -> Vec<(String, Bytes, u64)> {
+        self.update_calls.lock().unwrap().clone()
+    }
+
+    pub fn delete_calls(&self) -> Vec<(String, Option<u64>)> {
+        self.delete_calls.lock().unwrap().clone()
+    }
+}
+
+impl Default for MockJetStreamKvStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl JetStreamKeyValueStatus for MockJetStreamKvStore {
+    async fn status(&self) -> Result<async_nats::jetstream::kv::bucket::Status, kv::StatusError> {
+        self.settings
+            .lock()
+            .unwrap()
+            .clone()
+            .map(|settings| status_from_settings("bucket", settings))
+            .map_err(kv::StatusError::new)
+    }
+}
+
+impl JetStreamKeyValueCreateWithTtl for MockJetStreamKvStore {
+    async fn create_with_ttl(
+        &self,
+        key: &str,
+        value: Bytes,
+        ttl: Duration,
+    ) -> Result<u64, kv::CreateError> {
+        self.create_with_ttl_calls
+            .lock()
+            .unwrap()
+            .push((key.to_string(), value, ttl));
+        (*self.create_with_ttl_result.lock().unwrap()).map_err(kv::CreateError::new)
+    }
+}
+
+impl JetStreamKeyValueUpdate for MockJetStreamKvStore {
+    async fn update(&self, key: &str, value: Bytes, revision: u64) -> Result<u64, kv::UpdateError> {
+        self.update_calls
+            .lock()
+            .unwrap()
+            .push((key.to_string(), value, revision));
+        (*self.update_result.lock().unwrap()).map_err(kv::UpdateError::new)
+    }
+}
+
+impl JetStreamKeyValueDeleteExpectRevision for MockJetStreamKvStore {
+    async fn delete_expect_revision(
+        &self,
+        key: &str,
+        revision: Option<u64>,
+    ) -> Result<(), kv::DeleteError> {
+        self.delete_calls
+            .lock()
+            .unwrap()
+            .push((key.to_string(), revision));
+        (*self.delete_result.lock().unwrap()).map_err(kv::DeleteError::new)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct MockJetStreamKvClient {
+    create_result: Arc<Mutex<MockCreateKeyValueResult>>,
+    get_result: Arc<Mutex<MockGetKeyValueResult>>,
+    create_configs: Arc<Mutex<Vec<kv::Config>>>,
+    requested_buckets: Arc<Mutex<Vec<String>>>,
+}
+
+#[derive(Clone, Debug)]
+enum MockCreateKeyValueResult {
+    Ok(MockJetStreamKvStore),
+    Err(CreateKeyValueErrorKind),
+    AlreadyExists,
+}
+
+#[derive(Clone, Debug)]
+enum MockGetKeyValueResult {
+    Ok(MockJetStreamKvStore),
+    Err(context::KeyValueErrorKind),
+}
+
+impl MockJetStreamKvClient {
+    pub fn new() -> Self {
+        Self {
+            create_result: Arc::new(Mutex::new(MockCreateKeyValueResult::Ok(
+                MockJetStreamKvStore::new(),
+            ))),
+            get_result: Arc::new(Mutex::new(MockGetKeyValueResult::Ok(
+                MockJetStreamKvStore::new(),
+            ))),
+            create_configs: Arc::new(Mutex::new(Vec::new())),
+            requested_buckets: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    pub fn set_create_result(&self, result: MockJetStreamKvStore) {
+        *self.create_result.lock().unwrap() = MockCreateKeyValueResult::Ok(result);
+    }
+
+    pub fn set_get_result(&self, result: MockJetStreamKvStore) {
+        *self.get_result.lock().unwrap() = MockGetKeyValueResult::Ok(result);
+    }
+
+    pub fn fail_create_already_exists(&self) {
+        *self.create_result.lock().unwrap() = MockCreateKeyValueResult::AlreadyExists;
+    }
+
+    pub fn fail_create(&self, kind: CreateKeyValueErrorKind) {
+        *self.create_result.lock().unwrap() = MockCreateKeyValueResult::Err(kind);
+    }
+
+    pub fn fail_get(&self, kind: context::KeyValueErrorKind) {
+        *self.get_result.lock().unwrap() = MockGetKeyValueResult::Err(kind);
+    }
+
+    pub fn create_configs(&self) -> Vec<kv::Config> {
+        self.create_configs.lock().unwrap().clone()
+    }
+
+    pub fn requested_buckets(&self) -> Vec<String> {
+        self.requested_buckets.lock().unwrap().clone()
+    }
+}
+
+impl Default for MockJetStreamKvClient {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl JetStreamCreateKeyValue for MockJetStreamKvClient {
+    type Store = MockJetStreamKvStore;
+
+    async fn create_key_value(
+        &self,
+        config: kv::Config,
+    ) -> Result<Self::Store, CreateKeyValueError> {
+        self.create_configs.lock().unwrap().push(config);
+        match self.create_result.lock().unwrap().clone() {
+            MockCreateKeyValueResult::Ok(store) => Ok(store),
+            MockCreateKeyValueResult::Err(kind) => Err(CreateKeyValueError::new(kind)),
+            MockCreateKeyValueResult::AlreadyExists => Err(CreateKeyValueError::with_source(
+                CreateKeyValueErrorKind::BucketCreate,
+                mock_stream_exists_error(),
+            )),
+        }
+    }
+}
+
+impl JetStreamGetKeyValue for MockJetStreamKvClient {
+    type Store = MockJetStreamKvStore;
+
+    async fn get_key_value<T: Into<String> + Send>(
+        &self,
+        bucket: T,
+    ) -> Result<Self::Store, context::KeyValueError> {
+        self.requested_buckets.lock().unwrap().push(bucket.into());
+        match self.get_result.lock().unwrap().clone() {
+            MockGetKeyValueResult::Ok(store) => Ok(store),
+            MockGetKeyValueResult::Err(kind) => Err(context::KeyValueError::new(kind)),
+        }
+    }
+}
+
+fn mock_stream_exists_error() -> context::CreateStreamError {
+    let source: jetstream::Error = serde_json::from_str(
+        r#"{"code":400,"err_code":10058,"description":"stream name already in use with a different configuration"}"#,
+    )
+    .unwrap();
+
+    context::CreateStreamError::new(context::CreateStreamErrorKind::JetStream(source))
+}
+
+fn status_from_settings(
+    bucket: &str,
+    settings: MockKeyValueSettings,
+) -> async_nats::jetstream::kv::bucket::Status {
+    let config = stream::Config {
+        name: format!("KV_{bucket}"),
+        max_messages_per_subject: settings.history,
+        max_age: settings.max_age,
+        allow_message_ttl: settings.allow_message_ttl,
+        subject_delete_marker_ttl: settings.subject_delete_marker_ttl,
+        ..Default::default()
+    };
+
+    let info: stream::Info = serde_json::from_value(serde_json::json!({
+        "config": config,
+        "created": "1970-01-01T00:00:00Z",
+        "state": {
+            "messages": 0_u64,
+            "bytes": 0_u64,
+            "first_seq": 0_u64,
+            "first_ts": "1970-01-01T00:00:00Z",
+            "last_seq": 0_u64,
+            "last_ts": "1970-01-01T00:00:00Z",
+            "consumer_count": 0_usize,
+            "num_subjects": 0_u64
+        },
+        "cluster": null,
+        "mirror": null,
+        "sources": []
+    }))
+    .unwrap();
+
+    async_nats::jetstream::kv::bucket::Status {
+        info,
+        bucket: bucket.to_string(),
     }
 }
 

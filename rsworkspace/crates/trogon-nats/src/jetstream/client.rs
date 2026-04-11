@@ -8,8 +8,8 @@ use bytes::Bytes;
 
 use super::message::{JsAck, JsAckWith, JsDoubleAck, JsDoubleAckWith, JsMessageRef};
 use super::traits::{
-    JetStreamConsumer, JetStreamContext, JetStreamCreateConsumer, JetStreamGetStream,
-    JetStreamPublisher,
+    JetStreamConsumer, JetStreamContext, JetStreamCreateConsumer, JetStreamCreateKeyValue,
+    JetStreamGetKeyValue, JetStreamGetStream, JetStreamPublisher,
 };
 
 #[derive(Clone)]
@@ -55,6 +55,28 @@ impl JetStreamPublisher for NatsJetStreamClient {
         self.context
             .publish_with_headers(subject, headers, payload)
             .await
+    }
+}
+
+impl JetStreamCreateKeyValue for NatsJetStreamClient {
+    type Store = jetstream::kv::Store;
+
+    async fn create_key_value(
+        &self,
+        config: jetstream::kv::Config,
+    ) -> Result<Self::Store, async_nats::jetstream::context::CreateKeyValueError> {
+        self.context.create_key_value(config).await
+    }
+}
+
+impl JetStreamGetKeyValue for NatsJetStreamClient {
+    type Store = jetstream::kv::Store;
+
+    async fn get_key_value<T: Into<String> + Send>(
+        &self,
+        bucket: T,
+    ) -> Result<Self::Store, async_nats::jetstream::context::KeyValueError> {
+        self.context.get_key_value(bucket).await
     }
 }
 
