@@ -793,8 +793,10 @@ async fn dispatch_records_failed_run_on_agent_error() {
         .await
         .expect("publish");
 
-    // Poll until a RunRecord with status=failed appears (up to 10s).
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    // Poll until a RunRecord with status=failed appears.
+    // The agent retries 500s up to 3 times with 2s+4s+8s backoff (14s total)
+    // before giving up and recording the failure — allow enough headroom.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(25);
     let runs = loop {
         let body: serde_json::Value = client
             .get(&runs_url)

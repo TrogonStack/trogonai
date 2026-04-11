@@ -44,14 +44,20 @@ use crate::tools::{DefaultToolDispatcher, ToolContext, ToolDef};
 
 const NATS_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// `ack_wait` for all consumers — set to 3× the heartbeat interval.
+/// How often `spawn_heartbeat` sends `AckKind::Progress` to reset the
+/// JetStream ack timer. Changing this value automatically adjusts
+/// [`CONSUMER_ACK_WAIT`] — both must stay in sync so the server never
+/// redelivers while a live heartbeat is running.
+const HEARTBEAT_INTERVAL_SECS: u64 = 15;
+
+/// `ack_wait` for all consumers — exactly 3× [`HEARTBEAT_INTERVAL_SECS`].
 ///
-/// `spawn_heartbeat` sends `AckKind::Progress` every 15s, which resets the
-/// ack timer on the server. Redelivery only triggers if the process actually
-/// dies (the heartbeat stops). 45s = 3× 15s gives three missed beats before
-/// NATS redelivers — enough to absorb transient GC pauses without being so
-/// long that a real crash goes undetected for minutes.
-const CONSUMER_ACK_WAIT: Duration = Duration::from_secs(45);
+/// Three missed beats before NATS redelivers: enough to absorb transient
+/// GC pauses without being so long that a real crash goes undetected for
+/// minutes. Derived from the constant so the relationship is
+/// compiler-enforced — changing the heartbeat interval automatically keeps
+/// this in sync.
+const CONSUMER_ACK_WAIT: Duration = Duration::from_secs(HEARTBEAT_INTERVAL_SECS * 3);
 
 /// Worker identifier for promise ownership — hostname + PID.
 fn worker_id() -> String {
@@ -792,8 +798,10 @@ async fn prepare_agent_with_promise(
                 // are also re-claimed: a crash in the narrow window between
                 // marking Failed and calling msg.ack() causes NATS redelivery,
                 // and re-claiming ensures at most one worker retries the run.
-                // `PermanentFailed` and `Resolved` fall through without a claim
-                // — `run()` returns early for both without any LLM call.
+                // `PermanentFailed` and `Resolved` return `None` directly
+                // from this function — the caller skips the handler entirely,
+                // aborts the heartbeat, and calls msg.ack(). `run()` is never
+                // reached for terminal states.
                 // Note: startup recovery only scans `Running` promises via
                 // `list_running`, so `Failed` promises are only ever re-claimed
                 // by the NATS redelivery path, not by startup recovery.
@@ -814,20 +822,42 @@ async fn prepare_agent_with_promise(
                     }
                 };
                 if let Err(e) = claim_result {
-                    info!(
+                    // Could be a CAS revision conflict (another worker claimed
+                    // first — benign) or a NATS error (bucket unavailable).
+                    // The `error` field carries the actual cause; the action is
+                    // the same either way: skip this run.
+                    warn!(
                         promise_id = %promise_id,
                         error = %e,
-                        "CAS claim lost — another worker is handling this promise, skipping"
+                        "Promise claim failed — skipping to avoid concurrent execution"
                     );
                     return None;
                 }
             }
-            info!(
-                promise_id = %promise_id,
-                status = ?existing.status,
-                iteration = existing.iteration,
-                "Found existing promise — resuming"
-            );
+            match existing.status {
+                PromiseStatus::Running | PromiseStatus::Failed => {
+                    info!(
+                        promise_id = %promise_id,
+                        status = ?existing.status,
+                        iteration = existing.iteration,
+                        "Found existing promise — resuming"
+                    );
+                }
+                _ => {
+                    // Resolved / PermanentFailed: the run already completed.
+                    // NATS is redelivering because msg.ack() failed after the
+                    // run finished. Return None so the caller skips the handler
+                    // entirely — no memory.md fetch, no LLM call, no misleading
+                    // "done" log. The caller's 'handler: block breaks on None,
+                    // the heartbeat is aborted, and msg.ack() is called.
+                    info!(
+                        promise_id = %promise_id,
+                        status = ?existing.status,
+                        "Found existing promise — already terminal, acking without re-running"
+                    );
+                    return None;
+                }
+            }
         }
         Ok(None) => {
             let promise = AgentPromise {
@@ -880,7 +910,13 @@ async fn recover_stale_promises(
     run_store: &Arc<RunStore>,
     tenant_id: &str,
 ) {
-    const STALE_AFTER_SECS: u64 = 5 * 60;
+    // Must be strictly greater than the maximum time between two consecutive
+    // checkpoints. Between checkpoints, claimed_at does not update, so the
+    // age can grow by up to (tool_execution_time + LLM_call_time). The LLM
+    // hard timeout is 5 * 60 = 300 s — using the same value as STALE_AFTER_SECS
+    // would give zero margin. 10 minutes gives a 2× buffer so a worst-case
+    // slow LLM call never triggers a spurious startup recovery.
+    const STALE_AFTER_SECS: u64 = 10 * 60;
     /// Maximum number of stale promises to recover on a single startup.
     ///
     /// Each recovery re-runs the full agent (potentially multiple LLM calls),
@@ -1137,12 +1173,14 @@ async fn recover_stale_promises(
                     }
                 } else {
                     // Automation was deleted between the crash and this recovery.
-                    // Mark the promise as Failed so it is not picked up on future
-                    // restarts — a Running promise with no active worker is noise.
+                    // Mark PermanentFailed — the automation is gone permanently;
+                    // retrying would always reach this arm and cycle until the TTL.
+                    // (Failed would be semantically wrong: it implies a transient
+                    // error that NATS redelivery can fix, which is not the case here.)
                     warn!(
                         promise_id = %promise.id,
                         automation_id = %promise.automation_id,
-                        "Startup recovery: automation no longer exists — marking promise as Failed"
+                        "Startup recovery: automation no longer exists — marking promise PermanentFailed"
                     );
                     match tokio::time::timeout(
                         crate::agent_loop::NATS_KV_TIMEOUT,
@@ -1151,7 +1189,7 @@ async fn recover_stale_promises(
                     .await
                     {
                         Ok(Ok(Some((mut current, rev)))) => {
-                            current.status = PromiseStatus::Failed;
+                            current.status = PromiseStatus::PermanentFailed;
                             match tokio::time::timeout(
                                 crate::agent_loop::NATS_KV_TIMEOUT,
                                 promise_store.update_promise(
@@ -1167,11 +1205,11 @@ async fn recover_stale_promises(
                                 Ok(Err(e)) => warn!(
                                     promise_id = %promise.id,
                                     error = %e,
-                                    "Startup recovery: failed to mark orphaned promise as Failed"
+                                    "Startup recovery: failed to mark orphaned promise PermanentFailed"
                                 ),
                                 Err(_) => warn!(
                                     promise_id = %promise.id,
-                                    "Startup recovery: update_promise timed out marking orphaned promise as Failed"
+                                    "Startup recovery: update_promise timed out marking orphaned promise PermanentFailed"
                                 ),
                             }
                         }
@@ -1289,7 +1327,7 @@ async fn recover_stale_promises(
 /// stops sending progress acks after the message has been explicitly acked.
 fn spawn_heartbeat(msg: async_nats::jetstream::Message) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        let mut interval = tokio::time::interval(std::time::Duration::from_secs(15));
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(HEARTBEAT_INTERVAL_SECS));
         interval.tick().await; // skip immediate first tick
         loop {
             interval.tick().await;
