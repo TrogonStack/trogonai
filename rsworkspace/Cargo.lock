@@ -3464,6 +3464,7 @@ dependencies = [
  "trogon-source-discord",
  "trogon-source-github",
  "trogon-source-gitlab",
+ "trogon-source-incidentio",
  "trogon-source-linear",
  "trogon-source-slack",
  "trogon-source-telegram",
@@ -3538,6 +3539,26 @@ dependencies = [
  "async-nats",
  "axum",
  "bytes",
+ "sha2",
+ "subtle",
+ "tokio",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+ "trogon-nats",
+ "trogon-std",
+]
+
+[[package]]
+name = "trogon-source-incidentio"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "axum",
+ "base64 0.22.1",
+ "bytes",
+ "hmac",
+ "serde_json",
  "sha2",
  "subtle",
  "tokio",

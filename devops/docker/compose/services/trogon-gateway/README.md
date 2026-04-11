@@ -14,6 +14,7 @@ prefix:
 | Slack | `/slack/webhook` | `TROGON_SOURCE_SLACK_SIGNING_SECRET` |
 | Telegram | `/telegram/webhook` | `TROGON_SOURCE_TELEGRAM_WEBHOOK_SECRET` |
 | GitLab | `/gitlab/webhook` | `TROGON_SOURCE_GITLAB_WEBHOOK_SECRET` |
+| incident.io | `/incidentio/webhook` | `TROGON_SOURCE_INCIDENTIO_SIGNING_SECRET` |
 | Linear | `/linear/webhook` | `TROGON_SOURCE_LINEAR_WEBHOOK_SECRET` |
 
 The gateway port is configured via `TROGON_GATEWAY_PORT` (default `8080`).
@@ -64,6 +65,17 @@ docker compose --profile dev up
 
 Find the ngrok tunnel URL in `docker compose logs ngrok`, then set it as
 your Discord application's Interactions Endpoint URL (append `/discord/webhook`).
+
+## incident.io webhooks
+
+incident.io uses Svix-style webhook signing. Set `TROGON_SOURCE_INCIDENTIO_SIGNING_SECRET`
+to the `whsec_...` signing secret from incident.io and configure the webhook
+endpoint as `/incidentio/webhook`.
+
+incident.io does not guarantee ordered delivery, and private incident events may
+contain only resource IDs rather than full objects. The gateway forwards the raw
+verified payload to NATS and leaves any enrichment or reordering to downstream
+consumers.
 
 ## Exposing webhooks with ngrok
 
