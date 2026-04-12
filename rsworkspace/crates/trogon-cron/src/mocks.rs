@@ -11,7 +11,7 @@ use futures::Stream;
 use trogon_nats::lease::{ReleaseLease, RenewLease, TryAcquireLease};
 
 use crate::{
-    config::{JobEnabledState, JobSpec, JobWriteCondition, VersionedJobSpec},
+    config::{JobEnabledState, JobSpec, JobWriteCondition, JobWriteState, VersionedJobSpec},
     domain::ResolvedJobSpec,
     domain::validate_job_spec,
     error::CronError,
@@ -124,6 +124,7 @@ impl ReleaseLease for MockLeaderLock {
 #[derive(Clone, Default)]
 pub struct MockConfigStore {
     jobs: Arc<Mutex<HashMap<String, VersionedJobSpec>>>,
+    aggregate_versions: Arc<Mutex<HashMap<String, u64>>>,
 }
 
 impl MockConfigStore {
@@ -132,6 +133,10 @@ impl MockConfigStore {
     }
 
     pub fn seed_job(&self, spec: JobSpec) {
+        self.aggregate_versions
+            .lock()
+            .unwrap()
+            .insert(spec.id.clone(), 1);
         self.jobs
             .lock()
             .unwrap()
@@ -147,9 +152,12 @@ impl ConfigStore for MockConfigStore {
     ) -> Result<(), CronError> {
         validate_job_spec(config)?;
         let mut jobs = self.jobs.lock().unwrap();
-        let current_version = jobs.get(&config.id).map(|job| job.version);
-        write_condition.ensure(&config.id, current_version)?;
+        let mut aggregate_versions = self.aggregate_versions.lock().unwrap();
+        let current_version = aggregate_versions.get(&config.id).copied();
+        let write_state = JobWriteState::new(current_version, jobs.contains_key(&config.id));
+        write_condition.ensure(&config.id, write_state)?;
         let next_version = current_version.unwrap_or(0) + 1;
+        aggregate_versions.insert(config.id.clone(), next_version);
         jobs.insert(
             config.id.clone(),
             VersionedJobSpec {
@@ -170,9 +178,13 @@ impl ConfigStore for MockConfigStore {
         let job = jobs
             .get_mut(id)
             .ok_or_else(|| CronError::JobNotFound { id: id.to_string() })?;
-        write_condition.ensure(id, Some(job.version))?;
+        write_condition.ensure(id, JobWriteState::new(Some(job.version), true))?;
         job.version += 1;
         job.spec.state = state;
+        self.aggregate_versions
+            .lock()
+            .unwrap()
+            .insert(id.to_string(), job.version);
         Ok(())
     }
 
@@ -186,8 +198,15 @@ impl ConfigStore for MockConfigStore {
         write_condition: JobWriteCondition,
     ) -> Result<(), CronError> {
         let mut jobs = self.jobs.lock().unwrap();
-        let current_version = jobs.get(id).map(|job| job.version);
-        write_condition.ensure(id, current_version)?;
+        let current_version = jobs
+            .get(id)
+            .ok_or_else(|| CronError::JobNotFound { id: id.to_string() })?
+            .version;
+        write_condition.ensure(id, JobWriteState::new(Some(current_version), true))?;
+        self.aggregate_versions
+            .lock()
+            .unwrap()
+            .insert(id.to_string(), current_version + 1);
         jobs.remove(id);
         Ok(())
     }
@@ -331,6 +350,13 @@ mod tests {
             .await
             .unwrap();
         assert!(store.get_job("alpha").await.unwrap().is_none());
+
+        store
+            .put_job(&base_job("alpha"), JobWriteCondition::MustNotExist)
+            .await
+            .unwrap();
+        let re_registered = store.get_job("alpha").await.unwrap().unwrap();
+        assert_eq!(re_registered.version, alpha.version + 2);
     }
 
     #[tokio::test]
@@ -383,14 +409,17 @@ mod tests {
     #[test]
     fn ensure_write_condition_covers_accept_and_conflict_paths() {
         JobWriteCondition::MustNotExist
-            .ensure("alpha", None)
+            .ensure("alpha", JobWriteState::new(None, false))
+            .unwrap();
+        JobWriteCondition::MustNotExist
+            .ensure("alpha", JobWriteState::new(Some(4), false))
             .unwrap();
         JobWriteCondition::MustBeAtVersion(3)
-            .ensure("alpha", Some(3))
+            .ensure("alpha", JobWriteState::new(Some(3), true))
             .unwrap();
 
         let error = JobWriteCondition::MustBeAtVersion(3)
-            .ensure("alpha", Some(4))
+            .ensure("alpha", JobWriteState::new(Some(4), true))
             .unwrap_err();
         assert!(matches!(
             error,

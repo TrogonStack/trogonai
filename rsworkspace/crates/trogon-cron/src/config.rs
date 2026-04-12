@@ -58,15 +58,38 @@ pub enum JobWriteCondition {
     MustBeAtVersion(u64),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct JobWriteState {
+    current_version: Option<u64>,
+    exists: bool,
+}
+
+impl JobWriteState {
+    pub const fn new(current_version: Option<u64>, exists: bool) -> Self {
+        Self {
+            current_version,
+            exists,
+        }
+    }
+
+    pub const fn current_version(self) -> Option<u64> {
+        self.current_version
+    }
+
+    pub const fn exists(self) -> bool {
+        self.exists
+    }
+}
+
 impl JobWriteCondition {
-    pub fn ensure(self, id: &str, current_version: Option<u64>) -> Result<(), CronError> {
-        match (self, current_version) {
-            (Self::MustNotExist, None) => Ok(()),
-            (Self::MustBeAtVersion(expected), Some(current)) if expected == current => Ok(()),
-            (expected, current_version) => Err(CronError::OptimisticConcurrencyConflict {
+    pub fn ensure(self, id: &str, state: JobWriteState) -> Result<(), CronError> {
+        match self {
+            Self::MustNotExist if !state.exists() => Ok(()),
+            Self::MustBeAtVersion(expected) if state.current_version() == Some(expected) => Ok(()),
+            expected => Err(CronError::OptimisticConcurrencyConflict {
                 id: id.to_string(),
                 expected,
-                current_version,
+                current_version: state.current_version(),
             }),
         }
     }
@@ -230,14 +253,14 @@ mod tests {
     #[test]
     fn write_condition_ensures_expected_versions() {
         JobWriteCondition::MustNotExist
-            .ensure("alpha", None)
+            .ensure("alpha", JobWriteState::new(None, false))
             .unwrap();
         JobWriteCondition::MustBeAtVersion(3)
-            .ensure("alpha", Some(3))
+            .ensure("alpha", JobWriteState::new(Some(3), true))
             .unwrap();
 
         let error = JobWriteCondition::MustBeAtVersion(2)
-            .ensure("alpha", Some(4))
+            .ensure("alpha", JobWriteState::new(Some(4), true))
             .unwrap_err();
         assert!(matches!(
             error,
@@ -246,5 +269,12 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn write_condition_allows_recreating_deleted_aggregate() {
+        JobWriteCondition::MustNotExist
+            .ensure("alpha", JobWriteState::new(Some(7), false))
+            .unwrap();
     }
 }
