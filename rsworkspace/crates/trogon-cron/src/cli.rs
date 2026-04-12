@@ -23,7 +23,7 @@ pub enum Command {
 pub enum JobAction {
     List,
     Get { id: String },
-    Add { file: String },
+    Add,
     Remove { id: String },
     Enable { id: String },
     Disable { id: String },
