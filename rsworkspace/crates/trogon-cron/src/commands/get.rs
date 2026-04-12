@@ -1,8 +1,6 @@
 use std::fmt;
 
-use trogon_cron::{ConfigStore, NatsConfigStore};
-
-use super::job_id::{JobId, JobIdError};
+use trogon_cron::{ConfigStore, GetJobCommand as StoreGetJobCommand, JobId, JobIdError};
 
 #[derive(Debug)]
 pub struct GetCommand {
@@ -39,9 +37,14 @@ impl std::error::Error for CommandError {
     }
 }
 
-pub async fn run(store: &NatsConfigStore, command: GetCommand) -> Result<(), CommandError> {
+pub async fn run<S>(store: &S, command: GetCommand) -> Result<(), CommandError>
+where
+    S: ConfigStore,
+{
     match store
-        .get_job(command.job_id.as_str())
+        .get_job(StoreGetJobCommand {
+            id: command.job_id.clone(),
+        })
         .await
         .map_err(CommandError::GetJob)?
     {

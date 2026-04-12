@@ -21,10 +21,7 @@ pub use client::{
     PublishError, StreamError,
 };
 pub use create_conflicts::{is_create_key_value_already_exists, is_create_stream_already_exists};
-pub use message::{
-    JsAck, JsAckWith, JsDispatchMessage, JsDoubleAck, JsDoubleAckWith, JsMessageRef,
-    JsRequestMessage,
-};
+pub use message::{JsAck, JsAckWith, JsDispatchMessage, JsDoubleAck, JsDoubleAckWith, JsMessageRef, JsRequestMessage};
 #[cfg(not(coverage))]
 pub use object_store::NatsObjectStore;
 pub use object_store::{ObjectStoreGet, ObjectStorePut};

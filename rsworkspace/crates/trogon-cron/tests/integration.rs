@@ -5,13 +5,18 @@ use async_nats::Request;
 use async_nats::jetstream;
 use chrono::{Duration as ChronoDuration, Utc};
 use trogon_cron::{
-    ConfigStore, CronController, DeliverySpec, JobEnabledState, JobSpec, JobWriteCondition,
-    NatsConfigStore, SamplingSource, ScheduleSpec,
+    ConfigStore, CronController, DeliverySpec, JobEnabledState, JobId, JobSpec, JobWriteCondition,
+    SamplingSource, ScheduleSpec, connect_store,
+    store::{DeleteJobCommand, GetJobCommand, PutJobCommand, SetJobStateCommand},
 };
 use trogon_nats::{NatsConfig, connect as nats_connect};
 
 fn test_url() -> String {
     std::env::var("NATS_TEST_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string())
+}
+
+fn job_id(id: &str) -> JobId {
+    JobId::parse(id).unwrap()
 }
 
 async fn connect() -> async_nats::Client {
@@ -168,7 +173,7 @@ async fn raw_js_info_request_with_explicit_inbox_works() {
 async fn controller_reconciles_one_time_job() {
     let (nats, js) = connect_js().await;
     reset_state(&js).await;
-    let store = NatsConfigStore::new(nats.clone()).await.unwrap();
+    let store = connect_store(nats.clone()).await.unwrap();
 
     let handle = tokio::spawn(async move {
         CronController::from_nats(nats)
@@ -185,7 +190,10 @@ async fn controller_reconciles_one_time_job() {
     };
 
     store
-        .put_job(&job, JobWriteCondition::MustNotExist)
+        .put_job(PutJobCommand {
+            spec: job,
+            write_condition: JobWriteCondition::MustNotExist,
+        })
         .await
         .unwrap();
 
@@ -203,7 +211,7 @@ async fn controller_reconciles_one_time_job() {
 async fn controller_reconciles_sampling_job() {
     let (nats, js) = connect_js().await;
     reset_state(&js).await;
-    let store = NatsConfigStore::new(nats.clone()).await.unwrap();
+    let store = connect_store(nats.clone()).await.unwrap();
 
     let handle = tokio::spawn(async move {
         CronController::from_nats(nats)
@@ -225,7 +233,10 @@ async fn controller_reconciles_sampling_job() {
     };
 
     store
-        .put_job(&job, JobWriteCondition::MustNotExist)
+        .put_job(PutJobCommand {
+            spec: job,
+            write_condition: JobWriteCondition::MustNotExist,
+        })
         .await
         .unwrap();
     wait_for_stream_subject(&js, trogon_cron::kv::SCHEDULES_STREAM, "sensors.latest").await;
@@ -249,7 +260,7 @@ async fn controller_reconciles_sampling_job() {
 async fn controller_reconciles_cron_job_with_timezone() {
     let (nats, js) = connect_js().await;
     reset_state(&js).await;
-    let store = NatsConfigStore::new(nats.clone()).await.unwrap();
+    let store = connect_store(nats.clone()).await.unwrap();
 
     let handle = tokio::spawn(async move {
         CronController::from_nats(nats)
@@ -267,7 +278,10 @@ async fn controller_reconciles_cron_job_with_timezone() {
     };
 
     store
-        .put_job(&job, JobWriteCondition::MustNotExist)
+        .put_job(PutJobCommand {
+            spec: job,
+            write_condition: JobWriteCondition::MustNotExist,
+        })
         .await
         .unwrap();
 
@@ -285,7 +299,7 @@ async fn controller_reconciles_cron_job_with_timezone() {
 async fn disabling_job_removes_schedule_subject() {
     let (nats, js) = connect_js().await;
     reset_state(&js).await;
-    let store = NatsConfigStore::new(nats.clone()).await.unwrap();
+    let store = connect_store(nats.clone()).await.unwrap();
 
     let handle = tokio::spawn(async move {
         CronController::from_nats(nats)
@@ -298,7 +312,10 @@ async fn disabling_job_removes_schedule_subject() {
 
     let job = base_job("disabled");
     store
-        .put_job(&job, JobWriteCondition::MustNotExist)
+        .put_job(PutJobCommand {
+            spec: job,
+            write_condition: JobWriteCondition::MustNotExist,
+        })
         .await
         .unwrap();
 
@@ -308,13 +325,20 @@ async fn disabling_job_removes_schedule_subject() {
         .unwrap();
     wait_for_subject(&stream, "cron.schedules.disabled").await;
 
-    let version = store.get_job("disabled").await.unwrap().unwrap().version;
+    let version = store
+        .get_job(GetJobCommand {
+            id: job_id("disabled"),
+        })
+        .await
+        .unwrap()
+        .unwrap()
+        .version;
     store
-        .set_job_state(
-            "disabled",
-            JobEnabledState::Disabled,
-            JobWriteCondition::MustBeAtVersion(version),
-        )
+        .set_job_state(SetJobStateCommand {
+            id: job_id("disabled"),
+            state: JobEnabledState::Disabled,
+            write_condition: JobWriteCondition::MustBeAtVersion(version),
+        })
         .await
         .unwrap();
     wait_for_subject_absence(&stream, "cron.schedules.disabled").await;
@@ -327,7 +351,7 @@ async fn disabling_job_removes_schedule_subject() {
 async fn removing_job_removes_schedule_subject() {
     let (nats, js) = connect_js().await;
     reset_state(&js).await;
-    let store = NatsConfigStore::new(nats.clone()).await.unwrap();
+    let store = connect_store(nats.clone()).await.unwrap();
 
     let handle = tokio::spawn(async move {
         CronController::from_nats(nats)
@@ -340,7 +364,10 @@ async fn removing_job_removes_schedule_subject() {
 
     let job = base_job("removed");
     store
-        .put_job(&job, JobWriteCondition::MustNotExist)
+        .put_job(PutJobCommand {
+            spec: job,
+            write_condition: JobWriteCondition::MustNotExist,
+        })
         .await
         .unwrap();
 
@@ -350,9 +377,19 @@ async fn removing_job_removes_schedule_subject() {
         .unwrap();
     wait_for_subject(&stream, "cron.schedules.removed").await;
 
-    let version = store.get_job("removed").await.unwrap().unwrap().version;
+    let version = store
+        .get_job(GetJobCommand {
+            id: job_id("removed"),
+        })
+        .await
+        .unwrap()
+        .unwrap()
+        .version;
     store
-        .delete_job("removed", JobWriteCondition::MustBeAtVersion(version))
+        .delete_job(DeleteJobCommand {
+            id: job_id("removed"),
+            write_condition: JobWriteCondition::MustBeAtVersion(version),
+        })
         .await
         .unwrap();
     wait_for_subject_absence(&stream, "cron.schedules.removed").await;
@@ -366,30 +403,47 @@ async fn event_store_rebuilds_current_state_for_new_client() {
     let (nats, js) = connect_js().await;
     reset_state(&js).await;
 
-    let store = NatsConfigStore::new(nats.clone()).await.unwrap();
+    let store = connect_store(nats.clone()).await.unwrap();
     let mut job = base_job("eventful");
     job.schedule = ScheduleSpec::Cron {
         expr: "*/5 * * * * *".to_string(),
         timezone: Some("UTC".to_string()),
     };
+    let expected_schedule = job.schedule.clone();
 
     store
-        .put_job(&job, JobWriteCondition::MustNotExist)
+        .put_job(PutJobCommand {
+            spec: job,
+            write_condition: JobWriteCondition::MustNotExist,
+        })
         .await
         .unwrap();
-    let version = store.get_job("eventful").await.unwrap().unwrap().version;
+    let version = store
+        .get_job(GetJobCommand {
+            id: job_id("eventful"),
+        })
+        .await
+        .unwrap()
+        .unwrap()
+        .version;
     store
-        .set_job_state(
-            "eventful",
-            JobEnabledState::Disabled,
-            JobWriteCondition::MustBeAtVersion(version),
-        )
+        .set_job_state(SetJobStateCommand {
+            id: job_id("eventful"),
+            state: JobEnabledState::Disabled,
+            write_condition: JobWriteCondition::MustBeAtVersion(version),
+        })
         .await
         .unwrap();
 
-    let fresh = NatsConfigStore::new(nats).await.unwrap();
-    let rebuilt = fresh.get_job("eventful").await.unwrap().unwrap();
+    let fresh = connect_store(nats).await.unwrap();
+    let rebuilt = fresh
+        .get_job(GetJobCommand {
+            id: job_id("eventful"),
+        })
+        .await
+        .unwrap()
+        .unwrap();
 
     assert_eq!(rebuilt.spec.state, JobEnabledState::Disabled);
-    assert_eq!(rebuilt.spec.schedule, job.schedule);
+    assert_eq!(rebuilt.spec.schedule, expected_schedule);
 }
