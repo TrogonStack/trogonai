@@ -11,6 +11,7 @@ use async_nats::jetstream::{
     kv,
     message::PublishMessage,
 };
+use chrono::{DateTime, Utc};
 use futures::{Stream, StreamExt, TryStreamExt};
 use trogon_nats::NatsToken;
 use uuid::Uuid;
@@ -19,7 +20,9 @@ use crate::{
     config::{JobEnabledState, JobSpec, JobWriteCondition, JobWriteState, VersionedJobSpec},
     domain::{ResolvedJobSpec, validate_job_spec},
     error::{CronError, JobSpecError},
-    events::{JobEvent, ProjectionChange, RecordedJobEvent, apply_event_to_versioned_state},
+    events::{
+        JobEvent, JobEventData, ProjectionChange, RecordedJobEvent, apply_event_to_versioned_state,
+    },
     kv::{
         CONFIG_BUCKET, EVENTS_STREAM, EVENTS_SUBJECT_PATTERN, EVENTS_SUBJECT_PREFIX,
         JOBS_KEY_PREFIX, LEGACY_EVENTS_SUBJECT_PATTERN, LEGACY_EVENTS_SUBJECT_PREFIX,
@@ -109,8 +112,8 @@ impl NatsConfigStore {
         match stream.get_last_raw_message_by_subject(subject).await {
             Ok(message) => {
                 let version = message.sequence;
-                let event = RecordedJobEvent::from_stream_message(message)?;
-                let exists = !matches!(event.event, JobEvent::JobRemoved { .. });
+                let event = decode_recorded_job_event(message)?;
+                let exists = !matches!(event.data, JobEvent::JobRemoved { .. });
                 Ok(Some(JobWriteState::new(Some(version), exists)))
             }
             Err(error)
@@ -146,7 +149,7 @@ impl NatsConfigStore {
         &self,
         job_id: &str,
         write_condition: JobWriteCondition,
-        event: RecordedJobEvent,
+        event: JobEventData,
     ) -> Result<(), CronError> {
         let aggregate = self.aggregate_subject_state(job_id).await?;
         write_condition.ensure(job_id, aggregate.write_state)?;
@@ -271,8 +274,8 @@ impl NatsConfigStore {
             else {
                 continue;
             };
-            let event = RecordedJobEvent::from_stream_message(message)?;
-            let change = apply_event_to_snapshot_map(&mut snapshots, &event.event, sequence)?;
+            let event = decode_recorded_job_event(message)?;
+            let change = apply_event_to_snapshot_map(&mut snapshots, &event.data, sequence)?;
             persist_snapshot_change(&bucket, change).await?;
             write_snapshot_checkpoint(&bucket, sequence).await?;
         }
@@ -283,7 +286,7 @@ impl NatsConfigStore {
     async fn project_event_to_snapshot(
         &self,
         job_id: &str,
-        event: &RecordedJobEvent,
+        event: &JobEventData,
     ) -> Result<(), CronError> {
         let bucket = self.snapshot_bucket().await?;
         let mut snapshots = BTreeMap::new();
@@ -299,7 +302,7 @@ impl NatsConfigStore {
             )
         })?;
 
-        let change = apply_event_to_snapshot_map(&mut snapshots, &event.event, final_version)?;
+        let change = apply_event_to_snapshot_map(&mut snapshots, &event.data, final_version)?;
         persist_snapshot_change(&bucket, change).await?;
         maybe_advance_snapshot_checkpoint(&bucket, final_version).await
     }
@@ -341,7 +344,7 @@ impl ConfigStore for NatsConfigStore {
         self.append_event(
             &config.id,
             write_condition,
-            RecordedJobEvent::new(JobEvent::job_registered(config.clone())),
+            JobEventData::new(JobEvent::job_registered(config.clone())),
         )
         .await
     }
@@ -359,7 +362,7 @@ impl ConfigStore for NatsConfigStore {
         self.append_event(
             id,
             write_condition,
-            RecordedJobEvent::new(JobEvent::job_state_changed(id, state)),
+            JobEventData::new(JobEvent::job_state_changed(id, state)),
         )
         .await
     }
@@ -381,7 +384,7 @@ impl ConfigStore for NatsConfigStore {
         self.append_event(
             id,
             write_condition,
-            RecordedJobEvent::new(JobEvent::job_removed(id)),
+            JobEventData::new(JobEvent::job_removed(id)),
         )
         .await
     }
@@ -439,9 +442,7 @@ impl ConfigStore for NatsConfigStore {
                         }
                     };
 
-                    let event = match serde_json::from_slice::<RecordedJobEvent>(
-                        &message.message.payload,
-                    ) {
+                    let event = match decode_recorded_watch_message(&message) {
                         Ok(event) => event,
                         Err(error) => {
                             tracing::error!(error = %error, "Failed to decode job event from subscription");
@@ -452,7 +453,7 @@ impl ConfigStore for NatsConfigStore {
 
                     let projection_change = {
                         let mut state = state.lock().expect("job event state mutex poisoned");
-                        event.event.apply_to_state(&mut state)
+                        event.data.apply_to_state(&mut state)
                     };
                     let projection_change = match projection_change {
                         Ok(change) => change,
@@ -500,8 +501,8 @@ async fn rebuild_jobs_from_stream(
             continue;
         };
         let version = message.sequence;
-        let event = RecordedJobEvent::from_stream_message(message)?;
-        apply_event_to_versioned_state(&mut jobs, &event.event, version)?;
+        let event = decode_recorded_job_event(message)?;
+        apply_event_to_versioned_state(&mut jobs, &event.data, version)?;
     }
 
     Ok(jobs.into_values().collect())
@@ -524,6 +525,50 @@ async fn read_raw_event_message(
         }
         Err(source) => Err(CronError::event_source(context, source)),
     }
+}
+
+fn decode_job_event_data(payload: &[u8]) -> Result<JobEventData, CronError> {
+    JobEventData::decode(payload)
+        .map_err(|source| CronError::event_source("failed to decode stored job event", source))
+}
+
+fn decode_recorded_job_event(
+    message: async_nats::jetstream::message::StreamMessage,
+) -> Result<RecordedJobEvent, CronError> {
+    let recorded_at = recorded_at_from_message(&message)?;
+    let stream_id = message.subject.to_string();
+    let log_position = Some(message.sequence);
+    let event = decode_job_event_data(&message.payload)?;
+
+    Ok(event.record(stream_id, None, log_position, recorded_at))
+}
+
+fn decode_recorded_watch_message(
+    message: &async_nats::jetstream::Message,
+) -> Result<RecordedJobEvent, CronError> {
+    let stream_message = async_nats::jetstream::message::StreamMessage::try_from(
+        message.message.clone(),
+    )
+    .map_err(|source| {
+        CronError::event_source(
+            "failed to reconstruct stream message from watch delivery",
+            source,
+        )
+    })?;
+
+    decode_recorded_job_event(stream_message)
+}
+
+fn recorded_at_from_message(
+    message: &async_nats::jetstream::message::StreamMessage,
+) -> Result<DateTime<Utc>, CronError> {
+    DateTime::<Utc>::from_timestamp(message.time.unix_timestamp(), message.time.nanosecond())
+        .ok_or_else(|| {
+            CronError::event_source(
+                "failed to convert message timestamp into recorded event time",
+                std::io::Error::other(message.subject.to_string()),
+            )
+        })
 }
 
 fn next_watch_start_sequence(last_sequence: u64) -> u64 {

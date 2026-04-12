@@ -3113,6 +3113,7 @@ dependencies = [
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
+ "trogon-eventsourcing",
  "trogon-nats",
  "trogon-service-config",
  "trogon-std",
@@ -3125,6 +3126,16 @@ name = "trogon-decider"
 version = "0.1.0"
 dependencies = [
  "trybuild",
+]
+
+[[package]]
+name = "trogon-eventsourcing"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "uuid",
 ]
 
 [[package]]

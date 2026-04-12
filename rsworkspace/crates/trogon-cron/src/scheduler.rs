@@ -6,6 +6,7 @@ use futures::{Stream, StreamExt};
 use trogon_nats::lease::{
     LeaderElection, LeaseRenewInterval, LeaseTiming, LeaseTtl, NatsKvLease, NatsKvLeaseConfig,
 };
+use trogon_std::time::GetElapsed;
 use uuid::Uuid;
 
 use crate::{
@@ -105,17 +106,14 @@ where
                     break;
                 }
                 _ = heartbeat.tick() => {
-                    let is_leader = leader.ensure_leader().await.map_err(|source| {
-                        CronError::lease_source("failed to ensure controller leadership", source)
-                    })?;
-                    if is_leader && !currently_leader {
-                        tracing::info!(node_id = %self.node_id, job_count = desired_jobs.len(), "Controller became leader");
-                        reconcile_snapshot(
-                            &self.schedule_publisher,
-                            &desired_jobs,
-                        ).await?;
-                    }
-                    currently_leader = is_leader;
+                    handle_heartbeat(
+                        &mut leader,
+                        &self.node_id,
+                        &self.schedule_publisher,
+                        &desired_jobs,
+                        &mut currently_leader,
+                    )
+                    .await?;
                 }
                 change = config_watcher.next() => {
                     match change {
@@ -187,6 +185,40 @@ fn apply_local_change(desired_jobs: &mut HashMap<String, JobSpec>, change: &JobS
             desired_jobs.remove(id);
         }
     }
+}
+
+async fn handle_heartbeat<P, L, C>(
+    leader: &mut LeaderElection<L, C>,
+    node_id: &str,
+    publisher: &P,
+    desired_jobs: &HashMap<String, JobSpec>,
+    currently_leader: &mut bool,
+) -> Result<(), CronError>
+where
+    P: SchedulePublisher<Error = CronError>,
+    L: LeaderLock,
+    C: GetElapsed,
+{
+    match leader.ensure_leader().await {
+        Ok(is_leader) => {
+            if is_leader && !*currently_leader {
+                tracing::info!(node_id = %node_id, job_count = desired_jobs.len(), "Controller became leader");
+                reconcile_snapshot(publisher, desired_jobs).await?;
+            }
+            *currently_leader = is_leader;
+        }
+        Err(source) => {
+            tracing::warn!(
+                error = %source,
+                node_id = %node_id,
+                was_leader = *currently_leader,
+                "Controller leadership check failed, stepping down and retrying"
+            );
+            *currently_leader = false;
+        }
+    }
+
+    Ok(())
 }
 
 async fn apply_remote_change<P: SchedulePublisher<Error = CronError>>(
@@ -293,16 +325,46 @@ async fn reestablish_config_watch<C: ConfigStore>(
 #[cfg(test)]
 mod tests {
     use std::collections::{BTreeMap, HashMap};
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
 
     use super::{
         CronController, apply_local_change, apply_remote_change, default_leader_timing,
-        reconcile_snapshot, to_job_map,
+        handle_heartbeat, reconcile_snapshot, to_job_map,
     };
     use crate::{
         config::{DeliverySpec, JobEnabledState, JobSpec, ScheduleSpec},
         mocks::{MockConfigStore, MockLeaderLock, MockSchedulePublisher},
         traits::JobSpecChange,
     };
+    use trogon_nats::lease::{LeaderElection, LeaseRenewInterval, LeaseTiming, LeaseTtl};
+    use trogon_std::time::{GetElapsed, GetNow};
+
+    #[derive(Clone, Default)]
+    struct TestClock {
+        now: Arc<Mutex<Duration>>,
+    }
+
+    impl TestClock {
+        fn advance(&self, duration: Duration) {
+            let mut now = self.now.lock().unwrap();
+            *now += duration;
+        }
+    }
+
+    impl GetNow for TestClock {
+        type Instant = Duration;
+
+        fn now(&self) -> Self::Instant {
+            *self.now.lock().unwrap()
+        }
+    }
+
+    impl GetElapsed for TestClock {
+        fn elapsed(&self, since: Self::Instant) -> Duration {
+            self.now().saturating_sub(since)
+        }
+    }
 
     fn base_job(id: &str) -> JobSpec {
         JobSpec {
@@ -455,6 +517,51 @@ mod tests {
         reconcile_snapshot(&publisher, &desired_jobs).await.unwrap();
 
         assert_eq!(publisher.removals(), vec!["invalid"]);
+        assert_eq!(publisher.upserts(), vec!["cron.schedules.valid"]);
+    }
+
+    #[tokio::test]
+    async fn heartbeat_demotes_and_continues_on_renew_error() {
+        let publisher = MockSchedulePublisher::new();
+        let desired_jobs = HashMap::from([("valid".to_string(), base_job("valid"))]);
+        let lock = MockLeaderLock::new();
+        let clock = TestClock::default();
+        let timing = LeaseTiming::new(
+            LeaseTtl::from_secs(10).unwrap(),
+            LeaseRenewInterval::from_secs(5).unwrap(),
+        )
+        .unwrap();
+        let mut leader =
+            LeaderElection::with_clock(lock.clone(), "node-1".to_string(), timing, clock.clone());
+        let mut currently_leader = false;
+
+        handle_heartbeat(
+            &mut leader,
+            "node-1",
+            &publisher,
+            &desired_jobs,
+            &mut currently_leader,
+        )
+        .await
+        .unwrap();
+
+        assert!(currently_leader);
+        assert_eq!(publisher.upserts(), vec!["cron.schedules.valid"]);
+
+        clock.advance(Duration::from_secs(5));
+        lock.set_allow_renew(false);
+
+        handle_heartbeat(
+            &mut leader,
+            "node-1",
+            &publisher,
+            &desired_jobs,
+            &mut currently_leader,
+        )
+        .await
+        .unwrap();
+
+        assert!(!currently_leader);
         assert_eq!(publisher.upserts(), vec!["cron.schedules.valid"]);
     }
 }
