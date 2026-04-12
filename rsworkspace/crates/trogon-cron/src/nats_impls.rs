@@ -16,7 +16,7 @@ use trogon_nats::NatsToken;
 use uuid::Uuid;
 
 use crate::{
-    config::{JobEnabledState, JobSpec, JobWriteCondition, VersionedJobSpec},
+    config::{JobEnabledState, JobSpec, JobWriteCondition, JobWriteState, VersionedJobSpec},
     domain::{ResolvedJobSpec, validate_job_spec},
     error::{CronError, JobSpecError},
     events::{JobEvent, ProjectionChange, RecordedJobEvent, apply_event_to_versioned_state},
@@ -56,7 +56,7 @@ impl EventSubjectPrefix {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct AggregateSubjectState {
     prefix: EventSubjectPrefix,
-    current_version: Option<u64>,
+    write_state: JobWriteState,
 }
 
 enum SnapshotChange {
@@ -101,10 +101,18 @@ impl NatsConfigStore {
             .map_err(|source| CronError::event_source("failed to open events stream", source))
     }
 
-    async fn current_subject_version(&self, subject: &str) -> Result<Option<u64>, CronError> {
+    async fn current_subject_state(
+        &self,
+        subject: &str,
+    ) -> Result<Option<JobWriteState>, CronError> {
         let stream = self.events_stream().await?;
         match stream.get_last_raw_message_by_subject(subject).await {
-            Ok(message) => Ok(Some(message.sequence)),
+            Ok(message) => {
+                let version = message.sequence;
+                let event = RecordedJobEvent::from_stream_message(message)?;
+                let exists = !matches!(event.event, JobEvent::JobRemoved { .. });
+                Ok(Some(JobWriteState::new(Some(version), exists)))
+            }
             Err(error)
                 if matches!(
                     error.kind(),
@@ -125,10 +133,10 @@ impl NatsConfigStore {
         job_id: &str,
     ) -> Result<AggregateSubjectState, CronError> {
         let canonical_version = self
-            .current_subject_version(&EventSubjectPrefix::Canonical.subject(job_id))
+            .current_subject_state(&EventSubjectPrefix::Canonical.subject(job_id))
             .await?;
         let legacy_version = self
-            .current_subject_version(&EventSubjectPrefix::Legacy.subject(job_id))
+            .current_subject_state(&EventSubjectPrefix::Legacy.subject(job_id))
             .await?;
 
         resolve_event_subject_state(job_id, canonical_version, legacy_version)
@@ -141,8 +149,8 @@ impl NatsConfigStore {
         event: RecordedJobEvent,
     ) -> Result<(), CronError> {
         let aggregate = self.aggregate_subject_state(job_id).await?;
-        write_condition.ensure(job_id, aggregate.current_version)?;
-        let expected_version = aggregate.current_version.unwrap_or(0);
+        write_condition.ensure(job_id, aggregate.write_state)?;
+        let expected_version = aggregate.write_state.current_version().unwrap_or(0);
         let batch_id = Uuid::new_v4().to_string();
         let payload = serde_json::to_vec(&event)?;
         let publish = PublishMessage::build()
@@ -166,7 +174,11 @@ impl NatsConfigStore {
                 return Err(CronError::OptimisticConcurrencyConflict {
                     id: job_id.to_string(),
                     expected: write_condition,
-                    current_version: self.aggregate_subject_state(job_id).await?.current_version,
+                    current_version: self
+                        .aggregate_subject_state(job_id)
+                        .await?
+                        .write_state
+                        .current_version(),
                 });
             }
             Err(error) => {
@@ -280,7 +292,7 @@ impl NatsConfigStore {
         }
 
         let aggregate = self.aggregate_subject_state(job_id).await?;
-        let final_version = aggregate.current_version.ok_or_else(|| {
+        let final_version = aggregate.write_state.current_version().ok_or_else(|| {
             CronError::event_source(
                 "aggregate snapshot projection requires an event version",
                 std::io::Error::other(format!("job '{job_id}'")),
@@ -763,25 +775,25 @@ async fn delete_kv_value(bucket: &kv::Store, key: &str) -> Result<(), CronError>
 
 fn resolve_event_subject_state(
     job_id: &str,
-    canonical_version: Option<u64>,
-    legacy_version: Option<u64>,
+    canonical_state: Option<JobWriteState>,
+    legacy_state: Option<JobWriteState>,
 ) -> Result<AggregateSubjectState, CronError> {
-    match (canonical_version, legacy_version) {
+    match (canonical_state, legacy_state) {
         (Some(_), Some(_)) => Err(CronError::event_source(
             "job aggregate has conflicting event subjects",
             std::io::Error::other(format!("job '{job_id}'")),
         )),
-        (Some(version), None) => Ok(AggregateSubjectState {
+        (Some(write_state), None) => Ok(AggregateSubjectState {
             prefix: EventSubjectPrefix::Canonical,
-            current_version: Some(version),
+            write_state,
         }),
-        (None, Some(version)) => Ok(AggregateSubjectState {
+        (None, Some(write_state)) => Ok(AggregateSubjectState {
             prefix: EventSubjectPrefix::Legacy,
-            current_version: Some(version),
+            write_state,
         }),
         (None, None) => Ok(AggregateSubjectState {
             prefix: EventSubjectPrefix::Canonical,
-            current_version: None,
+            write_state: JobWriteState::new(None, false),
         }),
     }
 }
@@ -1031,7 +1043,7 @@ mod tests {
     #[test]
     fn write_condition_rejects_unexpected_version() {
         let error = JobWriteCondition::MustBeAtVersion(3)
-            .ensure("alpha", Some(4))
+            .ensure("alpha", JobWriteState::new(Some(4), true))
             .unwrap_err();
 
         assert!(matches!(
@@ -1048,20 +1060,40 @@ mod tests {
         let state = resolve_event_subject_state("alpha", None, None).unwrap();
 
         assert_eq!(state.prefix, EventSubjectPrefix::Canonical);
-        assert_eq!(state.current_version, None);
+        assert_eq!(state.write_state.current_version(), None);
+        assert!(!state.write_state.exists());
     }
 
     #[test]
     fn legacy_aggregates_keep_legacy_event_subject() {
-        let state = resolve_event_subject_state("alpha", None, Some(12)).unwrap();
+        let state =
+            resolve_event_subject_state("alpha", None, Some(JobWriteState::new(Some(12), true)))
+                .unwrap();
 
         assert_eq!(state.prefix, EventSubjectPrefix::Legacy);
-        assert_eq!(state.current_version, Some(12));
+        assert_eq!(state.write_state.current_version(), Some(12));
+        assert!(state.write_state.exists());
+    }
+
+    #[test]
+    fn deleted_aggregates_can_be_recreated_without_changing_subject() {
+        let state =
+            resolve_event_subject_state("alpha", Some(JobWriteState::new(Some(12), false)), None)
+                .unwrap();
+
+        assert_eq!(state.prefix, EventSubjectPrefix::Canonical);
+        assert_eq!(state.write_state.current_version(), Some(12));
+        assert!(!state.write_state.exists());
     }
 
     #[test]
     fn split_aggregate_subjects_are_rejected() {
-        let error = resolve_event_subject_state("alpha", Some(7), Some(9)).unwrap_err();
+        let error = resolve_event_subject_state(
+            "alpha",
+            Some(JobWriteState::new(Some(7), true)),
+            Some(JobWriteState::new(Some(9), true)),
+        )
+        .unwrap_err();
 
         assert!(
             error
