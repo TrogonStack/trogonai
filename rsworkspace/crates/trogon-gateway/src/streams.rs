@@ -45,9 +45,6 @@ mod tests {
     use std::io::Write;
     use trogon_nats::jetstream::MockJetStreamContext;
 
-    const VALID_ED25519_PUB_KEY: &str =
-        "236a4d1cb6b5d3b6e25664d96be99807095ea11930159bb832e53b87761648c3";
-
     fn write_toml(content: &str) -> tempfile::NamedTempFile {
         let mut f = tempfile::Builder::new()
             .suffix(".toml")
@@ -60,14 +57,12 @@ mod tests {
     }
 
     fn all_sources_toml() -> String {
-        format!(
-            r#"
+        r#"
 [sources.github]
 webhook_secret = "gh-secret"
 
 [sources.discord]
-mode = "webhook"
-public_key = "{VALID_ED25519_PUB_KEY}"
+bot_token = "Bot token"
 
 [sources.slack]
 signing_secret = "slack-secret"
@@ -84,7 +79,7 @@ signing_secret = "whsec_dGVzdC1zZWNyZXQ="
 [sources.linear]
 webhook_secret = "linear-secret"
 "#
-        )
+        .to_string()
     }
 
     #[tokio::test]

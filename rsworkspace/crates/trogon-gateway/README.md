@@ -7,7 +7,7 @@ How to run the unified ingress gateway that receives source events and publishes
 `trogon-gateway` starts:
 
 - One HTTP server for webhook-based sources
-- Optional Discord Gateway (WebSocket) runner when Discord is configured in `gateway` mode
+- Optional Discord Gateway (WebSocket) runner when Discord is enabled
 - JetStream stream provisioning for every enabled source
 - Health probes at `GET /-/liveness` and `GET /-/readiness`
 
@@ -34,7 +34,6 @@ All webhook sources share one HTTP port (`TROGON_GATEWAY_PORT`, default `8080`) 
 | Source | Route |
 |---|---|
 | GitHub | `/github/webhook` |
-| Discord (webhook mode) | `/discord/webhook` |
 | Slack | `/slack/webhook` |
 | Telegram | `/telegram/webhook` |
 | GitLab | `/gitlab/webhook` |
@@ -47,8 +46,7 @@ A source is enabled only when its required setting is present:
 | Source | Required setting |
 |---|---|
 | GitHub | `TROGON_SOURCE_GITHUB_WEBHOOK_SECRET` |
-| Discord (`gateway`) | `TROGON_SOURCE_DISCORD_MODE=gateway` and `TROGON_SOURCE_DISCORD_BOT_TOKEN` |
-| Discord (`webhook`) | `TROGON_SOURCE_DISCORD_MODE=webhook` and `TROGON_SOURCE_DISCORD_PUBLIC_KEY` |
+| Discord | `TROGON_SOURCE_DISCORD_BOT_TOKEN` |
 | Slack | `TROGON_SOURCE_SLACK_SIGNING_SECRET` |
 | Telegram | `TROGON_SOURCE_TELEGRAM_WEBHOOK_SECRET` |
 | GitLab | `TROGON_SOURCE_GITLAB_WEBHOOK_SECRET` |
@@ -78,7 +76,6 @@ Per-source optional tuning (with defaults):
 Source-specific extras:
 
 - `TROGON_SOURCE_DISCORD_GATEWAY_INTENTS`
-- `TROGON_SOURCE_DISCORD_NATS_REQUEST_TIMEOUT_SECS` (default: `2`)
 - `TROGON_SOURCE_SLACK_TIMESTAMP_MAX_DRIFT_SECS` (default: `300`)
 - `TROGON_SOURCE_LINEAR_TIMESTAMP_TOLERANCE_SECS` (default: `60`, `0` disables tolerance)
 
@@ -102,10 +99,7 @@ url = "localhost:4222"
 webhook_secret = "gh-secret"
 
 [sources.discord]
-mode = "webhook"
-public_key = "<discord-public-key-hex>"
-# mode = "gateway"
-# bot_token = "<discord-bot-token>"
+bot_token = "<discord-bot-token>"
 
 [sources.slack]
 signing_secret = "slack-secret"
