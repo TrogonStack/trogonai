@@ -5,6 +5,12 @@ use trogon_cron::{ConfigStore, JobEnabledState, JobWriteCondition, NatsConfigSto
 use super::job_id::{JobId, JobIdError};
 
 #[derive(Debug)]
+pub struct SetStateCommand {
+    pub job_id: JobId,
+    pub state: JobEnabledState,
+}
+
+#[derive(Debug)]
 pub enum CommandError {
     InvalidJobId(JobIdError),
     GetJob(trogon_cron::CronError),
@@ -34,31 +40,38 @@ impl std::error::Error for CommandError {
     }
 }
 
-pub async fn run(
-    store: &NatsConfigStore,
-    id: &str,
-    state: JobEnabledState,
-) -> Result<(), CommandError> {
-    let job_id = JobId::parse(id).map_err(CommandError::InvalidJobId)?;
-    let version = current_job_version(store, &job_id).await?;
+pub async fn run(store: &NatsConfigStore, command: SetStateCommand) -> Result<(), CommandError> {
+    let version = current_job_version(store, &command).await?;
     store
         .set_job_state(
-            job_id.as_str(),
-            state,
+            command.job_id.as_str(),
+            command.state,
             JobWriteCondition::MustBeAtVersion(version),
         )
         .await
         .map_err(CommandError::SetState)?;
-    println!("Job '{job_id}' {}.", state.as_str());
+    println!("Job '{}' {}.", command.job_id, command.state.as_str());
 
     Ok(())
 }
 
-async fn current_job_version(store: &NatsConfigStore, id: &JobId) -> Result<u64, CommandError> {
+async fn current_job_version(
+    store: &NatsConfigStore,
+    command: &SetStateCommand,
+) -> Result<u64, CommandError> {
     store
-        .get_job(id.as_str())
+        .get_job(command.job_id.as_str())
         .await
         .map_err(CommandError::GetJob)?
         .map(|job| job.version)
-        .ok_or_else(|| CommandError::JobNotFound(id.clone()))
+        .ok_or_else(|| CommandError::JobNotFound(command.job_id.clone()))
+}
+
+impl SetStateCommand {
+    pub fn new(id: String, state: JobEnabledState) -> Result<Self, CommandError> {
+        Ok(Self {
+            job_id: JobId::parse(&id).map_err(CommandError::InvalidJobId)?,
+            state,
+        })
+    }
 }

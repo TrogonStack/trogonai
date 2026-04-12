@@ -2,6 +2,9 @@ use std::fmt;
 
 use trogon_cron::{ConfigStore, NatsConfigStore, ScheduleSpec};
 
+#[derive(Debug, Default)]
+pub struct ListCommand;
+
 #[derive(Debug)]
 pub enum CommandError {
     ListJobs(trogon_cron::CronError),
@@ -23,7 +26,7 @@ impl std::error::Error for CommandError {
     }
 }
 
-pub async fn run(store: &NatsConfigStore) -> Result<(), CommandError> {
+pub async fn run(store: &NatsConfigStore, _command: ListCommand) -> Result<(), CommandError> {
     let jobs = store.list_jobs().await.map_err(CommandError::ListJobs)?;
     if jobs.is_empty() {
         println!("No jobs registered.");
