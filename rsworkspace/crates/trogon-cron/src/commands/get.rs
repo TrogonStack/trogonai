@@ -1,6 +1,8 @@
 use std::fmt;
 
-use trogon_cron::{ConfigStore, GetJobCommand as StoreGetJobCommand, JobId, JobIdError};
+use async_nats::jetstream::kv;
+use trogon_cron::{GetJobCommand as StoreGetJobCommand, JobId, JobIdError, get_job};
+use trogon_nats::jetstream::JetStreamGetKeyValue;
 
 #[derive(Debug)]
 pub struct GetCommand {
@@ -37,14 +39,16 @@ impl std::error::Error for CommandError {
     }
 }
 
-pub async fn run<S>(store: &S, command: GetCommand) -> Result<(), CommandError>
+pub async fn run<J>(js: &J, command: GetCommand) -> Result<(), CommandError>
 where
-    S: ConfigStore,
+    J: JetStreamGetKeyValue<Store = kv::Store>,
 {
-    match store
-        .get_job(StoreGetJobCommand {
+    match get_job(
+        js,
+        StoreGetJobCommand {
             id: command.job_id.clone(),
-        })
+        },
+    )
         .await
         .map_err(CommandError::GetJob)?
     {

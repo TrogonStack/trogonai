@@ -1,6 +1,8 @@
 use std::fmt;
 
-use trogon_cron::{ConfigStore, ListJobsCommand, ScheduleSpec};
+use async_nats::jetstream::kv;
+use trogon_cron::{ListJobsCommand, ScheduleSpec, list_jobs};
+use trogon_nats::jetstream::JetStreamGetKeyValue;
 
 #[derive(Debug, Default)]
 pub struct ListCommand;
@@ -26,12 +28,11 @@ impl std::error::Error for CommandError {
     }
 }
 
-pub async fn run<S>(store: &S, _command: ListCommand) -> Result<(), CommandError>
+pub async fn run<J>(js: &J, _command: ListCommand) -> Result<(), CommandError>
 where
-    S: ConfigStore,
+    J: JetStreamGetKeyValue<Store = kv::Store>,
 {
-    let jobs = store
-        .list_jobs(ListJobsCommand)
+    let jobs = list_jobs(js, ListJobsCommand)
         .await
         .map_err(CommandError::ListJobs)?;
     if jobs.is_empty() {

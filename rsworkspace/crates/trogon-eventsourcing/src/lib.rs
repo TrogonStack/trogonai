@@ -2,11 +2,19 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use uuid::Uuid;
 
-pub trait AggregateEvent {
-    fn aggregate_id(&self) -> &str;
+mod snapshots;
+
+pub use snapshots::{
+    SnapshotChange, SnapshotSchemaVersion, SnapshotStoreConfig, SnapshotStoreError, StreamSnapshot,
+    checkpoint_key, list_snapshots, load_snapshot, load_snapshot_map, maybe_advance_checkpoint,
+    persist_snapshot_change, read_checkpoint, snapshot_key, write_checkpoint,
+};
+
+pub trait StreamEvent {
+    fn stream_id(&self) -> &str;
 }
 
-pub trait SubjectEvent: AggregateEvent {
+pub trait SubjectEvent: StreamEvent {
     const SUBJECT_PREFIX: &'static str;
 }
 
@@ -82,14 +90,14 @@ where
 
 impl<E, M> EventData<E, M>
 where
-    E: AggregateEvent,
+    E: StreamEvent,
 {
-    pub fn aggregate_id(&self) -> &str {
-        self.data.aggregate_id()
+    pub fn stream_id(&self) -> &str {
+        self.data.stream_id()
     }
 
     pub fn subject_with_prefix(&self, prefix: &str) -> String {
-        format!("{prefix}{}", self.aggregate_id())
+        format!("{prefix}{}", self.stream_id())
     }
 }
 
@@ -114,14 +122,14 @@ where
 
 impl<E, M> RecordedEvent<E, M>
 where
-    E: AggregateEvent,
+    E: StreamEvent,
 {
-    pub fn aggregate_id(&self) -> &str {
-        self.data.aggregate_id()
+    pub fn stream_id(&self) -> &str {
+        self.data.stream_id()
     }
 
     pub fn subject_with_prefix(&self, prefix: &str) -> String {
-        format!("{prefix}{}", self.aggregate_id())
+        format!("{prefix}{}", self.stream_id())
     }
 }
 
@@ -155,8 +163,8 @@ mod tests {
         value: String,
     }
 
-    impl AggregateEvent for TestEvent {
-        fn aggregate_id(&self) -> &str {
+    impl StreamEvent for TestEvent {
+        fn stream_id(&self) -> &str {
             &self.id
         }
     }
@@ -178,7 +186,7 @@ mod tests {
             value: "beta".to_string(),
         });
 
-        assert_eq!(event.aggregate_id(), "alpha");
+        assert_eq!(event.stream_id(), "alpha");
         assert_eq!(event.event_type, "TestEvent");
         assert_eq!(event.subject(), "events.test.alpha");
         assert_eq!(
@@ -201,7 +209,7 @@ mod tests {
             DateTime::<Utc>::from_timestamp(1_700_000_000, 0).unwrap(),
         );
 
-        assert_eq!(recorded.aggregate_id(), "alpha");
+        assert_eq!(recorded.stream_id(), "alpha");
         assert_eq!(recorded.stream_id, "stream-alpha");
         assert_eq!(recorded.stream_position, Some(2));
         assert_eq!(recorded.log_position, Some(10));

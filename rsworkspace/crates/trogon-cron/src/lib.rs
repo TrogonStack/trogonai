@@ -24,9 +24,9 @@ pub use events::{JobEvent, JobEventData, ProjectionChange, RecordedJobEvent};
 pub use job_id::{JobId, JobIdError};
 pub use nats::NatsSchedulePublisher;
 pub use scheduler::CronController;
-pub use store::connect_store;
 pub use store::{
-    ConfigStore, DeleteJobCommand, GetJobCommand, JobSpecChange, ListJobsCommand,
-    LoadAndWatchCommand, PutJobCommand, SetJobStateCommand,
+    DeleteJobCommand, GetJobCommand, JobSpecChange, ListJobsCommand, LoadAndWatchCommand,
+    PutJobCommand, SetJobStateCommand, connect_store, delete_job, get_job, list_jobs,
+    load_and_watch, put_job, set_job_state,
 };
 pub use traits::{LeaderLock, SchedulePublisher};
