@@ -18,7 +18,7 @@ pub use config::{
 };
 pub use domain::ResolvedJobSpec;
 pub use error::{CronError, JobSpecError};
-pub use events::{JobEvent, ProjectionChange, RecordedJobEvent};
+pub use events::{JobEvent, JobEventData, ProjectionChange, RecordedJobEvent};
 pub use nats_impls::{NatsConfigStore, NatsSchedulePublisher};
 pub use scheduler::CronController;
 pub use traits::{ConfigStore, JobSpecChange, LeaderLock, SchedulePublisher};

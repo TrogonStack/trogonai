@@ -3504,9 +3504,20 @@ dependencies = [
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
+ "trogon-eventsourcing",
  "trogon-nats",
  "trogon-service-config",
  "trogon-std",
+ "uuid",
+]
+
+[[package]]
+name = "trogon-eventsourcing"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
  "uuid",
 ]
 
