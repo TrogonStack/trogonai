@@ -1,7 +1,10 @@
 use std::fmt;
 
 use async_nats::jetstream::kv;
-use trogon_cron::{ListJobsCommand, ScheduleSpec, list_jobs};
+use trogon_cron::{
+    CronError, SNAPSHOT_STORE_CONFIG, ScheduleSpec, VersionedJobSpec, open_snapshot_bucket,
+};
+use trogon_eventsourcing::list_snapshots;
 use trogon_nats::jetstream::JetStreamGetKeyValue;
 
 #[derive(Debug, Default)]
@@ -9,7 +12,7 @@ pub struct ListCommand;
 
 #[derive(Debug)]
 pub enum CommandError {
-    ListJobs(trogon_cron::CronError),
+    ListJobs(CronError),
 }
 
 impl fmt::Display for CommandError {
@@ -32,8 +35,12 @@ pub async fn run<J>(js: &J, _command: ListCommand) -> Result<(), CommandError>
 where
     J: JetStreamGetKeyValue<Store = kv::Store>,
 {
-    let jobs = list_jobs(js, ListJobsCommand)
+    let bucket = open_snapshot_bucket(js)
         .await
+        .map_err(CommandError::ListJobs)?;
+    let jobs = list_snapshots::<VersionedJobSpec>(&bucket, SNAPSHOT_STORE_CONFIG)
+        .await
+        .map_err(CronError::from)
         .map_err(CommandError::ListJobs)?;
     if jobs.is_empty() {
         println!("No jobs registered.");
