@@ -148,7 +148,7 @@ impl ConfigStore for MockConfigStore {
         validate_job_spec(config)?;
         let mut jobs = self.jobs.lock().unwrap();
         let current_version = jobs.get(&config.id).map(|job| job.version);
-        ensure_write_condition(&config.id, current_version, write_condition)?;
+        write_condition.ensure(&config.id, current_version)?;
         let next_version = current_version.unwrap_or(0) + 1;
         jobs.insert(
             config.id.clone(),
@@ -170,7 +170,7 @@ impl ConfigStore for MockConfigStore {
         let job = jobs
             .get_mut(id)
             .ok_or_else(|| CronError::JobNotFound { id: id.to_string() })?;
-        ensure_write_condition(id, Some(job.version), write_condition)?;
+        write_condition.ensure(id, Some(job.version))?;
         job.version += 1;
         job.spec.state = state;
         Ok(())
@@ -187,7 +187,7 @@ impl ConfigStore for MockConfigStore {
     ) -> Result<(), CronError> {
         let mut jobs = self.jobs.lock().unwrap();
         let current_version = jobs.get(id).map(|job| job.version);
-        ensure_write_condition(id, current_version, write_condition)?;
+        write_condition.ensure(id, current_version)?;
         jobs.remove(id);
         Ok(())
     }
@@ -214,24 +214,6 @@ impl ConfigStore for MockConfigStore {
             .map(|job| job.spec)
             .collect();
         Ok((jobs, Box::pin(futures::stream::pending())))
-    }
-}
-
-fn ensure_write_condition(
-    id: &str,
-    current_version: Option<u64>,
-    write_condition: JobWriteCondition,
-) -> Result<(), CronError> {
-    match (write_condition, current_version) {
-        (JobWriteCondition::MustNotExist, None) => Ok(()),
-        (JobWriteCondition::MustBeAtVersion(expected), Some(current)) if expected == current => {
-            Ok(())
-        }
-        (expected, current_version) => Err(CronError::OptimisticConcurrencyConflict {
-            id: id.to_string(),
-            expected,
-            current_version,
-        }),
     }
 }
 
@@ -400,10 +382,15 @@ mod tests {
 
     #[test]
     fn ensure_write_condition_covers_accept_and_conflict_paths() {
-        ensure_write_condition("alpha", None, JobWriteCondition::MustNotExist).unwrap();
-        ensure_write_condition("alpha", Some(3), JobWriteCondition::MustBeAtVersion(3)).unwrap();
+        JobWriteCondition::MustNotExist
+            .ensure("alpha", None)
+            .unwrap();
+        JobWriteCondition::MustBeAtVersion(3)
+            .ensure("alpha", Some(3))
+            .unwrap();
 
-        let error = ensure_write_condition("alpha", Some(4), JobWriteCondition::MustBeAtVersion(3))
+        let error = JobWriteCondition::MustBeAtVersion(3)
+            .ensure("alpha", Some(4))
             .unwrap_err();
         assert!(matches!(
             error,

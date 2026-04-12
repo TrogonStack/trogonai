@@ -141,7 +141,7 @@ impl NatsConfigStore {
         event: RecordedJobEvent,
     ) -> Result<(), CronError> {
         let aggregate = self.aggregate_subject_state(job_id).await?;
-        ensure_write_condition(job_id, aggregate.current_version, write_condition)?;
+        write_condition.ensure(job_id, aggregate.current_version)?;
         let expected_version = aggregate.current_version.unwrap_or(0);
         let batch_id = Uuid::new_v4().to_string();
         let payload = serde_json::to_vec(&event)?;
@@ -572,24 +572,6 @@ fn validate_job_id(id: &str) -> Result<(), CronError> {
             source,
         })
     })
-}
-
-fn ensure_write_condition(
-    id: &str,
-    current_version: Option<u64>,
-    write_condition: JobWriteCondition,
-) -> Result<(), CronError> {
-    match (write_condition, current_version) {
-        (JobWriteCondition::MustNotExist, None) => Ok(()),
-        (JobWriteCondition::MustBeAtVersion(expected), Some(current)) if expected == current => {
-            Ok(())
-        }
-        (expected, current_version) => Err(CronError::OptimisticConcurrencyConflict {
-            id: id.to_string(),
-            expected,
-            current_version,
-        }),
-    }
 }
 
 fn snapshot_key(id: &str) -> String {
@@ -1048,7 +1030,8 @@ mod tests {
 
     #[test]
     fn write_condition_rejects_unexpected_version() {
-        let error = ensure_write_condition("alpha", Some(4), JobWriteCondition::MustBeAtVersion(3))
+        let error = JobWriteCondition::MustBeAtVersion(3)
+            .ensure("alpha", Some(4))
             .unwrap_err();
 
         assert!(matches!(
