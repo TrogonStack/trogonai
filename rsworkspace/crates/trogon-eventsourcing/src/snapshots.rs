@@ -14,6 +14,9 @@ pub trait StreamSnapshot {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct SnapshotSchemaVersion(NonZeroU16);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SnapshotSchemaVersionError;
+
 impl SnapshotSchemaVersion {
     pub const V1: Self = Self(NonZeroU16::MIN);
 
@@ -26,12 +29,20 @@ impl SnapshotSchemaVersion {
     }
 }
 
+impl std::fmt::Display for SnapshotSchemaVersionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "snapshot schema version must be >= 1")
+    }
+}
+
+impl std::error::Error for SnapshotSchemaVersionError {}
+
 impl TryFrom<u16> for SnapshotSchemaVersion {
-    type Error = &'static str;
+    type Error = SnapshotSchemaVersionError;
 
     fn try_from(value: u16) -> Result<Self, Self::Error> {
         let Some(value) = NonZeroU16::new(value) else {
-            return Err("snapshot schema version must be >= 1");
+            return Err(SnapshotSchemaVersionError);
         };
 
         Ok(Self::new(value))
@@ -428,7 +439,7 @@ mod tests {
     fn snapshot_schema_version_rejects_zero() {
         assert_eq!(
             SnapshotSchemaVersion::try_from(0),
-            Err("snapshot schema version must be >= 1")
+            Err(SnapshotSchemaVersionError)
         );
     }
 
