@@ -1,10 +1,8 @@
-/// Known ACP service binaries. Used as the OTel service name, log directory
-/// name, and log file name — keeping them in one place prevents typos and
-/// guarantees the values are path-safe.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ServiceName {
     AcpNatsStdio,
     AcpNatsWs,
+    TrogonCron,
     TrogonGateway,
     TrogonSourceDiscord,
     TrogonSourceGithub,
@@ -19,6 +17,7 @@ impl ServiceName {
         match self {
             Self::AcpNatsStdio => "acp-nats-stdio",
             Self::AcpNatsWs => "acp-nats-ws",
+            Self::TrogonCron => "trogon-cron",
             Self::TrogonGateway => "trogon-gateway",
             Self::TrogonSourceDiscord => "trogon-source-discord",
             Self::TrogonSourceGithub => "trogon-source-github",
@@ -44,6 +43,7 @@ mod tests {
     fn as_str_returns_expected_values() {
         assert_eq!(ServiceName::AcpNatsStdio.as_str(), "acp-nats-stdio");
         assert_eq!(ServiceName::AcpNatsWs.as_str(), "acp-nats-ws");
+        assert_eq!(ServiceName::TrogonCron.as_str(), "trogon-cron");
         assert_eq!(ServiceName::TrogonGateway.as_str(), "trogon-gateway");
         assert_eq!(
             ServiceName::TrogonSourceDiscord.as_str(),
@@ -75,6 +75,7 @@ mod tests {
     fn display_delegates_to_as_str() {
         assert_eq!(format!("{}", ServiceName::AcpNatsStdio), "acp-nats-stdio");
         assert_eq!(format!("{}", ServiceName::AcpNatsWs), "acp-nats-ws");
+        assert_eq!(format!("{}", ServiceName::TrogonCron), "trogon-cron");
         assert_eq!(format!("{}", ServiceName::TrogonGateway), "trogon-gateway");
         assert_eq!(
             format!("{}", ServiceName::TrogonSourceDiscord),
