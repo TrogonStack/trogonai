@@ -2,7 +2,7 @@
 
 `trogon-gateway` is the unified inbound pipe for platform events into NATS
 JetStream. It runs all configured sources in a single process behind a single
-HTTP server.
+HTTP server, plus the optional Discord gateway runner.
 
 All webhook sources share one port (default `8080`) and are routed by path
 prefix:
@@ -10,7 +10,6 @@ prefix:
 | Source | Webhook path | Required env var |
 |---|---|---|
 | GitHub | `/github/webhook` | `TROGON_SOURCE_GITHUB_WEBHOOK_SECRET` |
-| Discord | `/discord/webhook` | `TROGON_SOURCE_DISCORD_MODE` |
 | Slack | `/slack/webhook` | `TROGON_SOURCE_SLACK_SIGNING_SECRET` |
 | Telegram | `/telegram/webhook` | `TROGON_SOURCE_TELEGRAM_WEBHOOK_SECRET` |
 | GitLab | `/gitlab/webhook` | `TROGON_SOURCE_GITLAB_WEBHOOK_SECRET` |
@@ -38,33 +37,15 @@ cp .env.example .env
 docker compose up
 ```
 
-## Discord modes
-
-Discord supports two mutually exclusive modes via `TROGON_SOURCE_DISCORD_MODE`:
-
-| Mode | Transport | Events | Requires |
-|---|---|---|---|
-| `gateway` | WebSocket (you connect to Discord) | Everything | `TROGON_SOURCE_DISCORD_BOT_TOKEN` |
-| `webhook` | HTTP POST (Discord connects to you) | Interactions only | `TROGON_SOURCE_DISCORD_PUBLIC_KEY` |
-
-### Gateway mode
+## Discord gateway
 
 ```bash
-TROGON_SOURCE_DISCORD_MODE=gateway \
 TROGON_SOURCE_DISCORD_BOT_TOKEN=<token> \
 docker compose up
 ```
 
-### Webhook mode
-
-```bash
-TROGON_SOURCE_DISCORD_MODE=webhook \
-TROGON_SOURCE_DISCORD_PUBLIC_KEY=<hex-key> \
-docker compose --profile dev up
-```
-
-Find the ngrok tunnel URL in `docker compose logs ngrok`, then set it as
-your Discord application's Interactions Endpoint URL (append `/discord/webhook`).
+Discord does not use the HTTP ingress or ngrok. It opens an outbound WebSocket
+connection to Discord and publishes every gateway event to NATS.
 
 ## incident.io webhooks
 
