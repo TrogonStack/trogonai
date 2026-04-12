@@ -87,6 +87,14 @@ impl MockLeaderLock {
     pub fn new() -> Self {
         Self::default()
     }
+
+    pub fn set_allow_acquire(&self, allowed: bool) {
+        self.allow_acquire.store(allowed, Ordering::SeqCst);
+    }
+
+    pub fn set_allow_renew(&self, allowed: bool) {
+        self.allow_renew.store(allowed, Ordering::SeqCst);
+    }
 }
 
 impl TryAcquireLease for MockLeaderLock {

@@ -18,6 +18,7 @@ mcp-nats-server = { path = "crates/mcp-nats-server" }
 mcp-nats-stdio = { path = "crates/mcp-nats-stdio" }
 trogon-nats = { path = "crates/trogon-nats" }
 trogon-service-config = { path = "crates/trogon-service-config" }
+trogon-eventsourcing = { path = "crates/trogon-eventsourcing" }
 trogon-std = { path = "crates/trogon-std" }
 
 # ACP
