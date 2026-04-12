@@ -21,7 +21,7 @@ use super::{
 #[derive(Debug, Clone, Default)]
 pub struct LoadAndWatchCommand;
 
-pub(super) async fn run<J>(js: &J, _command: LoadAndWatchCommand) -> LoadAndWatchResult
+pub async fn run<J>(js: &J, _command: LoadAndWatchCommand) -> LoadAndWatchResult
 where
     J: JetStreamGetKeyValue<Store = kv::Store>
         + JetStreamGetStream<Stream = jetstream::stream::Stream>,

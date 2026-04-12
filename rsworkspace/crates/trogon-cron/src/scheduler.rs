@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::pin::Pin;
 use std::time::Duration;
 
+use async_nats::jetstream;
 use futures::{Stream, StreamExt};
 use trogon_nats::lease::{
     LeaderElection, LeaseRenewInterval, LeaseTiming, LeaseTtl, NatsKvLease, NatsKvLeaseConfig,
@@ -15,7 +16,7 @@ use crate::{
     error::CronError,
     kv::{LEADER_BUCKET, LEADER_KEY},
     nats::NatsSchedulePublisher,
-    store::{ConfigStore, JobSpecChange, LoadAndWatchCommand, connect_store},
+    store::{JobSpecChange, LoadAndWatchCommand, connect_store, load_and_watch},
     traits::{LeaderLock, SchedulePublisher},
 };
 
@@ -72,12 +73,7 @@ impl CronController<async_nats::jetstream::Context, NatsSchedulePublisher, NatsK
     }
 }
 
-impl<C, P, L> CronController<C, P, L>
-where
-    C: ConfigStore,
-    P: SchedulePublisher<Error = CronError>,
-    L: LeaderLock,
-{
+impl<C, P, L> CronController<C, P, L> {
     pub fn new(config_store: C, schedule_publisher: P, leader_lock: L) -> Self {
         Self {
             config_store,
@@ -92,12 +88,16 @@ where
         self.node_id = node_id;
         self
     }
+}
 
+impl<P, L> CronController<jetstream::Context, P, L>
+where
+    P: SchedulePublisher<Error = CronError>,
+    L: LeaderLock,
+{
     pub async fn run(self) -> Result<(), CronError> {
-        let (initial_jobs, mut config_watcher) = self
-            .config_store
-            .load_and_watch(LoadAndWatchCommand)
-            .await?;
+        let (initial_jobs, mut config_watcher): (Vec<JobSpec>, ConfigWatcher) =
+            load_and_watch(&self.config_store, LoadAndWatchCommand).await?;
         let mut desired_jobs = to_job_map(initial_jobs);
         let mut leader =
             LeaderElection::new(self.leader_lock, self.node_id.clone(), self.leader_timing);
@@ -304,15 +304,15 @@ async fn reconcile_snapshot<P: SchedulePublisher<Error = CronError>>(
     Ok(())
 }
 
-async fn reestablish_config_watch<C: ConfigStore>(
-    config_store: &C,
+async fn reestablish_config_watch(
+    config_store: &jetstream::Context,
 ) -> Result<ReestablishedWatch, CronError> {
     loop {
         tokio::select! {
             _ = trogon_telemetry::signal::shutdown_signal() => {
                 return Ok(ReestablishedWatch::Shutdown);
             }
-            result = config_store.load_and_watch(LoadAndWatchCommand) => {
+            result = load_and_watch(config_store, LoadAndWatchCommand) => {
                 match result {
                     Ok((jobs, watcher)) => return Ok(ReestablishedWatch::Ready((jobs, watcher))),
                     Err(error) => {
