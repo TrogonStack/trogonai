@@ -824,7 +824,16 @@ impl NatsSchedulePublisher {
         };
 
         let stream = self.stream().await?;
-        let mut config = stream.cached_info().config.clone();
+        let mut config = stream
+            .get_info()
+            .await
+            .map_err(|source| {
+                CronError::schedule_source(
+                    "failed to query schedule stream info for sampling source",
+                    source,
+                )
+            })?
+            .config;
         if config
             .subjects
             .iter()
