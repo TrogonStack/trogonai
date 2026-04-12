@@ -3,7 +3,7 @@ use trogon_nats::jetstream::JetStreamGetKeyValue;
 
 use crate::{error::CronError, kv::SNAPSHOT_BUCKET};
 
-pub(super) async fn run<J>(js: &J) -> Result<kv::Store, CronError>
+pub async fn run<J>(js: &J) -> Result<kv::Store, CronError>
 where
     J: JetStreamGetKeyValue<Store = kv::Store>,
 {

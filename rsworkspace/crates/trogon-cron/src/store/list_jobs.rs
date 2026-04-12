@@ -9,10 +9,7 @@ use super::{SNAPSHOT_STORE_CONFIG, snapshot_bucket};
 #[derive(Debug, Clone, Default)]
 pub struct ListJobsCommand;
 
-pub async fn run<J>(
-    js: &J,
-    _command: ListJobsCommand,
-) -> Result<Vec<VersionedJobSpec>, CronError>
+pub async fn run<J>(js: &J, _command: ListJobsCommand) -> Result<Vec<VersionedJobSpec>, CronError>
 where
     J: JetStreamGetKeyValue<Store = kv::Store>,
 {

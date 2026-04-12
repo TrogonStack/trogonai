@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
 use trogon_cron::{
-    CronController, DeleteJobCommand, DeliverySpec, GetJobCommand, JobEnabledState, JobId,
-    JobSpec, JobWriteCondition, ListJobsCommand, PutJobCommand, SamplingSource, SchedulePublisher,
+    CronController, DeleteJobCommand, DeliverySpec, GetJobCommand, JobEnabledState, JobId, JobSpec,
+    JobWriteCondition, ListJobsCommand, PutJobCommand, SamplingSource, SchedulePublisher,
     ScheduleSpec, SetJobStateCommand,
     mocks::{MockConfigStore, MockLeaderLock, MockSchedulePublisher},
 };

@@ -10,10 +10,7 @@ mod list;
 mod remove;
 mod set_state;
 
-pub async fn handle_job<J>(
-    js: J,
-    action: cli::JobAction,
-) -> Result<(), Box<dyn std::error::Error>>
+pub async fn handle_job<J>(js: J, action: cli::JobAction) -> Result<(), Box<dyn std::error::Error>>
 where
     J: JetStreamGetKeyValue<Store = kv::Store>
         + JetStreamGetStream<Stream = jetstream::stream::Stream>
@@ -23,9 +20,7 @@ where
         >,
 {
     match action {
-        cli::JobAction::List => list::run(&js, list::ListCommand)
-            .await
-            .map_err(Into::into),
+        cli::JobAction::List => list::run(&js, list::ListCommand).await.map_err(Into::into),
         cli::JobAction::Get { id } => get::run(&js, get::GetCommand::try_from(id)?)
             .await
             .map_err(Into::into),

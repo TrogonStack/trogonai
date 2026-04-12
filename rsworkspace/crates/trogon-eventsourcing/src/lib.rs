@@ -5,9 +5,10 @@ use uuid::Uuid;
 mod snapshots;
 
 pub use snapshots::{
-    SnapshotChange, SnapshotSchemaVersion, SnapshotStoreConfig, SnapshotStoreError, StreamSnapshot,
-    checkpoint_key, list_snapshots, load_snapshot, load_snapshot_map, maybe_advance_checkpoint,
-    persist_snapshot_change, read_checkpoint, snapshot_key, write_checkpoint,
+    SnapshotChange, SnapshotSchemaVersion, SnapshotSchemaVersionError, SnapshotStoreConfig,
+    SnapshotStoreError, StreamSnapshot, checkpoint_key, list_snapshots, load_snapshot,
+    load_snapshot_map, maybe_advance_checkpoint, persist_snapshot_change, read_checkpoint,
+    snapshot_key, write_checkpoint,
 };
 
 pub trait StreamEvent {

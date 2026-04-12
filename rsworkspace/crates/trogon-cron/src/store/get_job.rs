@@ -11,10 +11,7 @@ pub struct GetJobCommand {
     pub id: JobId,
 }
 
-pub async fn run<J>(
-    js: &J,
-    command: GetJobCommand,
-) -> Result<Option<VersionedJobSpec>, CronError>
+pub async fn run<J>(js: &J, command: GetJobCommand) -> Result<Option<VersionedJobSpec>, CronError>
 where
     J: JetStreamGetKeyValue<Store = kv::Store>,
 {

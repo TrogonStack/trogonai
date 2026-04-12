@@ -1,7 +1,9 @@
 use std::{fmt, io::Read};
 
 use async_nats::jetstream::{self, context, kv};
-use trogon_cron::{JobSpec, PutJobCommand, put_job};
+use trogon_cron::{
+    CronError, JobEvent, JobEventData, JobSpec, JobWriteCondition, append_events, validate_job_spec,
+};
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream, JetStreamPublishMessage};
 
 #[derive(Debug)]
@@ -13,7 +15,7 @@ pub struct AddCommand {
 pub enum CommandError {
     ReadStdin(std::io::Error),
     InvalidJobSpec(serde_json::Error),
-    PutJob(trogon_cron::CronError),
+    RegisterJob(CronError),
 }
 
 impl fmt::Display for CommandError {
@@ -21,7 +23,7 @@ impl fmt::Display for CommandError {
         match self {
             Self::ReadStdin(source) => write!(f, "failed to read stdin: {source}"),
             Self::InvalidJobSpec(source) => write!(f, "invalid job spec: {source}"),
-            Self::PutJob(source) => write!(f, "failed to register job: {source}"),
+            Self::RegisterJob(source) => write!(f, "failed to register job: {source}"),
         }
     }
 }
@@ -31,7 +33,7 @@ impl std::error::Error for CommandError {
         match self {
             Self::ReadStdin(source) => Some(source),
             Self::InvalidJobSpec(source) => Some(source),
-            Self::PutJob(source) => Some(source),
+            Self::RegisterJob(source) => Some(source),
         }
     }
 }
@@ -56,15 +58,15 @@ where
         >,
 {
     let id = command.spec.id.clone();
-    put_job(
+    validate_job_spec(&command.spec).map_err(CommandError::RegisterJob)?;
+    append_events(
         js,
-        PutJobCommand {
-            spec: command.spec,
-            write_condition: trogon_cron::JobWriteCondition::MustNotExist,
-        },
+        &id,
+        JobWriteCondition::MustNotExist,
+        JobEventData::new(JobEvent::job_registered(command.spec)),
     )
-        .await
-        .map_err(CommandError::PutJob)?;
+    .await
+    .map_err(CommandError::RegisterJob)?;
     println!("Job '{id}' registered.");
 
     Ok(())

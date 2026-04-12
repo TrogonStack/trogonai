@@ -43,10 +43,7 @@ where
     }
 }
 
-pub(super) async fn stream_subject_state<J>(
-    js: &J,
-    job_id: &str,
-) -> Result<StreamSubjectState, CronError>
+pub async fn stream_subject_state<J>(js: &J, job_id: &str) -> Result<StreamSubjectState, CronError>
 where
     J: JetStreamGetStream<Stream = jetstream::stream::Stream>,
 {
@@ -58,7 +55,7 @@ where
     resolve_event_subject_state(job_id, canonical_version, legacy_version)
 }
 
-pub(super) async fn run<J>(
+pub async fn run<J>(
     js: &J,
     job_id: &str,
     write_condition: JobWriteCondition,

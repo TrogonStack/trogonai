@@ -18,7 +18,7 @@ pub use config::{
     DeliverySpec, JobEnabledState, JobSpec, JobWriteCondition, SamplingSource, ScheduleSpec,
     VersionedJobSpec,
 };
-pub use domain::ResolvedJobSpec;
+pub use domain::{ResolvedJobSpec, validate_job_spec};
 pub use error::{CronError, JobSpecError};
 pub use events::{JobEvent, JobEventData, ProjectionChange, RecordedJobEvent};
 pub use job_id::{JobId, JobIdError};
@@ -26,7 +26,7 @@ pub use nats::NatsSchedulePublisher;
 pub use scheduler::CronController;
 pub use store::{
     DeleteJobCommand, GetJobCommand, JobSpecChange, ListJobsCommand, LoadAndWatchCommand,
-    PutJobCommand, SetJobStateCommand, connect_store, delete_job, get_job, list_jobs,
-    load_and_watch, put_job, set_job_state,
+    PutJobCommand, SNAPSHOT_STORE_CONFIG, SetJobStateCommand, append_events, connect_store,
+    delete_job, get_job, list_jobs, load_and_watch, open_snapshot_bucket, put_job, set_job_state,
 };
 pub use traits::{LeaderLock, SchedulePublisher};

@@ -2,9 +2,10 @@ use std::fmt;
 
 use async_nats::jetstream::{self, context, kv};
 use trogon_cron::{
-    GetJobCommand as StoreGetJobCommand, JobEnabledState, JobId, JobIdError, JobWriteCondition,
-    SetJobStateCommand as StoreSetJobStateCommand, get_job, set_job_state,
+    CronError, JobEnabledState, JobEvent, JobEventData, JobId, JobIdError, JobWriteCondition,
+    SNAPSHOT_STORE_CONFIG, VersionedJobSpec, append_events, open_snapshot_bucket,
 };
+use trogon_eventsourcing::load_snapshot;
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream, JetStreamPublishMessage};
 
 #[derive(Debug)]
@@ -16,16 +17,16 @@ pub struct SetStateCommand {
 #[derive(Debug)]
 pub enum CommandError {
     InvalidJobId(JobIdError),
-    GetJob(trogon_cron::CronError),
+    LoadJob(CronError),
     JobNotFound(JobId),
-    SetState(trogon_cron::CronError),
+    SetState(CronError),
 }
 
 impl fmt::Display for CommandError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidJobId(source) => write!(f, "{source}"),
-            Self::GetJob(source) => write!(f, "failed to load job: {source}"),
+            Self::LoadJob(source) => write!(f, "failed to load job: {source}"),
             Self::JobNotFound(id) => write!(f, "job '{id}' not found"),
             Self::SetState(source) => write!(f, "failed to update job state: {source}"),
         }
@@ -36,7 +37,7 @@ impl std::error::Error for CommandError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::InvalidJobId(source) => Some(source),
-            Self::GetJob(source) => Some(source),
+            Self::LoadJob(source) => Some(source),
             Self::JobNotFound(_) => None,
             Self::SetState(source) => Some(source),
         }
@@ -53,16 +54,17 @@ where
         >,
 {
     let version = current_job_version(js, &command).await?;
-    set_job_state(
+    append_events(
         js,
-        StoreSetJobStateCommand {
-            id: command.job_id.clone(),
-            state: command.state,
-            write_condition: JobWriteCondition::MustBeAtVersion(version),
-        },
+        command.job_id.as_str(),
+        JobWriteCondition::MustBeAtVersion(version),
+        JobEventData::new(JobEvent::job_state_changed(
+            command.job_id.to_string(),
+            command.state,
+        )),
     )
-        .await
-        .map_err(CommandError::SetState)?;
+    .await
+    .map_err(CommandError::SetState)?;
     println!("Job '{}' {}.", command.job_id, command.state.as_str());
 
     Ok(())
@@ -72,14 +74,13 @@ async fn current_job_version<J>(js: &J, command: &SetStateCommand) -> Result<u64
 where
     J: JetStreamGetKeyValue<Store = kv::Store>,
 {
-    get_job(
-        js,
-        StoreGetJobCommand {
-            id: command.job_id.clone(),
-        },
-    )
+    let bucket = open_snapshot_bucket(js)
         .await
-        .map_err(CommandError::GetJob)?
+        .map_err(CommandError::LoadJob)?;
+    load_snapshot::<VersionedJobSpec>(&bucket, SNAPSHOT_STORE_CONFIG, command.job_id.as_str())
+        .await
+        .map_err(CronError::from)
+        .map_err(CommandError::LoadJob)?
         .map(|job| job.version)
         .ok_or_else(|| CommandError::JobNotFound(command.job_id.clone()))
 }

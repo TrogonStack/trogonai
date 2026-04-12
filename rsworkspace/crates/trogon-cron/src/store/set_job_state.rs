@@ -3,8 +3,7 @@ use trogon_eventsourcing::load_snapshot;
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream, JetStreamPublishMessage};
 
 use crate::{
-    JobEnabledState, JobId, JobWriteCondition,
-    VersionedJobSpec,
+    JobEnabledState, JobId, JobWriteCondition, VersionedJobSpec,
     error::CronError,
     events::{JobEvent, JobEventData},
 };
