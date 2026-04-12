@@ -14,8 +14,9 @@ use crate::{
     domain::ResolvedJobSpec,
     error::CronError,
     kv::{LEADER_BUCKET, LEADER_KEY},
-    nats_impls::{NatsConfigStore, NatsSchedulePublisher},
-    traits::{ConfigStore, JobSpecChange, LeaderLock, SchedulePublisher},
+    nats::NatsSchedulePublisher,
+    store::{ConfigStore, JobSpecChange, LoadAndWatchCommand, connect_store},
+    traits::{LeaderLock, SchedulePublisher},
 };
 
 const WATCH_RETRY_INTERVAL: Duration = Duration::from_secs(1);
@@ -29,7 +30,11 @@ enum ReestablishedWatch {
     Shutdown,
 }
 
-pub struct CronController<C = NatsConfigStore, P = NatsSchedulePublisher, L = NatsKvLease> {
+pub struct CronController<
+    C = async_nats::jetstream::Context,
+    P = NatsSchedulePublisher,
+    L = NatsKvLease,
+> {
     config_store: C,
     schedule_publisher: P,
     leader_lock: L,
@@ -37,10 +42,10 @@ pub struct CronController<C = NatsConfigStore, P = NatsSchedulePublisher, L = Na
     leader_timing: LeaseTiming,
 }
 
-impl CronController<NatsConfigStore, NatsSchedulePublisher, NatsKvLease> {
+impl CronController<async_nats::jetstream::Context, NatsSchedulePublisher, NatsKvLease> {
     pub async fn from_nats(nats: async_nats::Client) -> Result<Self, CronError> {
         let js = async_nats::jetstream::new(nats.clone());
-        let config_store = NatsConfigStore::new(nats.clone()).await?;
+        let config_store = connect_store(nats.clone()).await?;
         let schedule_publisher = NatsSchedulePublisher::new(nats).await?;
         let leader_config = NatsKvLeaseConfig::new(
             LEADER_BUCKET,
@@ -89,7 +94,10 @@ where
     }
 
     pub async fn run(self) -> Result<(), CronError> {
-        let (initial_jobs, mut config_watcher) = self.config_store.load_and_watch().await?;
+        let (initial_jobs, mut config_watcher) = self
+            .config_store
+            .load_and_watch(LoadAndWatchCommand)
+            .await?;
         let mut desired_jobs = to_job_map(initial_jobs);
         let mut leader =
             LeaderElection::new(self.leader_lock, self.node_id.clone(), self.leader_timing);
@@ -304,7 +312,7 @@ async fn reestablish_config_watch<C: ConfigStore>(
             _ = acp_telemetry::signal::shutdown_signal() => {
                 return Ok(ReestablishedWatch::Shutdown);
             }
-            result = config_store.load_and_watch() => {
+            result = config_store.load_and_watch(LoadAndWatchCommand) => {
                 match result {
                     Ok((jobs, watcher)) => return Ok(ReestablishedWatch::Ready((jobs, watcher))),
                     Err(error) => {
@@ -335,7 +343,7 @@ mod tests {
     use crate::{
         config::{DeliverySpec, JobEnabledState, JobSpec, ScheduleSpec},
         mocks::{MockConfigStore, MockLeaderLock, MockSchedulePublisher},
-        traits::JobSpecChange,
+        store::JobSpecChange,
     };
     use trogon_nats::lease::{LeaderElection, LeaseRenewInterval, LeaseTiming, LeaseTtl};
     use trogon_std::time::{GetElapsed, GetNow};

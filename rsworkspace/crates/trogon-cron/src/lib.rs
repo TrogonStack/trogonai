@@ -4,9 +4,11 @@ pub mod config;
 mod domain;
 pub mod error;
 pub mod events;
+mod job_id;
 pub mod kv;
-pub mod nats_impls;
+pub mod nats;
 pub mod scheduler;
+pub mod store;
 pub mod traits;
 
 #[cfg(any(test, feature = "test-support"))]
@@ -19,6 +21,12 @@ pub use config::{
 pub use domain::ResolvedJobSpec;
 pub use error::{CronError, JobSpecError};
 pub use events::{JobEvent, JobEventData, ProjectionChange, RecordedJobEvent};
-pub use nats_impls::{NatsConfigStore, NatsSchedulePublisher};
+pub use job_id::{JobId, JobIdError};
+pub use nats::NatsSchedulePublisher;
 pub use scheduler::CronController;
-pub use traits::{ConfigStore, JobSpecChange, LeaderLock, SchedulePublisher};
+pub use store::connect_store;
+pub use store::{
+    ConfigStore, DeleteJobCommand, GetJobCommand, JobSpecChange, ListJobsCommand,
+    LoadAndWatchCommand, PutJobCommand, SetJobStateCommand,
+};
+pub use traits::{LeaderLock, SchedulePublisher};

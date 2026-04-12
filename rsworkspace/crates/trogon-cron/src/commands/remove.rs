@@ -1,8 +1,9 @@
 use std::fmt;
 
-use trogon_cron::{ConfigStore, JobWriteCondition, NatsConfigStore};
-
-use super::job_id::{JobId, JobIdError};
+use trogon_cron::{
+    ConfigStore, DeleteJobCommand, GetJobCommand as StoreGetJobCommand, JobId, JobIdError,
+    JobWriteCondition,
+};
 
 #[derive(Debug)]
 pub struct RemoveCommand {
@@ -39,13 +40,16 @@ impl std::error::Error for CommandError {
     }
 }
 
-pub async fn run(store: &NatsConfigStore, command: RemoveCommand) -> Result<(), CommandError> {
+pub async fn run<S>(store: &S, command: RemoveCommand) -> Result<(), CommandError>
+where
+    S: ConfigStore,
+{
     let version = current_job_version(store, &command).await?;
     store
-        .delete_job(
-            command.job_id.as_str(),
-            JobWriteCondition::MustBeAtVersion(version),
-        )
+        .delete_job(DeleteJobCommand {
+            id: command.job_id.clone(),
+            write_condition: JobWriteCondition::MustBeAtVersion(version),
+        })
         .await
         .map_err(CommandError::DeleteJob)?;
     println!("Job '{}' removed.", command.job_id);
@@ -53,12 +57,14 @@ pub async fn run(store: &NatsConfigStore, command: RemoveCommand) -> Result<(), 
     Ok(())
 }
 
-async fn current_job_version(
-    store: &NatsConfigStore,
-    command: &RemoveCommand,
-) -> Result<u64, CommandError> {
+async fn current_job_version<S>(store: &S, command: &RemoveCommand) -> Result<u64, CommandError>
+where
+    S: ConfigStore,
+{
     store
-        .get_job(command.job_id.as_str())
+        .get_job(StoreGetJobCommand {
+            id: command.job_id.clone(),
+        })
         .await
         .map_err(CommandError::GetJob)?
         .map(|job| job.version)

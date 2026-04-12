@@ -1,6 +1,6 @@
 use std::{fmt, io::Read};
 
-use trogon_cron::{ConfigStore, JobSpec, NatsConfigStore};
+use trogon_cron::{ConfigStore, JobSpec, PutJobCommand};
 
 #[derive(Debug)]
 pub struct AddCommand {
@@ -44,10 +44,16 @@ pub fn read_from_stdin() -> Result<AddCommand, CommandError> {
     Ok(AddCommand { spec })
 }
 
-pub async fn run(store: &NatsConfigStore, command: AddCommand) -> Result<(), CommandError> {
+pub async fn run<S>(store: &S, command: AddCommand) -> Result<(), CommandError>
+where
+    S: ConfigStore,
+{
     let id = command.spec.id.clone();
     store
-        .put_job(&command.spec, trogon_cron::JobWriteCondition::MustNotExist)
+        .put_job(PutJobCommand {
+            spec: command.spec,
+            write_condition: trogon_cron::JobWriteCondition::MustNotExist,
+        })
         .await
         .map_err(CommandError::PutJob)?;
     println!("Job '{id}' registered.");
