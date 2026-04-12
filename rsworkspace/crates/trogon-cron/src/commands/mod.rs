@@ -1,18 +1,20 @@
-use trogon_cron::{JobEnabledState, NatsConfigStore};
+use trogon_cron::{ConfigStore, JobEnabledState};
 
 use crate::cli;
 
 mod add;
 mod get;
-mod job_id;
 mod list;
 mod remove;
 mod set_state;
 
-pub async fn handle_job(
-    store: NatsConfigStore,
+pub async fn handle_job<S>(
+    store: S,
     action: cli::JobAction,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error>>
+where
+    S: ConfigStore,
+{
     match action {
         cli::JobAction::List => list::run(&store, list::ListCommand)
             .await
