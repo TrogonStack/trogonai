@@ -13,8 +13,6 @@ pub async fn run<
 >(
     publisher: trogon_nats::jetstream::ClaimCheckPublisher<P, S>,
     config: &crate::config::DiscordConfig,
-    bot_token: &str,
-    intents: twilight_model::gateway::Intents,
 ) {
     info!("mode: gateway");
 
@@ -24,7 +22,11 @@ pub async fn run<
         config.nats_ack_timeout.into(),
     );
 
-    let mut shard = Shard::new(ShardId::ONE, bot_token.to_owned(), intents);
+    let mut shard = Shard::new(
+        ShardId::ONE,
+        config.bot_token.as_str().to_owned(),
+        config.intents,
+    );
 
     info!("starting Discord gateway connection");
 

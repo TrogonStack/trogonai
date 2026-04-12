@@ -1,6 +1,5 @@
 use std::fmt;
 
-use ed25519_dalek::VerifyingKey;
 use trogon_nats::NatsToken;
 use trogon_nats::jetstream::StreamMaxAge;
 use trogon_std::{EmptySecret, NonZeroDuration, SecretString};
@@ -26,24 +25,13 @@ impl fmt::Debug for DiscordBotToken {
 use twilight_model::gateway::Intents;
 
 #[derive(Clone)]
-pub enum SourceMode {
-    Gateway {
-        bot_token: DiscordBotToken,
-        intents: Intents,
-    },
-    Webhook {
-        public_key: VerifyingKey,
-    },
-}
-
-#[derive(Clone)]
 pub struct DiscordConfig {
-    pub mode: SourceMode,
+    pub bot_token: DiscordBotToken,
+    pub intents: Intents,
     pub subject_prefix: NatsToken,
     pub stream_name: NatsToken,
     pub stream_max_age: StreamMaxAge,
     pub nats_ack_timeout: NonZeroDuration,
-    pub nats_request_timeout: NonZeroDuration,
 }
 
 const PRIVILEGED_INTENTS: Intents = Intents::from_bits_truncate(
