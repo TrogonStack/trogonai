@@ -228,10 +228,7 @@ impl MockConfigStore {
         Ok(self.jobs.lock().unwrap().values().cloned().collect())
     }
 
-    pub async fn load_and_watch(
-        &self,
-        _command: LoadAndWatchCommand,
-    ) -> LoadAndWatchResult {
+    pub async fn load_and_watch(&self, _command: LoadAndWatchCommand) -> LoadAndWatchResult {
         let jobs = self
             .jobs
             .lock()
@@ -240,7 +237,10 @@ impl MockConfigStore {
             .cloned()
             .map(|job| job.spec)
             .collect();
-        Ok((jobs, Box::pin(futures::stream::pending()) as ConfigWatchStream))
+        Ok((
+            jobs,
+            Box::pin(futures::stream::pending()) as ConfigWatchStream,
+        ))
     }
 }
 
