@@ -24,7 +24,8 @@ use async_nats::jetstream::kv;
 use bytes::Bytes;
 #[cfg(test)]
 use provision::{
-    KeyValueSettings, create_bucket_error, inspect_bucket_error, open_existing_bucket_error, validate_bucket_settings,
+    KeyValueSettings, create_bucket_error, inspect_bucket_error, open_existing_bucket_error,
+    validate_bucket_settings,
 };
 use renew::KvPublishTarget;
 #[cfg(test)]
