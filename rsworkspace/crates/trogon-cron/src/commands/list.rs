@@ -1,0 +1,53 @@
+use std::fmt;
+
+use trogon_cron::{ConfigStore, NatsConfigStore, ScheduleSpec};
+
+#[derive(Debug)]
+pub enum CommandError {
+    ListJobs(trogon_cron::CronError),
+}
+
+impl fmt::Display for CommandError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ListJobs(source) => write!(f, "failed to list jobs: {source}"),
+        }
+    }
+}
+
+impl std::error::Error for CommandError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::ListJobs(source) => Some(source),
+        }
+    }
+}
+
+pub async fn run(store: &NatsConfigStore) -> Result<(), CommandError> {
+    let jobs = store.list_jobs().await.map_err(CommandError::ListJobs)?;
+    if jobs.is_empty() {
+        println!("No jobs registered.");
+        return Ok(());
+    }
+    println!("{:<30} {:<10} SCHEDULE", "ID", "STATUS");
+    println!("{}", "-".repeat(72));
+    for job in jobs {
+        let schedule = match &job.spec.schedule {
+            ScheduleSpec::At { at } => format!("at {}", at.to_rfc3339()),
+            ScheduleSpec::Every { every_sec } => format!("@every {every_sec}s"),
+            ScheduleSpec::Cron { expr, timezone } => match timezone {
+                Some(timezone) => format!("{expr} [{timezone}]"),
+                None => expr.clone(),
+            },
+        };
+        println!(
+            "{:<30} {:<10} {} (v{})",
+            job.spec.id,
+            job.spec.state.as_str(),
+            schedule,
+            job.version
+        );
+    }
+
+    Ok(())
+}
