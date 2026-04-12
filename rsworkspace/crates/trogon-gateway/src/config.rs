@@ -29,17 +29,6 @@ pub enum ConfigValidationError {
         field: &'static str,
         violation: SubjectTokenViolation,
     },
-    MissingRequiredField {
-        source: &'static str,
-        field: &'static str,
-        required_when: &'static str,
-    },
-    InvalidFieldValue {
-        source: &'static str,
-        field: &'static str,
-        expected: &'static str,
-        actual: String,
-    },
 }
 
 impl ConfigValidationError {
@@ -51,28 +40,6 @@ impl ConfigValidationError {
             source,
             field,
             error: Box::new(error),
-        }
-    }
-
-    fn required(source: &'static str, field: &'static str, required_when: &'static str) -> Self {
-        Self::MissingRequiredField {
-            source,
-            field,
-            required_when,
-        }
-    }
-
-    fn invalid_value(
-        source: &'static str,
-        field: &'static str,
-        expected: &'static str,
-        actual: impl Into<String>,
-    ) -> Self {
-        Self::InvalidFieldValue {
-            source,
-            field,
-            expected,
-            actual: actual.into(),
         }
     }
 
@@ -113,17 +80,6 @@ impl fmt::Display for ConfigValidationError {
                 field,
                 violation,
             } => write!(f, "{source}: invalid {field}: {violation:?}"),
-            Self::MissingRequiredField {
-                source,
-                field,
-                required_when,
-            } => write!(f, "{source}: {field} is required when {required_when}"),
-            Self::InvalidFieldValue {
-                source,
-                field,
-                expected,
-                actual,
-            } => write!(f, "{source}: {field} must be {expected}, got '{actual}'"),
         }
     }
 }
@@ -132,9 +88,7 @@ impl std::error::Error for ConfigValidationError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::InvalidField { error, .. } => Some(error.as_ref()),
-            Self::InvalidSubjectToken { .. }
-            | Self::MissingRequiredField { .. }
-            | Self::InvalidFieldValue { .. } => None,
+            Self::InvalidSubjectToken { .. } => None,
         }
     }
 }
@@ -212,14 +166,10 @@ struct GithubConfig {
 
 #[derive(Config)]
 struct DiscordConfig {
-    #[config(env = "TROGON_SOURCE_DISCORD_MODE")]
-    mode: Option<String>,
     #[config(env = "TROGON_SOURCE_DISCORD_BOT_TOKEN")]
     bot_token: Option<String>,
     #[config(env = "TROGON_SOURCE_DISCORD_GATEWAY_INTENTS")]
     gateway_intents: Option<String>,
-    #[config(env = "TROGON_SOURCE_DISCORD_PUBLIC_KEY")]
-    public_key: Option<String>,
     #[config(env = "TROGON_SOURCE_DISCORD_SUBJECT_PREFIX", default = "discord")]
     subject_prefix: String,
     #[config(env = "TROGON_SOURCE_DISCORD_STREAM_NAME", default = "DISCORD")]
@@ -228,8 +178,6 @@ struct DiscordConfig {
     stream_max_age_secs: u64,
     #[config(env = "TROGON_SOURCE_DISCORD_NATS_ACK_TIMEOUT_SECS", default = 10)]
     nats_ack_timeout_secs: u64,
-    #[config(env = "TROGON_SOURCE_DISCORD_NATS_REQUEST_TIMEOUT_SECS", default = 2)]
-    nats_request_timeout_secs: u64,
 }
 
 #[derive(Config)]
@@ -467,9 +415,30 @@ fn resolve_discord(
     section: DiscordConfig,
     errors: &mut Vec<ConfigValidationError>,
 ) -> Option<trogon_source_discord::DiscordConfig> {
-    let mode_str = section.mode.as_deref().filter(|s| !s.is_empty())?;
+    let token_str = section.bot_token.as_deref()?;
+    let bot_token = match DiscordBotToken::new(token_str) {
+        Ok(s) => s,
+        Err(e) => {
+            errors.push(ConfigValidationError::invalid("discord", "bot_token", e));
+            return None;
+        }
+    };
 
-    let mode = resolve_discord_mode(&section, mode_str, errors)?;
+    let intents = if let Some(s) = section.gateway_intents.as_deref().filter(|s| !s.is_empty()) {
+        match trogon_source_discord::config::parse_gateway_intents(s) {
+            Ok(i) => i,
+            Err(e) => {
+                errors.push(ConfigValidationError::invalid(
+                    "discord",
+                    "gateway_intents",
+                    e,
+                ));
+                return None;
+            }
+        }
+    } else {
+        trogon_source_discord::config::default_intents()
+    };
 
     let subject_prefix = match NatsToken::new(section.subject_prefix) {
         Ok(t) => t,
@@ -507,18 +476,6 @@ fn resolve_discord(
         }
     };
 
-    let nats_request_timeout = match NonZeroDuration::from_secs(section.nats_request_timeout_secs) {
-        Ok(d) => d,
-        Err(err) => {
-            errors.push(ConfigValidationError::invalid(
-                "discord",
-                "nats_request_timeout_secs",
-                err,
-            ));
-            return None;
-        }
-    };
-
     let stream_max_age = match StreamMaxAge::from_secs(section.stream_max_age_secs) {
         Ok(age) => age,
         Err(err) => {
@@ -532,89 +489,13 @@ fn resolve_discord(
     };
 
     Some(trogon_source_discord::DiscordConfig {
-        mode,
+        bot_token,
+        intents,
         subject_prefix,
         stream_name,
         stream_max_age,
         nats_ack_timeout,
-        nats_request_timeout,
     })
-}
-
-fn resolve_discord_mode(
-    section: &DiscordConfig,
-    mode_str: &str,
-    errors: &mut Vec<ConfigValidationError>,
-) -> Option<trogon_source_discord::config::SourceMode> {
-    match mode_str.to_ascii_lowercase().as_str() {
-        "gateway" => {
-            let Some(token_str) = section.bot_token.as_deref() else {
-                errors.push(ConfigValidationError::required(
-                    "discord",
-                    "bot_token",
-                    "mode=gateway",
-                ));
-                return None;
-            };
-            let bot_token = match DiscordBotToken::new(token_str) {
-                Ok(s) => s,
-                Err(e) => {
-                    errors.push(ConfigValidationError::invalid("discord", "bot_token", e));
-                    return None;
-                }
-            };
-
-            let intents =
-                if let Some(s) = section.gateway_intents.as_deref().filter(|s| !s.is_empty()) {
-                    match trogon_source_discord::config::parse_gateway_intents(s) {
-                        Ok(i) => i,
-                        Err(e) => {
-                            errors.push(ConfigValidationError::invalid(
-                                "discord",
-                                "gateway_intents",
-                                e,
-                            ));
-                            return None;
-                        }
-                    }
-                } else {
-                    trogon_source_discord::config::default_intents()
-                };
-
-            Some(trogon_source_discord::config::SourceMode::Gateway { bot_token, intents })
-        }
-        "webhook" => {
-            let Some(public_key_hex) = section.public_key.as_deref().filter(|s| !s.is_empty())
-            else {
-                errors.push(ConfigValidationError::required(
-                    "discord",
-                    "public_key",
-                    "mode=webhook",
-                ));
-                return None;
-            };
-
-            let public_key =
-                match trogon_source_discord::signature::parse_public_key(public_key_hex) {
-                    Ok(pk) => pk,
-                    Err(e) => {
-                        errors.push(ConfigValidationError::invalid("discord", "public_key", e));
-                        return None;
-                    }
-                };
-
-            Some(trogon_source_discord::config::SourceMode::Webhook { public_key })
-        }
-        other => {
-            errors.push(ConfigValidationError::invalid_value(
-                "discord",
-                "mode",
-                "'gateway' or 'webhook'",
-                other,
-            ));
-            None
-        }
-    }
 }
 
 fn resolve_slack(
@@ -1017,9 +898,6 @@ mod tests {
     use std::fmt;
     use std::io::Write;
 
-    const VALID_ED25519_PUB_KEY: &str =
-        "236a4d1cb6b5d3b6e25664d96be99807095ea11930159bb832e53b87761648c3";
-
     fn write_toml(content: &str) -> tempfile::NamedTempFile {
         let mut f = tempfile::Builder::new()
             .suffix(".toml")
@@ -1048,18 +926,7 @@ webhook_secret = "{secret}"
         format!(
             r#"
 [sources.discord]
-mode = "gateway"
 bot_token = "{bot_token}"
-"#
-        )
-    }
-
-    fn discord_webhook_toml(public_key: &str) -> String {
-        format!(
-            r#"
-[sources.discord]
-mode = "webhook"
-public_key = "{public_key}"
 "#
         )
     }
@@ -1181,17 +1048,13 @@ token = "{token}"
         let f = write_toml(&discord_gateway_toml("Bot my-bot-token"));
         let cfg = load(Some(f.path())).expect("load failed");
         let discord = cfg.discord.as_ref().expect("discord should be Some");
-        assert!(matches!(
-            discord.mode,
-            trogon_source_discord::config::SourceMode::Gateway { .. }
-        ));
+        assert_eq!(discord.bot_token.as_str(), "Bot my-bot-token");
     }
 
     #[test]
     fn discord_gateway_with_intents() {
         let toml = r#"
 [sources.discord]
-mode = "gateway"
 bot_token = "Bot my-bot-token"
 gateway_intents = "guilds,guild_messages"
 "#;
@@ -1204,7 +1067,6 @@ gateway_intents = "guilds,guild_messages"
     fn discord_gateway_with_invalid_intents() {
         let toml = r#"
 [sources.discord]
-mode = "gateway"
 bot_token = "Bot my-bot-token"
 gateway_intents = "bogus_intent"
 "#;
@@ -1214,41 +1076,10 @@ gateway_intents = "bogus_intent"
     }
 
     #[test]
-    fn discord_webhook_resolves_with_valid_key() {
-        let f = write_toml(&discord_webhook_toml(VALID_ED25519_PUB_KEY));
-        let cfg = load(Some(f.path())).expect("load failed");
-        let discord = cfg.discord.as_ref().expect("discord should be Some");
-        assert!(matches!(
-            discord.mode,
-            trogon_source_discord::config::SourceMode::Webhook { .. }
-        ));
-    }
-
-    #[test]
-    fn discord_webhook_invalid_public_key() {
-        let f = write_toml(&discord_webhook_toml("not-valid-hex"));
-        let result = load(Some(f.path()));
-        assert!(matches!(result, Err(ConfigError::Validation(_))));
-    }
-
-    #[test]
-    fn discord_unknown_mode() {
+    fn discord_missing_bot_token_returns_none() {
         let toml = r#"
 [sources.discord]
-mode = "unknown"
-"#;
-        let f = write_toml(toml);
-        let result = load(Some(f.path()));
-        assert!(
-            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("must be 'gateway' or 'webhook'")))
-        );
-    }
-
-    #[test]
-    fn discord_mode_empty_string_returns_none() {
-        let toml = r#"
-[sources.discord]
-mode = ""
+gateway_intents = "guilds,guild_messages"
 "#;
         let f = write_toml(toml);
         let cfg = load(Some(f.path())).expect("load failed");
@@ -1259,40 +1090,12 @@ mode = ""
     fn discord_gateway_empty_bot_token() {
         let toml = r#"
 [sources.discord]
-mode = "gateway"
 bot_token = ""
 "#;
         let f = write_toml(toml);
         let result = load(Some(f.path()));
         assert!(
             matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("invalid bot_token")))
-        );
-    }
-
-    #[test]
-    fn discord_gateway_missing_bot_token() {
-        let toml = r#"
-[sources.discord]
-mode = "gateway"
-"#;
-        let f = write_toml(toml);
-        let result = load(Some(f.path()));
-        assert!(
-            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("bot_token is required")))
-        );
-    }
-
-    #[test]
-    fn discord_webhook_empty_public_key() {
-        let toml = r#"
-[sources.discord]
-mode = "webhook"
-public_key = ""
-"#;
-        let f = write_toml(toml);
-        let result = load(Some(f.path()));
-        assert!(
-            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("public_key is required")))
         );
     }
 
@@ -1502,7 +1305,6 @@ stream_max_age_secs = 0
     fn discord_zero_nats_ack_timeout_is_error() {
         let toml = r#"
 [sources.discord]
-mode = "gateway"
 bot_token = "Bot token"
 nats_ack_timeout_secs = 0
 "#;
@@ -1514,25 +1316,9 @@ nats_ack_timeout_secs = 0
     }
 
     #[test]
-    fn discord_zero_nats_request_timeout_is_error() {
-        let toml = r#"
-[sources.discord]
-mode = "gateway"
-bot_token = "Bot token"
-nats_request_timeout_secs = 0
-"#;
-        let f = write_toml(toml);
-        let result = load(Some(f.path()));
-        assert!(
-            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("nats_request_timeout_secs must not be zero")))
-        );
-    }
-
-    #[test]
     fn discord_zero_stream_max_age_is_error() {
         let toml = r#"
 [sources.discord]
-mode = "gateway"
 bot_token = "Bot token"
 stream_max_age_secs = 0
 "#;
@@ -1737,12 +1523,16 @@ token = "file-token"
     fn config_error_display_validation() {
         let err = ConfigError::Validation(vec![
             ConfigValidationError::invalid("github", "stream_max_age_secs", ZeroDuration),
-            ConfigValidationError::required("discord", "bot_token", "mode=gateway"),
+            ConfigValidationError::invalid_subject_token(
+                "discord",
+                "subject_prefix",
+                SubjectTokenViolation::InvalidCharacter('.'),
+            ),
         ]);
         let display = format!("{err}");
         assert!(display.contains("config validation errors:"));
         assert!(display.contains("github: stream_max_age_secs must not be zero"));
-        assert!(display.contains("discord: bot_token is required when mode=gateway"));
+        assert!(display.contains("discord: invalid subject_prefix: InvalidCharacter('.')"));
     }
 
     #[test]
@@ -1767,22 +1557,6 @@ token = "file-token"
         assert_eq!(
             err.to_string(),
             "incidentio: invalid subject_prefix: InvalidCharacter('.')"
-        );
-        assert!(err.source().is_none());
-    }
-
-    #[test]
-    fn config_validation_error_invalid_field_value_has_no_source() {
-        let err = ConfigValidationError::invalid_value(
-            "discord",
-            "mode",
-            "'gateway' or 'webhook'",
-            "unknown",
-        );
-
-        assert_eq!(
-            err.to_string(),
-            "discord: mode must be 'gateway' or 'webhook', got 'unknown'"
         );
         assert!(err.source().is_none());
     }
@@ -1891,7 +1665,6 @@ port = 9090
     fn discord_invalid_subject_prefix() {
         let toml = r#"
 [sources.discord]
-mode = "gateway"
 bot_token = "Bot token"
 subject_prefix = "has.dots"
 "#;
@@ -1906,7 +1679,6 @@ subject_prefix = "has.dots"
     fn discord_invalid_stream_name() {
         let toml = r#"
 [sources.discord]
-mode = "gateway"
 bot_token = "Bot token"
 stream_name = "has.dots"
 "#;

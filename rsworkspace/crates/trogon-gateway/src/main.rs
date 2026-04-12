@@ -83,30 +83,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     {
-        if let Some(ref cfg) = resolved.discord
-            && let trogon_source_discord::config::SourceMode::Gateway {
-                ref bot_token,
-                intents,
-            } = cfg.mode
-        {
+        if let Some(ref cfg) = resolved.discord {
             let p = publisher.clone();
             let discord_cfg = cfg.clone();
-            let token = bot_token.clone();
             join_set.spawn(async move {
-                trogon_source_discord::gateway_runner::run(
-                    p,
-                    &discord_cfg,
-                    token.as_str(),
-                    intents,
-                )
-                .await;
+                trogon_source_discord::gateway_runner::run(p, &discord_cfg).await;
                 ("discord-gateway", Ok(()))
             });
-            info!(source = "discord", "gateway mode spawned");
+            info!(source = "discord", "gateway runner spawned");
         }
     }
 
-    let app = http::mount_sources(resolved, publisher, nats);
+    let app = http::mount_sources(resolved, publisher);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     let listener = tokio::net::TcpListener::bind(addr).await?;
