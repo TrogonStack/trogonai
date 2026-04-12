@@ -5,6 +5,11 @@ use trogon_cron::{ConfigStore, NatsConfigStore};
 use super::job_id::{JobId, JobIdError};
 
 #[derive(Debug)]
+pub struct GetCommand {
+    pub job_id: JobId,
+}
+
+#[derive(Debug)]
 pub enum CommandError {
     GetJob(trogon_cron::CronError),
     SerializeJob(serde_json::Error),
@@ -34,11 +39,9 @@ impl std::error::Error for CommandError {
     }
 }
 
-pub async fn run(store: &NatsConfigStore, id: &str) -> Result<(), CommandError> {
-    let job_id = JobId::parse(id).map_err(CommandError::InvalidJobId)?;
-
+pub async fn run(store: &NatsConfigStore, command: GetCommand) -> Result<(), CommandError> {
     match store
-        .get_job(job_id.as_str())
+        .get_job(command.job_id.as_str())
         .await
         .map_err(CommandError::GetJob)?
     {
@@ -46,8 +49,18 @@ pub async fn run(store: &NatsConfigStore, id: &str) -> Result<(), CommandError> 
             "{}",
             serde_json::to_string_pretty(&job).map_err(CommandError::SerializeJob)?
         ),
-        None => return Err(CommandError::JobNotFound(job_id)),
+        None => return Err(CommandError::JobNotFound(command.job_id)),
     }
 
     Ok(())
+}
+
+impl TryFrom<String> for GetCommand {
+    type Error = CommandError;
+
+    fn try_from(id: String) -> Result<Self, Self::Error> {
+        Ok(Self {
+            job_id: JobId::parse(&id).map_err(CommandError::InvalidJobId)?,
+        })
+    }
 }
