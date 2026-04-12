@@ -1,0 +1,51 @@
+[package]
+name = "trogon-cron"
+version = "0.1.0"
+edition = "2024"
+autotests = false
+
+[lints]
+workspace = true
+
+[features]
+test-support = []
+
+[dependencies]
+acp-telemetry = { workspace = true }
+async-nats = { workspace = true, features = ["jetstream", "kv", "server_2_12"] }
+bytes = { workspace = true }
+chrono = { version = "0.4", features = ["serde"] }
+clap = { workspace = true, features = ["env"] }
+confique = { workspace = true }
+cron = "0.12"
+futures = { workspace = true }
+opentelemetry = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["time", "signal", "rt-multi-thread", "macros"] }
+tracing = { workspace = true }
+tracing-opentelemetry = "0.32.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+trogon-nats = { path = "../trogon-nats" }
+trogon-service-config = { workspace = true }
+trogon-std = { path = "../trogon-std", features = ["clap"] }
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+time = "0.3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+uuid = { version = "1", features = ["v4"] }
+
+[[bin]]
+name = "trogon-cron"
+path = "src/main.rs"
+
+[[test]]
+name = "cron_unit"
+path = "tests/cron_unit.rs"
+required-features = ["test-support"]
+
+[[test]]
+name = "integration"
+path = "tests/integration.rs"
