@@ -4,13 +4,37 @@ use async_nats::HeaderMap;
 use bytes::Bytes;
 use serde::Deserialize;
 use serde_json::value::RawValue;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 use trogon_nats::NatsToken;
-use trogon_nats::jetstream::{ClaimCheckPublisher, JetStreamPublisher, ObjectStorePut};
+use trogon_nats::jetstream::{
+    ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut,
+};
 
+use crate::config::DiscordConfig;
 use crate::constants::{NATS_HEADER_EVENT_NAME, NATS_HEADER_GUILD_ID};
 
 const GATEWAY_OP_DISPATCH: u8 = 0;
+
+pub async fn provision<C: JetStreamContext>(
+    js: &C,
+    config: &DiscordConfig,
+) -> Result<(), C::Error> {
+    js.get_or_create_stream(async_nats::jetstream::stream::Config {
+        name: config.stream_name.to_string(),
+        subjects: vec![format!("{}.>", config.subject_prefix)],
+        max_age: config.stream_max_age.into(),
+        ..Default::default()
+    })
+    .await?;
+
+    let max_age_secs = Duration::from(config.stream_max_age).as_secs();
+    info!(
+        stream = %config.stream_name,
+        max_age_secs,
+        "JetStream stream ready"
+    );
+    Ok(())
+}
 
 #[derive(Deserialize)]
 struct GatewayPayload<'a> {
@@ -190,8 +214,10 @@ fn extract_dedup_id(event_name: &str, data: &[u8]) -> Option<String> {
 mod tests {
     use super::*;
     use trogon_nats::jetstream::{
-        ClaimCheckPublisher, MaxPayload, MockJetStreamPublisher, MockObjectStore,
+        ClaimCheckPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher,
+        MockObjectStore, StreamMaxAge,
     };
+    use trogon_std::NonZeroDuration;
 
     fn wrap_publisher(
         publisher: MockJetStreamPublisher,
@@ -210,6 +236,41 @@ mod tests {
             NatsToken::new("discord").unwrap(),
             Duration::from_secs(5),
         )
+    }
+
+    fn discord_config() -> DiscordConfig {
+        DiscordConfig {
+            bot_token: crate::config::DiscordBotToken::new("Bot token").unwrap(),
+            intents: twilight_model::gateway::Intents::GUILDS,
+            subject_prefix: NatsToken::new("discord").unwrap(),
+            stream_name: NatsToken::new("DISCORD").unwrap(),
+            stream_max_age: StreamMaxAge::from_secs(3600).unwrap(),
+            nats_ack_timeout: NonZeroDuration::from_secs(5).unwrap(),
+        }
+    }
+
+    #[tokio::test]
+    async fn provision_creates_stream() {
+        let js = MockJetStreamContext::new();
+        let config = discord_config();
+
+        provision(&js, &config).await.unwrap();
+
+        let streams = js.created_streams();
+        assert_eq!(streams.len(), 1);
+        assert_eq!(streams[0].name, "DISCORD");
+        assert_eq!(streams[0].subjects, vec!["discord.>"]);
+        assert_eq!(streams[0].max_age, Duration::from_secs(3600));
+    }
+
+    #[tokio::test]
+    async fn provision_propagates_error() {
+        let js = MockJetStreamContext::new();
+        js.fail_next();
+        let config = discord_config();
+
+        let result = provision(&js, &config).await;
+        assert!(result.is_err());
     }
 
     fn bridge_with_mock() -> (
