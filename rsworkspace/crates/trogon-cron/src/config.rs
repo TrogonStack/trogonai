@@ -3,6 +3,8 @@ use std::collections::BTreeMap;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::error::CronError;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct JobSpec {
     pub id: String,
@@ -54,6 +56,20 @@ impl JobEnabledState {
 pub enum JobWriteCondition {
     MustNotExist,
     MustBeAtVersion(u64),
+}
+
+impl JobWriteCondition {
+    pub fn ensure(self, id: &str, current_version: Option<u64>) -> Result<(), CronError> {
+        match (self, current_version) {
+            (Self::MustNotExist, None) => Ok(()),
+            (Self::MustBeAtVersion(expected), Some(current)) if expected == current => Ok(()),
+            (expected, current_version) => Err(CronError::OptimisticConcurrencyConflict {
+                id: id.to_string(),
+                expected,
+                current_version,
+            }),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -209,5 +225,26 @@ mod tests {
         assert_eq!(JobEnabledState::Enabled.as_str(), "enabled");
         assert!(!JobEnabledState::Disabled.is_enabled());
         assert_eq!(JobEnabledState::Disabled.as_str(), "disabled");
+    }
+
+    #[test]
+    fn write_condition_ensures_expected_versions() {
+        JobWriteCondition::MustNotExist
+            .ensure("alpha", None)
+            .unwrap();
+        JobWriteCondition::MustBeAtVersion(3)
+            .ensure("alpha", Some(3))
+            .unwrap();
+
+        let error = JobWriteCondition::MustBeAtVersion(2)
+            .ensure("alpha", Some(4))
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            CronError::OptimisticConcurrencyConflict {
+                current_version: Some(4),
+                ..
+            }
+        ));
     }
 }
