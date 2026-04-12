@@ -210,6 +210,17 @@ impl From<serde_json::Error> for CronError {
     }
 }
 
+impl From<trogon_eventsourcing::SnapshotStoreError> for CronError {
+    fn from(value: trogon_eventsourcing::SnapshotStoreError) -> Self {
+        match value {
+            trogon_eventsourcing::SnapshotStoreError::Kv { context, source } => {
+                Self::Kv { context, source }
+            }
+            trogon_eventsourcing::SnapshotStoreError::Serde(source) => Self::Serde(source),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

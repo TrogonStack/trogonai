@@ -1,5 +1,4 @@
 use std::collections::{HashMap, HashSet};
-use std::pin::Pin;
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, AtomicU64, Ordering},
@@ -7,7 +6,6 @@ use std::sync::{
 
 use async_nats::jetstream::kv;
 use bytes::Bytes;
-use futures::Stream;
 use trogon_nats::lease::{ReleaseLease, RenewLease, TryAcquireLease};
 
 use crate::{
@@ -16,8 +14,8 @@ use crate::{
     domain::validate_job_spec,
     error::CronError,
     store::{
-        ConfigStore, DeleteJobCommand, GetJobCommand, JobSpecChange, ListJobsCommand,
-        LoadAndWatchCommand, PutJobCommand, SetJobStateCommand,
+        ConfigWatchStream, DeleteJobCommand, GetJobCommand, ListJobsCommand, LoadAndWatchCommand,
+        LoadAndWatchResult, PutJobCommand, SetJobStateCommand,
     },
     traits::SchedulePublisher,
 };
@@ -136,7 +134,7 @@ impl ReleaseLease for MockLeaderLock {
 #[derive(Clone, Default)]
 pub struct MockConfigStore {
     jobs: Arc<Mutex<HashMap<String, VersionedJobSpec>>>,
-    aggregate_versions: Arc<Mutex<HashMap<String, u64>>>,
+    stream_versions: Arc<Mutex<HashMap<String, u64>>>,
 }
 
 impl MockConfigStore {
@@ -145,7 +143,7 @@ impl MockConfigStore {
     }
 
     pub fn seed_job(&self, spec: JobSpec) {
-        self.aggregate_versions
+        self.stream_versions
             .lock()
             .unwrap()
             .insert(spec.id.clone(), 1);
@@ -154,20 +152,18 @@ impl MockConfigStore {
             .unwrap()
             .insert(spec.id.clone(), VersionedJobSpec { version: 1, spec });
     }
-}
 
-impl ConfigStore for MockConfigStore {
-    async fn put_job(&self, command: PutJobCommand) -> Result<(), CronError> {
+    pub async fn put_job(&self, command: PutJobCommand) -> Result<(), CronError> {
         validate_job_spec(&command.spec)?;
         let mut jobs = self.jobs.lock().unwrap();
-        let mut aggregate_versions = self.aggregate_versions.lock().unwrap();
-        let current_version = aggregate_versions.get(&command.spec.id).copied();
+        let mut stream_versions = self.stream_versions.lock().unwrap();
+        let current_version = stream_versions.get(&command.spec.id).copied();
         let write_state = JobWriteState::new(current_version, jobs.contains_key(&command.spec.id));
         command
             .write_condition
             .ensure(&command.spec.id, write_state)?;
         let next_version = current_version.unwrap_or(0) + 1;
-        aggregate_versions.insert(command.spec.id.clone(), next_version);
+        stream_versions.insert(command.spec.id.clone(), next_version);
         jobs.insert(
             command.spec.id.clone(),
             VersionedJobSpec {
@@ -178,7 +174,7 @@ impl ConfigStore for MockConfigStore {
         Ok(())
     }
 
-    async fn set_job_state(&self, command: SetJobStateCommand) -> Result<(), CronError> {
+    pub async fn set_job_state(&self, command: SetJobStateCommand) -> Result<(), CronError> {
         let mut jobs = self.jobs.lock().unwrap();
         let job = jobs
             .get_mut(command.id.as_str())
@@ -191,18 +187,21 @@ impl ConfigStore for MockConfigStore {
         )?;
         job.version += 1;
         job.spec.state = command.state;
-        self.aggregate_versions
+        self.stream_versions
             .lock()
             .unwrap()
             .insert(command.id.to_string(), job.version);
         Ok(())
     }
 
-    async fn get_job(&self, command: GetJobCommand) -> Result<Option<VersionedJobSpec>, CronError> {
+    pub async fn get_job(
+        &self,
+        command: GetJobCommand,
+    ) -> Result<Option<VersionedJobSpec>, CronError> {
         Ok(self.jobs.lock().unwrap().get(command.id.as_str()).cloned())
     }
 
-    async fn delete_job(&self, command: DeleteJobCommand) -> Result<(), CronError> {
+    pub async fn delete_job(&self, command: DeleteJobCommand) -> Result<(), CronError> {
         let mut jobs = self.jobs.lock().unwrap();
         let current_version = jobs
             .get(command.id.as_str())
@@ -214,7 +213,7 @@ impl ConfigStore for MockConfigStore {
             command.id.as_str(),
             JobWriteState::new(Some(current_version), true),
         )?;
-        self.aggregate_versions
+        self.stream_versions
             .lock()
             .unwrap()
             .insert(command.id.to_string(), current_version + 1);
@@ -222,23 +221,17 @@ impl ConfigStore for MockConfigStore {
         Ok(())
     }
 
-    async fn list_jobs(
+    pub async fn list_jobs(
         &self,
         _command: ListJobsCommand,
     ) -> Result<Vec<VersionedJobSpec>, CronError> {
         Ok(self.jobs.lock().unwrap().values().cloned().collect())
     }
 
-    async fn load_and_watch(
+    pub async fn load_and_watch(
         &self,
         _command: LoadAndWatchCommand,
-    ) -> Result<
-        (
-            Vec<JobSpec>,
-            Pin<Box<dyn Stream<Item = JobSpecChange> + Send + 'static>>,
-        ),
-        CronError,
-    > {
+    ) -> LoadAndWatchResult {
         let jobs = self
             .jobs
             .lock()
@@ -247,7 +240,7 @@ impl ConfigStore for MockConfigStore {
             .cloned()
             .map(|job| job.spec)
             .collect();
-        Ok((jobs, Box::pin(futures::stream::pending())))
+        Ok((jobs, Box::pin(futures::stream::pending()) as ConfigWatchStream))
     }
 }
 
