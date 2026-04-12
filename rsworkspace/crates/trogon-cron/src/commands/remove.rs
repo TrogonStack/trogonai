@@ -5,6 +5,11 @@ use trogon_cron::{ConfigStore, JobWriteCondition, NatsConfigStore};
 use super::job_id::{JobId, JobIdError};
 
 #[derive(Debug)]
+pub struct RemoveCommand {
+    pub job_id: JobId,
+}
+
+#[derive(Debug)]
 pub enum CommandError {
     InvalidJobId(JobIdError),
     GetJob(trogon_cron::CronError),
@@ -34,23 +39,38 @@ impl std::error::Error for CommandError {
     }
 }
 
-pub async fn run(store: &NatsConfigStore, id: &str) -> Result<(), CommandError> {
-    let job_id = JobId::parse(id).map_err(CommandError::InvalidJobId)?;
-    let version = current_job_version(store, &job_id).await?;
+pub async fn run(store: &NatsConfigStore, command: RemoveCommand) -> Result<(), CommandError> {
+    let version = current_job_version(store, &command).await?;
     store
-        .delete_job(job_id.as_str(), JobWriteCondition::MustBeAtVersion(version))
+        .delete_job(
+            command.job_id.as_str(),
+            JobWriteCondition::MustBeAtVersion(version),
+        )
         .await
         .map_err(CommandError::DeleteJob)?;
-    println!("Job '{job_id}' removed.");
+    println!("Job '{}' removed.", command.job_id);
 
     Ok(())
 }
 
-async fn current_job_version(store: &NatsConfigStore, id: &JobId) -> Result<u64, CommandError> {
+async fn current_job_version(
+    store: &NatsConfigStore,
+    command: &RemoveCommand,
+) -> Result<u64, CommandError> {
     store
-        .get_job(id.as_str())
+        .get_job(command.job_id.as_str())
         .await
         .map_err(CommandError::GetJob)?
         .map(|job| job.version)
-        .ok_or_else(|| CommandError::JobNotFound(id.clone()))
+        .ok_or_else(|| CommandError::JobNotFound(command.job_id.clone()))
+}
+
+impl TryFrom<String> for RemoveCommand {
+    type Error = CommandError;
+
+    fn try_from(id: String) -> Result<Self, Self::Error> {
+        Ok(Self {
+            job_id: JobId::parse(&id).map_err(CommandError::InvalidJobId)?,
+        })
+    }
 }
