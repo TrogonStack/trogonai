@@ -1,10 +1,15 @@
 use std::collections::BTreeMap;
 
 use trogon_cron::{
-    ConfigStore, CronController, DeliverySpec, JobEnabledState, JobSpec, JobWriteCondition,
-    SamplingSource, SchedulePublisher, ScheduleSpec,
+    ConfigStore, CronController, DeleteJobCommand, DeliverySpec, GetJobCommand, JobEnabledState,
+    JobId, JobSpec, JobWriteCondition, ListJobsCommand, PutJobCommand, SamplingSource,
+    SchedulePublisher, ScheduleSpec, SetJobStateCommand,
     mocks::{MockConfigStore, MockLeaderLock, MockSchedulePublisher},
 };
+
+fn job_id(id: &str) -> JobId {
+    JobId::parse(id).unwrap()
+}
 
 fn base_job(id: &str) -> JobSpec {
     JobSpec {
@@ -28,12 +33,20 @@ async fn client_register_then_get() {
 
     let job = base_job("backup");
     store
-        .put_job(&job, JobWriteCondition::MustNotExist)
+        .put_job(PutJobCommand {
+            spec: job,
+            write_condition: JobWriteCondition::MustNotExist,
+        })
         .await
         .unwrap();
 
-    let got = store.get_job("backup").await.unwrap();
-    assert_eq!(got.map(|job| job.spec), Some(job));
+    let got = store
+        .get_job(GetJobCommand {
+            id: job_id("backup"),
+        })
+        .await
+        .unwrap();
+    assert_eq!(got.map(|job| job.spec), Some(base_job("backup")));
 }
 
 #[tokio::test]
@@ -41,20 +54,36 @@ async fn client_set_enabled_toggles_job() {
     let store = MockConfigStore::new();
 
     store
-        .put_job(&base_job("toggle"), JobWriteCondition::MustNotExist)
+        .put_job(PutJobCommand {
+            spec: base_job("toggle"),
+            write_condition: JobWriteCondition::MustNotExist,
+        })
         .await
         .unwrap();
-    let version = store.get_job("toggle").await.unwrap().unwrap().version;
+    let version = store
+        .get_job(GetJobCommand {
+            id: job_id("toggle"),
+        })
+        .await
+        .unwrap()
+        .unwrap()
+        .version;
     store
-        .set_job_state(
-            "toggle",
-            JobEnabledState::Disabled,
-            JobWriteCondition::MustBeAtVersion(version),
-        )
+        .set_job_state(SetJobStateCommand {
+            id: job_id("toggle"),
+            state: JobEnabledState::Disabled,
+            write_condition: JobWriteCondition::MustBeAtVersion(version),
+        })
         .await
         .unwrap();
 
-    let got = store.get_job("toggle").await.unwrap().unwrap();
+    let got = store
+        .get_job(GetJobCommand {
+            id: job_id("toggle"),
+        })
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(got.spec.state, JobEnabledState::Disabled);
 }
 
@@ -63,25 +92,45 @@ async fn client_remove_and_list_jobs_use_store_paths() {
     let store = MockConfigStore::new();
 
     store
-        .put_job(&base_job("alpha"), JobWriteCondition::MustNotExist)
+        .put_job(PutJobCommand {
+            spec: base_job("alpha"),
+            write_condition: JobWriteCondition::MustNotExist,
+        })
         .await
         .unwrap();
     store
-        .put_job(&base_job("beta"), JobWriteCondition::MustNotExist)
+        .put_job(PutJobCommand {
+            spec: base_job("beta"),
+            write_condition: JobWriteCondition::MustNotExist,
+        })
         .await
         .unwrap();
 
-    let listed = store.list_jobs().await.unwrap();
+    let listed = store.list_jobs(ListJobsCommand).await.unwrap();
     assert_eq!(listed.len(), 2);
 
-    let beta_version = store.get_job("beta").await.unwrap().unwrap().version;
+    let beta_version = store
+        .get_job(GetJobCommand { id: job_id("beta") })
+        .await
+        .unwrap()
+        .unwrap()
+        .version;
     store
-        .delete_job("beta", JobWriteCondition::MustBeAtVersion(beta_version))
+        .delete_job(DeleteJobCommand {
+            id: job_id("beta"),
+            write_condition: JobWriteCondition::MustBeAtVersion(beta_version),
+        })
         .await
         .unwrap();
 
-    assert!(store.get_job("beta").await.unwrap().is_none());
-    assert_eq!(store.list_jobs().await.unwrap().len(), 1);
+    assert!(
+        store
+            .get_job(GetJobCommand { id: job_id("beta") })
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(store.list_jobs(ListJobsCommand).await.unwrap().len(), 1);
 }
 
 #[tokio::test]
@@ -96,7 +145,10 @@ async fn client_rejects_invalid_route() {
     };
 
     let error = store
-        .put_job(&job, JobWriteCondition::MustNotExist)
+        .put_job(PutJobCommand {
+            spec: job,
+            write_condition: JobWriteCondition::MustNotExist,
+        })
         .await
         .unwrap_err();
     assert!(error.to_string().contains("route"));
@@ -116,7 +168,10 @@ async fn client_rejects_invalid_source_subject() {
     };
 
     let error = store
-        .put_job(&job, JobWriteCondition::MustNotExist)
+        .put_job(PutJobCommand {
+            spec: job,
+            write_condition: JobWriteCondition::MustNotExist,
+        })
         .await
         .unwrap_err();
     assert!(error.to_string().contains("sampling source"));
@@ -126,16 +181,19 @@ async fn client_rejects_invalid_source_subject() {
 async fn client_rejects_stale_version() {
     let store = MockConfigStore::new();
     store
-        .put_job(&base_job("stale"), JobWriteCondition::MustNotExist)
+        .put_job(PutJobCommand {
+            spec: base_job("stale"),
+            write_condition: JobWriteCondition::MustNotExist,
+        })
         .await
         .unwrap();
 
     let error = store
-        .set_job_state(
-            "stale",
-            JobEnabledState::Disabled,
-            JobWriteCondition::MustBeAtVersion(99),
-        )
+        .set_job_state(SetJobStateCommand {
+            id: job_id("stale"),
+            state: JobEnabledState::Disabled,
+            write_condition: JobWriteCondition::MustBeAtVersion(99),
+        })
         .await
         .unwrap_err();
 

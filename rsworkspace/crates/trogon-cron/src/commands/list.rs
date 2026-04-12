@@ -1,6 +1,6 @@
 use std::fmt;
 
-use trogon_cron::{ConfigStore, NatsConfigStore, ScheduleSpec};
+use trogon_cron::{ConfigStore, ListJobsCommand, ScheduleSpec};
 
 #[derive(Debug, Default)]
 pub struct ListCommand;
@@ -26,8 +26,14 @@ impl std::error::Error for CommandError {
     }
 }
 
-pub async fn run(store: &NatsConfigStore, _command: ListCommand) -> Result<(), CommandError> {
-    let jobs = store.list_jobs().await.map_err(CommandError::ListJobs)?;
+pub async fn run<S>(store: &S, _command: ListCommand) -> Result<(), CommandError>
+where
+    S: ConfigStore,
+{
+    let jobs = store
+        .list_jobs(ListJobsCommand)
+        .await
+        .map_err(CommandError::ListJobs)?;
     if jobs.is_empty() {
         println!("No jobs registered.");
         return Ok(());

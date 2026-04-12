@@ -11,7 +11,7 @@ use std::time::Duration;
 #[cfg(not(coverage))]
 use tracing::{error, info};
 #[cfg(not(coverage))]
-use trogon_cron::{CronController, NatsConfigStore};
+use trogon_cron::{CronController, connect_store};
 #[cfg(not(coverage))]
 use trogon_nats::connect;
 #[cfg(not(coverage))]
@@ -72,8 +72,8 @@ async fn run(cli: cli::Cli) -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(not(coverage))]
 async fn store_from_nats(
     nats: async_nats::Client,
-) -> Result<NatsConfigStore, Box<dyn std::error::Error>> {
-    Ok(NatsConfigStore::new(nats).await?)
+) -> Result<async_nats::jetstream::Context, Box<dyn std::error::Error>> {
+    Ok(connect_store(nats).await?)
 }
 
 #[cfg(not(coverage))]

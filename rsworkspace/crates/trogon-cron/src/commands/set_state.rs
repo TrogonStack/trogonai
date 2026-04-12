@@ -1,8 +1,9 @@
 use std::fmt;
 
-use trogon_cron::{ConfigStore, JobEnabledState, JobWriteCondition, NatsConfigStore};
-
-use super::job_id::{JobId, JobIdError};
+use trogon_cron::{
+    ConfigStore, GetJobCommand as StoreGetJobCommand, JobEnabledState, JobId, JobIdError,
+    JobWriteCondition, SetJobStateCommand as StoreSetJobStateCommand,
+};
 
 #[derive(Debug)]
 pub struct SetStateCommand {
@@ -40,14 +41,17 @@ impl std::error::Error for CommandError {
     }
 }
 
-pub async fn run(store: &NatsConfigStore, command: SetStateCommand) -> Result<(), CommandError> {
+pub async fn run<S>(store: &S, command: SetStateCommand) -> Result<(), CommandError>
+where
+    S: ConfigStore,
+{
     let version = current_job_version(store, &command).await?;
     store
-        .set_job_state(
-            command.job_id.as_str(),
-            command.state,
-            JobWriteCondition::MustBeAtVersion(version),
-        )
+        .set_job_state(StoreSetJobStateCommand {
+            id: command.job_id.clone(),
+            state: command.state,
+            write_condition: JobWriteCondition::MustBeAtVersion(version),
+        })
         .await
         .map_err(CommandError::SetState)?;
     println!("Job '{}' {}.", command.job_id, command.state.as_str());
@@ -55,12 +59,14 @@ pub async fn run(store: &NatsConfigStore, command: SetStateCommand) -> Result<()
     Ok(())
 }
 
-async fn current_job_version(
-    store: &NatsConfigStore,
-    command: &SetStateCommand,
-) -> Result<u64, CommandError> {
+async fn current_job_version<S>(store: &S, command: &SetStateCommand) -> Result<u64, CommandError>
+where
+    S: ConfigStore,
+{
     store
-        .get_job(command.job_id.as_str())
+        .get_job(StoreGetJobCommand {
+            id: command.job_id.clone(),
+        })
         .await
         .map_err(CommandError::GetJob)?
         .map(|job| job.version)

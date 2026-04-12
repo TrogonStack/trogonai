@@ -11,11 +11,15 @@ use futures::Stream;
 use trogon_nats::lease::{ReleaseLease, RenewLease, TryAcquireLease};
 
 use crate::{
-    config::{JobEnabledState, JobSpec, JobWriteCondition, JobWriteState, VersionedJobSpec},
+    config::{JobSpec, JobWriteState, VersionedJobSpec},
     domain::ResolvedJobSpec,
     domain::validate_job_spec,
     error::CronError,
-    traits::{ConfigStore, JobSpecChange, SchedulePublisher},
+    store::{
+        ConfigStore, DeleteJobCommand, GetJobCommand, JobSpecChange, ListJobsCommand,
+        LoadAndWatchCommand, PutJobCommand, SetJobStateCommand,
+    },
+    traits::SchedulePublisher,
 };
 
 #[derive(Clone, Default)]
@@ -153,78 +157,81 @@ impl MockConfigStore {
 }
 
 impl ConfigStore for MockConfigStore {
-    async fn put_job(
-        &self,
-        config: &JobSpec,
-        write_condition: JobWriteCondition,
-    ) -> Result<(), CronError> {
-        validate_job_spec(config)?;
+    async fn put_job(&self, command: PutJobCommand) -> Result<(), CronError> {
+        validate_job_spec(&command.spec)?;
         let mut jobs = self.jobs.lock().unwrap();
         let mut aggregate_versions = self.aggregate_versions.lock().unwrap();
-        let current_version = aggregate_versions.get(&config.id).copied();
-        let write_state = JobWriteState::new(current_version, jobs.contains_key(&config.id));
-        write_condition.ensure(&config.id, write_state)?;
+        let current_version = aggregate_versions.get(&command.spec.id).copied();
+        let write_state = JobWriteState::new(current_version, jobs.contains_key(&command.spec.id));
+        command
+            .write_condition
+            .ensure(&command.spec.id, write_state)?;
         let next_version = current_version.unwrap_or(0) + 1;
-        aggregate_versions.insert(config.id.clone(), next_version);
+        aggregate_versions.insert(command.spec.id.clone(), next_version);
         jobs.insert(
-            config.id.clone(),
+            command.spec.id.clone(),
             VersionedJobSpec {
                 version: next_version,
-                spec: config.clone(),
+                spec: command.spec,
             },
         );
         Ok(())
     }
 
-    async fn set_job_state(
-        &self,
-        id: &str,
-        state: JobEnabledState,
-        write_condition: JobWriteCondition,
-    ) -> Result<(), CronError> {
+    async fn set_job_state(&self, command: SetJobStateCommand) -> Result<(), CronError> {
         let mut jobs = self.jobs.lock().unwrap();
         let job = jobs
-            .get_mut(id)
-            .ok_or_else(|| CronError::JobNotFound { id: id.to_string() })?;
-        write_condition.ensure(id, JobWriteState::new(Some(job.version), true))?;
+            .get_mut(command.id.as_str())
+            .ok_or_else(|| CronError::JobNotFound {
+                id: command.id.to_string(),
+            })?;
+        command.write_condition.ensure(
+            command.id.as_str(),
+            JobWriteState::new(Some(job.version), true),
+        )?;
         job.version += 1;
-        job.spec.state = state;
+        job.spec.state = command.state;
         self.aggregate_versions
             .lock()
             .unwrap()
-            .insert(id.to_string(), job.version);
+            .insert(command.id.to_string(), job.version);
         Ok(())
     }
 
-    async fn get_job(&self, id: &str) -> Result<Option<VersionedJobSpec>, CronError> {
-        Ok(self.jobs.lock().unwrap().get(id).cloned())
+    async fn get_job(&self, command: GetJobCommand) -> Result<Option<VersionedJobSpec>, CronError> {
+        Ok(self.jobs.lock().unwrap().get(command.id.as_str()).cloned())
     }
 
-    async fn delete_job(
-        &self,
-        id: &str,
-        write_condition: JobWriteCondition,
-    ) -> Result<(), CronError> {
+    async fn delete_job(&self, command: DeleteJobCommand) -> Result<(), CronError> {
         let mut jobs = self.jobs.lock().unwrap();
         let current_version = jobs
-            .get(id)
-            .ok_or_else(|| CronError::JobNotFound { id: id.to_string() })?
+            .get(command.id.as_str())
+            .ok_or_else(|| CronError::JobNotFound {
+                id: command.id.to_string(),
+            })?
             .version;
-        write_condition.ensure(id, JobWriteState::new(Some(current_version), true))?;
+        command.write_condition.ensure(
+            command.id.as_str(),
+            JobWriteState::new(Some(current_version), true),
+        )?;
         self.aggregate_versions
             .lock()
             .unwrap()
-            .insert(id.to_string(), current_version + 1);
-        jobs.remove(id);
+            .insert(command.id.to_string(), current_version + 1);
+        jobs.remove(command.id.as_str());
         Ok(())
     }
 
-    async fn list_jobs(&self) -> Result<Vec<VersionedJobSpec>, CronError> {
+    async fn list_jobs(
+        &self,
+        _command: ListJobsCommand,
+    ) -> Result<Vec<VersionedJobSpec>, CronError> {
         Ok(self.jobs.lock().unwrap().values().cloned().collect())
     }
 
     async fn load_and_watch(
         &self,
+        _command: LoadAndWatchCommand,
     ) -> Result<
         (
             Vec<JobSpec>,
@@ -249,8 +256,18 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
-    use crate::config::{DeliverySpec, SamplingSource, ScheduleSpec};
+    use crate::config::{
+        DeliverySpec, JobEnabledState, JobWriteCondition, SamplingSource, ScheduleSpec,
+    };
+    use crate::store::{
+        DeleteJobCommand, GetJobCommand, ListJobsCommand, LoadAndWatchCommand, PutJobCommand,
+        SetJobStateCommand,
+    };
     use futures::StreamExt;
+
+    fn job_id(id: &str) -> crate::JobId {
+        crate::JobId::parse(id).unwrap()
+    }
 
     fn base_job(id: &str) -> JobSpec {
         JobSpec {
@@ -318,33 +335,56 @@ mod tests {
         let store = MockConfigStore::new();
         store.seed_job(base_job("seeded"));
 
-        let seeded = store.get_job("seeded").await.unwrap().unwrap();
+        let seeded = store
+            .get_job(GetJobCommand {
+                id: job_id("seeded"),
+            })
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(seeded.version, 1);
 
         store
-            .put_job(&base_job("alpha"), JobWriteCondition::MustNotExist)
+            .put_job(PutJobCommand {
+                spec: base_job("alpha"),
+                write_condition: JobWriteCondition::MustNotExist,
+            })
             .await
             .unwrap();
-        let alpha = store.get_job("alpha").await.unwrap().unwrap();
+        let alpha = store
+            .get_job(GetJobCommand {
+                id: job_id("alpha"),
+            })
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(alpha.version, 1);
 
         store
-            .set_job_state(
-                "alpha",
-                JobEnabledState::Disabled,
-                JobWriteCondition::MustBeAtVersion(alpha.version),
-            )
+            .set_job_state(SetJobStateCommand {
+                id: job_id("alpha"),
+                state: JobEnabledState::Disabled,
+                write_condition: JobWriteCondition::MustBeAtVersion(alpha.version),
+            })
             .await
             .unwrap();
         assert_eq!(
-            store.get_job("alpha").await.unwrap().unwrap().spec.state,
+            store
+                .get_job(GetJobCommand {
+                    id: job_id("alpha"),
+                })
+                .await
+                .unwrap()
+                .unwrap()
+                .spec
+                .state,
             JobEnabledState::Disabled
         );
 
-        let listed = store.list_jobs().await.unwrap();
+        let listed = store.list_jobs(ListJobsCommand).await.unwrap();
         assert_eq!(listed.len(), 2);
 
-        let (watch_jobs, mut watcher) = store.load_and_watch().await.unwrap();
+        let (watch_jobs, mut watcher) = store.load_and_watch(LoadAndWatchCommand).await.unwrap();
         assert_eq!(watch_jobs.len(), 2);
         assert!(
             tokio::time::timeout(std::time::Duration::from_millis(5), watcher.next())
@@ -352,18 +392,44 @@ mod tests {
                 .is_err()
         );
 
-        let alpha = store.get_job("alpha").await.unwrap().unwrap();
+        let alpha = store
+            .get_job(GetJobCommand {
+                id: job_id("alpha"),
+            })
+            .await
+            .unwrap()
+            .unwrap();
         store
-            .delete_job("alpha", JobWriteCondition::MustBeAtVersion(alpha.version))
+            .delete_job(DeleteJobCommand {
+                id: job_id("alpha"),
+                write_condition: JobWriteCondition::MustBeAtVersion(alpha.version),
+            })
             .await
             .unwrap();
-        assert!(store.get_job("alpha").await.unwrap().is_none());
+        assert!(
+            store
+                .get_job(GetJobCommand {
+                    id: job_id("alpha"),
+                })
+                .await
+                .unwrap()
+                .is_none()
+        );
 
         store
-            .put_job(&base_job("alpha"), JobWriteCondition::MustNotExist)
+            .put_job(PutJobCommand {
+                spec: base_job("alpha"),
+                write_condition: JobWriteCondition::MustNotExist,
+            })
             .await
             .unwrap();
-        let re_registered = store.get_job("alpha").await.unwrap().unwrap();
+        let re_registered = store
+            .get_job(GetJobCommand {
+                id: job_id("alpha"),
+            })
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(re_registered.version, alpha.version + 2);
     }
 
@@ -381,21 +447,27 @@ mod tests {
         };
 
         let invalid_error = store
-            .put_job(&invalid, JobWriteCondition::MustNotExist)
+            .put_job(PutJobCommand {
+                spec: invalid,
+                write_condition: JobWriteCondition::MustNotExist,
+            })
             .await
             .unwrap_err();
         assert!(invalid_error.to_string().contains("sampling source"));
 
         store
-            .put_job(&base_job("alpha"), JobWriteCondition::MustNotExist)
+            .put_job(PutJobCommand {
+                spec: base_job("alpha"),
+                write_condition: JobWriteCondition::MustNotExist,
+            })
             .await
             .unwrap();
         let stale_error = store
-            .set_job_state(
-                "alpha",
-                JobEnabledState::Disabled,
-                JobWriteCondition::MustBeAtVersion(99),
-            )
+            .set_job_state(SetJobStateCommand {
+                id: job_id("alpha"),
+                state: JobEnabledState::Disabled,
+                write_condition: JobWriteCondition::MustBeAtVersion(99),
+            })
             .await
             .unwrap_err();
         assert!(matches!(
@@ -404,11 +476,11 @@ mod tests {
         ));
 
         let missing_error = store
-            .set_job_state(
-                "missing",
-                JobEnabledState::Disabled,
-                JobWriteCondition::MustNotExist,
-            )
+            .set_job_state(SetJobStateCommand {
+                id: job_id("missing"),
+                state: JobEnabledState::Disabled,
+                write_condition: JobWriteCondition::MustNotExist,
+            })
             .await
             .unwrap_err();
         assert!(matches!(missing_error, CronError::JobNotFound { .. }));

@@ -1,489 +1,64 @@
 use std::collections::{BTreeMap, HashSet};
-use std::pin::Pin;
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use async_nats::jetstream::{
-    self,
-    consumer::{AckPolicy, DeliverPolicy, ReplayPolicy, pull},
-    context::PublishErrorKind,
-    context::traits::Publisher as _,
-    kv,
-    message::PublishMessage,
-};
-use chrono::{DateTime, Utc};
-use futures::{Stream, StreamExt, TryStreamExt};
-use trogon_nats::NatsToken;
-use uuid::Uuid;
-
 use crate::{
-    config::{JobEnabledState, JobSpec, JobWriteCondition, JobWriteState, VersionedJobSpec},
-    domain::{ResolvedJobSpec, validate_job_spec},
-    error::{CronError, JobSpecError},
+    config::{JobWriteState, VersionedJobSpec},
+    domain::ResolvedJobSpec,
+    error::CronError,
     events::{
         JobEvent, JobEventData, ProjectionChange, RecordedJobEvent, apply_event_to_versioned_state,
     },
     kv::{
-        CONFIG_BUCKET, EVENTS_STREAM, EVENTS_SUBJECT_PATTERN, EVENTS_SUBJECT_PREFIX,
-        JOBS_KEY_PREFIX, LEGACY_EVENTS_SUBJECT_PATTERN, LEGACY_EVENTS_SUBJECT_PREFIX,
-        SCHEDULES_STREAM, SNAPSHOT_BUCKET, SNAPSHOT_KEY_PREFIX, SNAPSHOT_LAST_EVENT_SEQUENCE_KEY,
-        get_or_create_config_bucket, get_or_create_events_stream, get_or_create_schedule_stream,
-        get_or_create_snapshot_bucket,
+        EVENTS_STREAM, EVENTS_SUBJECT_PATTERN, EVENTS_SUBJECT_PREFIX, JOBS_KEY_PREFIX,
+        LEGACY_EVENTS_SUBJECT_PATTERN, LEGACY_EVENTS_SUBJECT_PREFIX, SCHEDULES_STREAM,
+        SNAPSHOT_KEY_PREFIX, SNAPSHOT_LAST_EVENT_SEQUENCE_KEY, get_or_create_schedule_stream,
     },
-    traits::{ConfigStore, JobSpecChange, SchedulePublisher},
+    store::JobSpecChange,
+    traits::SchedulePublisher,
 };
+use async_nats::jetstream::{
+    self,
+    consumer::{AckPolicy, DeliverPolicy, ReplayPolicy, pull},
+    kv,
+};
+use chrono::{DateTime, Utc};
+use futures::{StreamExt, TryStreamExt};
 
-const NATS_BATCH_COMMIT: &str = "Nats-Batch-Commit";
-const NATS_BATCH_ID: &str = "Nats-Batch-Id";
-const NATS_BATCH_SEQUENCE: &str = "Nats-Batch-Sequence";
+pub(crate) const NATS_BATCH_COMMIT: &str = "Nats-Batch-Commit";
+pub(crate) const NATS_BATCH_ID: &str = "Nats-Batch-Id";
+pub(crate) const NATS_BATCH_SEQUENCE: &str = "Nats-Batch-Sequence";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum EventSubjectPrefix {
+pub(crate) enum EventSubjectPrefix {
     Canonical,
     Legacy,
 }
 
 impl EventSubjectPrefix {
-    fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Canonical => EVENTS_SUBJECT_PREFIX,
             Self::Legacy => LEGACY_EVENTS_SUBJECT_PREFIX,
         }
     }
 
-    fn subject(self, job_id: &str) -> String {
+    pub(crate) fn subject(self, job_id: &str) -> String {
         format!("{}{}", self.as_str(), job_id)
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct AggregateSubjectState {
-    prefix: EventSubjectPrefix,
-    write_state: JobWriteState,
+pub(crate) struct AggregateSubjectState {
+    pub(crate) prefix: EventSubjectPrefix,
+    pub(crate) write_state: JobWriteState,
 }
 
-enum SnapshotChange {
+pub(crate) enum SnapshotChange {
     Upsert(Box<VersionedJobSpec>),
     Delete(String),
 }
 
-#[derive(Clone)]
-pub struct NatsConfigStore {
-    js: jetstream::Context,
-}
-
-impl NatsConfigStore {
-    pub async fn new(nats: async_nats::Client) -> Result<Self, CronError> {
-        let js = jetstream::new(nats.clone());
-        get_or_create_config_bucket(&js).await?;
-        get_or_create_snapshot_bucket(&js).await?;
-        validate_events_stream(&get_or_create_events_stream(&js).await?)?;
-        let store = Self { js };
-        store.catch_up_snapshots().await?;
-        Ok(store)
-    }
-
-    async fn config_bucket(&self) -> Result<kv::Store, CronError> {
-        self.js
-            .get_key_value(CONFIG_BUCKET)
-            .await
-            .map_err(|source| CronError::kv_source("failed to open config bucket", source))
-    }
-
-    async fn snapshot_bucket(&self) -> Result<kv::Store, CronError> {
-        self.js
-            .get_key_value(SNAPSHOT_BUCKET)
-            .await
-            .map_err(|source| CronError::kv_source("failed to open snapshot bucket", source))
-    }
-
-    async fn events_stream(&self) -> Result<jetstream::stream::Stream, CronError> {
-        self.js
-            .get_stream(EVENTS_STREAM)
-            .await
-            .map_err(|source| CronError::event_source("failed to open events stream", source))
-    }
-
-    async fn current_subject_state(
-        &self,
-        subject: &str,
-    ) -> Result<Option<JobWriteState>, CronError> {
-        let stream = self.events_stream().await?;
-        match stream.get_last_raw_message_by_subject(subject).await {
-            Ok(message) => {
-                let version = message.sequence;
-                let event = decode_recorded_job_event(message)?;
-                let exists = !matches!(event.data, JobEvent::JobRemoved { .. });
-                Ok(Some(JobWriteState::new(Some(version), exists)))
-            }
-            Err(error)
-                if matches!(
-                    error.kind(),
-                    async_nats::jetstream::stream::LastRawMessageErrorKind::NoMessageFound
-                ) =>
-            {
-                Ok(None)
-            }
-            Err(error) => Err(CronError::event_source(
-                "failed to read latest aggregate version",
-                error,
-            )),
-        }
-    }
-
-    async fn aggregate_subject_state(
-        &self,
-        job_id: &str,
-    ) -> Result<AggregateSubjectState, CronError> {
-        let canonical_version = self
-            .current_subject_state(&EventSubjectPrefix::Canonical.subject(job_id))
-            .await?;
-        let legacy_version = self
-            .current_subject_state(&EventSubjectPrefix::Legacy.subject(job_id))
-            .await?;
-
-        resolve_event_subject_state(job_id, canonical_version, legacy_version)
-    }
-
-    async fn append_event(
-        &self,
-        job_id: &str,
-        write_condition: JobWriteCondition,
-        event: JobEventData,
-    ) -> Result<(), CronError> {
-        let aggregate = self.aggregate_subject_state(job_id).await?;
-        write_condition.ensure(job_id, aggregate.write_state)?;
-        let expected_version = aggregate.write_state.current_version().unwrap_or(0);
-        let batch_id = Uuid::new_v4().to_string();
-        let payload = serde_json::to_vec(&event)?;
-        let publish = PublishMessage::build()
-            .payload(payload.into())
-            .message_id(&event.event_id)
-            .expected_last_subject_sequence(expected_version)
-            .header(NATS_BATCH_ID, batch_id.as_str())
-            .header(NATS_BATCH_SEQUENCE, "1")
-            .header(NATS_BATCH_COMMIT, "1");
-        let ack = self
-            .js
-            .publish_message(
-                publish.outbound_message(event.subject_with_prefix(aggregate.prefix.as_str())),
-            )
-            .await
-            .map_err(|source| CronError::event_source("failed to publish job event", source))?;
-
-        match ack.await {
-            Ok(_) => {}
-            Err(error) if error.kind() == PublishErrorKind::WrongLastSequence => {
-                return Err(CronError::OptimisticConcurrencyConflict {
-                    id: job_id.to_string(),
-                    expected: write_condition,
-                    current_version: self
-                        .aggregate_subject_state(job_id)
-                        .await?
-                        .write_state
-                        .current_version(),
-                });
-            }
-            Err(error) => {
-                return Err(CronError::event_source(
-                    "failed to acknowledge job event batch",
-                    error,
-                ));
-            }
-        }
-
-        self.project_event_to_snapshot(job_id, &event).await?;
-
-        Ok(())
-    }
-
-    async fn load_snapshot(&self, id: &str) -> Result<Option<VersionedJobSpec>, CronError> {
-        let bucket = self.snapshot_bucket().await?;
-        let Some(entry) = bucket.entry(snapshot_key(id)).await.map_err(|source| {
-            CronError::kv_source("failed to read aggregate snapshot entry", source)
-        })?
-        else {
-            return Ok(None);
-        };
-
-        serde_json::from_slice::<VersionedJobSpec>(&entry.value)
-            .map(Some)
-            .map_err(|source| {
-                CronError::kv_source("failed to decode aggregate snapshot entry", source)
-            })
-    }
-
-    async fn list_snapshots(&self) -> Result<Vec<VersionedJobSpec>, CronError> {
-        let bucket = self.snapshot_bucket().await?;
-        let mut keys = bucket.keys().await.map_err(|source| {
-            CronError::kv_source("failed to list aggregate snapshot keys", source)
-        })?;
-        let mut jobs = Vec::new();
-
-        while let Some(result) = keys.next().await {
-            let key = result.map_err(|source| {
-                CronError::kv_source("failed to read aggregate snapshot key", source)
-            })?;
-            if !key.starts_with(SNAPSHOT_KEY_PREFIX) {
-                continue;
-            }
-            let Some(entry) = bucket.entry(key).await.map_err(|source| {
-                CronError::kv_source("failed to read aggregate snapshot value", source)
-            })?
-            else {
-                continue;
-            };
-            let job =
-                serde_json::from_slice::<VersionedJobSpec>(&entry.value).map_err(|source| {
-                    CronError::kv_source("failed to decode aggregate snapshot value", source)
-                })?;
-            jobs.push(job);
-        }
-
-        Ok(jobs)
-    }
-
-    async fn catch_up_snapshots(&self) -> Result<(), CronError> {
-        let stream = self.events_stream().await?;
-        let info = stream.get_info().await.map_err(|source| {
-            CronError::event_source(
-                "failed to query events stream info for snapshot catch-up",
-                source,
-            )
-        })?;
-        if info.state.messages == 0 {
-            return Ok(());
-        }
-
-        let bucket = self.snapshot_bucket().await?;
-        let checkpoint = read_snapshot_checkpoint(&bucket).await?;
-        if checkpoint >= info.state.last_sequence {
-            return Ok(());
-        }
-
-        let mut snapshots = load_snapshot_map(&bucket).await?;
-        let start = checkpoint.max(info.state.first_sequence.saturating_sub(1)) + 1;
-
-        for sequence in start..=info.state.last_sequence {
-            let Some(message) = read_raw_event_message(
-                &stream,
-                sequence,
-                "failed to read job event during snapshot catch-up",
-            )
-            .await?
-            else {
-                continue;
-            };
-            let event = decode_recorded_job_event(message)?;
-            let change = apply_event_to_snapshot_map(&mut snapshots, &event.data, sequence)?;
-            persist_snapshot_change(&bucket, change).await?;
-            write_snapshot_checkpoint(&bucket, sequence).await?;
-        }
-
-        Ok(())
-    }
-
-    async fn project_event_to_snapshot(
-        &self,
-        job_id: &str,
-        event: &JobEventData,
-    ) -> Result<(), CronError> {
-        let bucket = self.snapshot_bucket().await?;
-        let mut snapshots = BTreeMap::new();
-        if let Some(snapshot) = self.load_snapshot(job_id).await? {
-            snapshots.insert(job_id.to_string(), snapshot);
-        }
-
-        let aggregate = self.aggregate_subject_state(job_id).await?;
-        let final_version = aggregate.write_state.current_version().ok_or_else(|| {
-            CronError::event_source(
-                "aggregate snapshot projection requires an event version",
-                std::io::Error::other(format!("job '{job_id}'")),
-            )
-        })?;
-
-        let change = apply_event_to_snapshot_map(&mut snapshots, &event.data, final_version)?;
-        persist_snapshot_change(&bucket, change).await?;
-        maybe_advance_snapshot_checkpoint(&bucket, final_version).await
-    }
-
-    async fn rewrite_projection(&self, jobs: &[VersionedJobSpec]) -> Result<(), CronError> {
-        let kv = self.config_bucket().await?;
-        let mut keys = kv
-            .keys()
-            .await
-            .map_err(|source| CronError::kv_source("failed to list projection keys", source))?;
-
-        while let Some(result) = keys.next().await {
-            let key = result
-                .map_err(|source| CronError::kv_source("failed to read projection key", source))?;
-            if key.starts_with(JOBS_KEY_PREFIX) {
-                let _ = kv.purge(key).await;
-            }
-        }
-
-        for job in jobs {
-            let key = format!("{JOBS_KEY_PREFIX}{}", job.id());
-            let value = serde_json::to_vec(&job.spec)?;
-            kv.put(key, value.into()).await.map_err(|source| {
-                CronError::kv_source("failed to write projected job state", source)
-            })?;
-        }
-
-        Ok(())
-    }
-}
-
-impl ConfigStore for NatsConfigStore {
-    async fn put_job(
-        &self,
-        config: &JobSpec,
-        write_condition: JobWriteCondition,
-    ) -> Result<(), CronError> {
-        validate_job_spec(config)?;
-        self.append_event(
-            &config.id,
-            write_condition,
-            JobEventData::new(JobEvent::job_registered(config.clone())),
-        )
-        .await
-    }
-
-    async fn set_job_state(
-        &self,
-        id: &str,
-        state: JobEnabledState,
-        write_condition: JobWriteCondition,
-    ) -> Result<(), CronError> {
-        validate_job_id(id)?;
-        self.get_job(id)
-            .await?
-            .ok_or_else(|| CronError::JobNotFound { id: id.to_string() })?;
-        self.append_event(
-            id,
-            write_condition,
-            JobEventData::new(JobEvent::job_state_changed(id, state)),
-        )
-        .await
-    }
-
-    async fn get_job(&self, id: &str) -> Result<Option<VersionedJobSpec>, CronError> {
-        validate_job_id(id)?;
-        self.load_snapshot(id).await
-    }
-
-    async fn delete_job(
-        &self,
-        id: &str,
-        write_condition: JobWriteCondition,
-    ) -> Result<(), CronError> {
-        validate_job_id(id)?;
-        self.get_job(id)
-            .await?
-            .ok_or_else(|| CronError::JobNotFound { id: id.to_string() })?;
-        self.append_event(
-            id,
-            write_condition,
-            JobEventData::new(JobEvent::job_removed(id)),
-        )
-        .await
-    }
-
-    async fn list_jobs(&self) -> Result<Vec<VersionedJobSpec>, CronError> {
-        self.list_snapshots().await
-    }
-
-    async fn load_and_watch(
-        &self,
-    ) -> Result<
-        (
-            Vec<JobSpec>,
-            Pin<Box<dyn Stream<Item = JobSpecChange> + Send + 'static>>,
-        ),
-        CronError,
-    > {
-        let stream = self.events_stream().await?;
-        let info = stream.get_info().await.map_err(|source| {
-            CronError::event_source("failed to query events stream info", source)
-        })?;
-        let last_sequence = info.state.last_sequence;
-        let initial_jobs =
-            rebuild_jobs_from_stream(&stream, info.state.first_sequence, last_sequence).await?;
-        self.rewrite_projection(&initial_jobs).await?;
-        let consumer = stream
-            .create_consumer(event_watch_consumer_config(next_watch_start_sequence(
-                last_sequence,
-            )))
-            .await
-            .map_err(|source| {
-                CronError::event_source("failed to create job event watch consumer", source)
-            })?;
-        let subscriber = consumer.messages().await.map_err(|source| {
-            CronError::event_source("failed to open job event watch stream", source)
-        })?;
-
-        let kv = self.config_bucket().await?;
-        let state = initial_jobs
-            .iter()
-            .cloned()
-            .map(|job| (job.id().to_string(), job.spec))
-            .collect::<BTreeMap<_, _>>();
-        let state = Arc::new(Mutex::new(state));
-        let stream = subscriber
-            .then(move |result| {
-                let state = Arc::clone(&state);
-                let kv = kv.clone();
-                async move {
-                    let message = match result {
-                        Ok(message) => message,
-                        Err(error) => {
-                            tracing::error!(error = %error, "Failed to read job event from watch consumer");
-                            return None;
-                        }
-                    };
-
-                    let event = match decode_recorded_watch_message(&message) {
-                        Ok(event) => event,
-                        Err(error) => {
-                            tracing::error!(error = %error, "Failed to decode job event from subscription");
-                            ack_watch_message(&message).await;
-                            return None;
-                        }
-                    };
-
-                    let projection_change = {
-                        let mut state = state.lock().expect("job event state mutex poisoned");
-                        event.data.apply_to_state(&mut state)
-                    };
-                    let projection_change = match projection_change {
-                        Ok(change) => change,
-                        Err(error) => {
-                            tracing::error!(error = %error, "Failed to apply job event to current state");
-                            ack_watch_message(&message).await;
-                            return None;
-                        }
-                    };
-
-                    if let Err(error) = apply_projection_change(&kv, &projection_change).await {
-                        tracing::error!(error = %error, "Failed to update projected job state from event");
-                        ack_watch_message(&message).await;
-                        return None;
-                    }
-
-                    ack_watch_message(&message).await;
-                    Some(change_from_projection_change(projection_change))
-                }
-            })
-            .filter_map(futures::future::ready);
-
-        Ok((
-            initial_jobs.into_iter().map(|job| job.spec).collect(),
-            Box::pin(stream),
-        ))
-    }
-}
-
-async fn rebuild_jobs_from_stream(
+pub(crate) async fn rebuild_jobs_from_stream(
     stream: &jetstream::stream::Stream,
     first_sequence: u64,
     last_sequence: u64,
@@ -508,7 +83,7 @@ async fn rebuild_jobs_from_stream(
     Ok(jobs.into_values().collect())
 }
 
-async fn read_raw_event_message(
+pub(crate) async fn read_raw_event_message(
     stream: &jetstream::stream::Stream,
     sequence: u64,
     context: &'static str,
@@ -532,7 +107,7 @@ fn decode_job_event_data(payload: &[u8]) -> Result<JobEventData, CronError> {
         .map_err(|source| CronError::event_source("failed to decode stored job event", source))
 }
 
-fn decode_recorded_job_event(
+pub(crate) fn decode_recorded_job_event(
     message: async_nats::jetstream::message::StreamMessage,
 ) -> Result<RecordedJobEvent, CronError> {
     let recorded_at = recorded_at_from_message(&message)?;
@@ -543,7 +118,7 @@ fn decode_recorded_job_event(
     Ok(event.record(stream_id, None, log_position, recorded_at))
 }
 
-fn decode_recorded_watch_message(
+pub(crate) fn decode_recorded_watch_message(
     message: &async_nats::jetstream::Message,
 ) -> Result<RecordedJobEvent, CronError> {
     let stream_message = async_nats::jetstream::message::StreamMessage::try_from(
@@ -571,11 +146,11 @@ fn recorded_at_from_message(
         })
 }
 
-fn next_watch_start_sequence(last_sequence: u64) -> u64 {
+pub(crate) fn next_watch_start_sequence(last_sequence: u64) -> u64 {
     last_sequence.saturating_add(1).max(1)
 }
 
-fn event_watch_consumer_config(start_sequence: u64) -> pull::Config {
+pub(crate) fn event_watch_consumer_config(start_sequence: u64) -> pull::Config {
     pull::Config {
         deliver_policy: DeliverPolicy::ByStartSequence { start_sequence },
         ack_policy: AckPolicy::Explicit,
@@ -585,13 +160,13 @@ fn event_watch_consumer_config(start_sequence: u64) -> pull::Config {
     }
 }
 
-async fn ack_watch_message(message: &jetstream::Message) {
+pub(crate) async fn ack_watch_message(message: &jetstream::Message) {
     if let Err(error) = message.ack().await {
         tracing::error!(error = %error, "Failed to acknowledge watched job event");
     }
 }
 
-async fn apply_projection_change(
+pub(crate) async fn apply_projection_change(
     kv: &kv::Store,
     change: &ProjectionChange,
 ) -> Result<(), CronError> {
@@ -615,23 +190,14 @@ async fn apply_projection_change(
     Ok(())
 }
 
-fn change_from_projection_change(change: ProjectionChange) -> JobSpecChange {
+pub(crate) fn change_from_projection_change(change: ProjectionChange) -> JobSpecChange {
     match change {
         ProjectionChange::Upsert(job) => JobSpecChange::Put(job),
         ProjectionChange::Delete(id) => JobSpecChange::Delete(id),
     }
 }
 
-fn validate_job_id(id: &str) -> Result<(), CronError> {
-    NatsToken::new(id).map(|_| ()).map_err(|source| {
-        CronError::invalid_job_spec(JobSpecError::InvalidId {
-            id: id.to_string(),
-            source,
-        })
-    })
-}
-
-fn snapshot_key(id: &str) -> String {
+pub(crate) fn snapshot_key(id: &str) -> String {
     format!("{SNAPSHOT_KEY_PREFIX}{id}")
 }
 
@@ -665,12 +231,15 @@ async fn read_snapshot_checkpoint_entry(
     Ok((Some(entry.revision), sequence))
 }
 
-async fn read_snapshot_checkpoint(bucket: &kv::Store) -> Result<u64, CronError> {
+pub(crate) async fn read_snapshot_checkpoint(bucket: &kv::Store) -> Result<u64, CronError> {
     let (_revision, sequence) = read_snapshot_checkpoint_entry(bucket).await?;
     Ok(sequence)
 }
 
-async fn write_snapshot_checkpoint(bucket: &kv::Store, sequence: u64) -> Result<(), CronError> {
+pub(crate) async fn write_snapshot_checkpoint(
+    bucket: &kv::Store,
+    sequence: u64,
+) -> Result<(), CronError> {
     write_kv_value(
         bucket,
         SNAPSHOT_LAST_EVENT_SEQUENCE_KEY,
@@ -679,7 +248,7 @@ async fn write_snapshot_checkpoint(bucket: &kv::Store, sequence: u64) -> Result<
     .await
 }
 
-async fn maybe_advance_snapshot_checkpoint(
+pub(crate) async fn maybe_advance_snapshot_checkpoint(
     bucket: &kv::Store,
     sequence: u64,
 ) -> Result<(), CronError> {
@@ -716,7 +285,7 @@ async fn maybe_advance_snapshot_checkpoint(
     }
 }
 
-async fn load_snapshot_map(
+pub(crate) async fn load_snapshot_map(
     bucket: &kv::Store,
 ) -> Result<BTreeMap<String, VersionedJobSpec>, CronError> {
     let mut keys = bucket
@@ -747,7 +316,7 @@ async fn load_snapshot_map(
     Ok(snapshots)
 }
 
-fn apply_event_to_snapshot_map(
+pub(crate) fn apply_event_to_snapshot_map(
     snapshots: &mut BTreeMap<String, VersionedJobSpec>,
     event: &JobEvent,
     version: u64,
@@ -770,7 +339,7 @@ fn apply_event_to_snapshot_map(
     }
 }
 
-async fn persist_snapshot_change(
+pub(crate) async fn persist_snapshot_change(
     bucket: &kv::Store,
     change: SnapshotChange,
 ) -> Result<(), CronError> {
@@ -818,7 +387,7 @@ async fn delete_kv_value(bucket: &kv::Store, key: &str) -> Result<(), CronError>
     Ok(())
 }
 
-fn resolve_event_subject_state(
+pub(crate) fn resolve_event_subject_state(
     job_id: &str,
     canonical_state: Option<JobWriteState>,
     legacy_state: Option<JobWriteState>,
@@ -1004,7 +573,7 @@ fn parse_server_version(version: &str) -> Option<(u64, u64)> {
     Some((major, minor))
 }
 
-fn validate_events_stream(stream: &jetstream::stream::Stream) -> Result<(), CronError> {
+pub(crate) fn validate_events_stream(stream: &jetstream::stream::Stream) -> Result<(), CronError> {
     let config = &stream.cached_info().config;
     if !config.allow_atomic_publish {
         return Err(CronError::event_source(
@@ -1055,7 +624,7 @@ fn validate_schedule_stream(stream: &jetstream::stream::Stream) -> Result<(), Cr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{DeliverySpec, ScheduleSpec};
+    use crate::config::{DeliverySpec, JobEnabledState, JobSpec, JobWriteCondition, ScheduleSpec};
 
     fn test_job(id: &str) -> JobSpec {
         JobSpec {
