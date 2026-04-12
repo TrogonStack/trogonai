@@ -1,9 +1,11 @@
 use std::fmt;
 
+use async_nats::jetstream::{self, context, kv};
 use trogon_cron::{
-    ConfigStore, DeleteJobCommand, GetJobCommand as StoreGetJobCommand, JobId, JobIdError,
-    JobWriteCondition,
+    DeleteJobCommand, GetJobCommand as StoreGetJobCommand, JobId, JobIdError, JobWriteCondition,
+    delete_job, get_job,
 };
+use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream, JetStreamPublishMessage};
 
 #[derive(Debug)]
 pub struct RemoveCommand {
@@ -40,16 +42,23 @@ impl std::error::Error for CommandError {
     }
 }
 
-pub async fn run<S>(store: &S, command: RemoveCommand) -> Result<(), CommandError>
+pub async fn run<J>(js: &J, command: RemoveCommand) -> Result<(), CommandError>
 where
-    S: ConfigStore,
+    J: JetStreamGetKeyValue<Store = kv::Store>
+        + JetStreamGetStream<Stream = jetstream::stream::Stream>
+        + JetStreamPublishMessage<
+            PublishError = context::PublishError,
+            AckFuture = context::PublishAckFuture,
+        >,
 {
-    let version = current_job_version(store, &command).await?;
-    store
-        .delete_job(DeleteJobCommand {
+    let version = current_job_version(js, &command).await?;
+    delete_job(
+        js,
+        DeleteJobCommand {
             id: command.job_id.clone(),
             write_condition: JobWriteCondition::MustBeAtVersion(version),
-        })
+        },
+    )
         .await
         .map_err(CommandError::DeleteJob)?;
     println!("Job '{}' removed.", command.job_id);
@@ -57,14 +66,16 @@ where
     Ok(())
 }
 
-async fn current_job_version<S>(store: &S, command: &RemoveCommand) -> Result<u64, CommandError>
+async fn current_job_version<J>(js: &J, command: &RemoveCommand) -> Result<u64, CommandError>
 where
-    S: ConfigStore,
+    J: JetStreamGetKeyValue<Store = kv::Store>,
 {
-    store
-        .get_job(StoreGetJobCommand {
+    get_job(
+        js,
+        StoreGetJobCommand {
             id: command.job_id.clone(),
-        })
+        },
+    )
         .await
         .map_err(CommandError::GetJob)?
         .map(|job| job.version)

@@ -16,7 +16,7 @@ pub struct PutJobCommand {
     pub write_condition: JobWriteCondition,
 }
 
-pub(super) async fn run<J>(js: &J, command: PutJobCommand) -> Result<(), CronError>
+pub async fn run<J>(js: &J, command: PutJobCommand) -> Result<(), CronError>
 where
     J: JetStreamGetKeyValue<Store = kv::Store>
         + JetStreamGetStream<Stream = jetstream::stream::Stream>

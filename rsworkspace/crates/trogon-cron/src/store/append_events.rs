@@ -9,8 +9,8 @@ use crate::{
     error::CronError,
     events::{JobEvent, JobEventData},
     nats::{
-        AggregateSubjectState, EventSubjectPrefix, NATS_BATCH_COMMIT, NATS_BATCH_ID,
-        NATS_BATCH_SEQUENCE, decode_recorded_job_event, resolve_event_subject_state,
+        EventSubjectPrefix, NATS_BATCH_COMMIT, NATS_BATCH_ID, NATS_BATCH_SEQUENCE,
+        StreamSubjectState, decode_recorded_job_event, resolve_event_subject_state,
     },
 };
 
@@ -37,16 +37,16 @@ where
             Ok(None)
         }
         Err(error) => Err(CronError::event_source(
-            "failed to read latest aggregate version",
+            "failed to read latest stream version",
             error,
         )),
     }
 }
 
-pub(super) async fn aggregate_subject_state<J>(
+pub(super) async fn stream_subject_state<J>(
     js: &J,
     job_id: &str,
-) -> Result<AggregateSubjectState, CronError>
+) -> Result<StreamSubjectState, CronError>
 where
     J: JetStreamGetStream<Stream = jetstream::stream::Stream>,
 {
@@ -72,9 +72,9 @@ where
             AckFuture = context::PublishAckFuture,
         >,
 {
-    let aggregate = aggregate_subject_state(js, job_id).await?;
-    write_condition.ensure(job_id, aggregate.write_state)?;
-    let expected_version = aggregate.write_state.current_version().unwrap_or(0);
+    let stream = stream_subject_state(js, job_id).await?;
+    write_condition.ensure(job_id, stream.write_state)?;
+    let expected_version = stream.write_state.current_version().unwrap_or(0);
     let batch_id = Uuid::new_v4().to_string();
     let payload = serde_json::to_vec(&event)?;
     let publish = PublishMessage::build()
@@ -86,7 +86,7 @@ where
         .header(NATS_BATCH_COMMIT, "1");
     let ack = js
         .publish_message(
-            publish.outbound_message(event.subject_with_prefix(aggregate.prefix.as_str())),
+            publish.outbound_message(event.subject_with_prefix(stream.prefix.as_str())),
         )
         .await
         .map_err(|source| CronError::event_source("failed to publish job event", source))?;
@@ -97,7 +97,7 @@ where
             return Err(CronError::OptimisticConcurrencyConflict {
                 id: job_id.to_string(),
                 expected: write_condition,
-                current_version: aggregate_subject_state(js, job_id)
+                current_version: stream_subject_state(js, job_id)
                     .await?
                     .write_state
                     .current_version(),

@@ -1,16 +1,15 @@
 use async_nats::jetstream::{self, kv};
+use trogon_eventsourcing::{
+    load_snapshot_map, persist_snapshot_change, read_checkpoint, write_checkpoint,
+};
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream};
 
 use crate::{
     error::CronError,
-    nats::{
-        apply_event_to_snapshot_map, decode_recorded_job_event, load_snapshot_map,
-        persist_snapshot_change, read_raw_event_message, read_snapshot_checkpoint,
-        write_snapshot_checkpoint,
-    },
+    nats::{apply_event_to_snapshot_map, decode_recorded_job_event, read_raw_event_message},
 };
 
-use super::{events_stream, snapshot_bucket};
+use super::{SNAPSHOT_STORE_CONFIG, events_stream, snapshot_bucket};
 
 pub(super) async fn run<J>(js: &J) -> Result<(), CronError>
 where
@@ -29,12 +28,16 @@ where
     }
 
     let bucket = snapshot_bucket::run(js).await?;
-    let checkpoint = read_snapshot_checkpoint(&bucket).await?;
+    let checkpoint = read_checkpoint(&bucket, SNAPSHOT_STORE_CONFIG)
+        .await
+        .map_err(CronError::from)?;
     if checkpoint >= info.state.last_sequence {
         return Ok(());
     }
 
-    let mut snapshots = load_snapshot_map(&bucket).await?;
+    let mut snapshots = load_snapshot_map(&bucket, SNAPSHOT_STORE_CONFIG)
+        .await
+        .map_err(CronError::from)?;
     let start = checkpoint.max(info.state.first_sequence.saturating_sub(1)) + 1;
 
     for sequence in start..=info.state.last_sequence {
@@ -49,8 +52,12 @@ where
         };
         let event = decode_recorded_job_event(message)?;
         let change = apply_event_to_snapshot_map(&mut snapshots, &event.data, sequence)?;
-        persist_snapshot_change(&bucket, change).await?;
-        write_snapshot_checkpoint(&bucket, sequence).await?;
+        persist_snapshot_change(&bucket, SNAPSHOT_STORE_CONFIG, change)
+            .await
+            .map_err(CronError::from)?;
+        write_checkpoint(&bucket, SNAPSHOT_STORE_CONFIG, sequence)
+            .await
+            .map_err(CronError::from)?;
     }
 
     Ok(())

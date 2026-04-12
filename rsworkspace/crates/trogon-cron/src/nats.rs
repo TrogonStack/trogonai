@@ -11,7 +11,7 @@ use crate::{
     kv::{
         EVENTS_STREAM, EVENTS_SUBJECT_PATTERN, EVENTS_SUBJECT_PREFIX, JOBS_KEY_PREFIX,
         LEGACY_EVENTS_SUBJECT_PATTERN, LEGACY_EVENTS_SUBJECT_PREFIX, SCHEDULES_STREAM,
-        SNAPSHOT_KEY_PREFIX, SNAPSHOT_LAST_EVENT_SEQUENCE_KEY, get_or_create_schedule_stream,
+        get_or_create_schedule_stream,
     },
     store::JobSpecChange,
     traits::SchedulePublisher,
@@ -22,7 +22,8 @@ use async_nats::jetstream::{
     kv,
 };
 use chrono::{DateTime, Utc};
-use futures::{StreamExt, TryStreamExt};
+use futures::TryStreamExt;
+use trogon_eventsourcing::SnapshotChange;
 
 pub(crate) const NATS_BATCH_COMMIT: &str = "Nats-Batch-Commit";
 pub(crate) const NATS_BATCH_ID: &str = "Nats-Batch-Id";
@@ -48,14 +49,9 @@ impl EventSubjectPrefix {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct AggregateSubjectState {
+pub(crate) struct StreamSubjectState {
     pub(crate) prefix: EventSubjectPrefix,
     pub(crate) write_state: JobWriteState,
-}
-
-pub(crate) enum SnapshotChange {
-    Upsert(Box<VersionedJobSpec>),
-    Delete(String),
 }
 
 pub(crate) async fn rebuild_jobs_from_stream(
@@ -197,215 +193,48 @@ pub(crate) fn change_from_projection_change(change: ProjectionChange) -> JobSpec
     }
 }
 
-pub(crate) fn snapshot_key(id: &str) -> String {
-    format!("{SNAPSHOT_KEY_PREFIX}{id}")
-}
-
-fn checkpoint_value(sequence: u64) -> Vec<u8> {
-    sequence.to_string().into_bytes()
-}
-
-async fn read_snapshot_checkpoint_entry(
-    bucket: &kv::Store,
-) -> Result<(Option<u64>, u64), CronError> {
-    let Some(entry) = bucket
-        .entry(SNAPSHOT_LAST_EVENT_SEQUENCE_KEY)
-        .await
-        .map_err(|source| {
-            CronError::kv_source("failed to read aggregate snapshot checkpoint entry", source)
-        })?
-    else {
-        return Ok((None, 0));
-    };
-
-    let sequence = String::from_utf8(entry.value.to_vec())
-        .ok()
-        .and_then(|value| value.parse::<u64>().ok())
-        .ok_or_else(|| {
-            CronError::kv_source(
-                "failed to decode aggregate snapshot checkpoint",
-                std::io::Error::other(SNAPSHOT_LAST_EVENT_SEQUENCE_KEY),
-            )
-        })?;
-
-    Ok((Some(entry.revision), sequence))
-}
-
-pub(crate) async fn read_snapshot_checkpoint(bucket: &kv::Store) -> Result<u64, CronError> {
-    let (_revision, sequence) = read_snapshot_checkpoint_entry(bucket).await?;
-    Ok(sequence)
-}
-
-pub(crate) async fn write_snapshot_checkpoint(
-    bucket: &kv::Store,
-    sequence: u64,
-) -> Result<(), CronError> {
-    write_kv_value(
-        bucket,
-        SNAPSHOT_LAST_EVENT_SEQUENCE_KEY,
-        checkpoint_value(sequence),
-    )
-    .await
-}
-
-pub(crate) async fn maybe_advance_snapshot_checkpoint(
-    bucket: &kv::Store,
-    sequence: u64,
-) -> Result<(), CronError> {
-    let expected_previous = sequence.saturating_sub(1);
-    let (revision, current_sequence) = read_snapshot_checkpoint_entry(bucket).await?;
-    if current_sequence != expected_previous {
-        return Ok(());
-    }
-
-    let value = checkpoint_value(sequence);
-    match revision {
-        Some(revision) => match bucket
-            .update(SNAPSHOT_LAST_EVENT_SEQUENCE_KEY, value.into(), revision)
-            .await
-        {
-            Ok(_) => Ok(()),
-            Err(source) if source.kind() == kv::UpdateErrorKind::WrongLastRevision => Ok(()),
-            Err(source) => Err(CronError::kv_source(
-                "failed to advance aggregate snapshot checkpoint",
-                source,
-            )),
-        },
-        None => match bucket
-            .create(SNAPSHOT_LAST_EVENT_SEQUENCE_KEY, value.into())
-            .await
-        {
-            Ok(_) => Ok(()),
-            Err(source) if source.kind() == kv::CreateErrorKind::AlreadyExists => Ok(()),
-            Err(source) => Err(CronError::kv_source(
-                "failed to create aggregate snapshot checkpoint",
-                source,
-            )),
-        },
-    }
-}
-
-pub(crate) async fn load_snapshot_map(
-    bucket: &kv::Store,
-) -> Result<BTreeMap<String, VersionedJobSpec>, CronError> {
-    let mut keys = bucket
-        .keys()
-        .await
-        .map_err(|source| CronError::kv_source("failed to list aggregate snapshot keys", source))?;
-    let mut snapshots = BTreeMap::new();
-
-    while let Some(result) = keys.next().await {
-        let key = result.map_err(|source| {
-            CronError::kv_source("failed to read aggregate snapshot key", source)
-        })?;
-        if !key.starts_with(SNAPSHOT_KEY_PREFIX) {
-            continue;
-        }
-        let Some(value) = bucket.get(key.clone()).await.map_err(|source| {
-            CronError::kv_source("failed to read aggregate snapshot value", source)
-        })?
-        else {
-            continue;
-        };
-        let snapshot = serde_json::from_slice::<VersionedJobSpec>(&value).map_err(|source| {
-            CronError::kv_source("failed to decode aggregate snapshot value", source)
-        })?;
-        snapshots.insert(snapshot.id().to_string(), snapshot);
-    }
-
-    Ok(snapshots)
-}
-
 pub(crate) fn apply_event_to_snapshot_map(
     snapshots: &mut BTreeMap<String, VersionedJobSpec>,
     event: &JobEvent,
     version: u64,
-) -> Result<SnapshotChange, CronError> {
+) -> Result<SnapshotChange<VersionedJobSpec>, CronError> {
     apply_event_to_versioned_state(snapshots, event, version)?;
     match event {
-        JobEvent::JobRegistered { spec } => Ok(SnapshotChange::Upsert(Box::new(
+        JobEvent::JobRegistered { spec } => Ok(SnapshotChange::upsert(
             snapshots
                 .get(&spec.id)
                 .cloned()
                 .expect("registered job snapshot must exist"),
-        ))),
-        JobEvent::JobStateChanged { id, .. } => Ok(SnapshotChange::Upsert(Box::new(
+        )),
+        JobEvent::JobStateChanged { id, .. } => Ok(SnapshotChange::upsert(
             snapshots
                 .get(id)
                 .cloned()
                 .expect("state-changed job snapshot must exist"),
-        ))),
-        JobEvent::JobRemoved { id } => Ok(SnapshotChange::Delete(id.clone())),
+        )),
+        JobEvent::JobRemoved { id } => Ok(SnapshotChange::delete(id.clone())),
     }
-}
-
-pub(crate) async fn persist_snapshot_change(
-    bucket: &kv::Store,
-    change: SnapshotChange,
-) -> Result<(), CronError> {
-    match change {
-        SnapshotChange::Upsert(snapshot) => {
-            let value = serde_json::to_vec(snapshot.as_ref())?;
-            write_kv_value(bucket, &snapshot_key(snapshot.id()), value).await?;
-        }
-        SnapshotChange::Delete(id) => {
-            delete_kv_value(bucket, &snapshot_key(&id)).await?;
-        }
-    }
-
-    Ok(())
-}
-
-async fn write_kv_value(bucket: &kv::Store, key: &str, value: Vec<u8>) -> Result<(), CronError> {
-    if let Some(entry) = bucket.entry(key.to_string()).await.map_err(|source| {
-        CronError::kv_source("failed to read key-value entry for update", source)
-    })? {
-        let _ = bucket
-            .update(key, value.into(), entry.revision)
-            .await
-            .map_err(|source| CronError::kv_source("failed to update key-value entry", source))?;
-    } else {
-        let _ = bucket
-            .create(key, value.into())
-            .await
-            .map_err(|source| CronError::kv_source("failed to create key-value entry", source))?;
-    }
-
-    Ok(())
-}
-
-async fn delete_kv_value(bucket: &kv::Store, key: &str) -> Result<(), CronError> {
-    if let Some(entry) = bucket.entry(key.to_string()).await.map_err(|source| {
-        CronError::kv_source("failed to read key-value entry for delete", source)
-    })? {
-        bucket
-            .delete_expect_revision(key, Some(entry.revision))
-            .await
-            .map_err(|source| CronError::kv_source("failed to delete key-value entry", source))?;
-    }
-
-    Ok(())
 }
 
 pub(crate) fn resolve_event_subject_state(
     job_id: &str,
     canonical_state: Option<JobWriteState>,
     legacy_state: Option<JobWriteState>,
-) -> Result<AggregateSubjectState, CronError> {
+) -> Result<StreamSubjectState, CronError> {
     match (canonical_state, legacy_state) {
         (Some(_), Some(_)) => Err(CronError::event_source(
-            "job aggregate has conflicting event subjects",
+            "job stream has conflicting event subjects",
             std::io::Error::other(format!("job '{job_id}'")),
         )),
-        (Some(write_state), None) => Ok(AggregateSubjectState {
+        (Some(write_state), None) => Ok(StreamSubjectState {
             prefix: EventSubjectPrefix::Canonical,
             write_state,
         }),
-        (None, Some(write_state)) => Ok(AggregateSubjectState {
+        (None, Some(write_state)) => Ok(StreamSubjectState {
             prefix: EventSubjectPrefix::Legacy,
             write_state,
         }),
-        (None, None) => Ok(AggregateSubjectState {
+        (None, None) => Ok(StreamSubjectState {
             prefix: EventSubjectPrefix::Canonical,
             write_state: JobWriteState::new(None, false),
         }),
@@ -679,7 +508,7 @@ mod tests {
     }
 
     #[test]
-    fn new_aggregates_use_canonical_event_subject() {
+    fn new_streams_use_canonical_event_subject() {
         let state = resolve_event_subject_state("alpha", None, None).unwrap();
 
         assert_eq!(state.prefix, EventSubjectPrefix::Canonical);
@@ -688,7 +517,7 @@ mod tests {
     }
 
     #[test]
-    fn legacy_aggregates_keep_legacy_event_subject() {
+    fn legacy_streams_keep_legacy_event_subject() {
         let state =
             resolve_event_subject_state("alpha", None, Some(JobWriteState::new(Some(12), true)))
                 .unwrap();
@@ -699,7 +528,7 @@ mod tests {
     }
 
     #[test]
-    fn deleted_aggregates_can_be_recreated_without_changing_subject() {
+    fn deleted_streams_can_be_recreated_without_changing_subject() {
         let state =
             resolve_event_subject_state("alpha", Some(JobWriteState::new(Some(12), false)), None)
                 .unwrap();
@@ -710,7 +539,7 @@ mod tests {
     }
 
     #[test]
-    fn split_aggregate_subjects_are_rejected() {
+    fn split_stream_subjects_are_rejected() {
         let error = resolve_event_subject_state(
             "alpha",
             Some(JobWriteState::new(Some(7), true)),
@@ -721,7 +550,7 @@ mod tests {
         assert!(
             error
                 .to_string()
-                .contains("job aggregate has conflicting event subjects")
+                .contains("job stream has conflicting event subjects")
         );
     }
 

@@ -1,6 +1,8 @@
 use std::{fmt, io::Read};
 
-use trogon_cron::{ConfigStore, JobSpec, PutJobCommand};
+use async_nats::jetstream::{self, context, kv};
+use trogon_cron::{JobSpec, PutJobCommand, put_job};
+use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream, JetStreamPublishMessage};
 
 #[derive(Debug)]
 pub struct AddCommand {
@@ -44,16 +46,23 @@ pub fn read_from_stdin() -> Result<AddCommand, CommandError> {
     Ok(AddCommand { spec })
 }
 
-pub async fn run<S>(store: &S, command: AddCommand) -> Result<(), CommandError>
+pub async fn run<J>(js: &J, command: AddCommand) -> Result<(), CommandError>
 where
-    S: ConfigStore,
+    J: JetStreamGetKeyValue<Store = kv::Store>
+        + JetStreamGetStream<Stream = jetstream::stream::Stream>
+        + JetStreamPublishMessage<
+            PublishError = context::PublishError,
+            AckFuture = context::PublishAckFuture,
+        >,
 {
     let id = command.spec.id.clone();
-    store
-        .put_job(PutJobCommand {
+    put_job(
+        js,
+        PutJobCommand {
             spec: command.spec,
             write_condition: trogon_cron::JobWriteCondition::MustNotExist,
-        })
+        },
+    )
         .await
         .map_err(CommandError::PutJob)?;
     println!("Job '{id}' registered.");

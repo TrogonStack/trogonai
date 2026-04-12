@@ -5,8 +5,8 @@ use async_nats::Request;
 use async_nats::jetstream;
 use chrono::{Duration as ChronoDuration, Utc};
 use trogon_cron::{
-    ConfigStore, CronController, DeliverySpec, JobEnabledState, JobId, JobSpec, JobWriteCondition,
-    SamplingSource, ScheduleSpec, connect_store,
+    CronController, DeliverySpec, JobEnabledState, JobId, JobSpec, JobWriteCondition,
+    SamplingSource, ScheduleSpec, connect_store, delete_job, get_job, put_job, set_job_state,
     store::{DeleteJobCommand, GetJobCommand, PutJobCommand, SetJobStateCommand},
 };
 use trogon_nats::{NatsConfig, connect as nats_connect};
@@ -189,8 +189,7 @@ async fn controller_reconciles_one_time_job() {
         at: Utc::now() + ChronoDuration::seconds(2),
     };
 
-    store
-        .put_job(PutJobCommand {
+    put_job(&store, PutJobCommand {
             spec: job,
             write_condition: JobWriteCondition::MustNotExist,
         })
@@ -232,8 +231,7 @@ async fn controller_reconciles_sampling_job() {
         }),
     };
 
-    store
-        .put_job(PutJobCommand {
+    put_job(&store, PutJobCommand {
             spec: job,
             write_condition: JobWriteCondition::MustNotExist,
         })
@@ -277,8 +275,7 @@ async fn controller_reconciles_cron_job_with_timezone() {
         timezone: Some("UTC".to_string()),
     };
 
-    store
-        .put_job(PutJobCommand {
+    put_job(&store, PutJobCommand {
             spec: job,
             write_condition: JobWriteCondition::MustNotExist,
         })
@@ -311,8 +308,7 @@ async fn disabling_job_removes_schedule_subject() {
     });
 
     let job = base_job("disabled");
-    store
-        .put_job(PutJobCommand {
+    put_job(&store, PutJobCommand {
             spec: job,
             write_condition: JobWriteCondition::MustNotExist,
         })
@@ -325,16 +321,14 @@ async fn disabling_job_removes_schedule_subject() {
         .unwrap();
     wait_for_subject(&stream, "cron.schedules.disabled").await;
 
-    let version = store
-        .get_job(GetJobCommand {
+    let version = get_job(&store, GetJobCommand {
             id: job_id("disabled"),
         })
         .await
         .unwrap()
         .unwrap()
         .version;
-    store
-        .set_job_state(SetJobStateCommand {
+    set_job_state(&store, SetJobStateCommand {
             id: job_id("disabled"),
             state: JobEnabledState::Disabled,
             write_condition: JobWriteCondition::MustBeAtVersion(version),
@@ -363,8 +357,7 @@ async fn removing_job_removes_schedule_subject() {
     });
 
     let job = base_job("removed");
-    store
-        .put_job(PutJobCommand {
+    put_job(&store, PutJobCommand {
             spec: job,
             write_condition: JobWriteCondition::MustNotExist,
         })
@@ -377,16 +370,14 @@ async fn removing_job_removes_schedule_subject() {
         .unwrap();
     wait_for_subject(&stream, "cron.schedules.removed").await;
 
-    let version = store
-        .get_job(GetJobCommand {
+    let version = get_job(&store, GetJobCommand {
             id: job_id("removed"),
         })
         .await
         .unwrap()
         .unwrap()
         .version;
-    store
-        .delete_job(DeleteJobCommand {
+    delete_job(&store, DeleteJobCommand {
             id: job_id("removed"),
             write_condition: JobWriteCondition::MustBeAtVersion(version),
         })
@@ -411,23 +402,20 @@ async fn event_store_rebuilds_current_state_for_new_client() {
     };
     let expected_schedule = job.schedule.clone();
 
-    store
-        .put_job(PutJobCommand {
+    put_job(&store, PutJobCommand {
             spec: job,
             write_condition: JobWriteCondition::MustNotExist,
         })
         .await
         .unwrap();
-    let version = store
-        .get_job(GetJobCommand {
+    let version = get_job(&store, GetJobCommand {
             id: job_id("eventful"),
         })
         .await
         .unwrap()
         .unwrap()
         .version;
-    store
-        .set_job_state(SetJobStateCommand {
+    set_job_state(&store, SetJobStateCommand {
             id: job_id("eventful"),
             state: JobEnabledState::Disabled,
             write_condition: JobWriteCondition::MustBeAtVersion(version),
@@ -436,8 +424,7 @@ async fn event_store_rebuilds_current_state_for_new_client() {
         .unwrap();
 
     let fresh = connect_store(nats).await.unwrap();
-    let rebuilt = fresh
-        .get_job(GetJobCommand {
+    let rebuilt = get_job(&fresh, GetJobCommand {
             id: job_id("eventful"),
         })
         .await

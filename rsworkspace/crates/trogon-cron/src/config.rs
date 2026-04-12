@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use trogon_eventsourcing::StreamSnapshot;
 
 use crate::error::CronError;
 
@@ -27,6 +28,12 @@ pub struct VersionedJobSpec {
 impl VersionedJobSpec {
     pub fn id(&self) -> &str {
         &self.spec.id
+    }
+}
+
+impl StreamSnapshot for VersionedJobSpec {
+    fn stream_id(&self) -> &str {
+        self.id()
     }
 }
 
@@ -272,7 +279,7 @@ mod tests {
     }
 
     #[test]
-    fn write_condition_allows_recreating_deleted_aggregate() {
+    fn write_condition_allows_recreating_deleted_stream() {
         JobWriteCondition::MustNotExist
             .ensure("alpha", JobWriteState::new(Some(7), false))
             .unwrap();

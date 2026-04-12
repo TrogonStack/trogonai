@@ -1,9 +1,11 @@
 use std::fmt;
 
+use async_nats::jetstream::{self, context, kv};
 use trogon_cron::{
-    ConfigStore, GetJobCommand as StoreGetJobCommand, JobEnabledState, JobId, JobIdError,
-    JobWriteCondition, SetJobStateCommand as StoreSetJobStateCommand,
+    GetJobCommand as StoreGetJobCommand, JobEnabledState, JobId, JobIdError, JobWriteCondition,
+    SetJobStateCommand as StoreSetJobStateCommand, get_job, set_job_state,
 };
+use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream, JetStreamPublishMessage};
 
 #[derive(Debug)]
 pub struct SetStateCommand {
@@ -41,17 +43,24 @@ impl std::error::Error for CommandError {
     }
 }
 
-pub async fn run<S>(store: &S, command: SetStateCommand) -> Result<(), CommandError>
+pub async fn run<J>(js: &J, command: SetStateCommand) -> Result<(), CommandError>
 where
-    S: ConfigStore,
+    J: JetStreamGetKeyValue<Store = kv::Store>
+        + JetStreamGetStream<Stream = jetstream::stream::Stream>
+        + JetStreamPublishMessage<
+            PublishError = context::PublishError,
+            AckFuture = context::PublishAckFuture,
+        >,
 {
-    let version = current_job_version(store, &command).await?;
-    store
-        .set_job_state(StoreSetJobStateCommand {
+    let version = current_job_version(js, &command).await?;
+    set_job_state(
+        js,
+        StoreSetJobStateCommand {
             id: command.job_id.clone(),
             state: command.state,
             write_condition: JobWriteCondition::MustBeAtVersion(version),
-        })
+        },
+    )
         .await
         .map_err(CommandError::SetState)?;
     println!("Job '{}' {}.", command.job_id, command.state.as_str());
@@ -59,14 +68,16 @@ where
     Ok(())
 }
 
-async fn current_job_version<S>(store: &S, command: &SetStateCommand) -> Result<u64, CommandError>
+async fn current_job_version<J>(js: &J, command: &SetStateCommand) -> Result<u64, CommandError>
 where
-    S: ConfigStore,
+    J: JetStreamGetKeyValue<Store = kv::Store>,
 {
-    store
-        .get_job(StoreGetJobCommand {
+    get_job(
+        js,
+        StoreGetJobCommand {
             id: command.job_id.clone(),
-        })
+        },
+    )
         .await
         .map_err(CommandError::GetJob)?
         .map(|job| job.version)

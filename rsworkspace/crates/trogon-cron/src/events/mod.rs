@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
-use trogon_eventsourcing::{AggregateEvent, EventData, EventType, RecordedEvent, SubjectEvent};
+use trogon_eventsourcing::{EventData, EventType, RecordedEvent, StreamEvent, SubjectEvent};
 
 use crate::{
     config::{JobEnabledState, JobSpec, VersionedJobSpec},
@@ -30,8 +30,8 @@ pub enum ProjectionChange {
     Delete(String),
 }
 
-impl AggregateEvent for JobEvent {
-    fn aggregate_id(&self) -> &str {
+impl StreamEvent for JobEvent {
+    fn stream_id(&self) -> &str {
         self.job_id()
     }
 }
@@ -175,7 +175,7 @@ mod tests {
     #[test]
     fn event_data_and_recorded_event_helpers_work() {
         let event = JobEventData::new(JobEvent::job_removed("cleanup"));
-        assert_eq!(event.aggregate_id(), "cleanup");
+        assert_eq!(event.stream_id(), "cleanup");
         assert_eq!(event.event_type, "job_removed");
         assert_eq!(event.subject(), "cron.jobs.events.cleanup");
         assert_eq!(
@@ -193,7 +193,7 @@ mod tests {
             Some(9),
             chrono::DateTime::<chrono::Utc>::from_timestamp(1_700_000_000, 0).unwrap(),
         );
-        assert_eq!(recorded.aggregate_id(), "cleanup");
+        assert_eq!(recorded.stream_id(), "cleanup");
         assert_eq!(recorded.stream_id, "cron.jobs.events.cleanup");
         assert_eq!(recorded.log_position, Some(9));
         assert_eq!(recorded.subject(), "cron.jobs.events.cleanup");

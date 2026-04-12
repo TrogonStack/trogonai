@@ -3165,7 +3165,9 @@ dependencies = [
 name = "trogon-eventsourcing"
 version = "0.1.0"
 dependencies = [
+ "async-nats",
  "chrono",
+ "futures",
  "serde",
  "serde_json",
  "uuid",
