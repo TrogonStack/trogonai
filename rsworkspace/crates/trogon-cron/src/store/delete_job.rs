@@ -1,7 +1,7 @@
 #![cfg_attr(coverage, allow(dead_code, unused_imports))]
 
 use async_nats::jetstream::{self, context, kv};
-use trogon_eventsourcing::{Decide, Decision, NonEmpty, decide, load_snapshot};
+use trogon_eventsourcing::{Decide, Decision, NonEmpty, StreamCommand, decide, load_snapshot};
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream, JetStreamPublishMessage};
 
 use crate::{
@@ -19,16 +19,24 @@ pub struct DeleteJobCommand {
     pub write_condition: JobWriteCondition,
 }
 
+impl StreamCommand for DeleteJobCommand {
+    type StreamId = JobId;
+
+    fn stream_id(&self) -> &Self::StreamId {
+        &self.id
+    }
+}
+
 impl Decide<JobStreamState, JobEvent> for DeleteJobCommand {
     type Error = JobDecisionError;
 
     fn decide(state: &JobStreamState, command: &Self) -> Result<Decision<JobEvent>, Self::Error> {
         match state {
             JobStreamState::Initial => Err(JobDecisionError::MissingJobForRemoval {
-                id: command.id.clone(),
+                id: command.stream_id().clone(),
             }),
             JobStreamState::Present(_) => Ok(Decision::Event(NonEmpty::one(
-                JobEvent::job_removed(command.id.to_string()),
+                JobEvent::job_removed(command.stream_id().to_string()),
             ))),
         }
     }

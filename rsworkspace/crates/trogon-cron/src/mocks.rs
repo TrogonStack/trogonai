@@ -6,7 +6,7 @@ use std::sync::{
 
 use async_nats::jetstream::kv;
 use bytes::Bytes;
-use trogon_eventsourcing::{Decision, decide};
+use trogon_eventsourcing::{Decision, StreamCommand, decide};
 use trogon_nats::lease::{ReleaseLease, RenewLease, TryAcquireLease};
 
 use crate::{
@@ -157,8 +157,8 @@ impl MockConfigStore {
     pub async fn put_job(&self, command: PutJobCommand) -> Result<(), CronError> {
         let mut jobs = self.jobs.lock().unwrap();
         let mut stream_versions = self.stream_versions.lock().unwrap();
-        let current_snapshot = jobs.get(command.id().as_str()).cloned();
-        let current_version = stream_versions.get(command.id().as_str()).copied();
+        let current_snapshot = jobs.get(command.stream_id().as_str()).cloned();
+        let current_version = stream_versions.get(command.stream_id().as_str()).copied();
         let current_state = match current_snapshot.clone() {
             Some(snapshot) => JobStreamState::try_from(snapshot).map_err(|source| {
                 CronError::event_source(
@@ -171,7 +171,7 @@ impl MockConfigStore {
         let write_state = JobWriteState::new(current_version, current_snapshot.as_ref().is_some());
         command
             .write_condition()
-            .ensure(command.id().as_str(), write_state)?;
+            .ensure(command.stream_id().as_str(), write_state)?;
         let events = match decide(&current_state, &command) {
             Ok(Decision::Event(events)) => events,
             Ok(_) => {
@@ -182,7 +182,7 @@ impl MockConfigStore {
             }
             Err(JobDecisionError::CannotRegisterExistingJob { .. }) => {
                 return Err(CronError::OptimisticConcurrencyConflict {
-                    id: command.id().to_string(),
+                    id: command.stream_id().to_string(),
                     expected: command.write_condition(),
                     current_version,
                 });
@@ -204,13 +204,13 @@ impl MockConfigStore {
                 )
             })?;
         let next_version = current_version.unwrap_or(0) + 1;
-        stream_versions.insert(command.id().to_string(), next_version);
+        stream_versions.insert(command.stream_id().to_string(), next_version);
         match next_state.into_versioned_spec(next_version) {
             Some(snapshot) => {
-                jobs.insert(command.id().to_string(), snapshot);
+                jobs.insert(command.stream_id().to_string(), snapshot);
             }
             None => {
-                jobs.remove(command.id().as_str());
+                jobs.remove(command.stream_id().as_str());
             }
         }
         Ok(())
@@ -219,8 +219,8 @@ impl MockConfigStore {
     pub async fn set_job_state(&self, command: SetJobStateCommand) -> Result<(), CronError> {
         let mut jobs = self.jobs.lock().unwrap();
         let mut stream_versions = self.stream_versions.lock().unwrap();
-        let current_snapshot = jobs.get(command.id.as_str()).cloned();
-        let current_version = stream_versions.get(command.id.as_str()).copied();
+        let current_snapshot = jobs.get(command.stream_id().as_str()).cloned();
+        let current_version = stream_versions.get(command.stream_id().as_str()).copied();
         let current_state = match current_snapshot.clone() {
             Some(snapshot) => JobStreamState::try_from(snapshot).map_err(|source| {
                 CronError::event_source(
@@ -231,7 +231,7 @@ impl MockConfigStore {
             None => initial_state(),
         };
         command.write_condition.ensure(
-            command.id.as_str(),
+            command.stream_id().as_str(),
             JobWriteState::new(current_version, current_snapshot.as_ref().is_some()),
         )?;
         let events = match decide(&current_state, &command) {
@@ -244,12 +244,12 @@ impl MockConfigStore {
             }
             Err(JobDecisionError::MissingJobForStateChange { .. }) => {
                 return Err(CronError::JobNotFound {
-                    id: command.id.to_string(),
+                    id: command.stream_id().to_string(),
                 });
             }
             Err(JobDecisionError::StateAlreadySet { state, .. }) => {
                 return Err(CronError::JobStateAlreadySet {
-                    id: command.id.to_string(),
+                    id: command.stream_id().to_string(),
                     state,
                 });
             }
@@ -270,13 +270,13 @@ impl MockConfigStore {
                 )
             })?;
         let next_version = current_version.unwrap_or(0) + 1;
-        stream_versions.insert(command.id.to_string(), next_version);
+        stream_versions.insert(command.stream_id().to_string(), next_version);
         match next_state.into_versioned_spec(next_version) {
             Some(snapshot) => {
-                jobs.insert(command.id.to_string(), snapshot);
+                jobs.insert(command.stream_id().to_string(), snapshot);
             }
             None => {
-                jobs.remove(command.id.as_str());
+                jobs.remove(command.stream_id().as_str());
             }
         }
         Ok(())
@@ -286,14 +286,19 @@ impl MockConfigStore {
         &self,
         command: GetJobCommand,
     ) -> Result<Option<VersionedJobSpec>, CronError> {
-        Ok(self.jobs.lock().unwrap().get(command.id.as_str()).cloned())
+        Ok(self
+            .jobs
+            .lock()
+            .unwrap()
+            .get(command.stream_id().as_str())
+            .cloned())
     }
 
     pub async fn delete_job(&self, command: DeleteJobCommand) -> Result<(), CronError> {
         let mut jobs = self.jobs.lock().unwrap();
         let mut stream_versions = self.stream_versions.lock().unwrap();
-        let current_snapshot = jobs.get(command.id.as_str()).cloned();
-        let current_version = stream_versions.get(command.id.as_str()).copied();
+        let current_snapshot = jobs.get(command.stream_id().as_str()).cloned();
+        let current_version = stream_versions.get(command.stream_id().as_str()).copied();
         let current_state = match current_snapshot.clone() {
             Some(snapshot) => JobStreamState::try_from(snapshot).map_err(|source| {
                 CronError::event_source(
@@ -304,7 +309,7 @@ impl MockConfigStore {
             None => initial_state(),
         };
         command.write_condition.ensure(
-            command.id.as_str(),
+            command.stream_id().as_str(),
             JobWriteState::new(current_version, current_snapshot.as_ref().is_some()),
         )?;
         let events = match decide(&current_state, &command) {
@@ -317,7 +322,7 @@ impl MockConfigStore {
             }
             Err(JobDecisionError::MissingJobForRemoval { .. }) => {
                 return Err(CronError::JobNotFound {
-                    id: command.id.to_string(),
+                    id: command.stream_id().to_string(),
                 });
             }
             Err(error) => {
@@ -337,13 +342,13 @@ impl MockConfigStore {
                 )
             })?;
         let next_version = current_version.unwrap_or(0) + 1;
-        stream_versions.insert(command.id.to_string(), next_version);
+        stream_versions.insert(command.stream_id().to_string(), next_version);
         match next_state.into_versioned_spec(next_version) {
             Some(snapshot) => {
-                jobs.insert(command.id.to_string(), snapshot);
+                jobs.insert(command.stream_id().to_string(), snapshot);
             }
             None => {
-                jobs.remove(command.id.as_str());
+                jobs.remove(command.stream_id().as_str());
             }
         }
         Ok(())
