@@ -18,7 +18,7 @@ pub use config::{
     DeliverySpec, JobEnabledState, JobSpec, JobWriteCondition, SamplingSource, ScheduleSpec,
     VersionedJobSpec,
 };
-pub use domain::{ResolvedJobSpec, validate_job_spec};
+pub use domain::ResolvedJobSpec;
 pub use error::{CronError, JobSpecError};
 pub use events::{JobEvent, JobEventData, ProjectionChange, RecordedJobEvent};
 pub use job_id::{JobId, JobIdError};

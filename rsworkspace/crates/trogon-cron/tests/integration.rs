@@ -191,10 +191,7 @@ async fn controller_reconciles_one_time_job() {
 
     put_job(
         &store,
-        PutJobCommand {
-            spec: job,
-            write_condition: JobWriteCondition::MustNotExist,
-        },
+        PutJobCommand::new(job, JobWriteCondition::MustNotExist).unwrap(),
     )
     .await
     .unwrap();
@@ -236,10 +233,7 @@ async fn controller_reconciles_sampling_job() {
 
     put_job(
         &store,
-        PutJobCommand {
-            spec: job,
-            write_condition: JobWriteCondition::MustNotExist,
-        },
+        PutJobCommand::new(job, JobWriteCondition::MustNotExist).unwrap(),
     )
     .await
     .unwrap();
@@ -283,10 +277,7 @@ async fn controller_reconciles_cron_job_with_timezone() {
 
     put_job(
         &store,
-        PutJobCommand {
-            spec: job,
-            write_condition: JobWriteCondition::MustNotExist,
-        },
+        PutJobCommand::new(job, JobWriteCondition::MustNotExist).unwrap(),
     )
     .await
     .unwrap();
@@ -319,10 +310,7 @@ async fn disabling_job_removes_schedule_subject() {
     let job = base_job("disabled");
     put_job(
         &store,
-        PutJobCommand {
-            spec: job,
-            write_condition: JobWriteCondition::MustNotExist,
-        },
+        PutJobCommand::new(job, JobWriteCondition::MustNotExist).unwrap(),
     )
     .await
     .unwrap();
@@ -377,10 +365,7 @@ async fn removing_job_removes_schedule_subject() {
     let job = base_job("removed");
     put_job(
         &store,
-        PutJobCommand {
-            spec: job,
-            write_condition: JobWriteCondition::MustNotExist,
-        },
+        PutJobCommand::new(job, JobWriteCondition::MustNotExist).unwrap(),
     )
     .await
     .unwrap();
@@ -431,10 +416,7 @@ async fn event_store_rebuilds_current_state_for_new_client() {
 
     put_job(
         &store,
-        PutJobCommand {
-            spec: job,
-            write_condition: JobWriteCondition::MustNotExist,
-        },
+        PutJobCommand::new(job, JobWriteCondition::MustNotExist).unwrap(),
     )
     .await
     .unwrap();

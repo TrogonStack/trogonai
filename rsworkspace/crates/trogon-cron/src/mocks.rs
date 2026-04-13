@@ -11,7 +11,6 @@ use trogon_nats::lease::{ReleaseLease, RenewLease, TryAcquireLease};
 use crate::{
     config::{JobSpec, JobWriteState, VersionedJobSpec},
     domain::ResolvedJobSpec,
-    domain::validate_job_spec,
     error::CronError,
     store::{
         ConfigWatchStream, DeleteJobCommand, GetJobCommand, ListJobsCommand, LoadAndWatchCommand,
@@ -154,21 +153,19 @@ impl MockConfigStore {
     }
 
     pub async fn put_job(&self, command: PutJobCommand) -> Result<(), CronError> {
-        validate_job_spec(&command.spec)?;
+        let spec = command.job().spec().clone();
         let mut jobs = self.jobs.lock().unwrap();
         let mut stream_versions = self.stream_versions.lock().unwrap();
-        let current_version = stream_versions.get(&command.spec.id).copied();
-        let write_state = JobWriteState::new(current_version, jobs.contains_key(&command.spec.id));
-        command
-            .write_condition
-            .ensure(&command.spec.id, write_state)?;
+        let current_version = stream_versions.get(&spec.id).copied();
+        let write_state = JobWriteState::new(current_version, jobs.contains_key(&spec.id));
+        command.write_condition().ensure(&spec.id, write_state)?;
         let next_version = current_version.unwrap_or(0) + 1;
-        stream_versions.insert(command.spec.id.clone(), next_version);
+        stream_versions.insert(spec.id.clone(), next_version);
         jobs.insert(
-            command.spec.id.clone(),
+            spec.id.clone(),
             VersionedJobSpec {
                 version: next_version,
-                spec: command.spec,
+                spec,
             },
         );
         Ok(())
@@ -338,10 +335,9 @@ mod tests {
         assert_eq!(seeded.version, 1);
 
         store
-            .put_job(PutJobCommand {
-                spec: base_job("alpha"),
-                write_condition: JobWriteCondition::MustNotExist,
-            })
+            .put_job(
+                PutJobCommand::new(base_job("alpha"), JobWriteCondition::MustNotExist).unwrap(),
+            )
             .await
             .unwrap();
         let alpha = store
@@ -410,10 +406,9 @@ mod tests {
         );
 
         store
-            .put_job(PutJobCommand {
-                spec: base_job("alpha"),
-                write_condition: JobWriteCondition::MustNotExist,
-            })
+            .put_job(
+                PutJobCommand::new(base_job("alpha"), JobWriteCondition::MustNotExist).unwrap(),
+            )
             .await
             .unwrap();
         let re_registered = store
@@ -439,20 +434,14 @@ mod tests {
             }),
         };
 
-        let invalid_error = store
-            .put_job(PutJobCommand {
-                spec: invalid,
-                write_condition: JobWriteCondition::MustNotExist,
-            })
-            .await
-            .unwrap_err();
+        let invalid_error =
+            PutJobCommand::new(invalid, JobWriteCondition::MustNotExist).unwrap_err();
         assert!(invalid_error.to_string().contains("sampling source"));
 
         store
-            .put_job(PutJobCommand {
-                spec: base_job("alpha"),
-                write_condition: JobWriteCondition::MustNotExist,
-            })
+            .put_job(
+                PutJobCommand::new(base_job("alpha"), JobWriteCondition::MustNotExist).unwrap(),
+            )
             .await
             .unwrap();
         let stale_error = store

@@ -2,8 +2,7 @@ use async_nats::jetstream::{self, context, kv};
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream, JetStreamPublishMessage};
 
 use crate::{
-    JobSpec, JobWriteCondition,
-    domain::validate_job_spec,
+    JobSpec, JobWriteCondition, ResolvedJobSpec,
     error::CronError,
     events::{JobEvent, JobEventData},
 };
@@ -12,8 +11,25 @@ use super::append_events;
 
 #[derive(Debug, Clone)]
 pub struct PutJobCommand {
-    pub spec: JobSpec,
-    pub write_condition: JobWriteCondition,
+    job: ResolvedJobSpec,
+    write_condition: JobWriteCondition,
+}
+
+impl PutJobCommand {
+    pub fn new(spec: JobSpec, write_condition: JobWriteCondition) -> Result<Self, CronError> {
+        Ok(Self {
+            job: ResolvedJobSpec::try_from(&spec)?,
+            write_condition,
+        })
+    }
+
+    pub fn job(&self) -> &ResolvedJobSpec {
+        &self.job
+    }
+
+    pub const fn write_condition(&self) -> JobWriteCondition {
+        self.write_condition
+    }
 }
 
 pub async fn run<J>(js: &J, command: PutJobCommand) -> Result<(), CronError>
@@ -25,18 +41,12 @@ where
             AckFuture = context::PublishAckFuture,
         >,
 {
-    let PutJobCommand {
-        spec,
-        write_condition,
-    } = command;
-    let id = spec.id.clone();
-
-    validate_job_spec(&spec)?;
+    let id = command.job().id().to_string();
     append_events::run(
         js,
         &id,
-        write_condition,
-        JobEventData::new(JobEvent::job_registered(spec)),
+        command.write_condition(),
+        JobEventData::new(JobEvent::job_registered(command.job().spec().clone())),
     )
     .await
 }
