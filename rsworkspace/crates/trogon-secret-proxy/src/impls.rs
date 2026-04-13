@@ -1,6 +1,7 @@
 //! Concrete production implementations of the proxy traits.
 
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use async_nats::jetstream;
@@ -45,6 +46,31 @@ impl JetStreamPublisher for jetstream::Context {
             .await
             .map_err(|e| e.to_string())?;
         Ok(())
+    }
+}
+
+// ── Arc<T> forwarding impls ───────────────────────────────────────────────────
+
+impl<T: JetStreamPublisher> JetStreamPublisher for Arc<T> {
+    async fn publish_with_headers(
+        &self,
+        subject: String,
+        headers: async_nats::HeaderMap,
+        payload: Bytes,
+    ) -> Result<(), String> {
+        (**self).publish_with_headers(subject, headers, payload).await
+    }
+}
+
+impl<T: JetStreamConsumerClient> JetStreamConsumerClient for Arc<T> {
+    type Messages = T::Messages;
+
+    async fn get_messages(
+        &self,
+        stream_name: &str,
+        consumer_name: &str,
+    ) -> Result<Self::Messages, String> {
+        (**self).get_messages(stream_name, consumer_name).await
     }
 }
 
