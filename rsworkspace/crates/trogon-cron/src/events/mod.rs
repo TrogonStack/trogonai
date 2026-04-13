@@ -1,17 +1,17 @@
-use std::collections::BTreeMap;
-
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::{EventData, EventType, RecordedEvent, StreamEvent, SubjectEvent};
 
 use crate::{
-    config::{JobEnabledState, JobSpec, VersionedJobSpec},
-    error::CronError,
+    config::{JobEnabledState, JobSpec},
     kv::EVENTS_SUBJECT_PREFIX,
 };
 
 mod job_registered;
 mod job_removed;
 mod job_state_changed;
+mod state;
+
+pub use state::{JobStreamState, JobTransitionError, apply, initial_state, projection_change};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -70,39 +70,6 @@ impl JobEvent {
             Self::JobRemoved { id } => job_removed::job_id(id),
         }
     }
-
-    pub fn apply_to_state(
-        &self,
-        jobs: &mut BTreeMap<String, JobSpec>,
-    ) -> Result<ProjectionChange, CronError> {
-        match self {
-            Self::JobRegistered { spec } => job_registered::apply_to_state(spec, jobs),
-            Self::JobStateChanged { id, state } => {
-                job_state_changed::apply_to_state(id, *state, jobs)
-            }
-            Self::JobRemoved { id } => job_removed::apply_to_state(id, jobs),
-        }
-    }
-}
-
-pub fn apply_event_to_versioned_state(
-    jobs: &mut BTreeMap<String, VersionedJobSpec>,
-    event: &JobEvent,
-    version: u64,
-) -> Result<(), CronError> {
-    match event {
-        JobEvent::JobRegistered { spec } => {
-            job_registered::apply_to_versioned_state(spec, jobs, version)
-        }
-        JobEvent::JobStateChanged { id, state } => {
-            job_state_changed::apply_to_versioned_state(id, *state, jobs, version)
-        }
-        JobEvent::JobRemoved { id } => job_removed::apply_to_versioned_state(id, jobs),
-    }
-}
-
-pub(super) fn projection_invariant_error(context: &'static str, id: &str) -> CronError {
-    CronError::event_source(context, std::io::Error::other(format!("job '{id}'")))
 }
 
 #[cfg(test)]
@@ -110,7 +77,10 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
-    use crate::config::{DeliverySpec, ScheduleSpec};
+    use crate::{
+        JobId,
+        config::{DeliverySpec, ScheduleSpec},
+    };
 
     fn job(id: &str) -> JobSpec {
         JobSpec {
@@ -136,40 +106,47 @@ mod tests {
             JobEvent::job_removed("backup"),
             JobEvent::job_registered(job("backup")),
         ];
-        let mut jobs = BTreeMap::new();
+        let mut state = initial_state(JobId::parse("backup").unwrap());
 
         for event in events {
-            event.apply_to_state(&mut jobs).unwrap();
+            state = apply(state, event).unwrap();
         }
 
-        assert_eq!(jobs.into_values().collect::<Vec<_>>(), vec![job("backup")]);
+        assert_eq!(state, JobStreamState::Present(job("backup")));
     }
 
     #[test]
     fn state_change_requires_existing_job() {
-        let mut jobs = BTreeMap::new();
-        let error = JobEvent::job_state_changed("missing", JobEnabledState::Disabled)
-            .apply_to_state(&mut jobs)
-            .unwrap_err();
+        let error = apply(
+            initial_state(JobId::parse("missing").unwrap()),
+            JobEvent::job_state_changed("missing", JobEnabledState::Disabled),
+        )
+        .unwrap_err();
 
-        assert!(error.to_string().contains("missing job for state change"));
+        assert!(matches!(
+            error,
+            JobTransitionError::MissingJobForStateChange { .. }
+        ));
     }
 
     #[test]
-    fn versioned_projection_tracks_latest_sequence() {
-        let mut jobs = BTreeMap::new();
-        apply_event_to_versioned_state(&mut jobs, &JobEvent::job_registered(job("backup")), 4)
-            .unwrap();
-        apply_event_to_versioned_state(
-            &mut jobs,
-            &JobEvent::job_state_changed("backup", JobEnabledState::Disabled),
-            5,
+    fn projection_change_tracks_latest_state() {
+        let before = initial_state(JobId::parse("backup").unwrap());
+        let after = apply(before.clone(), JobEvent::job_registered(job("backup"))).unwrap();
+        assert_eq!(
+            projection_change(&before, &after),
+            Some(ProjectionChange::Upsert(job("backup")))
+        );
+
+        let updated = apply(
+            after.clone(),
+            JobEvent::job_state_changed("backup", JobEnabledState::Disabled),
         )
         .unwrap();
-
-        let projected = jobs.get("backup").unwrap();
-        assert_eq!(projected.version, 5);
-        assert_eq!(projected.spec.state, JobEnabledState::Disabled);
+        match projection_change(&after, &updated).unwrap() {
+            ProjectionChange::Upsert(job) => assert_eq!(job.state, JobEnabledState::Disabled),
+            ProjectionChange::Delete(_) => panic!("expected upsert change"),
+        }
     }
 
     #[test]
@@ -206,5 +183,41 @@ mod tests {
     fn invalid_payload_fails_decode() {
         assert!(JobEventData::decode(br#"not-json"#).is_err());
         assert!(RecordedJobEvent::decode(br#"not-json"#).is_err());
+    }
+
+    #[test]
+    fn initial_state_rejects_registering_existing_job() {
+        let error = apply(
+            JobStreamState::Present(job("backup")),
+            JobEvent::job_registered(job("backup")),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            JobTransitionError::CannotRegisterExistingJob { .. }
+        ));
+    }
+
+    #[test]
+    fn initial_state_rejects_missing_removal() {
+        let error = apply(
+            initial_state(JobId::parse("backup").unwrap()),
+            JobEvent::job_removed("backup"),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            JobTransitionError::MissingJobForRemoval { .. }
+        ));
+    }
+
+    #[test]
+    fn reducer_rejects_stream_id_mismatch() {
+        let error = apply(
+            initial_state(JobId::parse("backup").unwrap()),
+            JobEvent::job_removed("other"),
+        )
+        .unwrap_err();
+        assert!(matches!(error, JobTransitionError::StreamIdMismatch { .. }));
     }
 }

@@ -2,8 +2,11 @@ use std::{fmt, io::Read};
 
 use async_nats::jetstream::{self, context, kv};
 use trogon_cron::{
-    CronError, JobEvent, JobEventData, JobSpec, JobWriteCondition, ResolvedJobSpec, append_events,
+    CronError, JobEvent, JobEventData, JobId, JobSpec, JobStreamState, JobTransitionError,
+    JobWriteCondition, ResolvedJobSpec, SNAPSHOT_STORE_CONFIG, VersionedJobSpec, append_events,
+    apply, initial_state, open_snapshot_bucket,
 };
+use trogon_eventsourcing::load_snapshot;
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream, JetStreamPublishMessage};
 
 #[derive(Debug)]
@@ -16,6 +19,7 @@ pub enum CommandError {
     ReadStdin(std::io::Error),
     DeserializeJobSpec(serde_json::Error),
     InvalidJobSpec(CronError),
+    LoadJob(CronError),
     RegisterJob(CronError),
 }
 
@@ -25,6 +29,7 @@ impl fmt::Display for CommandError {
             Self::ReadStdin(source) => write!(f, "failed to read stdin: {source}"),
             Self::DeserializeJobSpec(source) => write!(f, "invalid job spec payload: {source}"),
             Self::InvalidJobSpec(source) => write!(f, "invalid job spec: {source}"),
+            Self::LoadJob(source) => write!(f, "failed to load current job state: {source}"),
             Self::RegisterJob(source) => write!(f, "failed to register job: {source}"),
         }
     }
@@ -36,6 +41,7 @@ impl std::error::Error for CommandError {
             Self::ReadStdin(source) => Some(source),
             Self::DeserializeJobSpec(source) => Some(source),
             Self::InvalidJobSpec(source) => Some(source),
+            Self::LoadJob(source) => Some(source),
             Self::RegisterJob(source) => Some(source),
         }
     }
@@ -69,11 +75,52 @@ where
         >,
 {
     let id = command.spec.id().to_string();
+    let bucket = open_snapshot_bucket(js)
+        .await
+        .map_err(CommandError::LoadJob)?;
+    let current_snapshot = load_snapshot::<VersionedJobSpec>(&bucket, SNAPSHOT_STORE_CONFIG, &id)
+        .await
+        .map_err(CronError::from)
+        .map_err(CommandError::LoadJob)?;
+    let current_state = match current_snapshot.clone() {
+        Some(snapshot) => JobStreamState::try_from(snapshot).map_err(|source| {
+            CommandError::LoadJob(CronError::event_source(
+                "failed to decode current job snapshot into stream state",
+                source,
+            ))
+        })?,
+        None => initial_state(JobId::parse(&id).map_err(|source| {
+            CommandError::LoadJob(CronError::event_source(
+                "failed to parse job id for registration command",
+                source,
+            ))
+        })?),
+    };
+    let event = JobEvent::job_registered(command.spec.spec().clone());
+    match apply(current_state, event.clone()) {
+        Ok(_) => {}
+        Err(JobTransitionError::CannotRegisterExistingJob { .. }) => {
+            return Err(CommandError::RegisterJob(
+                CronError::OptimisticConcurrencyConflict {
+                    id: id.clone(),
+                    expected: JobWriteCondition::MustNotExist,
+                    current_version: current_snapshot.as_ref().map(|job| job.version),
+                },
+            ));
+        }
+        Err(error) => {
+            return Err(CommandError::RegisterJob(CronError::event_source(
+                "failed to apply job registration to current stream state",
+                error,
+            )));
+        }
+    }
+
     append_events(
         js,
         &id,
         JobWriteCondition::MustNotExist,
-        JobEventData::new(JobEvent::job_registered(command.spec.spec().clone())),
+        JobEventData::new(event),
     )
     .await
     .map_err(CommandError::RegisterJob)?;
