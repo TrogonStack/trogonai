@@ -1793,4 +1793,324 @@ mod tests {
         assert!(tools.is_empty(), "no tools expected when list_tools fails");
         assert!(dispatch.is_empty(), "no dispatch entries expected");
     }
+
+    // ── prepare_agent_with_promise ────────────────────────────────────────────
+
+    fn make_empty_store() -> Arc<dyn crate::promise_store::PromiseRepository> {
+        Arc::new(crate::promise_store::mock::MockPromiseStore::new())
+    }
+
+    fn make_store_with(
+        promise: crate::promise_store::AgentPromise,
+    ) -> Arc<crate::promise_store::mock::MockPromiseStore> {
+        let store = Arc::new(crate::promise_store::mock::MockPromiseStore::new());
+        store.insert_promise(promise);
+        store
+    }
+
+    fn sample_promise(id: &str, status: crate::promise_store::PromiseStatus) -> crate::promise_store::AgentPromise {
+        crate::promise_store::AgentPromise {
+            id: id.to_string(),
+            tenant_id: "acme".to_string(),
+            automation_id: String::new(),
+            status,
+            messages: vec![],
+            iteration: 0,
+            worker_id: "old-worker".to_string(),
+            claimed_at: 0,
+            trigger: serde_json::Value::Null,
+            nats_subject: "github.pull_request".to_string(),
+            system_prompt: None,
+        }
+    }
+
+    /// When no promise exists for a new trigger, `prepare_agent_with_promise`
+    /// creates one in KV (`Running`) and returns an `AgentLoop` wired with the
+    /// store and promise ID.
+    #[tokio::test]
+    async fn prepare_agent_creates_promise_when_none_exists() {
+        let store = make_empty_store();
+        let agent = make_agent("http://127.0.0.1:1");
+
+        let result = super::prepare_agent_with_promise(
+            &agent,
+            &store,
+            "acme",
+            "p-new",
+            "",
+            "github.pull_request",
+            &serde_json::json!({}),
+        )
+        .await;
+
+        assert!(result.is_some(), "must return an agent for a new promise");
+        // The returned agent must be wired with the promise.
+        let returned = result.unwrap();
+        assert_eq!(returned.promise_id.as_deref(), Some("p-new"));
+
+        // A Running promise must have been created in KV.
+        let (p, _) = store.get_promise("acme", "p-new").await.unwrap().unwrap();
+        assert_eq!(p.status, crate::promise_store::PromiseStatus::Running);
+        assert_eq!(p.id, "p-new");
+    }
+
+    /// When an existing `Running` promise is found, the runner CAS-claims it
+    /// (updating `worker_id` and `claimed_at`) and returns an agent wired with
+    /// the store so recovery can resume from the checkpoint.
+    #[tokio::test]
+    async fn prepare_agent_claims_running_promise() {
+        use crate::promise_store::PromiseRepository;
+
+        let store = make_store_with(sample_promise("p1", crate::promise_store::PromiseStatus::Running));
+        let agent = make_agent("http://127.0.0.1:1");
+
+        let result = super::prepare_agent_with_promise(
+            &agent,
+            &(Arc::clone(&store) as Arc<dyn crate::promise_store::PromiseRepository>),
+            "acme",
+            "p1",
+            "",
+            "github.pull_request",
+            &serde_json::json!({}),
+        )
+        .await;
+
+        assert!(result.is_some(), "must return agent for a Running promise");
+
+        // worker_id must have been updated (CAS claim happened).
+        let (p, _) = store.get_promise("acme", "p1").await.unwrap().unwrap();
+        assert_ne!(p.worker_id, "old-worker", "worker_id must be updated by the CAS claim");
+    }
+
+    /// A `Resolved` promise means the run already completed. The function must
+    /// return `None` so the caller acks the NATS message without re-running —
+    /// avoiding duplicate LLM calls and tool side-effects.
+    #[tokio::test]
+    async fn prepare_agent_returns_none_for_resolved_promise() {
+        let store = make_store_with(sample_promise("p1", crate::promise_store::PromiseStatus::Resolved));
+        let agent = make_agent("http://127.0.0.1:1");
+
+        let result = super::prepare_agent_with_promise(
+            &agent,
+            &(Arc::clone(&store) as Arc<dyn crate::promise_store::PromiseRepository>),
+            "acme",
+            "p1",
+            "",
+            "github.pull_request",
+            &serde_json::json!({}),
+        )
+        .await;
+
+        assert!(result.is_none(), "must return None for Resolved promise — caller acks without re-running");
+    }
+
+    /// When the CAS claim of a `Running` promise fails (another worker claimed
+    /// it first), `prepare_agent_with_promise` returns `None` so this worker
+    /// skips the run and avoids concurrent execution.
+    #[tokio::test]
+    async fn prepare_agent_returns_none_on_cas_claim_conflict() {
+        let store = Arc::new(crate::promise_store::mock::CasConflictOnceStore::new());
+        store.inner.insert_promise(sample_promise("p1", crate::promise_store::PromiseStatus::Running));
+        let agent = make_agent("http://127.0.0.1:1");
+
+        let result = super::prepare_agent_with_promise(
+            &agent,
+            &(Arc::clone(&store) as Arc<dyn crate::promise_store::PromiseRepository>),
+            "acme",
+            "p1",
+            "",
+            "github.pull_request",
+            &serde_json::json!({}),
+        )
+        .await;
+
+        assert!(
+            result.is_none(),
+            "must return None when CAS claim fails — another worker already owns the run"
+        );
+    }
+
+    /// A `PermanentFailed` promise must be treated identically to `Resolved`:
+    /// return `None` so the caller acks without re-running. Retrying a
+    /// deterministic failure (e.g. max_tokens) would always produce the same
+    /// outcome and waste Anthropic credits.
+    #[tokio::test]
+    async fn prepare_agent_returns_none_for_permanent_failed_promise() {
+        let store = make_store_with(sample_promise(
+            "p1",
+            crate::promise_store::PromiseStatus::PermanentFailed,
+        ));
+        let agent = make_agent("http://127.0.0.1:1");
+
+        let result = super::prepare_agent_with_promise(
+            &agent,
+            &(Arc::clone(&store) as Arc<dyn crate::promise_store::PromiseRepository>),
+            "acme",
+            "p1",
+            "",
+            "github.pull_request",
+            &serde_json::json!({}),
+        )
+        .await;
+
+        assert!(
+            result.is_none(),
+            "must return None for PermanentFailed promise — same as Resolved, never re-run"
+        );
+    }
+
+    /// A `Failed` promise (transient error) must be re-claimed and resumed,
+    /// not skipped. `Failed` means "retry makes sense" — NATS redelivered the
+    /// message after a transient failure and this worker should take over.
+    #[tokio::test]
+    async fn prepare_agent_claims_failed_promise_for_retry() {
+        use crate::promise_store::PromiseRepository;
+
+        let store = make_store_with(sample_promise(
+            "p1",
+            crate::promise_store::PromiseStatus::Failed,
+        ));
+        let agent = make_agent("http://127.0.0.1:1");
+
+        let result = super::prepare_agent_with_promise(
+            &agent,
+            &(Arc::clone(&store) as Arc<dyn crate::promise_store::PromiseRepository>),
+            "acme",
+            "p1",
+            "",
+            "github.pull_request",
+            &serde_json::json!({}),
+        )
+        .await;
+
+        assert!(result.is_some(), "must return agent for a Failed promise — transient error, retry is valid");
+
+        // Promise must be re-claimed (worker_id updated, status reset to Running).
+        let (p, _) = store.get_promise("acme", "p1").await.unwrap().unwrap();
+        assert_eq!(
+            p.status,
+            crate::promise_store::PromiseStatus::Running,
+            "Failed promise must be reset to Running on re-claim"
+        );
+        assert_ne!(p.worker_id, "old-worker", "worker_id must be updated by the re-claim");
+    }
+
+    // ── prepare_agent timeout / error paths ───────────────────────────────────
+
+    /// When the initial `get_promise` KV call times out, the function must
+    /// log a warning and return `Some(original_agent)` — the original agent
+    /// without `promise_store` or `promise_id` wired so the run proceeds
+    /// without durability rather than blocking indefinitely.
+    #[tokio::test(start_paused = true)]
+    async fn prepare_agent_get_promise_timeout_returns_agent_without_durability() {
+        use crate::promise_store::mock::HangingGetPromiseStore;
+        use crate::promise_store::PromiseRepository;
+        use std::time::Duration;
+
+        let store = Arc::new(HangingGetPromiseStore::new());
+        let store_arc = Arc::clone(&store) as Arc<dyn PromiseRepository>;
+        let agent = make_agent("http://127.0.0.1:1");
+        let trigger = serde_json::json!({});
+
+        let (result, _) = tokio::join!(
+            super::prepare_agent_with_promise(
+                &agent,
+                &store_arc,
+                "acme",
+                "p1",
+                "",
+                "github.pull_request",
+                &trigger,
+            ),
+            tokio::time::advance(
+                crate::agent_loop::NATS_KV_TIMEOUT + Duration::from_millis(1)
+            ),
+        );
+
+        let returned = result.expect("must return Some(agent) when get_promise times out");
+        assert!(
+            returned.promise_id.is_none(),
+            "returned agent must have no promise_id — run proceeds without durability on timeout"
+        );
+        assert!(
+            returned.promise_store.is_none(),
+            "returned agent must have no promise_store — run proceeds without durability on timeout"
+        );
+    }
+
+    /// When the CAS claim `update_promise` call times out, the function must
+    /// return `None` — this worker cannot safely own the promise, so the run
+    /// is skipped to avoid concurrent execution with another worker.
+    #[tokio::test(start_paused = true)]
+    async fn prepare_agent_cas_claim_timeout_returns_none() {
+        use crate::promise_store::mock::HangingUpdateStore;
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+        use std::time::Duration;
+
+        let store = Arc::new(HangingUpdateStore::new());
+        store
+            .inner
+            .insert_promise(sample_promise("p1", PromiseStatus::Running));
+        let store_arc = Arc::clone(&store) as Arc<dyn PromiseRepository>;
+        let agent = make_agent("http://127.0.0.1:1");
+        let trigger = serde_json::json!({});
+
+        let (result, _) = tokio::join!(
+            super::prepare_agent_with_promise(
+                &agent,
+                &store_arc,
+                "acme",
+                "p1",
+                "",
+                "github.pull_request",
+                &trigger,
+            ),
+            tokio::time::advance(
+                crate::agent_loop::NATS_KV_TIMEOUT + Duration::from_millis(1)
+            ),
+        );
+
+        assert!(
+            result.is_none(),
+            "must return None when the CAS claim update_promise times out"
+        );
+    }
+
+    /// When `get_promise` returns an immediate `Err`, the function must log a
+    /// warning and return `Some(original_agent)` without durability fields —
+    /// the run proceeds as non-durable rather than aborting.
+    ///
+    /// Distinct from the timeout path (which hits the outer `Err(_)` arm of
+    /// `tokio::time::timeout`); this hits the inner `Err(e)` arm of the
+    /// `match get_result` block.
+    #[tokio::test]
+    async fn prepare_agent_get_promise_error_returns_agent_without_durability() {
+        use crate::promise_store::mock::ErrorGetPromiseStore;
+        use crate::promise_store::PromiseRepository;
+
+        let store = Arc::new(ErrorGetPromiseStore::new());
+        let store_arc = Arc::clone(&store) as Arc<dyn PromiseRepository>;
+        let agent = make_agent("http://127.0.0.1:1");
+
+        let result = super::prepare_agent_with_promise(
+            &agent,
+            &store_arc,
+            "acme",
+            "p1",
+            "",
+            "github.pull_request",
+            &serde_json::json!({}),
+        )
+        .await;
+
+        let returned = result.expect("must return Some(agent) when get_promise errors");
+        assert!(
+            returned.promise_id.is_none(),
+            "returned agent must have no promise_id — run proceeds without durability on error"
+        );
+        assert!(
+            returned.promise_store.is_none(),
+            "returned agent must have no promise_store — run proceeds without durability on error"
+        );
+    }
 }
