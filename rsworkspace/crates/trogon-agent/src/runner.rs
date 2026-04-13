@@ -4485,4 +4485,687 @@ mod tests {
             "unknown-subject update_promise timeout → promise stays Running"
         );
     }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Real NATS KV integration tests
+    //
+    // All tests below use a real NATS JetStream container (via testcontainers)
+    // and the real `PromiseStore` implementation — no mocks.
+    // ══════════════════════════════════════════════════════════════════════════
+
+    /// Start a throwaway NATS container and open a real `PromiseStore`,
+    /// `AutomationStore`, `RunStore`, and a raw `JetStream` context (needed for
+    /// the `spawn_heartbeat` stream setup).
+    ///
+    /// Returns the stores and an opaque drop guard — keep the guard alive for
+    /// the duration of the test or the container will be stopped.
+    async fn make_all_stores_with_promise() -> (
+        Arc<crate::promise_store::PromiseStore>,
+        Arc<trogon_automations::AutomationStore>,
+        Arc<trogon_automations::RunStore>,
+        async_nats::jetstream::Context,
+        impl Drop,
+    ) {
+        use testcontainers_modules::{
+            nats::Nats,
+            testcontainers::{ImageExt, runners::AsyncRunner},
+        };
+        let container = Nats::default()
+            .with_cmd(["--jetstream"])
+            .start()
+            .await
+            .expect("NATS container");
+        let port = container.get_host_port_ipv4(4222).await.expect("NATS port");
+        let nats = async_nats::connect(format!("nats://127.0.0.1:{port}"))
+            .await
+            .expect("NATS connect");
+        let js = async_nats::jetstream::new(nats);
+        let promise_store = Arc::new(
+            crate::promise_store::PromiseStore::open(&js)
+                .await
+                .expect("PromiseStore::open"),
+        );
+        let auto_store = Arc::new(
+            trogon_automations::AutomationStore::open(&js)
+                .await
+                .expect("AutomationStore"),
+        );
+        let run_store = Arc::new(
+            trogon_automations::RunStore::open(&js)
+                .await
+                .expect("RunStore"),
+        );
+        (promise_store, auto_store, run_store, js, container)
+    }
+
+    // ── prepare_agent_with_promise (real KV) ─────────────────────────────────
+
+    /// A new trigger (no prior KV entry) must cause `prepare_agent_with_promise`
+    /// to create a `Running` promise in real NATS KV and return a wired agent.
+    #[tokio::test]
+    async fn real_kv_prepare_agent_creates_promise() {
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+
+        let (ps, _, _, _, _c) = make_all_stores_with_promise().await;
+        let promise_repo: Arc<dyn PromiseRepository> = ps.clone();
+        let agent = make_agent("http://127.0.0.1:1");
+
+        let result = super::prepare_agent_with_promise(
+            &agent,
+            &promise_repo,
+            "test",
+            "p-real-new",
+            "",
+            "github.pull_request",
+            &serde_json::json!({}),
+        )
+        .await;
+
+        assert!(result.is_some(), "must return an agent for a new promise");
+        assert_eq!(
+            result.unwrap().promise_id.as_deref(),
+            Some("p-real-new"),
+            "returned agent must be wired with the promise id"
+        );
+
+        let (p, _) = ps
+            .get_promise("test", "p-real-new")
+            .await
+            .unwrap()
+            .expect("promise must exist in real KV after creation");
+        assert_eq!(p.status, PromiseStatus::Running);
+        assert_eq!(p.nats_subject, "github.pull_request");
+        assert_eq!(p.tenant_id, "test");
+    }
+
+    /// An existing `Running` promise must be CAS-claimed: `worker_id` is
+    /// replaced with the current worker's id and written back to real KV.
+    #[tokio::test]
+    async fn real_kv_prepare_agent_cas_claims_running_promise() {
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+
+        let (ps, _, _, _, _c) = make_all_stores_with_promise().await;
+
+        // Pre-insert a Running promise that appears to belong to a crashed worker.
+        let mut p = sample_promise("p-real-run", PromiseStatus::Running);
+        p.tenant_id = "test".to_string();
+        p.worker_id = "crashed-worker".to_string();
+        ps.put_promise(&p).await.unwrap();
+
+        let promise_repo: Arc<dyn PromiseRepository> = ps.clone();
+        let agent = make_agent("http://127.0.0.1:1");
+
+        let result = super::prepare_agent_with_promise(
+            &agent,
+            &promise_repo,
+            "test",
+            "p-real-run",
+            "",
+            "github.pull_request",
+            &serde_json::json!({}),
+        )
+        .await;
+
+        assert!(result.is_some(), "must return agent when claiming a Running promise");
+
+        // KV must reflect the CAS claim: worker_id must have changed.
+        let (claimed, _) = ps
+            .get_promise("test", "p-real-run")
+            .await
+            .unwrap()
+            .expect("promise must still exist after CAS claim");
+        assert_ne!(
+            claimed.worker_id, "crashed-worker",
+            "worker_id must be updated by the CAS claim"
+        );
+        assert_eq!(
+            claimed.status,
+            PromiseStatus::Running,
+            "status must remain Running after claim"
+        );
+    }
+
+    /// A `Resolved` promise must cause `prepare_agent_with_promise` to return
+    /// `None` — NATS redelivered the trigger but the run already completed.
+    #[tokio::test]
+    async fn real_kv_prepare_agent_skips_resolved_promise() {
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+
+        let (ps, _, _, _, _c) = make_all_stores_with_promise().await;
+
+        let mut p = sample_promise("p-real-res", PromiseStatus::Resolved);
+        p.tenant_id = "test".to_string();
+        ps.put_promise(&p).await.unwrap();
+
+        let promise_repo: Arc<dyn PromiseRepository> = ps.clone();
+        let agent = make_agent("http://127.0.0.1:1");
+
+        let result = super::prepare_agent_with_promise(
+            &agent,
+            &promise_repo,
+            "test",
+            "p-real-res",
+            "",
+            "github.pull_request",
+            &serde_json::json!({}),
+        )
+        .await;
+
+        assert!(
+            result.is_none(),
+            "Resolved promise must return None — no re-run on NATS redelivery"
+        );
+    }
+
+    // ── dispatch_automations (real KV) ────────────────────────────────────────
+
+    /// A successful automation run must leave the promise `Resolved` in real
+    /// NATS KV.  Verifies the full write path: create promise → run agent →
+    /// mark terminal status.
+    #[tokio::test]
+    async fn real_kv_dispatch_automations_resolves_promise() {
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+
+        let server = httpmock::MockServer::start_async().await;
+        server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(serde_json::json!({
+                    "stop_reason": "end_turn",
+                    "content": [{"type": "text", "text": "done"}]
+                }));
+        });
+
+        let (ps, _, run_store, _, _c) = make_all_stores_with_promise().await;
+        let promise_repo: Arc<dyn PromiseRepository> = ps.clone();
+        let agent = make_agent(&server.base_url());
+
+        let mut auto = make_automation("real-dispatch-auto");
+        auto.tenant_id = agent.tenant_id.clone(); // "test"
+
+        let payload = bytes::Bytes::from_static(b"{}");
+
+        dispatch_automations(
+            &agent,
+            &run_store,
+            &promise_repo,
+            "github.42",
+            vec![auto.clone()],
+            "github.push",
+            &payload,
+        )
+        .await;
+
+        // dispatch_automations constructs promise_id as "{prefix}.{auto.id}".
+        let promise_id = format!("github.42.{}", auto.id);
+        let (p, _) = ps
+            .get_promise(&agent.tenant_id, &promise_id)
+            .await
+            .unwrap()
+            .expect("promise must exist in real KV after dispatch");
+        assert_eq!(
+            p.status,
+            PromiseStatus::Resolved,
+            "successful run must mark promise Resolved in real KV; got {:?}",
+            p.status
+        );
+    }
+
+    // ── recover_stale_promises (real KV) ─────────────────────────────────────
+
+    /// A stale `Running` promise for an existing automation must be recovered:
+    /// the agent runs against real KV and the promise is marked `Resolved`.
+    #[tokio::test]
+    async fn real_kv_recover_stale_resolves_automation() {
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+
+        let server = httpmock::MockServer::start_async().await;
+        server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(serde_json::json!({
+                    "stop_reason": "end_turn",
+                    "content": [{"type": "text", "text": "recovered"}]
+                }));
+        });
+
+        let (ps, auto_store, run_store, _, _c) = make_all_stores_with_promise().await;
+        let agent = make_agent(&server.base_url());
+
+        let mut auto = make_automation("stale-auto");
+        auto.tenant_id = agent.tenant_id.clone();
+        auto_store.put(&auto).await.expect("put automation");
+
+        // Stale promise: Running, claimed 20 minutes ago, automation_id matches.
+        let mut stale = make_stale_promise("stale.auto-id");
+        stale.tenant_id = agent.tenant_id.clone();
+        stale.automation_id = auto.id.clone();
+        stale.nats_subject = "github.push".to_string();
+
+        let promise_repo: Arc<dyn PromiseRepository> = ps.clone();
+        promise_repo.put_promise(&stale).await.unwrap();
+
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_repo,
+            &auto_store,
+            &run_store,
+            &agent.tenant_id,
+        )
+        .await
+        .expect("must return a handle when stale promises exist");
+        handle.await.expect("recovery task must not panic");
+
+        let (p, _) = ps
+            .get_promise(&agent.tenant_id, &stale.id)
+            .await
+            .unwrap()
+            .expect("promise must still exist after recovery");
+        assert_eq!(
+            p.status,
+            PromiseStatus::Resolved,
+            "recovered automation run must mark promise Resolved; got {:?}",
+            p.status
+        );
+    }
+
+    // ── Crash-and-recovery simulation ─────────────────────────────────────────
+
+    /// THE key durability test.
+    ///
+    /// **Scenario:** Worker A ran turn 1 of an automation and wrote a checkpoint
+    /// (`iteration = 1`, `messages = [user_msg, assistant_turn1]`) to real NATS
+    /// KV.  Worker A then crashed.  Worker B starts, finds the stale promise via
+    /// `recover_stale_promises`, and must resume from the checkpoint rather than
+    /// restarting from scratch.
+    ///
+    /// **Discriminator:** the Anthropic mock only matches requests whose body
+    /// contains `"already did step one"` — the text from the checkpoint's
+    /// assistant message.  If recovery resumes correctly the body carries the
+    /// full message history, the mock is hit exactly once, and the promise ends
+    /// up `Resolved`.  If recovery restarted from scratch the body would only
+    /// carry the trigger and the mock would not match — causing an HTTP error,
+    /// a `Failed` promise, and assertion failures.
+    #[tokio::test]
+    async fn real_kv_recovery_resumes_from_checkpoint_not_from_scratch() {
+        use crate::agent_loop::{ContentBlock, Message};
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+
+        let server = httpmock::MockServer::start_async().await;
+        let mock = server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages")
+                .body_contains("already did step one");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(serde_json::json!({
+                    "stop_reason": "end_turn",
+                    "content": [{"type": "text", "text": "recovery confirmed"}]
+                }));
+        });
+
+        let (ps, auto_store, run_store, _, _c) = make_all_stores_with_promise().await;
+
+        // Use max_iterations = 2 so the recovered run can make one more call.
+        let agent = {
+            let mut a = (*make_agent(&server.base_url())).clone();
+            a.max_iterations = 2;
+            Arc::new(a)
+        };
+
+        let mut auto = make_automation("crash-auto");
+        auto.tenant_id = agent.tenant_id.clone();
+        auto_store.put(&auto).await.expect("put automation");
+
+        // Checkpoint written by worker A before it crashed:
+        // – iteration = 1: one LLM turn already completed.
+        // – messages: the full conversation history up to that turn.
+        let promise_id = format!("crash.{}", auto.id);
+        let stale = crate::promise_store::AgentPromise {
+            id: promise_id.clone(),
+            tenant_id: agent.tenant_id.clone(),
+            automation_id: auto.id.clone(),
+            status: PromiseStatus::Running,
+            messages: vec![
+                Message::user_text("run the automation"),
+                Message::assistant(vec![ContentBlock::Text {
+                    text: "already did step one".to_string(),
+                }]),
+            ],
+            iteration: 1,
+            worker_id: "crashed-worker-a".to_string(),
+            claimed_at: trogon_automations::now_unix().saturating_sub(20 * 60),
+            trigger: serde_json::json!({}),
+            nats_subject: "github.push".to_string(),
+            system_prompt: None,
+        };
+
+        let promise_repo: Arc<dyn PromiseRepository> = ps.clone();
+        promise_repo.put_promise(&stale).await.unwrap();
+
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_repo,
+            &auto_store,
+            &run_store,
+            &agent.tenant_id,
+        )
+        .await
+        .expect("must return a handle for the stale promise");
+        handle.await.expect("recovery task must not panic");
+
+        // The mock must have been hit exactly once with the checkpoint messages
+        // in the body — proving worker B resumed rather than restarted.
+        mock.assert_hits_async(1).await;
+
+        // The promise must be Resolved in real NATS KV.
+        let (p, _) = ps
+            .get_promise(&agent.tenant_id, &promise_id)
+            .await
+            .unwrap()
+            .expect("promise must still exist in real KV after crash-and-recovery");
+        assert_eq!(
+            p.status,
+            PromiseStatus::Resolved,
+            "promise must be Resolved after successful crash-and-recovery; got {:?}",
+            p.status
+        );
+    }
+
+    // ── spawn_heartbeat (real JetStream) ──────────────────────────────────────
+
+    /// `spawn_heartbeat` must return a non-finished `JoinHandle` and terminate
+    /// cleanly when aborted.
+    ///
+    /// Also verifies that `AckKind::Progress` succeeds on a real JetStream
+    /// message — the underlying call that every heartbeat tick makes.
+    #[tokio::test]
+    async fn spawn_heartbeat_sends_progress_ack_and_aborts_cleanly() {
+        use async_nats::jetstream::{AckKind, consumer::{AckPolicy, pull}};
+        use futures_util::StreamExt as _;
+        use std::time::Duration;
+
+        let (_, _, _, js, _c) = make_all_stores_with_promise().await;
+
+        // Create a minimal stream for the heartbeat test.
+        js.get_or_create_stream(async_nats::jetstream::stream::Config {
+            name: "HB_TEST".to_string(),
+            subjects: vec!["hb.>".to_string()],
+            ..Default::default()
+        })
+        .await
+        .expect("create HB_TEST stream");
+
+        // Publish one message so a consumer can fetch it.
+        js.publish("hb.tick", bytes::Bytes::from_static(b"{}"))
+            .await
+            .expect("publish")
+            .await
+            .expect("server ack");
+
+        // Create a pull consumer with explicit acks and a generous ack_wait.
+        let stream = js.get_stream("HB_TEST").await.expect("get stream");
+        let consumer: async_nats::jetstream::consumer::Consumer<pull::Config> = stream
+            .get_or_create_consumer(
+                "hb-consumer",
+                pull::Config {
+                    durable_name: Some("hb-consumer".to_string()),
+                    ack_policy: AckPolicy::Explicit,
+                    ack_wait: Duration::from_secs(30),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("create consumer");
+
+        let mut messages = consumer.messages().await.expect("messages stream");
+        let msg = messages.next().await.unwrap().unwrap();
+
+        // Directly verify that `AckKind::Progress` works on a real JetStream
+        // message — this is the exact call that spawn_heartbeat makes in its loop.
+        msg.ack_with(AckKind::Progress)
+            .await
+            .expect("AckKind::Progress must succeed on a real JetStream message");
+
+        // Start the heartbeat task.  The first actual Progress ack from the task
+        // is sent after HEARTBEAT_INTERVAL_SECS (15 s); we don't wait that long.
+        // We only verify the task lifecycle: starts running, aborts cleanly.
+        let handle = super::spawn_heartbeat(msg);
+        assert!(
+            !handle.is_finished(),
+            "heartbeat task must be running immediately after spawn"
+        );
+
+        // Abort — simulates the handler completing before the next tick.
+        handle.abort();
+
+        // Join with a short timeout to confirm the task terminates promptly.
+        let outcome = tokio::time::timeout(Duration::from_millis(200), handle)
+            .await
+            .expect("heartbeat task must terminate within 200 ms of abort");
+
+        assert!(
+            outcome.unwrap_err().is_cancelled(),
+            "aborted heartbeat task must return a cancellation JoinError"
+        );
+    }
+
+    // ── CAS race: concurrent claims (real NATS KV) ────────────────────────────
+
+    /// When two workers hold the same KV revision and simultaneously attempt
+    /// to `update_promise`, exactly one must succeed and the other must receive
+    /// a CAS conflict error.
+    ///
+    /// The test reads the initial revision once (guaranteeing both workers
+    /// share the same `rev`), then races two `update_promise` calls via
+    /// `tokio::join!`. NATS KV's atomic revision check ensures at-most-one
+    /// winner — this test verifies that the real NATS server enforces the
+    /// invariant that `prepare_agent_with_promise` depends on.
+    #[tokio::test]
+    async fn real_kv_concurrent_update_promise_cas_only_one_winner() {
+        use crate::promise_store::{AgentPromise, PromiseRepository, PromiseStatus};
+
+        let (ps, _, _, _, _c) = make_all_stores_with_promise().await;
+        let promise_repo: Arc<dyn PromiseRepository> = ps.clone();
+
+        // Insert the initial promise and capture its revision.
+        let initial = AgentPromise {
+            id: "race-p".to_string(),
+            tenant_id: "test".to_string(),
+            automation_id: "race-auto".to_string(),
+            status: PromiseStatus::Running,
+            messages: vec![],
+            iteration: 0,
+            worker_id: "crashed-worker".to_string(),
+            claimed_at: trogon_automations::now_unix().saturating_sub(5 * 60),
+            trigger: serde_json::json!({}),
+            nats_subject: "github.push".to_string(),
+            system_prompt: None,
+        };
+        promise_repo.put_promise(&initial).await.unwrap();
+        let (_, initial_rev) = promise_repo
+            .get_promise("test", "race-p")
+            .await
+            .unwrap()
+            .expect("promise must exist after put");
+
+        // Both workers build their own claimed version from the shared revision.
+        let mut claimed1 = initial.clone();
+        claimed1.worker_id = "worker-1".to_string();
+        let mut claimed2 = initial.clone();
+        claimed2.worker_id = "worker-2".to_string();
+
+        let pr1: Arc<dyn PromiseRepository> = ps.clone();
+        let pr2: Arc<dyn PromiseRepository> = ps.clone();
+
+        // Both race with the SAME revision — exactly one CAS update must succeed.
+        let (r1, r2) = tokio::join!(
+            pr1.update_promise("test", "race-p", &claimed1, initial_rev),
+            pr2.update_promise("test", "race-p", &claimed2, initial_rev),
+        );
+
+        let wins = [r1.is_ok(), r2.is_ok()];
+        assert_eq!(
+            wins.iter().filter(|&&w| w).count(),
+            1,
+            "exactly one CAS update must succeed when both use the same revision; got {:?}",
+            wins
+        );
+
+        // The KV entry must reflect the winner's worker_id.
+        let (final_p, _) = promise_repo
+            .get_promise("test", "race-p")
+            .await
+            .unwrap()
+            .expect("promise must still exist after the race");
+        let winner = if r1.is_ok() { "worker-1" } else { "worker-2" };
+        assert_eq!(
+            final_p.worker_id, winner,
+            "KV must reflect the winning worker's claim"
+        );
+    }
+
+    // ── Batch stale-promise recovery (real NATS KV) ───────────────────────────
+
+    /// `recover_stale_promises` must recover ALL stale promises sequentially,
+    /// not just the first one.
+    ///
+    /// Inserts 3 stale automations and their corresponding stale Running
+    /// promises into real NATS KV, then calls `recover_stale_promises` and
+    /// verifies every promise ends up `Resolved` after the recovery task
+    /// completes. This test catches any early-exit bugs (e.g., `return` instead
+    /// of `continue` inside the recovery loop).
+    #[tokio::test]
+    async fn real_kv_recover_three_stale_promises_all_resolved() {
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+
+        let server = httpmock::MockServer::start_async().await;
+        server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(serde_json::json!({
+                    "stop_reason": "end_turn",
+                    "content": [{"type": "text", "text": "recovered"}]
+                }));
+        });
+
+        let (ps, auto_store, run_store, _, _c) = make_all_stores_with_promise().await;
+        let agent = make_agent(&server.base_url());
+        let promise_repo: Arc<dyn PromiseRepository> = ps.clone();
+
+        let mut promise_ids = Vec::new();
+        for i in 0..3usize {
+            let mut auto = make_automation(&format!("batch-auto-{i}"));
+            auto.tenant_id = agent.tenant_id.clone();
+            auto_store.put(&auto).await.expect("put automation");
+
+            let pid = format!("batch-stale-{i}");
+            let mut stale = make_stale_promise(&pid);
+            stale.tenant_id = agent.tenant_id.clone();
+            stale.automation_id = auto.id.clone();
+            stale.nats_subject = "github.push".to_string();
+            promise_repo.put_promise(&stale).await.unwrap();
+            promise_ids.push(pid);
+        }
+
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_repo,
+            &auto_store,
+            &run_store,
+            &agent.tenant_id,
+        )
+        .await
+        .expect("must return a handle when 3 stale promises exist");
+        handle.await.expect("recovery task must not panic");
+
+        for pid in &promise_ids {
+            let (p, _) = ps
+                .get_promise(&agent.tenant_id, pid)
+                .await
+                .unwrap()
+                .unwrap_or_else(|| panic!("promise {pid} must exist after batch recovery"));
+            assert_eq!(
+                p.status,
+                PromiseStatus::Resolved,
+                "promise {pid} must be Resolved after batch recovery; got {:?}",
+                p.status
+            );
+        }
+    }
+
+    // ── Multi-automation parallel dispatch (real NATS KV) ─────────────────────
+
+    /// `dispatch_automations` with 3 automations must create 3 independent
+    /// promises in real NATS KV — one per automation, keyed as
+    /// `{prefix}.{auto_id}` — and resolve all of them.
+    ///
+    /// Verifies: (a) the key construction is correct, (b) each promise carries
+    /// the right `automation_id`, and (c) three parallel runs in the same KV
+    /// bucket do not overwrite or corrupt each other's checkpoints.
+    #[tokio::test]
+    async fn real_kv_dispatch_three_automations_independent_promises() {
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+
+        let server = httpmock::MockServer::start_async().await;
+        server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(serde_json::json!({
+                    "stop_reason": "end_turn",
+                    "content": [{"type": "text", "text": "done"}]
+                }));
+        });
+
+        let (ps, _, run_store, _, _c) = make_all_stores_with_promise().await;
+        let promise_repo: Arc<dyn PromiseRepository> = ps.clone();
+        let agent = make_agent(&server.base_url());
+
+        let autos: Vec<_> = (0..3usize)
+            .map(|i| {
+                let mut a = make_automation(&format!("parallel-{i}"));
+                a.tenant_id = agent.tenant_id.clone();
+                a
+            })
+            .collect();
+        let auto_ids: Vec<_> = autos.iter().map(|a| a.id.clone()).collect();
+
+        dispatch_automations(
+            &agent,
+            &run_store,
+            &promise_repo,
+            "github.100",
+            autos,
+            "github.push",
+            &bytes::Bytes::from_static(b"{}"),
+        )
+        .await;
+
+        for auto_id in &auto_ids {
+            let pid = format!("github.100.{auto_id}");
+            let (p, _) = ps
+                .get_promise(&agent.tenant_id, &pid)
+                .await
+                .unwrap()
+                .unwrap_or_else(|| panic!("promise {pid} must exist in real KV after dispatch"));
+            assert_eq!(
+                p.status,
+                PromiseStatus::Resolved,
+                "automation promise {pid} must be Resolved; got {:?}",
+                p.status
+            );
+            assert_eq!(
+                p.automation_id, *auto_id,
+                "promise automation_id must match the dispatched automation"
+            );
+        }
+    }
 }
