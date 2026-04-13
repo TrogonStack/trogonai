@@ -70,6 +70,14 @@ where
         info!(source = "linear", "mounted at /linear");
     }
 
+    if let Some(ref cfg) = config.notion {
+        app = app.nest(
+            "/notion",
+            trogon_source_notion::router(publisher.clone(), cfg),
+        );
+        info!(source = "notion", "mounted at /notion");
+    }
+
     app
 }
 
@@ -126,6 +134,9 @@ signing_secret = "whsec_dGVzdC1zZWNyZXQ="
 
 [sources.linear]
 webhook_secret = "linear-secret"
+
+[sources.notion]
+verification_token = "notion-verification-token-example"
 "#
         .to_string()
     }

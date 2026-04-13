@@ -13,6 +13,7 @@ use trogon_source_gitlab::config::GitLabWebhookSecret;
 use trogon_source_incidentio::config::IncidentioConfig as IncidentioSourceConfig;
 use trogon_source_incidentio::incidentio_signing_secret::IncidentioSigningSecret;
 use trogon_source_linear::config::LinearWebhookSecret;
+use trogon_source_notion::NotionVerificationToken;
 use trogon_source_slack::config::SlackSigningSecret;
 use trogon_source_telegram::config::TelegramWebhookSecret;
 use trogon_std::{NonZeroDuration, ZeroDuration};
@@ -148,6 +149,8 @@ struct SourcesConfig {
     incidentio: IncidentioConfig,
     #[config(nested)]
     linear: LinearConfig,
+    #[config(nested)]
+    notion: NotionConfig,
 }
 
 #[derive(Config)]
@@ -265,6 +268,20 @@ struct IncidentioConfig {
     timestamp_tolerance_secs: u64,
 }
 
+#[derive(Config)]
+struct NotionConfig {
+    #[config(env = "TROGON_SOURCE_NOTION_VERIFICATION_TOKEN")]
+    verification_token: Option<String>,
+    #[config(env = "TROGON_SOURCE_NOTION_SUBJECT_PREFIX", default = "notion")]
+    subject_prefix: String,
+    #[config(env = "TROGON_SOURCE_NOTION_STREAM_NAME", default = "NOTION")]
+    stream_name: String,
+    #[config(env = "TROGON_SOURCE_NOTION_STREAM_MAX_AGE_SECS", default = 604_800)]
+    stream_max_age_secs: u64,
+    #[config(env = "TROGON_SOURCE_NOTION_NATS_ACK_TIMEOUT_SECS", default = 10)]
+    nats_ack_timeout_secs: u64,
+}
+
 pub struct ResolvedHttpServerConfig {
     pub port: u16,
 }
@@ -279,6 +296,7 @@ pub struct ResolvedConfig {
     pub gitlab: Option<trogon_source_gitlab::GitlabConfig>,
     pub incidentio: Option<trogon_source_incidentio::IncidentioConfig>,
     pub linear: Option<trogon_source_linear::LinearConfig>,
+    pub notion: Option<trogon_source_notion::NotionConfig>,
 }
 
 impl ResolvedConfig {
@@ -290,6 +308,7 @@ impl ResolvedConfig {
             || self.gitlab.is_some()
             || self.incidentio.is_some()
             || self.linear.is_some()
+            || self.notion.is_some()
     }
 }
 
@@ -317,6 +336,7 @@ fn resolve(cfg: GatewayConfig, nats_overrides: &NatsArgs) -> Result<ResolvedConf
     let gitlab = resolve_gitlab(cfg.sources.gitlab, &mut errors);
     let incidentio = resolve_incidentio(cfg.sources.incidentio, &mut errors);
     let linear = resolve_linear(cfg.sources.linear, &mut errors);
+    let notion = resolve_notion(cfg.sources.notion, &mut errors);
 
     if !errors.is_empty() {
         return Err(ConfigError::Validation(errors));
@@ -334,6 +354,7 @@ fn resolve(cfg: GatewayConfig, nats_overrides: &NatsArgs) -> Result<ResolvedConf
         gitlab,
         incidentio,
         linear,
+        notion,
     })
 }
 
@@ -891,6 +912,86 @@ fn resolve_incidentio(
     })
 }
 
+fn resolve_notion(
+    section: NotionConfig,
+    errors: &mut Vec<ConfigValidationError>,
+) -> Option<trogon_source_notion::NotionConfig> {
+    let verification_token = match section.verification_token {
+        Some(token) => token,
+        None => {
+            return None;
+        }
+    };
+
+    let verification_token = match NotionVerificationToken::new(verification_token) {
+        Ok(token) => token,
+        Err(err) => {
+            errors.push(ConfigValidationError::invalid(
+                "notion",
+                "verification_token",
+                err,
+            ));
+            return None;
+        }
+    };
+
+    let subject_prefix = match NatsToken::new(section.subject_prefix) {
+        Ok(token) => token,
+        Err(err) => {
+            errors.push(ConfigValidationError::invalid_subject_token(
+                "notion",
+                "subject_prefix",
+                err,
+            ));
+            return None;
+        }
+    };
+
+    let stream_name = match NatsToken::new(section.stream_name) {
+        Ok(token) => token,
+        Err(err) => {
+            errors.push(ConfigValidationError::invalid_subject_token(
+                "notion",
+                "stream_name",
+                err,
+            ));
+            return None;
+        }
+    };
+
+    let nats_ack_timeout = match NonZeroDuration::from_secs(section.nats_ack_timeout_secs) {
+        Ok(duration) => duration,
+        Err(err) => {
+            errors.push(ConfigValidationError::invalid(
+                "notion",
+                "nats_ack_timeout_secs",
+                err,
+            ));
+            return None;
+        }
+    };
+
+    let stream_max_age = match StreamMaxAge::from_secs(section.stream_max_age_secs) {
+        Ok(age) => age,
+        Err(err) => {
+            errors.push(ConfigValidationError::invalid(
+                "notion",
+                "stream_max_age_secs",
+                err,
+            ));
+            return None;
+        }
+    };
+
+    Some(trogon_source_notion::NotionConfig {
+        verification_token,
+        subject_prefix,
+        stream_name,
+        stream_max_age,
+        nats_ack_timeout,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -972,6 +1073,15 @@ webhook_secret = "{secret}"
             r#"
 [sources.incidentio]
 signing_secret = "{secret}"
+"#
+        )
+    }
+
+    fn notion_toml(token: &str) -> String {
+        format!(
+            r#"
+[sources.notion]
+verification_token = "{token}"
 "#
         )
     }
@@ -1132,6 +1242,23 @@ bot_token = ""
         let f = write_toml(&incidentio_toml(&incidentio_valid_test_secret()));
         let cfg = load(Some(f.path())).expect("load failed");
         assert!(cfg.incidentio.is_some());
+    }
+
+    #[test]
+    fn notion_resolves_with_valid_token() {
+        let f = write_toml(&notion_toml("notion-verification-token-example"));
+        let cfg = load(Some(f.path())).expect("load failed");
+        assert!(cfg.notion.is_some());
+    }
+
+    #[test]
+    fn notion_missing_token_returns_none() {
+        let toml = r#"
+[sources.notion]
+"#;
+        let f = write_toml(toml);
+        let cfg = load(Some(f.path())).expect("load failed");
+        assert!(cfg.notion.is_none());
     }
 
     #[test]
@@ -1644,6 +1771,15 @@ port = 9090
     }
 
     #[test]
+    fn notion_empty_verification_token_is_invalid() {
+        let f = write_toml(&notion_toml(""));
+        let result = load(Some(f.path()));
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("notion: invalid verification_token")))
+        );
+    }
+
+    #[test]
     fn incidentio_invalid_secret_is_invalid() {
         let f = write_toml(&incidentio_toml("whsec_not-base64!"));
         let result = load(Some(f.path()));
@@ -1763,6 +1899,20 @@ subject_prefix = "has.dots"
     }
 
     #[test]
+    fn notion_invalid_subject_prefix() {
+        let toml = r#"
+[sources.notion]
+verification_token = "notion-verification-token-example"
+subject_prefix = "has.dots"
+"#;
+        let f = write_toml(toml);
+        let result = load(Some(f.path()));
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("notion: invalid subject_prefix")))
+        );
+    }
+
+    #[test]
     fn slack_invalid_stream_name() {
         let toml = r#"
 [sources.slack]
@@ -1836,6 +1986,20 @@ stream_name = "has.dots"
     }
 
     #[test]
+    fn notion_invalid_stream_name() {
+        let toml = r#"
+[sources.notion]
+verification_token = "notion-verification-token-example"
+stream_name = "has.dots"
+"#;
+        let f = write_toml(toml);
+        let result = load(Some(f.path()));
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("notion: invalid stream_name")))
+        );
+    }
+
+    #[test]
     fn incidentio_zero_nats_ack_timeout_is_error() {
         let toml = format!(
             r#"
@@ -1866,6 +2030,34 @@ stream_max_age_secs = 0
         let result = load(Some(f.path()));
         assert!(
             matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("incidentio: stream_max_age_secs must not be zero")))
+        );
+    }
+
+    #[test]
+    fn notion_zero_nats_ack_timeout_is_error() {
+        let toml = r#"
+[sources.notion]
+verification_token = "notion-verification-token-example"
+nats_ack_timeout_secs = 0
+"#;
+        let f = write_toml(toml);
+        let result = load(Some(f.path()));
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("notion: nats_ack_timeout_secs must not be zero")))
+        );
+    }
+
+    #[test]
+    fn notion_zero_stream_max_age_is_error() {
+        let toml = r#"
+[sources.notion]
+verification_token = "notion-verification-token-example"
+stream_max_age_secs = 0
+"#;
+        let f = write_toml(toml);
+        let result = load(Some(f.path()));
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("notion: stream_max_age_secs must not be zero")))
         );
     }
 
