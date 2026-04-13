@@ -133,6 +133,7 @@ fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
         action = tracing::field::Empty,
         webhook_id = tracing::field::Empty,
         subject = tracing::field::Empty,
+        messaging.message.body.size = tracing::field::Empty,
     )
 )]
 async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut>(
@@ -264,6 +265,7 @@ async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut>(
     span.record("action", action.as_str());
     span.record("webhook_id", &webhook_id);
     span.record("subject", &subject);
+    span.record("messaging.message.body.size", body.len());
 
     let mut nats_headers = async_nats::HeaderMap::new();
     nats_headers.insert("Nats-Msg-Id", webhook_id.as_str());

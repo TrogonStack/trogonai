@@ -1,0 +1,57 @@
+{
+    "action": "create",
+    "actor": {
+        "id": "00000000-0000-4000-8000-000000000010",
+        "name": "Test User",
+        "email": "test.user@example.invalid",
+        "avatarUrl": "https://example.invalid/avatar.png",
+        "url": "https://example.invalid/profiles/test-user",
+        "type": "user"
+    },
+    "createdAt": "2026-04-12T05:13:18.613Z",
+    "data": {
+        "id": "00000000-0000-4000-8000-000000000020",
+        "createdAt": "2026-04-12T05:13:18.613Z",
+        "updatedAt": "2026-04-12T05:13:18.613Z",
+        "number": 14,
+        "title": "Demo 2",
+        "priority": 0,
+        "sortOrder": 33,
+        "prioritySortOrder": 43.65,
+        "slaType": "all",
+        "addedToTeamAt": "2026-04-12T05:13:18.629Z",
+        "labelIds": [],
+        "teamId": "00000000-0000-4000-8000-000000000040",
+        "previousIdentifiers": [],
+        "creatorId": "00000000-0000-4000-8000-000000000010",
+        "stateId": "00000000-0000-4000-8000-000000000050",
+        "reactionData": [],
+        "priorityLabel": "No priority",
+        "inheritsSharedAccess": false,
+        "botActor": null,
+        "identifier": "STM-14",
+        "url": "https://example.invalid/issue/STM-14/demo-2",
+        "subscriberIds": [
+            "00000000-0000-4000-8000-000000000010"
+        ],
+        "state": {
+            "id": "00000000-0000-4000-8000-000000000050",
+            "color": "#bec2c8",
+            "name": "Backlog",
+            "type": "backlog"
+        },
+        "team": {
+            "id": "00000000-0000-4000-8000-000000000040",
+            "key": "STM",
+            "name": "Test Team"
+        },
+        "labels": [],
+        "description": "",
+        "descriptionData": "{\"type\":\"doc\",\"content\":[{\"type\":\"paragraph\"}]}"
+    },
+    "url": "https://example.invalid/issue/STM-14/demo-2",
+    "type": "Issue",
+    "organizationId": "00000000-0000-4000-8000-000000000001",
+    "webhookTimestamp": 1775990870911,
+    "webhookId": "00000000-0000-4000-8000-000000000002"
+}
