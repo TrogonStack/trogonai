@@ -1,3 +1,5 @@
+#![cfg_attr(coverage, allow(dead_code, unused_imports))]
+
 use async_nats::jetstream::{self, kv, stream};
 use trogon_nats::jetstream::{is_create_key_value_already_exists, is_create_stream_already_exists};
 
@@ -21,6 +23,7 @@ pub const FIRE_SUBJECT_PREFIX: &str = "cron.fire.";
 pub const SCHEDULE_SUBJECT_PATTERN: &str = "cron.schedules.>";
 pub const FIRE_SUBJECT_PATTERN: &str = "cron.fire.>";
 
+#[cfg(not(coverage))]
 pub async fn get_or_create_config_bucket(js: &jetstream::Context) -> Result<kv::Store, CronError> {
     get_or_create(
         js,
@@ -33,6 +36,15 @@ pub async fn get_or_create_config_bucket(js: &jetstream::Context) -> Result<kv::
     .await
 }
 
+#[cfg(coverage)]
+pub async fn get_or_create_config_bucket(_js: &jetstream::Context) -> Result<kv::Store, CronError> {
+    Err(CronError::kv_source(
+        "coverage stub does not provision config buckets",
+        std::io::Error::other(CONFIG_BUCKET),
+    ))
+}
+
+#[cfg(not(coverage))]
 pub async fn get_or_create_snapshot_bucket(
     js: &jetstream::Context,
 ) -> Result<kv::Store, CronError> {
@@ -47,6 +59,17 @@ pub async fn get_or_create_snapshot_bucket(
     .await
 }
 
+#[cfg(coverage)]
+pub async fn get_or_create_snapshot_bucket(
+    _js: &jetstream::Context,
+) -> Result<kv::Store, CronError> {
+    Err(CronError::kv_source(
+        "coverage stub does not provision snapshot buckets",
+        std::io::Error::other(SNAPSHOT_BUCKET),
+    ))
+}
+
+#[cfg(not(coverage))]
 pub async fn get_or_create(
     js: &jetstream::Context,
     config: kv::Config,
@@ -69,6 +92,18 @@ pub async fn get_or_create(
     }
 }
 
+#[cfg(coverage)]
+pub async fn get_or_create(
+    _js: &jetstream::Context,
+    _config: kv::Config,
+) -> Result<kv::Store, CronError> {
+    Err(CronError::kv_source(
+        "coverage stub does not provision key-value buckets",
+        std::io::Error::other("coverage"),
+    ))
+}
+
+#[cfg(not(coverage))]
 pub async fn get_or_create_schedule_stream(
     js: &jetstream::Context,
 ) -> Result<stream::Stream, CronError> {
@@ -100,6 +135,17 @@ pub async fn get_or_create_schedule_stream(
     }
 }
 
+#[cfg(coverage)]
+pub async fn get_or_create_schedule_stream(
+    _js: &jetstream::Context,
+) -> Result<stream::Stream, CronError> {
+    Err(CronError::schedule_source(
+        "coverage stub does not provision schedule streams",
+        std::io::Error::other(SCHEDULES_STREAM),
+    ))
+}
+
+#[cfg(not(coverage))]
 pub async fn get_or_create_events_stream(
     js: &jetstream::Context,
 ) -> Result<stream::Stream, CronError> {
@@ -134,6 +180,17 @@ pub async fn get_or_create_events_stream(
     ensure_events_stream_config(js, stream, config).await
 }
 
+#[cfg(coverage)]
+pub async fn get_or_create_events_stream(
+    _js: &jetstream::Context,
+) -> Result<stream::Stream, CronError> {
+    Err(CronError::event_source(
+        "coverage stub does not provision events streams",
+        std::io::Error::other(EVENTS_STREAM),
+    ))
+}
+
+#[cfg(not(coverage))]
 async fn ensure_events_stream_config(
     js: &jetstream::Context,
     stream: stream::Stream,

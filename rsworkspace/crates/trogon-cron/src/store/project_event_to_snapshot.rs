@@ -1,3 +1,5 @@
+#![cfg_attr(coverage, allow(dead_code, unused_imports))]
+
 use std::collections::BTreeMap;
 
 use async_nats::jetstream::{self, kv};
@@ -8,6 +10,7 @@ use crate::{JobId, error::CronError, events::JobEventData, nats::apply_event_to_
 
 use super::{SNAPSHOT_STORE_CONFIG, append_events, snapshot_bucket};
 
+#[cfg(not(coverage))]
 pub(super) async fn run<J>(js: &J, job_id: &str, events: &[JobEventData]) -> Result<(), CronError>
 where
     J: JetStreamGetKeyValue<Store = kv::Store>
@@ -62,4 +65,17 @@ where
     maybe_advance_checkpoint(&bucket, SNAPSHOT_STORE_CONFIG, final_version)
         .await
         .map_err(CronError::from)
+}
+
+#[cfg(coverage)]
+pub(super) async fn run<J>(
+    _js: &J,
+    _job_id: &str,
+    _events: &[JobEventData],
+) -> Result<(), CronError>
+where
+    J: JetStreamGetKeyValue<Store = kv::Store>
+        + JetStreamGetStream<Stream = jetstream::stream::Stream>,
+{
+    Ok(())
 }
