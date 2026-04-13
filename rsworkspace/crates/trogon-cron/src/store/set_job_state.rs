@@ -23,16 +23,8 @@ impl Decide<JobStreamState, JobEvent> for SetJobStateCommand {
     type Error = JobDecisionError;
 
     fn decide(state: &JobStreamState, command: &Self) -> Result<Decision<JobEvent>, Self::Error> {
-        let state_id = state.stream_id();
-        if state_id != command.id {
-            return Err(JobDecisionError::StreamIdMismatch {
-                state_id,
-                command_id: command.id.clone(),
-            });
-        }
-
         match state {
-            JobStreamState::Initial { .. } => Err(JobDecisionError::MissingJobForStateChange {
+            JobStreamState::Initial => Err(JobDecisionError::MissingJobForStateChange {
                 id: command.id.clone(),
             }),
             JobStreamState::Present(spec) if spec.state == command.state => {
@@ -75,7 +67,7 @@ where
                 source,
             )
         })?,
-        None => initial_state(id.clone()),
+        None => initial_state(),
     };
     let events = match decide(
         &current_state,

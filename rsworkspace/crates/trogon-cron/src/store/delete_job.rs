@@ -21,16 +21,8 @@ impl Decide<JobStreamState, JobEvent> for DeleteJobCommand {
     type Error = JobDecisionError;
 
     fn decide(state: &JobStreamState, command: &Self) -> Result<Decision<JobEvent>, Self::Error> {
-        let state_id = state.stream_id();
-        if state_id != command.id {
-            return Err(JobDecisionError::StreamIdMismatch {
-                state_id,
-                command_id: command.id.clone(),
-            });
-        }
-
         match state {
-            JobStreamState::Initial { .. } => Err(JobDecisionError::MissingJobForRemoval {
+            JobStreamState::Initial => Err(JobDecisionError::MissingJobForRemoval {
                 id: command.id.clone(),
             }),
             JobStreamState::Present(_) => Ok(Decision::Event(NonEmpty::one(
@@ -66,7 +58,7 @@ where
                 source,
             )
         })?,
-        None => initial_state(id.clone()),
+        None => initial_state(),
     };
     let events = match decide(
         &current_state,
@@ -102,7 +94,7 @@ where
                 error,
             )
         })?;
-    if !matches!(projected_state, JobStreamState::Initial { .. }) {
+    if !matches!(projected_state, JobStreamState::Initial) {
         return Err(CronError::event_source(
             "job removal decision must leave the stream initial",
             std::io::Error::other(format!("job '{}'", id)),
