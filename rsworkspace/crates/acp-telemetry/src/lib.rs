@@ -1,5 +1,4 @@
 pub mod constants;
-pub mod http;
 mod log;
 mod metric;
 mod service_name;

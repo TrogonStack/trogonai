@@ -79,7 +79,6 @@ dependencies = [
  "serde_json",
  "tokio",
  "tokio-tungstenite 0.29.0",
- "tower-http",
  "tracing",
  "tracing-subscriber",
  "trogon-nats",
@@ -90,14 +89,11 @@ dependencies = [
 name = "acp-telemetry"
 version = "0.1.0"
 dependencies = [
- "axum",
  "opentelemetry",
  "opentelemetry-appender-tracing",
  "opentelemetry-otlp",
- "opentelemetry-semantic-conventions",
  "opentelemetry_sdk",
  "tokio",
- "tower-http",
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
@@ -3670,10 +3666,16 @@ dependencies = [
 name = "trogon-std"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "bytesize",
  "clap",
+ "opentelemetry",
+ "opentelemetry-semantic-conventions",
  "serde",
  "serde_json",
+ "tower-http",
+ "tracing",
+ "tracing-opentelemetry",
 ]
 
 [[package]]

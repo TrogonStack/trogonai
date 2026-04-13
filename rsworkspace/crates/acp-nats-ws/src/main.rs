@@ -46,7 +46,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         shutdown_tx: shutdown_tx.clone(),
     };
 
-    let app = acp_telemetry::http::instrument_router(
+    let app = trogon_std::telemetry::http::instrument_router(
         axum::Router::new()
             .route("/ws", axum::routing::get(upgrade::handle))
             .with_state(state),
