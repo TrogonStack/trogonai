@@ -1,7 +1,7 @@
 #![cfg_attr(coverage, allow(dead_code, unused_imports))]
 
 use async_nats::jetstream::{self, context, kv};
-use trogon_eventsourcing::{Decide, Decision, NonEmpty, decide, load_snapshot};
+use trogon_eventsourcing::{Decide, Decision, NonEmpty, StreamCommand, decide, load_snapshot};
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream, JetStreamPublishMessage};
 
 use crate::{
@@ -21,22 +21,30 @@ pub struct SetJobStateCommand {
     pub write_condition: JobWriteCondition,
 }
 
+impl StreamCommand for SetJobStateCommand {
+    type StreamId = JobId;
+
+    fn stream_id(&self) -> &Self::StreamId {
+        &self.id
+    }
+}
+
 impl Decide<JobStreamState, JobEvent> for SetJobStateCommand {
     type Error = JobDecisionError;
 
     fn decide(state: &JobStreamState, command: &Self) -> Result<Decision<JobEvent>, Self::Error> {
         match state {
             JobStreamState::Initial => Err(JobDecisionError::MissingJobForStateChange {
-                id: command.id.clone(),
+                id: command.stream_id().clone(),
             }),
             JobStreamState::Present(spec) if spec.state == command.state => {
                 Err(JobDecisionError::StateAlreadySet {
-                    id: command.id.clone(),
+                    id: command.stream_id().clone(),
                     state: command.state,
                 })
             }
             JobStreamState::Present(_) => Ok(Decision::Event(NonEmpty::one(
-                JobEvent::job_state_changed(command.id.to_string(), command.state),
+                JobEvent::job_state_changed(command.stream_id().to_string(), command.state),
             ))),
         }
     }

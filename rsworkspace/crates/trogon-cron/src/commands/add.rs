@@ -5,7 +5,7 @@ use trogon_cron::{
     CronError, JobDecisionError, JobSpec, JobStreamState, JobWriteCondition, PutJobCommand,
     SNAPSHOT_STORE_CONFIG, VersionedJobSpec, append_events, initial_state, open_snapshot_bucket,
 };
-use trogon_eventsourcing::{Decision, decide, load_snapshot};
+use trogon_eventsourcing::{Decision, StreamCommand, decide, load_snapshot};
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream, JetStreamPublishMessage};
 
 #[derive(Debug)]
@@ -74,7 +74,7 @@ where
             AckFuture = context::PublishAckFuture,
         >,
 {
-    let id = command.command.id().to_string();
+    let id = command.command.stream_id().to_string();
     let bucket = open_snapshot_bucket(js)
         .await
         .map_err(CommandError::LoadJob)?;

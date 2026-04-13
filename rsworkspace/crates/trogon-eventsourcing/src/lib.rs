@@ -5,7 +5,7 @@ use uuid::Uuid;
 mod decision;
 mod snapshots;
 
-pub use decision::{Act, Decide, Decision, NonEmpty, decide};
+pub use decision::{Act, Decide, Decision, NonEmpty, StreamCommand, decide};
 pub use snapshots::{
     SnapshotChange, SnapshotSchemaVersion, SnapshotSchemaVersionError, SnapshotStoreConfig,
     SnapshotStoreError, StreamSnapshot, checkpoint_key, list_snapshots, load_snapshot,

@@ -1,6 +1,12 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Act;
 
+pub trait StreamCommand {
+    type StreamId: ?Sized;
+
+    fn stream_id(&self) -> &Self::StreamId;
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NonEmpty<T>(Vec<T>);
 
@@ -80,6 +86,14 @@ mod tests {
     #[derive(Debug, PartialEq, Eq)]
     struct TestCommand;
 
+    impl StreamCommand for TestCommand {
+        type StreamId = str;
+
+        fn stream_id(&self) -> &Self::StreamId {
+            "alpha"
+        }
+    }
+
     impl Decide<u8, &'static str> for TestCommand {
         type Error = ();
 
@@ -96,6 +110,12 @@ mod tests {
     fn act_is_constructible_and_defaultable() {
         let act = Act;
         let _ = act;
+    }
+
+    #[test]
+    fn stream_command_exposes_typed_stream_id() {
+        let command = TestCommand;
+        assert_eq!(command.stream_id(), "alpha");
     }
 
     #[test]
