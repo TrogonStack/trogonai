@@ -26,6 +26,7 @@ trogon-source-github = { workspace = true }
 trogon-source-gitlab = { workspace = true }
 trogon-source-incidentio = { workspace = true }
 trogon-source-linear = { workspace = true }
+trogon-source-notion = { workspace = true }
 trogon-source-slack = { workspace = true }
 trogon-source-telegram = { workspace = true }
 trogon-std = { workspace = true, features = ["clap"] }

@@ -35,6 +35,10 @@ pub(crate) async fn provision<C: JetStreamContext>(
         trogon_source_linear::provision(client, cfg).await?;
         info!(source = "linear", "stream provisioned");
     }
+    if let Some(ref cfg) = config.notion {
+        trogon_source_notion::provision(client, cfg).await?;
+        info!(source = "notion", "stream provisioned");
+    }
     Ok(())
 }
 
@@ -78,6 +82,9 @@ signing_secret = "whsec_dGVzdC1zZWNyZXQ="
 
 [sources.linear]
 webhook_secret = "linear-secret"
+
+[sources.notion]
+verification_token = "notion-verification-token-example"
 "#
         .to_string()
     }
@@ -104,6 +111,6 @@ webhook_secret = "linear-secret"
             .await
             .expect("provision should succeed");
 
-        assert_eq!(js.created_streams().len(), 7);
+        assert_eq!(js.created_streams().len(), 8);
     }
 }
