@@ -5324,4 +5324,232 @@ mod tests {
             "promise must stay Running — terminal write is skipped when checkpoint=None"
         );
     }
+
+    // ── ReqwestAnthropicClient retry helpers ──────────────────────────────────
+
+    /// Start a minimal raw-TCP HTTP/1.1 server.  Each incoming connection is
+    /// served the next `Vec<u8>` from `responses` in FIFO order.
+    /// Returns `(base_url, server_task)` — keep the task alive for the test.
+    async fn start_response_server(
+        responses: Vec<Vec<u8>>,
+    ) -> (String, tokio::task::JoinHandle<()>) {
+        use std::collections::VecDeque;
+        use std::sync::{Arc, Mutex};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let queue: Arc<Mutex<VecDeque<Vec<u8>>>> =
+            Arc::new(Mutex::new(responses.into_iter().collect()));
+
+        let handle = tokio::spawn(async move {
+            loop {
+                let Ok((mut conn, _)) = listener.accept().await else { return };
+                let queue = Arc::clone(&queue);
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 4096];
+                    let _ = conn.read(&mut buf).await; // drain request
+                    let response = queue
+                        .lock()
+                        .unwrap()
+                        .pop_front()
+                        .expect("response queue exhausted in test");
+                    let _ = conn.write_all(&response).await;
+                });
+            }
+        });
+
+        (format!("http://{addr}"), handle)
+    }
+
+    fn raw_500() -> Vec<u8> {
+        b"HTTP/1.1 500 Internal Server Error\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+            .to_vec()
+    }
+
+    fn raw_429_retry_after_1() -> Vec<u8> {
+        b"HTTP/1.1 429 Too Many Requests\r\nretry-after: 1\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+            .to_vec()
+    }
+
+    fn raw_200_json(body: serde_json::Value) -> Vec<u8> {
+        let s = body.to_string();
+        format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+            s.len(),
+            s
+        )
+        .into_bytes()
+    }
+
+    // ── ReqwestAnthropicClient::complete retry tests ──────────────────────────
+
+    /// All four attempts hit ECONNREFUSED — the retry loop exhausts attempts=3
+    /// and returns the final connect error.
+    ///
+    /// Backoff sequence: 2 s → 4 s → 8 s.  Uses Tokio's mock clock so the
+    /// test finishes instantly.
+    #[tokio::test(start_paused = true)]
+    async fn reqwest_client_exhausts_retries_on_connect_error() {
+        use std::time::Duration;
+
+        // Bind then immediately drop — reliably produces ECONNREFUSED on Linux.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        drop(listener);
+
+        let client = ReqwestAnthropicClient::new(
+            reqwest::Client::new(),
+            format!("http://{addr}"),
+            "test-token".to_string(),
+        );
+
+        let (result, _) = tokio::join!(
+            client.complete(serde_json::json!({"model": "test", "max_tokens": 1})),
+            async {
+                tokio::time::advance(Duration::from_secs(3)).await; // wakes sleep(2s)
+                tokio::time::advance(Duration::from_secs(5)).await; // wakes sleep(4s)
+                tokio::time::advance(Duration::from_secs(9)).await; // wakes sleep(8s)
+            }
+        );
+
+        assert!(result.is_err(), "must return Err after all retries exhausted");
+        assert!(
+            result.unwrap_err().is_connect(),
+            "final error must be a connect error"
+        );
+    }
+
+    /// One 500 followed by a 200 — the client retries once and succeeds.
+    ///
+    /// The 2-second backoff sleep after the 500 is advanced by the mock clock.
+    #[tokio::test(start_paused = true)]
+    async fn reqwest_client_retries_5xx_once_then_succeeds() {
+        use std::time::Duration;
+
+        let ok_body = serde_json::json!({"stop_reason": "end_turn", "content": []});
+        let (base_url, _server) =
+            start_response_server(vec![raw_500(), raw_200_json(ok_body.clone())]).await;
+
+        let client = ReqwestAnthropicClient::new(
+            reqwest::Client::new(),
+            base_url,
+            "test-token".to_string(),
+        );
+
+        let (result, _) = tokio::join!(
+            client.complete(serde_json::json!({"model": "test", "max_tokens": 1})),
+            async {
+                tokio::time::advance(Duration::from_secs(3)).await; // wakes sleep(2s) after 500
+            }
+        );
+
+        assert_eq!(
+            result.unwrap(),
+            ok_body,
+            "must return the 200 response after one retry"
+        );
+    }
+
+    /// Four consecutive 500s — the retry loop exhausts all three retries and
+    /// returns the final server-error.
+    #[tokio::test(start_paused = true)]
+    async fn reqwest_client_exhausts_retries_on_5xx() {
+        use std::time::Duration;
+
+        let (base_url, _server) =
+            start_response_server(vec![raw_500(), raw_500(), raw_500(), raw_500()]).await;
+
+        let client = ReqwestAnthropicClient::new(
+            reqwest::Client::new(),
+            base_url,
+            "test-token".to_string(),
+        );
+
+        let (result, _) = tokio::join!(
+            client.complete(serde_json::json!({"model": "test", "max_tokens": 1})),
+            async {
+                tokio::time::advance(Duration::from_secs(3)).await; // wakes sleep(2s)
+                tokio::time::advance(Duration::from_secs(5)).await; // wakes sleep(4s)
+                tokio::time::advance(Duration::from_secs(9)).await; // wakes sleep(8s)
+            }
+        );
+
+        let err = result.expect_err("must fail after exhausting retries on 5xx");
+        assert!(
+            err.status().map(|s| s.is_server_error()).unwrap_or(false),
+            "final error must carry a 5xx status; got: {err}"
+        );
+    }
+
+    /// One 429 (Retry-After: 1) followed by a 200 — the client waits 1 s and
+    /// succeeds on the second attempt.
+    #[tokio::test(start_paused = true)]
+    async fn reqwest_client_retries_429_once_then_succeeds() {
+        use std::time::Duration;
+
+        let ok_body = serde_json::json!({"stop_reason": "end_turn", "content": []});
+        let (base_url, _server) = start_response_server(vec![
+            raw_429_retry_after_1(),
+            raw_200_json(ok_body.clone()),
+        ])
+        .await;
+
+        let client = ReqwestAnthropicClient::new(
+            reqwest::Client::new(),
+            base_url,
+            "test-token".to_string(),
+        );
+
+        let (result, _) = tokio::join!(
+            client.complete(serde_json::json!({"model": "test", "max_tokens": 1})),
+            async {
+                tokio::time::advance(Duration::from_secs(2)).await; // wakes sleep(1s) from Retry-After
+            }
+        );
+
+        assert_eq!(
+            result.unwrap(),
+            ok_body,
+            "must return the 200 response after retrying on 429"
+        );
+    }
+
+    /// Four consecutive 429s (Retry-After: 1) — the retry loop exhausts all
+    /// three retries and returns the final 429 error.
+    #[tokio::test(start_paused = true)]
+    async fn reqwest_client_exhausts_retries_on_429() {
+        use std::time::Duration;
+
+        let (base_url, _server) = start_response_server(vec![
+            raw_429_retry_after_1(),
+            raw_429_retry_after_1(),
+            raw_429_retry_after_1(),
+            raw_429_retry_after_1(),
+        ])
+        .await;
+
+        let client = ReqwestAnthropicClient::new(
+            reqwest::Client::new(),
+            base_url,
+            "test-token".to_string(),
+        );
+
+        let (result, _) = tokio::join!(
+            client.complete(serde_json::json!({"model": "test", "max_tokens": 1})),
+            async {
+                tokio::time::advance(Duration::from_secs(2)).await; // wakes sleep(1s) after 429 #1
+                tokio::time::advance(Duration::from_secs(2)).await; // wakes sleep(1s) after 429 #2
+                tokio::time::advance(Duration::from_secs(2)).await; // wakes sleep(1s) after 429 #3
+            }
+        );
+
+        let err = result.expect_err("must fail after exhausting 429 retries");
+        assert_eq!(
+            err.status().map(|s| s.as_u16()),
+            Some(429),
+            "final error must carry status 429"
+        );
+    }
 }
