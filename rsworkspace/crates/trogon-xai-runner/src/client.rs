@@ -1802,4 +1802,49 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn chat_stream_network_drop_mid_chunk_emits_error_event() {
+        // Exercises the `Some(Err(e))` branch inside `parse_sse` (client.rs:361-363).
+        //
+        // The server sends a valid HTTP 200 with chunked encoding, announces a
+        // 32-byte chunk, writes only 13 bytes, then drops the connection. hyper
+        // detects the incomplete chunk and surfaces it as an Err on the byte
+        // stream, which parse_sse converts to XaiEvent::Error.
+        use futures_util::StreamExt as _;
+        use tokio::io::AsyncWriteExt as _;
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            let (mut tcp, _) = listener.accept().await.unwrap();
+            // Valid 200 response with chunked transfer encoding.
+            tcp.write_all(
+                b"HTTP/1.1 200 OK\r\n\
+                  content-type: text/event-stream\r\n\
+                  transfer-encoding: chunked\r\n\
+                  \r\n",
+            )
+            .await
+            .ok();
+            // Announce a 32-byte (0x20) chunk but only send 13 bytes, then close.
+            tcp.write_all(b"20\r\ndata: partial").await.ok();
+            tcp.flush().await.ok();
+            // Drop closes the TCP connection — hyper will detect the truncated chunk.
+        });
+
+        let client = XaiClient::with_base_url(format!("http://{addr}"));
+        let input = [InputItem::user("hi")];
+        let events: Vec<XaiEvent> =
+            XaiHttpClient::chat_stream(&client, "grok-3", &input, "key", &[], None, None)
+                .await
+                .collect()
+                .await;
+
+        assert!(
+            events.iter().any(|e| matches!(e, XaiEvent::Error { .. })),
+            "mid-stream connection drop must produce XaiEvent::Error; got: {events:?}"
+        );
+    }
+
 }
