@@ -3017,8 +3017,8 @@ async fn wasm_terminal_snapshot_shows_exit_before_explicit_wait() {
                 loop {
                     let out_req = TerminalOutputRequest::new(SessionId::from("s1"), tid.clone());
                     let out = runtime.handle_terminal_output(out_req).await.unwrap();
-                    if out.exit_status.is_some() {
-                        return out.exit_status.unwrap();
+                    if let Some(status) = out.exit_status {
+                        return status;
                     }
                     tokio::task::yield_now().await;
                 }
@@ -3750,10 +3750,10 @@ fn config_from_env_parses_environment_variables() {
     let config = Config::from_env();
 
     assert_eq!(config.output_byte_limit, 2097152);
-    assert_eq!(config.auto_allow_permissions, true);
+    assert!(config.auto_allow_permissions);
     assert_eq!(config.wasm_timeout_secs, Some(42));
     assert_eq!(config.wasm_fuel_limit, 500_000);
-    assert_eq!(config.wasm_only, false);
+    assert!(!config.wasm_only);
 
     std::env::remove_var("WASM_OUTPUT_BYTE_LIMIT");
     std::env::remove_var("WASM_AUTO_ALLOW_PERMISSIONS");

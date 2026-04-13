@@ -62,12 +62,18 @@ pub struct MockFs {
     dirs: Arc<Mutex<HashSet<PathBuf>>>,
 }
 
-impl MockFs {
-    pub fn new() -> Self {
+impl Default for MockFs {
+    fn default() -> Self {
         Self {
             files: Arc::new(Mutex::new(HashMap::new())),
             dirs: Arc::new(Mutex::new(HashSet::new())),
         }
+    }
+}
+
+impl MockFs {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     /// Returns the content of a file if it exists.
@@ -218,13 +224,19 @@ pub struct MockProcessSpawner {
     stdout_content: Vec<u8>,
 }
 
-impl MockProcessSpawner {
-    pub fn new() -> Self {
+impl Default for MockProcessSpawner {
+    fn default() -> Self {
         Self {
             spawned: Arc::new(Mutex::new(Vec::new())),
             exit_code: 0,
             stdout_content: b"mock output\n".to_vec(),
         }
+    }
+}
+
+impl MockProcessSpawner {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     pub fn with_output(exit_code: i32, stdout: Vec<u8>) -> Self {
@@ -304,11 +316,17 @@ pub struct MockClock {
     current: Arc<Mutex<std::time::Instant>>,
 }
 
-impl MockClock {
-    pub fn new() -> Self {
+impl Default for MockClock {
+    fn default() -> Self {
         Self {
             current: Arc::new(Mutex::new(std::time::Instant::now())),
         }
+    }
+}
+
+impl MockClock {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     /// Advances the mock clock by `duration`.
@@ -333,11 +351,17 @@ pub struct MockIdGenerator {
     counter: Arc<Mutex<u64>>,
 }
 
-impl MockIdGenerator {
-    pub fn new() -> Self {
+impl Default for MockIdGenerator {
+    fn default() -> Self {
         Self {
             counter: Arc::new(Mutex::new(0)),
         }
+    }
+}
+
+impl MockIdGenerator {
+    pub fn new() -> Self {
+        Self::default()
     }
 }
 
@@ -357,11 +381,17 @@ pub struct MockSyncFs {
     files: Arc<Mutex<HashMap<PathBuf, Vec<u8>>>>,
 }
 
-impl MockSyncFs {
-    pub fn new() -> Self {
+impl Default for MockSyncFs {
+    fn default() -> Self {
         Self {
             files: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+}
+
+impl MockSyncFs {
+    pub fn new() -> Self {
+        Self::default()
     }
 }
 
