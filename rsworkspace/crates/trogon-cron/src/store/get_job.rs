@@ -1,8 +1,8 @@
 use async_nats::jetstream::kv;
-use trogon_eventsourcing::{StreamCommand, load_snapshot};
+use trogon_eventsourcing::{Snapshot, StreamCommand, load_snapshot};
 use trogon_nats::jetstream::JetStreamGetKeyValue;
 
-use crate::{JobId, VersionedJobSpec, error::CronError};
+use crate::{JobId, JobSpec, error::CronError};
 
 use super::{SNAPSHOT_STORE_CONFIG, snapshot_bucket};
 
@@ -19,7 +19,7 @@ impl StreamCommand for GetJobCommand {
     }
 }
 
-pub async fn run<J>(js: &J, command: GetJobCommand) -> Result<Option<VersionedJobSpec>, CronError>
+pub async fn run<J>(js: &J, command: GetJobCommand) -> Result<Option<Snapshot<JobSpec>>, CronError>
 where
     J: JetStreamGetKeyValue<Store = kv::Store>,
 {

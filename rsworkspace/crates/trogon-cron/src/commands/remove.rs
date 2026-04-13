@@ -2,9 +2,8 @@ use std::fmt;
 
 use async_nats::jetstream::{self, context, kv};
 use trogon_cron::{
-    CronError, DeleteJobCommand, JobDecisionError, JobId, JobIdError, JobStreamState,
-    JobWriteCondition, SNAPSHOT_STORE_CONFIG, VersionedJobSpec, append_events, initial_state,
-    open_snapshot_bucket,
+    CronError, DeleteJobCommand, JobDecisionError, JobId, JobIdError, JobSpec, JobStreamState,
+    JobWriteCondition, SNAPSHOT_STORE_CONFIG, append_events, initial_state, open_snapshot_bucket,
 };
 use trogon_eventsourcing::{Decision, decide, load_snapshot};
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream, JetStreamPublishMessage};
@@ -57,17 +56,28 @@ where
         .await
         .map_err(CommandError::LoadJob)?;
     let current_snapshot =
-        load_snapshot::<VersionedJobSpec>(&bucket, SNAPSHOT_STORE_CONFIG, command.job_id.as_str())
+        load_snapshot::<JobSpec>(&bucket, SNAPSHOT_STORE_CONFIG, command.job_id.as_str())
             .await
             .map_err(CronError::from)
             .map_err(CommandError::LoadJob)?;
     let current_state = match current_snapshot.clone() {
-        Some(snapshot) => JobStreamState::try_from(snapshot).map_err(|source| {
-            CommandError::LoadJob(CronError::event_source(
-                "failed to decode current job snapshot into stream state",
-                source,
-            ))
-        })?,
+        Some(snapshot) => {
+            if snapshot.payload.id != command.job_id.as_str() {
+                return Err(CommandError::LoadJob(CronError::event_source(
+                    "failed to decode current job snapshot into stream state",
+                    std::io::Error::other(format!(
+                        "expected '{}' but snapshot carried '{}'",
+                        command.job_id, snapshot.payload.id
+                    )),
+                )));
+            }
+            JobStreamState::try_from(snapshot).map_err(|source| {
+                CommandError::LoadJob(CronError::event_source(
+                    "failed to decode current job snapshot into stream state",
+                    source,
+                ))
+            })?
+        }
         None => initial_state(),
     };
     let write_condition = current_snapshot
