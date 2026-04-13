@@ -1,4 +1,4 @@
-use crate::config::JobWriteCondition;
+use crate::config::{JobEnabledState, JobWriteCondition};
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -22,6 +22,10 @@ pub enum CronError {
     },
     JobNotFound {
         id: String,
+    },
+    JobStateAlreadySet {
+        id: String,
+        state: JobEnabledState,
     },
     OptimisticConcurrencyConflict {
         id: String,
@@ -78,6 +82,9 @@ impl std::fmt::Display for CronError {
                 write!(f, "Schedule error: {context}: {source}")
             }
             Self::JobNotFound { id } => write!(f, "Job '{id}' not found"),
+            Self::JobStateAlreadySet { id, state } => {
+                write!(f, "Job '{id}' is already {}", state.as_str())
+            }
             Self::OptimisticConcurrencyConflict {
                 id,
                 expected,
@@ -107,7 +114,9 @@ impl std::error::Error for CronError {
             Self::Schedule { source, .. } => Some(source.as_ref()),
             Self::Serde(error) => Some(error),
             Self::InvalidJobSpec { source } => Some(source),
-            Self::JobNotFound { .. } | Self::OptimisticConcurrencyConflict { .. } => None,
+            Self::JobNotFound { .. }
+            | Self::JobStateAlreadySet { .. }
+            | Self::OptimisticConcurrencyConflict { .. } => None,
         }
     }
 }
@@ -258,6 +267,13 @@ mod tests {
         };
         assert_eq!(not_found.to_string(), "Job 'missing' not found");
         assert!(std::error::Error::source(&not_found).is_none());
+
+        let already_set = CronError::JobStateAlreadySet {
+            id: "job-1".to_string(),
+            state: JobEnabledState::Enabled,
+        };
+        assert_eq!(already_set.to_string(), "Job 'job-1' is already enabled");
+        assert!(std::error::Error::source(&already_set).is_none());
 
         let occ_missing = CronError::OptimisticConcurrencyConflict {
             id: "job-1".to_string(),
