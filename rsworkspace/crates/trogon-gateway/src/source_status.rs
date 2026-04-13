@@ -1,10 +1,16 @@
+use std::fmt;
 use std::str::FromStr;
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SourceStatus {
-    #[default]
     Enabled,
     Disabled,
+}
+
+impl Default for SourceStatus {
+    fn default() -> Self {
+        Self::Enabled
+    }
 }
 
 impl SourceStatus {
@@ -25,17 +31,30 @@ impl FromStr for SourceStatus {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
-#[error("unsupported status value '{value}' ; expected 'enabled' or 'disabled'")]
+#[derive(Debug)]
 pub struct SourceStatusError {
     value: String,
 }
 
 impl SourceStatusError {
     pub fn new(value: impl Into<String>) -> Self {
-        Self { value: value.into() }
+        Self {
+            value: value.into(),
+        }
     }
 }
+
+impl fmt::Display for SourceStatusError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "unsupported status value '{}' ; expected 'enabled' or 'disabled'",
+            self.value
+        )
+    }
+}
+
+impl std::error::Error for SourceStatusError {}
 
 #[cfg(test)]
 mod tests {
@@ -48,8 +67,14 @@ mod tests {
 
     #[test]
     fn parses_enabled_and_disabled_case_insensitively() {
-        assert_eq!("enabled".parse::<SourceStatus>().unwrap(), SourceStatus::Enabled);
-        assert_eq!("DISABLED".parse::<SourceStatus>().unwrap(), SourceStatus::Disabled);
+        assert_eq!(
+            "enabled".parse::<SourceStatus>().unwrap(),
+            SourceStatus::Enabled
+        );
+        assert_eq!(
+            "DISABLED".parse::<SourceStatus>().unwrap(),
+            SourceStatus::Disabled
+        );
     }
 
     #[test]

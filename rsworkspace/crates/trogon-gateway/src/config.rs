@@ -18,6 +18,8 @@ use trogon_source_slack::config::SlackSigningSecret;
 use trogon_source_telegram::config::TelegramWebhookSecret;
 use trogon_std::{NonZeroDuration, ZeroDuration};
 
+use crate::source_status::SourceStatus;
+
 #[derive(Debug)]
 pub enum ConfigValidationError {
     InvalidField {
@@ -155,6 +157,8 @@ struct SourcesConfig {
 
 #[derive(Config)]
 struct GithubConfig {
+    #[config(env = "TROGON_SOURCE_GITHUB_STATUS")]
+    status: Option<String>,
     #[config(env = "TROGON_SOURCE_GITHUB_WEBHOOK_SECRET")]
     webhook_secret: Option<String>,
     #[config(env = "TROGON_SOURCE_GITHUB_SUBJECT_PREFIX", default = "github")]
@@ -169,6 +173,8 @@ struct GithubConfig {
 
 #[derive(Config)]
 struct DiscordConfig {
+    #[config(env = "TROGON_SOURCE_DISCORD_STATUS")]
+    status: Option<String>,
     #[config(env = "TROGON_SOURCE_DISCORD_BOT_TOKEN")]
     bot_token: Option<String>,
     #[config(env = "TROGON_SOURCE_DISCORD_GATEWAY_INTENTS")]
@@ -185,6 +191,8 @@ struct DiscordConfig {
 
 #[derive(Config)]
 struct SlackConfig {
+    #[config(env = "TROGON_SOURCE_SLACK_STATUS")]
+    status: Option<String>,
     #[config(env = "TROGON_SOURCE_SLACK_SIGNING_SECRET")]
     signing_secret: Option<String>,
     #[config(env = "TROGON_SOURCE_SLACK_SUBJECT_PREFIX", default = "slack")]
@@ -201,6 +209,8 @@ struct SlackConfig {
 
 #[derive(Config)]
 struct TelegramConfig {
+    #[config(env = "TROGON_SOURCE_TELEGRAM_STATUS")]
+    status: Option<String>,
     #[config(env = "TROGON_SOURCE_TELEGRAM_WEBHOOK_SECRET")]
     webhook_secret: Option<String>,
     #[config(env = "TROGON_SOURCE_TELEGRAM_SUBJECT_PREFIX", default = "telegram")]
@@ -215,6 +225,8 @@ struct TelegramConfig {
 
 #[derive(Config)]
 struct GitlabConfig {
+    #[config(env = "TROGON_SOURCE_GITLAB_STATUS")]
+    status: Option<String>,
     #[config(env = "TROGON_SOURCE_GITLAB_WEBHOOK_SECRET")]
     webhook_secret: Option<String>,
     #[config(env = "TROGON_SOURCE_GITLAB_SUBJECT_PREFIX", default = "gitlab")]
@@ -229,6 +241,8 @@ struct GitlabConfig {
 
 #[derive(Config)]
 struct LinearConfig {
+    #[config(env = "TROGON_SOURCE_LINEAR_STATUS")]
+    status: Option<String>,
     #[config(env = "TROGON_SOURCE_LINEAR_WEBHOOK_SECRET")]
     webhook_secret: Option<String>,
     #[config(env = "TROGON_SOURCE_LINEAR_SUBJECT_PREFIX", default = "linear")]
@@ -245,6 +259,8 @@ struct LinearConfig {
 
 #[derive(Config)]
 struct IncidentioConfig {
+    #[config(env = "TROGON_SOURCE_INCIDENTIO_STATUS")]
+    status: Option<String>,
     #[config(env = "TROGON_SOURCE_INCIDENTIO_SIGNING_SECRET")]
     signing_secret: Option<String>,
     #[config(
@@ -270,6 +286,8 @@ struct IncidentioConfig {
 
 #[derive(Config)]
 struct NotionConfig {
+    #[config(env = "TROGON_SOURCE_NOTION_STATUS")]
+    status: Option<String>,
     #[config(env = "TROGON_SOURCE_NOTION_VERIFICATION_TOKEN")]
     verification_token: Option<String>,
     #[config(env = "TROGON_SOURCE_NOTION_SUBJECT_PREFIX", default = "notion")]
@@ -362,6 +380,10 @@ fn resolve_github(
     section: GithubConfig,
     errors: &mut Vec<ConfigValidationError>,
 ) -> Option<trogon_source_github::GithubConfig> {
+    if !resolve_source_status("github", section.status.as_deref(), errors) {
+        return None;
+    }
+
     let secret_str = section.webhook_secret?;
     let webhook_secret = match GitHubWebhookSecret::new(secret_str) {
         Ok(s) => s,
@@ -436,6 +458,10 @@ fn resolve_discord(
     section: DiscordConfig,
     errors: &mut Vec<ConfigValidationError>,
 ) -> Option<trogon_source_discord::DiscordConfig> {
+    if !resolve_source_status("discord", section.status.as_deref(), errors) {
+        return None;
+    }
+
     let token_str = section.bot_token.as_deref()?;
     let bot_token = match DiscordBotToken::new(token_str) {
         Ok(s) => s,
@@ -523,6 +549,10 @@ fn resolve_slack(
     section: SlackConfig,
     errors: &mut Vec<ConfigValidationError>,
 ) -> Option<trogon_source_slack::SlackConfig> {
+    if !resolve_source_status("slack", section.status.as_deref(), errors) {
+        return None;
+    }
+
     let secret_str = section.signing_secret?;
     let signing_secret = match SlackSigningSecret::new(secret_str) {
         Ok(s) => s,
@@ -606,6 +636,10 @@ fn resolve_telegram(
     section: TelegramConfig,
     errors: &mut Vec<ConfigValidationError>,
 ) -> Option<trogon_source_telegram::TelegramSourceConfig> {
+    if !resolve_source_status("telegram", section.status.as_deref(), errors) {
+        return None;
+    }
+
     let secret_str = section.webhook_secret?;
     let webhook_secret = match TelegramWebhookSecret::new(secret_str) {
         Ok(s) => s,
@@ -680,6 +714,10 @@ fn resolve_gitlab(
     section: GitlabConfig,
     errors: &mut Vec<ConfigValidationError>,
 ) -> Option<trogon_source_gitlab::GitlabConfig> {
+    if !resolve_source_status("gitlab", section.status.as_deref(), errors) {
+        return None;
+    }
+
     let webhook_secret_str = section.webhook_secret?;
     let webhook_secret = match GitLabWebhookSecret::new(webhook_secret_str) {
         Ok(s) => s,
@@ -754,6 +792,10 @@ fn resolve_linear(
     section: LinearConfig,
     errors: &mut Vec<ConfigValidationError>,
 ) -> Option<trogon_source_linear::LinearConfig> {
+    if !resolve_source_status("linear", section.status.as_deref(), errors) {
+        return None;
+    }
+
     let secret_str = section.webhook_secret?;
     let webhook_secret = match LinearWebhookSecret::new(secret_str) {
         Ok(s) => s,
@@ -829,6 +871,10 @@ fn resolve_incidentio(
     section: IncidentioConfig,
     errors: &mut Vec<ConfigValidationError>,
 ) -> Option<IncidentioSourceConfig> {
+    if !resolve_source_status("incidentio", section.status.as_deref(), errors) {
+        return None;
+    }
+
     let signing_secret_str = section.signing_secret?;
     let signing_secret = match IncidentioSigningSecret::new(signing_secret_str) {
         Ok(secret) => secret,
@@ -916,6 +962,10 @@ fn resolve_notion(
     section: NotionConfig,
     errors: &mut Vec<ConfigValidationError>,
 ) -> Option<trogon_source_notion::NotionConfig> {
+    if !resolve_source_status("notion", section.status.as_deref(), errors) {
+        return None;
+    }
+
     let verification_token = match section.verification_token {
         Some(token) => token,
         None => {
@@ -990,6 +1040,25 @@ fn resolve_notion(
         stream_max_age,
         nats_ack_timeout,
     })
+}
+
+fn resolve_source_status(
+    source: &'static str,
+    status: Option<&str>,
+    errors: &mut Vec<ConfigValidationError>,
+) -> bool {
+    let status = match status {
+        Some(value) => match value.parse::<SourceStatus>() {
+            Ok(status) => status,
+            Err(err) => {
+                errors.push(ConfigValidationError::invalid(source, "status", err));
+                return false;
+            }
+        },
+        None => SourceStatus::default(),
+    };
+
+    status.is_enabled()
 }
 
 #[cfg(test)]
@@ -1146,6 +1215,19 @@ token = "{token}"
     }
 
     #[test]
+    fn github_disabled_returns_none() {
+        let toml = r#"
+[sources.github]
+status = "disabled"
+webhook_secret = "gh-secret"
+"#;
+        let f = write_toml(toml);
+        let cfg = load(Some(f.path())).expect("load failed");
+        assert!(cfg.github.is_none());
+        assert!(!cfg.has_any_source());
+    }
+
+    #[test]
     fn github_resolves_with_valid_secret() {
         let f = write_toml(&github_toml("my-gh-secret"));
         let cfg = load(Some(f.path())).expect("load failed");
@@ -1197,6 +1279,18 @@ gateway_intents = "guilds,guild_messages"
     }
 
     #[test]
+    fn discord_disabled_returns_none() {
+        let toml = r#"
+[sources.discord]
+status = "disabled"
+bot_token = "Bot my-bot-token"
+"#;
+        let f = write_toml(toml);
+        let cfg = load(Some(f.path())).expect("load failed");
+        assert!(cfg.discord.is_none());
+    }
+
+    #[test]
     fn discord_gateway_empty_bot_token() {
         let toml = r#"
 [sources.discord]
@@ -1217,10 +1311,34 @@ bot_token = ""
     }
 
     #[test]
+    fn slack_disabled_returns_none() {
+        let toml = r#"
+[sources.slack]
+status = "disabled"
+signing_secret = "slack-secret"
+"#;
+        let f = write_toml(toml);
+        let cfg = load(Some(f.path())).expect("load failed");
+        assert!(cfg.slack.is_none());
+    }
+
+    #[test]
     fn telegram_resolves_with_valid_secret() {
         let f = write_toml(&telegram_toml("telegram-webhook-secret"));
         let cfg = load(Some(f.path())).expect("load failed");
         assert!(cfg.telegram.is_some());
+    }
+
+    #[test]
+    fn telegram_disabled_returns_none() {
+        let toml = r#"
+[sources.telegram]
+status = "disabled"
+webhook_secret = "telegram-webhook-secret"
+"#;
+        let f = write_toml(toml);
+        let cfg = load(Some(f.path())).expect("load failed");
+        assert!(cfg.telegram.is_none());
     }
 
     #[test]
@@ -1231,10 +1349,34 @@ bot_token = ""
     }
 
     #[test]
+    fn gitlab_disabled_returns_none() {
+        let toml = r#"
+[sources.gitlab]
+status = "disabled"
+webhook_secret = "gitlab-webhook-secret"
+"#;
+        let f = write_toml(toml);
+        let cfg = load(Some(f.path())).expect("load failed");
+        assert!(cfg.gitlab.is_none());
+    }
+
+    #[test]
     fn linear_resolves_with_valid_secret() {
         let f = write_toml(&linear_toml("linear-webhook-secret"));
         let cfg = load(Some(f.path())).expect("load failed");
         assert!(cfg.linear.is_some());
+    }
+
+    #[test]
+    fn linear_disabled_returns_none() {
+        let toml = r#"
+[sources.linear]
+status = "disabled"
+webhook_secret = "linear-webhook-secret"
+"#;
+        let f = write_toml(toml);
+        let cfg = load(Some(f.path())).expect("load failed");
+        assert!(cfg.linear.is_none());
     }
 
     #[test]
@@ -1245,10 +1387,37 @@ bot_token = ""
     }
 
     #[test]
+    fn incidentio_disabled_returns_none() {
+        let toml = format!(
+            r#"
+[sources.incidentio]
+status = "disabled"
+signing_secret = "{}"
+"#,
+            incidentio_valid_test_secret()
+        );
+        let f = write_toml(&toml);
+        let cfg = load(Some(f.path())).expect("load failed");
+        assert!(cfg.incidentio.is_none());
+    }
+
+    #[test]
     fn notion_resolves_with_valid_token() {
         let f = write_toml(&notion_toml("notion-verification-token-example"));
         let cfg = load(Some(f.path())).expect("load failed");
         assert!(cfg.notion.is_some());
+    }
+
+    #[test]
+    fn notion_disabled_returns_none() {
+        let toml = r#"
+[sources.notion]
+status = "disabled"
+verification_token = "notion-verification-token-example"
+"#;
+        let f = write_toml(toml);
+        let cfg = load(Some(f.path())).expect("load failed");
+        assert!(cfg.notion.is_none());
     }
 
     #[test]
@@ -1660,6 +1829,20 @@ token = "file-token"
         assert!(display.contains("config validation errors:"));
         assert!(display.contains("github: stream_max_age_secs must not be zero"));
         assert!(display.contains("discord: invalid subject_prefix: InvalidCharacter('.')"));
+    }
+
+    #[test]
+    fn invalid_status_value_is_error() {
+        let toml = r#"
+[sources.github]
+status = "maybe"
+webhook_secret = "gh-secret"
+"#;
+        let f = write_toml(toml);
+        let result = load(Some(f.path()));
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("invalid status")))
+        );
     }
 
     #[test]

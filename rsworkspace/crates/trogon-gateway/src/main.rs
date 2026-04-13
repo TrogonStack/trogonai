@@ -5,6 +5,8 @@ mod config;
 #[cfg_attr(coverage, allow(dead_code))]
 mod http;
 #[cfg_attr(coverage, allow(dead_code))]
+mod source_status;
+#[cfg_attr(coverage, allow(dead_code))]
 mod streams;
 
 #[cfg(not(coverage))]
