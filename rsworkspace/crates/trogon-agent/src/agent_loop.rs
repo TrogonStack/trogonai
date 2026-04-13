@@ -2402,6 +2402,152 @@ mod tests {
         assert_ne!(key_1, key_3, "different tool names must produce different keys");
     }
 
+    // ── is_retryable_error ────────────────────────────────────────────────────
+
+    /// HTTP 5xx errors are retryable — Anthropic-side transient failures.
+    #[tokio::test]
+    async fn is_retryable_error_true_for_5xx_status() {
+        let err = make_http_error(500).await;
+        assert!(
+            super::is_retryable_error(&err),
+            "HTTP 500 must be retryable — server error, not a broken request"
+        );
+    }
+
+    /// HTTP 4xx errors (except 429, which is handled before reaching this
+    /// function) are not retryable — they indicate a deterministic failure in
+    /// the request that re-sending will not fix.
+    #[tokio::test]
+    async fn is_retryable_error_false_for_4xx_status() {
+        let err = make_http_error(400).await;
+        assert!(
+            !super::is_retryable_error(&err),
+            "HTTP 400 must not be retryable — broken request, retrying would always fail"
+        );
+    }
+
+    /// A TCP connection-refused error (ECONNREFUSED) is retryable: it indicates
+    /// a transient server-side condition (process restarting, port not yet
+    /// listening) that may resolve on the next attempt.
+    #[tokio::test]
+    async fn is_retryable_error_connect_returns_true() {
+        // Bind an ephemeral port, record the address, then immediately drop the
+        // listener.  On Linux this reliably produces ECONNREFUSED when we
+        // connect to the freed address.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        drop(listener);
+
+        let err = reqwest::Client::new()
+            .get(format!("http://{addr}/"))
+            .send()
+            .await
+            .expect_err("connection to freed port must fail");
+
+        assert!(
+            err.is_connect(),
+            "ECONNREFUSED must set is_connect()=true; err={err}"
+        );
+        assert!(
+            super::is_retryable_error(&err),
+            "connect error must be classified as retryable"
+        );
+    }
+
+    /// A request that times out while waiting for the server to respond is
+    /// retryable — the upstream may simply be slow or temporarily overloaded.
+    #[tokio::test]
+    async fn is_retryable_error_timeout_returns_true() {
+        use std::time::Duration;
+
+        // Server that accepts the connection but never writes a response.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            if let Ok((_stream, _)) = listener.accept().await {
+                // Hold the connection open without responding.
+                tokio::time::sleep(Duration::from_secs(60)).await;
+            }
+        });
+
+        let err = reqwest::Client::builder()
+            .timeout(Duration::from_millis(50))
+            .build()
+            .unwrap()
+            .get(format!("http://{addr}/"))
+            .send()
+            .await
+            .expect_err("request must time out after 50 ms");
+
+        assert!(
+            err.is_timeout(),
+            "request timeout must set is_timeout()=true; err={err}"
+        );
+        assert!(
+            super::is_retryable_error(&err),
+            "timeout error must be classified as retryable"
+        );
+    }
+
+    // ── retry_after_delay ─────────────────────────────────────────────────────
+
+    /// A valid positive integer in the `Retry-After` header is parsed and
+    /// returned directly — no fallback to the 60-second default.
+    #[test]
+    fn retry_after_delay_returns_parsed_integer_seconds() {
+        use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            HeaderName::from_static("retry-after"),
+            HeaderValue::from_static("30"),
+        );
+        assert_eq!(
+            super::retry_after_delay(&headers),
+            30,
+            "valid integer must be returned as-is, not replaced with the 60-s default"
+        );
+    }
+
+    /// A negative integer string (`"-30"`) fails `parse::<u64>()` (negative
+    /// values cannot be represented as unsigned) and the default 60 seconds
+    /// is returned.
+    #[test]
+    fn retry_after_delay_returns_60_for_negative_integer() {
+        use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            HeaderName::from_static("retry-after"),
+            HeaderValue::from_static("-30"),
+        );
+        assert_eq!(
+            super::retry_after_delay(&headers),
+            60,
+            "negative integer string must fall back to the 60-s default"
+        );
+    }
+
+    /// A header value containing non-UTF-8 bytes fails the `.to_str()` call
+    /// before reaching `parse::<u64>()`, so the default 60 seconds is returned.
+    ///
+    /// This exercises the `and_then(|v| v.to_str().ok())` guard in
+    /// `retry_after_delay`.
+    #[test]
+    fn retry_after_delay_returns_60_for_non_utf8_header() {
+        use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+        let mut headers = HeaderMap::new();
+        // 0xFF is valid in an HTTP header value (obs-text) but is not valid
+        // UTF-8, so `.to_str()` returns `Err` and we fall back to the default.
+        headers.insert(
+            HeaderName::from_static("retry-after"),
+            HeaderValue::from_bytes(b"\xff").unwrap(),
+        );
+        assert_eq!(
+            super::retry_after_delay(&headers),
+            60,
+            "non-UTF-8 header value must fall back to the 60-s default"
+        );
+    }
+
     // ── HTTP error classification ─────────────────────────────────────────────
 
     /// Spin up a minimal TCP server that responds with the given HTTP status

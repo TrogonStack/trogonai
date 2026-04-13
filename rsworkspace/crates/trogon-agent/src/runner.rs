@@ -175,7 +175,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
     let tenant_id = Arc::new(cfg.tenant_id.clone());
 
     // Recover any stale promises from a previous process run.
-    recover_stale_promises(&agent, &promise_store, &store, &run_store, &tenant_id).await;
+    let _ = recover_stale_promises(&agent, &promise_store, &store, &run_store, &tenant_id).await;
 
     // Start the combined HTTP API server unless disabled (port == 0).
     // Automations + run history + interactive chat sessions are all on the same port.
@@ -909,7 +909,7 @@ async fn recover_stale_promises(
     automation_store: &Arc<AutomationStore>,
     run_store: &Arc<RunStore>,
     tenant_id: &str,
-) {
+) -> Option<tokio::task::JoinHandle<()>> {
     // Must be strictly greater than the maximum time between two consecutive
     // checkpoints. Between checkpoints, claimed_at does not update, so the
     // age can grow by up to (tool_execution_time + LLM_call_time). The LLM
@@ -937,11 +937,11 @@ async fn recover_stale_promises(
         Ok(Ok(p)) => p,
         Ok(Err(e)) => {
             warn!(error = %e, "Startup recovery: failed to list running promises");
-            return;
+            return None;
         }
         Err(_) => {
             warn!("Startup recovery: list_running timed out — skipping recovery this startup");
-            return;
+            return None;
         }
     };
 
@@ -951,7 +951,7 @@ async fn recover_stale_promises(
         .collect();
 
     if stale.is_empty() {
-        return;
+        return None;
     }
 
     // Recover the most recently active first (those closest to completion
@@ -986,7 +986,7 @@ async fn recover_stale_promises(
     // flood the Anthropic API with simultaneous requests after an outage when
     // many promises are stale. Sequential execution keeps the load profile
     // predictable and avoids triggering rate limits.
-    tokio::spawn(async move {
+    Some(tokio::spawn(async move {
         for promise in stale {
             // Re-fetch to verify the promise is still Running. Between
             // `list_running` and here, another worker may have already claimed
@@ -1317,7 +1317,7 @@ async fn recover_stale_promises(
                 }
             }
         }
-    });
+    }))
 }
 
 /// Spawn a background task that sends [`AckKind::Progress`] every 15 seconds
@@ -1647,6 +1647,103 @@ mod tests {
             .await
             .expect("RunStore");
         (rs, container)
+    }
+
+    /// Start a throwaway NATS container and open both `AutomationStore` and
+    /// `RunStore` from it.  Returns the two stores and an opaque `impl Drop`
+    /// guard — keep the guard alive for the duration of the test.
+    async fn make_all_stores() -> (
+        std::sync::Arc<trogon_automations::AutomationStore>,
+        std::sync::Arc<trogon_automations::RunStore>,
+        impl Drop,
+    ) {
+        use testcontainers_modules::{
+            nats::Nats,
+            testcontainers::{ImageExt, runners::AsyncRunner},
+        };
+        let container = Nats::default()
+            .with_cmd(["--jetstream"])
+            .start()
+            .await
+            .expect("NATS");
+        let port = container.get_host_port_ipv4(4222).await.expect("port");
+        let nats = async_nats::connect(format!("nats://127.0.0.1:{port}"))
+            .await
+            .expect("connect");
+        let js = async_nats::jetstream::new(nats);
+        let auto_store = std::sync::Arc::new(
+            trogon_automations::AutomationStore::open(&js)
+                .await
+                .expect("AutomationStore"),
+        );
+        let run_store = std::sync::Arc::new(
+            trogon_automations::RunStore::open(&js)
+                .await
+                .expect("RunStore"),
+        );
+        (auto_store, run_store, container)
+    }
+
+    fn make_agent_off() -> Arc<crate::agent_loop::AgentLoop> {
+        use crate::agent_loop::ReqwestAnthropicClient;
+        use crate::tools::{DefaultToolDispatcher, ToolContext};
+        struct AlwaysOffFlagClient;
+        impl crate::flag_client::FeatureFlagClient for AlwaysOffFlagClient {
+            fn is_enabled<'a>(
+                &'a self,
+                _tenant_id: &'a str,
+                _flag: &'a dyn trogon_splitio::flags::FeatureFlag,
+            ) -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send + 'a>> {
+                Box::pin(async { false })
+            }
+        }
+        let http_client = reqwest::Client::new();
+        let tool_ctx = Arc::new(ToolContext::for_test(
+            "http://127.0.0.1:1",
+            "tok_test",
+            "",
+            "",
+        ));
+        Arc::new(crate::agent_loop::AgentLoop {
+            anthropic_client: Arc::new(ReqwestAnthropicClient::new(
+                http_client,
+                "http://127.0.0.1:1".to_string(),
+                String::new(),
+            )),
+            model: "test".to_string(),
+            max_iterations: 1,
+            tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),
+            tool_context: tool_ctx,
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            flag_client: Arc::new(AlwaysOffFlagClient),
+            tenant_id: "acme".to_string(),
+            promise_store: None,
+            promise_id: None,
+        })
+    }
+
+    /// Build a stale `Running` promise whose `claimed_at` is far enough in the
+    /// past to exceed the 10-minute staleness threshold inside
+    /// `recover_stale_promises`.
+    fn make_stale_promise(id: &str) -> crate::promise_store::AgentPromise {
+        crate::promise_store::AgentPromise {
+            id: id.to_string(),
+            tenant_id: "acme".to_string(),
+            automation_id: String::new(),
+            status: crate::promise_store::PromiseStatus::Running,
+            messages: vec![],
+            iteration: 3,
+            worker_id: "old-worker".to_string(),
+            // 20 minutes in the past — well past STALE_AFTER_SECS (10 min).
+            claimed_at: trogon_automations::now_unix().saturating_sub(20 * 60),
+            trigger: serde_json::json!({}),
+            nats_subject: "github.pull_request".to_string(),
+            system_prompt: None,
+        }
     }
 
     /// dispatch_automations runs every automation and waits for all tasks.
@@ -2111,6 +2208,642 @@ mod tests {
         assert!(
             returned.promise_store.is_none(),
             "returned agent must have no promise_store — run proceeds without durability on error"
+        );
+    }
+
+    /// When `put_promise` returns an immediate `Err` (new promise path — no
+    /// existing KV entry), the function must log a warning and still return
+    /// `Some(agent)` with `promise_id` and `promise_store` wired.
+    ///
+    /// The KV write failing means this run has no durable checkpoint, but it
+    /// should still proceed rather than abort — the `Ok(Err(e))` arm of the
+    /// inner `put_promise` match falls through to the wiring block.
+    #[tokio::test]
+    async fn prepare_agent_put_promise_error_returns_agent_with_promise_id_wired() {
+        use crate::promise_store::mock::ErrorPutPromiseStore;
+        use crate::promise_store::PromiseRepository;
+
+        let store = Arc::new(ErrorPutPromiseStore::new());
+        let store_arc = Arc::clone(&store) as Arc<dyn PromiseRepository>;
+        let agent = make_agent("http://127.0.0.1:1");
+
+        let result = super::prepare_agent_with_promise(
+            &agent,
+            &store_arc,
+            "acme",
+            "p-new",
+            "",
+            "github.pull_request",
+            &serde_json::json!({}),
+        )
+        .await;
+
+        let returned = result.expect("must return Some(agent) even when put_promise errors");
+        assert_eq!(
+            returned.promise_id.as_deref(),
+            Some("p-new"),
+            "promise_id must be wired despite put_promise error"
+        );
+        assert!(
+            returned.promise_store.is_some(),
+            "promise_store must be wired despite put_promise error"
+        );
+    }
+
+    /// When `put_promise` hangs and the KV timeout fires (new promise path),
+    /// the function must log a warning and still return `Some(agent)` with
+    /// `promise_id` and `promise_store` wired.
+    ///
+    /// The `Err(_)` timeout arm of `tokio::time::timeout(put_promise)` falls
+    /// through to the wiring block — the run proceeds without a durable
+    /// checkpoint but is not aborted.
+    #[tokio::test(start_paused = true)]
+    async fn prepare_agent_put_promise_timeout_returns_agent_with_promise_id_wired() {
+        use crate::promise_store::mock::HangingPutPromiseStore;
+        use crate::promise_store::PromiseRepository;
+        use std::time::Duration;
+
+        let store = Arc::new(HangingPutPromiseStore::new());
+        let store_arc = Arc::clone(&store) as Arc<dyn PromiseRepository>;
+        let agent = make_agent("http://127.0.0.1:1");
+        let trigger = serde_json::json!({});
+
+        let (result, _) = tokio::join!(
+            super::prepare_agent_with_promise(
+                &agent,
+                &store_arc,
+                "acme",
+                "p-new",
+                "",
+                "github.pull_request",
+                &trigger,
+            ),
+            tokio::time::advance(
+                crate::agent_loop::NATS_KV_TIMEOUT + Duration::from_millis(1)
+            ),
+        );
+
+        let returned = result.expect("must return Some(agent) when put_promise times out");
+        assert_eq!(
+            returned.promise_id.as_deref(),
+            Some("p-new"),
+            "promise_id must be wired despite put_promise timeout"
+        );
+        assert!(
+            returned.promise_store.is_some(),
+            "promise_store must be wired despite put_promise timeout"
+        );
+    }
+
+    // ── recover_stale_promises ────────────────────────────────────────────────
+
+    /// When `list_running` times out, `recover_stale_promises` must return
+    /// `None` (no recovery task spawned) immediately after the timeout.
+    ///
+    /// Note: `start_paused = true` would freeze the clock before testcontainers
+    /// can start Docker, so we pause the clock manually after store setup.
+    #[tokio::test]
+    async fn recover_list_running_timeout_returns_none() {
+        use crate::promise_store::mock::HangingListRunningStore;
+        use crate::promise_store::PromiseRepository;
+        use std::time::Duration;
+
+        // Set up the stores with a real clock so Docker/NATS can start.
+        let (auto_store, run_store, _container) = make_all_stores().await;
+
+        // Now pause the clock — `HangingListRunningStore::list_running` returns
+        // `pending()`, so `recover_stale_promises` blocks on the timeout future.
+        tokio::time::pause();
+
+        let promise_store: Arc<dyn PromiseRepository> =
+            Arc::new(HangingListRunningStore::new());
+        let agent = make_agent("http://127.0.0.1:1");
+
+        let (handle, _) = tokio::join!(
+            super::recover_stale_promises(
+                &agent,
+                &promise_store,
+                &auto_store,
+                &run_store,
+                "acme",
+            ),
+            tokio::time::advance(
+                crate::agent_loop::NATS_KV_TIMEOUT + Duration::from_millis(1)
+            ),
+        );
+
+        assert!(
+            handle.is_none(),
+            "no recovery task must be spawned when list_running times out"
+        );
+    }
+
+    /// When `list_running` returns an immediate error, `recover_stale_promises`
+    /// must return `None` without spawning a recovery task.
+    #[tokio::test]
+    async fn recover_list_running_error_returns_none() {
+        use crate::promise_store::mock::ErrorListRunningStore;
+        use crate::promise_store::PromiseRepository;
+
+        let (auto_store, run_store, _container) = make_all_stores().await;
+        let promise_store: Arc<dyn PromiseRepository> =
+            Arc::new(ErrorListRunningStore::new());
+        let agent = make_agent("http://127.0.0.1:1");
+
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &run_store,
+            "acme",
+        )
+        .await;
+
+        assert!(
+            handle.is_none(),
+            "no recovery task must be spawned when list_running errors"
+        );
+    }
+
+    /// When `list_running` returns an empty list (no Running promises at all),
+    /// `recover_stale_promises` must return `None`.
+    #[tokio::test]
+    async fn recover_empty_running_list_returns_none() {
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::PromiseRepository;
+
+        let (auto_store, run_store, _container) = make_all_stores().await;
+        let promise_store: Arc<dyn PromiseRepository> =
+            Arc::new(MockPromiseStore::new());
+        let agent = make_agent("http://127.0.0.1:1");
+
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &run_store,
+            "acme",
+        )
+        .await;
+
+        assert!(
+            handle.is_none(),
+            "no recovery task must be spawned when no Running promises exist"
+        );
+    }
+
+    /// When Running promises exist but none are stale (all have a recent
+    /// `claimed_at`), the stale filter produces an empty list and
+    /// `recover_stale_promises` must return `None`.
+    #[tokio::test]
+    async fn recover_no_stale_promises_returns_none() {
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::{AgentPromise, PromiseRepository, PromiseStatus};
+
+        let (auto_store, run_store, _container) = make_all_stores().await;
+        let store = Arc::new(MockPromiseStore::new());
+
+        // claimed_at = now → age = 0s, well under STALE_AFTER_SECS (600s).
+        let fresh = AgentPromise {
+            id: "p-fresh".to_string(),
+            tenant_id: "acme".to_string(),
+            automation_id: String::new(),
+            status: PromiseStatus::Running,
+            messages: vec![],
+            iteration: 0,
+            worker_id: "w".to_string(),
+            claimed_at: trogon_automations::now_unix(),
+            trigger: serde_json::Value::Null,
+            nats_subject: "github.pull_request".to_string(),
+            system_prompt: None,
+        };
+        store.insert_promise(fresh);
+
+        let promise_store: Arc<dyn PromiseRepository> = Arc::clone(&store) as _;
+        let agent = make_agent("http://127.0.0.1:1");
+
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &run_store,
+            "acme",
+        )
+        .await;
+
+        assert!(
+            handle.is_none(),
+            "no recovery task must be spawned when all Running promises are fresh"
+        );
+    }
+
+    /// When the re-fetch of a stale promise returns `Ok(None)` (the promise
+    /// was deleted from KV between the scan and the recovery loop), the loop
+    /// must skip that promise without claiming or modifying any state.
+    #[tokio::test]
+    async fn recover_refetch_vanished_skips_promise() {
+        use crate::promise_store::mock::VanishedOnRefetchStore;
+        use crate::promise_store::PromiseRepository;
+
+        let (auto_store, run_store, _container) = make_all_stores().await;
+        let store = Arc::new(VanishedOnRefetchStore::new());
+        // Populate inner so list_running returns the stale promise.
+        store.inner.insert_promise(make_stale_promise("p-vanished"));
+
+        let promise_store: Arc<dyn PromiseRepository> = Arc::clone(&store) as _;
+        let agent = make_agent("http://127.0.0.1:1");
+
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &run_store,
+            "acme",
+        )
+        .await
+        .expect("spawn handle must be returned when stale promises exist");
+
+        handle.await.expect("recovery task must not panic");
+
+        // The inner store must still hold the original Running promise with
+        // unchanged worker_id — the vanished re-fetch caused a skip.
+        let (p, _) = store
+            .inner
+            .get_promise("acme", "p-vanished")
+            .await
+            .unwrap()
+            .expect("promise must still be in inner store");
+        assert_eq!(
+            p.worker_id, "old-worker",
+            "worker_id must not change — promise was skipped after vanishing on re-fetch"
+        );
+    }
+
+    /// When the re-fetch returns the promise with a non-Running status
+    /// (another worker completed it between the scan and the re-fetch),
+    /// the loop must skip it without claiming.
+    #[tokio::test]
+    async fn recover_refetch_resolved_skips_promise() {
+        use crate::promise_store::mock::ResolvedOnRefetchStore;
+        use crate::promise_store::PromiseRepository;
+
+        let (auto_store, run_store, _container) = make_all_stores().await;
+        let store = Arc::new(ResolvedOnRefetchStore::new());
+        store.inner.insert_promise(make_stale_promise("p-resolved"));
+
+        let promise_store: Arc<dyn PromiseRepository> = Arc::clone(&store) as _;
+        let agent = make_agent("http://127.0.0.1:1");
+
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &run_store,
+            "acme",
+        )
+        .await
+        .expect("spawn handle must be returned when stale promises exist");
+
+        handle.await.expect("recovery task must not panic");
+
+        // Promise must remain with unchanged worker_id — re-fetch returned
+        // Resolved so the loop skipped without claiming.
+        let (p, _) = store
+            .inner
+            .get_promise("acme", "p-resolved")
+            .await
+            .unwrap()
+            .expect("promise must still be in inner store");
+        assert_eq!(
+            p.worker_id, "old-worker",
+            "worker_id must not change — promise was already Resolved on re-fetch"
+        );
+    }
+
+    /// When `get_promise` returns an error during the re-fetch inside the
+    /// recovery loop, the loop must skip that promise and continue.
+    #[tokio::test]
+    async fn recover_refetch_error_skips_promise() {
+        use crate::promise_store::mock::ErrorGetPromiseStore;
+        use crate::promise_store::PromiseRepository;
+
+        let (auto_store, run_store, _container) = make_all_stores().await;
+        let store = Arc::new(ErrorGetPromiseStore::new());
+        // Populate inner so list_running returns the stale promise (list_running
+        // delegates to inner; get_promise errors — that's the re-fetch failure).
+        store.inner.insert_promise(make_stale_promise("p-err"));
+
+        let promise_store: Arc<dyn PromiseRepository> = Arc::clone(&store) as _;
+        let agent = make_agent("http://127.0.0.1:1");
+
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &run_store,
+            "acme",
+        )
+        .await
+        .expect("spawn handle must be returned when stale promises exist");
+
+        // Must not panic — the error is logged and the loop continues.
+        handle.await.expect("recovery task must not panic");
+    }
+
+    /// When the feature flag for a built-in handler is disabled, the recovery
+    /// loop must skip the promise without calling `prepare_agent_with_promise`
+    /// (no CAS claim, no worker_id update).
+    #[tokio::test]
+    async fn recover_flag_disabled_skips_without_claiming() {
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::PromiseRepository;
+
+        let (auto_store, run_store, _container) = make_all_stores().await;
+        let store = Arc::new(MockPromiseStore::new());
+        store.insert_promise(make_stale_promise("p-flag-off"));
+
+        let promise_store: Arc<dyn PromiseRepository> = Arc::clone(&store) as _;
+        // AlwaysOffFlagClient — all feature flags return false.
+        let agent = make_agent_off();
+
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &run_store,
+            "acme",
+        )
+        .await
+        .expect("spawn handle must be returned when stale promises exist");
+
+        handle.await.expect("recovery task must not panic");
+
+        // worker_id must be unchanged — flag was off so we never claimed.
+        let (p, _) = store
+            .get_promise("acme", "p-flag-off")
+            .await
+            .unwrap()
+            .expect("promise must still exist");
+        assert_eq!(
+            p.worker_id, "old-worker",
+            "worker_id must not change when feature flag is disabled"
+        );
+    }
+
+    /// When a stale promise has an unknown `nats_subject` (built-in handler
+    /// dispatch falls through to the `other =>` arm), the recovery must mark
+    /// it `PermanentFailed` so neither startup recovery nor NATS redelivery
+    /// cycles on it again until the 24 h TTL expires.
+    #[tokio::test]
+    async fn recover_unknown_subject_marks_permanent_failed() {
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+
+        let (auto_store, run_store, _container) = make_all_stores().await;
+        let store = Arc::new(MockPromiseStore::new());
+
+        let mut p = make_stale_promise("p-unknown");
+        p.nats_subject = "completely.unknown.subject".to_string();
+        store.insert_promise(p);
+
+        let promise_store: Arc<dyn PromiseRepository> = Arc::clone(&store) as _;
+        let agent = make_agent("http://127.0.0.1:1");
+
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &run_store,
+            "acme",
+        )
+        .await
+        .expect("spawn handle must be returned when stale promises exist");
+
+        handle.await.expect("recovery task must not panic");
+
+        let (p, _) = store
+            .get_promise("acme", "p-unknown")
+            .await
+            .unwrap()
+            .expect("promise must still exist after recovery");
+        assert_eq!(
+            p.status,
+            PromiseStatus::PermanentFailed,
+            "unknown subject must mark promise PermanentFailed"
+        );
+    }
+
+    /// When `prepare_agent_with_promise` fails to CAS-claim the promise
+    /// (another worker took it between the re-fetch and the claim), the
+    /// recovery loop must skip without re-running the agent.
+    #[tokio::test]
+    async fn recover_cas_claim_lost_skips_promise() {
+        use crate::promise_store::mock::CasConflictOnceStore;
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+
+        let (auto_store, run_store, _container) = make_all_stores().await;
+        let store = Arc::new(CasConflictOnceStore::new());
+        store.inner.insert_promise(make_stale_promise("p-cas"));
+
+        let promise_store: Arc<dyn PromiseRepository> = Arc::clone(&store) as _;
+        let agent = make_agent("http://127.0.0.1:1");
+
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &run_store,
+            "acme",
+        )
+        .await
+        .expect("spawn handle must be returned when stale promises exist");
+
+        handle.await.expect("recovery task must not panic");
+
+        // Promise status must still be Running — no handler was called because
+        // the CAS claim returned None.
+        let (p, _) = store
+            .inner
+            .get_promise("acme", "p-cas")
+            .await
+            .unwrap()
+            .expect("promise must still exist");
+        assert_eq!(
+            p.status,
+            PromiseStatus::Running,
+            "promise must remain Running when CAS claim is lost"
+        );
+    }
+
+    /// When the re-fetch inside the recovery task times out (`get_promise`
+    /// hangs for longer than `NATS_KV_TIMEOUT`), the loop must skip that
+    /// promise and continue without panicking.
+    ///
+    /// `HangingGetPromiseStore` makes every `get_promise` return
+    /// `std::future::pending()`.  The clock is paused manually after container
+    /// setup to avoid breaking testcontainers, then advanced past the timeout
+    /// while awaiting the spawned handle.
+    #[tokio::test]
+    async fn recover_refetch_timeout_skips_promise() {
+        use crate::promise_store::mock::HangingGetPromiseStore;
+        use crate::promise_store::PromiseRepository;
+        use std::time::Duration;
+
+        // Start the NATS container with the real clock so Docker can reach the
+        // network properly.
+        let (auto_store, run_store, _container) = make_all_stores().await;
+
+        // Now freeze the clock — all subsequent `tokio::time::timeout` calls
+        // will block until we call `tokio::time::advance`.
+        tokio::time::pause();
+
+        let store = Arc::new(HangingGetPromiseStore::new());
+        // Populate inner so `list_running` returns a stale promise.
+        // `get_promise` is overridden to hang forever.
+        store.inner.insert_promise(make_stale_promise("p-hang"));
+
+        let promise_store: Arc<dyn PromiseRepository> = Arc::clone(&store) as _;
+        let agent = make_agent("http://127.0.0.1:1");
+
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &run_store,
+            "acme",
+        )
+        .await
+        .expect("spawn handle must be returned when stale promises exist");
+
+        // Advance the mock clock past NATS_KV_TIMEOUT to fire the re-fetch
+        // timeout inside the spawned task.
+        let (join_result, _) = tokio::join!(
+            handle,
+            tokio::time::advance(crate::agent_loop::NATS_KV_TIMEOUT + Duration::from_millis(1)),
+        );
+        join_result.expect("recovery task must not panic");
+
+        // worker_id must be unchanged — the re-fetch timed out so the promise
+        // was skipped without being claimed.
+        let (p, _) = store
+            .inner
+            .get_promise("acme", "p-hang")
+            .await
+            .unwrap()
+            .expect("promise must still exist in inner store");
+        assert_eq!(
+            p.worker_id, "old-worker",
+            "worker_id must not change — re-fetch timed out and promise was skipped"
+        );
+    }
+
+    /// `recover_stale_promises` must process at most `MAX_RECOVERY_AT_STARTUP`
+    /// (= 10) stale promises.  When more than 10 are stale, the remainder are
+    /// deferred to the next restart.
+    ///
+    /// Scenario: 11 stale promises with an unknown `nats_subject`.  The
+    /// unknown-subject arm marks each processed promise `PermanentFailed`
+    /// without making any HTTP calls, so the test completes instantly.
+    /// After recovery exactly 10 must be `PermanentFailed` and 1 must still
+    /// be `Running`.
+    #[tokio::test]
+    async fn recover_stale_cap_processes_at_most_10() {
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+
+        let (auto_store, run_store, _container) = make_all_stores().await;
+        let store = Arc::new(MockPromiseStore::new());
+
+        // Insert 11 stale promises — one more than the cap.
+        // All have an unknown subject so each is handled synchronously
+        // (no HTTP) by the `other =>` arm that marks PermanentFailed.
+        for i in 0..11u32 {
+            let mut p = make_stale_promise(&format!("p-cap-{i}"));
+            p.nats_subject = "completely.unknown.subject".to_string();
+            store.insert_promise(p);
+        }
+
+        let promise_store: Arc<dyn PromiseRepository> = Arc::clone(&store) as _;
+        let agent = make_agent("http://127.0.0.1:1");
+
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &run_store,
+            "acme",
+        )
+        .await
+        .expect("spawn handle must be returned when stale promises exist");
+
+        handle.await.expect("recovery task must not panic");
+
+        let all = store.snapshot_promises();
+        let permanent_failed = all
+            .values()
+            .filter(|(p, _)| p.status == PromiseStatus::PermanentFailed)
+            .count();
+        let still_running = all
+            .values()
+            .filter(|(p, _)| p.status == PromiseStatus::Running)
+            .count();
+
+        assert_eq!(
+            permanent_failed, 10,
+            "exactly 10 promises must be processed (cap = MAX_RECOVERY_AT_STARTUP); got {permanent_failed}"
+        );
+        assert_eq!(
+            still_running, 1,
+            "exactly 1 promise must remain Running — deferred to next restart; got {still_running}"
+        );
+    }
+
+    /// When a stale promise has a non-empty `automation_id` but the automation
+    /// no longer exists in the `AutomationStore`, the recovery loop must mark
+    /// the promise `PermanentFailed`.
+    ///
+    /// Rationale: the automation was deleted after the crash.  Retrying would
+    /// always reach the "automation not found" arm and cycle until the 24 h
+    /// TTL — marking `PermanentFailed` stops that cycle immediately.
+    #[tokio::test]
+    async fn recover_automation_deleted_marks_permanent_failed() {
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+
+        // Real AutomationStore — intentionally empty so every lookup fails.
+        let (auto_store, run_store, _container) = make_all_stores().await;
+        let store = Arc::new(MockPromiseStore::new());
+
+        // Stale promise that belongs to an automation that no longer exists.
+        let mut p = make_stale_promise("p-del-auto");
+        p.automation_id = "deleted-auto-id".to_string();
+        p.nats_subject = "github.push".to_string();
+        store.insert_promise(p);
+
+        let promise_store: Arc<dyn PromiseRepository> = Arc::clone(&store) as _;
+        let agent = make_agent("http://127.0.0.1:1");
+
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &run_store,
+            "acme",
+        )
+        .await
+        .expect("spawn handle must be returned when stale promises exist");
+
+        handle.await.expect("recovery task must not panic");
+
+        let (p, _) = store
+            .get_promise("acme", "p-del-auto")
+            .await
+            .unwrap()
+            .expect("promise must still exist");
+        assert_eq!(
+            p.status,
+            PromiseStatus::PermanentFailed,
+            "promise for a deleted automation must be marked PermanentFailed so recovery stops cycling"
         );
     }
 }

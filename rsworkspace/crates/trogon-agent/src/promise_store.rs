@@ -1472,6 +1472,450 @@ pub mod mock {
             self.inner.list_running(tenant_id)
         }
     }
+
+    /// Makes every `put_promise` call hang indefinitely.
+    ///
+    /// Used with Tokio's mock clock to test that a timeout on the initial
+    /// promise creation causes the run to proceed with promise fields still
+    /// wired (rather than blocking forever).
+    pub struct HangingPutPromiseStore {
+        pub inner: MockPromiseStore,
+    }
+
+    impl HangingPutPromiseStore {
+        pub fn new() -> Self {
+            Self { inner: MockPromiseStore::new() }
+        }
+    }
+
+    impl super::PromiseRepository for HangingPutPromiseStore {
+        fn get_promise<'a>(
+            &'a self,
+            tenant_id: &'a str,
+            promise_id: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<Option<super::PromiseEntry>, super::PromiseStoreError>> + Send + 'a>>
+        {
+            self.inner.get_promise(tenant_id, promise_id)
+        }
+
+        fn put_promise<'a>(
+            &'a self,
+            _promise: &'a super::AgentPromise,
+        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>> {
+            Box::pin(std::future::pending())
+        }
+
+        fn update_promise<'a>(
+            &'a self,
+            tenant_id: &'a str,
+            promise_id: &'a str,
+            promise: &'a super::AgentPromise,
+            revision: u64,
+        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>> {
+            self.inner.update_promise(tenant_id, promise_id, promise, revision)
+        }
+
+        fn get_tool_result<'a>(
+            &'a self,
+            tenant_id: &'a str,
+            promise_id: &'a str,
+            cache_key: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<Option<String>, super::PromiseStoreError>> + Send + 'a>>
+        {
+            self.inner.get_tool_result(tenant_id, promise_id, cache_key)
+        }
+
+        fn put_tool_result<'a>(
+            &'a self,
+            tenant_id: &'a str,
+            promise_id: &'a str,
+            cache_key: &'a str,
+            result: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<(), super::PromiseStoreError>> + Send + 'a>> {
+            self.inner.put_tool_result(tenant_id, promise_id, cache_key, result)
+        }
+
+        fn list_running<'a>(
+            &'a self,
+            tenant_id: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<super::AgentPromise>, super::PromiseStoreError>> + Send + 'a>>
+        {
+            self.inner.list_running(tenant_id)
+        }
+    }
+
+    /// Makes every `put_promise` call return an immediate error.
+    ///
+    /// Used to test that a KV write failure during initial promise creation
+    /// causes the run to proceed with promise fields still wired — the caller
+    /// receives a valid agent and can attempt checkpoint writes on later turns.
+    pub struct ErrorPutPromiseStore {
+        pub inner: MockPromiseStore,
+    }
+
+    impl ErrorPutPromiseStore {
+        pub fn new() -> Self {
+            Self { inner: MockPromiseStore::new() }
+        }
+    }
+
+    impl super::PromiseRepository for ErrorPutPromiseStore {
+        fn get_promise<'a>(
+            &'a self,
+            tenant_id: &'a str,
+            promise_id: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<Option<super::PromiseEntry>, super::PromiseStoreError>> + Send + 'a>>
+        {
+            self.inner.get_promise(tenant_id, promise_id)
+        }
+
+        fn put_promise<'a>(
+            &'a self,
+            _promise: &'a super::AgentPromise,
+        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>> {
+            Box::pin(async {
+                Err(super::PromiseStoreError("simulated put_promise failure".to_string()))
+            })
+        }
+
+        fn update_promise<'a>(
+            &'a self,
+            tenant_id: &'a str,
+            promise_id: &'a str,
+            promise: &'a super::AgentPromise,
+            revision: u64,
+        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>> {
+            self.inner.update_promise(tenant_id, promise_id, promise, revision)
+        }
+
+        fn get_tool_result<'a>(
+            &'a self,
+            tenant_id: &'a str,
+            promise_id: &'a str,
+            cache_key: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<Option<String>, super::PromiseStoreError>> + Send + 'a>>
+        {
+            self.inner.get_tool_result(tenant_id, promise_id, cache_key)
+        }
+
+        fn put_tool_result<'a>(
+            &'a self,
+            tenant_id: &'a str,
+            promise_id: &'a str,
+            cache_key: &'a str,
+            result: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<(), super::PromiseStoreError>> + Send + 'a>> {
+            self.inner.put_tool_result(tenant_id, promise_id, cache_key, result)
+        }
+
+        fn list_running<'a>(
+            &'a self,
+            tenant_id: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<super::AgentPromise>, super::PromiseStoreError>> + Send + 'a>>
+        {
+            self.inner.list_running(tenant_id)
+        }
+    }
+
+    /// Makes every `list_running` call hang indefinitely.
+    ///
+    /// Used with Tokio's mock clock to test that a timeout on `list_running`
+    /// during startup recovery causes `recover_stale_promises` to return early
+    /// without spawning a recovery task.
+    pub struct HangingListRunningStore {
+        pub inner: MockPromiseStore,
+    }
+
+    impl HangingListRunningStore {
+        pub fn new() -> Self {
+            Self { inner: MockPromiseStore::new() }
+        }
+    }
+
+    impl super::PromiseRepository for HangingListRunningStore {
+        fn get_promise<'a>(
+            &'a self,
+            tenant_id: &'a str,
+            promise_id: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<Option<super::PromiseEntry>, super::PromiseStoreError>> + Send + 'a>>
+        {
+            self.inner.get_promise(tenant_id, promise_id)
+        }
+
+        fn put_promise<'a>(
+            &'a self,
+            promise: &'a super::AgentPromise,
+        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>> {
+            self.inner.put_promise(promise)
+        }
+
+        fn update_promise<'a>(
+            &'a self,
+            tenant_id: &'a str,
+            promise_id: &'a str,
+            promise: &'a super::AgentPromise,
+            revision: u64,
+        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>> {
+            self.inner.update_promise(tenant_id, promise_id, promise, revision)
+        }
+
+        fn get_tool_result<'a>(
+            &'a self,
+            tenant_id: &'a str,
+            promise_id: &'a str,
+            cache_key: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<Option<String>, super::PromiseStoreError>> + Send + 'a>>
+        {
+            self.inner.get_tool_result(tenant_id, promise_id, cache_key)
+        }
+
+        fn put_tool_result<'a>(
+            &'a self,
+            tenant_id: &'a str,
+            promise_id: &'a str,
+            cache_key: &'a str,
+            result: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<(), super::PromiseStoreError>> + Send + 'a>> {
+            self.inner.put_tool_result(tenant_id, promise_id, cache_key, result)
+        }
+
+        fn list_running<'a>(
+            &'a self,
+            _tenant_id: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<super::AgentPromise>, super::PromiseStoreError>> + Send + 'a>>
+        {
+            Box::pin(std::future::pending())
+        }
+    }
+
+    /// Makes every `list_running` call return an immediate `Err`.
+    ///
+    /// Used to test that a KV error during startup recovery's `list_running`
+    /// call causes `recover_stale_promises` to return early without spawning a
+    /// recovery task.
+    pub struct ErrorListRunningStore {
+        pub inner: MockPromiseStore,
+    }
+
+    impl ErrorListRunningStore {
+        pub fn new() -> Self {
+            Self { inner: MockPromiseStore::new() }
+        }
+    }
+
+    impl super::PromiseRepository for ErrorListRunningStore {
+        fn get_promise<'a>(
+            &'a self,
+            tenant_id: &'a str,
+            promise_id: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<Option<super::PromiseEntry>, super::PromiseStoreError>> + Send + 'a>>
+        {
+            self.inner.get_promise(tenant_id, promise_id)
+        }
+
+        fn put_promise<'a>(
+            &'a self,
+            promise: &'a super::AgentPromise,
+        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>> {
+            self.inner.put_promise(promise)
+        }
+
+        fn update_promise<'a>(
+            &'a self,
+            tenant_id: &'a str,
+            promise_id: &'a str,
+            promise: &'a super::AgentPromise,
+            revision: u64,
+        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>> {
+            self.inner.update_promise(tenant_id, promise_id, promise, revision)
+        }
+
+        fn get_tool_result<'a>(
+            &'a self,
+            tenant_id: &'a str,
+            promise_id: &'a str,
+            cache_key: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<Option<String>, super::PromiseStoreError>> + Send + 'a>>
+        {
+            self.inner.get_tool_result(tenant_id, promise_id, cache_key)
+        }
+
+        fn put_tool_result<'a>(
+            &'a self,
+            tenant_id: &'a str,
+            promise_id: &'a str,
+            cache_key: &'a str,
+            result: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<(), super::PromiseStoreError>> + Send + 'a>> {
+            self.inner.put_tool_result(tenant_id, promise_id, cache_key, result)
+        }
+
+        fn list_running<'a>(
+            &'a self,
+            _tenant_id: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<super::AgentPromise>, super::PromiseStoreError>> + Send + 'a>>
+        {
+            Box::pin(async {
+                Err(super::PromiseStoreError("injected list_running error".to_string()))
+            })
+        }
+    }
+
+    /// `list_running` delegates to inner (returns Running promises for the
+    /// staleness scan), but `get_promise` always returns `Ok(None)`.
+    ///
+    /// Simulates the race where a promise appears in the startup scan but is
+    /// deleted from KV before the recovery loop re-fetches it. Expected
+    /// behaviour: the recovery loop logs and skips that promise without
+    /// claiming or modifying it.
+    pub struct VanishedOnRefetchStore {
+        pub inner: MockPromiseStore,
+    }
+
+    impl VanishedOnRefetchStore {
+        pub fn new() -> Self {
+            Self { inner: MockPromiseStore::new() }
+        }
+    }
+
+    impl super::PromiseRepository for VanishedOnRefetchStore {
+        fn get_promise<'a>(
+            &'a self,
+            _tenant_id: &'a str,
+            _promise_id: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<Option<super::PromiseEntry>, super::PromiseStoreError>> + Send + 'a>>
+        {
+            Box::pin(async { Ok(None) })
+        }
+
+        fn put_promise<'a>(
+            &'a self,
+            promise: &'a super::AgentPromise,
+        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>> {
+            self.inner.put_promise(promise)
+        }
+
+        fn update_promise<'a>(
+            &'a self,
+            tenant_id: &'a str,
+            promise_id: &'a str,
+            promise: &'a super::AgentPromise,
+            revision: u64,
+        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>> {
+            self.inner.update_promise(tenant_id, promise_id, promise, revision)
+        }
+
+        fn get_tool_result<'a>(
+            &'a self,
+            tenant_id: &'a str,
+            promise_id: &'a str,
+            cache_key: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<Option<String>, super::PromiseStoreError>> + Send + 'a>>
+        {
+            self.inner.get_tool_result(tenant_id, promise_id, cache_key)
+        }
+
+        fn put_tool_result<'a>(
+            &'a self,
+            tenant_id: &'a str,
+            promise_id: &'a str,
+            cache_key: &'a str,
+            result: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<(), super::PromiseStoreError>> + Send + 'a>> {
+            self.inner.put_tool_result(tenant_id, promise_id, cache_key, result)
+        }
+
+        fn list_running<'a>(
+            &'a self,
+            tenant_id: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<super::AgentPromise>, super::PromiseStoreError>> + Send + 'a>>
+        {
+            self.inner.list_running(tenant_id)
+        }
+    }
+
+    /// `list_running` delegates to inner (returns Running promises for the
+    /// staleness scan), but `get_promise` always returns the promise with
+    /// `status = Resolved`.
+    ///
+    /// Simulates the race where another worker completes the run between the
+    /// startup scan and the re-fetch. Expected behaviour: the recovery loop
+    /// logs "already completed" and skips without claiming.
+    pub struct ResolvedOnRefetchStore {
+        pub inner: MockPromiseStore,
+    }
+
+    impl ResolvedOnRefetchStore {
+        pub fn new() -> Self {
+            Self { inner: MockPromiseStore::new() }
+        }
+    }
+
+    impl super::PromiseRepository for ResolvedOnRefetchStore {
+        fn get_promise<'a>(
+            &'a self,
+            tenant_id: &'a str,
+            promise_id: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<Option<super::PromiseEntry>, super::PromiseStoreError>> + Send + 'a>>
+        {
+            let inner = self.inner.clone();
+            let tid = tenant_id.to_string();
+            let pid = promise_id.to_string();
+            Box::pin(async move {
+                if let Some((mut p, rev)) = inner.get_promise(&tid, &pid).await? {
+                    p.status = super::PromiseStatus::Resolved;
+                    Ok(Some((p, rev)))
+                } else {
+                    Ok(None)
+                }
+            })
+        }
+
+        fn put_promise<'a>(
+            &'a self,
+            promise: &'a super::AgentPromise,
+        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>> {
+            self.inner.put_promise(promise)
+        }
+
+        fn update_promise<'a>(
+            &'a self,
+            tenant_id: &'a str,
+            promise_id: &'a str,
+            promise: &'a super::AgentPromise,
+            revision: u64,
+        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>> {
+            self.inner.update_promise(tenant_id, promise_id, promise, revision)
+        }
+
+        fn get_tool_result<'a>(
+            &'a self,
+            tenant_id: &'a str,
+            promise_id: &'a str,
+            cache_key: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<Option<String>, super::PromiseStoreError>> + Send + 'a>>
+        {
+            self.inner.get_tool_result(tenant_id, promise_id, cache_key)
+        }
+
+        fn put_tool_result<'a>(
+            &'a self,
+            tenant_id: &'a str,
+            promise_id: &'a str,
+            cache_key: &'a str,
+            result: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<(), super::PromiseStoreError>> + Send + 'a>> {
+            self.inner.put_tool_result(tenant_id, promise_id, cache_key, result)
+        }
+
+        fn list_running<'a>(
+            &'a self,
+            tenant_id: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<super::AgentPromise>, super::PromiseStoreError>> + Send + 'a>>
+        {
+            self.inner.list_running(tenant_id)
+        }
+    }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -1556,6 +2000,63 @@ mod tests {
         );
     }
 
+    /// An `AgentPromise` serialized without the `system_prompt` key (e.g. by a
+    /// previous binary that did not have the field) must deserialize cleanly
+    /// with `system_prompt = None`.
+    ///
+    /// This exercises the `#[serde(default)]` annotation on the field —
+    /// backward compatibility for promises written before the field was
+    /// introduced.
+    #[test]
+    fn agent_promise_serde_default_system_prompt_when_key_absent() {
+        // JSON produced by an older binary — no `system_prompt` key at all.
+        let json = r#"{
+            "id": "p-old",
+            "tenant_id": "acme",
+            "automation_id": "",
+            "status": "running",
+            "messages": [],
+            "iteration": 0,
+            "worker_id": "w",
+            "claimed_at": 0,
+            "trigger": null,
+            "nats_subject": "github.pull_request"
+        }"#;
+        let p: AgentPromise = serde_json::from_str(json)
+            .expect("AgentPromise must deserialize even without the system_prompt key");
+        assert!(
+            p.system_prompt.is_none(),
+            "system_prompt must default to None when the key is absent from the serialized JSON"
+        );
+    }
+
+    /// `put_promise` on a key that **already exists** must increment the stored
+    /// revision rather than resetting it to 1.
+    ///
+    /// This exercises the `map(|(_, r)| r + 1)` branch of
+    /// [`MockPromiseStore::put_promise`] — the only branch not covered by
+    /// [`mock_put_and_get_promise`] (which always writes a fresh key).
+    #[tokio::test]
+    async fn mock_put_promise_on_existing_key_increments_revision() {
+        let store = MockPromiseStore::new();
+        let p = sample_promise("run-1");
+
+        // First write: no existing key → revision starts at 1.
+        let rev1 = store.put_promise(&p).await.unwrap();
+        assert_eq!(rev1, 1, "first put must return revision 1");
+
+        // Second write: key exists with revision 1 → must return 1 + 1 = 2.
+        let mut updated = p.clone();
+        updated.iteration = 1;
+        let rev2 = store.put_promise(&updated).await.unwrap();
+        assert_eq!(rev2, 2, "second put on existing key must increment revision to 2");
+
+        // Verify the stored value and revision reflect the second write.
+        let (fetched, stored_rev) = store.get_promise("acme", "run-1").await.unwrap().unwrap();
+        assert_eq!(stored_rev, 2, "stored revision must be 2 after second put");
+        assert_eq!(fetched.iteration, 1, "stored value must reflect the second put");
+    }
+
     #[tokio::test]
     async fn mock_put_and_get_promise() {
         let store = MockPromiseStore::new();
@@ -1592,6 +2093,35 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.to_string().contains("CAS mismatch"));
+    }
+
+    /// When `update_promise` is called for a key that does not yet exist in the
+    /// store, the mock's `_` arm inserts it as an upsert: `revision + 1` is
+    /// returned and the promise is retrievable via `get_promise`.
+    ///
+    /// This exercises the `_` branch of the `match guard.get(&key)` in
+    /// [`MockPromiseStore::update_promise`] — the only branch not covered by
+    /// the existing `mock_update_promise_cas` test (which always operates on
+    /// an existing key).
+    #[tokio::test]
+    async fn mock_update_promise_on_nonexistent_key_upserts() {
+        let store = MockPromiseStore::new();
+        let p = sample_promise("nonexistent");
+
+        // No prior `put_promise` — the key does not exist.
+        let new_rev = store
+            .update_promise("acme", "nonexistent", &p, 0)
+            .await
+            .unwrap();
+        assert_eq!(new_rev, 1, "upsert must return revision 0 + 1 = 1");
+
+        let (fetched, rev) = store
+            .get_promise("acme", "nonexistent")
+            .await
+            .unwrap()
+            .expect("promise must be stored after upsert");
+        assert_eq!(rev, 1, "stored revision must be 1");
+        assert_eq!(fetched.id, "nonexistent", "stored promise id must match");
     }
 
     #[tokio::test]
