@@ -18,10 +18,9 @@ clap = { workspace = true, features = ["env"] }
 futures-util = { workspace = true, features = ["sink"] }
 opentelemetry = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "net", "sync", "io-util"] }
-tower-http = { workspace = true }
 tracing = { workspace = true }
 trogon-nats = { workspace = true }
-trogon-std = { workspace = true }
+trogon-std = { workspace = true, features = ["telemetry-http"] }
 
 [dev-dependencies]
 serde_json = { workspace = true }
