@@ -2341,3 +2341,369 @@ mod tests {
         assert!(empty.is_empty(), "unknown tenant must return empty list");
     }
 }
+
+// ── Integration tests (real NATS KV via testcontainers) ───────────────────────
+
+#[cfg(test)]
+mod integration_tests {
+    use super::*;
+
+    /// Start a throwaway NATS container with JetStream and open a real
+    /// `PromiseStore` against it.  Returns the store, the JetStream context
+    /// (needed for the tombstone test), and an opaque drop guard that stops the
+    /// container when it goes out of scope.
+    async fn make_store() -> (PromiseStore, async_nats::jetstream::Context, impl Drop) {
+        use testcontainers_modules::{
+            nats::Nats,
+            testcontainers::{ImageExt, runners::AsyncRunner},
+        };
+        let container = Nats::default()
+            .with_cmd(["--jetstream"])
+            .start()
+            .await
+            .expect("NATS container");
+        let port = container.get_host_port_ipv4(4222).await.expect("NATS port");
+        let nats = async_nats::connect(format!("nats://127.0.0.1:{port}"))
+            .await
+            .expect("NATS connect");
+        let js = async_nats::jetstream::new(nats);
+        let store = PromiseStore::open(&js).await.expect("PromiseStore::open");
+        (store, js, container)
+    }
+
+    fn make_promise(id: &str) -> AgentPromise {
+        AgentPromise {
+            id: id.to_string(),
+            tenant_id: "tenant1".to_string(),
+            automation_id: "auto-1".to_string(),
+            status: PromiseStatus::Running,
+            messages: vec![],
+            iteration: 0,
+            worker_id: "worker-1".to_string(),
+            claimed_at: 1_700_000_000,
+            trigger: serde_json::json!({"action": "opened"}),
+            nats_subject: "github.pull_request".to_string(),
+            system_prompt: None,
+        }
+    }
+
+    /// `open()` must create both KV buckets so they are immediately accessible.
+    #[tokio::test]
+    async fn open_creates_both_buckets() {
+        let (_, js, _c) = make_store().await;
+        js.get_key_value(AGENT_PROMISES_BUCKET)
+            .await
+            .expect("AGENT_PROMISES bucket must exist after open()");
+        js.get_key_value(AGENT_TOOL_RESULTS_BUCKET)
+            .await
+            .expect("AGENT_TOOL_RESULTS bucket must exist after open()");
+    }
+
+    /// Calling `open()` a second time on the same server must succeed — the
+    /// underlying `create_or_update_key_value` is idempotent.
+    #[tokio::test]
+    async fn open_is_idempotent() {
+        let (_, js, _c) = make_store().await;
+        PromiseStore::open(&js)
+            .await
+            .expect("second open() must succeed");
+    }
+
+    /// `put_promise` followed by `get_promise` must return the original value
+    /// and a positive KV revision.
+    #[tokio::test]
+    async fn put_and_get_promise_round_trip() {
+        let (store, _, _c) = make_store().await;
+        let p = make_promise("run-1");
+        let rev = store.put_promise(&p).await.unwrap();
+        assert!(rev >= 1, "revision must be at least 1");
+
+        let (fetched, fetched_rev) = store
+            .get_promise("tenant1", "run-1")
+            .await
+            .unwrap()
+            .expect("promise must exist after put");
+        assert_eq!(fetched.id, "run-1");
+        assert_eq!(fetched.tenant_id, "tenant1");
+        assert_eq!(fetched.status, PromiseStatus::Running);
+        assert_eq!(fetched_rev, rev, "returned revision must match put() revision");
+    }
+
+    /// A second `put_promise` on the same key must overwrite the stored value.
+    #[tokio::test]
+    async fn put_promise_overwrites_existing() {
+        let (store, _, _c) = make_store().await;
+        let p = make_promise("run-overwrite");
+        store.put_promise(&p).await.unwrap();
+
+        let mut updated = p.clone();
+        updated.iteration = 5;
+        store.put_promise(&updated).await.unwrap();
+
+        let (fetched, _) = store
+            .get_promise("tenant1", "run-overwrite")
+            .await
+            .unwrap()
+            .expect("must exist");
+        assert_eq!(fetched.iteration, 5, "second put must overwrite the first");
+    }
+
+    /// `get_promise` on a key that has never been written must return `Ok(None)`.
+    #[tokio::test]
+    async fn get_missing_promise_returns_none() {
+        let (store, _, _c) = make_store().await;
+        let result = store
+            .get_promise("tenant1", "nonexistent")
+            .await
+            .unwrap();
+        assert!(result.is_none());
+    }
+
+    /// `update_promise` with the correct revision must succeed and return a
+    /// higher revision.  The stored value must reflect the update.
+    #[tokio::test]
+    async fn update_promise_cas_success() {
+        let (store, _, _c) = make_store().await;
+        let p = make_promise("run-cas");
+        let rev1 = store.put_promise(&p).await.unwrap();
+
+        let mut updated = p.clone();
+        updated.iteration = 1;
+        updated.status = PromiseStatus::Resolved;
+
+        let rev2 = store
+            .update_promise("tenant1", "run-cas", &updated, rev1)
+            .await
+            .unwrap();
+        assert!(rev2 > rev1, "new revision must be greater than the old one");
+
+        let (fetched, _) = store
+            .get_promise("tenant1", "run-cas")
+            .await
+            .unwrap()
+            .expect("must exist after update");
+        assert_eq!(fetched.iteration, 1);
+        assert_eq!(fetched.status, PromiseStatus::Resolved);
+    }
+
+    /// `update_promise` with a stale revision must return an error — the real
+    /// NATS KV enforces the CAS check.
+    #[tokio::test]
+    async fn update_promise_cas_wrong_revision_fails() {
+        let (store, _, _c) = make_store().await;
+        let p = make_promise("run-cas-fail");
+        let rev = store.put_promise(&p).await.unwrap();
+
+        // Use a deliberately wrong revision.
+        let stale_rev = rev + 999;
+        let err = store
+            .update_promise("tenant1", "run-cas-fail", &p, stale_rev)
+            .await
+            .unwrap_err();
+        // The exact error message is NATS-specific; just assert it's non-empty.
+        assert!(!err.to_string().is_empty(), "CAS mismatch must produce an error");
+    }
+
+    /// A two-writer CAS race: both workers read the same revision, only the
+    /// first `update_promise` succeeds, the second must fail.
+    #[tokio::test]
+    async fn update_promise_cas_race_second_writer_fails() {
+        let (store, _, _c) = make_store().await;
+        let p = make_promise("run-race");
+        let rev = store.put_promise(&p).await.unwrap();
+
+        // First writer wins.
+        let mut first = p.clone();
+        first.worker_id = "worker-a".to_string();
+        let new_rev = store
+            .update_promise("tenant1", "run-race", &first, rev)
+            .await
+            .unwrap();
+        assert!(new_rev > rev);
+
+        // Second writer uses the original (now stale) revision — must fail.
+        let mut second = p.clone();
+        second.worker_id = "worker-b".to_string();
+        let err = store
+            .update_promise("tenant1", "run-race", &second, rev)
+            .await
+            .unwrap_err();
+        assert!(!err.to_string().is_empty(), "second writer must lose the CAS race");
+
+        // The stored value must be the first writer's update.
+        let (fetched, _) = store
+            .get_promise("tenant1", "run-race")
+            .await
+            .unwrap()
+            .expect("must exist");
+        assert_eq!(fetched.worker_id, "worker-a", "first writer's update must be stored");
+    }
+
+    /// `list_running` must return only promises with `status = Running`.
+    #[tokio::test]
+    async fn list_running_returns_running_only() {
+        let (store, _, _c) = make_store().await;
+
+        store.put_promise(&make_promise("r1")).await.unwrap();
+
+        let mut resolved = make_promise("r2");
+        resolved.status = PromiseStatus::Resolved;
+        store.put_promise(&resolved).await.unwrap();
+
+        let mut failed = make_promise("r3");
+        failed.status = PromiseStatus::Failed;
+        store.put_promise(&failed).await.unwrap();
+
+        let mut perm = make_promise("r4");
+        perm.status = PromiseStatus::PermanentFailed;
+        store.put_promise(&perm).await.unwrap();
+
+        let running = store.list_running("tenant1").await.unwrap();
+        assert_eq!(running.len(), 1, "only Running promises must be returned");
+        assert_eq!(running[0].id, "r1");
+    }
+
+    /// `list_running` must filter by `tenant_id` prefix and never return
+    /// promises belonging to a different tenant.
+    #[tokio::test]
+    async fn list_running_filters_by_tenant() {
+        let (store, _, _c) = make_store().await;
+
+        store.put_promise(&make_promise("p1")).await.unwrap();
+
+        let other = AgentPromise {
+            id: "p2".to_string(),
+            tenant_id: "other-tenant".to_string(),
+            automation_id: String::new(),
+            status: PromiseStatus::Running,
+            messages: vec![],
+            iteration: 0,
+            worker_id: "w".to_string(),
+            claimed_at: 0,
+            trigger: serde_json::Value::Null,
+            nats_subject: "t".to_string(),
+            system_prompt: None,
+        };
+        store.put_promise(&other).await.unwrap();
+
+        let tenant1 = store.list_running("tenant1").await.unwrap();
+        assert_eq!(tenant1.len(), 1);
+        assert_eq!(tenant1[0].id, "p1");
+
+        let other_results = store.list_running("other-tenant").await.unwrap();
+        assert_eq!(other_results.len(), 1);
+        assert_eq!(other_results[0].id, "p2");
+
+        let unknown = store.list_running("unknown-tenant").await.unwrap();
+        assert!(unknown.is_empty(), "unknown tenant must return empty list");
+    }
+
+    /// A key deleted from the KV bucket creates a tombstone.  `list_running`
+    /// must skip tombstones and not attempt to deserialize them.
+    #[tokio::test]
+    async fn list_running_skips_tombstone() {
+        let (store, js, _c) = make_store().await;
+
+        // Write a Running promise.
+        store.put_promise(&make_promise("to-delete")).await.unwrap();
+
+        // Verify it appears in list_running.
+        let before = store.list_running("tenant1").await.unwrap();
+        assert_eq!(before.len(), 1, "promise must appear before deletion");
+
+        // Delete the key directly via the raw KV bucket to create a tombstone.
+        let kv = js
+            .get_key_value(AGENT_PROMISES_BUCKET)
+            .await
+            .expect("bucket must be accessible");
+        kv.delete("tenant1.to-delete")
+            .await
+            .expect("delete must succeed");
+
+        // list_running must skip the tombstone entry and return empty.
+        let after = store.list_running("tenant1").await.unwrap();
+        assert!(
+            after.is_empty(),
+            "list_running must skip tombstone entries — got {:?}",
+            after.iter().map(|p| &p.id).collect::<Vec<_>>()
+        );
+    }
+
+    /// `put_tool_result` followed by `get_tool_result` must return the original
+    /// string unchanged.
+    #[tokio::test]
+    async fn tool_result_round_trip() {
+        let (store, _, _c) = make_store().await;
+        let cache_key = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2";
+        store
+            .put_tool_result("tenant1", "run-1", cache_key, "tool result text")
+            .await
+            .unwrap();
+        let result = store
+            .get_tool_result("tenant1", "run-1", cache_key)
+            .await
+            .unwrap();
+        assert_eq!(result, Some("tool result text".to_string()));
+    }
+
+    /// `get_tool_result` for a key that was never written must return `Ok(None)`.
+    #[tokio::test]
+    async fn get_missing_tool_result_returns_none() {
+        let (store, _, _c) = make_store().await;
+        let result = store
+            .get_tool_result(
+                "tenant1",
+                "run-1",
+                "0000000000000000000000000000000000000000000000000000000000000000",
+            )
+            .await
+            .unwrap();
+        assert!(result.is_none());
+    }
+
+    /// A second `put_tool_result` on the same key must overwrite the first value.
+    #[tokio::test]
+    async fn put_tool_result_overwrites_existing() {
+        let (store, _, _c) = make_store().await;
+        let cache_key = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
+        store
+            .put_tool_result("tenant1", "run-1", cache_key, "first result")
+            .await
+            .unwrap();
+        store
+            .put_tool_result("tenant1", "run-1", cache_key, "second result")
+            .await
+            .unwrap();
+        let result = store
+            .get_tool_result("tenant1", "run-1", cache_key)
+            .await
+            .unwrap();
+        assert_eq!(
+            result,
+            Some("second result".to_string()),
+            "second put must overwrite the first"
+        );
+    }
+
+    /// Tool results are scoped to `(tenant_id, promise_id, cache_key)`.
+    /// A different `promise_id` must not see another promise's cached result.
+    #[tokio::test]
+    async fn tool_result_scoped_to_promise() {
+        let (store, _, _c) = make_store().await;
+        let cache_key = "cafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafe";
+        store
+            .put_tool_result("tenant1", "run-A", cache_key, "result-A")
+            .await
+            .unwrap();
+
+        // A different promise must not see run-A's cached result.
+        let result = store
+            .get_tool_result("tenant1", "run-B", cache_key)
+            .await
+            .unwrap();
+        assert!(
+            result.is_none(),
+            "run-B must not see run-A's tool result; got: {result:?}"
+        );
+    }
+}

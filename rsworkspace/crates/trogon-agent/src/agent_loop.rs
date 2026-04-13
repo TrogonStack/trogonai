@@ -5863,4 +5863,192 @@ mod tests {
             "non-recovering run must use caller-supplied prompt even when checkpoint has a stored system_prompt"
         );
     }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Real NATS KV integration tests (agent_loop)
+    //
+    // These tests exercise AgentLoop::run against a real NATS JetStream
+    // container so that NATS KV's actual serialization, size limits, and CAS
+    // semantics are exercised — not an in-memory mock.
+    // ══════════════════════════════════════════════════════════════════════════
+
+    /// Start a throwaway NATS container and open a real `PromiseStore`.
+    /// Returns the store and an opaque drop guard — keep the guard alive for
+    /// the duration of the test or the container will be stopped.
+    async fn make_real_promise_store() -> (Arc<crate::promise_store::PromiseStore>, impl Drop) {
+        use testcontainers_modules::{
+            nats::Nats,
+            testcontainers::{ImageExt, runners::AsyncRunner},
+        };
+        let container = Nats::default()
+            .with_cmd(["--jetstream"])
+            .start()
+            .await
+            .expect("NATS container");
+        let port = container.get_host_port_ipv4(4222).await.expect("NATS port");
+        let nats = async_nats::connect(format!("nats://127.0.0.1:{port}"))
+            .await
+            .expect("NATS connect");
+        let js = async_nats::jetstream::new(nats);
+        let ps = Arc::new(
+            crate::promise_store::PromiseStore::open(&js)
+                .await
+                .expect("PromiseStore::open"),
+        );
+        (ps, container)
+    }
+
+    /// The oversized-checkpoint guard must fire against real NATS KV: when
+    /// staging the accumulated messages into an `AgentPromise` would push the
+    /// serialized size over `CHECKPOINT_MAX_BYTES`, the run must:
+    ///   1. Complete successfully (`Ok("done")`).
+    ///   2. Skip the message-history write — `iteration` stays 0, `messages`
+    ///      stays empty in real KV.
+    ///   3. Still write the terminal `Resolved` status — the checkpoint
+    ///      revision is kept alive so the terminal write can succeed.
+    ///
+    /// This is the real-KV counterpart of
+    /// `oversized_checkpoint_disables_checkpointing_but_run_completes`.
+    /// The key difference: here the guard is tested against an actual NATS KV
+    /// bucket, confirming no oversized payload is ever submitted.
+    #[tokio::test]
+    async fn real_kv_oversized_checkpoint_guard_prevents_nats_write() {
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+        use crate::tools::mock::MockToolDispatcher;
+        use mock::SequencedMockAnthropicClient;
+
+        let (ps, _c) = make_real_promise_store().await;
+        let store: Arc<dyn PromiseRepository> = ps.clone();
+        store.put_promise(&make_test_promise("p-oversize")).await.unwrap();
+
+        let tool_use_resp = serde_json::json!({
+            "stop_reason": "tool_use",
+            "content": [{"type": "tool_use", "id": "tu1", "name": "my_tool", "input": {}}]
+        });
+        let end_turn_resp = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "done"}]
+        });
+        let anthropic = Arc::new(SequencedMockAnthropicClient::new(vec![
+            tool_use_resp,
+            end_turn_resp,
+        ]));
+        let dispatcher = Arc::new(MockToolDispatcher::new("tool result"));
+        let agent = make_durable_agent(anthropic, dispatcher, Arc::clone(&store), "p-oversize");
+
+        // Initial messages large enough that staging them into the AgentPromise
+        // pushes the total serialized size above CHECKPOINT_MAX_BYTES.
+        let large_text = "a".repeat(CHECKPOINT_MAX_BYTES + 1);
+        let result = agent.run(vec![Message::user_text(large_text)], &[], None).await;
+        assert_eq!(
+            result.unwrap(),
+            "done",
+            "run must complete normally even when checkpoint payload is oversized"
+        );
+
+        let (p, _) = ps
+            .get_promise("acme", "p-oversize")
+            .await
+            .unwrap()
+            .expect("promise must still exist in real KV");
+        assert!(
+            p.messages.is_empty(),
+            "oversized message history must not be written to real NATS KV"
+        );
+        assert_eq!(
+            p.iteration, 0,
+            "iteration must not advance when the size guard disables checkpointing"
+        );
+        assert_eq!(
+            p.status,
+            PromiseStatus::Resolved,
+            "terminal Resolved write must succeed even when message-history checkpointing is disabled; got {:?}",
+            p.status
+        );
+    }
+
+    /// After a crash, tool results already stored in the real NATS KV
+    /// `AGENT_TOOL_RESULTS` bucket must be replayed without re-dispatching the
+    /// tool.
+    ///
+    /// This is the real-KV counterpart of `recovery_replays_tool_from_cache`.
+    /// The difference: the cache round-trips through an actual NATS KV bucket
+    /// (serialization, network, bucket isolation) rather than an in-memory map.
+    /// In particular, the `tool_use_id` on recovery is different from the one
+    /// at crash time — the test uses `"fresh-id-after-restart"` — confirming
+    /// the content-based cache key (`SHA-256(name:input)`) survives the restart.
+    #[tokio::test]
+    async fn real_kv_tool_result_cache_prevents_reexecution_on_recovery() {
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+        use crate::tools::mock::CountingMockToolDispatcher;
+        use mock::SequencedMockAnthropicClient;
+        use std::sync::atomic::Ordering;
+
+        let (ps, _c) = make_real_promise_store().await;
+        let store: Arc<dyn PromiseRepository> = ps.clone();
+
+        // Non-empty checkpoint messages → `recovering = true` inside `run()`.
+        let mut p = make_test_promise("p-tool-cache");
+        p.messages = vec![Message::user_text("start")];
+        store.put_promise(&p).await.unwrap();
+
+        // Pre-populate the tool result cache in real NATS KV.
+        // The key is the same SHA-256 that `execute_tools` will compute at
+        // runtime from the tool name and input — content-based, not id-based.
+        let input = serde_json::json!({"k": "v"});
+        let ck = super::tool_cache_key("my_tool", &input);
+        store
+            .put_tool_result("acme", "p-tool-cache", &ck, "cached output")
+            .await
+            .unwrap();
+
+        // Anthropic returns the same call with a *fresh* tool_use_id — simulating
+        // the LLM regenerating the request after a restart.
+        let tool_use_resp = serde_json::json!({
+            "stop_reason": "tool_use",
+            "content": [{
+                "type": "tool_use",
+                "id": "fresh-id-after-restart",
+                "name": "my_tool",
+                "input": {"k": "v"}
+            }]
+        });
+        let end_turn_resp = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "all done"}]
+        });
+        let anthropic = Arc::new(SequencedMockAnthropicClient::new(vec![
+            tool_use_resp,
+            end_turn_resp,
+        ]));
+        let (dispatcher, call_count) =
+            CountingMockToolDispatcher::new("live result — must not appear");
+        let agent = make_durable_agent(
+            anthropic,
+            Arc::new(dispatcher),
+            Arc::clone(&store),
+            "p-tool-cache",
+        );
+
+        // Empty initial_messages — run() loads them from the checkpoint.
+        let result = agent.run(vec![], &[], None).await;
+        assert_eq!(result.unwrap(), "all done");
+        assert_eq!(
+            call_count.load(Ordering::SeqCst),
+            0,
+            "tool dispatcher must not be called — result must be replayed from real NATS KV cache"
+        );
+
+        let (p, _) = ps
+            .get_promise("acme", "p-tool-cache")
+            .await
+            .unwrap()
+            .expect("promise must still exist in real KV");
+        assert_eq!(
+            p.status,
+            PromiseStatus::Resolved,
+            "promise must be Resolved in real KV after recovery; got {:?}",
+            p.status
+        );
+    }
 }
