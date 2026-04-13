@@ -102,20 +102,15 @@ pub fn set_server_response_span_attributes(span: &Span, status: StatusCode) {
     }
 }
 
+#[rustfmt::skip]
 fn protocol_version(version: Version) -> Option<&'static str> {
-    match version {
-        Version::HTTP_09 => Some("0.9"),
-        Version::HTTP_10 => Some("1.0"),
-        Version::HTTP_11 => Some("1.1"),
-        Version::HTTP_2 => Some("2"),
-        Version::HTTP_3 => Some("3"),
-        _ => None,
-    }
+    Some(if version == Version::HTTP_09 { "0.9" } else if version == Version::HTTP_10 { "1.0" } else if version == Version::HTTP_11 { "1.1" } else if version == Version::HTTP_2 { "2" } else if version == Version::HTTP_3 { "3" } else { return None; })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tower::ServiceExt;
 
     fn value_for<'a>(attributes: &'a [KeyValue], key: &str) -> Option<&'a opentelemetry::Value> {
         attributes
@@ -124,12 +119,27 @@ mod tests {
             .map(|attribute| &attribute.value)
     }
 
-    #[test]
-    fn instrument_router_wraps_routes_without_changing_shape() {
-        let _router = instrument_router(Router::<()>::new().route(
+    #[tokio::test]
+    async fn instrument_router_executes_trace_callbacks() {
+        let app = instrument_router(Router::<()>::new().route(
             "/-/liveness",
             axum::routing::get(|| async { StatusCode::OK }),
         ));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/-/liveness")
+                    .version(Version::HTTP_11)
+                    .header(HOST, "gateway.test:8443")
+                    .header(USER_AGENT, "curl/8.7.1")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
     }
 
     #[test]
@@ -224,6 +234,91 @@ mod tests {
         assert!(value_for(&attributes, semconv::USER_AGENT_ORIGINAL).is_none());
         assert!(value_for(&attributes, semconv::SERVER_ADDRESS).is_none());
         assert!(value_for(&attributes, semconv::SERVER_PORT).is_none());
+    }
+
+    #[test]
+    fn server_request_attributes_cover_other_protocol_versions() {
+        let http_09_request = Request::builder()
+            .method("GET")
+            .uri("/legacy")
+            .version(Version::HTTP_09)
+            .body(())
+            .unwrap();
+        let http_10_request = Request::builder()
+            .method("GET")
+            .uri("/legacy")
+            .version(Version::HTTP_10)
+            .body(())
+            .unwrap();
+        let http_3_request = Request::builder()
+            .method("GET")
+            .uri("/modern")
+            .version(Version::HTTP_3)
+            .body(())
+            .unwrap();
+
+        assert_eq!(
+            value_for(
+                &server_request_attributes(&http_09_request),
+                semconv::NETWORK_PROTOCOL_VERSION,
+            )
+            .unwrap()
+            .as_str()
+            .as_ref(),
+            "0.9"
+        );
+        assert_eq!(
+            value_for(
+                &server_request_attributes(&http_10_request),
+                semconv::NETWORK_PROTOCOL_VERSION,
+            )
+            .unwrap()
+            .as_str()
+            .as_ref(),
+            "1.0"
+        );
+        assert_eq!(
+            value_for(
+                &server_request_attributes(&http_3_request),
+                semconv::NETWORK_PROTOCOL_VERSION,
+            )
+            .unwrap()
+            .as_str()
+            .as_ref(),
+            "3"
+        );
+    }
+
+    #[test]
+    fn server_request_attributes_ignore_invalid_host_header() {
+        let request = Request::builder()
+            .method("GET")
+            .uri("/-/liveness")
+            .version(Version::HTTP_11)
+            .header(HOST, "invalid host")
+            .body(())
+            .unwrap();
+
+        let attributes = server_request_attributes(&request);
+
+        assert!(value_for(&attributes, semconv::SERVER_ADDRESS).is_none());
+        assert!(value_for(&attributes, semconv::SERVER_PORT).is_none());
+    }
+
+    #[test]
+    fn direct_span_attribute_helpers_do_not_panic() {
+        let span = tracing::info_span!("http.server.request.test");
+        let _guard = span.enter();
+        let request = Request::builder()
+            .method("GET")
+            .uri("/-/ready")
+            .version(Version::HTTP_11)
+            .header(HOST, "gateway.test")
+            .body(())
+            .unwrap();
+
+        set_server_request_span_attributes(&Span::current(), &request);
+        set_server_response_span_attributes(&Span::current(), StatusCode::NO_CONTENT);
     }
 
     #[test]

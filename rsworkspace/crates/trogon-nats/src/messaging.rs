@@ -422,6 +422,22 @@ mod tests {
         result: String,
     }
 
+    #[cfg(feature = "test-support")]
+    struct FailingSerialize;
+
+    #[cfg(feature = "test-support")]
+    impl serde::Serialize for FailingSerialize {
+        fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            Err(serde::ser::Error::custom(format!(
+                "{} cannot be serialized",
+                std::any::type_name::<S>()
+            )))
+        }
+    }
+
     #[test]
     fn test_retry_policy_no_retries() {
         let policy = RetryPolicy::no_retries();
@@ -616,6 +632,17 @@ mod tests {
 
     #[tokio::test]
     #[cfg(feature = "test-support")]
+    async fn test_request_serialize_error() {
+        let mock = AdvancedMockNatsClient::new();
+
+        let result: Result<TestResponse, NatsError> =
+            request(&mock, "test.subject", &FailingSerialize).await;
+
+        assert!(matches!(result, Err(NatsError::Serialize(_))));
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "test-support")]
     async fn test_publish_simple() {
         let mock = AdvancedMockNatsClient::new();
         let data = TestRequest {
@@ -626,6 +653,23 @@ mod tests {
 
         assert!(result.is_ok());
         assert_eq!(mock.published_messages(), vec!["test.subject"]);
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "test-support")]
+    async fn test_publish_serialize_error() {
+        let mock = AdvancedMockNatsClient::new();
+
+        let result = publish(
+            &mock,
+            "test.subject",
+            &FailingSerialize,
+            PublishOptions::simple(),
+        )
+        .await;
+
+        assert!(matches!(result, Err(NatsError::Serialize(_))));
+        assert!(mock.published_messages().is_empty());
     }
 
     #[tokio::test]
@@ -643,6 +687,39 @@ mod tests {
         let result = publish(&mock, "test.subject", &data, options).await;
 
         assert!(result.is_ok());
+        assert_eq!(mock.published_messages(), vec!["test.subject"]);
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "test-support")]
+    async fn test_publish_returns_error_when_publish_fails() {
+        let mock = AdvancedMockNatsClient::new();
+        mock.fail_next_publish();
+        let data = TestRequest {
+            message: "test".to_string(),
+        };
+
+        let result = publish(&mock, "test.subject", &data, PublishOptions::simple()).await;
+
+        assert!(matches!(result, Err(NatsError::PublishOperation(_))));
+        assert!(mock.published_messages().is_empty());
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "test-support")]
+    async fn test_publish_returns_error_when_flush_fails() {
+        let mock = AdvancedMockNatsClient::new();
+        mock.fail_next_flush();
+        let data = TestRequest {
+            message: "test".to_string(),
+        };
+        let options = PublishOptions::builder()
+            .flush_policy(FlushPolicy::no_retries())
+            .build();
+
+        let result = publish(&mock, "test.subject", &data, options).await;
+
+        assert!(matches!(result, Err(NatsError::PublishOperation(_))));
         assert_eq!(mock.published_messages(), vec!["test.subject"]);
     }
 

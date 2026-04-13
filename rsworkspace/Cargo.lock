@@ -3673,6 +3673,8 @@ dependencies = [
  "opentelemetry-semantic-conventions",
  "serde",
  "serde_json",
+ "tokio",
+ "tower",
  "tower-http",
  "tracing",
  "tracing-opentelemetry",

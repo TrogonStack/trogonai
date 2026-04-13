@@ -135,4 +135,29 @@ mod tests {
         assert_eq!(attribute.key.as_str(), trace_semconv::ERROR_TYPE);
         assert_eq!(attribute.value.as_str().as_ref(), "timeout");
     }
+
+    #[test]
+    fn error_attribute_covers_all_semantic_error_variants() {
+        assert_eq!(
+            error_attribute(MessagingError::FlushOperation)
+                .value
+                .as_str()
+                .as_ref(),
+            "flush_operation"
+        );
+        assert_eq!(
+            error_attribute(MessagingError::PublishOperation)
+                .value
+                .as_str()
+                .as_ref(),
+            "publish_operation"
+        );
+        assert_eq!(
+            error_attribute(MessagingError::Serialize)
+                .value
+                .as_str()
+                .as_ref(),
+            "serialize"
+        );
+    }
 }
