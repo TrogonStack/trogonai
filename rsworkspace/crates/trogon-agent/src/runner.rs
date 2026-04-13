@@ -3482,4 +3482,71 @@ mod tests {
         // Must complete without panic even though record() always errors.
         handle.await.expect("recovery task must not panic");
     }
+
+    /// Startup recovery happy path: when a stale promise references an
+    /// automation that still exists, the agent runs to completion and the
+    /// promise is marked `Resolved`.
+    ///
+    /// Symmetric counterpart to `recover_automation_deleted_marks_permanent_failed`.
+    #[tokio::test]
+    async fn recover_automation_run_completes_and_marks_promise_resolved() {
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+
+        let server = httpmock::MockServer::start_async().await;
+        server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(serde_json::json!({
+                    "stop_reason": "end_turn",
+                    "content": [{"type": "text", "text": "recovered"}]
+                }));
+        });
+
+        let agent = make_agent(&server.base_url());
+        // agent.tenant_id = "test" — keep everything under "test" so the agent's
+        // internal KV writes (get_promise / update_promise Resolved) target the
+        // same key that prepare_agent_with_promise claims.
+
+        let (auto_store, run_store, _container) = make_all_stores().await;
+        let mut auto = make_automation("happy-auto");
+        auto.tenant_id = agent.tenant_id.clone(); // "test"
+        auto_store.put(&auto).await.expect("put automation");
+
+        // Stale promise: tenant_id matches the agent so the terminal Resolved
+        // write lands at the correct KV key.
+        let store = Arc::new(MockPromiseStore::new());
+        let mut p = make_stale_promise("p-happy-rec");
+        p.tenant_id = agent.tenant_id.clone(); // "test"
+        p.automation_id = auto.id.clone();
+        p.nats_subject = "github.push".to_string();
+        store.insert_promise(p);
+        let promise_store: Arc<dyn PromiseRepository> = Arc::clone(&store) as _;
+
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &run_store,
+            &agent.tenant_id, // "test"
+        )
+        .await
+        .expect("spawn handle must be returned when stale promises exist");
+
+        handle.await.expect("recovery task must not panic");
+
+        let (p, _) = store
+            .get_promise(&agent.tenant_id, "p-happy-rec")
+            .await
+            .unwrap()
+            .expect("promise must still exist");
+        assert_eq!(
+            p.status,
+            PromiseStatus::Resolved,
+            "automation found + run succeeds → promise must be marked Resolved; got {:?}",
+            p.status
+        );
+    }
 }

@@ -4871,6 +4871,81 @@ mod tests {
         );
     }
 
+    /// When `promise_store = Some(...)` but `promise_id = None`, the tool
+    /// cache guard and idempotency key guard both require `promise_id` — both
+    /// are skipped. The tool must execute normally without `_idempotency_key`
+    /// injection and no KV writes must occur, mirroring the fully non-durable
+    /// case tested by `non_durable_tool_use_executes_without_idempotency_key`.
+    #[tokio::test]
+    async fn promise_id_none_with_promise_store_tool_use_skips_cache_and_idempotency() {
+        use crate::flag_client::AlwaysOnFlagClient;
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::PromiseRepository;
+        use crate::tools::{ToolContext, ToolDispatcher};
+
+        struct CapturingDispatcher {
+            captured: std::sync::Mutex<Vec<serde_json::Value>>,
+        }
+        impl ToolDispatcher for CapturingDispatcher {
+            fn dispatch<'a>(
+                &'a self,
+                _name: &'a str,
+                input: &'a serde_json::Value,
+            ) -> Pin<Box<dyn Future<Output = String> + Send + 'a>> {
+                self.captured.lock().unwrap().push(input.clone());
+                Box::pin(async { "ok".to_string() })
+            }
+        }
+
+        let store = Arc::new(MockPromiseStore::new());
+
+        let tool_use_resp = serde_json::json!({
+            "stop_reason": "tool_use",
+            "content": [{"type": "tool_use", "id": "tu1", "name": "my_tool", "input": {"x": 1}}]
+        });
+        let end_turn_resp = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "done"}]
+        });
+        let anthropic = Arc::new(mock::SequencedMockAnthropicClient::new(vec![
+            tool_use_resp,
+            end_turn_resp,
+        ]));
+        let capturing = Arc::new(CapturingDispatcher { captured: std::sync::Mutex::new(vec![]) });
+
+        let agent = AgentLoop {
+            anthropic_client: anthropic,
+            model: "test".to_string(),
+            max_iterations: 5,
+            tool_dispatcher: Arc::clone(&capturing) as Arc<dyn ToolDispatcher>,
+            tool_context: Arc::new(ToolContext::for_test("http://127.0.0.1:1", "", "", "")),
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            flag_client: Arc::new(AlwaysOnFlagClient),
+            tenant_id: "acme".to_string(),
+            promise_store: Some(Arc::clone(&store) as Arc<dyn PromiseRepository>),
+            promise_id: None,
+        };
+
+        let result = agent.run(vec![Message::user_text("go")], &[], None).await.unwrap();
+        assert_eq!(result, "done");
+
+        let inputs = capturing.captured.lock().unwrap();
+        assert_eq!(inputs.len(), 1, "tool must be dispatched exactly once");
+        assert!(
+            inputs[0].get("_idempotency_key").is_none(),
+            "no _idempotency_key when promise_id is None even with promise_store wired; got: {}",
+            inputs[0]
+        );
+        assert!(
+            store.snapshot_promises().is_empty(),
+            "no KV writes must occur when promise_id is None even if promise_store is Some"
+        );
+    }
+
     // ── max_iterations = 0 ───────────────────────────────────────────────────
 
     /// When `max_iterations = 0` the for-loop body never runs — no Anthropic
@@ -4922,6 +4997,46 @@ mod tests {
             p.status,
             PromiseStatus::PermanentFailed,
             "promise must be marked PermanentFailed when max_iterations=0"
+        );
+    }
+
+    /// When `max_iterations = 0` and `promise_store = None` (non-durable run),
+    /// the loop body never executes, the post-loop KV guard is skipped, and
+    /// `run()` returns `Err(MaxIterationsReached)` without touching any store.
+    ///
+    /// Symmetric counterpart to `max_iterations_zero_with_promise_store_fails_immediately`
+    /// which covers the durable case.
+    #[tokio::test]
+    async fn max_iterations_zero_without_promise_store_returns_error() {
+        use crate::flag_client::AlwaysOnFlagClient;
+        use crate::tools::{mock::MockToolDispatcher, ToolContext};
+        use mock::SequencedMockAnthropicClient;
+
+        // Empty response queue — panics if Anthropic is ever called.
+        let anthropic = Arc::new(SequencedMockAnthropicClient::new(vec![]));
+
+        let agent = AgentLoop {
+            anthropic_client: anthropic,
+            model: "test".to_string(),
+            max_iterations: 0,
+            tool_dispatcher: Arc::new(MockToolDispatcher::new("unused")),
+            tool_context: Arc::new(ToolContext::for_test("http://127.0.0.1:1", "", "", "")),
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            flag_client: Arc::new(AlwaysOnFlagClient),
+            tenant_id: "acme".to_string(),
+            promise_store: None,
+            promise_id: None,
+        };
+
+        let result = agent.run(vec![Message::user_text("go")], &[], None).await;
+        assert!(
+            matches!(result, Err(AgentError::MaxIterationsReached)),
+            "non-durable max_iterations=0 must return MaxIterationsReached; got: {:?}",
+            result
         );
     }
 
