@@ -68,7 +68,7 @@ where
                 source,
             ))
         })?,
-        None => initial_state(command.job_id.clone()),
+        None => initial_state(),
     };
     let write_condition = current_snapshot
         .as_ref()
