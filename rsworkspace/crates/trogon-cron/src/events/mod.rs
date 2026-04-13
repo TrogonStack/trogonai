@@ -6,9 +6,6 @@ use crate::{
     kv::EVENTS_SUBJECT_PREFIX,
 };
 
-mod job_registered;
-mod job_removed;
-mod job_state_changed;
 mod state;
 
 pub use state::{JobStreamState, JobTransitionError, apply, initial_state, projection_change};
@@ -52,22 +49,25 @@ impl EventType for JobEvent {
 
 impl JobEvent {
     pub fn job_registered(spec: JobSpec) -> Self {
-        job_registered::new(spec)
+        Self::JobRegistered { spec }
     }
 
     pub fn job_state_changed(id: impl Into<String>, state: JobEnabledState) -> Self {
-        job_state_changed::new(id, state)
+        Self::JobStateChanged {
+            id: id.into(),
+            state,
+        }
     }
 
     pub fn job_removed(id: impl Into<String>) -> Self {
-        job_removed::new(id)
+        Self::JobRemoved { id: id.into() }
     }
 
     pub fn job_id(&self) -> &str {
         match self {
-            Self::JobRegistered { spec } => job_registered::job_id(spec),
-            Self::JobStateChanged { id, .. } => job_state_changed::job_id(id),
-            Self::JobRemoved { id } => job_removed::job_id(id),
+            Self::JobRegistered { spec } => &spec.id,
+            Self::JobStateChanged { id, .. } => id,
+            Self::JobRemoved { id } => id,
         }
     }
 }
