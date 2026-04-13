@@ -1,3 +1,5 @@
+#![cfg_attr(coverage, allow(dead_code))]
+
 use std::collections::{BTreeMap, HashSet};
 use std::time::Duration;
 

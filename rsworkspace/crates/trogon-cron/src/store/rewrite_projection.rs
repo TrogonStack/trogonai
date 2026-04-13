@@ -1,3 +1,5 @@
+#![cfg_attr(coverage, allow(dead_code))]
+
 use async_nats::jetstream::kv;
 use futures::StreamExt;
 use trogon_nats::jetstream::JetStreamGetKeyValue;

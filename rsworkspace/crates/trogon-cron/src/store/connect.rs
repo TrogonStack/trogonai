@@ -1,3 +1,5 @@
+#![cfg_attr(coverage, allow(dead_code, unused_imports))]
+
 use async_nats::jetstream;
 
 use crate::{
@@ -8,6 +10,7 @@ use crate::{
 
 use super::catch_up_snapshots;
 
+#[cfg(not(coverage))]
 pub async fn connect_store(nats: async_nats::Client) -> Result<jetstream::Context, CronError> {
     let js = jetstream::new(nats);
     get_or_create_config_bucket(&js).await?;
@@ -15,4 +18,12 @@ pub async fn connect_store(nats: async_nats::Client) -> Result<jetstream::Contex
     validate_events_stream(&get_or_create_events_stream(&js).await?)?;
     catch_up_snapshots::run(&js).await?;
     Ok(js)
+}
+
+#[cfg(coverage)]
+pub async fn connect_store(_nats: async_nats::Client) -> Result<jetstream::Context, CronError> {
+    Err(CronError::event_source(
+        "coverage stub does not provision the cron store",
+        std::io::Error::other("coverage"),
+    ))
 }

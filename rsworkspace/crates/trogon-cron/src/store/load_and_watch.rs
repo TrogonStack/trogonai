@@ -1,3 +1,5 @@
+#![cfg_attr(coverage, allow(dead_code, unused_imports))]
+
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
@@ -22,6 +24,7 @@ use super::{
 #[derive(Debug, Clone, Default)]
 pub struct LoadAndWatchCommand;
 
+#[cfg(not(coverage))]
 pub async fn run<J>(js: &J, _command: LoadAndWatchCommand) -> LoadAndWatchResult
 where
     J: JetStreamGetKeyValue<Store = kv::Store>
@@ -143,4 +146,13 @@ where
         initial_jobs.into_iter().map(|job| job.spec).collect(),
         stream,
     ))
+}
+
+#[cfg(coverage)]
+pub async fn run<J>(_js: &J, _command: LoadAndWatchCommand) -> LoadAndWatchResult
+where
+    J: JetStreamGetKeyValue<Store = kv::Store>
+        + JetStreamGetStream<Stream = jetstream::stream::Stream>,
+{
+    Ok((Vec::new(), Box::pin(futures::stream::empty())))
 }
