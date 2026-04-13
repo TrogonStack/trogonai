@@ -5325,6 +5325,69 @@ mod tests {
         );
     }
 
+    // ── run_chat does not touch promise_store ────────────────────────────────
+
+    /// `run_chat` has no durable-promise logic — it always passes
+    /// `recovering = false` and never reads or writes to the promise store.
+    ///
+    /// Wire a `MockPromiseStore` into the agent and verify the snapshot is
+    /// empty (no promise created, no tool result cached) after a full
+    /// `run_chat` that includes a tool turn.
+    #[tokio::test]
+    async fn run_chat_with_promise_store_wired_does_not_read_or_write_kv() {
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::PromiseRepository;
+        use crate::tools::mock::MockToolDispatcher;
+
+        let store = Arc::new(MockPromiseStore::new());
+
+        // tool_use then end_turn — exercises the tool dispatch path.
+        let tool_use_resp = serde_json::json!({
+            "stop_reason": "tool_use",
+            "content": [{"type": "tool_use", "id": "tu1", "name": "my_tool", "input": {}}]
+        });
+        let end_turn_resp = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "chat done"}]
+        });
+        let anthropic = Arc::new(mock::SequencedMockAnthropicClient::new(vec![
+            tool_use_resp,
+            end_turn_resp,
+        ]));
+
+        // Wire promise_store + promise_id just like a durable run would, but
+        // use run_chat instead of run.
+        let tool_ctx =
+            Arc::new(crate::tools::ToolContext::for_test("http://127.0.0.1:1", "", "", ""));
+        let agent = AgentLoop {
+            anthropic_client: anthropic,
+            model: "test".to_string(),
+            max_iterations: 5,
+            tool_dispatcher: Arc::new(MockToolDispatcher::new("ok")),
+            tool_context: tool_ctx,
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            flag_client: Arc::new(crate::flag_client::AlwaysOnFlagClient),
+            tenant_id: "acme".to_string(),
+            promise_store: Some(Arc::clone(&store) as Arc<dyn PromiseRepository>),
+            promise_id: Some("p-chat".to_string()),
+        };
+
+        let (text, _messages) = agent
+            .run_chat(vec![Message::user_text("hello")], &[], None)
+            .await
+            .unwrap();
+
+        assert_eq!(text, "chat done");
+        assert!(
+            store.snapshot_promises().is_empty(),
+            "run_chat must not create or update any promise in KV"
+        );
+    }
+
     // ── ReqwestAnthropicClient retry helpers ──────────────────────────────────
 
     /// Start a minimal raw-TCP HTTP/1.1 server.  Each incoming connection is
