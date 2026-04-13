@@ -11,6 +11,8 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::constants::{DEFAULT_TIMEOUT, REQ_ID_HEADER};
 
+const PAYLOAD_PREVIEW_BYTES: usize = 16;
+
 struct HeaderMapCarrier<'a>(&'a mut HeaderMap);
 
 impl Injector for HeaderMapCarrier<'_> {
@@ -36,6 +38,19 @@ pub fn build_request_headers() -> HeaderMap {
     let mut headers = headers_with_trace_context();
     headers.insert(REQ_ID_HEADER, uuid::Uuid::new_v4().to_string().as_str());
     headers
+}
+
+fn payload_preview(payload: &[u8]) -> String {
+    use std::fmt::Write as _;
+
+    let mut preview = String::with_capacity(PAYLOAD_PREVIEW_BYTES * 2 + 3);
+    for byte in payload.iter().take(PAYLOAD_PREVIEW_BYTES) {
+        let _ = write!(&mut preview, "{byte:02x}");
+    }
+    if payload.len() > PAYLOAD_PREVIEW_BYTES {
+        preview.push_str("...");
+    }
+    preview
 }
 
 #[instrument(name = "nats.request", skip(client, request), fields(subject = %subject))]
@@ -83,8 +98,10 @@ where
     serde_json::from_slice(&response.payload).map_err(|error| {
         set_span_error(&span, MessagingError::Deserialize);
         tracing::error!(
-            payload = %payload_str,
             error = %error,
+            subject = %subject,
+            payload_len = response.payload.len(),
+            payload_preview = %payload_preview(&response.payload),
             "Failed to deserialize NATS response"
         );
         NatsError::Deserialize(error)
@@ -533,6 +550,19 @@ mod tests {
         assert_eq!(
             headers.get("x-test-key").map(|v| v.as_str()),
             Some("test-value")
+        );
+    }
+
+    #[test]
+    fn payload_preview_hex_encodes_short_payloads() {
+        assert_eq!(payload_preview(b"abc"), "616263");
+    }
+
+    #[test]
+    fn payload_preview_truncates_long_payloads() {
+        assert_eq!(
+            payload_preview(b"1234567890abcdefghijklmnop"),
+            "31323334353637383930616263646566..."
         );
     }
 
