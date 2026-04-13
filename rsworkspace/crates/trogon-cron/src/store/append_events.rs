@@ -1,6 +1,7 @@
 use std::future::IntoFuture;
 
 use async_nats::jetstream::{self, context, context::PublishErrorKind, message::PublishMessage};
+use trogon_eventsourcing::NonEmpty;
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream, JetStreamPublishMessage};
 use uuid::Uuid;
 
@@ -59,7 +60,7 @@ pub async fn run<J>(
     js: &J,
     job_id: &str,
     write_condition: JobWriteCondition,
-    event: JobEventData,
+    events: NonEmpty<JobEventData>,
 ) -> Result<(), CronError>
 where
     J: JetStreamGetKeyValue<Store = jetstream::kv::Store>
@@ -69,46 +70,74 @@ where
             AckFuture = context::PublishAckFuture,
         >,
 {
+    if events.iter().any(|event| event.stream_id() != job_id) {
+        return Err(CronError::event_source(
+            "failed to publish job event batch",
+            std::io::Error::other(format!("batch contains events outside stream '{job_id}'")),
+        ));
+    }
+
     let stream = stream_subject_state(js, job_id).await?;
     write_condition.ensure(job_id, stream.write_state)?;
     let expected_version = stream.write_state.current_version().unwrap_or(0);
     let batch_id = Uuid::new_v4().to_string();
-    let payload = serde_json::to_vec(&event)?;
-    let publish = PublishMessage::build()
-        .payload(payload.into())
-        .message_id(&event.event_id)
-        .expected_last_subject_sequence(expected_version)
-        .header(NATS_BATCH_ID, batch_id.as_str())
-        .header(NATS_BATCH_SEQUENCE, "1")
-        .header(NATS_BATCH_COMMIT, "1");
-    let ack = js
-        .publish_message(
-            publish.outbound_message(event.subject_with_prefix(stream.prefix.as_str())),
-        )
-        .await
-        .map_err(|source| CronError::event_source("failed to publish job event", source))?;
-
-    match ack.into_future().await {
-        Ok(_) => {}
-        Err(error) if error.kind() == PublishErrorKind::WrongLastSequence => {
-            return Err(CronError::OptimisticConcurrencyConflict {
-                id: job_id.to_string(),
-                expected: write_condition,
-                current_version: stream_subject_state(js, job_id)
-                    .await?
-                    .write_state
-                    .current_version(),
-            });
-        }
-        Err(error) => {
+    let subject = events
+        .as_slice()
+        .first()
+        .expect("non-empty event batch")
+        .subject_with_prefix(stream.prefix.as_str());
+    let mut ack_futures = Vec::with_capacity(events.len());
+    for (index, event) in events.iter().enumerate() {
+        let event_subject = event.subject_with_prefix(stream.prefix.as_str());
+        if event_subject != subject {
             return Err(CronError::event_source(
-                "failed to acknowledge job event batch",
-                error,
+                "failed to publish job event batch",
+                std::io::Error::other(format!(
+                    "batch contains events across multiple subjects for stream '{job_id}'"
+                )),
             ));
+        }
+
+        let payload = serde_json::to_vec(event)?;
+        let mut publish = PublishMessage::build()
+            .payload(payload.into())
+            .message_id(&event.event_id)
+            .expected_last_subject_sequence(expected_version + index as u64)
+            .header(NATS_BATCH_ID, batch_id.as_str())
+            .header(NATS_BATCH_SEQUENCE, (index + 1).to_string());
+        if index + 1 == events.len() {
+            publish = publish.header(NATS_BATCH_COMMIT, "1");
+        }
+        let ack = js
+            .publish_message(publish.outbound_message(subject.clone()))
+            .await
+            .map_err(|source| CronError::event_source("failed to publish job event", source))?;
+        ack_futures.push(ack);
+    }
+
+    for ack in ack_futures {
+        match ack.into_future().await {
+            Ok(_) => {}
+            Err(error) if error.kind() == PublishErrorKind::WrongLastSequence => {
+                return Err(CronError::OptimisticConcurrencyConflict {
+                    id: job_id.to_string(),
+                    expected: write_condition,
+                    current_version: stream_subject_state(js, job_id)
+                        .await?
+                        .write_state
+                        .current_version(),
+                });
+            }
+            Err(error) => {
+                return Err(CronError::event_source(
+                    "failed to acknowledge job event batch",
+                    error,
+                ));
+            }
         }
     }
 
-    project_event_to_snapshot::run(js, job_id, &event).await?;
+    project_event_to_snapshot::run(js, job_id, events.as_slice()).await?;
 
     Ok(())
 }

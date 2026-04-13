@@ -2,16 +2,15 @@ use std::{fmt, io::Read};
 
 use async_nats::jetstream::{self, context, kv};
 use trogon_cron::{
-    CronError, JobEvent, JobEventData, JobId, JobSpec, JobStreamState, JobWriteCondition,
-    ResolvedJobSpec, SNAPSHOT_STORE_CONFIG, VersionedJobSpec, append_events, apply, initial_state,
-    open_snapshot_bucket,
+    CronError, JobDecisionError, JobSpec, JobStreamState, JobWriteCondition, PutJobCommand,
+    SNAPSHOT_STORE_CONFIG, VersionedJobSpec, append_events, initial_state, open_snapshot_bucket,
 };
-use trogon_eventsourcing::load_snapshot;
+use trogon_eventsourcing::{Decision, decide, load_snapshot};
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream, JetStreamPublishMessage};
 
 #[derive(Debug)]
 pub struct AddCommand {
-    spec: ResolvedJobSpec,
+    command: PutJobCommand,
 }
 
 #[derive(Debug)]
@@ -50,7 +49,8 @@ impl std::error::Error for CommandError {
 impl AddCommand {
     pub fn new(spec: JobSpec) -> Result<Self, CommandError> {
         Ok(Self {
-            spec: ResolvedJobSpec::try_from(&spec).map_err(CommandError::InvalidJobSpec)?,
+            command: PutJobCommand::new(spec, JobWriteCondition::MustNotExist)
+                .map_err(CommandError::InvalidJobSpec)?,
         })
     }
 }
@@ -74,7 +74,7 @@ where
             AckFuture = context::PublishAckFuture,
         >,
 {
-    let id = command.spec.id().to_string();
+    let id = command.command.id().to_string();
     let bucket = open_snapshot_bucket(js)
         .await
         .map_err(CommandError::LoadJob)?;
@@ -89,16 +89,17 @@ where
                 source,
             ))
         })?,
-        None => initial_state(JobId::parse(&id).map_err(|source| {
-            CommandError::LoadJob(CronError::event_source(
-                "failed to parse job id for registration command",
-                source,
-            ))
-        })?),
+        None => initial_state(command.command.id().clone()),
     };
-    match &current_state {
-        JobStreamState::Initial { .. } => {}
-        JobStreamState::Present(_) => {
+    let events = match decide(&current_state, &command.command) {
+        Ok(Decision::Event(events)) => events,
+        Ok(_) => {
+            return Err(CommandError::RegisterJob(CronError::event_source(
+                "failed to decide job registration from current stream state",
+                std::io::Error::other("unsupported decision variant"),
+            )));
+        }
+        Err(JobDecisionError::CannotRegisterExistingJob { .. }) => {
             return Err(CommandError::RegisterJob(
                 CronError::OptimisticConcurrencyConflict {
                     id: id.clone(),
@@ -107,24 +108,19 @@ where
                 },
             ));
         }
-    }
-
-    let event = JobEvent::job_registered(command.spec.spec().clone());
-    match apply(current_state, event.clone()) {
-        Ok(_) => {}
         Err(error) => {
             return Err(CommandError::RegisterJob(CronError::event_source(
-                "failed to apply job registration to current stream state",
+                "failed to decide job registration from current stream state",
                 error,
             )));
         }
-    }
+    };
 
     append_events(
         js,
         &id,
         JobWriteCondition::MustNotExist,
-        JobEventData::new(event),
+        events.map(trogon_cron::JobEventData::new),
     )
     .await
     .map_err(CommandError::RegisterJob)?;

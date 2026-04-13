@@ -2,11 +2,11 @@ use std::fmt;
 
 use async_nats::jetstream::{self, context, kv};
 use trogon_cron::{
-    CronError, JobEvent, JobEventData, JobId, JobIdError, JobStreamState, JobWriteCondition,
-    SNAPSHOT_STORE_CONFIG, VersionedJobSpec, append_events, apply, initial_state,
+    CronError, DeleteJobCommand, JobDecisionError, JobId, JobIdError, JobStreamState,
+    JobWriteCondition, SNAPSHOT_STORE_CONFIG, VersionedJobSpec, append_events, initial_state,
     open_snapshot_bucket,
 };
-use trogon_eventsourcing::load_snapshot;
+use trogon_eventsourcing::{Decision, decide, load_snapshot};
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream, JetStreamPublishMessage};
 
 #[derive(Debug)]
@@ -70,32 +70,37 @@ where
         })?,
         None => initial_state(command.job_id.clone()),
     };
-    match &current_state {
-        JobStreamState::Initial { .. } => {
+    let write_condition = current_snapshot
+        .as_ref()
+        .map(|job| JobWriteCondition::MustBeAtVersion(job.version))
+        .unwrap_or(JobWriteCondition::MustNotExist);
+    let store_command = DeleteJobCommand {
+        id: command.job_id.clone(),
+        write_condition,
+    };
+    let events = match decide(&current_state, &store_command) {
+        Ok(Decision::Event(events)) => events,
+        Ok(_) => {
+            return Err(CommandError::DeleteJob(CronError::event_source(
+                "failed to decide job removal from current stream state",
+                std::io::Error::other("unsupported decision variant"),
+            )));
+        }
+        Err(JobDecisionError::MissingJobForRemoval { .. }) => {
             return Err(CommandError::JobNotFound(command.job_id.clone()));
         }
-        JobStreamState::Present(_) => {}
-    }
-
-    let event = JobEvent::job_removed(command.job_id.to_string());
-    match apply(current_state, event.clone()) {
-        Ok(_) => {}
         Err(error) => {
             return Err(CommandError::DeleteJob(CronError::event_source(
-                "failed to apply job removal to current stream state",
+                "failed to decide job removal from current stream state",
                 error,
             )));
         }
-    }
-    let version = current_snapshot
-        .as_ref()
-        .map(|job| job.version)
-        .ok_or_else(|| CommandError::JobNotFound(command.job_id.clone()))?;
+    };
     append_events(
         js,
         command.job_id.as_str(),
-        JobWriteCondition::MustBeAtVersion(version),
-        JobEventData::new(event),
+        write_condition,
+        events.map(trogon_cron::JobEventData::new),
     )
     .await
     .map_err(CommandError::DeleteJob)?;

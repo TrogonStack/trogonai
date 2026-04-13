@@ -6,8 +6,10 @@ use crate::{
     kv::EVENTS_SUBJECT_PREFIX,
 };
 
+mod decision;
 mod state;
 
+pub use decision::JobDecisionError;
 pub use state::{JobStreamState, JobTransitionError, apply, initial_state, projection_change};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

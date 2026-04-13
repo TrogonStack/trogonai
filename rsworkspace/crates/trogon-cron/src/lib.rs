@@ -21,8 +21,8 @@ pub use config::{
 pub use domain::ResolvedJobSpec;
 pub use error::{CronError, JobSpecError};
 pub use events::{
-    JobEvent, JobEventData, JobStreamState, JobTransitionError, ProjectionChange, RecordedJobEvent,
-    apply, initial_state, projection_change,
+    JobDecisionError, JobEvent, JobEventData, JobStreamState, JobTransitionError, ProjectionChange,
+    RecordedJobEvent, apply, initial_state, projection_change,
 };
 pub use job_id::{JobId, JobIdError};
 pub use nats::NatsSchedulePublisher;
