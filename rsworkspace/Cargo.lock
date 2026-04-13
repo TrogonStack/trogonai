@@ -3463,6 +3463,7 @@ dependencies = [
  "trogon-source-gitlab",
  "trogon-source-incidentio",
  "trogon-source-linear",
+ "trogon-source-notion",
  "trogon-source-slack",
  "trogon-source-telegram",
  "trogon-std",
@@ -3586,6 +3587,26 @@ dependencies = [
  "serde_json",
  "sha2",
  "testcontainers-modules",
+ "tokio",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+ "trogon-nats",
+ "trogon-std",
+]
+
+[[package]]
+name = "trogon-source-notion"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "axum",
+ "bytes",
+ "hex",
+ "hmac",
+ "serde",
+ "serde_json",
+ "sha2",
  "tokio",
  "tower",
  "tracing",
