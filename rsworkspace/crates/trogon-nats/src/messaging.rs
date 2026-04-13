@@ -303,9 +303,8 @@ where
             subject,
         )
         .await
-        .map_err(|error| {
+        .inspect_err(|_error| {
             set_span_error(&span, MessagingError::PublishOperation);
-            error
         })?;
 
     let Some(flush_policy) = options.flush else {
@@ -328,9 +327,8 @@ where
             subject,
         )
         .await
-        .map_err(|error| {
+        .inspect_err(|_error| {
             set_span_error(&span, MessagingError::FlushOperation);
-            error
         })
 }
 
