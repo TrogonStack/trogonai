@@ -79,10 +79,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
-    use crate::{
-        JobId,
-        config::{DeliverySpec, ScheduleSpec},
-    };
+    use crate::config::{DeliverySpec, ScheduleSpec};
 
     fn job(id: &str) -> JobSpec {
         JobSpec {
@@ -108,7 +105,7 @@ mod tests {
             JobEvent::job_removed("backup"),
             JobEvent::job_registered(job("backup")),
         ];
-        let mut state = initial_state(JobId::parse("backup").unwrap());
+        let mut state = initial_state();
 
         for event in events {
             state = apply(state, event).unwrap();
@@ -120,7 +117,7 @@ mod tests {
     #[test]
     fn state_change_requires_existing_job() {
         let error = apply(
-            initial_state(JobId::parse("missing").unwrap()),
+            initial_state(),
             JobEvent::job_state_changed("missing", JobEnabledState::Disabled),
         )
         .unwrap_err();
@@ -133,7 +130,7 @@ mod tests {
 
     #[test]
     fn projection_change_tracks_latest_state() {
-        let before = initial_state(JobId::parse("backup").unwrap());
+        let before = initial_state();
         let after = apply(before.clone(), JobEvent::job_registered(job("backup"))).unwrap();
         assert_eq!(
             projection_change(&before, &after),
@@ -202,11 +199,7 @@ mod tests {
 
     #[test]
     fn initial_state_rejects_missing_removal() {
-        let error = apply(
-            initial_state(JobId::parse("backup").unwrap()),
-            JobEvent::job_removed("backup"),
-        )
-        .unwrap_err();
+        let error = apply(initial_state(), JobEvent::job_removed("backup")).unwrap_err();
         assert!(matches!(
             error,
             JobTransitionError::MissingJobForRemoval { .. }
@@ -215,11 +208,10 @@ mod tests {
 
     #[test]
     fn reducer_rejects_stream_id_mismatch() {
-        let error = apply(
-            initial_state(JobId::parse("backup").unwrap()),
-            JobEvent::job_removed("other"),
-        )
-        .unwrap_err();
-        assert!(matches!(error, JobTransitionError::StreamIdMismatch { .. }));
+        let error = apply(initial_state(), JobEvent::job_removed("other")).unwrap_err();
+        assert!(matches!(
+            error,
+            JobTransitionError::MissingJobForRemoval { .. }
+        ));
     }
 }

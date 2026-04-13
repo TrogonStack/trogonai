@@ -166,7 +166,7 @@ impl MockConfigStore {
                     source,
                 )
             })?,
-            None => initial_state(command.id().clone()),
+            None => initial_state(),
         };
         let write_state = JobWriteState::new(current_version, current_snapshot.as_ref().is_some());
         command
@@ -228,7 +228,7 @@ impl MockConfigStore {
                     source,
                 )
             })?,
-            None => initial_state(command.id.clone()),
+            None => initial_state(),
         };
         command.write_condition.ensure(
             command.id.as_str(),
@@ -301,7 +301,7 @@ impl MockConfigStore {
                     source,
                 )
             })?,
-            None => initial_state(command.id.clone()),
+            None => initial_state(),
         };
         command.write_condition.ensure(
             command.id.as_str(),

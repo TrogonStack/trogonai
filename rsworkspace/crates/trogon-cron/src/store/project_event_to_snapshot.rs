@@ -4,7 +4,7 @@ use async_nats::jetstream::{self, kv};
 use trogon_eventsourcing::{load_snapshot, maybe_advance_checkpoint, persist_snapshot_change};
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream};
 
-use crate::{error::CronError, events::JobEventData, nats::apply_event_to_snapshot_map};
+use crate::{JobId, error::CronError, events::JobEventData, nats::apply_event_to_snapshot_map};
 
 use super::{SNAPSHOT_STORE_CONFIG, append_events, snapshot_bucket};
 
@@ -16,6 +16,12 @@ where
     if events.is_empty() {
         return Ok(());
     }
+    let stream_id = JobId::parse(job_id).map_err(|source| {
+        CronError::event_source(
+            "failed to parse job stream id for snapshot projection",
+            source,
+        )
+    })?;
 
     let bucket = snapshot_bucket::run(js).await?;
     let mut snapshots = BTreeMap::new();
@@ -43,8 +49,12 @@ where
         })?;
 
     for (index, event) in events.iter().enumerate() {
-        let change =
-            apply_event_to_snapshot_map(&mut snapshots, &event.data, start_version + index as u64)?;
+        let change = apply_event_to_snapshot_map(
+            &mut snapshots,
+            &stream_id,
+            &event.data,
+            start_version + index as u64,
+        )?;
         persist_snapshot_change(&bucket, SNAPSHOT_STORE_CONFIG, change)
             .await
             .map_err(CronError::from)?;

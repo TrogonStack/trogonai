@@ -6,7 +6,10 @@ use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream};
 
 use crate::{
     error::CronError,
-    nats::{apply_event_to_snapshot_map, decode_recorded_job_event, read_raw_event_message},
+    nats::{
+        apply_event_to_snapshot_map, decode_recorded_job_event, job_id_from_event_subject,
+        read_raw_event_message,
+    },
 };
 
 use super::{SNAPSHOT_STORE_CONFIG, events_stream, snapshot_bucket};
@@ -51,7 +54,9 @@ where
             continue;
         };
         let event = decode_recorded_job_event(message)?;
-        let change = apply_event_to_snapshot_map(&mut snapshots, &event.data, sequence)?;
+        let stream_id = job_id_from_event_subject(&event.stream_id)?;
+        let change =
+            apply_event_to_snapshot_map(&mut snapshots, &stream_id, &event.data, sequence)?;
         persist_snapshot_change(&bucket, SNAPSHOT_STORE_CONFIG, change)
             .await
             .map_err(CronError::from)?;

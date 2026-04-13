@@ -6,13 +6,12 @@ use futures::{StreamExt, future};
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream};
 
 use crate::{
-    JobId,
     error::CronError,
     events::{JobStreamState, apply, initial_state, projection_change},
     nats::{
         ack_watch_message, apply_projection_change, change_from_projection_change,
-        decode_recorded_watch_message, event_watch_consumer_config, next_watch_start_sequence,
-        rebuild_jobs_from_stream,
+        decode_recorded_watch_message, ensure_event_matches_stream, event_watch_consumer_config,
+        job_id_from_event_subject, next_watch_start_sequence, rebuild_jobs_from_stream,
     },
 };
 
@@ -77,21 +76,26 @@ where
                 }
             };
 
-            let stream_id = match JobId::parse(event.data.job_id()) {
+            let stream_id = match job_id_from_event_subject(&event.stream_id) {
                 Ok(stream_id) => stream_id,
                 Err(error) => {
-                    tracing::error!(error = %error, "Failed to parse watched job event stream id");
+                    tracing::error!(error = %error, "Failed to derive watched job stream id from subject");
                     ack_watch_message(&message).await;
                     return None;
                 }
             };
+            if let Err(error) = ensure_event_matches_stream(&stream_id, &event.data) {
+                tracing::error!(error = %error, "Watched job event payload does not match stream subject");
+                ack_watch_message(&message).await;
+                return None;
+            }
             let projection_change = {
                 let mut state = state.lock().expect("job event state mutex poisoned");
                 (|| -> Result<Option<crate::events::ProjectionChange>, CronError> {
                     let current = state
                         .get(stream_id.as_str())
                         .cloned()
-                        .unwrap_or_else(|| initial_state(stream_id.clone()));
+                        .unwrap_or_else(initial_state);
                     let next = apply(current.clone(), event.data.clone()).map_err(|error| {
                         CronError::event_source(
                             "failed to apply watched job event to stream state",
@@ -103,7 +107,7 @@ where
                         JobStreamState::Present(_) => {
                             state.insert(stream_id.to_string(), next);
                         }
-                        JobStreamState::Initial { .. } => {
+                        JobStreamState::Initial => {
                             state.remove(stream_id.as_str());
                         }
                     }

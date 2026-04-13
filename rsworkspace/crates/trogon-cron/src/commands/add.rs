@@ -89,7 +89,7 @@ where
                 source,
             ))
         })?,
-        None => initial_state(command.command.id().clone()),
+        None => initial_state(),
     };
     let events = match decide(&current_state, &command.command) {
         Ok(Decision::Event(events)) => events,

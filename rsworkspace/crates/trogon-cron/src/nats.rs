@@ -75,7 +75,8 @@ pub(crate) async fn rebuild_jobs_from_stream(
         };
         let version = message.sequence;
         let event = decode_recorded_job_event(message)?;
-        apply_event_to_snapshot_map(&mut snapshots, &event.data, version)?;
+        let stream_id = job_id_from_event_subject(&event.stream_id)?;
+        apply_event_to_snapshot_map(&mut snapshots, &stream_id, &event.data, version)?;
     }
 
     Ok(snapshots.into_values().collect())
@@ -197,15 +198,11 @@ pub(crate) fn change_from_projection_change(change: ProjectionChange) -> JobSpec
 
 pub(crate) fn apply_event_to_snapshot_map(
     snapshots: &mut BTreeMap<String, VersionedJobSpec>,
+    stream_id: &JobId,
     event: &JobEvent,
     version: u64,
 ) -> Result<SnapshotChange<VersionedJobSpec>, CronError> {
-    let stream_id = JobId::parse(event.job_id()).map_err(|source| {
-        CronError::event_source(
-            "failed to parse job stream id while projecting event to snapshots",
-            source,
-        )
-    })?;
+    ensure_event_matches_stream(stream_id, event)?;
     let current_state = match snapshots.get(stream_id.as_str()).cloned() {
         Some(snapshot) => JobStreamState::try_from(snapshot).map_err(|source| {
             CronError::event_source(
@@ -213,7 +210,7 @@ pub(crate) fn apply_event_to_snapshot_map(
                 source,
             )
         })?,
-        None => initial_state(stream_id.clone()),
+        None => initial_state(),
     };
     let next_state = apply(current_state, event.clone()).map_err(|source| {
         CronError::event_source("failed to apply job event to stream snapshot state", source)
@@ -225,10 +222,44 @@ pub(crate) fn apply_event_to_snapshot_map(
             snapshots.insert(stream_id.to_string(), snapshot.clone());
             Ok(SnapshotChange::upsert(snapshot))
         }
-        JobStreamState::Initial { .. } => {
+        JobStreamState::Initial => {
             snapshots.remove(stream_id.as_str());
             Ok(SnapshotChange::delete(stream_id.to_string()))
         }
+    }
+}
+
+pub(crate) fn job_id_from_event_subject(subject: &str) -> Result<JobId, CronError> {
+    let raw_id = subject
+        .strip_prefix(EVENTS_SUBJECT_PREFIX)
+        .or_else(|| subject.strip_prefix(LEGACY_EVENTS_SUBJECT_PREFIX))
+        .ok_or_else(|| {
+            CronError::event_source(
+                "failed to derive job stream id from event subject",
+                std::io::Error::other(subject.to_string()),
+            )
+        })?;
+
+    JobId::parse(raw_id).map_err(|source| {
+        CronError::event_source("failed to parse job stream id from event subject", source)
+    })
+}
+
+pub(crate) fn ensure_event_matches_stream(
+    expected_stream_id: &JobId,
+    event: &JobEvent,
+) -> Result<(), CronError> {
+    if event.job_id() == expected_stream_id.as_str() {
+        Ok(())
+    } else {
+        Err(CronError::event_source(
+            "event payload stream id does not match the expected stream",
+            std::io::Error::other(format!(
+                "expected '{}' but event carried '{}'",
+                expected_stream_id,
+                event.job_id()
+            )),
+        ))
     }
 }
 
@@ -594,22 +625,32 @@ mod tests {
     #[test]
     fn snapshot_projection_replays_delete_and_recreate() {
         let mut snapshots = BTreeMap::new();
+        let stream_id = JobId::parse("alpha").unwrap();
 
         apply_event_to_snapshot_map(
             &mut snapshots,
+            &stream_id,
             &JobEvent::job_registered(test_job("alpha")),
             1,
         )
         .unwrap();
         apply_event_to_snapshot_map(
             &mut snapshots,
+            &stream_id,
             &JobEvent::job_state_changed("alpha", JobEnabledState::Disabled),
             2,
         )
         .unwrap();
-        apply_event_to_snapshot_map(&mut snapshots, &JobEvent::job_removed("alpha"), 3).unwrap();
         apply_event_to_snapshot_map(
             &mut snapshots,
+            &stream_id,
+            &JobEvent::job_removed("alpha"),
+            3,
+        )
+        .unwrap();
+        apply_event_to_snapshot_map(
+            &mut snapshots,
+            &stream_id,
             &JobEvent::job_registered(test_job("alpha")),
             4,
         )
@@ -622,8 +663,10 @@ mod tests {
 
     #[test]
     fn snapshot_projection_rejects_invalid_transition_sequence() {
+        let stream_id = JobId::parse("alpha").unwrap();
         let error = apply_event_to_snapshot_map(
             &mut BTreeMap::new(),
+            &stream_id,
             &JobEvent::job_state_changed("alpha", JobEnabledState::Disabled),
             1,
         )

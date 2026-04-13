@@ -3,7 +3,6 @@ use crate::config::JobEnabledState;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum JobDecisionError {
-    StreamIdMismatch { state_id: JobId, command_id: JobId },
     CannotRegisterExistingJob { id: JobId },
     MissingJobForStateChange { id: JobId },
     MissingJobForRemoval { id: JobId },
@@ -13,13 +12,6 @@ pub enum JobDecisionError {
 impl std::fmt::Display for JobDecisionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::StreamIdMismatch {
-                state_id,
-                command_id,
-            } => write!(
-                f,
-                "command stream id '{command_id}' does not match state stream id '{state_id}'"
-            ),
             Self::CannotRegisterExistingJob { id } => {
                 write!(f, "job '{id}' is already registered")
             }
@@ -68,7 +60,7 @@ mod tests {
 
     #[test]
     fn put_job_decides_registration_from_initial_state() {
-        let state = initial_state(JobId::parse("backup").unwrap());
+        let state = initial_state();
         let command = PutJobCommand::new(
             job("backup", JobEnabledState::Enabled),
             JobWriteCondition::MustNotExist,
@@ -128,19 +120,5 @@ mod tests {
             decision,
             Decision::Event(NonEmpty::one(crate::JobEvent::job_removed("backup")))
         );
-    }
-
-    #[test]
-    fn decision_rejects_stream_id_mismatch() {
-        let state = initial_state(JobId::parse("backup").unwrap());
-        let command = DeleteJobCommand {
-            id: JobId::parse("other").unwrap(),
-            write_condition: JobWriteCondition::MustNotExist,
-        };
-
-        assert!(matches!(
-            decide(&state, &command).unwrap_err(),
-            JobDecisionError::StreamIdMismatch { .. }
-        ));
     }
 }
