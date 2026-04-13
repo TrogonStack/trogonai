@@ -1473,6 +1473,106 @@ pub mod mock {
         }
     }
 
+    /// Wraps [`MockPromiseStore`] and injects a CAS conflict on the first
+    /// `update_promise` call. After the conflict fires, subsequent `get_promise`
+    /// calls hang indefinitely, simulating a NATS KV timeout during the CAS
+    /// conflict reload.
+    ///
+    /// Used with Tokio's mock clock (`start_paused = true`) to exercise the
+    /// `unwrap_or_else(|_| Ok(None))` path in the CAS reload branch — the
+    /// timeout is converted to `Ok(None)`, which sets `checkpoint = None` and
+    /// disables further checkpointing while the run still completes normally.
+    pub struct HangingCasReloadStore {
+        pub inner: MockPromiseStore,
+        conflict_fired: Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    impl HangingCasReloadStore {
+        pub fn new() -> Self {
+            Self {
+                inner: MockPromiseStore::new(),
+                conflict_fired: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            }
+        }
+    }
+
+    impl super::PromiseRepository for HangingCasReloadStore {
+        fn get_promise<'a>(
+            &'a self,
+            tenant_id: &'a str,
+            promise_id: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<Option<super::PromiseEntry>, super::PromiseStoreError>> + Send + 'a>>
+        {
+            let conflict_fired = Arc::clone(&self.conflict_fired);
+            let inner = self.inner.clone();
+            let tid = tenant_id.to_string();
+            let pid = promise_id.to_string();
+            Box::pin(async move {
+                if conflict_fired.load(std::sync::atomic::Ordering::SeqCst) {
+                    // After CAS conflict: hang indefinitely to trigger the NATS_KV_TIMEOUT.
+                    std::future::pending::<Result<Option<super::PromiseEntry>, super::PromiseStoreError>>().await
+                } else {
+                    inner.get_promise(&tid, &pid).await
+                }
+            })
+        }
+
+        fn put_promise<'a>(
+            &'a self,
+            promise: &'a super::AgentPromise,
+        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>> {
+            self.inner.put_promise(promise)
+        }
+
+        fn update_promise<'a>(
+            &'a self,
+            tenant_id: &'a str,
+            promise_id: &'a str,
+            promise: &'a super::AgentPromise,
+            revision: u64,
+        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>> {
+            let already = self
+                .conflict_fired
+                .swap(true, std::sync::atomic::Ordering::SeqCst);
+            if !already {
+                return Box::pin(async move {
+                    Err(super::PromiseStoreError(
+                        "CAS mismatch: injected conflict (hanging reload)".to_string(),
+                    ))
+                });
+            }
+            self.inner.update_promise(tenant_id, promise_id, promise, revision)
+        }
+
+        fn get_tool_result<'a>(
+            &'a self,
+            tenant_id: &'a str,
+            promise_id: &'a str,
+            cache_key: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<Option<String>, super::PromiseStoreError>> + Send + 'a>>
+        {
+            self.inner.get_tool_result(tenant_id, promise_id, cache_key)
+        }
+
+        fn put_tool_result<'a>(
+            &'a self,
+            tenant_id: &'a str,
+            promise_id: &'a str,
+            cache_key: &'a str,
+            result: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<(), super::PromiseStoreError>> + Send + 'a>> {
+            self.inner.put_tool_result(tenant_id, promise_id, cache_key, result)
+        }
+
+        fn list_running<'a>(
+            &'a self,
+            tenant_id: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<super::AgentPromise>, super::PromiseStoreError>> + Send + 'a>>
+        {
+            self.inner.list_running(tenant_id)
+        }
+    }
+
     /// Makes every `put_promise` call hang indefinitely.
     ///
     /// Used with Tokio's mock clock to test that a timeout on the initial

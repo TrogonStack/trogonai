@@ -31,7 +31,7 @@ use async_nats::jetstream::{
 };
 use futures_util::StreamExt;
 use tracing::{error, info, warn};
-use trogon_automations::{AutomationStore, RunRecord, RunStatus, RunStore};
+use trogon_automations::{AutomationRepository, AutomationStore, RunRecord, RunStatus, RunStore};
 
 use crate::agent_loop::{AgentLoop, ReqwestAnthropicClient};
 use crate::chat_api::{ChatAppState, router as chat_router};
@@ -903,10 +903,10 @@ async fn prepare_agent_with_promise(
 /// Only recovers promises that are owned by this tenant and have been running
 /// for more than `stale_after` seconds without completing — indicating the
 /// original process is gone.
-async fn recover_stale_promises(
+async fn recover_stale_promises<R: AutomationRepository>(
     agent: &Arc<AgentLoop>,
     promise_store: &Arc<dyn PromiseRepository>,
-    automation_store: &Arc<AutomationStore>,
+    automation_store: &Arc<R>,
     run_store: &Arc<RunStore>,
     tenant_id: &str,
 ) -> Option<tokio::task::JoinHandle<()>> {
@@ -3073,6 +3073,279 @@ mod tests {
         assert!(
             dispatch.is_empty(),
             "no dispatch entries expected when list_tools result cannot be deserialized"
+        );
+    }
+
+    // ── recover_stale_promises — error paths inside the recovery loop ─────────
+
+    /// In-memory automation store whose `list()` always returns an error.
+    ///
+    /// Used to verify that a transient `AutomationStore` failure during startup
+    /// recovery causes the affected promise to be skipped (kept in `Running`)
+    /// rather than incorrectly marked `PermanentFailed`.
+    #[derive(Clone)]
+    struct ErrorListAutomationStore;
+
+    impl trogon_automations::AutomationRepository for ErrorListAutomationStore {
+        fn put<'a>(
+            &'a self,
+            _automation: &'a trogon_automations::Automation,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), trogon_automations::store::StoreError>> + Send + 'a>>
+        {
+            Box::pin(async { Ok(()) })
+        }
+
+        fn get<'a>(
+            &'a self,
+            _tenant_id: &'a str,
+            _id: &'a str,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<trogon_automations::Automation>, trogon_automations::store::StoreError>> + Send + 'a>>
+        {
+            Box::pin(async { Ok(None) })
+        }
+
+        fn delete<'a>(
+            &'a self,
+            _tenant_id: &'a str,
+            _id: &'a str,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), trogon_automations::store::StoreError>> + Send + 'a>>
+        {
+            Box::pin(async { Ok(()) })
+        }
+
+        fn list<'a>(
+            &'a self,
+            _tenant_id: &'a str,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<trogon_automations::Automation>, trogon_automations::store::StoreError>> + Send + 'a>>
+        {
+            Box::pin(async {
+                Err(trogon_automations::store::StoreError(
+                    "injected list error".to_string(),
+                ))
+            })
+        }
+
+        fn matching<'a>(
+            &'a self,
+            _tenant_id: &'a str,
+            _nats_subject: &'a str,
+            _payload: &'a serde_json::Value,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<trogon_automations::Automation>, trogon_automations::store::StoreError>> + Send + 'a>>
+        {
+            Box::pin(async { Ok(vec![]) })
+        }
+    }
+
+    /// Promise store that delegates all operations to an inner [`MockPromiseStore`]
+    /// except `update_promise` — when the updated promise has status
+    /// `PermanentFailed`, the write returns an immediate error instead.
+    ///
+    /// This simulates the KV write failing after the promise was already
+    /// CAS-claimed (status `Running`), verifying that recovery continues without
+    /// panicking and leaves the promise in `Running` state.
+    struct FailsPermanentFailedUpdateStore {
+        inner: crate::promise_store::mock::MockPromiseStore,
+    }
+
+    impl crate::promise_store::PromiseRepository for FailsPermanentFailedUpdateStore {
+        fn get_promise<'a>(
+            &'a self,
+            tenant_id: &'a str,
+            promise_id: &'a str,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<crate::promise_store::PromiseEntry>, crate::promise_store::PromiseStoreError>> + Send + 'a>>
+        {
+            self.inner.get_promise(tenant_id, promise_id)
+        }
+
+        fn put_promise<'a>(
+            &'a self,
+            promise: &'a crate::promise_store::AgentPromise,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<u64, crate::promise_store::PromiseStoreError>> + Send + 'a>>
+        {
+            self.inner.put_promise(promise)
+        }
+
+        fn update_promise<'a>(
+            &'a self,
+            tenant_id: &'a str,
+            promise_id: &'a str,
+            promise: &'a crate::promise_store::AgentPromise,
+            revision: u64,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<u64, crate::promise_store::PromiseStoreError>> + Send + 'a>>
+        {
+            if promise.status == crate::promise_store::PromiseStatus::PermanentFailed {
+                return Box::pin(async {
+                    Err(crate::promise_store::PromiseStoreError(
+                        "injected: update_promise fails on PermanentFailed".to_string(),
+                    ))
+                });
+            }
+            self.inner.update_promise(tenant_id, promise_id, promise, revision)
+        }
+
+        fn get_tool_result<'a>(
+            &'a self,
+            tenant_id: &'a str,
+            promise_id: &'a str,
+            cache_key: &'a str,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<String>, crate::promise_store::PromiseStoreError>> + Send + 'a>>
+        {
+            self.inner.get_tool_result(tenant_id, promise_id, cache_key)
+        }
+
+        fn put_tool_result<'a>(
+            &'a self,
+            tenant_id: &'a str,
+            promise_id: &'a str,
+            cache_key: &'a str,
+            result: &'a str,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), crate::promise_store::PromiseStoreError>> + Send + 'a>>
+        {
+            self.inner.put_tool_result(tenant_id, promise_id, cache_key, result)
+        }
+
+        fn list_running<'a>(
+            &'a self,
+            tenant_id: &'a str,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<crate::promise_store::AgentPromise>, crate::promise_store::PromiseStoreError>> + Send + 'a>>
+        {
+            self.inner.list_running(tenant_id)
+        }
+    }
+
+    /// When `automation_store.list()` returns an error during startup recovery,
+    /// the affected promise must be skipped (kept in `Running`) rather than
+    /// marked `PermanentFailed`.
+    ///
+    /// Rationale: a transient KV error looks identical to "no automations", so
+    /// treating an error as an empty list would incorrectly cycle promises until
+    /// the 24 h TTL.  The fix is to propagate the error and retry on next restart.
+    #[tokio::test]
+    async fn recover_automation_list_error_skips_promise() {
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+
+        let inner = MockPromiseStore::new();
+        let mut p = make_stale_promise("p-list-err");
+        p.automation_id = "some-auto-id".to_string();
+        inner.insert_promise(p);
+        let store = Arc::new(inner);
+        let promise_store: Arc<dyn PromiseRepository> = Arc::clone(&store) as _;
+
+        let (_, run_store, _container) = make_all_stores().await;
+        let auto_store = Arc::new(ErrorListAutomationStore);
+        let agent = make_agent("http://127.0.0.1:1");
+
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &run_store,
+            "acme",
+        )
+        .await
+        .expect("spawn handle must be returned when stale promises exist");
+
+        handle.await.expect("recovery task must not panic");
+
+        let (p, _) = store
+            .get_promise("acme", "p-list-err")
+            .await
+            .unwrap()
+            .expect("promise must still exist");
+        assert_eq!(
+            p.status,
+            PromiseStatus::Running,
+            "automation_store.list() error must skip the promise, not mark it PermanentFailed"
+        );
+    }
+
+    /// When the `update_promise` that marks a deleted-automation promise as
+    /// `PermanentFailed` returns an error, recovery must log and continue
+    /// without panicking — the promise stays in `Running` and is retried on
+    /// the next restart.
+    #[tokio::test]
+    async fn recover_automation_deleted_permanent_failed_write_error_continues() {
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+
+        let inner = crate::promise_store::mock::MockPromiseStore::new();
+        let mut p = make_stale_promise("p-del-write-err");
+        p.automation_id = "deleted-auto-id".to_string();
+        inner.insert_promise(p);
+        let store = Arc::new(FailsPermanentFailedUpdateStore { inner });
+        let promise_store: Arc<dyn PromiseRepository> = Arc::clone(&store) as _;
+
+        // Real AutomationStore — empty, so the automation is "deleted".
+        let (auto_store, run_store, _container) = make_all_stores().await;
+        let agent = make_agent("http://127.0.0.1:1");
+
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &run_store,
+            "acme",
+        )
+        .await
+        .expect("spawn handle must be returned when stale promises exist");
+
+        handle.await.expect("recovery task must not panic");
+
+        // The PermanentFailed write failed → promise was NOT written to PermanentFailed.
+        let (p, _) = store
+            .inner
+            .get_promise("acme", "p-del-write-err")
+            .await
+            .unwrap()
+            .expect("promise must still exist");
+        assert_ne!(
+            p.status,
+            PromiseStatus::PermanentFailed,
+            "update_promise error on PermanentFailed write must not crash recovery"
+        );
+    }
+
+    /// When the `update_promise` that marks an unknown-subject promise as
+    /// `PermanentFailed` returns an error, recovery must log and continue
+    /// without panicking — the promise stays in `Running` and is retried on
+    /// the next restart.
+    #[tokio::test]
+    async fn recover_unknown_subject_permanent_failed_write_error_continues() {
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+
+        let inner = crate::promise_store::mock::MockPromiseStore::new();
+        let mut p = make_stale_promise("p-unk-write-err");
+        p.automation_id = String::new();
+        p.nats_subject = "completely.unknown.subject".to_string();
+        inner.insert_promise(p);
+        let store = Arc::new(FailsPermanentFailedUpdateStore { inner });
+        let promise_store: Arc<dyn PromiseRepository> = Arc::clone(&store) as _;
+
+        let (auto_store, run_store, _container) = make_all_stores().await;
+        let agent = make_agent("http://127.0.0.1:1");
+
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &run_store,
+            "acme",
+        )
+        .await
+        .expect("spawn handle must be returned when stale promises exist");
+
+        handle.await.expect("recovery task must not panic");
+
+        let (p, _) = store
+            .inner
+            .get_promise("acme", "p-unk-write-err")
+            .await
+            .unwrap()
+            .expect("promise must still exist");
+        assert_ne!(
+            p.status,
+            PromiseStatus::PermanentFailed,
+            "update_promise error on PermanentFailed write must not crash recovery"
         );
     }
 }

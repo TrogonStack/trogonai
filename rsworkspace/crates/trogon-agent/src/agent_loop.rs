@@ -2764,6 +2764,60 @@ mod tests {
         );
     }
 
+    /// When a CAS conflict occurs and the subsequent `get_promise` reload times
+    /// out, `unwrap_or_else(|_| Ok(None))` converts the timeout to `Ok(None)`.
+    /// The `Ok(None)` arm then sets `checkpoint = None`, disabling further
+    /// checkpointing while the run still completes normally.
+    ///
+    /// Distinct from `cas_reload_promise_disappeared_disables_checkpointing_and_run_completes`
+    /// which uses `DisappearedOnCasReloadStore` (returns `Ok(None)` directly).
+    /// This test exercises the `unwrap_or_else` closure path that logs a
+    /// different warning before falling through to the same `Ok(None)` arm.
+    #[tokio::test(start_paused = true)]
+    async fn cas_reload_get_promise_timeout_disables_checkpointing_and_run_completes() {
+        use crate::agent_loop::NATS_KV_TIMEOUT;
+        use crate::promise_store::mock::HangingCasReloadStore;
+        use crate::promise_store::PromiseRepository;
+        use crate::tools::mock::MockToolDispatcher;
+        use mock::SequencedMockAnthropicClient;
+        use std::time::Duration;
+
+        let store = Arc::new(HangingCasReloadStore::new());
+        store.inner.insert_promise(make_test_promise("p1"));
+
+        let tool_use_resp = serde_json::json!({
+            "stop_reason": "tool_use",
+            "content": [{"type": "tool_use", "id": "tu1", "name": "my_tool", "input": {}}]
+        });
+        let end_turn_resp = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "finished despite reload timeout"}]
+        });
+        let anthropic = Arc::new(SequencedMockAnthropicClient::new(vec![
+            tool_use_resp,
+            end_turn_resp,
+        ]));
+        let dispatcher = Arc::new(MockToolDispatcher::new("ok"));
+
+        let agent = make_durable_agent(
+            anthropic,
+            dispatcher,
+            Arc::clone(&store) as Arc<dyn PromiseRepository>,
+            "p1",
+        );
+
+        let (result, _) = tokio::join!(
+            agent.run(vec![Message::user_text("go")], &[], None),
+            tokio::time::advance(NATS_KV_TIMEOUT + Duration::from_millis(1)),
+        );
+
+        assert_eq!(
+            result.unwrap(),
+            "finished despite reload timeout",
+            "run must complete normally even when the CAS reload get_promise times out"
+        );
+    }
+
     // ── Deserialization error ─────────────────────────────────────────────────
 
     /// When Anthropic returns valid JSON that doesn't match `AnthropicResponse`
