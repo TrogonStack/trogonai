@@ -865,3 +865,65 @@ async fn send_message_completes_after_concurrent_session_delete() {
     let body: Value = resp.json().await.unwrap();
     assert_eq!(body["content"], "reply after delete");
 }
+
+/// Two concurrent `POST /sessions/:id/messages` requests to the same session
+/// both return 200. The `send_message` handler persists with `session_store.put`
+/// (no CAS), so the last write wins — one sender's assistant reply overwrites the
+/// other's. This test documents that behaviour and asserts neither request errors.
+#[tokio::test]
+async fn concurrent_sends_to_same_session_both_succeed() {
+    let env = start().await;
+
+    // Slow Anthropic mock so both requests are in-flight at the same time.
+    env.mock_server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(end_turn("concurrent reply"))
+            .delay(std::time::Duration::from_millis(200));
+    });
+
+    // Create a session.
+    let created: Value = env
+        .client
+        .post(format!("{}/sessions", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({"name": "concurrent-send-test"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = created["id"].as_str().unwrap().to_string();
+
+    let c1 = env.client.clone();
+    let c2 = env.client.clone();
+    let url1 = format!("{}/sessions/{id}/messages", env.base_url);
+    let url2 = url1.clone();
+
+    // Launch both sends concurrently — both must return 200 regardless of
+    // which write wins.
+    let (r1, r2) = tokio::join!(
+        async move {
+            c1.post(url1)
+                .header("x-tenant-id", "acme")
+                .json(&json!({"content": "message A"}))
+                .send()
+                .await
+                .unwrap()
+        },
+        async move {
+            c2.post(url2)
+                .header("x-tenant-id", "acme")
+                .json(&json!({"content": "message B"}))
+                .send()
+                .await
+                .unwrap()
+        }
+    );
+
+    assert_eq!(r1.status(), 200, "first concurrent send must return 200");
+    assert_eq!(r2.status(), 200, "second concurrent send must return 200");
+}
