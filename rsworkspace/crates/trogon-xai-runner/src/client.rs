@@ -1698,4 +1698,108 @@ mod tests {
         assert_eq!(client.request_timeout, Duration::from_secs(300));
     }
 
+    // ── start_request: HTTP error status codes ────────────────────────────────
+    //
+    // These tests spin up a real axum server on a random port so the actual
+    // reqwest/HTTP stack is exercised end-to-end. Each test verifies that a
+    // non-2xx response from the xAI API is converted to a single
+    // `XaiEvent::Error` carrying the status code in its message.
+
+    /// Bind a random local port and return (url, axum server future).
+    /// The caller must spawn / drive the server future.
+    #[cfg(test)]
+    async fn make_test_server(
+        app: axum::Router,
+    ) -> (String, impl std::future::Future<Output = ()>) {
+        let listener =
+            tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind test server");
+        let addr = listener.local_addr().expect("local addr");
+        let url = format!("http://{addr}");
+        let server = async move { axum::serve(listener, app).await.ok(); };
+        (url, server)
+    }
+
+    #[tokio::test]
+    async fn chat_stream_on_429_emits_error_event_with_status() {
+        use axum::{Router, http::StatusCode, routing::post};
+        use futures_util::StreamExt as _;
+
+        let app = Router::new()
+            .route("/responses", post(|| async { (StatusCode::TOO_MANY_REQUESTS, "rate limit exceeded") }));
+        let (url, server) = make_test_server(app).await;
+        let server_task = tokio::spawn(server);
+
+        let client = XaiClient::with_base_url(url);
+        let input = [InputItem::user("hi")];
+        let mut stream =
+            XaiHttpClient::chat_stream(&client, "grok-3", &input, "key", &[], None, None).await;
+        let event = stream.next().await.expect("stream must emit one event");
+
+        server_task.abort();
+
+        match event {
+            XaiEvent::Error { message } => {
+                assert!(
+                    message.contains("429"),
+                    "error message must contain HTTP status 429; got: {message}"
+                );
+            }
+            other => panic!("expected XaiEvent::Error, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn chat_stream_on_500_emits_error_event_with_status() {
+        use axum::{Router, http::StatusCode, routing::post};
+        use futures_util::StreamExt as _;
+
+        let app = Router::new()
+            .route("/responses", post(|| async { (StatusCode::INTERNAL_SERVER_ERROR, "internal error") }));
+        let (url, server) = make_test_server(app).await;
+        let server_task = tokio::spawn(server);
+
+        let client = XaiClient::with_base_url(url);
+        let input = [InputItem::user("hi")];
+        let mut stream =
+            XaiHttpClient::chat_stream(&client, "grok-3", &input, "key", &[], None, None).await;
+        let event = stream.next().await.expect("stream must emit one event");
+
+        server_task.abort();
+
+        match event {
+            XaiEvent::Error { message } => {
+                assert!(
+                    message.contains("500"),
+                    "error message must contain HTTP status 500; got: {message}"
+                );
+            }
+            other => panic!("expected XaiEvent::Error, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn chat_stream_on_connection_refused_emits_error_event() {
+        // Point at a port where nothing is listening — reqwest connection error
+        // must be surfaced as XaiEvent::Error (not a panic or hang).
+        use futures_util::StreamExt as _;
+
+        // Bind then immediately drop to guarantee the port is not in use.
+        let port = {
+            let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            l.local_addr().unwrap().port()
+        };
+        let url = format!("http://127.0.0.1:{port}");
+
+        let client = XaiClient::with_base_url(url);
+        let input = [InputItem::user("hi")];
+        let mut stream =
+            XaiHttpClient::chat_stream(&client, "grok-3", &input, "key", &[], None, None).await;
+        let event = stream.next().await.expect("stream must emit one event on connection error");
+
+        assert!(
+            matches!(event, XaiEvent::Error { .. }),
+            "connection refused must produce XaiEvent::Error, got {event:?}"
+        );
+    }
+
 }

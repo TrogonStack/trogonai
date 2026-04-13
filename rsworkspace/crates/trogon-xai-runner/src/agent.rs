@@ -1525,6 +1525,46 @@ mod tests {
         agent.cancel(CancelNotification::new("no-such-session")).await.unwrap();
     }
 
+    #[tokio::test]
+    async fn cancel_interrupts_in_flight_prompt() {
+        // Verify that cancel() fires the oneshot channel, causing prompt() to
+        // break out of its streaming loop and return StopReason::Cancelled
+        // without committing any history for the cancelled turn.
+        let agent = make_agent();
+        agent.test_insert_session("can1", "/tmp", None).await;
+
+        // Slow stream: emits one text delta then blocks forever.
+        agent.client.push_slow_response(XaiEvent::TextDelta { text: "partial".to_string() });
+
+        // Run prompt() and cancel() concurrently in the same task.
+        // Both take &self — safe because XaiAgent uses Arc<Mutex<...>> internally.
+        let prompt_fut =
+            agent.prompt(PromptRequest::new("can1", vec![ContentBlock::from("hi")]));
+        let cancel_fut = async {
+            // Yield enough times to let prompt() register its cancel sender and
+            // enter the select! loop waiting on the slow stream.
+            for _ in 0..10 {
+                tokio::task::yield_now().await;
+            }
+            agent.cancel(CancelNotification::new("can1")).await.unwrap();
+        };
+
+        let (result, _) = tokio::join!(prompt_fut, cancel_fut);
+        let response = result.unwrap();
+
+        assert_eq!(
+            response.stop_reason,
+            StopReason::Cancelled,
+            "cancel must return StopReason::Cancelled"
+        );
+        // Cancelled turns are discarded entirely — no user or assistant message.
+        assert_eq!(
+            agent.test_history_len("can1").await,
+            0,
+            "cancelled turn must not commit any history"
+        );
+    }
+
     // ── model list ────────────────────────────────────────────────────────────
 
     #[tokio::test]
@@ -1573,6 +1613,40 @@ mod tests {
         let agent = make_agent();
         agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
         assert_eq!(agent.test_session_count().await, 1);
+    }
+
+    #[tokio::test]
+    async fn new_session_evicts_oldest_when_limit_reached() {
+        // Fill up to MAX_SESSIONS (100). The very first session must be the
+        // oldest and therefore the one evicted when the 101st is created.
+        let agent = make_agent();
+
+        let first_resp = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+        let first_id = first_resp.session_id.to_string();
+
+        for _ in 1..MAX_SESSIONS {
+            agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+        }
+        assert_eq!(agent.test_session_count().await, MAX_SESSIONS);
+
+        // Adding the (MAX_SESSIONS + 1)-th session must trigger eviction of the oldest.
+        agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+        assert_eq!(
+            agent.test_session_count().await,
+            MAX_SESSIONS,
+            "session count must stay at MAX_SESSIONS after eviction"
+        );
+
+        // The first session must have been evicted.
+        let err = agent
+            .load_session(LoadSessionRequest::new(first_id.clone(), "/tmp"))
+            .await
+            .unwrap_err();
+        assert!(
+            err.message.contains("not found"),
+            "oldest session must have been evicted; got: {}",
+            err.message
+        );
     }
 
     #[tokio::test]
@@ -2334,6 +2408,107 @@ mod tests {
         assert_eq!(notifs.len(), 4, "expected 4 notifications: Pending, Completed, UsageUpdate, AgentMessageChunk");
     }
 
+    #[tokio::test]
+    async fn prompt_function_call_notification_carries_correct_fields() {
+        // FunctionCall must emit a ToolCall(Pending) notification with the
+        // call_id as tool_call_id, the function name as title, and the parsed
+        // JSON arguments as raw_input.
+        let agent = make_agent();
+        agent.test_insert_session("fc1", "/tmp", None).await;
+        agent.client.push_response(vec![
+            XaiEvent::FunctionCall {
+                call_id: "call-99".to_string(),
+                name: "web_search".to_string(),
+                arguments: r#"{"q":"rust async"}"#.to_string(),
+            },
+            XaiEvent::Done,
+        ]);
+
+        agent
+            .prompt(PromptRequest::new("fc1", vec![ContentBlock::from("search")]))
+            .await
+            .unwrap();
+
+        let notifs = agent.notifier.notifications.lock().unwrap();
+        let pending = notifs.iter().find(|n| {
+            matches!(&n.update, SessionUpdate::ToolCall(tc) if tc.status == ToolCallStatus::Pending)
+        });
+        let tc = match &pending.expect("ToolCall(Pending) must be emitted").update {
+            SessionUpdate::ToolCall(tc) => tc,
+            _ => unreachable!(),
+        };
+        assert_eq!(tc.tool_call_id.0.as_ref(), "call-99", "tool_call_id must match call_id");
+        assert_eq!(tc.title, "web_search", "title must match function name");
+        assert_eq!(tc.status, ToolCallStatus::Pending);
+        assert_eq!(
+            tc.raw_input.as_ref().and_then(|v| v.get("q")).and_then(|v| v.as_str()),
+            Some("rust async"),
+            "raw_input must carry the parsed JSON arguments"
+        );
+    }
+
+    #[tokio::test]
+    async fn prompt_server_tool_completed_notification_carries_correct_fields() {
+        // ServerToolCompleted must match the pending call by name and emit a
+        // ToolCall(Completed) notification carrying the same call_id and title.
+        let agent = make_agent();
+        agent.test_insert_session("fc2", "/tmp", None).await;
+        agent.client.push_response(vec![
+            XaiEvent::FunctionCall {
+                call_id: "call-77".to_string(),
+                name: "x_search".to_string(),
+                arguments: "{}".to_string(),
+            },
+            XaiEvent::ServerToolCompleted { name: "x_search".to_string() },
+            XaiEvent::Done,
+        ]);
+
+        agent
+            .prompt(PromptRequest::new("fc2", vec![ContentBlock::from("search")]))
+            .await
+            .unwrap();
+
+        let notifs = agent.notifier.notifications.lock().unwrap();
+        let completed = notifs.iter().find(|n| {
+            matches!(&n.update, SessionUpdate::ToolCall(tc) if tc.status == ToolCallStatus::Completed)
+        });
+        let tc = match &completed.expect("ToolCall(Completed) must be emitted").update {
+            SessionUpdate::ToolCall(tc) => tc,
+            _ => unreachable!(),
+        };
+        assert_eq!(tc.tool_call_id.0.as_ref(), "call-77", "completed call_id must match the pending one");
+        assert_eq!(tc.title, "x_search", "completed title must match the function name");
+        assert_eq!(tc.status, ToolCallStatus::Completed);
+    }
+
+    #[tokio::test]
+    async fn prompt_server_tool_completed_unknown_tool_is_silent() {
+        // ServerToolCompleted for a tool not in pending_tool_calls must not emit
+        // any ToolCall notification and must not crash.
+        let agent = make_agent();
+        agent.test_insert_session("fc3", "/tmp", None).await;
+        agent.client.push_response(vec![
+            // No preceding FunctionCall — nothing in pending_tool_calls.
+            XaiEvent::ServerToolCompleted { name: "ghost_tool".to_string() },
+            XaiEvent::Done,
+        ]);
+
+        agent
+            .prompt(PromptRequest::new("fc3", vec![ContentBlock::from("hi")]))
+            .await
+            .unwrap();
+
+        let notifs = agent.notifier.notifications.lock().unwrap();
+        let tool_notifs: Vec<_> = notifs
+            .iter()
+            .filter(|n| matches!(&n.update, SessionUpdate::ToolCall(_)))
+            .collect();
+        assert!(
+            tool_notifs.is_empty(),
+            "ServerToolCompleted for unknown tool must emit no ToolCall notification"
+        );
+    }
+
     // ── build_input: system prompt precedes history and new user message ──────
 
     #[tokio::test]
@@ -2928,6 +3103,45 @@ mod tests {
         assert_eq!(calls[1].input[0].content, "my query");
     }
 
+    #[tokio::test]
+    async fn prompt_incomplete_without_response_id_returns_end_turn() {
+        // When the model emits Incomplete but never emitted a ResponseId, the
+        // continuation cannot proceed (no response_id to chain from). The agent
+        // must fall back to EndTurn and commit the user message to history rather
+        // than panicking, retrying, or returning Cancelled.
+        let agent = make_agent();
+        agent.test_insert_session("cnt_noid", "/tmp", None).await;
+        agent.client.push_response(vec![
+            // Intentionally no ResponseId event before Incomplete.
+            XaiEvent::Finished {
+                reason: FinishReason::Incomplete,
+                incomplete_reason: Some("max_output_tokens".to_string()),
+            },
+            XaiEvent::Done,
+        ]);
+
+        let result = agent
+            .prompt(PromptRequest::new("cnt_noid", vec![ContentBlock::from("hi")]))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            result.stop_reason,
+            StopReason::EndTurn,
+            "Incomplete without ResponseId must fall back to EndTurn, not retry"
+        );
+        // Only one HTTP call — continuation must not be attempted.
+        let calls = agent.client.calls.lock().unwrap();
+        assert_eq!(calls.len(), 1, "must make exactly 1 HTTP call (no continuation)");
+        drop(calls);
+        // User message must be committed to history (not treated as a cancel).
+        assert_eq!(
+            agent.test_history_len("cnt_noid").await,
+            1,
+            "user message must be recorded even when continuation is skipped"
+        );
+    }
+
     // ── continuation: MAX_CONTINUATIONS limit ────────────────────────────────
 
     #[tokio::test]
@@ -3044,6 +3258,32 @@ mod tests {
         );
         assert!(enabled.contains(&"x_search".to_string()), "x_search must remain enabled");
         assert_eq!(enabled.len(), 1, "only x_search; idempotent re-enable must not duplicate");
+    }
+
+    // ── set_session_config_option: Boolean value is silently ignored ─────────
+
+    #[tokio::test]
+    async fn set_session_config_option_boolean_value_does_not_toggle_tool() {
+        // The tool-toggle logic only handles ValueId ("on"/"off").
+        // A Boolean value must be silently ignored — no tool must be enabled,
+        // and the call must succeed without error.
+        let agent = make_agent();
+        agent.test_insert_session("bool_cfg", "/tmp", None).await;
+
+        agent
+            .set_session_config_option(SetSessionConfigOptionRequest::new(
+                "bool_cfg",
+                "web_search",
+                true, // Boolean variant — not a ValueId
+            ))
+            .await
+            .unwrap();
+
+        let enabled = agent.test_session_enabled_tools("bool_cfg").await;
+        assert!(
+            !enabled.contains(&"web_search".to_string()),
+            "Boolean value must not enable web_search; enabled: {enabled:?}"
+        );
     }
 
     // ── 4xx error does not trigger stale-ID retry ─────────────────────────────
