@@ -29,7 +29,7 @@ trogon-source-linear = { workspace = true }
 trogon-source-notion = { workspace = true }
 trogon-source-slack = { workspace = true }
 trogon-source-telegram = { workspace = true }
-trogon-std = { workspace = true, features = ["clap"] }
+trogon-std = { workspace = true, features = ["clap", "telemetry-http"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }

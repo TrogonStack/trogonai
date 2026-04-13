@@ -45,6 +45,7 @@ pub mod lease;
 pub mod messaging;
 pub mod nats_token;
 pub mod subject_token_violation;
+pub(crate) mod telemetry;
 pub(crate) mod token;
 
 #[cfg(any(test, feature = "test-support"))]
