@@ -33,10 +33,7 @@ async fn client_register_then_get() {
 
     let job = base_job("backup");
     store
-        .put_job(PutJobCommand {
-            spec: job,
-            write_condition: JobWriteCondition::MustNotExist,
-        })
+        .put_job(PutJobCommand::new(job, JobWriteCondition::MustNotExist).unwrap())
         .await
         .unwrap();
 
@@ -54,10 +51,7 @@ async fn client_set_enabled_toggles_job() {
     let store = MockConfigStore::new();
 
     store
-        .put_job(PutJobCommand {
-            spec: base_job("toggle"),
-            write_condition: JobWriteCondition::MustNotExist,
-        })
+        .put_job(PutJobCommand::new(base_job("toggle"), JobWriteCondition::MustNotExist).unwrap())
         .await
         .unwrap();
     let version = store
@@ -92,17 +86,11 @@ async fn client_remove_and_list_jobs_use_store_paths() {
     let store = MockConfigStore::new();
 
     store
-        .put_job(PutJobCommand {
-            spec: base_job("alpha"),
-            write_condition: JobWriteCondition::MustNotExist,
-        })
+        .put_job(PutJobCommand::new(base_job("alpha"), JobWriteCondition::MustNotExist).unwrap())
         .await
         .unwrap();
     store
-        .put_job(PutJobCommand {
-            spec: base_job("beta"),
-            write_condition: JobWriteCondition::MustNotExist,
-        })
+        .put_job(PutJobCommand::new(base_job("beta"), JobWriteCondition::MustNotExist).unwrap())
         .await
         .unwrap();
 
@@ -135,7 +123,6 @@ async fn client_remove_and_list_jobs_use_store_paths() {
 
 #[tokio::test]
 async fn client_rejects_invalid_route() {
-    let store = MockConfigStore::new();
     let mut job = base_job("bad");
     job.delivery = DeliverySpec::NatsEvent {
         route: "agent.>".to_string(),
@@ -144,19 +131,12 @@ async fn client_rejects_invalid_route() {
         source: None,
     };
 
-    let error = store
-        .put_job(PutJobCommand {
-            spec: job,
-            write_condition: JobWriteCondition::MustNotExist,
-        })
-        .await
-        .unwrap_err();
+    let error = PutJobCommand::new(job, JobWriteCondition::MustNotExist).unwrap_err();
     assert!(error.to_string().contains("route"));
 }
 
 #[tokio::test]
 async fn client_rejects_invalid_source_subject() {
-    let store = MockConfigStore::new();
     let mut job = base_job("bad-source");
     job.delivery = DeliverySpec::NatsEvent {
         route: "agent.run".to_string(),
@@ -167,13 +147,7 @@ async fn client_rejects_invalid_source_subject() {
         }),
     };
 
-    let error = store
-        .put_job(PutJobCommand {
-            spec: job,
-            write_condition: JobWriteCondition::MustNotExist,
-        })
-        .await
-        .unwrap_err();
+    let error = PutJobCommand::new(job, JobWriteCondition::MustNotExist).unwrap_err();
     assert!(error.to_string().contains("sampling source"));
 }
 
@@ -181,10 +155,7 @@ async fn client_rejects_invalid_source_subject() {
 async fn client_rejects_stale_version() {
     let store = MockConfigStore::new();
     store
-        .put_job(PutJobCommand {
-            spec: base_job("stale"),
-            write_condition: JobWriteCondition::MustNotExist,
-        })
+        .put_job(PutJobCommand::new(base_job("stale"), JobWriteCondition::MustNotExist).unwrap())
         .await
         .unwrap();
 
