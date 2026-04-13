@@ -12,6 +12,5 @@ pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 pub const MAX_RECONNECT_DELAY: Duration = Duration::from_secs(30);
 
 pub const REQ_ID_HEADER: &str = "X-Req-Id";
-pub const PAYLOAD_PREVIEW_BYTES: usize = 16;
 
 pub const MAX_NATS_TOKEN_LENGTH: usize = 128;
