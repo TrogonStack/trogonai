@@ -113,4 +113,43 @@ verification_token = "notion-verification-token-example"
 
         assert_eq!(js.created_streams().len(), 8);
     }
+
+    #[tokio::test]
+    async fn provision_skips_disabled_sources() {
+        let toml = r#"
+[sources.github]
+status = "disabled"
+webhook_secret = "gh-secret"
+
+[sources.discord]
+bot_token = "Bot token"
+
+[sources.slack]
+signing_secret = "slack-secret"
+
+[sources.telegram]
+webhook_secret = "tg-secret"
+
+[sources.gitlab]
+webhook_secret = "gl-secret"
+
+[sources.incidentio]
+signing_secret = "whsec_dGVzdC1zZWNyZXQ="
+
+[sources.linear]
+webhook_secret = "linear-secret"
+
+[sources.notion]
+verification_token = "notion-verification-token-example"
+"#;
+        let f = write_toml(toml);
+        let cfg = load(Some(f.path())).expect("load failed");
+        let js = MockJetStreamContext::new();
+
+        provision(&js, &cfg)
+            .await
+            .expect("provision should succeed");
+
+        assert_eq!(js.created_streams().len(), 7);
+    }
 }
