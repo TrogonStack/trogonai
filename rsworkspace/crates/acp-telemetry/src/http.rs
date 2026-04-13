@@ -1,12 +1,42 @@
-use axum::http::{
-    Request, StatusCode, Version,
-    header::{HOST, USER_AGENT},
-    uri::Authority,
+use axum::{
+    Router,
+    body::Body,
+    http::{
+        Request, StatusCode, Version,
+        header::{HOST, USER_AGENT},
+        uri::Authority,
+    },
 };
 use opentelemetry::KeyValue;
 use opentelemetry_semantic_conventions::trace as semconv;
+use tower_http::trace::TraceLayer;
 use tracing::Span;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
+
+pub fn instrument_router<S>(router: Router<S>) -> Router<S>
+where
+    S: Clone + Send + Sync + 'static,
+{
+    router.layer(
+        TraceLayer::new_for_http()
+            .make_span_with(|request: &Request<Body>| {
+                let span = tracing::info_span!(
+                    "http.server.request",
+                    method = %request.method(),
+                    path = %request.uri().path()
+                );
+                set_server_request_span_attributes(&span, request);
+                span
+            })
+            .on_response(
+                |response: &axum::http::Response<Body>,
+                 _latency: std::time::Duration,
+                 span: &tracing::Span| {
+                    set_server_response_span_attributes(span, response.status());
+                },
+            ),
+    )
+}
 
 pub fn server_request_attributes<B>(request: &Request<B>) -> Vec<KeyValue> {
     let mut attributes = vec![
@@ -92,6 +122,14 @@ mod tests {
             .iter()
             .find(|attribute| attribute.key.as_str() == key)
             .map(|attribute| &attribute.value)
+    }
+
+    #[test]
+    fn instrument_router_wraps_routes_without_changing_shape() {
+        let _router = instrument_router(Router::<()>::new().route(
+            "/-/liveness",
+            axum::routing::get(|| async { StatusCode::OK }),
+        ));
     }
 
     #[test]

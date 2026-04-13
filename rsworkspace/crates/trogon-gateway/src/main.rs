@@ -15,11 +15,7 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 #[cfg(not(coverage))]
-use axum::body::Body;
-#[cfg(not(coverage))]
 use tokio::task::JoinSet;
-#[cfg(not(coverage))]
-use tower_http::trace::TraceLayer;
 #[cfg(not(coverage))]
 use tracing::{error, info};
 #[cfg(not(coverage))]
@@ -100,28 +96,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    let app = http::mount_sources(resolved, publisher).layer(
-        TraceLayer::new_for_http()
-            .make_span_with(|request: &axum::http::Request<Body>| {
-                let span = tracing::info_span!(
-                    "http.server.request",
-                    method = %request.method(),
-                    path = %request.uri().path()
-                );
-                acp_telemetry::http::set_server_request_span_attributes(&span, request);
-                span
-            })
-            .on_response(
-                |response: &axum::http::Response<Body>,
-                 _latency: Duration,
-                 span: &tracing::Span| {
-                    acp_telemetry::http::set_server_response_span_attributes(
-                        span,
-                        response.status(),
-                    );
-                },
-            ),
-    );
+    let app = acp_telemetry::http::instrument_router(http::mount_sources(resolved, publisher));
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     let listener = tokio::net::TcpListener::bind(addr).await?;
