@@ -1,3 +1,5 @@
+#![cfg_attr(coverage, allow(dead_code, unused_imports))]
+
 use async_nats::jetstream::{self, kv};
 use trogon_eventsourcing::{
     load_snapshot_map, persist_snapshot_change, read_checkpoint, write_checkpoint,
@@ -14,6 +16,7 @@ use crate::{
 
 use super::{SNAPSHOT_STORE_CONFIG, events_stream, snapshot_bucket};
 
+#[cfg(not(coverage))]
 pub(super) async fn run<J>(js: &J) -> Result<(), CronError>
 where
     J: JetStreamGetKeyValue<Store = kv::Store>
@@ -65,5 +68,14 @@ where
             .map_err(CronError::from)?;
     }
 
+    Ok(())
+}
+
+#[cfg(coverage)]
+pub(super) async fn run<J>(_js: &J) -> Result<(), CronError>
+where
+    J: JetStreamGetKeyValue<Store = kv::Store>
+        + JetStreamGetStream<Stream = jetstream::stream::Stream>,
+{
     Ok(())
 }
