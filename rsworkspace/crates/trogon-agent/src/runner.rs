@@ -5168,4 +5168,123 @@ mod tests {
             );
         }
     }
+
+    // ── recover_stale_promises: deleted automation (real NATS KV) ─────────────
+
+    /// When a promise references an automation that no longer exists in the
+    /// `AutomationStore`, `recover_stale_promises` must mark the promise
+    /// `PermanentFailed` — not leave it `Running` indefinitely.
+    ///
+    /// Scenario: worker A crashed while running automation "gone-auto".
+    /// Between the crash and startup recovery the automation was deleted from
+    /// the store. Recovery must detect the missing automation and terminate
+    /// the promise deterministically.
+    #[tokio::test]
+    async fn real_kv_recover_stale_orphaned_automation_marks_permanent_failed() {
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+
+        // Mock responds to nothing — the agent must never reach Anthropic.
+        let server = httpmock::MockServer::start_async().await;
+        let unexpected = server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages");
+            then.status(500).body("must not be called");
+        });
+
+        let (ps, auto_store, run_store, _, _c) = make_all_stores_with_promise().await;
+        let agent = make_agent(&server.base_url());
+        let promise_repo: Arc<dyn PromiseRepository> = ps.clone();
+
+        // Stale promise pointing to an automation that was deleted.
+        // The AutomationStore is empty — no automations stored.
+        let mut stale = make_stale_promise("orphan-promise");
+        stale.tenant_id = agent.tenant_id.clone();
+        stale.automation_id = "id-deleted-auto".to_string();
+        stale.nats_subject = "github.push".to_string();
+        promise_repo.put_promise(&stale).await.unwrap();
+
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_repo,
+            &auto_store,
+            &run_store,
+            &agent.tenant_id,
+        )
+        .await
+        .expect("must return a handle for the orphaned promise");
+        handle.await.expect("recovery task must not panic");
+
+        // Promise must be PermanentFailed — retrying would always reach the
+        // same "no automation" branch and cycle until the 24-hour TTL.
+        let (p, _) = ps
+            .get_promise(&agent.tenant_id, "orphan-promise")
+            .await
+            .unwrap()
+            .expect("promise must still exist in real KV");
+        assert_eq!(
+            p.status,
+            PromiseStatus::PermanentFailed,
+            "orphaned automation promise must be PermanentFailed, not {:?}",
+            p.status
+        );
+
+        // Anthropic must never have been called.
+        unexpected.assert_hits_async(0).await;
+    }
+
+    // ── recover_stale_promises: unknown subject (real NATS KV) ────────────────
+
+    /// A stale built-in-handler promise whose `nats_subject` no longer maps to
+    /// any known handler must be marked `PermanentFailed` by startup recovery.
+    ///
+    /// Scenario: a promise was created for subject `"legacy.event.v1"` which
+    /// was removed in a later deployment. Recovery hits the `other =>` arm of
+    /// the subject dispatch and terminates the promise so it is not retried.
+    #[tokio::test]
+    async fn real_kv_recover_stale_unknown_subject_marks_permanent_failed() {
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+
+        let server = httpmock::MockServer::start_async().await;
+        let unexpected = server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages");
+            then.status(500).body("must not be called");
+        });
+
+        let (ps, auto_store, run_store, _, _c) = make_all_stores_with_promise().await;
+        let agent = make_agent(&server.base_url());
+        let promise_repo: Arc<dyn PromiseRepository> = ps.clone();
+
+        // Built-in-handler promise (empty automation_id) with an unrecognised subject.
+        let mut stale = make_stale_promise("unknown-subj-promise");
+        stale.tenant_id = agent.tenant_id.clone();
+        stale.automation_id = String::new(); // built-in handler path
+        stale.nats_subject = "legacy.event.v1".to_string(); // no handler exists
+        promise_repo.put_promise(&stale).await.unwrap();
+
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_repo,
+            &auto_store,
+            &run_store,
+            &agent.tenant_id,
+        )
+        .await
+        .expect("must return a handle for the unknown-subject promise");
+        handle.await.expect("recovery task must not panic");
+
+        let (p, _) = ps
+            .get_promise(&agent.tenant_id, "unknown-subj-promise")
+            .await
+            .unwrap()
+            .expect("promise must still exist in real KV");
+        assert_eq!(
+            p.status,
+            PromiseStatus::PermanentFailed,
+            "unknown-subject promise must be PermanentFailed, not {:?}",
+            p.status
+        );
+
+        unexpected.assert_hits_async(0).await;
+    }
 }
