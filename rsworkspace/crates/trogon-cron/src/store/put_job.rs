@@ -1,7 +1,7 @@
 #![cfg_attr(coverage, allow(dead_code, unused_imports))]
 
 use async_nats::jetstream::{self, context, kv};
-use trogon_eventsourcing::{Decide, Decision, NonEmpty, decide, load_snapshot};
+use trogon_eventsourcing::{Decide, Decision, NonEmpty, StreamCommand, decide, load_snapshot};
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream, JetStreamPublishMessage};
 
 use crate::{
@@ -50,16 +50,20 @@ impl PutJobCommand {
         })
     }
 
-    pub fn id(&self) -> &JobId {
-        &self.id
-    }
-
     pub fn job(&self) -> &ResolvedJobSpec {
         &self.job
     }
 
     pub const fn write_condition(&self) -> JobWriteCondition {
         self.write_condition
+    }
+}
+
+impl StreamCommand for PutJobCommand {
+    type StreamId = JobId;
+
+    fn stream_id(&self) -> &Self::StreamId {
+        &self.id
     }
 }
 
@@ -72,7 +76,7 @@ impl Decide<JobStreamState, JobEvent> for PutJobCommand {
                 JobEvent::job_registered(command.job().spec().clone()),
             ))),
             JobStreamState::Present(_) => Err(JobDecisionError::CannotRegisterExistingJob {
-                id: command.id().clone(),
+                id: command.stream_id().clone(),
             }),
         }
     }
@@ -88,7 +92,7 @@ where
             AckFuture = context::PublishAckFuture,
         >,
 {
-    let id = command.id().to_string();
+    let id = command.stream_id().to_string();
     let bucket = snapshot_bucket::run(js).await?;
     let current_snapshot = load_snapshot::<VersionedJobSpec>(&bucket, SNAPSHOT_STORE_CONFIG, &id)
         .await
