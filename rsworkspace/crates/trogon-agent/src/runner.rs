@@ -31,7 +31,7 @@ use async_nats::jetstream::{
 };
 use futures_util::StreamExt;
 use tracing::{error, info, warn};
-use trogon_automations::{AutomationRepository, AutomationStore, RunRecord, RunStatus, RunStore};
+use trogon_automations::{AutomationRepository, AutomationStore, RunRecord, RunRepository, RunStatus, RunStore};
 
 use crate::agent_loop::{AgentLoop, ReqwestAnthropicClient};
 use crate::chat_api::{ChatAppState, router as chat_router};
@@ -903,11 +903,11 @@ async fn prepare_agent_with_promise(
 /// Only recovers promises that are owned by this tenant and have been running
 /// for more than `stale_after` seconds without completing — indicating the
 /// original process is gone.
-async fn recover_stale_promises<R: AutomationRepository>(
+async fn recover_stale_promises<A: AutomationRepository, R: RunRepository>(
     agent: &Arc<AgentLoop>,
     promise_store: &Arc<dyn PromiseRepository>,
-    automation_store: &Arc<R>,
-    run_store: &Arc<RunStore>,
+    automation_store: &Arc<A>,
+    run_store: &Arc<R>,
     tenant_id: &str,
 ) -> Option<tokio::task::JoinHandle<()>> {
     // Must be strictly greater than the maximum time between two consecutive
@@ -1340,9 +1340,9 @@ fn spawn_heartbeat(msg: async_nats::jetstream::Message) -> tokio::task::JoinHand
 
 /// Spawn one task per automation and wait for all to finish.
 /// Persists a [`RunRecord`] in `run_store` after each execution.
-pub(crate) async fn dispatch_automations(
+pub(crate) async fn dispatch_automations<R: RunRepository>(
     agent: &Arc<AgentLoop>,
-    run_store: &Arc<RunStore>,
+    run_store: &Arc<R>,
     promise_store: &Arc<dyn PromiseRepository>,
     promise_id_prefix: &str,
     automations: Vec<trogon_automations::Automation>,
@@ -3347,5 +3347,139 @@ mod tests {
             PromiseStatus::PermanentFailed,
             "update_promise error on PermanentFailed write must not crash recovery"
         );
+    }
+
+    // ── run_store.record() error paths ────────────────────────────────────────
+
+    /// `RunRepository` implementation whose `record()` always returns an error.
+    ///
+    /// Used to verify that a failing `run_store.record()` call is treated as a
+    /// non-fatal warning — the automation task and the recovery loop must both
+    /// complete without panicking.
+    #[derive(Clone)]
+    struct ErrorRecordRunStore;
+
+    impl trogon_automations::RunRepository for ErrorRecordRunStore {
+        fn record<'a>(
+            &'a self,
+            _run: &'a trogon_automations::RunRecord,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), trogon_automations::store::StoreError>> + Send + 'a>>
+        {
+            Box::pin(async {
+                Err(trogon_automations::store::StoreError(
+                    "injected record error".to_string(),
+                ))
+            })
+        }
+
+        fn list<'a>(
+            &'a self,
+            _tenant_id: &'a str,
+            _automation_id: Option<&'a str>,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<trogon_automations::RunRecord>, trogon_automations::store::StoreError>> + Send + 'a>>
+        {
+            Box::pin(async { Ok(vec![]) })
+        }
+
+        fn stats<'a>(
+            &'a self,
+            _tenant_id: &'a str,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<trogon_automations::RunStats, trogon_automations::store::StoreError>> + Send + 'a>>
+        {
+            Box::pin(async {
+                Ok(trogon_automations::RunStats {
+                    total: 0,
+                    successful_7d: 0,
+                    failed_7d: 0,
+                })
+            })
+        }
+    }
+
+    /// When `run_store.record()` fails inside `dispatch_automations`, the warning
+    /// must be logged but the function must still return normally — a record
+    /// failure must never abort the automation or propagate to the caller.
+    #[tokio::test]
+    async fn dispatch_automations_run_record_error_is_logged_not_fatal() {
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::PromiseRepository;
+
+        let server = httpmock::MockServer::start_async().await;
+        let mock = server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(serde_json::json!({
+                    "stop_reason": "end_turn",
+                    "content": [{"type": "text", "text": "done"}]
+                }));
+        });
+
+        let agent = make_agent(&server.base_url());
+        let promise_store: Arc<dyn PromiseRepository> = Arc::new(MockPromiseStore::new());
+        let payload = bytes::Bytes::from_static(b"{}");
+
+        // `record()` always errors — must not propagate.
+        dispatch_automations(
+            &agent,
+            &Arc::new(ErrorRecordRunStore),
+            &promise_store,
+            "github.1",
+            vec![make_automation("rec-err-auto")],
+            "github.push",
+            &payload,
+        )
+        .await;
+
+        mock.assert_hits_async(1).await;
+    }
+
+    /// When `run_store.record()` fails inside the startup recovery loop, the
+    /// warning must be logged but recovery must complete without panicking.
+    #[tokio::test]
+    async fn recover_automation_run_record_error_is_logged_not_fatal() {
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::PromiseRepository;
+
+        let server = httpmock::MockServer::start_async().await;
+        server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(serde_json::json!({
+                    "stop_reason": "end_turn",
+                    "content": [{"type": "text", "text": "recovered"}]
+                }));
+        });
+
+        // Insert the automation so recovery finds it (non-empty list).
+        let (auto_store, _, _container) = make_all_stores().await;
+        let auto = make_automation("run-rec-auto");
+        auto_store.put(&auto).await.expect("put automation");
+
+        // Stale promise that belongs to the automation above.
+        let store = Arc::new(MockPromiseStore::new());
+        let mut p = make_stale_promise("p-run-rec");
+        p.automation_id = auto.id.clone();
+        p.nats_subject = "github.push".to_string();
+        store.insert_promise(p);
+        let promise_store: Arc<dyn PromiseRepository> = Arc::clone(&store) as _;
+
+        let agent = make_agent(&server.base_url());
+
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &Arc::new(ErrorRecordRunStore),
+            "acme",
+        )
+        .await
+        .expect("spawn handle must be returned when stale promises exist");
+
+        // Must complete without panic even though record() always errors.
+        handle.await.expect("recovery task must not panic");
     }
 }
