@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use crate::{
     JobId,
-    config::{JobWriteState, VersionedJobSpec},
+    config::{JobSpec, JobWriteState},
     domain::ResolvedJobSpec,
     error::CronError,
     events::{
@@ -27,7 +27,7 @@ use async_nats::jetstream::{
 };
 use chrono::{DateTime, Utc};
 use futures::TryStreamExt;
-use trogon_eventsourcing::SnapshotChange;
+use trogon_eventsourcing::{Snapshot, SnapshotChange};
 
 pub(crate) const NATS_BATCH_COMMIT: &str = "Nats-Batch-Commit";
 pub(crate) const NATS_BATCH_ID: &str = "Nats-Batch-Id";
@@ -62,7 +62,7 @@ pub(crate) async fn rebuild_jobs_from_stream(
     stream: &jetstream::stream::Stream,
     first_sequence: u64,
     last_sequence: u64,
-) -> Result<Vec<VersionedJobSpec>, CronError> {
+) -> Result<Vec<Snapshot<JobSpec>>, CronError> {
     let mut snapshots = BTreeMap::new();
     if last_sequence == 0 || first_sequence == 0 || first_sequence > last_sequence {
         return Ok(Vec::new());
@@ -199,11 +199,11 @@ pub(crate) fn change_from_projection_change(change: ProjectionChange) -> JobSpec
 }
 
 pub(crate) fn apply_event_to_snapshot_map(
-    snapshots: &mut BTreeMap<String, VersionedJobSpec>,
+    snapshots: &mut BTreeMap<String, Snapshot<JobSpec>>,
     stream_id: &JobId,
     event: &JobEvent,
     version: u64,
-) -> Result<SnapshotChange<VersionedJobSpec>, CronError> {
+) -> Result<SnapshotChange<JobSpec>, CronError> {
     ensure_event_matches_stream(stream_id, event)?;
     let current_state = match snapshots.get(stream_id.as_str()).cloned() {
         Some(snapshot) => JobStreamState::try_from(snapshot).map_err(|source| {
@@ -220,9 +220,9 @@ pub(crate) fn apply_event_to_snapshot_map(
 
     match next_state {
         JobStreamState::Present(spec) => {
-            let snapshot = VersionedJobSpec { version, spec };
+            let snapshot = Snapshot::new(version, spec);
             snapshots.insert(stream_id.to_string(), snapshot.clone());
-            Ok(SnapshotChange::upsert(snapshot))
+            Ok(SnapshotChange::upsert(stream_id.to_string(), snapshot))
         }
         JobStreamState::Initial => {
             snapshots.remove(stream_id.as_str());
@@ -263,6 +263,24 @@ pub(crate) fn ensure_event_matches_stream(
             )),
         ))
     }
+}
+
+pub(crate) fn job_stream_state_from_snapshot(
+    expected_stream_id: &JobId,
+    snapshot: Snapshot<JobSpec>,
+    context: &'static str,
+) -> Result<JobStreamState, CronError> {
+    if snapshot.payload.id != expected_stream_id.as_str() {
+        return Err(CronError::event_source(
+            context,
+            std::io::Error::other(format!(
+                "expected '{}' but snapshot carried '{}'",
+                expected_stream_id, snapshot.payload.id
+            )),
+        ));
+    }
+
+    JobStreamState::try_from(snapshot).map_err(|source| CronError::event_source(context, source))
 }
 
 pub(crate) fn resolve_event_subject_state(
@@ -660,7 +678,7 @@ mod tests {
 
         let snapshot = snapshots.get("alpha").unwrap();
         assert_eq!(snapshot.version, 4);
-        assert_eq!(snapshot.spec, test_job("alpha"));
+        assert_eq!(snapshot.payload, test_job("alpha"));
     }
 
     #[test]

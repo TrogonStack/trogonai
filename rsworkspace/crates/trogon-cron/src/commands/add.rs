@@ -3,7 +3,7 @@ use std::{fmt, io::Read};
 use async_nats::jetstream::{self, context, kv};
 use trogon_cron::{
     CronError, JobDecisionError, JobSpec, JobStreamState, JobWriteCondition, PutJobCommand,
-    SNAPSHOT_STORE_CONFIG, VersionedJobSpec, append_events, initial_state, open_snapshot_bucket,
+    SNAPSHOT_STORE_CONFIG, append_events, initial_state, open_snapshot_bucket,
 };
 use trogon_eventsourcing::{Decision, StreamCommand, decide, load_snapshot};
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream, JetStreamPublishMessage};
@@ -78,17 +78,28 @@ where
     let bucket = open_snapshot_bucket(js)
         .await
         .map_err(CommandError::LoadJob)?;
-    let current_snapshot = load_snapshot::<VersionedJobSpec>(&bucket, SNAPSHOT_STORE_CONFIG, &id)
+    let current_snapshot = load_snapshot::<JobSpec>(&bucket, SNAPSHOT_STORE_CONFIG, &id)
         .await
         .map_err(CronError::from)
         .map_err(CommandError::LoadJob)?;
     let current_state = match current_snapshot.clone() {
-        Some(snapshot) => JobStreamState::try_from(snapshot).map_err(|source| {
-            CommandError::LoadJob(CronError::event_source(
-                "failed to decode current job snapshot into stream state",
-                source,
-            ))
-        })?,
+        Some(snapshot) => {
+            if snapshot.payload.id != id {
+                return Err(CommandError::LoadJob(CronError::event_source(
+                    "failed to decode current job snapshot into stream state",
+                    std::io::Error::other(format!(
+                        "expected '{id}' but snapshot carried '{}'",
+                        snapshot.payload.id
+                    )),
+                )));
+            }
+            JobStreamState::try_from(snapshot).map_err(|source| {
+                CommandError::LoadJob(CronError::event_source(
+                    "failed to decode current job snapshot into stream state",
+                    source,
+                ))
+            })?
+        }
         None => initial_state(),
     };
     let events = match decide(&current_state, &command.command) {

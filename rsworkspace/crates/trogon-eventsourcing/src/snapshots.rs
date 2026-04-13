@@ -3,12 +3,20 @@ use std::num::NonZeroU16;
 
 use async_nats::jetstream::kv;
 use futures::StreamExt;
-use serde::{Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
-pub trait StreamSnapshot {
-    fn stream_id(&self) -> &str;
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Snapshot<T> {
+    pub version: u64,
+    pub payload: T,
+}
+
+impl<T> Snapshot<T> {
+    pub fn new(version: u64, payload: T) -> Self {
+        Self { version, payload }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -19,6 +27,7 @@ pub struct SnapshotSchemaVersionError;
 
 impl SnapshotSchemaVersion {
     pub const V1: Self = Self(NonZeroU16::MIN);
+    pub const V2: Self = Self(NonZeroU16::new(2).unwrap());
 
     pub const fn new(value: NonZeroU16) -> Self {
         Self(value)
@@ -83,18 +92,28 @@ impl<'a> SnapshotStoreConfig<'a> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum SnapshotChange<S> {
-    Upsert(Box<S>),
-    Delete(String),
+pub enum SnapshotChange<T> {
+    Upsert {
+        stream_id: String,
+        snapshot: Box<Snapshot<T>>,
+    },
+    Delete {
+        stream_id: String,
+    },
 }
 
-impl<S> SnapshotChange<S> {
-    pub fn upsert(snapshot: S) -> Self {
-        Self::Upsert(Box::new(snapshot))
+impl<T> SnapshotChange<T> {
+    pub fn upsert(stream_id: impl Into<String>, snapshot: Snapshot<T>) -> Self {
+        Self::Upsert {
+            stream_id: stream_id.into(),
+            snapshot: Box::new(snapshot),
+        }
     }
 
-    pub fn delete(id: impl Into<String>) -> Self {
-        Self::Delete(id.into())
+    pub fn delete(stream_id: impl Into<String>) -> Self {
+        Self::Delete {
+            stream_id: stream_id.into(),
+        }
     }
 }
 
@@ -103,6 +122,9 @@ pub enum SnapshotStoreError {
     Kv {
         context: &'static str,
         source: BoxError,
+    },
+    InvalidSnapshotKey {
+        key: String,
     },
     Serde(serde_json::Error),
 }
@@ -123,6 +145,9 @@ impl std::fmt::Display for SnapshotStoreError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Kv { context, source } => write!(f, "KV error: {context}: {source}"),
+            Self::InvalidSnapshotKey { key } => {
+                write!(f, "Invalid stream snapshot key: {key}")
+            }
             Self::Serde(source) => write!(f, "Serialization error: {source}"),
         }
     }
@@ -132,6 +157,7 @@ impl std::error::Error for SnapshotStoreError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Kv { source, .. } => Some(source.as_ref()),
+            Self::InvalidSnapshotKey { .. } => None,
             Self::Serde(source) => Some(source),
         }
     }
@@ -168,13 +194,65 @@ fn snapshot_key_prefix(config: SnapshotStoreConfig<'_>) -> String {
     )
 }
 
-pub async fn load_snapshot<S>(
+fn stream_id_from_snapshot_key(
+    config: SnapshotStoreConfig<'_>,
+    key: &str,
+) -> Result<Option<String>, SnapshotStoreError> {
+    let prefix = snapshot_key_prefix(config);
+    let Some(stream_id) = key.strip_prefix(&prefix) else {
+        return Ok(None);
+    };
+
+    if stream_id.is_empty() {
+        return Err(SnapshotStoreError::InvalidSnapshotKey {
+            key: key.to_string(),
+        });
+    }
+
+    Ok(Some(stream_id.to_string()))
+}
+
+async fn load_snapshot_entries<T>(
+    bucket: &kv::Store,
+    config: SnapshotStoreConfig<'_>,
+) -> Result<Vec<(String, Snapshot<T>)>, SnapshotStoreError>
+where
+    T: DeserializeOwned,
+{
+    let mut keys = bucket.keys().await.map_err(|source| {
+        SnapshotStoreError::kv_source("failed to list stream snapshot keys", source)
+    })?;
+    let mut snapshots = Vec::new();
+
+    while let Some(result) = keys.next().await {
+        let key = result.map_err(|source| {
+            SnapshotStoreError::kv_source("failed to read stream snapshot key", source)
+        })?;
+        let Some(stream_id) = stream_id_from_snapshot_key(config, &key)? else {
+            continue;
+        };
+        let Some(entry) = bucket.entry(key).await.map_err(|source| {
+            SnapshotStoreError::kv_source("failed to read stream snapshot value", source)
+        })?
+        else {
+            continue;
+        };
+        let snapshot = serde_json::from_slice::<Snapshot<T>>(&entry.value).map_err(|source| {
+            SnapshotStoreError::kv_source("failed to decode stream snapshot value", source)
+        })?;
+        snapshots.push((stream_id, snapshot));
+    }
+
+    Ok(snapshots)
+}
+
+pub async fn load_snapshot<T>(
     bucket: &kv::Store,
     config: SnapshotStoreConfig<'_>,
     id: &str,
-) -> Result<Option<S>, SnapshotStoreError>
+) -> Result<Option<Snapshot<T>>, SnapshotStoreError>
 where
-    S: DeserializeOwned,
+    T: DeserializeOwned,
 {
     let Some(entry) = bucket
         .entry(snapshot_key(config, id))
@@ -186,62 +264,35 @@ where
         return Ok(None);
     };
 
-    serde_json::from_slice::<S>(&entry.value)
+    serde_json::from_slice::<Snapshot<T>>(&entry.value)
         .map(Some)
         .map_err(|source| {
             SnapshotStoreError::kv_source("failed to decode stream snapshot entry", source)
         })
 }
 
-pub async fn list_snapshots<S>(
+pub async fn list_snapshots<T>(
     bucket: &kv::Store,
     config: SnapshotStoreConfig<'_>,
-) -> Result<Vec<S>, SnapshotStoreError>
+) -> Result<Vec<Snapshot<T>>, SnapshotStoreError>
 where
-    S: DeserializeOwned,
+    T: DeserializeOwned,
 {
-    let mut keys = bucket.keys().await.map_err(|source| {
-        SnapshotStoreError::kv_source("failed to list stream snapshot keys", source)
-    })?;
-    let mut snapshots = Vec::new();
-
-    while let Some(result) = keys.next().await {
-        let key = result.map_err(|source| {
-            SnapshotStoreError::kv_source("failed to read stream snapshot key", source)
-        })?;
-        if !key.starts_with(&snapshot_key_prefix(config)) {
-            continue;
-        }
-        let Some(entry) = bucket.entry(key).await.map_err(|source| {
-            SnapshotStoreError::kv_source("failed to read stream snapshot value", source)
-        })?
-        else {
-            continue;
-        };
-        let snapshot = serde_json::from_slice::<S>(&entry.value).map_err(|source| {
-            SnapshotStoreError::kv_source("failed to decode stream snapshot value", source)
-        })?;
-        snapshots.push(snapshot);
-    }
-
-    Ok(snapshots)
+    load_snapshot_entries(bucket, config)
+        .await
+        .map(|entries| entries.into_iter().map(|(_, snapshot)| snapshot).collect())
 }
 
-pub async fn load_snapshot_map<S>(
+pub async fn load_snapshot_map<T>(
     bucket: &kv::Store,
     config: SnapshotStoreConfig<'_>,
-) -> Result<BTreeMap<String, S>, SnapshotStoreError>
+) -> Result<BTreeMap<String, Snapshot<T>>, SnapshotStoreError>
 where
-    S: StreamSnapshot + DeserializeOwned,
+    T: DeserializeOwned,
 {
-    let snapshots: Vec<S> = list_snapshots(bucket, config).await?;
-    let mut snapshot_map = BTreeMap::new();
-
-    for snapshot in snapshots {
-        snapshot_map.insert(snapshot.stream_id().to_string(), snapshot);
-    }
-
-    Ok(snapshot_map)
+    load_snapshot_entries(bucket, config)
+        .await
+        .map(|entries| entries.into_iter().collect())
 }
 
 pub async fn read_checkpoint(
@@ -295,21 +346,24 @@ pub async fn maybe_advance_checkpoint(
     }
 }
 
-pub async fn persist_snapshot_change<S>(
+pub async fn persist_snapshot_change<T>(
     bucket: &kv::Store,
     config: SnapshotStoreConfig<'_>,
-    change: SnapshotChange<S>,
+    change: SnapshotChange<T>,
 ) -> Result<(), SnapshotStoreError>
 where
-    S: StreamSnapshot + Serialize,
+    T: Serialize,
 {
     match change {
-        SnapshotChange::Upsert(snapshot) => {
+        SnapshotChange::Upsert {
+            stream_id,
+            snapshot,
+        } => {
             let value = serde_json::to_vec(snapshot.as_ref())?;
-            write_kv_value(bucket, &snapshot_key(config, snapshot.stream_id()), value).await?;
+            write_kv_value(bucket, &snapshot_key(config, &stream_id), value).await?;
         }
-        SnapshotChange::Delete(id) => {
-            delete_kv_value(bucket, &snapshot_key(config, &id)).await?;
+        SnapshotChange::Delete { stream_id } => {
+            delete_kv_value(bucket, &snapshot_key(config, &stream_id)).await?;
         }
     }
 
@@ -388,16 +442,11 @@ async fn delete_kv_value(bucket: &kv::Store, key: &str) -> Result<(), SnapshotSt
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde::{Deserialize, Serialize};
 
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    struct TestSnapshot {
+    #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+    struct TestPayload {
         id: String,
-    }
-
-    impl StreamSnapshot for TestSnapshot {
-        fn stream_id(&self) -> &str {
-            &self.id
-        }
     }
 
     #[test]
@@ -427,7 +476,7 @@ mod tests {
     #[test]
     fn checkpoint_key_uses_schema_version() {
         let config = SnapshotStoreConfig::new(
-            "snapshots.",
+            "_checkpoint",
             "_checkpoint",
             SnapshotSchemaVersion::try_from(3).unwrap(),
         );
@@ -444,18 +493,93 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_change_builders_keep_payloads() {
-        let upsert = SnapshotChange::upsert(TestSnapshot {
-            id: "backup".to_string(),
-        });
-        let delete = SnapshotChange::<TestSnapshot>::delete("backup");
+    fn snapshot_constructors_keep_version_and_payload() {
+        let snapshot = Snapshot::new(
+            9,
+            TestPayload {
+                id: "backup".to_string(),
+            },
+        );
+
+        assert_eq!(snapshot.version, 9);
+        assert_eq!(snapshot.payload.id, "backup");
+    }
+
+    #[test]
+    fn snapshot_change_builders_keep_stream_identity() {
+        let upsert = SnapshotChange::upsert(
+            "backup",
+            Snapshot::new(
+                3,
+                TestPayload {
+                    id: "backup".to_string(),
+                },
+            ),
+        );
+        let delete = SnapshotChange::<TestPayload>::delete("backup");
 
         assert_eq!(
             upsert,
-            SnapshotChange::Upsert(Box::new(TestSnapshot {
-                id: "backup".to_string(),
-            }))
+            SnapshotChange::Upsert {
+                stream_id: "backup".to_string(),
+                snapshot: Box::new(Snapshot::new(
+                    3,
+                    TestPayload {
+                        id: "backup".to_string(),
+                    },
+                )),
+            }
         );
-        assert_eq!(delete, SnapshotChange::Delete("backup".to_string()));
+        assert_eq!(
+            delete,
+            SnapshotChange::Delete {
+                stream_id: "backup".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn snapshot_round_trips_with_nested_payload() {
+        let snapshot = Snapshot::new(
+            7,
+            TestPayload {
+                id: "backup".to_string(),
+            },
+        );
+
+        let json = serde_json::to_string(&snapshot).unwrap();
+        let decoded: Snapshot<TestPayload> = serde_json::from_str(&json).unwrap();
+
+        assert!(json.contains("\"version\":7"));
+        assert!(json.contains("\"payload\""));
+        assert_eq!(decoded, snapshot);
+    }
+
+    #[test]
+    fn stream_id_from_snapshot_key_uses_versioned_prefix() {
+        let config =
+            SnapshotStoreConfig::new("snapshots.", "_checkpoint", SnapshotSchemaVersion::V2);
+
+        assert_eq!(
+            stream_id_from_snapshot_key(config, "snapshots.v2.backup").unwrap(),
+            Some("backup".to_string())
+        );
+        assert_eq!(
+            stream_id_from_snapshot_key(config, "snapshots.v1.backup").unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn stream_id_from_snapshot_key_rejects_empty_suffix() {
+        let config =
+            SnapshotStoreConfig::new("snapshots.", "_checkpoint", SnapshotSchemaVersion::V2);
+
+        assert_eq!(
+            stream_id_from_snapshot_key(config, "snapshots.v2.")
+                .unwrap_err()
+                .to_string(),
+            "Invalid stream snapshot key: snapshots.v2."
+        );
     }
 }

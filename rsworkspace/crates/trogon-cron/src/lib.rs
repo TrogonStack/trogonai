@@ -16,7 +16,6 @@ pub mod mocks;
 
 pub use config::{
     DeliverySpec, JobEnabledState, JobSpec, JobWriteCondition, SamplingSource, ScheduleSpec,
-    VersionedJobSpec,
 };
 pub use domain::ResolvedJobSpec;
 pub use error::{CronError, JobSpecError};

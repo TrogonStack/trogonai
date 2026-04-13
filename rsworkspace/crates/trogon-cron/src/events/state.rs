@@ -1,7 +1,5 @@
-use crate::{
-    JobId, JobIdError,
-    config::{JobSpec, VersionedJobSpec},
-};
+use crate::{JobId, JobIdError, config::JobSpec};
+use trogon_eventsourcing::Snapshot;
 
 use super::{JobEvent, ProjectionChange};
 
@@ -73,9 +71,8 @@ impl JobStreamState {
         }
     }
 
-    pub fn into_versioned_spec(self, version: u64) -> Option<VersionedJobSpec> {
-        self.into_spec()
-            .map(|spec| VersionedJobSpec { version, spec })
+    pub fn into_snapshot(self, version: u64) -> Option<Snapshot<JobSpec>> {
+        self.into_spec().map(|spec| Snapshot::new(version, spec))
     }
 }
 
@@ -88,11 +85,11 @@ impl TryFrom<JobSpec> for JobStreamState {
     }
 }
 
-impl TryFrom<VersionedJobSpec> for JobStreamState {
+impl TryFrom<Snapshot<JobSpec>> for JobStreamState {
     type Error = JobIdError;
 
-    fn try_from(value: VersionedJobSpec) -> Result<Self, Self::Error> {
-        Self::try_from(value.spec)
+    fn try_from(value: Snapshot<JobSpec>) -> Result<Self, Self::Error> {
+        Self::try_from(value.payload)
     }
 }
 

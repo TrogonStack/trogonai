@@ -1,9 +1,7 @@
 use std::fmt;
 
 use async_nats::jetstream::kv;
-use trogon_cron::{
-    CronError, SNAPSHOT_STORE_CONFIG, ScheduleSpec, VersionedJobSpec, open_snapshot_bucket,
-};
+use trogon_cron::{CronError, JobSpec, SNAPSHOT_STORE_CONFIG, ScheduleSpec, open_snapshot_bucket};
 use trogon_eventsourcing::list_snapshots;
 use trogon_nats::jetstream::JetStreamGetKeyValue;
 
@@ -38,7 +36,7 @@ where
     let bucket = open_snapshot_bucket(js)
         .await
         .map_err(CommandError::ListJobs)?;
-    let jobs = list_snapshots::<VersionedJobSpec>(&bucket, SNAPSHOT_STORE_CONFIG)
+    let jobs = list_snapshots::<JobSpec>(&bucket, SNAPSHOT_STORE_CONFIG)
         .await
         .map_err(CronError::from)
         .map_err(CommandError::ListJobs)?;
@@ -49,7 +47,7 @@ where
     println!("{:<30} {:<10} SCHEDULE", "ID", "STATUS");
     println!("{}", "-".repeat(72));
     for job in jobs {
-        let schedule = match &job.spec.schedule {
+        let schedule = match &job.payload.schedule {
             ScheduleSpec::At { at } => format!("at {}", at.to_rfc3339()),
             ScheduleSpec::Every { every_sec } => format!("@every {every_sec}s"),
             ScheduleSpec::Cron { expr, timezone } => match timezone {
@@ -59,8 +57,8 @@ where
         };
         println!(
             "{:<30} {:<10} {} (v{})",
-            job.spec.id,
-            job.spec.state.as_str(),
+            job.payload.id,
+            job.payload.state.as_str(),
             schedule,
             job.version
         );

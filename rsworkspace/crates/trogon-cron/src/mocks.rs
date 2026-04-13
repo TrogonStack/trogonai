@@ -6,11 +6,11 @@ use std::sync::{
 
 use async_nats::jetstream::kv;
 use bytes::Bytes;
-use trogon_eventsourcing::{Decision, StreamCommand, decide};
+use trogon_eventsourcing::{Decision, Snapshot, StreamCommand, decide};
 use trogon_nats::lease::{ReleaseLease, RenewLease, TryAcquireLease};
 
 use crate::{
-    config::{JobSpec, JobWriteState, VersionedJobSpec},
+    config::{JobSpec, JobWriteState},
     domain::ResolvedJobSpec,
     error::CronError,
     events::{JobDecisionError, JobStreamState, apply, initial_state},
@@ -134,7 +134,7 @@ impl ReleaseLease for MockLeaderLock {
 
 #[derive(Clone, Default)]
 pub struct MockConfigStore {
-    jobs: Arc<Mutex<HashMap<String, VersionedJobSpec>>>,
+    jobs: Arc<Mutex<HashMap<String, Snapshot<JobSpec>>>>,
     stream_versions: Arc<Mutex<HashMap<String, u64>>>,
 }
 
@@ -151,7 +151,7 @@ impl MockConfigStore {
         self.jobs
             .lock()
             .unwrap()
-            .insert(spec.id.clone(), VersionedJobSpec { version: 1, spec });
+            .insert(spec.id.clone(), Snapshot::new(1, spec));
     }
 
     pub async fn put_job(&self, command: PutJobCommand) -> Result<(), CronError> {
@@ -205,7 +205,7 @@ impl MockConfigStore {
             })?;
         let next_version = current_version.unwrap_or(0) + 1;
         stream_versions.insert(command.stream_id().to_string(), next_version);
-        match next_state.into_versioned_spec(next_version) {
+        match next_state.into_snapshot(next_version) {
             Some(snapshot) => {
                 jobs.insert(command.stream_id().to_string(), snapshot);
             }
@@ -271,7 +271,7 @@ impl MockConfigStore {
             })?;
         let next_version = current_version.unwrap_or(0) + 1;
         stream_versions.insert(command.stream_id().to_string(), next_version);
-        match next_state.into_versioned_spec(next_version) {
+        match next_state.into_snapshot(next_version) {
             Some(snapshot) => {
                 jobs.insert(command.stream_id().to_string(), snapshot);
             }
@@ -285,7 +285,7 @@ impl MockConfigStore {
     pub async fn get_job(
         &self,
         command: GetJobCommand,
-    ) -> Result<Option<VersionedJobSpec>, CronError> {
+    ) -> Result<Option<Snapshot<JobSpec>>, CronError> {
         Ok(self
             .jobs
             .lock()
@@ -343,7 +343,7 @@ impl MockConfigStore {
             })?;
         let next_version = current_version.unwrap_or(0) + 1;
         stream_versions.insert(command.stream_id().to_string(), next_version);
-        match next_state.into_versioned_spec(next_version) {
+        match next_state.into_snapshot(next_version) {
             Some(snapshot) => {
                 jobs.insert(command.stream_id().to_string(), snapshot);
             }
@@ -357,7 +357,7 @@ impl MockConfigStore {
     pub async fn list_jobs(
         &self,
         _command: ListJobsCommand,
-    ) -> Result<Vec<VersionedJobSpec>, CronError> {
+    ) -> Result<Vec<Snapshot<JobSpec>>, CronError> {
         Ok(self.jobs.lock().unwrap().values().cloned().collect())
     }
 
@@ -368,7 +368,7 @@ impl MockConfigStore {
             .unwrap()
             .values()
             .cloned()
-            .map(|job| job.spec)
+            .map(|job| job.payload)
             .collect();
         Ok((
             jobs,
@@ -501,7 +501,7 @@ mod tests {
                 .await
                 .unwrap()
                 .unwrap()
-                .spec
+                .payload
                 .state,
             JobEnabledState::Disabled
         );

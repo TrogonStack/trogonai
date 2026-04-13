@@ -2,13 +2,14 @@
 
 use async_nats::jetstream::kv;
 use futures::StreamExt;
+use trogon_eventsourcing::Snapshot;
 use trogon_nats::jetstream::JetStreamGetKeyValue;
 
-use crate::{VersionedJobSpec, error::CronError, kv::JOBS_KEY_PREFIX};
+use crate::{JobSpec, error::CronError, kv::JOBS_KEY_PREFIX};
 
 use super::config_bucket;
 
-pub(super) async fn run<J>(js: &J, jobs: &[VersionedJobSpec]) -> Result<(), CronError>
+pub(super) async fn run<J>(js: &J, jobs: &[Snapshot<JobSpec>]) -> Result<(), CronError>
 where
     J: JetStreamGetKeyValue<Store = kv::Store>,
 {
@@ -27,8 +28,8 @@ where
     }
 
     for job in jobs {
-        let key = format!("{JOBS_KEY_PREFIX}{}", job.id());
-        let value = serde_json::to_vec(&job.spec)?;
+        let key = format!("{JOBS_KEY_PREFIX}{}", job.payload.id);
+        let value = serde_json::to_vec(&job.payload)?;
         kv.put(key, value.into()).await.map_err(|source| {
             CronError::kv_source("failed to write projected job state", source)
         })?;
