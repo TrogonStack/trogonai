@@ -22,6 +22,7 @@ where
             .make_span_with(|request: &Request<Body>| {
                 let span = tracing::info_span!(
                     "http.server.request",
+                    otel.kind = "server",
                     method = %request.method(),
                     path = %request.uri().path()
                 );

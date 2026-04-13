@@ -32,4 +32,4 @@ tracing-opentelemetry = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
-tower = "0.5"
+tower = { version = "0.5", features = ["util"] }
