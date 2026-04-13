@@ -463,6 +463,33 @@ fn tool_cache_key(tool_name: &str, input: &Value) -> String {
 /// the next crash recovery.
 pub(crate) const NATS_KV_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
+/// Hard cap per tool call.
+///
+/// External APIs (GitHub, Slack, Linear) normally respond in under 5 seconds.
+/// 60 seconds is generous enough to absorb unusually slow responses while
+/// ensuring a hung API does not block the run indefinitely — the heartbeat
+/// task would otherwise keep the NATS message alive forever and the run would
+/// never complete or fail.
+///
+/// On timeout the tool returns an error string to the model so the agent can
+/// decide how to proceed (retry, skip, or summarise the failure). The run is
+/// not aborted.
+pub(crate) const TOOL_EXECUTION_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_secs(60);
+
+/// Maximum serialized size of an [`AgentPromise`] checkpoint written to NATS KV.
+///
+/// NATS KV defaults to a 1 MB value size limit. Exceeding it causes the write
+/// to be silently rejected, leaving a stale revision and making the run
+/// non-recoverable. 768 KB leaves ~25% headroom for NATS framing overhead and
+/// for growth in the promise envelope fields.
+///
+/// When a checkpoint would exceed this limit, checkpointing is disabled for
+/// the remainder of the run. The last successful checkpoint is still valid for
+/// crash recovery — the worst case is re-executing the turns since that
+/// checkpoint.
+pub(crate) const CHECKPOINT_MAX_BYTES: usize = 768 * 1024;
+
 /// Write a terminal status (`Failed` or `PermanentFailed`) to KV, with a
 /// `NATS_KV_TIMEOUT` deadline.
 ///
@@ -528,6 +555,12 @@ impl AgentLoop {
         // existing checkpoint. If one exists with a non-empty message history,
         // resume from it rather than starting from scratch.
         let mut checkpoint: Option<(crate::promise_store::AgentPromise, u64)> = None;
+        // When `true`, message-history checkpoint writes are skipped (payload too
+        // large for NATS KV), but terminal-status writes (Resolved, PermanentFailed)
+        // still proceed using the revision stored in `checkpoint`. Distinct from
+        // `checkpoint = None`, which means the KV revision was genuinely lost and
+        // no writes of any kind are possible.
+        let mut checkpointing_disabled = false;
         // `recovering` is true only when we loaded a checkpoint — used to gate
         // the tool-result cache replay in `execute_tools`.
         let mut recovering = false;
@@ -721,7 +754,41 @@ impl AgentLoop {
                     if let (Some(store), Some(pid)) = (&self.promise_store, &self.promise_id)
                         && let Some((ref mut p, ref mut rev)) = checkpoint
                     {
-                        p.messages = messages.clone();
+                        if checkpointing_disabled {
+                            // Payload was too large on a previous turn — skip the
+                            // message-history write but leave `checkpoint` intact so
+                            // terminal-status writes (Resolved, PermanentFailed) can
+                            // still use the current KV revision.
+                        } else {
+
+                        // Guard: refuse to write a checkpoint that exceeds
+                        // NATS KV's 1MB value limit. Oversized writes are
+                        // silently rejected by NATS — the write appears to
+                        // succeed but the revision does not advance, so
+                        // subsequent CAS writes fail with a conflict error
+                        // and the run loses all checkpoint progress.
+                        //
+                        // Measure size by temporarily staging the new messages
+                        // into `p`. If the guard fires, restore the previous
+                        // messages and leave all other fields of `p` untouched —
+                        // terminal-status writes (Resolved, PermanentFailed) must
+                        // not carry stale or oversized history into KV.
+                        let prev_messages =
+                            std::mem::replace(&mut p.messages, messages.clone());
+                        let serialized_len = serde_json::to_vec(p as &_)
+                            .map(|v| v.len())
+                            .unwrap_or(usize::MAX);
+                        if serialized_len > CHECKPOINT_MAX_BYTES {
+                            p.messages = prev_messages; // restore — p must stay clean
+                            warn!(
+                                promise_id = %pid,
+                                size_bytes = serialized_len,
+                                limit_bytes = CHECKPOINT_MAX_BYTES,
+                                "Checkpoint payload exceeds NATS KV size limit — disabling checkpointing for this run"
+                            );
+                            checkpointing_disabled = true;
+                        } else {
+                        // Size is within bounds — commit all fields to p.
                         p.iteration = iteration + 1;
                         p.claimed_at = trogon_automations::now_unix(); // refresh ownership lease
                         // Persist system prompt on the first checkpoint so that
@@ -729,6 +796,7 @@ impl AgentLoop {
                         if p.system_prompt.is_none() {
                             p.system_prompt = effective_prompt.clone();
                         }
+
                         match tokio::time::timeout(
                             NATS_KV_TIMEOUT,
                             store.update_promise(&self.tenant_id, pid, p, *rev),
@@ -819,6 +887,8 @@ impl AgentLoop {
                                 checkpoint = None;
                             }
                         }
+                        } // else: serialized_len <= CHECKPOINT_MAX_BYTES
+                        } // else: !checkpointing_disabled
                     }
                 }
                 other => {
@@ -1018,17 +1088,55 @@ impl AgentLoop {
                 // `additionalProperties: false` would reject the call with an
                 // unknown-field error. Built-in tools receive `call_input` which
                 // includes the key so their dedup logic fires correctly.
+                //
+                // Both paths are wrapped with `TOOL_EXECUTION_TIMEOUT` so a
+                // hung external API cannot block the run indefinitely while the
+                // heartbeat keeps the NATS message alive.
                 let output = if let Some((_, original, client)) = self
                     .mcp_dispatch
                     .iter()
                     .find(|(prefixed, _, _)| prefixed == name)
                 {
-                    match client.call_tool(original, input).await {
-                        Ok(out) => out,
-                        Err(e) => format!("Tool error: {e}"),
+                    match tokio::time::timeout(
+                        TOOL_EXECUTION_TIMEOUT,
+                        client.call_tool(original, input),
+                    )
+                    .await
+                    {
+                        Ok(Ok(out)) => out,
+                        Ok(Err(e)) => format!("Tool error: {e}"),
+                        Err(_) => {
+                            warn!(
+                                tool = %name,
+                                timeout_secs = TOOL_EXECUTION_TIMEOUT.as_secs(),
+                                "Tool execution timed out"
+                            );
+                            format!(
+                                "Tool error: execution timed out after {}s",
+                                TOOL_EXECUTION_TIMEOUT.as_secs()
+                            )
+                        }
                     }
                 } else {
-                    self.tool_dispatcher.dispatch(name, &call_input).await
+                    match tokio::time::timeout(
+                        TOOL_EXECUTION_TIMEOUT,
+                        self.tool_dispatcher.dispatch(name, &call_input),
+                    )
+                    .await
+                    {
+                        Ok(output) => output,
+                        Err(_) => {
+                            warn!(
+                                tool = %name,
+                                timeout_secs = TOOL_EXECUTION_TIMEOUT.as_secs(),
+                                "Tool execution timed out"
+                            );
+                            format!(
+                                "Tool error: execution timed out after {}s",
+                                TOOL_EXECUTION_TIMEOUT.as_secs()
+                            )
+                        }
+                    }
                 };
 
                 // ── Durable promise: persist tool result ─────────────────────
@@ -1783,6 +1891,157 @@ mod tests {
             p.status,
             PromiseStatus::PermanentFailed,
             "promise must be PermanentFailed after unexpected stop_reason — deterministic, retry cannot succeed"
+        );
+    }
+
+    // ── Tool execution timeout ────────────────────────────────────────────────
+
+    /// A tool whose dispatch future never resolves must time out after
+    /// `TOOL_EXECUTION_TIMEOUT` and feed an error string back to the model.
+    ///
+    /// Uses Tokio's mock clock (`start_paused = true`) so the test completes
+    /// instantly rather than waiting the full 60 real seconds.
+    ///
+    /// `join!` interleaves the two futures: `agent.run` blocks on the hanging
+    /// tool while `advance` moves the mock clock forward, firing the timeout.
+    /// The run continues, caches the error result in KV, sends a second request
+    /// to Anthropic (which returns `end_turn`), and returns normally.
+    #[tokio::test(start_paused = true)]
+    async fn hanging_tool_times_out_and_returns_error_string() {
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::PromiseRepository;
+        use mock::SequencedMockAnthropicClient;
+        use std::future::Future;
+        use std::pin::Pin;
+
+        struct HangingDispatcher;
+        impl crate::tools::ToolDispatcher for HangingDispatcher {
+            fn dispatch<'a>(
+                &'a self,
+                _name: &'a str,
+                _input: &'a serde_json::Value,
+            ) -> Pin<Box<dyn Future<Output = String> + Send + 'a>> {
+                Box::pin(std::future::pending())
+            }
+        }
+
+        let store = Arc::new(MockPromiseStore::new());
+        store.insert_promise(make_test_promise("p1"));
+
+        let tool_use_resp = serde_json::json!({
+            "stop_reason": "tool_use",
+            "content": [{"type": "tool_use", "id": "tu1", "name": "slow_tool", "input": {}}]
+        });
+        let end_turn_resp = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "done after timeout"}]
+        });
+        let anthropic = Arc::new(SequencedMockAnthropicClient::new(vec![
+            tool_use_resp,
+            end_turn_resp,
+        ]));
+
+        let agent = make_durable_agent(
+            anthropic,
+            Arc::new(HangingDispatcher),
+            Arc::clone(&store) as Arc<dyn PromiseRepository>,
+            "p1",
+        );
+
+        let (result, _) = tokio::join!(
+            agent.run(vec![Message::user_text("go")], &[], None),
+            tokio::time::advance(TOOL_EXECUTION_TIMEOUT + std::time::Duration::from_secs(1)),
+        );
+
+        assert_eq!(
+            result.unwrap(),
+            "done after timeout",
+            "run must complete normally after the tool timeout fires"
+        );
+
+        // The error result was cached in KV so crash recovery does not
+        // re-execute the hanging tool.
+        let ck = super::tool_cache_key("slow_tool", &serde_json::json!({}));
+        let cached = store
+            .get_tool_result("acme", "p1", &ck)
+            .await
+            .unwrap()
+            .expect("timed-out tool result must be persisted to KV");
+        assert!(
+            cached.contains("timed out"),
+            "cached result must describe the timeout; got: {cached}"
+        );
+    }
+
+    // ── Checkpoint size guard ─────────────────────────────────────────────────
+
+    /// When the serialized checkpoint would exceed `CHECKPOINT_MAX_BYTES` the
+    /// size guard disables further checkpointing for the run.  The run still
+    /// completes normally — the tool executes, the model receives the result,
+    /// and the final text is returned.  The promise store retains whatever
+    /// state it held at the last *successful* checkpoint (none in this test).
+    #[tokio::test]
+    async fn oversized_checkpoint_disables_checkpointing_but_run_completes() {
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::PromiseRepository;
+        use crate::tools::mock::MockToolDispatcher;
+        use mock::SequencedMockAnthropicClient;
+
+        let store = Arc::new(MockPromiseStore::new());
+        store.insert_promise(make_test_promise("p1"));
+
+        let tool_use_resp = serde_json::json!({
+            "stop_reason": "tool_use",
+            "content": [{"type": "tool_use", "id": "tu1", "name": "my_tool", "input": {}}]
+        });
+        let end_turn_resp = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "done"}]
+        });
+        let anthropic = Arc::new(SequencedMockAnthropicClient::new(vec![
+            tool_use_resp,
+            end_turn_resp,
+        ]));
+        let dispatcher = Arc::new(MockToolDispatcher::new("tool result"));
+
+        let agent = make_durable_agent(
+            anthropic,
+            dispatcher,
+            Arc::clone(&store) as Arc<dyn PromiseRepository>,
+            "p1",
+        );
+
+        // Seed initial messages large enough that `p.messages = messages.clone()`
+        // pushes the serialized AgentPromise past CHECKPOINT_MAX_BYTES.
+        let large_text = "a".repeat(CHECKPOINT_MAX_BYTES + 1);
+        let result = agent
+            .run(vec![Message::user_text(large_text)], &[], None)
+            .await;
+
+        assert_eq!(
+            result.unwrap(),
+            "done",
+            "run must complete normally even when checkpoint is oversized"
+        );
+
+        let (p, _) = store.get_promise("acme", "p1").await.unwrap().unwrap();
+
+        // Message history was never written — oversized payload skipped.
+        assert!(
+            p.messages.is_empty(),
+            "oversized checkpoint must not be written to the store"
+        );
+        assert_eq!(
+            p.iteration, 0,
+            "iteration must not advance when checkpointing is disabled by the size guard"
+        );
+
+        // Terminal status IS written — `checkpoint` stays Some so the Resolved
+        // write still has a valid KV revision.
+        assert_eq!(
+            p.status,
+            crate::promise_store::PromiseStatus::Resolved,
+            "promise must be marked Resolved even when message-history checkpointing is disabled"
         );
     }
 
