@@ -2,9 +2,9 @@ use std::fmt;
 
 use async_nats::jetstream::{self, context, kv};
 use trogon_cron::{
-    CronError, JobEvent, JobEventData, JobId, JobIdError, JobStreamState, JobTransitionError,
-    JobWriteCondition, SNAPSHOT_STORE_CONFIG, VersionedJobSpec, append_events, apply,
-    initial_state, open_snapshot_bucket,
+    CronError, JobEvent, JobEventData, JobId, JobIdError, JobStreamState, JobWriteCondition,
+    SNAPSHOT_STORE_CONFIG, VersionedJobSpec, append_events, apply, initial_state,
+    open_snapshot_bucket,
 };
 use trogon_eventsourcing::load_snapshot;
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream, JetStreamPublishMessage};
@@ -70,12 +70,16 @@ where
         })?,
         None => initial_state(command.job_id.clone()),
     };
+    match &current_state {
+        JobStreamState::Initial { .. } => {
+            return Err(CommandError::JobNotFound(command.job_id.clone()));
+        }
+        JobStreamState::Present(_) => {}
+    }
+
     let event = JobEvent::job_removed(command.job_id.to_string());
     match apply(current_state, event.clone()) {
         Ok(_) => {}
-        Err(JobTransitionError::MissingJobForRemoval { .. }) => {
-            return Err(CommandError::JobNotFound(command.job_id.clone()));
-        }
         Err(error) => {
             return Err(CommandError::DeleteJob(CronError::event_source(
                 "failed to apply job removal to current stream state",

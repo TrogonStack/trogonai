@@ -2,9 +2,9 @@ use std::{fmt, io::Read};
 
 use async_nats::jetstream::{self, context, kv};
 use trogon_cron::{
-    CronError, JobEvent, JobEventData, JobId, JobSpec, JobStreamState, JobTransitionError,
-    JobWriteCondition, ResolvedJobSpec, SNAPSHOT_STORE_CONFIG, VersionedJobSpec, append_events,
-    apply, initial_state, open_snapshot_bucket,
+    CronError, JobEvent, JobEventData, JobId, JobSpec, JobStreamState, JobWriteCondition,
+    ResolvedJobSpec, SNAPSHOT_STORE_CONFIG, VersionedJobSpec, append_events, apply, initial_state,
+    open_snapshot_bucket,
 };
 use trogon_eventsourcing::load_snapshot;
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream, JetStreamPublishMessage};
@@ -96,10 +96,9 @@ where
             ))
         })?),
     };
-    let event = JobEvent::job_registered(command.spec.spec().clone());
-    match apply(current_state, event.clone()) {
-        Ok(_) => {}
-        Err(JobTransitionError::CannotRegisterExistingJob { .. }) => {
+    match &current_state {
+        JobStreamState::Initial { .. } => {}
+        JobStreamState::Present(_) => {
             return Err(CommandError::RegisterJob(
                 CronError::OptimisticConcurrencyConflict {
                     id: id.clone(),
@@ -108,6 +107,11 @@ where
                 },
             ));
         }
+    }
+
+    let event = JobEvent::job_registered(command.spec.spec().clone());
+    match apply(current_state, event.clone()) {
+        Ok(_) => {}
         Err(error) => {
             return Err(CommandError::RegisterJob(CronError::event_source(
                 "failed to apply job registration to current stream state",
