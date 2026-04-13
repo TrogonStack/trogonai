@@ -55,7 +55,7 @@ where
     let state = initial_jobs
         .iter()
         .cloned()
-        .map(|job| (job.id().to_string(), JobStreamState::Present(job.spec)))
+        .map(|job| (job.payload.id.clone(), JobStreamState::Present(job.payload)))
         .collect::<BTreeMap<_, _>>();
     let state = Arc::new(Mutex::new(state));
     let stream: ConfigWatchStream = Box::pin(subscriber.then(move |result| {
@@ -143,7 +143,7 @@ where
     }).filter_map(future::ready));
 
     Ok((
-        initial_jobs.into_iter().map(|job| job.spec).collect(),
+        initial_jobs.into_iter().map(|job| job.payload).collect(),
         stream,
     ))
 }

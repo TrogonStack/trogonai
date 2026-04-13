@@ -2,7 +2,6 @@ use std::collections::BTreeMap;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use trogon_eventsourcing::StreamSnapshot;
 
 use crate::error::CronError;
 
@@ -16,25 +15,6 @@ pub struct JobSpec {
     pub payload: serde_json::Value,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub metadata: BTreeMap<String, String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct VersionedJobSpec {
-    pub version: u64,
-    #[serde(flatten)]
-    pub spec: JobSpec,
-}
-
-impl VersionedJobSpec {
-    pub fn id(&self) -> &str {
-        &self.spec.id
-    }
-}
-
-impl StreamSnapshot for VersionedJobSpec {
-    fn stream_id(&self) -> &str {
-        self.id()
-    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -141,6 +121,7 @@ pub enum SamplingSource {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use trogon_eventsourcing::Snapshot;
 
     #[test]
     fn job_spec_state_defaults_to_enabled() {
@@ -207,10 +188,10 @@ mod tests {
     }
 
     #[test]
-    fn versioned_job_round_trips() {
-        let versioned = VersionedJobSpec {
-            version: 9,
-            spec: JobSpec {
+    fn snapshot_round_trips() {
+        let snapshot = Snapshot::new(
+            9,
+            JobSpec {
                 id: "compact".to_string(),
                 state: JobEnabledState::Enabled,
                 schedule: ScheduleSpec::Every { every_sec: 30 },
@@ -223,34 +204,16 @@ mod tests {
                 payload: serde_json::json!({"kind": "heartbeat"}),
                 metadata: BTreeMap::new(),
             },
-        };
+        );
 
-        let json = serde_json::to_string(&versioned).unwrap();
-        let decoded: VersionedJobSpec = serde_json::from_str(&json).unwrap();
+        let json = serde_json::to_string(&snapshot).unwrap();
+        let decoded: Snapshot<JobSpec> = serde_json::from_str(&json).unwrap();
 
-        assert_eq!(decoded, versioned);
+        assert_eq!(decoded, snapshot);
     }
 
     #[test]
-    fn versioned_job_id_and_state_helpers_work() {
-        let versioned = VersionedJobSpec {
-            version: 7,
-            spec: JobSpec {
-                id: "heartbeat".to_string(),
-                state: JobEnabledState::Disabled,
-                schedule: ScheduleSpec::Every { every_sec: 15 },
-                delivery: DeliverySpec::NatsEvent {
-                    route: "agent.run".to_string(),
-                    headers: BTreeMap::new(),
-                    ttl_sec: None,
-                    source: None,
-                },
-                payload: serde_json::json!({"kind": "tick"}),
-                metadata: BTreeMap::new(),
-            },
-        };
-
-        assert_eq!(versioned.id(), "heartbeat");
+    fn job_enabled_state_helpers_work() {
         assert!(JobEnabledState::Enabled.is_enabled());
         assert_eq!(JobEnabledState::Enabled.as_str(), "enabled");
         assert!(!JobEnabledState::Disabled.is_enabled());

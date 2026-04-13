@@ -7,8 +7,8 @@ mod snapshots;
 
 pub use decision::{Act, Decide, Decision, NonEmpty, StreamCommand, decide};
 pub use snapshots::{
-    SnapshotChange, SnapshotSchemaVersion, SnapshotSchemaVersionError, SnapshotStoreConfig,
-    SnapshotStoreError, StreamSnapshot, checkpoint_key, list_snapshots, load_snapshot,
+    Snapshot, SnapshotChange, SnapshotSchemaVersion, SnapshotSchemaVersionError,
+    SnapshotStoreConfig, SnapshotStoreError, checkpoint_key, list_snapshots, load_snapshot,
     load_snapshot_map, maybe_advance_checkpoint, persist_snapshot_change, read_checkpoint,
     snapshot_key, write_checkpoint,
 };

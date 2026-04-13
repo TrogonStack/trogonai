@@ -2,7 +2,7 @@ use std::fmt;
 
 use async_nats::jetstream::kv;
 use trogon_cron::{
-    CronError, JobId, JobIdError, SNAPSHOT_STORE_CONFIG, VersionedJobSpec, open_snapshot_bucket,
+    CronError, JobId, JobIdError, JobSpec, SNAPSHOT_STORE_CONFIG, open_snapshot_bucket,
 };
 use trogon_eventsourcing::load_snapshot;
 use trogon_nats::jetstream::JetStreamGetKeyValue;
@@ -49,7 +49,7 @@ where
     let bucket = open_snapshot_bucket(js)
         .await
         .map_err(CommandError::LoadJob)?;
-    match load_snapshot::<VersionedJobSpec>(&bucket, SNAPSHOT_STORE_CONFIG, command.job_id.as_str())
+    match load_snapshot::<JobSpec>(&bucket, SNAPSHOT_STORE_CONFIG, command.job_id.as_str())
         .await
         .map_err(CronError::from)
         .map_err(CommandError::LoadJob)?

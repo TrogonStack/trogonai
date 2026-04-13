@@ -43,5 +43,5 @@ pub enum JobSpecChange {
 pub const SNAPSHOT_STORE_CONFIG: SnapshotStoreConfig<'static> = SnapshotStoreConfig::new(
     SNAPSHOT_KEY_PREFIX,
     SNAPSHOT_LAST_EVENT_SEQUENCE_KEY,
-    SnapshotSchemaVersion::V1,
+    SnapshotSchemaVersion::V2,
 );

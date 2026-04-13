@@ -5,11 +5,11 @@ use trogon_eventsourcing::{Decide, Decision, NonEmpty, StreamCommand, decide, lo
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream, JetStreamPublishMessage};
 
 use crate::{
-    JobDecisionError, JobId, JobSpec, JobStreamState, JobWriteCondition, ResolvedJobSpec,
-    VersionedJobSpec, apply,
+    JobDecisionError, JobId, JobSpec, JobStreamState, JobWriteCondition, ResolvedJobSpec, apply,
     error::CronError,
     events::{JobEvent, JobEventData},
     initial_state,
+    nats::job_stream_state_from_snapshot,
 };
 
 use super::{SNAPSHOT_STORE_CONFIG, append_events, snapshot_bucket};
@@ -94,16 +94,15 @@ where
 {
     let id = command.stream_id().to_string();
     let bucket = snapshot_bucket::run(js).await?;
-    let current_snapshot = load_snapshot::<VersionedJobSpec>(&bucket, SNAPSHOT_STORE_CONFIG, &id)
+    let current_snapshot = load_snapshot::<JobSpec>(&bucket, SNAPSHOT_STORE_CONFIG, &id)
         .await
         .map_err(CronError::from)?;
     let current_state = match current_snapshot.clone() {
-        Some(snapshot) => JobStreamState::try_from(snapshot).map_err(|source| {
-            CronError::event_source(
-                "failed to decode current job snapshot into stream state",
-                source,
-            )
-        })?,
+        Some(snapshot) => job_stream_state_from_snapshot(
+            command.stream_id(),
+            snapshot,
+            "failed to decode current job snapshot into stream state",
+        )?,
         None => initial_state(),
     };
 
