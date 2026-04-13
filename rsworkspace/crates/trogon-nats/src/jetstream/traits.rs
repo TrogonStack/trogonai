@@ -5,7 +5,6 @@ use async_nats::jetstream::kv;
 use async_nats::jetstream::message::OutboundMessage;
 use async_nats::jetstream::publish::PublishAck;
 use async_nats::jetstream::stream;
-#[cfg(not(coverage))]
 use async_nats::jetstream::{self};
 use async_nats::subject::ToSubject;
 use bytes::Bytes;
@@ -237,7 +236,6 @@ impl JetStreamGetStream for jetstream::Context {
     }
 }
 
-#[cfg(not(coverage))]
 impl JetStreamCreateConsumer for jetstream::stream::Stream {
     type Error = async_nats::jetstream::stream::ConsumerError;
     type Consumer = jetstream::consumer::Consumer<pull::Config>;
@@ -247,7 +245,6 @@ impl JetStreamCreateConsumer for jetstream::stream::Stream {
     }
 }
 
-#[cfg(not(coverage))]
 impl JetStreamConsumer for jetstream::consumer::Consumer<pull::Config> {
     type StreamError = async_nats::jetstream::consumer::StreamError;
     type MessagesError = async_nats::jetstream::consumer::pull::MessagesError;
