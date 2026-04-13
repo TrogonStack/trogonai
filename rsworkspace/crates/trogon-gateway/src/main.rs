@@ -59,7 +59,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("trogon-gateway starting");
 
     let nats = connect(&resolved.nats, NATS_CONNECT_TIMEOUT).await?;
-    let max_payload = MaxPayload::from_server_limit(nats.server_info().max_payload);
+    // TODO: restore the line below once the async-nats race is resolved.
+    //
+    // `trogon_nats::connect` always sets `retry_on_initial_connect`, which causes
+    // async-nats to return the `Client` before the background connection task has
+    // populated the `ServerInfo` watch channel. Reading `server_info().max_payload`
+    // immediately after `connect()` therefore returns 0 (the `Default` value for
+    // `usize`), which collapses `MaxPayload::from_server_limit` to a threshold of 0
+    // and routes every payload — including tiny ones — through the object-store
+    // claim-check path.
+    //
+    // Until async-nats guarantees `server_info()` is populated before returning the
+    // `Client` (or `trogon_nats::connect` exposes a post-connection hook), the value
+    // is taken from config (`TROGON_GATEWAY_NATS_MAX_PAYLOAD_BYTES`, default 1 MiB).
+    //
+    // Tracking issue: https://github.com/TrogonStack/trogonai/issues/122
+    // let server_max_payload = nats.server_info().max_payload;
+    let server_max_payload = resolved.nats_max_payload_bytes.get();
+    let max_payload = MaxPayload::from_server_limit(server_max_payload);
+    info!(
+        server_max_payload_bytes = server_max_payload,
+        claim_check_threshold_bytes = max_payload.threshold(),
+        "NATS connected"
+    );
     let js_context = async_nats::jetstream::new(nats.clone());
     let object_store = NatsObjectStore::provision(
         &js_context,

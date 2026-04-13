@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use async_nats::HeaderMap;
 use bytes::Bytes;
-use tracing::error;
+use tracing::{debug, error};
 
 use super::object_store::{ObjectStoreGet, ObjectStorePut};
 use super::publish::PublishOutcome;
@@ -144,7 +144,17 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> ClaimCheckPublisher<P, S> {
         payload: Bytes,
         ack_timeout: Duration,
     ) -> PublishOutcome<P::PublishError> {
-        if payload.len() <= self.max_payload.threshold() {
+        let payload_bytes = payload.len();
+        let threshold = self.max_payload.threshold();
+
+        if payload_bytes <= threshold {
+            debug!(
+                nats.subject = %subject,
+                messaging.message.body.size = payload_bytes,
+                trogon.claim_check.threshold_bytes = threshold,
+                trogon.claim_check.used = false,
+                "publishing directly"
+            );
             return super::publish::publish_event(
                 &self.publisher,
                 subject,
@@ -156,6 +166,15 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> ClaimCheckPublisher<P, S> {
         }
 
         let key = claim_object_key(&subject);
+
+        debug!(
+            nats.subject = %subject,
+            messaging.message.body.size = payload_bytes,
+            trogon.claim_check.threshold_bytes = threshold,
+            trogon.claim_check.used = true,
+            trogon.claim_check.key = %key,
+            "payload exceeds threshold, storing in object store"
+        );
 
         // Store-then-publish: if publish fails, the object becomes orphaned.
         // Cleanup relies on the object store bucket's TTL — see #101.

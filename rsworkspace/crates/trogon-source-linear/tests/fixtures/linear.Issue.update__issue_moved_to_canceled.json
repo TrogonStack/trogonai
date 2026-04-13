@@ -1,0 +1,82 @@
+{
+    "action": "update",
+    "actor": {
+        "id": "00000000-0000-4000-8000-000000000010",
+        "name": "Test User",
+        "email": "test.user@example.invalid",
+        "avatarUrl": "https://example.invalid/avatar.png",
+        "url": "https://example.invalid/profiles/test-user",
+        "type": "user"
+    },
+    "createdAt": "2026-04-12T04:54:27.300Z",
+    "data": {
+        "id": "00000000-0000-4000-8000-000000000021",
+        "createdAt": "2025-11-26T07:49:10.704Z",
+        "updatedAt": "2026-04-12T04:54:27.299Z",
+        "number": 13,
+        "title": "Demo",
+        "priority": 0,
+        "sortOrder": -45.11,
+        "prioritySortOrder": 94.09,
+        "startedAt": "2025-11-26T07:54:03.531Z",
+        "canceledAt": "2026-04-12T04:54:27.288Z",
+        "slaType": "all",
+        "addedToTeamAt": "2025-11-26T07:49:10.737Z",
+        "labelIds": [
+            "00000000-0000-4000-8000-000000000060"
+        ],
+        "teamId": "00000000-0000-4000-8000-000000000040",
+        "previousIdentifiers": [],
+        "creatorId": "00000000-0000-4000-8000-000000000010",
+        "assigneeId": "00000000-0000-4000-8000-000000000010",
+        "stateId": "00000000-0000-4000-8000-000000000051",
+        "reactionData": [],
+        "priorityLabel": "No priority",
+        "inheritsSharedAccess": false,
+        "botActor": null,
+        "identifier": "STM-13",
+        "url": "https://example.invalid/issue/STM-13/demo",
+        "subscriberIds": [
+            "00000000-0000-4000-8000-000000000010"
+        ],
+        "assignee": {
+            "id": "00000000-0000-4000-8000-000000000010",
+            "name": "Test User",
+            "email": "test.user@example.invalid",
+            "avatarUrl": "https://example.invalid/avatar.png",
+            "url": "https://example.invalid/profiles/test-user"
+        },
+        "state": {
+            "id": "00000000-0000-4000-8000-000000000051",
+            "color": "#95a2b3",
+            "name": "Canceled",
+            "type": "canceled"
+        },
+        "team": {
+            "id": "00000000-0000-4000-8000-000000000040",
+            "key": "STM",
+            "name": "Test Team"
+        },
+        "labels": [
+            {
+                "id": "00000000-0000-4000-8000-000000000060",
+                "color": "#BB87FC",
+                "name": "Feature"
+            }
+        ],
+        "description": "Test issue description",
+        "descriptionData": "{\"type\":\"doc\",\"content\":[{\"type\":\"paragraph\",\"content\":[{\"type\":\"text\",\"text\":\"Test issue description\"}]}]}"
+    },
+    "updatedFrom": {
+        "stateId": "00000000-0000-4000-8000-000000000053",
+        "sortOrder": 61.53,
+        "updatedAt": "2026-04-12T04:54:26.357Z",
+        "canceledAt": null,
+        "completedAt": "2026-04-12T04:54:26.345Z"
+    },
+    "url": "https://example.invalid/issue/STM-13/demo",
+    "type": "Issue",
+    "organizationId": "00000000-0000-4000-8000-000000000001",
+    "webhookTimestamp": 1775990847284,
+    "webhookId": "00000000-0000-4000-8000-000000000002"
+}
