@@ -1,9 +1,12 @@
 use crate::client::{FlushClient, PublishClient, RequestClient};
+use crate::telemetry::messaging::{
+    MessagingError, MessagingOperation, set_client_operation_span_attributes, set_span_error,
+};
 use async_nats::header::HeaderMap;
 use opentelemetry::propagation::Injector;
 use serde::{Serialize, de::DeserializeOwned};
 use std::time::Duration;
-use tracing::Span;
+use tracing::{Span, instrument};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::constants::{DEFAULT_TIMEOUT, REQ_ID_HEADER};
@@ -35,6 +38,7 @@ pub fn build_request_headers() -> HeaderMap {
     headers
 }
 
+#[instrument(name = "nats.request", skip(client, request), fields(subject = %subject))]
 pub async fn request_with_timeout<N: RequestClient, Req, Res>(
     client: &N,
     subject: &str,
@@ -45,7 +49,13 @@ where
     Req: Serialize,
     Res: DeserializeOwned,
 {
-    let payload = serde_json::to_vec(request).map_err(NatsError::Serialize)?;
+    let span = Span::current();
+    set_client_operation_span_attributes(&span, MessagingOperation::Request, subject);
+
+    let payload = serde_json::to_vec(request).map_err(|error| {
+        set_span_error(&span, MessagingError::Serialize);
+        NatsError::Serialize(error)
+    })?;
     let headers = build_request_headers();
 
     let response = tokio::time::timeout(
@@ -53,20 +63,31 @@ where
         client.request_with_headers(subject.to_string(), headers, payload.into()),
     )
     .await
-    .map_err(|_| NatsError::Timeout {
-        subject: subject.to_string(),
+    .map_err(|_| {
+        set_span_error(&span, MessagingError::Timeout);
+        NatsError::Timeout {
+            subject: subject.to_string(),
+        }
     })?
-    .map_err(|e| NatsError::Request {
-        subject: subject.to_string(),
-        error: e.to_string(),
+    .map_err(|error| {
+        set_span_error(&span, MessagingError::Request);
+        NatsError::Request {
+            subject: subject.to_string(),
+            error: error.to_string(),
+        }
     })?;
 
     let payload_str = String::from_utf8_lossy(&response.payload);
     tracing::debug!(payload = %payload_str, "Received NATS response");
 
-    serde_json::from_slice(&response.payload).map_err(|e| {
-        tracing::error!(payload = %payload_str, error = %e, "Failed to deserialize NATS response");
-        NatsError::Deserialize(e)
+    serde_json::from_slice(&response.payload).map_err(|error| {
+        set_span_error(&span, MessagingError::Deserialize);
+        tracing::error!(
+            error = %error,
+            subject = %subject,
+            "Failed to deserialize NATS response"
+        );
+        NatsError::Deserialize(error)
     })
 }
 
@@ -246,6 +267,7 @@ impl PublishOptionsBuilder {
     }
 }
 
+#[instrument(name = "nats.publish", skip(client, request, options), fields(subject = %subject))]
 pub async fn publish<N: PublishClient + FlushClient, Req>(
     client: &N,
     subject: &str,
@@ -255,7 +277,13 @@ pub async fn publish<N: PublishClient + FlushClient, Req>(
 where
     Req: Serialize,
 {
-    let payload = serde_json::to_vec(request).map_err(NatsError::Serialize)?;
+    let span = Span::current();
+    set_client_operation_span_attributes(&span, MessagingOperation::Publish, subject);
+
+    let payload = serde_json::to_vec(request).map_err(|error| {
+        set_span_error(&span, MessagingError::Serialize);
+        NatsError::Serialize(error)
+    })?;
     let headers = headers_with_trace_context();
 
     options
@@ -274,7 +302,10 @@ where
             "publish",
             subject,
         )
-        .await?;
+        .await
+        .inspect_err(|_error| {
+            set_span_error(&span, MessagingError::PublishOperation);
+        })?;
 
     let Some(flush_policy) = options.flush else {
         return Ok(());
@@ -296,6 +327,9 @@ where
             subject,
         )
         .await
+        .inspect_err(|_error| {
+            set_span_error(&span, MessagingError::FlushOperation);
+        })
 }
 
 #[derive(Debug)]
@@ -386,6 +420,22 @@ mod tests {
     #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
     struct TestResponse {
         result: String,
+    }
+
+    #[cfg(feature = "test-support")]
+    struct FailingSerialize;
+
+    #[cfg(feature = "test-support")]
+    impl serde::Serialize for FailingSerialize {
+        fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            Err(serde::ser::Error::custom(format!(
+                "{} cannot be serialized",
+                std::any::type_name::<S>()
+            )))
+        }
     }
 
     #[test]
@@ -582,6 +632,17 @@ mod tests {
 
     #[tokio::test]
     #[cfg(feature = "test-support")]
+    async fn test_request_serialize_error() {
+        let mock = AdvancedMockNatsClient::new();
+
+        let result: Result<TestResponse, NatsError> =
+            request(&mock, "test.subject", &FailingSerialize).await;
+
+        assert!(matches!(result, Err(NatsError::Serialize(_))));
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "test-support")]
     async fn test_publish_simple() {
         let mock = AdvancedMockNatsClient::new();
         let data = TestRequest {
@@ -592,6 +653,23 @@ mod tests {
 
         assert!(result.is_ok());
         assert_eq!(mock.published_messages(), vec!["test.subject"]);
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "test-support")]
+    async fn test_publish_serialize_error() {
+        let mock = AdvancedMockNatsClient::new();
+
+        let result = publish(
+            &mock,
+            "test.subject",
+            &FailingSerialize,
+            PublishOptions::simple(),
+        )
+        .await;
+
+        assert!(matches!(result, Err(NatsError::Serialize(_))));
+        assert!(mock.published_messages().is_empty());
     }
 
     #[tokio::test]
@@ -609,6 +687,39 @@ mod tests {
         let result = publish(&mock, "test.subject", &data, options).await;
 
         assert!(result.is_ok());
+        assert_eq!(mock.published_messages(), vec!["test.subject"]);
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "test-support")]
+    async fn test_publish_returns_error_when_publish_fails() {
+        let mock = AdvancedMockNatsClient::new();
+        mock.fail_next_publish();
+        let data = TestRequest {
+            message: "test".to_string(),
+        };
+
+        let result = publish(&mock, "test.subject", &data, PublishOptions::simple()).await;
+
+        assert!(matches!(result, Err(NatsError::PublishOperation(_))));
+        assert!(mock.published_messages().is_empty());
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "test-support")]
+    async fn test_publish_returns_error_when_flush_fails() {
+        let mock = AdvancedMockNatsClient::new();
+        mock.fail_next_flush();
+        let data = TestRequest {
+            message: "test".to_string(),
+        };
+        let options = PublishOptions::builder()
+            .flush_policy(FlushPolicy::no_retries())
+            .build();
+
+        let result = publish(&mock, "test.subject", &data, options).await;
+
+        assert!(matches!(result, Err(NatsError::PublishOperation(_))));
         assert_eq!(mock.published_messages(), vec!["test.subject"]);
     }
 

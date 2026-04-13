@@ -9,9 +9,8 @@ use upgrade::{ConnectionRequest, UpgradeState};
 
 #[cfg(not(coverage))]
 use {
-    acp_nats::nats, acp_telemetry::ServiceName, clap::Parser, std::net::SocketAddr,
-    tower_http::trace::TraceLayer, tracing::error, trogon_std::env::SystemEnv,
-    trogon_std::fs::SystemFs,
+    acp_nats::nats, acp_telemetry::ServiceName, clap::Parser, std::net::SocketAddr, tracing::error,
+    trogon_std::env::SystemEnv, trogon_std::fs::SystemFs,
 };
 
 #[cfg(not(coverage))]
@@ -47,10 +46,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         shutdown_tx: shutdown_tx.clone(),
     };
 
-    let app = axum::Router::new()
-        .route("/ws", axum::routing::get(upgrade::handle))
-        .layer(TraceLayer::new_for_http())
-        .with_state(state);
+    let app = trogon_std::telemetry::http::instrument_router(
+        axum::Router::new()
+            .route("/ws", axum::routing::get(upgrade::handle))
+            .with_state(state),
+    );
 
     let addr = SocketAddr::from((ws_config.host, ws_config.port));
     let listener = tokio::net::TcpListener::bind(addr).await?;

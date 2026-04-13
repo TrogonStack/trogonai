@@ -118,7 +118,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    let app = http::mount_sources(resolved, publisher);
+    let app =
+        trogon_std::telemetry::http::instrument_router(http::mount_sources(resolved, publisher));
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     let listener = tokio::net::TcpListener::bind(addr).await?;
