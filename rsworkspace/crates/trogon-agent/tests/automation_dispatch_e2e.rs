@@ -834,3 +834,112 @@ async fn dispatch_records_failed_run_on_agent_error() {
     assert_eq!(stats["failed_7d"], 1);
     assert_eq!(stats["successful_7d"], 0);
 }
+
+/// After an automation run completes, the `AgentPromise` in NATS KV must be
+/// `Resolved`. This verifies the full promise lifecycle: Running → Resolved.
+#[tokio::test]
+async fn dispatch_marks_promise_resolved_in_kv() {
+    use trogon_agent::promise_store::{PromiseStatus, PromiseStore};
+
+    let (_c, nats_port) = start_nats().await;
+    let mock = MockServer::start_async().await;
+    let mock_url = mock.base_url();
+
+    let (_, js) = js_client(nats_port).await;
+    create_streams(&js).await;
+
+    let store = AutomationStore::open(&js).await.expect("open store");
+    store
+        .put(&make_automation(
+            "auto-kv",
+            "default",
+            "github.pull_request",
+            "KV_PROMISE_PROMPT",
+        ))
+        .await
+        .expect("put automation");
+
+    mock.mock_async(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .body(end_turn_body());
+    })
+    .await;
+
+    // Find a free port for the API.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let api_port = listener.local_addr().unwrap().port();
+    drop(listener);
+
+    tokio::spawn(async move {
+        run(runner_cfg(nats_port, mock_url, "default", api_port))
+            .await
+            .ok()
+    });
+
+    // Wait for the API to come up.
+    let client = reqwest::Client::new();
+    let runs_url = format!("http://127.0.0.1:{api_port}/runs");
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        match client
+            .get(&runs_url)
+            .header("x-tenant-id", "default")
+            .send()
+            .await
+        {
+            Ok(_) => break,
+            Err(_) if tokio::time::Instant::now() < deadline => {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            Err(e) => panic!("API never came up: {e}"),
+        }
+    }
+
+    // Trigger an automation.
+    js.publish("github.pull_request", pr_opened_payload().into())
+        .await
+        .expect("publish");
+
+    // Poll until a RunRecord appears — the promise is marked Resolved before the
+    // RunRecord is stored, so once we see the RunRecord the KV entry is ready.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let body: serde_json::Value = client
+            .get(&runs_url)
+            .header("x-tenant-id", "default")
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        if body.as_array().map(|a| !a.is_empty()).unwrap_or(false) {
+            break;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            panic!("No RunRecord appeared within timeout");
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+
+    // Open a PromiseStore on the same NATS connection and verify the promise.
+    // Promise ID = "{stream_prefix}.{auto_id}" = "github.1.auto-kv"
+    // (first message on the GITHUB stream → seq = 1).
+    let ps = PromiseStore::open(&js).await.expect("open PromiseStore");
+    let (promise, _rev) = ps
+        .get_promise("default", "github.1.auto-kv")
+        .await
+        .expect("get_promise")
+        .expect("promise must exist in KV after run completes");
+
+    assert_eq!(
+        promise.status,
+        PromiseStatus::Resolved,
+        "promise must be Resolved after a successful run"
+    );
+    assert_eq!(promise.automation_id, "auto-kv");
+    assert_eq!(promise.tenant_id, "default");
+}
