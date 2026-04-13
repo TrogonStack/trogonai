@@ -49,7 +49,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let app = axum::Router::new()
         .route("/ws", axum::routing::get(upgrade::handle))
-        .layer(TraceLayer::new_for_http())
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(|request: &axum::http::Request<axum::body::Body>| {
+                    let span = tracing::info_span!(
+                        "http.server.request",
+                        method = %request.method(),
+                        path = %request.uri().path()
+                    );
+                    acp_telemetry::http::set_server_request_span_attributes(&span, request);
+                    span
+                })
+                .on_response(
+                    |response: &axum::http::Response<axum::body::Body>,
+                     _latency: std::time::Duration,
+                     span: &tracing::Span| {
+                        acp_telemetry::http::set_server_response_span_attributes(
+                            span,
+                            response.status(),
+                        );
+                    },
+                ),
+        )
         .with_state(state);
 
     let addr = SocketAddr::from((ws_config.host, ws_config.port));

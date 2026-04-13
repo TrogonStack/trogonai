@@ -7,9 +7,11 @@ edition = "2024"
 workspace = true
 
 [dependencies]
+axum = { workspace = true }
 opentelemetry = { workspace = true }
 opentelemetry-appender-tracing = { workspace = true }
 opentelemetry-otlp = { workspace = true, features = ["http-json", "logs", "metrics", "reqwest-rustls"] }
+opentelemetry-semantic-conventions = { workspace = true }
 opentelemetry_sdk = { workspace = true, features = ["rt-tokio", "logs", "metrics"] }
 tokio = { workspace = true, features = ["signal"] }
 tracing = { workspace = true }

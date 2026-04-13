@@ -18,6 +18,7 @@ clap = { workspace = true }
 confique = { workspace = true }
 serde = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
+tower-http = { workspace = true }
 tracing = { workspace = true }
 trogon-nats = { workspace = true }
 trogon-service-config = { workspace = true }

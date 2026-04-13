@@ -90,9 +90,11 @@ dependencies = [
 name = "acp-telemetry"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "opentelemetry",
  "opentelemetry-appender-tracing",
  "opentelemetry-otlp",
+ "opentelemetry-semantic-conventions",
  "opentelemetry_sdk",
  "tokio",
  "tracing",
@@ -1849,6 +1851,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "opentelemetry-semantic-conventions"
+version = "0.31.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e62e29dfe041afb8ed2a6c9737ab57db4907285d999ef8ad3a59092a36bdc846"
+
+[[package]]
 name = "opentelemetry_sdk"
 version = "0.31.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3455,6 +3463,7 @@ dependencies = [
  "serde",
  "tempfile",
  "tokio",
+ "tower-http",
  "tracing",
  "trogon-nats",
  "trogon-service-config",
@@ -3477,6 +3486,7 @@ dependencies = [
  "bytes",
  "futures",
  "opentelemetry",
+ "opentelemetry-semantic-conventions",
  "serde",
  "serde_json",
  "tokio",
