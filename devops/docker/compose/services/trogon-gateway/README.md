@@ -15,6 +15,7 @@ prefix:
 | GitLab | `/gitlab/webhook` | `TROGON_SOURCE_GITLAB_WEBHOOK_SECRET` |
 | incident.io | `/incidentio/webhook` | `TROGON_SOURCE_INCIDENTIO_SIGNING_SECRET` |
 | Linear | `/linear/webhook` | `TROGON_SOURCE_LINEAR_WEBHOOK_SECRET` |
+| Notion | `/notion/webhook` | `TROGON_SOURCE_NOTION_VERIFICATION_TOKEN` |
 
 The gateway port is configured via `TROGON_GATEWAY_PORT` (default `8080`).
 Liveness and readiness probes are available at `GET /-/liveness` and `GET /-/readiness`.
@@ -57,6 +58,14 @@ incident.io does not guarantee ordered delivery, and private incident events may
 contain only resource IDs rather than full objects. The gateway forwards the raw
 verified payload to NATS and leaves any enrichment or reordering to downstream
 consumers.
+
+## Notion webhooks
+
+Notion signs webhook payloads with the subscription `verification_token`.
+Configure `TROGON_SOURCE_NOTION_VERIFICATION_TOKEN` before starting the gateway,
+then point the Notion webhook endpoint at `/notion/webhook`. Verified events
+are forwarded to NATS on `{subject_prefix}.{type}` subjects such as
+`notion.page.created`.
 
 ## Exposing webhooks with ngrok
 
