@@ -49,10 +49,6 @@ struct ValidatedJobSpecParts {
     headers: BTreeMap<String, String>,
 }
 
-pub fn validate_job_spec(spec: &JobSpec) -> Result<(), CronError> {
-    validated_job_spec_parts(spec).map(|_| ())
-}
-
 impl TryFrom<&JobSpec> for ResolvedJobSpec {
     type Error = CronError;
 
@@ -444,8 +440,8 @@ mod tests {
     }
 
     #[test]
-    fn validate_job_spec_accepts_valid_job() {
-        validate_job_spec(&base_job()).unwrap();
+    fn resolved_job_accepts_valid_job() {
+        ResolvedJobSpec::try_from(&base_job()).unwrap();
     }
 
     #[test]
@@ -471,7 +467,7 @@ mod tests {
         let mut job = base_job();
         job.schedule = ScheduleSpec::Every { every_sec: 0 };
 
-        let error = validate_job_spec(&job).unwrap_err();
+        let error = ResolvedJobSpec::try_from(&job).unwrap_err();
         assert!(error.to_string().contains("every_sec"));
     }
 
@@ -483,7 +479,7 @@ mod tests {
             timezone: None,
         };
 
-        let error = validate_job_spec(&job).unwrap_err();
+        let error = ResolvedJobSpec::try_from(&job).unwrap_err();
         assert!(error.to_string().contains("cron expression"));
     }
 
@@ -495,7 +491,7 @@ mod tests {
             timezone: Some(" America/New_York ".to_string()),
         };
 
-        let error = validate_job_spec(&job).unwrap_err();
+        let error = ResolvedJobSpec::try_from(&job).unwrap_err();
         assert!(error.to_string().contains("timezone"));
     }
 
@@ -509,7 +505,7 @@ mod tests {
             source: None,
         };
 
-        let error = validate_job_spec(&job).unwrap_err();
+        let error = ResolvedJobSpec::try_from(&job).unwrap_err();
         assert!(error.to_string().contains("ttl_sec"));
     }
 
@@ -525,7 +521,7 @@ mod tests {
             }),
         };
 
-        let error = validate_job_spec(&job).unwrap_err();
+        let error = ResolvedJobSpec::try_from(&job).unwrap_err();
         assert!(error.to_string().contains("sampling source"));
     }
 
@@ -539,7 +535,7 @@ mod tests {
             source: None,
         };
 
-        let error = validate_job_spec(&job).unwrap_err();
+        let error = ResolvedJobSpec::try_from(&job).unwrap_err();
         assert!(error.to_string().contains("header name"));
     }
 
@@ -553,7 +549,7 @@ mod tests {
             source: None,
         };
 
-        let error = validate_job_spec(&job).unwrap_err();
+        let error = ResolvedJobSpec::try_from(&job).unwrap_err();
         assert!(error.to_string().contains("invalid value"));
     }
 }
