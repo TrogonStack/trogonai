@@ -65,16 +65,8 @@ impl Decide<JobStreamState, JobEvent> for PutJobCommand {
     type Error = JobDecisionError;
 
     fn decide(state: &JobStreamState, command: &Self) -> Result<Decision<JobEvent>, Self::Error> {
-        let state_id = state.stream_id();
-        if state_id != *command.id() {
-            return Err(JobDecisionError::StreamIdMismatch {
-                state_id,
-                command_id: command.id().clone(),
-            });
-        }
-
         match state {
-            JobStreamState::Initial { .. } => Ok(Decision::Event(NonEmpty::one(
+            JobStreamState::Initial => Ok(Decision::Event(NonEmpty::one(
                 JobEvent::job_registered(command.job().spec().clone()),
             ))),
             JobStreamState::Present(_) => Err(JobDecisionError::CannotRegisterExistingJob {
@@ -105,7 +97,7 @@ where
                 source,
             )
         })?,
-        None => initial_state(command.id().clone()),
+        None => initial_state(),
     };
 
     let events = match decide(&current_state, &command) {
