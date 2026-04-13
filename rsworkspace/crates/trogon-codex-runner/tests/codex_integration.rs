@@ -11,7 +11,8 @@
 //! A `LocalSet` wraps every async body because `CodexProcess` uses
 //! `tokio::task::spawn_local` internally.
 
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
+use tokio::sync::Mutex;
 
 use acp_nats::acp_prefix::AcpPrefix;
 use agent_client_protocol::{
@@ -34,7 +35,7 @@ const MOCK_BIN: &str = env!("CARGO_BIN_EXE_mock_codex_server");
 static BIN_ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 fn bin_env_lock() -> &'static Mutex<()> {
-    BIN_ENV_LOCK.get_or_init(|| Mutex::new(()))
+    BIN_ENV_LOCK.get_or_init(Mutex::default)
 }
 
 /// Minimal fake NATS server — handles the INFO/CONNECT/PING handshake only.
@@ -87,7 +88,7 @@ async fn make_agent() -> DefaultCodexAgent {
 
 #[tokio::test(flavor = "current_thread")]
 async fn new_session_creates_session_and_returns_state() {
-    let _guard = bin_env_lock().lock().unwrap();
+    let _guard = bin_env_lock().lock().await;
     let local = LocalSet::new();
     local
         .run_until(async {
@@ -119,7 +120,7 @@ async fn new_session_creates_session_and_returns_state() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn resume_session_succeeds_for_existing_session() {
-    let _guard = bin_env_lock().lock().unwrap();
+    let _guard = bin_env_lock().lock().await;
     let local = LocalSet::new();
     local
         .run_until(async {
@@ -143,7 +144,7 @@ async fn resume_session_succeeds_for_existing_session() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn fork_session_creates_independent_session_inheriting_model() {
-    let _guard = bin_env_lock().lock().unwrap();
+    let _guard = bin_env_lock().lock().await;
     let local = LocalSet::new();
     local
         .run_until(async {
@@ -188,7 +189,7 @@ async fn fork_session_creates_independent_session_inheriting_model() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn prompt_returns_end_turn_after_mock_completes() {
-    let _guard = bin_env_lock().lock().unwrap();
+    let _guard = bin_env_lock().lock().await;
     let local = LocalSet::new();
     local
         .run_until(async {
@@ -215,7 +216,7 @@ async fn prompt_returns_end_turn_after_mock_completes() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn multiple_prompts_reuse_the_same_process() {
-    let _guard = bin_env_lock().lock().unwrap();
+    let _guard = bin_env_lock().lock().await;
     let local = LocalSet::new();
     local
         .run_until(async {
@@ -247,7 +248,7 @@ async fn multiple_prompts_reuse_the_same_process() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn close_session_removes_it_from_list() {
-    let _guard = bin_env_lock().lock().unwrap();
+    let _guard = bin_env_lock().lock().await;
     let local = LocalSet::new();
     local
         .run_until(async {
@@ -279,7 +280,7 @@ async fn close_session_removes_it_from_list() {
 /// the session exists AND the process is alive. This test hits that code path.
 #[tokio::test(flavor = "current_thread")]
 async fn cancel_calls_turn_interrupt_when_process_alive() {
-    let _guard = bin_env_lock().lock().unwrap();
+    let _guard = bin_env_lock().lock().await;
     let local = LocalSet::new();
     local
         .run_until(async {
@@ -304,7 +305,7 @@ async fn cancel_calls_turn_interrupt_when_process_alive() {
 /// `prompt()` must break out of the event loop and return EndTurn.
 #[tokio::test(flavor = "current_thread")]
 async fn prompt_returns_end_turn_on_error_event() {
-    let _guard = bin_env_lock().lock().unwrap();
+    let _guard = bin_env_lock().lock().await;
     // Must be set before the process is spawned (env is inherited at fork).
     unsafe { std::env::set_var("MOCK_TURN_SENDS_ERROR", "1") };
     let local = LocalSet::new();
@@ -335,7 +336,7 @@ async fn prompt_returns_end_turn_on_error_event() {
 /// hanging until the timeout fires.
 #[tokio::test(flavor = "current_thread")]
 async fn prompt_unblocks_when_process_exits_mid_turn() {
-    let _guard = bin_env_lock().lock().unwrap();
+    let _guard = bin_env_lock().lock().await;
     unsafe { std::env::set_var("MOCK_EXIT_AFTER_TURN_ACK", "1") };
     let local = LocalSet::new();
     local
@@ -370,7 +371,7 @@ async fn prompt_unblocks_when_process_exits_mid_turn() {
 /// and spawn a fresh process.
 #[tokio::test(flavor = "current_thread")]
 async fn process_respawns_and_clears_sessions_after_death() {
-    let _guard = bin_env_lock().lock().unwrap();
+    let _guard = bin_env_lock().lock().await;
     unsafe { std::env::set_var("MOCK_EXIT_AFTER_TURN_ACK", "1") };
     let local = LocalSet::new();
     local
@@ -438,7 +439,7 @@ async fn process_respawns_and_clears_sessions_after_death() {
 /// `resume_session` must log a warning but still return `Ok(())`.
 #[tokio::test(flavor = "current_thread")]
 async fn resume_session_succeeds_when_thread_resume_fails() {
-    let _guard = bin_env_lock().lock().unwrap();
+    let _guard = bin_env_lock().lock().await;
     unsafe { std::env::set_var("MOCK_RESUME_FAILS", "1") };
     let local = LocalSet::new();
     local
@@ -467,7 +468,7 @@ async fn resume_session_succeeds_when_thread_resume_fails() {
 /// Internally this also exercises the sender-cleanup path in `turn_start`.
 #[tokio::test(flavor = "current_thread")]
 async fn prompt_returns_error_when_turn_start_fails() {
-    let _guard = bin_env_lock().lock().unwrap();
+    let _guard = bin_env_lock().lock().await;
     unsafe { std::env::set_var("MOCK_TURN_START_FAILS", "1") };
     let local = LocalSet::new();
     local
@@ -502,7 +503,7 @@ async fn prompt_returns_error_when_turn_start_fails() {
 async fn prompt_filters_non_text_content_blocks() {
     use agent_client_protocol::ResourceLink;
 
-    let _guard = bin_env_lock().lock().unwrap();
+    let _guard = bin_env_lock().lock().await;
     let local = LocalSet::new();
     local
         .run_until(async {
@@ -538,7 +539,7 @@ async fn prompt_filters_non_text_content_blocks() {
 /// return an error instead of panicking.
 #[tokio::test(flavor = "current_thread")]
 async fn new_session_returns_error_when_codex_not_found() {
-    let _guard = bin_env_lock().lock().unwrap();
+    let _guard = bin_env_lock().lock().await;
     unsafe { std::env::set_var("CODEX_BIN", "/nonexistent/path/to/codex") };
     let local = LocalSet::new();
     local
@@ -568,7 +569,7 @@ async fn new_session_returns_error_when_codex_not_found() {
 /// a warning and continue — the turn must still complete normally.
 #[tokio::test(flavor = "current_thread")]
 async fn read_loop_skips_malformed_json_and_turn_still_completes() {
-    let _guard = bin_env_lock().lock().unwrap();
+    let _guard = bin_env_lock().lock().await;
     unsafe { std::env::set_var("MOCK_MALFORMED_BEFORE_COMPLETE", "1") };
     let local = LocalSet::new();
     local
@@ -597,7 +598,7 @@ async fn read_loop_skips_malformed_json_and_turn_still_completes() {
 /// it as an ACP error instead of panicking or hanging.
 #[tokio::test(flavor = "current_thread")]
 async fn fork_session_returns_error_when_thread_fork_fails() {
-    let _guard = bin_env_lock().lock().unwrap();
+    let _guard = bin_env_lock().lock().await;
     unsafe { std::env::set_var("MOCK_FORK_FAILS", "1") };
     let local = LocalSet::new();
     local
@@ -623,7 +624,7 @@ async fn fork_session_returns_error_when_thread_fork_fails() {
 /// error, `new_session` must propagate the error.
 #[tokio::test(flavor = "current_thread")]
 async fn new_session_returns_error_when_thread_start_fails() {
-    let _guard = bin_env_lock().lock().unwrap();
+    let _guard = bin_env_lock().lock().await;
     unsafe { std::env::set_var("MOCK_THREAD_START_FAILS", "1") };
     let local = LocalSet::new();
     local
@@ -648,7 +649,7 @@ async fn new_session_returns_error_when_thread_start_fails() {
 async fn prompt_with_only_non_text_blocks_still_completes() {
     use agent_client_protocol::ResourceLink;
 
-    let _guard = bin_env_lock().lock().unwrap();
+    let _guard = bin_env_lock().lock().await;
     let local = LocalSet::new();
     local
         .run_until(async {
@@ -677,7 +678,7 @@ async fn prompt_with_only_non_text_blocks_still_completes() {
 /// request, `read_loop` must silently discard it and let the turn complete.
 #[tokio::test(flavor = "current_thread")]
 async fn read_loop_ignores_response_with_unknown_id() {
-    let _guard = bin_env_lock().lock().unwrap();
+    let _guard = bin_env_lock().lock().await;
     unsafe { std::env::set_var("MOCK_UNKNOWN_ID_BEFORE_COMPLETE", "1") };
     let local = LocalSet::new();
     local
@@ -706,7 +707,7 @@ async fn read_loop_ignores_response_with_unknown_id() {
 /// `read_loop` must warn and continue — the turn must still complete.
 #[tokio::test(flavor = "current_thread")]
 async fn read_loop_ignores_response_with_noninteger_id() {
-    let _guard = bin_env_lock().lock().unwrap();
+    let _guard = bin_env_lock().lock().await;
     unsafe { std::env::set_var("MOCK_NONINT_ID_BEFORE_COMPLETE", "1") };
     let local = LocalSet::new();
     local
@@ -736,7 +737,7 @@ async fn read_loop_ignores_response_with_noninteger_id() {
 /// Uses a 1-second timeout to keep the test fast.
 #[tokio::test(flavor = "current_thread")]
 async fn prompt_times_out_when_no_events_received() {
-    let _guard = bin_env_lock().lock().unwrap();
+    let _guard = bin_env_lock().lock().await;
     // Short timeout so the test completes in ~1 s.
     unsafe { std::env::set_var("CODEX_PROMPT_TIMEOUT_SECS", "1") };
     unsafe { std::env::set_var("MOCK_HANG_AFTER_TURN_ACK", "1") };
@@ -768,7 +769,7 @@ async fn prompt_times_out_when_no_events_received() {
 /// `new_session` must return an error.
 #[tokio::test(flavor = "current_thread")]
 async fn new_session_returns_error_when_thread_start_response_has_no_thread_id() {
-    let _guard = bin_env_lock().lock().unwrap();
+    let _guard = bin_env_lock().lock().await;
     unsafe { std::env::set_var("MOCK_THREAD_START_NO_ID", "1") };
     let local = LocalSet::new();
     local
@@ -790,7 +791,7 @@ async fn new_session_returns_error_when_thread_start_response_has_no_thread_id()
 /// `fork_session` must return an error.
 #[tokio::test(flavor = "current_thread")]
 async fn fork_session_returns_error_when_fork_response_has_no_thread_id() {
-    let _guard = bin_env_lock().lock().unwrap();
+    let _guard = bin_env_lock().lock().await;
     unsafe { std::env::set_var("MOCK_FORK_NO_ID", "1") };
     let local = LocalSet::new();
     local
@@ -817,7 +818,7 @@ async fn fork_session_returns_error_when_fork_response_has_no_thread_id() {
 /// with an uninitialised process.
 #[tokio::test(flavor = "current_thread")]
 async fn new_session_returns_error_when_initialize_fails() {
-    let _guard = bin_env_lock().lock().unwrap();
+    let _guard = bin_env_lock().lock().await;
     unsafe { std::env::set_var("MOCK_INITIALIZE_FAILS", "1") };
     let local = LocalSet::new();
     local
@@ -838,7 +839,7 @@ async fn new_session_returns_error_when_initialize_fails() {
 /// test completes quickly.
 #[tokio::test(flavor = "current_thread")]
 async fn new_session_returns_error_when_initialize_hangs() {
-    let _guard = bin_env_lock().lock().unwrap();
+    let _guard = bin_env_lock().lock().await;
     unsafe { std::env::set_var("MOCK_HANG_ON_INITIALIZE", "1") };
     unsafe { std::env::set_var("CODEX_SPAWN_TIMEOUT_SECS", "1") };
     let local = LocalSet::new();
@@ -866,7 +867,7 @@ async fn new_session_returns_error_when_initialize_hangs() {
 /// all return errors — the session no longer exists.
 #[tokio::test(flavor = "current_thread")]
 async fn operations_on_closed_session_return_errors() {
-    let _guard = bin_env_lock().lock().unwrap();
+    let _guard = bin_env_lock().lock().await;
     let local = LocalSet::new();
     local
         .run_until(async {
@@ -917,7 +918,7 @@ async fn operations_on_closed_session_return_errors() {
 /// close source → verify source is gone, fork still works.
 #[tokio::test(flavor = "current_thread")]
 async fn full_session_lifecycle() {
-    let _guard = bin_env_lock().lock().unwrap();
+    let _guard = bin_env_lock().lock().await;
     let local = LocalSet::new();
     local
         .run_until(async {
@@ -997,7 +998,7 @@ async fn full_session_lifecycle() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn prompt_on_forked_session_completes() {
-    let _guard = bin_env_lock().lock().unwrap();
+    let _guard = bin_env_lock().lock().await;
     let local = LocalSet::new();
     local
         .run_until(async {
@@ -1032,7 +1033,7 @@ async fn prompt_on_forked_session_completes() {
 /// test fails if the model is not forwarded correctly.
 #[tokio::test(flavor = "current_thread")]
 async fn prompt_forwards_session_model_to_subprocess() {
-    let _guard = bin_env_lock().lock().unwrap();
+    let _guard = bin_env_lock().lock().await;
     unsafe { std::env::set_var("MOCK_REQUIRE_MODEL", "o3") };
     let local = LocalSet::new();
     local
@@ -1068,7 +1069,7 @@ async fn prompt_forwards_session_model_to_subprocess() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn prompt_after_resume_completes() {
-    let _guard = bin_env_lock().lock().unwrap();
+    let _guard = bin_env_lock().lock().await;
     let local = LocalSet::new();
     local
         .run_until(async {
@@ -1104,7 +1105,7 @@ async fn prompt_after_resume_completes() {
 /// channel routing in `CodexProcess` under cooperative concurrency.
 #[tokio::test(flavor = "current_thread")]
 async fn concurrent_prompts_on_different_sessions_complete_independently() {
-    let _guard = bin_env_lock().lock().unwrap();
+    let _guard = bin_env_lock().lock().await;
     let local = LocalSet::new();
     local
         .run_until(async {
@@ -1145,7 +1146,7 @@ async fn concurrent_prompts_on_different_sessions_complete_independently() {
 /// must return an empty list.
 #[tokio::test(flavor = "current_thread")]
 async fn new_session_error_leaves_session_list_empty() {
-    let _guard = bin_env_lock().lock().unwrap();
+    let _guard = bin_env_lock().lock().await;
     unsafe { std::env::set_var("MOCK_THREAD_START_FAILS", "1") };
     let local = LocalSet::new();
     local
@@ -1176,7 +1177,7 @@ async fn new_session_error_leaves_session_list_empty() {
 /// return an error — the ACP contract is fire-and-forget for cancel.
 #[tokio::test(flavor = "current_thread")]
 async fn cancel_turn_interrupt_failure_is_non_fatal() {
-    let _guard = bin_env_lock().lock().unwrap();
+    let _guard = bin_env_lock().lock().await;
     unsafe { std::env::set_var("MOCK_INTERRUPT_FAILS", "1") };
     let local = LocalSet::new();
     local
@@ -1205,7 +1206,7 @@ async fn cancel_turn_interrupt_failure_is_non_fatal() {
 /// Uses `MOCK_SEND_N_TEXT_EVENTS=100` to emit 100 events per turn.
 #[tokio::test(flavor = "current_thread")]
 async fn prompt_receives_many_text_events_and_completes() {
-    let _guard = bin_env_lock().lock().unwrap();
+    let _guard = bin_env_lock().lock().await;
     unsafe { std::env::set_var("MOCK_SEND_N_TEXT_EVENTS", "100") };
     let local = LocalSet::new();
     local
@@ -1240,7 +1241,7 @@ async fn prompt_receives_many_text_events_and_completes() {
 /// in-flight `event_rx.recv()` callers unblock rather than hanging.
 #[tokio::test(flavor = "current_thread")]
 async fn process_death_clears_all_sessions_on_next_call() {
-    let _guard = bin_env_lock().lock().unwrap();
+    let _guard = bin_env_lock().lock().await;
     unsafe { std::env::set_var("MOCK_EXIT_AFTER_TURN_ACK", "1") };
     let local = LocalSet::new();
     local
@@ -1312,7 +1313,7 @@ async fn process_death_clears_all_sessions_on_next_call() {
 /// that chain by observing the alive flag after the struct is dropped.
 #[tokio::test(flavor = "current_thread")]
 async fn drop_kills_subprocess() {
-    let _guard = bin_env_lock().lock().unwrap();
+    let _guard = bin_env_lock().lock().await;
     let local = LocalSet::new();
     local
         .run_until(async {
@@ -1345,7 +1346,7 @@ async fn drop_kills_subprocess() {
 /// session's turn must still complete normally.
 #[tokio::test(flavor = "current_thread")]
 async fn stray_notification_is_silently_discarded() {
-    let _guard = bin_env_lock().lock().unwrap();
+    let _guard = bin_env_lock().lock().await;
     unsafe { std::env::set_var("MOCK_EMIT_STRAY_THREAD_EVENT", "1") };
     let local = LocalSet::new();
     local
@@ -1416,7 +1417,7 @@ async fn failing_nats() -> async_nats::Client {
 /// NOT cause `prompt()` to return `Err`. The turn must still complete normally.
 #[tokio::test(flavor = "current_thread")]
 async fn nats_publish_failure_during_prompt_is_non_fatal() {
-    let _guard = bin_env_lock().lock().unwrap();
+    let _guard = bin_env_lock().lock().await;
     // Emit multiple text events so NATS publish is attempted several times.
     unsafe { std::env::set_var("MOCK_SEND_N_TEXT_EVENTS", "3") };
     let local = LocalSet::new();
@@ -1460,7 +1461,7 @@ async fn nats_publish_failure_during_prompt_is_non_fatal() {
 /// on death). `cancel()` must still return `Ok(())`.
 #[tokio::test(flavor = "current_thread")]
 async fn cancel_when_process_dead_skips_interrupt_and_returns_ok() {
-    let _guard = bin_env_lock().lock().unwrap();
+    let _guard = bin_env_lock().lock().await;
     unsafe { std::env::set_var("MOCK_EXIT_AFTER_TURN_ACK", "1") };
     let local = LocalSet::new();
     local
@@ -1512,7 +1513,7 @@ async fn cancel_when_process_dead_skips_interrupt_and_returns_ok() {
 /// loop handles this with `continue`, so the turn must still complete normally.
 #[tokio::test(flavor = "current_thread")]
 async fn prompt_handles_event_channel_lag() {
-    let _guard = bin_env_lock().lock().unwrap();
+    let _guard = bin_env_lock().lock().await;
     // 300 events exceeds the channel capacity of 256 — guarantees lag.
     unsafe { std::env::set_var("MOCK_SEND_N_TEXT_EVENTS", "300") };
     let local = LocalSet::new();
@@ -1543,7 +1544,7 @@ async fn prompt_handles_event_channel_lag() {
 /// logged but must NOT cause `prompt()` to return `Err`.
 #[tokio::test(flavor = "current_thread")]
 async fn nats_publish_failure_for_tool_events_is_non_fatal() {
-    let _guard = bin_env_lock().lock().unwrap();
+    let _guard = bin_env_lock().lock().await;
     unsafe { std::env::set_var("MOCK_SEND_TOOL_EVENT", "1") };
     let local = LocalSet::new();
     local
@@ -1588,7 +1589,7 @@ async fn nats_publish_failure_for_tool_events_is_non_fatal() {
 /// both prompts must complete with `StopReason::EndTurn`.
 #[tokio::test(flavor = "current_thread")]
 async fn broadcast_error_without_thread_id_reaches_all_active_turns() {
-    let _guard = bin_env_lock().lock().unwrap();
+    let _guard = bin_env_lock().lock().await;
     // Emit the broadcast error after the 2nd turn/start is acked so that both
     // turn senders are registered before the error is routed.
     unsafe { std::env::set_var("MOCK_BROADCAST_ERROR_AFTER_TURNS", "2") };
@@ -1634,7 +1635,7 @@ async fn broadcast_error_without_thread_id_reaches_all_active_turns() {
 /// subprocess, set a model override, then load it and verify the state.
 #[tokio::test(flavor = "current_thread")]
 async fn load_session_returns_correct_state_after_new_session() {
-    let _guard = bin_env_lock().lock().unwrap();
+    let _guard = bin_env_lock().lock().await;
     let local = LocalSet::new();
     local
         .run_until(async {
@@ -1685,7 +1686,7 @@ async fn load_session_returns_correct_state_after_new_session() {
 /// mode string and return `Ok` without touching the subprocess.
 #[tokio::test(flavor = "current_thread")]
 async fn set_session_mode_is_accepted_for_real_session() {
-    let _guard = bin_env_lock().lock().unwrap();
+    let _guard = bin_env_lock().lock().await;
     let local = LocalSet::new();
     local
         .run_until(async {
@@ -1718,7 +1719,7 @@ async fn set_session_mode_is_accepted_for_real_session() {
 /// return an empty list and leave the session intact.
 #[tokio::test(flavor = "current_thread")]
 async fn set_session_config_option_returns_empty_and_session_survives() {
-    let _guard = bin_env_lock().lock().unwrap();
+    let _guard = bin_env_lock().lock().await;
     let local = LocalSet::new();
     local
         .run_until(async {
