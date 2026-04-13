@@ -1,16 +1,11 @@
 use std::fmt;
 use std::str::FromStr;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum SourceStatus {
+    #[default]
     Enabled,
     Disabled,
-}
-
-impl Default for SourceStatus {
-    fn default() -> Self {
-        Self::Enabled
-    }
 }
 
 impl SourceStatus {
