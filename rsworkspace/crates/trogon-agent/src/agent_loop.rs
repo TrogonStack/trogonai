@@ -2045,6 +2045,1691 @@ mod tests {
         );
     }
 
+    // ── CAS conflict reload ───────────────────────────────────────────────────
+
+    /// When `update_promise` returns a CAS conflict error on the first
+    /// checkpoint write, the agent reloads the current revision from KV and
+    /// continues the run normally rather than aborting or permanently losing
+    /// checkpoint progress.
+    ///
+    /// The `CasConflictOnceStore` injects exactly one conflict on the first
+    /// write, then delegates normally. After the reload, the run proceeds to
+    /// the second LLM call and marks the promise `Resolved`.
+    #[tokio::test]
+    async fn cas_conflict_checkpoint_reload_continues_run() {
+        use crate::promise_store::mock::CasConflictOnceStore;
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+        use crate::tools::mock::MockToolDispatcher;
+        use mock::SequencedMockAnthropicClient;
+
+        let store = Arc::new(CasConflictOnceStore::new());
+        store.inner.insert_promise(make_test_promise("p1"));
+
+        let tool_use_resp = serde_json::json!({
+            "stop_reason": "tool_use",
+            "content": [{"type": "tool_use", "id": "tu1", "name": "my_tool", "input": {}}]
+        });
+        let end_turn_resp = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "done"}]
+        });
+        let anthropic = Arc::new(SequencedMockAnthropicClient::new(vec![
+            tool_use_resp,
+            end_turn_resp,
+        ]));
+        let dispatcher = Arc::new(MockToolDispatcher::new("ok"));
+
+        let agent = make_durable_agent(
+            anthropic,
+            dispatcher,
+            Arc::clone(&store) as Arc<dyn PromiseRepository>,
+            "p1",
+        );
+
+        let result = agent.run(vec![Message::user_text("go")], &[], None).await;
+        assert_eq!(result.unwrap(), "done", "run must complete after CAS conflict reload");
+
+        // Promise must be Resolved in the inner store.
+        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        assert_eq!(
+            p.status,
+            PromiseStatus::Resolved,
+            "promise must be Resolved after run completes despite initial CAS conflict"
+        );
+    }
+
+    // ── checkpointing_disabled across turns ───────────────────────────────────
+
+    /// When the size guard fires on turn 1, `checkpointing_disabled = true`
+    /// persists across all subsequent turns — no message-history writes occur.
+    /// The terminal-status write (`Resolved`) still succeeds at end_turn because
+    /// `checkpoint` remains `Some` with a valid KV revision.
+    #[tokio::test]
+    async fn checkpointing_disabled_persists_across_multiple_turns() {
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+        use crate::tools::mock::MockToolDispatcher;
+        use mock::SequencedMockAnthropicClient;
+
+        let store = Arc::new(MockPromiseStore::new());
+        store.insert_promise(make_test_promise("p1"));
+
+        // Three LLM responses: two tool_use turns and one end_turn.
+        let tool_use_resp = || {
+            serde_json::json!({
+                "stop_reason": "tool_use",
+                "content": [{"type": "tool_use", "id": "tu1", "name": "my_tool", "input": {}}]
+            })
+        };
+        let end_turn_resp = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "done"}]
+        });
+        let anthropic = Arc::new(SequencedMockAnthropicClient::new(vec![
+            tool_use_resp(),
+            tool_use_resp(),
+            end_turn_resp,
+        ]));
+        let dispatcher = Arc::new(MockToolDispatcher::new("ok"));
+
+        let agent = make_durable_agent(
+            anthropic,
+            dispatcher,
+            Arc::clone(&store) as Arc<dyn PromiseRepository>,
+            "p1",
+        );
+
+        // Initial messages large enough to push the checkpoint over CHECKPOINT_MAX_BYTES.
+        let large_text = "a".repeat(CHECKPOINT_MAX_BYTES + 1);
+        let result = agent
+            .run(vec![Message::user_text(large_text)], &[], None)
+            .await;
+
+        assert_eq!(result.unwrap(), "done");
+
+        let (p, _) = store.get_promise("acme", "p1").await.unwrap().unwrap();
+        // Neither turn wrote message history.
+        assert!(p.messages.is_empty(), "no checkpoint must be written for either turn");
+        assert_eq!(p.iteration, 0, "iteration must not advance");
+        // Terminal write succeeded.
+        assert_eq!(
+            p.status,
+            PromiseStatus::Resolved,
+            "Resolved must be written even when checkpointing is disabled"
+        );
+    }
+
+    // ── Multiple tools per turn in recovery ───────────────────────────────────
+
+    /// When recovering and the LLM requests multiple tools in a single turn,
+    /// each tool is looked up individually in the KV cache. Cached tools are
+    /// replayed without dispatching; uncached tools are dispatched normally.
+    ///
+    /// Scenario: 3 tools in one turn — tool_a and tool_b pre-cached, tool_c not.
+    /// The dispatcher must be called exactly once (for tool_c).
+    #[tokio::test]
+    async fn recovery_replays_multiple_tools_in_same_turn() {
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::PromiseRepository;
+        use crate::tools::mock::CountingMockToolDispatcher;
+        use mock::SequencedMockAnthropicClient;
+        use std::sync::atomic::Ordering;
+
+        let store = Arc::new(MockPromiseStore::new());
+
+        // Non-empty checkpoint → recovering = true.
+        let mut p = make_test_promise("p1");
+        p.messages = vec![Message::user_text("start")];
+        store.insert_promise(p);
+
+        // Pre-cache tool_a and tool_b.
+        let input_a = serde_json::json!({"k": "a"});
+        let input_b = serde_json::json!({"k": "b"});
+        let ck_a = super::tool_cache_key("tool_a", &input_a);
+        let ck_b = super::tool_cache_key("tool_b", &input_b);
+        store.put_tool_result("acme", "p1", &ck_a, "result_a").await.unwrap();
+        store.put_tool_result("acme", "p1", &ck_b, "result_b").await.unwrap();
+
+        // LLM requests all 3 tools in a single turn, then ends.
+        let tool_use_resp = serde_json::json!({
+            "stop_reason": "tool_use",
+            "content": [
+                {"type": "tool_use", "id": "id_a", "name": "tool_a", "input": {"k": "a"}},
+                {"type": "tool_use", "id": "id_b", "name": "tool_b", "input": {"k": "b"}},
+                {"type": "tool_use", "id": "id_c", "name": "tool_c", "input": {"k": "c"}}
+            ]
+        });
+        let end_turn_resp = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "all done"}]
+        });
+        let anthropic = Arc::new(SequencedMockAnthropicClient::new(vec![
+            tool_use_resp,
+            end_turn_resp,
+        ]));
+        let (dispatcher, call_count) = CountingMockToolDispatcher::new("live");
+
+        let agent = make_durable_agent(
+            anthropic,
+            Arc::new(dispatcher),
+            Arc::clone(&store) as Arc<dyn PromiseRepository>,
+            "p1",
+        );
+
+        let result = agent.run(vec![], &[], None).await;
+        assert_eq!(result.unwrap(), "all done");
+
+        // tool_a and tool_b were replayed from cache — only tool_c was dispatched.
+        assert_eq!(
+            call_count.load(Ordering::SeqCst),
+            1,
+            "only the uncached tool must be dispatched; cached tools must be replayed"
+        );
+    }
+
+    // ── system_prompt persisted in checkpoint ─────────────────────────────────
+
+    /// The system prompt is stored in the first checkpoint so that crash
+    /// recovery uses the same context the LLM saw during the original run
+    /// rather than a freshly fetched (potentially different) version.
+    #[tokio::test]
+    async fn system_prompt_stored_in_first_checkpoint() {
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::PromiseRepository;
+        use crate::tools::mock::MockToolDispatcher;
+        use mock::SequencedMockAnthropicClient;
+
+        let store = Arc::new(MockPromiseStore::new());
+        store.insert_promise(make_test_promise("p1"));
+
+        let tool_use_resp = serde_json::json!({
+            "stop_reason": "tool_use",
+            "content": [{"type": "tool_use", "id": "tu1", "name": "my_tool", "input": {}}]
+        });
+        let end_turn_resp = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "done"}]
+        });
+        let anthropic = Arc::new(SequencedMockAnthropicClient::new(vec![
+            tool_use_resp,
+            end_turn_resp,
+        ]));
+        let dispatcher = Arc::new(MockToolDispatcher::new("ok"));
+
+        let agent = make_durable_agent(
+            anthropic,
+            dispatcher,
+            Arc::clone(&store) as Arc<dyn PromiseRepository>,
+            "p1",
+        );
+
+        let system_prompt = "You are a helpful assistant.";
+        let result = agent
+            .run(vec![Message::user_text("go")], &[], Some(system_prompt))
+            .await;
+        assert_eq!(result.unwrap(), "done");
+
+        // After the first tool turn the system prompt must be persisted.
+        let (p, _) = store.get_promise("acme", "p1").await.unwrap().unwrap();
+        assert_eq!(
+            p.system_prompt,
+            Some(system_prompt.to_string()),
+            "system_prompt must be stored in the first checkpoint"
+        );
+    }
+
+    // ── system_prompt restored from checkpoint on recovery ────────────────────
+
+    /// On crash recovery the agent must use the system prompt stored in the
+    /// checkpoint, not the one passed by the caller at recovery time.
+    ///
+    /// Rationale: the memory file (`.trogon/memory.md`) may have changed
+    /// between the crash and the recovery. Using a different system prompt
+    /// mid-run would shift the model's behaviour and could cause inconsistent
+    /// tool calls. Pinning the prompt to the checkpoint ensures the LLM sees
+    /// the same context before and after the crash.
+    ///
+    /// Scenario:
+    ///   1. First run: checkpoint stores `system_prompt = "original prompt"`.
+    ///   2. Recovery run: caller passes `system_prompt = "updated prompt"`.
+    ///   3. Agent must use `"original prompt"` from the checkpoint, not the
+    ///      caller-supplied `"updated prompt"`.
+    ///
+    /// Verified by inspecting the Anthropic request body serialized by the
+    /// mock client, which records the last body it received.
+    #[tokio::test]
+    async fn recovery_uses_system_prompt_from_checkpoint_not_caller() {
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::PromiseRepository;
+        use crate::tools::mock::MockToolDispatcher;
+        use std::sync::Mutex;
+
+        // ── Recording mock client ──────────────────────────────────────────
+        // Captures every request body so we can inspect the `system` field.
+        struct RecordingAnthropicClient {
+            bodies: Arc<Mutex<Vec<serde_json::Value>>>,
+            response: serde_json::Value,
+        }
+        impl AnthropicClient for RecordingAnthropicClient {
+            fn complete<'a>(
+                &'a self,
+                body: serde_json::Value,
+            ) -> std::pin::Pin<
+                Box<dyn std::future::Future<Output = Result<serde_json::Value, reqwest::Error>> + Send + 'a>,
+            > {
+                self.bodies.lock().unwrap().push(body);
+                let resp = self.response.clone();
+                Box::pin(async move { Ok(resp) })
+            }
+        }
+
+        let store = Arc::new(MockPromiseStore::new());
+
+        // Checkpoint with non-empty messages and the original system prompt.
+        let mut p = make_test_promise("p1");
+        p.messages = vec![Message::user_text("prior turn")];
+        p.system_prompt = Some("original prompt".to_string());
+        store.insert_promise(p);
+
+        let end_turn_resp = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "done"}]
+        });
+        let bodies: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(vec![]));
+        let anthropic = Arc::new(RecordingAnthropicClient {
+            bodies: Arc::clone(&bodies),
+            response: end_turn_resp,
+        });
+        let dispatcher = Arc::new(MockToolDispatcher::new("ok"));
+
+        let agent = make_durable_agent(
+            anthropic,
+            dispatcher,
+            Arc::clone(&store) as Arc<dyn PromiseRepository>,
+            "p1",
+        );
+
+        // Caller passes an updated prompt — agent must ignore it and use the
+        // one stored in the checkpoint.
+        let result = agent
+            .run(
+                vec![],
+                &[],
+                Some("updated prompt — must NOT be used on recovery"),
+            )
+            .await;
+        assert_eq!(result.unwrap(), "done");
+
+        // The Anthropic request must contain "original prompt", not the updated one.
+        let recorded = bodies.lock().unwrap();
+        assert_eq!(recorded.len(), 1, "exactly one Anthropic call expected");
+        let system_text = recorded[0]["system"][0]["text"]
+            .as_str()
+            .expect("system[0].text must be present");
+        assert_eq!(
+            system_text, "original prompt",
+            "recovery must use the system prompt from the checkpoint, not the caller-supplied one"
+        );
+    }
+
+    // ── tool_cache_key ────────────────────────────────────────────────────────
+
+    /// `tool_cache_key` must produce the same hash regardless of JSON object
+    /// key ordering.
+    ///
+    /// On crash recovery the LLM regenerates the same logical tool call but
+    /// may produce different key ordering in the `input` JSON. The cached
+    /// result must still match so the tool is not re-executed.
+    #[test]
+    fn tool_cache_key_is_stable_across_key_orderings() {
+        let input_a = serde_json::json!({"z": 1, "a": 2, "m": "hello"});
+        let input_b = serde_json::json!({"a": 2, "m": "hello", "z": 1});
+        let key_a = tool_cache_key("post_comment", &input_a);
+        let key_b = tool_cache_key("post_comment", &input_b);
+        assert_eq!(
+            key_a, key_b,
+            "tool_cache_key must be order-independent for crash-recovery replay"
+        );
+    }
+
+    /// Different inputs and different tool names must produce different keys.
+    #[test]
+    fn tool_cache_key_differs_for_different_inputs() {
+        let key_1 = tool_cache_key("post_comment", &serde_json::json!({"text": "hello"}));
+        let key_2 = tool_cache_key("post_comment", &serde_json::json!({"text": "world"}));
+        let key_3 = tool_cache_key("create_issue", &serde_json::json!({"text": "hello"}));
+        assert_ne!(key_1, key_2, "different inputs must produce different keys");
+        assert_ne!(key_1, key_3, "different tool names must produce different keys");
+    }
+
+    // ── HTTP error classification ─────────────────────────────────────────────
+
+    /// Spin up a minimal TCP server that responds with the given HTTP status
+    /// code. Returns a real `reqwest::Error` with that status attached so tests
+    /// can verify status-based promise state transitions without a real
+    /// Anthropic endpoint.
+    async fn make_http_error(status: u16) -> reqwest::Error {
+        use tokio::io::AsyncWriteExt;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            if let Ok((mut stream, _)) = listener.accept().await {
+                let response = format!(
+                    "HTTP/1.1 {status} Status\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                );
+                let _ = stream.write_all(response.as_bytes()).await;
+            }
+        });
+        let client = reqwest::Client::new();
+        let resp = client
+            .get(format!("http://{addr}/"))
+            .send()
+            .await
+            .unwrap();
+        resp.error_for_status().unwrap_err()
+    }
+
+    /// A non-retryable 4xx HTTP error (status 400) must write `PermanentFailed`
+    /// to the promise store so that neither startup recovery nor NATS
+    /// redelivery wastes Anthropic credits on a deterministically broken run.
+    #[tokio::test]
+    async fn http_4xx_error_marks_promise_permanent_failed() {
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+        use crate::tools::mock::MockToolDispatcher;
+        use std::sync::Mutex;
+
+        let err = make_http_error(400).await;
+
+        struct ErrorClient(Arc<Mutex<Option<reqwest::Error>>>);
+        impl AnthropicClient for ErrorClient {
+            fn complete<'a>(
+                &'a self,
+                _body: serde_json::Value,
+            ) -> std::pin::Pin<
+                Box<
+                    dyn std::future::Future<
+                            Output = Result<serde_json::Value, reqwest::Error>,
+                        > + Send
+                        + 'a,
+                >,
+            > {
+                let e = self.0.lock().unwrap().take().expect("error already consumed");
+                Box::pin(async move { Err(e) })
+            }
+        }
+
+        let store = Arc::new(MockPromiseStore::new());
+        store.insert_promise(make_test_promise("p1"));
+
+        let agent = make_durable_agent(
+            Arc::new(ErrorClient(Arc::new(Mutex::new(Some(err))))),
+            Arc::new(MockToolDispatcher::new("unused")),
+            Arc::clone(&store) as Arc<dyn PromiseRepository>,
+            "p1",
+        );
+
+        let result = agent.run(vec![Message::user_text("go")], &[], None).await;
+        assert!(matches!(result, Err(AgentError::Http(_))));
+
+        let (p, _) = store.get_promise("acme", "p1").await.unwrap().unwrap();
+        assert_eq!(
+            p.status,
+            PromiseStatus::PermanentFailed,
+            "4xx error must mark promise PermanentFailed — retrying would always fail"
+        );
+    }
+
+    /// A 5xx HTTP error must write `Failed` so NATS redelivery can retry the
+    /// run from its checkpoint once the upstream service recovers.
+    #[tokio::test]
+    async fn http_5xx_error_marks_promise_failed() {
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+        use crate::tools::mock::MockToolDispatcher;
+        use std::sync::Mutex;
+
+        let err = make_http_error(500).await;
+
+        struct ErrorClient(Arc<Mutex<Option<reqwest::Error>>>);
+        impl AnthropicClient for ErrorClient {
+            fn complete<'a>(
+                &'a self,
+                _body: serde_json::Value,
+            ) -> std::pin::Pin<
+                Box<
+                    dyn std::future::Future<
+                            Output = Result<serde_json::Value, reqwest::Error>,
+                        > + Send
+                        + 'a,
+                >,
+            > {
+                let e = self.0.lock().unwrap().take().expect("error already consumed");
+                Box::pin(async move { Err(e) })
+            }
+        }
+
+        let store = Arc::new(MockPromiseStore::new());
+        store.insert_promise(make_test_promise("p1"));
+
+        let agent = make_durable_agent(
+            Arc::new(ErrorClient(Arc::new(Mutex::new(Some(err))))),
+            Arc::new(MockToolDispatcher::new("unused")),
+            Arc::clone(&store) as Arc<dyn PromiseRepository>,
+            "p1",
+        );
+
+        let result = agent.run(vec![Message::user_text("go")], &[], None).await;
+        assert!(matches!(result, Err(AgentError::Http(_))));
+
+        let (p, _) = store.get_promise("acme", "p1").await.unwrap().unwrap();
+        assert_eq!(
+            p.status,
+            PromiseStatus::Failed,
+            "5xx error must mark promise Failed so NATS redelivery can retry"
+        );
+    }
+
+    // ── CAS reload edge cases ─────────────────────────────────────────────────
+
+    /// When the CAS conflict reload finds the promise is already `Resolved` by
+    /// another worker, the run must stop immediately and return `Ok("")` to
+    /// avoid duplicate tool side-effects (extra PR comments, Slack messages).
+    #[tokio::test]
+    async fn cas_reload_terminal_promise_by_other_worker_stops_run() {
+        use crate::promise_store::mock::TerminalOnCasReloadStore;
+        use crate::promise_store::PromiseRepository;
+        use crate::tools::mock::MockToolDispatcher;
+        use mock::SequencedMockAnthropicClient;
+
+        let store = Arc::new(TerminalOnCasReloadStore::new());
+        store.inner.insert_promise(make_test_promise("p1"));
+
+        // First LLM call returns tool_use to trigger the checkpoint + CAS
+        // conflict path. The second response must never be consumed.
+        let tool_use_resp = serde_json::json!({
+            "stop_reason": "tool_use",
+            "content": [{"type": "tool_use", "id": "tu1", "name": "my_tool", "input": {}}]
+        });
+        let unreachable_resp = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "must not reach here"}]
+        });
+        let anthropic = Arc::new(SequencedMockAnthropicClient::new(vec![
+            tool_use_resp,
+            unreachable_resp,
+        ]));
+        let dispatcher = Arc::new(MockToolDispatcher::new("ok"));
+
+        let agent = make_durable_agent(
+            anthropic,
+            dispatcher,
+            Arc::clone(&store) as Arc<dyn PromiseRepository>,
+            "p1",
+        );
+
+        let result = agent.run(vec![Message::user_text("go")], &[], None).await;
+        assert_eq!(
+            result.unwrap(),
+            "",
+            "run must stop when CAS reload finds another worker already resolved the promise"
+        );
+    }
+
+    /// When the CAS conflict reload finds the promise has disappeared from KV,
+    /// `checkpoint` is set to `None` — checkpointing is disabled for the
+    /// remainder of the run and the run still completes normally.
+    #[tokio::test]
+    async fn cas_reload_promise_disappeared_disables_checkpointing_and_run_completes() {
+        use crate::promise_store::mock::DisappearedOnCasReloadStore;
+        use crate::promise_store::PromiseRepository;
+        use crate::tools::mock::MockToolDispatcher;
+        use mock::SequencedMockAnthropicClient;
+
+        let store = Arc::new(DisappearedOnCasReloadStore::new());
+        store.inner.insert_promise(make_test_promise("p1"));
+
+        let tool_use_resp = serde_json::json!({
+            "stop_reason": "tool_use",
+            "content": [{"type": "tool_use", "id": "tu1", "name": "my_tool", "input": {}}]
+        });
+        let end_turn_resp = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "finished despite disappeared promise"}]
+        });
+        let anthropic = Arc::new(SequencedMockAnthropicClient::new(vec![
+            tool_use_resp,
+            end_turn_resp,
+        ]));
+        let dispatcher = Arc::new(MockToolDispatcher::new("ok"));
+
+        let agent = make_durable_agent(
+            anthropic,
+            dispatcher,
+            Arc::clone(&store) as Arc<dyn PromiseRepository>,
+            "p1",
+        );
+
+        let result = agent.run(vec![Message::user_text("go")], &[], None).await;
+        assert_eq!(
+            result.unwrap(),
+            "finished despite disappeared promise",
+            "run must complete normally even when the promise disappears during CAS reload"
+        );
+    }
+
+    // ── Deserialization error ─────────────────────────────────────────────────
+
+    /// When Anthropic returns valid JSON that doesn't match `AnthropicResponse`
+    /// (e.g. missing `stop_reason` and `content`), the agent must mark the
+    /// promise `PermanentFailed` — retrying the same malformed response will
+    /// always fail, so redelivery would only waste credits.
+    #[tokio::test]
+    async fn deserialization_error_marks_promise_permanent_failed() {
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+        use crate::tools::mock::MockToolDispatcher;
+        use mock::SequencedMockAnthropicClient;
+
+        let store = Arc::new(MockPromiseStore::new());
+        store.insert_promise(make_test_promise("p1"));
+
+        // Valid JSON but not a valid AnthropicResponse — missing required fields.
+        let malformed = serde_json::json!({"unexpected_field": "not a response"});
+        let anthropic = Arc::new(SequencedMockAnthropicClient::new(vec![malformed]));
+        let dispatcher = Arc::new(MockToolDispatcher::new("unused"));
+
+        let agent = make_durable_agent(
+            anthropic,
+            dispatcher,
+            Arc::clone(&store) as Arc<dyn PromiseRepository>,
+            "p1",
+        );
+
+        let result = agent.run(vec![Message::user_text("go")], &[], None).await;
+        match &result {
+            Err(AgentError::UnexpectedStopReason(s)) => {
+                assert!(s.contains("Deserialization"), "error must mention Deserialization; got: {s}");
+            }
+            other => panic!("expected UnexpectedStopReason, got: {other:?}"),
+        };
+
+        let (p, _) = store.get_promise("acme", "p1").await.unwrap().unwrap();
+        assert_eq!(
+            p.status,
+            PromiseStatus::PermanentFailed,
+            "deserialization error must mark promise PermanentFailed"
+        );
+    }
+
+    // ── _idempotency_key injection ────────────────────────────────────────────
+
+    /// When `promise_id` is set, built-in tools must receive an `_idempotency_key`
+    /// field injected into their input.  The key must be stable — derived from
+    /// `{promise_id}.{sha256(tool_name:input)}` — so that Slack/Linear dedup
+    /// checks fire correctly on retry even after a process restart.
+    #[tokio::test]
+    async fn idempotency_key_injected_into_builtin_tool_input() {
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::PromiseRepository;
+        use std::future::Future;
+        use std::pin::Pin;
+        use std::sync::Mutex;
+
+        struct CapturingDispatcher {
+            last_input: Arc<Mutex<Option<serde_json::Value>>>,
+        }
+        impl crate::tools::ToolDispatcher for CapturingDispatcher {
+            fn dispatch<'a>(
+                &'a self,
+                _name: &'a str,
+                input: &'a serde_json::Value,
+            ) -> Pin<Box<dyn Future<Output = String> + Send + 'a>> {
+                *self.last_input.lock().unwrap() = Some(input.clone());
+                Box::pin(async { "ok".to_string() })
+            }
+        }
+
+        let store = Arc::new(MockPromiseStore::new());
+        store.insert_promise(make_test_promise("p1"));
+
+        let tool_use_resp = serde_json::json!({
+            "stop_reason": "tool_use",
+            "content": [{"type": "tool_use", "id": "tu1", "name": "post_comment", "input": {"body": "hello"}}]
+        });
+        let end_turn_resp = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "done"}]
+        });
+        let anthropic = Arc::new(mock::SequencedMockAnthropicClient::new(vec![
+            tool_use_resp,
+            end_turn_resp,
+        ]));
+
+        let captured = Arc::new(Mutex::new(None::<serde_json::Value>));
+        let dispatcher = Arc::new(CapturingDispatcher {
+            last_input: Arc::clone(&captured),
+        });
+
+        let agent = make_durable_agent(
+            anthropic,
+            dispatcher,
+            Arc::clone(&store) as Arc<dyn PromiseRepository>,
+            "p1",
+        );
+
+        agent.run(vec![Message::user_text("go")], &[], None).await.unwrap();
+
+        let input = captured.lock().unwrap().take().expect("dispatcher was never called");
+        let ikey = input["_idempotency_key"]
+            .as_str()
+            .expect("_idempotency_key must be present in tool input");
+
+        // Key format: {promise_id}.{sha256(tool_name:canonical_json(input))}
+        assert!(
+            ikey.starts_with("p1."),
+            "_idempotency_key must start with the promise_id; got: {ikey}"
+        );
+
+        // The hash part must be a 64-char lowercase hex SHA-256.
+        let hash_part = ikey.trim_start_matches("p1.");
+        assert_eq!(hash_part.len(), 64, "hash must be 64 hex chars; got: {hash_part}");
+        assert!(
+            hash_part.chars().all(|c| c.is_ascii_hexdigit()),
+            "hash must be lowercase hex; got: {hash_part}"
+        );
+
+        // Stability: the key is content-based, so calling with the same input
+        // again must produce the identical key.
+        let expected_key = format!(
+            "p1.{}",
+            tool_cache_key("post_comment", &serde_json::json!({"body": "hello"}))
+        );
+        assert_eq!(
+            ikey, expected_key,
+            "_idempotency_key must be deterministic across retries"
+        );
+    }
+
+    // ── update_promise KV timeout → checkpoint = None ─────────────────────────
+
+    /// When the `update_promise` KV write exceeds `NATS_KV_TIMEOUT`, `checkpoint`
+    /// is set to `None` and the run continues to completion without further
+    /// checkpoint attempts.
+    ///
+    /// This prevents the run from blocking indefinitely while the NATS heartbeat
+    /// keeps the message alive. The worst case is that a subsequent crash causes
+    /// the run to restart from scratch rather than from a checkpoint.
+    ///
+    /// Uses Tokio's mock clock so the test completes instantly.
+    #[tokio::test(start_paused = true)]
+    async fn update_promise_kv_timeout_disables_checkpointing_and_run_completes() {
+        use crate::promise_store::mock::HangingUpdateStore;
+        use crate::promise_store::PromiseRepository;
+        use crate::tools::mock::MockToolDispatcher;
+
+        let store = Arc::new(HangingUpdateStore::new());
+        store.inner.insert_promise(make_test_promise("p1"));
+
+        let tool_use_resp = serde_json::json!({
+            "stop_reason": "tool_use",
+            "content": [{"type": "tool_use", "id": "tu1", "name": "my_tool", "input": {}}]
+        });
+        let end_turn_resp = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "done despite kv timeout"}]
+        });
+        let anthropic = Arc::new(mock::SequencedMockAnthropicClient::new(vec![
+            tool_use_resp,
+            end_turn_resp,
+        ]));
+        let dispatcher = Arc::new(MockToolDispatcher::new("ok"));
+
+        let agent = make_durable_agent(
+            anthropic,
+            dispatcher,
+            Arc::clone(&store) as Arc<dyn PromiseRepository>,
+            "p1",
+        );
+
+        let (result, _) = tokio::join!(
+            agent.run(vec![Message::user_text("go")], &[], None),
+            tokio::time::advance(NATS_KV_TIMEOUT + std::time::Duration::from_millis(1)),
+        );
+
+        assert_eq!(
+            result.unwrap(),
+            "done despite kv timeout",
+            "run must complete normally even when the KV checkpoint write times out"
+        );
+
+        // Promise was never updated — status is still Running.
+        // (checkpoint = None means the terminal Resolved write was also skipped.)
+        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        assert_eq!(
+            p.status,
+            crate::promise_store::PromiseStatus::Running,
+            "promise must remain Running when checkpoint write timed out — terminal write is also skipped"
+        );
+    }
+
+    // ── MCP tool idempotency key ──────────────────────────────────────────────
+
+    /// MCP tools must receive the original `input` without `_idempotency_key`
+    /// injected.  MCP servers may declare `additionalProperties: false` in their
+    /// tool schema and would reject an unknown field with a hard error.
+    ///
+    /// Built-in tools receive `call_input` (with the key); MCP tools receive
+    /// `input` (without it).  This test guards against accidentally swapping
+    /// the two.
+    #[tokio::test]
+    async fn mcp_tool_does_not_receive_idempotency_key() {
+        use crate::flag_client::AlwaysOnFlagClient;
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::PromiseRepository;
+        use crate::tools::{tool_def, ToolContext, ToolDispatcher};
+        use std::future::Future;
+        use std::pin::Pin;
+        use std::sync::Mutex;
+
+        struct CapturingMcpClient {
+            last_input: Arc<Mutex<Option<serde_json::Value>>>,
+        }
+        impl trogon_mcp::McpCallTool for CapturingMcpClient {
+            fn call_tool<'a>(
+                &'a self,
+                _name: &'a str,
+                arguments: &'a serde_json::Value,
+            ) -> Pin<Box<dyn Future<Output = Result<String, String>> + Send + 'a>> {
+                *self.last_input.lock().unwrap() = Some(arguments.clone());
+                Box::pin(async { Ok("mcp result".to_string()) })
+            }
+        }
+
+        // Stub built-in dispatcher — must not be called for an MCP tool.
+        struct PanickingDispatcher;
+        impl ToolDispatcher for PanickingDispatcher {
+            fn dispatch<'a>(
+                &'a self,
+                name: &'a str,
+                _input: &'a serde_json::Value,
+            ) -> Pin<Box<dyn Future<Output = String> + Send + 'a>> {
+                panic!("built-in dispatcher must not be called for MCP tool '{name}'");
+            }
+        }
+
+        let captured = Arc::new(Mutex::new(None::<serde_json::Value>));
+        let mcp_client: Arc<dyn trogon_mcp::McpCallTool> = Arc::new(CapturingMcpClient {
+            last_input: Arc::clone(&captured),
+        });
+
+        let store = Arc::new(MockPromiseStore::new());
+        store.insert_promise(make_test_promise("p1"));
+
+        // LLM calls the prefixed MCP tool name.
+        let tool_use_resp = serde_json::json!({
+            "stop_reason": "tool_use",
+            "content": [{"type": "tool_use", "id": "tu1", "name": "mcp__srv__search", "input": {"query": "rust"}}]
+        });
+        let end_turn_resp = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "done"}]
+        });
+        let anthropic = Arc::new(mock::SequencedMockAnthropicClient::new(vec![
+            tool_use_resp,
+            end_turn_resp,
+        ]));
+
+        let agent = AgentLoop {
+            anthropic_client: anthropic,
+            model: "test".to_string(),
+            max_iterations: 5,
+            tool_dispatcher: Arc::new(PanickingDispatcher),
+            tool_context: Arc::new(ToolContext::for_test("http://127.0.0.1:1", "", "", "")),
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![tool_def(
+                "mcp__srv__search",
+                "search",
+                serde_json::json!({"type": "object"}),
+            )],
+            mcp_dispatch: vec![(
+                "mcp__srv__search".to_string(),
+                "search".to_string(),
+                mcp_client,
+            )],
+            flag_client: Arc::new(AlwaysOnFlagClient),
+            tenant_id: "acme".to_string(),
+            promise_store: Some(Arc::clone(&store) as Arc<dyn PromiseRepository>),
+            promise_id: Some("p1".to_string()),
+        };
+
+        agent.run(vec![Message::user_text("go")], &[], None).await.unwrap();
+
+        let input = captured.lock().unwrap().take().expect("MCP client was never called");
+        assert!(
+            input.get("_idempotency_key").is_none(),
+            "_idempotency_key must NOT be injected into MCP tool input; got: {input}"
+        );
+        assert_eq!(
+            input["query"].as_str().unwrap(),
+            "rust",
+            "original input fields must be preserved"
+        );
+    }
+
+    // ── get_tool_result KV timeout ────────────────────────────────────────────
+
+    /// When `get_tool_result` times out during recovery, the timeout is treated
+    /// as a cache miss and the tool is re-executed rather than blocking the run.
+    ///
+    /// This ensures a degraded NATS connection does not permanently stall a
+    /// recovering run — worst case is one extra tool execution, not a hang.
+    #[tokio::test(start_paused = true)]
+    async fn get_tool_result_kv_timeout_treats_as_cache_miss_and_reexecutes() {
+        use crate::promise_store::mock::HangingGetToolResultStore;
+        use crate::promise_store::PromiseRepository;
+        use crate::tools::mock::CountingMockToolDispatcher;
+        use std::sync::atomic::Ordering;
+
+        let store = Arc::new(HangingGetToolResultStore::new());
+
+        // Non-empty checkpoint messages → `recovering = true`.
+        let mut p = make_test_promise("p1");
+        p.messages = vec![Message::user_text("prior turn")];
+        store.inner.insert_promise(p);
+
+        let tool_use_resp = serde_json::json!({
+            "stop_reason": "tool_use",
+            "content": [{"type": "tool_use", "id": "tu1", "name": "my_tool", "input": {}}]
+        });
+        let end_turn_resp = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "done after cache miss"}]
+        });
+        let anthropic = Arc::new(mock::SequencedMockAnthropicClient::new(vec![
+            tool_use_resp,
+            end_turn_resp,
+        ]));
+        let (dispatcher, call_count) = CountingMockToolDispatcher::new("live result");
+
+        let agent = make_durable_agent(
+            anthropic,
+            Arc::new(dispatcher),
+            Arc::clone(&store) as Arc<dyn PromiseRepository>,
+            "p1",
+        );
+
+        let (result, _) = tokio::join!(
+            agent.run(vec![], &[], None),
+            tokio::time::advance(NATS_KV_TIMEOUT + std::time::Duration::from_millis(1)),
+        );
+
+        assert_eq!(result.unwrap(), "done after cache miss");
+        assert_eq!(
+            call_count.load(Ordering::SeqCst),
+            1,
+            "tool must be re-executed when get_tool_result KV read times out"
+        );
+    }
+
+    // ── put_tool_result KV timeout ────────────────────────────────────────────
+
+    /// When `put_tool_result` times out, the run continues normally — but the
+    /// tool result is not persisted.  A subsequent crash would cause the tool
+    /// to be re-executed on recovery rather than replayed from cache.
+    #[tokio::test(start_paused = true)]
+    async fn put_tool_result_kv_timeout_run_completes_but_result_not_cached() {
+        use crate::promise_store::mock::HangingPutToolResultStore;
+        use crate::promise_store::PromiseRepository;
+        use crate::tools::mock::MockToolDispatcher;
+
+        let store = Arc::new(HangingPutToolResultStore::new());
+        store.inner.insert_promise(make_test_promise("p1"));
+
+        let tool_use_resp = serde_json::json!({
+            "stop_reason": "tool_use",
+            "content": [{"type": "tool_use", "id": "tu1", "name": "my_tool", "input": {}}]
+        });
+        let end_turn_resp = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "done despite put timeout"}]
+        });
+        let anthropic = Arc::new(mock::SequencedMockAnthropicClient::new(vec![
+            tool_use_resp,
+            end_turn_resp,
+        ]));
+        let dispatcher = Arc::new(MockToolDispatcher::new("tool output"));
+
+        let agent = make_durable_agent(
+            anthropic,
+            dispatcher,
+            Arc::clone(&store) as Arc<dyn PromiseRepository>,
+            "p1",
+        );
+
+        let (result, _) = tokio::join!(
+            agent.run(vec![Message::user_text("go")], &[], None),
+            tokio::time::advance(NATS_KV_TIMEOUT + std::time::Duration::from_millis(1)),
+        );
+
+        assert_eq!(result.unwrap(), "done despite put timeout");
+
+        // Tool result was NOT persisted — put_tool_result timed out.
+        let ck = tool_cache_key("my_tool", &serde_json::json!({}));
+        let cached = store.inner.get_tool_result("acme", "p1", &ck).await.unwrap();
+        assert!(
+            cached.is_none(),
+            "tool result must not be cached when put_tool_result times out"
+        );
+    }
+
+    // ── Non-durable mode ─────────────────────────────────────────────────────
+
+    /// When `promise_store` is `None` the durable promise block is skipped
+    /// entirely and the run completes normally.  This guards the backward-
+    /// compatible non-durable code path that existed before checkpointing was
+    /// added.
+    #[tokio::test]
+    async fn non_durable_run_completes_without_promise_store() {
+        use crate::flag_client::AlwaysOnFlagClient;
+        use crate::tools::{mock::MockToolDispatcher, ToolContext};
+
+        let end_turn_resp = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "non-durable result"}]
+        });
+        let anthropic = Arc::new(mock::SequencedMockAnthropicClient::new(vec![end_turn_resp]));
+
+        let agent = AgentLoop {
+            anthropic_client: anthropic,
+            model: "test".to_string(),
+            max_iterations: 5,
+            tool_dispatcher: Arc::new(MockToolDispatcher::new("unused")),
+            tool_context: Arc::new(ToolContext::for_test("http://127.0.0.1:1", "", "", "")),
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            flag_client: Arc::new(AlwaysOnFlagClient),
+            tenant_id: "acme".to_string(),
+            promise_store: None,
+            promise_id: None,
+        };
+
+        let result = agent
+            .run(vec![Message::user_text("go")], &[], None)
+            .await
+            .unwrap();
+        assert_eq!(result, "non-durable result");
+    }
+
+    // ── recovering flag reset between turns ───────────────────────────────────
+
+    /// After the first tool turn, `recovering` resets to `false`.  A second
+    /// tool turn must dispatch the tool live — the cache is not consulted for
+    /// turns after the recovery catch-up point.
+    ///
+    /// Scenario:
+    ///   1. Checkpoint with non-empty messages → `recovering = true`.
+    ///   2. Turn 1: `cached_tool` result is in KV → replayed without dispatch.
+    ///   3. `recovering` resets to `false`.
+    ///   4. Turn 2: `live_tool` result is NOT in KV, but cache is never checked
+    ///      (recovering=false) → dispatched live.
+    ///   5. Turn 3: end_turn.
+    ///
+    /// The dispatcher must be called exactly once (only turn 2).
+    #[tokio::test]
+    async fn recovering_flag_resets_after_first_tool_turn() {
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::PromiseRepository;
+        use crate::tools::mock::CountingMockToolDispatcher;
+        use std::sync::atomic::Ordering;
+
+        let store = Arc::new(MockPromiseStore::new());
+
+        // Non-empty checkpoint → recovering = true.
+        let mut p = make_test_promise("p1");
+        p.messages = vec![Message::user_text("prior")];
+        store.insert_promise(p);
+
+        // Pre-cache only the turn-1 tool.
+        let ck = tool_cache_key("cached_tool", &serde_json::json!({}));
+        store
+            .put_tool_result("acme", "p1", &ck, "cached output")
+            .await
+            .unwrap();
+
+        let resp_turn1 = serde_json::json!({
+            "stop_reason": "tool_use",
+            "content": [{"type": "tool_use", "id": "id1", "name": "cached_tool", "input": {}}]
+        });
+        let resp_turn2 = serde_json::json!({
+            "stop_reason": "tool_use",
+            "content": [{"type": "tool_use", "id": "id2", "name": "live_tool", "input": {}}]
+        });
+        let resp_end = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "done"}]
+        });
+        let anthropic = Arc::new(mock::SequencedMockAnthropicClient::new(vec![
+            resp_turn1, resp_turn2, resp_end,
+        ]));
+        let (dispatcher, call_count) = CountingMockToolDispatcher::new("live result");
+
+        let agent = make_durable_agent(
+            anthropic,
+            Arc::new(dispatcher),
+            Arc::clone(&store) as Arc<dyn PromiseRepository>,
+            "p1",
+        );
+
+        let result = agent.run(vec![], &[], None).await.unwrap();
+        assert_eq!(result, "done");
+        assert_eq!(
+            call_count.load(Ordering::SeqCst),
+            1,
+            "only turn 2 must be dispatched; turn 1 was recovered from cache"
+        );
+    }
+
+    // ── Failed promise with empty messages ────────────────────────────────────
+
+    /// A `Failed` promise with no checkpoint messages must start the run from
+    /// scratch using the caller-supplied `initial_messages`.
+    ///
+    /// This covers a crash that happened between the initial promise creation
+    /// and the first checkpoint write — before any LLM turn completed.
+    /// `recovering` must stay `false` so tools are dispatched live (no cache
+    /// lookup), and the run uses the caller's messages, not an empty history.
+    #[tokio::test]
+    async fn failed_promise_with_empty_messages_starts_fresh() {
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+        use crate::tools::mock::CountingMockToolDispatcher;
+        use std::sync::atomic::Ordering;
+
+        let store = Arc::new(MockPromiseStore::new());
+
+        // Failed promise with no checkpoint messages.
+        let mut p = make_test_promise("p1");
+        p.status = PromiseStatus::Failed;
+        p.messages = vec![]; // no checkpoint
+        store.insert_promise(p);
+
+        let tool_use_resp = serde_json::json!({
+            "stop_reason": "tool_use",
+            "content": [{"type": "tool_use", "id": "tu1", "name": "my_tool", "input": {}}]
+        });
+        let end_turn_resp = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "fresh start result"}]
+        });
+        let anthropic = Arc::new(mock::SequencedMockAnthropicClient::new(vec![
+            tool_use_resp,
+            end_turn_resp,
+        ]));
+        let (dispatcher, call_count) = CountingMockToolDispatcher::new("tool output");
+
+        let agent = make_durable_agent(
+            anthropic,
+            Arc::new(dispatcher),
+            Arc::clone(&store) as Arc<dyn PromiseRepository>,
+            "p1",
+        );
+
+        // Pass explicit initial messages to verify the run starts from them,
+        // not from an empty history.
+        let result = agent
+            .run(vec![Message::user_text("caller initial message")], &[], None)
+            .await
+            .unwrap();
+        assert_eq!(result, "fresh start result");
+
+        // Tool was dispatched live — no recovery cache lookup.
+        assert_eq!(
+            call_count.load(Ordering::SeqCst),
+            1,
+            "tool must be dispatched live when Failed promise has no checkpoint messages"
+        );
+
+        // Promise is now Resolved.
+        let (p, _) = store.get_promise("acme", "p1").await.unwrap().unwrap();
+        assert_eq!(p.status, PromiseStatus::Resolved);
+    }
+
+    // ── Initial get_promise failures ─────────────────────────────────────────
+
+    /// When the initial `get_promise` KV read times out, the run must start
+    /// fresh from the caller's `initial_messages` rather than blocking.
+    ///
+    /// `checkpoint` stays `None` so all checkpoint/terminal writes are skipped
+    /// for the run, but the run itself completes normally.
+    #[tokio::test(start_paused = true)]
+    async fn initial_get_promise_timeout_starts_fresh() {
+        use crate::promise_store::mock::HangingGetPromiseStore;
+        use crate::promise_store::PromiseRepository;
+        use crate::tools::mock::MockToolDispatcher;
+
+        let store = Arc::new(HangingGetPromiseStore::new());
+
+        let end_turn_resp = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "fresh run"}]
+        });
+        let anthropic =
+            Arc::new(mock::SequencedMockAnthropicClient::new(vec![end_turn_resp]));
+        let dispatcher = Arc::new(MockToolDispatcher::new("unused"));
+
+        let agent = make_durable_agent(
+            anthropic,
+            dispatcher,
+            Arc::clone(&store) as Arc<dyn PromiseRepository>,
+            "p1",
+        );
+
+        let (result, _) = tokio::join!(
+            agent.run(vec![Message::user_text("initial")], &[], None),
+            tokio::time::advance(NATS_KV_TIMEOUT + std::time::Duration::from_millis(1)),
+        );
+
+        assert_eq!(
+            result.unwrap(),
+            "fresh run",
+            "run must complete normally when initial KV load times out"
+        );
+    }
+
+    /// When the initial `get_promise` KV read returns an error, the run must
+    /// start fresh from the caller's `initial_messages` rather than returning
+    /// the error to the caller.
+    #[tokio::test]
+    async fn initial_get_promise_error_starts_fresh() {
+        use crate::promise_store::mock::ErrorGetPromiseStore;
+        use crate::promise_store::PromiseRepository;
+        use crate::tools::mock::MockToolDispatcher;
+
+        let store = Arc::new(ErrorGetPromiseStore::new());
+
+        let end_turn_resp = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "fresh run after error"}]
+        });
+        let anthropic =
+            Arc::new(mock::SequencedMockAnthropicClient::new(vec![end_turn_resp]));
+        let dispatcher = Arc::new(MockToolDispatcher::new("unused"));
+
+        let agent = make_durable_agent(
+            anthropic,
+            dispatcher,
+            Arc::clone(&store) as Arc<dyn PromiseRepository>,
+            "p1",
+        );
+
+        let result = agent
+            .run(vec![Message::user_text("initial")], &[], None)
+            .await
+            .unwrap();
+        assert_eq!(
+            result,
+            "fresh run after error",
+            "run must start fresh when initial KV read returns an error"
+        );
+    }
+
+    // ── effective_prompt fallback ─────────────────────────────────────────────
+
+    /// When recovering from a checkpoint that has no stored `system_prompt`
+    /// (e.g. a promise written before the field was introduced), the agent
+    /// must fall back to the caller-supplied prompt rather than using `None`.
+    ///
+    /// This ensures the LLM is not silently run without a system prompt after
+    /// a schema migration.
+    #[tokio::test]
+    async fn effective_prompt_falls_back_to_caller_when_checkpoint_has_no_system_prompt() {
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::PromiseRepository;
+        use crate::tools::mock::MockToolDispatcher;
+        use std::sync::Mutex;
+
+        struct RecordingAnthropicClient {
+            bodies: Arc<Mutex<Vec<serde_json::Value>>>,
+            response: serde_json::Value,
+        }
+        impl AnthropicClient for RecordingAnthropicClient {
+            fn complete<'a>(
+                &'a self,
+                body: serde_json::Value,
+            ) -> std::pin::Pin<
+                Box<
+                    dyn std::future::Future<
+                            Output = Result<serde_json::Value, reqwest::Error>,
+                        > + Send
+                        + 'a,
+                >,
+            > {
+                self.bodies.lock().unwrap().push(body);
+                let resp = self.response.clone();
+                Box::pin(async move { Ok(resp) })
+            }
+        }
+
+        let store = Arc::new(MockPromiseStore::new());
+
+        // Checkpoint with non-empty messages but NO system_prompt.
+        let mut p = make_test_promise("p1");
+        p.messages = vec![Message::user_text("prior turn")];
+        p.system_prompt = None; // old promise — field not persisted
+        store.insert_promise(p);
+
+        let end_turn_resp = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "done"}]
+        });
+        let bodies: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(vec![]));
+        let anthropic = Arc::new(RecordingAnthropicClient {
+            bodies: Arc::clone(&bodies),
+            response: end_turn_resp,
+        });
+
+        let agent = make_durable_agent(
+            anthropic,
+            Arc::new(MockToolDispatcher::new("ok")),
+            Arc::clone(&store) as Arc<dyn PromiseRepository>,
+            "p1",
+        );
+
+        agent
+            .run(vec![], &[], Some("caller fallback prompt"))
+            .await
+            .unwrap();
+
+        let recorded = bodies.lock().unwrap();
+        assert_eq!(recorded.len(), 1);
+        let system_text = recorded[0]["system"][0]["text"]
+            .as_str()
+            .expect("system[0].text must be present");
+        assert_eq!(
+            system_text,
+            "caller fallback prompt",
+            "must fall back to caller-supplied prompt when checkpoint has no system_prompt"
+        );
+    }
+
+    // ── MCP tool error ────────────────────────────────────────────────────────
+
+    /// When an MCP server returns an error from `call_tool`, the error string
+    /// must be forwarded to the model as the tool result so the agent can
+    /// decide how to handle it.  The run must not abort — the error is treated
+    /// like any other tool output.
+    #[tokio::test]
+    async fn mcp_tool_error_is_forwarded_to_model_as_tool_result() {
+        use crate::flag_client::AlwaysOnFlagClient;
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::PromiseRepository;
+        use crate::tools::{tool_def, ToolContext, ToolDispatcher};
+        use std::future::Future;
+        use std::pin::Pin;
+        use std::sync::Mutex;
+
+        struct ErrorMcpClient;
+        impl trogon_mcp::McpCallTool for ErrorMcpClient {
+            fn call_tool<'a>(
+                &'a self,
+                _name: &'a str,
+                _arguments: &'a serde_json::Value,
+            ) -> Pin<Box<dyn Future<Output = Result<String, String>> + Send + 'a>> {
+                Box::pin(async { Err("tool not found on server".to_string()) })
+            }
+        }
+
+        // Capture the second Anthropic request to inspect the tool-result message.
+        struct RecordingClient {
+            calls: Arc<Mutex<Vec<serde_json::Value>>>,
+            responses: Mutex<std::collections::VecDeque<serde_json::Value>>,
+        }
+        impl AnthropicClient for RecordingClient {
+            fn complete<'a>(
+                &'a self,
+                body: serde_json::Value,
+            ) -> std::pin::Pin<
+                Box<
+                    dyn std::future::Future<
+                            Output = Result<serde_json::Value, reqwest::Error>,
+                        > + Send
+                        + 'a,
+                >,
+            > {
+                self.calls.lock().unwrap().push(body);
+                let resp = self
+                    .responses
+                    .lock()
+                    .unwrap()
+                    .pop_front()
+                    .expect("no more responses");
+                Box::pin(async move { Ok(resp) })
+            }
+        }
+
+        let store = Arc::new(MockPromiseStore::new());
+        store.insert_promise(make_test_promise("p1"));
+
+        let tool_use_resp = serde_json::json!({
+            "stop_reason": "tool_use",
+            "content": [{"type": "tool_use", "id": "tu1", "name": "mcp__srv__search", "input": {}}]
+        });
+        let end_turn_resp = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "handled error"}]
+        });
+
+        let calls: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(vec![]));
+        let anthropic = Arc::new(RecordingClient {
+            calls: Arc::clone(&calls),
+            responses: Mutex::new([tool_use_resp, end_turn_resp].into()),
+        });
+
+        struct NeverDispatcher;
+        impl ToolDispatcher for NeverDispatcher {
+            fn dispatch<'a>(
+                &'a self,
+                name: &'a str,
+                _input: &'a serde_json::Value,
+            ) -> Pin<Box<dyn Future<Output = String> + Send + 'a>> {
+                panic!("built-in dispatcher must not be called; tool '{name}' is MCP");
+            }
+        }
+
+        let agent = AgentLoop {
+            anthropic_client: anthropic,
+            model: "test".to_string(),
+            max_iterations: 5,
+            tool_dispatcher: Arc::new(NeverDispatcher),
+            tool_context: Arc::new(ToolContext::for_test("http://127.0.0.1:1", "", "", "")),
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![tool_def(
+                "mcp__srv__search",
+                "search",
+                serde_json::json!({"type": "object"}),
+            )],
+            mcp_dispatch: vec![(
+                "mcp__srv__search".to_string(),
+                "search".to_string(),
+                Arc::new(ErrorMcpClient) as Arc<dyn trogon_mcp::McpCallTool>,
+            )],
+            flag_client: Arc::new(AlwaysOnFlagClient),
+            tenant_id: "acme".to_string(),
+            promise_store: Some(Arc::clone(&store) as Arc<dyn PromiseRepository>),
+            promise_id: Some("p1".to_string()),
+        };
+
+        let result = agent.run(vec![Message::user_text("go")], &[], None).await.unwrap();
+        assert_eq!(result, "handled error");
+
+        // The second Anthropic call must carry the MCP error as the tool result.
+        let recorded = calls.lock().unwrap();
+        assert_eq!(recorded.len(), 2, "expected exactly 2 Anthropic calls");
+        let messages = recorded[1]["messages"].as_array().unwrap();
+        let last_msg = messages.last().unwrap();
+        // Tool results are in a user message with ToolResult content blocks.
+        let tool_result_content = last_msg["content"][0]["content"]
+            .as_str()
+            .expect("tool result content must be a string");
+        assert!(
+            tool_result_content.starts_with("Tool error:"),
+            "MCP error must be prefixed 'Tool error:'; got: {tool_result_content}"
+        );
+        assert!(
+            tool_result_content.contains("tool not found on server"),
+            "MCP error message must be included; got: {tool_result_content}"
+        );
+    }
+
+    // ── get_tool_result Err during recovery ──────────────────────────────────
+
+    /// When `get_tool_result` returns an error (not timeout) during recovery,
+    /// the Err arm is treated as a cache miss and the tool is re-executed.
+    #[tokio::test]
+    async fn get_tool_result_error_treats_as_cache_miss_and_reexecutes() {
+        use crate::promise_store::mock::ErrorGetToolResultStore;
+        use crate::promise_store::PromiseRepository;
+        use crate::tools::mock::CountingMockToolDispatcher;
+        use std::sync::atomic::Ordering;
+
+        let store = Arc::new(ErrorGetToolResultStore::new());
+
+        // Non-empty checkpoint → recovering = true.
+        let mut p = make_test_promise("p1");
+        p.messages = vec![Message::user_text("prior turn")];
+        store.inner.insert_promise(p);
+
+        let tool_use_resp = serde_json::json!({
+            "stop_reason": "tool_use",
+            "content": [{"type": "tool_use", "id": "tu1", "name": "my_tool", "input": {}}]
+        });
+        let end_turn_resp = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "done after error"}]
+        });
+        let anthropic = Arc::new(mock::SequencedMockAnthropicClient::new(vec![
+            tool_use_resp,
+            end_turn_resp,
+        ]));
+        let (dispatcher, call_count) = CountingMockToolDispatcher::new("live result");
+
+        let agent = make_durable_agent(
+            anthropic,
+            Arc::new(dispatcher),
+            Arc::clone(&store) as Arc<dyn PromiseRepository>,
+            "p1",
+        );
+
+        let result = agent.run(vec![], &[], None).await.unwrap();
+        assert_eq!(result, "done after error");
+        assert_eq!(
+            call_count.load(Ordering::SeqCst),
+            1,
+            "tool must be re-executed when get_tool_result returns an error"
+        );
+    }
+
+    // ── MCP tool execution timeout ────────────────────────────────────────────
+
+    /// When an MCP `call_tool` hangs past `TOOL_EXECUTION_TIMEOUT`, the run
+    /// must continue and the model must receive a timed-out error string.
+    #[tokio::test(start_paused = true)]
+    async fn mcp_tool_execution_timeout_returns_error_string() {
+        use crate::flag_client::AlwaysOnFlagClient;
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::PromiseRepository;
+        use crate::tools::{tool_def, ToolContext, ToolDispatcher};
+        use std::future::Future;
+        use std::pin::Pin;
+
+        struct HangingMcpClient;
+        impl trogon_mcp::McpCallTool for HangingMcpClient {
+            fn call_tool<'a>(
+                &'a self,
+                _name: &'a str,
+                _arguments: &'a serde_json::Value,
+            ) -> Pin<Box<dyn Future<Output = Result<String, String>> + Send + 'a>> {
+                Box::pin(std::future::pending())
+            }
+        }
+
+        struct NeverDispatcher;
+        impl ToolDispatcher for NeverDispatcher {
+            fn dispatch<'a>(
+                &'a self,
+                name: &'a str,
+                _input: &'a serde_json::Value,
+            ) -> Pin<Box<dyn Future<Output = String> + Send + 'a>> {
+                panic!("built-in dispatcher must not be called for MCP tool '{name}'");
+            }
+        }
+
+        let store = Arc::new(MockPromiseStore::new());
+        store.insert_promise(make_test_promise("p1"));
+
+        let tool_use_resp = serde_json::json!({
+            "stop_reason": "tool_use",
+            "content": [{"type": "tool_use", "id": "tu1", "name": "mcp__srv__search", "input": {}}]
+        });
+        let end_turn_resp = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "done after mcp timeout"}]
+        });
+        let anthropic = Arc::new(mock::SequencedMockAnthropicClient::new(vec![
+            tool_use_resp,
+            end_turn_resp,
+        ]));
+
+        let agent = AgentLoop {
+            anthropic_client: anthropic,
+            model: "test".to_string(),
+            max_iterations: 5,
+            tool_dispatcher: Arc::new(NeverDispatcher),
+            tool_context: Arc::new(ToolContext::for_test("http://127.0.0.1:1", "", "", "")),
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![tool_def(
+                "mcp__srv__search",
+                "search",
+                serde_json::json!({"type": "object"}),
+            )],
+            mcp_dispatch: vec![(
+                "mcp__srv__search".to_string(),
+                "search".to_string(),
+                Arc::new(HangingMcpClient) as Arc<dyn trogon_mcp::McpCallTool>,
+            )],
+            flag_client: Arc::new(AlwaysOnFlagClient),
+            tenant_id: "acme".to_string(),
+            promise_store: Some(Arc::clone(&store) as Arc<dyn PromiseRepository>),
+            promise_id: Some("p1".to_string()),
+        };
+
+        let (result, _) = tokio::join!(
+            agent.run(vec![Message::user_text("go")], &[], None),
+            tokio::time::advance(TOOL_EXECUTION_TIMEOUT + std::time::Duration::from_secs(1)),
+        );
+
+        assert_eq!(result.unwrap(), "done after mcp timeout");
+
+        // Timed-out result must be cached so crash recovery does not re-hang.
+        // Cache key uses the prefixed name from the LLM response, not `original`.
+        let ck = tool_cache_key("mcp__srv__search", &serde_json::json!({}));
+        let cached = store
+            .get_tool_result("acme", "p1", &ck)
+            .await
+            .unwrap()
+            .expect("timed-out MCP result must be cached");
+        assert!(
+            cached.contains("timed out"),
+            "cached result must describe the timeout; got: {cached}"
+        );
+    }
+
+    // ── put_tool_result Err ───────────────────────────────────────────────────
+
+    /// When `put_tool_result` returns an error (not timeout), the run continues
+    /// normally — the error is logged but does not abort. The result is not
+    /// cached, so a crash would cause re-execution on recovery.
+    #[tokio::test]
+    async fn put_tool_result_error_run_completes_but_result_not_cached() {
+        use crate::promise_store::mock::ErrorPutToolResultStore;
+        use crate::promise_store::PromiseRepository;
+        use crate::tools::mock::MockToolDispatcher;
+
+        let store = Arc::new(ErrorPutToolResultStore::new());
+        store.inner.insert_promise(make_test_promise("p1"));
+
+        let tool_use_resp = serde_json::json!({
+            "stop_reason": "tool_use",
+            "content": [{"type": "tool_use", "id": "tu1", "name": "my_tool", "input": {}}]
+        });
+        let end_turn_resp = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "done despite put error"}]
+        });
+        let anthropic = Arc::new(mock::SequencedMockAnthropicClient::new(vec![
+            tool_use_resp,
+            end_turn_resp,
+        ]));
+
+        let agent = make_durable_agent(
+            anthropic,
+            Arc::new(MockToolDispatcher::new("tool output")),
+            Arc::clone(&store) as Arc<dyn PromiseRepository>,
+            "p1",
+        );
+
+        let result = agent.run(vec![Message::user_text("go")], &[], None).await.unwrap();
+        assert_eq!(result, "done despite put error");
+
+        // Result was not persisted — put failed.
+        let ck = tool_cache_key("my_tool", &serde_json::json!({}));
+        let cached = store.inner.get_tool_result("acme", "p1", &ck).await.unwrap();
+        assert!(
+            cached.is_none(),
+            "tool result must not be cached when put_tool_result returns an error"
+        );
+    }
+
+    // ── CAS reload get_promise Err → checkpoint = None ────────────────────────
+
+    /// When `get_promise` returns an error during the CAS conflict reload,
+    /// `checkpoint` is set to `None` — further checkpointing is disabled but
+    /// the run continues to completion normally.
+    #[tokio::test]
+    async fn cas_reload_get_promise_error_disables_checkpointing_and_run_completes() {
+        use crate::promise_store::mock::ErrorReloadStore;
+        use crate::promise_store::PromiseRepository;
+        use crate::tools::mock::MockToolDispatcher;
+
+        let store = Arc::new(ErrorReloadStore::new());
+        store.inner.insert_promise(make_test_promise("p1"));
+
+        let tool_use_resp = serde_json::json!({
+            "stop_reason": "tool_use",
+            "content": [{"type": "tool_use", "id": "tu1", "name": "my_tool", "input": {}}]
+        });
+        let end_turn_resp = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "done despite reload error"}]
+        });
+        let anthropic = Arc::new(mock::SequencedMockAnthropicClient::new(vec![
+            tool_use_resp,
+            end_turn_resp,
+        ]));
+
+        let agent = make_durable_agent(
+            anthropic,
+            Arc::new(MockToolDispatcher::new("ok")),
+            Arc::clone(&store) as Arc<dyn PromiseRepository>,
+            "p1",
+        );
+
+        let result = agent.run(vec![Message::user_text("go")], &[], None).await.unwrap();
+        assert_eq!(
+            result,
+            "done despite reload error",
+            "run must complete normally when CAS reload get_promise returns an error"
+        );
+
+        // checkpoint=None means terminal Resolved write was skipped.
+        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        assert_eq!(
+            p.status,
+            crate::promise_store::PromiseStatus::Running,
+            "promise must remain Running — terminal write skipped when checkpoint=None"
+        );
+    }
+
     // ── retry_after_delay ─────────────────────────────────────────────────────
 
     /// Valid integer-seconds value → parsed directly.
@@ -2079,5 +3764,1418 @@ mod tests {
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert("retry-after", "0".parse().unwrap());
         assert_eq!(retry_after_delay(&headers), 0);
+    }
+
+    // ── write_promise_terminal KV timeout ─────────────────────────────────────
+
+    /// When the `update_promise` call inside `write_promise_terminal` hangs past
+    /// `NATS_KV_TIMEOUT`, the function times out, logs a warning, and returns
+    /// without updating the promise.  The run still returns the error to the
+    /// caller — the timeout does NOT swallow the original error.
+    ///
+    /// Uses Tokio's mock clock so the test completes instantly.
+    #[tokio::test(start_paused = true)]
+    async fn write_promise_terminal_kv_timeout_leaves_promise_running() {
+        use crate::promise_store::mock::HangingUpdateStore;
+        use crate::promise_store::PromiseRepository;
+        use crate::tools::mock::MockToolDispatcher;
+
+        let store = Arc::new(HangingUpdateStore::new());
+        store.inner.insert_promise(make_test_promise("p1"));
+
+        // "max_tokens" is an unrecognised stop_reason that goes directly to the
+        // `write_promise_terminal` path without any prior checkpoint write.
+        let bad_resp = serde_json::json!({
+            "stop_reason": "max_tokens",
+            "content": [{"type": "text", "text": "truncated"}]
+        });
+        let anthropic = Arc::new(mock::SequencedMockAnthropicClient::new(vec![bad_resp]));
+        let dispatcher = Arc::new(MockToolDispatcher::new("unused"));
+
+        let agent = make_durable_agent(
+            anthropic,
+            dispatcher,
+            Arc::clone(&store) as Arc<dyn PromiseRepository>,
+            "p1",
+        );
+
+        let (result, _) = tokio::join!(
+            agent.run(vec![Message::user_text("go")], &[], None),
+            tokio::time::advance(NATS_KV_TIMEOUT + std::time::Duration::from_millis(1)),
+        );
+
+        assert!(
+            matches!(result, Err(AgentError::UnexpectedStopReason(_))),
+            "run must still return UnexpectedStopReason when terminal write times out; got: {result:?}"
+        );
+
+        // update_promise never returned — promise status is still Running.
+        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        assert_eq!(
+            p.status,
+            crate::promise_store::PromiseStatus::Running,
+            "promise must remain Running when write_promise_terminal KV write times out"
+        );
+    }
+
+    // ── sort_json_keys — nested and array inputs ──────────────────────────────
+
+    /// `sort_json_keys` must recursively sort nested object keys so the cache
+    /// key is identical regardless of deep key ordering.
+    #[test]
+    fn tool_cache_key_stable_for_deeply_nested_objects() {
+        let input_a =
+            serde_json::json!({"outer": {"z": 3, "a": 1, "m": {"y": 9, "x": 7}}});
+        let input_b =
+            serde_json::json!({"outer": {"a": 1, "m": {"x": 7, "y": 9}, "z": 3}});
+        assert_eq!(
+            tool_cache_key("t", &input_a),
+            tool_cache_key("t", &input_b),
+            "nested object key ordering must not affect the cache key"
+        );
+    }
+
+    /// Arrays of objects: element order is preserved but each object's keys are
+    /// sorted, so two inputs differing only in intra-object key order produce
+    /// the same cache key.
+    #[test]
+    fn tool_cache_key_stable_for_arrays_of_objects() {
+        let input_a = serde_json::json!([{"z": 1, "a": 2}, {"b": 3, "c": 4}]);
+        let input_b = serde_json::json!([{"a": 2, "z": 1}, {"c": 4, "b": 3}]);
+        assert_eq!(
+            tool_cache_key("t", &input_a),
+            tool_cache_key("t", &input_b),
+            "intra-object key order within array elements must not affect the cache key"
+        );
+    }
+
+    // ── run_chat ──────────────────────────────────────────────────────────────
+
+    /// `run_chat` on `end_turn` returns the text content and the full updated
+    /// message history, including the appended assistant turn.
+    #[tokio::test]
+    async fn run_chat_end_turn_returns_text_and_updated_messages() {
+        use crate::flag_client::AlwaysOnFlagClient;
+        use crate::tools::{mock::MockToolDispatcher, ToolContext};
+
+        let end_turn_resp = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "hello back"}]
+        });
+        let anthropic =
+            Arc::new(mock::SequencedMockAnthropicClient::new(vec![end_turn_resp]));
+
+        let agent = AgentLoop {
+            anthropic_client: anthropic,
+            model: "test".to_string(),
+            max_iterations: 5,
+            tool_dispatcher: Arc::new(MockToolDispatcher::new("unused")),
+            tool_context: Arc::new(ToolContext::for_test("http://127.0.0.1:1", "", "", "")),
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            flag_client: Arc::new(AlwaysOnFlagClient),
+            tenant_id: "acme".to_string(),
+            promise_store: None,
+            promise_id: None,
+        };
+
+        let (text, messages) = agent
+            .run_chat(vec![Message::user_text("hello")], &[], None)
+            .await
+            .unwrap();
+
+        assert_eq!(text, "hello back");
+        // [user("hello"), assistant("hello back")]
+        assert_eq!(messages.len(), 2, "expected 2 messages: initial user + assistant end_turn");
+        assert_eq!(messages[0].role, "user");
+        assert_eq!(messages[1].role, "assistant");
+        assert!(
+            matches!(&messages[1].content[0], ContentBlock::Text { text } if text == "hello back"),
+            "final assistant message must contain the response text"
+        );
+    }
+
+    /// `run_chat` with a tool_use turn extends the history with all exchanges:
+    /// initial user, assistant tool_use, user tool_results, assistant end_turn.
+    #[tokio::test]
+    async fn run_chat_tool_use_extends_messages() {
+        use crate::flag_client::AlwaysOnFlagClient;
+        use crate::tools::{mock::MockToolDispatcher, ToolContext};
+
+        let tool_use_resp = serde_json::json!({
+            "stop_reason": "tool_use",
+            "content": [{"type": "tool_use", "id": "tu1", "name": "my_tool", "input": {}}]
+        });
+        let end_turn_resp = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "all done"}]
+        });
+        let anthropic = Arc::new(mock::SequencedMockAnthropicClient::new(vec![
+            tool_use_resp,
+            end_turn_resp,
+        ]));
+
+        let agent = AgentLoop {
+            anthropic_client: anthropic,
+            model: "test".to_string(),
+            max_iterations: 5,
+            tool_dispatcher: Arc::new(MockToolDispatcher::new("tool result")),
+            tool_context: Arc::new(ToolContext::for_test("http://127.0.0.1:1", "", "", "")),
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            flag_client: Arc::new(AlwaysOnFlagClient),
+            tenant_id: "acme".to_string(),
+            promise_store: None,
+            promise_id: None,
+        };
+
+        let (text, messages) = agent
+            .run_chat(vec![Message::user_text("go")], &[], None)
+            .await
+            .unwrap();
+
+        assert_eq!(text, "all done");
+        // [user("go"), assistant(tool_use), user(tool_result), assistant(end_turn)]
+        assert_eq!(
+            messages.len(),
+            4,
+            "expected 4 messages: initial + tool_use + tool_result + end_turn"
+        );
+        assert_eq!(messages[0].role, "user");   // initial
+        assert_eq!(messages[1].role, "assistant"); // tool_use
+        assert_eq!(messages[2].role, "user");   // tool_result
+        assert_eq!(messages[3].role, "assistant"); // end_turn
+        assert!(
+            matches!(&messages[3].content[0], ContentBlock::Text { text } if text == "all done"),
+            "final assistant message must contain 'all done'"
+        );
+    }
+
+    /// `run_chat` returns `Err(MaxIterationsReached)` when the loop exhausts
+    /// its iteration budget without ever reaching `end_turn`.
+    #[tokio::test]
+    async fn run_chat_max_iterations_returns_error() {
+        use crate::flag_client::AlwaysOnFlagClient;
+        use crate::tools::{mock::MockToolDispatcher, ToolContext};
+
+        // One tool_use response and max_iterations = 1 — loop exhausts immediately.
+        let tool_use_resp = serde_json::json!({
+            "stop_reason": "tool_use",
+            "content": [{"type": "tool_use", "id": "tu1", "name": "my_tool", "input": {}}]
+        });
+        let anthropic =
+            Arc::new(mock::SequencedMockAnthropicClient::new(vec![tool_use_resp]));
+
+        let agent = AgentLoop {
+            anthropic_client: anthropic,
+            model: "test".to_string(),
+            max_iterations: 1,
+            tool_dispatcher: Arc::new(MockToolDispatcher::new("ok")),
+            tool_context: Arc::new(ToolContext::for_test("http://127.0.0.1:1", "", "", "")),
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            flag_client: Arc::new(AlwaysOnFlagClient),
+            tenant_id: "acme".to_string(),
+            promise_store: None,
+            promise_id: None,
+        };
+
+        let result = agent
+            .run_chat(vec![Message::user_text("go")], &[], None)
+            .await;
+
+        assert!(
+            matches!(result, Err(AgentError::MaxIterationsReached)),
+            "expected MaxIterationsReached when all iterations are tool_use; got: {result:?}"
+        );
+    }
+
+    // ── run_chat error paths ──────────────────────────────────────────────────
+
+    /// `run_chat` must propagate HTTP errors as `Err(AgentError::Http)`.
+    ///
+    /// Unlike `run()`, `run_chat()` has no promise store interaction — the
+    /// error just bubbles straight up via `map_err(AgentError::Http)?`.
+    #[tokio::test]
+    async fn run_chat_http_error_returns_error() {
+        use crate::flag_client::AlwaysOnFlagClient;
+        use crate::tools::{mock::MockToolDispatcher, ToolContext};
+        use std::future::Future;
+        use std::pin::Pin;
+        use std::sync::Mutex;
+
+        struct ErrorClient(Arc<Mutex<Option<reqwest::Error>>>);
+        impl AnthropicClient for ErrorClient {
+            fn complete<'a>(
+                &'a self,
+                _body: serde_json::Value,
+            ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, reqwest::Error>> + Send + 'a>>
+            {
+                let e = self.0.lock().unwrap().take().expect("error already consumed");
+                Box::pin(async move { Err(e) })
+            }
+        }
+
+        // A URL-parse error gives a real reqwest::Error without a network call.
+        let err = reqwest::Client::new()
+            .get("not a url at all:///")
+            .build()
+            .unwrap_err();
+
+        let agent = AgentLoop {
+            anthropic_client: Arc::new(ErrorClient(Arc::new(Mutex::new(Some(err))))),
+            model: "test".to_string(),
+            max_iterations: 5,
+            tool_dispatcher: Arc::new(MockToolDispatcher::new("unused")),
+            tool_context: Arc::new(ToolContext::for_test("http://127.0.0.1:1", "", "", "")),
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            flag_client: Arc::new(AlwaysOnFlagClient),
+            tenant_id: "acme".to_string(),
+            promise_store: None,
+            promise_id: None,
+        };
+
+        let result = agent
+            .run_chat(vec![Message::user_text("hello")], &[], None)
+            .await;
+
+        assert!(
+            matches!(result, Err(AgentError::Http(_))),
+            "run_chat must return Err(AgentError::Http) on Anthropic HTTP error; got: {result:?}"
+        );
+    }
+
+    /// `run_chat` must return `Err(UnexpectedStopReason("Deserialization error: ..."))`
+    /// when the Anthropic response JSON cannot be deserialized into `AnthropicResponse`.
+    #[tokio::test]
+    async fn run_chat_deserialization_error_returns_error() {
+        use crate::flag_client::AlwaysOnFlagClient;
+        use crate::tools::{mock::MockToolDispatcher, ToolContext};
+
+        let malformed = serde_json::json!({"not_a_response": true});
+        let anthropic =
+            Arc::new(mock::SequencedMockAnthropicClient::new(vec![malformed]));
+
+        let agent = AgentLoop {
+            anthropic_client: anthropic,
+            model: "test".to_string(),
+            max_iterations: 5,
+            tool_dispatcher: Arc::new(MockToolDispatcher::new("unused")),
+            tool_context: Arc::new(ToolContext::for_test("http://127.0.0.1:1", "", "", "")),
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            flag_client: Arc::new(AlwaysOnFlagClient),
+            tenant_id: "acme".to_string(),
+            promise_store: None,
+            promise_id: None,
+        };
+
+        let result = agent
+            .run_chat(vec![Message::user_text("hello")], &[], None)
+            .await;
+
+        match &result {
+            Err(AgentError::UnexpectedStopReason(s)) => {
+                assert!(
+                    s.contains("Deserialization"),
+                    "error must mention Deserialization; got: {s}"
+                );
+            }
+            other => panic!("expected UnexpectedStopReason, got: {other:?}"),
+        }
+    }
+
+    /// `run_chat` must return `Err(UnexpectedStopReason(reason))` for any
+    /// stop_reason that is neither `"end_turn"` nor `"tool_use"`.
+    #[tokio::test]
+    async fn run_chat_unknown_stop_reason_returns_error() {
+        use crate::flag_client::AlwaysOnFlagClient;
+        use crate::tools::{mock::MockToolDispatcher, ToolContext};
+
+        let resp = serde_json::json!({
+            "stop_reason": "max_tokens",
+            "content": [{"type": "text", "text": "truncated"}]
+        });
+        let anthropic = Arc::new(mock::SequencedMockAnthropicClient::new(vec![resp]));
+
+        let agent = AgentLoop {
+            anthropic_client: anthropic,
+            model: "test".to_string(),
+            max_iterations: 5,
+            tool_dispatcher: Arc::new(MockToolDispatcher::new("unused")),
+            tool_context: Arc::new(ToolContext::for_test("http://127.0.0.1:1", "", "", "")),
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            flag_client: Arc::new(AlwaysOnFlagClient),
+            tenant_id: "acme".to_string(),
+            promise_store: None,
+            promise_id: None,
+        };
+
+        let result = agent
+            .run_chat(vec![Message::user_text("hello")], &[], None)
+            .await;
+
+        match &result {
+            Err(AgentError::UnexpectedStopReason(s)) => {
+                assert_eq!(
+                    s, "max_tokens",
+                    "error must contain the original stop_reason; got: {s}"
+                );
+            }
+            other => panic!("expected UnexpectedStopReason(\"max_tokens\"), got: {other:?}"),
+        }
+    }
+
+    // ── end_turn Resolved write edge cases ────────────────────────────────────
+
+    /// When `update_promise` hangs during the `end_turn` Resolved write,
+    /// `NATS_KV_TIMEOUT` fires, a warning is logged, and the run still returns
+    /// `Ok(text)`.  The promise stays `Running` — the terminal write was never
+    /// committed.
+    ///
+    /// Distinct from `update_promise_kv_timeout_disables_checkpointing_and_run_completes`:
+    /// that test times out a checkpoint write in the tool_use branch, which
+    /// sets `checkpoint = None`.  Here `checkpoint` is still `Some` when the
+    /// end_turn Resolved write hangs, exercising the `Err(_)` arm directly.
+    #[tokio::test(start_paused = true)]
+    async fn end_turn_resolved_write_timeout_run_still_completes() {
+        use crate::promise_store::mock::HangingUpdateStore;
+        use crate::promise_store::PromiseRepository;
+        use crate::tools::mock::MockToolDispatcher;
+
+        let store = Arc::new(HangingUpdateStore::new());
+        store.inner.insert_promise(make_test_promise("p1"));
+
+        // Direct end_turn with no preceding tool_use.  The only update_promise
+        // call is the Resolved write inside end_turn.
+        let end_turn_resp = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "finished"}]
+        });
+        let anthropic =
+            Arc::new(mock::SequencedMockAnthropicClient::new(vec![end_turn_resp]));
+
+        let agent = make_durable_agent(
+            anthropic,
+            Arc::new(MockToolDispatcher::new("unused")),
+            Arc::clone(&store) as Arc<dyn PromiseRepository>,
+            "p1",
+        );
+
+        let (result, _) = tokio::join!(
+            agent.run(vec![Message::user_text("go")], &[], None),
+            tokio::time::advance(NATS_KV_TIMEOUT + std::time::Duration::from_millis(1)),
+        );
+
+        assert_eq!(
+            result.unwrap(),
+            "finished",
+            "run must return Ok(text) even when the end_turn Resolved write times out"
+        );
+
+        // update_promise timed out — promise status is still Running.
+        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        assert_eq!(
+            p.status,
+            crate::promise_store::PromiseStatus::Running,
+            "promise must remain Running when the end_turn Resolved write times out"
+        );
+    }
+
+    /// When `update_promise` returns an error during the `end_turn` Resolved
+    /// write, a warning is logged and the run still returns `Ok(text)`.  The
+    /// promise status stays `Running` — the Resolved write was never committed.
+    ///
+    /// Uses `CasConflictOnceStore` with a direct end_turn (no tool_use) so
+    /// the only update_promise call is the Resolved write, hitting the
+    /// `Ok(Err(e))` arm in the end_turn block.
+    #[tokio::test]
+    async fn end_turn_resolved_write_error_run_still_completes() {
+        use crate::promise_store::mock::CasConflictOnceStore;
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+        use crate::tools::mock::MockToolDispatcher;
+
+        let store = Arc::new(CasConflictOnceStore::new());
+        store.inner.insert_promise(make_test_promise("p1"));
+
+        let end_turn_resp = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "done"}]
+        });
+        let anthropic =
+            Arc::new(mock::SequencedMockAnthropicClient::new(vec![end_turn_resp]));
+
+        let agent = make_durable_agent(
+            anthropic,
+            Arc::new(MockToolDispatcher::new("unused")),
+            Arc::clone(&store) as Arc<dyn PromiseRepository>,
+            "p1",
+        );
+
+        let result = agent.run(vec![Message::user_text("go")], &[], None).await;
+        assert_eq!(
+            result.unwrap(),
+            "done",
+            "run must return Ok(text) even when the Resolved write returns an error"
+        );
+
+        // update_promise returned an error — status was never updated to Resolved.
+        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        assert_eq!(
+            p.status,
+            PromiseStatus::Running,
+            "promise must remain Running when the end_turn Resolved write returns an error"
+        );
+    }
+
+    // ── end_turn multi-block text join ────────────────────────────────────────
+
+    /// When `end_turn` content contains multiple `Text` blocks they are joined
+    /// with `"\n"`.  All existing tests pass a single text block; this covers
+    /// the join path in `run()`.
+    #[tokio::test]
+    async fn run_end_turn_joins_multiple_text_blocks_with_newline() {
+        use crate::flag_client::AlwaysOnFlagClient;
+        use crate::tools::{mock::MockToolDispatcher, ToolContext};
+
+        let resp = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [
+                {"type": "text", "text": "first"},
+                {"type": "text", "text": "second"}
+            ]
+        });
+        let anthropic = Arc::new(mock::SequencedMockAnthropicClient::new(vec![resp]));
+
+        let agent = AgentLoop {
+            anthropic_client: anthropic,
+            model: "test".to_string(),
+            max_iterations: 5,
+            tool_dispatcher: Arc::new(MockToolDispatcher::new("unused")),
+            tool_context: Arc::new(ToolContext::for_test("http://127.0.0.1:1", "", "", "")),
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            flag_client: Arc::new(AlwaysOnFlagClient),
+            tenant_id: "acme".to_string(),
+            promise_store: None,
+            promise_id: None,
+        };
+
+        let result = agent
+            .run(vec![Message::user_text("go")], &[], None)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            result, "first\nsecond",
+            "run() must join multiple text blocks with '\\n'"
+        );
+    }
+
+    /// Same as above but for `run_chat()`, which has its own independent
+    /// text-collection loop.
+    #[tokio::test]
+    async fn run_chat_end_turn_joins_multiple_text_blocks_with_newline() {
+        use crate::flag_client::AlwaysOnFlagClient;
+        use crate::tools::{mock::MockToolDispatcher, ToolContext};
+
+        let resp = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [
+                {"type": "text", "text": "line one"},
+                {"type": "text", "text": "line two"}
+            ]
+        });
+        let anthropic = Arc::new(mock::SequencedMockAnthropicClient::new(vec![resp]));
+
+        let agent = AgentLoop {
+            anthropic_client: anthropic,
+            model: "test".to_string(),
+            max_iterations: 5,
+            tool_dispatcher: Arc::new(MockToolDispatcher::new("unused")),
+            tool_context: Arc::new(ToolContext::for_test("http://127.0.0.1:1", "", "", "")),
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            flag_client: Arc::new(AlwaysOnFlagClient),
+            tenant_id: "acme".to_string(),
+            promise_store: None,
+            promise_id: None,
+        };
+
+        let (text, _) = agent
+            .run_chat(vec![Message::user_text("go")], &[], None)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            text, "line one\nline two",
+            "run_chat() must join multiple text blocks with '\\n'"
+        );
+    }
+
+    // ── non-object tool input — idempotency key not injected ──────────────────
+
+    /// When a built-in tool receives a non-object input (null, array, scalar),
+    /// `as_object_mut()` returns `None` and `_idempotency_key` is NOT injected.
+    /// The dispatcher receives the original input unchanged.
+    #[tokio::test]
+    async fn non_object_tool_input_does_not_receive_idempotency_key() {
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::PromiseRepository;
+        use std::future::Future;
+        use std::pin::Pin;
+        use std::sync::Mutex;
+
+        struct CapturingDispatcher {
+            last_input: Arc<Mutex<Option<serde_json::Value>>>,
+        }
+        impl crate::tools::ToolDispatcher for CapturingDispatcher {
+            fn dispatch<'a>(
+                &'a self,
+                _name: &'a str,
+                input: &'a serde_json::Value,
+            ) -> Pin<Box<dyn Future<Output = String> + Send + 'a>> {
+                *self.last_input.lock().unwrap() = Some(input.clone());
+                Box::pin(async { "ok".to_string() })
+            }
+        }
+
+        let store = Arc::new(MockPromiseStore::new());
+        store.insert_promise(make_test_promise("p1"));
+
+        // input: null — not an object, so as_object_mut() returns None.
+        let tool_use_resp = serde_json::json!({
+            "stop_reason": "tool_use",
+            "content": [{"type": "tool_use", "id": "tu1", "name": "my_tool", "input": null}]
+        });
+        let end_turn_resp = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "done"}]
+        });
+        let anthropic = Arc::new(mock::SequencedMockAnthropicClient::new(vec![
+            tool_use_resp,
+            end_turn_resp,
+        ]));
+        let captured = Arc::new(Mutex::new(None::<serde_json::Value>));
+        let dispatcher = Arc::new(CapturingDispatcher {
+            last_input: Arc::clone(&captured),
+        });
+
+        let agent = make_durable_agent(
+            anthropic,
+            dispatcher,
+            Arc::clone(&store) as Arc<dyn PromiseRepository>,
+            "p1",
+        );
+        agent.run(vec![Message::user_text("go")], &[], None).await.unwrap();
+
+        let input = captured.lock().unwrap().take().expect("dispatcher was never called");
+        assert!(
+            input.get("_idempotency_key").is_none(),
+            "_idempotency_key must NOT be injected into non-object tool input; got: {input}"
+        );
+        assert!(input.is_null(), "non-object input must be forwarded unchanged; got: {input}");
+    }
+
+    // ── system_prompt not overwritten on second checkpoint ────────────────────
+
+    /// After the first checkpoint stores the system_prompt, subsequent tool
+    /// turns must NOT overwrite it.  The `if p.system_prompt.is_none()` guard
+    /// in the checkpoint write enforces this.
+    ///
+    /// Two tool turns are used so both the "store on first" and the "skip on
+    /// second" branches execute.  The final promise must contain `iteration = 2`
+    /// (both turns checkpointed) and the original system prompt.
+    #[tokio::test]
+    async fn system_prompt_not_overwritten_on_subsequent_checkpoints() {
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::PromiseRepository;
+        use crate::tools::mock::MockToolDispatcher;
+
+        let store = Arc::new(MockPromiseStore::new());
+        store.insert_promise(make_test_promise("p1"));
+
+        let tool_use_resp = || serde_json::json!({
+            "stop_reason": "tool_use",
+            "content": [{"type": "tool_use", "id": "tu1", "name": "my_tool", "input": {}}]
+        });
+        let end_turn_resp = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "done"}]
+        });
+        let anthropic = Arc::new(mock::SequencedMockAnthropicClient::new(vec![
+            tool_use_resp(),
+            tool_use_resp(),
+            end_turn_resp,
+        ]));
+
+        let agent = make_durable_agent(
+            anthropic,
+            Arc::new(MockToolDispatcher::new("ok")),
+            Arc::clone(&store) as Arc<dyn PromiseRepository>,
+            "p1",
+        );
+
+        let system_prompt = "You are a test assistant.";
+        agent
+            .run(vec![Message::user_text("go")], &[], Some(system_prompt))
+            .await
+            .unwrap();
+
+        let (p, _) = store.get_promise("acme", "p1").await.unwrap().unwrap();
+        assert_eq!(
+            p.system_prompt,
+            Some(system_prompt.to_string()),
+            "system_prompt must be stored on the first checkpoint and preserved on subsequent ones"
+        );
+        assert_eq!(
+            p.iteration, 2,
+            "both tool turns must have been checkpointed (iteration advances once per tool turn)"
+        );
+    }
+
+    // ── end_turn non-Text block filtering ─────────────────────────────────────
+
+    /// When `end_turn` content contains non-Text blocks (e.g. a ToolUse block),
+    /// the `filter_map` in the text-collection loop silently discards them.
+    /// Only the text from `Text` blocks is returned.
+    #[tokio::test]
+    async fn end_turn_non_text_content_blocks_are_filtered_out() {
+        use crate::flag_client::AlwaysOnFlagClient;
+        use crate::tools::{mock::MockToolDispatcher, ToolContext};
+
+        // end_turn with a ToolUse block first, then a Text block.
+        // Result must be "actual response" (ToolUse is discarded).
+        let resp = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [
+                {"type": "tool_use", "id": "tu1", "name": "some_tool", "input": {}},
+                {"type": "text", "text": "actual response"}
+            ]
+        });
+        let anthropic = Arc::new(mock::SequencedMockAnthropicClient::new(vec![resp]));
+
+        let agent = AgentLoop {
+            anthropic_client: anthropic,
+            model: "test".to_string(),
+            max_iterations: 5,
+            tool_dispatcher: Arc::new(MockToolDispatcher::new("unused")),
+            tool_context: Arc::new(ToolContext::for_test("http://127.0.0.1:1", "", "", "")),
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            flag_client: Arc::new(AlwaysOnFlagClient),
+            tenant_id: "acme".to_string(),
+            promise_store: None,
+            promise_id: None,
+        };
+
+        let result = agent
+            .run(vec![Message::user_text("go")], &[], None)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            result, "actual response",
+            "non-Text content blocks in end_turn must be discarded by filter_map"
+        );
+    }
+
+    // ── sort_json_keys scalar arm ─────────────────────────────────────────────
+
+    /// `sort_json_keys` must return scalar values (null, number, string, bool)
+    /// unchanged — the `other => other.clone()` arm.
+    #[test]
+    fn sort_json_keys_passes_through_scalar_values_unchanged() {
+        for scalar in [
+            serde_json::Value::Null,
+            serde_json::json!(42),
+            serde_json::json!("hello"),
+            serde_json::json!(true),
+        ] {
+            assert_eq!(
+                sort_json_keys(&scalar),
+                scalar,
+                "sort_json_keys must return scalar values unchanged; input: {scalar}"
+            );
+        }
+    }
+
+    // ── Message::assistant constructor ────────────────────────────────────────
+
+    /// `Message::assistant` sets `role = "assistant"` and stores the given
+    /// content slice.
+    #[test]
+    fn message_assistant_has_correct_role_and_content() {
+        let content = vec![ContentBlock::Text { text: "hi".to_string() }];
+        let msg = Message::assistant(content);
+        assert_eq!(msg.role, "assistant");
+        assert_eq!(msg.content.len(), 1);
+        assert!(matches!(&msg.content[0], ContentBlock::Text { text } if text == "hi"));
+    }
+
+    // ── ContentBlock serde round-trips ────────────────────────────────────────
+
+    /// `ContentBlock::ToolUse` must serialize and deserialize correctly,
+    /// including the `"type": "tool_use"` tag required by the Anthropic wire format.
+    #[test]
+    fn content_block_tool_use_round_trips_json() {
+        let block = ContentBlock::ToolUse {
+            id: "tu1".to_string(),
+            name: "my_tool".to_string(),
+            input: serde_json::json!({"key": "val"}),
+        };
+        let json = serde_json::to_string(&block).unwrap();
+        assert!(
+            json.contains("\"type\":\"tool_use\""),
+            "serialized ToolUse must contain the type tag; got: {json}"
+        );
+        let back: ContentBlock = serde_json::from_str(&json).unwrap();
+        assert!(
+            matches!(back, ContentBlock::ToolUse { ref id, ref name, .. }
+                if id == "tu1" && name == "my_tool"),
+            "ToolUse must survive a serde round-trip"
+        );
+    }
+
+    /// `ContentBlock::ToolResult` must serialize and deserialize correctly,
+    /// including the `"type": "tool_result"` tag.
+    #[test]
+    fn content_block_tool_result_round_trips_json() {
+        let block = ContentBlock::ToolResult {
+            tool_use_id: "tu1".to_string(),
+            content: "output text".to_string(),
+        };
+        let json = serde_json::to_string(&block).unwrap();
+        assert!(
+            json.contains("\"type\":\"tool_result\""),
+            "serialized ToolResult must contain the type tag; got: {json}"
+        );
+        let back: ContentBlock = serde_json::from_str(&json).unwrap();
+        assert!(
+            matches!(back, ContentBlock::ToolResult { ref tool_use_id, ref content }
+                if tool_use_id == "tu1" && content == "output text"),
+            "ToolResult must survive a serde round-trip"
+        );
+    }
+
+    // ── tool_cache_key with empty inputs ──────────────────────────────────────
+
+    /// `tool_cache_key` with an empty object and an empty array must each
+    /// produce a stable 64-char hex SHA-256 digest, and the two must differ.
+    #[test]
+    fn tool_cache_key_stable_for_empty_inputs() {
+        let key_obj = tool_cache_key("t", &serde_json::json!({}));
+        let key_arr = tool_cache_key("t", &serde_json::json!([]));
+
+        assert_eq!(key_obj.len(), 64, "empty-object key must be 64 hex chars");
+        assert!(
+            key_obj.chars().all(|c| c.is_ascii_hexdigit()),
+            "empty-object key must be lowercase hex"
+        );
+
+        assert_eq!(key_arr.len(), 64, "empty-array key must be 64 hex chars");
+        assert!(
+            key_arr.chars().all(|c| c.is_ascii_hexdigit()),
+            "empty-array key must be lowercase hex"
+        );
+
+        // Deterministic: same input → same key.
+        assert_eq!(key_obj, tool_cache_key("t", &serde_json::json!({})));
+        assert_eq!(key_arr, tool_cache_key("t", &serde_json::json!([])));
+
+        // Empty object and empty array must produce distinct keys.
+        assert_ne!(
+            key_obj, key_arr,
+            "empty object and empty array must produce different cache keys"
+        );
+    }
+
+    // ── promise_store Some with promise_id None ───────────────────────────────
+
+    /// When `promise_store` is `Some` but `promise_id` is `None`, every
+    /// `if let (Some(store), Some(pid))` guard fails and the run completes
+    /// normally without any KV reads or writes.
+    #[tokio::test]
+    async fn promise_store_some_without_promise_id_skips_all_checkpointing() {
+        use crate::flag_client::AlwaysOnFlagClient;
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::PromiseRepository;
+        use crate::tools::{mock::MockToolDispatcher, ToolContext};
+
+        let store = Arc::new(MockPromiseStore::new());
+        // No promise inserted — if the run tried to load one it would get None,
+        // but the real check is that it completes without any write activity.
+
+        let end_turn_resp = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "done"}]
+        });
+        let anthropic =
+            Arc::new(mock::SequencedMockAnthropicClient::new(vec![end_turn_resp]));
+
+        let agent = AgentLoop {
+            anthropic_client: anthropic,
+            model: "test".to_string(),
+            max_iterations: 5,
+            tool_dispatcher: Arc::new(MockToolDispatcher::new("unused")),
+            tool_context: Arc::new(ToolContext::for_test("http://127.0.0.1:1", "", "", "")),
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            flag_client: Arc::new(AlwaysOnFlagClient),
+            tenant_id: "acme".to_string(),
+            promise_store: Some(Arc::clone(&store) as Arc<dyn PromiseRepository>),
+            promise_id: None, // paired guard requires both — None disables all checkpointing
+        };
+
+        let result = agent
+            .run(vec![Message::user_text("go")], &[], None)
+            .await
+            .unwrap();
+
+        assert_eq!(result, "done");
+        assert!(
+            store.snapshot_promises().is_empty(),
+            "no KV writes must occur when promise_id is None even if promise_store is Some"
+        );
+    }
+
+    // ── max_iterations = 0 ───────────────────────────────────────────────────
+
+    /// When `max_iterations = 0` the for-loop body never runs — no Anthropic
+    /// call is made.  The agent must write `PermanentFailed` to KV via the
+    /// post-loop `write_promise_terminal` call and return
+    /// `Err(MaxIterationsReached)`.
+    #[tokio::test]
+    async fn max_iterations_zero_with_promise_store_fails_immediately() {
+        use crate::flag_client::AlwaysOnFlagClient;
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+        use crate::tools::{mock::MockToolDispatcher, ToolContext};
+        use mock::SequencedMockAnthropicClient;
+
+        let store = Arc::new(MockPromiseStore::new());
+        store.insert_promise(make_test_promise("p1"));
+
+        // Empty queue — panics if Anthropic is called at all.
+        let anthropic = Arc::new(SequencedMockAnthropicClient::new(vec![]));
+
+        let agent = AgentLoop {
+            anthropic_client: anthropic,
+            model: "test".to_string(),
+            max_iterations: 0,
+            tool_dispatcher: Arc::new(MockToolDispatcher::new("unused")),
+            tool_context: Arc::new(ToolContext::for_test("http://127.0.0.1:1", "", "", "")),
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            flag_client: Arc::new(AlwaysOnFlagClient),
+            tenant_id: "acme".to_string(),
+            promise_store: Some(Arc::clone(&store) as Arc<dyn PromiseRepository>),
+            promise_id: Some("p1".to_string()),
+        };
+
+        let result = agent
+            .run(vec![Message::user_text("go")], &[], None)
+            .await;
+
+        assert!(
+            matches!(result, Err(AgentError::MaxIterationsReached)),
+            "max_iterations=0 must return MaxIterationsReached"
+        );
+
+        let (p, _) = store.get_promise("acme", "p1").await.unwrap().unwrap();
+        assert_eq!(
+            p.status,
+            PromiseStatus::PermanentFailed,
+            "promise must be marked PermanentFailed when max_iterations=0"
+        );
+    }
+
+    // ── non-durable run with tool_use ────────────────────────────────────────
+
+    /// When `promise_id` is `None`, the agent dispatches tool calls normally
+    /// but does NOT inject `_idempotency_key` into the input (no stable run
+    /// ID to derive it from) and does NOT cache the result in KV.
+    #[tokio::test]
+    async fn non_durable_tool_use_executes_without_idempotency_key() {
+        use crate::flag_client::AlwaysOnFlagClient;
+        use crate::tools::{ToolContext, ToolDispatcher};
+
+        struct CapturingDispatcher {
+            captured: std::sync::Mutex<Vec<serde_json::Value>>,
+        }
+        impl ToolDispatcher for CapturingDispatcher {
+            fn dispatch<'a>(
+                &'a self,
+                _name: &'a str,
+                input: &'a serde_json::Value,
+            ) -> Pin<Box<dyn Future<Output = String> + Send + 'a>> {
+                self.captured.lock().unwrap().push(input.clone());
+                Box::pin(async move { "tool output".to_string() })
+            }
+        }
+
+        let tool_use_resp = serde_json::json!({
+            "stop_reason": "tool_use",
+            "content": [{"type": "tool_use", "id": "tu1", "name": "my_tool", "input": {"key": "val"}}]
+        });
+        let end_turn_resp = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "done"}]
+        });
+        let anthropic = Arc::new(mock::SequencedMockAnthropicClient::new(vec![
+            tool_use_resp,
+            end_turn_resp,
+        ]));
+
+        let capturing = Arc::new(CapturingDispatcher {
+            captured: std::sync::Mutex::new(vec![]),
+        });
+
+        let agent = AgentLoop {
+            anthropic_client: anthropic,
+            model: "test".to_string(),
+            max_iterations: 5,
+            tool_dispatcher: Arc::clone(&capturing) as Arc<dyn ToolDispatcher>,
+            tool_context: Arc::new(ToolContext::for_test("http://127.0.0.1:1", "", "", "")),
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            flag_client: Arc::new(AlwaysOnFlagClient),
+            tenant_id: "acme".to_string(),
+            promise_store: None,
+            promise_id: None,
+        };
+
+        let result = agent
+            .run(vec![Message::user_text("go")], &[], None)
+            .await
+            .unwrap();
+
+        assert_eq!(result, "done");
+
+        let inputs = capturing.captured.lock().unwrap();
+        assert_eq!(inputs.len(), 1, "tool must be dispatched exactly once");
+        assert!(
+            inputs[0].get("_idempotency_key").is_none(),
+            "no _idempotency_key must be injected when promise_id is None; got: {}",
+            inputs[0]
+        );
+        assert_eq!(
+            inputs[0]["key"],
+            serde_json::json!("val"),
+            "original input fields must be forwarded unchanged"
+        );
+    }
+
+    // ── ContentBlock::Text serde round-trip ───────────────────────────────────
+
+    /// `ContentBlock::Text` must serialize with `"type":"text"` (the
+    /// `#[serde(tag = "type", rename_all = "snake_case")]` tag on the enum)
+    /// and survive a full serde round-trip.
+    /// `ToolUse` and `ToolResult` variants have existing tests; this covers
+    /// the `Text` variant.
+    #[test]
+    fn content_block_text_round_trips_json() {
+        let block = ContentBlock::Text { text: "hello world".to_string() };
+        let json = serde_json::to_string(&block).unwrap();
+
+        assert!(
+            json.contains("\"type\":\"text\""),
+            "serialized Text must contain the type tag; got: {json}"
+        );
+        assert!(
+            json.contains("\"text\":\"hello world\""),
+            "serialized Text must contain the text field; got: {json}"
+        );
+
+        let back: ContentBlock = serde_json::from_str(&json).unwrap();
+        assert!(
+            matches!(back, ContentBlock::Text { ref text } if text == "hello world"),
+            "ContentBlock::Text must survive a serde round-trip"
+        );
+    }
+
+    // ── run_chat with Some(system_prompt) ────────────────────────────────────
+
+    /// When `run_chat` receives `Some(system_prompt)`, the request body sent to
+    /// Anthropic must contain a `system` array whose first block has
+    /// `"type":"text"` and the supplied prompt text.
+    #[tokio::test]
+    async fn run_chat_with_system_prompt_sends_system_block() {
+        use crate::flag_client::AlwaysOnFlagClient;
+        use crate::tools::ToolContext;
+
+        struct RecordingAnthropicClient {
+            captured: std::sync::Mutex<Option<serde_json::Value>>,
+            response: serde_json::Value,
+        }
+        impl AnthropicClient for RecordingAnthropicClient {
+            fn complete<'a>(
+                &'a self,
+                body: serde_json::Value,
+            ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, reqwest::Error>> + Send + 'a>>
+            {
+                *self.captured.lock().unwrap() = Some(body);
+                let resp = self.response.clone();
+                Box::pin(async move { Ok(resp) })
+            }
+        }
+
+        let end_turn_resp = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "reply"}]
+        });
+        let recording = Arc::new(RecordingAnthropicClient {
+            captured: std::sync::Mutex::new(None),
+            response: end_turn_resp,
+        });
+
+        let agent = AgentLoop {
+            anthropic_client: Arc::clone(&recording) as Arc<dyn AnthropicClient>,
+            model: "test".to_string(),
+            max_iterations: 5,
+            tool_dispatcher: Arc::new(crate::tools::mock::MockToolDispatcher::new("unused")),
+            tool_context: Arc::new(ToolContext::for_test("http://127.0.0.1:1", "", "", "")),
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            flag_client: Arc::new(AlwaysOnFlagClient),
+            tenant_id: "acme".to_string(),
+            promise_store: None,
+            promise_id: None,
+        };
+
+        let (text, _) = agent
+            .run_chat(
+                vec![Message::user_text("hello")],
+                &[],
+                Some("my system prompt"),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(text, "reply");
+
+        let body = recording.captured.lock().unwrap().clone().unwrap();
+        let system = &body["system"];
+        assert!(
+            system.is_array(),
+            "request must include a system array when system_prompt is Some; got: {body}"
+        );
+        assert_eq!(
+            system[0]["type"], "text",
+            "system block must have type=text"
+        );
+        assert_eq!(
+            system[0]["text"], "my system prompt",
+            "system block must carry the supplied prompt text"
+        );
+    }
+
+    // ── run with Some(system_prompt), no checkpoint ───────────────────────────
+
+    /// `AgentLoop::run` with `Some(system_prompt)` and no promise store
+    /// (non-recovering path) must include a `system` array in the Anthropic
+    /// request body.
+    ///
+    /// This covers the `effective_prompt = system_prompt.map(|s| s.to_string())`
+    /// branch and the subsequent `effective_prompt.as_deref().map(|text| ...)`
+    /// system-block construction inside `run` — symmetrical to
+    /// `run_chat_with_system_prompt_sends_system_block` for `run_chat`.
+    #[tokio::test]
+    async fn run_with_system_prompt_sends_system_block() {
+        use crate::flag_client::AlwaysOnFlagClient;
+        use crate::tools::ToolContext;
+
+        struct RecordingAnthropicClient {
+            captured: std::sync::Mutex<Option<serde_json::Value>>,
+            response: serde_json::Value,
+        }
+        impl AnthropicClient for RecordingAnthropicClient {
+            fn complete<'a>(
+                &'a self,
+                body: serde_json::Value,
+            ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, reqwest::Error>> + Send + 'a>>
+            {
+                *self.captured.lock().unwrap() = Some(body);
+                let resp = self.response.clone();
+                Box::pin(async move { Ok(resp) })
+            }
+        }
+
+        let end_turn_resp = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "reply"}]
+        });
+        let recording = Arc::new(RecordingAnthropicClient {
+            captured: std::sync::Mutex::new(None),
+            response: end_turn_resp,
+        });
+
+        let agent = AgentLoop {
+            anthropic_client: Arc::clone(&recording) as Arc<dyn AnthropicClient>,
+            model: "test".to_string(),
+            max_iterations: 5,
+            tool_dispatcher: Arc::new(crate::tools::mock::MockToolDispatcher::new("unused")),
+            tool_context: Arc::new(ToolContext::for_test("http://127.0.0.1:1", "", "", "")),
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            flag_client: Arc::new(AlwaysOnFlagClient),
+            tenant_id: "acme".to_string(),
+            promise_store: None,
+            promise_id: None,
+        };
+
+        let result = agent
+            .run(vec![Message::user_text("hello")], &[], Some("my system prompt"))
+            .await
+            .unwrap();
+
+        assert_eq!(result, "reply");
+
+        let body = recording.captured.lock().unwrap().clone().unwrap();
+        let system = &body["system"];
+        assert!(
+            system.is_array(),
+            "request must include a system array when system_prompt is Some; got: {body}"
+        );
+        assert_eq!(system[0]["type"], "text", "system block must have type=text");
+        assert_eq!(
+            system[0]["text"], "my system prompt",
+            "system block must carry the supplied prompt text"
+        );
+    }
+
+    // ── sort_json_keys Array arm ──────────────────────────────────────────────
+
+    /// `sort_json_keys` must recurse into Array elements, sorting any nested
+    /// object keys while leaving scalars unchanged.
+    ///
+    /// This exercises the `Value::Array(arr) => ...` arm directly — not via
+    /// `tool_cache_key`. The existing `sort_json_keys_passes_through_scalar_values_unchanged`
+    /// test covers scalars; this covers the array arm.
+    #[test]
+    fn sort_json_keys_array_arm_recurses_into_inner_objects() {
+        // Mixed array: an unsorted-key object followed by a scalar.
+        let input = serde_json::json!([{"b": 2, "a": 1}, 42]);
+        let output = sort_json_keys(&input);
+
+        // The outer array must be preserved.
+        let arr = output.as_array().expect("result must be an array");
+        assert_eq!(arr.len(), 2, "array length must be unchanged");
+
+        // Inner object keys must be sorted alphabetically.
+        let inner = arr[0].as_object().expect("first element must be an object");
+        let keys: Vec<&str> = inner.keys().map(String::as_str).collect();
+        assert_eq!(keys, vec!["a", "b"], "inner object keys must be sorted");
+        assert_eq!(arr[0]["a"], 1);
+        assert_eq!(arr[0]["b"], 2);
+
+        // Scalar element must pass through unchanged.
+        assert_eq!(arr[1], serde_json::json!(42));
+
+        // Empty array must round-trip unchanged.
+        assert_eq!(sort_json_keys(&serde_json::json!([])), serde_json::json!([]));
+    }
+
+    // ── AgentError::Http display ──────────────────────────────────────────────
+
+    /// `AgentError::Http` must format as `"HTTP error: ..."`.
+    ///
+    /// `agent_error_display` covers `MaxIterationsReached` and
+    /// `UnexpectedStopReason`; `agent_error_source_for_http_variant` builds the
+    /// same error but only calls `.source()`. This test covers the `Display` impl
+    /// for the `Http` variant.
+    #[test]
+    fn agent_error_http_display_starts_with_http_error() {
+        let err = reqwest::Client::new()
+            .get("not a url at all:///")
+            .build()
+            .unwrap_err();
+        let display = AgentError::Http(err).to_string();
+        assert!(
+            display.starts_with("HTTP error:"),
+            "AgentError::Http display must start with 'HTTP error:'; got: {display}"
+        );
+    }
+
+    // ── run with promise_store=Some but promise not found ─────────────────────
+
+    /// When `promise_store` and `promise_id` are both `Some` but `get_promise`
+    /// returns `Ok(None)` (key genuinely absent from KV), `checkpoint` stays
+    /// `None` and the run completes normally without any KV writes.
+    ///
+    /// Distinct from `initial_get_promise_timeout_starts_fresh` (timeout → Err)
+    /// and `initial_get_promise_error_starts_fresh` (I/O error → Err). This
+    /// exercises the `Ok(None)` arm on line ~614 of `run`.
+    #[tokio::test]
+    async fn run_promise_not_found_starts_fresh_without_checkpoint_writes() {
+        use crate::flag_client::AlwaysOnFlagClient;
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::PromiseRepository;
+        use crate::tools::{mock::MockToolDispatcher, ToolContext};
+
+        // Empty store — get_promise("acme", "p1") returns Ok(None).
+        let store = Arc::new(MockPromiseStore::new());
+
+        let end_turn_resp = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "fresh start"}]
+        });
+        let anthropic =
+            Arc::new(mock::SequencedMockAnthropicClient::new(vec![end_turn_resp]));
+
+        let agent = AgentLoop {
+            anthropic_client: anthropic,
+            model: "test".to_string(),
+            max_iterations: 5,
+            tool_dispatcher: Arc::new(MockToolDispatcher::new("unused")),
+            tool_context: Arc::new(ToolContext::for_test("http://127.0.0.1:1", "", "", "")),
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            flag_client: Arc::new(AlwaysOnFlagClient),
+            tenant_id: "acme".to_string(),
+            promise_store: Some(Arc::clone(&store) as Arc<dyn PromiseRepository>),
+            promise_id: Some("p1".to_string()),
+        };
+
+        let result = agent
+            .run(vec![Message::user_text("go")], &[], None)
+            .await
+            .unwrap();
+
+        assert_eq!(result, "fresh start");
+        assert!(
+            store.snapshot_promises().is_empty(),
+            "checkpoint = None when promise not found — no KV writes must occur"
+        );
+    }
+
+    // ── checkpoint=None at error time ─────────────────────────────────────────
+
+    /// When `checkpoint` is `None` (cleared by a failed CAS reload) and the
+    /// next Anthropic call returns an HTTP error, the `write_promise_terminal`
+    /// guard silently fails (the `if let … && let Some(checkpoint)` is false)
+    /// and the run returns `Err(AgentError::Http)` without writing any terminal
+    /// status — the promise stays `Running`.
+    ///
+    /// This is distinct from `http_4xx_error_marks_promise_permanent_failed`
+    /// where `checkpoint` is always `Some` when the error fires.
+    #[tokio::test]
+    async fn http_error_with_null_checkpoint_does_not_write_terminal_status() {
+        use crate::promise_store::mock::DisappearedOnCasReloadStore;
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+        use crate::tools::mock::MockToolDispatcher;
+        use std::sync::atomic::{AtomicU32, Ordering};
+
+        // Client: first call → tool_use (triggers CAS → checkpoint cleared);
+        //         second call → HTTP error (exercises the null-checkpoint path).
+        struct FirstOkThenErrorClient {
+            first_response: serde_json::Value,
+            calls: AtomicU32,
+        }
+        impl AnthropicClient for FirstOkThenErrorClient {
+            fn complete<'a>(
+                &'a self,
+                _body: serde_json::Value,
+            ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, reqwest::Error>> + Send + 'a>>
+            {
+                let n = self.calls.fetch_add(1, Ordering::SeqCst);
+                if n == 0 {
+                    let resp = self.first_response.clone();
+                    Box::pin(async move { Ok(resp) })
+                } else {
+                    // Construct a non-retryable error without a real HTTP call.
+                    let err = reqwest::Client::new()
+                        .get("not a url at all:///")
+                        .build()
+                        .unwrap_err();
+                    Box::pin(async move { Err(err) })
+                }
+            }
+        }
+
+        let tool_use_resp = serde_json::json!({
+            "stop_reason": "tool_use",
+            "content": [{"type": "tool_use", "id": "tu1", "name": "my_tool", "input": {}}]
+        });
+        let anthropic = Arc::new(FirstOkThenErrorClient {
+            first_response: tool_use_resp,
+            calls: AtomicU32::new(0),
+        });
+
+        // DisappearedOnCasReloadStore: first update_promise → CAS conflict;
+        // subsequent get_promise → Ok(None) → agent_loop sets checkpoint=None.
+        let store = Arc::new(DisappearedOnCasReloadStore::new());
+        store.inner.insert_promise(make_test_promise("p1"));
+
+        let agent = make_durable_agent(
+            anthropic,
+            Arc::new(MockToolDispatcher::new("ok")),
+            Arc::clone(&store) as Arc<dyn PromiseRepository>,
+            "p1",
+        );
+
+        let result = agent.run(vec![Message::user_text("go")], &[], None).await;
+
+        // Run must return an HTTP error, not panic.
+        assert!(
+            matches!(result, Err(AgentError::Http(_))),
+            "must return Err(Http) when Anthropic errors after checkpoint cleared"
+        );
+
+        // Promise must still be Running — no terminal write was possible with
+        // checkpoint=None.
+        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        assert_eq!(
+            p.status,
+            PromiseStatus::Running,
+            "promise must stay Running — terminal write is skipped when checkpoint=None"
+        );
     }
 }
