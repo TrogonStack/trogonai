@@ -5784,4 +5784,83 @@ mod tests {
             "final error must carry status 429"
         );
     }
+
+    /// When a checkpoint exists but its `messages` vec is empty (`recovering =
+    /// false`), `effective_prompt` must come from the caller-supplied
+    /// `system_prompt`, NOT from the `system_prompt` stored in the checkpoint.
+    ///
+    /// Verifies the `else { system_prompt.map(...) }` branch: even if the
+    /// checkpoint has `system_prompt = Some("stored")`, a non-recovering run
+    /// must ignore it and use the freshly-fetched caller value instead.
+    #[tokio::test]
+    async fn non_recovering_checkpoint_with_system_prompt_uses_caller_prompt() {
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::PromiseRepository;
+        use crate::tools::mock::MockToolDispatcher;
+        use std::sync::Mutex;
+
+        struct RecordingClient {
+            bodies: Arc<Mutex<Vec<serde_json::Value>>>,
+        }
+        impl AnthropicClient for RecordingClient {
+            fn complete<'a>(
+                &'a self,
+                body: serde_json::Value,
+            ) -> std::pin::Pin<
+                Box<
+                    dyn std::future::Future<
+                            Output = Result<serde_json::Value, reqwest::Error>,
+                        > + Send
+                        + 'a,
+                >,
+            > {
+                self.bodies.lock().unwrap().push(body);
+                Box::pin(async move {
+                    Ok(serde_json::json!({
+                        "stop_reason": "end_turn",
+                        "content": [{"type": "text", "text": "ok"}]
+                    }))
+                })
+            }
+        }
+
+        let store = Arc::new(MockPromiseStore::new());
+
+        // Checkpoint: system_prompt is stored, but messages are EMPTY.
+        // recovering = false (no messages) → effective_prompt must use caller's.
+        let mut p = make_test_promise("p-sys-caller");
+        p.messages = vec![];
+        p.system_prompt = Some("stored checkpoint prompt".to_string());
+        store.insert_promise(p);
+
+        let bodies: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(vec![]));
+        let agent = make_durable_agent(
+            Arc::new(RecordingClient {
+                bodies: Arc::clone(&bodies),
+            }),
+            Arc::new(MockToolDispatcher::new("ok")),
+            Arc::clone(&store) as Arc<dyn PromiseRepository>,
+            "p-sys-caller",
+        );
+
+        agent
+            .run(
+                vec![Message::user_text("go")],
+                &[],
+                Some("caller prompt"),
+            )
+            .await
+            .unwrap();
+
+        let recorded = bodies.lock().unwrap();
+        assert_eq!(recorded.len(), 1, "exactly one LLM call");
+        let system_text = recorded[0]["system"][0]["text"]
+            .as_str()
+            .expect("system[0].text must be present");
+        assert_eq!(
+            system_text,
+            "caller prompt",
+            "non-recovering run must use caller-supplied prompt even when checkpoint has a stored system_prompt"
+        );
+    }
 }
