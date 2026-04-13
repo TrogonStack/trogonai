@@ -2846,4 +2846,233 @@ mod tests {
             "promise for a deleted automation must be marked PermanentFailed so recovery stops cycling"
         );
     }
+
+    // ── dispatch_automations — additional edge cases ───────────────────────────
+
+    /// When the NATS payload is not valid JSON, `serde_json::from_slice`
+    /// fails and `unwrap_or_default()` falls back to `Value::Null`.
+    /// The automation must still run and the created promise must carry
+    /// `trigger = Null`.
+    #[tokio::test]
+    async fn dispatch_automations_invalid_json_payload_stores_null_trigger() {
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::PromiseRepository;
+
+        let server = httpmock::MockServer::start_async().await;
+        server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(serde_json::json!({
+                    "stop_reason": "end_turn",
+                    "content": [{"type": "text", "text": "ok"}]
+                }));
+        });
+
+        let (rs, _container) = make_run_store().await;
+        let agent = make_agent(&server.base_url());
+        let promise_store = Arc::new(MockPromiseStore::new());
+        let promise_store_arc = Arc::clone(&promise_store) as Arc<dyn PromiseRepository>;
+
+        // Deliberately non-JSON payload.
+        let payload = bytes::Bytes::from_static(b"not-valid-json");
+
+        dispatch_automations(
+            &agent,
+            &Arc::new(rs),
+            &promise_store_arc,
+            "github.42",
+            vec![make_automation("auto-1")],
+            "github.push",
+            &payload,
+        )
+        .await;
+
+        // The promise must have been created with trigger = Null (unwrap_or_default).
+        let snapshot = promise_store.snapshot_promises();
+        assert_eq!(snapshot.len(), 1, "exactly one promise must be created");
+        let (p, _) = snapshot.values().next().unwrap();
+        assert_eq!(
+            p.trigger,
+            serde_json::Value::Null,
+            "invalid JSON payload must produce trigger = Null via unwrap_or_default"
+        );
+    }
+
+    /// Each automation spawned by `dispatch_automations` must receive a
+    /// distinct promise ID so concurrent automations on the same NATS
+    /// message checkpoint independently.
+    ///
+    /// The promise ID format is `{prefix}.{automation_id}`.
+    #[tokio::test]
+    async fn dispatch_automations_each_automation_gets_unique_promise_id() {
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::PromiseRepository;
+
+        let server = httpmock::MockServer::start_async().await;
+        server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(serde_json::json!({
+                    "stop_reason": "end_turn",
+                    "content": [{"type": "text", "text": "ok"}]
+                }));
+        });
+
+        let (rs, _container) = make_run_store().await;
+        let agent = make_agent(&server.base_url());
+        let promise_store = Arc::new(MockPromiseStore::new());
+        let promise_store_arc = Arc::clone(&promise_store) as Arc<dyn PromiseRepository>;
+        let payload = bytes::Bytes::from_static(b"{}");
+
+        dispatch_automations(
+            &agent,
+            &Arc::new(rs),
+            &promise_store_arc,
+            "github.42",
+            vec![make_automation("auto-A"), make_automation("auto-B")],
+            "github.push",
+            &payload,
+        )
+        .await;
+
+        let snapshot = promise_store.snapshot_promises();
+        assert_eq!(snapshot.len(), 2, "two automations must produce two distinct promises");
+
+        let ids: std::collections::HashSet<String> =
+            snapshot.values().map(|(p, _)| p.id.clone()).collect();
+        assert_eq!(ids.len(), 2, "promise IDs must be distinct");
+
+        // Each promise ID must encode the automation ID.
+        for (_, (p, _)) in &snapshot {
+            assert!(
+                p.id.contains("auto-A") || p.id.contains("auto-B"),
+                "promise ID must embed the automation ID; got: {}",
+                p.id
+            );
+        }
+    }
+
+    /// When a spawned automation task panics (e.g. due to an LLM client
+    /// panic), `dispatch_automations` catches the `JoinError`, logs it, and
+    /// returns normally — it must not propagate the panic to the caller.
+    #[tokio::test]
+    async fn dispatch_automations_panicking_task_is_caught() {
+        use crate::agent_loop::{AgentLoop, AnthropicClient};
+        use crate::flag_client::AlwaysOnFlagClient;
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::PromiseRepository;
+        use crate::tools::{DefaultToolDispatcher, ToolContext};
+
+        struct PanicClient;
+        impl AnthropicClient for PanicClient {
+            fn complete<'a>(
+                &'a self,
+                _body: serde_json::Value,
+            ) -> std::pin::Pin<
+                Box<
+                    dyn std::future::Future<
+                            Output = Result<serde_json::Value, reqwest::Error>,
+                        > + Send
+                        + 'a,
+                >,
+            > {
+                panic!("intentional panic from PanicClient");
+            }
+        }
+
+        let tool_ctx = Arc::new(ToolContext::for_test("http://127.0.0.1:1", "", "", ""));
+        let agent = Arc::new(AgentLoop {
+            anthropic_client: Arc::new(PanicClient),
+            model: "test".to_string(),
+            max_iterations: 1,
+            tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),
+            tool_context: tool_ctx,
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            flag_client: Arc::new(AlwaysOnFlagClient),
+            tenant_id: "test".to_string(),
+            promise_store: None,
+            promise_id: None,
+        });
+
+        let (rs, _container) = make_run_store().await;
+        let promise_store: Arc<dyn PromiseRepository> =
+            Arc::new(MockPromiseStore::new());
+        let payload = bytes::Bytes::from_static(b"{}");
+
+        // Must return without panicking even though the task panics.
+        dispatch_automations(
+            &agent,
+            &Arc::new(rs),
+            &promise_store,
+            "github.42",
+            vec![make_automation("panic-auto")],
+            "github.push",
+            &payload,
+        )
+        .await;
+    }
+
+    /// When `list_tools` returns a 200 response whose body parses as valid JSON
+    /// but whose `result` field cannot be deserialized as `ListToolsResult`,
+    /// `init_mcp_servers` must skip the server and return empty vectors.
+    ///
+    /// This is distinct from the 500-error case: here the HTTP call
+    /// "succeeds" but the payload is semantically wrong.
+    #[tokio::test]
+    async fn init_mcp_servers_list_tools_deserialize_error_skips_server() {
+        let server = httpmock::MockServer::start_async().await;
+
+        // initialize succeeds.
+        server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .body_contains("\"initialize\"");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(serde_json::json!({
+                    "jsonrpc": "2.0", "id": 1,
+                    "result": {
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {},
+                        "serverInfo": {}
+                    }
+                }));
+        });
+
+        // list_tools returns 200 but with a `result` that is a plain string,
+        // not the expected `{ tools: [...] }` object → deserialization error.
+        server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .body_contains("tools/list");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(serde_json::json!({
+                    "jsonrpc": "2.0", "id": 2,
+                    "result": "this is not a ListToolsResult"
+                }));
+        });
+
+        let cfg = vec![crate::config::McpServerConfig {
+            name: "bad-result-server".to_string(),
+            url: format!("{}/mcp", server.base_url()),
+        }];
+        let http_client = reqwest::Client::new();
+        let (tools, dispatch) = super::init_mcp_servers(&http_client, &cfg).await;
+
+        assert!(
+            tools.is_empty(),
+            "no tools expected when list_tools result cannot be deserialized"
+        );
+        assert!(
+            dispatch.is_empty(),
+            "no dispatch entries expected when list_tools result cannot be deserialized"
+        );
+    }
 }
