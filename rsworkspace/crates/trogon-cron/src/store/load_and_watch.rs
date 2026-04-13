@@ -6,7 +6,9 @@ use futures::{StreamExt, future};
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream};
 
 use crate::{
+    JobId,
     error::CronError,
+    events::{JobStreamState, apply, initial_state, projection_change},
     nats::{
         ack_watch_message, apply_projection_change, change_from_projection_change,
         decode_recorded_watch_message, event_watch_consumer_config, next_watch_start_sequence,
@@ -51,7 +53,7 @@ where
     let state = initial_jobs
         .iter()
         .cloned()
-        .map(|job| (job.id().to_string(), job.spec))
+        .map(|job| (job.id().to_string(), JobStreamState::Present(job.spec)))
         .collect::<BTreeMap<_, _>>();
     let state = Arc::new(Mutex::new(state));
     let stream: ConfigWatchStream = Box::pin(subscriber.then(move |result| {
@@ -75,9 +77,39 @@ where
                 }
             };
 
+            let stream_id = match JobId::parse(event.data.job_id()) {
+                Ok(stream_id) => stream_id,
+                Err(error) => {
+                    tracing::error!(error = %error, "Failed to parse watched job event stream id");
+                    ack_watch_message(&message).await;
+                    return None;
+                }
+            };
             let projection_change = {
                 let mut state = state.lock().expect("job event state mutex poisoned");
-                event.data.apply_to_state(&mut state)
+                (|| -> Result<Option<crate::events::ProjectionChange>, CronError> {
+                    let current = state
+                        .get(stream_id.as_str())
+                        .cloned()
+                        .unwrap_or_else(|| initial_state(stream_id.clone()));
+                    let next = apply(current.clone(), event.data.clone()).map_err(|error| {
+                        CronError::event_source(
+                            "failed to apply watched job event to stream state",
+                            error,
+                        )
+                    })?;
+                    let change = projection_change(&current, &next);
+                    match &next {
+                        JobStreamState::Present(_) => {
+                            state.insert(stream_id.to_string(), next);
+                        }
+                        JobStreamState::Initial { .. } => {
+                            state.remove(stream_id.as_str());
+                        }
+                    }
+
+                    Ok(change)
+                })()
             };
             let projection_change = match projection_change {
                 Ok(change) => change,
@@ -86,6 +118,10 @@ where
                     ack_watch_message(&message).await;
                     return None;
                 }
+            };
+            let Some(projection_change) = projection_change else {
+                ack_watch_message(&message).await;
+                return None;
             };
 
             if let Err(error) = apply_projection_change(&kv, &projection_change).await {

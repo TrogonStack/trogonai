@@ -2,11 +2,13 @@ use std::collections::{BTreeMap, HashSet};
 use std::time::Duration;
 
 use crate::{
+    JobId,
     config::{JobWriteState, VersionedJobSpec},
     domain::ResolvedJobSpec,
     error::CronError,
     events::{
-        JobEvent, JobEventData, ProjectionChange, RecordedJobEvent, apply_event_to_versioned_state,
+        JobEvent, JobEventData, JobStreamState, ProjectionChange, RecordedJobEvent, apply,
+        initial_state,
     },
     kv::{
         EVENTS_STREAM, EVENTS_SUBJECT_PATTERN, EVENTS_SUBJECT_PREFIX, JOBS_KEY_PREFIX,
@@ -59,7 +61,7 @@ pub(crate) async fn rebuild_jobs_from_stream(
     first_sequence: u64,
     last_sequence: u64,
 ) -> Result<Vec<VersionedJobSpec>, CronError> {
-    let mut jobs = BTreeMap::new();
+    let mut snapshots = BTreeMap::new();
     if last_sequence == 0 || first_sequence == 0 || first_sequence > last_sequence {
         return Ok(Vec::new());
     }
@@ -73,10 +75,10 @@ pub(crate) async fn rebuild_jobs_from_stream(
         };
         let version = message.sequence;
         let event = decode_recorded_job_event(message)?;
-        apply_event_to_versioned_state(&mut jobs, &event.data, version)?;
+        apply_event_to_snapshot_map(&mut snapshots, &event.data, version)?;
     }
 
-    Ok(jobs.into_values().collect())
+    Ok(snapshots.into_values().collect())
 }
 
 pub(crate) async fn read_raw_event_message(
@@ -198,21 +200,35 @@ pub(crate) fn apply_event_to_snapshot_map(
     event: &JobEvent,
     version: u64,
 ) -> Result<SnapshotChange<VersionedJobSpec>, CronError> {
-    apply_event_to_versioned_state(snapshots, event, version)?;
-    match event {
-        JobEvent::JobRegistered { spec } => Ok(SnapshotChange::upsert(
-            snapshots
-                .get(&spec.id)
-                .cloned()
-                .expect("registered job snapshot must exist"),
-        )),
-        JobEvent::JobStateChanged { id, .. } => Ok(SnapshotChange::upsert(
-            snapshots
-                .get(id)
-                .cloned()
-                .expect("state-changed job snapshot must exist"),
-        )),
-        JobEvent::JobRemoved { id } => Ok(SnapshotChange::delete(id.clone())),
+    let stream_id = JobId::parse(event.job_id()).map_err(|source| {
+        CronError::event_source(
+            "failed to parse job stream id while projecting event to snapshots",
+            source,
+        )
+    })?;
+    let current_state = match snapshots.get(stream_id.as_str()).cloned() {
+        Some(snapshot) => JobStreamState::try_from(snapshot).map_err(|source| {
+            CronError::event_source(
+                "failed to decode job snapshot into stream state during projection",
+                source,
+            )
+        })?,
+        None => initial_state(stream_id.clone()),
+    };
+    let next_state = apply(current_state, event.clone()).map_err(|source| {
+        CronError::event_source("failed to apply job event to stream snapshot state", source)
+    })?;
+
+    match next_state {
+        JobStreamState::Present(spec) => {
+            let snapshot = VersionedJobSpec { version, spec };
+            snapshots.insert(stream_id.to_string(), snapshot.clone());
+            Ok(SnapshotChange::upsert(snapshot))
+        }
+        JobStreamState::Initial { .. } => {
+            snapshots.remove(stream_id.as_str());
+            Ok(SnapshotChange::delete(stream_id.to_string()))
+        }
     }
 }
 
@@ -454,6 +470,7 @@ fn validate_schedule_stream(stream: &jetstream::stream::Stream) -> Result<(), Cr
 mod tests {
     use super::*;
     use crate::config::{DeliverySpec, JobEnabledState, JobSpec, JobWriteCondition, ScheduleSpec};
+    use crate::events::{JobStreamState, apply, projection_change};
 
     fn test_job(id: &str) -> JobSpec {
         JobSpec {
@@ -480,11 +497,13 @@ mod tests {
 
     #[test]
     fn live_projection_applies_state_change() {
-        let mut state = BTreeMap::from([("alpha".to_string(), test_job("alpha"))]);
-
-        let change = JobEvent::job_state_changed("alpha", JobEnabledState::Disabled)
-            .apply_to_state(&mut state)
-            .unwrap();
+        let current = JobStreamState::Present(test_job("alpha"));
+        let next = apply(
+            current.clone(),
+            JobEvent::job_state_changed("alpha", JobEnabledState::Disabled),
+        )
+        .unwrap();
+        let change = projection_change(&current, &next).unwrap();
 
         match change {
             ProjectionChange::Upsert(job) => assert_eq!(job.state, JobEnabledState::Disabled),
@@ -570,5 +589,50 @@ mod tests {
         );
         assert_eq!(config.ack_policy, AckPolicy::Explicit);
         assert_eq!(config.replay_policy, ReplayPolicy::Instant);
+    }
+
+    #[test]
+    fn snapshot_projection_replays_delete_and_recreate() {
+        let mut snapshots = BTreeMap::new();
+
+        apply_event_to_snapshot_map(
+            &mut snapshots,
+            &JobEvent::job_registered(test_job("alpha")),
+            1,
+        )
+        .unwrap();
+        apply_event_to_snapshot_map(
+            &mut snapshots,
+            &JobEvent::job_state_changed("alpha", JobEnabledState::Disabled),
+            2,
+        )
+        .unwrap();
+        apply_event_to_snapshot_map(&mut snapshots, &JobEvent::job_removed("alpha"), 3).unwrap();
+        apply_event_to_snapshot_map(
+            &mut snapshots,
+            &JobEvent::job_registered(test_job("alpha")),
+            4,
+        )
+        .unwrap();
+
+        let snapshot = snapshots.get("alpha").unwrap();
+        assert_eq!(snapshot.version, 4);
+        assert_eq!(snapshot.spec, test_job("alpha"));
+    }
+
+    #[test]
+    fn snapshot_projection_rejects_invalid_transition_sequence() {
+        let error = apply_event_to_snapshot_map(
+            &mut BTreeMap::new(),
+            &JobEvent::job_state_changed("alpha", JobEnabledState::Disabled),
+            1,
+        )
+        .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("failed to apply job event to stream snapshot state")
+        );
     }
 }
