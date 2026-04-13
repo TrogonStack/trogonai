@@ -9,6 +9,7 @@ use bytes::Bytes;
 
 use super::message::{JsAck, JsAckWith, JsDoubleAck, JsDoubleAckWith, JsMessageRef};
 use super::traits::{
+    JetStreamCreateConsumer,
     JetStreamContext, JetStreamCreateKeyValue, JetStreamGetKeyValue, JetStreamGetStream, JetStreamPublishMessage,
     JetStreamPublisher,
 };
@@ -141,6 +142,14 @@ impl JetStreamGetStream for NatsJetStreamClient {
         stream_name: T,
     ) -> Result<jetstream::stream::Stream, GetStreamError> {
         self.context.get_stream(stream_name).await
+    }
+}
+impl JetStreamCreateConsumer for jetstream::stream::Stream {
+    type Error = ConsumerError;
+    type Consumer = NatsJetStreamConsumer;
+
+    async fn create_consumer(&self, config: pull::Config) -> Result<NatsJetStreamConsumer, ConsumerError> {
+        self.create_consumer(config).await
     }
 }
 pub type MessagesError = async_nats::jetstream::consumer::pull::MessagesError;
