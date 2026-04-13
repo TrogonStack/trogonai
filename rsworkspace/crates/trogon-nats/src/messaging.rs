@@ -9,9 +9,7 @@ use std::time::Duration;
 use tracing::{Span, instrument};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
-use crate::constants::{DEFAULT_TIMEOUT, REQ_ID_HEADER};
-
-const PAYLOAD_PREVIEW_BYTES: usize = 16;
+use crate::constants::{DEFAULT_TIMEOUT, PAYLOAD_PREVIEW_BYTES, REQ_ID_HEADER};
 
 struct HeaderMapCarrier<'a>(&'a mut HeaderMap);
 
