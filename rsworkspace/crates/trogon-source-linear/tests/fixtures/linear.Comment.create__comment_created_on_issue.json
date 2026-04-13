@@ -1,0 +1,47 @@
+{
+    "action": "create",
+    "actor": {
+        "id": "00000000-0000-4000-8000-000000000010",
+        "name": "Test User",
+        "email": "test.user@example.invalid",
+        "avatarUrl": "https://example.invalid/avatar.png",
+        "url": "https://example.invalid/profiles/test-user",
+        "type": "user"
+    },
+    "createdAt": "2026-04-13T00:18:39.406Z",
+    "data": {
+        "id": "00000000-0000-4000-8000-000000000030",
+        "createdAt": "2026-04-13T00:18:39.406Z",
+        "updatedAt": "2026-04-13T00:18:39.398Z",
+        "body": "Test comment body",
+        "issueId": "00000000-0000-4000-8000-000000000020",
+        "userId": "00000000-0000-4000-8000-000000000010",
+        "reactionData": [],
+        "isArtificialAgentSessionRoot": false,
+        "botActor": null,
+        "user": {
+            "id": "00000000-0000-4000-8000-000000000010",
+            "name": "Test User",
+            "email": "test.user@example.invalid",
+            "avatarUrl": "https://example.invalid/avatar.png",
+            "url": "https://example.invalid/profiles/test-user"
+        },
+        "issue": {
+            "id": "00000000-0000-4000-8000-000000000020",
+            "title": "Demo 2",
+            "teamId": "00000000-0000-4000-8000-000000000040",
+            "team": {
+                "id": "00000000-0000-4000-8000-000000000040",
+                "key": "STM",
+                "name": "Test Team"
+            },
+            "identifier": "STM-14",
+            "url": "https://example.invalid/issue/STM-14/demo-2"
+        }
+    },
+    "url": "https://example.invalid/issue/STM-14/demo-2#comment-00000000",
+    "type": "Comment",
+    "organizationId": "00000000-0000-4000-8000-000000000001",
+    "webhookTimestamp": 1776039519669,
+    "webhookId": "00000000-0000-4000-8000-000000000002"
+}

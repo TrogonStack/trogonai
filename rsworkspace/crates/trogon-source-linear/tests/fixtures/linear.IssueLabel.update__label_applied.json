@@ -1,0 +1,24 @@
+{
+    "action": "update",
+    "actor": null,
+    "createdAt": "2026-04-12T05:13:29.682Z",
+    "data": {
+        "id": "00000000-0000-4000-8000-000000000061",
+        "createdAt": "2023-03-20T02:11:53.314Z",
+        "updatedAt": "2026-04-12T05:13:29.682Z",
+        "name": "Bug",
+        "color": "#EB5757",
+        "isGroup": false,
+        "lastAppliedAt": "2026-04-12T05:13:29.658Z",
+        "organizationId": "00000000-0000-4000-8000-000000000001"
+    },
+    "updatedFrom": {
+        "updatedAt": "2023-03-20T02:11:53.314Z",
+        "lastAppliedAt": null
+    },
+    "url": "https://example.invalid/issue-label/bug",
+    "type": "IssueLabel",
+    "organizationId": "00000000-0000-4000-8000-000000000001",
+    "webhookTimestamp": 1775990870707,
+    "webhookId": "00000000-0000-4000-8000-000000000002"
+}

@@ -1,0 +1,107 @@
+{
+    "action": "update",
+    "actor": {
+        "id": "00000000-0000-4000-8000-000000000010",
+        "name": "Test User",
+        "email": "test.user@example.invalid",
+        "avatarUrl": "https://example.invalid/avatar.png",
+        "url": "https://example.invalid/profiles/test-user",
+        "type": "user"
+    },
+    "createdAt": "2026-04-12T04:54:33.565Z",
+    "data": {
+        "id": "00000000-0000-4000-8000-000000000021",
+        "createdAt": "2025-11-26T07:49:10.704Z",
+        "updatedAt": "2026-04-12T05:05:10.609Z",
+        "archivedAt": null,
+        "number": 13,
+        "title": "Demo",
+        "priority": 0,
+        "estimate": null,
+        "sortOrder": 88.48,
+        "prioritySortOrder": 94.09,
+        "startedAt": null,
+        "completedAt": null,
+        "startedTriageAt": null,
+        "triagedAt": null,
+        "canceledAt": null,
+        "autoClosedAt": null,
+        "autoArchivedAt": null,
+        "dueDate": null,
+        "slaStartedAt": null,
+        "slaMediumRiskAt": null,
+        "slaHighRiskAt": null,
+        "slaBreachesAt": null,
+        "slaType": "all",
+        "addedToProjectAt": null,
+        "addedToCycleAt": null,
+        "addedToTeamAt": "2025-11-26T07:49:10.737Z",
+        "trashed": null,
+        "snoozedUntilAt": null,
+        "activitySummary": null,
+        "labelIds": [
+            "00000000-0000-4000-8000-000000000060"
+        ],
+        "teamId": "00000000-0000-4000-8000-000000000040",
+        "cycleId": null,
+        "projectId": null,
+        "projectMilestoneId": null,
+        "lastAppliedTemplateId": null,
+        "recurringIssueTemplateId": null,
+        "previousIdentifiers": [],
+        "creatorId": "00000000-0000-4000-8000-000000000010",
+        "externalUserCreatorId": null,
+        "assigneeId": "00000000-0000-4000-8000-000000000010",
+        "delegateId": null,
+        "snoozedById": null,
+        "stateId": "00000000-0000-4000-8000-000000000052",
+        "subIssueSortOrder": null,
+        "reactionData": [],
+        "priorityLabel": "No priority",
+        "sourceCommentId": null,
+        "inheritsSharedAccess": false,
+        "botActor": null,
+        "identifier": "STM-13",
+        "url": "https://example.invalid/issue/STM-13/demo",
+        "subscriberIds": [
+            "00000000-0000-4000-8000-000000000010"
+        ],
+        "parentId": null,
+        "assignee": {
+            "id": "00000000-0000-4000-8000-000000000010",
+            "name": "Test User",
+            "email": "test.user@example.invalid",
+            "avatarUrl": "https://example.invalid/avatar.png",
+            "url": "https://example.invalid/profiles/test-user"
+        },
+        "state": {
+            "id": "00000000-0000-4000-8000-000000000052",
+            "color": "#e2e2e2",
+            "name": "Todo",
+            "type": "unstarted"
+        },
+        "team": {
+            "id": "00000000-0000-4000-8000-000000000040",
+            "key": "STM",
+            "name": "Test Team"
+        },
+        "labels": [
+            {
+                "id": "00000000-0000-4000-8000-000000000060",
+                "color": "#BB87FC",
+                "name": "Feature"
+            }
+        ],
+        "description": "Test issue description",
+        "descriptionData": "{\"type\":\"doc\",\"content\":[{\"type\":\"paragraph\",\"content\":[{\"type\":\"text\",\"text\":\"Test issue description\"}]}]}"
+    },
+    "updatedFrom": {
+        "updatedAt": "2026-04-12T05:05:10.609Z",
+        "description": null
+    },
+    "url": "https://example.invalid/issue/STM-13/demo",
+    "type": "Issue",
+    "organizationId": "00000000-0000-4000-8000-000000000001",
+    "webhookTimestamp": 1775990849091,
+    "webhookId": "00000000-0000-4000-8000-000000000002"
+}
