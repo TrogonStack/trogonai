@@ -36,5 +36,6 @@ tracing-subscriber = { workspace = true }
 uuid            = { workspace = true }
 
 [dev-dependencies]
+axum         = { workspace = true }
 futures      = { workspace = true }
 trogon-nats  = { workspace = true, features = ["test-support"] }
