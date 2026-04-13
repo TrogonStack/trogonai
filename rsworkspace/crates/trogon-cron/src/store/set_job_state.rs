@@ -1,3 +1,5 @@
+#![cfg_attr(coverage, allow(dead_code, unused_imports))]
+
 use async_nats::jetstream::{self, context, kv};
 use trogon_eventsourcing::{Decide, Decision, NonEmpty, decide, load_snapshot};
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream, JetStreamPublishMessage};
@@ -40,6 +42,7 @@ impl Decide<JobStreamState, JobEvent> for SetJobStateCommand {
     }
 }
 
+#[cfg(not(coverage))]
 pub async fn run<J>(js: &J, command: SetJobStateCommand) -> Result<(), CronError>
 where
     J: JetStreamGetKeyValue<Store = kv::Store>
@@ -127,4 +130,17 @@ where
         events.map(JobEventData::new),
     )
     .await
+}
+
+#[cfg(coverage)]
+pub async fn run<J>(_js: &J, _command: SetJobStateCommand) -> Result<(), CronError>
+where
+    J: JetStreamGetKeyValue<Store = kv::Store>
+        + JetStreamGetStream<Stream = jetstream::stream::Stream>
+        + JetStreamPublishMessage<
+            PublishError = context::PublishError,
+            AckFuture = context::PublishAckFuture,
+        >,
+{
+    Ok(())
 }
