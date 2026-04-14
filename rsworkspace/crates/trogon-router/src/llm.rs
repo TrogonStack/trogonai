@@ -96,6 +96,106 @@ impl LlmClient for OpenAiCompatClient {
     }
 }
 
+// ── Unit tests for OpenAiCompatClient ────────────────────────────────────────
+
+#[cfg(test)]
+mod client_tests {
+    use super::*;
+    use axum::{Router, http::StatusCode, routing::post};
+    use std::future::IntoFuture as _;
+    use std::sync::Arc;
+
+    /// Spawn an `axum` server that returns the given JSON body and HTTP status.
+    /// Returns the bound socket address.
+    async fn spawn_mock_llm(status: StatusCode, body: String) -> std::net::SocketAddr {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind mock LLM");
+        let addr = listener.local_addr().unwrap();
+        let body = Arc::new(body);
+
+        let app = Router::new().route(
+            "/chat/completions",
+            post(move || {
+                let b = Arc::clone(&body);
+                async move {
+                    (status, [("content-type", "application/json")], (*b).clone())
+                }
+            }),
+        );
+
+        tokio::spawn(axum::serve(listener, app).into_future());
+        addr
+    }
+
+    fn client(addr: std::net::SocketAddr) -> OpenAiCompatClient {
+        OpenAiCompatClient::new(
+            reqwest::Client::new(),
+            LlmConfig {
+                api_url: format!("http://{addr}"),
+                api_key: "test-key".into(),
+                model: "test-model".into(),
+            },
+        )
+    }
+
+    fn choices_body(content: &str) -> String {
+        serde_json::json!({
+            "choices": [{"message": {"content": content}}]
+        })
+        .to_string()
+    }
+
+    #[tokio::test]
+    async fn complete_returns_routed_on_valid_response() {
+        let content = r#"{"status":"routed","agent_type":"PrActor","entity_key":"owner/repo/1","reasoning":"test"}"#;
+        let addr = spawn_mock_llm(StatusCode::OK, choices_body(content)).await;
+        let result = client(addr).complete("test prompt".into()).await.unwrap();
+        assert!(matches!(
+            result,
+            LlmRoutingResponse::Routed { agent_type, .. } if agent_type == "PrActor"
+        ));
+    }
+
+    #[tokio::test]
+    async fn complete_returns_unroutable_on_valid_response() {
+        let content = r#"{"status":"unroutable","reasoning":"no match"}"#;
+        let addr = spawn_mock_llm(StatusCode::OK, choices_body(content)).await;
+        let result = client(addr).complete("test prompt".into()).await.unwrap();
+        assert!(matches!(result, LlmRoutingResponse::Unroutable { .. }));
+    }
+
+    #[tokio::test]
+    async fn complete_returns_llm_request_error_on_non_2xx() {
+        let addr = spawn_mock_llm(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            r#"{"error":"oops"}"#.to_string(),
+        )
+        .await;
+        let err = client(addr).complete("test".into()).await.unwrap_err();
+        assert!(matches!(err, RouterError::LlmRequest(_)));
+    }
+
+    #[tokio::test]
+    async fn complete_returns_llm_parse_error_when_choices_missing() {
+        let addr = spawn_mock_llm(
+            StatusCode::OK,
+            r#"{"id":"x","choices":[]}"#.to_string(),
+        )
+        .await;
+        let err = client(addr).complete("test".into()).await.unwrap_err();
+        assert!(matches!(err, RouterError::LlmParse(_)));
+    }
+
+    #[tokio::test]
+    async fn complete_returns_llm_parse_error_when_content_not_json() {
+        let body_start = r#"{"choices": [{"message": {"content": "this is plain text, not json"}}]}"#;
+        let addr = spawn_mock_llm(StatusCode::OK, body_start.to_string()).await;
+        let err = client(addr).complete("test".into()).await.unwrap_err();
+        assert!(matches!(err, RouterError::LlmParse(_)));
+    }
+}
+
 // ── Mock implementation ───────────────────────────────────────────────────────
 
 #[cfg(any(test, feature = "test-helpers"))]

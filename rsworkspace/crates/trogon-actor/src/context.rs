@@ -224,4 +224,36 @@ mod tests {
             .unwrap();
         assert_eq!(result.as_ref(), b"ok");
     }
+
+    #[tokio::test]
+    async fn append_assistant_message_records_entry() {
+        let (ctx, entries) = ContextBuilder::new("pr", "owner/repo/1").build();
+        ctx.append_assistant_message("LGTM", Some(12)).await.unwrap();
+        let snapshot = entries.lock().unwrap();
+        assert_eq!(snapshot.len(), 1);
+        assert!(matches!(
+            &snapshot[0],
+            TranscriptEntry::Message { role: trogon_transcript::entry::Role::Assistant, tokens: Some(12), .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn append_tool_call_records_entry() {
+        let (ctx, entries) = ContextBuilder::new("pr", "owner/repo/1").build();
+        ctx.append_tool_call(
+            "search",
+            serde_json::json!({"q": "foo"}),
+            serde_json::json!({"results": []}),
+            55,
+        )
+        .await
+        .unwrap();
+        let snapshot = entries.lock().unwrap();
+        assert_eq!(snapshot.len(), 1);
+        assert!(matches!(
+            &snapshot[0],
+            TranscriptEntry::ToolCall { name, duration_ms: 55, .. } if name == "search"
+        ));
+    }
+
 }

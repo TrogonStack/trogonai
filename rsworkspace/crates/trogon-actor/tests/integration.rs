@@ -305,6 +305,33 @@ impl EntityActor for NoCapActor {
     }
 }
 
+/// `StateStore::delete` removes an entry from the KV store. After deletion,
+/// `load` must return `None` for that key.
+#[tokio::test]
+async fn state_delete_removes_entry() {
+    let (_nats, js, _container) = setup().await;
+
+    let state_store = provision_state(&js).await.unwrap();
+
+    // Save an entry directly via the KV handle so we don't need a runtime.
+    let kv = js.get_key_value("ACTOR_STATE").await.unwrap();
+    kv.put("counter.to-delete", Bytes::from_static(b"{\"count\":1}"))
+        .await
+        .unwrap();
+
+    // Confirm it exists before deletion.
+    let before = state_store.load("counter.to-delete").await.unwrap();
+    assert!(before.is_some(), "entry should exist before delete");
+
+    // Delete via the StateStore trait.
+    use trogon_actor::state::StateStore as _;
+    state_store.delete("counter.to-delete").await.unwrap();
+
+    // Entry must be gone after deletion.
+    let after = state_store.load("counter.to-delete").await.unwrap();
+    assert!(after.is_none(), "entry should be absent after delete");
+}
+
 /// When the KV store holds a value that cannot be deserialized into the actor's
 /// State type, handle_event must return ActorError::Deserialize — not panic.
 #[tokio::test]

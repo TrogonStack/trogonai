@@ -115,4 +115,14 @@ mod tests {
         let prompt = build_routing_prompt(&event, &[pr_actor()]);
         assert!(prompt.contains("[truncated]"));
     }
+
+    #[test]
+    fn prompt_includes_metadata_when_non_null() {
+        let mut agent = pr_actor();
+        agent.metadata = serde_json::json!({"team": "security", "region": "us-east-1"});
+        let event = make_event("trogon.events.github.push", "{}");
+        let prompt = build_routing_prompt(&event, &[agent]);
+        assert!(prompt.contains("metadata"), "prompt should include metadata block");
+        assert!(prompt.contains("us-east-1"), "prompt should include metadata values");
+    }
 }
