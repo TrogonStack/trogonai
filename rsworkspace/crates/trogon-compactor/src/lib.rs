@@ -285,6 +285,21 @@ mod tests {
         assert_eq!(result.len(), original_len);
     }
 
+    // ── build_compacted_history ─────────────────────────────────────────────
+
+    #[test]
+    fn build_compacted_history_with_empty_to_keep() {
+        // No recent messages to preserve → result is just [summary_user, ack_assistant]
+        let result = build_compacted_history("## Goal\nJust the summary".into(), &[]);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].role, "user");
+        assert_eq!(result[1].role, "assistant");
+        let ContentBlock::Text { text } = &result[0].content[0] else {
+            panic!("expected text block");
+        };
+        assert!(text.contains("## Goal\nJust the summary"));
+    }
+
     // ── extract_previous_summary edge cases ─────────────────────────────────
 
     #[test]
@@ -300,5 +315,22 @@ mod tests {
         // Missing closing tag → strip_suffix fails → None
         let messages = vec![Message::user("<context-summary>\n## Goal\nDo stuff")];
         assert!(extract_previous_summary(&messages).is_none());
+    }
+
+    #[test]
+    fn extract_previous_summary_scans_all_text_blocks_in_first_message() {
+        // The function iterates all content blocks — summary in 2nd block is still found
+        let messages = vec![Message {
+            role: "user".into(),
+            content: vec![
+                ContentBlock::Text { text: "regular intro".into() },
+                ContentBlock::Text {
+                    text: "<context-summary>\n## Goal\nDo stuff\n</context-summary>".into(),
+                },
+            ],
+        }];
+        let summary = extract_previous_summary(&messages);
+        assert!(summary.is_some());
+        assert_eq!(summary.unwrap(), "## Goal\nDo stuff");
     }
 }

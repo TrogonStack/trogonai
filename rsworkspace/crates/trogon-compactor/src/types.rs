@@ -173,4 +173,75 @@ mod tests {
         let b = ContentBlock::Image { source: serde_json::json!({"type": "base64"}) };
         assert!(b.as_text().is_none());
     }
+
+    // ── Serde round-trips ─────────────────────────────────────────────────────
+
+    #[test]
+    fn content_block_text_serializes_with_snake_case_type_tag() {
+        let b = ContentBlock::Text { text: "hello".into() };
+        let v = serde_json::to_value(&b).unwrap();
+        assert_eq!(v["type"], "text");
+        assert_eq!(v["text"], "hello");
+    }
+
+    #[test]
+    fn content_block_tool_use_omits_parent_id_when_none() {
+        let b = ContentBlock::ToolUse {
+            id: "1".into(),
+            name: "my_tool".into(),
+            input: serde_json::json!({"key": "val"}),
+            parent_tool_use_id: None,
+        };
+        let v = serde_json::to_value(&b).unwrap();
+        assert_eq!(v["type"], "tool_use");
+        assert!(!v.as_object().unwrap().contains_key("parent_tool_use_id"));
+    }
+
+    #[test]
+    fn content_block_tool_use_includes_parent_id_when_some() {
+        let b = ContentBlock::ToolUse {
+            id: "1".into(),
+            name: "my_tool".into(),
+            input: serde_json::json!({}),
+            parent_tool_use_id: Some("parent-123".into()),
+        };
+        let v = serde_json::to_value(&b).unwrap();
+        assert_eq!(v["parent_tool_use_id"], "parent-123");
+    }
+
+    #[test]
+    fn message_round_trips_through_json() {
+        // Critical: messages stored in NATS KV by trogon-acp-runner must
+        // deserialize correctly here without a conversion layer.
+        let original = Message {
+            role: "user".into(),
+            content: vec![
+                ContentBlock::Text { text: "question".into() },
+                ContentBlock::ToolResult {
+                    tool_use_id: "t1".into(),
+                    content: "output".into(),
+                },
+            ],
+        };
+        let json = serde_json::to_value(&original).unwrap();
+        let restored: Message = serde_json::from_value(json).unwrap();
+
+        assert_eq!(restored.role, "user");
+        assert_eq!(restored.content.len(), 2);
+        let ContentBlock::Text { text } = &restored.content[0] else {
+            panic!("expected Text block");
+        };
+        assert_eq!(text, "question");
+    }
+
+    #[test]
+    fn content_block_deserializes_tool_result_from_tagged_json() {
+        let json = serde_json::json!({
+            "type": "tool_result",
+            "tool_use_id": "id1",
+            "content": "the result"
+        });
+        let block: ContentBlock = serde_json::from_value(json).unwrap();
+        assert!(matches!(block, ContentBlock::ToolResult { .. }));
+    }
 }

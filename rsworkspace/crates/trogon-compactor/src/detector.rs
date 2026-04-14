@@ -192,6 +192,18 @@ mod tests {
     }
 
     #[test]
+    fn should_compact_when_reserve_exceeds_context_window() {
+        // saturating_sub clamps to 0 → threshold is 0 → any non-empty message triggers compaction
+        let settings = CompactionSettings {
+            context_window: 100,
+            reserve_tokens: 200, // larger than context_window
+            keep_recent_tokens: 20,
+        };
+        let msgs = vec![turn("user", 1)]; // even 1 char → 1 token > 0
+        assert!(should_compact(&msgs, &settings));
+    }
+
+    #[test]
     fn find_cut_point_none_when_all_user_messages_are_tool_results() {
         // No real user turns at all → backward scan finds nothing → None
         let msgs = vec![
