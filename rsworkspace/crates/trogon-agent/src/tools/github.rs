@@ -440,27 +440,39 @@ pub async fn post_pr_comment(
     // Dedup check: if an idempotency key is present, scan existing comments for
     // the embedded marker before posting.
     if let Some(key) = idempotency_key {
-        let marker = format!("<!-- trogon-idempotency-key: {key} -->");
-        match ctx.http_client.get(&url, auth_headers.clone()).await {
-            Ok(resp) => {
-                if let Ok(comments) = serde_json::from_str::<Value>(&resp.body) {
-                    if let Some(arr) = comments.as_array() {
-                        for comment in arr {
-                            if comment["body"]
-                                .as_str()
-                                .map(|b| b.contains(&marker))
-                                .unwrap_or(false)
-                            {
-                                let html_url =
-                                    comment["html_url"].as_str().unwrap_or("(no url)");
-                                return Ok(format!("Comment posted: {html_url}"));
+        let marker = super::idempotency_marker(key);
+
+        // Paginate through all comments — the default API response is only ~30 items.
+        // Without pagination, a comment on a PR with >30 comments may be on page 2+
+        // and the dedup check misses it, causing a duplicate post.
+        // Cap at 10 pages (1000 comments) to guard against unbounded loops.
+        'dedup: for page in 1u32..=10 {
+            let page_url = format!("{url}?per_page=100&page={page}");
+            match ctx.http_client.get(&page_url, auth_headers.clone()).await {
+                Ok(resp) => {
+                    match serde_json::from_str::<Value>(&resp.body) {
+                        Ok(Value::Array(arr)) => {
+                            for comment in &arr {
+                                if comment["body"]
+                                    .as_str()
+                                    .map(|b| b.contains(&marker))
+                                    .unwrap_or(false)
+                                {
+                                    let html_url =
+                                        comment["html_url"].as_str().unwrap_or("(no url)");
+                                    return Ok(format!("Comment posted: {html_url}"));
+                                }
+                            }
+                            if arr.len() < 100 {
+                                break 'dedup; // last page — marker not found
                             }
                         }
+                        _ => break 'dedup, // unexpected shape — stop paginating
                     }
                 }
+                // Graceful degradation: if we can't fetch comments, proceed with POST.
+                Err(_) => break 'dedup,
             }
-            // Graceful degradation: if we can't fetch comments, proceed with POST.
-            Err(_) => {}
         }
 
         let effective_body = format!("{body}\n\n{marker}");
