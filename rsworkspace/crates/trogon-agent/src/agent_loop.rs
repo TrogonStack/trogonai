@@ -1029,7 +1029,52 @@ impl AgentLoop {
                             }
                         }
                         Err(_) => {
-                            warn!(promise_id = %pid, "Pre-LLM heartbeat timed out — stale detection window may be wider than expected");
+                            // Timeout: write may or may not have landed. Reload
+                            // to get the current revision so future heartbeats
+                            // and the terminal-status write can succeed. Without
+                            // this, the revision stays stale and every subsequent
+                            // write CAS-conflicts, leaving claimed_at frozen.
+                            warn!(promise_id = %pid, "Pre-LLM heartbeat timed out — reloading revision and retrying");
+                            match tokio::time::timeout(
+                                NATS_KV_TIMEOUT,
+                                store.get_promise(&self.tenant_id, pid),
+                            )
+                            .await
+                            {
+                                Ok(Ok(Some((current, new_rev)))) => {
+                                    if current.status
+                                        != crate::promise_store::PromiseStatus::Running
+                                    {
+                                        warn!(
+                                            promise_id = %pid,
+                                            status = ?current.status,
+                                            "Promise no longer Running during heartbeat timeout-reload — stopping"
+                                        );
+                                        return Ok(String::new());
+                                    }
+                                    *rev = new_rev;
+                                    p.claimed_at = trogon_automations::now_unix();
+                                    match tokio::time::timeout(
+                                        NATS_KV_TIMEOUT,
+                                        store.update_promise(&self.tenant_id, pid, p, *rev),
+                                    )
+                                    .await
+                                    {
+                                        Ok(Ok(new_rev2)) => {
+                                            *rev = new_rev2;
+                                            last_heartbeat_at = std::time::Instant::now();
+                                        }
+                                        Ok(Err(e)) => warn!(error = %e, promise_id = %pid, "Pre-LLM heartbeat timeout retry failed — claimed_at may become stale"),
+                                        Err(_) => warn!(promise_id = %pid, "Pre-LLM heartbeat timeout retry also timed out — claimed_at may become stale"),
+                                    }
+                                }
+                                Ok(Ok(None)) => {
+                                    warn!(promise_id = %pid, "Promise vanished during heartbeat timeout-reload — stopping");
+                                    return Ok(String::new());
+                                }
+                                Ok(Err(e)) => warn!(error = %e, promise_id = %pid, "Could not reload revision after heartbeat timeout — claimed_at may become stale"),
+                                Err(_) => warn!(promise_id = %pid, "KV timeout reloading revision after heartbeat timeout — claimed_at may become stale"),
+                            }
                         }
                     }
                 }
@@ -1272,12 +1317,22 @@ impl AgentLoop {
                                 // p.messages is already the plain trim (messages[drop_count..]).
                                 // Attempt to enrich with an LLM-generated summary of the dropped
                                 // messages so a crash-recovered run has semantic context.
-                                let summary_pair = summarize_dropped_messages(
-                                    &*self.anthropic_client,
-                                    &self.model,
-                                    &messages[..drop_count],
+                                // Hard cap: summarization is best-effort —
+                                // blocking the checkpoint for up to 5 minutes
+                                // (inherited LLM timeout) is disproportionate.
+                                // 30 s is generous for a brief summary and keeps
+                                // the turn latency predictable. On timeout the
+                                // empty Vec triggers the plain-trim fallback.
+                                let summary_pair = tokio::time::timeout(
+                                    std::time::Duration::from_secs(30),
+                                    summarize_dropped_messages(
+                                        &*self.anthropic_client,
+                                        &self.model,
+                                        &messages[..drop_count],
+                                    ),
                                 )
-                                .await;
+                                .await
+                                .unwrap_or_default();
                                 if !summary_pair.is_empty() {
                                     let mut with_summary = summary_pair;
                                     with_summary.extend_from_slice(&messages[drop_count..]);
@@ -1469,6 +1524,24 @@ impl AgentLoop {
                         }
                         } // if !checkpointing_disabled: size fits (as-is or trimmed)
                         } // checkpoint attempt block
+                    }
+
+                    // Fix: if checkpointing is permanently disabled (payload
+                    // exceeds all trim levels), reset `recovering` so future
+                    // turns don't consult the tool cache. Without this,
+                    // `recovering` stays `true` forever and same-input tool
+                    // calls in genuinely-new turns (e.g. a polling loop that
+                    // calls the same tool twice expecting different results)
+                    // return the first cached value rather than fresh data.
+                    //
+                    // Safety: if the process crashes while `recovering=false`
+                    // and no new checkpoint exists, recovery re-lands at the
+                    // same checkpoint and replays the recovery turn from cache
+                    // again — correct behaviour. Tools executed in later turns
+                    // (before the crash) will be re-executed; built-in tool
+                    // idempotency keys handle dedup for those.
+                    if checkpointing_disabled {
+                        recovering = false;
                     }
                 }
                 "max_tokens" => {
@@ -6744,6 +6817,94 @@ mod tests {
             PromiseStatus::Resolved,
             "promise must be Resolved in real KV after recovery; got {:?}",
             p.status
+        );
+    }
+
+    // ── recovering resets when checkpointing is permanently disabled ──────────
+
+    /// When checkpointing is permanently disabled (payload exceeds all trim
+    /// levels), `recovering` must be reset to `false` after the first tool turn
+    /// so that subsequent turns don't return stale cached results.
+    ///
+    /// Scenario:
+    ///  - Checkpoint loaded with a large initial message → `recovering = true`.
+    ///  - Turn 1: my_tool replayed from cache (recovering=true → cache hit).
+    ///    Checkpoint oversized (3 messages < MIN_TRIM_KEEP=4) → disabled.
+    ///    Fix: `recovering = false`.
+    ///  - Turn 2: same my_tool requested again.
+    ///    `recovering = false` → cache NOT consulted → dispatcher called live.
+    ///
+    /// Without the fix, turn 2 would also hit the cache ("cached_result") and
+    /// the dispatcher would never be called — breaking any polling pattern that
+    /// calls the same tool twice expecting different results.
+    #[tokio::test]
+    async fn recovering_resets_when_checkpointing_permanently_disabled() {
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::PromiseRepository;
+        use crate::tools::mock::CountingMockToolDispatcher;
+        use mock::SequencedMockAnthropicClient;
+        use std::sync::atomic::Ordering;
+
+        let store = Arc::new(MockPromiseStore::new());
+
+        // Checkpoint with a message large enough that 3 messages (initial +
+        // one tool turn) exceed CHECKPOINT_MAX_BYTES. With only 3 messages
+        // the trim logic (MIN_TRIM_KEEP=4) cannot reduce the history, so
+        // checkpointing is permanently disabled for turn 1.
+        let mut p = make_test_promise("p1");
+        p.messages = vec![Message::user_text("a".repeat(CHECKPOINT_MAX_BYTES))];
+        store.insert_promise(p);
+
+        // Pre-populate cache for the recovery turn tool call.
+        let input = serde_json::json!({"k": "v"});
+        let ck = super::tool_cache_key("my_tool", &input);
+        store
+            .put_tool_result("acme", "p1", &ck, "cached_result")
+            .await
+            .unwrap();
+
+        let tool_use_resp = || {
+            serde_json::json!({
+                "stop_reason": "tool_use",
+                "content": [{"type": "tool_use", "id": "tu1", "name": "my_tool", "input": {"k": "v"}}]
+            })
+        };
+        // Turn 2 produces 5 messages total — divisor=2 → keep=4 trims the large
+        // initial message. summarize_dropped_messages is called for it.
+        let summarize_resp = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "Summary: large initial message."}]
+        });
+        let end_turn_resp = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "done"}]
+        });
+        // Order: turn-1 LLM, turn-2 LLM, summarize call (turn-2 checkpoint), turn-3 LLM.
+        let anthropic = Arc::new(SequencedMockAnthropicClient::new(vec![
+            tool_use_resp(),
+            tool_use_resp(),
+            summarize_resp,
+            end_turn_resp,
+        ]));
+        let (dispatcher, call_count) = CountingMockToolDispatcher::new("live_result");
+
+        let agent = make_durable_agent(
+            anthropic,
+            Arc::new(dispatcher),
+            Arc::clone(&store) as Arc<dyn PromiseRepository>,
+            "p1",
+        );
+
+        let result = agent.run(vec![], &[], None).await;
+        assert_eq!(result.unwrap(), "done");
+
+        // Turn 1: recovering=true → cache hit → 0 dispatches.
+        // Turn 2: recovering reset to false → cache not consulted → 1 dispatch.
+        assert_eq!(
+            call_count.load(Ordering::SeqCst),
+            1,
+            "dispatcher must be called once in turn 2 — recovering must have been reset \
+             to false when checkpointing was permanently disabled in turn 1"
         );
     }
 }
