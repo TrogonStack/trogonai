@@ -49,6 +49,46 @@ use crate::context::ActorContext;
 ///     }
 /// }
 /// ```
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::context::ActorContext;
+
+    #[derive(Default, serde::Serialize, serde::Deserialize)]
+    struct Empty;
+
+    struct Minimal;
+
+    impl EntityActor for Minimal {
+        type State = Empty;
+        type Error = std::convert::Infallible;
+
+        fn actor_type() -> &'static str {
+            "minimal"
+        }
+
+        async fn handle(
+            &mut self,
+            _state: &mut Empty,
+            _ctx: &ActorContext,
+        ) -> Result<(), Self::Error> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn on_create_default_impl_is_noop() {
+        let mut state = Empty;
+        Minimal::on_create(&mut state).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn on_destroy_default_impl_is_noop() {
+        let mut state = Empty;
+        Minimal::on_destroy(&mut state).await.unwrap();
+    }
+}
+
 pub trait EntityActor: Send + 'static {
     /// The persistent state type. The runtime loads this from KV before each
     /// event and saves it back afterwards. Must implement `Default` (returned

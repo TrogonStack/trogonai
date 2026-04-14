@@ -208,6 +208,46 @@ mod tests {
         assert_ne!(s1.id(), s2.id());
     }
 
+    #[test]
+    fn actor_type_and_key_getters_return_construction_values() {
+        let (session, _) = mock_session("incident", "acme/42");
+        assert_eq!(session.actor_type(), "incident");
+        assert_eq!(session.actor_key(), "acme/42");
+    }
+
+    #[tokio::test]
+    async fn append_assistant_message_records_entry() {
+        let (session, mock) = mock_session("pr", "owner/repo/1");
+        session.append_assistant_message("LGTM", Some(7)).await.unwrap();
+        let published = mock.take_published();
+        assert_eq!(published.len(), 1);
+        let entry: TranscriptEntry = serde_json::from_slice(&published[0].1).unwrap();
+        assert!(matches!(entry, TranscriptEntry::Message { role: crate::entry::Role::Assistant, tokens: Some(7), .. }));
+    }
+
+    #[tokio::test]
+    async fn append_tool_call_records_entry() {
+        let (session, mock) = mock_session("pr", "owner/repo/1");
+        session
+            .append_tool_call("search", serde_json::json!({"q": "foo"}), serde_json::json!([]), 99)
+            .await
+            .unwrap();
+        let published = mock.take_published();
+        let entry: TranscriptEntry = serde_json::from_slice(&published[0].1).unwrap();
+        assert!(matches!(entry, TranscriptEntry::ToolCall { name, duration_ms: 99, .. } if name == "search"));
+    }
+
+    #[tokio::test]
+    async fn append_sub_agent_spawn_records_entry() {
+        let (session, mock) = mock_session("pr", "owner/repo/1");
+        session.append_sub_agent_spawn("pr/owner/repo/1", "SecurityActor", "security_analysis")
+            .await
+            .unwrap();
+        let published = mock.take_published();
+        let entry: TranscriptEntry = serde_json::from_slice(&published[0].1).unwrap();
+        assert!(matches!(entry, TranscriptEntry::SubAgentSpawn { capability, .. } if capability == "security_analysis"));
+    }
+
     #[tokio::test]
     async fn routing_decision_round_trips() {
         let (session, mock) = mock_session("router", "global");

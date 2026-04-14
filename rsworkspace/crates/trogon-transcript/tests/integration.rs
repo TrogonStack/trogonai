@@ -203,6 +203,25 @@ async fn corrupted_entry_in_stream_returns_deserialization_error() {
     );
 }
 
+/// Publishing when the TRANSCRIPTS stream has not been provisioned causes the
+/// JetStream ack to fail. The error must bubble up as `TranscriptError::Publish`
+/// rather than panicking or being silently swallowed.
+#[tokio::test]
+async fn session_append_returns_publish_error_when_stream_not_provisioned() {
+    let (nats, _container) = setup().await;
+    let js = async_nats::jetstream::new(nats);
+    // Deliberately skip TranscriptStore::provision() so no TRANSCRIPTS stream exists.
+    let publisher = NatsTranscriptPublisher::new(js);
+    let session = Session::new(publisher, "pr", "no-stream-entity");
+
+    let err = session.append_user_message("hello", None).await.unwrap_err();
+
+    assert!(
+        matches!(err, TranscriptError::Publish(_)),
+        "expected Publish error when no stream is provisioned, got: {err:?}"
+    );
+}
+
 /// A stream that contains one valid and one corrupted entry should fail on the
 /// corrupted entry — the store does not silently skip bad payloads.
 #[tokio::test]
