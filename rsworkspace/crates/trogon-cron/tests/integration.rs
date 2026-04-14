@@ -6,8 +6,9 @@ use async_nats::jetstream;
 use chrono::{Duration as ChronoDuration, Utc};
 use trogon_cron::{
     CronController, DeliverySpec, JobEnabledState, JobId, JobSpec, JobWriteCondition,
-    SamplingSource, ScheduleSpec, connect_store, delete_job, get_job, put_job, set_job_state,
-    store::{DeleteJobCommand, GetJobCommand, PutJobCommand, SetJobStateCommand},
+    SamplingSource, ScheduleSpec, change_job_state, connect_store, get_job, register_job,
+    remove_job,
+    store::{ChangeJobStateCommand, GetJobCommand, RegisterJobCommand, RemoveJobCommand},
 };
 use trogon_nats::{NatsConfig, connect as nats_connect};
 
@@ -189,9 +190,9 @@ async fn controller_reconciles_one_time_job() {
         at: Utc::now() + ChronoDuration::seconds(2),
     };
 
-    put_job(
+    register_job(
         &store,
-        PutJobCommand::new(job, JobWriteCondition::MustNotExist).unwrap(),
+        RegisterJobCommand::new(job, JobWriteCondition::MustNotExist).unwrap(),
     )
     .await
     .unwrap();
@@ -231,9 +232,9 @@ async fn controller_reconciles_sampling_job() {
         }),
     };
 
-    put_job(
+    register_job(
         &store,
-        PutJobCommand::new(job, JobWriteCondition::MustNotExist).unwrap(),
+        RegisterJobCommand::new(job, JobWriteCondition::MustNotExist).unwrap(),
     )
     .await
     .unwrap();
@@ -275,9 +276,9 @@ async fn controller_reconciles_cron_job_with_timezone() {
         timezone: Some("UTC".to_string()),
     };
 
-    put_job(
+    register_job(
         &store,
-        PutJobCommand::new(job, JobWriteCondition::MustNotExist).unwrap(),
+        RegisterJobCommand::new(job, JobWriteCondition::MustNotExist).unwrap(),
     )
     .await
     .unwrap();
@@ -308,9 +309,9 @@ async fn disabling_job_removes_schedule_subject() {
     });
 
     let job = base_job("disabled");
-    put_job(
+    register_job(
         &store,
-        PutJobCommand::new(job, JobWriteCondition::MustNotExist).unwrap(),
+        RegisterJobCommand::new(job, JobWriteCondition::MustNotExist).unwrap(),
     )
     .await
     .unwrap();
@@ -331,9 +332,9 @@ async fn disabling_job_removes_schedule_subject() {
     .unwrap()
     .unwrap()
     .version;
-    set_job_state(
+    change_job_state(
         &store,
-        SetJobStateCommand {
+        ChangeJobStateCommand {
             id: job_id("disabled"),
             state: JobEnabledState::Disabled,
             write_condition: JobWriteCondition::MustBeAtVersion(version),
@@ -363,9 +364,9 @@ async fn removing_job_removes_schedule_subject() {
     });
 
     let job = base_job("removed");
-    put_job(
+    register_job(
         &store,
-        PutJobCommand::new(job, JobWriteCondition::MustNotExist).unwrap(),
+        RegisterJobCommand::new(job, JobWriteCondition::MustNotExist).unwrap(),
     )
     .await
     .unwrap();
@@ -386,9 +387,9 @@ async fn removing_job_removes_schedule_subject() {
     .unwrap()
     .unwrap()
     .version;
-    delete_job(
+    remove_job(
         &store,
-        DeleteJobCommand {
+        RemoveJobCommand {
             id: job_id("removed"),
             write_condition: JobWriteCondition::MustBeAtVersion(version),
         },
@@ -414,9 +415,9 @@ async fn event_store_rebuilds_current_state_for_new_client() {
     };
     let expected_schedule = job.schedule.clone();
 
-    put_job(
+    register_job(
         &store,
-        PutJobCommand::new(job, JobWriteCondition::MustNotExist).unwrap(),
+        RegisterJobCommand::new(job, JobWriteCondition::MustNotExist).unwrap(),
     )
     .await
     .unwrap();
@@ -430,9 +431,9 @@ async fn event_store_rebuilds_current_state_for_new_client() {
     .unwrap()
     .unwrap()
     .version;
-    set_job_state(
+    change_job_state(
         &store,
-        SetJobStateCommand {
+        ChangeJobStateCommand {
             id: job_id("eventful"),
             state: JobEnabledState::Disabled,
             write_condition: JobWriteCondition::MustBeAtVersion(version),

@@ -15,8 +15,8 @@ use crate::{
     error::CronError,
     events::{JobDecisionError, JobEvent},
     store::{
-        ConfigWatchStream, DeleteJobCommand, GetJobCommand, ListJobsCommand, LoadAndWatchCommand,
-        LoadAndWatchResult, PutJobCommand, SetJobStateCommand,
+        ChangeJobStateCommand, ConfigWatchStream, GetJobCommand, ListJobsCommand,
+        LoadAndWatchCommand, LoadAndWatchResult, RegisterJobCommand, RemoveJobCommand,
     },
     traits::SchedulePublisher,
 };
@@ -154,7 +154,7 @@ impl MockConfigStore {
             .insert(spec.id.clone(), Snapshot::new(1, spec));
     }
 
-    pub async fn put_job(&self, command: PutJobCommand) -> Result<(), CronError> {
+    pub async fn register_job(&self, command: RegisterJobCommand) -> Result<(), CronError> {
         let mut jobs = self.jobs.lock().unwrap();
         let mut stream_versions = self.stream_versions.lock().unwrap();
         let current_snapshot = jobs.get(command.stream_id().as_str()).cloned();
@@ -181,7 +181,7 @@ impl MockConfigStore {
             }
             Err(error) => {
                 return Err(CronError::event_source(
-                    "failed to decide mocked job registration from current put-job state",
+                    "failed to decide mocked job registration from current register-job state",
                     error,
                 ));
             }
@@ -196,7 +196,7 @@ impl MockConfigStore {
                 }
                 other => {
                     return Err(CronError::event_source(
-                        "failed to project mocked put-job event into current snapshot",
+                        "failed to project mocked register-job event into current snapshot",
                         std::io::Error::other(format!("{other:?}")),
                     ));
                 }
@@ -210,7 +210,7 @@ impl MockConfigStore {
         Ok(())
     }
 
-    pub async fn set_job_state(&self, command: SetJobStateCommand) -> Result<(), CronError> {
+    pub async fn change_job_state(&self, command: ChangeJobStateCommand) -> Result<(), CronError> {
         let mut jobs = self.jobs.lock().unwrap();
         let mut stream_versions = self.stream_versions.lock().unwrap();
         let current_snapshot = jobs.get(command.stream_id().as_str()).cloned();
@@ -241,7 +241,7 @@ impl MockConfigStore {
             }
             Err(error) => {
                 return Err(CronError::event_source(
-                    "failed to decide mocked job state change from current set-job-state state",
+                    "failed to decide mocked job state change from current change-job-state state",
                     error,
                 ));
             }
@@ -264,7 +264,7 @@ impl MockConfigStore {
                 }
                 other => {
                     return Err(CronError::event_source(
-                        "failed to project mocked set-job-state event into current snapshot",
+                        "failed to project mocked change-job-state event into current snapshot",
                         std::io::Error::other(format!("{other:?}")),
                     ));
                 }
@@ -290,7 +290,7 @@ impl MockConfigStore {
             .cloned())
     }
 
-    pub async fn delete_job(&self, command: DeleteJobCommand) -> Result<(), CronError> {
+    pub async fn remove_job(&self, command: RemoveJobCommand) -> Result<(), CronError> {
         let mut jobs = self.jobs.lock().unwrap();
         let mut stream_versions = self.stream_versions.lock().unwrap();
         let current_snapshot = jobs.get(command.stream_id().as_str()).cloned();
@@ -315,7 +315,7 @@ impl MockConfigStore {
             }
             Err(error) => {
                 return Err(CronError::event_source(
-                    "failed to decide mocked job removal from current delete-job state",
+                    "failed to decide mocked job removal from current remove-job state",
                     error,
                 ));
             }
@@ -330,7 +330,7 @@ impl MockConfigStore {
                 }
                 other => {
                     return Err(CronError::event_source(
-                        "failed to project mocked delete-job event into current snapshot",
+                        "failed to project mocked remove-job event into current snapshot",
                         std::io::Error::other(format!("{other:?}")),
                     ));
                 }
@@ -376,8 +376,8 @@ mod tests {
         DeliverySpec, JobEnabledState, JobWriteCondition, SamplingSource, ScheduleSpec,
     };
     use crate::store::{
-        DeleteJobCommand, GetJobCommand, ListJobsCommand, LoadAndWatchCommand, PutJobCommand,
-        SetJobStateCommand,
+        ChangeJobStateCommand, GetJobCommand, ListJobsCommand, LoadAndWatchCommand,
+        RegisterJobCommand, RemoveJobCommand,
     };
     use futures::StreamExt;
 
@@ -461,8 +461,9 @@ mod tests {
         assert_eq!(seeded.version, 1);
 
         store
-            .put_job(
-                PutJobCommand::new(base_job("alpha"), JobWriteCondition::MustNotExist).unwrap(),
+            .register_job(
+                RegisterJobCommand::new(base_job("alpha"), JobWriteCondition::MustNotExist)
+                    .unwrap(),
             )
             .await
             .unwrap();
@@ -476,7 +477,7 @@ mod tests {
         assert_eq!(alpha.version, 1);
 
         store
-            .set_job_state(SetJobStateCommand {
+            .change_job_state(ChangeJobStateCommand {
                 id: job_id("alpha"),
                 state: JobEnabledState::Disabled,
                 write_condition: JobWriteCondition::MustBeAtVersion(alpha.version),
@@ -515,7 +516,7 @@ mod tests {
             .unwrap()
             .unwrap();
         store
-            .delete_job(DeleteJobCommand {
+            .remove_job(RemoveJobCommand {
                 id: job_id("alpha"),
                 write_condition: JobWriteCondition::MustBeAtVersion(alpha.version),
             })
@@ -532,8 +533,9 @@ mod tests {
         );
 
         store
-            .put_job(
-                PutJobCommand::new(base_job("alpha"), JobWriteCondition::MustNotExist).unwrap(),
+            .register_job(
+                RegisterJobCommand::new(base_job("alpha"), JobWriteCondition::MustNotExist)
+                    .unwrap(),
             )
             .await
             .unwrap();
@@ -561,17 +563,18 @@ mod tests {
         };
 
         let invalid_error =
-            PutJobCommand::new(invalid, JobWriteCondition::MustNotExist).unwrap_err();
+            RegisterJobCommand::new(invalid, JobWriteCondition::MustNotExist).unwrap_err();
         assert!(invalid_error.to_string().contains("sampling source"));
 
         store
-            .put_job(
-                PutJobCommand::new(base_job("alpha"), JobWriteCondition::MustNotExist).unwrap(),
+            .register_job(
+                RegisterJobCommand::new(base_job("alpha"), JobWriteCondition::MustNotExist)
+                    .unwrap(),
             )
             .await
             .unwrap();
         let stale_error = store
-            .set_job_state(SetJobStateCommand {
+            .change_job_state(ChangeJobStateCommand {
                 id: job_id("alpha"),
                 state: JobEnabledState::Disabled,
                 write_condition: JobWriteCondition::MustBeAtVersion(99),
@@ -584,7 +587,7 @@ mod tests {
         ));
 
         let same_state_error = store
-            .set_job_state(SetJobStateCommand {
+            .change_job_state(ChangeJobStateCommand {
                 id: job_id("alpha"),
                 state: JobEnabledState::Enabled,
                 write_condition: JobWriteCondition::MustBeAtVersion(1),
@@ -597,7 +600,7 @@ mod tests {
         ));
 
         let missing_error = store
-            .set_job_state(SetJobStateCommand {
+            .change_job_state(ChangeJobStateCommand {
                 id: job_id("missing"),
                 state: JobEnabledState::Disabled,
                 write_condition: JobWriteCondition::MustNotExist,
