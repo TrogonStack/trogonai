@@ -6,7 +6,9 @@ use async_nats::jetstream::{self, kv};
 use trogon_eventsourcing::{load_snapshot, maybe_advance_checkpoint, persist_snapshot_change};
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream};
 
-use crate::{JobId, error::CronError, events::JobEventData, nats::apply_event_to_snapshot_map};
+use crate::{
+    JobId, error::CronError, events::JobEventData, processors::apply_event_to_snapshot_map,
+};
 
 use super::{SNAPSHOT_STORE_CONFIG, append_events, snapshot_bucket};
 
@@ -52,10 +54,13 @@ where
         })?;
 
     for (index, event) in events.iter().enumerate() {
+        let decoded = event.decode_data().map_err(|source| {
+            CronError::event_source("failed to decode job event for snapshot projection", source)
+        })?;
         let change = apply_event_to_snapshot_map(
             &mut snapshots,
             &stream_id,
-            &event.data,
+            &decoded,
             start_version + index as u64,
         )?;
         persist_snapshot_change(&bucket, SNAPSHOT_STORE_CONFIG, change)
