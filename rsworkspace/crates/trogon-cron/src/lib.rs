@@ -1,5 +1,6 @@
 //! Generic scheduling control plane backed by native NATS scheduled messages.
 
+pub mod commands;
 pub mod config;
 mod domain;
 pub mod error;
@@ -14,6 +15,12 @@ pub mod traits;
 #[cfg(any(test, feature = "test-support"))]
 pub mod mocks;
 
+pub use commands::{
+    ChangeJobStateCommand, ChangeJobStateState, GetJobCommand, ListJobsCommand,
+    ReadRegisterJobCommandError, RegisterJobCommand, RegisterJobState, RemoveJobCommand,
+    RemoveJobState, change_job_state, get_job, list_jobs,
+    read_from_stdin as read_register_job_from_stdin, register_job, remove_job,
+};
 pub use config::{
     DeliverySpec, JobEnabledState, JobSpec, JobWriteCondition, SamplingSource, ScheduleSpec,
 };
@@ -27,9 +34,7 @@ pub use job_id::{JobId, JobIdError};
 pub use nats::NatsSchedulePublisher;
 pub use scheduler::CronController;
 pub use store::{
-    ChangeJobStateCommand, ChangeJobStateState, GetJobCommand, JobSpecChange, ListJobsCommand,
-    LoadAndWatchCommand, RegisterJobCommand, RegisterJobState, RemoveJobCommand, RemoveJobState,
-    SNAPSHOT_STORE_CONFIG, append_events, change_job_state, connect_store, get_job, list_jobs,
-    load_and_watch, open_snapshot_bucket, register_job, remove_job,
+    JobSpecChange, LoadAndWatchCommand, SNAPSHOT_STORE_CONFIG, append_events, connect_store,
+    load_and_watch, open_snapshot_bucket,
 };
 pub use traits::{LeaderLock, SchedulePublisher};
