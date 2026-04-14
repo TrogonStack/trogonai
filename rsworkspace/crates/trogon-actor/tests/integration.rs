@@ -247,6 +247,42 @@ async fn concurrent_events_to_same_entity_no_lost_writes() {
     assert_eq!(saved.count, 2, "both events must be reflected in final state");
 }
 
+/// Like `concurrent_events_to_same_entity_no_lost_writes` but starts from an
+/// already-existing state entry so the race is in the `update()` path (not the
+/// `create()` path). This exercises lines 117-122 in state.rs.
+#[tokio::test]
+async fn concurrent_updates_on_existing_state_trigger_update_occ() {
+    let (nats, js, _container) = setup().await;
+
+    let state_store = provision_state(&js).await.unwrap();
+    let registry_store = provision_registry(&js).await.unwrap();
+    let publisher = NatsTranscriptPublisher::new(js.clone());
+    let registry = Registry::new(registry_store);
+
+    let runtime = ActorRuntime::new(state_store, publisher, nats, registry);
+    let runtime2 = runtime.clone();
+
+    // Create initial state (count=1, revision=0).
+    runtime.handle_event(&mut CounterActor, "entity-update-occ").await.unwrap();
+
+    // Now two concurrent events on the SAME existing entity. Both load
+    // revision=0, both try to update, one fails with OCC and retries.
+    let mut actor1 = CounterActor;
+    let mut actor2 = CounterActor;
+    let (r1, r2) = tokio::join!(
+        runtime.handle_event(&mut actor1, "entity-update-occ"),
+        runtime2.handle_event(&mut actor2, "entity-update-occ"),
+    );
+
+    assert!(r1.is_ok(), "first concurrent update failed: {r1:?}");
+    assert!(r2.is_ok(), "second concurrent update failed: {r2:?}");
+
+    let kv = js.get_key_value("ACTOR_STATE").await.unwrap();
+    let bytes = kv.entry("counter.entity-update-occ").await.unwrap().unwrap().value;
+    let saved: Counter = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(saved.count, 3, "all 3 increments (initial + 2 concurrent) must be counted");
+}
+
 // ── Actor that spawns a sub-agent ─────────────────────────────────────────────
 
 #[derive(Default, serde::Serialize, serde::Deserialize)]
@@ -323,9 +359,9 @@ async fn state_delete_removes_entry() {
     let before = state_store.load("counter.to-delete").await.unwrap();
     assert!(before.is_some(), "entry should exist before delete");
 
-    // Delete via the StateStore trait.
-    use trogon_actor::state::StateStore as _;
-    state_store.delete("counter.to-delete").await.unwrap();
+    // Delete via the StateStore trait (using UFCS to avoid kv::Store's inherent delete()).
+    use trogon_actor::state::StateStore;
+    StateStore::delete(&state_store, "counter.to-delete").await.unwrap();
 
     // Entry must be gone after deletion.
     let after = state_store.load("counter.to-delete").await.unwrap();
