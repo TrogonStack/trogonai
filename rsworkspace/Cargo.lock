@@ -3496,6 +3496,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-registry"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "bytes",
+ "futures-util",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "trogon-service-config"
 version = "0.1.0"
 dependencies = [
