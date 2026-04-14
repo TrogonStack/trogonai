@@ -24,8 +24,21 @@ pub const AGENT_PROMISES_BUCKET: &str = "AGENT_PROMISES";
 /// NATS KV bucket for cached tool call results.
 pub const AGENT_TOOL_RESULTS_BUCKET: &str = "AGENT_TOOL_RESULTS";
 
-/// TTL for both buckets — long enough for the longest possible run.
+/// TTL for the `AGENT_PROMISES` bucket. A run can be active for at most this
+/// long before the promise expires and recovery is no longer possible.
 const PROMISE_TTL: Duration = Duration::from_secs(24 * 3600);
+
+/// TTL for the `AGENT_TOOL_RESULTS` bucket.
+///
+/// Tool results are written **once** and never updated — their TTL starts at
+/// creation time and does not reset on checkpoint writes. A run that starts
+/// at T=0 may write a tool result at T=1h and then crash at T=23h; recovery
+/// at T=25h would find that result expired at T=25h (24 h after creation).
+///
+/// Using `2 × PROMISE_TTL` ensures that any tool result written during the
+/// first iteration of a maximum-length run is still available at the very end
+/// of that run: T_creation + 48h ≥ T_creation + 24h (max run length) + δ.
+const TOOL_RESULTS_TTL: Duration = Duration::from_secs(2 * 24 * 3600);
 
 // ── PromiseStatus ─────────────────────────────────────────────────────────────
 
@@ -163,7 +176,7 @@ impl PromiseStore {
             .create_or_update_key_value(kv::Config {
                 bucket: AGENT_TOOL_RESULTS_BUCKET.to_string(),
                 history: 1,
-                max_age: PROMISE_TTL,
+                max_age: TOOL_RESULTS_TTL,
                 ..Default::default()
             })
             .await
