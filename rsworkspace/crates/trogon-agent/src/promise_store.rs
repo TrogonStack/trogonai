@@ -108,6 +108,27 @@ pub struct AgentPromise {
     /// `#[serde(default)]` preserves backward-compat with existing checkpoints.
     #[serde(default)]
     pub recovery_count: u32,
+    /// Set to `true` when the checkpoint payload permanently exceeded
+    /// [`CHECKPOINT_MAX_BYTES`] after all trim-and-summarize attempts failed.
+    ///
+    /// When `true`, the run continues executing but message-history checkpoints
+    /// are no longer written. A crash after this point resumes from the *last
+    /// successful checkpoint*, potentially re-executing several LLM turns.
+    ///
+    /// Operators can observe this field to identify runs with degraded durability.
+    /// `#[serde(default)]` preserves backward-compat with existing checkpoints.
+    #[serde(default)]
+    pub checkpoint_degraded: bool,
+    /// Human-readable reason for the terminal status, set when the run ends
+    /// with `Failed` or `PermanentFailed`.
+    ///
+    /// Populated by [`write_promise_terminal`] using the `context` string
+    /// already threaded through every failure path (e.g. `"max_tokens"`,
+    /// `"HTTP error"`, `"max iterations"`). `None` for successful (`Resolved`)
+    /// runs and for promises written before this field was introduced.
+    /// `#[serde(default)]` preserves backward-compat with existing checkpoints.
+    #[serde(default)]
+    pub failure_reason: Option<String>,
 }
 
 // ── PromiseStoreError ─────────────────────────────────────────────────────────
@@ -2061,6 +2082,8 @@ mod tests {
             nats_subject: "github.pull_request".to_string(),
             system_prompt: None,
             recovery_count: 0,
+            checkpoint_degraded: false,
+            failure_reason: None,
         }
     }
 
@@ -2350,6 +2373,8 @@ mod tests {
             nats_subject: "t".to_string(),
             system_prompt: None,
             recovery_count: 0,
+            checkpoint_degraded: false,
+            failure_reason: None,
         };
         store.insert_promise(other);
 
@@ -2409,6 +2434,8 @@ mod integration_tests {
             nats_subject: "github.pull_request".to_string(),
             system_prompt: None,
             recovery_count: 0,
+            checkpoint_degraded: false,
+            failure_reason: None,
         }
     }
 
@@ -2609,6 +2636,8 @@ mod integration_tests {
             nats_subject: "t".to_string(),
             system_prompt: None,
             recovery_count: 0,
+            checkpoint_degraded: false,
+            failure_reason: None,
         };
         store.put_promise(&other).await.unwrap();
 
