@@ -293,6 +293,68 @@ async fn router_uses_real_jetstream_transcript() {
     ));
 }
 
+/// The router attaches two metadata headers to every forwarded message.
+/// This test subscribes to the actor subject and checks both headers are present
+/// with the expected values.
+#[tokio::test]
+async fn forwarded_message_carries_routing_headers() {
+    let (nats, js, _container) = setup().await;
+
+    let store = provision_registry(&js).await.unwrap();
+    let registry = Registry::new(store);
+    registry.register(&pr_actor()).await.unwrap();
+
+    let mut actor_sub = nats.subscribe("actors.pr.>").await.unwrap();
+
+    let llm = MockLlmClient::new();
+    llm.push_response(LlmRoutingResponse::Routed {
+        agent_type: "PrActor".into(),
+        entity_key: "owner/repo/1".into(),
+        reasoning: "PR event".into(),
+    });
+
+    let publisher = MockTranscriptPublisher::new();
+    let router = Router::new(llm, registry, publisher, nats.clone());
+
+    let nats_clone = nats.clone();
+    let router_handle = tokio::spawn(async move {
+        router.run("trogon.events.>").await.ok();
+    });
+
+    publish_after_subscribe(
+        &nats_clone,
+        "trogon.events.github.pull_request",
+        Bytes::from_static(br#"{"action":"opened","number":1}"#),
+    )
+    .await;
+
+    let msg = tokio::time::timeout(Duration::from_secs(3), actor_sub.next())
+        .await
+        .expect("timed out")
+        .expect("subscription ended");
+
+    router_handle.abort();
+
+    let headers = msg.headers.expect("message should have headers");
+    assert_eq!(
+        headers.get("Trogon-Original-Subject").map(|v| v.as_str()),
+        Some("trogon.events.github.pull_request"),
+        "Trogon-Original-Subject header should carry the source subject"
+    );
+    assert!(
+        headers.get("Trogon-Routed-At").is_some(),
+        "Trogon-Routed-At header should be present"
+    );
+    // Routed-At must be a valid millisecond timestamp (large positive integer).
+    let routed_at: u64 = headers
+        .get("Trogon-Routed-At")
+        .unwrap()
+        .as_str()
+        .parse()
+        .expect("Trogon-Routed-At should be a numeric timestamp");
+    assert!(routed_at > 0, "timestamp should be non-zero");
+}
+
 #[tokio::test]
 async fn router_prompt_contains_live_registry_data() {
     let (nats, js, _container) = setup().await;

@@ -1,3 +1,4 @@
+use bytes::Bytes;
 use testcontainers_modules::{
     nats::Nats,
     testcontainers::{runners::AsyncRunner, ImageExt},
@@ -7,6 +8,7 @@ use trogon_transcript::{
     session::Session,
     store::TranscriptStore,
     entry::TranscriptEntry,
+    error::TranscriptError,
 };
 
 async fn setup() -> (async_nats::Client, impl Drop) {
@@ -170,4 +172,66 @@ async fn all_entry_types_round_trip() {
     assert!(matches!(&entries[3], TranscriptEntry::ToolCall { name, duration_ms: 42, .. } if name == "search"));
     assert!(matches!(&entries[4], TranscriptEntry::RoutingDecision { to, .. } if to == "PrActor"));
     assert!(matches!(&entries[5], TranscriptEntry::SubAgentSpawn { capability, .. } if capability == "security_analysis"));
+}
+
+/// Publish a non-JSON payload directly into the TRANSCRIPTS stream (simulating
+/// a corrupted or schema-incompatible entry) and verify that query() surfaces a
+/// deserialization error rather than panicking or silently skipping the entry.
+#[tokio::test]
+async fn corrupted_entry_in_stream_returns_deserialization_error() {
+    let (nats, _container) = setup().await;
+    let js = async_nats::jetstream::new(nats);
+
+    let store = TranscriptStore::new(js.clone());
+    store.provision().await.unwrap();
+
+    // Inject a corrupt entry directly into JetStream on the expected subject.
+    js.publish(
+        "transcripts.pr.corrupt-entity.session-bad",
+        Bytes::from_static(b"this is not json at all {{{{"),
+    )
+    .await
+    .unwrap()
+    .await
+    .unwrap();
+
+    let result = store.query("pr", "corrupt-entity").await;
+
+    assert!(
+        matches!(result, Err(TranscriptError::Deserialization(_))),
+        "expected Deserialization error, got: {result:?}"
+    );
+}
+
+/// A stream that contains one valid and one corrupted entry should fail on the
+/// corrupted entry — the store does not silently skip bad payloads.
+#[tokio::test]
+async fn corrupted_entry_among_valid_entries_returns_error() {
+    let (nats, _container) = setup().await;
+    let js = async_nats::jetstream::new(nats.clone());
+
+    let store = TranscriptStore::new(js.clone());
+    store.provision().await.unwrap();
+
+    // Write one valid entry via the normal Session path.
+    let publisher = NatsTranscriptPublisher::new(js.clone());
+    let session = Session::new(publisher, "pr", "mixed-entity");
+    session.append_user_message("ok", None).await.unwrap();
+
+    // Then inject a corrupt entry for the same entity (different session).
+    js.publish(
+        "transcripts.pr.mixed-entity.session-bad",
+        Bytes::from_static(b"{{bad}}"),
+    )
+    .await
+    .unwrap()
+    .await
+    .unwrap();
+
+    // query fetches all entries for the entity — it should error on the bad one.
+    let result = store.query("pr", "mixed-entity").await;
+    assert!(
+        matches!(result, Err(TranscriptError::Deserialization(_))),
+        "expected Deserialization error on mixed stream, got: {result:?}"
+    );
 }

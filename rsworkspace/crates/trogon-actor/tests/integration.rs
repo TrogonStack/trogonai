@@ -1,3 +1,4 @@
+use bytes::Bytes;
 use testcontainers_modules::{
     nats::Nats,
     testcontainers::{runners::AsyncRunner, ImageExt},
@@ -5,6 +6,7 @@ use testcontainers_modules::{
 use trogon_actor::{
     context::ActorContext,
     actor::EntityActor,
+    error::ActorError,
     runtime::ActorRuntime,
     state::provision_state,
 };
@@ -208,6 +210,69 @@ async fn different_entities_have_independent_state() {
     let b_bytes = kv.entry("counter.entity-B").await.unwrap().unwrap().value;
     let b: Counter = serde_json::from_slice(&b_bytes).unwrap();
     assert_eq!(b.count, 1);
+}
+
+// ── New tests ─────────────────────────────────────────────────────────────────
+
+/// Two concurrent handle_event calls to the same entity key exercise the real
+/// OCC path in NATS KV. Neither call should fail and the final count must
+/// equal 2 — no lost writes regardless of how NATS schedules the two saves.
+#[tokio::test]
+async fn concurrent_events_to_same_entity_no_lost_writes() {
+    let (nats, js, _container) = setup().await;
+
+    let state_store = provision_state(&js).await.unwrap();
+    let registry_store = provision_registry(&js).await.unwrap();
+    let publisher = NatsTranscriptPublisher::new(js.clone());
+    let registry = Registry::new(registry_store);
+
+    let runtime = ActorRuntime::new(state_store, publisher, nats, registry);
+    let runtime2 = runtime.clone();
+
+    // Fire two concurrent handle_event calls at the same entity.
+    let mut actor1 = CounterActor;
+    let mut actor2 = CounterActor;
+    let (r1, r2) = tokio::join!(
+        runtime.handle_event(&mut actor1, "entity-concurrent"),
+        runtime2.handle_event(&mut actor2, "entity-concurrent"),
+    );
+
+    assert!(r1.is_ok(), "first concurrent handler failed: {r1:?}");
+    assert!(r2.is_ok(), "second concurrent handler failed: {r2:?}");
+
+    let kv = js.get_key_value("ACTOR_STATE").await.unwrap();
+    let bytes = kv.entry("counter.entity-concurrent").await.unwrap().unwrap().value;
+    let saved: Counter = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(saved.count, 2, "both events must be reflected in final state");
+}
+
+/// When the KV store holds a value that cannot be deserialized into the actor's
+/// State type, handle_event must return ActorError::Deserialize — not panic.
+#[tokio::test]
+async fn corrupted_state_in_kv_returns_deserialize_error() {
+    let (nats, js, _container) = setup().await;
+
+    let state_store = provision_state(&js).await.unwrap();
+    let registry_store = provision_registry(&js).await.unwrap();
+    let publisher = NatsTranscriptPublisher::new(js.clone());
+    let registry = Registry::new(registry_store);
+
+    // Write corrupt bytes directly into the KV store under the actor's key.
+    let kv = js.get_key_value("ACTOR_STATE").await.unwrap();
+    kv.put("counter.entity-corrupt", Bytes::from_static(b"not valid json {{{{"))
+        .await
+        .unwrap();
+
+    let runtime = ActorRuntime::new(state_store, publisher, nats, registry);
+    let err = runtime
+        .handle_event(&mut CounterActor, "entity-corrupt")
+        .await
+        .unwrap_err();
+
+    assert!(
+        matches!(err, ActorError::Deserialize(_)),
+        "expected Deserialize error, got: {err:?}"
+    );
 }
 
 #[tokio::test]
