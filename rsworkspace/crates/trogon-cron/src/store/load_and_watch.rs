@@ -9,12 +9,12 @@ use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream};
 
 use crate::{
     error::CronError,
-    events::{JobStreamState, apply, initial_state, projection_change},
     nats::{
         ack_watch_message, apply_projection_change, change_from_projection_change,
         decode_recorded_watch_message, ensure_event_matches_stream, event_watch_consumer_config,
         job_id_from_event_subject, next_watch_start_sequence, rebuild_jobs_from_stream,
     },
+    projections::{JobStreamState, ProjectionChange, apply, initial_state, projection_change},
 };
 
 use super::{
@@ -94,7 +94,7 @@ where
             }
             let projection_change = {
                 let mut state = state.lock().expect("job event state mutex poisoned");
-                (|| -> Result<Option<crate::events::ProjectionChange>, CronError> {
+                (|| -> Result<Option<ProjectionChange>, CronError> {
                     let current = state
                         .get(stream_id.as_str())
                         .cloned()
