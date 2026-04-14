@@ -38,8 +38,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        DeleteJobCommand, DeliverySpec, JobSpec, JobStreamState, JobWriteCondition, PutJobCommand,
-        ScheduleSpec, SetJobStateCommand, initial_state,
+        DeleteJobCommand, DeleteJobState, DeliverySpec, JobSpec, JobWriteCondition, PutJobCommand,
+        PutJobState, ScheduleSpec, SetJobStateCommand, SetJobStateState,
     };
 
     fn job(id: &str, state: JobEnabledState) -> JobSpec {
@@ -60,7 +60,7 @@ mod tests {
 
     #[test]
     fn put_job_decides_registration_from_initial_state() {
-        let state = initial_state();
+        let state = PutJobState::Missing;
         let command = PutJobCommand::new(
             job("backup", JobEnabledState::Enabled),
             JobWriteCondition::MustNotExist,
@@ -79,7 +79,7 @@ mod tests {
 
     #[test]
     fn put_job_rejects_existing_stream() {
-        let state = JobStreamState::try_from(job("backup", JobEnabledState::Enabled)).unwrap();
+        let state = PutJobState::Present;
         let command = PutJobCommand::new(
             job("backup", JobEnabledState::Enabled),
             JobWriteCondition::MustNotExist,
@@ -94,7 +94,9 @@ mod tests {
 
     #[test]
     fn set_job_state_rejects_noop_changes() {
-        let state = JobStreamState::try_from(job("backup", JobEnabledState::Enabled)).unwrap();
+        let state = SetJobStateState::Present {
+            current: JobEnabledState::Enabled,
+        };
         let command = SetJobStateCommand {
             id: JobId::parse("backup").unwrap(),
             state: JobEnabledState::Enabled,
@@ -109,7 +111,7 @@ mod tests {
 
     #[test]
     fn delete_job_decides_removal_from_present_state() {
-        let state = JobStreamState::try_from(job("backup", JobEnabledState::Enabled)).unwrap();
+        let state = DeleteJobState::Present;
         let command = DeleteJobCommand {
             id: JobId::parse("backup").unwrap(),
             write_condition: JobWriteCondition::MustBeAtVersion(1),
