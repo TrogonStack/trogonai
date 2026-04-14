@@ -10,4 +10,7 @@ pub enum CompactorError {
 
     #[error("summarization LLM returned unexpected stop reason: {0}")]
     UnexpectedStopReason(String),
+
+    #[error("invalid compaction request: {0}")]
+    InvalidRequest(String),
 }

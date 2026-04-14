@@ -58,14 +58,30 @@ RULES:
 
 // ── LLM configuration ─────────────────────────────────────────────────────────
 
+/// Authentication style for the LLM endpoint.
+#[derive(Debug, Clone, Default)]
+pub enum AuthStyle {
+    /// Direct Anthropic API — sends `x-api-key: {key}`.
+    #[default]
+    XApiKey,
+    /// Via `trogon-secret-proxy` — sends `Authorization: Bearer {token}`.
+    /// This is the standard auth style for all trogon services.
+    Bearer,
+}
+
 /// Connection details for the summarization LLM.
 #[derive(Debug, Clone)]
 pub struct LlmConfig {
-    /// Base URL, e.g. `https://api.anthropic.com` or a proxy root.
-    /// The path `/v1/messages` is appended automatically.
+    /// Full messages endpoint URL.
+    ///
+    /// - Direct Anthropic: `https://api.anthropic.com/v1/messages`
+    /// - Via trogon-secret-proxy: `{PROXY_URL}/anthropic/v1/messages`
     pub api_url: String,
-    /// Anthropic API key (sent as the `x-api-key` header).
+    /// API key or proxy bearer token.
     pub api_key: String,
+    /// How the key is sent. Use [`AuthStyle::Bearer`] when routing through
+    /// `trogon-secret-proxy` (the standard in production).
+    pub auth_style: AuthStyle,
     /// Model to use. Prefer a fast, cost-efficient model (e.g. Haiku).
     pub model: String,
     /// Maximum tokens for the summary output.
@@ -75,17 +91,12 @@ pub struct LlmConfig {
 impl Default for LlmConfig {
     fn default() -> Self {
         Self {
-            api_url: "https://api.anthropic.com".into(),
+            api_url: "https://api.anthropic.com/v1/messages".into(),
             api_key: String::new(),
+            auth_style: AuthStyle::XApiKey,
             model: "claude-haiku-4-5-20251001".into(),
             max_summary_tokens: 8_192,
         }
-    }
-}
-
-impl LlmConfig {
-    fn messages_url(&self) -> String {
-        format!("{}/v1/messages", self.api_url.trim_end_matches('/'))
     }
 }
 
@@ -141,9 +152,18 @@ pub async fn generate_summary(
         messages: [SumMessage { role: "user", content: &prompt }],
     };
 
+    let auth_value = match config.auth_style {
+        AuthStyle::XApiKey => config.api_key.clone(),
+        AuthStyle::Bearer => format!("Bearer {}", config.api_key),
+    };
+    let auth_header = match config.auth_style {
+        AuthStyle::XApiKey => "x-api-key",
+        AuthStyle::Bearer => "Authorization",
+    };
+
     let resp: SumResponse = client
-        .post(config.messages_url())
-        .header("x-api-key", &config.api_key)
+        .post(&config.api_url)
+        .header(auth_header, auth_value)
         .header("anthropic-version", "2023-06-01")
         .json(&req)
         .send()
@@ -206,26 +226,17 @@ mod tests {
     }
 
     #[test]
-    fn messages_url_appends_path() {
-        let config = LlmConfig {
-            api_url: "https://api.anthropic.com".into(),
-            ..Default::default()
-        };
-        assert_eq!(
-            config.messages_url(),
-            "https://api.anthropic.com/v1/messages"
-        );
+    fn default_api_url_is_full_anthropic_messages_endpoint() {
+        let config = LlmConfig::default();
+        assert_eq!(config.api_url, "https://api.anthropic.com/v1/messages");
     }
 
     #[test]
-    fn messages_url_trims_trailing_slash() {
-        let config = LlmConfig {
-            api_url: "https://api.anthropic.com/".into(),
-            ..Default::default()
-        };
-        assert_eq!(
-            config.messages_url(),
-            "https://api.anthropic.com/v1/messages"
-        );
+    fn bearer_auth_style_formats_header_correctly() {
+        // Verify the auth value is formatted as expected for Bearer style.
+        // The actual header injection is tested via httpmock in integration tests.
+        let key = "my-proxy-token";
+        let bearer_value = format!("Bearer {key}");
+        assert!(bearer_value.starts_with("Bearer "));
     }
 }

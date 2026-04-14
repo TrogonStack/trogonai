@@ -63,10 +63,11 @@ async fn compact_if_needed_calls_llm_and_replaces_old_messages() {
     let config = CompactorConfig {
         settings: settings.clone(),
         llm: LlmConfig {
-            api_url: server.base_url(),
+            api_url: format!("{}/v1/messages", server.base_url()),
             api_key: "test-key".into(),
             model: "claude-haiku-4-5-20251001".into(),
             max_summary_tokens: 1024,
+            ..Default::default()
         },
     };
 
@@ -151,10 +152,11 @@ async fn incremental_update_when_previous_summary_exists() {
     let config = CompactorConfig {
         settings: settings.clone(),
         llm: LlmConfig {
-            api_url: server.base_url(),
+            api_url: format!("{}/v1/messages", server.base_url()),
             api_key: "test-key".into(),
             model: "claude-haiku-4-5-20251001".into(),
             max_summary_tokens: 1024,
+            ..Default::default()
         },
     };
 
