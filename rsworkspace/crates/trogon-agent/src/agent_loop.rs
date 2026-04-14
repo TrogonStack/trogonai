@@ -522,6 +522,142 @@ async fn write_promise_terminal(
     }
 }
 
+/// When `checkpoint` is `None` (the CAS revision was lost to a reload error)
+/// and the run ends with a *deterministic* error, attempt one final KV write
+/// to mark the promise `PermanentFailed`.
+///
+/// Without this, the promise stays `Running` and startup recovery re-runs it
+/// on every restart — wasting resources on a hopeless run that will always
+/// hit the same deterministic error.
+async fn try_mark_permanent_failed_fresh(
+    store: &dyn PromiseRepository,
+    tenant_id: &str,
+    pid: &str,
+    context: &str,
+) {
+    match tokio::time::timeout(NATS_KV_TIMEOUT, store.get_promise(tenant_id, pid)).await {
+        Ok(Ok(Some((mut p, rev)))) => {
+            write_promise_terminal(
+                store,
+                tenant_id,
+                pid,
+                &mut p,
+                rev,
+                crate::promise_store::PromiseStatus::PermanentFailed,
+                context,
+            )
+            .await;
+        }
+        Ok(Ok(None)) => {} // Promise gone from KV — no cycle risk
+        Ok(Err(e)) => warn!(error = %e, context, "Could not fetch promise for terminal-status write"),
+        Err(_) => warn!(context, "KV timeout fetching promise for terminal-status write"),
+    }
+}
+
+/// Render a slice of messages as readable text for the summarization prompt.
+///
+/// Tool calls are shown as `name: {input}` and results as `Tool result: …`
+/// so the LLM gets a human-readable transcript of both sides of each turn.
+fn render_messages_for_summary(messages: &[Message]) -> String {
+    let mut out = String::new();
+    for msg in messages {
+        let role = match msg.role.as_str() {
+            "user" => "User",
+            "assistant" => "Assistant",
+            other => other,
+        };
+        for block in &msg.content {
+            match block {
+                ContentBlock::Text { text } => {
+                    out.push_str(role);
+                    out.push_str(": ");
+                    out.push_str(text);
+                    out.push_str("\n\n");
+                }
+                ContentBlock::ToolUse { name, input, .. } => {
+                    out.push_str(&format!("{role} called tool `{name}`: {input}\n\n"));
+                }
+                ContentBlock::ToolResult { content, .. } => {
+                    out.push_str("Tool result: ");
+                    out.push_str(content);
+                    out.push_str("\n\n");
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Call the LLM to summarize `dropped` messages that are about to be trimmed
+/// from the checkpoint.
+///
+/// Returns `[user_summary_msg, assistant_ack_msg]` on success — a synthetic
+/// pair that can be prepended to the kept messages so the resumed run retains
+/// semantic context for earlier decisions.
+///
+/// Returns an empty `Vec` on any failure (network error, deserialization
+/// error, empty LLM response) so callers can fall back to plain trimming.
+async fn summarize_dropped_messages(
+    client: &dyn AnthropicClient,
+    model: &str,
+    dropped: &[Message],
+) -> Vec<Message> {
+    let rendered = render_messages_for_summary(dropped);
+    if rendered.is_empty() {
+        return vec![];
+    }
+    let prompt = format!(
+        "The following is the beginning of a conversation that is being truncated due to length. \
+         Summarize it concisely in plain text, preserving all key decisions, findings, discovered \
+         facts, and any context that would be needed to continue the work effectively. \
+         Focus on outcomes and important information — omit conversational phrasing.\n\n{rendered}"
+    );
+    let body = serde_json::json!({
+        "model": model,
+        "max_tokens": 1024,
+        "messages": [{"role": "user", "content": prompt}]
+    });
+    let raw = match client.complete(body).await {
+        Ok(v) => v,
+        Err(e) => {
+            warn!(error = %e, "LLM summarization call failed — will use plain history trim");
+            return vec![];
+        }
+    };
+    let resp = match serde_json::from_value::<AnthropicResponse>(raw) {
+        Ok(r) => r,
+        Err(e) => {
+            warn!(error = %e, "LLM summarization response deserialization failed — will use plain history trim");
+            return vec![];
+        }
+    };
+    let text: String = resp
+        .content
+        .iter()
+        .filter_map(|b| {
+            if let ContentBlock::Text { text } = b {
+                Some(text.as_str())
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    if text.is_empty() {
+        return vec![];
+    }
+    vec![
+        Message::user_text(format!(
+            "Context summary from earlier in this conversation (some history was truncated):\n\n{text}"
+        )),
+        Message::assistant(vec![ContentBlock::Text {
+            text: "Understood. I have the context from the earlier part of this conversation \
+                   and will keep it in mind."
+                .to_string(),
+        }]),
+    ]
+}
+
 impl AgentLoop {
     /// Check whether a feature flag is enabled for this agent's tenant.
     ///
@@ -646,8 +782,90 @@ impl AgentLoop {
             last.cache_control = Some(serde_json::json!({"type": "ephemeral"}));
         }
 
+        // ── Durable promise: pre-pin system prompt ───────────────────────────
+        // The checkpoint path stores system_prompt on the first *successful*
+        // LLM response, leaving a window where a crash before that response
+        // loses the original prompt. Writing it here — before any LLM call —
+        // closes that window so recovery always resumes with the same context
+        // even if the very first request never completes.
+        //
+        // Only do this on a fresh run (not recovering): on recovery the prompt
+        // was already stored on the original run's first checkpoint, and we
+        // don't want to overwrite it with a potentially stale re-fetch.
+        if !recovering {
+            if let (Some(store), Some(pid)) = (&self.promise_store, &self.promise_id)
+                && let Some((ref mut p, ref mut rev)) = checkpoint
+                && p.system_prompt.is_none()
+                && effective_prompt.is_some()
+            {
+                p.system_prompt = effective_prompt.clone();
+                match tokio::time::timeout(
+                    NATS_KV_TIMEOUT,
+                    store.update_promise(&self.tenant_id, pid, p, *rev),
+                )
+                .await
+                {
+                    Ok(Ok(new_rev)) => *rev = new_rev,
+                    Ok(Err(e)) => {
+                        // Non-fatal: the normal checkpoint path will retry this
+                        // on the first successful LLM response.
+                        warn!(error = %e, promise_id = %pid, "Failed to pre-pin system prompt — crash before first checkpoint may resume with different prompt");
+                        p.system_prompt = None; // revert so the checkpoint path retries
+                    }
+                    Err(_) => {
+                        warn!(promise_id = %pid, "NATS KV timeout pre-pinning system prompt — crash before first checkpoint may resume with different prompt");
+                        p.system_prompt = None;
+                    }
+                }
+            }
+        }
+
+        // ── Durable promise: ownership heartbeat ────────────────────────────
+        // `claimed_at` is refreshed on every checkpoint write, but there is a
+        // gap while the LLM call is in flight (up to 5 minutes). If a new
+        // process starts during that window, startup recovery uses the stale
+        // `claimed_at` to determine whether the run is abandoned. To close the
+        // gap, we refresh `claimed_at` in KV every HEARTBEAT_REFRESH_INTERVAL —
+        // well under the 10-minute stale threshold — so recovery never fires
+        // while the LLM is legitimately working.
+        const HEARTBEAT_REFRESH_INTERVAL: std::time::Duration =
+            std::time::Duration::from_secs(3 * 60); // 3 min — 7 min margin under 10-min stale threshold
+        // Track the last time we successfully wrote `claimed_at` to KV
+        // (either via a checkpoint or a heartbeat). Initialised to now because
+        // the promise was just claimed moments ago at the call site.
+        let mut last_heartbeat_at = std::time::Instant::now();
+
         for iteration in 0..self.max_iterations {
             debug!(iteration, "Agent loop iteration");
+
+            // ── Durable promise: pre-LLM ownership refresh ───────────────────
+            // Refresh `claimed_at` in KV before starting the LLM call so that
+            // startup recovery on another process cannot false-positively steal
+            // this promise while we're waiting for the model's response.
+            if last_heartbeat_at.elapsed() >= HEARTBEAT_REFRESH_INTERVAL {
+                if let (Some(store), Some(pid)) = (&self.promise_store, &self.promise_id)
+                    && let Some((ref mut p, ref mut rev)) = checkpoint
+                {
+                    p.claimed_at = trogon_automations::now_unix();
+                    match tokio::time::timeout(
+                        NATS_KV_TIMEOUT,
+                        store.update_promise(&self.tenant_id, pid, p, *rev),
+                    )
+                    .await
+                    {
+                        Ok(Ok(new_rev)) => {
+                            *rev = new_rev;
+                            last_heartbeat_at = std::time::Instant::now();
+                        }
+                        Ok(Err(e)) => {
+                            warn!(error = %e, promise_id = %pid, "Pre-LLM heartbeat CAS conflict — stale detection window may be wider than expected");
+                        }
+                        Err(_) => {
+                            warn!(promise_id = %pid, "Pre-LLM heartbeat timed out — stale detection window may be wider than expected");
+                        }
+                    }
+                }
+            }
 
             // Build the cacheable system block on each iteration (cheap — just wraps a &str).
             let system: Option<Vec<SystemBlock<'_>>> = effective_prompt.as_deref().map(|text| {
@@ -690,6 +908,12 @@ impl AgentLoop {
                             crate::promise_store::PromiseStatus::Failed
                         };
                         write_promise_terminal(store.as_ref(), &self.tenant_id, pid, p, *rev, terminal_status, "HTTP error").await;
+                    } else if e.status().map(|s| s.is_client_error() && s != 429).unwrap_or(false) {
+                        // checkpoint=None (CAS revision lost) + deterministic 4xx — attempt fresh write
+                        // to prevent infinite startup-recovery cycling on a hopeless run.
+                        if let (Some(store), Some(pid)) = (&self.promise_store, &self.promise_id) {
+                            try_mark_permanent_failed_fresh(store.as_ref(), &self.tenant_id, pid, "HTTP error (checkpoint lost)").await;
+                        }
                     }
                     return Err(AgentError::Http(e));
                 }
@@ -697,11 +921,14 @@ impl AgentLoop {
             let response = match serde_json::from_value::<AnthropicResponse>(raw) {
                 Ok(r) => r,
                 Err(e) => {
-                    if let (Some(store), Some(pid)) = (&self.promise_store, &self.promise_id)
-                        && let Some((ref mut p, ref mut rev)) = checkpoint
-                    {
-                        // Deterministic: retrying the same response will always fail.
-                        write_promise_terminal(store.as_ref(), &self.tenant_id, pid, p, *rev, crate::promise_store::PromiseStatus::PermanentFailed, "deserialization error").await;
+                    if let (Some(store), Some(pid)) = (&self.promise_store, &self.promise_id) {
+                        if let Some((ref mut p, ref mut rev)) = checkpoint {
+                            // Deterministic: retrying the same response will always fail.
+                            write_promise_terminal(store.as_ref(), &self.tenant_id, pid, p, *rev, crate::promise_store::PromiseStatus::PermanentFailed, "deserialization error").await;
+                        } else {
+                            // checkpoint=None — attempt fresh write to prevent cycling.
+                            try_mark_permanent_failed_fresh(store.as_ref(), &self.tenant_id, pid, "deserialization error (checkpoint lost)").await;
+                        }
                     }
                     return Err(AgentError::UnexpectedStopReason(format!("Deserialization error: {e}")));
                 }
@@ -725,19 +952,45 @@ impl AgentLoop {
                         .join("\n");
 
                     info!(iterations = iteration + 1, "Agent completed");
-                    if let (Some(store), Some(pid)) = (&self.promise_store, &self.promise_id)
-                        && let Some((ref mut p, ref mut rev)) = checkpoint
-                    {
-                        p.status = crate::promise_store::PromiseStatus::Resolved;
-                        match tokio::time::timeout(
-                            NATS_KV_TIMEOUT,
-                            store.update_promise(&self.tenant_id, pid, p, *rev),
-                        )
-                        .await
-                        {
-                            Ok(Ok(_)) => {}
-                            Ok(Err(e)) => warn!(error = %e, "Failed to mark promise Resolved"),
-                            Err(_) => warn!(promise_id = %pid, "NATS KV write timed out marking promise Resolved"),
+                    if let (Some(store), Some(pid)) = (&self.promise_store, &self.promise_id) {
+                        if let Some((ref mut p, ref mut rev)) = checkpoint {
+                            p.status = crate::promise_store::PromiseStatus::Resolved;
+                            match tokio::time::timeout(
+                                NATS_KV_TIMEOUT,
+                                store.update_promise(&self.tenant_id, pid, p, *rev),
+                            )
+                            .await
+                            {
+                                Ok(Ok(_)) => {}
+                                Ok(Err(e)) => warn!(error = %e, "Failed to mark promise Resolved"),
+                                Err(_) => warn!(promise_id = %pid, "NATS KV write timed out marking promise Resolved"),
+                            }
+                        } else {
+                            // checkpoint=None (CAS revision lost) — attempt a fresh get+write so
+                            // the promise doesn't stay Running and trigger startup recovery re-runs.
+                            match tokio::time::timeout(
+                                NATS_KV_TIMEOUT,
+                                store.get_promise(&self.tenant_id, pid),
+                            )
+                            .await
+                            {
+                                Ok(Ok(Some((mut p, rev)))) => {
+                                    p.status = crate::promise_store::PromiseStatus::Resolved;
+                                    match tokio::time::timeout(
+                                        NATS_KV_TIMEOUT,
+                                        store.update_promise(&self.tenant_id, pid, &p, rev),
+                                    )
+                                    .await
+                                    {
+                                        Ok(Ok(_)) => {}
+                                        Ok(Err(e)) => warn!(error = %e, promise_id = %pid, "Failed to mark promise Resolved (checkpoint lost)"),
+                                        Err(_) => warn!(promise_id = %pid, "NATS KV write timed out marking promise Resolved (checkpoint lost)"),
+                                    }
+                                }
+                                Ok(Ok(None)) => {} // Promise gone from KV — no recovery risk
+                                Ok(Err(e)) => warn!(error = %e, promise_id = %pid, "Could not fetch promise to mark Resolved (checkpoint lost)"),
+                                Err(_) => warn!(promise_id = %pid, "NATS KV timeout fetching promise to mark Resolved (checkpoint lost)"),
+                            }
                         }
                     }
                     return Ok(text);
@@ -779,16 +1032,91 @@ impl AgentLoop {
                             .map(|v| v.len())
                             .unwrap_or(usize::MAX);
                         if serialized_len > CHECKPOINT_MAX_BYTES {
-                            p.messages = prev_messages; // restore — p must stay clean
-                            warn!(
-                                promise_id = %pid,
-                                size_bytes = serialized_len,
-                                limit_bytes = CHECKPOINT_MAX_BYTES,
-                                "Checkpoint payload exceeds NATS KV size limit — disabling checkpointing for this run"
-                            );
-                            checkpointing_disabled = true;
-                        } else {
-                        // Size is within bounds — commit all fields to p.
+                            // Before giving up, try trimming the oldest messages so the
+                            // payload fits. Halve the history up to three times (keeping
+                            // at most the most-recent MIN_TRIM_KEEP messages as a floor)
+                            // before permanently disabling checkpointing.
+                            //
+                            // Once a plain-trim level that fits is found, attempt to
+                            // preserve semantic context by summarising the dropped
+                            // messages via the LLM and prepending the summary to the
+                            // kept slice. If the summary itself is too large or the
+                            // call fails, fall back to the plain trim silently.
+                            const MIN_TRIM_KEEP: usize = 4;
+                            let mut trim_keep: Option<usize> = None;
+                            for divisor in [2_usize, 4, 8] {
+                                let keep = (messages.len() / divisor).max(MIN_TRIM_KEEP);
+                                if keep >= messages.len() {
+                                    continue; // divisor too small to reduce history
+                                }
+                                p.messages = messages[messages.len() - keep..].to_vec();
+                                let trimmed_len = serde_json::to_vec(p as &_)
+                                    .map(|v| v.len())
+                                    .unwrap_or(usize::MAX);
+                                if trimmed_len <= CHECKPOINT_MAX_BYTES {
+                                    trim_keep = Some(keep);
+                                    break;
+                                }
+                            }
+                            if let Some(keep) = trim_keep {
+                                let drop_count = messages.len() - keep;
+                                // p.messages is already the plain trim (messages[drop_count..]).
+                                // Attempt to enrich with an LLM-generated summary of the dropped
+                                // messages so a crash-recovered run has semantic context.
+                                let summary_pair = summarize_dropped_messages(
+                                    &*self.anthropic_client,
+                                    &self.model,
+                                    &messages[..drop_count],
+                                )
+                                .await;
+                                if !summary_pair.is_empty() {
+                                    let mut with_summary = summary_pair;
+                                    with_summary.extend_from_slice(&messages[drop_count..]);
+                                    p.messages = with_summary;
+                                    let summary_len = serde_json::to_vec(p as &_)
+                                        .map(|v| v.len())
+                                        .unwrap_or(usize::MAX);
+                                    if summary_len <= CHECKPOINT_MAX_BYTES {
+                                        warn!(
+                                            promise_id = %pid,
+                                            original_messages = messages.len(),
+                                            kept_messages = keep,
+                                            dropped_messages = drop_count,
+                                            bytes = summary_len,
+                                            "Checkpoint history trimmed — dropped messages replaced by LLM summary"
+                                        );
+                                    } else {
+                                        // Summary + kept still over limit — revert to plain trim
+                                        p.messages = messages[drop_count..].to_vec();
+                                        warn!(
+                                            promise_id = %pid,
+                                            original_messages = messages.len(),
+                                            kept_messages = keep,
+                                            "Checkpoint history trimmed — oldest messages discarded (LLM summary too large to fit)"
+                                        );
+                                    }
+                                } else {
+                                    warn!(
+                                        promise_id = %pid,
+                                        original_messages = messages.len(),
+                                        kept_messages = keep,
+                                        "Checkpoint history trimmed — oldest messages discarded (LLM summarization unavailable)"
+                                    );
+                                }
+                                // p.messages is now set to the final slice (summary+kept or plain kept).
+                            } else {
+                                p.messages = prev_messages; // restore — p must stay clean
+                                warn!(
+                                    promise_id = %pid,
+                                    size_bytes = serialized_len,
+                                    limit_bytes = CHECKPOINT_MAX_BYTES,
+                                    "Checkpoint payload exceeds NATS KV size limit — disabling checkpointing for this run"
+                                );
+                                checkpointing_disabled = true;
+                            }
+                        }
+                        // Size fits (as-is or after trimming) — commit all fields to p.
+                        if !checkpointing_disabled {
                         p.iteration = iteration + 1;
                         p.claimed_at = trogon_automations::now_unix(); // refresh ownership lease
                         // Persist system prompt on the first checkpoint so that
@@ -803,7 +1131,12 @@ impl AgentLoop {
                         )
                         .await
                         {
-                            Ok(Ok(new_rev)) => *rev = new_rev,
+                            Ok(Ok(new_rev)) => {
+                                *rev = new_rev;
+                                // Checkpoint just wrote a fresh claimed_at — reset the
+                                // heartbeat timer so we don't immediately re-write.
+                                last_heartbeat_at = std::time::Instant::now();
+                            }
                             Ok(Err(e)) => {
                                 // CAS conflict: another process wrote to this promise
                                 // between our last read and now. Reload the current
@@ -874,30 +1207,61 @@ impl AgentLoop {
                                 }
                             }
                             Err(_) => {
-                                warn!(
-                                    promise_id = %pid,
-                                    "NATS KV update_promise timed out — checkpointing disabled for this run"
-                                );
-                                // Terminal-status writes are also skipped for the
-                                // remainder of this run. If the run hits a
-                                // deterministic error (e.g. max_tokens), the promise
-                                // stays Running until the next startup recovery, which
-                                // reloads the last valid checkpoint and can mark it
-                                // PermanentFailed on a successful KV write.
-                                checkpoint = None;
+                                // The write may or may not have landed on the server.
+                                // Reload the current revision: if the write succeeded,
+                                // we pick up the new rev and checkpointing continues
+                                // normally on the next turn; if it failed, we keep the
+                                // old rev and retry. Without reloading, the revision
+                                // stays stale, subsequent CAS writes all fail with
+                                // conflict errors, checkpoint eventually becomes None,
+                                // and terminal-status writes (Resolved, PermanentFailed)
+                                // are blocked for the rest of the run.
+                                warn!(promise_id = %pid, "NATS KV update_promise timed out — reloading revision to restore checkpoint");
+                                match tokio::time::timeout(
+                                    NATS_KV_TIMEOUT,
+                                    store.get_promise(&self.tenant_id, pid),
+                                )
+                                .await
+                                .unwrap_or_else(|_| {
+                                    warn!(promise_id = %pid, "NATS KV get_promise timed out during timeout-reload — checkpointing disabled for this run");
+                                    Ok(None)
+                                }) {
+                                    Ok(Some((current, new_rev))) => {
+                                        if current.status != crate::promise_store::PromiseStatus::Running {
+                                            warn!(
+                                                promise_id = %pid,
+                                                status = ?current.status,
+                                                "Promise reached terminal state during timeout-reload — stopping this run to avoid duplicate outputs"
+                                            );
+                                            return Ok(String::new());
+                                        }
+                                        *rev = new_rev;
+                                    }
+                                    Ok(None) => {
+                                        error!(promise_id = %pid, "Promise disappeared during timeout-reload — checkpointing disabled for this run");
+                                        checkpoint = None;
+                                    }
+                                    Err(e) => {
+                                        error!(error = %e, promise_id = %pid, "Timeout-reload failed — checkpointing disabled for this run");
+                                        checkpoint = None;
+                                    }
+                                }
                             }
                         }
-                        } // else: serialized_len <= CHECKPOINT_MAX_BYTES
-                        } // else: !checkpointing_disabled
+                        } // if !checkpointing_disabled: size fits (as-is or trimmed)
+                        } // else: !checkpointing_disabled (outer)
                     }
                 }
                 other => {
                     let reason = other.to_string();
-                    if let (Some(store), Some(pid)) = (&self.promise_store, &self.promise_id)
-                        && let Some((ref mut p, ref mut rev)) = checkpoint
-                    {
-                        // Deterministic: same stop_reason on every retry.
-                        write_promise_terminal(store.as_ref(), &self.tenant_id, pid, p, *rev, crate::promise_store::PromiseStatus::PermanentFailed, "unexpected stop reason").await;
+                    if let (Some(store), Some(pid)) = (&self.promise_store, &self.promise_id) {
+                        if let Some((ref mut p, ref mut rev)) = checkpoint {
+                            // Deterministic: same stop_reason on every retry.
+                            write_promise_terminal(store.as_ref(), &self.tenant_id, pid, p, *rev, crate::promise_store::PromiseStatus::PermanentFailed, "unexpected stop reason").await;
+                        } else {
+                            // checkpoint=None — attempt fresh write to prevent cycling.
+                            try_mark_permanent_failed_fresh(store.as_ref(), &self.tenant_id, pid, "unexpected stop reason (checkpoint lost)").await;
+                        }
                     }
                     return Err(AgentError::UnexpectedStopReason(reason));
                 }
@@ -905,11 +1269,14 @@ impl AgentLoop {
         }
 
         warn!(max = self.max_iterations, "Agent reached max iterations");
-        if let (Some(store), Some(pid)) = (&self.promise_store, &self.promise_id)
-            && let Some((ref mut p, ref mut rev)) = checkpoint
-        {
-            // Deterministic: same messages + same max_iterations = same outcome.
-            write_promise_terminal(store.as_ref(), &self.tenant_id, pid, p, *rev, crate::promise_store::PromiseStatus::PermanentFailed, "max iterations").await;
+        if let (Some(store), Some(pid)) = (&self.promise_store, &self.promise_id) {
+            if let Some((ref mut p, ref mut rev)) = checkpoint {
+                // Deterministic: same messages + same max_iterations = same outcome.
+                write_promise_terminal(store.as_ref(), &self.tenant_id, pid, p, *rev, crate::promise_store::PromiseStatus::PermanentFailed, "max iterations").await;
+            } else {
+                // checkpoint=None — attempt fresh write to prevent cycling.
+                try_mark_permanent_failed_fresh(store.as_ref(), &self.tenant_id, pid, "max iterations (checkpoint lost)").await;
+            }
         }
         Err(AgentError::MaxIterationsReached)
     }
@@ -1088,6 +1455,13 @@ impl AgentLoop {
                 // `additionalProperties: false` would reject the call with an
                 // unknown-field error. Built-in tools receive `call_input` which
                 // includes the key so their dedup logic fires correctly.
+                //
+                // MCP tool results ARE transparently cached in AGENT_TOOL_RESULTS
+                // (keyed on `(name, input)` — same as built-in tools) by the
+                // `put_tool_result` block below. On recovery the cache lookup above
+                // fires before this dispatch block and skips re-execution for both
+                // MCP and built-in tools. MCP servers themselves do not need to
+                // implement idempotency for crash-recovery correctness.
                 //
                 // Both paths are wrapped with `TOOL_EXECUTION_TIMEOUT` so a
                 // hung external API cannot block the run indefinitely while the

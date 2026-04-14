@@ -57,8 +57,11 @@ pub enum PromiseStatus {
 /// Stored in [`AGENT_PROMISES_BUCKET`] with key `{tenant_id}.{promise_id}`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentPromise {
-    /// Unique run identifier — `{tenant_id}.{nats_stream_seq}` for single-handler
-    /// runs, or `{tenant_id}.{nats_stream_seq}.{automation_id}` for automation runs.
+    /// Unique run identifier — `{subject_slug}.{nats_stream_seq}` for single-handler
+    /// runs, or `{subject_slug}.{nats_stream_seq}.{automation_id}` for automation runs.
+    /// `subject_slug` is the NATS subject with dots replaced by underscores and
+    /// lowercased (e.g. `github_pull_request`, `linear_issue`), ensuring uniqueness
+    /// even when separate JetStream streams share the same sequence counter.
     pub id: String,
     /// Tenant that owns this run.
     pub tenant_id: String,

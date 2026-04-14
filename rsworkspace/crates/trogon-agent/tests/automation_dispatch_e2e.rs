@@ -926,11 +926,11 @@ async fn dispatch_marks_promise_resolved_in_kv() {
     }
 
     // Open a PromiseStore on the same NATS connection and verify the promise.
-    // Promise ID = "{stream_prefix}.{auto_id}" = "github.1.auto-kv"
+    // Promise ID = "{subject_slug}.{seq}.{auto_id}" = "github_pull_request.1.auto-kv"
     // (first message on the GITHUB stream → seq = 1).
     let ps = PromiseStore::open(&js).await.expect("open PromiseStore");
     let (promise, _rev) = ps
-        .get_promise("default", "github.1.auto-kv")
+        .get_promise("default", "github_pull_request.1.auto-kv")
         .await
         .expect("get_promise")
         .expect("promise must exist in KV after run completes");
@@ -979,7 +979,7 @@ async fn startup_recovery_resumes_stale_automation_promise_to_resolved() {
         .as_secs()
         .saturating_sub(20 * 60);
     let stale = AgentPromise {
-        id: "github.99.auto-recover".to_string(),
+        id: "github_pull_request.99.auto-recover".to_string(),
         tenant_id: "default".to_string(),
         automation_id: "auto-recover".to_string(),
         status: PromiseStatus::Running,
@@ -1057,7 +1057,7 @@ async fn startup_recovery_resumes_stale_automation_promise_to_resolved() {
 
     // The promise must now be Resolved in KV.
     let (promise, _rev) = ps
-        .get_promise("default", "github.99.auto-recover")
+        .get_promise("default", "github_pull_request.99.auto-recover")
         .await
         .expect("get_promise")
         .expect("promise must still exist in KV");
@@ -1163,7 +1163,7 @@ async fn dispatch_marks_promise_permanent_failed_on_4xx_error() {
 
     let ps = PromiseStore::open(&js).await.expect("open PromiseStore");
     let (promise, _rev) = ps
-        .get_promise("default", "github.1.auto-pf")
+        .get_promise("default", "github_pull_request.1.auto-pf")
         .await
         .expect("get_promise")
         .expect("promise must exist in KV");
@@ -1176,7 +1176,7 @@ async fn dispatch_marks_promise_permanent_failed_on_4xx_error() {
 }
 
 /// The built-in GitHub PR handler (no matching automation) creates and resolves
-/// its promise in KV under key `{tenant_id}.github.{seq}` (no automation_id suffix).
+/// its promise in KV under key `{tenant_id}.github_pull_request.{seq}` (no automation_id suffix).
 #[tokio::test]
 async fn builtin_handler_marks_promise_resolved_in_kv() {
     use trogon_agent::promise_store::{PromiseStatus, PromiseStore};
@@ -1210,11 +1210,11 @@ async fn builtin_handler_marks_promise_resolved_in_kv() {
         .expect("publish");
 
     // Poll the promise KV directly — built-in handlers don't create RunRecords.
-    // Promise ID = "github.1" (first message on GITHUB stream, no auto_id suffix).
+    // Promise ID = "github_pull_request.1" (first message on GITHUB stream, no auto_id suffix).
     let ps = PromiseStore::open(&js).await.expect("open PromiseStore");
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     let promise = loop {
-        if let Ok(Some((p, _))) = ps.get_promise("default", "github.1").await {
+        if let Ok(Some((p, _))) = ps.get_promise("default", "github_pull_request.1").await {
             if p.status == PromiseStatus::Resolved {
                 break p;
             }
@@ -1352,7 +1352,7 @@ async fn multi_turn_run_checkpoints_iteration_and_messages_in_kv() {
     // The promise must reflect at least one checkpointed tool exchange.
     let ps = PromiseStore::open(&js).await.expect("open PromiseStore");
     let (promise, _rev) = ps
-        .get_promise("default", "github.1.auto-multiturn")
+        .get_promise("default", "github_pull_request.1.auto-multiturn")
         .await
         .expect("get_promise")
         .expect("promise must exist in KV");
@@ -1462,7 +1462,7 @@ async fn dispatch_marks_promise_failed_on_transient_5xx_exhaustion() {
 
     let ps = PromiseStore::open(&js).await.expect("open PromiseStore");
     let (promise, _rev) = ps
-        .get_promise("default", "github.1.auto-5xx")
+        .get_promise("default", "github_pull_request.1.auto-5xx")
         .await
         .expect("get_promise")
         .expect("promise must exist in KV");
@@ -1475,8 +1475,8 @@ async fn dispatch_marks_promise_failed_on_transient_5xx_exhaustion() {
 }
 
 /// A Linear event that matches an automation produces a promise in KV with ID
-/// `linear.{seq}.{auto_id}` — verifies the promise_id prefix for the LINEAR
-/// stream is distinct from the GITHUB prefix (`github.{seq}.{auto_id}`).
+/// `linear_issue.{seq}.{auto_id}` — verifies the promise_id prefix for the LINEAR
+/// stream is distinct from the GITHUB prefix (`github_pull_request.{seq}.{auto_id}`).
 #[tokio::test]
 async fn linear_event_marks_promise_resolved_in_kv() {
     use trogon_agent::promise_store::{PromiseStatus, PromiseStore};
@@ -1568,18 +1568,753 @@ async fn linear_event_marks_promise_resolved_in_kv() {
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
 
-    // Promise ID = "linear.{seq}.{auto_id}" = "linear.1.auto-linear-kv".
+    // Promise ID = "linear_issue.{seq}.{auto_id}" = "linear_issue.1.auto-linear-kv".
     let ps = PromiseStore::open(&js).await.expect("open PromiseStore");
     let (promise, _rev) = ps
-        .get_promise("default", "linear.1.auto-linear-kv")
+        .get_promise("default", "linear_issue.1.auto-linear-kv")
         .await
         .expect("get_promise")
-        .expect("promise must exist under linear.1.auto-linear-kv");
+        .expect("promise must exist under linear_issue.1.auto-linear-kv");
 
     assert_eq!(promise.status, PromiseStatus::Resolved);
     assert_eq!(promise.automation_id, "auto-linear-kv");
     assert_eq!(
         promise.nats_subject, "linear.Issue",
         "runner normalises all Linear subjects to the canonical 'linear.Issue' string"
+    );
+}
+
+// ── helpers for the remaining tests ──────────────────────────────────────────
+
+/// Mirror of `agent_loop::tool_cache_key`.
+///
+/// Computes the SHA-256 hex digest used as the NATS KV key suffix when
+/// caching a tool result.  Must stay in sync with the production
+/// implementation in `src/agent_loop.rs`.
+fn compute_tool_cache_key(tool_name: &str, input: &serde_json::Value) -> String {
+    use sha2::{Digest, Sha256};
+    fn sort_keys(v: &serde_json::Value) -> serde_json::Value {
+        match v {
+            serde_json::Value::Object(map) => {
+                let sorted: serde_json::Map<String, serde_json::Value> = map
+                    .iter()
+                    .map(|(k, val)| (k.clone(), sort_keys(val)))
+                    .collect::<std::collections::BTreeMap<_, _>>()
+                    .into_iter()
+                    .collect();
+                serde_json::Value::Object(sorted)
+            }
+            serde_json::Value::Array(arr) => {
+                serde_json::Value::Array(arr.iter().map(sort_keys).collect())
+            }
+            other => other.clone(),
+        }
+    }
+    let canonical = format!(
+        "{tool_name}:{}",
+        serde_json::to_string(&sort_keys(input)).unwrap_or_default()
+    );
+    let digest = Sha256::digest(canonical.as_bytes());
+    format!("{digest:x}")
+}
+
+/// When a process crashes after executing a write tool (e.g. `create_pull_request`)
+/// but before checkpointing the tool result into the promise messages, startup
+/// recovery re-runs the automation.  The KV-cached tool result must be replayed —
+/// the downstream API (GitHub) must NOT be called again.
+///
+/// Setup:
+/// - Stale `Running` promise with non-empty `messages` checkpoint → `recovering = true`
+/// - Pre-seeded tool result in `AGENT_TOOL_RESULTS` KV
+///
+/// The GitHub mock has no `header_exists` constraint and would match any POST to
+/// the pulls endpoint.  A hit count of 0 after the run proves the cache was used.
+#[tokio::test]
+async fn tool_cache_dedup_on_recovery_skips_tool_reexecution() {
+    use trogon_agent::agent_loop::Message;
+    use trogon_agent::promise_store::{AgentPromise, PromiseStatus, PromiseStore};
+
+    let (_c, nats_port) = start_nats().await;
+    let mock = MockServer::start_async().await;
+    let mock_url = mock.base_url();
+
+    let (_, js) = js_client(nats_port).await;
+    create_streams(&js).await;
+
+    let astore = AutomationStore::open(&js).await.expect("open AutomationStore");
+    astore
+        .put(&make_automation(
+            "auto-cache",
+            "default",
+            "github.pull_request",
+            "CACHE_DEDUP_PROMPT",
+        ))
+        .await
+        .expect("put automation");
+
+    // Pre-seed a stale Running promise with non-empty messages (simulates a crash
+    // after the first LLM turn checkpointed but before a second tool call was
+    // re-checkpointed). non-empty messages → `recovering = true` in `run()`.
+    let ps = PromiseStore::open(&js).await.expect("open PromiseStore");
+    let stale_claimed_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        .saturating_sub(20 * 60);
+    let stale = AgentPromise {
+        id: "github_pull_request.99.auto-cache".to_string(),
+        tenant_id: "default".to_string(),
+        automation_id: "auto-cache".to_string(),
+        status: PromiseStatus::Running,
+        // Non-empty → `recovering = true` so the KV cache is consulted.
+        messages: vec![Message::user_text("trigger checkpoint")],
+        iteration: 0,
+        worker_id: "crashed-worker".to_string(),
+        claimed_at: stale_claimed_at,
+        trigger: serde_json::from_slice(&pr_opened_payload()).unwrap_or_default(),
+        nats_subject: "github.pull_request".to_string(),
+        system_prompt: None,
+    };
+    ps.put_promise(&stale).await.expect("seed stale promise");
+
+    // Pre-seed the tool result.  The Anthropic mock below returns a `create_pull_request`
+    // tool_use with this exact input — the hash must match so the cache fires.
+    let tool_input = serde_json::json!({
+        "owner": "acme",
+        "repo": "api",
+        "title": "feat: cache test",
+        "head": "feature/cache-test"
+    });
+    let cache_key = compute_tool_cache_key("create_pull_request", &tool_input);
+    ps.put_tool_result(
+        "default",
+        "github_pull_request.99.auto-cache",
+        &cache_key,
+        "Pull request #42 opened: https://github.com/acme/api/pull/42",
+    )
+    .await
+    .expect("seed tool result cache");
+
+    // Second Anthropic call (body contains "tool_result") → end_turn. FIRST.
+    mock.mock_async(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages")
+            .body_contains("tool_result");
+        then.status(200)
+            .header("content-type", "application/json")
+            .body(end_turn_body());
+    })
+    .await;
+
+    // First Anthropic call (recovering from checkpoint) → create_pull_request tool_use.
+    // The input must exactly match `tool_input` above so the hash aligns.
+    mock.mock_async(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .body(
+                r#"{"stop_reason":"tool_use","content":[{"type":"tool_use","id":"tu_cache_01","name":"create_pull_request","input":{"owner":"acme","repo":"api","title":"feat: cache test","head":"feature/cache-test"}}]}"#,
+            );
+    })
+    .await;
+
+    // GitHub mock — MUST NOT be hit when the cache replays the result.
+    let github_mock = mock
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/github/repos/acme/api/pulls");
+            then.status(201)
+                .header("content-type", "application/json")
+                .body(r#"{"number":99,"html_url":"https://github.com/acme/api/pull/99"}"#);
+        })
+        .await;
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let api_port = listener.local_addr().unwrap().port();
+    drop(listener);
+
+    tokio::spawn(async move {
+        let mut cfg = runner_cfg(nats_port, mock_url, "default", api_port);
+        cfg.max_iterations = 2;
+        run(cfg).await.ok()
+    });
+
+    let client = reqwest::Client::new();
+    let runs_url = format!("http://127.0.0.1:{api_port}/runs");
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        match client
+            .get(&runs_url)
+            .header("x-tenant-id", "default")
+            .send()
+            .await
+        {
+            Ok(_) => break,
+            Err(_) if tokio::time::Instant::now() < deadline => {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            Err(e) => panic!("API never came up: {e}"),
+        }
+    }
+
+    // No event published — startup recovery finds the stale promise.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    loop {
+        let body: serde_json::Value = client
+            .get(&runs_url)
+            .header("x-tenant-id", "default")
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        if body.as_array().map(|a| !a.is_empty()).unwrap_or(false) {
+            break;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            panic!("No RunRecord appeared — startup recovery may have failed");
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+
+    // GitHub hits = 0 → the KV cache suppressed re-execution.
+    assert_eq!(
+        github_mock.hits_async().await,
+        0,
+        "tool cache must suppress create_pull_request re-execution on recovery"
+    );
+}
+
+/// When a promise is already `Resolved` (the original run completed successfully)
+/// and NATS redelivers the same message — simulated by pre-seeding the `Resolved`
+/// promise before publishing seq=1 — `prepare_agent_with_promise` must return
+/// `None`, skipping the run entirely without calling the model.
+///
+/// A second "canary" automation on the same trigger fires normally and produces
+/// a RunRecord, proving the event was processed before we assert the skip mock
+/// was never hit.
+#[tokio::test]
+async fn resolved_promise_skips_redelivered_nats_message() {
+    use trogon_agent::promise_store::{AgentPromise, PromiseStatus, PromiseStore};
+
+    let (_c, nats_port) = start_nats().await;
+    let mock = MockServer::start_async().await;
+    let mock_url = mock.base_url();
+
+    let (_, js) = js_client(nats_port).await;
+    create_streams(&js).await;
+
+    let astore = AutomationStore::open(&js).await.expect("open AutomationStore");
+    // "auto-skip": pre-seeded as Resolved → must be skipped on dispatch.
+    astore
+        .put(&make_automation(
+            "auto-skip",
+            "default",
+            "github.pull_request",
+            "SKIP_RESOLVED_PROMPT",
+        ))
+        .await
+        .expect("put skip automation");
+    // "auto-canary": no pre-seeded promise → runs normally, its RunRecord proves
+    // the event was fully processed before the skip assertion is checked.
+    astore
+        .put(&make_automation(
+            "auto-canary",
+            "default",
+            "github.pull_request",
+            "CANARY_PROMPT",
+        ))
+        .await
+        .expect("put canary automation");
+
+    // Pre-seed the "skip" promise as Resolved.
+    // Promise ID = "github_pull_request.1.auto-skip" — first message on GITHUB stream → seq=1.
+    let ps = PromiseStore::open(&js).await.expect("open PromiseStore");
+    let resolved = AgentPromise {
+        id: "github_pull_request.1.auto-skip".to_string(),
+        tenant_id: "default".to_string(),
+        automation_id: "auto-skip".to_string(),
+        status: PromiseStatus::Resolved,
+        messages: vec![],
+        iteration: 1,
+        worker_id: "prev-worker".to_string(),
+        claimed_at: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs(),
+        trigger: serde_json::from_slice(&pr_opened_payload()).unwrap_or_default(),
+        nats_subject: "github.pull_request".to_string(),
+        system_prompt: None,
+    };
+    ps.put_promise(&resolved).await.expect("seed resolved promise");
+
+    // Canary mock — fires when "CANARY_PROMPT" is in the Anthropic request body.
+    let canary_mock = mock
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages")
+                .body_contains("CANARY_PROMPT");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(end_turn_body());
+        })
+        .await;
+
+    // Skip mock — must NEVER be hit if the Resolved promise is correctly skipped.
+    let skip_mock = mock
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages")
+                .body_contains("SKIP_RESOLVED_PROMPT");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(end_turn_body());
+        })
+        .await;
+
+    tokio::spawn(async move {
+        run(runner_cfg(nats_port, mock_url, "default", 0))
+            .await
+            .ok()
+    });
+    tokio::time::sleep(Duration::from_millis(400)).await;
+
+    js.publish("github.pull_request", pr_opened_payload().into())
+        .await
+        .expect("publish");
+
+    // Canary hit = 1 proves the event was processed and both automations were
+    // considered (one ran, one was skipped).
+    assert!(
+        wait_for_hits(&canary_mock, 1, Duration::from_secs(10)).await,
+        "canary automation must fire to confirm event was processed"
+    );
+
+    assert_eq!(
+        skip_mock.hits_async().await,
+        0,
+        "Resolved promise must prevent re-execution on NATS redelivery"
+    );
+}
+
+/// When two automations both match the same incoming event, `dispatch_automations`
+/// runs them concurrently.  Each gets its own promise keyed
+/// `{prefix}.{auto_id}` — they must not interfere and both must be `Resolved`.
+#[tokio::test]
+async fn two_automations_for_same_event_get_separate_resolved_promises() {
+    use trogon_agent::promise_store::{PromiseStatus, PromiseStore};
+
+    let (_c, nats_port) = start_nats().await;
+    let mock = MockServer::start_async().await;
+    let mock_url = mock.base_url();
+
+    let (_, js) = js_client(nats_port).await;
+    create_streams(&js).await;
+
+    let astore = AutomationStore::open(&js).await.expect("open AutomationStore");
+    astore
+        .put(&make_automation(
+            "auto-dispatch-a",
+            "default",
+            "github.pull_request",
+            "DISPATCH_A_PROMPT",
+        ))
+        .await
+        .expect("put auto-a");
+    astore
+        .put(&make_automation(
+            "auto-dispatch-b",
+            "default",
+            "github.pull_request",
+            "DISPATCH_B_PROMPT",
+        ))
+        .await
+        .expect("put auto-b");
+
+    // Independent Anthropic mocks — matched by distinct body_contains constraints.
+    mock.mock_async(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages")
+            .body_contains("DISPATCH_A_PROMPT");
+        then.status(200)
+            .header("content-type", "application/json")
+            .body(end_turn_body());
+    })
+    .await;
+    mock.mock_async(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages")
+            .body_contains("DISPATCH_B_PROMPT");
+        then.status(200)
+            .header("content-type", "application/json")
+            .body(end_turn_body());
+    })
+    .await;
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let api_port = listener.local_addr().unwrap().port();
+    drop(listener);
+
+    tokio::spawn(async move {
+        run(runner_cfg(nats_port, mock_url, "default", api_port))
+            .await
+            .ok()
+    });
+
+    let client = reqwest::Client::new();
+    let runs_url = format!("http://127.0.0.1:{api_port}/runs");
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        match client
+            .get(&runs_url)
+            .header("x-tenant-id", "default")
+            .send()
+            .await
+        {
+            Ok(_) => break,
+            Err(_) if tokio::time::Instant::now() < deadline => {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            Err(e) => panic!("API never came up: {e}"),
+        }
+    }
+
+    js.publish("github.pull_request", pr_opened_payload().into())
+        .await
+        .expect("publish");
+
+    // Poll until both RunRecords appear — dispatches run concurrently so order
+    // is non-deterministic; we only care that count >= 2.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let body: serde_json::Value = client
+            .get(&runs_url)
+            .header("x-tenant-id", "default")
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        if body.as_array().map(|a| a.len() >= 2).unwrap_or(false) {
+            break;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            let count = body.as_array().map(|a| a.len()).unwrap_or(0);
+            panic!("Expected 2 RunRecords, got {count} within timeout");
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+
+    // Both promises must be Resolved with the correct automation_id.
+    // First message on GITHUB stream → seq = 1 → prefix = "github_pull_request.1".
+    let ps = PromiseStore::open(&js).await.expect("open PromiseStore");
+    let (pa, _) = ps
+        .get_promise("default", "github_pull_request.1.auto-dispatch-a")
+        .await
+        .expect("get promise-a")
+        .expect("promise-a must exist");
+    let (pb, _) = ps
+        .get_promise("default", "github_pull_request.1.auto-dispatch-b")
+        .await
+        .expect("get promise-b")
+        .expect("promise-b must exist");
+
+    assert_eq!(pa.status, PromiseStatus::Resolved, "promise-a must be Resolved");
+    assert_eq!(pa.automation_id, "auto-dispatch-a");
+    assert_eq!(pb.status, PromiseStatus::Resolved, "promise-b must be Resolved");
+    assert_eq!(pb.automation_id, "auto-dispatch-b");
+}
+
+/// The runner's HTTP server exposes the full automation lifecycle management API.
+/// Tests the complete CRUD flow via HTTP: create → read → update → disable →
+/// enable → delete, verifying status codes and response bodies at each step.
+#[tokio::test]
+async fn automations_http_api_crud_lifecycle() {
+    let (_c, nats_port) = start_nats().await;
+    // No Anthropic calls expected — this test only exercises the management API.
+    let mock = MockServer::start_async().await;
+    let mock_url = mock.base_url();
+
+    let (_, js) = js_client(nats_port).await;
+    create_streams(&js).await;
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let api_port = listener.local_addr().unwrap().port();
+    drop(listener);
+
+    tokio::spawn(async move {
+        run(runner_cfg(nats_port, mock_url, "default", api_port))
+            .await
+            .ok()
+    });
+
+    let client = reqwest::Client::new();
+    let base = format!("http://127.0.0.1:{api_port}");
+
+    // Wait for API.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        match client
+            .get(format!("{base}/automations"))
+            .header("x-tenant-id", "default")
+            .send()
+            .await
+        {
+            Ok(_) => break,
+            Err(_) if tokio::time::Instant::now() < deadline => {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            Err(e) => panic!("API never came up: {e}"),
+        }
+    }
+
+    // 1. GET /automations → empty initially.
+    let list: serde_json::Value = client
+        .get(format!("{base}/automations"))
+        .header("x-tenant-id", "default")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(list.as_array().unwrap().len(), 0, "initially empty");
+
+    // 2. POST /automations → 201 Created.
+    let create_resp = client
+        .post(format!("{base}/automations"))
+        .header("x-tenant-id", "default")
+        .json(&serde_json::json!({
+            "name": "CRUD Automation",
+            "trigger": "github.pull_request",
+            "prompt": "CRUD test prompt"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(create_resp.status(), 201);
+    let created: serde_json::Value = create_resp.json().await.unwrap();
+    let auto_id = created["id"].as_str().expect("id must be present").to_string();
+    assert_eq!(created["name"], "CRUD Automation");
+    assert!(created["enabled"].as_bool().unwrap_or(false), "enabled by default");
+
+    // 3. GET /automations/:id → round-trip.
+    let fetched: serde_json::Value = client
+        .get(format!("{base}/automations/{auto_id}"))
+        .header("x-tenant-id", "default")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(fetched["id"].as_str().unwrap(), auto_id);
+    assert_eq!(fetched["prompt"], "CRUD test prompt");
+
+    // 4. PUT /automations/:id → replace name and prompt.
+    let updated: serde_json::Value = client
+        .put(format!("{base}/automations/{auto_id}"))
+        .header("x-tenant-id", "default")
+        .json(&serde_json::json!({
+            "name": "Updated Automation",
+            "trigger": "github.pull_request",
+            "prompt": "Updated prompt",
+            "enabled": true
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(updated["name"], "Updated Automation");
+    assert_eq!(updated["prompt"], "Updated prompt");
+
+    // 5. PATCH /automations/:id/disable → 200, enabled = false.
+    let disabled: serde_json::Value = client
+        .patch(format!("{base}/automations/{auto_id}/disable"))
+        .header("x-tenant-id", "default")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(!disabled["enabled"].as_bool().unwrap_or(true), "must be disabled");
+
+    // 6. PATCH /automations/:id/enable → 200, enabled = true.
+    let re_enabled: serde_json::Value = client
+        .patch(format!("{base}/automations/{auto_id}/enable"))
+        .header("x-tenant-id", "default")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(re_enabled["enabled"].as_bool().unwrap_or(false), "must be re-enabled");
+
+    // 7. DELETE /automations/:id → 204 No Content.
+    let del_status = client
+        .delete(format!("{base}/automations/{auto_id}"))
+        .header("x-tenant-id", "default")
+        .send()
+        .await
+        .unwrap()
+        .status();
+    assert_eq!(del_status, 204);
+
+    // 8. GET /automations/:id → 404 after deletion.
+    let not_found = client
+        .get(format!("{base}/automations/{auto_id}"))
+        .header("x-tenant-id", "default")
+        .send()
+        .await
+        .unwrap()
+        .status();
+    assert_eq!(not_found, 404);
+
+    // 9. GET /automations → empty again after deletion.
+    let final_list: serde_json::Value = client
+        .get(format!("{base}/automations"))
+        .header("x-tenant-id", "default")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(final_list.as_array().unwrap().len(), 0, "empty after delete");
+}
+
+/// The `_idempotency_key` injected into built-in tool inputs must be forwarded
+/// as an `Idempotency-Key` HTTP header on write calls.  The GitHub mock uses
+/// `header_exists("Idempotency-Key")` so it only matches when the header is
+/// present — a hit count of 1 proves the header reached the downstream API
+/// end-to-end through the durable promise pipeline.
+#[tokio::test]
+async fn write_tool_sends_idempotency_key_header() {
+    let (_c, nats_port) = start_nats().await;
+    let mock = MockServer::start_async().await;
+    let mock_url = mock.base_url();
+
+    let (_, js) = js_client(nats_port).await;
+    create_streams(&js).await;
+
+    let astore = AutomationStore::open(&js).await.expect("open AutomationStore");
+    astore
+        .put(&make_automation(
+            "auto-idem",
+            "default",
+            "github.pull_request",
+            "IDEM_PROMPT",
+        ))
+        .await
+        .expect("put automation");
+
+    // Second Anthropic call (body contains "tool_result") → end_turn.
+    // Registered FIRST so httpmock's FIFO ordering handles the multi-turn flow;
+    // the body_contains constraint prevents it from matching the initial call.
+    mock.mock_async(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages")
+            .body_contains("tool_result");
+        then.status(200)
+            .header("content-type", "application/json")
+            .body(end_turn_body());
+    })
+    .await;
+
+    // First Anthropic call → create_pull_request tool_use.
+    // Registered SECOND (broader match — fires for the initial call which has
+    // no tool_result block in the body yet).
+    mock.mock_async(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .body(
+                r#"{"stop_reason":"tool_use","content":[{"type":"tool_use","id":"tu_idem_01","name":"create_pull_request","input":{"owner":"acme","repo":"api","title":"feat: idem test","head":"feature/idem-test"}}]}"#,
+            );
+    })
+    .await;
+
+    // GitHub PR endpoint — only matches when the Idempotency-Key header is present.
+    // If key injection is broken (header absent), this mock never fires → hits = 0
+    // and the final assertion fails.
+    let github_mock = mock
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/github/repos/acme/api/pulls")
+                .header_exists("Idempotency-Key");
+            then.status(201)
+                .header("content-type", "application/json")
+                .body(r#"{"number":99,"html_url":"https://github.com/acme/api/pull/99"}"#);
+        })
+        .await;
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let api_port = listener.local_addr().unwrap().port();
+    drop(listener);
+
+    tokio::spawn(async move {
+        // max_iterations = 2 so the second LLM call (after tool result) reaches
+        // end_turn; the default of 1 would terminate after the first tool call.
+        let mut cfg = runner_cfg(nats_port, mock_url, "default", api_port);
+        cfg.max_iterations = 2;
+        run(cfg).await.ok()
+    });
+
+    let client = reqwest::Client::new();
+    let runs_url = format!("http://127.0.0.1:{api_port}/runs");
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        match client
+            .get(&runs_url)
+            .header("x-tenant-id", "default")
+            .send()
+            .await
+        {
+            Ok(_) => break,
+            Err(_) if tokio::time::Instant::now() < deadline => {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            Err(e) => panic!("API never came up: {e}"),
+        }
+    }
+
+    js.publish("github.pull_request", pr_opened_payload().into())
+        .await
+        .expect("publish");
+
+    // Wait for the run to complete (RunRecord is proof the agent finished).
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let body: serde_json::Value = client
+            .get(&runs_url)
+            .header("x-tenant-id", "default")
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        if body.as_array().map(|a| !a.is_empty()).unwrap_or(false) {
+            break;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            panic!("No RunRecord appeared within timeout");
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+
+    // hits = 1 → the Idempotency-Key header was forwarded correctly end-to-end.
+    assert_eq!(
+        github_mock.hits_async().await,
+        1,
+        "create_pull_request must send exactly one request with Idempotency-Key header"
     );
 }

@@ -15,13 +15,13 @@
 //! This means automations can be added, edited, enabled, or disabled at any
 //! time via the [`trogon_automations::api`] HTTP API — no restart required.
 //!
-//! | JetStream stream | Filter subject        | Fallback handler                   |
-//! |------------------|-----------------------|------------------------------------|
-//! | `GITHUB`         | `github.pull_request` | pr_review / pr_merged              |
-//! | `GITHUB`         | `github.issue_comment`| comment_added                      |
-//! | `GITHUB`         | `github.push`         | push_to_branch                     |
-//! | `GITHUB`         | `github.check_run`    | ci_completed                       |
-//! | `LINEAR`         | `linear.Issue.>`      | issue_triage                       |
+//! | JetStream stream | Filter subject        | Promise-id prefix        | Fallback handler                   |
+//! |------------------|-----------------------|--------------------------|------------------------------------|
+//! | `GITHUB`         | `github.pull_request` | `github_pull_request`    | pr_review / pr_merged              |
+//! | `GITHUB`         | `github.issue_comment`| `github_issue_comment`   | comment_added                      |
+//! | `GITHUB`         | `github.push`         | `github_push`            | push_to_branch                     |
+//! | `GITHUB`         | `github.check_run`    | `github_check_run`       | ci_completed                       |
+//! | `LINEAR`         | `linear.Issue.>`      | `linear_issue`           | issue_triage                       |
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -64,6 +64,17 @@ fn worker_id() -> String {
     let hostname = std::env::var("HOSTNAME").unwrap_or_else(|_| "unknown".to_string());
     let pid = std::process::id();
     format!("{hostname}:{pid}")
+}
+
+/// Convert a NATS subject into a dot-free, lowercase slug for use as a
+/// promise-id segment.
+///
+/// `"github.pull_request"` → `"github_pull_request"`, ensuring that two
+/// JetStream streams whose sequence counters both start at 1 (e.g. a
+/// dedicated `GITHUB_PR` stream and a `GITHUB_CHECK_RUN` stream) produce
+/// distinct promise-id prefixes and never collide in the KV bucket.
+fn subject_slug(subject: &str) -> String {
+    subject.replace('.', "_").to_lowercase()
 }
 
 const GITHUB_CONSUMER: &str = "trogon-agent-pr-review";
@@ -293,6 +304,9 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
         "Agent runner started"
     );
 
+    // Track in-flight message-handler tasks so we can drain them on shutdown.
+    let mut tasks: tokio::task::JoinSet<()> = tokio::task::JoinSet::new();
+
     loop {
         tokio::select! {
             msg = pr_messages.next() => {
@@ -305,7 +319,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                         let run_store = Arc::clone(&run_store);
                         let promise_store = Arc::clone(&promise_store);
                         let tenant_id = Arc::clone(&tenant_id);
-                        tokio::spawn(async move {
+                        tasks.spawn(async move {
                             let subject = "github.pull_request";
                             let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_else(|e| {
                                 warn!(error = %e, "Failed to parse NATS message payload as JSON — processing with empty value");
@@ -319,7 +333,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     return;
                                 }
                             };
-                            let promise_id_prefix = format!("github.{stream_seq}");
+                            let promise_id_prefix = format!("{}.{stream_seq}", subject_slug(subject));
                             let autos = match store.matching(&tenant_id, subject, &pv).await {
                                 Ok(list) => list,
                                 Err(e) => {
@@ -370,7 +384,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                         let run_store = Arc::clone(&run_store);
                         let promise_store = Arc::clone(&promise_store);
                         let tenant_id = Arc::clone(&tenant_id);
-                        tokio::spawn(async move {
+                        tasks.spawn(async move {
                             let subject = "github.issue_comment";
                             let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_else(|e| {
                                 warn!(error = %e, "Failed to parse NATS message payload as JSON — processing with empty value");
@@ -384,7 +398,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     return;
                                 }
                             };
-                            let promise_id_prefix = format!("github.{stream_seq}");
+                            let promise_id_prefix = format!("{}.{stream_seq}", subject_slug(subject));
                             let autos = match store.matching(&tenant_id, subject, &pv).await {
                                 Ok(list) => list,
                                 Err(e) => {
@@ -425,7 +439,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                         let run_store = Arc::clone(&run_store);
                         let promise_store = Arc::clone(&promise_store);
                         let tenant_id = Arc::clone(&tenant_id);
-                        tokio::spawn(async move {
+                        tasks.spawn(async move {
                             let subject = "github.push";
                             let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_else(|e| {
                                 warn!(error = %e, "Failed to parse NATS message payload as JSON — processing with empty value");
@@ -439,7 +453,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     return;
                                 }
                             };
-                            let promise_id_prefix = format!("github.{stream_seq}");
+                            let promise_id_prefix = format!("{}.{stream_seq}", subject_slug(subject));
                             let autos = match store.matching(&tenant_id, subject, &pv).await {
                                 Ok(list) => list,
                                 Err(e) => {
@@ -480,7 +494,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                         let run_store = Arc::clone(&run_store);
                         let promise_store = Arc::clone(&promise_store);
                         let tenant_id = Arc::clone(&tenant_id);
-                        tokio::spawn(async move {
+                        tasks.spawn(async move {
                             let subject = "github.check_run";
                             let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_else(|e| {
                                 warn!(error = %e, "Failed to parse NATS message payload as JSON — processing with empty value");
@@ -494,7 +508,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     return;
                                 }
                             };
-                            let promise_id_prefix = format!("github.{stream_seq}");
+                            let promise_id_prefix = format!("{}.{stream_seq}", subject_slug(subject));
                             let autos = match store.matching(&tenant_id, subject, &pv).await {
                                 Ok(list) => list,
                                 Err(e) => {
@@ -535,7 +549,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                         let run_store = Arc::clone(&run_store);
                         let promise_store = Arc::clone(&promise_store);
                         let tenant_id = Arc::clone(&tenant_id);
-                        tokio::spawn(async move {
+                        tasks.spawn(async move {
                             let subject = "linear.Issue";
                             let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_else(|e| {
                                 warn!(error = %e, "Failed to parse NATS message payload as JSON — processing with empty value");
@@ -549,7 +563,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     return;
                                 }
                             };
-                            let promise_id_prefix = format!("linear.{stream_seq}");
+                            let promise_id_prefix = format!("{}.{stream_seq}", subject_slug(subject));
                             let autos = match store.matching(&tenant_id, subject, &pv).await {
                                 Ok(list) => list,
                                 Err(e) => {
@@ -591,7 +605,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                         let promise_store = Arc::clone(&promise_store);
                         let tenant_id = Arc::clone(&tenant_id);
                         let nats_subject = msg.subject.to_string();
-                        tokio::spawn(async move {
+                        tasks.spawn(async move {
                             let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_else(|e| {
                                 warn!(error = %e, "Failed to parse NATS message payload as JSON — processing with empty value");
                                 serde_json::Value::default()
@@ -604,7 +618,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     return;
                                 }
                             };
-                            let promise_id_prefix = format!("cron.{stream_seq}");
+                            let promise_id_prefix = format!("{}.{stream_seq}", subject_slug(&nats_subject));
                             let autos = match store.matching(&tenant_id, &nats_subject, &pv).await {
                                 Ok(list) => list,
                                 Err(e) => {
@@ -635,7 +649,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                         let promise_store = Arc::clone(&promise_store);
                         let tenant_id = Arc::clone(&tenant_id);
                         let nats_subject = msg.subject.to_string();
-                        tokio::spawn(async move {
+                        tasks.spawn(async move {
                             let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_else(|e| {
                                 warn!(error = %e, "Failed to parse NATS message payload as JSON — processing with empty value");
                                 serde_json::Value::default()
@@ -648,7 +662,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     return;
                                 }
                             };
-                            let promise_id_prefix = format!("datadog.{stream_seq}");
+                            let promise_id_prefix = format!("{}.{stream_seq}", subject_slug(&nats_subject));
                             let autos = match store.matching(&tenant_id, &nats_subject, &pv).await {
                                 Ok(list) => list,
                                 Err(e) => {
@@ -695,7 +709,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                         let promise_store = Arc::clone(&promise_store);
                         let tenant_id = Arc::clone(&tenant_id);
                         let nats_subject = msg.subject.to_string();
-                        tokio::spawn(async move {
+                        tasks.spawn(async move {
                             let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_else(|e| {
                                 warn!(error = %e, "Failed to parse NATS message payload as JSON — processing with empty value");
                                 serde_json::Value::default()
@@ -708,7 +722,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     return;
                                 }
                             };
-                            let promise_id_prefix = format!("incidentio.{stream_seq}");
+                            let promise_id_prefix = format!("{}.{stream_seq}", subject_slug(&nats_subject));
                             let autos = match store.matching(&tenant_id, &nats_subject, &pv).await {
                                 Ok(list) => list,
                                 Err(e) => {
@@ -739,7 +753,50 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                     }
                 }
             }
+            // Reap completed tasks so the JoinSet doesn't grow unboundedly
+            // during long-running deployments.
+            Some(result) = tasks.join_next() => {
+                if let Err(e) = result {
+                    if e.is_panic() {
+                        error!(error = ?e, "Message handler task panicked");
+                    }
+                }
+            }
+            // Stop consuming new messages on SIGTERM (Kubernetes pod shutdown)
+            // or SIGINT (Ctrl+C in development).
+            _ = shutdown_signal() => {
+                info!("Shutdown signal received — stopping message consumption");
+                break;
+            }
         }
+    }
+
+    // Drain in-flight tasks: give each active run time to finish its current
+    // LLM call, write a final checkpoint, and ack the NATS message before the
+    // process exits. Without draining, an in-flight run loses its checkpoint
+    // progress and NATS redelivers the trigger to the next process instance,
+    // causing an unnecessary full re-run from the last checkpoint.
+    if !tasks.is_empty() {
+        info!(count = tasks.len(), "Shutdown: draining in-flight runs");
+        let drain_deadline =
+            tokio::time::Instant::now() + std::time::Duration::from_secs(5 * 60);
+        loop {
+            match tokio::time::timeout_at(drain_deadline, tasks.join_next()).await {
+                Ok(Some(Err(e))) if e.is_panic() => {
+                    error!(error = ?e, "Message handler panicked during shutdown drain");
+                }
+                Ok(Some(_)) => continue,
+                Ok(None) => break, // all tasks completed
+                Err(_) => {
+                    warn!(
+                        remaining = tasks.len(),
+                        "Shutdown drain timeout — exiting with tasks still in flight"
+                    );
+                    break;
+                }
+            }
+        }
+        info!("Shutdown: drain complete");
     }
 
     info!("Agent runner stopped");
@@ -917,15 +974,6 @@ async fn recover_stale_promises<A: AutomationRepository, R: RunRepository>(
     // would give zero margin. 10 minutes gives a 2× buffer so a worst-case
     // slow LLM call never triggers a spurious startup recovery.
     const STALE_AFTER_SECS: u64 = 10 * 60;
-    /// Maximum number of stale promises to recover on a single startup.
-    ///
-    /// Each recovery re-runs the full agent (potentially multiple LLM calls),
-    /// so recovering an unbounded number sequentially would delay fresh event
-    /// processing when many promises are stale (e.g. after a long outage).
-    /// Cap at 10 most-recent by claimed_at; the rest stay Running and are
-    /// picked up on the next restart once the backlog has drained.
-    const MAX_RECOVERY_AT_STARTUP: usize = 10;
-
     let now = trogon_automations::now_unix();
 
     let promises = match tokio::time::timeout(
@@ -955,17 +1003,17 @@ async fn recover_stale_promises<A: AutomationRepository, R: RunRepository>(
     }
 
     // Recover the most recently active first (those closest to completion
-    // are most likely to succeed quickly). Truncate to cap.
+    // are most likely to succeed quickly).
     stale.sort_by(|a, b| b.claimed_at.cmp(&a.claimed_at));
-    if stale.len() > MAX_RECOVERY_AT_STARTUP {
+
+    // No hard cap: recovery runs in a background task so it doesn't block
+    // fresh event processing. Warn when the backlog is large so operators
+    // know recovery may take time to drain.
+    if stale.len() > 50 {
         warn!(
-            total = stale.len(),
-            recovering = MAX_RECOVERY_AT_STARTUP,
-            "Startup recovery: capping to {} most recent stale promises — {} deferred to next restart",
-            MAX_RECOVERY_AT_STARTUP,
-            stale.len() - MAX_RECOVERY_AT_STARTUP,
+            count = stale.len(),
+            "Startup recovery: large stale-promise backlog — all will be processed sequentially"
         );
-        stale.truncate(MAX_RECOVERY_AT_STARTUP);
     }
 
     // Recovery runs in the background so the consumer loop can start accepting
@@ -1430,6 +1478,33 @@ pub(crate) async fn dispatch_automations<R: RunRepository>(
             }
         }
     }
+}
+
+/// Returns when a shutdown signal is received.
+///
+/// On Unix (Linux, macOS) listens for both SIGTERM (sent by Kubernetes /
+/// container runtimes on `kubectl delete pod` or rolling deploys) and SIGINT
+/// (Ctrl+C in development). On non-Unix platforms only SIGINT is handled.
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
+    };
+
+    #[cfg(unix)]
+    {
+        let mut terminate =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                .expect("failed to install SIGTERM handler");
+        tokio::select! {
+            _ = ctrl_c => {}
+            _ = terminate.recv() => {}
+        }
+    }
+
+    #[cfg(not(unix))]
+    ctrl_c.await;
 }
 
 pub async fn init_mcp_servers(
@@ -2737,26 +2812,24 @@ mod tests {
         );
     }
 
-    /// `recover_stale_promises` must process at most `MAX_RECOVERY_AT_STARTUP`
-    /// (= 10) stale promises.  When more than 10 are stale, the remainder are
-    /// deferred to the next restart.
+    /// `recover_stale_promises` must process ALL stale promises without a hard
+    /// cap.  The recovery task runs in the background so it does not block fresh
+    /// event processing regardless of how many promises are stale.
     ///
     /// Scenario: 11 stale promises with an unknown `nats_subject`.  The
     /// unknown-subject arm marks each processed promise `PermanentFailed`
     /// without making any HTTP calls, so the test completes instantly.
-    /// After recovery exactly 10 must be `PermanentFailed` and 1 must still
-    /// be `Running`.
+    /// After recovery all 11 must be `PermanentFailed` and none `Running`.
     #[tokio::test]
-    async fn recover_stale_cap_processes_at_most_10() {
+    async fn recover_stale_processes_all_without_cap() {
         use crate::promise_store::mock::MockPromiseStore;
         use crate::promise_store::{PromiseRepository, PromiseStatus};
 
         let (auto_store, run_store, _container) = make_all_stores().await;
         let store = Arc::new(MockPromiseStore::new());
 
-        // Insert 11 stale promises — one more than the cap.
-        // All have an unknown subject so each is handled synchronously
-        // (no HTTP) by the `other =>` arm that marks PermanentFailed.
+        // Insert 11 stale promises.  All have an unknown subject so each is
+        // handled synchronously (no HTTP) by the `other =>` arm.
         for i in 0..11u32 {
             let mut p = make_stale_promise(&format!("p-cap-{i}"));
             p.nats_subject = "completely.unknown.subject".to_string();
@@ -2789,13 +2862,10 @@ mod tests {
             .count();
 
         assert_eq!(
-            permanent_failed, 10,
-            "exactly 10 promises must be processed (cap = MAX_RECOVERY_AT_STARTUP); got {permanent_failed}"
+            permanent_failed, 11,
+            "all 11 stale promises must be processed (no cap); got {permanent_failed}"
         );
-        assert_eq!(
-            still_running, 1,
-            "exactly 1 promise must remain Running — deferred to next restart; got {still_running}"
-        );
+        assert_eq!(still_running, 0, "no promises must remain Running; got {still_running}");
     }
 
     /// When a stale promise has a non-empty `automation_id` but the automation

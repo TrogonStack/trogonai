@@ -118,6 +118,125 @@ async fn post_pr_comment_returns_url() {
     assert!(result.contains("github.com"), "got: {result}");
 }
 
+/// With `_idempotency_key`, the function GETs existing comments first; if the
+/// marker is already there it returns the existing url without re-posting.
+#[tokio::test]
+async fn post_pr_comment_dedup_skips_when_marker_found() {
+    let server = MockServer::start_async().await;
+    let key = "idem-key-abc123";
+    let marker = format!("<!-- trogon-idempotency-key: {key} -->");
+
+    // GET returns a comment that already contains the marker.
+    let get_mock = server.mock(|when, then| {
+        when.method(httpmock::Method::GET)
+            .path("/github/repos/owner/repo/issues/7/comments");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(json!([{
+                "id": 99,
+                "body": format!("LGTM\n\n{marker}"),
+                "html_url": "https://github.com/owner/repo/issues/7#comment-99"
+            }]));
+    });
+
+    // POST must NOT be called.
+    let post_mock = server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/github/repos/owner/repo/issues/7/comments");
+        then.status(201)
+            .header("content-type", "application/json")
+            .json_body(json!({ "html_url": "https://github.com/owner/repo/issues/7#comment-NEW" }));
+    });
+
+    let ctx = make_ctx(&server.base_url());
+    let input = json!({
+        "owner": "owner", "repo": "repo", "pr_number": 7,
+        "body": "LGTM", "_idempotency_key": key
+    });
+    let result = dispatch_tool(&ctx, "post_pr_comment", &input).await;
+
+    // Returns the existing comment URL, not a new one.
+    assert!(result.contains("comment-99"), "got: {result}");
+    assert_eq!(get_mock.hits(), 1);
+    assert_eq!(post_mock.hits(), 0, "duplicate POST must not happen");
+}
+
+/// With `_idempotency_key` and no existing marker, the function posts and
+/// embeds the marker in the body.
+#[tokio::test]
+async fn post_pr_comment_with_key_embeds_marker_in_body() {
+    let server = MockServer::start_async().await;
+    let key = "idem-key-xyz789";
+    let marker = format!("<!-- trogon-idempotency-key: {key} -->");
+
+    // GET returns empty list — no prior comment.
+    server.mock(|when, then| {
+        when.method(httpmock::Method::GET)
+            .path("/github/repos/owner/repo/issues/8/comments");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(json!([]));
+    });
+
+    // POST must include the marker in the body.
+    let post_mock = server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/github/repos/owner/repo/issues/8/comments")
+            .body_contains(&marker);
+        then.status(201)
+            .header("content-type", "application/json")
+            .json_body(json!({ "html_url": "https://github.com/owner/repo/issues/8#comment-200" }));
+    });
+
+    let ctx = make_ctx(&server.base_url());
+    let input = json!({
+        "owner": "owner", "repo": "repo", "pr_number": 8,
+        "body": "Looks good!", "_idempotency_key": key
+    });
+    let result = dispatch_tool(&ctx, "post_pr_comment", &input).await;
+
+    assert!(result.contains("comment-200"), "got: {result}");
+    assert_eq!(post_mock.hits(), 1, "POST must be called exactly once");
+}
+
+/// If the pre-post GET fails, `post_pr_comment` degrades gracefully and still
+/// posts the comment (body unchanged since no key to embed a marker for).
+/// This test uses `_idempotency_key` so the GET path is exercised; we force
+/// the GET to return a non-JSON body to trigger the graceful-degradation path.
+#[tokio::test]
+async fn post_pr_comment_degrades_gracefully_when_get_fails() {
+    let server = MockServer::start_async().await;
+    let key = "idem-key-fail";
+    let marker = format!("<!-- trogon-idempotency-key: {key} -->");
+
+    // GET returns 500 — simulates proxy/network failure.
+    server.mock(|when, then| {
+        when.method(httpmock::Method::GET)
+            .path("/github/repos/owner/repo/issues/9/comments");
+        then.status(500).body("internal error");
+    });
+
+    // POST must still be called.
+    let post_mock = server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/github/repos/owner/repo/issues/9/comments")
+            .body_contains(&marker);
+        then.status(201)
+            .header("content-type", "application/json")
+            .json_body(json!({ "html_url": "https://github.com/owner/repo/issues/9#comment-300" }));
+    });
+
+    let ctx = make_ctx(&server.base_url());
+    let input = json!({
+        "owner": "owner", "repo": "repo", "pr_number": 9,
+        "body": "fallback post", "_idempotency_key": key
+    });
+    let result = dispatch_tool(&ctx, "post_pr_comment", &input).await;
+
+    assert!(result.contains("comment-300"), "got: {result}");
+    assert_eq!(post_mock.hits(), 1, "POST must still be called after GET failure");
+}
+
 #[tokio::test]
 async fn get_pr_diff_missing_fields_returns_tool_error() {
     let server = MockServer::start_async().await;

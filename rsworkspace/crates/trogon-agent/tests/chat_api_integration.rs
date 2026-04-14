@@ -993,3 +993,76 @@ async fn concurrent_sends_to_same_session_both_succeed() {
     assert_eq!(r1.status(), 200, "first concurrent send must return 200");
     assert_eq!(r2.status(), 200, "second concurrent send must return 200");
 }
+
+#[tokio::test]
+async fn get_session_missing_tenant_returns_400() {
+    let env = start().await;
+    let created: Value = env
+        .client
+        .post(format!("{}/sessions", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({"name": "tenant-check"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = created["id"].as_str().unwrap();
+    let res = env
+        .client
+        .get(format!("{}/sessions/{id}", env.base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 400);
+}
+
+#[tokio::test]
+async fn patch_session_missing_tenant_returns_400() {
+    let env = start().await;
+    let created: Value = env
+        .client
+        .post(format!("{}/sessions", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({"name": "tenant-check-patch"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = created["id"].as_str().unwrap();
+    let res = env
+        .client
+        .patch(format!("{}/sessions/{id}", env.base_url))
+        .json(&json!({"name": "new name"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 400);
+}
+
+#[tokio::test]
+async fn delete_session_missing_tenant_returns_400() {
+    let env = start().await;
+    let created: Value = env
+        .client
+        .post(format!("{}/sessions", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({"name": "tenant-check-delete"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = created["id"].as_str().unwrap();
+    let res = env
+        .client
+        .delete(format!("{}/sessions/{id}", env.base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 400);
+}
