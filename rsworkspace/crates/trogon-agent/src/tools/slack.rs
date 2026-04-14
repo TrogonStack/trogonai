@@ -8,6 +8,7 @@
 //! from Vault at request time.
 
 use serde_json::Value;
+use tracing::warn;
 
 use super::{HttpClient, ToolContext, ToolDef, tool_def};
 
@@ -128,6 +129,28 @@ pub async fn send_message(
                         return Ok(format!(
                             "Message already sent to {channel} (skipped duplicate)"
                         ));
+                    }
+
+                    // Warn once when messages exist but none carry a `metadata`
+                    // field — the bot token is missing `metadata:read` scope.
+                    // The fallback (text equality) is unreliable if the LLM
+                    // regenerates different wording on recovery, so surface the
+                    // misconfiguration early rather than silently duplicating.
+                    if messages
+                        .map(|msgs| {
+                            !msgs.is_empty()
+                                && msgs.iter().all(|m| m.get("metadata").is_none())
+                        })
+                        .unwrap_or(false)
+                    {
+                        warn!(
+                            channel = channel,
+                            "Slack history has messages but none carry a `metadata` field \
+                             — bot token is likely missing the `metadata:read` OAuth scope. \
+                             Idempotency dedup is falling back to text equality; duplicate \
+                             messages may be sent on recovery if the LLM regenerates \
+                             different wording."
+                        );
                     }
 
                     // Fallback: text equality — handles missing metadata:read scope.
