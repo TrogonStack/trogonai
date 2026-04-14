@@ -26,6 +26,7 @@ trogon-source-slack = { path = "crates/trogon-source-slack" }
 trogon-source-telegram = { path = "crates/trogon-source-telegram" }
 trogon-source-twitter = { path = "crates/trogon-source-twitter" }
 trogon-std = { path = "crates/trogon-std" }
+trogon-actor = { path = "crates/trogon-actor" }
 trogon-registry = { path = "crates/trogon-registry" }
 trogon-transcript = { path = "crates/trogon-transcript" }
 

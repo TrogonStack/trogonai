@@ -3449,6 +3449,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-actor"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "bytes",
+ "futures-util",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "trogon-nats",
+ "trogon-registry",
+ "trogon-transcript",
+ "uuid",
+]
+
+[[package]]
 name = "trogon-gateway"
 version = "0.1.0"
 dependencies = [
