@@ -316,4 +316,134 @@ mod tests {
 
         assert!(matches!(err, RouterError::UnknownAgentType(_)));
     }
+
+    /// A publisher that always fails — used to exercise the best-effort
+    /// transcript-write warn paths inside `route_event`.
+    #[derive(Clone)]
+    struct FailPublisher;
+    impl trogon_transcript::TranscriptPublisher for FailPublisher {
+        async fn publish(
+            &self,
+            _subject: String,
+            _payload: bytes::Bytes,
+        ) -> Result<(), trogon_transcript::TranscriptError> {
+            Err(trogon_transcript::TranscriptError::Publish(
+                "always fails".into(),
+            ))
+        }
+    }
+
+    fn make_router_fail_publisher() -> (
+        Router<MockLlmClient, MockRegistryStore, FailPublisher, MockNatsClient>,
+        MockLlmClient,
+        MockRegistryStore,
+        MockNatsClient,
+    ) {
+        let llm = MockLlmClient::new();
+        let store = MockRegistryStore::new();
+        let nats = MockNatsClient::new();
+        let registry = Registry::new(store.clone());
+        let router = Router::new(llm.clone(), registry, FailPublisher, nats.clone());
+        (router, llm, store, nats)
+    }
+
+    #[tokio::test]
+    async fn routed_transcript_write_failure_does_not_fail_route() {
+        let (router, llm, store, nats) = make_router_fail_publisher();
+        let registry = Registry::new(store.clone());
+        registry.register(&pr_actor()).await.unwrap();
+
+        llm.push_response(LlmRoutingResponse::Routed {
+            agent_type: "PrActor".into(),
+            entity_key: "owner/repo/1".into(),
+            reasoning: "test".into(),
+        });
+
+        let event = RouterEvent::new("trogon.events.github.push", b"{}".as_ref());
+        // Even though transcript write fails, dispatch must still succeed.
+        let result = router.route_event(event).await.unwrap();
+        assert!(matches!(result, RouteResult::Routed(_)));
+        assert_eq!(nats.published_messages().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn unroutable_transcript_write_failure_does_not_fail_route() {
+        let (router, llm, store, _nats) = make_router_fail_publisher();
+        let registry = Registry::new(store.clone());
+        registry.register(&pr_actor()).await.unwrap();
+
+        llm.push_response(LlmRoutingResponse::Unroutable {
+            reasoning: "no match".into(),
+        });
+
+        let event = RouterEvent::new("trogon.events.github.push", b"{}".as_ref());
+        let result = router.route_event(event).await.unwrap();
+        assert!(matches!(result, RouteResult::Unroutable { .. }));
+    }
+
+    /// Test `run()`: inject one message, verify it gets routed, drop sender to
+    /// end the subscription and verify `run()` returns Ok.
+    #[tokio::test]
+    async fn run_processes_message_then_exits_on_closed_subscription() {
+        let (router, llm, store, _publisher, nats) = make_router();
+
+        let registry = Registry::new(store.clone());
+        registry.register(&pr_actor()).await.unwrap();
+
+        llm.push_response(LlmRoutingResponse::Routed {
+            agent_type: "PrActor".into(),
+            entity_key: "owner/repo/1".into(),
+            reasoning: "it is a pr".into(),
+        });
+
+        // Pre-inject a message stream BEFORE run() calls subscribe().
+        let sender = nats.inject_messages();
+        let msg = async_nats::Message {
+            subject: "trogon.events.github.push".into(),
+            payload: bytes::Bytes::from_static(b"{}"),
+            headers: None,
+            status: None,
+            description: None,
+            length: 2,
+            reply: None,
+        };
+        sender.unbounded_send(msg).unwrap();
+        drop(sender); // close channel → subscription stream ends → run() exits
+
+        router.run("trogon.events.>").await.unwrap();
+
+        // The message was dispatched to the actor subject.
+        let subjects = nats.published_messages();
+        assert_eq!(subjects.len(), 1);
+        assert_eq!(subjects[0], "actors.pr.owner.repo.1");
+    }
+
+    /// Test that `run()` continues after a `route_event` error (warn path).
+    #[tokio::test]
+    async fn run_continues_after_route_error() {
+        let (router, llm, _store, _publisher, nats) = make_router();
+        // No agent registered → routing will error with UnknownAgentType.
+
+        llm.push_response(LlmRoutingResponse::Routed {
+            agent_type: "GhostActor".into(),
+            entity_key: "x/y".into(),
+            reasoning: "hallucinated".into(),
+        });
+
+        let sender = nats.inject_messages();
+        let msg = async_nats::Message {
+            subject: "trogon.events.github.push".into(),
+            payload: bytes::Bytes::from_static(b"{}"),
+            headers: None,
+            status: None,
+            description: None,
+            length: 2,
+            reply: None,
+        };
+        sender.unbounded_send(msg).unwrap();
+        drop(sender);
+
+        // run() must return Ok even though route_event errored for the one message.
+        router.run("trogon.events.>").await.unwrap();
+    }
 }
