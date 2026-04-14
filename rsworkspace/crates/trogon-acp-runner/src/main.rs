@@ -128,7 +128,8 @@ async fn main() -> anyhow::Result<()> {
         model,
         None, // no in-process permission gate
         gateway_config,
-    );
+    )
+    .with_compactor(nats.clone());
 
     let prefix = AcpPrefix::new(&acp_prefix)?;
     let (_conn, io_task) =
