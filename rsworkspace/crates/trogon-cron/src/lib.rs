@@ -8,6 +8,7 @@ pub mod events;
 mod job_id;
 pub mod kv;
 pub mod nats;
+pub mod projections;
 pub mod scheduler;
 pub mod store;
 pub mod traits;
@@ -26,12 +27,12 @@ pub use config::{
 };
 pub use domain::ResolvedJobSpec;
 pub use error::{CronError, JobSpecError};
-pub use events::{
-    JobDecisionError, JobEvent, JobEventData, JobStreamState, JobTransitionError, ProjectionChange,
-    RecordedJobEvent, apply, initial_state, projection_change,
-};
+pub use events::{JobDecisionError, JobEvent, JobEventData, RecordedJobEvent};
 pub use job_id::{JobId, JobIdError};
 pub use nats::NatsSchedulePublisher;
+pub use projections::{
+    JobStreamState, JobTransitionError, ProjectionChange, apply, initial_state, projection_change,
+};
 pub use scheduler::CronController;
 pub use store::{
     JobSpecChange, LoadAndWatchCommand, SNAPSHOT_STORE_CONFIG, append_events, connect_store,
