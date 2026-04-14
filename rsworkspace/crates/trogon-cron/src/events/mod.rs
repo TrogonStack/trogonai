@@ -7,10 +7,8 @@ use crate::{
 };
 
 mod decision;
-mod state;
 
 pub use decision::JobDecisionError;
-pub use state::{JobStreamState, JobTransitionError, apply, initial_state, projection_change};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -22,12 +20,6 @@ pub enum JobEvent {
 
 pub type JobEventData = EventData<JobEvent>;
 pub type RecordedJobEvent = RecordedEvent<JobEvent>;
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum ProjectionChange {
-    Upsert(JobSpec),
-    Delete(String),
-}
 
 impl StreamEvent for JobEvent {
     fn stream_id(&self) -> &str {
@@ -76,77 +68,7 @@ impl JobEvent {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
     use super::*;
-    use crate::config::{DeliverySpec, ScheduleSpec};
-
-    fn job(id: &str) -> JobSpec {
-        JobSpec {
-            id: id.to_string(),
-            state: JobEnabledState::Enabled,
-            schedule: ScheduleSpec::Every { every_sec: 30 },
-            delivery: DeliverySpec::NatsEvent {
-                route: "agent.run".to_string(),
-                headers: BTreeMap::new(),
-                ttl_sec: None,
-                source: None,
-            },
-            payload: serde_json::json!({"kind": "heartbeat"}),
-            metadata: BTreeMap::new(),
-        }
-    }
-
-    #[test]
-    fn event_projection_replays_latest_state() {
-        let events = [
-            JobEvent::job_registered(job("backup")),
-            JobEvent::job_state_changed("backup", JobEnabledState::Disabled),
-            JobEvent::job_removed("backup"),
-            JobEvent::job_registered(job("backup")),
-        ];
-        let mut state = initial_state();
-
-        for event in events {
-            state = apply(state, event).unwrap();
-        }
-
-        assert_eq!(state, JobStreamState::Present(job("backup")));
-    }
-
-    #[test]
-    fn state_change_requires_existing_job() {
-        let error = apply(
-            initial_state(),
-            JobEvent::job_state_changed("missing", JobEnabledState::Disabled),
-        )
-        .unwrap_err();
-
-        assert!(matches!(
-            error,
-            JobTransitionError::MissingJobForStateChange { .. }
-        ));
-    }
-
-    #[test]
-    fn projection_change_tracks_latest_state() {
-        let before = initial_state();
-        let after = apply(before.clone(), JobEvent::job_registered(job("backup"))).unwrap();
-        assert_eq!(
-            projection_change(&before, &after),
-            Some(ProjectionChange::Upsert(job("backup")))
-        );
-
-        let updated = apply(
-            after.clone(),
-            JobEvent::job_state_changed("backup", JobEnabledState::Disabled),
-        )
-        .unwrap();
-        match projection_change(&after, &updated).unwrap() {
-            ProjectionChange::Upsert(job) => assert_eq!(job.state, JobEnabledState::Disabled),
-            ProjectionChange::Delete(_) => panic!("expected upsert change"),
-        }
-    }
 
     #[test]
     fn event_data_and_recorded_event_helpers_work() {
@@ -182,36 +104,5 @@ mod tests {
     fn invalid_payload_fails_decode() {
         assert!(JobEventData::decode(br#"not-json"#).is_err());
         assert!(RecordedJobEvent::decode(br#"not-json"#).is_err());
-    }
-
-    #[test]
-    fn initial_state_rejects_registering_existing_job() {
-        let error = apply(
-            JobStreamState::Present(job("backup")),
-            JobEvent::job_registered(job("backup")),
-        )
-        .unwrap_err();
-        assert!(matches!(
-            error,
-            JobTransitionError::CannotRegisterExistingJob { .. }
-        ));
-    }
-
-    #[test]
-    fn initial_state_rejects_missing_removal() {
-        let error = apply(initial_state(), JobEvent::job_removed("backup")).unwrap_err();
-        assert!(matches!(
-            error,
-            JobTransitionError::MissingJobForRemoval { .. }
-        ));
-    }
-
-    #[test]
-    fn reducer_rejects_stream_id_mismatch() {
-        let error = apply(initial_state(), JobEvent::job_removed("other")).unwrap_err();
-        assert!(matches!(
-            error,
-            JobTransitionError::MissingJobForRemoval { .. }
-        ));
     }
 }
