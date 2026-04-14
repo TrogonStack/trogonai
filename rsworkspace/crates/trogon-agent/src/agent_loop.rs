@@ -560,19 +560,20 @@ async fn write_promise_terminal(
 /// on every restart — wasting resources on a hopeless run that will always
 /// hit the same deterministic error.
 ///
-/// Retries up to 3 times with exponential back-off (2 s, 4 s) to survive
-/// transient NATS hiccups that may have caused the checkpoint revision to be
-/// lost in the first place. After 3 failures the promise stays `Running` and
-/// will be recovered correctly once NATS comes back online.
+/// Retries up to 5 times with exponential back-off (2 s, 4 s, 8 s, 16 s)
+/// to survive transient NATS hiccups that may have caused the checkpoint
+/// revision to be lost in the first place. After 5 failures the promise
+/// stays `Running` and will be recovered correctly once NATS comes back
+/// online.
 async fn try_mark_permanent_failed_fresh(
     store: &dyn PromiseRepository,
     tenant_id: &str,
     pid: &str,
     context: &str,
 ) {
-    for attempt in 0u32..3 {
+    for attempt in 0u32..5 {
         if attempt > 0 {
-            // Exponential back-off: 2 s, 4 s.
+            // Exponential back-off: 2 s, 4 s, 8 s, 16 s.
             tokio::time::sleep(std::time::Duration::from_secs(2u64.pow(attempt))).await;
         }
         match tokio::time::timeout(NATS_KV_TIMEOUT, store.get_promise(tenant_id, pid)).await {
@@ -594,7 +595,7 @@ async fn try_mark_permanent_failed_fresh(
             Err(_) => warn!(context, attempt, "KV timeout fetching promise for terminal-status write — retrying"),
         }
     }
-    error!(context, promise_id = %pid, "Failed to mark promise PermanentFailed after 3 attempts — promise will stay Running until TTL or next successful recovery");
+    error!(context, promise_id = %pid, "Failed to mark promise PermanentFailed after 5 attempts — promise will stay Running until TTL or next successful recovery");
 }
 
 /// Render a slice of messages as readable text for the summarization prompt.
@@ -910,7 +911,7 @@ impl AgentLoop {
         // well under the 10-minute stale threshold — so recovery never fires
         // while the LLM is legitimately working.
         const HEARTBEAT_REFRESH_INTERVAL: std::time::Duration =
-            std::time::Duration::from_secs(3 * 60); // 3 min — 7 min margin under 10-min stale threshold
+            std::time::Duration::from_secs(3 * 60); // 3 min — 12 min margin under 15-min stale threshold
         // Track the last time we successfully wrote `claimed_at` to KV
         // (either via a checkpoint or a heartbeat). Initialised to now because
         // the promise was just claimed moments ago at the call site.

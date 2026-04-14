@@ -983,12 +983,17 @@ async fn recover_stale_promises<A: AutomationRepository, R: RunRepository>(
     tenant_id: &str,
 ) -> Option<tokio::task::JoinHandle<()>> {
     // Must be strictly greater than the maximum time between two consecutive
-    // checkpoints. Between checkpoints, claimed_at does not update, so the
-    // age can grow by up to (tool_execution_time + LLM_call_time). The LLM
-    // hard timeout is 5 * 60 = 300 s — using the same value as STALE_AFTER_SECS
-    // would give zero margin. 10 minutes gives a 2× buffer so a worst-case
-    // slow LLM call never triggers a spurious startup recovery.
-    const STALE_AFTER_SECS: u64 = 10 * 60;
+    // checkpoint writes. Between checkpoints, `claimed_at` does not update.
+    // The age accumulates across both the LLM call AND all tool executions
+    // in a single turn:
+    //   LLM hard timeout:              300 s (HARD_TIMEOUT)
+    //   tool execution per tool:        60 s (TOOL_EXECUTION_TIMEOUT)
+    //   typical tools per turn (worst): ~5  → 300 s of tool time
+    //   total worst-case gap:          ~600 s
+    // Using 600 s as the threshold gives zero margin. 15 minutes (900 s)
+    // keeps a 300 s safety buffer so a worst-case turn (slow LLM + many
+    // tools) never triggers a spurious startup recovery.
+    const STALE_AFTER_SECS: u64 = 15 * 60;
     let now = trogon_automations::now_unix();
 
     let promises = match tokio::time::timeout(
@@ -1828,7 +1833,7 @@ mod tests {
             messages: vec![],
             iteration: 3,
             worker_id: "old-worker".to_string(),
-            // 20 minutes in the past — well past STALE_AFTER_SECS (10 min).
+            // 20 minutes in the past — well past STALE_AFTER_SECS (15 min).
             claimed_at: trogon_automations::now_unix().saturating_sub(20 * 60),
             trigger: serde_json::json!({}),
             nats_subject: "github.pull_request".to_string(),
@@ -2493,7 +2498,7 @@ mod tests {
         let (auto_store, run_store, _container) = make_all_stores().await;
         let store = Arc::new(MockPromiseStore::new());
 
-        // claimed_at = now → age = 0s, well under STALE_AFTER_SECS (600s).
+        // claimed_at = now → age = 0s, well under STALE_AFTER_SECS (900s).
         let fresh = AgentPromise {
             id: "p-fresh".to_string(),
             tenant_id: "acme".to_string(),
