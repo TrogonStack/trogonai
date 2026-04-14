@@ -6,8 +6,8 @@
 use httpmock::prelude::*;
 use serde_json::json;
 use trogon_compactor::{
-    CompactionSettings, CompactorConfig, CompactorError, ContentBlock, LlmConfig, Message,
-    compactor_with_client,
+    AuthStyle, CompactionSettings, CompactorConfig, CompactorError, ContentBlock, LlmConfig,
+    Message, compactor_with_client,
 };
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -342,4 +342,134 @@ async fn x_api_key_auth_sends_correct_header() {
     let result = compactor.compact_if_needed(large_conversation(&settings)).await;
 
     assert!(result.is_ok(), "expected success with x-api-key auth, got {result:?}");
+}
+
+#[tokio::test]
+async fn bearer_auth_sends_authorization_header() {
+    let server = MockServer::start();
+
+    // Only matches if Authorization: Bearer proxy-token is present
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/v1/messages")
+            .header("Authorization", "Bearer proxy-token");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(mock_anthropic_response("## Goal\nVerify bearer auth"));
+    });
+
+    let settings = CompactionSettings {
+        context_window: 200,
+        reserve_tokens: 20,
+        keep_recent_tokens: 40,
+    };
+    let config = CompactorConfig {
+        settings: settings.clone(),
+        llm: LlmConfig {
+            api_url: format!("{}/v1/messages", server.base_url()),
+            api_key: "proxy-token".into(),
+            auth_style: AuthStyle::Bearer,
+            model: "claude-haiku-4-5-20251001".into(),
+            max_summary_tokens: 1024,
+        },
+    };
+
+    let compactor = compactor_with_client(config, reqwest::Client::new());
+    let result = compactor.compact_if_needed(large_conversation(&settings)).await;
+
+    assert!(result.is_ok(), "expected success with Bearer auth, got {result:?}");
+}
+
+#[tokio::test]
+async fn multiple_text_blocks_in_response_are_joined() {
+    let server = MockServer::start();
+
+    server.mock(|when, then| {
+        when.method(POST).path("/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(json!({
+                "id": "msg_test",
+                "type": "message",
+                "role": "assistant",
+                "stop_reason": "end_turn",
+                "model": "claude-haiku-4-5-20251001",
+                "usage": { "input_tokens": 100, "output_tokens": 50 },
+                "content": [
+                    { "type": "text", "text": "## Goal\nFix the bug" },
+                    { "type": "text", "text": "\n\n## Progress\n### Done\n- [x] Step 1" }
+                ]
+            }));
+    });
+
+    let settings = CompactionSettings {
+        context_window: 200,
+        reserve_tokens: 20,
+        keep_recent_tokens: 40,
+    };
+    let config = CompactorConfig {
+        settings: settings.clone(),
+        llm: LlmConfig {
+            api_url: format!("{}/v1/messages", server.base_url()),
+            api_key: "test-key".into(),
+            ..Default::default()
+        },
+    };
+
+    let compactor = compactor_with_client(config, reqwest::Client::new());
+    let result = compactor.compact_if_needed(large_conversation(&settings)).await.unwrap();
+
+    let ContentBlock::Text { text } = &result[0].content[0] else {
+        panic!("expected text block in summary message");
+    };
+    assert!(text.contains("## Goal\nFix the bug"), "first block missing");
+    assert!(text.contains("## Progress"), "second block missing");
+}
+
+#[tokio::test]
+async fn non_text_response_blocks_are_filtered_out() {
+    let server = MockServer::start();
+
+    // Response contains a thinking block followed by the actual text summary.
+    // Only the text block should end up in the summary.
+    server.mock(|when, then| {
+        when.method(POST).path("/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(json!({
+                "id": "msg_test",
+                "type": "message",
+                "role": "assistant",
+                "stop_reason": "end_turn",
+                "model": "claude-haiku-4-5-20251001",
+                "usage": { "input_tokens": 100, "output_tokens": 50 },
+                "content": [
+                    { "type": "thinking", "thinking": "internal reasoning here" },
+                    { "type": "text", "text": "## Goal\nActual summary content" }
+                ]
+            }));
+    });
+
+    let settings = CompactionSettings {
+        context_window: 200,
+        reserve_tokens: 20,
+        keep_recent_tokens: 40,
+    };
+    let config = CompactorConfig {
+        settings: settings.clone(),
+        llm: LlmConfig {
+            api_url: format!("{}/v1/messages", server.base_url()),
+            api_key: "test-key".into(),
+            ..Default::default()
+        },
+    };
+
+    let compactor = compactor_with_client(config, reqwest::Client::new());
+    let result = compactor.compact_if_needed(large_conversation(&settings)).await.unwrap();
+
+    let ContentBlock::Text { text } = &result[0].content[0] else {
+        panic!("expected text block in summary message");
+    };
+    assert!(!text.contains("internal reasoning"), "thinking block leaked into summary");
+    assert!(text.contains("## Goal\nActual summary content"));
 }

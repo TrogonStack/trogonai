@@ -168,6 +168,45 @@ mod tests {
     }
 
     #[test]
+    fn image_block_in_assistant_produces_no_output() {
+        // Image blocks in assistant messages are silently skipped
+        let msg = Message {
+            role: "assistant".into(),
+            content: vec![ContentBlock::Image {
+                source: serde_json::json!({"type": "base64", "media_type": "image/png"}),
+            }],
+        };
+        let out = serialize_for_prompt(&[msg]);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn user_message_with_only_empty_text_produces_no_output() {
+        // Empty text after joining is not emitted
+        let msg = Message {
+            role: "user".into(),
+            content: vec![ContentBlock::Text { text: "".into() }],
+        };
+        let out = serialize_for_prompt(&[msg]);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn tool_result_at_exact_truncation_boundary_is_not_truncated() {
+        // s.len() == max_bytes → the ≤ branch → no truncation
+        let content = "x".repeat(TOOL_RESULT_TRUNCATE);
+        let msg = Message {
+            role: "user".into(),
+            content: vec![ContentBlock::ToolResult {
+                tool_use_id: "id1".into(),
+                content,
+            }],
+        };
+        let out = serialize_for_prompt(&[msg]);
+        assert!(!out.contains("truncated"));
+    }
+
+    #[test]
     fn multiple_tool_calls_are_joined_with_semicolon() {
         let msg = Message {
             role: "assistant".into(),

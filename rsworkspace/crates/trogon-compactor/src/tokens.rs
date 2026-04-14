@@ -55,4 +55,27 @@ mod tests {
         // Each message: 1 content token + 4 overhead = 5, total = 10
         assert_eq!(estimate_total_tokens(&msgs), 10);
     }
+
+    #[test]
+    fn image_block_estimates_300_tokens() {
+        use crate::types::ContentBlock;
+        let msg = crate::types::Message {
+            role: "user".into(),
+            content: vec![ContentBlock::Image { source: serde_json::json!({}) }],
+        };
+        // image = 300 (hardcoded) + 4 overhead = 304
+        assert_eq!(estimate_message_tokens(&msg), 304);
+    }
+
+    #[test]
+    fn estimate_tokens_counts_bytes_not_chars_for_multibyte() {
+        // Each emoji is 4 bytes in UTF-8 → 1 token per emoji
+        assert_eq!(estimate_tokens("😀"), 1);
+        // Two emojis = 8 bytes → 2 tokens
+        assert_eq!(estimate_tokens("😀😀"), 2);
+        // CJK character: 3 bytes → ceil(3/4) = 1 token
+        assert_eq!(estimate_tokens("中"), 1);
+        // Four CJK: 12 bytes → 3 tokens
+        assert_eq!(estimate_tokens("中中中中"), 3);
+    }
 }
