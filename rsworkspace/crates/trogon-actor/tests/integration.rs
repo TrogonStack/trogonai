@@ -1,4 +1,5 @@
 use bytes::Bytes;
+use futures_util::StreamExt;
 use testcontainers_modules::{
     nats::Nats,
     testcontainers::{runners::AsyncRunner, ImageExt},
@@ -10,7 +11,7 @@ use trogon_actor::{
     runtime::ActorRuntime,
     state::provision_state,
 };
-use trogon_registry::{Registry, provision as provision_registry};
+use trogon_registry::{AgentCapability, Registry, provision as provision_registry};
 use trogon_transcript::{
     publisher::NatsTranscriptPublisher,
     store::TranscriptStore,
@@ -246,6 +247,64 @@ async fn concurrent_events_to_same_entity_no_lost_writes() {
     assert_eq!(saved.count, 2, "both events must be reflected in final state");
 }
 
+// ── Actor that spawns a sub-agent ─────────────────────────────────────────────
+
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+struct SpawnState {
+    spawn_reply: String,
+}
+
+struct SpawnActor;
+
+impl EntityActor for SpawnActor {
+    type State = SpawnState;
+    type Error = std::convert::Infallible;
+
+    fn actor_type() -> &'static str {
+        "spawn-actor"
+    }
+
+    async fn handle(
+        &mut self,
+        state: &mut SpawnState,
+        ctx: &ActorContext,
+    ) -> Result<(), Self::Error> {
+        if let Ok(bytes) = ctx
+            .spawn_agent::<Self::Error>("security_analysis", Bytes::from_static(b"request"))
+            .await
+        {
+            state.spawn_reply = String::from_utf8_lossy(&bytes).to_string();
+        }
+        Ok(())
+    }
+}
+
+// ── Actor that calls spawn_agent when no capable agent exists ─────────────────
+
+struct NoCapActor;
+
+impl EntityActor for NoCapActor {
+    type State = Counter;
+    type Error = std::convert::Infallible;
+
+    fn actor_type() -> &'static str {
+        "no-cap-actor"
+    }
+
+    async fn handle(
+        &mut self,
+        state: &mut Counter,
+        ctx: &ActorContext,
+    ) -> Result<(), Self::Error> {
+        state.count += 1;
+        // The registry has no agent with this capability — ignore the error.
+        ctx.spawn_agent::<Self::Error>("nonexistent_capability", Bytes::new())
+            .await
+            .ok();
+        Ok(())
+    }
+}
+
 /// When the KV store holds a value that cannot be deserialized into the actor's
 /// State type, handle_event must return ActorError::Deserialize — not panic.
 #[tokio::test]
@@ -295,4 +354,93 @@ async fn transcript_entries_written_to_jetstream() {
     assert_eq!(entries.len(), 2);
     assert!(matches!(&entries[0], TranscriptEntry::Message { role: trogon_transcript::Role::User, .. }));
     assert!(matches!(&entries[1], TranscriptEntry::Message { role: trogon_transcript::Role::Assistant, tokens: Some(5), .. }));
+}
+
+/// An actor calls `ctx.spawn_agent()` with a registered capability. The runtime
+/// performs NATS request-reply, records a `SubAgentSpawn` transcript entry, and
+/// returns the reply payload to the actor.
+#[tokio::test]
+async fn spawn_agent_records_sub_agent_spawn_entry() {
+    let (nats, js, _container) = setup().await;
+
+    let state_store = provision_state(&js).await.unwrap();
+    let registry_store = provision_registry(&js).await.unwrap();
+    let publisher = NatsTranscriptPublisher::new(js.clone());
+    let registry = Registry::new(registry_store);
+
+    // Provision transcript stream so entries can be confirmed afterwards.
+    let transcript_store = TranscriptStore::new(js.clone());
+    transcript_store.provision().await.unwrap();
+
+    // Register a sub-agent with a concrete (non-wildcard) inbox subject.
+    let cap = AgentCapability::new("SecurityActor", ["security_analysis"], "sub-agents.security");
+    registry.register(&cap).await.unwrap();
+
+    // Spin up a NATS responder on that subject before calling handle_event.
+    let nats_responder = nats.clone();
+    let mut responder_sub = nats.subscribe("sub-agents.security").await.unwrap();
+    tokio::spawn(async move {
+        while let Some(msg) = responder_sub.next().await {
+            if let Some(reply) = msg.reply {
+                nats_responder
+                    .publish(reply, Bytes::from_static(b"security-ok"))
+                    .await
+                    .ok();
+            }
+        }
+    });
+
+    let runtime = ActorRuntime::new(state_store, publisher, nats, registry);
+    runtime.handle_event(&mut SpawnActor, "entity-1").await.unwrap();
+
+    // Actor state captured the sub-agent reply payload.
+    let kv = js.get_key_value("ACTOR_STATE").await.unwrap();
+    let bytes = kv.entry("spawn-actor.entity-1").await.unwrap().unwrap().value;
+    let state: SpawnState = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(state.spawn_reply, "security-ok");
+
+    // A SubAgentSpawn entry must have been written to the transcript.
+    let entries = transcript_store.query("spawn-actor", "entity-1").await.unwrap();
+    assert_eq!(entries.len(), 1);
+    assert!(
+        matches!(
+            &entries[0],
+            TranscriptEntry::SubAgentSpawn { capability, .. } if capability == "security_analysis"
+        ),
+        "expected SubAgentSpawn entry, got: {:?}", entries[0]
+    );
+}
+
+/// When no registered agent provides the requested capability, `spawn_agent`
+/// returns an error string and the runtime does NOT write a `SubAgentSpawn`
+/// transcript entry (the entry is only written after the agent is found).
+#[tokio::test]
+async fn spawn_agent_no_capability_no_transcript_entry() {
+    let (nats, js, _container) = setup().await;
+
+    let state_store = provision_state(&js).await.unwrap();
+    // Empty registry — no agents registered.
+    let registry_store = provision_registry(&js).await.unwrap();
+    let publisher = NatsTranscriptPublisher::new(js.clone());
+    let registry = Registry::new(registry_store);
+
+    let transcript_store = TranscriptStore::new(js.clone());
+    transcript_store.provision().await.unwrap();
+
+    let runtime = ActorRuntime::new(state_store, publisher, nats, registry);
+    // NoCapActor ignores the spawn error — handle_event must still succeed.
+    runtime.handle_event(&mut NoCapActor, "entity-1").await.unwrap();
+
+    // Actor state was saved (handle completed normally).
+    let kv = js.get_key_value("ACTOR_STATE").await.unwrap();
+    let bytes = kv.entry("no-cap-actor.entity-1").await.unwrap().unwrap().value;
+    let saved: Counter = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(saved.count, 1);
+
+    // No SubAgentSpawn entry should have been written.
+    let entries = transcript_store.query("no-cap-actor", "entity-1").await.unwrap();
+    assert!(
+        entries.is_empty(),
+        "expected no transcript entries when no capable agent is found, got: {entries:?}"
+    );
 }

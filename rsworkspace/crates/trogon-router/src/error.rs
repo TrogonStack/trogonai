@@ -35,3 +35,44 @@ impl fmt::Display for RouterError {
 }
 
 impl std::error::Error for RouterError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn display_subscribe() {
+        assert!(format!("{}", RouterError::Subscribe("x".into())).contains("subscribe error"));
+    }
+
+    #[test]
+    fn display_publish() {
+        assert!(format!("{}", RouterError::Publish("x".into())).contains("publish error"));
+    }
+
+    #[test]
+    fn display_registry() {
+        assert!(format!("{}", RouterError::Registry("x".into())).contains("registry error"));
+    }
+
+    #[test]
+    fn display_llm_request() {
+        assert!(format!("{}", RouterError::LlmRequest("x".into())).contains("LLM request error"));
+    }
+
+    #[test]
+    fn display_llm_parse() {
+        assert!(format!("{}", RouterError::LlmParse("x".into())).contains("LLM response parse error"));
+    }
+
+    #[test]
+    fn display_unknown_agent_type() {
+        assert!(format!("{}", RouterError::UnknownAgentType("Ghost".into()))
+            .contains("unknown agent type"));
+    }
+
+    #[test]
+    fn display_transcript() {
+        assert!(format!("{}", RouterError::Transcript("x".into())).contains("transcript error"));
+    }
+}
