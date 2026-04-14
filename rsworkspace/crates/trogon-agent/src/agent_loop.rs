@@ -1389,15 +1389,32 @@ impl AgentLoop {
                         } // else: !checkpointing_disabled (outer)
                     }
                 }
+                "max_tokens" => {
+                    // Deterministic: the conversation has exceeded the model's
+                    // context window. The same history always hits max_tokens on
+                    // retry — mark PermanentFailed to stop cycling.
+                    if let (Some(store), Some(pid)) = (&self.promise_store, &self.promise_id) {
+                        if let Some((ref mut p, ref mut rev)) = checkpoint {
+                            write_promise_terminal(store.as_ref(), &self.tenant_id, pid, p, *rev, crate::promise_store::PromiseStatus::PermanentFailed, "max_tokens").await;
+                        } else {
+                            try_mark_permanent_failed_fresh(store.as_ref(), &self.tenant_id, pid, "max_tokens (checkpoint lost)").await;
+                        }
+                    }
+                    return Err(AgentError::UnexpectedStopReason("max_tokens".to_string()));
+                }
                 other => {
+                    // Unknown stop_reason: treat as transient (`Failed`) so
+                    // NATS redelivery can retry. A future Anthropic API
+                    // addition may use a new stop_reason that is not
+                    // deterministic — permanently failing would discard the
+                    // run with no retry opportunity.
+                    // checkpoint=None: no CAS revision; returning Err is
+                    // enough — NATS will redeliver and retry from the last
+                    // valid checkpoint without any explicit KV write here.
                     let reason = other.to_string();
                     if let (Some(store), Some(pid)) = (&self.promise_store, &self.promise_id) {
                         if let Some((ref mut p, ref mut rev)) = checkpoint {
-                            // Deterministic: same stop_reason on every retry.
-                            write_promise_terminal(store.as_ref(), &self.tenant_id, pid, p, *rev, crate::promise_store::PromiseStatus::PermanentFailed, "unexpected stop reason").await;
-                        } else {
-                            // checkpoint=None — attempt fresh write to prevent cycling.
-                            try_mark_permanent_failed_fresh(store.as_ref(), &self.tenant_id, pid, "unexpected stop reason (checkpoint lost)").await;
+                            write_promise_terminal(store.as_ref(), &self.tenant_id, pid, p, *rev, crate::promise_store::PromiseStatus::Failed, "unexpected stop reason").await;
                         }
                     }
                     return Err(AgentError::UnexpectedStopReason(reason));
@@ -2042,6 +2059,7 @@ mod tests {
             trigger: serde_json::Value::Null,
             nats_subject: "test.subject".to_string(),
             system_prompt: None,
+            recovery_count: 0,
         }
     }
 
@@ -2383,7 +2401,7 @@ mod tests {
     /// retrying the run — deterministic errors produce the same outcome on every
     /// attempt, so retrying wastes Anthropic credits without any benefit.
     #[tokio::test]
-    async fn unexpected_stop_reason_marks_promise_permanent_failed() {
+    async fn max_tokens_stop_reason_marks_promise_permanent_failed() {
         use crate::promise_store::mock::MockPromiseStore;
         use crate::promise_store::{PromiseRepository, PromiseStatus};
         use crate::tools::mock::MockToolDispatcher;
@@ -2392,13 +2410,13 @@ mod tests {
         let store = Arc::new(MockPromiseStore::new());
         store.insert_promise(make_test_promise("p1"));
 
-        // Anthropic returns a structurally valid response with an unrecognised
-        // stop_reason. `"max_tokens"` is the realistic trigger for this path.
-        let max_tokens_resp = serde_json::json!({
+        // `max_tokens` is deterministic: the same history will always exhaust
+        // the context window, so the run must be PermanentFailed.
+        let resp = serde_json::json!({
             "stop_reason": "max_tokens",
             "content": [{"type": "text", "text": "truncated"}]
         });
-        let anthropic = Arc::new(SequencedMockAnthropicClient::new(vec![max_tokens_resp]));
+        let anthropic = Arc::new(SequencedMockAnthropicClient::new(vec![resp]));
         let dispatcher = Arc::new(MockToolDispatcher::new("should not run"));
 
         let agent = make_durable_agent(
@@ -2414,12 +2432,53 @@ mod tests {
             "expected UnexpectedStopReason error"
         );
 
-        // Promise must be PermanentFailed — never retried by recovery or NATS redelivery.
         let (p, _) = store.get_promise("acme", "p1").await.unwrap().unwrap();
         assert_eq!(
             p.status,
             PromiseStatus::PermanentFailed,
-            "promise must be PermanentFailed after unexpected stop_reason — deterministic, retry cannot succeed"
+            "max_tokens must be PermanentFailed — same history always hits the limit"
+        );
+    }
+
+    /// An unknown `stop_reason` (e.g. a future Anthropic API addition) must
+    /// mark the promise `Failed` — not `PermanentFailed` — so NATS redelivery
+    /// can retry the run. Only `max_tokens` is definitively deterministic.
+    #[tokio::test]
+    async fn unknown_stop_reason_marks_promise_failed_not_permanent() {
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+        use crate::tools::mock::MockToolDispatcher;
+        use mock::SequencedMockAnthropicClient;
+
+        let store = Arc::new(MockPromiseStore::new());
+        store.insert_promise(make_test_promise("p1"));
+
+        let resp = serde_json::json!({
+            "stop_reason": "some_future_reason",
+            "content": [{"type": "text", "text": ""}]
+        });
+        let anthropic = Arc::new(SequencedMockAnthropicClient::new(vec![resp]));
+        let dispatcher = Arc::new(MockToolDispatcher::new("should not run"));
+
+        let agent = make_durable_agent(
+            anthropic,
+            dispatcher,
+            Arc::clone(&store) as Arc<dyn PromiseRepository>,
+            "p1",
+        );
+
+        let result = agent.run(vec![Message::user_text("go")], &[], None).await;
+        assert!(
+            matches!(result, Err(AgentError::UnexpectedStopReason(_))),
+            "expected UnexpectedStopReason error"
+        );
+
+        // Must be Failed (retryable), not PermanentFailed.
+        let (p, _) = store.get_promise("acme", "p1").await.unwrap().unwrap();
+        assert_eq!(
+            p.status,
+            PromiseStatus::Failed,
+            "unknown stop_reason must be Failed so NATS redelivery can retry"
         );
     }
 

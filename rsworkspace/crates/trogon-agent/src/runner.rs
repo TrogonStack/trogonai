@@ -862,10 +862,48 @@ async fn prepare_agent_with_promise(
                 // Note: startup recovery only scans `Running` promises via
                 // `list_running`, so `Failed` promises are only ever re-claimed
                 // by the NATS redelivery path, not by startup recovery.
+                // ── Recovery-cycle guard ─────────────────────────────────────
+                // Each time startup recovery re-claims a stale `Running`
+                // promise, `recovery_count` is incremented. If the count
+                // reaches the limit the run is permanently broken (e.g., a
+                // deterministic crash before `try_mark_permanent_failed_fresh`
+                // could write) — mark it `PermanentFailed` and skip rather
+                // than cycling indefinitely.
+                // Only `Running` promises are counted; `Failed` promises are
+                // managed by NATS delivery limits and are not affected.
+                const MAX_RECOVERY_ATTEMPTS: u32 = 5;
+                if existing.status == PromiseStatus::Running
+                    && existing.recovery_count >= MAX_RECOVERY_ATTEMPTS
+                {
+                    warn!(
+                        promise_id = %promise_id,
+                        recovery_count = existing.recovery_count,
+                        "Promise exceeded max recovery attempts — marking PermanentFailed to stop cycling"
+                    );
+                    let mut over_limit = existing.clone();
+                    over_limit.status = PromiseStatus::PermanentFailed;
+                    match tokio::time::timeout(
+                        crate::agent_loop::NATS_KV_TIMEOUT,
+                        promise_store.update_promise(tenant_id, promise_id, &over_limit, rev),
+                    )
+                    .await
+                    {
+                        Ok(Ok(_)) => {}
+                        Ok(Err(e)) => warn!(promise_id = %promise_id, error = %e, "Could not mark over-limit promise PermanentFailed — will retry on next recovery"),
+                        Err(_) => warn!(promise_id = %promise_id, "KV timeout marking over-limit promise PermanentFailed — will retry on next recovery"),
+                    }
+                    return None;
+                }
+
                 let mut claimed = existing.clone();
                 claimed.status = PromiseStatus::Running; // re-activate so list_running finds it if we crash mid-run
                 claimed.worker_id = wid.clone();
                 claimed.claimed_at = trogon_automations::now_unix();
+                // Increment recovery_count for Running re-claims so the guard
+                // above terminates infinite startup-recovery cycles.
+                if existing.status == PromiseStatus::Running {
+                    claimed.recovery_count = existing.recovery_count.saturating_add(1);
+                }
                 let claim_result = match tokio::time::timeout(
                     crate::agent_loop::NATS_KV_TIMEOUT,
                     promise_store.update_promise(tenant_id, promise_id, &claimed, rev),
@@ -944,6 +982,7 @@ async fn prepare_agent_with_promise(
                 trigger: trigger.clone(),
                 nats_subject: nats_subject.to_string(),
                 system_prompt: None, // populated at first checkpoint in agent_loop::run
+                recovery_count: 0,
             };
             match tokio::time::timeout(
                 crate::agent_loop::NATS_KV_TIMEOUT,
@@ -1838,6 +1877,7 @@ mod tests {
             trigger: serde_json::json!({}),
             nats_subject: "github.pull_request".to_string(),
             system_prompt: None,
+            recovery_count: 0,
         }
     }
 
@@ -2013,6 +2053,7 @@ mod tests {
             trigger: serde_json::Value::Null,
             nats_subject: "github.pull_request".to_string(),
             system_prompt: None,
+            recovery_count: 0,
         }
     }
 
@@ -2268,6 +2309,82 @@ mod tests {
         );
     }
 
+    /// When a `Running` promise has been recovered `MAX_RECOVERY_ATTEMPTS`
+    /// times without completing, `prepare_agent_with_promise` must mark it
+    /// `PermanentFailed` and return `None` — stopping the infinite cycle of
+    /// startup-recovery re-executions.
+    #[tokio::test]
+    async fn prepare_agent_over_recovery_limit_marks_permanent_failed_and_returns_none() {
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+
+        let store = Arc::new(MockPromiseStore::new());
+        // Insert a Running promise at the recovery limit.
+        store.insert_promise(crate::promise_store::AgentPromise {
+            id: "p-stuck".to_string(),
+            tenant_id: "acme".to_string(),
+            automation_id: String::new(),
+            status: PromiseStatus::Running,
+            messages: vec![],
+            iteration: 0,
+            worker_id: "old-worker".to_string(),
+            claimed_at: 0,
+            trigger: serde_json::Value::Null,
+            nats_subject: "github.pull_request".to_string(),
+            system_prompt: None,
+            recovery_count: 5, // == MAX_RECOVERY_ATTEMPTS
+        });
+        let store_arc = Arc::clone(&store) as Arc<dyn PromiseRepository>;
+        let agent = make_agent("http://127.0.0.1:1");
+
+        let result = super::prepare_agent_with_promise(
+            &agent,
+            &store_arc,
+            "acme",
+            "p-stuck",
+            "",
+            "github.pull_request",
+            &serde_json::json!({}),
+        )
+        .await;
+
+        assert!(result.is_none(), "must return None when recovery limit is reached");
+
+        let (p, _) = store.get_promise("acme", "p-stuck").await.unwrap().unwrap();
+        assert_eq!(
+            p.status,
+            PromiseStatus::PermanentFailed,
+            "promise must be marked PermanentFailed to stop cycling"
+        );
+    }
+
+    /// Each time a `Running` promise is re-claimed (startup recovery), its
+    /// `recovery_count` must increment so the cycling guard above can fire.
+    #[tokio::test]
+    async fn prepare_agent_running_reclaim_increments_recovery_count() {
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+
+        let store = Arc::new(MockPromiseStore::new());
+        store.insert_promise(sample_promise("p-rc", PromiseStatus::Running));
+        let store_arc = Arc::clone(&store) as Arc<dyn PromiseRepository>;
+        let agent = make_agent("http://127.0.0.1:1");
+
+        super::prepare_agent_with_promise(
+            &agent,
+            &store_arc,
+            "acme",
+            "p-rc",
+            "",
+            "github.pull_request",
+            &serde_json::json!({}),
+        )
+        .await;
+
+        let (p, _) = store.get_promise("acme", "p-rc").await.unwrap().unwrap();
+        assert_eq!(p.recovery_count, 1, "recovery_count must be incremented on Running re-claim");
+    }
+
     /// When `get_promise` returns an immediate `Err`, the function must log a
     /// warning and return `Some(original_agent)` without durability fields —
     /// the run proceeds as non-durable rather than aborting.
@@ -2511,6 +2628,7 @@ mod tests {
             trigger: serde_json::Value::Null,
             nats_subject: "github.pull_request".to_string(),
             system_prompt: None,
+            recovery_count: 0,
         };
         store.insert_promise(fresh);
 
@@ -4341,6 +4459,7 @@ mod tests {
             trigger: serde_json::json!({}),
             nats_subject: "github.push".to_string(),
             system_prompt: None,
+            recovery_count: 0,
         });
         // AlwaysFailsUpdateStore: every update_promise call fails → CAS claim lost.
         let store = Arc::new(AlwaysFailsUpdateStore { inner });
@@ -4932,6 +5051,7 @@ mod tests {
             trigger: serde_json::json!({}),
             nats_subject: "github.push".to_string(),
             system_prompt: None,
+            recovery_count: 0,
         };
 
         let promise_repo: Arc<dyn PromiseRepository> = ps.clone();
@@ -5075,6 +5195,7 @@ mod tests {
             trigger: serde_json::json!({}),
             nats_subject: "github.push".to_string(),
             system_prompt: None,
+            recovery_count: 0,
         };
         promise_repo.put_promise(&initial).await.unwrap();
         let (_, initial_rev) = promise_repo
