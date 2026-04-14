@@ -26,13 +26,14 @@
 pub mod detector;
 pub mod error;
 pub mod serializer;
+pub mod service;
 pub mod summarizer;
 pub mod tokens;
 pub mod types;
 
 pub use detector::CompactionSettings;
 pub use error::CompactorError;
-pub use summarizer::LlmConfig;
+pub use summarizer::{AuthStyle, LlmConfig};
 pub use types::{ContentBlock, Message};
 
 /// Convenience constructor that injects a pre-built [`reqwest::Client`].
