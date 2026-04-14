@@ -390,4 +390,130 @@ mod tests {
         let published = publisher.take_published();
         assert_eq!(published.len(), 2);
     }
+
+    // ── spawn_fn closure coverage ─────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn spawn_agent_through_runtime_succeeds() {
+        use trogon_nats::AdvancedMockNatsClient;
+        use trogon_registry::AgentCapability;
+
+        let nats = AdvancedMockNatsClient::new();
+        nats.set_response("sub.inbox", bytes::Bytes::from("pong"));
+
+        let store = MockRegistryStore::new();
+        let registry = Registry::new(store.clone());
+        registry
+            .register(&AgentCapability::new("SubAgent", ["analyze"], "sub.inbox"))
+            .await
+            .unwrap();
+
+        let state_store = MockStateStore::new();
+        let publisher = MockTranscriptPublisher::new();
+        let runtime = ActorRuntime::new(state_store, publisher.clone(), nats, registry);
+
+        struct Spawner;
+        impl EntityActor for Spawner {
+            type State = Counter;
+            type Error = std::convert::Infallible;
+            fn actor_type() -> &'static str { "spawner" }
+            async fn handle(
+                &mut self,
+                _state: &mut Counter,
+                ctx: &ActorContext,
+            ) -> Result<(), Self::Error> {
+                let reply = ctx
+                    .spawn_agent::<Self::Error>("analyze", bytes::Bytes::new())
+                    .await
+                    .unwrap();
+                assert_eq!(reply.as_ref(), b"pong");
+                Ok(())
+            }
+        }
+
+        runtime.handle_event(&mut Spawner, "e-1").await.unwrap();
+
+        // SubAgentSpawn entry recorded in transcript.
+        let published = publisher.take_published();
+        assert_eq!(published.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn spawn_agent_no_capability_returns_spawn_failed() {
+        use trogon_nats::AdvancedMockNatsClient;
+
+        let nats = AdvancedMockNatsClient::new();
+        let registry = Registry::new(MockRegistryStore::new());
+        // No agents registered.
+
+        let runtime = ActorRuntime::new(
+            MockStateStore::new(),
+            MockTranscriptPublisher::new(),
+            nats,
+            registry,
+        );
+
+        struct NoCapActor;
+        impl EntityActor for NoCapActor {
+            type State = Counter;
+            type Error = std::convert::Infallible;
+            fn actor_type() -> &'static str { "no-cap" }
+            async fn handle(
+                &mut self,
+                _state: &mut Counter,
+                ctx: &ActorContext,
+            ) -> Result<(), Self::Error> {
+                let result = ctx
+                    .spawn_agent::<Self::Error>("missing_cap", bytes::Bytes::new())
+                    .await;
+                assert!(result.is_err());
+                Ok(())
+            }
+        }
+
+        runtime.handle_event(&mut NoCapActor, "e-1").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn spawn_agent_request_failure_returns_spawn_failed() {
+        use trogon_nats::AdvancedMockNatsClient;
+        use trogon_registry::AgentCapability;
+
+        let nats = AdvancedMockNatsClient::new();
+        nats.fail_next_request();
+
+        let store = MockRegistryStore::new();
+        let registry = Registry::new(store.clone());
+        registry
+            .register(&AgentCapability::new("SubAgent", ["analyze"], "sub.inbox"))
+            .await
+            .unwrap();
+
+        let runtime = ActorRuntime::new(
+            MockStateStore::new(),
+            MockTranscriptPublisher::new(),
+            nats,
+            registry,
+        );
+
+        struct ReqFailActor;
+        impl EntityActor for ReqFailActor {
+            type State = Counter;
+            type Error = std::convert::Infallible;
+            fn actor_type() -> &'static str { "req-fail" }
+            async fn handle(
+                &mut self,
+                _state: &mut Counter,
+                ctx: &ActorContext,
+            ) -> Result<(), Self::Error> {
+                let result = ctx
+                    .spawn_agent::<Self::Error>("analyze", bytes::Bytes::new())
+                    .await;
+                assert!(result.is_err());
+                Ok(())
+            }
+        }
+
+        runtime.handle_event(&mut ReqFailActor, "e-1").await.unwrap();
+    }
 }
