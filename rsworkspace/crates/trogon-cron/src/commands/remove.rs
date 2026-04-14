@@ -4,6 +4,7 @@ use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream, JetStream
 
 use crate::{
     JobId, JobSpec, JobWriteCondition,
+    commands::catch_up_command_state,
     error::CronError,
     events::{JobEvent, JobEventData},
     store::{SNAPSHOT_STORE_CONFIG, append_events, open_snapshot_bucket},
@@ -63,13 +64,22 @@ impl RemoveJobCommand {
 
     pub(crate) fn resolved_write_condition(
         &self,
-        current_snapshot: Option<&trogon_eventsourcing::Snapshot<JobSpec>>,
+        current_version: Option<u64>,
     ) -> JobWriteCondition {
         self.write_condition.unwrap_or_else(|| {
-            current_snapshot
-                .map(|job| JobWriteCondition::MustBeAtVersion(job.version))
+            current_version
+                .map(JobWriteCondition::MustBeAtVersion)
                 .unwrap_or(JobWriteCondition::MustNotExist)
         })
+    }
+
+    fn apply_event(_state: RemoveJobState, event: JobEvent) -> Result<RemoveJobState, CronError> {
+        match event {
+            JobEvent::JobRegistered { .. } | JobEvent::JobStateChanged { .. } => {
+                Ok(RemoveJobState::Present)
+            }
+            JobEvent::JobRemoved { .. } => Ok(RemoveJobState::Missing),
+        }
     }
 }
 
@@ -122,7 +132,15 @@ where
         .await
         .map_err(CronError::from)?;
     let current_state = command.state_from_snapshot(current_snapshot.as_ref())?;
-    let write_condition = command.resolved_write_condition(current_snapshot.as_ref());
+    let (current_state, current_version) = catch_up_command_state(
+        js,
+        command.stream_id(),
+        current_snapshot.as_ref(),
+        current_state,
+        RemoveJobCommand::apply_event,
+    )
+    .await?;
+    let write_condition = command.resolved_write_condition(current_version);
     let events = match decide(&current_state, &command) {
         Ok(Decision::Event(events)) => events,
         Ok(_) => {

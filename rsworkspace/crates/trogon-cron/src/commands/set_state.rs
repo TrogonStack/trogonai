@@ -4,6 +4,7 @@ use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream, JetStream
 
 use crate::{
     JobEnabledState, JobId, JobSpec, JobWriteCondition,
+    commands::catch_up_command_state,
     error::CronError,
     events::{JobEvent, JobEventData},
     store::{SNAPSHOT_STORE_CONFIG, append_events, open_snapshot_bucket},
@@ -73,13 +74,28 @@ impl ChangeJobStateCommand {
 
     pub(crate) fn resolved_write_condition(
         &self,
-        current_snapshot: Option<&trogon_eventsourcing::Snapshot<JobSpec>>,
+        current_version: Option<u64>,
     ) -> JobWriteCondition {
         self.write_condition.unwrap_or_else(|| {
-            current_snapshot
-                .map(|job| JobWriteCondition::MustBeAtVersion(job.version))
+            current_version
+                .map(JobWriteCondition::MustBeAtVersion)
                 .unwrap_or(JobWriteCondition::MustNotExist)
         })
+    }
+
+    fn apply_event(
+        _state: ChangeJobStateState,
+        event: JobEvent,
+    ) -> Result<ChangeJobStateState, CronError> {
+        match event {
+            JobEvent::JobRegistered { id, spec } => Ok(ChangeJobStateState::Present {
+                current: spec.into_job_spec(id).state,
+            }),
+            JobEvent::JobStateChanged { state, .. } => {
+                Ok(ChangeJobStateState::Present { current: state })
+            }
+            JobEvent::JobRemoved { .. } => Ok(ChangeJobStateState::Missing),
+        }
     }
 }
 
@@ -147,7 +163,15 @@ where
         .await
         .map_err(CronError::from)?;
     let current_state = command.state_from_snapshot(current_snapshot.as_ref())?;
-    let write_condition = command.resolved_write_condition(current_snapshot.as_ref());
+    let (current_state, current_version) = catch_up_command_state(
+        js,
+        command.stream_id(),
+        current_snapshot.as_ref(),
+        current_state,
+        ChangeJobStateCommand::apply_event,
+    )
+    .await?;
+    let write_condition = command.resolved_write_condition(current_version);
     let events = match decide(&current_state, &command) {
         Ok(Decision::Event(events)) => events,
         Ok(_) => {

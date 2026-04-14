@@ -77,9 +77,10 @@ pub fn apply(state: JobStreamState, event: JobEvent) -> Result<JobStreamState, J
             })
         }
         (JobStreamState::Present(spec), JobEvent::JobRegistered { .. }) => {
-            Err(JobTransitionError::CannotRegisterExistingJob {
-                id: JobId::parse(&spec.id).expect("present job state must carry a valid job id"),
-            })
+            let id = spec.id.clone();
+            let job_id = JobId::parse(&id)
+                .map_err(|source| JobTransitionError::InvalidEventId { id, source })?;
+            Err(JobTransitionError::CannotRegisterExistingJob { id: job_id })
         }
         (JobStreamState::Present(mut spec), JobEvent::JobStateChanged { state, .. }) => {
             spec.state = state;
@@ -234,7 +235,16 @@ where
                 return None;
             }
             let projection_change = {
-                let mut state = state.lock().expect("job event state mutex poisoned");
+                let Some(mut state) = (match state.lock() {
+                    Ok(state) => Some(state),
+                    Err(source) => {
+                        tracing::error!(error = %source, "Cron jobs projection state mutex poisoned");
+                        None
+                    }
+                }) else {
+                    ack_watch_message(&message).await;
+                    return None;
+                };
                 (|| -> Result<Option<ProjectionChange>, CronError> {
                     let current = state
                         .get(stream_id.as_str())

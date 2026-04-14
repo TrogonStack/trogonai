@@ -14,9 +14,9 @@ pub const EVENTS_SUBJECT_PATTERN: &str = "cron.jobs.events.>";
 pub const LEGACY_EVENTS_SUBJECT_PREFIX: &str = "cron.events.jobs.";
 pub const LEGACY_EVENTS_SUBJECT_PATTERN: &str = "cron.events.jobs.>";
 pub const SNAPSHOT_BUCKET: &str = "cron_snapshots";
-pub const CRON_JOBS_SNAPSHOT_KEY_PREFIX: &str = "cron_jobs.";
+pub const CRON_JOBS_SNAPSHOT_KEY_PREFIX: &str = "cron_jobs.v2.";
 pub const CRON_JOBS_SNAPSHOT_LAST_EVENT_SEQUENCE_KEY: &str =
-    "_snapshot.cron_jobs.last_event_sequence";
+    "_snapshot.cron_jobs.v2.last_event_sequence";
 pub const SCHEDULES_STREAM: &str = "CRON_SCHEDULES";
 pub const SCHEDULE_SUBJECT_PREFIX: &str = "cron.schedules.";
 pub const FIRE_SUBJECT_PREFIX: &str = "cron.fire.";

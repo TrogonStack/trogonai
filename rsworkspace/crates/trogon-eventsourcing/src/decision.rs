@@ -31,6 +31,10 @@ impl<T> NonEmpty<T> {
         &self.0
     }
 
+    pub fn first(&self) -> &T {
+        &self.0[0]
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = &T> {
         self.0.iter()
     }

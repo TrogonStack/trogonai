@@ -1,9 +1,7 @@
-use std::collections::BTreeMap;
-use std::num::NonZeroU16;
-
 use async_nats::jetstream::kv;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use std::collections::BTreeMap;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -19,62 +17,17 @@ impl<T> Snapshot<T> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct SnapshotSchemaVersion(NonZeroU16);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SnapshotSchemaVersionError;
-
-impl SnapshotSchemaVersion {
-    pub const V1: Self = Self(NonZeroU16::MIN);
-    pub const V2: Self = Self(NonZeroU16::new(2).unwrap());
-
-    pub const fn new(value: NonZeroU16) -> Self {
-        Self(value)
-    }
-
-    pub const fn as_u16(self) -> u16 {
-        self.0.get()
-    }
-}
-
-impl std::fmt::Display for SnapshotSchemaVersionError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "snapshot schema version must be >= 1")
-    }
-}
-
-impl std::error::Error for SnapshotSchemaVersionError {}
-
-impl TryFrom<u16> for SnapshotSchemaVersion {
-    type Error = SnapshotSchemaVersionError;
-
-    fn try_from(value: u16) -> Result<Self, Self::Error> {
-        let Some(value) = NonZeroU16::new(value) else {
-            return Err(SnapshotSchemaVersionError);
-        };
-
-        Ok(Self::new(value))
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SnapshotStoreConfig<'a> {
     key_prefix: &'a str,
     checkpoint_key: &'a str,
-    schema_version: SnapshotSchemaVersion,
 }
 
 impl<'a> SnapshotStoreConfig<'a> {
-    pub const fn new(
-        key_prefix: &'a str,
-        checkpoint_key: &'a str,
-        schema_version: SnapshotSchemaVersion,
-    ) -> Self {
+    pub const fn new(key_prefix: &'a str, checkpoint_key: &'a str) -> Self {
         Self {
             key_prefix,
             checkpoint_key,
-            schema_version,
         }
     }
 
@@ -84,10 +37,6 @@ impl<'a> SnapshotStoreConfig<'a> {
 
     pub const fn checkpoint_key(self) -> &'a str {
         self.checkpoint_key
-    }
-
-    pub const fn schema_version(self) -> SnapshotSchemaVersion {
-        self.schema_version
     }
 }
 
@@ -170,28 +119,15 @@ impl From<serde_json::Error> for SnapshotStoreError {
 }
 
 pub fn snapshot_key(config: SnapshotStoreConfig<'_>, id: &str) -> String {
-    format!(
-        "{}v{}.{}",
-        config.key_prefix(),
-        config.schema_version().as_u16(),
-        id
-    )
+    format!("{}{}", config.key_prefix(), id)
 }
 
 pub fn checkpoint_key(config: SnapshotStoreConfig<'_>) -> String {
-    format!(
-        "{}.v{}",
-        config.checkpoint_key(),
-        config.schema_version().as_u16()
-    )
+    config.checkpoint_key().to_string()
 }
 
 fn snapshot_key_prefix(config: SnapshotStoreConfig<'_>) -> String {
-    format!(
-        "{}v{}.",
-        config.key_prefix(),
-        config.schema_version().as_u16()
-    )
+    config.key_prefix().to_string()
 }
 
 fn stream_id_from_snapshot_key(
@@ -451,45 +387,24 @@ mod tests {
 
     #[test]
     fn snapshot_store_config_exposes_values() {
-        let config = SnapshotStoreConfig::new(
-            "snapshots.",
-            "_checkpoint",
-            SnapshotSchemaVersion::try_from(2).unwrap(),
-        );
+        let config = SnapshotStoreConfig::new("snapshots.v2.", "_checkpoint.v2");
 
-        assert_eq!(config.key_prefix(), "snapshots.");
-        assert_eq!(config.checkpoint_key(), "_checkpoint");
-        assert_eq!(config.schema_version().as_u16(), 2);
+        assert_eq!(config.key_prefix(), "snapshots.v2.");
+        assert_eq!(config.checkpoint_key(), "_checkpoint.v2");
     }
 
     #[test]
     fn snapshot_key_uses_prefix() {
-        let config = SnapshotStoreConfig::new(
-            "snapshots.",
-            "_checkpoint",
-            SnapshotSchemaVersion::try_from(2).unwrap(),
-        );
+        let config = SnapshotStoreConfig::new("snapshots.v2.", "_checkpoint.v2");
 
         assert_eq!(snapshot_key(config, "backup"), "snapshots.v2.backup");
     }
 
     #[test]
-    fn checkpoint_key_uses_schema_version() {
-        let config = SnapshotStoreConfig::new(
-            "_checkpoint",
-            "_checkpoint",
-            SnapshotSchemaVersion::try_from(3).unwrap(),
-        );
+    fn checkpoint_key_uses_config_value() {
+        let config = SnapshotStoreConfig::new("snapshots.v3.", "_checkpoint.v3");
 
         assert_eq!(checkpoint_key(config), "_checkpoint.v3");
-    }
-
-    #[test]
-    fn snapshot_schema_version_rejects_zero() {
-        assert_eq!(
-            SnapshotSchemaVersion::try_from(0),
-            Err(SnapshotSchemaVersionError)
-        );
     }
 
     #[test]
@@ -556,9 +471,8 @@ mod tests {
     }
 
     #[test]
-    fn stream_id_from_snapshot_key_uses_versioned_prefix() {
-        let config =
-            SnapshotStoreConfig::new("snapshots.", "_checkpoint", SnapshotSchemaVersion::V2);
+    fn stream_id_from_snapshot_key_uses_configured_prefix() {
+        let config = SnapshotStoreConfig::new("snapshots.v2.", "_checkpoint.v2");
 
         assert_eq!(
             stream_id_from_snapshot_key(config, "snapshots.v2.backup").unwrap(),
@@ -572,8 +486,7 @@ mod tests {
 
     #[test]
     fn stream_id_from_snapshot_key_rejects_empty_suffix() {
-        let config =
-            SnapshotStoreConfig::new("snapshots.", "_checkpoint", SnapshotSchemaVersion::V2);
+        let config = SnapshotStoreConfig::new("snapshots.v2.", "_checkpoint.v2");
 
         assert_eq!(
             stream_id_from_snapshot_key(config, "snapshots.v2.")

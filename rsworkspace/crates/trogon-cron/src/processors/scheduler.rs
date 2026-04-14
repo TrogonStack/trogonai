@@ -49,13 +49,15 @@ impl CronController<async_nats::jetstream::Context, NatsSchedulePublisher, NatsK
         let js = async_nats::jetstream::new(nats.clone());
         let store = connect_store(nats.clone()).await?;
         let schedule_publisher = NatsSchedulePublisher::new(nats).await?;
+        let leader_timing = default_leader_timing()?;
         let leader_config = NatsKvLeaseConfig::new(
             LEADER_BUCKET,
             LEADER_KEY,
             LeaseTtl::from_secs(DEFAULT_LEADER_TTL.as_secs())
-                .expect("default leader TTL must be valid"),
-            LeaseRenewInterval::from_secs(DEFAULT_LEADER_RENEW_INTERVAL.as_secs())
-                .expect("default leader renew interval must be valid"),
+                .map_err(|source| CronError::lease_source("invalid default leader TTL", source))?,
+            LeaseRenewInterval::from_secs(DEFAULT_LEADER_RENEW_INTERVAL.as_secs()).map_err(
+                |source| CronError::lease_source("invalid default leader renew interval", source),
+            )?,
         )
         .map_err(|source| CronError::lease_source("invalid leader lease config", source))?;
         let leader_lock = NatsKvLease::provision(&js, &leader_config)
@@ -69,20 +71,20 @@ impl CronController<async_nats::jetstream::Context, NatsSchedulePublisher, NatsK
             schedule_publisher,
             leader_lock,
             node_id: Uuid::new_v4().to_string(),
-            leader_timing: leader_config.timing(),
+            leader_timing,
         })
     }
 }
 
 impl<C, P, L> CronController<C, P, L> {
-    pub fn new(store: C, schedule_publisher: P, leader_lock: L) -> Self {
-        Self {
+    pub fn new(store: C, schedule_publisher: P, leader_lock: L) -> Result<Self, CronError> {
+        Ok(Self {
             store,
             schedule_publisher,
             leader_lock,
             node_id: Uuid::new_v4().to_string(),
-            leader_timing: default_leader_timing(),
-        }
+            leader_timing: default_leader_timing()?,
+        })
     }
 
     pub fn with_node_id(mut self, node_id: String) -> Self {
@@ -171,14 +173,16 @@ where
     }
 }
 
-fn default_leader_timing() -> LeaseTiming {
-    LeaseTiming::new(
-        LeaseTtl::from_secs(DEFAULT_LEADER_TTL.as_secs())
-            .expect("default leader TTL must be valid"),
-        LeaseRenewInterval::from_secs(DEFAULT_LEADER_RENEW_INTERVAL.as_secs())
-            .expect("default leader renew interval must be valid"),
-    )
-    .expect("default leader timing must be valid")
+fn default_leader_timing() -> Result<LeaseTiming, CronError> {
+    let ttl = LeaseTtl::from_secs(DEFAULT_LEADER_TTL.as_secs())
+        .map_err(|source| CronError::lease_source("invalid default leader TTL", source))?;
+    let renew_interval = LeaseRenewInterval::from_secs(DEFAULT_LEADER_RENEW_INTERVAL.as_secs())
+        .map_err(|source| {
+            CronError::lease_source("invalid default leader renew interval", source)
+        })?;
+
+    LeaseTiming::new(ttl, renew_interval)
+        .map_err(|source| CronError::lease_source("invalid default leader timing", source))
 }
 
 fn to_job_map(jobs: Vec<JobSpec>) -> HashMap<String, JobSpec> {
@@ -433,16 +437,15 @@ mod tests {
             MockSchedulePublisher::new(),
             MockLeaderLock::new(),
         )
+        .unwrap()
         .with_node_id("node-1".to_string());
+        let default_leader_timing = default_leader_timing().unwrap();
 
         assert_eq!(controller.node_id, "node-1");
-        assert_eq!(
-            controller.leader_timing.ttl(),
-            default_leader_timing().ttl()
-        );
+        assert_eq!(controller.leader_timing.ttl(), default_leader_timing.ttl());
         assert_eq!(
             controller.leader_timing.renew_interval(),
-            default_leader_timing().renew_interval()
+            default_leader_timing.renew_interval()
         );
     }
 
