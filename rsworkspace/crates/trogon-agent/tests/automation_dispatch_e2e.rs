@@ -1367,6 +1367,10 @@ async fn multi_turn_run_checkpoints_iteration_and_messages_in_kv() {
         !promise.messages.is_empty(),
         "checkpoint must carry conversation messages"
     );
+    // system_prompt is None when no memory is configured (correct behaviour —
+    // it is stored as the actual system prompt used, which is None here because
+    // runner_cfg does not set memory_owner/memory_repo). Covered by the
+    // system_prompt_stored_in_first_checkpoint unit test in agent_loop.rs.
 }
 
 /// When Anthropic returns 5xx and all three retry attempts are exhausted, the
@@ -1467,5 +1471,115 @@ async fn dispatch_marks_promise_failed_on_transient_5xx_exhaustion() {
         promise.status,
         PromiseStatus::Failed,
         "exhausted 5xx retries must mark promise Failed (transient), not PermanentFailed"
+    );
+}
+
+/// A Linear event that matches an automation produces a promise in KV with ID
+/// `linear.{seq}.{auto_id}` — verifies the promise_id prefix for the LINEAR
+/// stream is distinct from the GITHUB prefix (`github.{seq}.{auto_id}`).
+#[tokio::test]
+async fn linear_event_marks_promise_resolved_in_kv() {
+    use trogon_agent::promise_store::{PromiseStatus, PromiseStore};
+
+    let (_c, nats_port) = start_nats().await;
+    let mock = MockServer::start_async().await;
+    let mock_url = mock.base_url();
+
+    let (_, js) = js_client(nats_port).await;
+    create_streams(&js).await;
+
+    let astore = AutomationStore::open(&js).await.expect("open AutomationStore");
+    astore
+        .put(&make_automation(
+            "auto-linear-kv",
+            "default",
+            "linear.Issue",
+            "LINEAR_KV_PROMPT",
+        ))
+        .await
+        .expect("put automation");
+
+    mock.mock_async(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .body(end_turn_body());
+    })
+    .await;
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let api_port = listener.local_addr().unwrap().port();
+    drop(listener);
+
+    tokio::spawn(async move {
+        run(runner_cfg(nats_port, mock_url, "default", api_port))
+            .await
+            .ok()
+    });
+
+    let client = reqwest::Client::new();
+    let runs_url = format!("http://127.0.0.1:{api_port}/runs");
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        match client
+            .get(&runs_url)
+            .header("x-tenant-id", "default")
+            .send()
+            .await
+        {
+            Ok(_) => break,
+            Err(_) if tokio::time::Instant::now() < deadline => {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            Err(e) => panic!("API never came up: {e}"),
+        }
+    }
+
+    // Publish a Linear Issue event — first message on the LINEAR stream → seq = 1.
+    let payload = serde_json::to_vec(&json!({
+        "action": "create",
+        "type": "Issue",
+        "data": { "id": "ISS-1", "title": "Integration test issue" }
+    }))
+    .unwrap();
+    js.publish("linear.Issue.create", payload.into())
+        .await
+        .expect("publish");
+
+    // Poll until RunRecord appears.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let body: serde_json::Value = client
+            .get(&runs_url)
+            .header("x-tenant-id", "default")
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        if body.as_array().map(|a| !a.is_empty()).unwrap_or(false) {
+            break;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            panic!("No RunRecord appeared within timeout");
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+
+    // Promise ID = "linear.{seq}.{auto_id}" = "linear.1.auto-linear-kv".
+    let ps = PromiseStore::open(&js).await.expect("open PromiseStore");
+    let (promise, _rev) = ps
+        .get_promise("default", "linear.1.auto-linear-kv")
+        .await
+        .expect("get_promise")
+        .expect("promise must exist under linear.1.auto-linear-kv");
+
+    assert_eq!(promise.status, PromiseStatus::Resolved);
+    assert_eq!(promise.automation_id, "auto-linear-kv");
+    assert_eq!(
+        promise.nats_subject, "linear.Issue",
+        "runner normalises all Linear subjects to the canonical 'linear.Issue' string"
     );
 }
