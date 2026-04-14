@@ -43,6 +43,21 @@ pub async fn get_issue(
 }
 
 /// Post a comment on a Linear issue.
+///
+/// ## Idempotency — HTML marker + `Idempotency-Key` header
+///
+/// Linear supports the `Idempotency-Key` header on GraphQL mutations, so
+/// duplicate requests with the same key return the original result without
+/// creating a duplicate. As defence-in-depth (identical to `post_pr_comment`
+/// in GitHub), when `_idempotency_key` is present this function also:
+///
+/// 1. Before posting, fetches existing comments on the issue and scans for an
+///    HTML comment marker `<!-- trogon-idempotency-key: {key} -->` embedded in
+///    any body. If found, skips the post.
+/// 2. When posting, appends the marker to the body so future recovery passes
+///    can detect duplicates even if the `Idempotency-Key` header window expires.
+///
+/// Graceful degradation: if the pre-check fetch fails, proceeds with the post.
 pub async fn post_comment(
     ctx: &ToolContext<impl HttpClient>,
     input: &Value,
@@ -50,6 +65,40 @@ pub async fn post_comment(
     let issue_id = input["issue_id"].as_str().ok_or("missing issue_id")?;
     let body = input["body"].as_str().ok_or("missing body")?;
     let idempotency_key = input["_idempotency_key"].as_str();
+
+    // ── Idempotency pre-check ─────────────────────────────────────────────────
+    if let Some(key) = idempotency_key {
+        let marker = format!("<!-- trogon-idempotency-key: {key} -->");
+        let check_input = json!({ "issue_id": issue_id });
+        match get_comments(ctx, &check_input).await {
+            Ok(json_str) => {
+                if let Ok(Value::Array(comments)) = serde_json::from_str::<Value>(&json_str) {
+                    let already_posted = comments.iter().any(|c| {
+                        c["body"]
+                            .as_str()
+                            .map(|b| b.contains(&marker))
+                            .unwrap_or(false)
+                    });
+                    if already_posted {
+                        return Ok(format!(
+                            "Comment already posted to {issue_id} (skipped duplicate)"
+                        ));
+                    }
+                }
+            }
+            Err(_) => {
+                // Graceful degradation: if the pre-check fetch fails, proceed with
+                // the post — the Idempotency-Key header still provides protection.
+            }
+        }
+    }
+
+    // ── Embed marker in body ─────────────────────────────────────────────────
+    let effective_body = if let Some(key) = idempotency_key {
+        format!("{body}\n\n<!-- trogon-idempotency-key: {key} -->")
+    } else {
+        body.to_string()
+    };
 
     let mutation = json!({
         "query": "mutation($input: CommentCreateInput!) {
@@ -59,7 +108,7 @@ pub async fn post_comment(
             }
         }",
         "variables": {
-            "input": { "issueId": issue_id, "body": body }
+            "input": { "issueId": issue_id, "body": effective_body }
         }
     });
 

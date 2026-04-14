@@ -517,7 +517,37 @@ async fn write_promise_terminal(
     promise.status = status;
     match tokio::time::timeout(NATS_KV_TIMEOUT, store.update_promise(tenant_id, pid, promise, rev)).await {
         Ok(Ok(_)) => {}
-        Ok(Err(e)) => warn!(error = %e, context, "Failed to write terminal promise status"),
+        Ok(Err(e)) => {
+            // CAS conflict — the stored revision is stale. This happens when
+            // `checkpointing_disabled = true`: message-history checkpoints are
+            // skipped, but the pre-LLM heartbeat still advances the KV revision
+            // without updating the local copy. Reload the current revision and
+            // retry once so the terminal status is durably written.
+            warn!(error = %e, context, "Terminal write CAS conflict — reloading revision and retrying");
+            match tokio::time::timeout(NATS_KV_TIMEOUT, store.get_promise(tenant_id, pid)).await {
+                Ok(Ok(Some((_, fresh_rev)))) => {
+                    match tokio::time::timeout(
+                        NATS_KV_TIMEOUT,
+                        store.update_promise(tenant_id, pid, promise, fresh_rev),
+                    )
+                    .await
+                    {
+                        Ok(Ok(_)) => {}
+                        Ok(Err(e)) => warn!(error = %e, context, "Failed to write terminal promise status after revision reload"),
+                        Err(_) => warn!(promise_id = %pid, context, "NATS KV timed out writing terminal promise status after revision reload"),
+                    }
+                }
+                Ok(Ok(None)) => {
+                    warn!(promise_id = %pid, context, "Promise vanished from KV — terminal status write skipped");
+                }
+                Ok(Err(e)) => {
+                    warn!(error = %e, context, "Could not reload KV revision for terminal write retry");
+                }
+                Err(_) => {
+                    warn!(promise_id = %pid, context, "KV timeout reloading revision for terminal write retry");
+                }
+            }
+        }
         Err(_) => warn!(promise_id = %pid, context, "NATS KV write timed out writing terminal promise status"),
     }
 }
@@ -1012,9 +1042,12 @@ impl AgentLoop {
                     let results = self.execute_tools(&response.content, recovering).await;
                     messages.push(Message::assistant(response.content));
                     messages.push(Message::tool_results(results));
-                    // Once we've executed a tool turn, we've caught up with the
-                    // checkpoint and are back in normal forward execution.
-                    recovering = false;
+                    // `recovering` is flipped to `false` inside the successful
+                    // checkpoint write arm below, not here. This ensures the tool
+                    // result cache is still consulted on the next tool turn if the
+                    // checkpoint write fails or is disabled — a crash before the
+                    // next checkpoint would land at the same recovery point, and
+                    // the cache prevents re-executing already-completed tool calls.
 
                     // ── Durable promise: checkpoint after tool turn ───────────
                     if let (Some(store), Some(pid)) = (&self.promise_store, &self.promise_id)
@@ -1149,6 +1182,10 @@ impl AgentLoop {
                                 // Checkpoint just wrote a fresh claimed_at — reset the
                                 // heartbeat timer so we don't immediately re-write.
                                 last_heartbeat_at = std::time::Instant::now();
+                                // Messages are now durable: we've caught up with the
+                                // recovery point. Future tool turns are genuinely new
+                                // and must not be replayed from the cache.
+                                recovering = false;
                             }
                             Ok(Err(e)) => {
                                 // CAS conflict: another process wrote to this promise
