@@ -17,31 +17,29 @@ pub trait StreamEvent {
     fn stream_id(&self) -> &str;
 }
 
-pub trait SubjectEvent: StreamEvent {
-    const SUBJECT_PREFIX: &'static str;
-}
-
 pub trait EventType {
     fn event_type(&self) -> &'static str;
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct EventData<E, M = serde_json::Value> {
+pub struct EventData {
     pub event_id: String,
     pub event_type: String,
-    pub data: E,
+    pub stream_id: String,
+    pub data: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub metadata: Option<M>,
+    pub metadata: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct RecordedEvent<E, M = serde_json::Value> {
+pub struct RecordedEvent {
     pub event_id: String,
     pub event_type: String,
-    pub data: E,
+    pub event_stream_id: String,
+    pub data: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub metadata: Option<M>,
-    pub stream_id: String,
+    pub metadata: Option<String>,
+    pub recorded_stream_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stream_position: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -49,107 +47,112 @@ pub struct RecordedEvent<E, M = serde_json::Value> {
     pub recorded_at: DateTime<Utc>,
 }
 
-impl<E> EventData<E>
-where
-    E: EventType,
-{
-    pub fn new(event: E) -> Self {
-        Self::with_metadata(event, None::<serde_json::Value>)
-    }
-}
-
-impl<E, M> EventData<E, M>
-where
-    E: EventType,
-{
-    pub fn with_metadata(event: E, metadata: Option<M>) -> Self {
-        Self {
+impl EventData {
+    pub fn new<E>(event: E) -> serde_json::Result<Self>
+    where
+        E: EventType + StreamEvent + Serialize,
+    {
+        Ok(Self {
             event_id: Uuid::new_v4().to_string(),
             event_type: event.event_type().to_string(),
-            data: event,
-            metadata,
-        }
+            stream_id: event.stream_id().to_string(),
+            data: serde_json::to_string(&event)?,
+            metadata: None,
+        })
+    }
+
+    pub fn with_metadata<E, M>(event: E, metadata: Option<M>) -> serde_json::Result<Self>
+    where
+        E: EventType + StreamEvent + Serialize,
+        M: Serialize,
+    {
+        Ok(Self {
+            event_id: Uuid::new_v4().to_string(),
+            event_type: event.event_type().to_string(),
+            stream_id: event.stream_id().to_string(),
+            data: serde_json::to_string(&event)?,
+            metadata: metadata
+                .map(|value| serde_json::to_string(&value))
+                .transpose()?,
+        })
     }
 
     pub fn record(
         self,
-        stream_id: impl Into<String>,
+        recorded_stream_id: impl Into<String>,
         stream_position: Option<u64>,
         log_position: Option<u64>,
         recorded_at: DateTime<Utc>,
-    ) -> RecordedEvent<E, M> {
+    ) -> RecordedEvent {
         RecordedEvent {
             event_id: self.event_id,
             event_type: self.event_type,
+            event_stream_id: self.stream_id,
             data: self.data,
             metadata: self.metadata,
-            stream_id: stream_id.into(),
+            recorded_stream_id: recorded_stream_id.into(),
             stream_position,
             log_position,
             recorded_at,
         }
     }
-}
 
-impl<E, M> EventData<E, M>
-where
-    E: StreamEvent,
-{
     pub fn stream_id(&self) -> &str {
-        self.data.stream_id()
+        &self.stream_id
     }
 
     pub fn subject_with_prefix(&self, prefix: &str) -> String {
         format!("{prefix}{}", self.stream_id())
     }
-}
 
-impl<E, M> EventData<E, M>
-where
-    E: SubjectEvent,
-{
-    pub fn subject(&self) -> String {
-        self.subject_with_prefix(E::SUBJECT_PREFIX)
+    pub fn decode_data<E>(&self) -> serde_json::Result<E>
+    where
+        E: DeserializeOwned,
+    {
+        serde_json::from_str(&self.data)
     }
-}
 
-impl<E, M> EventData<E, M>
-where
-    E: DeserializeOwned,
-    M: DeserializeOwned,
-{
+    pub fn decode_metadata<M>(&self) -> serde_json::Result<Option<M>>
+    where
+        M: DeserializeOwned,
+    {
+        self.metadata
+            .as_deref()
+            .map(serde_json::from_str)
+            .transpose()
+    }
+
     pub fn decode(payload: &[u8]) -> serde_json::Result<Self> {
         serde_json::from_slice::<Self>(payload)
     }
 }
 
-impl<E, M> RecordedEvent<E, M>
-where
-    E: StreamEvent,
-{
+impl RecordedEvent {
     pub fn stream_id(&self) -> &str {
-        self.data.stream_id()
+        &self.event_stream_id
     }
 
     pub fn subject_with_prefix(&self, prefix: &str) -> String {
         format!("{prefix}{}", self.stream_id())
     }
-}
 
-impl<E, M> RecordedEvent<E, M>
-where
-    E: SubjectEvent,
-{
-    pub fn subject(&self) -> String {
-        self.subject_with_prefix(E::SUBJECT_PREFIX)
+    pub fn decode_data<E>(&self) -> serde_json::Result<E>
+    where
+        E: DeserializeOwned,
+    {
+        serde_json::from_str(&self.data)
     }
-}
 
-impl<E, M> RecordedEvent<E, M>
-where
-    E: DeserializeOwned,
-    M: DeserializeOwned,
-{
+    pub fn decode_metadata<M>(&self) -> serde_json::Result<Option<M>>
+    where
+        M: DeserializeOwned,
+    {
+        self.metadata
+            .as_deref()
+            .map(serde_json::from_str)
+            .transpose()
+    }
+
     pub fn decode(payload: &[u8]) -> serde_json::Result<Self> {
         serde_json::from_slice::<Self>(payload)
     }
@@ -172,10 +175,6 @@ mod tests {
         }
     }
 
-    impl SubjectEvent for TestEvent {
-        const SUBJECT_PREFIX: &'static str = "events.test.";
-    }
-
     impl EventType for TestEvent {
         fn event_type(&self) -> &'static str {
             "TestEvent"
@@ -187,15 +186,16 @@ mod tests {
         let event = EventData::new(TestEvent {
             id: "alpha".to_string(),
             value: "beta".to_string(),
-        });
+        })
+        .unwrap();
 
         assert_eq!(event.stream_id(), "alpha");
         assert_eq!(event.event_type, "TestEvent");
-        assert_eq!(event.subject(), "events.test.alpha");
         assert_eq!(
-            event.subject_with_prefix("events.legacy."),
-            "events.legacy.alpha"
+            event.subject_with_prefix("events.test."),
+            "events.test.alpha"
         );
+        assert_eq!(event.decode_data::<TestEvent>().unwrap().value, "beta");
     }
 
     #[test]
@@ -203,7 +203,8 @@ mod tests {
         let event = EventData::new(TestEvent {
             id: "alpha".to_string(),
             value: "beta".to_string(),
-        });
+        })
+        .unwrap();
 
         let recorded = event.record(
             "stream-alpha",
@@ -213,10 +214,13 @@ mod tests {
         );
 
         assert_eq!(recorded.stream_id(), "alpha");
-        assert_eq!(recorded.stream_id, "stream-alpha");
+        assert_eq!(recorded.recorded_stream_id, "stream-alpha");
         assert_eq!(recorded.stream_position, Some(2));
         assert_eq!(recorded.log_position, Some(10));
-        assert_eq!(recorded.subject(), "events.test.alpha");
+        assert_eq!(
+            recorded.subject_with_prefix("events.test."),
+            "events.test.alpha"
+        );
     }
 
     #[test]
@@ -224,10 +228,15 @@ mod tests {
         let event = EventData::new(TestEvent {
             id: "alpha".to_string(),
             value: "beta".to_string(),
-        });
+        })
+        .unwrap();
         let event_payload = serde_json::to_vec(&event).unwrap();
-        let decoded_event = EventData::<TestEvent>::decode(&event_payload).unwrap();
+        let decoded_event = EventData::decode(&event_payload).unwrap();
         assert_eq!(decoded_event, event);
+        assert_eq!(
+            decoded_event.decode_data::<TestEvent>().unwrap().id,
+            "alpha"
+        );
 
         let recorded = event.record(
             "stream-alpha",
@@ -236,7 +245,11 @@ mod tests {
             DateTime::<Utc>::from_timestamp(1_700_000_001, 0).unwrap(),
         );
         let recorded_payload = serde_json::to_vec(&recorded).unwrap();
-        let decoded_recorded = RecordedEvent::<TestEvent>::decode(&recorded_payload).unwrap();
+        let decoded_recorded = RecordedEvent::decode(&recorded_payload).unwrap();
         assert_eq!(decoded_recorded, recorded);
+        assert_eq!(
+            decoded_recorded.decode_data::<TestEvent>().unwrap().id,
+            "alpha"
+        );
     }
 }

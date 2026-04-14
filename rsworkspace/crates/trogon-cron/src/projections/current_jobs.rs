@@ -1,5 +1,5 @@
 use crate::{JobId, JobIdError, config::JobSpec, events::JobEvent};
-use trogon_eventsourcing::Snapshot;
+use trogon_eventsourcing::{Snapshot, StreamEvent};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ProjectionChange {
@@ -28,9 +28,9 @@ pub const fn initial_state() -> JobStreamState {
 
 pub fn apply(state: JobStreamState, event: JobEvent) -> Result<JobStreamState, JobTransitionError> {
     match (state, event) {
-        (JobStreamState::Initial, JobEvent::JobRegistered { spec }) => {
-            Ok(JobStreamState::Present(spec))
-        }
+        (JobStreamState::Initial, JobEvent::JobRegistered { id, spec }) => JobId::parse(&id)
+            .map_err(|source| JobTransitionError::InvalidEventId { id, source })
+            .map(|job_id| JobStreamState::Present(spec.into_job_spec(job_id.to_string()))),
         (JobStreamState::Initial, event @ JobEvent::JobStateChanged { .. }) => {
             Err(JobTransitionError::MissingJobForStateChange {
                 id: parse_event_job_id(&event)?,
@@ -124,7 +124,7 @@ impl std::error::Error for JobTransitionError {
 }
 
 fn parse_event_job_id(event: &JobEvent) -> Result<JobId, JobTransitionError> {
-    let id = event.job_id().to_string();
+    let id = event.stream_id().to_string();
     JobId::parse(&id).map_err(|source| JobTransitionError::InvalidEventId { id, source })
 }
 
@@ -157,10 +157,21 @@ mod tests {
     #[test]
     fn event_projection_replays_latest_state() {
         let events = [
-            JobEvent::job_registered(job("backup")),
-            JobEvent::job_state_changed("backup", JobEnabledState::Disabled),
-            JobEvent::job_removed("backup"),
-            JobEvent::job_registered(job("backup")),
+            JobEvent::JobRegistered {
+                id: "backup".to_string(),
+                spec: job("backup").into(),
+            },
+            JobEvent::JobStateChanged {
+                id: "backup".to_string(),
+                state: JobEnabledState::Disabled,
+            },
+            JobEvent::JobRemoved {
+                id: "backup".to_string(),
+            },
+            JobEvent::JobRegistered {
+                id: "backup".to_string(),
+                spec: job("backup").into(),
+            },
         ];
         let mut state = initial_state();
 
@@ -175,7 +186,10 @@ mod tests {
     fn state_change_requires_existing_job() {
         let error = apply(
             initial_state(),
-            JobEvent::job_state_changed("missing", JobEnabledState::Disabled),
+            JobEvent::JobStateChanged {
+                id: "missing".to_string(),
+                state: JobEnabledState::Disabled,
+            },
         )
         .unwrap_err();
 
@@ -188,7 +202,14 @@ mod tests {
     #[test]
     fn projection_change_tracks_latest_state() {
         let before = initial_state();
-        let after = apply(before.clone(), JobEvent::job_registered(job("backup"))).unwrap();
+        let after = apply(
+            before.clone(),
+            JobEvent::JobRegistered {
+                id: "backup".to_string(),
+                spec: job("backup").into(),
+            },
+        )
+        .unwrap();
         assert_eq!(
             projection_change(&before, &after),
             Some(ProjectionChange::Upsert(job("backup")))
@@ -196,7 +217,10 @@ mod tests {
 
         let updated = apply(
             after.clone(),
-            JobEvent::job_state_changed("backup", JobEnabledState::Disabled),
+            JobEvent::JobStateChanged {
+                id: "backup".to_string(),
+                state: JobEnabledState::Disabled,
+            },
         )
         .unwrap();
         match projection_change(&after, &updated).unwrap() {
@@ -209,7 +233,10 @@ mod tests {
     fn initial_state_rejects_registering_existing_job() {
         let error = apply(
             JobStreamState::Present(job("backup")),
-            JobEvent::job_registered(job("backup")),
+            JobEvent::JobRegistered {
+                id: "backup".to_string(),
+                spec: job("backup").into(),
+            },
         )
         .unwrap_err();
         assert!(matches!(
@@ -220,7 +247,13 @@ mod tests {
 
     #[test]
     fn initial_state_rejects_missing_removal() {
-        let error = apply(initial_state(), JobEvent::job_removed("backup")).unwrap_err();
+        let error = apply(
+            initial_state(),
+            JobEvent::JobRemoved {
+                id: "backup".to_string(),
+            },
+        )
+        .unwrap_err();
         assert!(matches!(
             error,
             JobTransitionError::MissingJobForRemoval { .. }
@@ -229,7 +262,13 @@ mod tests {
 
     #[test]
     fn reducer_rejects_stream_id_mismatch() {
-        let error = apply(initial_state(), JobEvent::job_removed("other")).unwrap_err();
+        let error = apply(
+            initial_state(),
+            JobEvent::JobRemoved {
+                id: "other".to_string(),
+            },
+        )
+        .unwrap_err();
         assert!(matches!(
             error,
             JobTransitionError::MissingJobForRemoval { .. }

@@ -13,8 +13,9 @@ use crate::{
     events::{JobEvent, JobEventData},
     nats::{
         EventSubjectPrefix, NATS_BATCH_COMMIT, NATS_BATCH_ID, NATS_BATCH_SEQUENCE,
-        StreamSubjectState, decode_recorded_job_event, resolve_event_subject_state,
+        StreamSubjectState, resolve_event_subject_state,
     },
+    processors::decode_recorded_job_event,
 };
 
 use super::{events_stream, project_event_to_snapshot};
@@ -29,7 +30,10 @@ where
         Ok(message) => {
             let version = message.sequence;
             let event = decode_recorded_job_event(message)?;
-            let exists = !matches!(event.data, JobEvent::JobRemoved { .. });
+            let event = event.decode_data::<JobEvent>().map_err(|source| {
+                CronError::event_source("failed to decode latest job event payload", source)
+            })?;
+            let exists = !matches!(event, JobEvent::JobRemoved { .. });
             Ok(Some(JobWriteState::new(Some(version), exists)))
         }
         Err(error)

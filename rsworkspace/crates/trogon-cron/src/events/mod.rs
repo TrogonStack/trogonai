@@ -1,34 +1,77 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
-use trogon_eventsourcing::{EventData, EventType, RecordedEvent, StreamEvent, SubjectEvent};
+use trogon_eventsourcing::{EventData, EventType, RecordedEvent, StreamEvent};
 
-use crate::{
-    config::{JobEnabledState, JobSpec},
-    kv::EVENTS_SUBJECT_PREFIX,
-};
+use crate::config::{DeliverySpec, JobEnabledState, JobSpec, ScheduleSpec};
 
-mod decision;
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RegisteredJobSpec {
+    #[serde(default)]
+    pub state: JobEnabledState,
+    pub schedule: ScheduleSpec,
+    pub delivery: DeliverySpec,
+    pub payload: serde_json::Value,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub metadata: BTreeMap<String, String>,
+}
 
-pub use decision::JobDecisionError;
+impl RegisteredJobSpec {
+    pub fn into_job_spec(self, id: impl Into<String>) -> JobSpec {
+        JobSpec {
+            id: id.into(),
+            state: self.state,
+            schedule: self.schedule,
+            delivery: self.delivery,
+            payload: self.payload,
+            metadata: self.metadata,
+        }
+    }
+}
+
+impl From<JobSpec> for RegisteredJobSpec {
+    fn from(spec: JobSpec) -> Self {
+        Self {
+            state: spec.state,
+            schedule: spec.schedule,
+            delivery: spec.delivery,
+            payload: spec.payload,
+            metadata: spec.metadata,
+        }
+    }
+}
+
+impl From<&JobSpec> for RegisteredJobSpec {
+    fn from(spec: &JobSpec) -> Self {
+        Self {
+            state: spec.state,
+            schedule: spec.schedule.clone(),
+            delivery: spec.delivery.clone(),
+            payload: spec.payload.clone(),
+            metadata: spec.metadata.clone(),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum JobEvent {
-    JobRegistered { spec: JobSpec },
+    JobRegistered { id: String, spec: RegisteredJobSpec },
     JobStateChanged { id: String, state: JobEnabledState },
     JobRemoved { id: String },
 }
 
-pub type JobEventData = EventData<JobEvent>;
-pub type RecordedJobEvent = RecordedEvent<JobEvent>;
+pub type JobEventData = EventData;
+pub type RecordedJobEvent = RecordedEvent;
 
 impl StreamEvent for JobEvent {
     fn stream_id(&self) -> &str {
-        self.job_id()
+        match self {
+            Self::JobRegistered { id, .. } => id,
+            Self::JobStateChanged { id, .. } => id,
+            Self::JobRemoved { id } => id,
+        }
     }
-}
-
-impl SubjectEvent for JobEvent {
-    const SUBJECT_PREFIX: &'static str = EVENTS_SUBJECT_PREFIX;
 }
 
 impl EventType for JobEvent {
@@ -41,41 +84,19 @@ impl EventType for JobEvent {
     }
 }
 
-impl JobEvent {
-    pub fn job_registered(spec: JobSpec) -> Self {
-        Self::JobRegistered { spec }
-    }
-
-    pub fn job_state_changed(id: impl Into<String>, state: JobEnabledState) -> Self {
-        Self::JobStateChanged {
-            id: id.into(),
-            state,
-        }
-    }
-
-    pub fn job_removed(id: impl Into<String>) -> Self {
-        Self::JobRemoved { id: id.into() }
-    }
-
-    pub fn job_id(&self) -> &str {
-        match self {
-            Self::JobRegistered { spec } => &spec.id,
-            Self::JobStateChanged { id, .. } => id,
-            Self::JobRemoved { id } => id,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::SamplingSource;
 
     #[test]
     fn event_data_and_recorded_event_helpers_work() {
-        let event = JobEventData::new(JobEvent::job_removed("cleanup"));
+        let event = JobEventData::new(JobEvent::JobRemoved {
+            id: "cleanup".to_string(),
+        })
+        .unwrap();
         assert_eq!(event.stream_id(), "cleanup");
         assert_eq!(event.event_type, "job_removed");
-        assert_eq!(event.subject(), "cron.jobs.events.cleanup");
         assert_eq!(
             event.subject_with_prefix("cron.events.jobs."),
             "cron.events.jobs.cleanup"
@@ -84,6 +105,12 @@ mod tests {
         let payload = serde_json::to_vec(&event).unwrap();
         let decoded = JobEventData::decode(&payload).unwrap();
         assert_eq!(decoded, event);
+        assert_eq!(
+            decoded.decode_data::<JobEvent>().unwrap(),
+            JobEvent::JobRemoved {
+                id: "cleanup".to_string()
+            }
+        );
 
         let recorded = event.record(
             "cron.jobs.events.cleanup",
@@ -92,17 +119,50 @@ mod tests {
             chrono::DateTime::<chrono::Utc>::from_timestamp(1_700_000_000, 0).unwrap(),
         );
         assert_eq!(recorded.stream_id(), "cleanup");
-        assert_eq!(recorded.stream_id, "cron.jobs.events.cleanup");
+        assert_eq!(recorded.recorded_stream_id, "cron.jobs.events.cleanup");
         assert_eq!(recorded.log_position, Some(9));
-        assert_eq!(recorded.subject(), "cron.jobs.events.cleanup");
+        assert_eq!(
+            recorded.subject_with_prefix("cron.events.jobs."),
+            "cron.events.jobs.cleanup"
+        );
         let recorded_payload = serde_json::to_vec(&recorded).unwrap();
         let decoded = RecordedJobEvent::decode(&recorded_payload).unwrap();
         assert_eq!(decoded, recorded);
+        assert_eq!(
+            decoded.decode_data::<JobEvent>().unwrap(),
+            JobEvent::JobRemoved {
+                id: "cleanup".to_string()
+            }
+        );
     }
 
     #[test]
     fn invalid_payload_fails_decode() {
         assert!(JobEventData::decode(br#"not-json"#).is_err());
         assert!(RecordedJobEvent::decode(br#"not-json"#).is_err());
+    }
+
+    #[test]
+    fn registered_job_spec_round_trips_without_id() {
+        let spec = RegisteredJobSpec {
+            state: JobEnabledState::Enabled,
+            schedule: ScheduleSpec::Every { every_sec: 30 },
+            delivery: DeliverySpec::NatsEvent {
+                route: "agent.run".to_string(),
+                headers: BTreeMap::new(),
+                ttl_sec: None,
+                source: Some(SamplingSource::LatestFromSubject {
+                    subject: "jobs.latest".to_string(),
+                }),
+            },
+            payload: serde_json::json!({"kind": "heartbeat"}),
+            metadata: BTreeMap::from([("owner".to_string(), "ops".to_string())]),
+        };
+
+        let json = serde_json::to_string(&spec).unwrap();
+        let decoded: RegisteredJobSpec = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(decoded, spec);
+        assert!(!json.contains("\"id\""));
     }
 }

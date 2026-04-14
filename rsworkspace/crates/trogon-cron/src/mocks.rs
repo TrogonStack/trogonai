@@ -10,11 +10,12 @@ use trogon_eventsourcing::{Decision, Snapshot, StreamCommand, decide};
 use trogon_nats::lease::{ReleaseLease, RenewLease, TryAcquireLease};
 
 use crate::{
-    ChangeJobStateCommand, GetJobCommand, ListJobsCommand, RegisterJobCommand, RemoveJobCommand,
+    ChangeJobStateCommand, ChangeJobStateDecisionError, GetJobCommand, ListJobsCommand,
+    RegisterJobCommand, RegisterJobDecisionError, RemoveJobCommand, RemoveJobDecisionError,
     config::{JobSpec, JobWriteState},
     domain::ResolvedJobSpec,
     error::CronError,
-    events::{JobDecisionError, JobEvent},
+    events::JobEvent,
     store::{ConfigWatchStream, LoadAndWatchCommand, LoadAndWatchResult},
     traits::SchedulePublisher,
 };
@@ -170,18 +171,12 @@ impl MockConfigStore {
                     std::io::Error::other("unsupported decision variant"),
                 ));
             }
-            Err(JobDecisionError::CannotRegisterExistingJob { .. }) => {
+            Err(RegisterJobDecisionError::AlreadyRegistered { .. }) => {
                 return Err(CronError::OptimisticConcurrencyConflict {
                     id: command.stream_id().to_string(),
                     expected: command.write_condition(),
                     current_version,
                 });
-            }
-            Err(error) => {
-                return Err(CronError::event_source(
-                    "failed to decide mocked job registration from current register-job state",
-                    error,
-                ));
             }
         };
         let next_version = current_version.unwrap_or(0) + 1;
@@ -189,8 +184,8 @@ impl MockConfigStore {
         let mut projected_snapshot = current_snapshot;
         for event in events {
             match event {
-                JobEvent::JobRegistered { spec } => {
-                    projected_snapshot = Some(Snapshot::new(next_version, spec));
+                JobEvent::JobRegistered { id, spec } => {
+                    projected_snapshot = Some(Snapshot::new(next_version, spec.into_job_spec(id)));
                 }
                 other => {
                     return Err(CronError::event_source(
@@ -228,22 +223,16 @@ impl MockConfigStore {
                     std::io::Error::other("unsupported decision variant"),
                 ));
             }
-            Err(JobDecisionError::MissingJobForStateChange { .. }) => {
+            Err(ChangeJobStateDecisionError::JobNotFound { .. }) => {
                 return Err(CronError::JobNotFound {
                     id: command.stream_id().to_string(),
                 });
             }
-            Err(JobDecisionError::StateAlreadySet { state, .. }) => {
+            Err(ChangeJobStateDecisionError::StateAlreadySet { state, .. }) => {
                 return Err(CronError::JobStateAlreadySet {
                     id: command.stream_id().to_string(),
                     state,
                 });
-            }
-            Err(error) => {
-                return Err(CronError::event_source(
-                    "failed to decide mocked job state change from current change-job-state state",
-                    error,
-                ));
             }
         };
         let next_version = current_version.unwrap_or(0) + 1;
@@ -310,16 +299,10 @@ impl MockConfigStore {
                     std::io::Error::other("unsupported decision variant"),
                 ));
             }
-            Err(JobDecisionError::MissingJobForRemoval { .. }) => {
+            Err(RemoveJobDecisionError::JobNotFound { .. }) => {
                 return Err(CronError::JobNotFound {
                     id: command.stream_id().to_string(),
                 });
-            }
-            Err(error) => {
-                return Err(CronError::event_source(
-                    "failed to decide mocked job removal from current remove-job state",
-                    error,
-                ));
             }
         };
         let next_version = current_version.unwrap_or(0) + 1;
