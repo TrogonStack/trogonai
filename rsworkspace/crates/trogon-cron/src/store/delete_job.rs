@@ -5,11 +5,9 @@ use trogon_eventsourcing::{Decide, Decision, NonEmpty, StreamCommand, decide, lo
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream, JetStreamPublishMessage};
 
 use crate::{
-    JobDecisionError, JobId, JobSpec, JobStreamState, JobWriteCondition, apply,
+    JobDecisionError, JobId, JobSpec, JobWriteCondition,
     error::CronError,
     events::{JobEvent, JobEventData},
-    initial_state,
-    nats::job_stream_state_from_snapshot,
 };
 
 use super::{SNAPSHOT_STORE_CONFIG, append_events, snapshot_bucket};
@@ -20,6 +18,12 @@ pub struct DeleteJobCommand {
     pub write_condition: JobWriteCondition,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeleteJobState {
+    Missing,
+    Present,
+}
+
 impl StreamCommand for DeleteJobCommand {
     type StreamId = JobId;
 
@@ -28,17 +32,39 @@ impl StreamCommand for DeleteJobCommand {
     }
 }
 
-impl Decide<JobStreamState, JobEvent> for DeleteJobCommand {
+impl DeleteJobCommand {
+    pub fn state_from_snapshot(
+        &self,
+        snapshot: Option<&trogon_eventsourcing::Snapshot<JobSpec>>,
+    ) -> Result<DeleteJobState, CronError> {
+        match snapshot {
+            None => Ok(DeleteJobState::Missing),
+            Some(snapshot) if snapshot.payload.id == self.stream_id().as_str() => {
+                Ok(DeleteJobState::Present)
+            }
+            Some(snapshot) => Err(CronError::event_source(
+                "failed to decode current job snapshot into delete-job state",
+                std::io::Error::other(format!(
+                    "expected '{}' but snapshot carried '{}'",
+                    self.stream_id(),
+                    snapshot.payload.id
+                )),
+            )),
+        }
+    }
+}
+
+impl Decide<DeleteJobState, JobEvent> for DeleteJobCommand {
     type Error = JobDecisionError;
 
-    fn decide(state: &JobStreamState, command: &Self) -> Result<Decision<JobEvent>, Self::Error> {
+    fn decide(state: &DeleteJobState, command: &Self) -> Result<Decision<JobEvent>, Self::Error> {
         match state {
-            JobStreamState::Initial => Err(JobDecisionError::MissingJobForRemoval {
+            DeleteJobState::Missing => Err(JobDecisionError::MissingJobForRemoval {
                 id: command.stream_id().clone(),
             }),
-            JobStreamState::Present(_) => Ok(Decision::Event(NonEmpty::one(
-                JobEvent::job_removed(command.stream_id().to_string()),
-            ))),
+            DeleteJobState::Present => Ok(Decision::Event(NonEmpty::one(JobEvent::job_removed(
+                command.stream_id().to_string(),
+            )))),
         }
     }
 }
@@ -62,21 +88,12 @@ where
     let current_snapshot = load_snapshot::<JobSpec>(&bucket, SNAPSHOT_STORE_CONFIG, id.as_str())
         .await
         .map_err(CronError::from)?;
-    let current_state = match current_snapshot.clone() {
-        Some(snapshot) => job_stream_state_from_snapshot(
-            &id,
-            snapshot,
-            "failed to decode current job snapshot into stream state",
-        )?,
-        None => initial_state(),
+    let command = DeleteJobCommand {
+        id: id.clone(),
+        write_condition,
     };
-    let events = match decide(
-        &current_state,
-        &DeleteJobCommand {
-            id: id.clone(),
-            write_condition,
-        },
-    ) {
+    let current_state = command.state_from_snapshot(current_snapshot.as_ref())?;
+    let events = match decide(&current_state, &command) {
         Ok(Decision::Event(events)) => events,
         Ok(_) => {
             return Err(CronError::event_source(
@@ -89,32 +106,16 @@ where
         }
         Err(error) => {
             return Err(CronError::event_source(
-                "failed to decide job removal from current stream state",
+                "failed to decide job removal from current delete-job state",
                 error,
             ));
         }
     };
-    let projected_state = events
-        .iter()
-        .cloned()
-        .try_fold(current_state, apply)
-        .map_err(|error| {
-            CronError::event_source(
-                "failed to apply decided job removal events to current stream state",
-                error,
-            )
-        })?;
-    if !matches!(projected_state, JobStreamState::Initial) {
-        return Err(CronError::event_source(
-            "job removal decision must leave the stream initial",
-            std::io::Error::other(format!("job '{}'", id)),
-        ));
-    }
 
     append_events::run(
         js,
         id.as_str(),
-        write_condition,
+        command.write_condition,
         events.map(JobEventData::new),
     )
     .await

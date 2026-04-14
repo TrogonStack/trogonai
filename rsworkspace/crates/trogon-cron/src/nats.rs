@@ -265,24 +265,6 @@ pub(crate) fn ensure_event_matches_stream(
     }
 }
 
-pub(crate) fn job_stream_state_from_snapshot(
-    expected_stream_id: &JobId,
-    snapshot: Snapshot<JobSpec>,
-    context: &'static str,
-) -> Result<JobStreamState, CronError> {
-    if snapshot.payload.id != expected_stream_id.as_str() {
-        return Err(CronError::event_source(
-            context,
-            std::io::Error::other(format!(
-                "expected '{}' but snapshot carried '{}'",
-                expected_stream_id, snapshot.payload.id
-            )),
-        ));
-    }
-
-    JobStreamState::try_from(snapshot).map_err(|source| CronError::event_source(context, source))
-}
-
 pub(crate) fn resolve_event_subject_state(
     job_id: &str,
     canonical_state: Option<JobWriteState>,

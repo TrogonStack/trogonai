@@ -5,11 +5,9 @@ use trogon_eventsourcing::{Decide, Decision, NonEmpty, StreamCommand, decide, lo
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream, JetStreamPublishMessage};
 
 use crate::{
-    JobDecisionError, JobEnabledState, JobId, JobSpec, JobStreamState, JobWriteCondition, apply,
+    JobDecisionError, JobEnabledState, JobId, JobSpec, JobWriteCondition,
     error::CronError,
     events::{JobEvent, JobEventData},
-    initial_state,
-    nats::job_stream_state_from_snapshot,
 };
 
 use super::{SNAPSHOT_STORE_CONFIG, append_events, snapshot_bucket};
@@ -21,6 +19,12 @@ pub struct SetJobStateCommand {
     pub write_condition: JobWriteCondition,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SetJobStateState {
+    Missing,
+    Present { current: JobEnabledState },
+}
+
 impl StreamCommand for SetJobStateCommand {
     type StreamId = JobId;
 
@@ -29,21 +33,45 @@ impl StreamCommand for SetJobStateCommand {
     }
 }
 
-impl Decide<JobStreamState, JobEvent> for SetJobStateCommand {
+impl SetJobStateCommand {
+    pub fn state_from_snapshot(
+        &self,
+        snapshot: Option<&trogon_eventsourcing::Snapshot<JobSpec>>,
+    ) -> Result<SetJobStateState, CronError> {
+        match snapshot {
+            None => Ok(SetJobStateState::Missing),
+            Some(snapshot) if snapshot.payload.id == self.stream_id().as_str() => {
+                Ok(SetJobStateState::Present {
+                    current: snapshot.payload.state,
+                })
+            }
+            Some(snapshot) => Err(CronError::event_source(
+                "failed to decode current job snapshot into set-job-state state",
+                std::io::Error::other(format!(
+                    "expected '{}' but snapshot carried '{}'",
+                    self.stream_id(),
+                    snapshot.payload.id
+                )),
+            )),
+        }
+    }
+}
+
+impl Decide<SetJobStateState, JobEvent> for SetJobStateCommand {
     type Error = JobDecisionError;
 
-    fn decide(state: &JobStreamState, command: &Self) -> Result<Decision<JobEvent>, Self::Error> {
+    fn decide(state: &SetJobStateState, command: &Self) -> Result<Decision<JobEvent>, Self::Error> {
         match state {
-            JobStreamState::Initial => Err(JobDecisionError::MissingJobForStateChange {
+            SetJobStateState::Missing => Err(JobDecisionError::MissingJobForStateChange {
                 id: command.stream_id().clone(),
             }),
-            JobStreamState::Present(spec) if spec.state == command.state => {
+            SetJobStateState::Present { current } if *current == command.state => {
                 Err(JobDecisionError::StateAlreadySet {
                     id: command.stream_id().clone(),
                     state: command.state,
                 })
             }
-            JobStreamState::Present(_) => Ok(Decision::Event(NonEmpty::one(
+            SetJobStateState::Present { .. } => Ok(Decision::Event(NonEmpty::one(
                 JobEvent::job_state_changed(command.stream_id().to_string(), command.state),
             ))),
         }
@@ -70,22 +98,13 @@ where
     let current_snapshot = load_snapshot::<JobSpec>(&bucket, SNAPSHOT_STORE_CONFIG, id.as_str())
         .await
         .map_err(CronError::from)?;
-    let current_state = match current_snapshot.clone() {
-        Some(snapshot) => job_stream_state_from_snapshot(
-            &id,
-            snapshot,
-            "failed to decode current job snapshot into stream state",
-        )?,
-        None => initial_state(),
+    let command = SetJobStateCommand {
+        id: id.clone(),
+        state,
+        write_condition,
     };
-    let events = match decide(
-        &current_state,
-        &SetJobStateCommand {
-            id: id.clone(),
-            state,
-            write_condition,
-        },
-    ) {
+    let current_state = command.state_from_snapshot(current_snapshot.as_ref())?;
+    let events = match decide(&current_state, &command) {
         Ok(Decision::Event(events)) => events,
         Ok(_) => {
             return Err(CronError::event_source(
@@ -104,35 +123,16 @@ where
         }
         Err(error) => {
             return Err(CronError::event_source(
-                "failed to decide job state change from current stream state",
+                "failed to decide job state change from current set-job-state state",
                 error,
             ));
         }
     };
-    let projected_state = events
-        .iter()
-        .cloned()
-        .try_fold(current_state, apply)
-        .map_err(|error| {
-            CronError::event_source(
-                "failed to apply decided job state events to current stream state",
-                error,
-            )
-        })?;
-    match projected_state {
-        JobStreamState::Present(spec) if spec.state == state => {}
-        _ => {
-            return Err(CronError::event_source(
-                "job state decision must leave the stream present at the target state",
-                std::io::Error::other(format!("job '{}'", id)),
-            ));
-        }
-    }
 
     append_events::run(
         js,
         id.as_str(),
-        write_condition,
+        command.write_condition,
         events.map(JobEventData::new),
     )
     .await

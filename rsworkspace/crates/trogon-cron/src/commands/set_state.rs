@@ -2,9 +2,9 @@ use std::fmt;
 
 use async_nats::jetstream::{self, context, kv};
 use trogon_cron::{
-    CronError, JobDecisionError, JobEnabledState, JobId, JobIdError, JobSpec, JobStreamState,
-    JobWriteCondition, SNAPSHOT_STORE_CONFIG, SetJobStateCommand as StoreSetJobStateCommand,
-    append_events, initial_state, open_snapshot_bucket,
+    CronError, JobDecisionError, JobEnabledState, JobId, JobIdError, JobSpec, JobWriteCondition,
+    SNAPSHOT_STORE_CONFIG, SetJobStateCommand as StoreSetJobStateCommand, append_events,
+    open_snapshot_bucket,
 };
 use trogon_eventsourcing::{Decision, decide, load_snapshot};
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream, JetStreamPublishMessage};
@@ -62,26 +62,6 @@ where
             .await
             .map_err(CronError::from)
             .map_err(CommandError::LoadJob)?;
-    let current_state = match current_snapshot.clone() {
-        Some(snapshot) => {
-            if snapshot.payload.id != command.job_id.as_str() {
-                return Err(CommandError::LoadJob(CronError::event_source(
-                    "failed to decode current job snapshot into stream state",
-                    std::io::Error::other(format!(
-                        "expected '{}' but snapshot carried '{}'",
-                        command.job_id, snapshot.payload.id
-                    )),
-                )));
-            }
-            JobStreamState::try_from(snapshot).map_err(|source| {
-                CommandError::LoadJob(CronError::event_source(
-                    "failed to decode current job snapshot into stream state",
-                    source,
-                ))
-            })?
-        }
-        None => initial_state(),
-    };
     let write_condition = current_snapshot
         .as_ref()
         .map(|job| JobWriteCondition::MustBeAtVersion(job.version))
@@ -91,6 +71,9 @@ where
         state: command.state,
         write_condition,
     };
+    let current_state = store_command
+        .state_from_snapshot(current_snapshot.as_ref())
+        .map_err(CommandError::LoadJob)?;
     let events = match decide(&current_state, &store_command) {
         Ok(Decision::Event(events)) => events,
         Ok(_) => {
@@ -110,7 +93,7 @@ where
         }
         Err(error) => {
             return Err(CommandError::SetState(CronError::event_source(
-                "failed to decide job state change from current stream state",
+                "failed to decide job state change from current set-job-state state",
                 error,
             )));
         }

@@ -13,7 +13,7 @@ use crate::{
     config::{JobSpec, JobWriteState},
     domain::ResolvedJobSpec,
     error::CronError,
-    events::{JobDecisionError, JobStreamState, apply, initial_state},
+    events::{JobDecisionError, JobEvent},
     store::{
         ConfigWatchStream, DeleteJobCommand, GetJobCommand, ListJobsCommand, LoadAndWatchCommand,
         LoadAndWatchResult, PutJobCommand, SetJobStateCommand,
@@ -159,15 +159,7 @@ impl MockConfigStore {
         let mut stream_versions = self.stream_versions.lock().unwrap();
         let current_snapshot = jobs.get(command.stream_id().as_str()).cloned();
         let current_version = stream_versions.get(command.stream_id().as_str()).copied();
-        let current_state = match current_snapshot.clone() {
-            Some(snapshot) => JobStreamState::try_from(snapshot).map_err(|source| {
-                CronError::event_source(
-                    "failed to decode mocked current job snapshot into stream state",
-                    source,
-                )
-            })?,
-            None => initial_state(),
-        };
+        let current_state = command.state_from_snapshot(current_snapshot.as_ref())?;
         let write_state = JobWriteState::new(current_version, current_snapshot.as_ref().is_some());
         command
             .write_condition()
@@ -189,29 +181,31 @@ impl MockConfigStore {
             }
             Err(error) => {
                 return Err(CronError::event_source(
-                    "failed to decide mocked job registration from current stream state",
+                    "failed to decide mocked job registration from current put-job state",
                     error,
                 ));
             }
         };
-        let next_state = events
-            .into_iter()
-            .try_fold(current_state, apply)
-            .map_err(|error| {
-                CronError::event_source(
-                    "failed to apply mocked job registration events to current stream state",
-                    error,
-                )
-            })?;
         let next_version = current_version.unwrap_or(0) + 1;
         stream_versions.insert(command.stream_id().to_string(), next_version);
-        match next_state.into_snapshot(next_version) {
-            Some(snapshot) => {
-                jobs.insert(command.stream_id().to_string(), snapshot);
+        let mut projected_snapshot = current_snapshot;
+        for event in events {
+            match event {
+                JobEvent::JobRegistered { spec } => {
+                    projected_snapshot = Some(Snapshot::new(next_version, spec));
+                }
+                other => {
+                    return Err(CronError::event_source(
+                        "failed to project mocked put-job event into current snapshot",
+                        std::io::Error::other(format!("{other:?}")),
+                    ));
+                }
             }
-            None => {
-                jobs.remove(command.stream_id().as_str());
-            }
+        }
+        if let Some(snapshot) = projected_snapshot {
+            jobs.insert(command.stream_id().to_string(), snapshot);
+        } else {
+            jobs.remove(command.stream_id().as_str());
         }
         Ok(())
     }
@@ -221,15 +215,7 @@ impl MockConfigStore {
         let mut stream_versions = self.stream_versions.lock().unwrap();
         let current_snapshot = jobs.get(command.stream_id().as_str()).cloned();
         let current_version = stream_versions.get(command.stream_id().as_str()).copied();
-        let current_state = match current_snapshot.clone() {
-            Some(snapshot) => JobStreamState::try_from(snapshot).map_err(|source| {
-                CronError::event_source(
-                    "failed to decode mocked current job snapshot into stream state",
-                    source,
-                )
-            })?,
-            None => initial_state(),
-        };
+        let current_state = command.state_from_snapshot(current_snapshot.as_ref())?;
         command.write_condition.ensure(
             command.stream_id().as_str(),
             JobWriteState::new(current_version, current_snapshot.as_ref().is_some()),
@@ -255,29 +241,39 @@ impl MockConfigStore {
             }
             Err(error) => {
                 return Err(CronError::event_source(
-                    "failed to decide mocked job state change from current stream state",
+                    "failed to decide mocked job state change from current set-job-state state",
                     error,
                 ));
             }
         };
-        let next_state = events
-            .into_iter()
-            .try_fold(current_state, apply)
-            .map_err(|error| {
-                CronError::event_source(
-                    "failed to apply mocked job state events to current stream state",
-                    error,
-                )
-            })?;
         let next_version = current_version.unwrap_or(0) + 1;
         stream_versions.insert(command.stream_id().to_string(), next_version);
-        match next_state.into_snapshot(next_version) {
-            Some(snapshot) => {
-                jobs.insert(command.stream_id().to_string(), snapshot);
+        let mut projected_snapshot = current_snapshot;
+        for event in events {
+            match event {
+                JobEvent::JobStateChanged { state, .. } => {
+                    let mut snapshot = projected_snapshot.take().ok_or_else(|| {
+                        CronError::event_source(
+                            "failed to project mocked job state change without current snapshot",
+                            std::io::Error::other(command.stream_id().to_string()),
+                        )
+                    })?;
+                    snapshot.version = next_version;
+                    snapshot.payload.state = state;
+                    projected_snapshot = Some(snapshot);
+                }
+                other => {
+                    return Err(CronError::event_source(
+                        "failed to project mocked set-job-state event into current snapshot",
+                        std::io::Error::other(format!("{other:?}")),
+                    ));
+                }
             }
-            None => {
-                jobs.remove(command.stream_id().as_str());
-            }
+        }
+        if let Some(snapshot) = projected_snapshot {
+            jobs.insert(command.stream_id().to_string(), snapshot);
+        } else {
+            jobs.remove(command.stream_id().as_str());
         }
         Ok(())
     }
@@ -299,15 +295,7 @@ impl MockConfigStore {
         let mut stream_versions = self.stream_versions.lock().unwrap();
         let current_snapshot = jobs.get(command.stream_id().as_str()).cloned();
         let current_version = stream_versions.get(command.stream_id().as_str()).copied();
-        let current_state = match current_snapshot.clone() {
-            Some(snapshot) => JobStreamState::try_from(snapshot).map_err(|source| {
-                CronError::event_source(
-                    "failed to decode mocked current job snapshot into stream state",
-                    source,
-                )
-            })?,
-            None => initial_state(),
-        };
+        let current_state = command.state_from_snapshot(current_snapshot.as_ref())?;
         command.write_condition.ensure(
             command.stream_id().as_str(),
             JobWriteState::new(current_version, current_snapshot.as_ref().is_some()),
@@ -327,29 +315,31 @@ impl MockConfigStore {
             }
             Err(error) => {
                 return Err(CronError::event_source(
-                    "failed to decide mocked job removal from current stream state",
+                    "failed to decide mocked job removal from current delete-job state",
                     error,
                 ));
             }
         };
-        let next_state = events
-            .into_iter()
-            .try_fold(current_state, apply)
-            .map_err(|error| {
-                CronError::event_source(
-                    "failed to apply mocked job removal events to current stream state",
-                    error,
-                )
-            })?;
         let next_version = current_version.unwrap_or(0) + 1;
         stream_versions.insert(command.stream_id().to_string(), next_version);
-        match next_state.into_snapshot(next_version) {
-            Some(snapshot) => {
-                jobs.insert(command.stream_id().to_string(), snapshot);
+        let mut projected_snapshot = current_snapshot;
+        for event in events {
+            match event {
+                JobEvent::JobRemoved { .. } => {
+                    projected_snapshot = None;
+                }
+                other => {
+                    return Err(CronError::event_source(
+                        "failed to project mocked delete-job event into current snapshot",
+                        std::io::Error::other(format!("{other:?}")),
+                    ));
+                }
             }
-            None => {
-                jobs.remove(command.stream_id().as_str());
-            }
+        }
+        if let Some(snapshot) = projected_snapshot {
+            jobs.insert(command.stream_id().to_string(), snapshot);
+        } else {
+            jobs.remove(command.stream_id().as_str());
         }
         Ok(())
     }
