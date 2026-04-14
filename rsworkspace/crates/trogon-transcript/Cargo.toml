@@ -17,6 +17,8 @@ uuid = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+testcontainers-modules = { workspace = true }
+futures-util = { workspace = true }
 
 [features]
 default = []
