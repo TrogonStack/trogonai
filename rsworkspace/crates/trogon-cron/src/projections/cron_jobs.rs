@@ -20,18 +20,18 @@ use crate::{
     JobId, JobIdError, JobSpec,
     error::CronError,
     events::{JobEvent, JobEventData, RecordedJobEvent},
-    kv::{EVENTS_SUBJECT_PREFIX, JOBS_KEY_PREFIX, LEGACY_EVENTS_SUBJECT_PREFIX},
+    kv::{EVENTS_SUBJECT_PREFIX, LEGACY_EVENTS_SUBJECT_PREFIX},
     store::{
-        SNAPSHOT_STORE_CONFIG, open_config_bucket, open_events_stream, open_snapshot_bucket,
+        SNAPSHOT_STORE_CONFIG, open_cron_jobs_bucket, open_events_stream, open_snapshot_bucket,
         stream_subject_state,
     },
 };
 
-pub type ConfigWatchStream = Pin<Box<dyn Stream<Item = JobSpecChange> + Send + 'static>>;
-pub type LoadAndWatchResult = Result<(Vec<JobSpec>, ConfigWatchStream), CronError>;
+pub type CronJobWatchStream = Pin<Box<dyn Stream<Item = CronJobChange> + Send + 'static>>;
+pub type LoadAndWatchCronJobsResult = Result<(Vec<JobSpec>, CronJobWatchStream), CronError>;
 
 #[derive(Debug, Clone)]
-pub enum JobSpecChange {
+pub enum CronJobChange {
     Put(JobSpec),
     Delete(String),
 }
@@ -158,7 +158,7 @@ impl std::error::Error for JobTransitionError {
     }
 }
 
-pub async fn load_and_watch<J>(js: &J) -> LoadAndWatchResult
+pub async fn load_and_watch_cron_jobs<J>(js: &J) -> LoadAndWatchCronJobsResult
 where
     J: JetStreamGetKeyValue<Store = kv::Store>
         + JetStreamGetStream<Stream = jetstream::stream::Stream>,
@@ -171,34 +171,34 @@ where
     let last_sequence = info.state.last_sequence;
     let initial_jobs =
         rebuild_jobs_from_stream(&stream, info.state.first_sequence, last_sequence).await?;
-    rewrite_projection(js, &initial_jobs).await?;
+    rewrite_cron_jobs_projection(js, &initial_jobs).await?;
     let consumer = stream
         .create_consumer(event_watch_consumer_config(next_watch_start_sequence(
             last_sequence,
         )))
         .await
         .map_err(|source| {
-            CronError::event_source("failed to create job event watch consumer", source)
+            CronError::event_source("failed to create cron job event watch consumer", source)
         })?;
     let subscriber = consumer.messages().await.map_err(|source| {
-        CronError::event_source("failed to open job event watch stream", source)
+        CronError::event_source("failed to open cron job event watch stream", source)
     })?;
 
-    let kv: kv::Store = open_config_bucket(js).await?;
+    let kv: kv::Store = open_cron_jobs_bucket(js).await?;
     let state = initial_jobs
         .iter()
         .cloned()
         .map(|job| (job.payload.id.clone(), JobStreamState::Present(job.payload)))
         .collect::<BTreeMap<_, _>>();
     let state = Arc::new(Mutex::new(state));
-    let stream: ConfigWatchStream = Box::pin(subscriber.then(move |result| {
+    let watcher: CronJobWatchStream = Box::pin(subscriber.then(move |result| {
         let state = Arc::clone(&state);
         let kv = kv.clone();
         async move {
             let message = match result {
                 Ok(message) => message,
                 Err(error) => {
-                    tracing::error!(error = %error, "Failed to read job event from watch consumer");
+                    tracing::error!(error = %error, "Failed to read cron job event from watch consumer");
                     return None;
                 }
             };
@@ -206,7 +206,7 @@ where
             let event = match decode_recorded_watch_message(&message) {
                 Ok(event) => event,
                 Err(error) => {
-                    tracing::error!(error = %error, "Failed to decode job event from subscription");
+                    tracing::error!(error = %error, "Failed to decode cron job event from watcher");
                     ack_watch_message(&message).await;
                     return None;
                 }
@@ -215,7 +215,7 @@ where
             let stream_id = match job_id_from_event_subject(&event.recorded_stream_id) {
                 Ok(stream_id) => stream_id,
                 Err(error) => {
-                    tracing::error!(error = %error, "Failed to derive watched job stream id from subject");
+                    tracing::error!(error = %error, "Failed to derive watched cron job stream id from subject");
                     ack_watch_message(&message).await;
                     return None;
                 }
@@ -223,13 +223,13 @@ where
             let data = match event.decode_data() {
                 Ok(data) => data,
                 Err(error) => {
-                    tracing::error!(error = %error, "Failed to decode watched job event payload");
+                    tracing::error!(error = %error, "Failed to decode watched cron job event payload");
                     ack_watch_message(&message).await;
                     return None;
                 }
             };
             if let Err(error) = ensure_event_matches_stream(&stream_id, &data) {
-                tracing::error!(error = %error, "Watched job event payload does not match stream subject");
+                tracing::error!(error = %error, "Watched cron job event payload does not match stream subject");
                 ack_watch_message(&message).await;
                 return None;
             }
@@ -273,7 +273,7 @@ where
             };
 
             if let Err(error) = apply_projection_change(&kv, &projection_change).await {
-                tracing::error!(error = %error, "Failed to update projected job state from event");
+                tracing::error!(error = %error, "Failed to update projected cron jobs state from event");
                 ack_watch_message(&message).await;
                 return None;
             }
@@ -285,7 +285,7 @@ where
 
     Ok((
         initial_jobs.into_iter().map(|job| job.payload).collect(),
-        stream,
+        watcher,
     ))
 }
 
@@ -416,11 +416,14 @@ fn parse_event_job_id(event: &JobEvent) -> Result<JobId, JobTransitionError> {
     JobId::parse(&id).map_err(|source| JobTransitionError::InvalidEventId { id, source })
 }
 
-async fn rewrite_projection<J>(js: &J, jobs: &[Snapshot<JobSpec>]) -> Result<(), CronError>
+async fn rewrite_cron_jobs_projection<J>(
+    js: &J,
+    jobs: &[Snapshot<JobSpec>],
+) -> Result<(), CronError>
 where
     J: JetStreamGetKeyValue<Store = kv::Store>,
 {
-    let kv: kv::Store = open_config_bucket(js).await?;
+    let kv: kv::Store = open_cron_jobs_bucket(js).await?;
     let mut keys = kv
         .keys()
         .await
@@ -429,17 +432,16 @@ where
     while let Some(result) = keys.next().await {
         let key = result
             .map_err(|source| CronError::kv_source("failed to read projection key", source))?;
-        if key.starts_with(JOBS_KEY_PREFIX) {
-            let _ = kv.purge(key).await;
-        }
+        let _ = kv.purge(key).await;
     }
 
     for job in jobs {
-        let key = format!("{JOBS_KEY_PREFIX}{}", job.payload.id);
         let value = serde_json::to_vec(&job.payload)?;
-        kv.put(key, value.into()).await.map_err(|source| {
-            CronError::kv_source("failed to write projected job state", source)
-        })?;
+        kv.put(job.payload.id.clone(), value.into())
+            .await
+            .map_err(|source| {
+                CronError::kv_source("failed to write projected job state", source)
+            })?;
     }
 
     Ok(())
@@ -563,28 +565,27 @@ async fn apply_projection_change(
 ) -> Result<(), CronError> {
     match change {
         ProjectionChange::Upsert(job) => {
-            let key = format!("{JOBS_KEY_PREFIX}{}", job.id);
             let value = serde_json::to_vec(job)?;
-            kv.put(key, value.into()).await.map_err(|source| {
-                CronError::kv_source("failed to store projected job state", source)
-            })?;
-        }
-        ProjectionChange::Delete(id) => {
-            kv.delete(format!("{JOBS_KEY_PREFIX}{id}"))
+            kv.put(job.id.clone(), value.into())
                 .await
                 .map_err(|source| {
-                    CronError::kv_source("failed to delete projected job state", source)
+                    CronError::kv_source("failed to store projected job state", source)
                 })?;
+        }
+        ProjectionChange::Delete(id) => {
+            kv.delete(id.clone()).await.map_err(|source| {
+                CronError::kv_source("failed to delete projected job state", source)
+            })?;
         }
     }
 
     Ok(())
 }
 
-fn change_from_projection_change(change: ProjectionChange) -> JobSpecChange {
+fn change_from_projection_change(change: ProjectionChange) -> CronJobChange {
     match change {
-        ProjectionChange::Upsert(job) => JobSpecChange::Put(job),
-        ProjectionChange::Delete(id) => JobSpecChange::Delete(id),
+        ProjectionChange::Upsert(job) => CronJobChange::Put(job),
+        ProjectionChange::Delete(id) => CronJobChange::Delete(id),
     }
 }
 

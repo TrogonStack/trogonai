@@ -5,7 +5,7 @@ use trogon_nats::jetstream::{is_create_key_value_already_exists, is_create_strea
 
 use crate::error::CronError;
 
-pub const CONFIG_BUCKET: &str = "cron_configs";
+pub const CRON_JOBS_BUCKET: &str = "cron_jobs";
 pub const LEADER_BUCKET: &str = "cron_leader";
 pub const LEADER_KEY: &str = "lock";
 pub const EVENTS_STREAM: &str = "CRON_EVENTS";
@@ -13,10 +13,10 @@ pub const EVENTS_SUBJECT_PREFIX: &str = "cron.jobs.events.";
 pub const EVENTS_SUBJECT_PATTERN: &str = "cron.jobs.events.>";
 pub const LEGACY_EVENTS_SUBJECT_PREFIX: &str = "cron.events.jobs.";
 pub const LEGACY_EVENTS_SUBJECT_PATTERN: &str = "cron.events.jobs.>";
-pub const JOBS_KEY_PREFIX: &str = "jobs.";
 pub const SNAPSHOT_BUCKET: &str = "cron_snapshots";
-pub const SNAPSHOT_KEY_PREFIX: &str = "jobs.";
-pub const SNAPSHOT_LAST_EVENT_SEQUENCE_KEY: &str = "_snapshot.last_event_sequence";
+pub const CRON_JOBS_SNAPSHOT_KEY_PREFIX: &str = "cron_jobs.";
+pub const CRON_JOBS_SNAPSHOT_LAST_EVENT_SEQUENCE_KEY: &str =
+    "_snapshot.cron_jobs.last_event_sequence";
 pub const SCHEDULES_STREAM: &str = "CRON_SCHEDULES";
 pub const SCHEDULE_SUBJECT_PREFIX: &str = "cron.schedules.";
 pub const FIRE_SUBJECT_PREFIX: &str = "cron.fire.";
@@ -24,11 +24,13 @@ pub const SCHEDULE_SUBJECT_PATTERN: &str = "cron.schedules.>";
 pub const FIRE_SUBJECT_PATTERN: &str = "cron.fire.>";
 
 #[cfg(not(coverage))]
-pub async fn get_or_create_config_bucket(js: &jetstream::Context) -> Result<kv::Store, CronError> {
+pub async fn get_or_create_cron_jobs_bucket(
+    js: &jetstream::Context,
+) -> Result<kv::Store, CronError> {
     get_or_create(
         js,
         kv::Config {
-            bucket: CONFIG_BUCKET.to_string(),
+            bucket: CRON_JOBS_BUCKET.to_string(),
             history: 5,
             ..Default::default()
         },
@@ -37,10 +39,12 @@ pub async fn get_or_create_config_bucket(js: &jetstream::Context) -> Result<kv::
 }
 
 #[cfg(coverage)]
-pub async fn get_or_create_config_bucket(_js: &jetstream::Context) -> Result<kv::Store, CronError> {
+pub async fn get_or_create_cron_jobs_bucket(
+    _js: &jetstream::Context,
+) -> Result<kv::Store, CronError> {
     Err(CronError::kv_source(
-        "coverage stub does not provision config buckets",
-        std::io::Error::other(CONFIG_BUCKET),
+        "coverage stub does not provision cron jobs buckets",
+        std::io::Error::other(CRON_JOBS_BUCKET),
     ))
 }
 

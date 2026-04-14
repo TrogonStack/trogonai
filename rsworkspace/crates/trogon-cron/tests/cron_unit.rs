@@ -4,7 +4,7 @@ use trogon_cron::{
     ChangeJobStateCommand, CronController, DeliverySpec, GetJobCommand, JobEnabledState, JobId,
     JobSpec, JobWriteCondition, ListJobsCommand, RegisterJobCommand, RemoveJobCommand,
     SamplingSource, SchedulePublisher, ScheduleSpec,
-    mocks::{MockConfigStore, MockLeaderLock, MockSchedulePublisher},
+    mocks::{MockCronStore, MockLeaderLock, MockSchedulePublisher},
 };
 
 fn job_id(id: &str) -> JobId {
@@ -29,7 +29,7 @@ fn base_job(id: &str) -> JobSpec {
 
 #[tokio::test]
 async fn client_register_then_get() {
-    let store = MockConfigStore::new();
+    let store = MockCronStore::new();
 
     let job = base_job("backup");
     store
@@ -48,7 +48,7 @@ async fn client_register_then_get() {
 
 #[tokio::test]
 async fn client_set_enabled_toggles_job() {
-    let store = MockConfigStore::new();
+    let store = MockCronStore::new();
 
     store
         .register_job(
@@ -85,7 +85,7 @@ async fn client_set_enabled_toggles_job() {
 
 #[tokio::test]
 async fn client_remove_and_list_jobs_use_store_paths() {
-    let store = MockConfigStore::new();
+    let store = MockCronStore::new();
 
     store
         .register_job(
@@ -159,7 +159,7 @@ async fn client_rejects_invalid_source_subject() {
 
 #[tokio::test]
 async fn client_rejects_stale_version() {
-    let store = MockConfigStore::new();
+    let store = MockCronStore::new();
     store
         .register_job(
             RegisterJobCommand::new(base_job("stale"), JobWriteCondition::MustNotExist).unwrap(),
@@ -197,7 +197,7 @@ async fn mock_schedule_publisher_records_changes() {
 #[test]
 fn controller_new_with_mocks_compiles() {
     let _controller = CronController::new(
-        MockConfigStore::new(),
+        MockCronStore::new(),
         MockSchedulePublisher::new(),
         MockLeaderLock::new(),
     );

@@ -43,7 +43,7 @@ async fn reset_state(js: &jetstream::Context) {
         let _ = stream.purge().await;
     }
     let _ = js.delete_stream("SENSORS").await;
-    if let Ok(kv) = js.get_key_value(trogon_cron::kv::CONFIG_BUCKET).await {
+    if let Ok(kv) = js.get_key_value(trogon_cron::kv::CRON_JOBS_BUCKET).await {
         let mut keys = kv.keys().await.unwrap();
         while let Some(result) = futures::StreamExt::next(&mut keys).await {
             let key = result.unwrap();
