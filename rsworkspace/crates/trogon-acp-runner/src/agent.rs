@@ -161,6 +161,65 @@ fn internal_error(msg: impl Into<String>) -> Error {
     Error::new(ErrorCode::InternalError.into(), msg.into())
 }
 
+/// Sends the conversation history to `trogon-compactor` via NATS request-reply.
+///
+/// Returns the original messages unchanged if the compactor is not running or
+/// returns an error — compaction is always opt-in and never blocks the prompt.
+#[cfg_attr(coverage, coverage(off))]
+async fn compact_messages(
+    nats: &async_nats::Client,
+    messages: Vec<Message>,
+    session_id: &str,
+) -> Vec<Message> {
+    #[derive(serde::Serialize)]
+    struct CompactReq<'a> {
+        messages: &'a [Message],
+    }
+    #[derive(serde::Deserialize)]
+    struct CompactResp {
+        messages: Vec<Message>,
+        #[serde(default)]
+        compacted: bool,
+        #[serde(default)]
+        tokens_before: usize,
+        #[serde(default)]
+        tokens_after: usize,
+    }
+
+    let Ok(payload) = serde_json::to_vec(&CompactReq { messages: &messages }) else {
+        return messages;
+    };
+
+    let reply = match nats
+        .request("trogon.compactor.compact", payload.into())
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            warn!(session_id, error = %e, "compactor unavailable — skipping compaction");
+            return messages;
+        }
+    };
+
+    match serde_json::from_slice::<CompactResp>(&reply.payload) {
+        Ok(resp) => {
+            if resp.compacted {
+                info!(
+                    session_id,
+                    tokens_before = resp.tokens_before,
+                    tokens_after = resp.tokens_after,
+                    "context compacted"
+                );
+            }
+            resp.messages
+        }
+        Err(e) => {
+            warn!(session_id, error = %e, "compactor returned invalid response — skipping");
+            messages
+        }
+    }
+}
+
 /// Agent implementation that handles all ACP methods via NATS.
 ///
 /// Generic parameters with production defaults:
@@ -181,6 +240,8 @@ pub struct TrogonAgent<
     gateway_config: Arc<RwLock<Option<GatewayConfig>>>,
     /// Per-session semaphore (1 permit) to serialize concurrent prompt calls.
     session_locks: Arc<std::sync::Mutex<HashMap<String, Arc<tokio::sync::Semaphore>>>>,
+    /// NATS client used to call trogon-compactor.  `None` disables compaction.
+    compactor_nats: Option<async_nats::Client>,
 }
 
 impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> TrogonAgent<S, A, N> {
@@ -202,7 +263,19 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> TrogonAgent<
             permission_tx,
             gateway_config,
             session_locks: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            compactor_nats: None,
         }
+    }
+
+    /// Enable context compaction via `trogon-compactor`.
+    ///
+    /// When set, each prompt call sends the session history to
+    /// `trogon.compactor.compact` before running the agent loop.  If the
+    /// compactor service is unavailable the call degrades gracefully and
+    /// continues without compaction.
+    pub fn with_compactor(mut self, nats: async_nats::Client) -> Self {
+        self.compactor_nats = Some(nats);
+        self
     }
 
     #[cfg_attr(coverage, coverage(off))]
@@ -311,6 +384,13 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> TrogonAgent<
         }
 
         state.messages.push(user_message_from_request(req));
+
+        // Compact history if approaching the context window limit.
+        // Degrades gracefully — if trogon-compactor is not running, continues unchanged.
+        if let Some(ref nats) = self.compactor_nats {
+            let msgs = std::mem::take(&mut state.messages);
+            state.messages = compact_messages(nats, msgs, &session_id).await;
+        }
 
         let (event_tx, mut event_rx) = mpsc::channel::<AgentEvent>(32);
         let tools: Vec<ToolDef> = vec![];
