@@ -6,7 +6,7 @@ use trogon_nats::jetstream::JetStreamGetStream;
 use crate::{error::CronError, kv::EVENTS_STREAM};
 
 #[cfg(not(coverage))]
-pub(super) async fn run<J>(js: &J) -> Result<jetstream::stream::Stream, CronError>
+pub(crate) async fn run<J>(js: &J) -> Result<jetstream::stream::Stream, CronError>
 where
     J: JetStreamGetStream<Stream = jetstream::stream::Stream>,
 {
@@ -16,7 +16,7 @@ where
 }
 
 #[cfg(coverage)]
-pub(super) async fn run<J>(_js: &J) -> Result<jetstream::stream::Stream, CronError>
+pub(crate) async fn run<J>(_js: &J) -> Result<jetstream::stream::Stream, CronError>
 where
     J: JetStreamGetStream<Stream = jetstream::stream::Stream>,
 {

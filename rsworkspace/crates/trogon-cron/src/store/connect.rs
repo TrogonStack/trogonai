@@ -6,9 +6,8 @@ use crate::{
     error::CronError,
     kv::{get_or_create_config_bucket, get_or_create_events_stream, get_or_create_snapshot_bucket},
     nats::validate_events_stream,
+    projections::catch_up_snapshots,
 };
-
-use super::catch_up_snapshots;
 
 #[cfg(not(coverage))]
 pub async fn connect_store(nats: async_nats::Client) -> Result<jetstream::Context, CronError> {
@@ -16,7 +15,7 @@ pub async fn connect_store(nats: async_nats::Client) -> Result<jetstream::Contex
     get_or_create_config_bucket(&js).await?;
     get_or_create_snapshot_bucket(&js).await?;
     validate_events_stream(&get_or_create_events_stream(&js).await?)?;
-    catch_up_snapshots::run(&js).await?;
+    catch_up_snapshots(&js).await?;
     Ok(js)
 }
 

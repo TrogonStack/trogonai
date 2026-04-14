@@ -16,7 +16,8 @@ use crate::{
     error::CronError,
     kv::{LEADER_BUCKET, LEADER_KEY},
     nats::NatsSchedulePublisher,
-    store::{JobSpecChange, LoadAndWatchCommand, connect_store, load_and_watch},
+    projections::{JobSpecChange, load_and_watch},
+    store::connect_store,
     traits::{LeaderLock, SchedulePublisher},
 };
 
@@ -97,7 +98,7 @@ where
 {
     pub async fn run(self) -> Result<(), CronError> {
         let (initial_jobs, mut config_watcher): (Vec<JobSpec>, ConfigWatcher) =
-            load_and_watch(&self.config_store, LoadAndWatchCommand).await?;
+            load_and_watch(&self.config_store).await?;
         let mut desired_jobs = to_job_map(initial_jobs);
         let mut leader =
             LeaderElection::new(self.leader_lock, self.node_id.clone(), self.leader_timing);
@@ -312,7 +313,7 @@ async fn reestablish_config_watch(
             _ = trogon_telemetry::signal::shutdown_signal() => {
                 return Ok(ReestablishedWatch::Shutdown);
             }
-            result = load_and_watch(config_store, LoadAndWatchCommand) => {
+            result = load_and_watch(config_store) => {
                 match result {
                     Ok((jobs, watcher)) => return Ok(ReestablishedWatch::Ready((jobs, watcher))),
                     Err(error) => {
@@ -343,7 +344,7 @@ mod tests {
     use crate::{
         config::{DeliverySpec, JobEnabledState, JobSpec, ScheduleSpec},
         mocks::{MockConfigStore, MockLeaderLock, MockSchedulePublisher},
-        store::JobSpecChange,
+        projections::JobSpecChange,
     };
     use trogon_nats::lease::{LeaderElection, LeaseRenewInterval, LeaseTiming, LeaseTtl};
     use trogon_std::time::{GetElapsed, GetNow};

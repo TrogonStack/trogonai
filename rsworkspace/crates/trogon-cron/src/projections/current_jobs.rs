@@ -1,5 +1,40 @@
-use crate::{JobId, JobIdError, config::JobSpec, events::JobEvent};
-use trogon_eventsourcing::{Snapshot, StreamEvent};
+use std::collections::BTreeMap;
+use std::pin::Pin;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use async_nats::jetstream::{
+    self,
+    consumer::{AckPolicy, DeliverPolicy, ReplayPolicy, pull},
+    kv,
+};
+use chrono::{DateTime, Utc};
+use futures::{Stream, StreamExt, future};
+use trogon_eventsourcing::{
+    Snapshot, SnapshotChange, StreamEvent, load_snapshot, load_snapshot_map,
+    maybe_advance_checkpoint, persist_snapshot_change, read_checkpoint, write_checkpoint,
+};
+use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream};
+
+use crate::{
+    JobId, JobIdError, JobSpec,
+    error::CronError,
+    events::{JobEvent, JobEventData, RecordedJobEvent},
+    kv::{EVENTS_SUBJECT_PREFIX, JOBS_KEY_PREFIX, LEGACY_EVENTS_SUBJECT_PREFIX},
+    store::{
+        SNAPSHOT_STORE_CONFIG, open_config_bucket, open_events_stream, open_snapshot_bucket,
+        stream_subject_state,
+    },
+};
+
+pub type ConfigWatchStream = Pin<Box<dyn Stream<Item = JobSpecChange> + Send + 'static>>;
+pub type LoadAndWatchResult = Result<(Vec<JobSpec>, ConfigWatchStream), CronError>;
+
+#[derive(Debug, Clone)]
+pub enum JobSpecChange {
+    Put(JobSpec),
+    Delete(String),
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ProjectionChange {
@@ -123,9 +158,501 @@ impl std::error::Error for JobTransitionError {
     }
 }
 
+pub async fn load_and_watch<J>(js: &J) -> LoadAndWatchResult
+where
+    J: JetStreamGetKeyValue<Store = kv::Store>
+        + JetStreamGetStream<Stream = jetstream::stream::Stream>,
+{
+    let stream: jetstream::stream::Stream = open_events_stream(js).await?;
+    let info = stream
+        .get_info()
+        .await
+        .map_err(|source| CronError::event_source("failed to query events stream info", source))?;
+    let last_sequence = info.state.last_sequence;
+    let initial_jobs =
+        rebuild_jobs_from_stream(&stream, info.state.first_sequence, last_sequence).await?;
+    rewrite_projection(js, &initial_jobs).await?;
+    let consumer = stream
+        .create_consumer(event_watch_consumer_config(next_watch_start_sequence(
+            last_sequence,
+        )))
+        .await
+        .map_err(|source| {
+            CronError::event_source("failed to create job event watch consumer", source)
+        })?;
+    let subscriber = consumer.messages().await.map_err(|source| {
+        CronError::event_source("failed to open job event watch stream", source)
+    })?;
+
+    let kv: kv::Store = open_config_bucket(js).await?;
+    let state = initial_jobs
+        .iter()
+        .cloned()
+        .map(|job| (job.payload.id.clone(), JobStreamState::Present(job.payload)))
+        .collect::<BTreeMap<_, _>>();
+    let state = Arc::new(Mutex::new(state));
+    let stream: ConfigWatchStream = Box::pin(subscriber.then(move |result| {
+        let state = Arc::clone(&state);
+        let kv = kv.clone();
+        async move {
+            let message = match result {
+                Ok(message) => message,
+                Err(error) => {
+                    tracing::error!(error = %error, "Failed to read job event from watch consumer");
+                    return None;
+                }
+            };
+
+            let event = match decode_recorded_watch_message(&message) {
+                Ok(event) => event,
+                Err(error) => {
+                    tracing::error!(error = %error, "Failed to decode job event from subscription");
+                    ack_watch_message(&message).await;
+                    return None;
+                }
+            };
+
+            let stream_id = match job_id_from_event_subject(&event.recorded_stream_id) {
+                Ok(stream_id) => stream_id,
+                Err(error) => {
+                    tracing::error!(error = %error, "Failed to derive watched job stream id from subject");
+                    ack_watch_message(&message).await;
+                    return None;
+                }
+            };
+            let data = match event.decode_data() {
+                Ok(data) => data,
+                Err(error) => {
+                    tracing::error!(error = %error, "Failed to decode watched job event payload");
+                    ack_watch_message(&message).await;
+                    return None;
+                }
+            };
+            if let Err(error) = ensure_event_matches_stream(&stream_id, &data) {
+                tracing::error!(error = %error, "Watched job event payload does not match stream subject");
+                ack_watch_message(&message).await;
+                return None;
+            }
+            let projection_change = {
+                let mut state = state.lock().expect("job event state mutex poisoned");
+                (|| -> Result<Option<ProjectionChange>, CronError> {
+                    let current = state
+                        .get(stream_id.as_str())
+                        .cloned()
+                        .unwrap_or_else(initial_state);
+                    let next = apply(current.clone(), data.clone()).map_err(|error| {
+                        CronError::event_source(
+                            "failed to apply watched job event to stream state",
+                            error,
+                        )
+                    })?;
+                    let change = projection_change(&current, &next);
+                    match &next {
+                        JobStreamState::Present(_) => {
+                            state.insert(stream_id.to_string(), next);
+                        }
+                        JobStreamState::Initial => {
+                            state.remove(stream_id.as_str());
+                        }
+                    }
+
+                    Ok(change)
+                })()
+            };
+            let projection_change = match projection_change {
+                Ok(change) => change,
+                Err(error) => {
+                    tracing::error!(error = %error, "Failed to apply job event to current state");
+                    ack_watch_message(&message).await;
+                    return None;
+                }
+            };
+            let Some(projection_change) = projection_change else {
+                ack_watch_message(&message).await;
+                return None;
+            };
+
+            if let Err(error) = apply_projection_change(&kv, &projection_change).await {
+                tracing::error!(error = %error, "Failed to update projected job state from event");
+                ack_watch_message(&message).await;
+                return None;
+            }
+
+            ack_watch_message(&message).await;
+            Some(change_from_projection_change(projection_change))
+        }
+    }).filter_map(future::ready));
+
+    Ok((
+        initial_jobs.into_iter().map(|job| job.payload).collect(),
+        stream,
+    ))
+}
+
+pub(crate) async fn catch_up_snapshots<J>(js: &J) -> Result<(), CronError>
+where
+    J: JetStreamGetKeyValue<Store = kv::Store>
+        + JetStreamGetStream<Stream = jetstream::stream::Stream>,
+{
+    let stream: jetstream::stream::Stream = open_events_stream(js).await?;
+    let info = stream.get_info().await.map_err(|source| {
+        CronError::event_source(
+            "failed to query events stream info for snapshot catch-up",
+            source,
+        )
+    })?;
+    if info.state.messages == 0 {
+        return Ok(());
+    }
+
+    let bucket = open_snapshot_bucket(js).await?;
+    let checkpoint = read_checkpoint(&bucket, SNAPSHOT_STORE_CONFIG)
+        .await
+        .map_err(CronError::from)?;
+    if checkpoint >= info.state.last_sequence {
+        return Ok(());
+    }
+
+    let mut snapshots = load_snapshot_map(&bucket, SNAPSHOT_STORE_CONFIG)
+        .await
+        .map_err(CronError::from)?;
+    let start = checkpoint.max(info.state.first_sequence.saturating_sub(1)) + 1;
+
+    for sequence in start..=info.state.last_sequence {
+        let Some(message) = read_raw_event_message(
+            &stream,
+            sequence,
+            "failed to read job event during snapshot catch-up",
+        )
+        .await?
+        else {
+            continue;
+        };
+        let event = decode_recorded_job_event(message)?;
+        let stream_id = job_id_from_event_subject(&event.recorded_stream_id)?;
+        let data = event.decode_data().map_err(|source| {
+            CronError::event_source(
+                "failed to decode job event during snapshot catch-up",
+                source,
+            )
+        })?;
+        let change = apply_event_to_snapshot_map(&mut snapshots, &stream_id, &data, sequence)?;
+        persist_snapshot_change(&bucket, SNAPSHOT_STORE_CONFIG, change)
+            .await
+            .map_err(CronError::from)?;
+        write_checkpoint(&bucket, SNAPSHOT_STORE_CONFIG, sequence)
+            .await
+            .map_err(CronError::from)?;
+    }
+
+    Ok(())
+}
+
+pub(crate) async fn project_appended_events<J>(
+    js: &J,
+    job_id: &str,
+    events: &[JobEventData],
+) -> Result<(), CronError>
+where
+    J: JetStreamGetKeyValue<Store = kv::Store>
+        + JetStreamGetStream<Stream = jetstream::stream::Stream>,
+{
+    if events.is_empty() {
+        return Ok(());
+    }
+    let stream_id = JobId::parse(job_id).map_err(|source| {
+        CronError::event_source(
+            "failed to parse job stream id for snapshot projection",
+            source,
+        )
+    })?;
+
+    let bucket = open_snapshot_bucket(js).await?;
+    let mut snapshots = BTreeMap::new();
+    if let Some(snapshot) = load_snapshot(&bucket, SNAPSHOT_STORE_CONFIG, job_id)
+        .await
+        .map_err(CronError::from)?
+    {
+        snapshots.insert(job_id.to_string(), snapshot);
+    }
+
+    let stream = stream_subject_state(js, job_id).await?;
+    let final_version = stream.write_state.current_version().ok_or_else(|| {
+        CronError::event_source(
+            "stream snapshot projection requires an event version",
+            std::io::Error::other(format!("job '{job_id}'")),
+        )
+    })?;
+    let start_version = final_version
+        .checked_sub(events.len() as u64 - 1)
+        .ok_or_else(|| {
+            CronError::event_source(
+                "stream snapshot projection requires a valid batch version range",
+                std::io::Error::other(format!("job '{job_id}'")),
+            )
+        })?;
+
+    for (index, event) in events.iter().enumerate() {
+        let decoded = event.decode_data().map_err(|source| {
+            CronError::event_source("failed to decode job event for snapshot projection", source)
+        })?;
+        let change = apply_event_to_snapshot_map(
+            &mut snapshots,
+            &stream_id,
+            &decoded,
+            start_version + index as u64,
+        )?;
+        persist_snapshot_change(&bucket, SNAPSHOT_STORE_CONFIG, change)
+            .await
+            .map_err(CronError::from)?;
+    }
+    maybe_advance_checkpoint(&bucket, SNAPSHOT_STORE_CONFIG, final_version)
+        .await
+        .map_err(CronError::from)
+}
+
 fn parse_event_job_id(event: &JobEvent) -> Result<JobId, JobTransitionError> {
     let id = event.stream_id().to_string();
     JobId::parse(&id).map_err(|source| JobTransitionError::InvalidEventId { id, source })
+}
+
+async fn rewrite_projection<J>(js: &J, jobs: &[Snapshot<JobSpec>]) -> Result<(), CronError>
+where
+    J: JetStreamGetKeyValue<Store = kv::Store>,
+{
+    let kv: kv::Store = open_config_bucket(js).await?;
+    let mut keys = kv
+        .keys()
+        .await
+        .map_err(|source| CronError::kv_source("failed to list projection keys", source))?;
+
+    while let Some(result) = keys.next().await {
+        let key = result
+            .map_err(|source| CronError::kv_source("failed to read projection key", source))?;
+        if key.starts_with(JOBS_KEY_PREFIX) {
+            let _ = kv.purge(key).await;
+        }
+    }
+
+    for job in jobs {
+        let key = format!("{JOBS_KEY_PREFIX}{}", job.payload.id);
+        let value = serde_json::to_vec(&job.payload)?;
+        kv.put(key, value.into()).await.map_err(|source| {
+            CronError::kv_source("failed to write projected job state", source)
+        })?;
+    }
+
+    Ok(())
+}
+
+async fn rebuild_jobs_from_stream(
+    stream: &jetstream::stream::Stream,
+    first_sequence: u64,
+    last_sequence: u64,
+) -> Result<Vec<Snapshot<JobSpec>>, CronError> {
+    let mut snapshots = BTreeMap::new();
+    if last_sequence == 0 || first_sequence == 0 || first_sequence > last_sequence {
+        return Ok(Vec::new());
+    }
+
+    for sequence in first_sequence..=last_sequence {
+        let Some(message) =
+            read_raw_event_message(stream, sequence, "failed to read job event from stream")
+                .await?
+        else {
+            continue;
+        };
+        let version = message.sequence;
+        let event = decode_recorded_job_event(message)?;
+        let stream_id = job_id_from_event_subject(&event.recorded_stream_id)?;
+        let data = event.decode_data::<JobEvent>().map_err(|source| {
+            CronError::event_source("failed to decode recorded job event payload", source)
+        })?;
+        apply_event_to_snapshot_map(&mut snapshots, &stream_id, &data, version)?;
+    }
+
+    Ok(snapshots.into_values().collect())
+}
+
+async fn read_raw_event_message(
+    stream: &jetstream::stream::Stream,
+    sequence: u64,
+    context: &'static str,
+) -> Result<Option<async_nats::jetstream::message::StreamMessage>, CronError> {
+    match stream.get_raw_message(sequence).await {
+        Ok(message) => Ok(Some(message)),
+        Err(source)
+            if matches!(
+                source.kind(),
+                async_nats::jetstream::stream::RawMessageErrorKind::NoMessageFound
+            ) =>
+        {
+            Ok(None)
+        }
+        Err(source) => Err(CronError::event_source(context, source)),
+    }
+}
+
+fn decode_job_event_data(payload: &[u8]) -> Result<JobEventData, CronError> {
+    JobEventData::decode(payload)
+        .map_err(|source| CronError::event_source("failed to decode stored job event", source))
+}
+
+fn decode_recorded_job_event(
+    message: async_nats::jetstream::message::StreamMessage,
+) -> Result<RecordedJobEvent, CronError> {
+    let recorded_at = recorded_at_from_message(&message)?;
+    let stream_id = message.subject.to_string();
+    let log_position = Some(message.sequence);
+    let event = decode_job_event_data(&message.payload)?;
+
+    Ok(event.record(stream_id, None, log_position, recorded_at))
+}
+
+fn decode_recorded_watch_message(
+    message: &async_nats::jetstream::Message,
+) -> Result<RecordedJobEvent, CronError> {
+    let stream_message = async_nats::jetstream::message::StreamMessage::try_from(
+        message.message.clone(),
+    )
+    .map_err(|source| {
+        CronError::event_source(
+            "failed to reconstruct stream message from watch delivery",
+            source,
+        )
+    })?;
+
+    decode_recorded_job_event(stream_message)
+}
+
+fn recorded_at_from_message(
+    message: &async_nats::jetstream::message::StreamMessage,
+) -> Result<DateTime<Utc>, CronError> {
+    DateTime::<Utc>::from_timestamp(message.time.unix_timestamp(), message.time.nanosecond())
+        .ok_or_else(|| {
+            CronError::event_source(
+                "failed to convert message timestamp into recorded event time",
+                std::io::Error::other(message.subject.to_string()),
+            )
+        })
+}
+
+fn next_watch_start_sequence(last_sequence: u64) -> u64 {
+    last_sequence.saturating_add(1).max(1)
+}
+
+fn event_watch_consumer_config(start_sequence: u64) -> pull::Config {
+    pull::Config {
+        deliver_policy: DeliverPolicy::ByStartSequence { start_sequence },
+        ack_policy: AckPolicy::Explicit,
+        replay_policy: ReplayPolicy::Instant,
+        inactive_threshold: Duration::from_secs(30),
+        ..Default::default()
+    }
+}
+
+async fn ack_watch_message(message: &jetstream::Message) {
+    if let Err(error) = message.ack().await {
+        tracing::error!(error = %error, "Failed to acknowledge watched job event");
+    }
+}
+
+async fn apply_projection_change(
+    kv: &kv::Store,
+    change: &ProjectionChange,
+) -> Result<(), CronError> {
+    match change {
+        ProjectionChange::Upsert(job) => {
+            let key = format!("{JOBS_KEY_PREFIX}{}", job.id);
+            let value = serde_json::to_vec(job)?;
+            kv.put(key, value.into()).await.map_err(|source| {
+                CronError::kv_source("failed to store projected job state", source)
+            })?;
+        }
+        ProjectionChange::Delete(id) => {
+            kv.delete(format!("{JOBS_KEY_PREFIX}{id}"))
+                .await
+                .map_err(|source| {
+                    CronError::kv_source("failed to delete projected job state", source)
+                })?;
+        }
+    }
+
+    Ok(())
+}
+
+fn change_from_projection_change(change: ProjectionChange) -> JobSpecChange {
+    match change {
+        ProjectionChange::Upsert(job) => JobSpecChange::Put(job),
+        ProjectionChange::Delete(id) => JobSpecChange::Delete(id),
+    }
+}
+
+fn apply_event_to_snapshot_map(
+    snapshots: &mut BTreeMap<String, Snapshot<JobSpec>>,
+    stream_id: &JobId,
+    event: &JobEvent,
+    version: u64,
+) -> Result<SnapshotChange<JobSpec>, CronError> {
+    ensure_event_matches_stream(stream_id, event)?;
+    let current_state = match snapshots.get(stream_id.as_str()).cloned() {
+        Some(snapshot) => JobStreamState::try_from(snapshot).map_err(|source| {
+            CronError::event_source(
+                "failed to decode job snapshot into stream state during projection",
+                source,
+            )
+        })?,
+        None => initial_state(),
+    };
+    let next_state = apply(current_state, event.clone()).map_err(|source| {
+        CronError::event_source("failed to apply job event to stream snapshot state", source)
+    })?;
+
+    match next_state {
+        JobStreamState::Present(spec) => {
+            let snapshot = Snapshot::new(version, spec);
+            snapshots.insert(stream_id.to_string(), snapshot.clone());
+            Ok(SnapshotChange::upsert(stream_id.to_string(), snapshot))
+        }
+        JobStreamState::Initial => {
+            snapshots.remove(stream_id.as_str());
+            Ok(SnapshotChange::delete(stream_id.to_string()))
+        }
+    }
+}
+
+fn job_id_from_event_subject(subject: &str) -> Result<JobId, CronError> {
+    let raw_id = subject
+        .strip_prefix(EVENTS_SUBJECT_PREFIX)
+        .or_else(|| subject.strip_prefix(LEGACY_EVENTS_SUBJECT_PREFIX))
+        .ok_or_else(|| {
+            CronError::event_source(
+                "failed to derive job stream id from event subject",
+                std::io::Error::other(subject.to_string()),
+            )
+        })?;
+
+    JobId::parse(raw_id).map_err(|source| {
+        CronError::event_source("failed to parse job stream id from event subject", source)
+    })
+}
+
+fn ensure_event_matches_stream(
+    expected_stream_id: &JobId,
+    event: &JobEvent,
+) -> Result<(), CronError> {
+    if event.stream_id() == expected_stream_id.as_str() {
+        Ok(())
+    } else {
+        Err(CronError::event_source(
+            "event payload stream id does not match the expected stream",
+            std::io::Error::other(format!(
+                "expected '{}' but event carried '{}'",
+                expected_stream_id,
+                event.stream_id()
+            )),
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -134,8 +661,8 @@ mod tests {
 
     use super::*;
     use crate::{
+        RegisteredJobSpec,
         config::{DeliverySpec, JobEnabledState, ScheduleSpec},
-        events::JobEvent,
     };
 
     fn job(id: &str) -> JobSpec {
@@ -262,16 +789,107 @@ mod tests {
 
     #[test]
     fn reducer_rejects_stream_id_mismatch() {
-        let error = apply(
-            initial_state(),
-            JobEvent::JobRemoved {
-                id: "other".to_string(),
+        let stream_id = JobId::parse("alpha").unwrap();
+        let error = ensure_event_matches_stream(
+            &stream_id,
+            &JobEvent::JobRemoved {
+                id: "beta".to_string(),
             },
         )
         .unwrap_err();
-        assert!(matches!(
-            error,
-            JobTransitionError::MissingJobForRemoval { .. }
-        ));
+        assert!(
+            error
+                .to_string()
+                .contains("event payload stream id does not match")
+        );
+    }
+
+    #[test]
+    fn watch_start_sequence_moves_past_bootstrap_tail() {
+        assert_eq!(next_watch_start_sequence(0), 1);
+        assert_eq!(next_watch_start_sequence(41), 42);
+    }
+
+    #[test]
+    fn watch_consumer_replays_only_after_bootstrap_boundary() {
+        let config = event_watch_consumer_config(42);
+
+        assert_eq!(
+            config.deliver_policy,
+            DeliverPolicy::ByStartSequence { start_sequence: 42 }
+        );
+        assert_eq!(config.ack_policy, AckPolicy::Explicit);
+        assert_eq!(config.replay_policy, ReplayPolicy::Instant);
+    }
+
+    #[test]
+    fn snapshot_projection_replays_delete_and_recreate() {
+        let mut snapshots = BTreeMap::new();
+        let stream_id = JobId::parse("alpha").unwrap();
+
+        apply_event_to_snapshot_map(
+            &mut snapshots,
+            &stream_id,
+            &JobEvent::JobRegistered {
+                id: "alpha".to_string(),
+                spec: RegisteredJobSpec::from(job("alpha")),
+            },
+            1,
+        )
+        .unwrap();
+        apply_event_to_snapshot_map(
+            &mut snapshots,
+            &stream_id,
+            &JobEvent::JobStateChanged {
+                id: "alpha".to_string(),
+                state: JobEnabledState::Disabled,
+            },
+            2,
+        )
+        .unwrap();
+        apply_event_to_snapshot_map(
+            &mut snapshots,
+            &stream_id,
+            &JobEvent::JobRemoved {
+                id: "alpha".to_string(),
+            },
+            3,
+        )
+        .unwrap();
+        apply_event_to_snapshot_map(
+            &mut snapshots,
+            &stream_id,
+            &JobEvent::JobRegistered {
+                id: "alpha".to_string(),
+                spec: RegisteredJobSpec::from(job("alpha")),
+            },
+            4,
+        )
+        .unwrap();
+
+        let snapshot = snapshots.get("alpha").unwrap();
+        assert_eq!(snapshot.version, 4);
+        assert_eq!(snapshot.payload, job("alpha"));
+    }
+
+    #[test]
+    fn snapshot_projection_rejects_invalid_transition_sequence() {
+        let stream_id = JobId::parse("alpha").unwrap();
+        let error = apply_event_to_snapshot_map(
+            &mut BTreeMap::new(),
+            &stream_id,
+            &JobEvent::JobStateChanged {
+                id: "alpha".to_string(),
+                state: JobEnabledState::Disabled,
+            },
+            1,
+        )
+        .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("failed to apply job event to stream snapshot state")
+        );
     }
 }

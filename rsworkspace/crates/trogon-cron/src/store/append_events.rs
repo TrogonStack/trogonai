@@ -3,6 +3,7 @@
 use std::future::IntoFuture;
 
 use async_nats::jetstream::{self, context, context::PublishErrorKind, message::PublishMessage};
+use chrono::{DateTime, Utc};
 use trogon_eventsourcing::NonEmpty;
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream, JetStreamPublishMessage};
 use uuid::Uuid;
@@ -15,17 +16,45 @@ use crate::{
         EventSubjectPrefix, NATS_BATCH_COMMIT, NATS_BATCH_ID, NATS_BATCH_SEQUENCE,
         StreamSubjectState, resolve_event_subject_state,
     },
-    processors::decode_recorded_job_event,
+    projections::project_appended_events,
 };
 
-use super::{events_stream, project_event_to_snapshot};
+use super::open_events_stream;
+
+fn decode_job_event_data(payload: &[u8]) -> Result<JobEventData, CronError> {
+    JobEventData::decode(payload)
+        .map_err(|source| CronError::event_source("failed to decode stored job event", source))
+}
+
+fn decode_recorded_job_event(
+    message: async_nats::jetstream::message::StreamMessage,
+) -> Result<crate::RecordedJobEvent, CronError> {
+    let recorded_at = recorded_at_from_message(&message)?;
+    let stream_id = message.subject.to_string();
+    let log_position = Some(message.sequence);
+    let event = decode_job_event_data(&message.payload)?;
+
+    Ok(event.record(stream_id, None, log_position, recorded_at))
+}
+
+fn recorded_at_from_message(
+    message: &async_nats::jetstream::message::StreamMessage,
+) -> Result<DateTime<Utc>, CronError> {
+    DateTime::<Utc>::from_timestamp(message.time.unix_timestamp(), message.time.nanosecond())
+        .ok_or_else(|| {
+            CronError::event_source(
+                "failed to convert message timestamp into recorded event time",
+                std::io::Error::other(message.subject.to_string()),
+            )
+        })
+}
 
 #[cfg(not(coverage))]
 async fn current_subject_state<J>(js: &J, subject: &str) -> Result<Option<JobWriteState>, CronError>
 where
     J: JetStreamGetStream<Stream = jetstream::stream::Stream>,
 {
-    let stream = events_stream::run(js).await?;
+    let stream = open_events_stream(js).await?;
     match stream.get_last_raw_message_by_subject(subject).await {
         Ok(message) => {
             let version = message.sequence;
@@ -169,7 +198,7 @@ where
         }
     }
 
-    project_event_to_snapshot::run(js, job_id, events.as_slice()).await?;
+    project_appended_events(js, job_id, events.as_slice()).await?;
 
     Ok(())
 }
