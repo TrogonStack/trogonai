@@ -81,11 +81,15 @@ pub async fn send_message(
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs()
-            // 25-hour window — one hour beyond PROMISE_TTL so recovery that
-            // happens right at the TTL boundary still finds the original message.
-            // limit=1000 (Slack API maximum) so the message is not missed in
-            // busy channels even at the edge of the window.
-            .saturating_sub(25 * 3600);
+            // 49-hour window — one hour beyond TOOL_RESULTS_TTL (48 h).
+            // Tool results live for 2 × PROMISE_TTL so a message posted
+            // during a long run that crashes and is recovered near the end
+            // of that window is still found in Slack history. Without this,
+            // recovery at hour 47 would search only 25 h back and miss a
+            // message posted at hour 25, causing a duplicate send.
+            // limit=1000 (Slack API maximum) so the message is not missed
+            // in busy channels even at the edge of the window.
+            .saturating_sub(49 * 3600);
 
         let history_url = format!(
             "{}/slack/conversations.history?channel={channel}&oldest={oldest}&limit=1000&include_all_metadata=true",
