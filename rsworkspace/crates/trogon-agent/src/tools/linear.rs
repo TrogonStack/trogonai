@@ -87,8 +87,27 @@ pub async fn post_comment(
                 }
             }
             Err(_) => {
-                // Graceful degradation: if the pre-check fetch fails, proceed with
-                // the post — the Idempotency-Key header still provides protection.
+                // Retry once on transient failure before graceful degradation.
+                match get_comments(ctx, &check_input).await {
+                    Ok(json_str) => {
+                        if let Ok(Value::Array(comments)) = serde_json::from_str::<Value>(&json_str) {
+                            let already_posted = comments.iter().any(|c| {
+                                c["body"]
+                                    .as_str()
+                                    .map(|b| b.contains(&marker))
+                                    .unwrap_or(false)
+                            });
+                            if already_posted {
+                                return Ok(format!(
+                                    "Comment already posted to {issue_id} (skipped duplicate)"
+                                ));
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        // Both attempts failed — proceed with the post.
+                    }
+                }
             }
         }
     }

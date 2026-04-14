@@ -740,7 +740,9 @@ impl AgentLoop {
         // still proceed using the revision stored in `checkpoint`. Distinct from
         // `checkpoint = None`, which means the KV revision was genuinely lost and
         // no writes of any kind are possible.
-        let mut checkpointing_disabled = false;
+        // `checkpointing_disabled` is declared inside the `tool_use` match arm so
+        // it resets to false on every iteration — Fix #1: re-attempt checkpointing
+        // each turn in case the payload has shrunk since it last exceeded the limit.
         // `recovering` is true only when we loaded a checkpoint — used to gate
         // the tool-result cache replay in `execute_tools`.
         let mut recovering = false;
@@ -1085,15 +1087,53 @@ impl AgentLoop {
                     if let (Some(store), Some(pid)) = (&self.promise_store, &self.promise_id) {
                         if let Some((ref mut p, ref mut rev)) = checkpoint {
                             p.status = crate::promise_store::PromiseStatus::Resolved;
-                            match tokio::time::timeout(
+                            let needs_reload = match tokio::time::timeout(
                                 NATS_KV_TIMEOUT,
                                 store.update_promise(&self.tenant_id, pid, p, *rev),
                             )
                             .await
                             {
-                                Ok(Ok(_)) => {}
-                                Ok(Err(e)) => warn!(error = %e, "Failed to mark promise Resolved"),
-                                Err(_) => warn!(promise_id = %pid, "NATS KV write timed out marking promise Resolved"),
+                                Ok(Ok(_)) => false,
+                                Ok(Err(e)) => {
+                                    warn!(error = %e, promise_id = %pid, "CAS conflict marking promise Resolved — reloading revision");
+                                    true
+                                }
+                                Err(_) => {
+                                    warn!(promise_id = %pid, "NATS KV write timed out marking promise Resolved — reloading to verify");
+                                    true
+                                }
+                            };
+                            if needs_reload {
+                                // Reload and retry once — either the write landed (CAS conflict
+                                // from a concurrent writer) or we need a fresh revision to retry.
+                                match tokio::time::timeout(
+                                    NATS_KV_TIMEOUT,
+                                    store.get_promise(&self.tenant_id, pid),
+                                )
+                                .await
+                                {
+                                    Ok(Ok(Some((current, new_rev))))
+                                        if current.status
+                                            != crate::promise_store::PromiseStatus::Resolved =>
+                                    {
+                                        p.status = crate::promise_store::PromiseStatus::Resolved;
+                                        *rev = new_rev;
+                                        match tokio::time::timeout(
+                                            NATS_KV_TIMEOUT,
+                                            store.update_promise(&self.tenant_id, pid, p, new_rev),
+                                        )
+                                        .await
+                                        {
+                                            Ok(Ok(_)) => {}
+                                            Ok(Err(e)) => warn!(error = %e, promise_id = %pid, "Failed to mark promise Resolved on retry"),
+                                            Err(_) => warn!(promise_id = %pid, "NATS KV write timed out marking promise Resolved on retry"),
+                                        }
+                                    }
+                                    Ok(Ok(Some(_))) => {} // Already Resolved by another process
+                                    Ok(Ok(None)) => {}    // Promise gone from KV
+                                    Ok(Err(e)) => warn!(error = %e, promise_id = %pid, "Failed to reload promise for Resolved retry"),
+                                    Err(_) => warn!(promise_id = %pid, "NATS KV timed out reloading promise for Resolved retry"),
+                                }
                             }
                         } else {
                             // checkpoint=None (CAS revision lost) — attempt a fresh get+write so
@@ -1126,6 +1166,11 @@ impl AgentLoop {
                     return Ok(text);
                 }
                 "tool_use" => {
+                    // Declared here (not outside the loop) so it resets to false on every
+                    // tool turn — each iteration retries the checkpoint in case the payload
+                    // has shrunk. The size-guard below re-enables it for this turn only
+                    // if trimming still cannot bring the payload under CHECKPOINT_MAX_BYTES.
+                    let mut checkpointing_disabled = false;
                     let results = self.execute_tools(&response.content, recovering).await;
                     messages.push(Message::assistant(response.content));
                     messages.push(Message::tool_results(results));
@@ -1140,12 +1185,7 @@ impl AgentLoop {
                     if let (Some(store), Some(pid)) = (&self.promise_store, &self.promise_id)
                         && let Some((ref mut p, ref mut rev)) = checkpoint
                     {
-                        if checkpointing_disabled {
-                            // Payload was too large on a previous turn — skip the
-                            // message-history write but leave `checkpoint` intact so
-                            // terminal-status writes (Resolved, PermanentFailed) can
-                            // still use the current KV revision.
-                        } else {
+                        {
 
                         // Guard: refuse to write a checkpoint that exceeds
                         // NATS KV's 1MB value limit. Oversized writes are
@@ -1386,7 +1426,7 @@ impl AgentLoop {
                             }
                         }
                         } // if !checkpointing_disabled: size fits (as-is or trimmed)
-                        } // else: !checkpointing_disabled (outer)
+                        } // checkpoint attempt block
                     }
                 }
                 "max_tokens" => {
@@ -2686,12 +2726,17 @@ mod tests {
         );
     }
 
-    // ── checkpointing_disabled across turns ───────────────────────────────────
+    // ── checkpointing retried each turn ───────────────────────────────────────
 
-    /// When the size guard fires on turn 1, `checkpointing_disabled = true`
-    /// persists across all subsequent turns — no message-history writes occur.
-    /// The terminal-status write (`Resolved`) still succeeds at end_turn because
-    /// `checkpoint` remains `Some` with a valid KV revision.
+    /// `checkpointing_disabled` resets to `false` on every tool turn so that a
+    /// payload that shrank since the last disabled turn can be written.
+    ///
+    /// Scenario:
+    ///  - turn 1 (3 msgs): payload too large, MIN_TRIM_KEEP=4 prevents any trim → no write.
+    ///  - turn 2 (5 msgs): divisor=2 → keep=4, drops the large user message → fits.
+    ///    `summarize_dropped_messages` is called for the dropped message (1 LLM call),
+    ///    checkpoint written with summary+kept messages.
+    ///  - end_turn: `Resolved` written.
     #[tokio::test]
     async fn checkpointing_disabled_persists_across_multiple_turns() {
         use crate::promise_store::mock::MockPromiseStore;
@@ -2702,20 +2747,26 @@ mod tests {
         let store = Arc::new(MockPromiseStore::new());
         store.insert_promise(make_test_promise("p1"));
 
-        // Three LLM responses: two tool_use turns and one end_turn.
         let tool_use_resp = || {
             serde_json::json!({
                 "stop_reason": "tool_use",
                 "content": [{"type": "tool_use", "id": "tu1", "name": "my_tool", "input": {}}]
             })
         };
+        // Response consumed by summarize_dropped_messages during turn 2 checkpoint.
+        let summarize_resp = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "Summary: the agent received a large initial message."}]
+        });
         let end_turn_resp = serde_json::json!({
             "stop_reason": "end_turn",
             "content": [{"type": "text", "text": "done"}]
         });
+        // Order: turn-1 LLM, turn-2 LLM, summarize call (inside turn-2 checkpoint), final LLM.
         let anthropic = Arc::new(SequencedMockAnthropicClient::new(vec![
             tool_use_resp(),
             tool_use_resp(),
+            summarize_resp,
             end_turn_resp,
         ]));
         let dispatcher = Arc::new(MockToolDispatcher::new("ok"));
@@ -2727,7 +2778,7 @@ mod tests {
             "p1",
         );
 
-        // Initial messages large enough to push the checkpoint over CHECKPOINT_MAX_BYTES.
+        // Initial message large enough to exceed CHECKPOINT_MAX_BYTES alone.
         let large_text = "a".repeat(CHECKPOINT_MAX_BYTES + 1);
         let result = agent
             .run(vec![Message::user_text(large_text)], &[], None)
@@ -2736,14 +2787,18 @@ mod tests {
         assert_eq!(result.unwrap(), "done");
 
         let (p, _) = store.get_promise("acme", "p1").await.unwrap().unwrap();
-        // Neither turn wrote message history.
-        assert!(p.messages.is_empty(), "no checkpoint must be written for either turn");
-        assert_eq!(p.iteration, 0, "iteration must not advance");
+        // Turn 1: trimming failed (only 3 messages, can't reduce below MIN_TRIM_KEEP=4).
+        // Turn 2: trimming succeeded — large message dropped, checkpoint written.
+        assert!(
+            !p.messages.is_empty(),
+            "checkpoint must be written on turn 2 when trimming drops the large message"
+        );
+        assert!(p.iteration > 0, "iteration must advance once checkpoint is written");
         // Terminal write succeeded.
         assert_eq!(
             p.status,
             PromiseStatus::Resolved,
-            "Resolved must be written even when checkpointing is disabled"
+            "Resolved must be written after checkpointing resumes"
         );
     }
 
@@ -4995,13 +5050,13 @@ mod tests {
         );
     }
 
-    /// When `update_promise` returns an error during the `end_turn` Resolved
-    /// write, a warning is logged and the run still returns `Ok(text)`.  The
-    /// promise status stays `Running` — the Resolved write was never committed.
+    /// When `update_promise` returns a CAS conflict during the `end_turn`
+    /// Resolved write, the code reloads the current revision and retries once.
+    /// `CasConflictOnceStore` only conflicts on the first call, so the retry
+    /// succeeds and the promise is ultimately marked Resolved.
     ///
     /// Uses `CasConflictOnceStore` with a direct end_turn (no tool_use) so
-    /// the only update_promise call is the Resolved write, hitting the
-    /// `Ok(Err(e))` arm in the end_turn block.
+    /// the only checkpoint update_promise calls are the Resolved write + retry.
     #[tokio::test]
     async fn end_turn_resolved_write_error_run_still_completes() {
         use crate::promise_store::mock::CasConflictOnceStore;
@@ -5029,15 +5084,15 @@ mod tests {
         assert_eq!(
             result.unwrap(),
             "done",
-            "run must return Ok(text) even when the Resolved write returns an error"
+            "run must return Ok(text) even when the first Resolved write CAS-conflicts"
         );
 
-        // update_promise returned an error — status was never updated to Resolved.
+        // CAS conflict on first write → reload + retry → retry succeeds → Resolved.
         let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
         assert_eq!(
             p.status,
-            PromiseStatus::Running,
-            "promise must remain Running when the end_turn Resolved write returns an error"
+            PromiseStatus::Resolved,
+            "promise must be Resolved after reload+retry when first write CAS-conflicts"
         );
     }
 
