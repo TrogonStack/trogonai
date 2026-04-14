@@ -1,51 +1,116 @@
-use std::fmt;
-
 use async_nats::jetstream::{self, context, kv};
-use trogon_cron::{
-    ChangeJobStateCommand as StoreChangeJobStateCommand, CronError, JobDecisionError,
-    JobEnabledState, JobId, JobIdError, JobSpec, JobWriteCondition, SNAPSHOT_STORE_CONFIG,
-    append_events, open_snapshot_bucket,
-};
-use trogon_eventsourcing::{Decision, decide, load_snapshot};
+use trogon_eventsourcing::{Decide, Decision, NonEmpty, StreamCommand, decide, load_snapshot};
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream, JetStreamPublishMessage};
 
-#[derive(Debug)]
-pub struct SetStateCommand {
-    pub job_id: JobId,
+use crate::{
+    JobDecisionError, JobEnabledState, JobId, JobSpec, JobWriteCondition,
+    error::CronError,
+    events::{JobEvent, JobEventData},
+    store::{SNAPSHOT_STORE_CONFIG, append_events, open_snapshot_bucket},
+};
+
+#[derive(Debug, Clone)]
+pub struct ChangeJobStateCommand {
+    pub id: JobId,
     pub state: JobEnabledState,
+    write_condition: Option<JobWriteCondition>,
 }
 
-#[derive(Debug)]
-pub enum CommandError {
-    InvalidJobId(JobIdError),
-    LoadJob(CronError),
-    JobNotFound(JobId),
-    SetState(CronError),
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChangeJobStateState {
+    Missing,
+    Present { current: JobEnabledState },
 }
 
-impl fmt::Display for CommandError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::InvalidJobId(source) => write!(f, "{source}"),
-            Self::LoadJob(source) => write!(f, "failed to load job: {source}"),
-            Self::JobNotFound(id) => write!(f, "job '{id}' not found"),
-            Self::SetState(source) => write!(f, "failed to update job state: {source}"),
+impl ChangeJobStateCommand {
+    pub const fn new(id: JobId, state: JobEnabledState) -> Self {
+        Self {
+            id,
+            state,
+            write_condition: None,
+        }
+    }
+
+    pub const fn with_write_condition(
+        id: JobId,
+        state: JobEnabledState,
+        write_condition: JobWriteCondition,
+    ) -> Self {
+        Self {
+            id,
+            state,
+            write_condition: Some(write_condition),
+        }
+    }
+
+    pub fn state_from_snapshot(
+        &self,
+        snapshot: Option<&trogon_eventsourcing::Snapshot<JobSpec>>,
+    ) -> Result<ChangeJobStateState, CronError> {
+        match snapshot {
+            None => Ok(ChangeJobStateState::Missing),
+            Some(snapshot) if snapshot.payload.id == self.stream_id().as_str() => {
+                Ok(ChangeJobStateState::Present {
+                    current: snapshot.payload.state,
+                })
+            }
+            Some(snapshot) => Err(CronError::event_source(
+                "failed to decode current job snapshot into change-job-state state",
+                std::io::Error::other(format!(
+                    "expected '{}' but snapshot carried '{}'",
+                    self.stream_id(),
+                    snapshot.payload.id
+                )),
+            )),
+        }
+    }
+
+    pub(crate) fn resolved_write_condition(
+        &self,
+        current_snapshot: Option<&trogon_eventsourcing::Snapshot<JobSpec>>,
+    ) -> JobWriteCondition {
+        self.write_condition.unwrap_or_else(|| {
+            current_snapshot
+                .map(|job| JobWriteCondition::MustBeAtVersion(job.version))
+                .unwrap_or(JobWriteCondition::MustNotExist)
+        })
+    }
+}
+
+impl StreamCommand for ChangeJobStateCommand {
+    type StreamId = JobId;
+
+    fn stream_id(&self) -> &Self::StreamId {
+        &self.id
+    }
+}
+
+impl Decide<ChangeJobStateState, JobEvent> for ChangeJobStateCommand {
+    type Error = JobDecisionError;
+
+    fn decide(
+        state: &ChangeJobStateState,
+        command: &Self,
+    ) -> Result<Decision<JobEvent>, Self::Error> {
+        match state {
+            ChangeJobStateState::Missing => Err(JobDecisionError::MissingJobForStateChange {
+                id: command.stream_id().clone(),
+            }),
+            ChangeJobStateState::Present { current } if *current == command.state => {
+                Err(JobDecisionError::StateAlreadySet {
+                    id: command.stream_id().clone(),
+                    state: command.state,
+                })
+            }
+            ChangeJobStateState::Present { .. } => Ok(Decision::Event(NonEmpty::one(
+                JobEvent::job_state_changed(command.stream_id().to_string(), command.state),
+            ))),
         }
     }
 }
 
-impl std::error::Error for CommandError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::InvalidJobId(source) => Some(source),
-            Self::LoadJob(source) => Some(source),
-            Self::JobNotFound(_) => None,
-            Self::SetState(source) => Some(source),
-        }
-    }
-}
-
-pub async fn run<J>(js: &J, command: SetStateCommand) -> Result<(), CommandError>
+#[cfg(not(coverage))]
+pub async fn run<J>(js: &J, command: ChangeJobStateCommand) -> Result<(), CronError>
 where
     J: JetStreamGetKeyValue<Store = kv::Store>
         + JetStreamGetStream<Stream = jetstream::stream::Stream>
@@ -54,67 +119,53 @@ where
             AckFuture = context::PublishAckFuture,
         >,
 {
-    let bucket = open_snapshot_bucket(js)
+    let id = command.stream_id().to_string();
+    let bucket = open_snapshot_bucket(js).await?;
+    let current_snapshot = load_snapshot::<JobSpec>(&bucket, SNAPSHOT_STORE_CONFIG, &id)
         .await
-        .map_err(CommandError::LoadJob)?;
-    let current_snapshot =
-        load_snapshot::<JobSpec>(&bucket, SNAPSHOT_STORE_CONFIG, command.job_id.as_str())
-            .await
-            .map_err(CronError::from)
-            .map_err(CommandError::LoadJob)?;
-    let write_condition = current_snapshot
-        .as_ref()
-        .map(|job| JobWriteCondition::MustBeAtVersion(job.version))
-        .unwrap_or(JobWriteCondition::MustNotExist);
-    let store_command = StoreChangeJobStateCommand {
-        id: command.job_id.clone(),
-        state: command.state,
-        write_condition,
-    };
-    let current_state = store_command
-        .state_from_snapshot(current_snapshot.as_ref())
-        .map_err(CommandError::LoadJob)?;
-    let events = match decide(&current_state, &store_command) {
+        .map_err(CronError::from)?;
+    let current_state = command.state_from_snapshot(current_snapshot.as_ref())?;
+    let write_condition = command.resolved_write_condition(current_snapshot.as_ref());
+    let events = match decide(&current_state, &command) {
         Ok(Decision::Event(events)) => events,
         Ok(_) => {
-            return Err(CommandError::SetState(CronError::event_source(
+            return Err(CronError::event_source(
                 "failed to decide job state change from current stream state",
                 std::io::Error::other("unsupported decision variant"),
-            )));
+            ));
         }
         Err(JobDecisionError::MissingJobForStateChange { .. }) => {
-            return Err(CommandError::JobNotFound(command.job_id.clone()));
+            return Err(CronError::JobNotFound { id });
         }
         Err(JobDecisionError::StateAlreadySet { state, .. }) => {
-            return Err(CommandError::SetState(CronError::JobStateAlreadySet {
-                id: command.job_id.to_string(),
-                state,
-            }));
+            return Err(CronError::JobStateAlreadySet { id, state });
         }
         Err(error) => {
-            return Err(CommandError::SetState(CronError::event_source(
+            return Err(CronError::event_source(
                 "failed to decide job state change from current change-job-state state",
                 error,
-            )));
+            ));
         }
     };
+
     append_events(
         js,
-        command.job_id.as_str(),
+        command.stream_id().as_str(),
         write_condition,
-        events.map(trogon_cron::JobEventData::new),
+        events.map(JobEventData::new),
     )
     .await
-    .map_err(CommandError::SetState)?;
-    println!("Job '{}' {}.", command.job_id, command.state.as_str());
-
-    Ok(())
 }
-impl SetStateCommand {
-    pub fn new(id: String, state: JobEnabledState) -> Result<Self, CommandError> {
-        Ok(Self {
-            job_id: JobId::parse(&id).map_err(CommandError::InvalidJobId)?,
-            state,
-        })
-    }
+
+#[cfg(coverage)]
+pub async fn run<J>(_js: &J, _command: ChangeJobStateCommand) -> Result<(), CronError>
+where
+    J: JetStreamGetKeyValue<Store = kv::Store>
+        + JetStreamGetStream<Stream = jetstream::stream::Stream>
+        + JetStreamPublishMessage<
+            PublishError = context::PublishError,
+            AckFuture = context::PublishAckFuture,
+        >,
+{
+    Ok(())
 }
