@@ -1,4 +1,4 @@
-use std::{fmt, io::Read};
+use std::fmt;
 
 use async_nats::jetstream::{self, context, kv};
 use trogon_eventsourcing::{Decide, Decision, NonEmpty, StreamCommand, decide, load_snapshot};
@@ -28,33 +28,6 @@ pub enum RegisterJobState {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RegisterJobDecisionError {
     AlreadyRegistered { id: JobId },
-}
-
-#[derive(Debug)]
-pub enum ReadRegisterJobCommandError {
-    ReadStdin(std::io::Error),
-    DeserializeJobSpec(serde_json::Error),
-    InvalidJobSpec(CronError),
-}
-
-impl fmt::Display for ReadRegisterJobCommandError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::ReadStdin(source) => write!(f, "failed to read stdin: {source}"),
-            Self::DeserializeJobSpec(source) => write!(f, "invalid job spec payload: {source}"),
-            Self::InvalidJobSpec(source) => write!(f, "invalid job spec: {source}"),
-        }
-    }
-}
-
-impl std::error::Error for ReadRegisterJobCommandError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::ReadStdin(source) => Some(source),
-            Self::DeserializeJobSpec(source) => Some(source),
-            Self::InvalidJobSpec(source) => Some(source),
-        }
-    }
 }
 
 impl fmt::Display for RegisterJobDecisionError {
@@ -147,18 +120,6 @@ impl Decide<RegisterJobState, JobEvent> for RegisterJobCommand {
             }),
         }
     }
-}
-
-pub fn read_from_stdin() -> Result<RegisterJobCommand, ReadRegisterJobCommandError> {
-    let mut buf = String::new();
-    std::io::stdin()
-        .read_to_string(&mut buf)
-        .map_err(ReadRegisterJobCommandError::ReadStdin)?;
-
-    let spec =
-        serde_json::from_str(&buf).map_err(ReadRegisterJobCommandError::DeserializeJobSpec)?;
-    RegisterJobCommand::new(spec, JobWriteCondition::MustNotExist)
-        .map_err(ReadRegisterJobCommandError::InvalidJobSpec)
 }
 
 #[cfg(not(coverage))]
