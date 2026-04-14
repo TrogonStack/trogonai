@@ -1254,40 +1254,21 @@ async fn recover_stale_promises<A: AutomationRepository, R: RunRepository>(
                         continue;
                     }
                 };
-                if let Some(auto) = autos.into_iter().find(|a| a.id == promise.automation_id) {
-                    let started_at = trogon_automations::now_unix();
-                    let result =
-                        handlers::run_automation(&agent, &auto, &promise.nats_subject, &payload)
-                            .await;
-                    let finished_at = trogon_automations::now_unix();
-                    let (status, output) = match &result {
-                        Ok(o) => (RunStatus::Success, o.clone()),
-                        Err(e) => (RunStatus::Failed, e.clone()),
-                    };
-                    let run = RunRecord {
-                        id: uuid::Uuid::new_v4().to_string(),
-                        automation_id: auto.id.clone(),
-                        automation_name: auto.name.clone(),
-                        tenant_id: tenant_id.clone(),
-                        nats_subject: promise.nats_subject.clone(),
-                        started_at,
-                        finished_at,
-                        status,
-                        output,
-                    };
-                    if let Err(e) = run_store.record(&run).await {
-                        warn!(error = %e, "Startup recovery: failed to persist run record");
-                    }
-                } else {
-                    // Automation was deleted between the crash and this recovery.
-                    // Mark PermanentFailed — the automation is gone permanently;
-                    // retrying would always reach this arm and cycle until the TTL.
-                    // (Failed would be semantically wrong: it implies a transient
-                    // error that NATS redelivery can fix, which is not the case here.)
+                // Determine whether to run, skip-as-disabled, or skip-as-deleted.
+                // Both disabled and deleted automations are marked PermanentFailed —
+                // they cycle on every restart otherwise (same issue the built-in
+                // feature-flag check prevents for handler-based promises above).
+                let auto_opt = autos.into_iter().find(|a| a.id == promise.automation_id);
+                let perm_fail_reason: Option<&str> = match &auto_opt {
+                    Some(a) if !a.enabled => Some("automation is disabled"),
+                    None => Some("automation no longer exists"),
+                    Some(_) => None, // enabled — proceed to run
+                };
+                if let Some(reason) = perm_fail_reason {
                     warn!(
                         promise_id = %promise.id,
                         automation_id = %promise.automation_id,
-                        "Startup recovery: automation no longer exists — marking promise PermanentFailed"
+                        "Startup recovery: {reason} — marking promise PermanentFailed"
                     );
                     match tokio::time::timeout(
                         crate::agent_loop::NATS_KV_TIMEOUT,
@@ -1312,11 +1293,11 @@ async fn recover_stale_promises<A: AutomationRepository, R: RunRepository>(
                                 Ok(Err(e)) => warn!(
                                     promise_id = %promise.id,
                                     error = %e,
-                                    "Startup recovery: failed to mark orphaned promise PermanentFailed"
+                                    "Startup recovery: failed to mark promise PermanentFailed ({reason})"
                                 ),
                                 Err(_) => warn!(
                                     promise_id = %promise.id,
-                                    "Startup recovery: update_promise timed out marking orphaned promise PermanentFailed"
+                                    "Startup recovery: update_promise timed out marking promise PermanentFailed ({reason})"
                                 ),
                             }
                         }
@@ -1324,14 +1305,43 @@ async fn recover_stale_promises<A: AutomationRepository, R: RunRepository>(
                         Ok(Err(e)) => warn!(
                             promise_id = %promise.id,
                             error = %e,
-                            "Startup recovery: get_promise failed for orphaned promise"
+                            "Startup recovery: get_promise failed ({reason})"
                         ),
                         Err(_) => warn!(
                             promise_id = %promise.id,
-                            "Startup recovery: get_promise timed out for orphaned promise"
+                            "Startup recovery: get_promise timed out ({reason})"
                         ),
                     }
+                    continue;
                 }
+                // Safety: perm_fail_reason == None only when auto_opt == Some(enabled).
+                if let Some(auto) = auto_opt {
+                    let started_at = trogon_automations::now_unix();
+                    let result =
+                        handlers::run_automation(&agent, &auto, &promise.nats_subject, &payload)
+                            .await;
+                    let finished_at = trogon_automations::now_unix();
+                    let (status, output) = match &result {
+                        Ok(o) => (RunStatus::Success, o.clone()),
+                        Err(e) => (RunStatus::Failed, e.clone()),
+                    };
+                    let run = RunRecord {
+                        id: uuid::Uuid::new_v4().to_string(),
+                        automation_id: auto.id.clone(),
+                        automation_name: auto.name.clone(),
+                        tenant_id: tenant_id.clone(),
+                        nats_subject: promise.nats_subject.clone(),
+                        started_at,
+                        finished_at,
+                        status,
+                        output,
+                    };
+                    if let Err(e) = run_store.record(&run).await {
+                        warn!(error = %e, "Startup recovery: failed to persist run record");
+                    }
+                }
+                // The deleted/disabled cases are handled above in the perm_fail_reason
+                // block; no else branch needed here.
             } else {
                 // Built-in handler dispatch based on NATS subject.
                 // Feature flags were already checked before the CAS-claim above,

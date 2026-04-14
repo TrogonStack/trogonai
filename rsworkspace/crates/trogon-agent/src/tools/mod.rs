@@ -2,6 +2,21 @@ pub mod github;
 pub mod linear;
 pub mod slack;
 
+/// Build the HTML comment marker used for idempotency dedup in PR/issue comments.
+///
+/// HTML comments (`<!-- ... -->`) are terminated by the first `--` followed by
+/// `>`. If the key itself contains `--` the comment closes prematurely, making
+/// `body.contains(&marker)` always return false — a silent false negative that
+/// lets duplicate comments through.
+///
+/// We neutralise this by replacing every `--` in the key with `__` before
+/// embedding it. Both the write and scan paths call this function, so the
+/// substitution is consistent and `contains` still finds the exact marker.
+pub(crate) fn idempotency_marker(key: &str) -> String {
+    let safe_key = key.replace("--", "__");
+    format!("<!-- trogon-idempotency-key: {safe_key} -->")
+}
+
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;

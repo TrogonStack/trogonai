@@ -68,7 +68,7 @@ pub async fn post_comment(
 
     // ── Idempotency pre-check ─────────────────────────────────────────────────
     if let Some(key) = idempotency_key {
-        let marker = format!("<!-- trogon-idempotency-key: {key} -->");
+        let marker = super::idempotency_marker(key);
         let check_input = json!({ "issue_id": issue_id });
         match get_comments(ctx, &check_input).await {
             Ok(json_str) => {

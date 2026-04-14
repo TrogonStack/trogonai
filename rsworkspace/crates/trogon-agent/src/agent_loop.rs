@@ -1326,11 +1326,8 @@ impl AgentLoop {
                                     store.get_promise(&self.tenant_id, pid),
                                 )
                                 .await
-                                .unwrap_or_else(|_| {
-                                    warn!(promise_id = %pid, "NATS KV get_promise timed out during CAS reload — checkpointing disabled for this run");
-                                    Ok(None)
-                                }) {
-                                    Ok(Some((current, new_rev))) => {
+                                {
+                                    Ok(Ok(Some((current, new_rev)))) => {
                                         // If another worker reached a terminal state
                                         // between our tool turn and the CAS write,
                                         // stop immediately — continuing would produce
@@ -1348,38 +1345,40 @@ impl AgentLoop {
                                         }
                                         *rev = new_rev;
                                     }
-                                    Ok(None) => {
+                                    Ok(Ok(None)) => {
                                         error!(
                                             promise_id = %pid,
                                             "Promise disappeared during CAS reload — checkpointing disabled for this run"
                                         );
-                                        // Disable further checkpoint attempts: the
-                                        // promise is gone so every subsequent write
-                                        // would fail too, and the misleading
+                                        // The promise is gone from KV — every subsequent
+                                        // write would fail too, and the misleading
                                         // "CAS conflict" log would repeat each turn.
-                                        // Side-effect: terminal-status writes (Failed,
-                                        // PermanentFailed) are also skipped for the
-                                        // rest of this run, since they require a valid
-                                        // checkpoint revision. This is acceptable —
-                                        // the promise is already gone from KV.
+                                        // Terminal-status writes are also skipped; this
+                                        // is acceptable since the promise is already gone.
                                         checkpoint = None;
                                     }
-                                    Err(e) => {
+                                    Ok(Err(e)) => {
+                                        // NATS returned an error. Keep the current revision
+                                        // so terminal-status writes (Resolved, PermanentFailed)
+                                        // can still succeed. The next checkpoint write will
+                                        // either land with the old rev (if it's still valid)
+                                        // or CAS-conflict again and trigger another reload.
                                         error!(
                                             error = %e,
                                             promise_id = %pid,
-                                            "CAS reload failed — checkpointing disabled for this run; crash recovery will replay from last successful checkpoint"
+                                            "CAS reload failed — keeping current revision; will retry on next checkpoint"
                                         );
-                                        // Same: stop attempting checkpoints so
-                                        // future turns don't log spurious
-                                        // "CAS conflict" errors for a stale revision.
-                                        // Terminal-status writes are also skipped for
-                                        // the remainder of this run. If the run hits
-                                        // a deterministic error (e.g. max_tokens), the
-                                        // promise stays Running until the next startup
-                                        // recovery, which reloads the last valid
-                                        // checkpoint and can mark it PermanentFailed.
-                                        checkpoint = None;
+                                    }
+                                    Err(_) => {
+                                        // Reload timed out. Same reasoning as the error arm:
+                                        // keep current revision to preserve terminal-status
+                                        // write capability. A crashed process that recovers
+                                        // from the last successful checkpoint is strictly
+                                        // better than a stuck-Running promise.
+                                        warn!(
+                                            promise_id = %pid,
+                                            "NATS KV get_promise timed out during CAS reload — keeping current revision; will retry on next checkpoint"
+                                        );
                                     }
                                 }
                             }
@@ -1399,11 +1398,8 @@ impl AgentLoop {
                                     store.get_promise(&self.tenant_id, pid),
                                 )
                                 .await
-                                .unwrap_or_else(|_| {
-                                    warn!(promise_id = %pid, "NATS KV get_promise timed out during timeout-reload — checkpointing disabled for this run");
-                                    Ok(None)
-                                }) {
-                                    Ok(Some((current, new_rev))) => {
+                                {
+                                    Ok(Ok(Some((current, new_rev)))) => {
                                         if current.status != crate::promise_store::PromiseStatus::Running {
                                             warn!(
                                                 promise_id = %pid,
@@ -1414,13 +1410,23 @@ impl AgentLoop {
                                         }
                                         *rev = new_rev;
                                     }
-                                    Ok(None) => {
+                                    Ok(Ok(None)) => {
+                                        // Promise genuinely gone from KV — no point writing.
                                         error!(promise_id = %pid, "Promise disappeared during timeout-reload — checkpointing disabled for this run");
                                         checkpoint = None;
                                     }
-                                    Err(e) => {
-                                        error!(error = %e, promise_id = %pid, "Timeout-reload failed — checkpointing disabled for this run");
-                                        checkpoint = None;
+                                    Ok(Err(e)) => {
+                                        // NATS error. Keep the current revision so
+                                        // terminal-status writes can still succeed.
+                                        // Worst case: next checkpoint write CAS-conflicts
+                                        // and triggers another reload attempt.
+                                        error!(error = %e, promise_id = %pid, "Timeout-reload get_promise failed — keeping current revision; will retry on next checkpoint");
+                                    }
+                                    Err(_) => {
+                                        // The reload itself timed out. Keep the current
+                                        // revision — a stale rev that retries is better
+                                        // than a stuck-Running promise.
+                                        warn!(promise_id = %pid, "NATS KV get_promise timed out during timeout-reload — keeping current revision; will retry on next checkpoint");
                                     }
                                 }
                             }
@@ -4528,15 +4534,18 @@ mod tests {
         );
     }
 
-    // ── CAS reload get_promise Err → checkpoint = None ────────────────────────
+    // ── CAS reload get_promise Err → keep revision, terminal write still works ──
 
     /// When `get_promise` returns an error during the CAS conflict reload,
-    /// `checkpoint` is set to `None` — further checkpointing is disabled but
-    /// the run continues to completion normally.
+    /// the checkpoint revision is preserved (not set to None). The terminal
+    /// Resolved write therefore succeeds using the still-valid old revision.
+    ///
+    /// This is the fix for #11: an unreachable NATS during reload no longer
+    /// permanently blocks terminal-status writes for the rest of the run.
     #[tokio::test]
     async fn cas_reload_get_promise_error_disables_checkpointing_and_run_completes() {
         use crate::promise_store::mock::ErrorReloadStore;
-        use crate::promise_store::PromiseRepository;
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
         use crate::tools::mock::MockToolDispatcher;
 
         let store = Arc::new(ErrorReloadStore::new());
@@ -4569,12 +4578,14 @@ mod tests {
             "run must complete normally when CAS reload get_promise returns an error"
         );
 
-        // checkpoint=None means terminal Resolved write was skipped.
+        // With Fix #11: reload error keeps the old revision. The inner store never
+        // wrote a new revision (the CAS conflict was injected), so the old rev is
+        // still valid. The terminal Resolved write therefore succeeds.
         let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
         assert_eq!(
             p.status,
-            crate::promise_store::PromiseStatus::Running,
-            "promise must remain Running — terminal write skipped when checkpoint=None"
+            PromiseStatus::Resolved,
+            "promise must be Resolved — terminal write succeeds with preserved revision"
         );
     }
 
