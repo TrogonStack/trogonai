@@ -850,10 +850,40 @@ impl AgentLoop {
                 {
                     Ok(Ok(new_rev)) => *rev = new_rev,
                     Ok(Err(e)) => {
-                        // Non-fatal: the normal checkpoint path will retry this
-                        // on the first successful LLM response.
-                        warn!(error = %e, promise_id = %pid, "Failed to pre-pin system prompt — crash before first checkpoint may resume with different prompt");
-                        p.system_prompt = None; // revert so the checkpoint path retries
+                        // CAS conflict — another write landed between our load
+                        // and this write. Reload the current revision and retry
+                        // once so the prompt is pinned before the first LLM call.
+                        warn!(error = %e, promise_id = %pid, "Pre-pin system prompt CAS conflict — reloading revision and retrying");
+                        match tokio::time::timeout(
+                            NATS_KV_TIMEOUT,
+                            store.get_promise(&self.tenant_id, pid),
+                        )
+                        .await
+                        {
+                            Ok(Ok(Some((_, new_rev)))) => {
+                                *rev = new_rev;
+                                match tokio::time::timeout(
+                                    NATS_KV_TIMEOUT,
+                                    store.update_promise(&self.tenant_id, pid, p, *rev),
+                                )
+                                .await
+                                {
+                                    Ok(Ok(new_rev2)) => *rev = new_rev2,
+                                    Ok(Err(e)) => {
+                                        warn!(error = %e, promise_id = %pid, "Pre-pin system prompt retry failed — crash before first checkpoint may resume with different prompt");
+                                        p.system_prompt = None;
+                                    }
+                                    Err(_) => {
+                                        warn!(promise_id = %pid, "Pre-pin system prompt retry timed out — crash before first checkpoint may resume with different prompt");
+                                        p.system_prompt = None;
+                                    }
+                                }
+                            }
+                            _ => {
+                                warn!(promise_id = %pid, "Could not reload revision for pre-pin retry — crash before first checkpoint may resume with different prompt");
+                                p.system_prompt = None;
+                            }
+                        }
                     }
                     Err(_) => {
                         warn!(promise_id = %pid, "NATS KV timeout pre-pinning system prompt — crash before first checkpoint may resume with different prompt");
@@ -901,7 +931,55 @@ impl AgentLoop {
                             last_heartbeat_at = std::time::Instant::now();
                         }
                         Ok(Err(e)) => {
-                            warn!(error = %e, promise_id = %pid, "Pre-LLM heartbeat CAS conflict — stale detection window may be wider than expected");
+                            // CAS conflict — reload the current revision and retry
+                            // the heartbeat write so claimed_at is actually refreshed.
+                            // Without the retry, a single conflict leaves claimed_at
+                            // stale for up to HEARTBEAT_REFRESH_INTERVAL, which can
+                            // accumulate into a false-positive stale detection if
+                            // conflicts occur repeatedly.
+                            warn!(error = %e, promise_id = %pid, "Pre-LLM heartbeat CAS conflict — reloading revision and retrying");
+                            match tokio::time::timeout(
+                                NATS_KV_TIMEOUT,
+                                store.get_promise(&self.tenant_id, pid),
+                            )
+                            .await
+                            {
+                                Ok(Ok(Some((current, new_rev)))) => {
+                                    if current.status
+                                        != crate::promise_store::PromiseStatus::Running
+                                    {
+                                        // Another worker reached a terminal state — stop
+                                        // to avoid producing duplicate side effects.
+                                        warn!(
+                                            promise_id = %pid,
+                                            status = ?current.status,
+                                            "Promise no longer Running during heartbeat reload — stopping"
+                                        );
+                                        return Ok(String::new());
+                                    }
+                                    *rev = new_rev;
+                                    p.claimed_at = trogon_automations::now_unix();
+                                    match tokio::time::timeout(
+                                        NATS_KV_TIMEOUT,
+                                        store.update_promise(&self.tenant_id, pid, p, *rev),
+                                    )
+                                    .await
+                                    {
+                                        Ok(Ok(new_rev2)) => {
+                                            *rev = new_rev2;
+                                            last_heartbeat_at = std::time::Instant::now();
+                                        }
+                                        Ok(Err(e)) => warn!(error = %e, promise_id = %pid, "Pre-LLM heartbeat retry failed — claimed_at may become stale"),
+                                        Err(_) => warn!(promise_id = %pid, "Pre-LLM heartbeat retry timed out — claimed_at may become stale"),
+                                    }
+                                }
+                                Ok(Ok(None)) => {
+                                    warn!(promise_id = %pid, "Promise vanished during heartbeat reload — stopping");
+                                    return Ok(String::new());
+                                }
+                                Ok(Err(e)) => warn!(error = %e, promise_id = %pid, "Could not reload revision after heartbeat CAS conflict — claimed_at may become stale"),
+                                Err(_) => warn!(promise_id = %pid, "KV timeout reloading revision after heartbeat CAS conflict — claimed_at may become stale"),
+                            }
                         }
                         Err(_) => {
                             warn!(promise_id = %pid, "Pre-LLM heartbeat timed out — stale detection window may be wider than expected");
