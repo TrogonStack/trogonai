@@ -1,0 +1,234 @@
+use async_nats::jetstream::{
+    self, context, context::PublishErrorKind, message::PublishMessage, publish::PublishAck,
+};
+use chrono::{DateTime, Utc};
+use trogon_nats::jetstream::JetStreamPublishMessage;
+use uuid::Uuid;
+
+use crate::{EventData, NonEmpty, RecordedEvent};
+
+type BoxError = Box<dyn std::error::Error + Send + Sync>;
+
+const NATS_BATCH_COMMIT: &str = "Nats-Batch-Commit";
+const NATS_BATCH_ID: &str = "Nats-Batch-Id";
+const NATS_BATCH_SEQUENCE: &str = "Nats-Batch-Sequence";
+
+#[derive(Debug)]
+pub enum StreamStoreError {
+    Read {
+        context: &'static str,
+        source: BoxError,
+    },
+    Publish {
+        context: &'static str,
+        source: BoxError,
+    },
+    WrongExpectedVersion,
+    Serde(serde_json::Error),
+}
+
+impl StreamStoreError {
+    fn read_source<E>(context: &'static str, source: E) -> Self
+    where
+        E: std::error::Error + Send + Sync + 'static,
+    {
+        Self::Read {
+            context,
+            source: Box::new(source),
+        }
+    }
+
+    fn publish_source<E>(context: &'static str, source: E) -> Self
+    where
+        E: std::error::Error + Send + Sync + 'static,
+    {
+        Self::Publish {
+            context,
+            source: Box::new(source),
+        }
+    }
+}
+
+impl std::fmt::Display for StreamStoreError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Read { context, source } => write!(f, "stream read error: {context}: {source}"),
+            Self::Publish { context, source } => {
+                write!(f, "stream publish error: {context}: {source}")
+            }
+            Self::WrongExpectedVersion => {
+                write!(f, "stream publish error: wrong expected version")
+            }
+            Self::Serde(source) => write!(f, "stream serialization error: {source}"),
+        }
+    }
+}
+
+impl std::error::Error for StreamStoreError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Read { source, .. } | Self::Publish { source, .. } => Some(source.as_ref()),
+            Self::Serde(source) => Some(source),
+            Self::WrongExpectedVersion => None,
+        }
+    }
+}
+
+impl From<serde_json::Error> for StreamStoreError {
+    fn from(value: serde_json::Error) -> Self {
+        Self::Serde(value)
+    }
+}
+
+pub async fn append_stream<J>(
+    js: &J,
+    subject: String,
+    expected_last_subject_sequence: u64,
+    events: &NonEmpty<EventData>,
+) -> Result<(), StreamStoreError>
+where
+    J: JetStreamPublishMessage<
+            PublishError = context::PublishError,
+            AckFuture = context::PublishAckFuture,
+        >,
+{
+    let first_stream_id = events.first().stream_id().to_string();
+    if events
+        .iter()
+        .any(|event| event.stream_id() != first_stream_id)
+    {
+        return Err(StreamStoreError::publish_source(
+            "failed to publish stream event batch",
+            std::io::Error::other("batch contains events across multiple streams"),
+        ));
+    }
+
+    let batch_id = Uuid::new_v4().to_string();
+    let mut ack_futures = Vec::with_capacity(events.len());
+
+    for (index, event) in events.iter().enumerate() {
+        let payload = serde_json::to_vec(event)?;
+        let mut publish = PublishMessage::build()
+            .payload(payload.into())
+            .message_id(&event.event_id)
+            .expected_last_subject_sequence(expected_last_subject_sequence + index as u64)
+            .header(NATS_BATCH_ID, batch_id.as_str())
+            .header(NATS_BATCH_SEQUENCE, (index + 1).to_string());
+        if index + 1 == events.len() {
+            publish = publish.header(NATS_BATCH_COMMIT, "1");
+        }
+
+        let ack = js
+            .publish_message(publish.outbound_message(subject.clone()))
+            .await
+            .map_err(|source| {
+                StreamStoreError::publish_source("failed to publish stream event", source)
+            })?;
+        ack_futures.push(ack);
+    }
+
+    for ack in ack_futures {
+        match ack.into_future().await {
+            Ok(PublishAck { .. }) => {}
+            Err(error) if error.kind() == PublishErrorKind::WrongLastSequence => {
+                return Err(StreamStoreError::WrongExpectedVersion);
+            }
+            Err(error) => {
+                return Err(StreamStoreError::publish_source(
+                    "failed to acknowledge stream event batch",
+                    error,
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+pub async fn read_stream_from(
+    stream: &jetstream::stream::Stream,
+    from_sequence: u64,
+) -> Result<Vec<RecordedEvent>, StreamStoreError> {
+    let info = stream
+        .get_info()
+        .await
+        .map_err(|source| StreamStoreError::read_source("failed to query stream info", source))?;
+    read_stream_range(stream, from_sequence, info.state.last_sequence).await
+}
+
+pub async fn read_stream_range(
+    stream: &jetstream::stream::Stream,
+    from_sequence: u64,
+    to_sequence: u64,
+) -> Result<Vec<RecordedEvent>, StreamStoreError> {
+    if from_sequence == 0 || to_sequence == 0 || from_sequence > to_sequence {
+        return Ok(Vec::new());
+    }
+
+    let mut events = Vec::new();
+    for sequence in from_sequence..=to_sequence {
+        let Some(message) = read_raw_message(stream, sequence).await? else {
+            continue;
+        };
+        events.push(record_message(message)?);
+    }
+
+    Ok(events)
+}
+
+async fn read_raw_message(
+    stream: &jetstream::stream::Stream,
+    sequence: u64,
+) -> Result<Option<async_nats::jetstream::message::StreamMessage>, StreamStoreError> {
+    match stream.get_raw_message(sequence).await {
+        Ok(message) => Ok(Some(message)),
+        Err(source)
+            if matches!(
+                source.kind(),
+                async_nats::jetstream::stream::RawMessageErrorKind::NoMessageFound
+            ) =>
+        {
+            Ok(None)
+        }
+        Err(source) => Err(StreamStoreError::read_source(
+            "failed to read stream message",
+            source,
+        )),
+    }
+}
+
+fn record_message(
+    message: async_nats::jetstream::message::StreamMessage,
+) -> Result<RecordedEvent, StreamStoreError> {
+    let recorded_at =
+        DateTime::<Utc>::from_timestamp(message.time.unix_timestamp(), message.time.nanosecond())
+            .ok_or_else(|| {
+            StreamStoreError::read_source(
+                "failed to convert stream message timestamp into recorded event time",
+                std::io::Error::other(message.subject.to_string()),
+            )
+        })?;
+    let event = EventData::decode(&message.payload)?;
+
+    Ok(event.record(
+        message.subject.to_string(),
+        None,
+        Some(message.sequence),
+        recorded_at,
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn read_stream_range_rejects_empty_ranges() {
+        assert!(read_stream_range_bounds(0, 1));
+        assert!(read_stream_range_bounds(1, 0));
+        assert!(read_stream_range_bounds(2, 1));
+        assert!(!read_stream_range_bounds(1, 1));
+    }
+
+    fn read_stream_range_bounds(from_sequence: u64, to_sequence: u64) -> bool {
+        from_sequence == 0 || to_sequence == 0 || from_sequence > to_sequence
+    }
+}

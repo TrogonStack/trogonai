@@ -1,21 +1,15 @@
 #![cfg_attr(coverage, allow(dead_code, unused_imports))]
 
-use std::future::IntoFuture;
-
-use async_nats::jetstream::{self, context, context::PublishErrorKind, message::PublishMessage};
+use async_nats::jetstream::{self, context};
 use chrono::{DateTime, Utc};
-use trogon_eventsourcing::NonEmpty;
+use trogon_eventsourcing::{NonEmpty, StreamStoreError, append_stream};
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream, JetStreamPublishMessage};
-use uuid::Uuid;
 
 use crate::{
     config::{JobWriteCondition, JobWriteState},
     error::CronError,
     events::{JobEvent, JobEventData},
-    nats::{
-        EventSubjectPrefix, NATS_BATCH_COMMIT, NATS_BATCH_ID, NATS_BATCH_SEQUENCE,
-        StreamSubjectState, resolve_event_subject_state,
-    },
+    nats::{EventSubjectPrefix, StreamSubjectState, resolve_event_subject_state},
     projections::project_appended_events,
 };
 
@@ -141,60 +135,24 @@ where
     let stream = stream_subject_state(js, job_id).await?;
     write_condition.ensure(job_id, stream.write_state)?;
     let expected_version = stream.write_state.current_version().unwrap_or(0);
-    let batch_id = Uuid::new_v4().to_string();
-    let subject = events
-        .as_slice()
-        .first()
-        .expect("non-empty event batch")
-        .subject_with_prefix(stream.prefix.as_str());
-    let mut ack_futures = Vec::with_capacity(events.len());
-    for (index, event) in events.iter().enumerate() {
-        let event_subject = event.subject_with_prefix(stream.prefix.as_str());
-        if event_subject != subject {
+    let subject = events.first().subject_with_prefix(stream.prefix.as_str());
+    match append_stream(js, subject, expected_version, &events).await {
+        Ok(()) => {}
+        Err(StreamStoreError::WrongExpectedVersion) => {
+            return Err(CronError::OptimisticConcurrencyConflict {
+                id: job_id.to_string(),
+                expected: write_condition,
+                current_version: stream_subject_state(js, job_id)
+                    .await?
+                    .write_state
+                    .current_version(),
+            });
+        }
+        Err(source) => {
             return Err(CronError::event_source(
-                "failed to publish job event batch",
-                std::io::Error::other(format!(
-                    "batch contains events across multiple subjects for stream '{job_id}'"
-                )),
+                "failed to append job event batch",
+                source,
             ));
-        }
-
-        let payload = serde_json::to_vec(event)?;
-        let mut publish = PublishMessage::build()
-            .payload(payload.into())
-            .message_id(&event.event_id)
-            .expected_last_subject_sequence(expected_version + index as u64)
-            .header(NATS_BATCH_ID, batch_id.as_str())
-            .header(NATS_BATCH_SEQUENCE, (index + 1).to_string());
-        if index + 1 == events.len() {
-            publish = publish.header(NATS_BATCH_COMMIT, "1");
-        }
-        let ack = js
-            .publish_message(publish.outbound_message(subject.clone()))
-            .await
-            .map_err(|source| CronError::event_source("failed to publish job event", source))?;
-        ack_futures.push(ack);
-    }
-
-    for ack in ack_futures {
-        match ack.into_future().await {
-            Ok(_) => {}
-            Err(error) if error.kind() == PublishErrorKind::WrongLastSequence => {
-                return Err(CronError::OptimisticConcurrencyConflict {
-                    id: job_id.to_string(),
-                    expected: write_condition,
-                    current_version: stream_subject_state(js, job_id)
-                        .await?
-                        .write_state
-                        .current_version(),
-                });
-            }
-            Err(error) => {
-                return Err(CronError::event_source(
-                    "failed to acknowledge job event batch",
-                    error,
-                ));
-            }
         }
     }
 
