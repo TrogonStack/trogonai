@@ -338,15 +338,21 @@ pub async fn request_reviewers(
 
 /// Post a comment on a pull request (uses the Issues comments endpoint).
 ///
-/// ## Idempotency limitation
+/// ## Idempotency
 ///
-/// GitHub does not honour the `Idempotency-Key` header. Unlike
-/// `create_pull_request`, GitHub has no duplicate-rejection mechanism for
-/// issue/PR comments — a second POST will always create a second comment.
-/// Protection relies entirely on the durable promise tool-result cache: if the
-/// cache write succeeded before the crash, recovery replays the cached result
-/// and never calls this function again. If the cache write also failed, a
-/// duplicate comment will appear on recovery.
+/// When `_idempotency_key` is present this function provides best-effort
+/// duplicate suppression on recovery:
+///
+/// 1. Before posting, fetch existing comments on the PR and scan for an HTML
+///    comment marker `<!-- trogon-idempotency-key: {key} -->` embedded in any
+///    comment body. If found, return early without posting a second comment.
+/// 2. When posting, append the marker to the body so future recovery passes can
+///    detect the already-posted comment.
+/// 3. If the pre-post fetch itself fails the function degrades gracefully and
+///    proceeds with the POST (same behaviour as before).
+///
+/// Note: GitHub silently ignores the `Idempotency-Key` HTTP header for comment
+/// endpoints, so we do not forward it.
 pub async fn post_pr_comment(
     ctx: &ToolContext<impl HttpClient>,
     input: &Value,
@@ -362,7 +368,7 @@ pub async fn post_pr_comment(
         ctx.proxy_url,
     );
 
-    let mut headers = vec![
+    let auth_headers = vec![
         (
             "Authorization".to_string(),
             format!("Bearer {}", ctx.github_token),
@@ -372,13 +378,46 @@ pub async fn post_pr_comment(
             "application/vnd.github.v3+json".to_string(),
         ),
     ];
+
+    // Dedup check: if an idempotency key is present, scan existing comments for
+    // the embedded marker before posting.
     if let Some(key) = idempotency_key {
-        headers.push(("Idempotency-Key".to_string(), key.to_string()));
+        let marker = format!("<!-- trogon-idempotency-key: {key} -->");
+        match ctx.http_client.get(&url, auth_headers.clone()).await {
+            Ok(resp) => {
+                if let Ok(comments) = serde_json::from_str::<Value>(&resp.body) {
+                    if let Some(arr) = comments.as_array() {
+                        for comment in arr {
+                            if comment["body"]
+                                .as_str()
+                                .map(|b| b.contains(&marker))
+                                .unwrap_or(false)
+                            {
+                                let html_url =
+                                    comment["html_url"].as_str().unwrap_or("(no url)");
+                                return Ok(format!("Comment posted: {html_url}"));
+                            }
+                        }
+                    }
+                }
+            }
+            // Graceful degradation: if we can't fetch comments, proceed with POST.
+            Err(_) => {}
+        }
+
+        let effective_body = format!("{body}\n\n{marker}");
+        let resp = ctx
+            .http_client
+            .post(&url, auth_headers, serde_json::json!({ "body": effective_body }))
+            .await?;
+        let response: Value = serde_json::from_str(&resp.body).map_err(|e| e.to_string())?;
+        let url_str = response["html_url"].as_str().unwrap_or("(no url)");
+        return Ok(format!("Comment posted: {url_str}"));
     }
 
     let resp = ctx
         .http_client
-        .post(&url, headers, serde_json::json!({ "body": body }))
+        .post(&url, auth_headers, serde_json::json!({ "body": body }))
         .await?;
     let response: Value = serde_json::from_str(&resp.body).map_err(|e| e.to_string())?;
 
