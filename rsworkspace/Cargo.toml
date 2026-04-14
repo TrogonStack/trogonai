@@ -26,6 +26,7 @@ trogon-source-slack = { path = "crates/trogon-source-slack" }
 trogon-source-telegram = { path = "crates/trogon-source-telegram" }
 trogon-source-twitter = { path = "crates/trogon-source-twitter" }
 trogon-std = { path = "crates/trogon-std" }
+trogon-transcript = { path = "crates/trogon-transcript" }
 
 # ACP
 agent-client-protocol = { version = "=0.10.4", features = ["unstable_logout"] }
