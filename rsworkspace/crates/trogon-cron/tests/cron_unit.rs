@@ -65,11 +65,11 @@ async fn client_set_enabled_toggles_job() {
         .unwrap()
         .version;
     store
-        .change_job_state(ChangeJobStateCommand {
-            id: job_id("toggle"),
-            state: JobEnabledState::Disabled,
-            write_condition: JobWriteCondition::MustBeAtVersion(version),
-        })
+        .change_job_state(ChangeJobStateCommand::with_write_condition(
+            job_id("toggle"),
+            JobEnabledState::Disabled,
+            JobWriteCondition::MustBeAtVersion(version),
+        ))
         .await
         .unwrap();
 
@@ -110,10 +110,10 @@ async fn client_remove_and_list_jobs_use_store_paths() {
         .unwrap()
         .version;
     store
-        .remove_job(RemoveJobCommand {
-            id: job_id("beta"),
-            write_condition: JobWriteCondition::MustBeAtVersion(beta_version),
-        })
+        .remove_job(RemoveJobCommand::with_write_condition(
+            job_id("beta"),
+            JobWriteCondition::MustBeAtVersion(beta_version),
+        ))
         .await
         .unwrap();
 
@@ -168,11 +168,11 @@ async fn client_rejects_stale_version() {
         .unwrap();
 
     let error = store
-        .change_job_state(ChangeJobStateCommand {
-            id: job_id("stale"),
-            state: JobEnabledState::Disabled,
-            write_condition: JobWriteCondition::MustBeAtVersion(99),
-        })
+        .change_job_state(ChangeJobStateCommand::with_write_condition(
+            job_id("stale"),
+            JobEnabledState::Disabled,
+            JobWriteCondition::MustBeAtVersion(99),
+        ))
         .await
         .unwrap_err();
 

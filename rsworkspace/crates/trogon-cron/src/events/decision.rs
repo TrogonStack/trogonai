@@ -97,11 +97,11 @@ mod tests {
         let state = ChangeJobStateState::Present {
             current: JobEnabledState::Enabled,
         };
-        let command = ChangeJobStateCommand {
-            id: JobId::parse("backup").unwrap(),
-            state: JobEnabledState::Enabled,
-            write_condition: JobWriteCondition::MustBeAtVersion(1),
-        };
+        let command = ChangeJobStateCommand::with_write_condition(
+            JobId::parse("backup").unwrap(),
+            JobEnabledState::Enabled,
+            JobWriteCondition::MustBeAtVersion(1),
+        );
 
         assert!(matches!(
             decide(&state, &command).unwrap_err(),
@@ -112,10 +112,10 @@ mod tests {
     #[test]
     fn remove_job_decides_removal_from_present_state() {
         let state = RemoveJobState::Present;
-        let command = RemoveJobCommand {
-            id: JobId::parse("backup").unwrap(),
-            write_condition: JobWriteCondition::MustBeAtVersion(1),
-        };
+        let command = RemoveJobCommand::with_write_condition(
+            JobId::parse("backup").unwrap(),
+            JobWriteCondition::MustBeAtVersion(1),
+        );
 
         let decision = decide(&state, &command).unwrap();
         assert_eq!(
