@@ -24,6 +24,8 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 trogon-nats = { workspace = true, features = ["test-support"] }
 trogon-registry = { workspace = true, features = ["test-helpers"] }
 trogon-transcript = { workspace = true, features = ["test-helpers"] }
+testcontainers-modules = { workspace = true }
+futures-util = { workspace = true }
 
 [features]
 default = []
