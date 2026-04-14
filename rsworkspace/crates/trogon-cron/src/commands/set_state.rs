@@ -3,7 +3,7 @@ use trogon_eventsourcing::{Decide, Decision, NonEmpty, StreamCommand, decide, lo
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream, JetStreamPublishMessage};
 
 use crate::{
-    JobDecisionError, JobEnabledState, JobId, JobSpec, JobWriteCondition,
+    JobEnabledState, JobId, JobSpec, JobWriteCondition,
     error::CronError,
     events::{JobEvent, JobEventData},
     store::{SNAPSHOT_STORE_CONFIG, append_events, open_snapshot_bucket},
@@ -20,6 +20,12 @@ pub struct ChangeJobStateCommand {
 pub enum ChangeJobStateState {
     Missing,
     Present { current: JobEnabledState },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChangeJobStateDecisionError {
+    JobNotFound { id: JobId },
+    StateAlreadySet { id: JobId, state: JobEnabledState },
 }
 
 impl ChangeJobStateCommand {
@@ -77,6 +83,19 @@ impl ChangeJobStateCommand {
     }
 }
 
+impl std::fmt::Display for ChangeJobStateDecisionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::JobNotFound { id } => write!(f, "missing job for state change '{id}'"),
+            Self::StateAlreadySet { id, state } => {
+                write!(f, "job '{id}' is already {}", state.as_str())
+            }
+        }
+    }
+}
+
+impl std::error::Error for ChangeJobStateDecisionError {}
+
 impl StreamCommand for ChangeJobStateCommand {
     type StreamId = JobId;
 
@@ -86,25 +105,28 @@ impl StreamCommand for ChangeJobStateCommand {
 }
 
 impl Decide<ChangeJobStateState, JobEvent> for ChangeJobStateCommand {
-    type Error = JobDecisionError;
+    type Error = ChangeJobStateDecisionError;
 
     fn decide(
         state: &ChangeJobStateState,
         command: &Self,
     ) -> Result<Decision<JobEvent>, Self::Error> {
         match state {
-            ChangeJobStateState::Missing => Err(JobDecisionError::MissingJobForStateChange {
+            ChangeJobStateState::Missing => Err(ChangeJobStateDecisionError::JobNotFound {
                 id: command.stream_id().clone(),
             }),
             ChangeJobStateState::Present { current } if *current == command.state => {
-                Err(JobDecisionError::StateAlreadySet {
+                Err(ChangeJobStateDecisionError::StateAlreadySet {
                     id: command.stream_id().clone(),
                     state: command.state,
                 })
             }
-            ChangeJobStateState::Present { .. } => Ok(Decision::Event(NonEmpty::one(
-                JobEvent::job_state_changed(command.stream_id().to_string(), command.state),
-            ))),
+            ChangeJobStateState::Present { .. } => {
+                Ok(Decision::Event(NonEmpty::one(JobEvent::JobStateChanged {
+                    id: command.stream_id().to_string(),
+                    state: command.state,
+                })))
+            }
         }
     }
 }
@@ -134,27 +156,16 @@ where
                 std::io::Error::other("unsupported decision variant"),
             ));
         }
-        Err(JobDecisionError::MissingJobForStateChange { .. }) => {
+        Err(ChangeJobStateDecisionError::JobNotFound { .. }) => {
             return Err(CronError::JobNotFound { id });
         }
-        Err(JobDecisionError::StateAlreadySet { state, .. }) => {
+        Err(ChangeJobStateDecisionError::StateAlreadySet { state, .. }) => {
             return Err(CronError::JobStateAlreadySet { id, state });
-        }
-        Err(error) => {
-            return Err(CronError::event_source(
-                "failed to decide job state change from current change-job-state state",
-                error,
-            ));
         }
     };
 
-    append_events(
-        js,
-        command.stream_id().as_str(),
-        write_condition,
-        events.map(JobEventData::new),
-    )
-    .await
+    let events = events.try_map(JobEventData::new)?;
+    append_events(js, command.stream_id().as_str(), write_condition, events).await
 }
 
 #[cfg(coverage)]
@@ -168,4 +179,64 @@ where
         >,
 {
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use trogon_eventsourcing::{Decision, NonEmpty, decide};
+
+    use super::*;
+
+    #[test]
+    fn decides_state_change_from_present_state() {
+        let state = ChangeJobStateState::Present {
+            current: JobEnabledState::Enabled,
+        };
+        let command = ChangeJobStateCommand::with_write_condition(
+            JobId::parse("backup").unwrap(),
+            JobEnabledState::Disabled,
+            JobWriteCondition::MustBeAtVersion(1),
+        );
+
+        let decision = decide(&state, &command).unwrap();
+        assert_eq!(
+            decision,
+            Decision::Event(NonEmpty::one(JobEvent::JobStateChanged {
+                id: "backup".to_string(),
+                state: JobEnabledState::Disabled,
+            }))
+        );
+    }
+
+    #[test]
+    fn rejects_noop_state_changes() {
+        let state = ChangeJobStateState::Present {
+            current: JobEnabledState::Enabled,
+        };
+        let command = ChangeJobStateCommand::with_write_condition(
+            JobId::parse("backup").unwrap(),
+            JobEnabledState::Enabled,
+            JobWriteCondition::MustBeAtVersion(1),
+        );
+
+        assert!(matches!(
+            decide(&state, &command).unwrap_err(),
+            ChangeJobStateDecisionError::StateAlreadySet { .. }
+        ));
+    }
+
+    #[test]
+    fn rejects_state_changes_for_missing_jobs() {
+        let state = ChangeJobStateState::Missing;
+        let command = ChangeJobStateCommand::with_write_condition(
+            JobId::parse("backup").unwrap(),
+            JobEnabledState::Enabled,
+            JobWriteCondition::MustBeAtVersion(1),
+        );
+
+        assert!(matches!(
+            decide(&state, &command).unwrap_err(),
+            ChangeJobStateDecisionError::JobNotFound { .. }
+        ));
+    }
 }

@@ -8,6 +8,7 @@ pub mod events;
 mod job_id;
 pub mod kv;
 pub mod nats;
+mod processors;
 pub mod projections;
 pub mod scheduler;
 pub mod store;
@@ -17,17 +18,17 @@ pub mod traits;
 pub mod mocks;
 
 pub use commands::{
-    ChangeJobStateCommand, ChangeJobStateState, GetJobCommand, ListJobsCommand,
-    ReadRegisterJobCommandError, RegisterJobCommand, RegisterJobState, RemoveJobCommand,
-    RemoveJobState, change_job_state, get_job, list_jobs,
-    read_from_stdin as read_register_job_from_stdin, register_job, remove_job,
+    ChangeJobStateCommand, ChangeJobStateDecisionError, ChangeJobStateState, GetJobCommand,
+    ListJobsCommand, ReadRegisterJobCommandError, RegisterJobCommand, RegisterJobDecisionError,
+    RegisterJobState, RemoveJobCommand, RemoveJobDecisionError, RemoveJobState, change_job_state,
+    get_job, list_jobs, read_from_stdin as read_register_job_from_stdin, register_job, remove_job,
 };
 pub use config::{
     DeliverySpec, JobEnabledState, JobSpec, JobWriteCondition, SamplingSource, ScheduleSpec,
 };
 pub use domain::ResolvedJobSpec;
 pub use error::{CronError, JobSpecError};
-pub use events::{JobDecisionError, JobEvent, JobEventData, RecordedJobEvent};
+pub use events::{JobEvent, JobEventData, RecordedJobEvent, RegisteredJobSpec};
 pub use job_id::{JobId, JobIdError};
 pub use nats::NatsSchedulePublisher;
 pub use projections::{

@@ -49,6 +49,17 @@ impl<T> NonEmpty<T> {
     {
         NonEmpty(self.0.into_iter().map(f).collect())
     }
+
+    pub fn try_map<U, E, F>(self, mut f: F) -> Result<NonEmpty<U>, E>
+    where
+        F: FnMut(T) -> Result<U, E>,
+    {
+        let mut values = Vec::with_capacity(self.0.len());
+        for value in self.0 {
+            values.push(f(value)?);
+        }
+        Ok(NonEmpty(values))
+    }
 }
 
 impl<T> IntoIterator for NonEmpty<T> {

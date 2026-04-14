@@ -9,7 +9,7 @@ use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream};
 
 use crate::{
     error::CronError,
-    nats::{
+    processors::{
         ack_watch_message, apply_projection_change, change_from_projection_change,
         decode_recorded_watch_message, ensure_event_matches_stream, event_watch_consumer_config,
         job_id_from_event_subject, next_watch_start_sequence, rebuild_jobs_from_stream,
@@ -79,7 +79,7 @@ where
                 }
             };
 
-            let stream_id = match job_id_from_event_subject(&event.stream_id) {
+            let stream_id = match job_id_from_event_subject(&event.recorded_stream_id) {
                 Ok(stream_id) => stream_id,
                 Err(error) => {
                     tracing::error!(error = %error, "Failed to derive watched job stream id from subject");
@@ -87,7 +87,15 @@ where
                     return None;
                 }
             };
-            if let Err(error) = ensure_event_matches_stream(&stream_id, &event.data) {
+            let data = match event.decode_data() {
+                Ok(data) => data,
+                Err(error) => {
+                    tracing::error!(error = %error, "Failed to decode watched job event payload");
+                    ack_watch_message(&message).await;
+                    return None;
+                }
+            };
+            if let Err(error) = ensure_event_matches_stream(&stream_id, &data) {
                 tracing::error!(error = %error, "Watched job event payload does not match stream subject");
                 ack_watch_message(&message).await;
                 return None;
@@ -99,7 +107,7 @@ where
                         .get(stream_id.as_str())
                         .cloned()
                         .unwrap_or_else(initial_state);
-                    let next = apply(current.clone(), event.data.clone()).map_err(|error| {
+                    let next = apply(current.clone(), data.clone()).map_err(|error| {
                         CronError::event_source(
                             "failed to apply watched job event to stream state",
                             error,
