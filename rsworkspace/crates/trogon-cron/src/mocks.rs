@@ -16,7 +16,7 @@ use crate::{
     domain::ResolvedJobSpec,
     error::CronError,
     events::JobEvent,
-    store::{ConfigWatchStream, LoadAndWatchCommand, LoadAndWatchResult},
+    projections::{ConfigWatchStream, LoadAndWatchResult},
     traits::SchedulePublisher,
 };
 
@@ -336,7 +336,7 @@ impl MockConfigStore {
         Ok(self.jobs.lock().unwrap().values().cloned().collect())
     }
 
-    pub async fn load_and_watch(&self, _command: LoadAndWatchCommand) -> LoadAndWatchResult {
+    pub async fn load_and_watch(&self) -> LoadAndWatchResult {
         let jobs = self
             .jobs
             .lock()
@@ -361,8 +361,7 @@ mod tests {
         DeliverySpec, JobEnabledState, JobWriteCondition, SamplingSource, ScheduleSpec,
     };
     use crate::{
-        ChangeJobStateCommand, GetJobCommand, ListJobsCommand, LoadAndWatchCommand,
-        RegisterJobCommand, RemoveJobCommand,
+        ChangeJobStateCommand, GetJobCommand, ListJobsCommand, RegisterJobCommand, RemoveJobCommand,
     };
     use futures::StreamExt;
 
@@ -485,7 +484,7 @@ mod tests {
         let listed = store.list_jobs(ListJobsCommand).await.unwrap();
         assert_eq!(listed.len(), 2);
 
-        let (watch_jobs, mut watcher) = store.load_and_watch(LoadAndWatchCommand).await.unwrap();
+        let (watch_jobs, mut watcher) = store.load_and_watch().await.unwrap();
         assert_eq!(watch_jobs.len(), 2);
         assert!(
             tokio::time::timeout(std::time::Duration::from_millis(5), watcher.next())

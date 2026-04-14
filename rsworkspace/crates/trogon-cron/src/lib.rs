@@ -10,7 +10,6 @@ pub mod kv;
 pub mod nats;
 mod processors;
 pub mod projections;
-pub mod scheduler;
 pub mod store;
 pub mod traits;
 
@@ -31,12 +30,10 @@ pub use error::{CronError, JobSpecError};
 pub use events::{JobEvent, JobEventData, RecordedJobEvent, RegisteredJobSpec};
 pub use job_id::{JobId, JobIdError};
 pub use nats::NatsSchedulePublisher;
+pub use processors::CronController;
 pub use projections::{
-    JobStreamState, JobTransitionError, ProjectionChange, apply, initial_state, projection_change,
+    ConfigWatchStream, JobSpecChange, JobStreamState, JobTransitionError, LoadAndWatchResult,
+    ProjectionChange, apply, initial_state, load_and_watch, projection_change,
 };
-pub use scheduler::CronController;
-pub use store::{
-    JobSpecChange, LoadAndWatchCommand, SNAPSHOT_STORE_CONFIG, append_events, connect_store,
-    load_and_watch, open_snapshot_bucket,
-};
+pub use store::{SNAPSHOT_STORE_CONFIG, append_events, connect_store, open_snapshot_bucket};
 pub use traits::{LeaderLock, SchedulePublisher};

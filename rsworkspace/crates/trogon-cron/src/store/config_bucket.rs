@@ -6,7 +6,7 @@ use trogon_nats::jetstream::JetStreamGetKeyValue;
 use crate::{error::CronError, kv::CONFIG_BUCKET};
 
 #[cfg(not(coverage))]
-pub(super) async fn run<J>(js: &J) -> Result<kv::Store, CronError>
+pub(crate) async fn run<J>(js: &J) -> Result<kv::Store, CronError>
 where
     J: JetStreamGetKeyValue<Store = kv::Store>,
 {
@@ -16,7 +16,7 @@ where
 }
 
 #[cfg(coverage)]
-pub(super) async fn run<J>(_js: &J) -> Result<kv::Store, CronError>
+pub(crate) async fn run<J>(_js: &J) -> Result<kv::Store, CronError>
 where
     J: JetStreamGetKeyValue<Store = kv::Store>,
 {
