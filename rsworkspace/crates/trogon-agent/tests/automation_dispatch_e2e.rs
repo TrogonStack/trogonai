@@ -943,3 +943,292 @@ async fn dispatch_marks_promise_resolved_in_kv() {
     assert_eq!(promise.automation_id, "auto-kv");
     assert_eq!(promise.tenant_id, "default");
 }
+
+/// Startup recovery: a stale `Running` promise (simulating a crashed process) is
+/// detected at startup, the automation is re-run from its checkpoint, and the
+/// promise is marked `Resolved` in KV.
+#[tokio::test]
+async fn startup_recovery_resumes_stale_automation_promise_to_resolved() {
+    use trogon_agent::promise_store::{AgentPromise, PromiseStatus, PromiseStore};
+
+    let (_c, nats_port) = start_nats().await;
+    let mock = MockServer::start_async().await;
+    let mock_url = mock.base_url();
+
+    let (_, js) = js_client(nats_port).await;
+    create_streams(&js).await;
+
+    // Create the automation so the recovery can find and run it.
+    let astore = AutomationStore::open(&js).await.expect("open AutomationStore");
+    astore
+        .put(&make_automation(
+            "auto-recover",
+            "default",
+            "github.pull_request",
+            "RECOVERY_PROMPT",
+        ))
+        .await
+        .expect("put automation");
+
+    // Pre-seed a stale Running promise — simulates a process that crashed
+    // mid-run 20 minutes ago (well past the 10-minute staleness threshold).
+    let ps = PromiseStore::open(&js).await.expect("open PromiseStore");
+    let stale_claimed_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        .saturating_sub(20 * 60);
+    let stale = AgentPromise {
+        id: "github.99.auto-recover".to_string(),
+        tenant_id: "default".to_string(),
+        automation_id: "auto-recover".to_string(),
+        status: PromiseStatus::Running,
+        messages: vec![],
+        iteration: 0,
+        worker_id: "crashed-worker-pid12345".to_string(),
+        claimed_at: stale_claimed_at,
+        trigger: serde_json::from_slice(&pr_opened_payload()).unwrap_or_default(),
+        nats_subject: "github.pull_request".to_string(),
+        system_prompt: None,
+    };
+    ps.put_promise(&stale).await.expect("seed stale promise");
+
+    // Anthropic mock — called once when the recovery re-runs the automation.
+    mock.mock_async(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .body(end_turn_body());
+    })
+    .await;
+
+    // Find a free port for the API.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let api_port = listener.local_addr().unwrap().port();
+    drop(listener);
+
+    tokio::spawn(async move {
+        run(runner_cfg(nats_port, mock_url, "default", api_port))
+            .await
+            .ok()
+    });
+
+    // Wait for the API to come up.
+    let client = reqwest::Client::new();
+    let runs_url = format!("http://127.0.0.1:{api_port}/runs");
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        match client
+            .get(&runs_url)
+            .header("x-tenant-id", "default")
+            .send()
+            .await
+        {
+            Ok(_) => break,
+            Err(_) if tokio::time::Instant::now() < deadline => {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            Err(e) => panic!("API never came up: {e}"),
+        }
+    }
+
+    // Poll until the recovery produces a RunRecord (proof the run completed).
+    // No NATS event is published — the runner finds the stale promise on startup.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    loop {
+        let body: serde_json::Value = client
+            .get(&runs_url)
+            .header("x-tenant-id", "default")
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        if body.as_array().map(|a| !a.is_empty()).unwrap_or(false) {
+            break;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            panic!("Startup recovery did not produce a RunRecord within timeout");
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+
+    // The promise must now be Resolved in KV.
+    let (promise, _rev) = ps
+        .get_promise("default", "github.99.auto-recover")
+        .await
+        .expect("get_promise")
+        .expect("promise must still exist in KV");
+
+    assert_eq!(
+        promise.status,
+        PromiseStatus::Resolved,
+        "startup recovery must mark the stale promise Resolved"
+    );
+    assert_eq!(promise.automation_id, "auto-recover");
+}
+
+/// A non-retryable 4xx error from Anthropic (400 Bad Request) marks the promise
+/// `PermanentFailed` in KV — retrying this run can never succeed.
+#[tokio::test]
+async fn dispatch_marks_promise_permanent_failed_on_4xx_error() {
+    use trogon_agent::promise_store::{PromiseStatus, PromiseStore};
+
+    let (_c, nats_port) = start_nats().await;
+    let mock = MockServer::start_async().await;
+    let mock_url = mock.base_url();
+
+    let (_, js) = js_client(nats_port).await;
+    create_streams(&js).await;
+
+    let astore = AutomationStore::open(&js).await.expect("open AutomationStore");
+    astore
+        .put(&make_automation(
+            "auto-pf",
+            "default",
+            "github.pull_request",
+            "PF_PROMPT",
+        ))
+        .await
+        .expect("put automation");
+
+    // 400 Bad Request — non-retryable 4xx → agent marks promise PermanentFailed
+    // immediately, without the 2s/4s/8s backoff applied to 5xx errors.
+    mock.mock_async(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
+        then.status(400).body("bad request");
+    })
+    .await;
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let api_port = listener.local_addr().unwrap().port();
+    drop(listener);
+
+    tokio::spawn(async move {
+        run(runner_cfg(nats_port, mock_url, "default", api_port))
+            .await
+            .ok()
+    });
+
+    let client = reqwest::Client::new();
+    let runs_url = format!("http://127.0.0.1:{api_port}/runs");
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        match client
+            .get(&runs_url)
+            .header("x-tenant-id", "default")
+            .send()
+            .await
+        {
+            Ok(_) => break,
+            Err(_) if tokio::time::Instant::now() < deadline => {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            Err(e) => panic!("API never came up: {e}"),
+        }
+    }
+
+    js.publish("github.pull_request", pr_opened_payload().into())
+        .await
+        .expect("publish");
+
+    // Poll until a RunRecord appears with status=failed (promise is written
+    // before the RunRecord, so querying KV after this is safe).
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let body: serde_json::Value = client
+            .get(&runs_url)
+            .header("x-tenant-id", "default")
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        if body
+            .as_array()
+            .map(|a| !a.is_empty())
+            .unwrap_or(false)
+        {
+            break;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            panic!("No RunRecord appeared within timeout");
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+
+    let ps = PromiseStore::open(&js).await.expect("open PromiseStore");
+    let (promise, _rev) = ps
+        .get_promise("default", "github.1.auto-pf")
+        .await
+        .expect("get_promise")
+        .expect("promise must exist in KV");
+
+    assert_eq!(
+        promise.status,
+        PromiseStatus::PermanentFailed,
+        "non-retryable 4xx must mark the promise PermanentFailed"
+    );
+}
+
+/// The built-in GitHub PR handler (no matching automation) creates and resolves
+/// its promise in KV under key `{tenant_id}.github.{seq}` (no automation_id suffix).
+#[tokio::test]
+async fn builtin_handler_marks_promise_resolved_in_kv() {
+    use trogon_agent::promise_store::{PromiseStatus, PromiseStore};
+
+    let (_c, nats_port) = start_nats().await;
+    let mock = MockServer::start_async().await;
+    let mock_url = mock.base_url();
+
+    let (_, js) = js_client(nats_port).await;
+    create_streams(&js).await;
+
+    // No automations — the runner falls back to the built-in PR handler.
+    mock.mock_async(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .body(end_turn_body());
+    })
+    .await;
+
+    tokio::spawn(async move {
+        run(runner_cfg(nats_port, mock_url, "default", 0))
+            .await
+            .ok()
+    });
+    tokio::time::sleep(Duration::from_millis(400)).await;
+
+    js.publish("github.pull_request", pr_opened_payload().into())
+        .await
+        .expect("publish");
+
+    // Poll the promise KV directly — built-in handlers don't create RunRecords.
+    // Promise ID = "github.1" (first message on GITHUB stream, no auto_id suffix).
+    let ps = PromiseStore::open(&js).await.expect("open PromiseStore");
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let promise = loop {
+        if let Ok(Some((p, _))) = ps.get_promise("default", "github.1").await {
+            if p.status == PromiseStatus::Resolved {
+                break p;
+            }
+        }
+        if tokio::time::Instant::now() >= deadline {
+            panic!("Built-in handler promise never became Resolved within timeout");
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    };
+
+    assert_eq!(
+        promise.automation_id, "",
+        "built-in handler promise must have empty automation_id"
+    );
+    assert_eq!(promise.tenant_id, "default");
+    assert_eq!(promise.nats_subject, "github.pull_request");
+}
