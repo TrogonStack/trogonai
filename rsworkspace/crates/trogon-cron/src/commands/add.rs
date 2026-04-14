@@ -2,8 +2,8 @@ use std::{fmt, io::Read};
 
 use async_nats::jetstream::{self, context, kv};
 use trogon_cron::{
-    CronError, JobDecisionError, JobSpec, JobStreamState, JobWriteCondition, PutJobCommand,
-    SNAPSHOT_STORE_CONFIG, append_events, initial_state, open_snapshot_bucket,
+    CronError, JobDecisionError, JobSpec, JobWriteCondition, PutJobCommand, SNAPSHOT_STORE_CONFIG,
+    append_events, open_snapshot_bucket,
 };
 use trogon_eventsourcing::{Decision, StreamCommand, decide, load_snapshot};
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream, JetStreamPublishMessage};
@@ -82,26 +82,10 @@ where
         .await
         .map_err(CronError::from)
         .map_err(CommandError::LoadJob)?;
-    let current_state = match current_snapshot.clone() {
-        Some(snapshot) => {
-            if snapshot.payload.id != id {
-                return Err(CommandError::LoadJob(CronError::event_source(
-                    "failed to decode current job snapshot into stream state",
-                    std::io::Error::other(format!(
-                        "expected '{id}' but snapshot carried '{}'",
-                        snapshot.payload.id
-                    )),
-                )));
-            }
-            JobStreamState::try_from(snapshot).map_err(|source| {
-                CommandError::LoadJob(CronError::event_source(
-                    "failed to decode current job snapshot into stream state",
-                    source,
-                ))
-            })?
-        }
-        None => initial_state(),
-    };
+    let current_state = command
+        .command
+        .state_from_snapshot(current_snapshot.as_ref())
+        .map_err(CommandError::LoadJob)?;
     let events = match decide(&current_state, &command.command) {
         Ok(Decision::Event(events)) => events,
         Ok(_) => {

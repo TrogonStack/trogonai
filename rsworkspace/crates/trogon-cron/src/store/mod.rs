@@ -23,12 +23,12 @@ use crate::kv::{SNAPSHOT_KEY_PREFIX, SNAPSHOT_LAST_EVENT_SEQUENCE_KEY};
 
 pub use append_events::run as append_events;
 pub use connect::connect_store;
-pub use delete_job::{DeleteJobCommand, run as delete_job};
+pub use delete_job::{DeleteJobCommand, DeleteJobState, run as delete_job};
 pub use get_job::{GetJobCommand, run as get_job};
 pub use list_jobs::{ListJobsCommand, run as list_jobs};
 pub use load_and_watch::{LoadAndWatchCommand, run as load_and_watch};
-pub use put_job::{PutJobCommand, run as put_job};
-pub use set_job_state::{SetJobStateCommand, run as set_job_state};
+pub use put_job::{PutJobCommand, PutJobState, run as put_job};
+pub use set_job_state::{SetJobStateCommand, SetJobStateState, run as set_job_state};
 pub use snapshot_bucket::run as open_snapshot_bucket;
 
 pub type ConfigWatchStream = Pin<Box<dyn Stream<Item = JobSpecChange> + Send + 'static>>;
