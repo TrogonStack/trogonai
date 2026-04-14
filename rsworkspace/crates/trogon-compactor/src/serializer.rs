@@ -127,4 +127,68 @@ mod tests {
         let out = serialize_for_prompt(&[msg]);
         assert!(out.contains("[Assistant tool calls]: read_file("));
     }
+
+    #[test]
+    fn empty_messages_returns_empty_string() {
+        assert_eq!(serialize_for_prompt(&[]), "");
+    }
+
+    #[test]
+    fn thinking_block_in_assistant_is_serialized() {
+        let msg = Message {
+            role: "assistant".into(),
+            content: vec![ContentBlock::Thinking { thinking: "deep thought".into() }],
+        };
+        let out = serialize_for_prompt(&[msg]);
+        assert!(out.contains("[Assistant thinking]: deep thought"));
+    }
+
+    #[test]
+    fn short_tool_result_is_not_truncated() {
+        let msg = Message {
+            role: "user".into(),
+            content: vec![ContentBlock::ToolResult {
+                tool_use_id: "id1".into(),
+                content: "short output".into(),
+            }],
+        };
+        let out = serialize_for_prompt(&[msg]);
+        assert_eq!(out, "[Tool result]: short output");
+        assert!(!out.contains("truncated"));
+    }
+
+    #[test]
+    fn unknown_role_is_silently_skipped() {
+        let msg = Message {
+            role: "system".into(),
+            content: vec![ContentBlock::Text { text: "secret system prompt".into() }],
+        };
+        let out = serialize_for_prompt(&[msg]);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn multiple_tool_calls_are_joined_with_semicolon() {
+        let msg = Message {
+            role: "assistant".into(),
+            content: vec![
+                ContentBlock::ToolUse {
+                    id: "t1".into(),
+                    name: "read_file".into(),
+                    input: serde_json::json!({}),
+                    parent_tool_use_id: None,
+                },
+                ContentBlock::ToolUse {
+                    id: "t2".into(),
+                    name: "write_file".into(),
+                    input: serde_json::json!({}),
+                    parent_tool_use_id: None,
+                },
+            ],
+        };
+        let out = serialize_for_prompt(&[msg]);
+        assert!(out.contains("read_file("));
+        assert!(out.contains("write_file("));
+        assert!(out.contains("; "));
+    }
 }

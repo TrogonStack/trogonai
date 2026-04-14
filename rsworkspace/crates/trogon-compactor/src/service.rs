@@ -42,12 +42,12 @@ pub const COMPACT_SUBJECT: &str = "trogon.compactor.compact";
 
 // ── Wire types ────────────────────────────────────────────────────────────────
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct CompactRequest {
     pub messages: Vec<Message>,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct CompactResponse {
     pub messages: Vec<Message>,
     /// `true` if old messages were actually replaced by a summary.
@@ -109,4 +109,47 @@ async fn handle(
         tokens_before,
         tokens_after,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::CompactorConfig;
+
+    #[tokio::test]
+    async fn handle_invalid_json_returns_invalid_request_error() {
+        let compactor = Compactor::new(CompactorConfig::default());
+        let result = handle(&compactor, b"not valid json {{{").await;
+        assert!(
+            matches!(result, Err(CompactorError::InvalidRequest(_))),
+            "expected InvalidRequest, got {result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn handle_tiny_conversation_returns_not_compacted() {
+        let compactor = Compactor::new(CompactorConfig::default());
+        let req = CompactRequest {
+            messages: vec![Message::user("hello"), Message::assistant("world")],
+        };
+        let payload = serde_json::to_vec(&req).unwrap();
+        let resp = handle(&compactor, &payload).await.unwrap();
+
+        assert!(!resp.compacted);
+        assert_eq!(resp.messages.len(), 2);
+        assert!(resp.tokens_before > 0);
+        assert_eq!(resp.tokens_before, resp.tokens_after);
+    }
+
+    #[tokio::test]
+    async fn handle_empty_messages_array_returns_not_compacted() {
+        let compactor = Compactor::new(CompactorConfig::default());
+        let payload = serde_json::to_vec(&CompactRequest { messages: vec![] }).unwrap();
+        let resp = handle(&compactor, &payload).await.unwrap();
+
+        assert!(!resp.compacted);
+        assert!(resp.messages.is_empty());
+        assert_eq!(resp.tokens_before, 0);
+        assert_eq!(resp.tokens_after, 0);
+    }
 }

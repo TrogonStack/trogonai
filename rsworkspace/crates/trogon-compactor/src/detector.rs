@@ -163,4 +163,44 @@ mod tests {
         let msgs = vec![turn("user", 4), turn("assistant", 4)];
         assert!(find_cut_point(&msgs, settings_keep).is_none());
     }
+
+    #[test]
+    fn should_compact_empty_messages_is_false() {
+        let settings = CompactionSettings::default();
+        assert!(!should_compact(&[], &settings));
+    }
+
+    #[test]
+    fn find_cut_point_empty_messages_returns_none() {
+        assert!(find_cut_point(&[], 1_000).is_none());
+    }
+
+    #[test]
+    fn find_cut_point_none_when_only_valid_cut_is_at_index_zero() {
+        // [0] real user turn — the only valid cut point, but j==0 → None
+        // [1] assistant (big, triggers keep_recent accumulation)
+        // [2] tool-result user (big, not a valid cut)
+        let msgs = vec![
+            turn("user", 400),
+            turn("assistant", 400),
+            tool_result_msg(),
+        ];
+        // keep_recent_tokens = 10 → threshold hit at i=2 or i=1
+        // backward scan only finds a valid user turn at index 0 → None
+        let result = find_cut_point(&msgs, 10);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn find_cut_point_none_when_all_user_messages_are_tool_results() {
+        // No real user turns at all → backward scan finds nothing → None
+        let msgs = vec![
+            tool_result_msg(),
+            turn("assistant", 200),
+            tool_result_msg(),
+            turn("assistant", 200),
+            tool_result_msg(),
+        ];
+        assert!(find_cut_point(&msgs, 10).is_none());
+    }
 }

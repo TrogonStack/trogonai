@@ -249,4 +249,56 @@ mod tests {
         let result = compactor.compact_if_needed(messages.clone()).await.unwrap();
         assert_eq!(result.len(), messages.len());
     }
+
+    #[tokio::test]
+    async fn returns_unchanged_when_should_compact_but_no_actionable_cut() {
+        // Triggers should_compact (total > threshold) but find_cut_point returns None
+        // because the only valid user turn is at index 0.
+        let settings = CompactionSettings {
+            context_window: 100,
+            reserve_tokens: 0,
+            keep_recent_tokens: 50,
+        };
+        let config = CompactorConfig {
+            settings,
+            llm: LlmConfig::default(), // must not be called
+        };
+        let compactor = Compactor::new(config);
+
+        // [0] real user turn (only valid cut candidate → j==0 → None)
+        // [1] assistant (big)
+        // [2] tool-result user (big, not a valid cut)
+        let messages = vec![
+            Message::user("x".repeat(200)),
+            Message::assistant("x".repeat(200)),
+            Message {
+                role: "user".into(),
+                content: vec![ContentBlock::ToolResult {
+                    tool_use_id: "id".into(),
+                    content: "x".repeat(200),
+                }],
+            },
+        ];
+
+        let original_len = messages.len();
+        let result = compactor.compact_if_needed(messages).await.unwrap();
+        assert_eq!(result.len(), original_len);
+    }
+
+    // ── extract_previous_summary edge cases ─────────────────────────────────
+
+    #[test]
+    fn extract_previous_summary_returns_none_for_assistant_first() {
+        let messages = vec![Message::assistant(
+            "<context-summary>\n## Goal\nDo stuff\n</context-summary>",
+        )];
+        assert!(extract_previous_summary(&messages).is_none());
+    }
+
+    #[test]
+    fn extract_previous_summary_returns_none_for_partial_open_tag() {
+        // Missing closing tag → strip_suffix fails → None
+        let messages = vec![Message::user("<context-summary>\n## Goal\nDo stuff")];
+        assert!(extract_previous_summary(&messages).is_none());
+    }
 }
