@@ -446,4 +446,48 @@ mod tests {
         // run() must return Ok even though route_event errored for the one message.
         router.run("trogon.events.>").await.unwrap();
     }
+
+    /// Line 63: MockNatsClient.subscribe() returns Err when no stream is injected.
+    #[tokio::test]
+    async fn run_returns_subscribe_error_when_subscribe_fails() {
+        let (router, _llm, _store, _publisher, _nats) = make_router();
+        // No inject_messages() call → subscribe() returns MockError → mapped to RouterError::Subscribe
+        let err = router.run("trogon.events.>").await.unwrap_err();
+        assert!(matches!(err, RouterError::Subscribe(_)));
+    }
+
+    /// Line 90: registry.list_all() error is mapped to RouterError::Registry.
+    #[tokio::test]
+    async fn route_event_returns_registry_error_when_list_all_fails() {
+        use trogon_registry::RegistryError;
+        use trogon_registry::store::RegistryStore;
+        use bytes::Bytes;
+
+        #[derive(Clone)]
+        struct AlwaysFailStore;
+        impl RegistryStore for AlwaysFailStore {
+            async fn put(&self, _: &str, _: Bytes) -> Result<(), RegistryError> {
+                Err(RegistryError::Put("fail".into()))
+            }
+            async fn get(&self, _: &str) -> Result<Option<Bytes>, RegistryError> {
+                Err(RegistryError::Get("fail".into()))
+            }
+            async fn delete(&self, _: &str) -> Result<(), RegistryError> {
+                Err(RegistryError::Delete("fail".into()))
+            }
+            async fn keys(&self) -> Result<Vec<String>, RegistryError> {
+                Err(RegistryError::List("injected keys error".into()))
+            }
+        }
+
+        let llm = crate::llm::mock::MockLlmClient::new();
+        let registry = trogon_registry::Registry::new(AlwaysFailStore);
+        let publisher = MockTranscriptPublisher::new();
+        let nats = MockNatsClient::new();
+        let router = Router::new(llm, registry, publisher, nats);
+
+        let event = crate::event::RouterEvent::new("trogon.events.x", b"{}".as_ref());
+        let err = router.route_event(event).await.unwrap_err();
+        assert!(matches!(err, RouterError::Registry(_)));
+    }
 }
