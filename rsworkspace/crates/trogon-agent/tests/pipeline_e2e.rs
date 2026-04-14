@@ -2126,12 +2126,26 @@ async fn pipeline_post_linear_comment_tool_detokenized() {
         })
         .await;
 
+    // Linear GraphQL: pre-check query for existing comments (idempotency check).
+    let get_comments_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/graphql")
+                .header("authorization", "Bearer sk-linear-realkey")
+                .body_contains("comments");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"data":{"issue":{"comments":{"nodes":[]}}}}"#);
+        })
+        .await;
+
     // Linear GraphQL: commentCreate returns success.
     let graphql_mock = mock_server
         .mock_async(|when, then| {
             when.method(httpmock::Method::POST)
                 .path("/graphql")
-                .header("authorization", "Bearer sk-linear-realkey");
+                .header("authorization", "Bearer sk-linear-realkey")
+                .body_contains("commentCreate");
             then.status(200)
                 .header("content-type", "application/json")
                 .body(r#"{"data":{"commentCreate":{"success":true,"comment":{"id":"c1","url":"https://linear.app/comment/c1"}}}}"#);
@@ -2242,6 +2256,7 @@ async fn pipeline_post_linear_comment_tool_detokenized() {
     );
     anthropic_end_turn.assert_async().await;
     anthropic_tool_call.assert_async().await;
+    get_comments_mock.assert_async().await;
     graphql_mock.assert_async().await;
 }
 
@@ -2280,13 +2295,27 @@ async fn pipeline_graphql_failure_wrapped_as_tool_error() {
         })
         .await;
 
+    // Linear GraphQL: pre-check query for existing comments (idempotency check).
+    let get_comments_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/graphql")
+                .header("authorization", "Bearer sk-linear-realkey")
+                .body_contains("comments");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"data":{"issue":{"comments":{"nodes":[]}}}}"#);
+        })
+        .await;
+
     // Linear GraphQL: commentCreate returns success:false — triggers the Err
     // branch in post_comment() → "commentCreate failed: ...".
     let graphql_failure_mock = mock_server
         .mock_async(|when, then| {
             when.method(httpmock::Method::POST)
                 .path("/graphql")
-                .header("authorization", "Bearer sk-linear-realkey");
+                .header("authorization", "Bearer sk-linear-realkey")
+                .body_contains("commentCreate");
             then.status(200)
                 .header("content-type", "application/json")
                 .body(r#"{"data":{"commentCreate":{"success":false}},"errors":[{"message":"Not authorized"}]}"#);
@@ -2397,6 +2426,7 @@ async fn pipeline_graphql_failure_wrapped_as_tool_error() {
     );
     anthropic_end_turn.assert_async().await;
     anthropic_tool_call.assert_async().await;
+    get_comments_mock.assert_async().await;
     graphql_failure_mock.assert_async().await;
 }
 
@@ -4046,12 +4076,26 @@ async fn pipeline_post_linear_comment_no_url_fallback() {
         })
         .await;
 
+    // Linear GraphQL: pre-check query for existing comments (idempotency check).
+    let get_comments_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/graphql")
+                .header("authorization", "Bearer sk-linear-realkey")
+                .body_contains("comments");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"data":{"issue":{"comments":{"nodes":[]}}}}"#);
+        })
+        .await;
+
     // GraphQL: success:true but comment object has no url field.
     let graphql_mock = mock_server
         .mock_async(|when, then| {
             when.method(httpmock::Method::POST)
                 .path("/graphql")
-                .header("authorization", "Bearer sk-linear-realkey");
+                .header("authorization", "Bearer sk-linear-realkey")
+                .body_contains("commentCreate");
             then.status(200)
                 .header("content-type", "application/json")
                 .body(r#"{"data":{"commentCreate":{"success":true,"comment":{"id":"c99"}}}}"#);
@@ -4162,6 +4206,7 @@ async fn pipeline_post_linear_comment_no_url_fallback() {
     );
     anthropic_end_turn.assert_async().await;
     anthropic_tool_call.assert_async().await;
+    get_comments_mock.assert_async().await;
     graphql_mock.assert_async().await;
 }
 
