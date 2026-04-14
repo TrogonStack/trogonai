@@ -1232,3 +1232,240 @@ async fn builtin_handler_marks_promise_resolved_in_kv() {
     assert_eq!(promise.tenant_id, "default");
     assert_eq!(promise.nats_subject, "github.pull_request");
 }
+
+/// A tool-use turn causes a KV checkpoint before the follow-up LLM call.
+/// After the run completes, the promise in KV must have `iteration >= 1`
+/// (at least one tool exchange was checkpointed) and non-empty `messages`.
+#[tokio::test]
+async fn multi_turn_run_checkpoints_iteration_and_messages_in_kv() {
+    use trogon_agent::promise_store::{PromiseStatus, PromiseStore};
+
+    let (_c, nats_port) = start_nats().await;
+    let mock = MockServer::start_async().await;
+    let mock_url = mock.base_url();
+
+    let (_, js) = js_client(nats_port).await;
+    create_streams(&js).await;
+
+    let astore = AutomationStore::open(&js).await.expect("open AutomationStore");
+    astore
+        .put(&make_automation(
+            "auto-multiturn",
+            "default",
+            "github.pull_request",
+            "MULTITURN_PROMPT",
+        ))
+        .await
+        .expect("put automation");
+
+    // Second Anthropic call (body contains "tool_result") → end_turn.
+    // Registered FIRST so httpmock matches it first (FIFO); the body_contains
+    // constraint makes it selective — only fires after a tool result is present.
+    mock.mock_async(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages")
+            .body_contains("tool_result");
+        then.status(200)
+            .header("content-type", "application/json")
+            .body(end_turn_body());
+    })
+    .await;
+
+    // First Anthropic call → tool_use for an unknown tool (no external API call
+    // needed; the dispatcher returns an error result, which the agent sends back
+    // as a tool_result block on the second call).
+    mock.mock_async(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .body(
+                r#"{
+                    "stop_reason":"tool_use",
+                    "content":[{
+                        "type":"tool_use",
+                        "id":"tu_ckpt_01",
+                        "name":"nonexistent_tool_for_checkpoint_test",
+                        "input":{}
+                    }]
+                }"#,
+            );
+    })
+    .await;
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let api_port = listener.local_addr().unwrap().port();
+    drop(listener);
+
+    tokio::spawn(async move {
+        // max_iterations must be >= 2 so the second LLM call (after tool result)
+        // can reach end_turn; the default runner_cfg uses 1 which would terminate
+        // with PermanentFailed (MaxIterationsReached) after the first tool call.
+        let mut cfg = runner_cfg(nats_port, mock_url, "default", api_port);
+        cfg.max_iterations = 2;
+        run(cfg).await.ok()
+    });
+
+    let client = reqwest::Client::new();
+    let runs_url = format!("http://127.0.0.1:{api_port}/runs");
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        match client
+            .get(&runs_url)
+            .header("x-tenant-id", "default")
+            .send()
+            .await
+        {
+            Ok(_) => break,
+            Err(_) if tokio::time::Instant::now() < deadline => {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            Err(e) => panic!("API never came up: {e}"),
+        }
+    }
+
+    js.publish("github.pull_request", pr_opened_payload().into())
+        .await
+        .expect("publish");
+
+    // Poll until the run completes (RunRecord = proof the agent finished).
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let body: serde_json::Value = client
+            .get(&runs_url)
+            .header("x-tenant-id", "default")
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        if body.as_array().map(|a| !a.is_empty()).unwrap_or(false) {
+            break;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            panic!("No RunRecord appeared within timeout");
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+
+    // The promise must reflect at least one checkpointed tool exchange.
+    let ps = PromiseStore::open(&js).await.expect("open PromiseStore");
+    let (promise, _rev) = ps
+        .get_promise("default", "github.1.auto-multiturn")
+        .await
+        .expect("get_promise")
+        .expect("promise must exist in KV");
+
+    assert_eq!(promise.status, PromiseStatus::Resolved);
+    assert!(
+        promise.iteration >= 1,
+        "promise must have at least one checkpointed iteration (got {})",
+        promise.iteration
+    );
+    assert!(
+        !promise.messages.is_empty(),
+        "checkpoint must carry conversation messages"
+    );
+}
+
+/// When Anthropic returns 5xx and all three retry attempts are exhausted, the
+/// promise is marked `Failed` (not `PermanentFailed`) — indicating a transient
+/// error that NATS redelivery may resolve.
+#[tokio::test]
+async fn dispatch_marks_promise_failed_on_transient_5xx_exhaustion() {
+    use trogon_agent::promise_store::{PromiseStatus, PromiseStore};
+
+    let (_c, nats_port) = start_nats().await;
+    let mock = MockServer::start_async().await;
+    let mock_url = mock.base_url();
+
+    let (_, js) = js_client(nats_port).await;
+    create_streams(&js).await;
+
+    let astore = AutomationStore::open(&js).await.expect("open AutomationStore");
+    astore
+        .put(&make_automation(
+            "auto-5xx",
+            "default",
+            "github.pull_request",
+            "5XX_PROMPT",
+        ))
+        .await
+        .expect("put automation");
+
+    // Anthropic always returns 500 — triggers the 2s+4s+8s retry backoff
+    // (3 retries, ~14 s total) before the agent gives up.
+    mock.mock_async(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
+        then.status(500).body("internal server error");
+    })
+    .await;
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let api_port = listener.local_addr().unwrap().port();
+    drop(listener);
+
+    tokio::spawn(async move {
+        run(runner_cfg(nats_port, mock_url, "default", api_port))
+            .await
+            .ok()
+    });
+
+    let client = reqwest::Client::new();
+    let runs_url = format!("http://127.0.0.1:{api_port}/runs");
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        match client
+            .get(&runs_url)
+            .header("x-tenant-id", "default")
+            .send()
+            .await
+        {
+            Ok(_) => break,
+            Err(_) if tokio::time::Instant::now() < deadline => {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            Err(e) => panic!("API never came up: {e}"),
+        }
+    }
+
+    js.publish("github.pull_request", pr_opened_payload().into())
+        .await
+        .expect("publish");
+
+    // The retry backoff totals ~14 s; allow 25 s for the RunRecord to appear.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(25);
+    loop {
+        let body: serde_json::Value = client
+            .get(&runs_url)
+            .header("x-tenant-id", "default")
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        if body.as_array().map(|a| !a.is_empty()).unwrap_or(false) {
+            break;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            panic!("No RunRecord appeared after 5xx exhaustion within timeout");
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+
+    let ps = PromiseStore::open(&js).await.expect("open PromiseStore");
+    let (promise, _rev) = ps
+        .get_promise("default", "github.1.auto-5xx")
+        .await
+        .expect("get_promise")
+        .expect("promise must exist in KV");
+
+    assert_eq!(
+        promise.status,
+        PromiseStatus::Failed,
+        "exhausted 5xx retries must mark promise Failed (transient), not PermanentFailed"
+    );
+}

@@ -365,6 +365,72 @@ async fn update_session_name_model_tools() {
     assert_eq!(updated["model"], "claude-haiku-4-5-20251001");
 }
 
+/// PATCH the session tools list, then POST a message — the agent must use the
+/// updated tools, not the original ones. Verifies that `send_message` reads
+/// the session fresh from KV after the PATCH and applies the new tool filter.
+#[tokio::test]
+async fn patch_tools_then_send_message_uses_updated_tool_list() {
+    let env = start().await;
+
+    // Only fire when "get_pr_diff" is in the Anthropic request (patched tools).
+    let patched_mock = env.mock_server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages")
+            .body_contains("get_pr_diff");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(end_turn("diff result after patch"));
+    });
+
+    // Must NOT fire — if create_linear_issue appears, the tool list was not updated.
+    let stale_mock = env.mock_server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages")
+            .body_contains("create_linear_issue");
+        then.status(500).body("stale tool list detected");
+    });
+
+    // Create session with no tools (all tools available by default).
+    let created: Value = env
+        .client
+        .post(format!("{}/sessions", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = created["id"].as_str().unwrap();
+
+    // PATCH: restrict tools to only get_pr_diff.
+    env.client
+        .patch(format!("{}/sessions/{id}", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({"tools": ["get_pr_diff"]}))
+        .send()
+        .await
+        .unwrap();
+
+    // POST a message — must use the patched tool list.
+    let res: Value = env
+        .client
+        .post(format!("{}/sessions/{id}/messages", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({"content": "show me the diff"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(res["content"], "diff result after patch");
+    patched_mock.assert_hits_async(1).await;
+    stale_mock.assert_hits_async(0).await;
+}
+
 #[tokio::test]
 async fn update_session_not_found_returns_404() {
     let env = start().await;
