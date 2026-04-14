@@ -87,6 +87,26 @@ mod tests {
         let mut state = Empty;
         Minimal::on_destroy(&mut state).await.unwrap();
     }
+
+    /// Run `Minimal` through the real runtime so that `handle()` is executed
+    /// and the default `on_create` path is exercised through the runtime cycle.
+    #[tokio::test]
+    async fn minimal_actor_handle_is_callable() {
+        use crate::{
+            runtime::ActorRuntime,
+            state::mock::MockStateStore,
+        };
+        use trogon_registry::{MockRegistryStore, Registry};
+        use trogon_transcript::publisher::mock::MockTranscriptPublisher;
+
+        let runtime = ActorRuntime::new(
+            MockStateStore::new(),
+            MockTranscriptPublisher::new(),
+            trogon_nats::MockNatsClient::new(),
+            Registry::new(MockRegistryStore::new()),
+        );
+        runtime.handle_event(&mut Minimal, "e-1").await.unwrap();
+    }
 }
 
 pub trait EntityActor: Send + 'static {
