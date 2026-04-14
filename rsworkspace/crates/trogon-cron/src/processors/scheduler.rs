@@ -16,7 +16,7 @@ use crate::{
     error::CronError,
     kv::{LEADER_BUCKET, LEADER_KEY},
     nats::NatsSchedulePublisher,
-    projections::{JobSpecChange, load_and_watch},
+    projections::{CronJobChange, load_and_watch_cron_jobs},
     store::connect_store,
     traits::{LeaderLock, SchedulePublisher},
 };
@@ -25,10 +25,10 @@ const WATCH_RETRY_INTERVAL: Duration = Duration::from_secs(1);
 const DEFAULT_LEADER_RENEW_INTERVAL: Duration = Duration::from_secs(5);
 const DEFAULT_LEADER_TTL: Duration = Duration::from_secs(10);
 
-type ConfigWatcher = Pin<Box<dyn Stream<Item = JobSpecChange> + Send + 'static>>;
+type CronJobWatcher = Pin<Box<dyn Stream<Item = CronJobChange> + Send + 'static>>;
 
 enum ReestablishedWatch {
-    Ready((Vec<JobSpec>, ConfigWatcher)),
+    Ready((Vec<JobSpec>, CronJobWatcher)),
     Shutdown,
 }
 
@@ -37,7 +37,7 @@ pub struct CronController<
     P = NatsSchedulePublisher,
     L = NatsKvLease,
 > {
-    config_store: C,
+    store: C,
     schedule_publisher: P,
     leader_lock: L,
     node_id: String,
@@ -47,7 +47,7 @@ pub struct CronController<
 impl CronController<async_nats::jetstream::Context, NatsSchedulePublisher, NatsKvLease> {
     pub async fn from_nats(nats: async_nats::Client) -> Result<Self, CronError> {
         let js = async_nats::jetstream::new(nats.clone());
-        let config_store = connect_store(nats.clone()).await?;
+        let store = connect_store(nats.clone()).await?;
         let schedule_publisher = NatsSchedulePublisher::new(nats).await?;
         let leader_config = NatsKvLeaseConfig::new(
             LEADER_BUCKET,
@@ -65,7 +65,7 @@ impl CronController<async_nats::jetstream::Context, NatsSchedulePublisher, NatsK
             })?;
 
         Ok(Self {
-            config_store,
+            store,
             schedule_publisher,
             leader_lock,
             node_id: Uuid::new_v4().to_string(),
@@ -75,9 +75,9 @@ impl CronController<async_nats::jetstream::Context, NatsSchedulePublisher, NatsK
 }
 
 impl<C, P, L> CronController<C, P, L> {
-    pub fn new(config_store: C, schedule_publisher: P, leader_lock: L) -> Self {
+    pub fn new(store: C, schedule_publisher: P, leader_lock: L) -> Self {
         Self {
-            config_store,
+            store,
             schedule_publisher,
             leader_lock,
             node_id: Uuid::new_v4().to_string(),
@@ -97,8 +97,8 @@ where
     L: LeaderLock,
 {
     pub async fn run(self) -> Result<(), CronError> {
-        let (initial_jobs, mut config_watcher): (Vec<JobSpec>, ConfigWatcher) =
-            load_and_watch(&self.config_store).await?;
+        let (initial_jobs, mut cron_job_watcher): (Vec<JobSpec>, CronJobWatcher) =
+            load_and_watch_cron_jobs(&self.store).await?;
         let mut desired_jobs = to_job_map(initial_jobs);
         let mut leader =
             LeaderElection::new(self.leader_lock, self.node_id.clone(), self.leader_timing);
@@ -124,7 +124,7 @@ where
                     )
                     .await?;
                 }
-                change = config_watcher.next() => {
+                change = cron_job_watcher.next() => {
                     match change {
                         Some(change) => {
                             apply_local_change(&mut desired_jobs, &change);
@@ -139,12 +139,12 @@ where
                         None => {
                             tracing::warn!(
                                 retry_ms = WATCH_RETRY_INTERVAL.as_millis(),
-                                "Config watcher ended, attempting to re-establish it"
+                                "Cron jobs watcher ended, attempting to re-establish it"
                             );
-                            match reestablish_config_watch(&self.config_store).await? {
+                            match reestablish_cron_jobs_watch(&self.store).await? {
                                 ReestablishedWatch::Ready((jobs, watcher)) => {
                                     desired_jobs = to_job_map(jobs);
-                                    config_watcher = watcher;
+                                    cron_job_watcher = watcher;
                                     if currently_leader {
                                         reconcile_snapshot(
                                             &self.schedule_publisher,
@@ -154,7 +154,7 @@ where
                                     }
                                 }
                                 ReestablishedWatch::Shutdown => {
-                                    tracing::info!("Shutdown received while re-establishing config watcher, releasing leader lease");
+                                    tracing::info!("Shutdown received while re-establishing cron jobs watcher, releasing leader lease");
                                     if let Err(error) = leader.release().await {
                                         tracing::warn!(error = %error, "Failed to release leader lease");
                                     }
@@ -185,12 +185,12 @@ fn to_job_map(jobs: Vec<JobSpec>) -> HashMap<String, JobSpec> {
     jobs.into_iter().map(|job| (job.id.clone(), job)).collect()
 }
 
-fn apply_local_change(desired_jobs: &mut HashMap<String, JobSpec>, change: &JobSpecChange) {
+fn apply_local_change(desired_jobs: &mut HashMap<String, JobSpec>, change: &CronJobChange) {
     match change {
-        JobSpecChange::Put(job) => {
+        CronJobChange::Put(job) => {
             desired_jobs.insert(job.id.clone(), job.clone());
         }
-        JobSpecChange::Delete(id) => {
+        CronJobChange::Delete(id) => {
             desired_jobs.remove(id);
         }
     }
@@ -232,10 +232,10 @@ where
 
 async fn apply_remote_change<P: SchedulePublisher<Error = CronError>>(
     publisher: &P,
-    change: &JobSpecChange,
+    change: &CronJobChange,
 ) -> Result<(), CronError> {
     match change {
-        JobSpecChange::Put(job) => {
+        CronJobChange::Put(job) => {
             if job.state.is_enabled() {
                 match ResolvedJobSpec::try_from(job) {
                     Ok(resolved) => {
@@ -254,7 +254,7 @@ async fn apply_remote_change<P: SchedulePublisher<Error = CronError>>(
                 publisher.remove_schedule(&job.id).await?;
             }
         }
-        JobSpecChange::Delete(id) => {
+        CronJobChange::Delete(id) => {
             publisher.remove_schedule(id).await?;
         }
     }
@@ -305,22 +305,22 @@ async fn reconcile_snapshot<P: SchedulePublisher<Error = CronError>>(
     Ok(())
 }
 
-async fn reestablish_config_watch(
-    config_store: &jetstream::Context,
+async fn reestablish_cron_jobs_watch(
+    store: &jetstream::Context,
 ) -> Result<ReestablishedWatch, CronError> {
     loop {
         tokio::select! {
             _ = acp_telemetry::signal::shutdown_signal() => {
                 return Ok(ReestablishedWatch::Shutdown);
             }
-            result = load_and_watch(config_store) => {
+            result = load_and_watch_cron_jobs(store) => {
                 match result {
                     Ok((jobs, watcher)) => return Ok(ReestablishedWatch::Ready((jobs, watcher))),
                     Err(error) => {
                         tracing::error!(
                             error = %error,
                             retry_ms = WATCH_RETRY_INTERVAL.as_millis(),
-                            "Failed to re-establish config watcher"
+                            "Failed to re-establish cron jobs watcher"
                         );
                     }
                 }
@@ -343,8 +343,8 @@ mod tests {
     };
     use crate::{
         config::{DeliverySpec, JobEnabledState, JobSpec, ScheduleSpec},
-        mocks::{MockConfigStore, MockLeaderLock, MockSchedulePublisher},
-        projections::JobSpecChange,
+        mocks::{MockCronStore, MockLeaderLock, MockSchedulePublisher},
+        projections::CronJobChange,
     };
     use trogon_nats::lease::{LeaderElection, LeaseRenewInterval, LeaseTiming, LeaseTtl};
     use trogon_std::time::{GetElapsed, GetNow};
@@ -429,7 +429,7 @@ mod tests {
     #[test]
     fn controller_construction_and_helpers_set_expected_state() {
         let controller = CronController::new(
-            MockConfigStore::new(),
+            MockCronStore::new(),
             MockSchedulePublisher::new(),
             MockLeaderLock::new(),
         )
@@ -451,10 +451,10 @@ mod tests {
         let mut jobs = to_job_map(vec![base_job("alpha")]);
         assert_eq!(jobs.keys().cloned().collect::<Vec<_>>(), vec!["alpha"]);
 
-        apply_local_change(&mut jobs, &JobSpecChange::Put(base_job("beta")));
+        apply_local_change(&mut jobs, &CronJobChange::Put(base_job("beta")));
         assert!(jobs.contains_key("beta"));
 
-        apply_local_change(&mut jobs, &JobSpecChange::Delete("alpha".to_string()));
+        apply_local_change(&mut jobs, &CronJobChange::Delete("alpha".to_string()));
         assert!(!jobs.contains_key("alpha"));
     }
 
@@ -462,7 +462,7 @@ mod tests {
     async fn apply_remote_change_upserts_enabled_jobs() {
         let publisher = MockSchedulePublisher::new();
 
-        apply_remote_change(&publisher, &JobSpecChange::Put(base_job("enabled")))
+        apply_remote_change(&publisher, &CronJobChange::Put(base_job("enabled")))
             .await
             .unwrap();
 
@@ -476,10 +476,10 @@ mod tests {
         let mut disabled = base_job("disabled");
         disabled.state = JobEnabledState::Disabled;
 
-        apply_remote_change(&publisher, &JobSpecChange::Put(disabled))
+        apply_remote_change(&publisher, &CronJobChange::Put(disabled))
             .await
             .unwrap();
-        apply_remote_change(&publisher, &JobSpecChange::Delete("deleted".to_string()))
+        apply_remote_change(&publisher, &CronJobChange::Delete("deleted".to_string()))
             .await
             .unwrap();
 
@@ -499,7 +499,7 @@ mod tests {
             source: None,
         };
 
-        apply_remote_change(&publisher, &JobSpecChange::Put(invalid))
+        apply_remote_change(&publisher, &CronJobChange::Put(invalid))
             .await
             .unwrap();
 
