@@ -523,35 +523,48 @@ async fn write_promise_terminal(
 }
 
 /// When `checkpoint` is `None` (the CAS revision was lost to a reload error)
-/// and the run ends with a *deterministic* error, attempt one final KV write
-/// to mark the promise `PermanentFailed`.
+/// and the run ends with a *deterministic* error, attempt to mark the promise
+/// `PermanentFailed` via a fresh `get_promise` + CAS write.
 ///
 /// Without this, the promise stays `Running` and startup recovery re-runs it
 /// on every restart — wasting resources on a hopeless run that will always
 /// hit the same deterministic error.
+///
+/// Retries up to 3 times with exponential back-off (2 s, 4 s) to survive
+/// transient NATS hiccups that may have caused the checkpoint revision to be
+/// lost in the first place. After 3 failures the promise stays `Running` and
+/// will be recovered correctly once NATS comes back online.
 async fn try_mark_permanent_failed_fresh(
     store: &dyn PromiseRepository,
     tenant_id: &str,
     pid: &str,
     context: &str,
 ) {
-    match tokio::time::timeout(NATS_KV_TIMEOUT, store.get_promise(tenant_id, pid)).await {
-        Ok(Ok(Some((mut p, rev)))) => {
-            write_promise_terminal(
-                store,
-                tenant_id,
-                pid,
-                &mut p,
-                rev,
-                crate::promise_store::PromiseStatus::PermanentFailed,
-                context,
-            )
-            .await;
+    for attempt in 0u32..3 {
+        if attempt > 0 {
+            // Exponential back-off: 2 s, 4 s.
+            tokio::time::sleep(std::time::Duration::from_secs(2u64.pow(attempt))).await;
         }
-        Ok(Ok(None)) => {} // Promise gone from KV — no cycle risk
-        Ok(Err(e)) => warn!(error = %e, context, "Could not fetch promise for terminal-status write"),
-        Err(_) => warn!(context, "KV timeout fetching promise for terminal-status write"),
+        match tokio::time::timeout(NATS_KV_TIMEOUT, store.get_promise(tenant_id, pid)).await {
+            Ok(Ok(Some((mut p, rev)))) => {
+                write_promise_terminal(
+                    store,
+                    tenant_id,
+                    pid,
+                    &mut p,
+                    rev,
+                    crate::promise_store::PromiseStatus::PermanentFailed,
+                    context,
+                )
+                .await;
+                return; // write attempted (success or terminal CAS failure — either way, stop)
+            }
+            Ok(Ok(None)) => return, // Promise gone from KV — no cycle risk
+            Ok(Err(e)) => warn!(error = %e, context, attempt, "Could not fetch promise for terminal-status write — retrying"),
+            Err(_) => warn!(context, attempt, "KV timeout fetching promise for terminal-status write — retrying"),
+        }
     }
+    error!(context, promise_id = %pid, "Failed to mark promise PermanentFailed after 3 attempts — promise will stay Running until TTL or next successful recovery");
 }
 
 /// Render a slice of messages as readable text for the summarization prompt.
