@@ -343,6 +343,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn save_other_error_propagates_as_actor_error_state() {
+        let runtime = make_runtime();
+        runtime.state.inject_save_error();
+        let (mut actor, _) = CounterActor::new();
+        let err = runtime.handle_event(&mut actor, "entity-1").await.unwrap_err();
+        assert!(matches!(err, ActorError::State(_)));
+    }
+
+    #[tokio::test]
+    async fn load_error_propagates_as_actor_error_state() {
+        let runtime = make_runtime();
+        runtime.state.inject_load_error();
+        let (mut actor, _) = CounterActor::new();
+        let err = runtime.handle_event(&mut actor, "entity-1").await.unwrap_err();
+        assert!(matches!(err, ActorError::State(_)));
+    }
+
+    #[tokio::test]
     async fn transcript_entries_are_published() {
         // Actor that writes transcript entries.
         struct Scribe;

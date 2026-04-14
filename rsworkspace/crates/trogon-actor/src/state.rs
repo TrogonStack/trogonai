@@ -195,6 +195,10 @@ pub mod mock {
         data: Arc<Mutex<HashMap<String, (Bytes, u64)>>>,
         /// If set to `Some(n)`, the next `n` saves will return `Conflict`.
         conflict_count: Arc<Mutex<u32>>,
+        /// If true, the next save will return `SaveError::Other`.
+        next_save_other_error: Arc<Mutex<bool>>,
+        /// If true, the next load will return an error.
+        next_load_error: Arc<Mutex<bool>>,
     }
 
     impl MockStateStore {
@@ -205,6 +209,16 @@ pub mod mock {
         /// Cause the next `n` calls to `save` to return `SaveError::Conflict`.
         pub fn inject_conflicts(&self, n: u32) {
             *self.conflict_count.lock().unwrap() = n;
+        }
+
+        /// Cause the next `save` to return `SaveError::Other`.
+        pub fn inject_save_error(&self) {
+            *self.next_save_other_error.lock().unwrap() = true;
+        }
+
+        /// Cause the next `load` to return an error.
+        pub fn inject_load_error(&self) {
+            *self.next_load_error.lock().unwrap() = true;
         }
 
         pub fn snapshot(&self) -> HashMap<String, Bytes> {
@@ -219,6 +233,12 @@ pub mod mock {
 
     impl StateStore for MockStateStore {
         async fn load(&self, key: &str) -> Result<Option<StateEntry>, String> {
+            let mut load_err = self.next_load_error.lock().unwrap();
+            if *load_err {
+                *load_err = false;
+                return Err("injected load error".to_string());
+            }
+            drop(load_err);
             Ok(self
                 .data
                 .lock()
@@ -231,6 +251,13 @@ pub mod mock {
         }
 
         async fn save(&self, key: &str, value: Bytes, _revision: Option<u64>) -> Result<u64, SaveError> {
+            let mut save_err = self.next_save_other_error.lock().unwrap();
+            if *save_err {
+                *save_err = false;
+                return Err(SaveError::Other("injected save error".to_string()));
+            }
+            drop(save_err);
+
             let mut count = self.conflict_count.lock().unwrap();
             if *count > 0 {
                 *count -= 1;
@@ -306,6 +333,36 @@ mod tests {
         let store = MockStateStore::new();
         store.save("k", Bytes::from_static(b"v"), None).await.unwrap();
         store.delete("k").await.unwrap();
+        assert!(store.load("k").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn mock_snapshot_reflects_saved_state() {
+        let store = MockStateStore::new();
+        store.save("a", Bytes::from_static(b"1"), None).await.unwrap();
+        store.save("b", Bytes::from_static(b"2"), None).await.unwrap();
+        let snap = store.snapshot();
+        assert_eq!(snap.len(), 2);
+        assert_eq!(snap["a"], Bytes::from_static(b"1"));
+        assert_eq!(snap["b"], Bytes::from_static(b"2"));
+    }
+
+    #[tokio::test]
+    async fn mock_inject_save_error_returns_other() {
+        let store = MockStateStore::new();
+        store.inject_save_error();
+        let result = store.save("k", Bytes::new(), None).await;
+        assert!(matches!(result, Err(SaveError::Other(_))));
+        // Next save succeeds.
+        assert!(store.save("k", Bytes::new(), None).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn mock_inject_load_error_returns_err() {
+        let store = MockStateStore::new();
+        store.inject_load_error();
+        assert!(store.load("k").await.is_err());
+        // Next load succeeds (returns None).
         assert!(store.load("k").await.unwrap().is_none());
     }
 }

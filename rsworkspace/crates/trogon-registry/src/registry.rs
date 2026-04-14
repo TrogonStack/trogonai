@@ -233,4 +233,33 @@ mod tests {
         assert!(cap.has_capability("Code_Review"));
         assert!(!cap.has_capability("triage"));
     }
+
+    #[tokio::test]
+    async fn mock_store_snapshot_reflects_registered_agents() {
+        let store = MockRegistryStore::new();
+        let r = Registry::new(store.clone());
+        r.register(&pr_actor()).await.unwrap();
+        r.register(&incident_actor()).await.unwrap();
+
+        let snap = store.snapshot();
+        assert_eq!(snap.len(), 2);
+        assert!(snap.contains_key("PrActor"));
+        assert!(snap.contains_key("IncidentActor"));
+    }
+
+    #[tokio::test]
+    async fn list_all_skips_corrupted_entries() {
+        // Cover the Err(e) deserialization branch in list_all: put raw bytes
+        // that are not valid JSON into the store, verify the good entries
+        // are still returned and the bad one is silently skipped.
+        use crate::store::RegistryStore as _;
+        let store = MockRegistryStore::new();
+        let r = Registry::new(store.clone());
+        r.register(&pr_actor()).await.unwrap();
+        store.put("Corrupted", bytes::Bytes::from_static(b"not-valid-json")).await.unwrap();
+
+        let all = r.list_all().await.unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].agent_type, "PrActor");
+    }
 }

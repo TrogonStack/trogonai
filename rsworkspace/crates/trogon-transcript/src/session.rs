@@ -268,4 +268,17 @@ mod tests {
             other => panic!("unexpected entry variant: {other:?}"),
         }
     }
+
+    #[tokio::test]
+    async fn append_system_message_records_entry() {
+        let (session, mock) = mock_session("pr", "owner/repo/1");
+        session.append_system_message("You are a helpful assistant.").await.unwrap();
+        let published = mock.take_published();
+        assert_eq!(published.len(), 1);
+        let entry: TranscriptEntry = serde_json::from_slice(&published[0].1).unwrap();
+        assert!(matches!(
+            entry,
+            TranscriptEntry::Message { role: crate::entry::Role::System, tokens: None, .. }
+        ));
+    }
 }
