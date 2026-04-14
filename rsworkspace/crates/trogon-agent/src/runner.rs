@@ -1035,8 +1035,14 @@ async fn recover_stale_promises<A: AutomationRepository, R: RunRepository>(
     const STALE_AFTER_SECS: u64 = 15 * 60;
     let now = trogon_automations::now_unix();
 
+    // list_running does N+1 KV reads (one keys() scan + one get_promise per key).
+    // NATS_KV_TIMEOUT (10 s) is too tight for high-volume deployments where many
+    // promises may be stale simultaneously — 50 promises × 100 ms/read = 5 s under
+    // mild load, easily 10 s+ under degradation. Recovery runs in a background task
+    // so a longer timeout does not block fresh event processing.
+    const LIST_RUNNING_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2 * 60);
     let promises = match tokio::time::timeout(
-        crate::agent_loop::NATS_KV_TIMEOUT,
+        LIST_RUNNING_TIMEOUT,
         promise_store.list_running(tenant_id),
     )
     .await
@@ -1047,7 +1053,7 @@ async fn recover_stale_promises<A: AutomationRepository, R: RunRepository>(
             return None;
         }
         Err(_) => {
-            warn!("Startup recovery: list_running timed out — skipping recovery this startup");
+            warn!("Startup recovery: list_running timed out after 2 min — skipping recovery this startup");
             return None;
         }
     };
