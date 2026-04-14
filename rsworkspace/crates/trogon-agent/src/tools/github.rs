@@ -364,9 +364,13 @@ pub async fn request_reviewers(
         ),
     ];
 
-    // Recovery dedup: if all requested reviewers are already in the pending
-    // list, skip the POST to avoid sending duplicate review notifications.
-    if idempotency_key.is_some() {
+    // Recovery dedup: filter out reviewers who are already in the pending list
+    // before posting. The previous "all-or-nothing" check (skip only if ALL are
+    // present) allowed duplicate notifications for reviewers added before a
+    // crash when at least one reviewer was missing. Now we only request the
+    // reviewers who are not yet present — those already added are silently
+    // dropped so they don't receive a second notification.
+    let reviewers_to_request: Vec<&str> = if idempotency_key.is_some() {
         match ctx.http_client.get(&url, auth_headers.clone()).await {
             Ok(resp) => {
                 if let Ok(data) = serde_json::from_str::<Value>(&resp.body) {
@@ -374,19 +378,33 @@ pub async fn request_reviewers(
                         .as_array()
                         .map(|arr| arr.iter().filter_map(|u| u["login"].as_str()).collect())
                         .unwrap_or_default();
-                    if reviewers.iter().all(|r| existing.contains(r)) {
-                        return Ok(format!("Reviewers requested on PR #{pr_number}"));
-                    }
+                    reviewers
+                        .iter()
+                        .copied()
+                        .filter(|r| !existing.contains(r))
+                        .collect()
+                } else {
+                    reviewers.clone()
                 }
             }
-            // Graceful degradation: if the pre-check fails, proceed with POST.
-            Err(_) => {}
+            // Graceful degradation: if the pre-check fails, request all reviewers.
+            Err(_) => reviewers.clone(),
         }
+    } else {
+        reviewers.clone()
+    };
+
+    if reviewers_to_request.is_empty() {
+        return Ok(format!("Reviewers requested on PR #{pr_number}"));
     }
 
     let resp = ctx
         .http_client
-        .post(&url, auth_headers, serde_json::json!({ "reviewers": reviewers }))
+        .post(
+            &url,
+            auth_headers,
+            serde_json::json!({ "reviewers": reviewers_to_request }),
+        )
         .await?;
     let response: Value = serde_json::from_str(&resp.body).map_err(|e| e.to_string())?;
 

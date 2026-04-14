@@ -113,8 +113,11 @@ pub async fn post_comment(
     }
 
     // ── Embed marker in body ─────────────────────────────────────────────────
+    // Use idempotency_marker() so the embedded marker is byte-identical to the
+    // one constructed in the pre-check scan above — both paths sanitise `--`
+    // the same way, keeping check and write in sync.
     let effective_body = if let Some(key) = idempotency_key {
-        format!("{body}\n\n<!-- trogon-idempotency-key: {key} -->")
+        format!("{body}\n\n{}", super::idempotency_marker(key))
     } else {
         body.to_string()
     };
