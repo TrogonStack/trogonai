@@ -8,15 +8,13 @@ use crate::{
     config::{JobSpec, JobWriteState},
     domain::ResolvedJobSpec,
     error::CronError,
-    events::{
-        JobEvent, JobEventData, JobStreamState, ProjectionChange, RecordedJobEvent, apply,
-        initial_state,
-    },
+    events::{JobEvent, JobEventData, RecordedJobEvent},
     kv::{
         EVENTS_STREAM, EVENTS_SUBJECT_PATTERN, EVENTS_SUBJECT_PREFIX, JOBS_KEY_PREFIX,
         LEGACY_EVENTS_SUBJECT_PATTERN, LEGACY_EVENTS_SUBJECT_PREFIX, SCHEDULES_STREAM,
         get_or_create_schedule_stream,
     },
+    projections::{JobStreamState, ProjectionChange, apply, initial_state},
     store::JobSpecChange,
     traits::SchedulePublisher,
 };
@@ -503,7 +501,7 @@ fn validate_schedule_stream(stream: &jetstream::stream::Stream) -> Result<(), Cr
 mod tests {
     use super::*;
     use crate::config::{DeliverySpec, JobEnabledState, JobSpec, JobWriteCondition, ScheduleSpec};
-    use crate::events::{JobStreamState, apply, projection_change};
+    use crate::projections::{JobStreamState, apply, projection_change};
 
     fn test_job(id: &str) -> JobSpec {
         JobSpec {
