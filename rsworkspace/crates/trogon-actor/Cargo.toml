@@ -19,6 +19,7 @@ trogon-registry = { workspace = true }
 trogon-transcript = { workspace = true }
 
 [dev-dependencies]
+futures-util = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 trogon-nats = { workspace = true, features = ["test-support"] }
 trogon-registry = { workspace = true, features = ["test-helpers"] }

@@ -355,6 +355,76 @@ async fn forwarded_message_carries_routing_headers() {
     assert!(routed_at > 0, "timestamp should be non-zero");
 }
 
+/// Send two events: the first causes an `UnknownAgentType` error (LLM returns
+/// an agent type not in the registry). The second is correctly routed.
+/// Verifies that the router loop's `warn! and continue` behaviour means the
+/// second event is still processed even after the first fails.
+#[tokio::test]
+async fn router_loop_continues_after_routing_error() {
+    let (nats, js, _container) = setup().await;
+
+    let store = provision_registry(&js).await.unwrap();
+    let registry = Registry::new(store);
+    registry.register(&pr_actor()).await.unwrap();
+
+    let mut actor_sub = nats.subscribe("actors.pr.>").await.unwrap();
+
+    let llm = MockLlmClient::new();
+    // First event: LLM returns a ghost agent type not in the registry.
+    llm.push_response(LlmRoutingResponse::Routed {
+        agent_type: "GhostActor".into(),
+        entity_key: "some/key/1".into(),
+        reasoning: "hallucinated".into(),
+    });
+    // Second event: LLM returns a valid routing decision.
+    llm.push_response(LlmRoutingResponse::Routed {
+        agent_type: "PrActor".into(),
+        entity_key: "owner/repo/99".into(),
+        reasoning: "valid PR event".into(),
+    });
+
+    let publisher = MockTranscriptPublisher::new();
+    let router = Router::new(llm, registry, publisher, nats.clone());
+
+    let nats_clone = nats.clone();
+    let router_handle = tokio::spawn(async move {
+        router.run("trogon.events.>").await.ok();
+    });
+
+    // Publish the first event (triggers UnknownAgentType error).
+    publish_after_subscribe(
+        &nats_clone,
+        "trogon.events.github.push",
+        Bytes::from_static(b"{}"),
+    )
+    .await;
+
+    // Allow the router time to process the first (failed) event.
+    tokio::time::sleep(Duration::from_millis(150)).await;
+
+    // Publish the second event — the router must still be running and route it.
+    nats_clone
+        .publish(
+            "trogon.events.github.pull_request",
+            Bytes::from_static(br#"{"number":99}"#),
+        )
+        .await
+        .unwrap();
+
+    let msg = tokio::time::timeout(Duration::from_secs(3), actor_sub.next())
+        .await
+        .expect("timed out — router may have stopped after the first error")
+        .expect("subscription ended unexpectedly");
+
+    assert_eq!(
+        msg.subject.as_str(),
+        "actors.pr.owner.repo.99",
+        "second event should be forwarded after first event error"
+    );
+
+    router_handle.abort();
+}
+
 #[tokio::test]
 async fn router_prompt_contains_live_registry_data() {
     let (nats, js, _container) = setup().await;

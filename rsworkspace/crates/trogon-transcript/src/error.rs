@@ -31,3 +31,39 @@ impl fmt::Display for TranscriptError {
 }
 
 impl std::error::Error for TranscriptError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn json_err() -> serde_json::Error {
+        serde_json::from_str::<u32>("{bad}").unwrap_err()
+    }
+
+    #[test]
+    fn display_publish() {
+        assert!(format!("{}", TranscriptError::Publish("x".into())).contains("publish error"));
+    }
+
+    #[test]
+    fn display_provision() {
+        assert!(format!("{}", TranscriptError::Provision("x".into())).contains("provision error"));
+    }
+
+    #[test]
+    fn display_serialization() {
+        assert!(format!("{}", TranscriptError::Serialization(json_err()))
+            .contains("serialization error"));
+    }
+
+    #[test]
+    fn display_deserialization() {
+        assert!(format!("{}", TranscriptError::Deserialization(json_err()))
+            .contains("deserialization error"));
+    }
+
+    #[test]
+    fn display_stream() {
+        assert!(format!("{}", TranscriptError::Stream("x".into())).contains("stream error"));
+    }
+}

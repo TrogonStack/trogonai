@@ -53,6 +53,84 @@ impl<E: std::error::Error + 'static> std::error::Error for ActorError<E> {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn json_err() -> serde_json::Error {
+        serde_json::from_str::<u32>("{bad}").unwrap_err()
+    }
+
+    #[test]
+    fn display_actor() {
+        let e = ActorError::Actor(std::io::Error::new(std::io::ErrorKind::Other, "boom"));
+        assert!(format!("{e}").contains("actor error"));
+    }
+
+    #[test]
+    fn display_state() {
+        assert!(format!("{}", ActorError::<std::io::Error>::State("oops".into()))
+            .contains("state store error"));
+    }
+
+    #[test]
+    fn display_serialize() {
+        assert!(format!("{}", ActorError::<std::io::Error>::Serialize(json_err()))
+            .contains("serialization error"));
+    }
+
+    #[test]
+    fn display_deserialize() {
+        assert!(format!("{}", ActorError::<std::io::Error>::Deserialize(json_err()))
+            .contains("deserialization error"));
+    }
+
+    #[test]
+    fn display_transcript() {
+        assert!(format!("{}", ActorError::<std::io::Error>::Transcript("t".into()))
+            .contains("transcript error"));
+    }
+
+    #[test]
+    fn display_spawn_failed() {
+        assert!(format!("{}", ActorError::<std::io::Error>::SpawnFailed("net".into()))
+            .contains("spawn failed"));
+    }
+
+    #[test]
+    fn display_no_agent_found() {
+        assert!(format!("{}", ActorError::<std::io::Error>::NoAgentFound("cap".into()))
+            .contains("no agent found"));
+    }
+
+    #[test]
+    fn display_retry_limit_exceeded() {
+        assert!(format!("{}", ActorError::<std::io::Error>::RetryLimitExceeded)
+            .contains("retry limit"));
+    }
+
+    #[test]
+    fn source_actor_is_some() {
+        use std::error::Error;
+        let e = ActorError::Actor(std::io::Error::new(std::io::ErrorKind::Other, "boom"));
+        assert!(e.source().is_some());
+    }
+
+    #[test]
+    fn source_serialize_is_some() {
+        use std::error::Error;
+        let e = ActorError::<std::io::Error>::Serialize(json_err());
+        assert!(e.source().is_some());
+    }
+
+    #[test]
+    fn source_state_is_none() {
+        use std::error::Error;
+        let e = ActorError::<std::io::Error>::State("msg".into());
+        assert!(e.source().is_none());
+    }
+}
+
 /// Outcome of a state-save attempt in the runtime's optimistic-concurrency loop.
 #[derive(Debug)]
 pub enum SaveError {
