@@ -351,6 +351,13 @@ pub enum AgentError {
     Http(reqwest::Error),
     MaxIterationsReached,
     UnexpectedStopReason(String),
+    /// NATS KV timed out on the initial `get_promise` load after all retries.
+    ///
+    /// The promise is left in `Running` state so startup recovery can pick it
+    /// up once KV is healthy again. The run does not start — returning an error
+    /// here is safer than proceeding without checkpoint durability and
+    /// potentially re-executing tools that were already cached.
+    CheckpointLoadTimeout,
 }
 
 impl std::fmt::Display for AgentError {
@@ -359,6 +366,7 @@ impl std::fmt::Display for AgentError {
             Self::Http(e) => write!(f, "HTTP error: {e}"),
             Self::MaxIterationsReached => write!(f, "Agent exceeded max iterations"),
             Self::UnexpectedStopReason(r) => write!(f, "Unexpected stop reason: {r}"),
+            Self::CheckpointLoadTimeout => write!(f, "NATS KV timed out loading checkpoint — run deferred to startup recovery"),
         }
     }
 }
@@ -515,6 +523,7 @@ async fn write_promise_terminal(
     context: &str,
 ) {
     promise.status = status;
+    promise.failure_reason = Some(context.to_string());
     match tokio::time::timeout(NATS_KV_TIMEOUT, store.update_promise(tenant_id, pid, promise, rev)).await {
         Ok(Ok(_)) => {}
         Ok(Err(e)) => {
@@ -741,23 +750,55 @@ impl AgentLoop {
         // `checkpoint = None`, which means the KV revision was genuinely lost and
         // no writes of any kind are possible.
         // `checkpointing_disabled` is declared inside the `tool_use` match arm so
-        // it resets to false on every iteration — Fix #1: re-attempt checkpointing
-        // each turn in case the payload has shrunk since it last exceeded the limit.
-        // `recovering` is true only when we loaded a checkpoint — used to gate
-        // the tool-result cache replay in `execute_tools`.
+        // it resets to false on every iteration — re-attempt checkpointing each turn
+        // in case the payload has shrunk since it last exceeded the limit.
+        // `recovering` is true when we loaded a non-empty checkpoint — used only for
+        // system-prompt pinning logic. Tool-result cache is gated on `promise_id`
+        // being set (see `execute_tools`), not on this flag.
         let mut recovering = false;
         if let (Some(store), Some(pid)) = (&self.promise_store, &self.promise_id) {
-            let initial_load = match tokio::time::timeout(
-                NATS_KV_TIMEOUT,
-                store.get_promise(&self.tenant_id, pid),
-            )
-            .await
-            {
-                Ok(r) => r,
-                Err(_) => {
-                    warn!(promise_id = %pid, "NATS KV get_promise timed out on initial load — starting fresh without checkpoint");
-                    Ok(None)
+            // Attempt the initial checkpoint load twice before giving up.
+            // A single transient NATS blip should not forfeit all checkpoint
+            // durability for the run — one retry covers the common case.
+            // If both attempts time out we return Err rather than proceeding
+            // without a checkpoint: running without durability risks
+            // re-executing tool calls that were already cached in a previous
+            // delivery, which is worse than deferring to startup recovery.
+            // The promise remains Running so recover_stale_promises will pick
+            // it up on the next restart once KV is healthy again.
+            let initial_load = 'load: {
+                let mut last_err = None;
+                for attempt in 0u32..2 {
+                    match tokio::time::timeout(
+                        NATS_KV_TIMEOUT,
+                        store.get_promise(&self.tenant_id, pid),
+                    )
+                    .await
+                    {
+                        Ok(r) => break 'load r,
+                        Err(_) => {
+                            warn!(
+                                promise_id = %pid,
+                                attempt,
+                                "NATS KV get_promise timed out on initial load"
+                            );
+                            last_err = Some(());
+                            if attempt == 0 {
+                                // Brief pause before retrying — gives a
+                                // momentarily overloaded KV server time to
+                                // recover without burning the full timeout again.
+                                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                            }
+                        }
+                    }
                 }
+                let _ = last_err;
+                error!(
+                    promise_id = %pid,
+                    "NATS KV get_promise timed out on initial load after 2 attempts \
+                     — aborting run; promise stays Running for startup recovery"
+                );
+                return Err(AgentError::CheckpointLoadTimeout);
             };
             match initial_load {
                 Ok(Some((p, rev))) => {
@@ -1252,7 +1293,7 @@ impl AgentLoop {
                     // has shrunk. The size-guard below re-enables it for this turn only
                     // if trimming still cannot bring the payload under CHECKPOINT_MAX_BYTES.
                     let mut checkpointing_disabled = false;
-                    let results = self.execute_tools(&response.content, recovering).await;
+                    let results = self.execute_tools(&response.content).await;
                     messages.push(Message::assistant(response.content));
                     messages.push(Message::tool_results(results));
                     // `recovering` is flipped to `false` inside the successful
@@ -1377,6 +1418,73 @@ impl AgentLoop {
                                     "Checkpoint payload exceeds NATS KV size limit — disabling checkpointing for this run"
                                 );
                                 checkpointing_disabled = true;
+                                // Persist the degraded flag so operators can observe
+                                // runs that lost durability. Uses prev_messages (the
+                                // last successful checkpoint) which fits by definition.
+                                // Best-effort: if this write fails the run continues
+                                // without the flag — not worth blocking on.
+                                if !p.checkpoint_degraded {
+                                    p.checkpoint_degraded = true;
+                                    let first_ok = match tokio::time::timeout(
+                                        NATS_KV_TIMEOUT,
+                                        store.update_promise(&self.tenant_id, pid, p, *rev),
+                                    )
+                                    .await
+                                    {
+                                        Ok(Ok(new_rev)) => { *rev = new_rev; true }
+                                        Ok(Err(e)) => {
+                                            warn!(error = %e, promise_id = %pid,
+                                                "checkpoint_degraded write CAS conflict — reloading and retrying");
+                                            false
+                                        }
+                                        Err(_) => {
+                                            warn!(promise_id = %pid,
+                                                "checkpoint_degraded write timed out — reloading to verify and retry");
+                                            false
+                                        }
+                                    };
+                                    if !first_ok {
+                                        // Reload revision and retry once. If the first write
+                                        // landed despite the error (timeout case), the reload
+                                        // will show checkpoint_degraded=true and we skip.
+                                        match tokio::time::timeout(
+                                            NATS_KV_TIMEOUT,
+                                            store.get_promise(&self.tenant_id, pid),
+                                        )
+                                        .await
+                                        {
+                                            Ok(Ok(Some((ref current, fresh_rev))))
+                                                if !current.checkpoint_degraded =>
+                                            {
+                                                // First write did not land — retry with fresh rev.
+                                                match tokio::time::timeout(
+                                                    NATS_KV_TIMEOUT,
+                                                    store.update_promise(&self.tenant_id, pid, p, fresh_rev),
+                                                )
+                                                .await
+                                                {
+                                                    Ok(Ok(new_rev)) => *rev = new_rev,
+                                                    Ok(Err(e)) => warn!(
+                                                        error = %e, promise_id = %pid,
+                                                        "Could not persist checkpoint_degraded flag after retry — flag visible in-memory only"
+                                                    ),
+                                                    Err(_) => warn!(
+                                                        promise_id = %pid,
+                                                        "NATS KV timeout persisting checkpoint_degraded flag on retry — flag visible in-memory only"
+                                                    ),
+                                                }
+                                            }
+                                            Ok(Ok(Some((_, fresh_rev)))) => {
+                                                // First write landed despite error response.
+                                                *rev = fresh_rev;
+                                            }
+                                            _ => warn!(
+                                                promise_id = %pid,
+                                                "Could not reload revision for checkpoint_degraded retry — flag visible in-memory only"
+                                            ),
+                                        }
+                                    }
+                                }
                             }
                         }
                         // Size fits (as-is or after trimming) — commit all fields to p.
@@ -1400,10 +1508,6 @@ impl AgentLoop {
                                 // Checkpoint just wrote a fresh claimed_at — reset the
                                 // heartbeat timer so we don't immediately re-write.
                                 last_heartbeat_at = std::time::Instant::now();
-                                // Messages are now durable: we've caught up with the
-                                // recovery point. Future tool turns are genuinely new
-                                // and must not be replayed from the cache.
-                                recovering = false;
                             }
                             Ok(Err(e)) => {
                                 // CAS conflict: another process wrote to this promise
@@ -1526,23 +1630,6 @@ impl AgentLoop {
                         } // checkpoint attempt block
                     }
 
-                    // Fix: if checkpointing is permanently disabled (payload
-                    // exceeds all trim levels), reset `recovering` so future
-                    // turns don't consult the tool cache. Without this,
-                    // `recovering` stays `true` forever and same-input tool
-                    // calls in genuinely-new turns (e.g. a polling loop that
-                    // calls the same tool twice expecting different results)
-                    // return the first cached value rather than fresh data.
-                    //
-                    // Safety: if the process crashes while `recovering=false`
-                    // and no new checkpoint exists, recovery re-lands at the
-                    // same checkpoint and replays the recovery turn from cache
-                    // again — correct behaviour. Tools executed in later turns
-                    // (before the crash) will be re-executed; built-in tool
-                    // idempotency keys handle dedup for those.
-                    if checkpointing_disabled {
-                        recovering = false;
-                    }
                 }
                 "max_tokens" => {
                     // Deterministic: the conversation has exceeded the model's
@@ -1661,7 +1748,7 @@ impl AgentLoop {
                     return Ok((text, messages));
                 }
                 "tool_use" => {
-                    let results = self.execute_tools(&response.content, false).await;
+                    let results = self.execute_tools(&response.content).await;
                     messages.push(Message::assistant(response.content));
                     messages.push(Message::tool_results(results));
                 }
@@ -1677,31 +1764,39 @@ impl AgentLoop {
 
     /// Execute tool calls from an Anthropic response.
     ///
-    /// `recovering` is `true` when the caller is replaying a turn from a
-    /// checkpointed message history after a process restart. In that state,
-    /// tool results that were already persisted to KV are replayed without
-    /// re-executing the side effect. Once we are back in normal forward
-    /// execution (`recovering = false`), the KV cache is never consulted —
-    /// Anthropic generates unique tool_use IDs per request, so there is no
-    /// risk of replaying a fresh call as a cached one.
-    async fn execute_tools(&self, content: &[ContentBlock], recovering: bool) -> Vec<ToolResult> {
+    /// Executes the tool calls in `content`, consulting the KV tool-result
+    /// cache whenever a `promise_id` is set on this agent.
+    ///
+    /// The cache is keyed on `(tool_name, canonical_json(input))` rather than
+    /// the ephemeral `tool_use_id`. This means:
+    /// - On crash recovery the LLM re-generates a fresh `tool_use_id` for the
+    ///   same call, but the content-based key is identical → cache hit → no
+    ///   re-execution of the side effect.
+    /// - Within a single run, the same (name, input) called in a later turn
+    ///   returns the earlier result from cache, preventing intra-run duplicates
+    ///   (e.g. posting the same PR comment twice). For pure-read tools called
+    ///   repeatedly with the same input the cached result may be one or more
+    ///   turns stale; this is an accepted trade-off given that side-effecting
+    ///   tools greatly outnumber read tools in practice.
+    ///
+    /// When `promise_id` is `None` (non-durable or chat runs) the cache is
+    /// never consulted and every tool executes fresh.
+    async fn execute_tools(&self, content: &[ContentBlock]) -> Vec<ToolResult> {
         let mut results = Vec::new();
 
         for block in content {
             if let ContentBlock::ToolUse { id, name, input } = block {
                 debug!(tool = %name, "Executing tool");
 
-                // ── Durable promise: replay cached result (recovery only) ────
-                // Only consult the KV cache when we are recovering from a
-                // checkpoint. The cache key is derived from (tool_name, input)
-                // rather than tool_use_id, because Anthropic generates a fresh
-                // tool_use_id on every request — meaning the old ID would never
-                // match after a restart. The content-based key survives the
-                // restart: the LLM re-generates the same call with the same
-                // name and input, so the hash is identical and the cached result
-                // is replayed without re-executing the tool.
-                if recovering
-                    && let (Some(store), Some(pid)) = (&self.promise_store, &self.promise_id)
+                // ── Durable promise: replay cached result ────────────────────
+                // Consult the KV cache whenever a promise_id is set. The cache
+                // is populated by `put_tool_result` after every tool execution,
+                // so a hit means the tool ran successfully in a previous attempt
+                // (either an earlier turn of this run or a prior crashed run).
+                // Replaying the cached result avoids re-executing side effects
+                // and works correctly across process restarts because the key is
+                // content-based, not tied to the ephemeral tool_use_id.
+                if let (Some(store), Some(pid)) = (&self.promise_store, &self.promise_id)
                 {
                     let ck = tool_cache_key(name, input);
                     let cache_result = match tokio::time::timeout(
@@ -2215,6 +2310,8 @@ mod tests {
             nats_subject: "test.subject".to_string(),
             system_prompt: None,
             recovery_count: 0,
+            checkpoint_degraded: false,
+            failure_reason: None,
         }
     }
 
@@ -4165,25 +4262,24 @@ mod tests {
 
     // ── Initial get_promise failures ─────────────────────────────────────────
 
-    /// When the initial `get_promise` KV read times out, the run must start
-    /// fresh from the caller's `initial_messages` rather than blocking.
+    /// When the initial `get_promise` KV read times out on both attempts,
+    /// `run()` must return `Err(AgentError::CheckpointLoadTimeout)` rather
+    /// than proceeding without checkpoint durability.
     ///
-    /// `checkpoint` stays `None` so all checkpoint/terminal writes are skipped
-    /// for the run, but the run itself completes normally.
+    /// Proceeding silently would risk re-executing tool calls that were
+    /// already cached in a previous delivery. Returning an error leaves the
+    /// promise in `Running` state so startup recovery can resume it once
+    /// KV is healthy again.
     #[tokio::test(start_paused = true)]
-    async fn initial_get_promise_timeout_starts_fresh() {
+    async fn initial_get_promise_timeout_returns_error() {
         use crate::promise_store::mock::HangingGetPromiseStore;
         use crate::promise_store::PromiseRepository;
         use crate::tools::mock::MockToolDispatcher;
+        use std::time::Duration;
 
         let store = Arc::new(HangingGetPromiseStore::new());
-
-        let end_turn_resp = serde_json::json!({
-            "stop_reason": "end_turn",
-            "content": [{"type": "text", "text": "fresh run"}]
-        });
-        let anthropic =
-            Arc::new(mock::SequencedMockAnthropicClient::new(vec![end_turn_resp]));
+        // No Anthropic response needed — run aborts before any LLM call.
+        let anthropic = Arc::new(mock::SequencedMockAnthropicClient::new(vec![]));
         let dispatcher = Arc::new(MockToolDispatcher::new("unused"));
 
         let agent = make_durable_agent(
@@ -4193,15 +4289,16 @@ mod tests {
             "p1",
         );
 
+        // Advance past both timeout attempts (each NATS_KV_TIMEOUT) and the
+        // 200 ms sleep between them.
         let (result, _) = tokio::join!(
             agent.run(vec![Message::user_text("initial")], &[], None),
-            tokio::time::advance(NATS_KV_TIMEOUT + std::time::Duration::from_millis(1)),
+            tokio::time::advance(2 * NATS_KV_TIMEOUT + Duration::from_millis(300)),
         );
 
-        assert_eq!(
-            result.unwrap(),
-            "fresh run",
-            "run must complete normally when initial KV load times out"
+        assert!(
+            matches!(result, Err(AgentError::CheckpointLoadTimeout)),
+            "run must return CheckpointLoadTimeout when initial KV load times out after retries"
         );
     }
 
@@ -6823,22 +6920,23 @@ mod tests {
     // ── recovering resets when checkpointing is permanently disabled ──────────
 
     /// When checkpointing is permanently disabled (payload exceeds all trim
-    /// levels), `recovering` must be reset to `false` after the first tool turn
-    /// so that subsequent turns don't return stale cached results.
+    /// levels), the tool-result cache remains active for subsequent turns because
+    /// `execute_tools` gates cache lookups on `promise_id` being set, not on the
+    /// `recovering` flag. This means a crash after checkpointing is disabled can
+    /// still replay tool results from turns executed after the last successful
+    /// checkpoint, rather than re-executing them from scratch.
     ///
     /// Scenario:
-    ///  - Checkpoint loaded with a large initial message → `recovering = true`.
-    ///  - Turn 1: my_tool replayed from cache (recovering=true → cache hit).
+    ///  - Checkpoint loaded with a large initial message.
+    ///  - Turn 1: my_tool replayed from cache (promise_id set → cache hit).
     ///    Checkpoint oversized (3 messages < MIN_TRIM_KEEP=4) → disabled.
-    ///    Fix: `recovering = false`.
+    ///    `checkpoint_degraded = true` written to KV.
     ///  - Turn 2: same my_tool requested again.
-    ///    `recovering = false` → cache NOT consulted → dispatcher called live.
-    ///
-    /// Without the fix, turn 2 would also hit the cache ("cached_result") and
-    /// the dispatcher would never be called — breaking any polling pattern that
-    /// calls the same tool twice expecting different results.
+    ///    Cache still consulted (promise_id still set) → cache hit → 0 live dispatches.
+    ///  - Turn 2 checkpoint attempt: 5 messages, divisor=2 → keep=4 → trim succeeds.
+    ///  - Turn 3: end_turn → "done".
     #[tokio::test]
-    async fn recovering_resets_when_checkpointing_permanently_disabled() {
+    async fn cache_remains_active_when_checkpointing_permanently_disabled() {
         use crate::promise_store::mock::MockPromiseStore;
         use crate::promise_store::PromiseRepository;
         use crate::tools::mock::CountingMockToolDispatcher;
@@ -6898,13 +6996,25 @@ mod tests {
         let result = agent.run(vec![], &[], None).await;
         assert_eq!(result.unwrap(), "done");
 
-        // Turn 1: recovering=true → cache hit → 0 dispatches.
-        // Turn 2: recovering reset to false → cache not consulted → 1 dispatch.
+        // Both turns call my_tool with the same input — both hit the cache.
+        // No live dispatch occurs because promise_id is set throughout the run.
         assert_eq!(
             call_count.load(Ordering::SeqCst),
-            1,
-            "dispatcher must be called once in turn 2 — recovering must have been reset \
-             to false when checkpointing was permanently disabled in turn 1"
+            0,
+            "neither turn should dispatch live — cache is active for both turns \
+             because promise_id is set, regardless of whether checkpointing is disabled"
+        );
+
+        // checkpoint_degraded must be persisted to KV so operators can observe
+        // runs that lost durability.
+        let (p, _) = store
+            .get_promise("acme", "p1")
+            .await
+            .unwrap()
+            .expect("promise must still exist");
+        assert!(
+            p.checkpoint_degraded,
+            "checkpoint_degraded must be set on the promise when checkpointing is permanently disabled"
         );
     }
 }

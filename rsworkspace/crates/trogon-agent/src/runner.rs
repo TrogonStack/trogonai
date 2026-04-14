@@ -183,6 +183,49 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
             .await
             .map_err(|e| RunnerError::JetStream(format!("PromiseStore: {e}")))?,
     );
+
+    // ── OS-crash durability check ────────────────────────────────────────────
+    // `async-nats` 0.47.0 cannot set `sync_always` on a KV bucket config, so
+    // NATS fsyncs every ~2 minutes by default. A checkpoint acknowledged by
+    // NATS but not yet fsynced can be lost on kernel panic / power failure.
+    // Process crashes (OOM kill, SIGKILL) are NOT affected.
+    //
+    // Two mitigations, in order of preference:
+    //   1. 3-node NATS cluster — quorum writes survive a single node failure
+    //      without per-write fsync overhead.
+    //   2. `sync_always: true` in the NATS server's `jetstream {}` block —
+    //      fsyncs before each ack, closes the window at a throughput cost
+    //      that is negligible here (LLM calls dominate latency).
+    //
+    // This check reads the AGENT_PROMISES stream's replica count and warns
+    // when neither mitigation is in place, so the gap is visible at startup
+    // rather than only discovered after a rare OS-level crash.
+    {
+        let stream_name = format!("KV_{}", crate::promise_store::AGENT_PROMISES_BUCKET);
+        match js.get_stream(&stream_name).await {
+            Ok(stream) => {
+                let num_replicas = stream.cached_info().config.num_replicas;
+                if num_replicas < 2 {
+                    warn!(
+                        stream = %stream_name,
+                        num_replicas,
+                        "AGENT_PROMISES KV has a single replica and sync_always cannot be set \
+                         programmatically (async-nats 0.47.0 limitation). OS crashes (kernel \
+                         panic, power failure) may lose the last checkpoint before fsync. \
+                         Mitigations: (1) run a 3-node NATS cluster, or (2) set \
+                         `sync_always: true` in the NATS server jetstream block."
+                    );
+                }
+                // ≥2 replicas — quorum provides WAL-equivalent durability
+            }
+            Err(e) => warn!(
+                error = %e,
+                stream = %stream_name,
+                "Could not verify AGENT_PROMISES KV durability config"
+            ),
+        }
+    }
+
     let tenant_id = Arc::new(cfg.tenant_id.clone());
 
     // Recover any stale promises from a previous process run.
@@ -983,6 +1026,8 @@ async fn prepare_agent_with_promise(
                 nats_subject: nats_subject.to_string(),
                 system_prompt: None, // populated at first checkpoint in agent_loop::run
                 recovery_count: 0,
+                checkpoint_degraded: false,
+            failure_reason: None,
             };
             match tokio::time::timeout(
                 crate::agent_loop::NATS_KV_TIMEOUT,
@@ -1100,6 +1145,25 @@ async fn recover_stale_promises<A: AutomationRepository, R: RunRepository>(
     // many promises are stale. Sequential execution keeps the load profile
     // predictable and avoids triggering rate limits.
     Some(tokio::spawn(async move {
+        // Jitter before starting recovery to prevent thundering herd when
+        // many instances restart simultaneously (e.g. after a deploy or
+        // cluster-wide outage).
+        //
+        // PID alone is a poor seed in containers: Kubernetes assigns PID 1
+        // to the entry-point process in every pod, so a fleet-wide restart
+        // yields identical jitter for all instances.  XOR-ing with the
+        // sub-second nanoseconds of the wall clock adds entropy that varies
+        // even across pods that start within the same second.  PID is kept
+        // to differentiate threads/workers on bare-metal hosts where the
+        // clock resolution might not be sufficient on its own.
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .subsec_nanos() as u64;
+        let jitter_ms =
+            (nanos ^ (std::process::id() as u64).wrapping_mul(2_654_435_761)) % 30_000;
+        tokio::time::sleep(std::time::Duration::from_millis(jitter_ms)).await;
+
         for promise in stale {
             // Re-fetch to verify the promise is still Running. Between
             // `list_running` and here, another worker may have already claimed
@@ -1284,6 +1348,7 @@ async fn recover_stale_promises<A: AutomationRepository, R: RunRepository>(
                     {
                         Ok(Ok(Some((mut current, rev)))) => {
                             current.status = PromiseStatus::PermanentFailed;
+                            current.failure_reason = Some(reason.to_string());
                             match tokio::time::timeout(
                                 crate::agent_loop::NATS_KV_TIMEOUT,
                                 promise_store.update_promise(
@@ -1894,6 +1959,8 @@ mod tests {
             nats_subject: "github.pull_request".to_string(),
             system_prompt: None,
             recovery_count: 0,
+            checkpoint_degraded: false,
+            failure_reason: None,
         }
     }
 
@@ -2070,6 +2137,8 @@ mod tests {
             nats_subject: "github.pull_request".to_string(),
             system_prompt: None,
             recovery_count: 0,
+            checkpoint_degraded: false,
+            failure_reason: None,
         }
     }
 
@@ -2349,6 +2418,8 @@ mod tests {
             nats_subject: "github.pull_request".to_string(),
             system_prompt: None,
             recovery_count: 5, // == MAX_RECOVERY_ATTEMPTS
+            checkpoint_degraded: false,
+            failure_reason: None,
         });
         let store_arc = Arc::clone(&store) as Arc<dyn PromiseRepository>;
         let agent = make_agent("http://127.0.0.1:1");
@@ -2645,6 +2716,8 @@ mod tests {
             nats_subject: "github.pull_request".to_string(),
             system_prompt: None,
             recovery_count: 0,
+            checkpoint_degraded: false,
+            failure_reason: None,
         };
         store.insert_promise(fresh);
 
@@ -4476,6 +4549,8 @@ mod tests {
             nats_subject: "github.push".to_string(),
             system_prompt: None,
             recovery_count: 0,
+            checkpoint_degraded: false,
+            failure_reason: None,
         });
         // AlwaysFailsUpdateStore: every update_promise call fails → CAS claim lost.
         let store = Arc::new(AlwaysFailsUpdateStore { inner });
@@ -5068,6 +5143,8 @@ mod tests {
             nats_subject: "github.push".to_string(),
             system_prompt: None,
             recovery_count: 0,
+            checkpoint_degraded: false,
+            failure_reason: None,
         };
 
         let promise_repo: Arc<dyn PromiseRepository> = ps.clone();
@@ -5212,6 +5289,8 @@ mod tests {
             nats_subject: "github.push".to_string(),
             system_prompt: None,
             recovery_count: 0,
+            checkpoint_degraded: false,
+            failure_reason: None,
         };
         promise_repo.put_promise(&initial).await.unwrap();
         let (_, initial_rev) = promise_repo
