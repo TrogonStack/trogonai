@@ -82,3 +82,95 @@ impl ContentBlock {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── is_tool_result_only ────────────────────────────────────────────────────
+
+    #[test]
+    fn is_tool_result_only_true_for_single_tool_result() {
+        let msg = Message {
+            role: "user".into(),
+            content: vec![ContentBlock::ToolResult {
+                tool_use_id: "id".into(),
+                content: "result".into(),
+            }],
+        };
+        assert!(msg.is_tool_result_only());
+    }
+
+    #[test]
+    fn is_tool_result_only_false_for_empty_content() {
+        let msg = Message { role: "user".into(), content: vec![] };
+        assert!(!msg.is_tool_result_only());
+    }
+
+    #[test]
+    fn is_tool_result_only_false_for_mixed_content() {
+        let msg = Message {
+            role: "user".into(),
+            content: vec![
+                ContentBlock::Text { text: "hello".into() },
+                ContentBlock::ToolResult {
+                    tool_use_id: "id".into(),
+                    content: "result".into(),
+                },
+            ],
+        };
+        assert!(!msg.is_tool_result_only());
+    }
+
+    #[test]
+    fn is_tool_result_only_false_for_assistant_role() {
+        let msg = Message {
+            role: "assistant".into(),
+            content: vec![ContentBlock::ToolResult {
+                tool_use_id: "id".into(),
+                content: "result".into(),
+            }],
+        };
+        assert!(!msg.is_tool_result_only());
+    }
+
+    // ── ContentBlock::as_text ─────────────────────────────────────────────────
+
+    #[test]
+    fn as_text_returns_text_content() {
+        let b = ContentBlock::Text { text: "hello".into() };
+        assert_eq!(b.as_text(), Some("hello"));
+    }
+
+    #[test]
+    fn as_text_returns_thinking_text() {
+        let b = ContentBlock::Thinking { thinking: "deep thought".into() };
+        assert_eq!(b.as_text(), Some("deep thought"));
+    }
+
+    #[test]
+    fn as_text_returns_tool_use_name() {
+        let b = ContentBlock::ToolUse {
+            id: "1".into(),
+            name: "my_tool".into(),
+            input: serde_json::json!({}),
+            parent_tool_use_id: None,
+        };
+        assert_eq!(b.as_text(), Some("my_tool"));
+    }
+
+    #[test]
+    fn as_text_returns_tool_result_content() {
+        let b = ContentBlock::ToolResult {
+            tool_use_id: "1".into(),
+            content: "the output".into(),
+        };
+        assert_eq!(b.as_text(), Some("the output"));
+    }
+
+    #[test]
+    fn as_text_returns_none_for_image() {
+        let b = ContentBlock::Image { source: serde_json::json!({"type": "base64"}) };
+        assert!(b.as_text().is_none());
+    }
+}

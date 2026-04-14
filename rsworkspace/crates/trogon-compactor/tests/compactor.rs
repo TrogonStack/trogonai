@@ -6,7 +6,7 @@
 use httpmock::prelude::*;
 use serde_json::json;
 use trogon_compactor::{
-    CompactionSettings, CompactorConfig, ContentBlock, LlmConfig, Message,
+    CompactionSettings, CompactorConfig, CompactorError, ContentBlock, LlmConfig, Message,
     compactor_with_client,
 };
 
@@ -187,4 +187,159 @@ async fn incremental_update_when_previous_summary_exists() {
         panic!("expected text block");
     };
     assert!(text.contains(updated_summary));
+}
+
+#[tokio::test]
+async fn unexpected_stop_reason_returns_error() {
+    let server = MockServer::start();
+
+    server.mock(|when, then| {
+        when.method(POST).path("/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(json!({
+                "id": "msg_test",
+                "type": "message",
+                "role": "assistant",
+                "stop_reason": "max_tokens",
+                "model": "claude-haiku-4-5-20251001",
+                "usage": { "input_tokens": 100, "output_tokens": 8192 },
+                "content": [{ "type": "text", "text": "truncated..." }]
+            }));
+    });
+
+    let settings = CompactionSettings {
+        context_window: 200,
+        reserve_tokens: 20,
+        keep_recent_tokens: 40,
+    };
+    let config = CompactorConfig {
+        settings: settings.clone(),
+        llm: LlmConfig {
+            api_url: format!("{}/v1/messages", server.base_url()),
+            api_key: "test-key".into(),
+            ..Default::default()
+        },
+    };
+
+    let compactor = compactor_with_client(config, reqwest::Client::new());
+    let result = compactor.compact_if_needed(large_conversation(&settings)).await;
+
+    assert!(
+        matches!(result, Err(CompactorError::UnexpectedStopReason(ref r)) if r == "max_tokens"),
+        "expected UnexpectedStopReason(max_tokens), got {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn empty_response_content_returns_error() {
+    let server = MockServer::start();
+
+    server.mock(|when, then| {
+        when.method(POST).path("/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(json!({
+                "id": "msg_test",
+                "type": "message",
+                "role": "assistant",
+                "stop_reason": "end_turn",
+                "model": "claude-haiku-4-5-20251001",
+                "usage": { "input_tokens": 100, "output_tokens": 0 },
+                "content": []
+            }));
+    });
+
+    let settings = CompactionSettings {
+        context_window: 200,
+        reserve_tokens: 20,
+        keep_recent_tokens: 40,
+    };
+    let config = CompactorConfig {
+        settings: settings.clone(),
+        llm: LlmConfig {
+            api_url: format!("{}/v1/messages", server.base_url()),
+            api_key: "test-key".into(),
+            ..Default::default()
+        },
+    };
+
+    let compactor = compactor_with_client(config, reqwest::Client::new());
+    let result = compactor.compact_if_needed(large_conversation(&settings)).await;
+
+    assert!(
+        matches!(result, Err(CompactorError::EmptyResponse)),
+        "expected EmptyResponse, got {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn http_5xx_error_returns_http_error() {
+    let server = MockServer::start();
+
+    server.mock(|when, then| {
+        when.method(POST).path("/v1/messages");
+        then.status(500);
+    });
+
+    let settings = CompactionSettings {
+        context_window: 200,
+        reserve_tokens: 20,
+        keep_recent_tokens: 40,
+    };
+    let config = CompactorConfig {
+        settings: settings.clone(),
+        llm: LlmConfig {
+            api_url: format!("{}/v1/messages", server.base_url()),
+            api_key: "test-key".into(),
+            ..Default::default()
+        },
+    };
+
+    let compactor = compactor_with_client(config, reqwest::Client::new());
+    let result = compactor.compact_if_needed(large_conversation(&settings)).await;
+
+    assert!(
+        matches!(result, Err(CompactorError::Http(_))),
+        "expected Http error, got {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn x_api_key_auth_sends_correct_header() {
+    use trogon_compactor::AuthStyle;
+
+    let server = MockServer::start();
+
+    // The mock only matches requests that carry the exact x-api-key header value.
+    // If the wrong header (or no header) is sent it returns 404 → reqwest error.
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/v1/messages")
+            .header("x-api-key", "direct-api-key");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(mock_anthropic_response("## Goal\nVerify auth header"));
+    });
+
+    let settings = CompactionSettings {
+        context_window: 200,
+        reserve_tokens: 20,
+        keep_recent_tokens: 40,
+    };
+    let config = CompactorConfig {
+        settings: settings.clone(),
+        llm: LlmConfig {
+            api_url: format!("{}/v1/messages", server.base_url()),
+            api_key: "direct-api-key".into(),
+            auth_style: AuthStyle::XApiKey,
+            model: "claude-haiku-4-5-20251001".into(),
+            max_summary_tokens: 1024,
+        },
+    };
+
+    let compactor = compactor_with_client(config, reqwest::Client::new());
+    let result = compactor.compact_if_needed(large_conversation(&settings)).await;
+
+    assert!(result.is_ok(), "expected success with x-api-key auth, got {result:?}");
 }
