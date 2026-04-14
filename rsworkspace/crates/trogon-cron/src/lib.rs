@@ -32,8 +32,9 @@ pub use job_id::{JobId, JobIdError};
 pub use nats::NatsSchedulePublisher;
 pub use processors::CronController;
 pub use projections::{
-    ConfigWatchStream, JobSpecChange, JobStreamState, JobTransitionError, LoadAndWatchResult,
-    ProjectionChange, apply, initial_state, load_and_watch, projection_change,
+    CronJobChange, CronJobWatchStream, JobStreamState, JobTransitionError,
+    LoadAndWatchCronJobsResult, ProjectionChange, apply, initial_state, load_and_watch_cron_jobs,
+    projection_change,
 };
 pub use store::{SNAPSHOT_STORE_CONFIG, append_events, connect_store, open_snapshot_bucket};
 pub use traits::{LeaderLock, SchedulePublisher};

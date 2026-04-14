@@ -16,7 +16,7 @@ use crate::{
     domain::ResolvedJobSpec,
     error::CronError,
     events::JobEvent,
-    projections::{ConfigWatchStream, LoadAndWatchResult},
+    projections::{CronJobWatchStream, LoadAndWatchCronJobsResult},
     traits::SchedulePublisher,
 };
 
@@ -132,12 +132,12 @@ impl ReleaseLease for MockLeaderLock {
 }
 
 #[derive(Clone, Default)]
-pub struct MockConfigStore {
+pub struct MockCronStore {
     jobs: Arc<Mutex<HashMap<String, Snapshot<JobSpec>>>>,
     stream_versions: Arc<Mutex<HashMap<String, u64>>>,
 }
 
-impl MockConfigStore {
+impl MockCronStore {
     pub fn new() -> Self {
         Self::default()
     }
@@ -336,7 +336,7 @@ impl MockConfigStore {
         Ok(self.jobs.lock().unwrap().values().cloned().collect())
     }
 
-    pub async fn load_and_watch(&self) -> LoadAndWatchResult {
+    pub async fn load_and_watch_cron_jobs(&self) -> LoadAndWatchCronJobsResult {
         let jobs = self
             .jobs
             .lock()
@@ -347,7 +347,7 @@ impl MockConfigStore {
             .collect();
         Ok((
             jobs,
-            Box::pin(futures::stream::pending()) as ConfigWatchStream,
+            Box::pin(futures::stream::pending()) as CronJobWatchStream,
         ))
     }
 }
@@ -431,8 +431,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn mock_config_store_covers_crud_and_watch_snapshot() {
-        let store = MockConfigStore::new();
+    async fn mock_cron_store_covers_crud_and_watch_snapshot() {
+        let store = MockCronStore::new();
         store.seed_job(base_job("seeded"));
 
         let seeded = store
@@ -484,7 +484,7 @@ mod tests {
         let listed = store.list_jobs(ListJobsCommand).await.unwrap();
         assert_eq!(listed.len(), 2);
 
-        let (watch_jobs, mut watcher) = store.load_and_watch().await.unwrap();
+        let (watch_jobs, mut watcher) = store.load_and_watch_cron_jobs().await.unwrap();
         assert_eq!(watch_jobs.len(), 2);
         assert!(
             tokio::time::timeout(std::time::Duration::from_millis(5), watcher.next())
@@ -534,8 +534,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn mock_config_store_rejects_invalid_specs_and_stale_versions() {
-        let store = MockConfigStore::new();
+    async fn mock_cron_store_rejects_invalid_specs_and_stale_versions() {
+        let store = MockCronStore::new();
         let mut invalid = base_job("bad");
         invalid.delivery = DeliverySpec::NatsEvent {
             route: "agent.run".to_string(),
