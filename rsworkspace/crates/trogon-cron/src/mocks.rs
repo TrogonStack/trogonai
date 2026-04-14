@@ -10,14 +10,12 @@ use trogon_eventsourcing::{Decision, Snapshot, StreamCommand, decide};
 use trogon_nats::lease::{ReleaseLease, RenewLease, TryAcquireLease};
 
 use crate::{
+    ChangeJobStateCommand, GetJobCommand, ListJobsCommand, RegisterJobCommand, RemoveJobCommand,
     config::{JobSpec, JobWriteState},
     domain::ResolvedJobSpec,
     error::CronError,
     events::{JobDecisionError, JobEvent},
-    store::{
-        ChangeJobStateCommand, ConfigWatchStream, GetJobCommand, ListJobsCommand,
-        LoadAndWatchCommand, LoadAndWatchResult, RegisterJobCommand, RemoveJobCommand,
-    },
+    store::{ConfigWatchStream, LoadAndWatchCommand, LoadAndWatchResult},
     traits::SchedulePublisher,
 };
 
@@ -216,10 +214,12 @@ impl MockConfigStore {
         let current_snapshot = jobs.get(command.stream_id().as_str()).cloned();
         let current_version = stream_versions.get(command.stream_id().as_str()).copied();
         let current_state = command.state_from_snapshot(current_snapshot.as_ref())?;
-        command.write_condition.ensure(
-            command.stream_id().as_str(),
-            JobWriteState::new(current_version, current_snapshot.as_ref().is_some()),
-        )?;
+        command
+            .resolved_write_condition(current_snapshot.as_ref())
+            .ensure(
+                command.stream_id().as_str(),
+                JobWriteState::new(current_version, current_snapshot.as_ref().is_some()),
+            )?;
         let events = match decide(&current_state, &command) {
             Ok(Decision::Event(events)) => events,
             Ok(_) => {
@@ -296,10 +296,12 @@ impl MockConfigStore {
         let current_snapshot = jobs.get(command.stream_id().as_str()).cloned();
         let current_version = stream_versions.get(command.stream_id().as_str()).copied();
         let current_state = command.state_from_snapshot(current_snapshot.as_ref())?;
-        command.write_condition.ensure(
-            command.stream_id().as_str(),
-            JobWriteState::new(current_version, current_snapshot.as_ref().is_some()),
-        )?;
+        command
+            .resolved_write_condition(current_snapshot.as_ref())
+            .ensure(
+                command.stream_id().as_str(),
+                JobWriteState::new(current_version, current_snapshot.as_ref().is_some()),
+            )?;
         let events = match decide(&current_state, &command) {
             Ok(Decision::Event(events)) => events,
             Ok(_) => {
@@ -375,7 +377,7 @@ mod tests {
     use crate::config::{
         DeliverySpec, JobEnabledState, JobWriteCondition, SamplingSource, ScheduleSpec,
     };
-    use crate::store::{
+    use crate::{
         ChangeJobStateCommand, GetJobCommand, ListJobsCommand, LoadAndWatchCommand,
         RegisterJobCommand, RemoveJobCommand,
     };
@@ -477,11 +479,11 @@ mod tests {
         assert_eq!(alpha.version, 1);
 
         store
-            .change_job_state(ChangeJobStateCommand {
-                id: job_id("alpha"),
-                state: JobEnabledState::Disabled,
-                write_condition: JobWriteCondition::MustBeAtVersion(alpha.version),
-            })
+            .change_job_state(ChangeJobStateCommand::with_write_condition(
+                job_id("alpha"),
+                JobEnabledState::Disabled,
+                JobWriteCondition::MustBeAtVersion(alpha.version),
+            ))
             .await
             .unwrap();
         assert_eq!(
@@ -516,10 +518,10 @@ mod tests {
             .unwrap()
             .unwrap();
         store
-            .remove_job(RemoveJobCommand {
-                id: job_id("alpha"),
-                write_condition: JobWriteCondition::MustBeAtVersion(alpha.version),
-            })
+            .remove_job(RemoveJobCommand::with_write_condition(
+                job_id("alpha"),
+                JobWriteCondition::MustBeAtVersion(alpha.version),
+            ))
             .await
             .unwrap();
         assert!(
@@ -574,11 +576,11 @@ mod tests {
             .await
             .unwrap();
         let stale_error = store
-            .change_job_state(ChangeJobStateCommand {
-                id: job_id("alpha"),
-                state: JobEnabledState::Disabled,
-                write_condition: JobWriteCondition::MustBeAtVersion(99),
-            })
+            .change_job_state(ChangeJobStateCommand::with_write_condition(
+                job_id("alpha"),
+                JobEnabledState::Disabled,
+                JobWriteCondition::MustBeAtVersion(99),
+            ))
             .await
             .unwrap_err();
         assert!(matches!(
@@ -587,11 +589,11 @@ mod tests {
         ));
 
         let same_state_error = store
-            .change_job_state(ChangeJobStateCommand {
-                id: job_id("alpha"),
-                state: JobEnabledState::Enabled,
-                write_condition: JobWriteCondition::MustBeAtVersion(1),
-            })
+            .change_job_state(ChangeJobStateCommand::with_write_condition(
+                job_id("alpha"),
+                JobEnabledState::Enabled,
+                JobWriteCondition::MustBeAtVersion(1),
+            ))
             .await
             .unwrap_err();
         assert!(matches!(
@@ -600,11 +602,11 @@ mod tests {
         ));
 
         let missing_error = store
-            .change_job_state(ChangeJobStateCommand {
-                id: job_id("missing"),
-                state: JobEnabledState::Disabled,
-                write_condition: JobWriteCondition::MustNotExist,
-            })
+            .change_job_state(ChangeJobStateCommand::with_write_condition(
+                job_id("missing"),
+                JobEnabledState::Disabled,
+                JobWriteCondition::MustNotExist,
+            ))
             .await
             .unwrap_err();
         assert!(matches!(missing_error, CronError::JobNotFound { .. }));

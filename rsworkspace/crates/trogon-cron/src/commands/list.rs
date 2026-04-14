@@ -1,68 +1,22 @@
-use std::fmt;
-
 use async_nats::jetstream::kv;
-use trogon_cron::{CronError, JobSpec, SNAPSHOT_STORE_CONFIG, ScheduleSpec, open_snapshot_bucket};
-use trogon_eventsourcing::list_snapshots;
+use trogon_eventsourcing::{Snapshot, list_snapshots};
 use trogon_nats::jetstream::JetStreamGetKeyValue;
 
-#[derive(Debug, Default)]
-pub struct ListCommand;
+use crate::{
+    JobSpec,
+    error::CronError,
+    store::{SNAPSHOT_STORE_CONFIG, open_snapshot_bucket},
+};
 
-#[derive(Debug)]
-pub enum CommandError {
-    ListJobs(CronError),
-}
+#[derive(Debug, Clone, Default)]
+pub struct ListJobsCommand;
 
-impl fmt::Display for CommandError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::ListJobs(source) => write!(f, "failed to list jobs: {source}"),
-        }
-    }
-}
-
-impl std::error::Error for CommandError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::ListJobs(source) => Some(source),
-        }
-    }
-}
-
-pub async fn run<J>(js: &J, _command: ListCommand) -> Result<(), CommandError>
+pub async fn run<J>(js: &J, _command: ListJobsCommand) -> Result<Vec<Snapshot<JobSpec>>, CronError>
 where
     J: JetStreamGetKeyValue<Store = kv::Store>,
 {
-    let bucket = open_snapshot_bucket(js)
-        .await
-        .map_err(CommandError::ListJobs)?;
-    let jobs = list_snapshots::<JobSpec>(&bucket, SNAPSHOT_STORE_CONFIG)
+    let bucket = open_snapshot_bucket(js).await?;
+    list_snapshots::<JobSpec>(&bucket, SNAPSHOT_STORE_CONFIG)
         .await
         .map_err(CronError::from)
-        .map_err(CommandError::ListJobs)?;
-    if jobs.is_empty() {
-        println!("No jobs registered.");
-        return Ok(());
-    }
-    println!("{:<30} {:<10} SCHEDULE", "ID", "STATUS");
-    println!("{}", "-".repeat(72));
-    for job in jobs {
-        let schedule = match &job.payload.schedule {
-            ScheduleSpec::At { at } => format!("at {}", at.to_rfc3339()),
-            ScheduleSpec::Every { every_sec } => format!("@every {every_sec}s"),
-            ScheduleSpec::Cron { expr, timezone } => match timezone {
-                Some(timezone) => format!("{expr} [{timezone}]"),
-                None => expr.clone(),
-            },
-        };
-        println!(
-            "{:<30} {:<10} {} (v{})",
-            job.payload.id,
-            job.payload.state.as_str(),
-            schedule,
-            job.version
-        );
-    }
-
-    Ok(())
 }

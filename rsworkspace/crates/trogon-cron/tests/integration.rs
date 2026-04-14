@@ -5,10 +5,9 @@ use async_nats::Request;
 use async_nats::jetstream;
 use chrono::{Duration as ChronoDuration, Utc};
 use trogon_cron::{
-    CronController, DeliverySpec, JobEnabledState, JobId, JobSpec, JobWriteCondition,
-    SamplingSource, ScheduleSpec, change_job_state, connect_store, get_job, register_job,
-    remove_job,
-    store::{ChangeJobStateCommand, GetJobCommand, RegisterJobCommand, RemoveJobCommand},
+    ChangeJobStateCommand, CronController, DeliverySpec, GetJobCommand, JobEnabledState, JobId,
+    JobSpec, JobWriteCondition, RegisterJobCommand, RemoveJobCommand, SamplingSource, ScheduleSpec,
+    change_job_state, connect_store, get_job, register_job, remove_job,
 };
 use trogon_nats::{NatsConfig, connect as nats_connect};
 
@@ -334,11 +333,11 @@ async fn disabling_job_removes_schedule_subject() {
     .version;
     change_job_state(
         &store,
-        ChangeJobStateCommand {
-            id: job_id("disabled"),
-            state: JobEnabledState::Disabled,
-            write_condition: JobWriteCondition::MustBeAtVersion(version),
-        },
+        ChangeJobStateCommand::with_write_condition(
+            job_id("disabled"),
+            JobEnabledState::Disabled,
+            JobWriteCondition::MustBeAtVersion(version),
+        ),
     )
     .await
     .unwrap();
@@ -389,10 +388,10 @@ async fn removing_job_removes_schedule_subject() {
     .version;
     remove_job(
         &store,
-        RemoveJobCommand {
-            id: job_id("removed"),
-            write_condition: JobWriteCondition::MustBeAtVersion(version),
-        },
+        RemoveJobCommand::with_write_condition(
+            job_id("removed"),
+            JobWriteCondition::MustBeAtVersion(version),
+        ),
     )
     .await
     .unwrap();
@@ -433,11 +432,11 @@ async fn event_store_rebuilds_current_state_for_new_client() {
     .version;
     change_job_state(
         &store,
-        ChangeJobStateCommand {
-            id: job_id("eventful"),
-            state: JobEnabledState::Disabled,
-            write_condition: JobWriteCondition::MustBeAtVersion(version),
-        },
+        ChangeJobStateCommand::with_write_condition(
+            job_id("eventful"),
+            JobEnabledState::Disabled,
+            JobWriteCondition::MustBeAtVersion(version),
+        ),
     )
     .await
     .unwrap();
