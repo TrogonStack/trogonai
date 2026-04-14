@@ -81,10 +81,14 @@ pub async fn send_message(
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs()
-            .saturating_sub(24 * 3600); // 24-hour window — matches PROMISE_TTL in promise_store.rs
+            // 25-hour window — one hour beyond PROMISE_TTL so recovery that
+            // happens right at the TTL boundary still finds the original message.
+            // limit=1000 (Slack API maximum) so the message is not missed in
+            // busy channels even at the edge of the window.
+            .saturating_sub(25 * 3600);
 
         let history_url = format!(
-            "{}/slack/conversations.history?channel={channel}&oldest={oldest}&limit=50&include_all_metadata=true",
+            "{}/slack/conversations.history?channel={channel}&oldest={oldest}&limit=1000&include_all_metadata=true",
             ctx.proxy_url,
         );
 

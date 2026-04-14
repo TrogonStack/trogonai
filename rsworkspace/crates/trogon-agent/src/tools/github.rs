@@ -233,15 +233,15 @@ pub async fn update_file(
 
 /// Open a pull request.
 ///
-/// ## Idempotency limitation
+/// ## Idempotency
 ///
-/// GitHub does not honour the `Idempotency-Key` header — it is forwarded but
-/// silently ignored. If the tool result was not cached and the process crashes
-/// after this call, recovery will attempt a second `POST /pulls`. GitHub will
-/// reject the duplicate with a 422 ("A pull request already exists") error if a
-/// PR for the same `head` → `base` pair is still open, so a duplicate PR is
-/// unlikely in practice. However, if the original PR was closed or merged
-/// between the crash and recovery, a second PR **will** be created.
+/// GitHub does not honour the `Idempotency-Key` header for `POST /pulls`.
+/// Instead, when `_idempotency_key` is present (recovery path), this function
+/// first checks whether a PR from `head` → `base` already exists (in any state)
+/// and returns it if found. This prevents creating a duplicate PR when the tool
+/// result cache was not written before the process crashed — including the case
+/// where the original PR was closed or merged between the crash and recovery
+/// (which would otherwise bypass GitHub's own 422 duplicate guard).
 pub async fn create_pull_request(
     ctx: &ToolContext<impl HttpClient>,
     input: &Value,
@@ -254,9 +254,7 @@ pub async fn create_pull_request(
     let body = input["body"].as_str().unwrap_or("");
     let idempotency_key = input["_idempotency_key"].as_str();
 
-    let url = format!("{}/github/repos/{owner}/{repo}/pulls", ctx.proxy_url);
-
-    let mut headers = vec![
+    let auth_headers = vec![
         (
             "Authorization".to_string(),
             format!("Bearer {}", ctx.github_token),
@@ -266,15 +264,49 @@ pub async fn create_pull_request(
             "application/vnd.github.v3+json".to_string(),
         ),
     ];
+
+    // Build POST headers separately so the Idempotency-Key is always forwarded
+    // to GitHub (even though GitHub currently ignores it for /pulls, forwarding
+    // it keeps the behaviour consistent and future-proof).
+    let mut post_headers = auth_headers.clone();
     if let Some(key) = idempotency_key {
-        headers.push(("Idempotency-Key".to_string(), key.to_string()));
+        post_headers.push(("Idempotency-Key".to_string(), key.to_string()));
     }
+
+    // Recovery dedup: scan for any existing PR from `head` → `base` before
+    // creating a new one. GitHub's own 422 guard only fires when the original
+    // PR is still open; if it was closed or merged between the crash and
+    // recovery, this check prevents creating a second PR.
+    if idempotency_key.is_some() {
+        let list_url = format!(
+            "{}/github/repos/{owner}/{repo}/pulls?head={owner}:{head}&base={base}&state=all&per_page=5",
+            ctx.proxy_url,
+        );
+        match ctx.http_client.get(&list_url, auth_headers).await {
+            Ok(resp) => {
+                if let Ok(prs) = serde_json::from_str::<Value>(&resp.body) {
+                    if let Some(arr) = prs.as_array() {
+                        if let Some(pr) = arr.first() {
+                            let html_url = pr["html_url"].as_str().unwrap_or("(no url)");
+                            let number = pr["number"].as_u64().unwrap_or(0);
+                            return Ok(format!("Pull request #{number} opened: {html_url}"));
+                        }
+                    }
+                }
+            }
+            // Graceful degradation: if the pre-check fails, proceed with the
+            // create. GitHub's 422 guard still blocks obvious duplicates.
+            Err(_) => {}
+        }
+    }
+
+    let url = format!("{}/github/repos/{owner}/{repo}/pulls", ctx.proxy_url);
 
     let resp = ctx
         .http_client
         .post(
             &url,
-            headers,
+            post_headers,
             serde_json::json!({
                 "title": title,
                 "head": head,
@@ -291,6 +323,15 @@ pub async fn create_pull_request(
 }
 
 /// Request reviewers on a pull request.
+///
+/// ## Idempotency
+///
+/// GitHub does not honour the `Idempotency-Key` header for reviewer requests.
+/// When `_idempotency_key` is present (recovery path), this function first
+/// fetches the current requested reviewers and skips the POST if all requested
+/// reviewers are already in the list. This prevents sending duplicate review
+/// request notifications to reviewers who were already requested before the
+/// crash.
 pub async fn request_reviewers(
     ctx: &ToolContext<impl HttpClient>,
     input: &Value,
@@ -312,7 +353,7 @@ pub async fn request_reviewers(
         ctx.proxy_url,
     );
 
-    let mut headers = vec![
+    let auth_headers = vec![
         (
             "Authorization".to_string(),
             format!("Bearer {}", ctx.github_token),
@@ -322,13 +363,30 @@ pub async fn request_reviewers(
             "application/vnd.github.v3+json".to_string(),
         ),
     ];
-    if let Some(key) = idempotency_key {
-        headers.push(("Idempotency-Key".to_string(), key.to_string()));
+
+    // Recovery dedup: if all requested reviewers are already in the pending
+    // list, skip the POST to avoid sending duplicate review notifications.
+    if idempotency_key.is_some() {
+        match ctx.http_client.get(&url, auth_headers.clone()).await {
+            Ok(resp) => {
+                if let Ok(data) = serde_json::from_str::<Value>(&resp.body) {
+                    let existing: Vec<&str> = data["users"]
+                        .as_array()
+                        .map(|arr| arr.iter().filter_map(|u| u["login"].as_str()).collect())
+                        .unwrap_or_default();
+                    if reviewers.iter().all(|r| existing.contains(r)) {
+                        return Ok(format!("Reviewers requested on PR #{pr_number}"));
+                    }
+                }
+            }
+            // Graceful degradation: if the pre-check fails, proceed with POST.
+            Err(_) => {}
+        }
     }
 
     let resp = ctx
         .http_client
-        .post(&url, headers, serde_json::json!({ "reviewers": reviewers }))
+        .post(&url, auth_headers, serde_json::json!({ "reviewers": reviewers }))
         .await?;
     let response: Value = serde_json::from_str(&resp.body).map_err(|e| e.to_string())?;
 
