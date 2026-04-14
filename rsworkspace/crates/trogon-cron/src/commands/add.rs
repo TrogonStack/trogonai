@@ -1,3 +1,5 @@
+#![cfg_attr(coverage, allow(dead_code, unused_imports))]
+
 use std::fmt;
 
 use async_nats::jetstream::{self, context, kv};

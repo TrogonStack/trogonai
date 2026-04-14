@@ -1,3 +1,5 @@
+#![cfg_attr(coverage, allow(dead_code, unused_imports))]
+
 use async_nats::jetstream;
 use trogon_eventsourcing::{Snapshot, read_stream_range};
 use trogon_nats::jetstream::JetStreamGetStream;
