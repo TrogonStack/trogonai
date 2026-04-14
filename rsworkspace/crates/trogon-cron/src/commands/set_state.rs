@@ -2,9 +2,9 @@ use std::fmt;
 
 use async_nats::jetstream::{self, context, kv};
 use trogon_cron::{
-    CronError, JobDecisionError, JobEnabledState, JobId, JobIdError, JobSpec, JobWriteCondition,
-    SNAPSHOT_STORE_CONFIG, SetJobStateCommand as StoreSetJobStateCommand, append_events,
-    open_snapshot_bucket,
+    ChangeJobStateCommand as StoreChangeJobStateCommand, CronError, JobDecisionError,
+    JobEnabledState, JobId, JobIdError, JobSpec, JobWriteCondition, SNAPSHOT_STORE_CONFIG,
+    append_events, open_snapshot_bucket,
 };
 use trogon_eventsourcing::{Decision, decide, load_snapshot};
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream, JetStreamPublishMessage};
@@ -66,7 +66,7 @@ where
         .as_ref()
         .map(|job| JobWriteCondition::MustBeAtVersion(job.version))
         .unwrap_or(JobWriteCondition::MustNotExist);
-    let store_command = StoreSetJobStateCommand {
+    let store_command = StoreChangeJobStateCommand {
         id: command.job_id.clone(),
         state: command.state,
         write_condition,
@@ -93,7 +93,7 @@ where
         }
         Err(error) => {
             return Err(CommandError::SetState(CronError::event_source(
-                "failed to decide job state change from current set-job-state state",
+                "failed to decide job state change from current change-job-state state",
                 error,
             )));
         }

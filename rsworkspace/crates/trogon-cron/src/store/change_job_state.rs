@@ -5,7 +5,7 @@ use trogon_eventsourcing::{Decide, Decision, NonEmpty, StreamCommand, decide, lo
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream, JetStreamPublishMessage};
 
 use crate::{
-    JobDecisionError, JobId, JobSpec, JobWriteCondition,
+    JobDecisionError, JobEnabledState, JobId, JobSpec, JobWriteCondition,
     error::CronError,
     events::{JobEvent, JobEventData},
 };
@@ -13,18 +13,19 @@ use crate::{
 use super::{SNAPSHOT_STORE_CONFIG, append_events, snapshot_bucket};
 
 #[derive(Debug, Clone)]
-pub struct DeleteJobCommand {
+pub struct ChangeJobStateCommand {
     pub id: JobId,
+    pub state: JobEnabledState,
     pub write_condition: JobWriteCondition,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DeleteJobState {
+pub enum ChangeJobStateState {
     Missing,
-    Present,
+    Present { current: JobEnabledState },
 }
 
-impl StreamCommand for DeleteJobCommand {
+impl StreamCommand for ChangeJobStateCommand {
     type StreamId = JobId;
 
     fn stream_id(&self) -> &Self::StreamId {
@@ -32,18 +33,20 @@ impl StreamCommand for DeleteJobCommand {
     }
 }
 
-impl DeleteJobCommand {
+impl ChangeJobStateCommand {
     pub fn state_from_snapshot(
         &self,
         snapshot: Option<&trogon_eventsourcing::Snapshot<JobSpec>>,
-    ) -> Result<DeleteJobState, CronError> {
+    ) -> Result<ChangeJobStateState, CronError> {
         match snapshot {
-            None => Ok(DeleteJobState::Missing),
+            None => Ok(ChangeJobStateState::Missing),
             Some(snapshot) if snapshot.payload.id == self.stream_id().as_str() => {
-                Ok(DeleteJobState::Present)
+                Ok(ChangeJobStateState::Present {
+                    current: snapshot.payload.state,
+                })
             }
             Some(snapshot) => Err(CronError::event_source(
-                "failed to decode current job snapshot into delete-job state",
+                "failed to decode current job snapshot into change-job-state state",
                 std::io::Error::other(format!(
                     "expected '{}' but snapshot carried '{}'",
                     self.stream_id(),
@@ -54,23 +57,32 @@ impl DeleteJobCommand {
     }
 }
 
-impl Decide<DeleteJobState, JobEvent> for DeleteJobCommand {
+impl Decide<ChangeJobStateState, JobEvent> for ChangeJobStateCommand {
     type Error = JobDecisionError;
 
-    fn decide(state: &DeleteJobState, command: &Self) -> Result<Decision<JobEvent>, Self::Error> {
+    fn decide(
+        state: &ChangeJobStateState,
+        command: &Self,
+    ) -> Result<Decision<JobEvent>, Self::Error> {
         match state {
-            DeleteJobState::Missing => Err(JobDecisionError::MissingJobForRemoval {
+            ChangeJobStateState::Missing => Err(JobDecisionError::MissingJobForStateChange {
                 id: command.stream_id().clone(),
             }),
-            DeleteJobState::Present => Ok(Decision::Event(NonEmpty::one(JobEvent::job_removed(
-                command.stream_id().to_string(),
-            )))),
+            ChangeJobStateState::Present { current } if *current == command.state => {
+                Err(JobDecisionError::StateAlreadySet {
+                    id: command.stream_id().clone(),
+                    state: command.state,
+                })
+            }
+            ChangeJobStateState::Present { .. } => Ok(Decision::Event(NonEmpty::one(
+                JobEvent::job_state_changed(command.stream_id().to_string(), command.state),
+            ))),
         }
     }
 }
 
 #[cfg(not(coverage))]
-pub async fn run<J>(js: &J, command: DeleteJobCommand) -> Result<(), CronError>
+pub async fn run<J>(js: &J, command: ChangeJobStateCommand) -> Result<(), CronError>
 where
     J: JetStreamGetKeyValue<Store = kv::Store>
         + JetStreamGetStream<Stream = jetstream::stream::Stream>
@@ -79,8 +91,9 @@ where
             AckFuture = context::PublishAckFuture,
         >,
 {
-    let DeleteJobCommand {
+    let ChangeJobStateCommand {
         id,
+        state,
         write_condition,
     } = command;
 
@@ -88,8 +101,9 @@ where
     let current_snapshot = load_snapshot::<JobSpec>(&bucket, SNAPSHOT_STORE_CONFIG, id.as_str())
         .await
         .map_err(CronError::from)?;
-    let command = DeleteJobCommand {
+    let command = ChangeJobStateCommand {
         id: id.clone(),
+        state,
         write_condition,
     };
     let current_state = command.state_from_snapshot(current_snapshot.as_ref())?;
@@ -97,16 +111,22 @@ where
         Ok(Decision::Event(events)) => events,
         Ok(_) => {
             return Err(CronError::event_source(
-                "failed to decide job removal from current stream state",
+                "failed to decide job state change from current stream state",
                 std::io::Error::other("unsupported decision variant"),
             ));
         }
-        Err(JobDecisionError::MissingJobForRemoval { .. }) => {
+        Err(JobDecisionError::MissingJobForStateChange { .. }) => {
             return Err(CronError::JobNotFound { id: id.to_string() });
+        }
+        Err(JobDecisionError::StateAlreadySet { state, .. }) => {
+            return Err(CronError::JobStateAlreadySet {
+                id: id.to_string(),
+                state,
+            });
         }
         Err(error) => {
             return Err(CronError::event_source(
-                "failed to decide job removal from current delete-job state",
+                "failed to decide job state change from current change-job-state state",
                 error,
             ));
         }
@@ -122,7 +142,7 @@ where
 }
 
 #[cfg(coverage)]
-pub async fn run<J>(_js: &J, _command: DeleteJobCommand) -> Result<(), CronError>
+pub async fn run<J>(_js: &J, _command: ChangeJobStateCommand) -> Result<(), CronError>
 where
     J: JetStreamGetKeyValue<Store = kv::Store>
         + JetStreamGetStream<Stream = jetstream::stream::Stream>

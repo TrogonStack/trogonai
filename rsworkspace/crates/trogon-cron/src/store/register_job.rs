@@ -13,23 +13,23 @@ use crate::{
 use super::{SNAPSHOT_STORE_CONFIG, append_events, snapshot_bucket};
 
 #[derive(Debug, Clone)]
-pub struct PutJobCommand {
+pub struct RegisterJobCommand {
     id: JobId,
     job: ResolvedJobSpec,
     write_condition: JobWriteCondition,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PutJobState {
+pub enum RegisterJobState {
     Missing,
     Present,
 }
 
-impl PutJobCommand {
+impl RegisterJobCommand {
     pub fn new(spec: JobSpec, write_condition: JobWriteCondition) -> Result<Self, CronError> {
         let id = JobId::parse(&spec.id).map_err(|source| {
             CronError::event_source(
-                "failed to build put job command from validated spec",
+                "failed to build register job command from validated spec",
                 source,
             )
         })?;
@@ -45,7 +45,10 @@ impl PutJobCommand {
         write_condition: JobWriteCondition,
     ) -> Result<Self, CronError> {
         let id = JobId::parse(job.id()).map_err(|source| {
-            CronError::event_source("failed to build put job command from resolved spec", source)
+            CronError::event_source(
+                "failed to build register job command from resolved spec",
+                source,
+            )
         })?;
         Ok(Self {
             id,
@@ -65,14 +68,14 @@ impl PutJobCommand {
     pub fn state_from_snapshot(
         &self,
         snapshot: Option<&trogon_eventsourcing::Snapshot<JobSpec>>,
-    ) -> Result<PutJobState, CronError> {
+    ) -> Result<RegisterJobState, CronError> {
         match snapshot {
-            None => Ok(PutJobState::Missing),
+            None => Ok(RegisterJobState::Missing),
             Some(snapshot) if snapshot.payload.id == self.stream_id().as_str() => {
-                Ok(PutJobState::Present)
+                Ok(RegisterJobState::Present)
             }
             Some(snapshot) => Err(CronError::event_source(
-                "failed to decode current job snapshot into put-job state",
+                "failed to decode current job snapshot into register-job state",
                 std::io::Error::other(format!(
                     "expected '{}' but snapshot carried '{}'",
                     self.stream_id(),
@@ -83,7 +86,7 @@ impl PutJobCommand {
     }
 }
 
-impl StreamCommand for PutJobCommand {
+impl StreamCommand for RegisterJobCommand {
     type StreamId = JobId;
 
     fn stream_id(&self) -> &Self::StreamId {
@@ -91,15 +94,15 @@ impl StreamCommand for PutJobCommand {
     }
 }
 
-impl Decide<PutJobState, JobEvent> for PutJobCommand {
+impl Decide<RegisterJobState, JobEvent> for RegisterJobCommand {
     type Error = JobDecisionError;
 
-    fn decide(state: &PutJobState, command: &Self) -> Result<Decision<JobEvent>, Self::Error> {
+    fn decide(state: &RegisterJobState, command: &Self) -> Result<Decision<JobEvent>, Self::Error> {
         match state {
-            PutJobState::Missing => Ok(Decision::Event(NonEmpty::one(JobEvent::job_registered(
-                command.job().spec().clone(),
-            )))),
-            PutJobState::Present => Err(JobDecisionError::CannotRegisterExistingJob {
+            RegisterJobState::Missing => Ok(Decision::Event(NonEmpty::one(
+                JobEvent::job_registered(command.job().spec().clone()),
+            ))),
+            RegisterJobState::Present => Err(JobDecisionError::CannotRegisterExistingJob {
                 id: command.stream_id().clone(),
             }),
         }
@@ -107,7 +110,7 @@ impl Decide<PutJobState, JobEvent> for PutJobCommand {
 }
 
 #[cfg(not(coverage))]
-pub async fn run<J>(js: &J, command: PutJobCommand) -> Result<(), CronError>
+pub async fn run<J>(js: &J, command: RegisterJobCommand) -> Result<(), CronError>
 where
     J: JetStreamGetKeyValue<Store = kv::Store>
         + JetStreamGetStream<Stream = jetstream::stream::Stream>
@@ -140,7 +143,7 @@ where
         }
         Err(error) => {
             return Err(CronError::event_source(
-                "failed to decide job registration from current put-job state",
+                "failed to decide job registration from current register-job state",
                 error,
             ));
         }
@@ -156,7 +159,7 @@ where
 }
 
 #[cfg(coverage)]
-pub async fn run<J>(_js: &J, _command: PutJobCommand) -> Result<(), CronError>
+pub async fn run<J>(_js: &J, _command: RegisterJobCommand) -> Result<(), CronError>
 where
     J: JetStreamGetKeyValue<Store = kv::Store>
         + JetStreamGetStream<Stream = jetstream::stream::Stream>

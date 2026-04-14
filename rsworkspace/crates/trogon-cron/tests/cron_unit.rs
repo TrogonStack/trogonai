@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
 
 use trogon_cron::{
-    CronController, DeleteJobCommand, DeliverySpec, GetJobCommand, JobEnabledState, JobId, JobSpec,
-    JobWriteCondition, ListJobsCommand, PutJobCommand, SamplingSource, SchedulePublisher,
-    ScheduleSpec, SetJobStateCommand,
+    ChangeJobStateCommand, CronController, DeliverySpec, GetJobCommand, JobEnabledState, JobId,
+    JobSpec, JobWriteCondition, ListJobsCommand, RegisterJobCommand, RemoveJobCommand,
+    SamplingSource, SchedulePublisher, ScheduleSpec,
     mocks::{MockConfigStore, MockLeaderLock, MockSchedulePublisher},
 };
 
@@ -33,7 +33,7 @@ async fn client_register_then_get() {
 
     let job = base_job("backup");
     store
-        .put_job(PutJobCommand::new(job, JobWriteCondition::MustNotExist).unwrap())
+        .register_job(RegisterJobCommand::new(job, JobWriteCondition::MustNotExist).unwrap())
         .await
         .unwrap();
 
@@ -51,7 +51,9 @@ async fn client_set_enabled_toggles_job() {
     let store = MockConfigStore::new();
 
     store
-        .put_job(PutJobCommand::new(base_job("toggle"), JobWriteCondition::MustNotExist).unwrap())
+        .register_job(
+            RegisterJobCommand::new(base_job("toggle"), JobWriteCondition::MustNotExist).unwrap(),
+        )
         .await
         .unwrap();
     let version = store
@@ -63,7 +65,7 @@ async fn client_set_enabled_toggles_job() {
         .unwrap()
         .version;
     store
-        .set_job_state(SetJobStateCommand {
+        .change_job_state(ChangeJobStateCommand {
             id: job_id("toggle"),
             state: JobEnabledState::Disabled,
             write_condition: JobWriteCondition::MustBeAtVersion(version),
@@ -86,11 +88,15 @@ async fn client_remove_and_list_jobs_use_store_paths() {
     let store = MockConfigStore::new();
 
     store
-        .put_job(PutJobCommand::new(base_job("alpha"), JobWriteCondition::MustNotExist).unwrap())
+        .register_job(
+            RegisterJobCommand::new(base_job("alpha"), JobWriteCondition::MustNotExist).unwrap(),
+        )
         .await
         .unwrap();
     store
-        .put_job(PutJobCommand::new(base_job("beta"), JobWriteCondition::MustNotExist).unwrap())
+        .register_job(
+            RegisterJobCommand::new(base_job("beta"), JobWriteCondition::MustNotExist).unwrap(),
+        )
         .await
         .unwrap();
 
@@ -104,7 +110,7 @@ async fn client_remove_and_list_jobs_use_store_paths() {
         .unwrap()
         .version;
     store
-        .delete_job(DeleteJobCommand {
+        .remove_job(RemoveJobCommand {
             id: job_id("beta"),
             write_condition: JobWriteCondition::MustBeAtVersion(beta_version),
         })
@@ -131,7 +137,7 @@ async fn client_rejects_invalid_route() {
         source: None,
     };
 
-    let error = PutJobCommand::new(job, JobWriteCondition::MustNotExist).unwrap_err();
+    let error = RegisterJobCommand::new(job, JobWriteCondition::MustNotExist).unwrap_err();
     assert!(error.to_string().contains("route"));
 }
 
@@ -147,7 +153,7 @@ async fn client_rejects_invalid_source_subject() {
         }),
     };
 
-    let error = PutJobCommand::new(job, JobWriteCondition::MustNotExist).unwrap_err();
+    let error = RegisterJobCommand::new(job, JobWriteCondition::MustNotExist).unwrap_err();
     assert!(error.to_string().contains("sampling source"));
 }
 
@@ -155,12 +161,14 @@ async fn client_rejects_invalid_source_subject() {
 async fn client_rejects_stale_version() {
     let store = MockConfigStore::new();
     store
-        .put_job(PutJobCommand::new(base_job("stale"), JobWriteCondition::MustNotExist).unwrap())
+        .register_job(
+            RegisterJobCommand::new(base_job("stale"), JobWriteCondition::MustNotExist).unwrap(),
+        )
         .await
         .unwrap();
 
     let error = store
-        .set_job_state(SetJobStateCommand {
+        .change_job_state(ChangeJobStateCommand {
             id: job_id("stale"),
             state: JobEnabledState::Disabled,
             write_condition: JobWriteCondition::MustBeAtVersion(99),

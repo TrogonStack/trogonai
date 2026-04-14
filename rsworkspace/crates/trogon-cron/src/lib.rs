@@ -27,9 +27,9 @@ pub use job_id::{JobId, JobIdError};
 pub use nats::NatsSchedulePublisher;
 pub use scheduler::CronController;
 pub use store::{
-    DeleteJobCommand, DeleteJobState, GetJobCommand, JobSpecChange, ListJobsCommand,
-    LoadAndWatchCommand, PutJobCommand, PutJobState, SNAPSHOT_STORE_CONFIG, SetJobStateCommand,
-    SetJobStateState, append_events, connect_store, delete_job, get_job, list_jobs, load_and_watch,
-    open_snapshot_bucket, put_job, set_job_state,
+    ChangeJobStateCommand, ChangeJobStateState, GetJobCommand, JobSpecChange, ListJobsCommand,
+    LoadAndWatchCommand, RegisterJobCommand, RegisterJobState, RemoveJobCommand, RemoveJobState,
+    SNAPSHOT_STORE_CONFIG, append_events, change_job_state, connect_store, get_job, list_jobs,
+    load_and_watch, open_snapshot_bucket, register_job, remove_job,
 };
 pub use traits::{LeaderLock, SchedulePublisher};

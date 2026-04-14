@@ -2,16 +2,11 @@ use std::{fmt, io::Read};
 
 use async_nats::jetstream::{self, context, kv};
 use trogon_cron::{
-    CronError, JobDecisionError, JobSpec, JobWriteCondition, PutJobCommand, SNAPSHOT_STORE_CONFIG,
-    append_events, open_snapshot_bucket,
+    CronError, JobDecisionError, JobSpec, JobWriteCondition, RegisterJobCommand,
+    SNAPSHOT_STORE_CONFIG, append_events, open_snapshot_bucket,
 };
 use trogon_eventsourcing::{Decision, StreamCommand, decide, load_snapshot};
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream, JetStreamPublishMessage};
-
-#[derive(Debug)]
-pub struct AddCommand {
-    command: PutJobCommand,
-}
 
 #[derive(Debug)]
 pub enum CommandError {
@@ -46,26 +41,18 @@ impl std::error::Error for CommandError {
     }
 }
 
-impl AddCommand {
-    pub fn new(spec: JobSpec) -> Result<Self, CommandError> {
-        Ok(Self {
-            command: PutJobCommand::new(spec, JobWriteCondition::MustNotExist)
-                .map_err(CommandError::InvalidJobSpec)?,
-        })
-    }
-}
-
-pub fn read_from_stdin() -> Result<AddCommand, CommandError> {
+pub fn read_from_stdin() -> Result<RegisterJobCommand, CommandError> {
     let mut buf = String::new();
     std::io::stdin()
         .read_to_string(&mut buf)
         .map_err(CommandError::ReadStdin)?;
 
     let spec = serde_json::from_str(&buf).map_err(CommandError::DeserializeJobSpec)?;
-    AddCommand::new(spec)
+    RegisterJobCommand::new(spec, JobWriteCondition::MustNotExist)
+        .map_err(CommandError::InvalidJobSpec)
 }
 
-pub async fn run<J>(js: &J, command: AddCommand) -> Result<(), CommandError>
+pub async fn run<J>(js: &J, command: RegisterJobCommand) -> Result<(), CommandError>
 where
     J: JetStreamGetKeyValue<Store = kv::Store>
         + JetStreamGetStream<Stream = jetstream::stream::Stream>
@@ -74,7 +61,7 @@ where
             AckFuture = context::PublishAckFuture,
         >,
 {
-    let id = command.command.stream_id().to_string();
+    let id = command.stream_id().to_string();
     let bucket = open_snapshot_bucket(js)
         .await
         .map_err(CommandError::LoadJob)?;
@@ -83,10 +70,9 @@ where
         .map_err(CronError::from)
         .map_err(CommandError::LoadJob)?;
     let current_state = command
-        .command
         .state_from_snapshot(current_snapshot.as_ref())
         .map_err(CommandError::LoadJob)?;
-    let events = match decide(&current_state, &command.command) {
+    let events = match decide(&current_state, &command) {
         Ok(Decision::Event(events)) => events,
         Ok(_) => {
             return Err(CommandError::RegisterJob(CronError::event_source(
