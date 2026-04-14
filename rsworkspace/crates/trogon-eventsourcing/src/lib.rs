@@ -1,17 +1,20 @@
+#![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use uuid::Uuid;
 
 mod decision;
 mod snapshots;
+mod streams;
 
 pub use decision::{Act, Decide, Decision, NonEmpty, StreamCommand, decide};
 pub use snapshots::{
-    Snapshot, SnapshotChange, SnapshotSchemaVersion, SnapshotSchemaVersionError,
-    SnapshotStoreConfig, SnapshotStoreError, checkpoint_key, list_snapshots, load_snapshot,
-    load_snapshot_map, maybe_advance_checkpoint, persist_snapshot_change, read_checkpoint,
-    snapshot_key, write_checkpoint,
+    Snapshot, SnapshotChange, SnapshotStoreConfig, SnapshotStoreError, checkpoint_key,
+    list_snapshots, load_snapshot, load_snapshot_map, maybe_advance_checkpoint,
+    persist_snapshot_change, read_checkpoint, snapshot_key, write_checkpoint,
 };
+pub use streams::{StreamStoreError, append_stream, read_stream_from, read_stream_range};
 
 pub trait StreamEvent {
     fn stream_id(&self) -> &str;

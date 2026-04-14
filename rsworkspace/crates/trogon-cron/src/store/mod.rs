@@ -4,7 +4,7 @@ mod cron_jobs_bucket;
 mod events_stream;
 mod snapshot_bucket;
 
-use trogon_eventsourcing::{SnapshotSchemaVersion, SnapshotStoreConfig};
+use trogon_eventsourcing::SnapshotStoreConfig;
 
 use crate::kv::{CRON_JOBS_SNAPSHOT_KEY_PREFIX, CRON_JOBS_SNAPSHOT_LAST_EVENT_SEQUENCE_KEY};
 
@@ -18,5 +18,4 @@ pub use snapshot_bucket::run as open_snapshot_bucket;
 pub const SNAPSHOT_STORE_CONFIG: SnapshotStoreConfig<'static> = SnapshotStoreConfig::new(
     CRON_JOBS_SNAPSHOT_KEY_PREFIX,
     CRON_JOBS_SNAPSHOT_LAST_EVENT_SEQUENCE_KEY,
-    SnapshotSchemaVersion::V2,
 );

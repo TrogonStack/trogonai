@@ -16,10 +16,6 @@ use crate::{
 use async_nats::jetstream::{self};
 use futures::TryStreamExt;
 
-pub(crate) const NATS_BATCH_COMMIT: &str = "Nats-Batch-Commit";
-pub(crate) const NATS_BATCH_ID: &str = "Nats-Batch-Id";
-pub(crate) const NATS_BATCH_SEQUENCE: &str = "Nats-Batch-Sequence";
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EventSubjectPrefix {
     Canonical,
