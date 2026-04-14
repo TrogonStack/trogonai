@@ -6,16 +6,16 @@ use std::sync::{
 
 use async_nats::jetstream::kv;
 use bytes::Bytes;
-use trogon_eventsourcing::{Decision, Snapshot, StreamCommand, decide};
+use trogon_eventsourcing::{Snapshot, StreamCommand};
 use trogon_nats::lease::{ReleaseLease, RenewLease, TryAcquireLease};
 
 use crate::{
-    ChangeJobStateCommand, ChangeJobStateDecisionError, GetJobCommand, ListJobsCommand,
-    RegisterJobCommand, RegisterJobDecisionError, RemoveJobCommand, RemoveJobDecisionError,
-    config::{JobSpec, JobWriteState},
+    ChangeJobStateCommand, GetJobCommand, ListJobsCommand, RegisterJobCommand, RemoveJobCommand,
+    commands::{CommandRuntime, change_job_state, register_job, remove_job},
+    config::{JobSpec, JobWriteCondition, JobWriteState},
     domain::ResolvedJobSpec,
     error::CronError,
-    events::JobEvent,
+    events::{JobEvent, JobEventData},
     projections::{CronJobWatchStream, LoadAndWatchCronJobsResult},
     traits::SchedulePublisher,
 };
@@ -135,6 +135,7 @@ impl ReleaseLease for MockLeaderLock {
 pub struct MockCronStore {
     jobs: Arc<Mutex<HashMap<String, Snapshot<JobSpec>>>>,
     stream_versions: Arc<Mutex<HashMap<String, u64>>>,
+    events: Arc<Mutex<HashMap<String, Vec<JobEventData>>>>,
 }
 
 impl MockCronStore {
@@ -147,6 +148,16 @@ impl MockCronStore {
             .lock()
             .unwrap()
             .insert(spec.id.clone(), 1);
+        self.events.lock().unwrap().insert(
+            spec.id.clone(),
+            vec![
+                JobEventData::new(JobEvent::JobRegistered {
+                    id: spec.id.clone(),
+                    spec: crate::RegisteredJobSpec::from(&spec),
+                })
+                .unwrap(),
+            ],
+        );
         self.jobs
             .lock()
             .unwrap()
@@ -154,115 +165,11 @@ impl MockCronStore {
     }
 
     pub async fn register_job(&self, command: RegisterJobCommand) -> Result<(), CronError> {
-        let mut jobs = self.jobs.lock().unwrap();
-        let mut stream_versions = self.stream_versions.lock().unwrap();
-        let current_snapshot = jobs.get(command.stream_id().as_str()).cloned();
-        let current_version = stream_versions.get(command.stream_id().as_str()).copied();
-        let current_state = command.state_from_snapshot(current_snapshot.as_ref())?;
-        let write_state = JobWriteState::new(current_version, current_snapshot.as_ref().is_some());
-        command
-            .write_condition()
-            .ensure(command.stream_id().as_str(), write_state)?;
-        let events = match decide(&current_state, &command) {
-            Ok(Decision::Event(events)) => events,
-            Ok(_) => {
-                return Err(CronError::event_source(
-                    "failed to decide mocked job registration from current stream state",
-                    std::io::Error::other("unsupported decision variant"),
-                ));
-            }
-            Err(RegisterJobDecisionError::AlreadyRegistered { .. }) => {
-                return Err(CronError::OptimisticConcurrencyConflict {
-                    id: command.stream_id().to_string(),
-                    expected: command.write_condition(),
-                    current_version,
-                });
-            }
-        };
-        let next_version = current_version.unwrap_or(0) + 1;
-        stream_versions.insert(command.stream_id().to_string(), next_version);
-        let mut projected_snapshot = current_snapshot;
-        for event in events {
-            match event {
-                JobEvent::JobRegistered { id, spec } => {
-                    projected_snapshot = Some(Snapshot::new(next_version, spec.into_job_spec(id)));
-                }
-                other => {
-                    return Err(CronError::event_source(
-                        "failed to project mocked register-job event into current snapshot",
-                        std::io::Error::other(format!("{other:?}")),
-                    ));
-                }
-            }
-        }
-        if let Some(snapshot) = projected_snapshot {
-            jobs.insert(command.stream_id().to_string(), snapshot);
-        } else {
-            jobs.remove(command.stream_id().as_str());
-        }
-        Ok(())
+        register_job(self, command).await
     }
 
     pub async fn change_job_state(&self, command: ChangeJobStateCommand) -> Result<(), CronError> {
-        let mut jobs = self.jobs.lock().unwrap();
-        let mut stream_versions = self.stream_versions.lock().unwrap();
-        let current_snapshot = jobs.get(command.stream_id().as_str()).cloned();
-        let current_version = stream_versions.get(command.stream_id().as_str()).copied();
-        let current_state = command.state_from_snapshot(current_snapshot.as_ref())?;
-        command.resolved_write_condition(current_version).ensure(
-            command.stream_id().as_str(),
-            JobWriteState::new(current_version, current_snapshot.as_ref().is_some()),
-        )?;
-        let events = match decide(&current_state, &command) {
-            Ok(Decision::Event(events)) => events,
-            Ok(_) => {
-                return Err(CronError::event_source(
-                    "failed to decide mocked job state change from current stream state",
-                    std::io::Error::other("unsupported decision variant"),
-                ));
-            }
-            Err(ChangeJobStateDecisionError::JobNotFound { .. }) => {
-                return Err(CronError::JobNotFound {
-                    id: command.stream_id().to_string(),
-                });
-            }
-            Err(ChangeJobStateDecisionError::StateAlreadySet { state, .. }) => {
-                return Err(CronError::JobStateAlreadySet {
-                    id: command.stream_id().to_string(),
-                    state,
-                });
-            }
-        };
-        let next_version = current_version.unwrap_or(0) + 1;
-        stream_versions.insert(command.stream_id().to_string(), next_version);
-        let mut projected_snapshot = current_snapshot;
-        for event in events {
-            match event {
-                JobEvent::JobStateChanged { state, .. } => {
-                    let mut snapshot = projected_snapshot.take().ok_or_else(|| {
-                        CronError::event_source(
-                            "failed to project mocked job state change without current snapshot",
-                            std::io::Error::other(command.stream_id().to_string()),
-                        )
-                    })?;
-                    snapshot.version = next_version;
-                    snapshot.payload.state = state;
-                    projected_snapshot = Some(snapshot);
-                }
-                other => {
-                    return Err(CronError::event_source(
-                        "failed to project mocked change-job-state event into current snapshot",
-                        std::io::Error::other(format!("{other:?}")),
-                    ));
-                }
-            }
-        }
-        if let Some(snapshot) = projected_snapshot {
-            jobs.insert(command.stream_id().to_string(), snapshot);
-        } else {
-            jobs.remove(command.stream_id().as_str());
-        }
-        Ok(())
+        change_job_state(self, command).await
     }
 
     pub async fn get_job(
@@ -278,51 +185,7 @@ impl MockCronStore {
     }
 
     pub async fn remove_job(&self, command: RemoveJobCommand) -> Result<(), CronError> {
-        let mut jobs = self.jobs.lock().unwrap();
-        let mut stream_versions = self.stream_versions.lock().unwrap();
-        let current_snapshot = jobs.get(command.stream_id().as_str()).cloned();
-        let current_version = stream_versions.get(command.stream_id().as_str()).copied();
-        let current_state = command.state_from_snapshot(current_snapshot.as_ref())?;
-        command.resolved_write_condition(current_version).ensure(
-            command.stream_id().as_str(),
-            JobWriteState::new(current_version, current_snapshot.as_ref().is_some()),
-        )?;
-        let events = match decide(&current_state, &command) {
-            Ok(Decision::Event(events)) => events,
-            Ok(_) => {
-                return Err(CronError::event_source(
-                    "failed to decide mocked job removal from current stream state",
-                    std::io::Error::other("unsupported decision variant"),
-                ));
-            }
-            Err(RemoveJobDecisionError::JobNotFound { .. }) => {
-                return Err(CronError::JobNotFound {
-                    id: command.stream_id().to_string(),
-                });
-            }
-        };
-        let next_version = current_version.unwrap_or(0) + 1;
-        stream_versions.insert(command.stream_id().to_string(), next_version);
-        let mut projected_snapshot = current_snapshot;
-        for event in events {
-            match event {
-                JobEvent::JobRemoved { .. } => {
-                    projected_snapshot = None;
-                }
-                other => {
-                    return Err(CronError::event_source(
-                        "failed to project mocked remove-job event into current snapshot",
-                        std::io::Error::other(format!("{other:?}")),
-                    ));
-                }
-            }
-        }
-        if let Some(snapshot) = projected_snapshot {
-            jobs.insert(command.stream_id().to_string(), snapshot);
-        } else {
-            jobs.remove(command.stream_id().as_str());
-        }
-        Ok(())
+        remove_job(self, command).await
     }
 
     pub async fn list_jobs(
@@ -345,6 +208,133 @@ impl MockCronStore {
             jobs,
             Box::pin(futures::stream::pending()) as CronJobWatchStream,
         ))
+    }
+}
+
+impl CommandRuntime for MockCronStore {
+    async fn load_job_snapshot(
+        &self,
+        stream_id: &crate::JobId,
+    ) -> Result<Option<Snapshot<JobSpec>>, CronError> {
+        Ok(self.jobs.lock().unwrap().get(stream_id.as_str()).cloned())
+    }
+
+    async fn current_job_stream_version(
+        &self,
+        stream_id: &crate::JobId,
+    ) -> Result<Option<u64>, CronError> {
+        Ok(self
+            .stream_versions
+            .lock()
+            .unwrap()
+            .get(stream_id.as_str())
+            .copied())
+    }
+
+    async fn read_job_stream_events(
+        &self,
+        stream_id: &crate::JobId,
+        from_sequence: u64,
+        to_sequence: u64,
+    ) -> Result<Vec<JobEvent>, CronError> {
+        let stream_events = self
+            .events
+            .lock()
+            .unwrap()
+            .get(stream_id.as_str())
+            .cloned()
+            .unwrap_or_default();
+        if from_sequence == 0 || to_sequence == 0 || from_sequence > to_sequence {
+            return Ok(Vec::new());
+        }
+
+        let mut decoded = Vec::new();
+        for sequence in from_sequence..=to_sequence {
+            let Some(event) = stream_events.get((sequence - 1) as usize) else {
+                continue;
+            };
+            decoded.push(event.decode_data::<JobEvent>().map_err(|source| {
+                CronError::event_source(
+                    "failed to decode mocked job event while catching up command state",
+                    source,
+                )
+            })?);
+        }
+        Ok(decoded)
+    }
+
+    async fn append_job_events(
+        &self,
+        stream_id: &crate::JobId,
+        write_condition: JobWriteCondition,
+        events: trogon_eventsourcing::NonEmpty<JobEventData>,
+    ) -> Result<(), CronError> {
+        let stream_id = stream_id.clone();
+        let jobs = self.jobs.clone();
+        let stream_versions = self.stream_versions.clone();
+        let event_log = self.events.clone();
+        if events
+            .iter()
+            .any(|event| event.stream_id() != stream_id.as_str())
+        {
+            return Err(CronError::event_source(
+                "failed to append mocked job event batch",
+                std::io::Error::other(format!(
+                    "batch contains events outside stream '{}'",
+                    stream_id
+                )),
+            ));
+        }
+
+        let mut jobs = jobs.lock().unwrap();
+        let mut stream_versions = stream_versions.lock().unwrap();
+        let mut stream_events = event_log.lock().unwrap();
+
+        let current_snapshot = jobs.get(stream_id.as_str()).cloned();
+        let current_version = stream_versions.get(stream_id.as_str()).copied();
+        write_condition.ensure(
+            stream_id.as_str(),
+            JobWriteState::new(current_version, current_snapshot.as_ref().is_some()),
+        )?;
+
+        let stored_events = stream_events.entry(stream_id.to_string()).or_default();
+        let mut projected_snapshot = current_snapshot;
+        let mut version = current_version.unwrap_or(0);
+
+        for event_data in events {
+            let event = event_data.decode_data::<JobEvent>().map_err(|source| {
+                CronError::event_source("failed to decode mocked job event payload", source)
+            })?;
+            version += 1;
+            stored_events.push(event_data);
+            match event {
+                JobEvent::JobRegistered { id, spec } => {
+                    projected_snapshot = Some(Snapshot::new(version, spec.into_job_spec(id)));
+                }
+                JobEvent::JobStateChanged { state, .. } => {
+                    let mut snapshot = projected_snapshot.take().ok_or_else(|| {
+                        CronError::event_source(
+                            "failed to project mocked job state change without current snapshot",
+                            std::io::Error::other(stream_id.to_string()),
+                        )
+                    })?;
+                    snapshot.version = version;
+                    snapshot.payload.state = state;
+                    projected_snapshot = Some(snapshot);
+                }
+                JobEvent::JobRemoved { .. } => {
+                    projected_snapshot = None;
+                }
+            }
+        }
+
+        stream_versions.insert(stream_id.to_string(), version);
+        if let Some(snapshot) = projected_snapshot {
+            jobs.insert(stream_id.to_string(), snapshot);
+        } else {
+            jobs.remove(stream_id.as_str());
+        }
+        Ok(())
     }
 }
 

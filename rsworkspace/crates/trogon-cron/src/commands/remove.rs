@@ -1,15 +1,10 @@
-#![cfg_attr(coverage, allow(dead_code, unused_imports))]
-
-use async_nats::jetstream::{self, context, kv};
-use trogon_eventsourcing::{Decide, Decision, NonEmpty, StreamCommand, decide, load_snapshot};
-use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream, JetStreamPublishMessage};
+use trogon_eventsourcing::{Decide, Decision, NonEmpty, StreamCommand, decide};
 
 use crate::{
     JobId, JobSpec, JobWriteCondition,
-    commands::catch_up_command_state,
+    commands::{CommandRuntime, Evolve, catch_up_command_state},
     error::CronError,
     events::{JobEvent, JobEventData},
-    store::{SNAPSHOT_STORE_CONFIG, append_events, open_snapshot_bucket},
 };
 
 #[derive(Debug, Clone)]
@@ -74,15 +69,6 @@ impl RemoveJobCommand {
                 .unwrap_or(JobWriteCondition::MustNotExist)
         })
     }
-
-    fn apply_event(_state: RemoveJobState, event: JobEvent) -> Result<RemoveJobState, CronError> {
-        match event {
-            JobEvent::JobRegistered { .. } | JobEvent::JobStateChanged { .. } => {
-                Ok(RemoveJobState::Present)
-            }
-            JobEvent::JobRemoved { .. } => Ok(RemoveJobState::Missing),
-        }
-    }
 }
 
 impl std::fmt::Display for RemoveJobDecisionError {
@@ -118,30 +104,28 @@ impl Decide<RemoveJobState, JobEvent> for RemoveJobCommand {
     }
 }
 
-#[cfg(not(coverage))]
-pub async fn run<J>(js: &J, command: RemoveJobCommand) -> Result<(), CronError>
+impl Evolve for RemoveJobCommand {
+    type State = RemoveJobState;
+
+    fn evolve(_state: Self::State, event: JobEvent) -> Result<Self::State, CronError> {
+        match event {
+            JobEvent::JobRegistered { .. } | JobEvent::JobStateChanged { .. } => {
+                Ok(RemoveJobState::Present)
+            }
+            JobEvent::JobRemoved { .. } => Ok(RemoveJobState::Missing),
+        }
+    }
+}
+
+pub async fn run<R>(runtime: &R, command: RemoveJobCommand) -> Result<(), CronError>
 where
-    J: JetStreamGetKeyValue<Store = kv::Store>
-        + JetStreamGetStream<Stream = jetstream::stream::Stream>
-        + JetStreamPublishMessage<
-            PublishError = context::PublishError,
-            AckFuture = context::PublishAckFuture,
-        >,
+    R: CommandRuntime,
 {
     let id = command.stream_id().to_string();
-    let bucket = open_snapshot_bucket(js).await?;
-    let current_snapshot = load_snapshot::<JobSpec>(&bucket, SNAPSHOT_STORE_CONFIG, &id)
-        .await
-        .map_err(CronError::from)?;
+    let current_snapshot = runtime.load_job_snapshot(command.stream_id()).await?;
     let current_state = command.state_from_snapshot(current_snapshot.as_ref())?;
-    let (current_state, current_version) = catch_up_command_state(
-        js,
-        command.stream_id(),
-        current_snapshot.as_ref(),
-        current_state,
-        RemoveJobCommand::apply_event,
-    )
-    .await?;
+    let (current_state, current_version) =
+        catch_up_command_state(runtime, &command, current_snapshot.as_ref(), current_state).await?;
     let write_condition = command.resolved_write_condition(current_version);
     let events = match decide(&current_state, &command) {
         Ok(Decision::Event(events)) => events,
@@ -157,27 +141,37 @@ where
     };
 
     let events = events.try_map(JobEventData::new)?;
-    append_events(js, command.stream_id().as_str(), write_condition, events).await
-}
-
-#[cfg(coverage)]
-pub async fn run<J>(_js: &J, _command: RemoveJobCommand) -> Result<(), CronError>
-where
-    J: JetStreamGetKeyValue<Store = kv::Store>
-        + JetStreamGetStream<Stream = jetstream::stream::Stream>
-        + JetStreamPublishMessage<
-            PublishError = context::PublishError,
-            AckFuture = context::PublishAckFuture,
-        >,
-{
-    Ok(())
+    runtime
+        .append_job_events(command.stream_id(), write_condition, events)
+        .await
 }
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use trogon_eventsourcing::{Decision, NonEmpty, decide};
 
     use super::*;
+    use crate::{
+        DeliverySpec, GetJobCommand, JobEnabledState, JobSpec, ScheduleSpec, mocks::MockCronStore,
+    };
+
+    fn job(id: &str) -> JobSpec {
+        JobSpec {
+            id: id.to_string(),
+            state: JobEnabledState::Enabled,
+            schedule: ScheduleSpec::Every { every_sec: 30 },
+            delivery: DeliverySpec::NatsEvent {
+                route: "agent.run".to_string(),
+                headers: BTreeMap::new(),
+                ttl_sec: None,
+                source: None,
+            },
+            payload: serde_json::json!({"kind": "heartbeat"}),
+            metadata: BTreeMap::new(),
+        }
+    }
 
     #[test]
     fn decides_removal_from_present_state() {
@@ -208,5 +202,28 @@ mod tests {
             decide(&state, &command).unwrap_err(),
             RemoveJobDecisionError::JobNotFound { .. }
         ));
+    }
+
+    #[tokio::test]
+    async fn run_removes_existing_job() {
+        let store = MockCronStore::new();
+        store.seed_job(job("backup"));
+
+        run(
+            &store,
+            RemoveJobCommand::new(JobId::parse("backup").unwrap()),
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            store
+                .get_job(GetJobCommand {
+                    id: JobId::parse("backup").unwrap(),
+                })
+                .await
+                .unwrap()
+                .is_none()
+        );
     }
 }
