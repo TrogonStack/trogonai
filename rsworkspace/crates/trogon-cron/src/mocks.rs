@@ -209,12 +209,10 @@ impl MockCronStore {
         let current_snapshot = jobs.get(command.stream_id().as_str()).cloned();
         let current_version = stream_versions.get(command.stream_id().as_str()).copied();
         let current_state = command.state_from_snapshot(current_snapshot.as_ref())?;
-        command
-            .resolved_write_condition(current_snapshot.as_ref())
-            .ensure(
-                command.stream_id().as_str(),
-                JobWriteState::new(current_version, current_snapshot.as_ref().is_some()),
-            )?;
+        command.resolved_write_condition(current_version).ensure(
+            command.stream_id().as_str(),
+            JobWriteState::new(current_version, current_snapshot.as_ref().is_some()),
+        )?;
         let events = match decide(&current_state, &command) {
             Ok(Decision::Event(events)) => events,
             Ok(_) => {
@@ -285,12 +283,10 @@ impl MockCronStore {
         let current_snapshot = jobs.get(command.stream_id().as_str()).cloned();
         let current_version = stream_versions.get(command.stream_id().as_str()).copied();
         let current_state = command.state_from_snapshot(current_snapshot.as_ref())?;
-        command
-            .resolved_write_condition(current_snapshot.as_ref())
-            .ensure(
-                command.stream_id().as_str(),
-                JobWriteState::new(current_version, current_snapshot.as_ref().is_some()),
-            )?;
+        command.resolved_write_condition(current_version).ensure(
+            command.stream_id().as_str(),
+            JobWriteState::new(current_version, current_snapshot.as_ref().is_some()),
+        )?;
         let events = match decide(&current_state, &command) {
             Ok(Decision::Event(events)) => events,
             Ok(_) => {

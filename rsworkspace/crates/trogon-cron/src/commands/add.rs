@@ -6,6 +6,7 @@ use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream, JetStream
 
 use crate::{
     JobId, JobSpec, JobWriteCondition, ResolvedJobSpec,
+    commands::catch_up_command_state,
     error::CronError,
     events::{JobEvent, JobEventData, RegisteredJobSpec},
     store::{SNAPSHOT_STORE_CONFIG, append_events, open_snapshot_bucket},
@@ -108,6 +109,18 @@ impl RegisterJobCommand {
             )),
         }
     }
+
+    fn apply_event(
+        _state: RegisterJobState,
+        event: JobEvent,
+    ) -> Result<RegisterJobState, CronError> {
+        match event {
+            JobEvent::JobRegistered { .. } | JobEvent::JobStateChanged { .. } => {
+                Ok(RegisterJobState::Present)
+            }
+            JobEvent::JobRemoved { .. } => Ok(RegisterJobState::Missing),
+        }
+    }
 }
 
 impl StreamCommand for RegisterJobCommand {
@@ -164,6 +177,14 @@ where
         .await
         .map_err(CronError::from)?;
     let current_state = command.state_from_snapshot(current_snapshot.as_ref())?;
+    let (current_state, current_version) = catch_up_command_state(
+        js,
+        command.stream_id(),
+        current_snapshot.as_ref(),
+        current_state,
+        RegisterJobCommand::apply_event,
+    )
+    .await?;
 
     let events = match decide(&current_state, &command) {
         Ok(Decision::Event(events)) => events,
@@ -177,7 +198,7 @@ where
             return Err(CronError::OptimisticConcurrencyConflict {
                 id: id.clone(),
                 expected: command.write_condition(),
-                current_version: current_snapshot.as_ref().map(|job| job.version),
+                current_version,
             });
         }
     };

@@ -3,8 +3,15 @@ name = "trogon-eventsourcing"
 version = "0.1.0"
 edition = "2024"
 
-[lints]
-workspace = true
+[lints.rust]
+warnings = "deny"
+unexpected_cfgs = { level = "deny", check-cfg = ['cfg(coverage)'] }
+
+[lints.clippy]
+all = "deny"
+expect_used = "deny"
+panic = "deny"
+unwrap_used = "deny"
 
 [dependencies]
 async-nats = { workspace = true, features = ["jetstream", "kv"] }
@@ -12,4 +19,5 @@ chrono = { version = "0.4", features = ["serde"] }
 futures = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+trogon-nats = { path = "../trogon-nats" }
 uuid = { workspace = true }

@@ -1,3 +1,8 @@
+#![cfg_attr(
+    any(test, feature = "test-support"),
+    allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)
+)]
+
 //! Generic scheduling control plane backed by native NATS scheduled messages.
 
 pub mod commands;
