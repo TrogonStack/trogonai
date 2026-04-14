@@ -102,6 +102,12 @@ pub struct AgentPromise {
     /// `#[serde(default)]` deserializes them gracefully.
     #[serde(default)]
     pub system_prompt: Option<String>,
+    /// How many times startup recovery has re-claimed this promise after
+    /// finding it stale. Used to cap recovery cycles and mark a permanently
+    /// broken run `PermanentFailed` rather than retrying it indefinitely.
+    /// `#[serde(default)]` preserves backward-compat with existing checkpoints.
+    #[serde(default)]
+    pub recovery_count: u32,
 }
 
 // ── PromiseStoreError ─────────────────────────────────────────────────────────
@@ -2054,6 +2060,7 @@ mod tests {
             trigger: serde_json::json!({"action": "opened"}),
             nats_subject: "github.pull_request".to_string(),
             system_prompt: None,
+            recovery_count: 0,
         }
     }
 
@@ -2342,6 +2349,7 @@ mod tests {
             trigger: serde_json::Value::Null,
             nats_subject: "t".to_string(),
             system_prompt: None,
+            recovery_count: 0,
         };
         store.insert_promise(other);
 
@@ -2400,6 +2408,7 @@ mod integration_tests {
             trigger: serde_json::json!({"action": "opened"}),
             nats_subject: "github.pull_request".to_string(),
             system_prompt: None,
+            recovery_count: 0,
         }
     }
 
@@ -2599,6 +2608,7 @@ mod integration_tests {
             trigger: serde_json::Value::Null,
             nats_subject: "t".to_string(),
             system_prompt: None,
+            recovery_count: 0,
         };
         store.put_promise(&other).await.unwrap();
 

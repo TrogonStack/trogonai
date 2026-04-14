@@ -990,6 +990,7 @@ async fn startup_recovery_resumes_stale_automation_promise_to_resolved() {
         trigger: serde_json::from_slice(&pr_opened_payload()).unwrap_or_default(),
         nats_subject: "github.pull_request".to_string(),
         system_prompt: None,
+        recovery_count: 0,
     };
     ps.put_promise(&stale).await.expect("seed stale promise");
 
@@ -1674,6 +1675,7 @@ async fn tool_cache_dedup_on_recovery_skips_tool_reexecution() {
         trigger: serde_json::from_slice(&pr_opened_payload()).unwrap_or_default(),
         nats_subject: "github.pull_request".to_string(),
         system_prompt: None,
+        recovery_count: 0,
     };
     ps.put_promise(&stale).await.expect("seed stale promise");
 
@@ -1847,6 +1849,7 @@ async fn resolved_promise_skips_redelivered_nats_message() {
         trigger: serde_json::from_slice(&pr_opened_payload()).unwrap_or_default(),
         nats_subject: "github.pull_request".to_string(),
         system_prompt: None,
+        recovery_count: 0,
     };
     ps.put_promise(&resolved).await.expect("seed resolved promise");
 
