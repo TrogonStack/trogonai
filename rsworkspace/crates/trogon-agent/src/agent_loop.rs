@@ -893,12 +893,48 @@ impl AgentLoop {
                         }
                     }
                     Err(_) => {
-                        // Timeout: write may have landed on the server. Keep
-                        // p.system_prompt set so that if checkpoint writes succeed,
-                        // the prompt is guaranteed to reach KV. If the write did
-                        // succeed, the checkpoint path's `if p.system_prompt.is_none()`
-                        // guard prevents a redundant overwrite.
-                        warn!(promise_id = %pid, "NATS KV timeout pre-pinning system prompt — system_prompt will be written on first checkpoint");
+                        // Timeout: write may or may not have landed. Reload and
+                        // retry once — if it landed the reload confirms it; if not,
+                        // the retry writes it. Keep p.system_prompt set regardless
+                        // so the first checkpoint persists it if both paths fail.
+                        warn!(promise_id = %pid, "NATS KV timeout pre-pinning system prompt — reloading revision and retrying");
+                        match tokio::time::timeout(
+                            NATS_KV_TIMEOUT,
+                            store.get_promise(&self.tenant_id, pid),
+                        )
+                        .await
+                        {
+                            Ok(Ok(Some((reloaded, new_rev)))) => {
+                                *rev = new_rev;
+                                if reloaded.system_prompt.is_some() {
+                                    // Write landed before the timeout was observed on
+                                    // our side — nothing more to do.
+                                } else {
+                                    match tokio::time::timeout(
+                                        NATS_KV_TIMEOUT,
+                                        store.update_promise(&self.tenant_id, pid, p, *rev),
+                                    )
+                                    .await
+                                    {
+                                        Ok(Ok(new_rev2)) => *rev = new_rev2,
+                                        Ok(Err(e)) => {
+                                            warn!(error = %e, promise_id = %pid,
+                                                "Pre-pin system prompt timeout retry failed — system_prompt will be written on first checkpoint");
+                                        }
+                                        Err(_) => {
+                                            warn!(promise_id = %pid,
+                                                "Pre-pin system prompt timeout retry also timed out — system_prompt will be written on first checkpoint");
+                                        }
+                                    }
+                                }
+                            }
+                            _ => {
+                                // Could not reload revision — keep p.system_prompt
+                                // set for the first checkpoint write.
+                                warn!(promise_id = %pid,
+                                    "Could not reload revision after pre-pin timeout — system_prompt will be written on first checkpoint");
+                            }
+                        }
                     }
                 }
             }
