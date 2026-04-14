@@ -1,17 +1,12 @@
-#![cfg_attr(coverage, allow(dead_code, unused_imports))]
-
 use std::fmt;
 
-use async_nats::jetstream::{self, context, kv};
-use trogon_eventsourcing::{Decide, Decision, NonEmpty, StreamCommand, decide, load_snapshot};
-use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream, JetStreamPublishMessage};
+use trogon_eventsourcing::{Decide, Decision, NonEmpty, StreamCommand, decide};
 
 use crate::{
     JobId, JobSpec, JobWriteCondition, ResolvedJobSpec,
-    commands::catch_up_command_state,
+    commands::{CommandRuntime, Evolve, catch_up_command_state},
     error::CronError,
     events::{JobEvent, JobEventData, RegisteredJobSpec},
-    store::{SNAPSHOT_STORE_CONFIG, append_events, open_snapshot_bucket},
 };
 
 #[derive(Debug, Clone)]
@@ -84,18 +79,6 @@ impl RegisterJobCommand {
             )),
         }
     }
-
-    fn apply_event(
-        _state: RegisterJobState,
-        event: JobEvent,
-    ) -> Result<RegisterJobState, CronError> {
-        match event {
-            JobEvent::JobRegistered { .. } | JobEvent::JobStateChanged { .. } => {
-                Ok(RegisterJobState::Present)
-            }
-            JobEvent::JobRemoved { .. } => Ok(RegisterJobState::Missing),
-        }
-    }
 }
 
 impl StreamCommand for RegisterJobCommand {
@@ -124,30 +107,28 @@ impl Decide<RegisterJobState, JobEvent> for RegisterJobCommand {
     }
 }
 
-#[cfg(not(coverage))]
-pub async fn run<J>(js: &J, command: RegisterJobCommand) -> Result<(), CronError>
+impl Evolve for RegisterJobCommand {
+    type State = RegisterJobState;
+
+    fn evolve(_state: Self::State, event: JobEvent) -> Result<Self::State, CronError> {
+        match event {
+            JobEvent::JobRegistered { .. } | JobEvent::JobStateChanged { .. } => {
+                Ok(RegisterJobState::Present)
+            }
+            JobEvent::JobRemoved { .. } => Ok(RegisterJobState::Missing),
+        }
+    }
+}
+
+pub async fn run<R>(runtime: &R, command: RegisterJobCommand) -> Result<(), CronError>
 where
-    J: JetStreamGetKeyValue<Store = kv::Store>
-        + JetStreamGetStream<Stream = jetstream::stream::Stream>
-        + JetStreamPublishMessage<
-            PublishError = context::PublishError,
-            AckFuture = context::PublishAckFuture,
-        >,
+    R: CommandRuntime,
 {
     let id = command.stream_id().to_string();
-    let bucket = open_snapshot_bucket(js).await?;
-    let current_snapshot = load_snapshot::<JobSpec>(&bucket, SNAPSHOT_STORE_CONFIG, &id)
-        .await
-        .map_err(CronError::from)?;
+    let current_snapshot = runtime.load_job_snapshot(command.stream_id()).await?;
     let current_state = command.state_from_snapshot(current_snapshot.as_ref())?;
-    let (current_state, current_version) = catch_up_command_state(
-        js,
-        command.stream_id(),
-        current_snapshot.as_ref(),
-        current_state,
-        RegisterJobCommand::apply_event,
-    )
-    .await?;
+    let (current_state, current_version) =
+        catch_up_command_state(runtime, &command, current_snapshot.as_ref(), current_state).await?;
 
     let events = match decide(&current_state, &command) {
         Ok(Decision::Event(events)) => events,
@@ -167,20 +148,9 @@ where
     };
 
     let events = events.try_map(JobEventData::new)?;
-    append_events(js, &id, command.write_condition(), events).await
-}
-
-#[cfg(coverage)]
-pub async fn run<J>(_js: &J, _command: RegisterJobCommand) -> Result<(), CronError>
-where
-    J: JetStreamGetKeyValue<Store = kv::Store>
-        + JetStreamGetStream<Stream = jetstream::stream::Stream>
-        + JetStreamPublishMessage<
-            PublishError = context::PublishError,
-            AckFuture = context::PublishAckFuture,
-        >,
-{
-    Ok(())
+    runtime
+        .append_job_events(command.stream_id(), command.write_condition(), events)
+        .await
 }
 
 #[cfg(test)]
@@ -190,7 +160,7 @@ mod tests {
     use trogon_eventsourcing::{Decision, NonEmpty, decide};
 
     use super::*;
-    use crate::{DeliverySpec, JobEnabledState, ScheduleSpec};
+    use crate::{DeliverySpec, GetJobCommand, JobEnabledState, ScheduleSpec, mocks::MockCronStore};
 
     fn job(id: &str) -> JobSpec {
         JobSpec {
@@ -234,5 +204,26 @@ mod tests {
             decide(&state, &command).unwrap_err(),
             RegisterJobDecisionError::AlreadyRegistered { .. }
         ));
+    }
+
+    #[tokio::test]
+    async fn run_registers_job_in_store() {
+        let store = MockCronStore::new();
+
+        run(
+            &store,
+            RegisterJobCommand::new(job("backup"), JobWriteCondition::MustNotExist).unwrap(),
+        )
+        .await
+        .unwrap();
+
+        let snapshot = store
+            .get_job(GetJobCommand {
+                id: JobId::parse("backup").unwrap(),
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(snapshot.payload, job("backup"));
     }
 }
