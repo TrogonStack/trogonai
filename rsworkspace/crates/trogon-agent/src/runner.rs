@@ -864,7 +864,7 @@ async fn prepare_agent_with_promise(
                 // by the NATS redelivery path, not by startup recovery.
                 let mut claimed = existing.clone();
                 claimed.status = PromiseStatus::Running; // re-activate so list_running finds it if we crash mid-run
-                claimed.worker_id = wid;
+                claimed.worker_id = wid.clone();
                 claimed.claimed_at = trogon_automations::now_unix();
                 let claim_result = match tokio::time::timeout(
                     crate::agent_loop::NATS_KV_TIMEOUT,
@@ -874,8 +874,23 @@ async fn prepare_agent_with_promise(
                 {
                     Ok(r) => r,
                     Err(_) => {
-                        warn!(promise_id = %promise_id, "NATS KV update_promise timed out during CAS claim — treating as claim lost, skipping");
-                        return None;
+                        // Timeout: the write may have landed. Reload to verify.
+                        warn!(promise_id = %promise_id, "NATS KV update_promise timed out during CAS claim — reloading to verify");
+                        match tokio::time::timeout(
+                            crate::agent_loop::NATS_KV_TIMEOUT,
+                            promise_store.get_promise(tenant_id, promise_id),
+                        )
+                        .await
+                        {
+                            Ok(Ok(Some((current, _)))) if current.worker_id == wid => {
+                                info!(promise_id = %promise_id, "CAS claim timeout but write landed — continuing");
+                                Ok(0) // write landed; only Err branch below uses this
+                            }
+                            _ => {
+                                warn!(promise_id = %promise_id, "CAS claim timed out — write did not land or could not verify, skipping");
+                                return None;
+                            }
+                        }
                     }
                 };
                 if let Err(e) = claim_result {

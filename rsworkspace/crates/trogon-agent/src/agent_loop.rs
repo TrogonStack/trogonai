@@ -870,24 +870,32 @@ impl AgentLoop {
                                 {
                                     Ok(Ok(new_rev2)) => *rev = new_rev2,
                                     Ok(Err(e)) => {
-                                        warn!(error = %e, promise_id = %pid, "Pre-pin system prompt retry failed — crash before first checkpoint may resume with different prompt");
-                                        p.system_prompt = None;
+                                        // Keep p.system_prompt set — the first
+                                        // successful checkpoint write will persist it.
+                                        warn!(error = %e, promise_id = %pid, "Pre-pin system prompt retry failed — system_prompt will be written on first checkpoint");
                                     }
                                     Err(_) => {
-                                        warn!(promise_id = %pid, "Pre-pin system prompt retry timed out — crash before first checkpoint may resume with different prompt");
-                                        p.system_prompt = None;
+                                        // Timeout: write may have landed. Either way,
+                                        // p.system_prompt stays set so the checkpoint
+                                        // path persists it on the first successful write.
+                                        warn!(promise_id = %pid, "Pre-pin system prompt retry timed out — system_prompt will be written on first checkpoint");
                                     }
                                 }
                             }
                             _ => {
-                                warn!(promise_id = %pid, "Could not reload revision for pre-pin retry — crash before first checkpoint may resume with different prompt");
-                                p.system_prompt = None;
+                                // Keep p.system_prompt set — the checkpoint path will
+                                // persist it on the first successful write.
+                                warn!(promise_id = %pid, "Could not reload revision for pre-pin retry — system_prompt will be written on first checkpoint");
                             }
                         }
                     }
                     Err(_) => {
-                        warn!(promise_id = %pid, "NATS KV timeout pre-pinning system prompt — crash before first checkpoint may resume with different prompt");
-                        p.system_prompt = None;
+                        // Timeout: write may have landed on the server. Keep
+                        // p.system_prompt set so that if checkpoint writes succeed,
+                        // the prompt is guaranteed to reach KV. If the write did
+                        // succeed, the checkpoint path's `if p.system_prompt.is_none()`
+                        // guard prevents a redundant overwrite.
+                        warn!(promise_id = %pid, "NATS KV timeout pre-pinning system prompt — system_prompt will be written on first checkpoint");
                     }
                 }
             }
@@ -1662,8 +1670,26 @@ impl AgentLoop {
                             warn!(
                                 tool = %name,
                                 promise_id = %pid,
-                                "NATS KV put_tool_result timed out — tool will be re-executed on recovery if process crashes"
+                                "NATS KV put_tool_result timed out — retrying once"
                             );
+                            match tokio::time::timeout(
+                                NATS_KV_TIMEOUT,
+                                store.put_tool_result(&self.tenant_id, pid, &ck, &output),
+                            )
+                            .await
+                            {
+                                Ok(Ok(())) => {}
+                                Ok(Err(e)) => {
+                                    error!(error = %e, tool = %name, promise_id = %pid, "Failed to cache tool result after retry — tool will be re-executed on recovery if process crashes");
+                                }
+                                Err(_) => {
+                                    warn!(
+                                        tool = %name,
+                                        promise_id = %pid,
+                                        "NATS KV put_tool_result timed out on retry — tool will be re-executed on recovery if process crashes"
+                                    );
+                                }
+                            }
                         }
                     }
                 }
@@ -3713,12 +3739,17 @@ mod tests {
 
         let (result, _) = tokio::join!(
             agent.run(vec![Message::user_text("go")], &[], None),
-            tokio::time::advance(NATS_KV_TIMEOUT + std::time::Duration::from_millis(1)),
+            async {
+                // Fire the first put_tool_result timeout.
+                tokio::time::advance(NATS_KV_TIMEOUT + std::time::Duration::from_millis(1)).await;
+                // Fire the retry timeout (HangingPutToolResultStore hangs both calls).
+                tokio::time::advance(NATS_KV_TIMEOUT + std::time::Duration::from_millis(1)).await;
+            },
         );
 
         assert_eq!(result.unwrap(), "done despite put timeout");
 
-        // Tool result was NOT persisted — put_tool_result timed out.
+        // Tool result was NOT persisted — both put_tool_result attempts timed out.
         let ck = tool_cache_key("my_tool", &serde_json::json!({}));
         let cached = store.inner.get_tool_result("acme", "p1", &ck).await.unwrap();
         assert!(
