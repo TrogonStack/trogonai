@@ -8,7 +8,7 @@ use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream};
 
 use crate::{
     error::CronError,
-    nats::{
+    processors::{
         apply_event_to_snapshot_map, decode_recorded_job_event, job_id_from_event_subject,
         read_raw_event_message,
     },
@@ -57,9 +57,14 @@ where
             continue;
         };
         let event = decode_recorded_job_event(message)?;
-        let stream_id = job_id_from_event_subject(&event.stream_id)?;
-        let change =
-            apply_event_to_snapshot_map(&mut snapshots, &stream_id, &event.data, sequence)?;
+        let stream_id = job_id_from_event_subject(&event.recorded_stream_id)?;
+        let data = event.decode_data().map_err(|source| {
+            CronError::event_source(
+                "failed to decode job event during snapshot catch-up",
+                source,
+            )
+        })?;
+        let change = apply_event_to_snapshot_map(&mut snapshots, &stream_id, &data, sequence)?;
         persist_snapshot_change(&bucket, SNAPSHOT_STORE_CONFIG, change)
             .await
             .map_err(CronError::from)?;

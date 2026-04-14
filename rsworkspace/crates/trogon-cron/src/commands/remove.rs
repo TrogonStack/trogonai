@@ -3,7 +3,7 @@ use trogon_eventsourcing::{Decide, Decision, NonEmpty, StreamCommand, decide, lo
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream, JetStreamPublishMessage};
 
 use crate::{
-    JobDecisionError, JobId, JobSpec, JobWriteCondition,
+    JobId, JobSpec, JobWriteCondition,
     error::CronError,
     events::{JobEvent, JobEventData},
     store::{SNAPSHOT_STORE_CONFIG, append_events, open_snapshot_bucket},
@@ -19,6 +19,11 @@ pub struct RemoveJobCommand {
 pub enum RemoveJobState {
     Missing,
     Present,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RemoveJobDecisionError {
+    JobNotFound { id: JobId },
 }
 
 impl RemoveJobCommand {
@@ -68,6 +73,16 @@ impl RemoveJobCommand {
     }
 }
 
+impl std::fmt::Display for RemoveJobDecisionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::JobNotFound { id } => write!(f, "missing job for removal '{id}'"),
+        }
+    }
+}
+
+impl std::error::Error for RemoveJobDecisionError {}
+
 impl StreamCommand for RemoveJobCommand {
     type StreamId = JobId;
 
@@ -77,16 +92,16 @@ impl StreamCommand for RemoveJobCommand {
 }
 
 impl Decide<RemoveJobState, JobEvent> for RemoveJobCommand {
-    type Error = JobDecisionError;
+    type Error = RemoveJobDecisionError;
 
     fn decide(state: &RemoveJobState, command: &Self) -> Result<Decision<JobEvent>, Self::Error> {
         match state {
-            RemoveJobState::Missing => Err(JobDecisionError::MissingJobForRemoval {
+            RemoveJobState::Missing => Err(RemoveJobDecisionError::JobNotFound {
                 id: command.stream_id().clone(),
             }),
-            RemoveJobState::Present => Ok(Decision::Event(NonEmpty::one(JobEvent::job_removed(
-                command.stream_id().to_string(),
-            )))),
+            RemoveJobState::Present => Ok(Decision::Event(NonEmpty::one(JobEvent::JobRemoved {
+                id: command.stream_id().to_string(),
+            }))),
         }
     }
 }
@@ -116,24 +131,13 @@ where
                 std::io::Error::other("unsupported decision variant"),
             ));
         }
-        Err(JobDecisionError::MissingJobForRemoval { .. }) => {
+        Err(RemoveJobDecisionError::JobNotFound { .. }) => {
             return Err(CronError::JobNotFound { id });
-        }
-        Err(error) => {
-            return Err(CronError::event_source(
-                "failed to decide job removal from current remove-job state",
-                error,
-            ));
         }
     };
 
-    append_events(
-        js,
-        command.stream_id().as_str(),
-        write_condition,
-        events.map(JobEventData::new),
-    )
-    .await
+    let events = events.try_map(JobEventData::new)?;
+    append_events(js, command.stream_id().as_str(), write_condition, events).await
 }
 
 #[cfg(coverage)]
@@ -147,4 +151,42 @@ where
         >,
 {
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use trogon_eventsourcing::{Decision, NonEmpty, decide};
+
+    use super::*;
+
+    #[test]
+    fn decides_removal_from_present_state() {
+        let state = RemoveJobState::Present;
+        let command = RemoveJobCommand::with_write_condition(
+            JobId::parse("backup").unwrap(),
+            JobWriteCondition::MustBeAtVersion(1),
+        );
+
+        let decision = decide(&state, &command).unwrap();
+        assert_eq!(
+            decision,
+            Decision::Event(NonEmpty::one(JobEvent::JobRemoved {
+                id: "backup".to_string(),
+            }))
+        );
+    }
+
+    #[test]
+    fn rejects_removing_missing_job() {
+        let state = RemoveJobState::Missing;
+        let command = RemoveJobCommand::with_write_condition(
+            JobId::parse("backup").unwrap(),
+            JobWriteCondition::MustBeAtVersion(1),
+        );
+
+        assert!(matches!(
+            decide(&state, &command).unwrap_err(),
+            RemoveJobDecisionError::JobNotFound { .. }
+        ));
+    }
 }
