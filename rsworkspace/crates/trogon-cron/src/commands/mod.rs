@@ -16,8 +16,7 @@ mod remove;
 mod set_state;
 
 pub use add::{
-    ReadRegisterJobCommandError, RegisterJobCommand, RegisterJobDecisionError, RegisterJobState,
-    read_from_stdin, run as register_job,
+    RegisterJobCommand, RegisterJobDecisionError, RegisterJobState, run as register_job,
 };
 pub use get::{GetJobCommand, run as get_job};
 pub use list::{ListJobsCommand, run as list_jobs};
