@@ -1,8 +1,8 @@
 use async_nats::jetstream::{self, context, kv};
 use serde::{Serialize, de::DeserializeOwned};
 use trogon_eventsourcing::{
-    AppendOutcome, EventData, ExecutionRuntime, ExpectedState, NonEmpty, RecordedEvent, Snapshot,
-    SnapshotChange, SnapshotRuntime, SnapshotStoreConfig, load_snapshot, persist_snapshot_change,
+    AppendOutcome, EventData, EventStore, ExpectedState, NonEmpty, RecordedEvent, Snapshot,
+    SnapshotChange, SnapshotStore, SnapshotStoreConfig, load_snapshot, persist_snapshot_change,
     read_stream_from,
 };
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream, JetStreamPublishMessage};
@@ -13,7 +13,8 @@ use crate::{
     store::{append_events, open_events_stream, open_snapshot_bucket, stream_subject_state},
 };
 
-pub trait CronCommandRuntimePort: Send + Sync {
+#[doc(hidden)]
+pub trait JobEventStoreRuntime: Send + Sync {
     fn current_job_stream_version(
         &self,
         stream_id: &JobId,
@@ -33,7 +34,8 @@ pub trait CronCommandRuntimePort: Send + Sync {
     ) -> impl std::future::Future<Output = Result<AppendOutcome, CronError>> + Send;
 }
 
-pub trait CronCommandSnapshotRuntime<Payload>: Send + Sync {
+#[doc(hidden)]
+pub trait JobSnapshotStoreRuntime<Payload>: Send + Sync {
     fn load_command_snapshot(
         &self,
         config: SnapshotStoreConfig<'static>,
@@ -48,23 +50,29 @@ pub trait CronCommandSnapshotRuntime<Payload>: Send + Sync {
     ) -> impl std::future::Future<Output = Result<(), CronError>> + Send;
 }
 
-pub(crate) struct CronCommandRuntime<'a, R> {
+pub(crate) struct JobEventStore<'a, R> {
     runtime: &'a R,
-    snapshot_config: SnapshotStoreConfig<'static>,
 }
 
-impl<'a, R> CronCommandRuntime<'a, R> {
-    pub(crate) const fn new(runtime: &'a R, snapshot_config: SnapshotStoreConfig<'static>) -> Self {
-        Self {
-            runtime,
-            snapshot_config,
-        }
+impl<'a, R> JobEventStore<'a, R> {
+    pub(crate) const fn new(runtime: &'a R) -> Self {
+        Self { runtime }
     }
 }
 
-impl<R> ExecutionRuntime<JobId> for CronCommandRuntime<'_, R>
+pub(crate) struct JobSnapshotStore<'a, R> {
+    runtime: &'a R,
+}
+
+impl<'a, R> JobSnapshotStore<'a, R> {
+    pub(crate) const fn new(runtime: &'a R) -> Self {
+        Self { runtime }
+    }
+}
+
+impl<R> EventStore<JobId> for JobEventStore<'_, R>
 where
-    R: CronCommandRuntimePort,
+    R: JobEventStoreRuntime,
 {
     type Error = CronError;
 
@@ -94,34 +102,34 @@ where
     }
 }
 
-impl<Payload, R> SnapshotRuntime<Payload, JobId> for CronCommandRuntime<'_, R>
+impl<Payload, R> SnapshotStore<Payload, JobId> for JobSnapshotStore<'_, R>
 where
-    R: CronCommandSnapshotRuntime<Payload>,
+    R: JobSnapshotStoreRuntime<Payload>,
     Payload: Send,
 {
     type Error = CronError;
 
     async fn load_snapshot(
         &self,
+        config: SnapshotStoreConfig<'static>,
         stream_id: &JobId,
     ) -> Result<Option<Snapshot<Payload>>, Self::Error> {
-        self.runtime
-            .load_command_snapshot(self.snapshot_config, stream_id)
-            .await
+        self.runtime.load_command_snapshot(config, stream_id).await
     }
 
     async fn save_snapshot(
         &self,
+        config: SnapshotStoreConfig<'static>,
         stream_id: &JobId,
         snapshot: Snapshot<Payload>,
     ) -> Result<(), Self::Error> {
         self.runtime
-            .save_command_snapshot(self.snapshot_config, stream_id, snapshot)
+            .save_command_snapshot(config, stream_id, snapshot)
             .await
     }
 }
 
-impl<J> CronCommandRuntimePort for J
+impl<J> JobEventStoreRuntime for J
 where
     J: JetStreamGetKeyValue<Store = kv::Store>
         + JetStreamGetStream<Stream = jetstream::stream::Stream>
@@ -203,7 +211,7 @@ where
     }
 }
 
-impl<Payload, J> CronCommandSnapshotRuntime<Payload> for J
+impl<Payload, J> JobSnapshotStoreRuntime<Payload> for J
 where
     J: JetStreamGetKeyValue<Store = kv::Store>
         + JetStreamGetStream<Stream = jetstream::stream::Stream>

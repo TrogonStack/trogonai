@@ -1,8 +1,8 @@
 use serde::{Serialize, de::DeserializeOwned};
 
 use crate::{
-    Decide, Decision, EventData, EventType, NonEmpty, RecordedEvent, Snapshot, StreamCommand,
-    StreamEvent,
+    Decide, Decision, EventData, EventType, NonEmpty, RecordedEvent, Snapshot, SnapshotStoreConfig,
+    StreamCommand, StreamEvent,
 };
 
 pub trait CommandStateModel: StreamCommand + Sized {
@@ -81,7 +81,7 @@ pub trait DefaultExpectedStateProvider: StreamCommand {
     }
 }
 
-pub trait ExecutionRuntime<StreamId: ?Sized>: Send + Sync {
+pub trait EventStore<StreamId: ?Sized>: Send + Sync {
     type Error;
 
     fn current_stream_version(
@@ -103,16 +103,18 @@ pub trait ExecutionRuntime<StreamId: ?Sized>: Send + Sync {
     ) -> impl std::future::Future<Output = Result<AppendOutcome, Self::Error>> + Send;
 }
 
-pub trait SnapshotRuntime<SnapshotPayload, StreamId: ?Sized>: Send + Sync {
+pub trait SnapshotStore<SnapshotPayload, StreamId: ?Sized>: Send + Sync {
     type Error;
 
     fn load_snapshot(
         &self,
+        config: SnapshotStoreConfig<'static>,
         stream_id: &StreamId,
     ) -> impl std::future::Future<Output = Result<Option<Snapshot<SnapshotPayload>>, Self::Error>> + Send;
 
     fn save_snapshot(
         &self,
+        config: SnapshotStoreConfig<'static>,
         stream_id: &StreamId,
         snapshot: Snapshot<SnapshotPayload>,
     ) -> impl std::future::Future<Output = Result<(), Self::Error>> + Send;
@@ -187,57 +189,68 @@ pub enum ExecuteError<DecisionError, DomainError, RuntimeError> {
 pub struct WithoutSnapshots;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct WithSnapshots<P> {
+pub struct WithSnapshots<'a, S, P> {
+    snapshot_store: &'a S,
+    snapshot_config: SnapshotStoreConfig<'static>,
     policy: P,
 }
 
-pub struct CommandExecution<'a, R, C, S = WithoutSnapshots> {
-    runtime: &'a R,
+pub struct CommandExecution<'a, E, C, S = WithoutSnapshots> {
+    event_store: &'a E,
     command: &'a C,
     occ: OccPolicy,
     snapshots: S,
 }
 
-impl<'a, R, C> CommandExecution<'a, R, C, WithoutSnapshots> {
-    pub const fn new(runtime: &'a R, command: &'a C) -> Self {
+impl<'a, E, C> CommandExecution<'a, E, C, WithoutSnapshots> {
+    pub const fn new(event_store: &'a E, command: &'a C) -> Self {
         Self {
-            runtime,
+            event_store,
             command,
             occ: OccPolicy::CommandDefault,
             snapshots: WithoutSnapshots,
         }
     }
 
-    pub fn snapshots<P>(self, policy: P) -> CommandExecution<'a, R, C, WithSnapshots<P>> {
+    pub fn snapshots<S, P>(
+        self,
+        snapshot_store: &'a S,
+        snapshot_config: SnapshotStoreConfig<'static>,
+        policy: P,
+    ) -> CommandExecution<'a, E, C, WithSnapshots<'a, S, P>> {
         CommandExecution {
-            runtime: self.runtime,
+            event_store: self.event_store,
             command: self.command,
             occ: self.occ,
-            snapshots: WithSnapshots { policy },
+            snapshots: WithSnapshots {
+                snapshot_store,
+                snapshot_config,
+                policy,
+            },
         }
     }
 }
 
-impl<R, C, S> CommandExecution<'_, R, C, S> {
+impl<E, C, S> CommandExecution<'_, E, C, S> {
     pub fn occ(mut self, occ: OccPolicy) -> Self {
         self.occ = occ;
         self
     }
 }
 
-impl<R, C> CommandExecution<'_, R, C, WithoutSnapshots>
+impl<E, C> CommandExecution<'_, E, C, WithoutSnapshots>
 where
     C: CommandStateModel + Decide<C::State, C::Event> + DefaultExpectedStateProvider,
     C::Event: EventType + StreamEvent + Serialize + DeserializeOwned + Clone,
-    R: ExecutionRuntime<C::StreamId>,
+    E: EventStore<C::StreamId>,
 {
     pub async fn execute(
         self,
-    ) -> Result<ExecutionResult<C::State, C::Event>, ExecuteError<C::Error, C::DomainError, R::Error>>
+    ) -> Result<ExecutionResult<C::State, C::Event>, ExecuteError<C::Error, C::DomainError, E::Error>>
     {
         let stream_id = self.command.stream_id();
         let current_version = self
-            .runtime
+            .event_store
             .current_stream_version(stream_id)
             .await
             .map_err(ExecuteError::ReadStream)?;
@@ -245,7 +258,7 @@ where
 
         if let Some(current_version) = current_version {
             let recorded_events = self
-                .runtime
+                .event_store
                 .read_stream_from(stream_id, 1)
                 .await
                 .map_err(ExecuteError::ReadStream)?;
@@ -268,7 +281,7 @@ where
             .occ
             .resolve(current_version, self.command.default_expected_state());
         let append_outcome = self
-            .runtime
+            .event_store
             .append_events(stream_id, expected_state, encoded_events)
             .await
             .map_err(ExecuteError::Append)?;
@@ -285,29 +298,30 @@ where
     }
 }
 
-impl<R, C, P, E> CommandExecution<'_, R, C, WithSnapshots<P>>
+impl<E, S, C, P, SErr> CommandExecution<'_, E, C, WithSnapshots<'_, S, P>>
 where
     C: SnapshotStateModel + Decide<C::State, C::Event> + DefaultExpectedStateProvider,
     C::Event: EventType + StreamEvent + Serialize + DeserializeOwned + Clone,
     C::Snapshot: Into<C::State>,
-    R: ExecutionRuntime<C::StreamId, Error = E>
-        + SnapshotRuntime<C::Snapshot, C::StreamId, Error = E>,
+    E: EventStore<C::StreamId, Error = SErr>,
+    S: SnapshotStore<C::Snapshot, C::StreamId, Error = SErr>,
     P: SnapshotPolicy<C::State, C::Event>,
 {
     pub async fn execute(
         self,
-    ) -> Result<ExecutionResult<C::State, C::Event>, ExecuteError<C::Error, C::DomainError, E>>
+    ) -> Result<ExecutionResult<C::State, C::Event>, ExecuteError<C::Error, C::DomainError, SErr>>
     {
         let stream_id = self.command.stream_id();
         let snapshot = self
-            .runtime
-            .load_snapshot(stream_id)
+            .snapshots
+            .snapshot_store
+            .load_snapshot(self.snapshots.snapshot_config, stream_id)
             .await
             .map_err(ExecuteError::LoadSnapshot)?;
         let snapshot_version = snapshot.as_ref().map(|snapshot| snapshot.version);
         let mut state = C::restore_state(self.command, snapshot).map_err(ExecuteError::Domain)?;
         let current_version = self
-            .runtime
+            .event_store
             .current_stream_version(stream_id)
             .await
             .map_err(ExecuteError::ReadStream)?;
@@ -331,7 +345,7 @@ where
 
             if start_sequence <= current_version {
                 let recorded_events = self
-                    .runtime
+                    .event_store
                     .read_stream_from(stream_id, start_sequence)
                     .await
                     .map_err(ExecuteError::ReadStream)?;
@@ -352,7 +366,7 @@ where
             .occ
             .resolve(current_version, self.command.default_expected_state());
         let append_outcome = self
-            .runtime
+            .event_store
             .append_events(stream_id, expected_state, encoded_events)
             .await
             .map_err(ExecuteError::Append)?;
@@ -367,8 +381,10 @@ where
             &events,
         ) && let Some(snapshot_payload) = C::snapshot_state(&state)
         {
-            self.runtime
+            self.snapshots
+                .snapshot_store
                 .save_snapshot(
+                    self.snapshots.snapshot_config,
                     stream_id,
                     Snapshot::new(append_outcome.next_expected_version, snapshot_payload),
                 )
@@ -600,7 +616,10 @@ mod tests {
         }
     }
 
-    impl ExecutionRuntime<str> for FakeRuntime {
+    const TEST_SNAPSHOT_CONFIG: SnapshotStoreConfig<'static> =
+        SnapshotStoreConfig::new("test.command.", None);
+
+    impl EventStore<str> for FakeRuntime {
         type Error = &'static str;
 
         async fn current_stream_version(
@@ -650,11 +669,12 @@ mod tests {
         }
     }
 
-    impl SnapshotRuntime<TestState, str> for FakeRuntime {
+    impl SnapshotStore<TestState, str> for FakeRuntime {
         type Error = &'static str;
 
         async fn load_snapshot(
             &self,
+            _config: SnapshotStoreConfig<'static>,
             stream_id: &str,
         ) -> Result<Option<Snapshot<TestState>>, Self::Error> {
             if self.fail_load_snapshot {
@@ -669,6 +689,7 @@ mod tests {
 
         async fn save_snapshot(
             &self,
+            _config: SnapshotStoreConfig<'static>,
             _stream_id: &str,
             snapshot: Snapshot<TestState>,
         ) -> Result<(), Self::Error> {
@@ -744,7 +765,7 @@ mod tests {
 
         let result = block_on(
             CommandExecution::new(&runtime, &command)
-                .snapshots(NoSnapshot)
+                .snapshots(&runtime, TEST_SNAPSHOT_CONFIG, NoSnapshot)
                 .execute(),
         )
         .unwrap();
@@ -768,7 +789,7 @@ mod tests {
 
         let error = block_on(
             CommandExecution::new(&runtime, &command)
-                .snapshots(NoSnapshot)
+                .snapshots(&runtime, TEST_SNAPSHOT_CONFIG, NoSnapshot)
                 .execute(),
         )
         .unwrap_err();
@@ -793,7 +814,7 @@ mod tests {
 
         let error = block_on(
             CommandExecution::new(&runtime, &command)
-                .snapshots(NoSnapshot)
+                .snapshots(&runtime, TEST_SNAPSHOT_CONFIG, NoSnapshot)
                 .execute(),
         )
         .unwrap_err();
@@ -840,7 +861,7 @@ mod tests {
 
         let error = block_on(
             CommandExecution::new(&runtime, &command)
-                .snapshots(NoSnapshot)
+                .snapshots(&runtime, TEST_SNAPSHOT_CONFIG, NoSnapshot)
                 .execute(),
         )
         .unwrap_err();
@@ -863,7 +884,7 @@ mod tests {
 
         let result = block_on(
             CommandExecution::new(&runtime, &command)
-                .snapshots(NoSnapshot)
+                .snapshots(&runtime, TEST_SNAPSHOT_CONFIG, NoSnapshot)
                 .execute(),
         )
         .unwrap();
@@ -958,7 +979,7 @@ mod tests {
 
         let result = block_on(
             CommandExecution::new(&runtime, &command)
-                .snapshots(AlwaysSnapshot)
+                .snapshots(&runtime, TEST_SNAPSHOT_CONFIG, AlwaysSnapshot)
                 .execute(),
         )
         .unwrap();
@@ -980,7 +1001,7 @@ mod tests {
 
         let _ = block_on(
             CommandExecution::new(&runtime, &command)
-                .snapshots(NoSnapshot)
+                .snapshots(&runtime, TEST_SNAPSHOT_CONFIG, NoSnapshot)
                 .execute(),
         )
         .unwrap();
@@ -999,7 +1020,7 @@ mod tests {
 
         let error = block_on(
             CommandExecution::new(&runtime, &command)
-                .snapshots(AlwaysSnapshot)
+                .snapshots(&runtime, TEST_SNAPSHOT_CONFIG, AlwaysSnapshot)
                 .execute(),
         )
         .unwrap_err();

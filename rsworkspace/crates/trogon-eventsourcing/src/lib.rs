@@ -12,8 +12,8 @@ mod streams;
 pub use decision::{Act, Decide, Decision, NonEmpty, StreamCommand, decide};
 pub use execution::{
     AlwaysSnapshot, AppendOutcome, CommandExecution, CommandStateModel,
-    DefaultExpectedStateProvider, ExecuteError, ExecutionResult, ExecutionRuntime, ExpectedState,
-    NoSnapshot, OccPolicy, SnapshotPolicy, SnapshotRuntime, SnapshotStateModel, WithSnapshots,
+    DefaultExpectedStateProvider, EventStore, ExecuteError, ExecutionResult, ExpectedState,
+    NoSnapshot, OccPolicy, SnapshotPolicy, SnapshotStateModel, SnapshotStore, WithSnapshots,
     WithoutSnapshots,
 };
 pub use snapshots::{

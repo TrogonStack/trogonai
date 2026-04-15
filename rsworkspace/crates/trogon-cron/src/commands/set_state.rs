@@ -7,7 +7,9 @@ use trogon_eventsourcing::{
 
 use crate::{
     JobEnabledState, JobId,
-    commands::{CronCommandRuntime, CronCommandRuntimePort, CronCommandSnapshotRuntime},
+    commands::runtime::{
+        JobEventStore, JobEventStoreRuntime, JobSnapshotStore, JobSnapshotStoreRuntime,
+    },
     error::CronError,
     events::JobEvent,
 };
@@ -125,14 +127,15 @@ pub async fn run<R>(
     occ: OccPolicy,
 ) -> Result<(), CronError>
 where
-    R: CronCommandRuntimePort + CronCommandSnapshotRuntime<ChangeJobStateState>,
+    R: JobEventStoreRuntime + JobSnapshotStoreRuntime<ChangeJobStateState>,
 {
     let id = command.stream_id().to_string();
-    let runtime = CronCommandRuntime::new(runtime, SNAPSHOT_STORE_CONFIG);
+    let event_store = JobEventStore::new(runtime);
+    let snapshot_store = JobSnapshotStore::new(runtime);
 
-    match CommandExecution::new(&runtime, &command)
+    match CommandExecution::new(&event_store, &command)
         .occ(occ)
-        .snapshots(AlwaysSnapshot)
+        .snapshots(&snapshot_store, SNAPSHOT_STORE_CONFIG, AlwaysSnapshot)
         .execute()
         .await
     {
