@@ -180,4 +180,22 @@ mod tests {
                 .is_none()
         );
     }
+
+    /// When `issue.number` is absent the `?` on line 29 returns `None` even
+    /// when `repository` is fully present.
+    #[tokio::test]
+    async fn handle_returns_none_when_issue_number_absent() {
+        let payload = serde_json::json!({
+            "action": "created",
+            "comment": {"body": "hey", "user": {"login": "u"}},
+            "issue": {},   // number field missing
+            "repository": {"owner": {"login": "o"}, "name": "r"}
+        });
+        assert!(
+            handle(&make_agent(), &serde_json::to_vec(&payload).unwrap())
+                .await
+                .is_none(),
+            "absent issue.number must cause the handler to return None"
+        );
+    }
 }

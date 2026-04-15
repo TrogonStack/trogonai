@@ -172,4 +172,60 @@ mod tests {
                 .is_none()
         );
     }
+
+    /// Invalid JSON payload must return `Some(Err(...))` — same pattern as
+    /// every other handler in this crate.
+    #[tokio::test]
+    async fn handle_returns_error_on_invalid_json() {
+        let result = handle(&make_skip_agent(), b"not valid json{{").await;
+        assert!(
+            matches!(result, Some(Err(ref e)) if e.contains("JSON parse error")),
+            "invalid JSON must return Some(Err(..)); got: {result:?}"
+        );
+    }
+
+    /// When `repository.owner.login` or `repository.name` is absent the `?`
+    /// operator returns `None` — the handler skips silently rather than panicking.
+    #[tokio::test]
+    async fn handle_skips_when_repository_fields_absent() {
+        let payload = serde_json::json!({
+            "action": "completed",
+            "check_run": {"name": "CI", "conclusion": "failure", "pull_requests": [], "details_url": ""},
+            "repository": {}   // no owner or name
+        });
+        let result = handle(
+            &make_skip_agent(),
+            &serde_json::to_vec(&payload).unwrap(),
+        )
+        .await;
+        assert!(
+            result.is_none(),
+            "missing repository fields must return None; got: {result:?}"
+        );
+    }
+
+    /// `"skipped"` and `"neutral"` conclusions are treated the same as
+    /// `"success"` — the handler returns `None` without running the agent.
+    #[tokio::test]
+    async fn handle_skips_skipped_and_neutral_conclusions() {
+        let agent = make_skip_agent();
+        for conclusion in ["skipped", "neutral"] {
+            let payload = serde_json::json!({
+                "action": "completed",
+                "check_run": {
+                    "name": "CI",
+                    "conclusion": conclusion,
+                    "pull_requests": [],
+                    "details_url": ""
+                },
+                "repository": {"owner": {"login": "o"}, "name": "r"}
+            });
+            assert!(
+                handle(&agent, &serde_json::to_vec(&payload).unwrap())
+                    .await
+                    .is_none(),
+                "conclusion '{conclusion}' must be skipped"
+            );
+        }
+    }
 }

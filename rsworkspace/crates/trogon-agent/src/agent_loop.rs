@@ -231,6 +231,27 @@ pub mod mock {
             Box::pin(async move { Ok(resp) })
         }
     }
+
+    /// An `AnthropicClient` that always returns a `reqwest::Error` — used to
+    /// test graceful degradation paths that call the LLM and handle failure.
+    pub struct AlwaysErrAnthropicClient;
+
+    impl AnthropicClient for AlwaysErrAnthropicClient {
+        fn complete<'a>(
+            &'a self,
+            _body: serde_json::Value,
+        ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, reqwest::Error>> + Send + 'a>>
+        {
+            Box::pin(async move {
+                // Construct a real reqwest::Error via a URL-parse failure
+                // (no network I/O — the build() call fails synchronously).
+                Err(reqwest::Client::new()
+                    .get("not a url at all:///")
+                    .build()
+                    .unwrap_err())
+            })
+        }
+    }
 }
 
 // ── Wire types ────────────────────────────────────────────────────────────────
@@ -7061,6 +7082,224 @@ mod tests {
         assert!(
             p.checkpoint_degraded,
             "checkpoint_degraded must be set on the promise when checkpointing is permanently disabled"
+        );
+    }
+
+    // ── render_messages_for_summary ───────────────────────────────────────────
+
+    #[test]
+    fn render_messages_for_summary_empty_slice_returns_empty_string() {
+        assert_eq!(render_messages_for_summary(&[]), "");
+    }
+
+    #[test]
+    fn render_messages_for_summary_text_block() {
+        let msgs = vec![Message::user_text("hello world")];
+        let out = render_messages_for_summary(&msgs);
+        assert_eq!(out, "User: hello world\n\n");
+    }
+
+    #[test]
+    fn render_messages_for_summary_assistant_text_block() {
+        let msgs = vec![Message::assistant(vec![ContentBlock::Text {
+            text: "I will help".to_string(),
+        }])];
+        let out = render_messages_for_summary(&msgs);
+        assert_eq!(out, "Assistant: I will help\n\n");
+    }
+
+    #[test]
+    fn render_messages_for_summary_tool_use_block() {
+        let msgs = vec![Message::assistant(vec![ContentBlock::ToolUse {
+            id: "tu1".to_string(),
+            name: "post_comment".to_string(),
+            input: serde_json::json!({"body": "hi"}),
+        }])];
+        let out = render_messages_for_summary(&msgs);
+        assert!(
+            out.contains("called tool `post_comment`"),
+            "ToolUse must render with backtick-quoted name; got: {out}"
+        );
+        assert!(out.contains("hi"), "ToolUse must include the input JSON; got: {out}");
+    }
+
+    #[test]
+    fn render_messages_for_summary_tool_result_block() {
+        let msgs = vec![Message::tool_results(vec![ToolResult {
+            tool_use_id: "tu1".to_string(),
+            content: "success output".to_string(),
+        }])];
+        let out = render_messages_for_summary(&msgs);
+        assert_eq!(out, "Tool result: success output\n\n");
+    }
+
+    #[test]
+    fn render_messages_for_summary_unknown_role_passes_through() {
+        let msgs = vec![Message {
+            role: "system".to_string(),
+            content: vec![ContentBlock::Text { text: "sys msg".to_string() }],
+        }];
+        let out = render_messages_for_summary(&msgs);
+        // Unknown role is passed through verbatim.
+        assert!(out.starts_with("system: "), "unknown role must pass through; got: {out}");
+    }
+
+    #[test]
+    fn render_messages_for_summary_multiple_messages_concatenates() {
+        let msgs = vec![
+            Message::user_text("first"),
+            Message::assistant(vec![ContentBlock::Text { text: "second".to_string() }]),
+            Message::user_text("third"),
+        ];
+        let out = render_messages_for_summary(&msgs);
+        assert!(out.contains("User: first"), "must contain first user msg");
+        assert!(out.contains("Assistant: second"), "must contain assistant msg");
+        assert!(out.contains("User: third"), "must contain third user msg");
+        // Each block ends with \n\n — three blocks = three double-newlines.
+        assert_eq!(out.matches("\n\n").count(), 3);
+    }
+
+    // ── summarize_dropped_messages ────────────────────────────────────────────
+
+    /// When all dropped messages have no content, the rendered string is empty
+    /// and the function returns `vec![]` without calling the LLM.
+    #[tokio::test]
+    async fn summarize_dropped_messages_empty_rendered_returns_empty_vec() {
+        // Message with no content blocks → render produces "".
+        let msgs = vec![Message { role: "user".to_string(), content: vec![] }];
+        // Empty response queue — panics if LLM is called.
+        let client = mock::SequencedMockAnthropicClient::new(vec![]);
+        let result = summarize_dropped_messages(&client, "model", &msgs).await;
+        assert!(result.is_empty(), "empty rendered output must return vec![]");
+    }
+
+    /// When the LLM call returns an error, the function degrades gracefully
+    /// and returns `vec![]` rather than propagating the error.
+    #[tokio::test]
+    async fn summarize_dropped_messages_llm_error_returns_empty_vec() {
+        let msgs = vec![Message::user_text("some content")];
+        let client = mock::AlwaysErrAnthropicClient;
+        let result = summarize_dropped_messages(&client, "model", &msgs).await;
+        assert!(result.is_empty(), "LLM error must degrade gracefully to vec![]");
+    }
+
+    /// When the LLM returns JSON that cannot be deserialized as `AnthropicResponse`,
+    /// the function degrades gracefully and returns `vec![]`.
+    #[tokio::test]
+    async fn summarize_dropped_messages_malformed_llm_response_returns_empty_vec() {
+        let msgs = vec![Message::user_text("some content")];
+        // Valid JSON but wrong schema — no `stop_reason` or `content` fields.
+        let bad_resp = serde_json::json!({"status": "ok", "result": 42});
+        let client = mock::SequencedMockAnthropicClient::new(vec![bad_resp]);
+        let result = summarize_dropped_messages(&client, "model", &msgs).await;
+        assert!(result.is_empty(), "malformed LLM response must degrade gracefully to vec![]");
+    }
+
+    /// When the LLM returns a valid summary text, the function returns exactly
+    /// two messages: a user message embedding the summary and an assistant ack.
+    #[tokio::test]
+    async fn summarize_dropped_messages_valid_response_returns_two_messages() {
+        let msgs = vec![Message::user_text("do some work")];
+        let summary_resp = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "The agent fetched issue ISS-1 and posted a comment."}]
+        });
+        let client = mock::SequencedMockAnthropicClient::new(vec![summary_resp]);
+        let result = summarize_dropped_messages(&client, "model", &msgs).await;
+        assert_eq!(result.len(), 2, "must return exactly [user_summary, assistant_ack]");
+        // First message: user role with summary text embedded.
+        assert_eq!(result[0].role, "user");
+        let first_text = match &result[0].content[0] {
+            ContentBlock::Text { text } => text.clone(),
+            other => panic!("expected Text block, got: {other:?}"),
+        };
+        assert!(
+            first_text.contains("ISS-1"),
+            "user summary must embed LLM output; got: {first_text}"
+        );
+        assert!(
+            first_text.contains("Context summary"),
+            "user summary must include the context-summary header; got: {first_text}"
+        );
+        // Second message: assistant ack.
+        assert_eq!(result[1].role, "assistant");
+    }
+
+    // ── try_mark_permanent_failed_fresh ───────────────────────────────────────
+
+    /// When the promise is `None` in KV (already deleted), the function returns
+    /// immediately without retrying — no exponential back-off, no error.
+    #[tokio::test(start_paused = true)]
+    async fn try_mark_permanent_failed_promise_none_returns_immediately() {
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::PromiseRepository;
+
+        // Store is empty — get_promise returns Ok(None).
+        let store = Arc::new(MockPromiseStore::new());
+        let store_as_repo: Arc<dyn PromiseRepository> = store;
+
+        // If the function retried, the test would advance through the back-off
+        // sleeps and complete very slowly. With start_paused it still completes
+        // instantly because there are no sleeps to advance past.
+        try_mark_permanent_failed_fresh(store_as_repo.as_ref(), "acme", "missing-pid", "test").await;
+        // Reaching here means the function returned — success.
+    }
+
+    /// When every `get_promise` call returns an `Err`, the function retries up
+    /// to 5 times (with exponential back-off) and then gives up — no panic,
+    /// no infinite loop.
+    #[tokio::test(start_paused = true)]
+    async fn try_mark_permanent_failed_all_get_errors_exhausts_retries() {
+        use crate::promise_store::mock::ErrorGetPromiseStore;
+        use crate::promise_store::PromiseRepository;
+
+        let store = Arc::new(ErrorGetPromiseStore::new());
+        let store_as_repo: Arc<dyn PromiseRepository> =
+            Arc::clone(&store) as Arc<dyn PromiseRepository>;
+
+        // Back-off sleeps: attempt 1→2s, 2→4s, 3→8s, 4→16s  (attempt 0 has no sleep).
+        // With start_paused these advance instantly — the whole test completes synchronously.
+        try_mark_permanent_failed_fresh(store_as_repo.as_ref(), "acme", "pid-err", "test ctx").await;
+        // Function returns after exhausting retries — no panic.
+    }
+
+    /// When `get_promise` hangs indefinitely (simulating a KV timeout), the
+    /// NATS_KV_TIMEOUT inside `try_mark_permanent_failed_fresh` fires and the
+    /// function retries. After 5 timeouts it gives up without panicking.
+    #[tokio::test(start_paused = true)]
+    async fn try_mark_permanent_failed_all_get_timeouts_exhausts_retries() {
+        use crate::promise_store::mock::HangingGetPromiseStore;
+        use crate::promise_store::PromiseRepository;
+
+        let store = Arc::new(HangingGetPromiseStore::new());
+        let store_as_repo: Arc<dyn PromiseRepository> =
+            Arc::clone(&store) as Arc<dyn PromiseRepository>;
+
+        // Each attempt hangs → NATS_KV_TIMEOUT (10s) fires → retry sleep → next attempt.
+        // Tokio's paused clock auto-advances all sleeps instantly.
+        try_mark_permanent_failed_fresh(store_as_repo.as_ref(), "acme", "pid-hang", "test ctx").await;
+        // Returns after all 5 attempts time out — no panic.
+    }
+
+    /// Happy path: promise is found and `write_promise_terminal` marks it
+    /// `PermanentFailed` on the first attempt.
+    #[tokio::test(start_paused = true)]
+    async fn try_mark_permanent_failed_found_promise_marks_it() {
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+
+        let store = Arc::new(MockPromiseStore::new());
+        store.insert_promise(make_test_promise("pid-found"));
+        let store_as_repo: Arc<dyn PromiseRepository> =
+            Arc::clone(&store) as Arc<dyn PromiseRepository>;
+
+        try_mark_permanent_failed_fresh(store_as_repo.as_ref(), "acme", "pid-found", "test ctx").await;
+
+        let (p, _) = store.get_promise("acme", "pid-found").await.unwrap().unwrap();
+        assert_eq!(
+            p.status,
+            PromiseStatus::PermanentFailed,
+            "promise must be PermanentFailed after try_mark_permanent_failed_fresh"
         );
     }
 }

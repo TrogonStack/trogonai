@@ -61,7 +61,10 @@ fn now_iso8601() -> String {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-    // reuse epoch_to_parts logic inline
+    epoch_to_iso8601(secs)
+}
+
+pub(crate) fn epoch_to_iso8601(secs: u64) -> String {
     let s = secs % 60;
     let m = (secs / 60) % 60;
     let h = (secs / 3600) % 24;
@@ -495,7 +498,7 @@ pub fn router<R: SessionRepository>(state: ChatAppState<R>) -> Router {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::session::mock::MockSessionStore;
+    use crate::session::mock::{ErrorSessionStore, GetOkPutErrorSessionStore, MockSessionStore};
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use tower::util::ServiceExt as _;
@@ -537,6 +540,74 @@ mod tests {
         assert_eq!(tenant_id(&headers).unwrap(), "acme");
     }
 
+    #[test]
+    fn tenant_id_empty_string_returns_err() {
+        // HTTP header values can contain empty strings; treat them as missing.
+        let mut headers = HeaderMap::new();
+        headers.insert("x-tenant-id", "".parse().unwrap());
+        assert!(
+            tenant_id(&headers).is_err(),
+            "empty X-Tenant-Id must be rejected"
+        );
+    }
+
+    // ── epoch_to_iso8601 ──────────────────────────────────────────────────────
+
+    /// Epoch 0 → 1970-01-01T00:00:00Z
+    #[test]
+    fn epoch_to_iso8601_epoch_zero_is_unix_epoch() {
+        assert_eq!(epoch_to_iso8601(0), "1970-01-01T00:00:00Z");
+    }
+
+    /// Feb 29 in a leap year (2024-02-29T00:00:00Z = epoch 1709164800).
+    #[test]
+    fn epoch_to_iso8601_leap_year_feb_29() {
+        // 2024 is a leap year (divisible by 4, not by 100).
+        // 2024-02-29T00:00:00Z in Unix time:
+        //   2024-01-01T00:00:00Z = 1704067200
+        //   + 31 days (Jan) + 28 days (to reach Feb 29) = 59 days = 5097600 s
+        let epoch = 1704067200u64 + 59 * 86400;
+        assert_eq!(epoch_to_iso8601(epoch), "2024-02-29T00:00:00Z");
+    }
+
+    /// Feb 28 in a non-leap year — no 29th day should appear.
+    #[test]
+    fn epoch_to_iso8601_non_leap_year_feb_28() {
+        // 2023 is not a leap year.
+        // 2023-02-28T00:00:00Z = 1677542400
+        //   2023-01-01T00:00:00Z = 1672531200 + 31 days (Jan) + 27 days = 58 days
+        let epoch = 1672531200u64 + 58 * 86400;
+        assert_eq!(epoch_to_iso8601(epoch), "2023-02-28T00:00:00Z");
+    }
+
+    /// Year 2000 is a leap year (divisible by 400) — Mar 1 must follow Feb 29.
+    #[test]
+    fn epoch_to_iso8601_year_2000_is_leap_year() {
+        // 2000-02-29T00:00:00Z
+        // 2000-01-01T00:00:00Z = 946684800
+        // +31 (Jan) +28 (to Feb 29) = 59 days
+        let epoch = 946684800u64 + 59 * 86400;
+        assert_eq!(epoch_to_iso8601(epoch), "2000-02-29T00:00:00Z");
+    }
+
+    /// Year 1900 is not a leap year (divisible by 100 but not 400) — but since
+    /// we start from 1970 we verify 1996 (a regular quadrennial leap year).
+    #[test]
+    fn epoch_to_iso8601_1996_is_leap_year() {
+        // 1996-02-29T00:00:00Z
+        // 1996-01-01T00:00:00Z = 820454400
+        // +31 (Jan) +28 (to Feb 29) = 59 days
+        let epoch = 820454400u64 + 59 * 86400;
+        assert_eq!(epoch_to_iso8601(epoch), "1996-02-29T00:00:00Z");
+    }
+
+    /// Time component — seconds, minutes, hours are correctly decomposed.
+    #[test]
+    fn epoch_to_iso8601_time_of_day() {
+        // 1970-01-01T15:30:45Z = 15*3600 + 30*60 + 45 = 55845
+        assert_eq!(epoch_to_iso8601(55845), "1970-01-01T15:30:45Z");
+    }
+
     // ── Handler tests ─────────────────────────────────────────────────────────
 
     fn make_test_agent() -> Arc<AgentLoop> {
@@ -566,6 +637,24 @@ mod tests {
             promise_store: None,
             promise_id: None,
         })
+    }
+
+    fn get_ok_put_error_app() -> axum::Router {
+        let state = ChatAppState {
+            agent: make_test_agent(),
+            session_store: GetOkPutErrorSessionStore::new(),
+            promise_store: Arc::new(crate::promise_store::mock::MockPromiseStore::new()),
+        };
+        router(state)
+    }
+
+    fn error_app() -> axum::Router {
+        let state = ChatAppState {
+            agent: make_test_agent(),
+            session_store: ErrorSessionStore::new(),
+            promise_store: Arc::new(crate::promise_store::mock::MockPromiseStore::new()),
+        };
+        router(state)
     }
 
     fn mock_app(store: MockSessionStore) -> axum::Router {
@@ -642,6 +731,19 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     }
 
+    #[tokio::test]
+    async fn create_session_missing_tenant_returns_400() {
+        let app = mock_app(MockSessionStore::new());
+        let req = Request::builder()
+            .method("POST")
+            .uri("/sessions")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"name":"My Session"}"#))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
     // create_session
 
     #[tokio::test]
@@ -685,6 +787,18 @@ mod tests {
         assert_eq!(json["name"], "New Agent");
     }
 
+    #[tokio::test]
+    async fn get_session_missing_tenant_returns_400() {
+        let app = mock_app(MockSessionStore::new());
+        let req = Request::builder()
+            .method("GET")
+            .uri("/sessions/sess-1")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
     // get_session
 
     #[tokio::test]
@@ -717,6 +831,19 @@ mod tests {
         assert_eq!(json["messages"].as_array().unwrap().len(), 1);
     }
 
+    #[tokio::test]
+    async fn update_session_missing_tenant_returns_400() {
+        let app = mock_app(MockSessionStore::new());
+        let req = Request::builder()
+            .method("PATCH")
+            .uri("/sessions/sess-1")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"name":"New Name"}"#))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
     // update_session
 
     #[tokio::test]
@@ -731,6 +858,91 @@ mod tests {
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn update_session_updates_model_field() {
+        let store = MockSessionStore::new();
+        store.insert(sample_session("sess-2", "acme"));
+        let app = mock_app(store.clone());
+        let req = Request::builder()
+            .method("PATCH")
+            .uri("/sessions/sess-2")
+            .header("x-tenant-id", "acme")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"model":"claude-opus-4-6"}"#))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["model"], "claude-opus-4-6");
+        assert_eq!(store.snapshot()["acme.sess-2"].model.as_deref(), Some("claude-opus-4-6"));
+    }
+
+    #[tokio::test]
+    async fn update_session_updates_tools_field() {
+        let store = MockSessionStore::new();
+        store.insert(sample_session("sess-3", "acme"));
+        let app = mock_app(store.clone());
+        let req = Request::builder()
+            .method("PATCH")
+            .uri("/sessions/sess-3")
+            .header("x-tenant-id", "acme")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"tools":["post_pr_comment","send_slack_message"]}"#))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let snap = store.snapshot();
+        assert_eq!(
+            snap["acme.sess-3"].tools,
+            vec!["post_pr_comment", "send_slack_message"]
+        );
+    }
+
+    #[tokio::test]
+    async fn update_session_updates_memory_path_field() {
+        let store = MockSessionStore::new();
+        store.insert(sample_session("sess-4", "acme"));
+        let app = mock_app(store.clone());
+        let req = Request::builder()
+            .method("PATCH")
+            .uri("/sessions/sess-4")
+            .header("x-tenant-id", "acme")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"memory_path":".trogon/memory.md"}"#))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let snap = store.snapshot();
+        assert_eq!(
+            snap["acme.sess-4"].memory_path.as_deref(),
+            Some(".trogon/memory.md")
+        );
+    }
+
+    #[tokio::test]
+    async fn update_session_updates_multiple_fields_at_once() {
+        let store = MockSessionStore::new();
+        store.insert(sample_session("sess-5", "acme"));
+        let app = mock_app(store.clone());
+        let req = Request::builder()
+            .method("PATCH")
+            .uri("/sessions/sess-5")
+            .header("x-tenant-id", "acme")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                r#"{"name":"Multi","model":"claude-haiku-4-5","tools":["get_pr_diff"]}"#,
+            ))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let snap = store.snapshot();
+        let s = &snap["acme.sess-5"];
+        assert_eq!(s.name, "Multi");
+        assert_eq!(s.model.as_deref(), Some("claude-haiku-4-5"));
+        assert_eq!(s.tools, vec!["get_pr_diff"]);
     }
 
     #[tokio::test]
@@ -785,6 +997,35 @@ mod tests {
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::NO_CONTENT);
         assert!(store.snapshot().is_empty());
+    }
+
+    #[tokio::test]
+    async fn delete_session_missing_tenant_returns_400() {
+        let app = mock_app(MockSessionStore::new());
+        let req = Request::builder()
+            .method("DELETE")
+            .uri("/sessions/sess-1")
+            // no x-tenant-id header
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    // send_message
+
+    #[tokio::test]
+    async fn send_message_missing_tenant_returns_400() {
+        let app = mock_app(MockSessionStore::new());
+        let req = Request::builder()
+            .method("POST")
+            .uri("/sessions/sess-1/messages")
+            // no x-tenant-id header
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"content":"hello"}"#))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     }
 
     // list_promises
@@ -908,5 +1149,106 @@ mod tests {
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    // ── store-error → 500 ─────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn list_sessions_store_error_returns_500() {
+        let resp = error_app()
+            .oneshot(get_req("/sessions", "acme"))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn create_session_store_error_returns_500() {
+        let req = Request::builder()
+            .method("POST")
+            .uri("/sessions")
+            .header("x-tenant-id", "acme")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"name":"S"}"#))
+            .unwrap();
+        let resp = error_app().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn get_session_store_error_returns_500() {
+        let resp = error_app()
+            .oneshot(get_req("/sessions/any-id", "acme"))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn update_session_store_error_returns_500() {
+        let req = Request::builder()
+            .method("PATCH")
+            .uri("/sessions/any-id")
+            .header("x-tenant-id", "acme")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"name":"New"}"#))
+            .unwrap();
+        let resp = error_app().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn delete_session_store_error_returns_500() {
+        let req = Request::builder()
+            .method("DELETE")
+            .uri("/sessions/any-id")
+            .header("x-tenant-id", "acme")
+            .body(Body::empty())
+            .unwrap();
+        let resp = error_app().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    /// `update_session` first calls `get()` (succeeds) then `put()`. When `put()`
+    /// fails the handler must return 500 — the `ErrorSessionStore` never reaches
+    /// this path because its `get()` always fails first.
+    #[tokio::test]
+    async fn update_session_put_error_returns_500() {
+        let req = Request::builder()
+            .method("PATCH")
+            .uri("/sessions/dummy")
+            .header("x-tenant-id", "acme")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"name":"New Name"}"#))
+            .unwrap();
+        let resp = get_ok_put_error_app().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    /// `delete_session` first calls `get()` (succeeds) then `delete()`. When
+    /// `delete()` fails the handler must return 500.
+    #[tokio::test]
+    async fn delete_session_delete_error_returns_500() {
+        let req = Request::builder()
+            .method("DELETE")
+            .uri("/sessions/dummy")
+            .header("x-tenant-id", "acme")
+            .body(Body::empty())
+            .unwrap();
+        let resp = get_ok_put_error_app().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn send_message_store_error_returns_500() {
+        let req = Request::builder()
+            .method("POST")
+            .uri("/sessions/any-id/messages")
+            .header("x-tenant-id", "acme")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"content":"hello"}"#))
+            .unwrap();
+        let resp = error_app().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 }

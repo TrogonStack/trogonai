@@ -218,4 +218,37 @@ mod tests {
             Some(Err(_))
         ));
     }
+
+    /// When `number`, `repository.owner.login`, or `repository.name` is absent
+    /// the `?` operator returns `None` — the handler skips silently.
+    #[tokio::test]
+    async fn handle_skips_when_required_fields_absent() {
+        // `action` and `merged` pass the guards, but `number` is missing.
+        let payload = serde_json::json!({
+            "action": "closed",
+            "pull_request": {"merged": true, "title": "t", "merged_by": {"login": "u"}},
+            "repository": {"owner": {"login": "o"}, "name": "r"}
+            // "number" field intentionally absent
+        });
+        assert!(
+            handle(&make_stub_agent(), &serde_json::to_vec(&payload).unwrap())
+                .await
+                .is_none(),
+            "absent 'number' must cause the handler to return None"
+        );
+
+        // Also verify missing repository fields.
+        let payload2 = serde_json::json!({
+            "action": "closed",
+            "number": 5,
+            "pull_request": {"merged": true, "title": "t", "merged_by": {"login": "u"}},
+            "repository": {}   // no owner or name
+        });
+        assert!(
+            handle(&make_stub_agent(), &serde_json::to_vec(&payload2).unwrap())
+                .await
+                .is_none(),
+            "absent repository fields must cause the handler to return None"
+        );
+    }
 }

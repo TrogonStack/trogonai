@@ -357,6 +357,63 @@ pub mod mock {
 }
 
 #[cfg(test)]
+pub mod error_mock {
+    use super::*;
+
+    /// Automation store that always returns errors — used to test 500 paths.
+    #[derive(Clone, Default)]
+    pub struct ErrorAutomationStore;
+
+    impl ErrorAutomationStore {
+        pub fn new() -> Self {
+            Self
+        }
+    }
+
+    impl AutomationRepository for ErrorAutomationStore {
+        fn put<'a>(
+            &'a self,
+            _automation: &'a Automation,
+        ) -> Pin<Box<dyn Future<Output = Result<(), StoreError>> + Send + 'a>> {
+            Box::pin(async move { Err(StoreError("injected put error".into())) })
+        }
+
+        fn get<'a>(
+            &'a self,
+            _tenant_id: &'a str,
+            _id: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<Option<Automation>, StoreError>> + Send + 'a>>
+        {
+            Box::pin(async move { Err(StoreError("injected get error".into())) })
+        }
+
+        fn delete<'a>(
+            &'a self,
+            _tenant_id: &'a str,
+            _id: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<(), StoreError>> + Send + 'a>> {
+            Box::pin(async move { Err(StoreError("injected delete error".into())) })
+        }
+
+        fn list<'a>(
+            &'a self,
+            _tenant_id: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<Automation>, StoreError>> + Send + 'a>> {
+            Box::pin(async move { Err(StoreError("injected list error".into())) })
+        }
+
+        fn matching<'a>(
+            &'a self,
+            _tenant_id: &'a str,
+            _nats_subject: &'a str,
+            _payload: &'a serde_json::Value,
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<Automation>, StoreError>> + Send + 'a>> {
+            Box::pin(async move { Err(StoreError("injected matching error".into())) })
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -364,6 +421,15 @@ mod tests {
     fn store_error_display() {
         let e = StoreError("bucket gone".to_string());
         assert!(e.to_string().contains("bucket gone"));
+    }
+
+    #[test]
+    fn store_error_source_is_none() {
+        let e = StoreError("some error".to_string());
+        assert!(
+            std::error::Error::source(&e).is_none(),
+            "StoreError::source must be None — no underlying cause"
+        );
     }
 
     #[test]

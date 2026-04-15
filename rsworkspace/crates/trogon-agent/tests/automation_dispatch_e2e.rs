@@ -1038,7 +1038,8 @@ async fn startup_recovery_resumes_stale_automation_promise_to_resolved() {
 
     // Poll until the recovery produces a RunRecord (proof the run completed).
     // No NATS event is published — the runner finds the stale promise on startup.
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    // Allow up to 45 s: startup recovery jitter is 0–30 s plus actual run time.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(45);
     loop {
         let body: serde_json::Value = client
             .get(&runs_url)
@@ -1765,7 +1766,9 @@ async fn tool_cache_dedup_on_recovery_skips_tool_reexecution() {
     }
 
     // No event published — startup recovery finds the stale promise.
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    // Allow up to 45 s: startup recovery jitter is 0–30 s, plus time for the
+    // actual agent run. Tests waiting only 15 s would flake whenever jitter > 15 s.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(45);
     loop {
         let body: serde_json::Value = client
             .get(&runs_url)

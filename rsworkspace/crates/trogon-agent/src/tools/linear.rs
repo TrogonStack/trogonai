@@ -274,6 +274,260 @@ mod tests {
         crate::tools::ToolContext::for_test("http://proxy.test", "", "tok_linear", "")
     }
 
+    // ── get_issue ─────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn get_issue_returns_pretty_json() {
+        let ctx = make_ctx();
+        ctx.http_client.enqueue_ok(
+            200,
+            json!({
+                "data": {
+                    "issue": {
+                        "id": "ISS-1", "title": "Bug: crash on startup",
+                        "description": "It crashes.", "priority": 1,
+                        "state": {"name": "In Progress"},
+                        "assignee": {"name": "Alice", "email": "alice@example.com"},
+                        "labels": {"nodes": [{"name": "bug"}]},
+                        "team": {"name": "Platform"},
+                        "createdAt": "2026-01-01T00:00:00Z",
+                        "updatedAt": "2026-01-02T00:00:00Z"
+                    }
+                }
+            })
+            .to_string(),
+        );
+        let result = get_issue(&ctx, &json!({"issue_id": "ISS-1"})).await;
+        assert!(result.is_ok(), "get_issue must succeed: {result:?}");
+        let v: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
+        assert_eq!(v["title"], "Bug: crash on startup");
+    }
+
+    #[tokio::test]
+    async fn get_issue_not_found_returns_err() {
+        let ctx = make_ctx();
+        ctx.http_client.enqueue_ok(
+            200,
+            json!({"data": {"issue": null}}).to_string(),
+        );
+        let result = get_issue(&ctx, &json!({"issue_id": "ISS-NONE"})).await;
+        assert!(result.is_err(), "null issue must return Err");
+        assert!(
+            result.unwrap_err().contains("not found"),
+            "error must mention 'not found'"
+        );
+    }
+
+    // ── get_comments ──────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn get_comments_returns_array() {
+        let ctx = make_ctx();
+        ctx.http_client.enqueue_ok(
+            200,
+            json!({
+                "data": {
+                    "issue": {
+                        "comments": {
+                            "nodes": [
+                                {"id": "c1", "body": "First comment", "createdAt": "2026-01-01T00:00:00Z", "user": {"name": "Bob", "email": "b@x.com"}},
+                                {"id": "c2", "body": "Second comment", "createdAt": "2026-01-02T00:00:00Z", "user": null}
+                            ]
+                        }
+                    }
+                }
+            })
+            .to_string(),
+        );
+        let result = get_comments(&ctx, &json!({"issue_id": "ISS-2"})).await;
+        assert!(result.is_ok(), "get_comments must succeed: {result:?}");
+        let v: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
+        assert_eq!(v.as_array().unwrap().len(), 2);
+        assert_eq!(v[0]["body"], "First comment");
+    }
+
+    #[tokio::test]
+    async fn get_comments_issue_not_found_returns_err() {
+        let ctx = make_ctx();
+        ctx.http_client.enqueue_ok(
+            200,
+            json!({"data": {"issue": null}}).to_string(),
+        );
+        let result = get_comments(&ctx, &json!({"issue_id": "ISS-NONE"})).await;
+        assert!(result.is_err(), "null issue must return Err");
+        assert!(
+            result.unwrap_err().contains("not found"),
+            "error must mention 'not found'"
+        );
+    }
+
+    // ── update_issue ──────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn update_issue_with_state_id_succeeds() {
+        let ctx = make_ctx();
+        ctx.http_client.enqueue_ok(
+            200,
+            json!({
+                "data": {
+                    "issueUpdate": {
+                        "success": true,
+                        "issue": {"id": "ISS-3", "title": "Bug", "state": {"name": "Done"}}
+                    }
+                }
+            })
+            .to_string(),
+        );
+        let result = update_issue(
+            &ctx,
+            &json!({"issue_id": "ISS-3", "state_id": "state-done-uuid"}),
+        )
+        .await;
+        assert!(result.is_ok(), "update_issue must succeed: {result:?}");
+        assert!(
+            result.unwrap().contains("Done"),
+            "result must include new state name"
+        );
+    }
+
+    #[tokio::test]
+    async fn update_issue_with_all_fields_succeeds() {
+        let ctx = make_ctx();
+        ctx.http_client.enqueue_ok(
+            200,
+            json!({
+                "data": {
+                    "issueUpdate": {
+                        "success": true,
+                        "issue": {"id": "ISS-4", "title": "Task", "state": {"name": "In Review"}}
+                    }
+                }
+            })
+            .to_string(),
+        );
+        let result = update_issue(
+            &ctx,
+            &json!({
+                "issue_id": "ISS-4",
+                "state_id": "state-review-uuid",
+                "assignee_id": "user-uuid",
+                "priority": 2
+            }),
+        )
+        .await;
+        assert!(result.is_ok(), "update_issue with all fields must succeed: {result:?}");
+        assert!(result.unwrap().contains("ISS-4"));
+    }
+
+    #[tokio::test]
+    async fn update_issue_failure_returns_err() {
+        let ctx = make_ctx();
+        ctx.http_client.enqueue_ok(
+            200,
+            json!({
+                "data": {
+                    "issueUpdate": {
+                        "success": false,
+                        "issue": null
+                    }
+                },
+                "errors": [{"message": "Issue not found"}]
+            })
+            .to_string(),
+        );
+        let result = update_issue(&ctx, &json!({"issue_id": "ISS-99"})).await;
+        assert!(result.is_err(), "failed issueUpdate must return Err");
+    }
+
+    // ── post_comment — no idempotency key ─────────────────────────────────────
+
+    /// First-time execution (no `_idempotency_key`) skips the pre-check and
+    /// posts the comment directly without any dedup scanning.
+    #[tokio::test]
+    async fn post_comment_no_idempotency_key_posts_directly() {
+        let ctx = make_ctx();
+        // No get_comments GET enqueued — dedup must be skipped.
+        ctx.http_client.enqueue_ok(
+            200,
+            json!({
+                "data": {
+                    "commentCreate": {
+                        "success": true,
+                        "comment": {"id": "c99", "url": "https://linear.app/acme/issue/ISS-5/comment/c99"}
+                    }
+                }
+            })
+            .to_string(),
+        );
+        let result = post_comment(
+            &ctx,
+            &json!({"issue_id": "ISS-5", "body": "Hello from agent"}),
+        )
+        .await;
+        assert!(result.is_ok(), "first-time post must succeed: {result:?}");
+        assert!(result.unwrap().contains("Comment posted"));
+        assert!(
+            ctx.http_client.is_empty(),
+            "exactly one HTTP call (the mutation) must have been made"
+        );
+    }
+
+    /// When the GraphQL mutation returns `success: false` (no GraphQL-level
+    /// errors), `post_comment` must return an Err describing the failure.
+    #[tokio::test]
+    async fn post_comment_success_false_returns_err() {
+        let ctx = make_ctx();
+        // No idempotency key → no dedup GET; only the mutation POST runs.
+        ctx.http_client.enqueue_ok(
+            200,
+            json!({
+                "data": {
+                    "commentCreate": {
+                        "success": false,
+                        "comment": null
+                    }
+                }
+            })
+            .to_string(),
+        );
+
+        let result = post_comment(
+            &ctx,
+            &json!({"issue_id": "ISS-42", "body": "This will fail"}),
+        )
+        .await;
+
+        assert!(result.is_err(), "success:false must return Err: {result:?}");
+        assert!(
+            result.unwrap_err().contains("commentCreate failed"),
+            "error must mention 'commentCreate failed'"
+        );
+    }
+
+    /// When none of `state_id`, `assignee_id`, or `priority` are provided, the
+    /// patch object is empty and the mutation is still sent (Linear accepts an
+    /// empty update and returns success).
+    #[tokio::test]
+    async fn update_issue_empty_patch_still_sends_mutation() {
+        let ctx = make_ctx();
+        ctx.http_client.enqueue_ok(
+            200,
+            json!({
+                "data": {
+                    "issueUpdate": {
+                        "success": true,
+                        "issue": {"id": "ISS-7", "title": "Unchanged", "state": {"name": "Todo"}}
+                    }
+                }
+            })
+            .to_string(),
+        );
+        // Only issue_id provided — no optional patch fields.
+        let result = update_issue(&ctx, &json!({"issue_id": "ISS-7"})).await;
+        assert!(result.is_ok(), "empty patch must still succeed: {result:?}");
+        assert!(result.unwrap().contains("ISS-7"));
+    }
+
     /// When the first `get_comments` call fails transiently, `post_comment`
     /// sleeps 200 ms and retries. If the retry succeeds and the idempotency
     /// marker is found, the function must return early without posting.

@@ -282,4 +282,35 @@ mod tests {
             Some(Err(_))
         ));
     }
+
+    /// When `repository.owner.login`, `repository.name`, or `number` is absent
+    /// the `?` operator on lines 43-45 returns `None` — the handler skips silently.
+    #[tokio::test]
+    async fn handle_skips_when_required_fields_absent() {
+        // Action passes the guard but repository is empty.
+        let payload = serde_json::json!({
+            "action": "opened",
+            "number": 7,
+            "repository": {}   // no owner or name
+        });
+        assert!(
+            handle(&make_agent(), &serde_json::to_vec(&payload).unwrap())
+                .await
+                .is_none(),
+            "missing repository fields must return None"
+        );
+
+        // Repository present but number absent.
+        let payload2 = serde_json::json!({
+            "action": "opened",
+            "repository": {"owner": {"login": "o"}, "name": "r"}
+            // "number" field intentionally absent
+        });
+        assert!(
+            handle(&make_agent(), &serde_json::to_vec(&payload2).unwrap())
+                .await
+                .is_none(),
+            "missing number field must return None"
+        );
+    }
 }

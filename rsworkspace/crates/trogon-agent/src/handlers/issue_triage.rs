@@ -211,4 +211,20 @@ mod tests {
         let result = handle(&make_stub_agent(), b"not json").await;
         assert!(matches!(result, Some(Err(_))));
     }
+
+    /// When `data.id` is absent, the `?` operator on `as_str()` returns `None`
+    /// — the handler skips the event silently rather than panicking.
+    #[tokio::test]
+    async fn handle_skips_when_data_id_absent() {
+        let payload = serde_json::json!({
+            "action": "create",
+            "type": "Issue",
+            "data": { "title": "No ID here" }   // id field missing
+        });
+        let result = handle(&make_stub_agent(), &serde_json::to_vec(&payload).unwrap()).await;
+        assert!(
+            result.is_none(),
+            "absent data.id must return None; got: {result:?}"
+        );
+    }
 }

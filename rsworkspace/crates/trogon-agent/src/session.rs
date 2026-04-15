@@ -251,6 +251,110 @@ pub mod mock {
         }
     }
 
+    /// Session store that always returns an error — used to test 500 paths.
+    #[derive(Clone, Default)]
+    pub struct ErrorSessionStore;
+
+    impl ErrorSessionStore {
+        pub fn new() -> Self {
+            Self
+        }
+    }
+
+    impl SessionRepository for ErrorSessionStore {
+        fn put<'a>(
+            &'a self,
+            _session: &'a ChatSession,
+        ) -> Pin<Box<dyn Future<Output = Result<(), SessionStoreError>> + Send + 'a>> {
+            Box::pin(async move { Err(SessionStoreError("injected put error".into())) })
+        }
+
+        fn get<'a>(
+            &'a self,
+            _tenant_id: &'a str,
+            _id: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<Option<ChatSession>, SessionStoreError>> + Send + 'a>>
+        {
+            Box::pin(async move { Err(SessionStoreError("injected get error".into())) })
+        }
+
+        fn delete<'a>(
+            &'a self,
+            _tenant_id: &'a str,
+            _id: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<(), SessionStoreError>> + Send + 'a>> {
+            Box::pin(async move { Err(SessionStoreError("injected delete error".into())) })
+        }
+
+        fn list<'a>(
+            &'a self,
+            _tenant_id: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<ChatSession>, SessionStoreError>> + Send + 'a>>
+        {
+            Box::pin(async move { Err(SessionStoreError("injected list error".into())) })
+        }
+    }
+
+    /// Session store that succeeds on `get()` (returning a dummy session) but
+    /// fails on `put()` and `delete()`. Used to test the second-store-call 500
+    /// paths in `update_session` and `delete_session`.
+    #[derive(Clone, Default)]
+    pub struct GetOkPutErrorSessionStore;
+
+    impl GetOkPutErrorSessionStore {
+        pub fn new() -> Self {
+            Self
+        }
+
+        fn dummy_session() -> ChatSession {
+            ChatSession {
+                id: "dummy".into(),
+                tenant_id: "acme".into(),
+                name: "Dummy".into(),
+                model: None,
+                tools: vec![],
+                memory_path: None,
+                messages: vec![],
+                created_at: "2026-01-01T00:00:00Z".into(),
+                updated_at: "2026-01-01T00:00:00Z".into(),
+            }
+        }
+    }
+
+    impl SessionRepository for GetOkPutErrorSessionStore {
+        fn put<'a>(
+            &'a self,
+            _session: &'a ChatSession,
+        ) -> Pin<Box<dyn Future<Output = Result<(), SessionStoreError>> + Send + 'a>> {
+            Box::pin(async move { Err(SessionStoreError("injected put error".into())) })
+        }
+
+        fn get<'a>(
+            &'a self,
+            _tenant_id: &'a str,
+            _id: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<Option<ChatSession>, SessionStoreError>> + Send + 'a>>
+        {
+            Box::pin(async move { Ok(Some(Self::dummy_session())) })
+        }
+
+        fn delete<'a>(
+            &'a self,
+            _tenant_id: &'a str,
+            _id: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<(), SessionStoreError>> + Send + 'a>> {
+            Box::pin(async move { Err(SessionStoreError("injected delete error".into())) })
+        }
+
+        fn list<'a>(
+            &'a self,
+            _tenant_id: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<ChatSession>, SessionStoreError>> + Send + 'a>>
+        {
+            Box::pin(async move { Err(SessionStoreError("injected list error".into())) })
+        }
+    }
+
     impl SessionRepository for MockSessionStore {
         fn put<'a>(
             &'a self,

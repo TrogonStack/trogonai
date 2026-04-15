@@ -306,6 +306,10 @@ pub mod mock {
             self.responses.lock().unwrap().push_back(Err(msg.into()));
         }
 
+        pub fn is_empty(&self) -> bool {
+            self.responses.lock().unwrap().is_empty()
+        }
+
         fn next(&self) -> Result<HttpResponse, String> {
             self.responses
                 .lock()
@@ -656,6 +660,96 @@ mod tests {
         let result = dispatch_tool(&ctx, "read_slack_channel", &json!({})).await;
         assert!(result.starts_with("Tool error:"), "got: {result}");
         assert!(!result.contains("Unknown tool"));
+    }
+
+    #[tokio::test]
+    async fn dispatch_get_pr_diff_routes_correctly() {
+        let ctx = ToolContext::for_test("http://localhost:8080", "tok_github_prod_test01", "", "");
+        let result = dispatch_tool(&ctx, "get_pr_diff", &json!({})).await;
+        assert!(result.starts_with("Tool error:"), "got: {result}");
+        assert!(!result.contains("Unknown tool"));
+    }
+
+    #[tokio::test]
+    async fn dispatch_get_file_contents_routes_correctly() {
+        let ctx = ToolContext::for_test("http://localhost:8080", "tok_github_prod_test01", "", "");
+        let result = dispatch_tool(&ctx, "get_file_contents", &json!({})).await;
+        assert!(result.starts_with("Tool error:"), "got: {result}");
+        assert!(!result.contains("Unknown tool"));
+    }
+
+    #[tokio::test]
+    async fn dispatch_list_pr_files_routes_correctly() {
+        let ctx = ToolContext::for_test("http://localhost:8080", "tok_github_prod_test01", "", "");
+        let result = dispatch_tool(&ctx, "list_pr_files", &json!({})).await;
+        assert!(result.starts_with("Tool error:"), "got: {result}");
+        assert!(!result.contains("Unknown tool"));
+    }
+
+    #[tokio::test]
+    async fn dispatch_post_pr_comment_routes_correctly() {
+        let ctx = ToolContext::for_test("http://localhost:8080", "tok_github_prod_test01", "", "");
+        let result = dispatch_tool(&ctx, "post_pr_comment", &json!({})).await;
+        assert!(result.starts_with("Tool error:"), "got: {result}");
+        assert!(!result.contains("Unknown tool"));
+    }
+
+    #[tokio::test]
+    async fn dispatch_get_linear_issue_routes_correctly() {
+        let ctx = ToolContext::for_test("http://localhost:8080", "", "tok_linear_prod_test01", "");
+        let result = dispatch_tool(&ctx, "get_linear_issue", &json!({})).await;
+        assert!(result.starts_with("Tool error:"), "got: {result}");
+        assert!(!result.contains("Unknown tool"));
+    }
+
+    #[tokio::test]
+    async fn dispatch_update_linear_issue_routes_correctly() {
+        let ctx = ToolContext::for_test("http://localhost:8080", "", "tok_linear_prod_test01", "");
+        let result = dispatch_tool(&ctx, "update_linear_issue", &json!({})).await;
+        assert!(result.starts_with("Tool error:"), "got: {result}");
+        assert!(!result.contains("Unknown tool"));
+    }
+
+    #[tokio::test]
+    async fn dispatch_post_linear_comment_routes_correctly() {
+        let ctx = ToolContext::for_test("http://localhost:8080", "", "tok_linear_prod_test01", "");
+        let result = dispatch_tool(&ctx, "post_linear_comment", &json!({})).await;
+        assert!(result.starts_with("Tool error:"), "got: {result}");
+        assert!(!result.contains("Unknown tool"));
+    }
+
+    // ── idempotency_marker ────────────────────────────────────────────────────
+
+    /// Keys without `--` must be embedded verbatim — no substitution.
+    #[test]
+    fn idempotency_marker_simple_key_embedded_verbatim() {
+        let m = idempotency_marker("promise-abc.tool-1");
+        assert_eq!(m, "<!-- trogon-idempotency-key: promise-abc.tool-1 -->");
+    }
+
+    /// A key containing `--` would terminate an HTML comment prematurely.
+    /// The function must replace every `--` with `__` before embedding.
+    #[test]
+    fn idempotency_marker_double_dash_replaced_with_underscores() {
+        let m = idempotency_marker("key--with--dashes");
+        assert_eq!(m, "<!-- trogon-idempotency-key: key__with__dashes -->");
+        // The embedded key portion must not contain raw `--` (only the closing
+        // `-->` of the HTML comment itself contains `--`, which is unavoidable).
+        let key_portion = m
+            .strip_prefix("<!-- trogon-idempotency-key: ")
+            .and_then(|s| s.strip_suffix(" -->"))
+            .expect("marker must have the expected prefix and suffix");
+        assert!(
+            !key_portion.contains("--"),
+            "raw `--` must not appear inside the embedded key: {key_portion}"
+        );
+    }
+
+    /// Multiple consecutive occurrences of `--` must all be replaced.
+    #[test]
+    fn idempotency_marker_multiple_double_dashes_all_replaced() {
+        let m = idempotency_marker("a--b--c");
+        assert_eq!(m, "<!-- trogon-idempotency-key: a__b__c -->");
     }
 }
 

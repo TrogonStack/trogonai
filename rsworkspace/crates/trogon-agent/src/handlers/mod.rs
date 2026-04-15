@@ -584,4 +584,59 @@ mod tests {
         let result = fetch_memory(&agent, "owner", "repo", DEFAULT_MEMORY_PATH).await;
         assert!(result.is_none());
     }
+
+    /// Valid base64 that decodes to non-UTF-8 bytes → fetch_memory returns None.
+    ///
+    /// Exercises the `String::from_utf8(bytes).ok()?` branch — the path where
+    /// base64 decoding succeeds but the resulting byte sequence is not valid UTF-8.
+    #[tokio::test]
+    async fn fetch_memory_returns_none_when_decoded_bytes_are_not_utf8() {
+        use base64::engine::general_purpose;
+
+        let server = MockServer::start_async().await;
+        // 0xFF 0xFE are valid base64-encodable bytes but not valid UTF-8.
+        let non_utf8_bytes = vec![0xFF_u8, 0xFE];
+        let encoded = general_purpose::STANDARD.encode(&non_utf8_bytes);
+        server.mock(|when, then| {
+            when.method(httpmock::Method::GET)
+                .path_contains("memory.md");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(serde_json::json!({ "content": encoded }));
+        });
+
+        let agent = make_agent(&server.base_url());
+        let result = fetch_memory(&agent, "owner", "repo", DEFAULT_MEMORY_PATH).await;
+        assert!(
+            result.is_none(),
+            "non-UTF-8 decoded bytes must return None from fetch_memory"
+        );
+    }
+
+    /// When `automation.model` is set, `run_automation` must build a merged
+    /// `AgentLoop` that uses the automation's model — not the agent's default.
+    ///
+    /// Exercises the `else` branch in `run_automation` where `automation.model`
+    /// is `Some`, triggering construction of a temporary merged loop.
+    #[tokio::test]
+    async fn run_automation_model_override_uses_automation_model() {
+        let server = MockServer::start_async().await;
+        // The mock checks that the request body contains the overridden model name.
+        let mock = server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages")
+                .body_contains("claude-haiku-override");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(end_turn_json());
+        });
+
+        let agent = make_agent(&server.base_url());
+        let mut automation = make_automation(vec![]);
+        automation.model = Some("claude-haiku-override".to_string());
+
+        let result = run_automation(&agent, &automation, "github.push", b"{}").await;
+        assert!(result.is_ok(), "expected Ok with model override: {result:?}");
+        mock.assert_async().await;
+    }
 }
