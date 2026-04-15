@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::{
-    AlwaysSnapshot, CommandStateModel, Decide, Decision, DefaultExpectedStateProvider,
-    ExecuteError, ExecuteOptions, NonEmpty, SnapshotStateModel, SnapshotStoreConfig, StreamCommand,
-    execute_command_with_snapshots_and_options,
+    AlwaysSnapshot, CommandExecution, CommandStateModel, Decide, Decision,
+    DefaultExpectedStateProvider, ExecuteError, NonEmpty, OccPolicy, SnapshotStateModel,
+    SnapshotStoreConfig, StreamCommand,
 };
 
 use crate::{
@@ -123,13 +123,13 @@ pub async fn run<R>(runtime: &R, command: ChangeJobStateCommand) -> Result<(), C
 where
     R: CronCommandRuntimePort + CronCommandSnapshotRuntime<ChangeJobStateState>,
 {
-    run_with_options(runtime, command, ExecuteOptions::default()).await
+    run_with_occ(runtime, command, OccPolicy::CommandDefault).await
 }
 
-pub async fn run_with_options<R>(
+pub async fn run_with_occ<R>(
     runtime: &R,
     command: ChangeJobStateCommand,
-    options: ExecuteOptions,
+    occ: OccPolicy,
 ) -> Result<(), CronError>
 where
     R: CronCommandRuntimePort + CronCommandSnapshotRuntime<ChangeJobStateState>,
@@ -137,7 +137,10 @@ where
     let id = command.stream_id().to_string();
     let runtime = CronCommandRuntime::new(runtime, SNAPSHOT_STORE_CONFIG);
 
-    match execute_command_with_snapshots_and_options(&runtime, &command, &AlwaysSnapshot, options)
+    match CommandExecution::new(&runtime, &command)
+        .occ(occ)
+        .snapshots(AlwaysSnapshot)
+        .execute()
         .await
     {
         Ok(_) => Ok(()),
