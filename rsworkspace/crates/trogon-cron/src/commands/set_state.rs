@@ -1,12 +1,14 @@
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::{
-    AlwaysSnapshot, CommandStateModel, Decide, Decision, ExecuteError, NonEmpty, Snapshot,
-    SnapshotStoreConfig, StreamCommand, execute_command,
+    AlwaysSnapshot, CommandStateModel, Decide, Decision, ExecuteError, ExpectedVersionProvider,
+    NonEmpty, Snapshot, SnapshotStoreConfig, StreamCommand, execute_command,
 };
 
 use crate::{
     JobEnabledState, JobId, JobWriteCondition,
-    commands::{CronCommandExecutionRuntime, CronCommandRuntime},
+    commands::{
+        CronCommandExecutionRuntime, CronCommandRuntime, expected_version_from_write_condition,
+    },
     error::CronError,
     events::JobEvent,
 };
@@ -52,17 +54,6 @@ impl ChangeJobStateCommand {
             state,
             write_condition: Some(write_condition),
         }
-    }
-
-    pub(crate) fn resolved_write_condition(
-        &self,
-        current_version: Option<u64>,
-    ) -> JobWriteCondition {
-        self.write_condition.unwrap_or_else(|| {
-            current_version
-                .map(JobWriteCondition::MustBeAtVersion)
-                .unwrap_or(JobWriteCondition::MustNotExist)
-        })
     }
 }
 
@@ -118,20 +109,10 @@ impl CommandStateModel for ChangeJobStateCommand {
     type State = ChangeJobStateState;
     type Event = JobEvent;
     type Snapshot = ChangeJobStateState;
-    type AppendCondition = JobWriteCondition;
     type DomainError = CronError;
 
     fn initial_state() -> Self::State {
         ChangeJobStateState::Missing
-    }
-
-    fn restore_state(
-        _command: &Self,
-        snapshot: Option<Snapshot<Self::Snapshot>>,
-    ) -> Result<Self::State, Self::DomainError> {
-        Ok(snapshot
-            .map(|snapshot| snapshot.payload)
-            .unwrap_or(Self::initial_state()))
     }
 
     fn evolve(_state: Self::State, event: JobEvent) -> Result<Self::State, Self::DomainError> {
@@ -149,13 +130,12 @@ impl CommandStateModel for ChangeJobStateCommand {
     fn snapshot_state(state: &Self::State, version: u64) -> Option<Snapshot<Self::Snapshot>> {
         Some(Snapshot::new(version, *state))
     }
+}
 
-    fn append_condition(
-        command: &Self,
-        _state: &Self::State,
-        current_version: Option<u64>,
-    ) -> Self::AppendCondition {
-        command.resolved_write_condition(current_version)
+impl ExpectedVersionProvider for ChangeJobStateCommand {
+    fn expected_version(&self) -> Option<trogon_eventsourcing::ExpectedVersion> {
+        self.write_condition
+            .map(expected_version_from_write_condition)
     }
 }
 

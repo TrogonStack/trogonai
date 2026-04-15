@@ -2,13 +2,16 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::{
-    AlwaysSnapshot, CommandStateModel, Decide, Decision, ExecuteError, ExecutionRuntime, NonEmpty,
-    Snapshot, SnapshotStoreConfig, StreamCommand, execute_command,
+    AlwaysSnapshot, CommandStateModel, Decide, Decision, ExecuteError, ExecutionRuntime,
+    ExpectedVersionProvider, NonEmpty, Snapshot, SnapshotStoreConfig, StreamCommand,
+    execute_command,
 };
 
 use crate::{
     JobId, JobSpec, JobWriteCondition, ResolvedJobSpec,
-    commands::{CronCommandExecutionRuntime, CronCommandRuntime},
+    commands::{
+        CronCommandExecutionRuntime, CronCommandRuntime, expected_version_from_write_condition,
+    },
     error::CronError,
     events::{JobEvent, RegisteredJobSpec},
 };
@@ -98,20 +101,10 @@ impl CommandStateModel for RegisterJobCommand {
     type State = RegisterJobState;
     type Event = JobEvent;
     type Snapshot = RegisterJobState;
-    type AppendCondition = JobWriteCondition;
     type DomainError = CronError;
 
     fn initial_state() -> Self::State {
         RegisterJobState::Missing
-    }
-
-    fn restore_state(
-        _command: &Self,
-        snapshot: Option<Snapshot<Self::Snapshot>>,
-    ) -> Result<Self::State, Self::DomainError> {
-        Ok(snapshot
-            .map(|snapshot| snapshot.payload)
-            .unwrap_or(Self::initial_state()))
     }
 
     fn evolve(state: Self::State, event: JobEvent) -> Result<Self::State, Self::DomainError> {
@@ -129,13 +122,13 @@ impl CommandStateModel for RegisterJobCommand {
     fn snapshot_state(state: &Self::State, version: u64) -> Option<Snapshot<Self::Snapshot>> {
         Some(Snapshot::new(version, *state))
     }
+}
 
-    fn append_condition(
-        command: &Self,
-        _state: &Self::State,
-        _current_version: Option<u64>,
-    ) -> Self::AppendCondition {
-        command.write_condition()
+impl ExpectedVersionProvider for RegisterJobCommand {
+    fn expected_version(&self) -> Option<trogon_eventsourcing::ExpectedVersion> {
+        Some(expected_version_from_write_condition(
+            self.write_condition(),
+        ))
     }
 }
 
