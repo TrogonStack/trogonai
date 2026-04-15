@@ -232,7 +232,7 @@ mod client_tests {
 
 // ── Mock implementation ───────────────────────────────────────────────────────
 
-#[cfg(any(test, feature = "test-helpers"))]
+#[cfg(any(test, feature = "test-support"))]
 pub mod mock {
     use super::*;
     use std::sync::{Arc, Mutex};

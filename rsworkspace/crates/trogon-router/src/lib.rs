@@ -52,9 +52,9 @@ pub mod decision;
 pub mod error;
 pub mod event;
 pub mod llm;
-pub mod metrics;
 pub mod prompt;
 pub mod router;
+pub mod telemetry;
 pub mod unroutable;
 
 pub use decision::{RouteResult, RoutingDecision};

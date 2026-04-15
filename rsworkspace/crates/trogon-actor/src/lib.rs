@@ -62,9 +62,9 @@ pub mod actor;
 pub mod context;
 pub mod error;
 pub mod host;
-pub mod metrics;
 pub mod runtime;
 pub mod state;
+pub mod telemetry;
 
 pub use actor::EntityActor;
 pub use context::{ActorContext, MAX_SPAWN_DEPTH};
@@ -74,7 +74,7 @@ pub use state::{
     MAX_OCC_RETRIES, StateStore, provision_state, state_kv_key,
 };
 
-#[cfg(any(test, feature = "test-helpers"))]
+#[cfg(any(test, feature = "test-support"))]
 pub use context::test_helpers::ContextBuilder;
-#[cfg(any(test, feature = "test-helpers"))]
+#[cfg(any(test, feature = "test-support"))]
 pub use state::mock::MockStateStore;

@@ -20,7 +20,7 @@ use crate::{
     actor::EntityActor,
     context::ActorContext,
     error::{ActorError, SaveError},
-    metrics,
+    telemetry::metrics,
     state::{MAX_OCC_RETRIES, StateStore, state_kv_key},
 };
 
@@ -120,7 +120,7 @@ where
                 .state
                 .load(&kv_key)
                 .await
-                .map_err(ActorError::State)?
+                .map_err(|e| ActorError::State(e.to_string()))?
             {
                 Some(entry) => {
                     let s = serde_json::from_slice::<A::State>(&entry.value)
@@ -164,7 +164,7 @@ where
             {
                 Ok(_) => return Ok(()),
                 Err(SaveError::Conflict) => continue,
-                Err(SaveError::Other(msg)) => return Err(ActorError::State(msg)),
+                Err(SaveError::Other(e)) => return Err(ActorError::State(e.to_string())),
             }
         }
 

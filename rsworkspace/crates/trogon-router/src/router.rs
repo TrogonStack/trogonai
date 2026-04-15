@@ -10,7 +10,7 @@ use crate::{
     error::RouterError,
     event::RouterEvent,
     llm::LlmClient,
-    metrics,
+    telemetry::metrics,
     prompt::build_routing_prompt,
 };
 
@@ -502,24 +502,37 @@ mod tests {
     /// Line 90: registry.list_all() error is mapped to RouterError::Registry.
     #[tokio::test]
     async fn route_event_returns_registry_error_when_list_all_fails() {
-        use trogon_registry::RegistryError;
         use trogon_registry::store::RegistryStore;
         use bytes::Bytes;
+
+        #[derive(Debug)]
+        struct StoreError(&'static str);
+        impl std::fmt::Display for StoreError {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "{}", self.0)
+            }
+        }
+        impl std::error::Error for StoreError {}
 
         #[derive(Clone)]
         struct AlwaysFailStore;
         impl RegistryStore for AlwaysFailStore {
-            async fn put(&self, _: &str, _: Bytes) -> Result<(), RegistryError> {
-                Err(RegistryError::Put("fail".into()))
+            type PutError = StoreError;
+            type GetError = StoreError;
+            type DeleteError = StoreError;
+            type KeysError = StoreError;
+
+            async fn put(&self, _: &str, _: Bytes) -> Result<u64, Self::PutError> {
+                Err(StoreError("fail"))
             }
-            async fn get(&self, _: &str) -> Result<Option<Bytes>, RegistryError> {
-                Err(RegistryError::Get("fail".into()))
+            async fn get(&self, _: &str) -> Result<Option<Bytes>, Self::GetError> {
+                Err(StoreError("fail"))
             }
-            async fn delete(&self, _: &str) -> Result<(), RegistryError> {
-                Err(RegistryError::Delete("fail".into()))
+            async fn delete(&self, _: &str) -> Result<(), Self::DeleteError> {
+                Err(StoreError("fail"))
             }
-            async fn keys(&self) -> Result<Vec<String>, RegistryError> {
-                Err(RegistryError::List("injected keys error".into()))
+            async fn keys(&self) -> Result<Vec<String>, Self::KeysError> {
+                Err(StoreError("injected keys error"))
             }
         }
 

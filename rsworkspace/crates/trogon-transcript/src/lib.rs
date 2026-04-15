@@ -60,7 +60,7 @@
 //!
 //! ## Testing
 //!
-//! Enable the `test-helpers` feature to access [`publisher::mock::MockTranscriptPublisher`],
+//! Enable the `test-support` feature to access [`publisher::mock::MockTranscriptPublisher`],
 //! which collects entries in memory so you can assert on them without a NATS server.
 
 pub mod entry;

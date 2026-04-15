@@ -62,5 +62,5 @@ pub use provision::{BUCKET_NAME, ENTRY_TTL, HEARTBEAT_INTERVAL, provision};
 pub use registry::Registry;
 pub use store::RegistryStore;
 
-#[cfg(any(test, feature = "test-helpers"))]
+#[cfg(any(test, feature = "test-support"))]
 pub use store::mock::MockRegistryStore;

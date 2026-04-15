@@ -138,5 +138,23 @@ pub enum SaveError {
     /// The runtime will reload state and retry.
     Conflict,
     /// A genuine storage or network error — do not retry.
-    Other(String),
+    Other(Box<dyn std::error::Error + Send + Sync>),
+}
+
+impl std::fmt::Display for SaveError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SaveError::Conflict => write!(f, "optimistic concurrency conflict"),
+            SaveError::Other(e) => write!(f, "state save error: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for SaveError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            SaveError::Other(e) => Some(e.as_ref()),
+            SaveError::Conflict => None,
+        }
+    }
 }

@@ -6,7 +6,7 @@ use std::future::Future;
 /// Abstraction over the JetStream publish operation.
 ///
 /// Implemented by `NatsTranscriptPublisher` for production and by
-/// `MockTranscriptPublisher` (behind the `test-helpers` feature) for unit tests.
+/// `MockTranscriptPublisher` (behind the `test-support` feature) for unit tests.
 /// Using a trait here keeps `Session<P>` fully testable without a real NATS server.
 pub trait TranscriptPublisher: Send + Sync + Clone + 'static {
     fn publish(
@@ -45,7 +45,7 @@ impl TranscriptPublisher for NatsTranscriptPublisher {
 ///
 /// Collects every `(subject, payload)` pair into an `Arc<Mutex<Vec<...>>>` so
 /// tests can assert on what was published without a real NATS connection.
-#[cfg(any(test, feature = "test-helpers"))]
+#[cfg(any(test, feature = "test-support"))]
 pub mod mock {
     use super::*;
     use std::sync::{Arc, Mutex};
