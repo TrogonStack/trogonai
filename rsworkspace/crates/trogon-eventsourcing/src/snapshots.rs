@@ -3,6 +3,8 @@ use futures::StreamExt;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::collections::BTreeMap;
 
+use crate::StreamCommand;
+
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -17,14 +19,35 @@ impl<T> Snapshot<T> {
     }
 }
 
+pub trait SnapshotLoader<Payload>: Send + Sync {
+    type StreamId: ?Sized;
+    type Error;
+
+    fn load_snapshot(
+        &self,
+        stream_id: &Self::StreamId,
+    ) -> impl std::future::Future<Output = Result<Option<Snapshot<Payload>>, Self::Error>> + Send;
+}
+
+pub async fn load_snapshot_for<Payload, Loader, Command>(
+    loader: &Loader,
+    command: &Command,
+) -> Result<Option<Snapshot<Payload>>, Loader::Error>
+where
+    Loader: SnapshotLoader<Payload>,
+    Command: StreamCommand<StreamId = Loader::StreamId>,
+{
+    loader.load_snapshot(command.stream_id()).await
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SnapshotStoreConfig<'a> {
     key_prefix: &'a str,
-    checkpoint_key: &'a str,
+    checkpoint_key: Option<&'a str>,
 }
 
 impl<'a> SnapshotStoreConfig<'a> {
-    pub const fn new(key_prefix: &'a str, checkpoint_key: &'a str) -> Self {
+    pub const fn new(key_prefix: &'a str, checkpoint_key: Option<&'a str>) -> Self {
         Self {
             key_prefix,
             checkpoint_key,
@@ -35,7 +58,7 @@ impl<'a> SnapshotStoreConfig<'a> {
         self.key_prefix
     }
 
-    pub const fn checkpoint_key(self) -> &'a str {
+    pub const fn checkpoint_key(self) -> Option<&'a str> {
         self.checkpoint_key
     }
 }
@@ -75,6 +98,9 @@ pub enum SnapshotStoreError {
     InvalidSnapshotKey {
         key: String,
     },
+    MissingCheckpointKey {
+        key_prefix: String,
+    },
     Serde(serde_json::Error),
 }
 
@@ -97,6 +123,12 @@ impl std::fmt::Display for SnapshotStoreError {
             Self::InvalidSnapshotKey { key } => {
                 write!(f, "Invalid stream snapshot key: {key}")
             }
+            Self::MissingCheckpointKey { key_prefix } => {
+                write!(
+                    f,
+                    "Missing checkpoint key for snapshot namespace: {key_prefix}"
+                )
+            }
             Self::Serde(source) => write!(f, "Serialization error: {source}"),
         }
     }
@@ -106,7 +138,7 @@ impl std::error::Error for SnapshotStoreError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Kv { source, .. } => Some(source.as_ref()),
-            Self::InvalidSnapshotKey { .. } => None,
+            Self::InvalidSnapshotKey { .. } | Self::MissingCheckpointKey { .. } => None,
             Self::Serde(source) => Some(source),
         }
     }
@@ -122,8 +154,13 @@ pub fn snapshot_key(config: SnapshotStoreConfig<'_>, id: &str) -> String {
     format!("{}{}", config.key_prefix(), id)
 }
 
-pub fn checkpoint_key(config: SnapshotStoreConfig<'_>) -> String {
-    config.checkpoint_key().to_string()
+pub fn checkpoint_key(config: SnapshotStoreConfig<'_>) -> Result<String, SnapshotStoreError> {
+    config
+        .checkpoint_key()
+        .map(ToString::to_string)
+        .ok_or_else(|| SnapshotStoreError::MissingCheckpointKey {
+            key_prefix: config.key_prefix().to_string(),
+        })
 }
 
 fn snapshot_key_prefix(config: SnapshotStoreConfig<'_>) -> String {
@@ -244,7 +281,7 @@ pub async fn write_checkpoint(
     config: SnapshotStoreConfig<'_>,
     sequence: u64,
 ) -> Result<(), SnapshotStoreError> {
-    write_kv_value(bucket, &checkpoint_key(config), checkpoint_value(sequence)).await
+    write_kv_value(bucket, &checkpoint_key(config)?, checkpoint_value(sequence)).await
 }
 
 pub async fn maybe_advance_checkpoint(
@@ -261,7 +298,7 @@ pub async fn maybe_advance_checkpoint(
     let value = checkpoint_value(sequence);
     match revision {
         Some(revision) => match bucket
-            .update(&checkpoint_key(config), value.into(), revision)
+            .update(&checkpoint_key(config)?, value.into(), revision)
             .await
         {
             Ok(_) => Ok(()),
@@ -271,7 +308,7 @@ pub async fn maybe_advance_checkpoint(
                 source,
             )),
         },
-        None => match bucket.create(&checkpoint_key(config), value.into()).await {
+        None => match bucket.create(&checkpoint_key(config)?, value.into()).await {
             Ok(_) => Ok(()),
             Err(source) if source.kind() == kv::CreateErrorKind::AlreadyExists => Ok(()),
             Err(source) => Err(SnapshotStoreError::kv_source(
@@ -314,8 +351,9 @@ async fn read_checkpoint_entry(
     bucket: &kv::Store,
     config: SnapshotStoreConfig<'_>,
 ) -> Result<(Option<u64>, u64), SnapshotStoreError> {
+    let checkpoint_key = checkpoint_key(config)?;
     let Some(entry) = bucket
-        .entry(checkpoint_key(config))
+        .entry(checkpoint_key.clone())
         .await
         .map_err(|source| {
             SnapshotStoreError::kv_source("failed to read stream snapshot checkpoint entry", source)
@@ -330,7 +368,7 @@ async fn read_checkpoint_entry(
         .ok_or_else(|| {
             SnapshotStoreError::kv_source(
                 "failed to decode stream snapshot checkpoint",
-                std::io::Error::other(checkpoint_key(config)),
+                std::io::Error::other(checkpoint_key),
             )
         })?;
 
@@ -378,7 +416,44 @@ async fn delete_kv_value(bucket: &kv::Store, key: &str) -> Result<(), SnapshotSt
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures::executor::block_on;
     use serde::{Deserialize, Serialize};
+    use std::sync::Mutex;
+
+    #[derive(Debug)]
+    struct TestCommand {
+        id: String,
+    }
+
+    impl crate::StreamCommand for TestCommand {
+        type StreamId = str;
+
+        fn stream_id(&self) -> &Self::StreamId {
+            &self.id
+        }
+    }
+
+    #[derive(Debug)]
+    struct TestLoader {
+        requested_stream_ids: Mutex<Vec<String>>,
+        snapshot: Option<Snapshot<TestPayload>>,
+    }
+
+    impl SnapshotLoader<TestPayload> for TestLoader {
+        type StreamId = str;
+        type Error = ();
+
+        async fn load_snapshot(
+            &self,
+            stream_id: &Self::StreamId,
+        ) -> Result<Option<Snapshot<TestPayload>>, Self::Error> {
+            self.requested_stream_ids
+                .lock()
+                .unwrap()
+                .push(stream_id.to_string());
+            Ok(self.snapshot.clone())
+        }
+    }
 
     #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
     struct TestPayload {
@@ -387,24 +462,34 @@ mod tests {
 
     #[test]
     fn snapshot_store_config_exposes_values() {
-        let config = SnapshotStoreConfig::new("snapshots.v2.", "_checkpoint.v2");
+        let config = SnapshotStoreConfig::new("snapshots.v2.", Some("_checkpoint.v2"));
 
         assert_eq!(config.key_prefix(), "snapshots.v2.");
-        assert_eq!(config.checkpoint_key(), "_checkpoint.v2");
+        assert_eq!(config.checkpoint_key(), Some("_checkpoint.v2"));
     }
 
     #[test]
     fn snapshot_key_uses_prefix() {
-        let config = SnapshotStoreConfig::new("snapshots.v2.", "_checkpoint.v2");
+        let config = SnapshotStoreConfig::new("snapshots.v2.", Some("_checkpoint.v2"));
 
         assert_eq!(snapshot_key(config, "backup"), "snapshots.v2.backup");
     }
 
     #[test]
     fn checkpoint_key_uses_config_value() {
-        let config = SnapshotStoreConfig::new("snapshots.v3.", "_checkpoint.v3");
+        let config = SnapshotStoreConfig::new("snapshots.v3.", Some("_checkpoint.v3"));
 
-        assert_eq!(checkpoint_key(config), "_checkpoint.v3");
+        assert_eq!(checkpoint_key(config).unwrap(), "_checkpoint.v3");
+    }
+
+    #[test]
+    fn checkpoint_key_requires_configured_value() {
+        let config = SnapshotStoreConfig::new("snapshots.v3.", None);
+
+        assert_eq!(
+            checkpoint_key(config).unwrap_err().to_string(),
+            "Missing checkpoint key for snapshot namespace: snapshots.v3."
+        );
     }
 
     #[test]
@@ -471,8 +556,40 @@ mod tests {
     }
 
     #[test]
+    fn load_snapshot_for_uses_command_stream_id() {
+        let loader = TestLoader {
+            requested_stream_ids: Mutex::new(Vec::new()),
+            snapshot: Some(Snapshot::new(
+                4,
+                TestPayload {
+                    id: "backup".to_string(),
+                },
+            )),
+        };
+        let command = TestCommand {
+            id: "backup".to_string(),
+        };
+
+        let snapshot = block_on(load_snapshot_for(&loader, &command)).unwrap();
+
+        assert_eq!(
+            snapshot,
+            Some(Snapshot::new(
+                4,
+                TestPayload {
+                    id: "backup".to_string(),
+                },
+            ))
+        );
+        assert_eq!(
+            loader.requested_stream_ids.lock().unwrap().as_slice(),
+            ["backup"]
+        );
+    }
+
+    #[test]
     fn stream_id_from_snapshot_key_uses_configured_prefix() {
-        let config = SnapshotStoreConfig::new("snapshots.v2.", "_checkpoint.v2");
+        let config = SnapshotStoreConfig::new("snapshots.v2.", Some("_checkpoint.v2"));
 
         assert_eq!(
             stream_id_from_snapshot_key(config, "snapshots.v2.backup").unwrap(),
@@ -486,7 +603,7 @@ mod tests {
 
     #[test]
     fn stream_id_from_snapshot_key_rejects_empty_suffix() {
-        let config = SnapshotStoreConfig::new("snapshots.v2.", "_checkpoint.v2");
+        let config = SnapshotStoreConfig::new("snapshots.v2.", Some("_checkpoint.v2"));
 
         assert_eq!(
             stream_id_from_snapshot_key(config, "snapshots.v2.")
