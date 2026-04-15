@@ -3468,9 +3468,13 @@ version = "0.1.0"
 dependencies = [
  "acp-telemetry",
  "async-nats",
+ "bytes",
  "clap",
  "confique",
+ "futures-util",
  "serde",
+ "serde_json",
+ "testcontainers-modules",
  "tokio",
  "tracing",
  "trogon-actor",

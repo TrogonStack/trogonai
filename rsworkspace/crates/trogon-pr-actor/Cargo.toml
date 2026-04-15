@@ -26,4 +26,10 @@ trogon-std = { workspace = true }
 trogon-transcript = { workspace = true }
 
 [dev-dependencies]
+bytes = { workspace = true }
+futures-util = { workspace = true }
+serde_json = { workspace = true }
+testcontainers-modules = { workspace = true }
 trogon-actor = { workspace = true, features = ["test-helpers"] }
+trogon-registry = { workspace = true }
+trogon-transcript = { workspace = true }
