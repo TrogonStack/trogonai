@@ -19,10 +19,12 @@ pub fn build_routing_prompt(event: &RouterEvent, agents: &[AgentCapability]) -> 
     } else {
         lines.push("## Registered agents".to_string());
         lines.push(String::new());
+        lines.push("IMPORTANT: Route based on capabilities and event content — NOT by matching the event subject to the delivery address.".to_string());
+        lines.push(String::new());
         for agent in agents {
             lines.push(format!("### {}", agent.agent_type));
             lines.push(format!("- capabilities: {}", agent.capabilities.join(", ")));
-            lines.push(format!("- subject pattern: {}", agent.nats_subject));
+            lines.push(format!("- delivery address (where routed events are forwarded): {}", agent.nats_subject));
             lines.push(format!("- current load: {}", agent.current_load));
             if !agent.metadata.is_null() {
                 lines.push(format!("- metadata: {}", agent.metadata));
@@ -34,7 +36,6 @@ pub fn build_routing_prompt(event: &RouterEvent, agents: &[AgentCapability]) -> 
     // ── Incoming event ────────────────────────────────────────────────────────
     lines.push("## Incoming event".to_string());
     lines.push(String::new());
-    lines.push(format!("- subject: {}", event.subject));
     lines.push(format!("- event_type: {}", event.event_type()));
     lines.push(String::new());
     lines.push("### Payload (truncated to 4096 bytes)".to_string());
@@ -46,7 +47,7 @@ pub fn build_routing_prompt(event: &RouterEvent, agents: &[AgentCapability]) -> 
     // ── Instructions ─────────────────────────────────────────────────────────
     lines.push("## Task".to_string());
     lines.push(String::new());
-    lines.push("Decide which agent should handle this event and what the entity key is.".to_string());
+    lines.push("Decide which agent should handle this event based on its capabilities and the event type/content.".to_string());
     lines.push("The entity key uniquely identifies the domain object, e.g. `owner/repo/456` for a PR.".to_string());
     lines.push(String::new());
     lines.push("Respond with ONLY a JSON object — no markdown, no commentary.".to_string());
