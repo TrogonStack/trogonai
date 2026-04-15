@@ -9,30 +9,52 @@ pub trait CommandStateModel: StreamCommand + Sized {
     type State;
     type Event;
     type Snapshot;
-    type AppendCondition;
     type DomainError;
 
     fn initial_state() -> Self::State;
 
     fn restore_state(
-        command: &Self,
+        _command: &Self,
         snapshot: Option<Snapshot<Self::Snapshot>>,
-    ) -> Result<Self::State, Self::DomainError>;
+    ) -> Result<Self::State, Self::DomainError>
+    where
+        Self::Snapshot: Into<Self::State>,
+    {
+        Ok(snapshot
+            .map(|snapshot| snapshot.payload.into())
+            .unwrap_or_else(Self::initial_state))
+    }
 
     fn evolve(state: Self::State, event: Self::Event) -> Result<Self::State, Self::DomainError>;
 
     fn snapshot_state(state: &Self::State, version: u64) -> Option<Snapshot<Self::Snapshot>>;
-
-    fn append_condition(
-        command: &Self,
-        state: &Self::State,
-        current_version: Option<u64>,
-    ) -> Self::AppendCondition;
 }
 
-pub trait ExecutionRuntime<SnapshotPayload, StreamId: ?Sized, AppendCondition>:
-    Send + Sync
-{
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExpectedVersion {
+    NoStream,
+    StreamVersion(u64),
+}
+
+impl ExpectedVersion {
+    pub const fn resolve(current_version: Option<u64>, override_version: Option<Self>) -> Self {
+        match override_version {
+            Some(expected_version) => expected_version,
+            None => match current_version {
+                Some(version) => Self::StreamVersion(version),
+                None => Self::NoStream,
+            },
+        }
+    }
+}
+
+pub trait ExpectedVersionProvider: StreamCommand {
+    fn expected_version(&self) -> Option<ExpectedVersion> {
+        None
+    }
+}
+
+pub trait ExecutionRuntime<SnapshotPayload, StreamId: ?Sized>: Send + Sync {
     type Error;
 
     fn load_snapshot(
@@ -60,7 +82,7 @@ pub trait ExecutionRuntime<SnapshotPayload, StreamId: ?Sized, AppendCondition>:
     fn append_events(
         &self,
         stream_id: &StreamId,
-        condition: AppendCondition,
+        expected_version: ExpectedVersion,
         events: NonEmpty<EventData>,
     ) -> impl std::future::Future<Output = Result<AppendOutcome, Self::Error>> + Send;
 }
@@ -136,9 +158,10 @@ pub async fn execute_command<C, R, P>(
     snapshot_policy: &P,
 ) -> Result<ExecutionResult<C::State, C::Event>, ExecuteError<C::Error, C::DomainError, R::Error>>
 where
-    C: CommandStateModel + Decide<C::State, C::Event>,
+    C: CommandStateModel + Decide<C::State, C::Event> + ExpectedVersionProvider,
     C::Event: EventType + StreamEvent + Serialize + DeserializeOwned + Clone,
-    R: ExecutionRuntime<C::Snapshot, C::StreamId, C::AppendCondition>,
+    C::Snapshot: Into<C::State>,
+    R: ExecutionRuntime<C::Snapshot, C::StreamId>,
     P: SnapshotPolicy<C::State, C::Event>,
 {
     let stream_id = command.stream_id();
@@ -187,9 +210,9 @@ where
 
     let Decision::Event(events) = C::decide(&state, command).map_err(ExecuteError::Decision)?;
     let encoded_events = encode_events(&events).map_err(ExecuteError::EncodeEvent)?;
-    let append_condition = C::append_condition(command, &state, current_version);
+    let expected_version = ExpectedVersion::resolve(current_version, command.expected_version());
     let append_outcome = runtime
-        .append_events(stream_id, append_condition, encoded_events)
+        .append_events(stream_id, expected_version, encoded_events)
         .await
         .map_err(ExecuteError::Append)?;
 
@@ -302,7 +325,7 @@ mod tests {
         fail_append: bool,
         loaded_stream_ids: Arc<Mutex<Vec<String>>>,
         read_from_sequences: Arc<Mutex<Vec<u64>>>,
-        append_conditions: Arc<Mutex<Vec<u64>>>,
+        expected_versions: Arc<Mutex<Vec<ExpectedVersion>>>,
         appended_events: Arc<Mutex<Vec<EventData>>>,
         saved_snapshots: Arc<Mutex<Vec<Snapshot<TestState>>>>,
     }
@@ -334,20 +357,10 @@ mod tests {
         type State = TestState;
         type Event = TestEvent;
         type Snapshot = TestState;
-        type AppendCondition = u64;
         type DomainError = TestDomainError;
 
         fn initial_state() -> Self::State {
             TestState::Missing
-        }
-
-        fn restore_state(
-            _command: &Self,
-            snapshot: Option<Snapshot<Self::Snapshot>>,
-        ) -> Result<Self::State, Self::DomainError> {
-            Ok(snapshot
-                .map(|snapshot| snapshot.payload)
-                .unwrap_or(Self::initial_state()))
         }
 
         fn evolve(
@@ -365,15 +378,9 @@ mod tests {
         fn snapshot_state(state: &Self::State, version: u64) -> Option<Snapshot<Self::Snapshot>> {
             Some(Snapshot::new(version, *state))
         }
-
-        fn append_condition(
-            _command: &Self,
-            _state: &Self::State,
-            current_version: Option<u64>,
-        ) -> Self::AppendCondition {
-            current_version.unwrap_or(0)
-        }
     }
+
+    impl ExpectedVersionProvider for TestCommand {}
 
     impl Decide<TestState, TestEvent> for TestCommand {
         type Error = TestDecisionError;
@@ -431,7 +438,7 @@ mod tests {
         }
     }
 
-    impl ExecutionRuntime<TestState, str, u64> for FakeRuntime {
+    impl ExecutionRuntime<TestState, str> for FakeRuntime {
         type Error = &'static str;
 
         async fn load_snapshot(
@@ -487,13 +494,16 @@ mod tests {
         async fn append_events(
             &self,
             _stream_id: &str,
-            condition: u64,
+            expected_version: ExpectedVersion,
             events: NonEmpty<EventData>,
         ) -> Result<AppendOutcome, Self::Error> {
             if self.fail_append {
                 return Err("append");
             }
-            self.append_conditions.lock().unwrap().push(condition);
+            self.expected_versions
+                .lock()
+                .unwrap()
+                .push(expected_version);
             self.appended_events
                 .lock()
                 .unwrap()
@@ -531,7 +541,10 @@ mod tests {
                 id: "alpha".to_string(),
             })
         );
-        assert_eq!(runtime.append_conditions.lock().unwrap().as_slice(), &[0]);
+        assert_eq!(
+            runtime.expected_versions.lock().unwrap().as_slice(),
+            &[ExpectedVersion::NoStream]
+        );
         assert_eq!(
             runtime.read_from_sequences.lock().unwrap().as_slice(),
             &[] as &[u64]
@@ -566,7 +579,10 @@ mod tests {
         let result = block_on(execute_command(&runtime, &command, &NoSnapshot)).unwrap();
 
         assert_eq!(runtime.read_from_sequences.lock().unwrap().as_slice(), &[2]);
-        assert_eq!(runtime.append_conditions.lock().unwrap().as_slice(), &[2]);
+        assert_eq!(
+            runtime.expected_versions.lock().unwrap().as_slice(),
+            &[ExpectedVersion::StreamVersion(2)]
+        );
         assert_eq!(result.state, TestState::Missing);
     }
 
@@ -663,7 +679,10 @@ mod tests {
         let appended_events = runtime.appended_events.lock().unwrap();
 
         assert_eq!(result.next_expected_version, 2);
-        assert_eq!(runtime.append_conditions.lock().unwrap().as_slice(), &[1]);
+        assert_eq!(
+            runtime.expected_versions.lock().unwrap().as_slice(),
+            &[ExpectedVersion::StreamVersion(1)]
+        );
         assert_eq!(appended_events.len(), 1);
         assert_eq!(appended_events[0].event_type, "state_changed");
         assert_eq!(appended_events[0].stream_id, "alpha");
