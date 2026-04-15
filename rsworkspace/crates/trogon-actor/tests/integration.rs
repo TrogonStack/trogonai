@@ -599,3 +599,77 @@ async fn provision_state_returns_error_when_nats_is_down() {
     let result = provision_state(&js).await;
     assert!(result.is_err(), "expected error when NATS is down, got Ok");
 }
+
+/// Deleting the backing stream causes `kv::Store::entry()` to fail, which must
+/// propagate as `Err(String)` from `StateStore::load` — covers state.rs line 88.
+#[tokio::test]
+async fn state_store_load_returns_error_when_stream_deleted() {
+    let (_nats, js, _container) = setup().await;
+    let state_store = provision_state(&js).await.unwrap();
+
+    js.delete_stream("KV_ACTOR_STATE").await.unwrap();
+
+    use trogon_actor::state::StateStore;
+    let result = StateStore::load(&state_store, "counter.ghost").await;
+    assert!(result.is_err(), "expected Err from load when stream is gone");
+}
+
+/// Deleting the backing stream causes `kv::Store::delete()` to fail, propagating
+/// as `Err(String)` from `StateStore::delete` — covers state.rs line 130.
+#[tokio::test]
+async fn state_store_delete_returns_error_when_stream_deleted() {
+    let (_nats, js, _container) = setup().await;
+    let state_store = provision_state(&js).await.unwrap();
+
+    js.delete_stream("KV_ACTOR_STATE").await.unwrap();
+
+    use trogon_actor::state::StateStore;
+    let result = StateStore::delete(&state_store, "counter.ghost").await;
+    assert!(result.is_err(), "expected Err from delete when stream is gone, got: {result:?}");
+}
+
+/// When the TRANSCRIPTS stream is not provisioned, `Session::append()` returns
+/// an error. The actor's transcript writes fail silently (actors call `.ok()`) but
+/// `handle_event` still succeeds — covers runtime.rs line 167 (append_fn error path).
+#[tokio::test]
+async fn actor_transcript_append_failure_does_not_abort_handle_event() {
+    let (nats, js, _container) = setup().await;
+
+    let state_store = provision_state(&js).await.unwrap();
+    let registry_store = provision_registry(&js).await.unwrap();
+    // Use NatsTranscriptPublisher WITHOUT provisioning the TRANSCRIPTS stream.
+    let publisher = NatsTranscriptPublisher::new(js.clone());
+    let registry = Registry::new(registry_store);
+
+    let runtime = ActorRuntime::new(state_store, publisher, nats, registry);
+    // Scribe calls ctx.append_user_message(...).ok() — if append fails the actor
+    // still succeeds. handle_event must return Ok.
+    let result = runtime.handle_event(&mut Scribe, "entity-no-transcript").await;
+    assert!(result.is_ok(), "handle_event must succeed even when transcript appends fail");
+}
+
+/// Deleting the AGENT_REGISTRY backing stream makes `registry.discover()` fail.
+/// The spawn_fn propagates the error as an `Err(String)` — covers runtime.rs line 185.
+/// SpawnActor ignores errors from `ctx.spawn_agent()` via `.ok()`, so handle_event
+/// still succeeds.
+#[tokio::test]
+async fn spawn_agent_discover_failure_is_propagated_as_error_string() {
+    let (nats, js, _container) = setup().await;
+
+    let state_store = provision_state(&js).await.unwrap();
+    let registry_store = provision_registry(&js).await.unwrap();
+    let publisher = NatsTranscriptPublisher::new(js.clone());
+    let registry = Registry::new(registry_store);
+
+    // Register a capable agent so the registry lookup would succeed normally.
+    let cap = AgentCapability::new("SecurityActor", ["security_analysis"], "sub-agents.sec");
+    registry.register(&cap).await.unwrap();
+
+    // Now destroy the AGENT_REGISTRY backing stream — discover() will fail.
+    js.delete_stream("KV_AGENT_REGISTRY").await.unwrap();
+
+    let runtime = ActorRuntime::new(state_store, publisher, nats, registry);
+    // SpawnActor calls ctx.spawn_agent(...) and ignores errors — handle_event must succeed.
+    let result = runtime.handle_event(&mut SpawnActor, "entity-discover-fail").await;
+    assert!(result.is_ok(), "handle_event must succeed when discover fails: {result:?}");
+}
