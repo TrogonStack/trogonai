@@ -4,10 +4,12 @@ use testcontainers_modules::{
     nats::Nats,
     testcontainers::{runners::AsyncRunner, ImageExt},
 };
+use std::sync::Arc;
 use trogon_actor::{
     context::ActorContext,
     actor::EntityActor,
     error::ActorError,
+    host::ActorHost,
     runtime::ActorRuntime,
     state::provision_state,
 };
@@ -672,4 +674,178 @@ async fn spawn_agent_discover_failure_is_propagated_as_error_string() {
     // SpawnActor calls ctx.spawn_agent(...) and ignores errors — handle_event must succeed.
     let result = runtime.handle_event(&mut SpawnActor, "entity-discover-fail").await;
     assert!(result.is_ok(), "handle_event must succeed when discover fails: {result:?}");
+}
+
+// ── ActorHost integration tests ───────────────────────────────────────────────
+//
+// These tests exercise ActorHost::run(): subscribing to NATS, dispatching
+// incoming messages to the actor, and the cancel/shutdown path.
+
+/// Clonable actor used only in host tests.
+#[derive(Clone)]
+struct HostCounterActor;
+
+impl EntityActor for HostCounterActor {
+    type State = Counter;
+    type Error = std::convert::Infallible;
+
+    fn actor_type() -> &'static str { "host-counter" }
+
+    async fn handle(
+        &mut self,
+        state: &mut Counter,
+        _ctx: &ActorContext,
+    ) -> Result<(), Self::Error> {
+        state.count += 1;
+        Ok(())
+    }
+}
+
+fn make_host(
+    runtime: ActorRuntime<
+        async_nats::jetstream::kv::Store,
+        NatsTranscriptPublisher,
+        async_nats::Client,
+        async_nats::jetstream::kv::Store,
+    >,
+) -> ActorHost<
+    HostCounterActor,
+    async_nats::jetstream::kv::Store,
+    NatsTranscriptPublisher,
+    async_nats::Client,
+    async_nats::jetstream::kv::Store,
+> {
+    let capability = AgentCapability::new(
+        "HostCounterActor",
+        ["host_count"],
+        "actors.host-counter.>",
+    );
+    ActorHost::new(runtime, HostCounterActor, capability)
+}
+
+async fn make_runtime(
+    nats: async_nats::Client,
+    js: async_nats::jetstream::Context,
+) -> ActorRuntime<
+    async_nats::jetstream::kv::Store,
+    NatsTranscriptPublisher,
+    async_nats::Client,
+    async_nats::jetstream::kv::Store,
+> {
+    let state_store = provision_state(&js).await.unwrap();
+    let registry_store = provision_registry(&js).await.unwrap();
+    let publisher = NatsTranscriptPublisher::new(js);
+    let registry = Registry::new(registry_store);
+    ActorRuntime::new(state_store, publisher, nats, registry)
+}
+
+/// Publish a NATS message to the actor's inbox and verify that:
+/// - the message is dispatched to the actor's `handle()` method, and
+/// - the resulting state is persisted in the ACTOR_STATE KV bucket.
+#[tokio::test]
+async fn host_dispatches_nats_message_to_actor() {
+    let (nats, js, _container) = setup().await;
+    let runtime = make_runtime(nats.clone(), js.clone()).await;
+    let state_store = js.get_key_value("ACTOR_STATE").await.unwrap();
+
+    let host = Arc::new(make_host(runtime));
+    let host_task = Arc::clone(&host);
+    let run_handle = tokio::spawn(async move { host_task.run().await });
+
+    // Give the subscription time to be established before publishing.
+    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+    nats.publish("actors.host-counter.entity-1", Bytes::new())
+        .await
+        .unwrap();
+    nats.flush().await.unwrap();
+
+    // Wait for the actor to process the message.
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+    host.cancel();
+    tokio::time::timeout(
+        tokio::time::Duration::from_secs(2),
+        run_handle,
+    )
+    .await
+    .expect("host.run() did not stop within 2s")
+    .unwrap()  // JoinError
+    .unwrap(); // HostError
+
+    // State for "host-counter" actor, entity "entity-1" must have count == 1.
+    let entry = state_store
+        .entry("host-counter.entity-1")
+        .await
+        .unwrap()
+        .expect("state entry not found — actor may not have handled the message");
+    let saved: Counter = serde_json::from_slice(&entry.value).unwrap();
+    assert_eq!(saved.count, 1, "actor should have handled exactly one message");
+}
+
+/// Calling `cancel()` on a running host causes `run()` to return `Ok(())`.
+#[tokio::test]
+async fn host_cancel_stops_run_cleanly() {
+    let (nats, js, _container) = setup().await;
+    let runtime = make_runtime(nats, js).await;
+
+    let host = Arc::new(make_host(runtime));
+    let host_task = Arc::clone(&host);
+    let run_handle = tokio::spawn(async move { host_task.run().await });
+
+    // Cancel immediately — no messages published.
+    tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
+    host.cancel();
+
+    let result = tokio::time::timeout(
+        tokio::time::Duration::from_secs(2),
+        run_handle,
+    )
+    .await
+    .expect("host.run() did not stop within 2s")
+    .unwrap(); // JoinError
+
+    assert!(result.is_ok(), "expected Ok(()), got: {result:?}");
+}
+
+/// The entity key is extracted from the NATS subject by stripping the
+/// `actors.{type}.` prefix. Verify that state is persisted under the correct
+/// KV key when the entity key contains dots (e.g. `owner.repo.42`).
+#[tokio::test]
+async fn host_entity_key_extracted_from_nats_subject() {
+    let (nats, js, _container) = setup().await;
+    let runtime = make_runtime(nats.clone(), js.clone()).await;
+    let state_store = js.get_key_value("ACTOR_STATE").await.unwrap();
+
+    let host = Arc::new(make_host(runtime));
+    let host_task = Arc::clone(&host);
+    let run_handle = tokio::spawn(async move { host_task.run().await });
+
+    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+    // Entity key with dots: "owner.repo.42"
+    nats.publish("actors.host-counter.owner.repo.42", Bytes::new())
+        .await
+        .unwrap();
+    nats.flush().await.unwrap();
+
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    host.cancel();
+    tokio::time::timeout(
+        tokio::time::Duration::from_secs(2),
+        run_handle,
+    )
+    .await
+    .expect("host.run() did not stop within 2s")
+    .unwrap()
+    .unwrap();
+
+    // KV key: "host-counter.owner.repo.42"
+    let entry = state_store
+        .entry("host-counter.owner.repo.42")
+        .await
+        .unwrap()
+        .expect("state not found under host-counter.owner.repo.42");
+    let saved: Counter = serde_json::from_slice(&entry.value).unwrap();
+    assert_eq!(saved.count, 1);
 }
