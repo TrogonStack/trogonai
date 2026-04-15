@@ -88,6 +88,8 @@ pub async fn post_comment(
             }
             Err(_) => {
                 // Retry once on transient failure before graceful degradation.
+                // Short pause to avoid amplifying a transient NATS spike.
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
                 match get_comments(ctx, &check_input).await {
                     Ok(json_str) => {
                         if let Ok(Value::Array(comments)) = serde_json::from_str::<Value>(&json_str) {
