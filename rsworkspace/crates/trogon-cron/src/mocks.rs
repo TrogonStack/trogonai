@@ -9,13 +9,16 @@ use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use serde::{Serialize, de::DeserializeOwned};
 use trogon_eventsourcing::{
-    AppendOutcome, EventData, ExpectedVersion, NonEmpty, RecordedEvent, Snapshot, StreamCommand,
+    AppendOutcome, EventData, ExpectedState, NonEmpty, RecordedEvent, Snapshot, StreamCommand,
 };
 use trogon_nats::lease::{ReleaseLease, RenewLease, TryAcquireLease};
 
 use crate::{
     ChangeJobStateCommand, GetJobCommand, ListJobsCommand, RegisterJobCommand, RemoveJobCommand,
-    commands::{CronCommandExecutionRuntime, change_job_state, register_job, remove_job},
+    commands::{
+        CronCommandRuntimePort, CronCommandSnapshotRuntime, change_job_state, register_job,
+        remove_job,
+    },
     config::{JobSpec, JobWriteCondition, JobWriteState},
     domain::ResolvedJobSpec,
     error::CronError,
@@ -234,34 +237,7 @@ impl MockCronStore {
     }
 }
 
-impl<Payload> CronCommandExecutionRuntime<Payload> for MockCronStore
-where
-    Payload: Serialize + DeserializeOwned + Send,
-{
-    async fn load_command_snapshot(
-        &self,
-        config: trogon_eventsourcing::SnapshotStoreConfig<'static>,
-        stream_id: &crate::JobId,
-    ) -> Result<Option<Snapshot<Payload>>, CronError> {
-        self.read_command_snapshot(config, stream_id)
-    }
-
-    async fn save_command_snapshot(
-        &self,
-        config: trogon_eventsourcing::SnapshotStoreConfig<'static>,
-        stream_id: &crate::JobId,
-        snapshot: Snapshot<Payload>,
-    ) -> Result<(), CronError> {
-        let snapshot = serde_json::to_string(&snapshot)?;
-        self.command_snapshots
-            .lock()
-            .unwrap()
-            .entry(config.key_prefix().to_string())
-            .or_default()
-            .insert(stream_id.to_string(), snapshot);
-        Ok(())
-    }
-
+impl CronCommandRuntimePort for MockCronStore {
     async fn current_job_stream_version(
         &self,
         stream_id: &crate::JobId,
@@ -316,7 +292,7 @@ where
     async fn append_job_events(
         &self,
         stream_id: &crate::JobId,
-        expected_version: ExpectedVersion,
+        expected_state: ExpectedState,
         events: NonEmpty<EventData>,
     ) -> Result<AppendOutcome, CronError> {
         let stream_id = stream_id.clone();
@@ -342,14 +318,25 @@ where
 
         let current_snapshot = jobs.get(stream_id.as_str()).cloned();
         let current_version = stream_versions.get(stream_id.as_str()).copied();
-        let write_condition = match expected_version {
-            ExpectedVersion::NoStream => JobWriteCondition::MustNotExist,
-            ExpectedVersion::StreamVersion(version) => JobWriteCondition::MustBeAtVersion(version),
-        };
-        write_condition.ensure(
-            stream_id.as_str(),
-            JobWriteState::new(current_version, current_snapshot.as_ref().is_some()),
-        )?;
+        let write_state = JobWriteState::new(current_version, current_snapshot.as_ref().is_some());
+        match expected_state {
+            ExpectedState::Any => {}
+            ExpectedState::StreamExists if write_state.exists() => {}
+            ExpectedState::StreamExists => {
+                return Err(CronError::OptimisticConcurrencyConflict {
+                    id: stream_id.to_string(),
+                    expected: ExpectedState::StreamExists,
+                    current_version,
+                });
+            }
+            ExpectedState::NoStream => {
+                JobWriteCondition::MustNotExist.ensure(stream_id.as_str(), write_state)?;
+            }
+            ExpectedState::StreamRevision(version) => {
+                JobWriteCondition::MustBeAtVersion(version)
+                    .ensure(stream_id.as_str(), write_state)?;
+            }
+        }
 
         let stored_events = stream_events.entry(stream_id.to_string()).or_default();
         let mut projected_snapshot = current_snapshot;
@@ -392,6 +379,35 @@ where
         Ok(AppendOutcome {
             next_expected_version: current_version.unwrap_or(0) + appended_events,
         })
+    }
+}
+
+impl<Payload> CronCommandSnapshotRuntime<Payload> for MockCronStore
+where
+    Payload: Serialize + DeserializeOwned + Send,
+{
+    async fn load_command_snapshot(
+        &self,
+        config: trogon_eventsourcing::SnapshotStoreConfig<'static>,
+        stream_id: &crate::JobId,
+    ) -> Result<Option<Snapshot<Payload>>, CronError> {
+        self.read_command_snapshot(config, stream_id)
+    }
+
+    async fn save_command_snapshot(
+        &self,
+        config: trogon_eventsourcing::SnapshotStoreConfig<'static>,
+        stream_id: &crate::JobId,
+        snapshot: Snapshot<Payload>,
+    ) -> Result<(), CronError> {
+        let snapshot = serde_json::to_string(&snapshot)?;
+        self.command_snapshots
+            .lock()
+            .unwrap()
+            .entry(config.key_prefix().to_string())
+            .or_default()
+            .insert(stream_id.to_string(), snapshot);
+        Ok(())
     }
 }
 
@@ -488,10 +504,7 @@ mod tests {
         assert_eq!(seeded.version, 1);
 
         store
-            .register_job(
-                RegisterJobCommand::new(base_job("alpha"), JobWriteCondition::MustNotExist)
-                    .unwrap(),
-            )
+            .register_job(RegisterJobCommand::new(base_job("alpha")).unwrap())
             .await
             .unwrap();
         let alpha = store
@@ -504,10 +517,9 @@ mod tests {
         assert_eq!(alpha.version, 1);
 
         store
-            .change_job_state(ChangeJobStateCommand::with_write_condition(
+            .change_job_state(ChangeJobStateCommand::new(
                 job_id("alpha"),
                 JobEnabledState::Disabled,
-                JobWriteCondition::MustBeAtVersion(alpha.version),
             ))
             .await
             .unwrap();
@@ -543,10 +555,7 @@ mod tests {
             .unwrap()
             .unwrap();
         store
-            .remove_job(RemoveJobCommand::with_write_condition(
-                job_id("alpha"),
-                JobWriteCondition::MustBeAtVersion(alpha.version),
-            ))
+            .remove_job(RemoveJobCommand::new(job_id("alpha")))
             .await
             .unwrap();
         assert!(
@@ -560,10 +569,7 @@ mod tests {
         );
 
         store
-            .register_job(
-                RegisterJobCommand::new(base_job("alpha"), JobWriteCondition::MustNotExist)
-                    .unwrap(),
-            )
+            .register_job(RegisterJobCommand::new(base_job("alpha")).unwrap())
             .await
             .unwrap();
         let re_registered = store
@@ -577,7 +583,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn mock_cron_store_rejects_invalid_specs_and_stale_versions() {
+    async fn mock_cron_store_rejects_invalid_specs_and_state_errors() {
         let store = MockCronStore::new();
         let mut invalid = base_job("bad");
         invalid.delivery = DeliverySpec::NatsEvent {
@@ -589,35 +595,17 @@ mod tests {
             }),
         };
 
-        let invalid_error =
-            RegisterJobCommand::new(invalid, JobWriteCondition::MustNotExist).unwrap_err();
+        let invalid_error = RegisterJobCommand::new(invalid).unwrap_err();
         assert!(invalid_error.to_string().contains("sampling source"));
 
         store
-            .register_job(
-                RegisterJobCommand::new(base_job("alpha"), JobWriteCondition::MustNotExist)
-                    .unwrap(),
-            )
+            .register_job(RegisterJobCommand::new(base_job("alpha")).unwrap())
             .await
             .unwrap();
-        let stale_error = store
-            .change_job_state(ChangeJobStateCommand::with_write_condition(
-                job_id("alpha"),
-                JobEnabledState::Disabled,
-                JobWriteCondition::MustBeAtVersion(99),
-            ))
-            .await
-            .unwrap_err();
-        assert!(matches!(
-            stale_error,
-            CronError::OptimisticConcurrencyConflict { .. }
-        ));
-
         let same_state_error = store
-            .change_job_state(ChangeJobStateCommand::with_write_condition(
+            .change_job_state(ChangeJobStateCommand::new(
                 job_id("alpha"),
                 JobEnabledState::Enabled,
-                JobWriteCondition::MustBeAtVersion(1),
             ))
             .await
             .unwrap_err();
@@ -627,10 +615,9 @@ mod tests {
         ));
 
         let missing_error = store
-            .change_job_state(ChangeJobStateCommand::with_write_condition(
+            .change_job_state(ChangeJobStateCommand::new(
                 job_id("missing"),
                 JobEnabledState::Disabled,
-                JobWriteCondition::MustNotExist,
             ))
             .await
             .unwrap_err();

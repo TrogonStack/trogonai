@@ -1,4 +1,6 @@
-use crate::config::{JobEnabledState, JobWriteCondition};
+use trogon_eventsourcing::ExpectedState;
+
+use crate::config::JobEnabledState;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -29,7 +31,7 @@ pub enum CronError {
     },
     OptimisticConcurrencyConflict {
         id: String,
-        expected: JobWriteCondition,
+        expected: ExpectedState,
         current_version: Option<u64>,
     },
     Serde(serde_json::Error),
@@ -245,6 +247,7 @@ impl From<trogon_eventsourcing::SnapshotStoreError> for CronError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use trogon_eventsourcing::ExpectedState;
     use trogon_nats::SubjectTokenViolation;
 
     #[test]
@@ -289,7 +292,7 @@ mod tests {
 
         let occ_missing = CronError::OptimisticConcurrencyConflict {
             id: "job-1".to_string(),
-            expected: JobWriteCondition::MustNotExist,
+            expected: ExpectedState::NoStream,
             current_version: None,
         };
         assert!(
@@ -301,7 +304,7 @@ mod tests {
 
         let occ_current = CronError::OptimisticConcurrencyConflict {
             id: "job-1".to_string(),
-            expected: JobWriteCondition::MustBeAtVersion(3),
+            expected: ExpectedState::StreamRevision(3),
             current_version: Some(4),
         };
         assert!(occ_current.to_string().contains("current version is 4"));

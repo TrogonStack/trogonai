@@ -3,15 +3,13 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::{
     AlwaysSnapshot, CommandStateModel, Decide, Decision, ExecuteError, ExecutionRuntime,
-    ExpectedVersionProvider, NonEmpty, Snapshot, SnapshotStoreConfig, StreamCommand,
-    execute_command,
+    ExpectedState, ExpectedStateProvider, NonEmpty, Snapshot, SnapshotStateModel,
+    SnapshotStoreConfig, StreamCommand, execute_command_with_snapshots,
 };
 
 use crate::{
-    JobId, JobSpec, JobWriteCondition, ResolvedJobSpec,
-    commands::{
-        CronCommandExecutionRuntime, CronCommandRuntime, expected_version_from_write_condition,
-    },
+    JobId, JobSpec, ResolvedJobSpec,
+    commands::{CronCommandRuntime, CronCommandRuntimePort, CronCommandSnapshotRuntime},
     error::CronError,
     events::{JobEvent, RegisteredJobSpec},
 };
@@ -20,7 +18,6 @@ use crate::{
 pub struct RegisterJobCommand {
     id: JobId,
     job: ResolvedJobSpec,
-    write_condition: JobWriteCondition,
 }
 
 pub(crate) const SNAPSHOT_STORE_CONFIG: SnapshotStoreConfig<'static> =
@@ -48,7 +45,7 @@ impl fmt::Display for RegisterJobDecisionError {
 impl std::error::Error for RegisterJobDecisionError {}
 
 impl RegisterJobCommand {
-    pub fn new(spec: JobSpec, write_condition: JobWriteCondition) -> Result<Self, CronError> {
+    pub fn new(spec: JobSpec) -> Result<Self, CronError> {
         let id = JobId::parse(&spec.id).map_err(|source| {
             CronError::event_source(
                 "failed to build register job command from validated spec",
@@ -58,16 +55,11 @@ impl RegisterJobCommand {
         Ok(Self {
             id,
             job: ResolvedJobSpec::try_from(&spec)?,
-            write_condition,
         })
     }
 
     pub fn job(&self) -> &ResolvedJobSpec {
         &self.job
-    }
-
-    pub const fn write_condition(&self) -> JobWriteCondition {
-        self.write_condition
     }
 }
 
@@ -100,7 +92,6 @@ impl Decide<RegisterJobState, JobEvent> for RegisterJobCommand {
 impl CommandStateModel for RegisterJobCommand {
     type State = RegisterJobState;
     type Event = JobEvent;
-    type Snapshot = RegisterJobState;
     type DomainError = CronError;
 
     fn initial_state() -> Self::State {
@@ -118,33 +109,35 @@ impl CommandStateModel for RegisterJobCommand {
             },
         }
     }
+}
+
+impl SnapshotStateModel for RegisterJobCommand {
+    type Snapshot = RegisterJobState;
 
     fn snapshot_state(state: &Self::State, version: u64) -> Option<Snapshot<Self::Snapshot>> {
         Some(Snapshot::new(version, *state))
     }
 }
 
-impl ExpectedVersionProvider for RegisterJobCommand {
-    fn expected_version(&self) -> Option<trogon_eventsourcing::ExpectedVersion> {
-        Some(expected_version_from_write_condition(
-            self.write_condition(),
-        ))
+impl ExpectedStateProvider for RegisterJobCommand {
+    fn expected_state(&self) -> Option<ExpectedState> {
+        Some(ExpectedState::NoStream)
     }
 }
 
 pub async fn run<R>(runtime: &R, command: RegisterJobCommand) -> Result<(), CronError>
 where
-    R: CronCommandExecutionRuntime<RegisterJobState>,
+    R: CronCommandRuntimePort + CronCommandSnapshotRuntime<RegisterJobState>,
 {
     let id = command.stream_id().to_string();
     let runtime = CronCommandRuntime::new(runtime, SNAPSHOT_STORE_CONFIG);
 
-    match execute_command(&runtime, &command, &AlwaysSnapshot).await {
+    match execute_command_with_snapshots(&runtime, &command, &AlwaysSnapshot).await {
         Ok(_) => Ok(()),
         Err(ExecuteError::Decision(RegisterJobDecisionError::AlreadyRegistered { .. })) => {
             return Err(CronError::OptimisticConcurrencyConflict {
                 id: id.clone(),
-                expected: command.write_condition(),
+                expected: ExpectedState::NoStream,
                 current_version: runtime.current_stream_version(command.stream_id()).await?,
             });
         }
@@ -201,8 +194,7 @@ mod tests {
     #[test]
     fn decides_registration_from_missing_state() {
         let state = RegisterJobState::Missing;
-        let command =
-            RegisterJobCommand::new(job("backup"), JobWriteCondition::MustNotExist).unwrap();
+        let command = RegisterJobCommand::new(job("backup")).unwrap();
 
         let decision = decide(&state, &command).unwrap();
         assert_eq!(
@@ -217,8 +209,7 @@ mod tests {
     #[test]
     fn rejects_registering_existing_job() {
         let state = RegisterJobState::Present;
-        let command =
-            RegisterJobCommand::new(job("backup"), JobWriteCondition::MustNotExist).unwrap();
+        let command = RegisterJobCommand::new(job("backup")).unwrap();
 
         assert!(matches!(
             decide(&state, &command).unwrap_err(),
@@ -230,12 +221,9 @@ mod tests {
     async fn run_registers_job_in_store() {
         let store = MockCronStore::new();
 
-        run(
-            &store,
-            RegisterJobCommand::new(job("backup"), JobWriteCondition::MustNotExist).unwrap(),
-        )
-        .await
-        .unwrap();
+        run(&store, RegisterJobCommand::new(job("backup")).unwrap())
+            .await
+            .unwrap();
 
         let snapshot = store
             .get_job(GetJobCommand {
