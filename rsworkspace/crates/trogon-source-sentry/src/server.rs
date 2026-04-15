@@ -550,6 +550,17 @@ mod tests {
         assert!(publisher.published_messages().is_empty());
     }
 
+    #[test]
+    fn sentry_resource_as_str_covers_all_documented_values() {
+        assert_eq!(SentryResource::Installation.as_str(), "installation");
+        assert_eq!(SentryResource::EventAlert.as_str(), "event_alert");
+        assert_eq!(SentryResource::Issue.as_str(), "issue");
+        assert_eq!(SentryResource::MetricAlert.as_str(), "metric_alert");
+        assert_eq!(SentryResource::Error.as_str(), "error");
+        assert_eq!(SentryResource::Comment.as_str(), "comment");
+        assert_eq!(SentryResource::Seer.as_str(), "seer");
+    }
+
     #[tokio::test]
     async fn invalid_action_token_returns_400() {
         let _guard = tracing_guard();
