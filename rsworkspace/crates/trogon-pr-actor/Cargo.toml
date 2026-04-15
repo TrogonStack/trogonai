@@ -1,0 +1,29 @@
+[package]
+name = "trogon-pr-actor"
+version = "0.1.0"
+edition = "2024"
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "trogon-pr-actor"
+path = "src/main.rs"
+
+[dependencies]
+acp-telemetry = { workspace = true }
+async-nats = { workspace = true, features = ["jetstream", "kv"] }
+clap = { workspace = true, features = ["derive"] }
+confique = { workspace = true }
+serde = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+tracing = { workspace = true }
+trogon-actor = { workspace = true }
+trogon-nats = { workspace = true }
+trogon-registry = { workspace = true }
+trogon-service-config = { workspace = true }
+trogon-std = { workspace = true }
+trogon-transcript = { workspace = true }
+
+[dev-dependencies]
+trogon-actor = { workspace = true, features = ["test-helpers"] }
