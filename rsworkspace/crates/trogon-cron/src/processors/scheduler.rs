@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use async_nats::jetstream;
 use futures::{Stream, StreamExt};
+use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream};
 use trogon_nats::lease::{
     LeaderElection, LeaseRenewInterval, LeaseTiming, LeaseTtl, NatsKvLease, NatsKvLeaseConfig,
 };
@@ -17,7 +18,7 @@ use crate::{
     kv::{LEADER_BUCKET, LEADER_KEY},
     nats::NatsSchedulePublisher,
     projections::{CronJobChange, load_and_watch_cron_jobs},
-    store::connect_store,
+    store::{Store, connect_store},
     traits::{LeaderLock, SchedulePublisher},
 };
 
@@ -33,7 +34,7 @@ enum ReestablishedWatch {
 }
 
 pub struct CronController<
-    C = async_nats::jetstream::Context,
+    C = Store,
     P = NatsSchedulePublisher,
     L = NatsKvLease,
 > {
@@ -44,7 +45,7 @@ pub struct CronController<
     leader_timing: LeaseTiming,
 }
 
-impl CronController<async_nats::jetstream::Context, NatsSchedulePublisher, NatsKvLease> {
+impl CronController<Store, NatsSchedulePublisher, NatsKvLease> {
     pub async fn from_nats(nats: async_nats::Client) -> Result<Self, CronError> {
         let js = async_nats::jetstream::new(nats.clone());
         let store = connect_store(nats.clone()).await?;
@@ -93,8 +94,10 @@ impl<C, P, L> CronController<C, P, L> {
     }
 }
 
-impl<P, L> CronController<jetstream::Context, P, L>
+impl<C, P, L> CronController<C, P, L>
 where
+    C: JetStreamGetKeyValue<Store = jetstream::kv::Store>
+        + JetStreamGetStream<Stream = jetstream::stream::Stream>,
     P: SchedulePublisher<Error = CronError>,
     L: LeaderLock,
 {
@@ -309,9 +312,11 @@ async fn reconcile_snapshot<P: SchedulePublisher<Error = CronError>>(
     Ok(())
 }
 
-async fn reestablish_cron_jobs_watch(
-    store: &jetstream::Context,
-) -> Result<ReestablishedWatch, CronError> {
+async fn reestablish_cron_jobs_watch<C>(store: &C) -> Result<ReestablishedWatch, CronError>
+where
+    C: JetStreamGetKeyValue<Store = jetstream::kv::Store>
+        + JetStreamGetStream<Stream = jetstream::stream::Stream>,
+{
     loop {
         tokio::select! {
             _ = trogon_telemetry::signal::shutdown_signal() => {

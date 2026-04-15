@@ -41,6 +41,6 @@ pub use projections::{
     LoadAndWatchCronJobsResult, ProjectionChange, apply, initial_state, load_and_watch_cron_jobs,
     projection_change,
 };
-pub use store::{SNAPSHOT_STORE_CONFIG, append_events, connect_store, open_snapshot_bucket};
+pub use store::{SNAPSHOT_STORE_CONFIG, Store, append_events, connect_store, open_snapshot_bucket};
 pub use traits::{LeaderLock, SchedulePublisher};
 pub use trogon_eventsourcing::OccPolicy;

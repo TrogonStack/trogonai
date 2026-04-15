@@ -193,6 +193,7 @@ async fn controller_reconciles_one_time_job() {
 
     register_job(
         &store,
+        &store,
         RegisterJobCommand::new(job).unwrap(),
         OccPolicy::CommandDefault,
     )
@@ -235,6 +236,7 @@ async fn controller_reconciles_sampling_job() {
     };
 
     register_job(
+        &store,
         &store,
         RegisterJobCommand::new(job).unwrap(),
         OccPolicy::CommandDefault,
@@ -281,6 +283,7 @@ async fn controller_reconciles_cron_job_with_timezone() {
 
     register_job(
         &store,
+        &store,
         RegisterJobCommand::new(job).unwrap(),
         OccPolicy::CommandDefault,
     )
@@ -315,6 +318,7 @@ async fn disabling_job_removes_schedule_subject() {
     let job = base_job("disabled");
     register_job(
         &store,
+        &store,
         RegisterJobCommand::new(job).unwrap(),
         OccPolicy::CommandDefault,
     )
@@ -328,6 +332,7 @@ async fn disabling_job_removes_schedule_subject() {
     wait_for_subject(&stream, "cron.schedules.disabled").await;
 
     change_job_state(
+        &store,
         &store,
         ChangeJobStateCommand::new(job_id("disabled"), JobEnabledState::Disabled),
         OccPolicy::CommandDefault,
@@ -358,6 +363,7 @@ async fn removing_job_removes_schedule_subject() {
     let job = base_job("removed");
     register_job(
         &store,
+        &store,
         RegisterJobCommand::new(job).unwrap(),
         OccPolicy::CommandDefault,
     )
@@ -371,6 +377,7 @@ async fn removing_job_removes_schedule_subject() {
     wait_for_subject(&stream, "cron.schedules.removed").await;
 
     remove_job(
+        &store,
         &store,
         RemoveJobCommand::new(job_id("removed")),
         OccPolicy::CommandDefault,
@@ -398,12 +405,14 @@ async fn event_store_rebuilds_current_state_for_new_client() {
 
     register_job(
         &store,
+        &store,
         RegisterJobCommand::new(job).unwrap(),
         OccPolicy::CommandDefault,
     )
     .await
     .unwrap();
     change_job_state(
+        &store,
         &store,
         ChangeJobStateCommand::new(job_id("eventful"), JobEnabledState::Disabled),
         OccPolicy::CommandDefault,
