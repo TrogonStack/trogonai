@@ -3,13 +3,15 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::{
     AlwaysSnapshot, CommandExecution, CommandStateModel, Decide, Decision,
-    DefaultExpectedStateProvider, ExecuteError, ExecutionRuntime, ExpectedState, NonEmpty,
-    OccPolicy, SnapshotStateModel, SnapshotStoreConfig, StreamCommand,
+    DefaultExpectedStateProvider, EventStore, ExecuteError, ExpectedState, NonEmpty, OccPolicy,
+    SnapshotStateModel, SnapshotStoreConfig, StreamCommand,
 };
 
 use crate::{
     JobId, JobSpec, ResolvedJobSpec,
-    commands::{CronCommandRuntime, CronCommandRuntimePort, CronCommandSnapshotRuntime},
+    commands::runtime::{
+        JobEventStore, JobEventStoreRuntime, JobSnapshotStore, JobSnapshotStoreRuntime,
+    },
     error::CronError,
     events::{JobEvent, RegisteredJobSpec},
 };
@@ -131,20 +133,23 @@ pub async fn run<R>(
     occ: OccPolicy,
 ) -> Result<(), CronError>
 where
-    R: CronCommandRuntimePort + CronCommandSnapshotRuntime<RegisterJobState>,
+    R: JobEventStoreRuntime + JobSnapshotStoreRuntime<RegisterJobState>,
 {
     let id = command.stream_id().to_string();
-    let runtime = CronCommandRuntime::new(runtime, SNAPSHOT_STORE_CONFIG);
+    let event_store = JobEventStore::new(runtime);
+    let snapshot_store = JobSnapshotStore::new(runtime);
 
-    match CommandExecution::new(&runtime, &command)
+    match CommandExecution::new(&event_store, &command)
         .occ(occ)
-        .snapshots(AlwaysSnapshot)
+        .snapshots(&snapshot_store, SNAPSHOT_STORE_CONFIG, AlwaysSnapshot)
         .execute()
         .await
     {
         Ok(_) => Ok(()),
         Err(ExecuteError::Decision(RegisterJobDecisionError::AlreadyRegistered { .. })) => {
-            let current_version = runtime.current_stream_version(command.stream_id()).await?;
+            let current_version = event_store
+                .current_stream_version(command.stream_id())
+                .await?;
             Err(CronError::OptimisticConcurrencyConflict {
                 id: id.clone(),
                 expected: occ.resolve(current_version, command.default_expected_state()),
