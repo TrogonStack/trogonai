@@ -6,11 +6,21 @@ use trogon_transcript::entry::{Role, now_ms};
 
 use crate::error::ActorError;
 
+/// Maximum number of nested `spawn_agent` hops allowed in a single call chain.
+///
+/// When actor A spawns B, B is given `spawn_depth = 1`. If B also calls
+/// `spawn_agent`, C would receive `spawn_depth = 2`. Once the depth reaches
+/// this limit the call is rejected with `ActorError::SpawnFailed` to prevent
+/// unbounded recursion.
+pub const MAX_SPAWN_DEPTH: u32 = 5;
+
 // Type aliases for the two injected operations.
 type AppendFn =
     Arc<dyn Fn(TranscriptEntry) -> BoxFuture<'static, Result<(), String>> + Send + Sync>;
+// SpawnFn carries the *next* depth (current + 1) so it can embed it in the
+// NATS request headers for the child actor to read.
 type SpawnFn =
-    Arc<dyn Fn(String, Bytes) -> BoxFuture<'static, Result<Bytes, String>> + Send + Sync>;
+    Arc<dyn Fn(String, Bytes, u32) -> BoxFuture<'static, Result<Bytes, String>> + Send + Sync>;
 
 /// Passed to every [`crate::EntityActor::handle`] invocation.
 ///
@@ -30,6 +40,12 @@ pub struct ActorContext {
     pub actor_type: String,
     /// The unique ID of the transcript session opened for this invocation.
     pub session_id: String,
+    /// How many `spawn_agent` hops deep this invocation is.
+    ///
+    /// Top-level actors (dispatched by the router) start at `0`. Each nested
+    /// spawn increments by one. Calls that would exceed [`MAX_SPAWN_DEPTH`] are
+    /// rejected immediately to prevent unbounded recursion.
+    pub spawn_depth: u32,
     append_fn: AppendFn,
     spawn_fn: SpawnFn,
 }
@@ -42,6 +58,7 @@ impl ActorContext {
         entity_key: impl Into<String>,
         actor_type: impl Into<String>,
         session_id: impl Into<String>,
+        spawn_depth: u32,
         append_fn: AppendFn,
         spawn_fn: SpawnFn,
     ) -> Self {
@@ -49,6 +66,7 @@ impl ActorContext {
             entity_key: entity_key.into(),
             actor_type: actor_type.into(),
             session_id: session_id.into(),
+            spawn_depth,
             append_fn,
             spawn_fn,
         }
@@ -122,15 +140,23 @@ impl ActorContext {
     /// records a [`TranscriptEntry::SubAgentSpawn`] entry, and returns the
     /// reply payload.
     ///
-    /// Returns `Err` if no registered agent provides the capability or if the
-    /// request-reply fails.
+    /// Returns `Err` if:
+    /// - No registered agent provides the capability.
+    /// - The request-reply fails or times out.
+    /// - The call would exceed [`MAX_SPAWN_DEPTH`] (prevents infinite recursion).
     pub async fn spawn_agent<E: std::error::Error>(
         &self,
         capability: impl Into<String>,
         payload: Bytes,
     ) -> Result<Bytes, ActorError<E>> {
+        if self.spawn_depth >= MAX_SPAWN_DEPTH {
+            return Err(ActorError::SpawnFailed(format!(
+                "spawn depth limit ({MAX_SPAWN_DEPTH}) exceeded — aborting recursive spawn"
+            )));
+        }
         let cap = capability.into();
-        (self.spawn_fn)(cap, payload)
+        let next_depth = self.spawn_depth + 1;
+        (self.spawn_fn)(cap, payload, next_depth)
             .await
             .map_err(ActorError::SpawnFailed)
     }
@@ -181,7 +207,7 @@ pub mod test_helpers {
             });
 
             let spawn_response = self.spawn_response.clone();
-            let spawn_fn: SpawnFn = Arc::new(move |_cap, _payload| {
+            let spawn_fn: SpawnFn = Arc::new(move |_cap, _payload, _depth| {
                 let resp = spawn_response.clone();
                 Box::pin(async move { Ok(resp) })
             });
@@ -190,6 +216,7 @@ pub mod test_helpers {
                 self.entity_key,
                 self.actor_type,
                 uuid::Uuid::new_v4().to_string(),
+                0, // spawn_depth: top-level test context
                 append_fn,
                 spawn_fn,
             );

@@ -6,7 +6,18 @@ use trogon_nats::{PublishClient, RequestClient, SubscribeClient};
 use trogon_registry::{AgentCapability, RegistryStore};
 use trogon_transcript::TranscriptPublisher;
 
-use crate::{EntityActor, StateStore, runtime::ActorRuntime};
+use crate::{EntityActor, StateStore, metrics, runtime::{ActorRuntime, SPAWN_DEPTH_HEADER}};
+
+/// Default maximum time allowed for a single `handle_event` invocation.
+///
+/// If an actor's `handle()` implementation (or its sub-agent spawns) does not
+/// complete within this window, `handle_event` is cancelled and a warning is
+/// logged.  The host then continues with the next message.
+///
+/// This bound also serves as the effective **shutdown grace period**: once
+/// `cancel()` is called the host waits at most this long for any in-progress
+/// event before stopping.
+pub const DEFAULT_EVENT_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Hosts a single `EntityActor` type: subscribes to its NATS inbox, registers
 /// the actor's capabilities in the live registry, and dispatches every incoming
@@ -72,6 +83,9 @@ where
     /// gets a fresh `&mut self`.
     actor: A,
     capability: AgentCapability,
+    /// Maximum time allowed for a single `handle_event` invocation.
+    /// See [`DEFAULT_EVENT_TIMEOUT`].
+    event_timeout: Duration,
     cancel: tokio::sync::watch::Sender<bool>,
     cancel_rx: tokio::sync::watch::Receiver<bool>,
 }
@@ -84,13 +98,28 @@ where
     N: SubscribeClient + PublishClient + RequestClient + Clone + Send + Sync + 'static,
     R: RegistryStore,
 {
+    /// Create a host with the [`DEFAULT_EVENT_TIMEOUT`].
     pub fn new(
         runtime: ActorRuntime<S, P, N, R>,
         actor: A,
         capability: AgentCapability,
     ) -> Self {
+        Self::with_event_timeout(runtime, actor, capability, DEFAULT_EVENT_TIMEOUT)
+    }
+
+    /// Create a host with a custom per-event timeout.
+    ///
+    /// The timeout applies to every `handle_event` call.  Set it low in tests
+    /// that want fast failure, or increase it for actors that call long-running
+    /// LLMs or external APIs.
+    pub fn with_event_timeout(
+        runtime: ActorRuntime<S, P, N, R>,
+        actor: A,
+        capability: AgentCapability,
+        event_timeout: Duration,
+    ) -> Self {
         let (cancel, cancel_rx) = tokio::sync::watch::channel(false);
-        Self { runtime, actor, capability, cancel, cancel_rx }
+        Self { runtime, actor, capability, event_timeout, cancel, cancel_rx }
     }
 
     /// Signal the host to stop after the current event (if any) completes.
@@ -163,13 +192,43 @@ where
                         .strip_prefix(&key_prefix)
                         .unwrap_or(msg.subject.as_str());
 
+                    // Extract spawn depth propagated by the caller (0 for
+                    // top-level messages dispatched by the router).
+                    let spawn_depth: u32 = msg
+                        .headers
+                        .as_ref()
+                        .and_then(|h| h.get(SPAWN_DEPTH_HEADER))
+                        .and_then(|v| v.as_str().parse().ok())
+                        .unwrap_or(0);
+
                     let mut actor = self.actor.clone();
-                    if let Err(e) = self.runtime.handle_event(&mut actor, entity_key).await {
-                        warn!(
-                            error = %e,
-                            entity_key,
-                            "handle_event error — continuing"
-                        );
+                    let handle_start = std::time::Instant::now();
+                    let event_result = tokio::time::timeout(
+                        self.event_timeout,
+                        self.runtime.handle_event(&mut actor, entity_key, spawn_depth),
+                    )
+                    .await;
+                    let latency_ms = handle_start.elapsed().as_millis() as f64;
+                    match event_result {
+                        Ok(Ok(())) => {
+                            metrics::record_handle_latency(A::actor_type(), latency_ms);
+                        }
+                        Ok(Err(e)) => {
+                            metrics::inc_handle_error(A::actor_type());
+                            warn!(
+                                error = %e,
+                                entity_key,
+                                "handle_event error — continuing"
+                            );
+                        }
+                        Err(_elapsed) => {
+                            metrics::inc_handle_timeout(A::actor_type());
+                            warn!(
+                                entity_key,
+                                timeout_secs = self.event_timeout.as_secs(),
+                                "handle_event timed out — event dropped, continuing"
+                            );
+                        }
                     }
                 }
                 _ = cancel_rx.changed() => break,

@@ -121,6 +121,30 @@ mod tests {
     use super::*;
     use crate::store::mock::MockRegistryStore;
 
+    // ── TOCTOU store ──────────────────────────────────────────────────────────
+    //
+    // A store whose `keys()` lists one entry but whose `get()` always returns
+    // `None`, simulating the real race where a KV entry's TTL expires between
+    // the `keys()` call and the subsequent `get()` call in `list_all()`.
+
+    #[derive(Clone)]
+    struct VanishingStore;
+
+    impl crate::store::RegistryStore for VanishingStore {
+        async fn put(&self, _key: &str, _value: bytes::Bytes) -> Result<(), RegistryError> {
+            Ok(())
+        }
+        async fn get(&self, _key: &str) -> Result<Option<bytes::Bytes>, RegistryError> {
+            Ok(None) // simulate TTL expiry — key listed but then gone
+        }
+        async fn delete(&self, _key: &str) -> Result<(), RegistryError> {
+            Ok(())
+        }
+        async fn keys(&self) -> Result<Vec<String>, RegistryError> {
+            Ok(vec!["PhantomAgent".to_string()])
+        }
+    }
+
     fn pr_actor() -> AgentCapability {
         AgentCapability::new(
             "PrActor",
@@ -245,6 +269,19 @@ mod tests {
         assert_eq!(snap.len(), 2);
         assert!(snap.contains_key("PrActor"));
         assert!(snap.contains_key("IncidentActor"));
+    }
+
+    /// `list_all` must silently skip a key that vanishes between `keys()` and
+    /// `get()` — the normal NATS KV TTL race. The returned list must be empty
+    /// (not an error) even though `keys()` reported one entry.
+    #[tokio::test]
+    async fn list_all_ignores_key_that_expires_between_keys_and_get() {
+        let r = Registry::new(VanishingStore);
+        let all = r.list_all().await.unwrap();
+        assert!(
+            all.is_empty(),
+            "key that vanishes between keys() and get() should be silently skipped"
+        );
     }
 
     #[tokio::test]

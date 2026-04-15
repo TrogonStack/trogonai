@@ -2,7 +2,7 @@ use async_nats::HeaderMap;
 use futures_util::StreamExt;
 use tracing::{instrument, warn};
 use trogon_nats::{PublishClient, SubscribeClient};
-use trogon_registry::{Registry, RegistryStore};
+use trogon_registry::{AgentCapability, Registry, RegistryStore};
 use trogon_transcript::{Session, TranscriptPublisher, entry::now_ms};
 
 use crate::{
@@ -10,6 +10,7 @@ use crate::{
     error::RouterError,
     event::RouterEvent,
     llm::LlmClient,
+    metrics,
     prompt::build_routing_prompt,
 };
 
@@ -39,6 +40,9 @@ where
     registry: Registry<R>,
     publisher: P,
     nats: N,
+    /// When `Some`, unroutable events are published to
+    /// `{dlq_subject_prefix}.{event_type}` in addition to being logged.
+    dlq_subject_prefix: Option<String>,
 }
 
 impl<L, R, P, N> Router<L, R, P, N>
@@ -49,7 +53,18 @@ where
     N: SubscribeClient + PublishClient,
 {
     pub fn new(llm: L, registry: Registry<R>, publisher: P, nats: N) -> Self {
-        Self { llm, registry, publisher, nats }
+        Self { llm, registry, publisher, nats, dlq_subject_prefix: None }
+    }
+
+    /// Enable the dead-letter queue.
+    ///
+    /// When set, every unroutable event is published to
+    /// `{subject_prefix}.{event_type}` (e.g. `trogon.unroutable.github.pull_request`).
+    /// The caller is responsible for provisioning the backing JetStream stream
+    /// via [`crate::unroutable::provision_unroutable_stream`].
+    pub fn with_dlq(mut self, subject_prefix: impl Into<String>) -> Self {
+        self.dlq_subject_prefix = Some(subject_prefix.into());
+        self
     }
 
     /// Subscribe to `trogon.events.>` and route events until the subscription
@@ -91,7 +106,14 @@ where
 
         // ── 2. Ask the LLM ────────────────────────────────────────────────────
         let prompt = build_routing_prompt(&event, &agents);
-        let llm_response = self.llm.complete(prompt).await?;
+        let llm_start = std::time::Instant::now();
+        let llm_response = self.llm.complete(prompt).await.inspect_err(|_| {
+            metrics::inc_events_error(event.event_type(), "llm");
+        })?;
+        metrics::record_llm_latency(
+            event.event_type(),
+            llm_start.elapsed().as_millis() as f64,
+        );
         let result: RouteResult = llm_response.into();
 
         // ── 3. Record routing decision in transcript (best-effort) ────────────
@@ -109,7 +131,12 @@ where
                     warn!(error = %e, "failed to write routing decision to transcript");
                 }
                 // ── 4. Forward to actor ───────────────────────────────────────
-                self.dispatch(&event, decision).await?;
+                // Pass the already-fetched agent list so dispatch() does not
+                // perform a second registry lookup (eliminates TOCTOU race).
+                self.dispatch(&event, decision, &agents).await.inspect_err(|_| {
+                    metrics::inc_events_error(event.event_type(), "dispatch");
+                })?;
+                metrics::inc_events_routed(event.event_type(), &decision.agent_type);
             }
             RouteResult::Unroutable { reasoning } => {
                 tracing::warn!(
@@ -127,6 +154,24 @@ where
                 {
                     warn!(error = %e, "failed to write unroutable entry to transcript");
                 }
+                metrics::inc_events_unroutable(event.event_type());
+                // ── Dead-letter queue ─────────────────────────────────────────
+                if let Some(ref prefix) = self.dlq_subject_prefix {
+                    let dlq_subject = format!("{prefix}.{}", event.event_type());
+                    if let Err(e) = self
+                        .nats
+                        .publish_with_headers(
+                            dlq_subject,
+                            HeaderMap::new(),
+                            event.payload.clone(),
+                        )
+                        .await
+                    {
+                        warn!(error = %e, "failed to publish unroutable event to DLQ");
+                    } else {
+                        metrics::inc_dlq_published(event.event_type());
+                    }
+                }
             }
         }
 
@@ -139,18 +184,16 @@ where
     /// The actor's `nats_subject` pattern uses `>` as the entity wildcard, e.g.
     /// `actors.pr.>`. We replace `>` with the sanitized entity key so the final
     /// subject is something like `actors.pr.owner.repo.456`.
+    ///
+    /// `agents` must be the same snapshot fetched by `route_event` — passing it
+    /// here avoids a second `list_all()` call and eliminates the TOCTOU race
+    /// where an agent could unregister between the two lookups.
     async fn dispatch(
         &self,
         event: &RouterEvent,
         decision: &RoutingDecision,
+        agents: &[AgentCapability],
     ) -> Result<(), RouterError> {
-        // Find the capability entry so we have the subject pattern.
-        let agents = self
-            .registry
-            .list_all()
-            .await
-            .map_err(|e| RouterError::Registry(e.to_string()))?;
-
         let agent = agents
             .iter()
             .find(|a| a.agent_type == decision.agent_type)

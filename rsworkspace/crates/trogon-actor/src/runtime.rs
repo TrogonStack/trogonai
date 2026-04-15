@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_nats::HeaderMap;
 use bytes::Bytes;
@@ -8,10 +9,18 @@ use trogon_nats::RequestClient;
 use trogon_registry::{Registry, RegistryStore};
 use trogon_transcript::{Session, TranscriptEntry, TranscriptPublisher, entry::now_ms};
 
+/// Maximum time to wait for a sub-agent to respond to a NATS request-reply.
+///
+/// If the sub-agent does not reply within this window `spawn_agent` returns
+/// `Err(ActorError::SpawnFailed(...))` so the actor can handle the timeout
+/// gracefully instead of blocking indefinitely.
+pub const SPAWN_AGENT_TIMEOUT: Duration = Duration::from_secs(30);
+
 use crate::{
     actor::EntityActor,
     context::ActorContext,
     error::{ActorError, SaveError},
+    metrics,
     state::{MAX_OCC_RETRIES, StateStore, state_kv_key},
 };
 
@@ -75,11 +84,17 @@ where
     /// 3. Call `actor.handle(state, ctx)`.
     /// 4. Save updated state with optimistic concurrency.
     /// 5. On conflict: reload state and retry (up to [`MAX_OCC_RETRIES`] times).
+    ///
+    /// `spawn_depth` is `0` for top-level invocations (dispatched by the router)
+    /// and increments by one for each nested `spawn_agent` hop. Passing it
+    /// through here allows [`ActorContext::spawn_agent`] to enforce
+    /// [`MAX_SPAWN_DEPTH`].
     #[instrument(
         skip(self, actor),
         fields(
             actor_type = A::actor_type(),
             entity_key,
+            spawn_depth,
         ),
         err
     )]
@@ -87,6 +102,7 @@ where
         &self,
         actor: &mut A,
         entity_key: &str,
+        spawn_depth: u32,
     ) -> Result<(), ActorError<A::Error>>
     where
         A: EntityActor,
@@ -96,6 +112,7 @@ where
         for attempt in 0..=MAX_OCC_RETRIES {
             if attempt > 0 {
                 tracing::warn!(attempt, entity_key, "optimistic concurrency conflict — retrying");
+                metrics::inc_occ_retry(A::actor_type());
             }
 
             // ── 1. Load state ─────────────────────────────────────────────────
@@ -132,6 +149,7 @@ where
                 Arc::clone(&session),
                 self.nats.clone(),
                 self.registry.clone(),
+                spawn_depth,
             );
 
             // ── 4. Handle event ───────────────────────────────────────────────
@@ -156,12 +174,16 @@ where
 
 // ── Context construction ──────────────────────────────────────────────────────
 
+/// NATS header name used to propagate spawn depth across actor boundaries.
+pub(crate) const SPAWN_DEPTH_HEADER: &str = "Trogon-Spawn-Depth";
+
 fn build_context<A, P, N, R>(
     entity_key: &str,
     session_id: String,
     session: Arc<Session<P>>,
     nats: N,
     registry: Registry<R>,
+    spawn_depth: u32,
 ) -> ActorContext
 where
     A: EntityActor,
@@ -183,21 +205,30 @@ where
     };
 
     // Spawn function: registry lookup → request-reply → transcript entry.
-    let spawn_fn: Arc<dyn Fn(String, Bytes) -> BoxFuture<'static, Result<Bytes, String>> + Send + Sync> = {
-        Arc::new(move |capability: String, payload: Bytes| {
+    // `next_depth` is the depth the *child* actor will receive (current + 1),
+    // embedded in the NATS request headers so the child's ActorHost can read it.
+    let actor_type_str = A::actor_type();
+    let spawn_fn: Arc<dyn Fn(String, Bytes, u32) -> BoxFuture<'static, Result<Bytes, String>> + Send + Sync> = {
+        Arc::new(move |capability: String, payload: Bytes, next_depth: u32| {
             let reg = registry.clone();
             let nats = nats.clone();
             let parent = parent_id.clone();
             let session = Arc::clone(&session_for_spawn);
+            let actor_type = actor_type_str;
 
             Box::pin(async move {
+                metrics::inc_spawn_call(actor_type, &capability);
                 // Find the first agent with the requested capability.
                 let agents = reg
                     .discover(&capability)
                     .await
-                    .map_err(|e| e.to_string())?;
+                    .map_err(|e| {
+                        metrics::inc_spawn_error(actor_type, &capability);
+                        e.to_string()
+                    })?;
 
                 let agent = agents.first().ok_or_else(|| {
+                    metrics::inc_spawn_error(actor_type, &capability);
                     format!("no agent found with capability '{capability}'")
                 })?;
 
@@ -214,18 +245,37 @@ where
                     })
                     .await;
 
+                // Embed the child's spawn depth in the request headers so the
+                // receiving ActorHost can thread it through to the child context.
+                let mut headers = HeaderMap::new();
+                headers.insert(
+                    SPAWN_DEPTH_HEADER,
+                    next_depth.to_string().as_str(),
+                );
+
                 // Send request to the sub-agent's inbox and await reply.
-                let reply = nats
-                    .request_with_headers(subject, HeaderMap::new(), payload)
-                    .await
-                    .map_err(|e| format!("sub-agent request failed: {e}"))?;
+                // A bounded timeout prevents the actor from blocking indefinitely
+                // when a sub-agent is slow or unresponsive.
+                let reply = tokio::time::timeout(
+                    SPAWN_AGENT_TIMEOUT,
+                    nats.request_with_headers(subject, headers, payload),
+                )
+                .await
+                .map_err(|_| {
+                    metrics::inc_spawn_error(actor_type, &capability);
+                    format!("sub-agent request timed out after {SPAWN_AGENT_TIMEOUT:?}")
+                })?
+                .map_err(|e| {
+                    metrics::inc_spawn_error(actor_type, &capability);
+                    format!("sub-agent request failed: {e}")
+                })?;
 
                 Ok(reply.payload)
             })
         })
     };
 
-    ActorContext::new(entity_key, A::actor_type(), session_id, append_fn, spawn_fn)
+    ActorContext::new(entity_key, A::actor_type(), session_id, spawn_depth, append_fn, spawn_fn)
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -301,7 +351,7 @@ mod tests {
         let (mut actor, handled) = CounterActor::new();
 
         runtime
-            .handle_event(&mut actor, "entity-1")
+            .handle_event(&mut actor, "entity-1", 0)
             .await
             .unwrap();
 
@@ -319,8 +369,8 @@ mod tests {
         let runtime = make_runtime();
         let (mut actor, _) = CounterActor::new();
 
-        runtime.handle_event(&mut actor, "entity-1").await.unwrap();
-        runtime.handle_event(&mut actor, "entity-1").await.unwrap();
+        runtime.handle_event(&mut actor, "entity-1", 0).await.unwrap();
+        runtime.handle_event(&mut actor, "entity-1", 0).await.unwrap();
 
         let kv_key = state_kv_key("counter", "entity-1");
         let entry = runtime.state.load(&kv_key).await.unwrap().unwrap();
@@ -335,7 +385,7 @@ mod tests {
         runtime.state.inject_conflicts(2);
 
         let (mut actor, handled) = CounterActor::new();
-        runtime.handle_event(&mut actor, "entity-1").await.unwrap();
+        runtime.handle_event(&mut actor, "entity-1", 0).await.unwrap();
 
         // handle() was called 3 times (2 retried + 1 success).
         assert_eq!(*handled.lock().unwrap(), 3);
@@ -348,7 +398,7 @@ mod tests {
 
         let (mut actor, _) = CounterActor::new();
         let err = runtime
-            .handle_event(&mut actor, "entity-1")
+            .handle_event(&mut actor, "entity-1", 0)
             .await
             .unwrap_err();
 
@@ -360,7 +410,7 @@ mod tests {
         let runtime = make_runtime();
         runtime.state.inject_save_error();
         let (mut actor, _) = CounterActor::new();
-        let err = runtime.handle_event(&mut actor, "entity-1").await.unwrap_err();
+        let err = runtime.handle_event(&mut actor, "entity-1", 0).await.unwrap_err();
         assert!(matches!(err, ActorError::State(_)));
     }
 
@@ -369,7 +419,7 @@ mod tests {
         let runtime = make_runtime();
         runtime.state.inject_load_error();
         let (mut actor, _) = CounterActor::new();
-        let err = runtime.handle_event(&mut actor, "entity-1").await.unwrap_err();
+        let err = runtime.handle_event(&mut actor, "entity-1", 0).await.unwrap_err();
         assert!(matches!(err, ActorError::State(_)));
     }
 
@@ -398,7 +448,7 @@ mod tests {
         let registry = Registry::new(MockRegistryStore::new());
         let runtime = ActorRuntime::new(state, publisher.clone(), nats, registry);
 
-        runtime.handle_event(&mut Scribe, "e-1").await.unwrap();
+        runtime.handle_event(&mut Scribe, "e-1", 0).await.unwrap();
 
         let published = publisher.take_published();
         assert_eq!(published.len(), 2);
@@ -444,7 +494,7 @@ mod tests {
             }
         }
 
-        runtime.handle_event(&mut Spawner, "e-1").await.unwrap();
+        runtime.handle_event(&mut Spawner, "e-1", 0).await.unwrap();
 
         // SubAgentSpawn entry recorded in transcript.
         let published = publisher.take_published();
@@ -484,7 +534,7 @@ mod tests {
             }
         }
 
-        runtime.handle_event(&mut NoCapActor, "e-1").await.unwrap();
+        runtime.handle_event(&mut NoCapActor, "e-1", 0).await.unwrap();
     }
 
     #[tokio::test]
@@ -527,6 +577,6 @@ mod tests {
             }
         }
 
-        runtime.handle_event(&mut ReqFailActor, "e-1").await.unwrap();
+        runtime.handle_event(&mut ReqFailActor, "e-1", 0).await.unwrap();
     }
 }

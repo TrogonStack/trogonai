@@ -15,7 +15,8 @@ use trogon_actor::{
 };
 use trogon_registry::{AgentCapability, Registry, provision as provision_registry};
 use trogon_transcript::{
-    publisher::NatsTranscriptPublisher,
+    TranscriptError,
+    publisher::{NatsTranscriptPublisher, TranscriptPublisher},
     store::TranscriptStore,
     entry::TranscriptEntry,
 };
@@ -174,9 +175,9 @@ async fn state_persists_across_events() {
 
     let runtime = ActorRuntime::new(state_store, publisher, nats, registry);
 
-    runtime.handle_event(&mut CounterActor, "entity-1").await.unwrap();
-    runtime.handle_event(&mut CounterActor, "entity-1").await.unwrap();
-    runtime.handle_event(&mut CounterActor, "entity-1").await.unwrap();
+    runtime.handle_event(&mut CounterActor, "entity-1", 0).await.unwrap();
+    runtime.handle_event(&mut CounterActor, "entity-1", 0).await.unwrap();
+    runtime.handle_event(&mut CounterActor, "entity-1", 0).await.unwrap();
 
     // Load state directly to verify persistence.
     let kv = js.get_key_value("ACTOR_STATE").await.unwrap();
@@ -197,7 +198,7 @@ async fn on_create_called_on_first_event_only() {
     let runtime = ActorRuntime::new(state_store, publisher, nats, registry);
 
     // First event: on_create sets initialized = true.
-    runtime.handle_event(&mut InitActor, "e-1").await.unwrap();
+    runtime.handle_event(&mut InitActor, "e-1", 0).await.unwrap();
 
     let kv = js.get_key_value("ACTOR_STATE").await.unwrap();
     let bytes = kv.entry("init-actor.e-1").await.unwrap().unwrap().value;
@@ -206,7 +207,7 @@ async fn on_create_called_on_first_event_only() {
     assert_eq!(state.count, 1);
 
     // Second event: on_create is NOT called again.
-    runtime.handle_event(&mut InitActor, "e-1").await.unwrap();
+    runtime.handle_event(&mut InitActor, "e-1", 0).await.unwrap();
     let bytes2 = kv.entry("init-actor.e-1").await.unwrap().unwrap().value;
     let state2: InitState = serde_json::from_slice(&bytes2).unwrap();
     assert!(state2.initialized);
@@ -224,9 +225,9 @@ async fn different_entities_have_independent_state() {
 
     let runtime = ActorRuntime::new(state_store, publisher, nats, registry);
 
-    runtime.handle_event(&mut CounterActor, "entity-A").await.unwrap();
-    runtime.handle_event(&mut CounterActor, "entity-A").await.unwrap();
-    runtime.handle_event(&mut CounterActor, "entity-B").await.unwrap();
+    runtime.handle_event(&mut CounterActor, "entity-A", 0).await.unwrap();
+    runtime.handle_event(&mut CounterActor, "entity-A", 0).await.unwrap();
+    runtime.handle_event(&mut CounterActor, "entity-B", 0).await.unwrap();
 
     let kv = js.get_key_value("ACTOR_STATE").await.unwrap();
 
@@ -260,8 +261,8 @@ async fn concurrent_events_to_same_entity_no_lost_writes() {
     let mut actor1 = CounterActor;
     let mut actor2 = CounterActor;
     let (r1, r2) = tokio::join!(
-        runtime.handle_event(&mut actor1, "entity-concurrent"),
-        runtime2.handle_event(&mut actor2, "entity-concurrent"),
+        runtime.handle_event(&mut actor1, "entity-concurrent", 0),
+        runtime2.handle_event(&mut actor2, "entity-concurrent", 0),
     );
 
     assert!(r1.is_ok(), "first concurrent handler failed: {r1:?}");
@@ -289,15 +290,15 @@ async fn concurrent_updates_on_existing_state_trigger_update_occ() {
     let runtime2 = runtime.clone();
 
     // Create initial state (count=1, revision=0).
-    runtime.handle_event(&mut CounterActor, "entity-update-occ").await.unwrap();
+    runtime.handle_event(&mut CounterActor, "entity-update-occ", 0).await.unwrap();
 
     // Now two concurrent events on the SAME existing entity. Both load
     // revision=0, both try to update, one fails with OCC and retries.
     let mut actor1 = CounterActor;
     let mut actor2 = CounterActor;
     let (r1, r2) = tokio::join!(
-        runtime.handle_event(&mut actor1, "entity-update-occ"),
-        runtime2.handle_event(&mut actor2, "entity-update-occ"),
+        runtime.handle_event(&mut actor1, "entity-update-occ", 0),
+        runtime2.handle_event(&mut actor2, "entity-update-occ", 0),
     );
 
     assert!(r1.is_ok(), "first concurrent update failed: {r1:?}");
@@ -413,7 +414,7 @@ async fn corrupted_state_in_kv_returns_deserialize_error() {
 
     let runtime = ActorRuntime::new(state_store, publisher, nats, registry);
     let err = runtime
-        .handle_event(&mut CounterActor, "entity-corrupt")
+        .handle_event(&mut CounterActor, "entity-corrupt", 0)
         .await
         .unwrap_err();
 
@@ -437,7 +438,7 @@ async fn transcript_entries_written_to_jetstream() {
     transcript_store.provision().await.unwrap();
 
     let runtime = ActorRuntime::new(state_store, publisher, nats, registry);
-    runtime.handle_event(&mut Scribe, "entity-1").await.unwrap();
+    runtime.handle_event(&mut Scribe, "entity-1", 0).await.unwrap();
 
     let entries = transcript_store.query("scribe", "entity-1").await.unwrap();
     assert_eq!(entries.len(), 2);
@@ -480,7 +481,7 @@ async fn spawn_agent_records_sub_agent_spawn_entry() {
     });
 
     let runtime = ActorRuntime::new(state_store, publisher, nats, registry);
-    runtime.handle_event(&mut SpawnActor, "entity-1").await.unwrap();
+    runtime.handle_event(&mut SpawnActor, "entity-1", 0).await.unwrap();
 
     // Actor state captured the sub-agent reply payload.
     let kv = js.get_key_value("ACTOR_STATE").await.unwrap();
@@ -518,7 +519,7 @@ async fn spawn_agent_no_capability_no_transcript_entry() {
 
     let runtime = ActorRuntime::new(state_store, publisher, nats, registry);
     // NoCapActor ignores the spawn error — handle_event must still succeed.
-    runtime.handle_event(&mut NoCapActor, "entity-1").await.unwrap();
+    runtime.handle_event(&mut NoCapActor, "entity-1", 0).await.unwrap();
 
     // Actor state was saved (handle completed normally).
     let kv = js.get_key_value("ACTOR_STATE").await.unwrap();
@@ -566,7 +567,7 @@ async fn state_store_save_update_returns_other_error_when_stream_deleted() {
 
     // Create initial state so we have a valid revision.
     let runtime = ActorRuntime::new(state_store.clone(), publisher, nats, registry);
-    runtime.handle_event(&mut CounterActor, "ghost-update").await.unwrap();
+    runtime.handle_event(&mut CounterActor, "ghost-update", 0).await.unwrap();
 
     // Read back the revision so we can pass it to save().
     let kv = js.get_key_value("ACTOR_STATE").await.unwrap();
@@ -721,7 +722,7 @@ async fn actor_transcript_append_failure_does_not_abort_handle_event() {
     let runtime = ActorRuntime::new(state_store, publisher, nats, registry);
     // Scribe calls ctx.append_user_message(...).ok() — if append fails the actor
     // still succeeds. handle_event must return Ok.
-    let result = runtime.handle_event(&mut Scribe, "entity-no-transcript").await;
+    let result = runtime.handle_event(&mut Scribe, "entity-no-transcript", 0).await;
     assert!(result.is_ok(), "handle_event must succeed even when transcript appends fail");
 }
 
@@ -747,7 +748,7 @@ async fn spawn_agent_discover_failure_is_propagated_as_error_string() {
 
     let runtime = ActorRuntime::new(state_store, publisher, nats, registry);
     // SpawnActor calls ctx.spawn_agent(...) and ignores errors — handle_event must succeed.
-    let result = runtime.handle_event(&mut SpawnActor, "entity-discover-fail").await;
+    let result = runtime.handle_event(&mut SpawnActor, "entity-discover-fail", 0).await;
     assert!(result.is_ok(), "handle_event must succeed when discover fails: {result:?}");
 }
 
@@ -941,5 +942,68 @@ async fn host_run_returns_register_error_when_registry_unavailable() {
     assert!(
         matches!(result, Err(HostError::Register(_))),
         "expected HostError::Register, got: {result:?}"
+    );
+}
+
+// ── FailPublisher ─────────────────────────────────────────────────────────────
+//
+// A transcript publisher that always returns an error, used to verify that a
+// transcript write failure inside the spawn_fn is silent — the spawn and the
+// overall `handle_event` must still succeed.
+
+#[derive(Clone)]
+struct FailPublisher;
+
+impl TranscriptPublisher for FailPublisher {
+    async fn publish(&self, _subject: String, _payload: bytes::Bytes) -> Result<(), TranscriptError> {
+        Err(TranscriptError::Publish("always fails".into()))
+    }
+}
+
+/// When the transcript publisher fails, the `let _ = session.append(...)` inside
+/// the spawn_fn discards the error. The NATS request-reply must still complete and
+/// `handle_event` must return `Ok`.
+///
+/// Covers `runtime.rs` — `build_context` spawn closure, line `let _ = session.append(...).await`.
+#[tokio::test]
+async fn spawn_fn_transcript_append_failure_does_not_abort_spawn() {
+    let (nats, js, _container) = setup().await;
+
+    let state_store = provision_state(&js).await.unwrap();
+    let registry_store = provision_registry(&js).await.unwrap();
+    let registry = Registry::new(registry_store);
+
+    // Register a sub-agent with a concrete inbox subject.
+    let cap = AgentCapability::new(
+        "SecurityActor",
+        ["security_analysis"],
+        "sub-agents.security-fail-pub",
+    );
+    registry.register(&cap).await.unwrap();
+
+    // Spin up a responder on the sub-agent's inbox.
+    let nats_responder = nats.clone();
+    let mut responder_sub = nats.subscribe("sub-agents.security-fail-pub").await.unwrap();
+    tokio::spawn(async move {
+        while let Some(msg) = responder_sub.next().await {
+            if let Some(reply) = msg.reply {
+                nats_responder
+                    .publish(reply, Bytes::from_static(b"ok"))
+                    .await
+                    .ok();
+            }
+        }
+    });
+
+    // Use a publisher that always fails — transcript appends are all discarded.
+    let runtime = ActorRuntime::new(state_store, FailPublisher, nats, registry);
+
+    let result = runtime
+        .handle_event(&mut SpawnActor, "entity-fail-pub", 0)
+        .await;
+
+    assert!(
+        result.is_ok(),
+        "handle_event must succeed when transcript publisher fails: {result:?}"
     );
 }

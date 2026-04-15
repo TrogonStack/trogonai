@@ -52,11 +52,13 @@ pub mod decision;
 pub mod error;
 pub mod event;
 pub mod llm;
+pub mod metrics;
 pub mod prompt;
 pub mod router;
+pub mod unroutable;
 
 pub use decision::{RouteResult, RoutingDecision};
 pub use error::RouterError;
 pub use event::RouterEvent;
-pub use llm::{LlmClient, LlmConfig, OpenAiCompatClient};
+pub use llm::{LLM_REQUEST_TIMEOUT, LlmClient, LlmConfig, OpenAiCompatClient};
 pub use router::Router;
