@@ -23,3 +23,6 @@ trogon-std = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 trogon-nats = { workspace = true, features = ["test-support"] }
 trogon-std = { workspace = true, features = ["test-support"] }
+testcontainers-modules = { version = "0.8", features = ["nats"] }
+futures-util = { workspace = true }
+ed25519-dalek = { version = "2.1", features = ["std"] }

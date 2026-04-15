@@ -40,3 +40,28 @@ impl super::super::stream::StreamAssignment for ResumeSubject {
     const STREAM: Option<super::super::stream::AcpStream> =
         Some(super::super::stream::AcpStream::Commands);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_nats::subject::ToSubject as _;
+
+    fn prefix() -> crate::acp_prefix::AcpPrefix {
+        crate::acp_prefix::AcpPrefix::new("acp").expect("prefix")
+    }
+    fn session_id() -> crate::session_id::AcpSessionId {
+        crate::session_id::AcpSessionId::new("ses1").expect("session_id")
+    }
+
+    #[test]
+    fn display_formats_subject_correctly() {
+        let s = ResumeSubject::new(&prefix(), &session_id());
+        assert_eq!(s.to_string(), "acp.session.ses1.agent.resume");
+    }
+
+    #[test]
+    fn to_subject_matches_display() {
+        let s = ResumeSubject::new(&prefix(), &session_id());
+        assert_eq!(s.to_subject().as_str(), s.to_string());
+    }
+}
