@@ -37,6 +37,7 @@ async fn client_register_then_get() {
     let job = base_job("backup");
     register_job(
         &store,
+        &store,
         RegisterJobCommand::new(job).unwrap(),
         OccPolicy::CommandDefault,
     )
@@ -58,12 +59,14 @@ async fn client_set_enabled_toggles_job() {
 
     register_job(
         &store,
+        &store,
         RegisterJobCommand::new(base_job("toggle")).unwrap(),
         OccPolicy::CommandDefault,
     )
     .await
     .unwrap();
     change_job_state(
+        &store,
         &store,
         ChangeJobStateCommand::new(job_id("toggle"), JobEnabledState::Disabled),
         OccPolicy::CommandDefault,
@@ -87,12 +90,14 @@ async fn client_remove_and_list_jobs_use_store_paths() {
 
     register_job(
         &store,
+        &store,
         RegisterJobCommand::new(base_job("alpha")).unwrap(),
         OccPolicy::CommandDefault,
     )
     .await
     .unwrap();
     register_job(
+        &store,
         &store,
         RegisterJobCommand::new(base_job("beta")).unwrap(),
         OccPolicy::CommandDefault,
@@ -104,6 +109,7 @@ async fn client_remove_and_list_jobs_use_store_paths() {
     assert_eq!(listed.len(), 2);
 
     remove_job(
+        &store,
         &store,
         RemoveJobCommand::new(job_id("beta")),
         OccPolicy::CommandDefault,
