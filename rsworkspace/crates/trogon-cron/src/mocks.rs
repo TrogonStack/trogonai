@@ -9,14 +9,13 @@ use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use serde::{Serialize, de::DeserializeOwned};
 use trogon_eventsourcing::{
-    AppendOutcome, EventData, ExpectedState, NonEmpty, RecordedEvent, Snapshot,
-    SnapshotStoreConfig, StreamCommand,
+    AppendOutcome, EventData, EventStore, ExpectedState, NonEmpty, RecordedEvent, Snapshot,
+    SnapshotStore, SnapshotStoreConfig, StreamCommand,
 };
 use trogon_nats::lease::{ReleaseLease, RenewLease, TryAcquireLease};
 
 use crate::{
     GetJobCommand, ListJobsCommand,
-    commands::runtime::CommandRuntime,
     config::{JobSpec, JobWriteCondition, JobWriteState},
     domain::ResolvedJobSpec,
     error::CronError,
@@ -223,11 +222,13 @@ impl MockCronStore {
     }
 }
 
-impl CommandRuntime for MockCronStore {
-    async fn current_command_stream_version(
+impl EventStore<crate::JobId> for MockCronStore {
+    type Error = CronError;
+
+    async fn current_stream_version(
         &self,
         stream_id: &crate::JobId,
-    ) -> Result<Option<u64>, CronError> {
+    ) -> Result<Option<u64>, Self::Error> {
         Ok(self
             .stream_versions
             .lock()
@@ -236,11 +237,11 @@ impl CommandRuntime for MockCronStore {
             .copied())
     }
 
-    async fn read_command_stream_from(
+    async fn read_stream_from(
         &self,
         stream_id: &crate::JobId,
         from_sequence: u64,
-    ) -> Result<Vec<RecordedEvent>, CronError> {
+    ) -> Result<Vec<RecordedEvent>, Self::Error> {
         let stream_events = self
             .events
             .lock()
@@ -275,12 +276,12 @@ impl CommandRuntime for MockCronStore {
         Ok(recorded)
     }
 
-    async fn append_command_events(
+    async fn append_events(
         &self,
         stream_id: &crate::JobId,
         expected_state: ExpectedState,
         events: NonEmpty<EventData>,
-    ) -> Result<AppendOutcome, CronError> {
+    ) -> Result<AppendOutcome, Self::Error> {
         let stream_id = stream_id.clone();
         let jobs = self.jobs.clone();
         let stream_versions = self.stream_versions.clone();
@@ -366,26 +367,28 @@ impl CommandRuntime for MockCronStore {
             next_expected_version: current_version.unwrap_or(0) + appended_events,
         })
     }
-    async fn load_command_snapshot<Payload>(
+}
+
+impl<Payload> SnapshotStore<Payload, crate::JobId> for MockCronStore
+where
+    Payload: Serialize + DeserializeOwned + Send,
+{
+    type Error = CronError;
+
+    async fn load_snapshot(
         &self,
         config: SnapshotStoreConfig<'static>,
         stream_id: &crate::JobId,
-    ) -> Result<Option<Snapshot<Payload>>, CronError>
-    where
-        Payload: DeserializeOwned + Send,
-    {
+    ) -> Result<Option<Snapshot<Payload>>, Self::Error> {
         self.read_command_snapshot(config, stream_id)
     }
 
-    async fn save_command_snapshot<Payload>(
+    async fn save_snapshot(
         &self,
         config: SnapshotStoreConfig<'static>,
         stream_id: &crate::JobId,
         snapshot: Snapshot<Payload>,
-    ) -> Result<(), CronError>
-    where
-        Payload: Serialize + Send,
-    {
+    ) -> Result<(), Self::Error> {
         let snapshot = serde_json::to_string(&snapshot)?;
         self.command_snapshots
             .lock()
@@ -492,6 +495,7 @@ mod tests {
 
         register_job(
             &store,
+            &store,
             RegisterJobCommand::new(base_job("alpha")).unwrap(),
             OccPolicy::CommandDefault,
         )
@@ -507,6 +511,7 @@ mod tests {
         assert_eq!(alpha.version, 1);
 
         change_job_state(
+            &store,
             &store,
             ChangeJobStateCommand::new(job_id("alpha"), JobEnabledState::Disabled),
             OccPolicy::CommandDefault,
@@ -546,6 +551,7 @@ mod tests {
             .unwrap();
         remove_job(
             &store,
+            &store,
             RemoveJobCommand::new(job_id("alpha")),
             OccPolicy::CommandDefault,
         )
@@ -562,6 +568,7 @@ mod tests {
         );
 
         register_job(
+            &store,
             &store,
             RegisterJobCommand::new(base_job("alpha")).unwrap(),
             OccPolicy::CommandDefault,
@@ -596,12 +603,14 @@ mod tests {
 
         register_job(
             &store,
+            &store,
             RegisterJobCommand::new(base_job("alpha")).unwrap(),
             OccPolicy::CommandDefault,
         )
         .await
         .unwrap();
         let same_state_error = change_job_state(
+            &store,
             &store,
             ChangeJobStateCommand::new(job_id("alpha"), JobEnabledState::Enabled),
             OccPolicy::CommandDefault,
@@ -614,6 +623,7 @@ mod tests {
         ));
 
         let missing_error = change_job_state(
+            &store,
             &store,
             ChangeJobStateCommand::new(job_id("missing"), JobEnabledState::Disabled),
             OccPolicy::CommandDefault,
