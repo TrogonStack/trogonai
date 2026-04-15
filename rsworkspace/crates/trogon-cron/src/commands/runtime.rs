@@ -1,8 +1,8 @@
 use async_nats::jetstream::{self, context, kv};
 use serde::{Serialize, de::DeserializeOwned};
 use trogon_eventsourcing::{
-    AppendOutcome, EventData, ExecutionRuntime, NonEmpty, RecordedEvent, Snapshot, SnapshotChange,
-    SnapshotStoreConfig, load_snapshot, persist_snapshot_change, read_stream_from,
+    AppendOutcome, EventData, ExecutionRuntime, ExpectedVersion, NonEmpty, RecordedEvent, Snapshot,
+    SnapshotChange, SnapshotStoreConfig, load_snapshot, persist_snapshot_change, read_stream_from,
 };
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream, JetStreamPublishMessage};
 
@@ -40,7 +40,7 @@ pub trait CronCommandExecutionRuntime<Payload>: Send + Sync {
     fn append_job_events(
         &self,
         stream_id: &JobId,
-        condition: JobWriteCondition,
+        expected_version: ExpectedVersion,
         events: NonEmpty<EventData>,
     ) -> impl std::future::Future<Output = Result<AppendOutcome, CronError>> + Send;
 }
@@ -59,7 +59,7 @@ impl<'a, R> CronCommandRuntime<'a, R> {
     }
 }
 
-impl<Payload, R> ExecutionRuntime<Payload, JobId, JobWriteCondition> for CronCommandRuntime<'_, R>
+impl<Payload, R> ExecutionRuntime<Payload, JobId> for CronCommandRuntime<'_, R>
 where
     R: CronCommandExecutionRuntime<Payload>,
     Payload: Send,
@@ -102,12 +102,19 @@ where
     async fn append_events(
         &self,
         stream_id: &JobId,
-        condition: JobWriteCondition,
+        expected_version: ExpectedVersion,
         events: NonEmpty<EventData>,
     ) -> Result<AppendOutcome, Self::Error> {
         self.runtime
-            .append_job_events(stream_id, condition, events)
+            .append_job_events(stream_id, expected_version, events)
             .await
+    }
+}
+
+fn write_condition_from_expected_version(expected_version: ExpectedVersion) -> JobWriteCondition {
+    match expected_version {
+        ExpectedVersion::NoStream => JobWriteCondition::MustNotExist,
+        ExpectedVersion::StreamVersion(version) => JobWriteCondition::MustBeAtVersion(version),
     }
 }
 
@@ -184,7 +191,7 @@ where
     async fn append_job_events(
         &self,
         stream_id: &JobId,
-        condition: JobWriteCondition,
+        expected_version: ExpectedVersion,
         events: NonEmpty<EventData>,
     ) -> Result<AppendOutcome, CronError> {
         let current_version = stream_subject_state(self, stream_id.as_str())
@@ -193,7 +200,13 @@ where
             .current_version()
             .unwrap_or(0);
         let appended_events = events.len() as u64;
-        append_events(self, stream_id.as_str(), condition, events).await?;
+        append_events(
+            self,
+            stream_id.as_str(),
+            write_condition_from_expected_version(expected_version),
+            events,
+        )
+        .await?;
         Ok(AppendOutcome {
             next_expected_version: current_version + appended_events,
         })

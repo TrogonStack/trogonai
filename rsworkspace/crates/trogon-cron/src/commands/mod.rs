@@ -5,6 +5,19 @@ mod remove;
 mod runtime;
 mod set_state;
 
+use trogon_eventsourcing::ExpectedVersion;
+
+use crate::JobWriteCondition;
+
+pub(crate) const fn expected_version_from_write_condition(
+    write_condition: JobWriteCondition,
+) -> ExpectedVersion {
+    match write_condition {
+        JobWriteCondition::MustNotExist => ExpectedVersion::NoStream,
+        JobWriteCondition::MustBeAtVersion(version) => ExpectedVersion::StreamVersion(version),
+    }
+}
+
 pub use add::{
     RegisterJobCommand, RegisterJobDecisionError, RegisterJobState, run as register_job,
 };

@@ -9,7 +9,7 @@ use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use serde::{Serialize, de::DeserializeOwned};
 use trogon_eventsourcing::{
-    AppendOutcome, EventData, NonEmpty, RecordedEvent, Snapshot, StreamCommand,
+    AppendOutcome, EventData, ExpectedVersion, NonEmpty, RecordedEvent, Snapshot, StreamCommand,
 };
 use trogon_nats::lease::{ReleaseLease, RenewLease, TryAcquireLease};
 
@@ -316,7 +316,7 @@ where
     async fn append_job_events(
         &self,
         stream_id: &crate::JobId,
-        write_condition: JobWriteCondition,
+        expected_version: ExpectedVersion,
         events: NonEmpty<EventData>,
     ) -> Result<AppendOutcome, CronError> {
         let stream_id = stream_id.clone();
@@ -342,6 +342,10 @@ where
 
         let current_snapshot = jobs.get(stream_id.as_str()).cloned();
         let current_version = stream_versions.get(stream_id.as_str()).copied();
+        let write_condition = match expected_version {
+            ExpectedVersion::NoStream => JobWriteCondition::MustNotExist,
+            ExpectedVersion::StreamVersion(version) => JobWriteCondition::MustBeAtVersion(version),
+        };
         write_condition.ensure(
             stream_id.as_str(),
             JobWriteState::new(current_version, current_snapshot.as_ref().is_some()),
