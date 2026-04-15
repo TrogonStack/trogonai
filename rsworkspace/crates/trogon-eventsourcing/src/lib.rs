@@ -11,11 +11,10 @@ mod streams;
 
 pub use decision::{Act, Decide, Decision, NonEmpty, StreamCommand, decide};
 pub use execution::{
-    AlwaysSnapshot, AppendOutcome, CommandStateModel, DefaultExpectedStateProvider, ExecuteError,
-    ExecuteOptions, ExecutionResult, ExecutionRuntime, ExpectedState, NoSnapshot, OccPolicy,
-    SnapshotPolicy, SnapshotRuntime, SnapshotStateModel, execute_command,
-    execute_command_with_options, execute_command_with_snapshots,
-    execute_command_with_snapshots_and_options,
+    AlwaysSnapshot, AppendOutcome, CommandExecution, CommandStateModel,
+    DefaultExpectedStateProvider, ExecuteError, ExecutionResult, ExecutionRuntime, ExpectedState,
+    NoSnapshot, OccPolicy, SnapshotPolicy, SnapshotRuntime, SnapshotStateModel, WithSnapshots,
+    WithoutSnapshots,
 };
 pub use snapshots::{
     Snapshot, SnapshotChange, SnapshotLoader, SnapshotStoreConfig, SnapshotStoreError,
