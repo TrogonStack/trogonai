@@ -1,12 +1,16 @@
 use std::fmt;
 
-use trogon_eventsourcing::{Decide, Decision, NonEmpty, StreamCommand, decide};
+use serde::{Deserialize, Serialize};
+use trogon_eventsourcing::{
+    AlwaysSnapshot, CommandStateModel, Decide, Decision, ExecuteError, ExecutionRuntime, NonEmpty,
+    Snapshot, SnapshotStoreConfig, StreamCommand, execute_command,
+};
 
 use crate::{
     JobId, JobSpec, JobWriteCondition, ResolvedJobSpec,
-    commands::{CommandRuntime, Evolve, catch_up_command_state},
+    commands::{CronCommandExecutionRuntime, CronCommandRuntime},
     error::CronError,
-    events::{JobEvent, JobEventData, RegisteredJobSpec},
+    events::{JobEvent, RegisteredJobSpec},
 };
 
 #[derive(Debug, Clone)]
@@ -16,7 +20,10 @@ pub struct RegisterJobCommand {
     write_condition: JobWriteCondition,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) const SNAPSHOT_STORE_CONFIG: SnapshotStoreConfig<'static> =
+    SnapshotStoreConfig::new("cron.command.register_job.v1.", None);
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum RegisterJobState {
     Missing,
     Present,
@@ -59,26 +66,6 @@ impl RegisterJobCommand {
     pub const fn write_condition(&self) -> JobWriteCondition {
         self.write_condition
     }
-
-    pub fn state_from_snapshot(
-        &self,
-        snapshot: Option<&trogon_eventsourcing::Snapshot<JobSpec>>,
-    ) -> Result<RegisterJobState, CronError> {
-        match snapshot {
-            None => Ok(RegisterJobState::Missing),
-            Some(snapshot) if snapshot.payload.id == self.stream_id().as_str() => {
-                Ok(RegisterJobState::Present)
-            }
-            Some(snapshot) => Err(CronError::event_source(
-                "failed to decode current job snapshot into register-job state",
-                std::io::Error::other(format!(
-                    "expected '{}' but snapshot carried '{}'",
-                    self.stream_id(),
-                    snapshot.payload.id
-                )),
-            )),
-        }
-    }
 }
 
 impl StreamCommand for RegisterJobCommand {
@@ -107,50 +94,90 @@ impl Decide<RegisterJobState, JobEvent> for RegisterJobCommand {
     }
 }
 
-impl Evolve for RegisterJobCommand {
+impl CommandStateModel for RegisterJobCommand {
     type State = RegisterJobState;
+    type Event = JobEvent;
+    type Snapshot = RegisterJobState;
+    type AppendCondition = JobWriteCondition;
+    type DomainError = CronError;
 
-    fn evolve(_state: Self::State, event: JobEvent) -> Result<Self::State, CronError> {
+    fn initial_state() -> Self::State {
+        RegisterJobState::Missing
+    }
+
+    fn restore_state(
+        _command: &Self,
+        snapshot: Option<Snapshot<Self::Snapshot>>,
+    ) -> Result<Self::State, Self::DomainError> {
+        Ok(snapshot
+            .map(|snapshot| snapshot.payload)
+            .unwrap_or(Self::initial_state()))
+    }
+
+    fn evolve(state: Self::State, event: JobEvent) -> Result<Self::State, Self::DomainError> {
         match event {
             JobEvent::JobRegistered { .. } | JobEvent::JobStateChanged { .. } => {
                 Ok(RegisterJobState::Present)
             }
-            JobEvent::JobRemoved { .. } => Ok(RegisterJobState::Missing),
+            JobEvent::JobRemoved { .. } => match state {
+                RegisterJobState::Missing => Ok(RegisterJobState::Missing),
+                RegisterJobState::Present => Ok(RegisterJobState::Missing),
+            },
         }
+    }
+
+    fn snapshot_state(state: &Self::State, version: u64) -> Option<Snapshot<Self::Snapshot>> {
+        Some(Snapshot::new(version, *state))
+    }
+
+    fn append_condition(
+        command: &Self,
+        _state: &Self::State,
+        _current_version: Option<u64>,
+    ) -> Self::AppendCondition {
+        command.write_condition()
     }
 }
 
 pub async fn run<R>(runtime: &R, command: RegisterJobCommand) -> Result<(), CronError>
 where
-    R: CommandRuntime,
+    R: CronCommandExecutionRuntime<RegisterJobState>,
 {
     let id = command.stream_id().to_string();
-    let current_snapshot = runtime.load_job_snapshot(command.stream_id()).await?;
-    let current_state = command.state_from_snapshot(current_snapshot.as_ref())?;
-    let (current_state, current_version) =
-        catch_up_command_state(runtime, &command, current_snapshot.as_ref(), current_state).await?;
+    let runtime = CronCommandRuntime::new(runtime, SNAPSHOT_STORE_CONFIG);
 
-    let events = match decide(&current_state, &command) {
-        Ok(Decision::Event(events)) => events,
-        Ok(_) => {
-            return Err(CronError::event_source(
-                "failed to apply job registration to current stream state",
-                std::io::Error::other("unsupported decision variant"),
-            ));
-        }
-        Err(RegisterJobDecisionError::AlreadyRegistered { .. }) => {
+    match execute_command(&runtime, &command, &AlwaysSnapshot).await {
+        Ok(_) => Ok(()),
+        Err(ExecuteError::Decision(RegisterJobDecisionError::AlreadyRegistered { .. })) => {
             return Err(CronError::OptimisticConcurrencyConflict {
                 id: id.clone(),
                 expected: command.write_condition(),
-                current_version,
+                current_version: runtime.current_stream_version(command.stream_id()).await?,
             });
         }
-    };
-
-    let events = events.try_map(JobEventData::new)?;
-    runtime
-        .append_job_events(command.stream_id(), command.write_condition(), events)
-        .await
+        Err(ExecuteError::LoadSnapshot(error))
+        | Err(ExecuteError::SaveSnapshot(error))
+        | Err(ExecuteError::ReadStream(error))
+        | Err(ExecuteError::Append(error))
+        | Err(ExecuteError::Domain(error)) => Err(error),
+        Err(ExecuteError::EncodeEvent(source)) => Err(CronError::event_source(
+            "failed to encode job registration event",
+            source,
+        )),
+        Err(ExecuteError::DecodeEvent(source)) => Err(CronError::event_source(
+            "failed to decode job event while catching up register-job state",
+            source,
+        )),
+        Err(ExecuteError::SnapshotAheadOfStream {
+            snapshot_version,
+            stream_version,
+        }) => Err(CronError::event_source(
+            "loaded register-job snapshot is ahead of the stream state",
+            std::io::Error::other(format!(
+                "job '{id}' snapshot version {snapshot_version} > stream version {stream_version:?}"
+            )),
+        )),
+    }
 }
 
 #[cfg(test)]
@@ -225,5 +252,17 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(snapshot.payload, job("backup"));
+
+        let command_snapshot = store
+            .read_command_snapshot::<RegisterJobState>(
+                SNAPSHOT_STORE_CONFIG,
+                &JobId::parse("backup").unwrap(),
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            command_snapshot,
+            Snapshot::new(1, RegisterJobState::Present)
+        );
     }
 }
