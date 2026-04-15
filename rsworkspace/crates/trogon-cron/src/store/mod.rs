@@ -17,5 +17,5 @@ pub use snapshot_bucket::run as open_snapshot_bucket;
 
 pub const SNAPSHOT_STORE_CONFIG: SnapshotStoreConfig<'static> = SnapshotStoreConfig::new(
     CRON_JOBS_SNAPSHOT_KEY_PREFIX,
-    CRON_JOBS_SNAPSHOT_LAST_EVENT_SEQUENCE_KEY,
+    Some(CRON_JOBS_SNAPSHOT_LAST_EVENT_SEQUENCE_KEY),
 );

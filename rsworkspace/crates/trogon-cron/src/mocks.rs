@@ -6,12 +6,16 @@ use std::sync::{
 
 use async_nats::jetstream::kv;
 use bytes::Bytes;
-use trogon_eventsourcing::{Snapshot, StreamCommand};
+use chrono::{DateTime, Utc};
+use serde::{Serialize, de::DeserializeOwned};
+use trogon_eventsourcing::{
+    AppendOutcome, EventData, NonEmpty, RecordedEvent, Snapshot, StreamCommand,
+};
 use trogon_nats::lease::{ReleaseLease, RenewLease, TryAcquireLease};
 
 use crate::{
     ChangeJobStateCommand, GetJobCommand, ListJobsCommand, RegisterJobCommand, RemoveJobCommand,
-    commands::{CommandRuntime, change_job_state, register_job, remove_job},
+    commands::{CronCommandExecutionRuntime, change_job_state, register_job, remove_job},
     config::{JobSpec, JobWriteCondition, JobWriteState},
     domain::ResolvedJobSpec,
     error::CronError,
@@ -136,6 +140,7 @@ pub struct MockCronStore {
     jobs: Arc<Mutex<HashMap<String, Snapshot<JobSpec>>>>,
     stream_versions: Arc<Mutex<HashMap<String, u64>>>,
     events: Arc<Mutex<HashMap<String, Vec<JobEventData>>>>,
+    command_snapshots: Arc<Mutex<HashMap<String, HashMap<String, String>>>>,
 }
 
 impl MockCronStore {
@@ -162,6 +167,24 @@ impl MockCronStore {
             .lock()
             .unwrap()
             .insert(spec.id.clone(), Snapshot::new(1, spec));
+    }
+
+    pub(crate) fn read_command_snapshot<Payload>(
+        &self,
+        config: trogon_eventsourcing::SnapshotStoreConfig<'static>,
+        stream_id: &crate::JobId,
+    ) -> Result<Option<Snapshot<Payload>>, CronError>
+    where
+        Payload: DeserializeOwned,
+    {
+        self.command_snapshots
+            .lock()
+            .unwrap()
+            .get(config.key_prefix())
+            .and_then(|snapshots| snapshots.get(stream_id.as_str()).cloned())
+            .map(|snapshot| serde_json::from_str(&snapshot))
+            .transpose()
+            .map_err(CronError::from)
     }
 
     pub async fn register_job(&self, command: RegisterJobCommand) -> Result<(), CronError> {
@@ -211,12 +234,32 @@ impl MockCronStore {
     }
 }
 
-impl CommandRuntime for MockCronStore {
-    async fn load_job_snapshot(
+impl<Payload> CronCommandExecutionRuntime<Payload> for MockCronStore
+where
+    Payload: Serialize + DeserializeOwned + Send,
+{
+    async fn load_command_snapshot(
         &self,
+        config: trogon_eventsourcing::SnapshotStoreConfig<'static>,
         stream_id: &crate::JobId,
-    ) -> Result<Option<Snapshot<JobSpec>>, CronError> {
-        Ok(self.jobs.lock().unwrap().get(stream_id.as_str()).cloned())
+    ) -> Result<Option<Snapshot<Payload>>, CronError> {
+        self.read_command_snapshot(config, stream_id)
+    }
+
+    async fn save_command_snapshot(
+        &self,
+        config: trogon_eventsourcing::SnapshotStoreConfig<'static>,
+        stream_id: &crate::JobId,
+        snapshot: Snapshot<Payload>,
+    ) -> Result<(), CronError> {
+        let snapshot = serde_json::to_string(&snapshot)?;
+        self.command_snapshots
+            .lock()
+            .unwrap()
+            .entry(config.key_prefix().to_string())
+            .or_default()
+            .insert(stream_id.to_string(), snapshot);
+        Ok(())
     }
 
     async fn current_job_stream_version(
@@ -231,12 +274,11 @@ impl CommandRuntime for MockCronStore {
             .copied())
     }
 
-    async fn read_job_stream_events(
+    async fn read_job_stream_from(
         &self,
         stream_id: &crate::JobId,
         from_sequence: u64,
-        to_sequence: u64,
-    ) -> Result<Vec<JobEvent>, CronError> {
+    ) -> Result<Vec<RecordedEvent>, CronError> {
         let stream_events = self
             .events
             .lock()
@@ -244,31 +286,39 @@ impl CommandRuntime for MockCronStore {
             .get(stream_id.as_str())
             .cloned()
             .unwrap_or_default();
-        if from_sequence == 0 || to_sequence == 0 || from_sequence > to_sequence {
+        if from_sequence == 0 {
             return Ok(Vec::new());
         }
 
-        let mut decoded = Vec::new();
-        for sequence in from_sequence..=to_sequence {
-            let Some(event) = stream_events.get((sequence - 1) as usize) else {
+        let mut recorded = Vec::new();
+        for (index, event) in stream_events.into_iter().enumerate() {
+            let sequence = index as u64 + 1;
+            if sequence < from_sequence {
                 continue;
-            };
-            decoded.push(event.decode_data::<JobEvent>().map_err(|source| {
-                CronError::event_source(
-                    "failed to decode mocked job event while catching up command state",
-                    source,
-                )
-            })?);
+            }
+            recorded.push(event.record(
+                stream_id.to_string(),
+                Some(sequence),
+                Some(sequence),
+                DateTime::<Utc>::from_timestamp(1_700_000_000 + sequence as i64, 0).ok_or_else(
+                    || {
+                        CronError::event_source(
+                            "failed to build mocked recorded event timestamp",
+                            std::io::Error::other(stream_id.to_string()),
+                        )
+                    },
+                )?,
+            ));
         }
-        Ok(decoded)
+        Ok(recorded)
     }
 
     async fn append_job_events(
         &self,
         stream_id: &crate::JobId,
         write_condition: JobWriteCondition,
-        events: trogon_eventsourcing::NonEmpty<JobEventData>,
-    ) -> Result<(), CronError> {
+        events: NonEmpty<EventData>,
+    ) -> Result<AppendOutcome, CronError> {
         let stream_id = stream_id.clone();
         let jobs = self.jobs.clone();
         let stream_versions = self.stream_versions.clone();
@@ -300,6 +350,7 @@ impl CommandRuntime for MockCronStore {
         let stored_events = stream_events.entry(stream_id.to_string()).or_default();
         let mut projected_snapshot = current_snapshot;
         let mut version = current_version.unwrap_or(0);
+        let appended_events = events.len() as u64;
 
         for event_data in events {
             let event = event_data.decode_data::<JobEvent>().map_err(|source| {
@@ -334,7 +385,9 @@ impl CommandRuntime for MockCronStore {
         } else {
             jobs.remove(stream_id.as_str());
         }
-        Ok(())
+        Ok(AppendOutcome {
+            next_expected_version: current_version.unwrap_or(0) + appended_events,
+        })
     }
 }
 

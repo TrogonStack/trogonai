@@ -1,10 +1,14 @@
-use trogon_eventsourcing::{Decide, Decision, NonEmpty, StreamCommand, decide};
+use serde::{Deserialize, Serialize};
+use trogon_eventsourcing::{
+    AlwaysSnapshot, CommandStateModel, Decide, Decision, ExecuteError, NonEmpty, Snapshot,
+    SnapshotStoreConfig, StreamCommand, execute_command,
+};
 
 use crate::{
-    JobId, JobSpec, JobWriteCondition,
-    commands::{CommandRuntime, Evolve, catch_up_command_state},
+    JobId, JobWriteCondition,
+    commands::{CronCommandExecutionRuntime, CronCommandRuntime},
     error::CronError,
-    events::{JobEvent, JobEventData},
+    events::JobEvent,
 };
 
 #[derive(Debug, Clone)]
@@ -13,7 +17,10 @@ pub struct RemoveJobCommand {
     write_condition: Option<JobWriteCondition>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) const SNAPSHOT_STORE_CONFIG: SnapshotStoreConfig<'static> =
+    SnapshotStoreConfig::new("cron.command.remove_job.v1.", None);
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum RemoveJobState {
     Missing,
     Present,
@@ -38,27 +45,6 @@ impl RemoveJobCommand {
             write_condition: Some(write_condition),
         }
     }
-
-    pub fn state_from_snapshot(
-        &self,
-        snapshot: Option<&trogon_eventsourcing::Snapshot<JobSpec>>,
-    ) -> Result<RemoveJobState, CronError> {
-        match snapshot {
-            None => Ok(RemoveJobState::Missing),
-            Some(snapshot) if snapshot.payload.id == self.stream_id().as_str() => {
-                Ok(RemoveJobState::Present)
-            }
-            Some(snapshot) => Err(CronError::event_source(
-                "failed to decode current job snapshot into remove-job state",
-                std::io::Error::other(format!(
-                    "expected '{}' but snapshot carried '{}'",
-                    self.stream_id(),
-                    snapshot.payload.id
-                )),
-            )),
-        }
-    }
-
     pub(crate) fn resolved_write_condition(
         &self,
         current_version: Option<u64>,
@@ -104,10 +90,27 @@ impl Decide<RemoveJobState, JobEvent> for RemoveJobCommand {
     }
 }
 
-impl Evolve for RemoveJobCommand {
+impl CommandStateModel for RemoveJobCommand {
     type State = RemoveJobState;
+    type Event = JobEvent;
+    type Snapshot = RemoveJobState;
+    type AppendCondition = JobWriteCondition;
+    type DomainError = CronError;
 
-    fn evolve(_state: Self::State, event: JobEvent) -> Result<Self::State, CronError> {
+    fn initial_state() -> Self::State {
+        RemoveJobState::Missing
+    }
+
+    fn restore_state(
+        _command: &Self,
+        snapshot: Option<Snapshot<Self::Snapshot>>,
+    ) -> Result<Self::State, Self::DomainError> {
+        Ok(snapshot
+            .map(|snapshot| snapshot.payload)
+            .unwrap_or(Self::initial_state()))
+    }
+
+    fn evolve(_state: Self::State, event: JobEvent) -> Result<Self::State, Self::DomainError> {
         match event {
             JobEvent::JobRegistered { .. } | JobEvent::JobStateChanged { .. } => {
                 Ok(RemoveJobState::Present)
@@ -115,35 +118,55 @@ impl Evolve for RemoveJobCommand {
             JobEvent::JobRemoved { .. } => Ok(RemoveJobState::Missing),
         }
     }
+
+    fn snapshot_state(state: &Self::State, version: u64) -> Option<Snapshot<Self::Snapshot>> {
+        Some(Snapshot::new(version, *state))
+    }
+
+    fn append_condition(
+        command: &Self,
+        _state: &Self::State,
+        current_version: Option<u64>,
+    ) -> Self::AppendCondition {
+        command.resolved_write_condition(current_version)
+    }
 }
 
 pub async fn run<R>(runtime: &R, command: RemoveJobCommand) -> Result<(), CronError>
 where
-    R: CommandRuntime,
+    R: CronCommandExecutionRuntime<RemoveJobState>,
 {
     let id = command.stream_id().to_string();
-    let current_snapshot = runtime.load_job_snapshot(command.stream_id()).await?;
-    let current_state = command.state_from_snapshot(current_snapshot.as_ref())?;
-    let (current_state, current_version) =
-        catch_up_command_state(runtime, &command, current_snapshot.as_ref(), current_state).await?;
-    let write_condition = command.resolved_write_condition(current_version);
-    let events = match decide(&current_state, &command) {
-        Ok(Decision::Event(events)) => events,
-        Ok(_) => {
-            return Err(CronError::event_source(
-                "failed to decide job removal from current stream state",
-                std::io::Error::other("unsupported decision variant"),
-            ));
-        }
-        Err(RemoveJobDecisionError::JobNotFound { .. }) => {
-            return Err(CronError::JobNotFound { id });
-        }
-    };
+    let runtime = CronCommandRuntime::new(runtime, SNAPSHOT_STORE_CONFIG);
 
-    let events = events.try_map(JobEventData::new)?;
-    runtime
-        .append_job_events(command.stream_id(), write_condition, events)
-        .await
+    match execute_command(&runtime, &command, &AlwaysSnapshot).await {
+        Ok(_) => Ok(()),
+        Err(ExecuteError::Decision(RemoveJobDecisionError::JobNotFound { .. })) => {
+            Err(CronError::JobNotFound { id })
+        }
+        Err(ExecuteError::LoadSnapshot(error))
+        | Err(ExecuteError::SaveSnapshot(error))
+        | Err(ExecuteError::ReadStream(error))
+        | Err(ExecuteError::Append(error))
+        | Err(ExecuteError::Domain(error)) => Err(error),
+        Err(ExecuteError::EncodeEvent(source)) => Err(CronError::event_source(
+            "failed to encode job removal event",
+            source,
+        )),
+        Err(ExecuteError::DecodeEvent(source)) => Err(CronError::event_source(
+            "failed to decode job event while catching up remove-job state",
+            source,
+        )),
+        Err(ExecuteError::SnapshotAheadOfStream {
+            snapshot_version,
+            stream_version,
+        }) => Err(CronError::event_source(
+            "loaded remove-job snapshot is ahead of the stream state",
+            std::io::Error::other(format!(
+                "job '{id}' snapshot version {snapshot_version} > stream version {stream_version:?}"
+            )),
+        )),
+    }
 }
 
 #[cfg(test)]
@@ -225,5 +248,14 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+
+        let command_snapshot = store
+            .read_command_snapshot::<RemoveJobState>(
+                SNAPSHOT_STORE_CONFIG,
+                &JobId::parse("backup").unwrap(),
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(command_snapshot, Snapshot::new(2, RemoveJobState::Missing));
     }
 }

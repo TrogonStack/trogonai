@@ -5,14 +5,20 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use uuid::Uuid;
 
 mod decision;
+mod execution;
 mod snapshots;
 mod streams;
 
 pub use decision::{Act, Decide, Decision, NonEmpty, StreamCommand, decide};
+pub use execution::{
+    AlwaysSnapshot, AppendOutcome, CommandStateModel, ExecuteError, ExecutionResult,
+    ExecutionRuntime, NoSnapshot, SnapshotPolicy, execute_command,
+};
 pub use snapshots::{
-    Snapshot, SnapshotChange, SnapshotStoreConfig, SnapshotStoreError, checkpoint_key,
-    list_snapshots, load_snapshot, load_snapshot_map, maybe_advance_checkpoint,
-    persist_snapshot_change, read_checkpoint, snapshot_key, write_checkpoint,
+    Snapshot, SnapshotChange, SnapshotLoader, SnapshotStoreConfig, SnapshotStoreError,
+    checkpoint_key, list_snapshots, load_snapshot, load_snapshot_for, load_snapshot_map,
+    maybe_advance_checkpoint, persist_snapshot_change, read_checkpoint, snapshot_key,
+    write_checkpoint,
 };
 pub use streams::{StreamStoreError, append_stream, read_stream_from, read_stream_range};
 
