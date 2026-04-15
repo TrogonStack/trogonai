@@ -3480,9 +3480,12 @@ dependencies = [
 name = "trogon-router"
 version = "0.1.0"
 dependencies = [
+ "acp-telemetry",
  "async-nats",
  "axum",
  "bytes",
+ "clap",
+ "confique",
  "futures-util",
  "reqwest",
  "serde",
@@ -3492,6 +3495,8 @@ dependencies = [
  "tracing",
  "trogon-nats",
  "trogon-registry",
+ "trogon-service-config",
+ "trogon-std",
  "trogon-transcript",
  "uuid",
 ]
