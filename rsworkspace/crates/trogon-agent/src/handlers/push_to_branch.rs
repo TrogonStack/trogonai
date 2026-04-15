@@ -167,4 +167,33 @@ mod tests {
                 .is_none()
         );
     }
+
+    #[tokio::test]
+    async fn handle_returns_error_on_invalid_json() {
+        let result = handle(&make_stub_agent(), b"not valid json{{").await;
+        assert!(
+            matches!(result, Some(Err(ref e)) if e.contains("JSON parse error")),
+            "invalid JSON must return Some(Err(..)); got: {result:?}"
+        );
+    }
+
+    /// When `repository.owner.login` or `repository.name` is absent the `?`
+    /// operator on `as_str()` returns `None` — the handler skips silently.
+    #[tokio::test]
+    async fn handle_skips_when_repository_fields_absent() {
+        // `refs/heads/` prefix passes the tag/deletion guard, but `owner` is missing.
+        let payload = serde_json::json!({
+            "ref": "refs/heads/main",
+            "deleted": false,
+            "pusher": {"name": "u"},
+            "commits": [],
+            "head_commit": {"message": "fix: typo"},
+            "repository": {}   // no owner or name
+        });
+        let result = handle(&make_stub_agent(), &serde_json::to_vec(&payload).unwrap()).await;
+        assert!(
+            result.is_none(),
+            "missing repository fields must cause the handler to return None; got: {result:?}"
+        );
+    }
 }

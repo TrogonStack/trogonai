@@ -259,3 +259,297 @@ pub async fn read_channel(
         messages
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn make_ctx() -> crate::tools::ToolContext<crate::tools::mock::MockHttpClient> {
+        crate::tools::ToolContext::for_test("http://proxy.test", "", "", "tok_slack")
+    }
+
+    /// When Slack history returns messages that have no `metadata` field (bot
+    /// token missing `metadata:read` scope), `send_message` falls back to text
+    /// equality. If a message with matching text is found, it must return early
+    /// as a duplicate without posting.
+    #[tokio::test]
+    async fn send_message_no_metadata_read_scope_falls_back_to_text_match() {
+        let ctx = make_ctx();
+
+        // History response: messages present but none have a `metadata` field.
+        // One message has text matching what we're about to send.
+        ctx.http_client.enqueue_ok(
+            200,
+            json!({
+                "ok": true,
+                "messages": [
+                    { "ts": "1700000001.000001", "user": "U123", "text": "Deployment complete!" },
+                    { "ts": "1700000002.000002", "user": "U456", "text": "some other message" }
+                ]
+            })
+            .to_string(),
+        );
+        // No POST enqueued — the function must skip posting when text matches.
+
+        let input = json!({
+            "channel": "C-ENGINEERING",
+            "text": "Deployment complete!",
+            "_idempotency_key": "promise-42.tool-send-1"
+        });
+
+        let result = send_message(&ctx, &input).await;
+        assert!(result.is_ok(), "send_message must succeed: {result:?}");
+        assert!(
+            result.unwrap().contains("already sent"),
+            "must detect duplicate via text fallback when metadata is absent"
+        );
+        assert!(
+            ctx.http_client.is_empty(),
+            "no POST should be made when text-fallback dedup finds a match"
+        );
+    }
+
+    /// Primary metadata key match — when a message in history has the exact
+    /// `event_type` and `idempotency_key` fields, the function returns early
+    /// without posting.
+    #[tokio::test]
+    async fn send_message_metadata_primary_match_skips_post() {
+        let ctx = make_ctx();
+
+        ctx.http_client.enqueue_ok(
+            200,
+            json!({
+                "ok": true,
+                "messages": [
+                    {
+                        "ts": "1700000001.000001",
+                        "user": "U123",
+                        "text": "Deployment complete!",
+                        "metadata": {
+                            "event_type": "trogon_agent_msg",
+                            "event_payload": { "idempotency_key": "promise-42.tool-send-1" }
+                        }
+                    }
+                ]
+            })
+            .to_string(),
+        );
+        // No POST enqueued.
+
+        let result = send_message(
+            &ctx,
+            &json!({
+                "channel": "C-ENG",
+                "text": "Deployment complete!",
+                "_idempotency_key": "promise-42.tool-send-1"
+            }),
+        )
+        .await;
+        assert!(result.is_ok(), "send_message must succeed: {result:?}");
+        assert!(
+            result.unwrap().contains("already sent"),
+            "must detect duplicate via metadata primary match"
+        );
+        assert!(
+            ctx.http_client.is_empty(),
+            "no POST should be made on metadata match"
+        );
+    }
+
+    /// When the history GET fails with a network error, `send_message` must
+    /// degrade gracefully and proceed to post rather than returning an error.
+    #[tokio::test]
+    async fn send_message_history_get_fails_proceeds_with_post() {
+        let ctx = make_ctx();
+
+        // History GET fails.
+        ctx.http_client.enqueue_err("connection refused");
+        // POST succeeds.
+        ctx.http_client.enqueue_ok(
+            200,
+            json!({"ok": true, "ts": "1700000003.000003"}).to_string(),
+        );
+
+        let result = send_message(
+            &ctx,
+            &json!({
+                "channel": "C-ENG",
+                "text": "Hello team",
+                "_idempotency_key": "key-net-err"
+            }),
+        )
+        .await;
+        assert!(result.is_ok(), "must succeed after history GET failure: {result:?}");
+        assert!(result.unwrap().contains("Message sent"));
+    }
+
+    /// When history returns `ok: false` (e.g. missing scope), the check is
+    /// skipped and the message is posted.
+    #[tokio::test]
+    async fn send_message_history_ok_false_proceeds_with_post() {
+        let ctx = make_ctx();
+
+        ctx.http_client.enqueue_ok(
+            200,
+            json!({"ok": false, "error": "missing_scope"}).to_string(),
+        );
+        ctx.http_client.enqueue_ok(
+            200,
+            json!({"ok": true, "ts": "1700000004.000004"}).to_string(),
+        );
+
+        let result = send_message(
+            &ctx,
+            &json!({
+                "channel": "C-ENG",
+                "text": "Alert!",
+                "_idempotency_key": "key-ok-false"
+            }),
+        )
+        .await;
+        assert!(result.is_ok(), "must succeed when history ok:false: {result:?}");
+        assert!(result.unwrap().contains("Message sent"));
+    }
+
+    /// When Slack returns `ok: false`, `read_channel` must return an Err with
+    /// the error string from the response.
+    #[tokio::test]
+    async fn read_channel_ok_false_returns_error() {
+        let ctx = make_ctx();
+        ctx.http_client.enqueue_ok(
+            200,
+            json!({"ok": false, "error": "channel_not_found"}).to_string(),
+        );
+        let result = read_channel(&ctx, &json!({"channel": "C-MISSING"})).await;
+        assert!(result.is_err(), "ok:false must return Err");
+        assert!(
+            result.unwrap_err().contains("channel_not_found"),
+            "error must include Slack's error code"
+        );
+    }
+
+    /// Messages that have no `text` field are silently filtered out by
+    /// `filter_map`. Only messages with text contribute to the output.
+    #[tokio::test]
+    async fn read_channel_message_without_text_is_filtered() {
+        let ctx = make_ctx();
+        ctx.http_client.enqueue_ok(
+            200,
+            json!({
+                "ok": true,
+                "messages": [
+                    // No `text` field — must be filtered out.
+                    {"ts": "1700000001.000001", "user": "U1"},
+                    // Has `text` — must appear in output.
+                    {"ts": "1700000002.000002", "user": "U2", "text": "visible message"}
+                ]
+            })
+            .to_string(),
+        );
+        let result = read_channel(&ctx, &json!({"channel": "C-MIXED"})).await;
+        assert!(result.is_ok(), "read_channel must succeed: {result:?}");
+        let body = result.unwrap();
+        assert!(body.contains("visible message"), "message with text must appear");
+        assert!(!body.contains("U1"), "message without text must be filtered");
+    }
+
+    /// When the send POST itself returns `ok: false`, `send_message` must
+    /// return an Err containing Slack's error string — not a success.
+    #[tokio::test]
+    async fn send_message_post_ok_false_returns_err() {
+        let ctx = make_ctx();
+
+        // No idempotency key → no history GET; only the POST runs.
+        ctx.http_client.enqueue_ok(
+            200,
+            json!({"ok": false, "error": "not_in_channel"}).to_string(),
+        );
+
+        let result = send_message(
+            &ctx,
+            &json!({"channel": "C-RESTRICTED", "text": "Hello!"}),
+        )
+        .await;
+
+        assert!(result.is_err(), "ok:false from POST must return Err: {result:?}");
+        assert!(
+            result.unwrap_err().contains("not_in_channel"),
+            "error must include Slack's error code"
+        );
+    }
+
+    /// When the history GET returns HTTP 200 but with an invalid JSON body,
+    /// the `if let Ok(body) = serde_json::from_str(...)` guard fails silently
+    /// and `send_message` proceeds to post the message.
+    #[tokio::test]
+    async fn send_message_history_invalid_json_proceeds_with_post() {
+        let ctx = make_ctx();
+
+        // History GET: 200 OK but body is malformed JSON.
+        ctx.http_client.enqueue_ok(200, "not valid json {{");
+
+        // POST: send the message normally.
+        ctx.http_client.enqueue_ok(
+            200,
+            json!({"ok": true, "ts": "1700000005.000005"}).to_string(),
+        );
+
+        let result = send_message(
+            &ctx,
+            &json!({
+                "channel": "C-ENG",
+                "text": "Deploy complete",
+                "_idempotency_key": "key-history-bad-json"
+            }),
+        )
+        .await;
+
+        assert!(
+            result.is_ok(),
+            "must proceed with send when history JSON is invalid: {result:?}"
+        );
+        assert!(result.unwrap().contains("Message sent"));
+        assert!(
+            ctx.http_client.is_empty(),
+            "both GET and POST must have been consumed"
+        );
+    }
+
+    /// When the HTTP response body is not valid JSON, `read_channel` must
+    /// return an Err rather than panicking.
+    #[tokio::test]
+    async fn read_channel_json_parse_error_returns_err() {
+        let ctx = make_ctx();
+        ctx.http_client.enqueue_ok(200, "not valid json {{");
+
+        let result = read_channel(&ctx, &json!({"channel": "C-ENG"})).await;
+        assert!(result.is_err(), "invalid JSON response must return Err: {result:?}");
+    }
+
+    /// When the channel history is empty, `read_channel` must return the
+    /// sentinel string "No messages in {channel}".
+    #[tokio::test]
+    async fn read_channel_empty_messages_returns_no_messages_string() {
+        let ctx = make_ctx();
+
+        ctx.http_client.enqueue_ok(
+            200,
+            json!({
+                "ok": true,
+                "messages": []
+            })
+            .to_string(),
+        );
+
+        let input = json!({ "channel": "C-EMPTY" });
+
+        let result = read_channel(&ctx, &input).await;
+        assert!(result.is_ok(), "read_channel must succeed: {result:?}");
+        assert_eq!(
+            result.unwrap(),
+            "No messages in C-EMPTY",
+            "must return sentinel string for an empty channel"
+        );
+    }
+}

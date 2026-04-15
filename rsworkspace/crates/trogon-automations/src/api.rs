@@ -768,4 +768,293 @@ mod tests {
     fn default_true_returns_true() {
         assert!(default_true());
     }
+
+    // ── create_automation missing tenant ──────────────────────────────────────
+
+    #[tokio::test]
+    async fn create_automation_missing_tenant_returns_400() {
+        let app = mock_app(MockAutomationStore::new(), MockRunStore::new());
+        let body = serde_json::json!({"name":"X","trigger":"t","prompt":"p"});
+        let req = Request::builder()
+            .method("POST")
+            .uri("/automations")
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    // ── enable/disable 404 ────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn enable_automation_returns_404_when_not_found() {
+        let app = mock_app(MockAutomationStore::new(), MockRunStore::new());
+        let req = Request::builder()
+            .method("PATCH")
+            .uri("/automations/no-such/enable")
+            .header("x-tenant-id", "acme")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn disable_automation_returns_404_when_not_found() {
+        let app = mock_app(MockAutomationStore::new(), MockRunStore::new());
+        let req = Request::builder()
+            .method("PATCH")
+            .uri("/automations/no-such/disable")
+            .header("x-tenant-id", "acme")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    // ── list_runs with data ───────────────────────────────────────────────────
+
+    fn sample_run(id: &str, auto_id: &str, tenant: &str) -> crate::runs::RunRecord {
+        crate::runs::RunRecord {
+            id: id.to_string(),
+            automation_id: auto_id.to_string(),
+            automation_name: "My auto".to_string(),
+            tenant_id: tenant.to_string(),
+            nats_subject: "github.push".to_string(),
+            started_at: 1_700_000_000,
+            finished_at: 1_700_000_010,
+            status: crate::runs::RunStatus::Success,
+            output: "ok".to_string(),
+        }
+    }
+
+    #[tokio::test]
+    async fn list_runs_returns_runs_when_present() {
+        let run_store = MockRunStore::new();
+        run_store.insert(sample_run("r1", "a1", "acme"));
+        run_store.insert(sample_run("r2", "a2", "acme"));
+        run_store.insert(sample_run("r3", "a1", "other")); // different tenant
+        let app = mock_app(MockAutomationStore::new(), run_store);
+        let resp = app.oneshot(get_req("/runs", "acme")).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json.as_array().unwrap().len(), 2, "must return only acme's 2 runs");
+    }
+
+    #[tokio::test]
+    async fn list_runs_filtered_by_automation_id_query_param() {
+        let run_store = MockRunStore::new();
+        run_store.insert(sample_run("r1", "auto-1", "acme"));
+        run_store.insert(sample_run("r2", "auto-2", "acme"));
+        let app = mock_app(MockAutomationStore::new(), run_store);
+        let resp = app
+            .oneshot(get_req("/runs?automation_id=auto-1", "acme"))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let arr = json.as_array().unwrap();
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["automation_id"], "auto-1");
+    }
+
+    #[tokio::test]
+    async fn list_runs_missing_tenant_returns_400() {
+        let app = mock_app(MockAutomationStore::new(), MockRunStore::new());
+        let req = Request::builder()
+            .method("GET")
+            .uri("/runs")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    // ── list_runs_for_automation ──────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn list_runs_for_automation_returns_runs() {
+        let run_store = MockRunStore::new();
+        run_store.insert(sample_run("r1", "a1", "acme"));
+        run_store.insert(sample_run("r2", "a1", "acme"));
+        run_store.insert(sample_run("r3", "a2", "acme")); // different automation
+        let app = mock_app(MockAutomationStore::new(), run_store);
+        let resp = app
+            .oneshot(get_req("/automations/a1/runs", "acme"))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            json.as_array().unwrap().len(),
+            2,
+            "must return only runs for automation a1"
+        );
+    }
+
+    #[tokio::test]
+    async fn list_runs_for_automation_missing_tenant_returns_400() {
+        let app = mock_app(MockAutomationStore::new(), MockRunStore::new());
+        let req = Request::builder()
+            .method("GET")
+            .uri("/automations/a1/runs")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    // ── get_stats with data ───────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn get_stats_with_runs_returns_nonzero_counts() {
+        let run_store = MockRunStore::new();
+        let now = crate::runs::now_unix();
+        let mut r1 = sample_run("r1", "a1", "acme");
+        r1.started_at = now - 3600; // 1 h ago — in 7-day window
+        r1.status = crate::runs::RunStatus::Success;
+        let mut r2 = sample_run("r2", "a1", "acme");
+        r2.started_at = now - 3600;
+        r2.status = crate::runs::RunStatus::Failed;
+        run_store.insert(r1);
+        run_store.insert(r2);
+        let app = mock_app(MockAutomationStore::new(), run_store);
+        let resp = app.oneshot(get_req("/stats", "acme")).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["total"], 2);
+        assert_eq!(json["successful_7d"], 1);
+        assert_eq!(json["failed_7d"], 1);
+    }
+
+    // ── 500 error paths ───────────────────────────────────────────────────────
+
+    fn error_app() -> axum::Router {
+        use crate::runs::mock::ErrorRunStore;
+        use crate::store::error_mock::ErrorAutomationStore;
+        router(AppState {
+            store: ErrorAutomationStore::new(),
+            run_store: ErrorRunStore::new(),
+        })
+    }
+
+    #[tokio::test]
+    async fn list_automations_store_error_returns_500() {
+        let resp = error_app()
+            .oneshot(get_req("/automations", "acme"))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn create_automation_store_error_returns_500() {
+        let body = serde_json::json!({"name":"X","trigger":"t","prompt":"p"});
+        let req = Request::builder()
+            .method("POST")
+            .uri("/automations")
+            .header("x-tenant-id", "acme")
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap();
+        let resp = error_app().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn get_automation_store_error_returns_500() {
+        let resp = error_app()
+            .oneshot(get_req("/automations/a1", "acme"))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn update_automation_store_error_returns_500() {
+        let body = serde_json::json!({"name":"X","trigger":"t","prompt":"p","enabled":true});
+        let req = Request::builder()
+            .method("PUT")
+            .uri("/automations/a1")
+            .header("x-tenant-id", "acme")
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap();
+        let resp = error_app().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn delete_automation_store_error_returns_500() {
+        let req = Request::builder()
+            .method("DELETE")
+            .uri("/automations/a1")
+            .header("x-tenant-id", "acme")
+            .body(Body::empty())
+            .unwrap();
+        let resp = error_app().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn enable_automation_store_error_returns_500() {
+        let req = Request::builder()
+            .method("PATCH")
+            .uri("/automations/a1/enable")
+            .header("x-tenant-id", "acme")
+            .body(Body::empty())
+            .unwrap();
+        let resp = error_app().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn list_runs_store_error_returns_500() {
+        let resp = error_app()
+            .oneshot(get_req("/runs", "acme"))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn list_runs_for_automation_store_error_returns_500() {
+        let resp = error_app()
+            .oneshot(get_req("/automations/a1/runs", "acme"))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn get_stats_store_error_returns_500() {
+        let resp = error_app()
+            .oneshot(get_req("/stats", "acme"))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    // ── epoch_to_parts non-zero dates ─────────────────────────────────────────
+
+    #[test]
+    fn epoch_to_parts_known_date() {
+        // 2026-04-15 00:00:00 UTC = 1776211200
+        // 2026-01-01 = 1767225600 (56 years * 365d + 14 leaps = 20454 days)
+        // + 104 days (Jan31 + Feb28 + Mar31 + Apr14) = 1776211200
+        let (y, mo, d, h, mi, s) = epoch_to_parts(1_776_211_200);
+        assert_eq!((y, mo, d, h, mi, s), (2026, 4, 15, 0, 0, 0));
+    }
+
+    #[test]
+    fn epoch_to_parts_leap_year_feb_29() {
+        // 2024-02-29 12:00:00 UTC = 1709208000
+        let (y, mo, d, h, mi, s) = epoch_to_parts(1_709_208_000);
+        assert_eq!((y, mo, d, h, mi, s), (2024, 2, 29, 12, 0, 0));
+    }
 }

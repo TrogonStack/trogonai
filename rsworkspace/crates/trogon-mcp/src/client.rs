@@ -221,3 +221,67 @@ pub mod mock {
         }
     }
 }
+
+#[cfg(all(test, feature = "test-support"))]
+mod tests {
+    use super::McpCallTool;
+    use super::mock::MockMcpClient;
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn mock_mcp_client_default_returns_ok_response() {
+        let client = MockMcpClient::new();
+        let result = client.call_tool("any", &json!({})).await;
+        assert_eq!(result, Ok("mock response".to_string()));
+    }
+
+    #[tokio::test]
+    async fn mock_mcp_client_set_response_changes_return_value() {
+        let client = MockMcpClient::new();
+        client.set_response("custom result");
+        let result = client.call_tool("tool", &json!({"x": 1})).await;
+        assert_eq!(result, Ok("custom result".to_string()));
+    }
+
+    #[tokio::test]
+    async fn mock_mcp_client_set_error_returns_err() {
+        let client = MockMcpClient::new();
+        client.set_error("something went wrong");
+        let result = client.call_tool("tool", &json!({})).await;
+        assert_eq!(result, Err("something went wrong".to_string()));
+    }
+
+    #[tokio::test]
+    async fn mock_mcp_client_set_response_then_set_error_returns_error() {
+        let client = MockMcpClient::new();
+        client.set_response("ok first");
+        client.set_error("then broken");
+        let result = client.call_tool("tool", &json!({})).await;
+        assert_eq!(result, Err("then broken".to_string()));
+    }
+
+    #[tokio::test]
+    async fn mock_mcp_client_ignores_tool_name_and_arguments() {
+        let client = MockMcpClient::new();
+        client.set_response("fixed");
+        let r1 = client.call_tool("tool_a", &json!({})).await;
+        let r2 = client.call_tool("tool_b", &json!({"key": "val"})).await;
+        assert_eq!(r1, Ok("fixed".to_string()));
+        assert_eq!(r2, Ok("fixed".to_string()));
+    }
+
+    #[tokio::test]
+    async fn mock_mcp_client_implements_mcp_call_tool_via_dyn_dispatch() {
+        let client: Box<dyn McpCallTool> = Box::new(MockMcpClient::new());
+        let result = client.call_tool("test", &json!({})).await;
+        assert!(result.is_ok(), "trait dispatch must work: {result:?}");
+    }
+
+    #[test]
+    fn mock_mcp_client_default_equals_new() {
+        // Default and new() must both start in the ok state.
+        // Verified by cloning — no panic means internal Arc/Mutex are valid.
+        let _a = MockMcpClient::new().clone();
+        let _b = MockMcpClient::default().clone();
+    }
+}

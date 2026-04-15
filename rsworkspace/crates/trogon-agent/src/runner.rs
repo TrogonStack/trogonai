@@ -1913,7 +1913,7 @@ async fn bind_consumer(
 
 #[cfg(test)]
 mod tests {
-    use super::{dispatch_automations, sanitize_name};
+    use super::{dispatch_automations, sanitize_name, subject_slug, worker_id};
     use std::sync::Arc;
 
     fn make_agent(proxy_url: &str) -> Arc<crate::agent_loop::AgentLoop> {
@@ -6264,6 +6264,75 @@ mod tests {
         assert!(
             p.checkpoint_degraded,
             "checkpoint_degraded must be set when payload exceeds CHECKPOINT_MAX_BYTES"
+        );
+    }
+
+    #[test]
+    fn subject_slug_replaces_dots_with_underscores() {
+        assert_eq!(subject_slug("github.pull_request"), "github_pull_request");
+    }
+
+    #[test]
+    fn subject_slug_lowercases_input() {
+        assert_eq!(subject_slug("LINEAR.ISSUE"), "linear_issue");
+    }
+
+    #[test]
+    fn subject_slug_no_dots_is_unchanged_except_case() {
+        assert_eq!(subject_slug("CronJob"), "cronjob");
+    }
+
+    // ── worker_id ─────────────────────────────────────────────────────────────
+
+    /// `worker_id()` must return a string in the format `"{hostname}:{pid}"`.
+    /// The PID is always positive, and the separator `:` must be present.
+    #[test]
+    fn worker_id_has_hostname_colon_pid_format() {
+        let id = worker_id();
+        // Must contain exactly one `:` separating hostname from pid.
+        let parts: Vec<&str> = id.splitn(2, ':').collect();
+        assert_eq!(parts.len(), 2, "worker_id must contain a ':' separator; got: {id}");
+        let hostname = parts[0];
+        let pid_str = parts[1];
+        assert!(!hostname.is_empty(), "hostname part must not be empty; got: {id}");
+        let pid: u32 = pid_str
+            .parse()
+            .unwrap_or_else(|_| panic!("PID part must be a valid u32; got: {pid_str}"));
+        assert!(pid > 0, "PID must be positive; got: {pid}");
+    }
+
+    /// When the `HOSTNAME` environment variable is set, `worker_id()` uses it.
+    #[test]
+    fn worker_id_uses_hostname_env_var() {
+        // Use a unique key to avoid races with parallel tests.
+        let original = std::env::var("HOSTNAME").ok();
+        // SAFETY: single-threaded portion of this test — set before reading.
+        unsafe { std::env::set_var("HOSTNAME", "my-test-host") };
+        let id = worker_id();
+        // Restore before asserting so cleanup happens even on failure.
+        match original {
+            Some(v) => unsafe { std::env::set_var("HOSTNAME", v) },
+            None => unsafe { std::env::remove_var("HOSTNAME") },
+        }
+        assert!(
+            id.starts_with("my-test-host:"),
+            "worker_id must use HOSTNAME env var; got: {id}"
+        );
+    }
+
+    /// When `HOSTNAME` is not set, `worker_id()` falls back to `"unknown"`.
+    #[test]
+    fn worker_id_falls_back_to_unknown_when_hostname_absent() {
+        let original = std::env::var("HOSTNAME").ok();
+        unsafe { std::env::remove_var("HOSTNAME") };
+        let id = worker_id();
+        match original {
+            Some(v) => unsafe { std::env::set_var("HOSTNAME", v) },
+            None => {}
+        }
+        assert!(
+            id.starts_with("unknown:"),
+            "worker_id must fall back to 'unknown' when HOSTNAME is unset; got: {id}"
         );
     }
 }

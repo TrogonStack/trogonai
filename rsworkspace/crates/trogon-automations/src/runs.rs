@@ -224,6 +224,45 @@ pub mod mock {
         pub fn snapshot(&self) -> Vec<RunRecord> {
             self.data.lock().unwrap().clone()
         }
+
+        /// Pre-populate the store with a run record (test helper).
+        pub fn insert(&self, run: RunRecord) {
+            self.data.lock().unwrap().push(run);
+        }
+    }
+
+    /// Run store that always returns errors — used to test 500 paths.
+    #[derive(Clone, Default)]
+    pub struct ErrorRunStore;
+
+    impl ErrorRunStore {
+        pub fn new() -> Self {
+            Self
+        }
+    }
+
+    impl RunRepository for ErrorRunStore {
+        fn record<'a>(
+            &'a self,
+            _run: &'a RunRecord,
+        ) -> Pin<Box<dyn Future<Output = Result<(), StoreError>> + Send + 'a>> {
+            Box::pin(async move { Err(StoreError("injected record error".into())) })
+        }
+
+        fn list<'a>(
+            &'a self,
+            _tenant_id: &'a str,
+            _automation_id: Option<&'a str>,
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<RunRecord>, StoreError>> + Send + 'a>> {
+            Box::pin(async move { Err(StoreError("injected list error".into())) })
+        }
+
+        fn stats<'a>(
+            &'a self,
+            _tenant_id: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<RunStats, StoreError>> + Send + 'a>> {
+            Box::pin(async move { Err(StoreError("injected stats error".into())) })
+        }
     }
 
     impl RunRepository for MockRunStore {

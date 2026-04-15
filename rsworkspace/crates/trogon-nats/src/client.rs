@@ -98,3 +98,33 @@ impl FlushClient for NatsAsyncClient {
         self.flush().await
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bytes::Bytes;
+
+    /// A minimal stub that relies entirely on the default `max_payload()` impl.
+    #[derive(Clone)]
+    struct StubPublisher;
+
+    impl PublishClient for StubPublisher {
+        type PublishError = std::io::Error;
+
+        async fn publish_with_headers<S: ToSubject + Send>(
+            &self,
+            _subject: S,
+            _headers: HeaderMap,
+            _payload: Bytes,
+        ) -> Result<(), Self::PublishError> {
+            Ok(())
+        }
+        // max_payload() NOT overridden — uses the 1 MiB default
+    }
+
+    #[test]
+    fn publish_client_default_max_payload_is_one_mib() {
+        let stub = StubPublisher;
+        assert_eq!(stub.max_payload(), 1024 * 1024);
+    }
+}
