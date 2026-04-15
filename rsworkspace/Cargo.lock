@@ -3463,6 +3463,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-pr-actor"
+version = "0.1.0"
+dependencies = [
+ "acp-telemetry",
+ "async-nats",
+ "clap",
+ "confique",
+ "serde",
+ "tokio",
+ "tracing",
+ "trogon-actor",
+ "trogon-nats",
+ "trogon-registry",
+ "trogon-service-config",
+ "trogon-std",
+ "trogon-transcript",
+]
+
+[[package]]
 name = "trogon-registry"
 version = "0.1.0"
 dependencies = [
