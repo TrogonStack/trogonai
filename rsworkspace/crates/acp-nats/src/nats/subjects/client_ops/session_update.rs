@@ -34,3 +34,21 @@ impl super::super::stream::StreamAssignment for SessionUpdateSubject {
     const STREAM: Option<super::super::stream::AcpStream> =
         Some(super::super::stream::AcpStream::ClientOps);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn prefix() -> crate::acp_prefix::AcpPrefix {
+        crate::acp_prefix::AcpPrefix::new("acp").expect("prefix")
+    }
+    fn session_id() -> crate::session_id::AcpSessionId {
+        crate::session_id::AcpSessionId::new("ses1").expect("session_id")
+    }
+
+    #[test]
+    fn display_formats_subject_correctly() {
+        let s = SessionUpdateSubject::new(&prefix(), &session_id());
+        assert_eq!(s.to_string(), "acp.session.ses1.client.session.update");
+    }
+}

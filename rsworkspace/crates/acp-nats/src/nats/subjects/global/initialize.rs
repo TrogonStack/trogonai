@@ -24,3 +24,18 @@ impl super::super::stream::StreamAssignment for InitializeSubject {
     const STREAM: Option<super::super::stream::AcpStream> =
         Some(super::super::stream::AcpStream::Global);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn prefix() -> crate::acp_prefix::AcpPrefix {
+        crate::acp_prefix::AcpPrefix::new("acp").expect("prefix")
+    }
+
+    #[test]
+    fn display_formats_subject_correctly() {
+        let s = InitializeSubject::new(&prefix());
+        assert_eq!(s.to_string(), "acp.agent.initialize");
+    }
+}

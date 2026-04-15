@@ -29,3 +29,25 @@ impl super::super::markers::Subscribable for GlobalAllSubject {}
 impl super::super::stream::StreamAssignment for GlobalAllSubject {
     const STREAM: Option<super::super::stream::AcpStream> = None;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_nats::subject::ToSubject as _;
+
+    fn prefix() -> crate::acp_prefix::AcpPrefix {
+        crate::acp_prefix::AcpPrefix::new("acp").expect("prefix")
+    }
+
+    #[test]
+    fn display_formats_subject_correctly() {
+        let s = GlobalAllSubject::new(&prefix());
+        assert_eq!(s.to_string(), "acp.agent.>");
+    }
+
+    #[test]
+    fn to_subject_matches_display() {
+        let s = GlobalAllSubject::new(&prefix());
+        assert_eq!(s.to_subject().as_str(), s.to_string());
+    }
+}
