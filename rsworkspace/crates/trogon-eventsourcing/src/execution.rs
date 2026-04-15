@@ -75,25 +75,6 @@ impl OccPolicy {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct ExecuteOptions {
-    pub occ: OccPolicy,
-}
-
-impl ExecuteOptions {
-    pub const fn exact_current_version() -> Self {
-        Self {
-            occ: OccPolicy::ExactCurrentVersion,
-        }
-    }
-
-    pub const fn explicit(expected_state: ExpectedState) -> Self {
-        Self {
-            occ: OccPolicy::Explicit(expected_state),
-        }
-    }
-}
-
 pub trait DefaultExpectedStateProvider: StreamCommand {
     fn default_expected_state(&self) -> Option<ExpectedState> {
         None
@@ -202,184 +183,205 @@ pub enum ExecuteError<DecisionError, DomainError, RuntimeError> {
     },
 }
 
-pub async fn execute_command<C, R>(
-    runtime: &R,
-    command: &C,
-) -> Result<ExecutionResult<C::State, C::Event>, ExecuteError<C::Error, C::DomainError, R::Error>>
-where
-    C: CommandStateModel + Decide<C::State, C::Event> + DefaultExpectedStateProvider,
-    C::Event: EventType + StreamEvent + Serialize + DeserializeOwned + Clone,
-    R: ExecutionRuntime<C::StreamId>,
-{
-    execute_command_with_options(runtime, command, ExecuteOptions::default()).await
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct WithoutSnapshots;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WithSnapshots<P> {
+    policy: P,
 }
 
-pub async fn execute_command_with_options<C, R>(
-    runtime: &R,
-    command: &C,
-    options: ExecuteOptions,
-) -> Result<ExecutionResult<C::State, C::Event>, ExecuteError<C::Error, C::DomainError, R::Error>>
+pub struct CommandExecution<'a, R, C, S = WithoutSnapshots> {
+    runtime: &'a R,
+    command: &'a C,
+    occ: OccPolicy,
+    snapshots: S,
+}
+
+impl<'a, R, C> CommandExecution<'a, R, C, WithoutSnapshots> {
+    pub const fn new(runtime: &'a R, command: &'a C) -> Self {
+        Self {
+            runtime,
+            command,
+            occ: OccPolicy::CommandDefault,
+            snapshots: WithoutSnapshots,
+        }
+    }
+
+    pub fn snapshots<P>(self, policy: P) -> CommandExecution<'a, R, C, WithSnapshots<P>> {
+        CommandExecution {
+            runtime: self.runtime,
+            command: self.command,
+            occ: self.occ,
+            snapshots: WithSnapshots { policy },
+        }
+    }
+}
+
+impl<R, C, S> CommandExecution<'_, R, C, S> {
+    pub fn occ(mut self, occ: OccPolicy) -> Self {
+        self.occ = occ;
+        self
+    }
+}
+
+impl<R, C> CommandExecution<'_, R, C, WithoutSnapshots>
 where
     C: CommandStateModel + Decide<C::State, C::Event> + DefaultExpectedStateProvider,
     C::Event: EventType + StreamEvent + Serialize + DeserializeOwned + Clone,
     R: ExecutionRuntime<C::StreamId>,
 {
-    let stream_id = command.stream_id();
-    let current_version = runtime
-        .current_stream_version(stream_id)
-        .await
-        .map_err(ExecuteError::ReadStream)?;
-    let mut state = C::initial_state();
-
-    if let Some(current_version) = current_version {
-        let recorded_events = runtime
-            .read_stream_from(stream_id, 1)
+    pub async fn execute(
+        self,
+    ) -> Result<ExecutionResult<C::State, C::Event>, ExecuteError<C::Error, C::DomainError, R::Error>>
+    {
+        let stream_id = self.command.stream_id();
+        let current_version = self
+            .runtime
+            .current_stream_version(stream_id)
             .await
             .map_err(ExecuteError::ReadStream)?;
+        let mut state = C::initial_state();
 
-        for recorded_event in recorded_events
-            .into_iter()
-            .filter(|event| event.log_position.unwrap_or(0) <= current_version)
-        {
-            let event = recorded_event
-                .decode_data::<C::Event>()
-                .map_err(ExecuteError::DecodeEvent)?;
-            state = C::evolve(state, event).map_err(ExecuteError::Domain)?;
-        }
-    }
-
-    let Decision::Event(events) = C::decide(&state, command).map_err(ExecuteError::Decision)?;
-    let encoded_events = encode_events(&events).map_err(ExecuteError::EncodeEvent)?;
-    let expected_state = options
-        .occ
-        .resolve(current_version, command.default_expected_state());
-    let append_outcome = runtime
-        .append_events(stream_id, expected_state, encoded_events)
-        .await
-        .map_err(ExecuteError::Append)?;
-
-    for event in events.iter().cloned() {
-        state = C::evolve(state, event).map_err(ExecuteError::Domain)?;
-    }
-
-    Ok(ExecutionResult {
-        next_expected_version: append_outcome.next_expected_version,
-        events,
-        state,
-    })
-}
-
-pub async fn execute_command_with_snapshots<C, R, P, E>(
-    runtime: &R,
-    command: &C,
-    snapshot_policy: &P,
-) -> Result<ExecutionResult<C::State, C::Event>, ExecuteError<C::Error, C::DomainError, E>>
-where
-    C: SnapshotStateModel + Decide<C::State, C::Event> + DefaultExpectedStateProvider,
-    C::Event: EventType + StreamEvent + Serialize + DeserializeOwned + Clone,
-    C::Snapshot: Into<C::State>,
-    R: ExecutionRuntime<C::StreamId, Error = E>
-        + SnapshotRuntime<C::Snapshot, C::StreamId, Error = E>,
-    P: SnapshotPolicy<C::State, C::Event>,
-{
-    execute_command_with_snapshots_and_options(
-        runtime,
-        command,
-        snapshot_policy,
-        ExecuteOptions::default(),
-    )
-    .await
-}
-
-pub async fn execute_command_with_snapshots_and_options<C, R, P, E>(
-    runtime: &R,
-    command: &C,
-    snapshot_policy: &P,
-    options: ExecuteOptions,
-) -> Result<ExecutionResult<C::State, C::Event>, ExecuteError<C::Error, C::DomainError, E>>
-where
-    C: SnapshotStateModel + Decide<C::State, C::Event> + DefaultExpectedStateProvider,
-    C::Event: EventType + StreamEvent + Serialize + DeserializeOwned + Clone,
-    C::Snapshot: Into<C::State>,
-    R: ExecutionRuntime<C::StreamId, Error = E>
-        + SnapshotRuntime<C::Snapshot, C::StreamId, Error = E>,
-    P: SnapshotPolicy<C::State, C::Event>,
-{
-    let stream_id = command.stream_id();
-    let snapshot = runtime
-        .load_snapshot(stream_id)
-        .await
-        .map_err(ExecuteError::LoadSnapshot)?;
-    let snapshot_version = snapshot.as_ref().map(|snapshot| snapshot.version);
-    let mut state = C::restore_state(command, snapshot).map_err(ExecuteError::Domain)?;
-    let current_version = runtime
-        .current_stream_version(stream_id)
-        .await
-        .map_err(ExecuteError::ReadStream)?;
-
-    if let Some(snapshot_version) = snapshot_version {
-        match current_version {
-            Some(stream_version) if snapshot_version <= stream_version => {}
-            stream_version => {
-                return Err(ExecuteError::SnapshotAheadOfStream {
-                    snapshot_version,
-                    stream_version,
-                });
-            }
-        }
-    }
-
-    if let Some(current_version) = current_version {
-        let start_sequence = snapshot_version
-            .map(|version| version.saturating_add(1))
-            .unwrap_or(1);
-
-        if start_sequence <= current_version {
-            let recorded_events = runtime
-                .read_stream_from(stream_id, start_sequence)
+        if let Some(current_version) = current_version {
+            let recorded_events = self
+                .runtime
+                .read_stream_from(stream_id, 1)
                 .await
                 .map_err(ExecuteError::ReadStream)?;
 
-            for recorded_event in recorded_events {
+            for recorded_event in recorded_events
+                .into_iter()
+                .filter(|event| event.log_position.unwrap_or(0) <= current_version)
+            {
                 let event = recorded_event
                     .decode_data::<C::Event>()
                     .map_err(ExecuteError::DecodeEvent)?;
                 state = C::evolve(state, event).map_err(ExecuteError::Domain)?;
             }
         }
-    }
 
-    let Decision::Event(events) = C::decide(&state, command).map_err(ExecuteError::Decision)?;
-    let encoded_events = encode_events(&events).map_err(ExecuteError::EncodeEvent)?;
-    let expected_state = options
-        .occ
-        .resolve(current_version, command.default_expected_state());
-    let append_outcome = runtime
-        .append_events(stream_id, expected_state, encoded_events)
-        .await
-        .map_err(ExecuteError::Append)?;
-
-    for event in events.iter().cloned() {
-        state = C::evolve(state, event).map_err(ExecuteError::Domain)?;
-    }
-
-    if snapshot_policy.should_snapshot(append_outcome.next_expected_version, &state, &events)
-        && let Some(snapshot_payload) = C::snapshot_state(&state)
-    {
-        runtime
-            .save_snapshot(
-                stream_id,
-                Snapshot::new(append_outcome.next_expected_version, snapshot_payload),
-            )
+        let Decision::Event(events) =
+            C::decide(&state, self.command).map_err(ExecuteError::Decision)?;
+        let encoded_events = encode_events(&events).map_err(ExecuteError::EncodeEvent)?;
+        let expected_state = self
+            .occ
+            .resolve(current_version, self.command.default_expected_state());
+        let append_outcome = self
+            .runtime
+            .append_events(stream_id, expected_state, encoded_events)
             .await
-            .map_err(ExecuteError::SaveSnapshot)?;
-    }
+            .map_err(ExecuteError::Append)?;
 
-    Ok(ExecutionResult {
-        next_expected_version: append_outcome.next_expected_version,
-        events,
-        state,
-    })
+        for event in events.iter().cloned() {
+            state = C::evolve(state, event).map_err(ExecuteError::Domain)?;
+        }
+
+        Ok(ExecutionResult {
+            next_expected_version: append_outcome.next_expected_version,
+            events,
+            state,
+        })
+    }
+}
+
+impl<R, C, P, E> CommandExecution<'_, R, C, WithSnapshots<P>>
+where
+    C: SnapshotStateModel + Decide<C::State, C::Event> + DefaultExpectedStateProvider,
+    C::Event: EventType + StreamEvent + Serialize + DeserializeOwned + Clone,
+    C::Snapshot: Into<C::State>,
+    R: ExecutionRuntime<C::StreamId, Error = E>
+        + SnapshotRuntime<C::Snapshot, C::StreamId, Error = E>,
+    P: SnapshotPolicy<C::State, C::Event>,
+{
+    pub async fn execute(
+        self,
+    ) -> Result<ExecutionResult<C::State, C::Event>, ExecuteError<C::Error, C::DomainError, E>>
+    {
+        let stream_id = self.command.stream_id();
+        let snapshot = self
+            .runtime
+            .load_snapshot(stream_id)
+            .await
+            .map_err(ExecuteError::LoadSnapshot)?;
+        let snapshot_version = snapshot.as_ref().map(|snapshot| snapshot.version);
+        let mut state = C::restore_state(self.command, snapshot).map_err(ExecuteError::Domain)?;
+        let current_version = self
+            .runtime
+            .current_stream_version(stream_id)
+            .await
+            .map_err(ExecuteError::ReadStream)?;
+
+        if let Some(snapshot_version) = snapshot_version {
+            match current_version {
+                Some(stream_version) if snapshot_version <= stream_version => {}
+                stream_version => {
+                    return Err(ExecuteError::SnapshotAheadOfStream {
+                        snapshot_version,
+                        stream_version,
+                    });
+                }
+            }
+        }
+
+        if let Some(current_version) = current_version {
+            let start_sequence = snapshot_version
+                .map(|version| version.saturating_add(1))
+                .unwrap_or(1);
+
+            if start_sequence <= current_version {
+                let recorded_events = self
+                    .runtime
+                    .read_stream_from(stream_id, start_sequence)
+                    .await
+                    .map_err(ExecuteError::ReadStream)?;
+
+                for recorded_event in recorded_events {
+                    let event = recorded_event
+                        .decode_data::<C::Event>()
+                        .map_err(ExecuteError::DecodeEvent)?;
+                    state = C::evolve(state, event).map_err(ExecuteError::Domain)?;
+                }
+            }
+        }
+
+        let Decision::Event(events) =
+            C::decide(&state, self.command).map_err(ExecuteError::Decision)?;
+        let encoded_events = encode_events(&events).map_err(ExecuteError::EncodeEvent)?;
+        let expected_state = self
+            .occ
+            .resolve(current_version, self.command.default_expected_state());
+        let append_outcome = self
+            .runtime
+            .append_events(stream_id, expected_state, encoded_events)
+            .await
+            .map_err(ExecuteError::Append)?;
+
+        for event in events.iter().cloned() {
+            state = C::evolve(state, event).map_err(ExecuteError::Domain)?;
+        }
+
+        if self.snapshots.policy.should_snapshot(
+            append_outcome.next_expected_version,
+            &state,
+            &events,
+        ) && let Some(snapshot_payload) = C::snapshot_state(&state)
+        {
+            self.runtime
+                .save_snapshot(
+                    stream_id,
+                    Snapshot::new(append_outcome.next_expected_version, snapshot_payload),
+                )
+                .await
+                .map_err(ExecuteError::SaveSnapshot)?;
+        }
+
+        Ok(ExecutionResult {
+            next_expected_version: append_outcome.next_expected_version,
+            events,
+            state,
+        })
+    }
 }
 
 fn encode_events<E>(events: &NonEmpty<E>) -> serde_json::Result<NonEmpty<EventData>>
@@ -695,7 +697,7 @@ mod tests {
         };
         let command = TestCommand::new("alpha", TestAction::Register);
 
-        let result = block_on(execute_command(&runtime, &command)).unwrap();
+        let result = block_on(CommandExecution::new(&runtime, &command).execute()).unwrap();
 
         assert_eq!(result.next_expected_version, 1);
         assert_eq!(result.state, TestState::Present { enabled: true });
@@ -740,11 +742,11 @@ mod tests {
         };
         let command = TestCommand::new("alpha", TestAction::Remove);
 
-        let result = block_on(execute_command_with_snapshots(
-            &runtime,
-            &command,
-            &NoSnapshot,
-        ))
+        let result = block_on(
+            CommandExecution::new(&runtime, &command)
+                .snapshots(NoSnapshot)
+                .execute(),
+        )
         .unwrap();
 
         assert_eq!(runtime.read_from_sequences.lock().unwrap().as_slice(), &[2]);
@@ -764,11 +766,11 @@ mod tests {
         };
         let command = TestCommand::new("alpha", TestAction::Remove);
 
-        let error = block_on(execute_command_with_snapshots(
-            &runtime,
-            &command,
-            &NoSnapshot,
-        ))
+        let error = block_on(
+            CommandExecution::new(&runtime, &command)
+                .snapshots(NoSnapshot)
+                .execute(),
+        )
         .unwrap_err();
 
         assert!(matches!(
@@ -789,11 +791,11 @@ mod tests {
         };
         let command = TestCommand::new("alpha", TestAction::Remove);
 
-        let error = block_on(execute_command_with_snapshots(
-            &runtime,
-            &command,
-            &NoSnapshot,
-        ))
+        let error = block_on(
+            CommandExecution::new(&runtime, &command)
+                .snapshots(NoSnapshot)
+                .execute(),
+        )
         .unwrap_err();
 
         assert!(matches!(
@@ -819,7 +821,7 @@ mod tests {
         };
         let command = TestCommand::new("alpha", TestAction::Register);
 
-        let error = block_on(execute_command(&runtime, &command)).unwrap_err();
+        let error = block_on(CommandExecution::new(&runtime, &command).execute()).unwrap_err();
 
         assert!(matches!(
             error,
@@ -836,11 +838,11 @@ mod tests {
         };
         let command = TestCommand::new("alpha", TestAction::Register);
 
-        let error = block_on(execute_command_with_snapshots(
-            &runtime,
-            &command,
-            &NoSnapshot,
-        ))
+        let error = block_on(
+            CommandExecution::new(&runtime, &command)
+                .snapshots(NoSnapshot)
+                .execute(),
+        )
         .unwrap_err();
 
         assert!(matches!(
@@ -859,11 +861,11 @@ mod tests {
         };
         let command = TestCommand::new("alpha", TestAction::Disable);
 
-        let result = block_on(execute_command_with_snapshots(
-            &runtime,
-            &command,
-            &NoSnapshot,
-        ))
+        let result = block_on(
+            CommandExecution::new(&runtime, &command)
+                .snapshots(NoSnapshot)
+                .execute(),
+        )
         .unwrap();
         let appended_events = runtime.appended_events.lock().unwrap();
 
@@ -887,7 +889,7 @@ mod tests {
         let command = TestCommand::new("alpha", TestAction::Register)
             .with_default_expected_state(ExpectedState::StreamExists);
 
-        let _ = block_on(execute_command(&runtime, &command)).unwrap();
+        let _ = block_on(CommandExecution::new(&runtime, &command).execute()).unwrap();
 
         assert_eq!(
             runtime.expected_versions.lock().unwrap().as_slice(),
@@ -904,11 +906,11 @@ mod tests {
         let command = TestCommand::new("alpha", TestAction::Register)
             .with_default_expected_state(ExpectedState::StreamExists);
 
-        let _ = block_on(execute_command_with_options(
-            &runtime,
-            &command,
-            ExecuteOptions::explicit(ExpectedState::Any),
-        ))
+        let _ = block_on(
+            CommandExecution::new(&runtime, &command)
+                .occ(OccPolicy::Explicit(ExpectedState::Any))
+                .execute(),
+        )
         .unwrap();
 
         assert_eq!(
@@ -933,11 +935,11 @@ mod tests {
         let command = TestCommand::new("alpha", TestAction::Remove)
             .with_default_expected_state(ExpectedState::StreamExists);
 
-        let _ = block_on(execute_command_with_options(
-            &runtime,
-            &command,
-            ExecuteOptions::exact_current_version(),
-        ))
+        let _ = block_on(
+            CommandExecution::new(&runtime, &command)
+                .occ(OccPolicy::ExactCurrentVersion)
+                .execute(),
+        )
         .unwrap();
 
         assert_eq!(
@@ -954,11 +956,11 @@ mod tests {
         };
         let command = TestCommand::new("alpha", TestAction::Register);
 
-        let result = block_on(execute_command_with_snapshots(
-            &runtime,
-            &command,
-            &AlwaysSnapshot,
-        ))
+        let result = block_on(
+            CommandExecution::new(&runtime, &command)
+                .snapshots(AlwaysSnapshot)
+                .execute(),
+        )
         .unwrap();
 
         assert_eq!(result.state, TestState::Present { enabled: true });
@@ -976,11 +978,11 @@ mod tests {
         };
         let command = TestCommand::new("alpha", TestAction::Register);
 
-        let _ = block_on(execute_command_with_snapshots(
-            &runtime,
-            &command,
-            &NoSnapshot,
-        ))
+        let _ = block_on(
+            CommandExecution::new(&runtime, &command)
+                .snapshots(NoSnapshot)
+                .execute(),
+        )
         .unwrap();
 
         assert!(runtime.saved_snapshots.lock().unwrap().is_empty());
@@ -995,11 +997,11 @@ mod tests {
         };
         let command = TestCommand::new("alpha", TestAction::Register);
 
-        let error = block_on(execute_command_with_snapshots(
-            &runtime,
-            &command,
-            &AlwaysSnapshot,
-        ))
+        let error = block_on(
+            CommandExecution::new(&runtime, &command)
+                .snapshots(AlwaysSnapshot)
+                .execute(),
+        )
         .unwrap_err();
 
         assert!(matches!(error, ExecuteError::SaveSnapshot("save_snapshot")));
@@ -1013,7 +1015,7 @@ mod tests {
         };
         let command = TestCommand::new("alpha", TestAction::Register);
 
-        let _ = block_on(execute_command(&runtime, &command)).unwrap();
+        let _ = block_on(CommandExecution::new(&runtime, &command).execute()).unwrap();
 
         assert_eq!(command.stream_id_calls(), 1);
         assert!(runtime.loaded_stream_ids.lock().unwrap().is_empty());
