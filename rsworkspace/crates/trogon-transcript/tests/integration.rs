@@ -255,6 +255,43 @@ async fn corrupted_entry_among_valid_entries_returns_error() {
     );
 }
 
+/// Calling query() before provision() causes get_stream() to fail because the
+/// TRANSCRIPTS stream doesn't exist. The error must surface as
+/// TranscriptError::Stream — covers store.rs line 94.
+#[tokio::test]
+async fn query_without_provision_returns_stream_error() {
+    let (nats, _container) = setup().await;
+    let js = async_nats::jetstream::new(nats);
+    let store = TranscriptStore::new(js);
+
+    // No provision() call — TRANSCRIPTS stream doesn't exist.
+    let result = store.query("pr", "some-entity").await;
+    assert!(
+        matches!(result, Err(TranscriptError::Stream(_))),
+        "expected Stream error when TRANSCRIPTS not provisioned, got: {result:?}"
+    );
+}
+
+/// Dropping the NATS container and then publishing breaks the underlying
+/// connection. The first publish call fails (not the ack) and must surface
+/// as TranscriptError::Publish — covers publisher.rs line 37.
+#[tokio::test]
+async fn publish_returns_error_when_connection_broken() {
+    let (nats, container) = setup().await;
+    let js = async_nats::jetstream::new(nats);
+    let publisher = NatsTranscriptPublisher::new(js);
+    let session = Session::new(publisher, "pr", "broken-conn");
+
+    drop(container);
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+    let err = session.append_user_message("hello", None).await.unwrap_err();
+    assert!(
+        matches!(err, TranscriptError::Publish(_)),
+        "expected Publish error when connection is broken, got: {err:?}"
+    );
+}
+
 /// Drop the NATS container before calling provision() to verify that a
 /// JetStream error is surfaced as TranscriptError::Provision (line 52 of store.rs).
 #[tokio::test]

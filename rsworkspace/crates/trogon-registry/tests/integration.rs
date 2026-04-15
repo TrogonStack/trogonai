@@ -284,6 +284,60 @@ async fn provision_falls_back_to_existing_bucket_on_config_mismatch() {
     assert_eq!(registry.list_all().await.unwrap().len(), 1);
 }
 
+/// Delete the KV_AGENT_REGISTRY stream then call register() — kv::Store::put()
+/// fails and must surface as RegistryError::Put — covers store.rs line 42.
+#[tokio::test]
+async fn register_returns_put_error_when_stream_deleted() {
+    use trogon_registry::RegistryError;
+    let (js, _container) = setup().await;
+    let store = provision(&js).await.unwrap();
+    let registry = Registry::new(store);
+
+    js.delete_stream("KV_AGENT_REGISTRY").await.unwrap();
+
+    let result = registry.register(&pr_actor()).await;
+    assert!(
+        matches!(result, Err(RegistryError::Put(_))),
+        "expected Put error when stream is gone, got: {result:?}"
+    );
+}
+
+/// Delete the stream then call list_all() — kv::Store::keys() fails and must
+/// surface as RegistryError::List — covers store.rs line 60.
+#[tokio::test]
+async fn list_all_returns_list_error_when_stream_deleted() {
+    use trogon_registry::RegistryError;
+    let (js, _container) = setup().await;
+    let store = provision(&js).await.unwrap();
+    let registry = Registry::new(store);
+
+    js.delete_stream("KV_AGENT_REGISTRY").await.unwrap();
+
+    let result = registry.list_all().await;
+    assert!(
+        matches!(result, Err(RegistryError::List(_))),
+        "expected List error when stream is gone, got: {result:?}"
+    );
+}
+
+/// Delete the stream then call unregister() — kv::Store::delete() fails and must
+/// surface as RegistryError::Delete — covers store.rs line 54.
+#[tokio::test]
+async fn unregister_returns_delete_error_when_stream_deleted() {
+    use trogon_registry::RegistryError;
+    let (js, _container) = setup().await;
+    let store = provision(&js).await.unwrap();
+    let registry = Registry::new(store);
+
+    js.delete_stream("KV_AGENT_REGISTRY").await.unwrap();
+
+    let result = registry.unregister("PrActor").await;
+    assert!(
+        matches!(result, Err(RegistryError::Delete(_))),
+        "expected Delete error when stream is gone, got: {result:?}"
+    );
+}
+
 /// Drop the NATS container before calling provision() to verify that a
 /// JetStream error is surfaced as RegistryError::Provision — covers provision.rs line 36.
 #[tokio::test]
