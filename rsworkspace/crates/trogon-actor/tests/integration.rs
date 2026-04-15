@@ -9,7 +9,7 @@ use trogon_actor::{
     context::ActorContext,
     actor::EntityActor,
     error::ActorError,
-    host::ActorHost,
+    host::{ActorHost, HostError},
     runtime::ActorRuntime,
     state::provision_state,
 };
@@ -630,6 +630,81 @@ async fn state_store_delete_returns_error_when_stream_deleted() {
     assert!(result.is_err(), "expected Err from delete when stream is gone, got: {result:?}");
 }
 
+/// Calling `StateStore::save` with `revision = None` for a key that already
+/// exists exercises `is_create_conflict()`: the inner KV create fails with an
+/// OCC error and `SaveError::Conflict` must be returned — covers state.rs
+/// `is_create_conflict` string-matching path.
+#[tokio::test]
+async fn state_store_create_conflict_returns_save_error_conflict() {
+    let (_nats, js, _container) = setup().await;
+    let state_store = provision_state(&js).await.unwrap();
+
+    use trogon_actor::{SaveError, state::StateStore};
+
+    // First create succeeds.
+    StateStore::save(&state_store, "counter.occ-create", Bytes::from_static(b"{\"count\":0}"), None)
+        .await
+        .unwrap();
+
+    // Second create on the same key — KV returns an OCC error → Conflict.
+    let result = StateStore::save(
+        &state_store,
+        "counter.occ-create",
+        Bytes::from_static(b"{\"count\":1}"),
+        None,
+    )
+    .await;
+    assert!(
+        matches!(result, Err(SaveError::Conflict)),
+        "expected SaveError::Conflict on duplicate create, got: {result:?}"
+    );
+}
+
+/// Calling `StateStore::save` with a stale `revision` (i.e. the KV entry was
+/// already updated to a newer revision) exercises `is_update_conflict()`:
+/// `SaveError::Conflict` must be returned — covers state.rs `is_update_conflict`
+/// string-matching path.
+#[tokio::test]
+async fn state_store_update_stale_revision_returns_save_error_conflict() {
+    let (_nats, js, _container) = setup().await;
+    let state_store = provision_state(&js).await.unwrap();
+
+    use trogon_actor::{SaveError, state::StateStore};
+
+    // Create initial entry (revision = rev0).
+    let rev0 = StateStore::save(
+        &state_store,
+        "counter.occ-update",
+        Bytes::from_static(b"{\"count\":0}"),
+        None,
+    )
+    .await
+    .unwrap();
+
+    // Advance the entry to a new revision.
+    StateStore::save(
+        &state_store,
+        "counter.occ-update",
+        Bytes::from_static(b"{\"count\":1}"),
+        Some(rev0),
+    )
+    .await
+    .unwrap();
+
+    // Now attempt to update with the stale rev0 — OCC conflict.
+    let result = StateStore::save(
+        &state_store,
+        "counter.occ-update",
+        Bytes::from_static(b"{\"count\":2}"),
+        Some(rev0),
+    )
+    .await;
+    assert!(
+        matches!(result, Err(SaveError::Conflict)),
+        "expected SaveError::Conflict on stale revision update, got: {result:?}"
+    );
+}
+
 /// When the TRANSCRIPTS stream is not provisioned, `Session::append()` returns
 /// an error. The actor's transcript writes fail silently (actors call `.ok()`) but
 /// `handle_event` still succeeds — covers runtime.rs line 167 (append_fn error path).
@@ -848,4 +923,23 @@ async fn host_entity_key_extracted_from_nats_subject() {
         .expect("state not found under host-counter.owner.repo.42");
     let saved: Counter = serde_json::from_slice(&entry.value).unwrap();
     assert_eq!(saved.count, 1);
+}
+
+/// Destroying the AGENT_REGISTRY backing stream before calling `host.run()`
+/// causes `registry.register()` to fail. `run()` must return
+/// `Err(HostError::Register(_))` — covers host.rs error-return path.
+#[tokio::test]
+async fn host_run_returns_register_error_when_registry_unavailable() {
+    let (nats, js, _container) = setup().await;
+    let runtime = make_runtime(nats, js.clone()).await;
+
+    // Remove the registry backing stream so register() fails.
+    js.delete_stream("KV_AGENT_REGISTRY").await.unwrap();
+
+    let host = make_host(runtime);
+    let result = host.run().await;
+    assert!(
+        matches!(result, Err(HostError::Register(_))),
+        "expected HostError::Register, got: {result:?}"
+    );
 }
