@@ -241,6 +241,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
         let chat_state = ChatAppState {
             agent: Arc::clone(&agent),
             session_store,
+            promise_store: Arc::clone(&promise_store),
         };
         let api_port = cfg.api_port;
         tokio::spawn(async move {
@@ -1173,6 +1174,13 @@ async fn recover_stale_promises<A: AutomationRepository, R: RunRepository>(
             (nanos ^ (std::process::id() as u64).wrapping_mul(2_654_435_761)) % 30_000;
         tokio::time::sleep(std::time::Duration::from_millis(jitter_ms)).await;
 
+        // Automation promises skipped due to a transient automation-store
+        // failure. Collected here and retried after the main loop with backoff.
+        // The store is typically NATS-backed, so a transient failure affects
+        // all promises at once — retrying the whole batch after one list() call
+        // is more efficient than per-promise retries.
+        let mut auto_store_backlog: Vec<(AgentPromise, Arc<AgentLoop>)> = Vec::new();
+
         for promise in stale {
             // Re-fetch to verify the promise is still Running. Between
             // `list_running` and here, another worker may have already claimed
@@ -1328,8 +1336,9 @@ async fn recover_stale_promises<A: AutomationRepository, R: RunRepository>(
                             error = %e,
                             promise_id = %promise.id,
                             automation_id = %promise.automation_id,
-                            "Startup recovery: failed to list automations — skipping promise, will retry on next restart"
+                            "Startup recovery: failed to list automations — queued for retry after backoff"
                         );
+                        auto_store_backlog.push((promise, Arc::clone(&agent)));
                         continue;
                     }
                 };
@@ -1510,6 +1519,112 @@ async fn recover_stale_promises<A: AutomationRepository, R: RunRepository>(
                                 "Startup recovery: get_promise timed out for unknown-subject promise"
                             ),
                         }
+                    }
+                }
+            }
+        }
+
+        // ── Retry automation promises that failed due to store errors ─────────
+        // Up to 3 attempts with 30 s delay each. On every attempt we do a
+        // single list() call and process the whole backlog, so the store is
+        // not hit more than once per attempt regardless of backlog size.
+        const AUTO_RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(30);
+        const AUTO_MAX_RETRIES: u32 = 3;
+        for attempt in 0..AUTO_MAX_RETRIES {
+            if auto_store_backlog.is_empty() {
+                break;
+            }
+            tokio::time::sleep(AUTO_RETRY_DELAY).await;
+            let autos = match automation_store.list(&tenant_id).await {
+                Ok(list) => list,
+                Err(e) => {
+                    let remaining = auto_store_backlog.len();
+                    if attempt + 1 == AUTO_MAX_RETRIES {
+                        error!(
+                            error = %e,
+                            count = remaining,
+                            "Startup recovery: automation store unavailable after all retries \
+                            — promises stay Running until TTL or next restart"
+                        );
+                    } else {
+                        warn!(
+                            error = %e,
+                            attempt = attempt + 1,
+                            count = remaining,
+                            "Startup recovery: automation store retry failed — will retry"
+                        );
+                    }
+                    continue;
+                }
+            };
+
+            for (promise, agent) in std::mem::take(&mut auto_store_backlog) {
+                let payload: bytes::Bytes = serde_json::to_vec(&promise.trigger)
+                    .unwrap_or_default()
+                    .into();
+                let auto_opt = autos.iter().find(|a| a.id == promise.automation_id).cloned();
+                let perm_fail_reason: Option<&str> = match &auto_opt {
+                    Some(a) if !a.enabled => Some("automation is disabled"),
+                    None => Some("automation no longer exists"),
+                    Some(_) => None,
+                };
+                if let Some(reason) = perm_fail_reason {
+                    warn!(
+                        promise_id = %promise.id,
+                        automation_id = %promise.automation_id,
+                        "Startup recovery (retry): {reason} — marking promise PermanentFailed"
+                    );
+                    match tokio::time::timeout(
+                        crate::agent_loop::NATS_KV_TIMEOUT,
+                        promise_store.get_promise(&tenant_id, &promise.id),
+                    )
+                    .await
+                    {
+                        Ok(Ok(Some((mut current, rev)))) => {
+                            current.status = PromiseStatus::PermanentFailed;
+                            current.failure_reason = Some(reason.to_string());
+                            let _ = tokio::time::timeout(
+                                crate::agent_loop::NATS_KV_TIMEOUT,
+                                promise_store.update_promise(
+                                    &tenant_id,
+                                    &promise.id,
+                                    &current,
+                                    rev,
+                                ),
+                            )
+                            .await;
+                        }
+                        _ => {}
+                    }
+                    continue;
+                }
+                if let Some(auto) = auto_opt {
+                    let started_at = trogon_automations::now_unix();
+                    let result = handlers::run_automation(
+                        &agent,
+                        &auto,
+                        &promise.nats_subject,
+                        &payload,
+                    )
+                    .await;
+                    let finished_at = trogon_automations::now_unix();
+                    let (status, output) = match &result {
+                        Ok(o) => (RunStatus::Success, o.clone()),
+                        Err(e) => (RunStatus::Failed, e.clone()),
+                    };
+                    let run = RunRecord {
+                        id: uuid::Uuid::new_v4().to_string(),
+                        automation_id: auto.id.clone(),
+                        automation_name: auto.name.clone(),
+                        tenant_id: tenant_id.clone(),
+                        nats_subject: promise.nats_subject.clone(),
+                        started_at,
+                        finished_at,
+                        status,
+                        output,
+                    };
+                    if let Err(e) = run_store.record(&run).await {
+                        warn!(error = %e, "Startup recovery (retry): failed to persist run record");
                     }
                 }
             }
