@@ -8,8 +8,8 @@ use async_nats::jetstream;
 use chrono::{Duration as ChronoDuration, Utc};
 use trogon_cron::{
     ChangeJobStateCommand, CronController, DeliverySpec, GetJobCommand, JobEnabledState, JobId,
-    JobSpec, JobWriteCondition, RegisterJobCommand, RemoveJobCommand, SamplingSource, ScheduleSpec,
-    change_job_state, connect_store, get_job, register_job, remove_job,
+    JobSpec, RegisterJobCommand, RemoveJobCommand, SamplingSource, ScheduleSpec, change_job_state,
+    connect_store, get_job, register_job, remove_job,
 };
 use trogon_nats::{NatsConfig, connect as nats_connect};
 
@@ -191,12 +191,9 @@ async fn controller_reconciles_one_time_job() {
         at: Utc::now() + ChronoDuration::seconds(2),
     };
 
-    register_job(
-        &store,
-        RegisterJobCommand::new(job, JobWriteCondition::MustNotExist).unwrap(),
-    )
-    .await
-    .unwrap();
+    register_job(&store, RegisterJobCommand::new(job).unwrap())
+        .await
+        .unwrap();
 
     let stream = js
         .get_stream(trogon_cron::kv::SCHEDULES_STREAM)
@@ -233,12 +230,9 @@ async fn controller_reconciles_sampling_job() {
         }),
     };
 
-    register_job(
-        &store,
-        RegisterJobCommand::new(job, JobWriteCondition::MustNotExist).unwrap(),
-    )
-    .await
-    .unwrap();
+    register_job(&store, RegisterJobCommand::new(job).unwrap())
+        .await
+        .unwrap();
     wait_for_stream_subject(&js, trogon_cron::kv::SCHEDULES_STREAM, "sensors.latest").await;
     js.publish("sensors.latest", br#"{"value":42}"#.as_slice().into())
         .await
@@ -277,12 +271,9 @@ async fn controller_reconciles_cron_job_with_timezone() {
         timezone: Some("UTC".to_string()),
     };
 
-    register_job(
-        &store,
-        RegisterJobCommand::new(job, JobWriteCondition::MustNotExist).unwrap(),
-    )
-    .await
-    .unwrap();
+    register_job(&store, RegisterJobCommand::new(job).unwrap())
+        .await
+        .unwrap();
 
     let stream = js
         .get_stream(trogon_cron::kv::SCHEDULES_STREAM)
@@ -310,12 +301,9 @@ async fn disabling_job_removes_schedule_subject() {
     });
 
     let job = base_job("disabled");
-    register_job(
-        &store,
-        RegisterJobCommand::new(job, JobWriteCondition::MustNotExist).unwrap(),
-    )
-    .await
-    .unwrap();
+    register_job(&store, RegisterJobCommand::new(job).unwrap())
+        .await
+        .unwrap();
 
     let stream = js
         .get_stream(trogon_cron::kv::SCHEDULES_STREAM)
@@ -323,23 +311,9 @@ async fn disabling_job_removes_schedule_subject() {
         .unwrap();
     wait_for_subject(&stream, "cron.schedules.disabled").await;
 
-    let version = get_job(
-        &store,
-        GetJobCommand {
-            id: job_id("disabled"),
-        },
-    )
-    .await
-    .unwrap()
-    .unwrap()
-    .version;
     change_job_state(
         &store,
-        ChangeJobStateCommand::with_write_condition(
-            job_id("disabled"),
-            JobEnabledState::Disabled,
-            JobWriteCondition::MustBeAtVersion(version),
-        ),
+        ChangeJobStateCommand::new(job_id("disabled"), JobEnabledState::Disabled),
     )
     .await
     .unwrap();
@@ -365,12 +339,9 @@ async fn removing_job_removes_schedule_subject() {
     });
 
     let job = base_job("removed");
-    register_job(
-        &store,
-        RegisterJobCommand::new(job, JobWriteCondition::MustNotExist).unwrap(),
-    )
-    .await
-    .unwrap();
+    register_job(&store, RegisterJobCommand::new(job).unwrap())
+        .await
+        .unwrap();
 
     let stream = js
         .get_stream(trogon_cron::kv::SCHEDULES_STREAM)
@@ -378,25 +349,9 @@ async fn removing_job_removes_schedule_subject() {
         .unwrap();
     wait_for_subject(&stream, "cron.schedules.removed").await;
 
-    let version = get_job(
-        &store,
-        GetJobCommand {
-            id: job_id("removed"),
-        },
-    )
-    .await
-    .unwrap()
-    .unwrap()
-    .version;
-    remove_job(
-        &store,
-        RemoveJobCommand::with_write_condition(
-            job_id("removed"),
-            JobWriteCondition::MustBeAtVersion(version),
-        ),
-    )
-    .await
-    .unwrap();
+    remove_job(&store, RemoveJobCommand::new(job_id("removed")))
+        .await
+        .unwrap();
     wait_for_subject_absence(&stream, "cron.schedules.removed").await;
 
     handle.abort();
@@ -416,29 +371,12 @@ async fn event_store_rebuilds_current_state_for_new_client() {
     };
     let expected_schedule = job.schedule.clone();
 
-    register_job(
-        &store,
-        RegisterJobCommand::new(job, JobWriteCondition::MustNotExist).unwrap(),
-    )
-    .await
-    .unwrap();
-    let version = get_job(
-        &store,
-        GetJobCommand {
-            id: job_id("eventful"),
-        },
-    )
-    .await
-    .unwrap()
-    .unwrap()
-    .version;
+    register_job(&store, RegisterJobCommand::new(job).unwrap())
+        .await
+        .unwrap();
     change_job_state(
         &store,
-        ChangeJobStateCommand::with_write_condition(
-            job_id("eventful"),
-            JobEnabledState::Disabled,
-            JobWriteCondition::MustBeAtVersion(version),
-        ),
+        ChangeJobStateCommand::new(job_id("eventful"), JobEnabledState::Disabled),
     )
     .await
     .unwrap();

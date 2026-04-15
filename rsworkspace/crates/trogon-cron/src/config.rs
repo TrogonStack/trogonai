@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use trogon_eventsourcing::ExpectedState;
 
 use crate::error::CronError;
 
@@ -75,9 +76,18 @@ impl JobWriteCondition {
             Self::MustBeAtVersion(expected) if state.current_version() == Some(expected) => Ok(()),
             expected => Err(CronError::OptimisticConcurrencyConflict {
                 id: id.to_string(),
-                expected,
+                expected: expected.into(),
                 current_version: state.current_version(),
             }),
+        }
+    }
+}
+
+impl From<JobWriteCondition> for ExpectedState {
+    fn from(value: JobWriteCondition) -> Self {
+        match value {
+            JobWriteCondition::MustNotExist => Self::NoStream,
+            JobWriteCondition::MustBeAtVersion(version) => Self::StreamRevision(version),
         }
     }
 }

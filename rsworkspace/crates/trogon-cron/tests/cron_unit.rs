@@ -35,7 +35,7 @@ async fn client_register_then_get() {
 
     let job = base_job("backup");
     store
-        .register_job(RegisterJobCommand::new(job, JobWriteCondition::MustNotExist).unwrap())
+        .register_job(RegisterJobCommand::new(job).unwrap())
         .await
         .unwrap();
 
@@ -53,24 +53,13 @@ async fn client_set_enabled_toggles_job() {
     let store = MockCronStore::new();
 
     store
-        .register_job(
-            RegisterJobCommand::new(base_job("toggle"), JobWriteCondition::MustNotExist).unwrap(),
-        )
+        .register_job(RegisterJobCommand::new(base_job("toggle")).unwrap())
         .await
         .unwrap();
-    let version = store
-        .get_job(GetJobCommand {
-            id: job_id("toggle"),
-        })
-        .await
-        .unwrap()
-        .unwrap()
-        .version;
     store
-        .change_job_state(ChangeJobStateCommand::with_write_condition(
+        .change_job_state(ChangeJobStateCommand::new(
             job_id("toggle"),
             JobEnabledState::Disabled,
-            JobWriteCondition::MustBeAtVersion(version),
         ))
         .await
         .unwrap();
@@ -90,32 +79,19 @@ async fn client_remove_and_list_jobs_use_store_paths() {
     let store = MockCronStore::new();
 
     store
-        .register_job(
-            RegisterJobCommand::new(base_job("alpha"), JobWriteCondition::MustNotExist).unwrap(),
-        )
+        .register_job(RegisterJobCommand::new(base_job("alpha")).unwrap())
         .await
         .unwrap();
     store
-        .register_job(
-            RegisterJobCommand::new(base_job("beta"), JobWriteCondition::MustNotExist).unwrap(),
-        )
+        .register_job(RegisterJobCommand::new(base_job("beta")).unwrap())
         .await
         .unwrap();
 
     let listed = store.list_jobs(ListJobsCommand).await.unwrap();
     assert_eq!(listed.len(), 2);
 
-    let beta_version = store
-        .get_job(GetJobCommand { id: job_id("beta") })
-        .await
-        .unwrap()
-        .unwrap()
-        .version;
     store
-        .remove_job(RemoveJobCommand::with_write_condition(
-            job_id("beta"),
-            JobWriteCondition::MustBeAtVersion(beta_version),
-        ))
+        .remove_job(RemoveJobCommand::new(job_id("beta")))
         .await
         .unwrap();
 
@@ -139,7 +115,7 @@ async fn client_rejects_invalid_route() {
         source: None,
     };
 
-    let error = RegisterJobCommand::new(job, JobWriteCondition::MustNotExist).unwrap_err();
+    let error = RegisterJobCommand::new(job).unwrap_err();
     assert!(error.to_string().contains("route"));
 }
 
@@ -155,27 +131,17 @@ async fn client_rejects_invalid_source_subject() {
         }),
     };
 
-    let error = RegisterJobCommand::new(job, JobWriteCondition::MustNotExist).unwrap_err();
+    let error = RegisterJobCommand::new(job).unwrap_err();
     assert!(error.to_string().contains("sampling source"));
 }
 
 #[tokio::test]
 async fn client_rejects_stale_version() {
-    let store = MockCronStore::new();
-    store
-        .register_job(
-            RegisterJobCommand::new(base_job("stale"), JobWriteCondition::MustNotExist).unwrap(),
+    let error = JobWriteCondition::MustBeAtVersion(99)
+        .ensure(
+            "stale",
+            trogon_cron::config::JobWriteState::new(Some(1), true),
         )
-        .await
-        .unwrap();
-
-    let error = store
-        .change_job_state(ChangeJobStateCommand::with_write_condition(
-            job_id("stale"),
-            JobEnabledState::Disabled,
-            JobWriteCondition::MustBeAtVersion(99),
-        ))
-        .await
         .unwrap_err();
 
     assert!(matches!(

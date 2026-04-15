@@ -1,14 +1,13 @@
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::{
-    AlwaysSnapshot, CommandStateModel, Decide, Decision, ExecuteError, ExpectedVersionProvider,
-    NonEmpty, Snapshot, SnapshotStoreConfig, StreamCommand, execute_command,
+    AlwaysSnapshot, CommandStateModel, Decide, Decision, ExecuteError, ExpectedStateProvider,
+    NonEmpty, Snapshot, SnapshotStateModel, SnapshotStoreConfig, StreamCommand,
+    execute_command_with_snapshots,
 };
 
 use crate::{
-    JobId, JobWriteCondition,
-    commands::{
-        CronCommandExecutionRuntime, CronCommandRuntime, expected_version_from_write_condition,
-    },
+    JobId,
+    commands::{CronCommandRuntime, CronCommandRuntimePort, CronCommandSnapshotRuntime},
     error::CronError,
     events::JobEvent,
 };
@@ -16,7 +15,6 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct RemoveJobCommand {
     pub id: JobId,
-    write_condition: Option<JobWriteCondition>,
 }
 
 pub(crate) const SNAPSHOT_STORE_CONFIG: SnapshotStoreConfig<'static> =
@@ -35,17 +33,7 @@ pub enum RemoveJobDecisionError {
 
 impl RemoveJobCommand {
     pub const fn new(id: JobId) -> Self {
-        Self {
-            id,
-            write_condition: None,
-        }
-    }
-
-    pub const fn with_write_condition(id: JobId, write_condition: JobWriteCondition) -> Self {
-        Self {
-            id,
-            write_condition: Some(write_condition),
-        }
+        Self { id }
     }
 }
 
@@ -85,7 +73,6 @@ impl Decide<RemoveJobState, JobEvent> for RemoveJobCommand {
 impl CommandStateModel for RemoveJobCommand {
     type State = RemoveJobState;
     type Event = JobEvent;
-    type Snapshot = RemoveJobState;
     type DomainError = CronError;
 
     fn initial_state() -> Self::State {
@@ -100,27 +87,26 @@ impl CommandStateModel for RemoveJobCommand {
             JobEvent::JobRemoved { .. } => Ok(RemoveJobState::Missing),
         }
     }
+}
+
+impl SnapshotStateModel for RemoveJobCommand {
+    type Snapshot = RemoveJobState;
 
     fn snapshot_state(state: &Self::State, version: u64) -> Option<Snapshot<Self::Snapshot>> {
         Some(Snapshot::new(version, *state))
     }
 }
 
-impl ExpectedVersionProvider for RemoveJobCommand {
-    fn expected_version(&self) -> Option<trogon_eventsourcing::ExpectedVersion> {
-        self.write_condition
-            .map(expected_version_from_write_condition)
-    }
-}
+impl ExpectedStateProvider for RemoveJobCommand {}
 
 pub async fn run<R>(runtime: &R, command: RemoveJobCommand) -> Result<(), CronError>
 where
-    R: CronCommandExecutionRuntime<RemoveJobState>,
+    R: CronCommandRuntimePort + CronCommandSnapshotRuntime<RemoveJobState>,
 {
     let id = command.stream_id().to_string();
     let runtime = CronCommandRuntime::new(runtime, SNAPSHOT_STORE_CONFIG);
 
-    match execute_command(&runtime, &command, &AlwaysSnapshot).await {
+    match execute_command_with_snapshots(&runtime, &command, &AlwaysSnapshot).await {
         Ok(_) => Ok(()),
         Err(ExecuteError::Decision(RemoveJobDecisionError::JobNotFound { .. })) => {
             Err(CronError::JobNotFound { id })
@@ -180,10 +166,7 @@ mod tests {
     #[test]
     fn decides_removal_from_present_state() {
         let state = RemoveJobState::Present;
-        let command = RemoveJobCommand::with_write_condition(
-            JobId::parse("backup").unwrap(),
-            JobWriteCondition::MustBeAtVersion(1),
-        );
+        let command = RemoveJobCommand::new(JobId::parse("backup").unwrap());
 
         let decision = decide(&state, &command).unwrap();
         assert_eq!(
@@ -197,10 +180,7 @@ mod tests {
     #[test]
     fn rejects_removing_missing_job() {
         let state = RemoveJobState::Missing;
-        let command = RemoveJobCommand::with_write_condition(
-            JobId::parse("backup").unwrap(),
-            JobWriteCondition::MustBeAtVersion(1),
-        );
+        let command = RemoveJobCommand::new(JobId::parse("backup").unwrap());
 
         assert!(matches!(
             decide(&state, &command).unwrap_err(),
