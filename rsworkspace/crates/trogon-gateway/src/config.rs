@@ -34,6 +34,31 @@ impl fmt::Display for ZeroNotAllowed {
 impl std::error::Error for ZeroNotAllowed {}
 
 #[derive(Debug)]
+struct DurationTooLong {
+    max_secs: u64,
+}
+
+impl DurationTooLong {
+    fn new(max_secs: u64) -> Self {
+        Self { max_secs }
+    }
+}
+
+impl fmt::Display for DurationTooLong {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.max_secs == 1 {
+            f.write_str("must not exceed 1 second")
+        } else {
+            write!(f, "must not exceed {} seconds", self.max_secs)
+        }
+    }
+}
+
+impl std::error::Error for DurationTooLong {}
+
+const SENTRY_MAX_ACK_TIMEOUT_SECS: u64 = 1;
+
+#[derive(Debug)]
 pub enum ConfigValidationError {
     InvalidField {
         source: &'static str,
@@ -341,7 +366,7 @@ struct SentryConfig {
     stream_name: String,
     #[config(env = "TROGON_SOURCE_SENTRY_STREAM_MAX_AGE_SECS", default = 604_800)]
     stream_max_age_secs: u64,
-    #[config(env = "TROGON_SOURCE_SENTRY_NATS_ACK_TIMEOUT_SECS", default = 10)]
+    #[config(env = "TROGON_SOURCE_SENTRY_NATS_ACK_TIMEOUT_SECS", default = 1)]
     nats_ack_timeout_secs: u64,
 }
 
@@ -1173,6 +1198,14 @@ fn resolve_sentry(
             return None;
         }
     };
+    if section.nats_ack_timeout_secs > SENTRY_MAX_ACK_TIMEOUT_SECS {
+        errors.push(ConfigValidationError::invalid(
+            "sentry",
+            "nats_ack_timeout_secs",
+            DurationTooLong::new(SENTRY_MAX_ACK_TIMEOUT_SECS),
+        ));
+        return None;
+    }
 
     let stream_max_age = match StreamMaxAge::from_secs(section.stream_max_age_secs) {
         Ok(age) => age,
@@ -2531,6 +2564,20 @@ stream_max_age_secs = 0
         let result = load(Some(f.path()));
         assert!(
             matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("sentry: stream_max_age_secs must not be zero")))
+        );
+    }
+
+    #[test]
+    fn sentry_nats_ack_timeout_over_one_second_is_error() {
+        let toml = r#"
+[sources.sentry]
+client_secret = "sentry-client-secret"
+nats_ack_timeout_secs = 2
+"#;
+        let f = write_toml(toml);
+        let result = load(Some(f.path()));
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("sentry: invalid nats_ack_timeout_secs: must not exceed 1 second")))
         );
     }
 

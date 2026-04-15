@@ -1,4 +1,5 @@
 use std::fmt;
+use std::str::FromStr;
 use std::time::Duration;
 
 use crate::config::SentryConfig;
@@ -22,6 +23,67 @@ use trogon_std::NonZeroDuration;
 #[derive(Deserialize)]
 struct WebhookEnvelope {
     action: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SentryResource {
+    Installation,
+    EventAlert,
+    Issue,
+    MetricAlert,
+    Error,
+    Comment,
+    Seer,
+}
+
+impl SentryResource {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Installation => "installation",
+            Self::EventAlert => "event_alert",
+            Self::Issue => "issue",
+            Self::MetricAlert => "metric_alert",
+            Self::Error => "error",
+            Self::Comment => "comment",
+            Self::Seer => "seer",
+        }
+    }
+}
+
+#[derive(Debug)]
+struct InvalidSentryResource;
+
+impl fmt::Display for InvalidSentryResource {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("unsupported Sentry webhook resource")
+    }
+}
+
+impl std::error::Error for InvalidSentryResource {}
+
+impl FromStr for SentryResource {
+    type Err = InvalidSentryResource;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.trim() {
+            "installation" => Ok(Self::Installation),
+            "event_alert" => Ok(Self::EventAlert),
+            "issue" => Ok(Self::Issue),
+            "metric_alert" => Ok(Self::MetricAlert),
+            "error" => Ok(Self::Error),
+            "comment" => Ok(Self::Comment),
+            "seer" => Ok(Self::Seer),
+            _ => Err(InvalidSentryResource),
+        }
+    }
+}
+
+fn header_value<'a>(headers: &'a HeaderMap, name: &'static str) -> Option<&'a str> {
+    headers
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
 }
 
 fn outcome_to_status<E: fmt::Display>(outcome: PublishOutcome<E>) -> StatusCode {
@@ -89,10 +151,7 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
     headers: HeaderMap,
     body: Bytes,
 ) -> StatusCode {
-    let Some(signature) = headers
-        .get(HEADER_SIGNATURE)
-        .and_then(|value| value.to_str().ok())
-    else {
+    let Some(signature) = header_value(&headers, HEADER_SIGNATURE) else {
         warn!("Missing Sentry-Hook-Signature header");
         return StatusCode::UNAUTHORIZED;
     };
@@ -102,23 +161,19 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
         return StatusCode::UNAUTHORIZED;
     }
 
-    let Some(resource) = headers
-        .get(HEADER_RESOURCE)
-        .and_then(|value| value.to_str().ok())
-        .map(str::to_owned)
-    else {
+    let Some(resource) = header_value(&headers, HEADER_RESOURCE) else {
         warn!("Missing Sentry-Hook-Resource header");
         return StatusCode::BAD_REQUEST;
     };
 
-    let timestamp = headers
-        .get(HEADER_TIMESTAMP)
-        .and_then(|value| value.to_str().ok())
-        .map(str::to_owned);
-    let request_id = headers
-        .get(HEADER_REQUEST_ID)
-        .and_then(|value| value.to_str().ok())
-        .map(str::to_owned);
+    let Some(timestamp) = header_value(&headers, HEADER_TIMESTAMP).map(str::to_owned) else {
+        warn!("Missing Sentry-Hook-Timestamp header");
+        return StatusCode::BAD_REQUEST;
+    };
+    let Some(request_id) = header_value(&headers, HEADER_REQUEST_ID).map(str::to_owned) else {
+        warn!("Missing Request-ID header");
+        return StatusCode::BAD_REQUEST;
+    };
 
     let payload = match serde_json::from_slice::<WebhookEnvelope>(&body) {
         Ok(payload) => payload,
@@ -128,10 +183,10 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
         }
     };
 
-    let resource_token = match NatsToken::new(resource.as_str()) {
-        Ok(token) => token,
+    let resource = match resource.parse::<SentryResource>() {
+        Ok(resource) => resource,
         Err(error) => {
-            warn!(reason = ?error, resource = %resource, "Invalid Sentry resource token");
+            warn!(reason = %error, resource, "Unsupported Sentry webhook resource");
             return StatusCode::BAD_REQUEST;
         }
     };
@@ -145,24 +200,22 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
 
     let subject = format!(
         "{}.{}.{}",
-        state.subject_prefix, resource_token, action_token
+        state.subject_prefix,
+        resource.as_str(),
+        action_token
     );
     let span = tracing::Span::current();
-    span.record("resource", &resource);
+    span.record("resource", resource.as_str());
     span.record("action", &payload.action);
-    span.record("request_id", request_id.as_deref().unwrap_or("unknown"));
+    span.record("request_id", &request_id);
     span.record("subject", &subject);
 
     let mut nats_headers = async_nats::HeaderMap::new();
     nats_headers.insert(NATS_HEADER_RESOURCE, resource.as_str());
     nats_headers.insert(NATS_HEADER_ACTION, payload.action.as_str());
-    if let Some(ref request_id) = request_id {
-        nats_headers.insert(async_nats::header::NATS_MESSAGE_ID, request_id.as_str());
-        nats_headers.insert(NATS_HEADER_REQUEST_ID, request_id.as_str());
-    }
-    if let Some(ref timestamp) = timestamp {
-        nats_headers.insert(NATS_HEADER_TIMESTAMP, timestamp.as_str());
-    }
+    nats_headers.insert(async_nats::header::NATS_MESSAGE_ID, request_id.as_str());
+    nats_headers.insert(NATS_HEADER_REQUEST_ID, request_id.as_str());
+    nats_headers.insert(NATS_HEADER_TIMESTAMP, timestamp.as_str());
 
     let outcome = state
         .publisher
@@ -406,6 +459,52 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn missing_timestamp_returns_400() {
+        let _guard = tracing_guard();
+        let publisher = MockJetStreamPublisher::new();
+        let app = mock_app(publisher.clone());
+        let body = br#"{"action":"created"}"#;
+        let signature = compute_sig(TEST_SECRET, body);
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("/webhook")
+            .header(HEADER_RESOURCE, "issue")
+            .header(HEADER_REQUEST_ID, "req-1")
+            .header(HEADER_SIGNATURE, signature)
+            .body(Body::from(body.to_vec()))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert!(publisher.published_messages().is_empty());
+    }
+
+    #[tokio::test]
+    async fn missing_request_id_returns_400() {
+        let _guard = tracing_guard();
+        let publisher = MockJetStreamPublisher::new();
+        let app = mock_app(publisher.clone());
+        let body = br#"{"action":"created"}"#;
+        let signature = compute_sig(TEST_SECRET, body);
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("/webhook")
+            .header(HEADER_RESOURCE, "issue")
+            .header(HEADER_TIMESTAMP, "1711315768")
+            .header(HEADER_SIGNATURE, signature)
+            .body(Body::from(body.to_vec()))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert!(publisher.published_messages().is_empty());
+    }
+
+    #[tokio::test]
     async fn invalid_payload_returns_400() {
         let _guard = tracing_guard();
         let publisher = MockJetStreamPublisher::new();
@@ -417,6 +516,29 @@ mod tests {
             .oneshot(webhook_request(
                 body,
                 "issue",
+                "1711315768",
+                "req-1",
+                Some(&signature),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert!(publisher.published_messages().is_empty());
+    }
+
+    #[tokio::test]
+    async fn unsupported_resource_returns_400() {
+        let _guard = tracing_guard();
+        let publisher = MockJetStreamPublisher::new();
+        let app = mock_app(publisher.clone());
+        let body = br#"{"action":"created"}"#;
+        let signature = compute_sig(TEST_SECRET, body);
+
+        let response = app
+            .oneshot(webhook_request(
+                body,
+                "organization",
                 "1711315768",
                 "req-1",
                 Some(&signature),
