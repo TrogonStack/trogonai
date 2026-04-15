@@ -8,8 +8,8 @@ use async_nats::jetstream;
 use chrono::{Duration as ChronoDuration, Utc};
 use trogon_cron::{
     ChangeJobStateCommand, CronController, DeliverySpec, GetJobCommand, JobEnabledState, JobId,
-    JobSpec, RegisterJobCommand, RemoveJobCommand, SamplingSource, ScheduleSpec, change_job_state,
-    connect_store, get_job, register_job, remove_job,
+    JobSpec, OccPolicy, RegisterJobCommand, RemoveJobCommand, SamplingSource, ScheduleSpec,
+    change_job_state, connect_store, get_job, register_job, remove_job,
 };
 use trogon_nats::{NatsConfig, connect as nats_connect};
 
@@ -191,9 +191,13 @@ async fn controller_reconciles_one_time_job() {
         at: Utc::now() + ChronoDuration::seconds(2),
     };
 
-    register_job(&store, RegisterJobCommand::new(job).unwrap())
-        .await
-        .unwrap();
+    register_job(
+        &store,
+        RegisterJobCommand::new(job).unwrap(),
+        OccPolicy::CommandDefault,
+    )
+    .await
+    .unwrap();
 
     let stream = js
         .get_stream(trogon_cron::kv::SCHEDULES_STREAM)
@@ -230,9 +234,13 @@ async fn controller_reconciles_sampling_job() {
         }),
     };
 
-    register_job(&store, RegisterJobCommand::new(job).unwrap())
-        .await
-        .unwrap();
+    register_job(
+        &store,
+        RegisterJobCommand::new(job).unwrap(),
+        OccPolicy::CommandDefault,
+    )
+    .await
+    .unwrap();
     wait_for_stream_subject(&js, trogon_cron::kv::SCHEDULES_STREAM, "sensors.latest").await;
     js.publish("sensors.latest", br#"{"value":42}"#.as_slice().into())
         .await
@@ -271,9 +279,13 @@ async fn controller_reconciles_cron_job_with_timezone() {
         timezone: Some("UTC".to_string()),
     };
 
-    register_job(&store, RegisterJobCommand::new(job).unwrap())
-        .await
-        .unwrap();
+    register_job(
+        &store,
+        RegisterJobCommand::new(job).unwrap(),
+        OccPolicy::CommandDefault,
+    )
+    .await
+    .unwrap();
 
     let stream = js
         .get_stream(trogon_cron::kv::SCHEDULES_STREAM)
@@ -301,9 +313,13 @@ async fn disabling_job_removes_schedule_subject() {
     });
 
     let job = base_job("disabled");
-    register_job(&store, RegisterJobCommand::new(job).unwrap())
-        .await
-        .unwrap();
+    register_job(
+        &store,
+        RegisterJobCommand::new(job).unwrap(),
+        OccPolicy::CommandDefault,
+    )
+    .await
+    .unwrap();
 
     let stream = js
         .get_stream(trogon_cron::kv::SCHEDULES_STREAM)
@@ -314,6 +330,7 @@ async fn disabling_job_removes_schedule_subject() {
     change_job_state(
         &store,
         ChangeJobStateCommand::new(job_id("disabled"), JobEnabledState::Disabled),
+        OccPolicy::CommandDefault,
     )
     .await
     .unwrap();
@@ -339,9 +356,13 @@ async fn removing_job_removes_schedule_subject() {
     });
 
     let job = base_job("removed");
-    register_job(&store, RegisterJobCommand::new(job).unwrap())
-        .await
-        .unwrap();
+    register_job(
+        &store,
+        RegisterJobCommand::new(job).unwrap(),
+        OccPolicy::CommandDefault,
+    )
+    .await
+    .unwrap();
 
     let stream = js
         .get_stream(trogon_cron::kv::SCHEDULES_STREAM)
@@ -349,9 +370,13 @@ async fn removing_job_removes_schedule_subject() {
         .unwrap();
     wait_for_subject(&stream, "cron.schedules.removed").await;
 
-    remove_job(&store, RemoveJobCommand::new(job_id("removed")))
-        .await
-        .unwrap();
+    remove_job(
+        &store,
+        RemoveJobCommand::new(job_id("removed")),
+        OccPolicy::CommandDefault,
+    )
+    .await
+    .unwrap();
     wait_for_subject_absence(&stream, "cron.schedules.removed").await;
 
     handle.abort();
@@ -371,12 +396,17 @@ async fn event_store_rebuilds_current_state_for_new_client() {
     };
     let expected_schedule = job.schedule.clone();
 
-    register_job(&store, RegisterJobCommand::new(job).unwrap())
-        .await
-        .unwrap();
+    register_job(
+        &store,
+        RegisterJobCommand::new(job).unwrap(),
+        OccPolicy::CommandDefault,
+    )
+    .await
+    .unwrap();
     change_job_state(
         &store,
         ChangeJobStateCommand::new(job_id("eventful"), JobEnabledState::Disabled),
+        OccPolicy::CommandDefault,
     )
     .await
     .unwrap();

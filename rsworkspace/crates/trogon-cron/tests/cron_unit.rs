@@ -4,9 +4,10 @@ use std::collections::BTreeMap;
 
 use trogon_cron::{
     ChangeJobStateCommand, CronController, DeliverySpec, GetJobCommand, JobEnabledState, JobId,
-    JobSpec, JobWriteCondition, ListJobsCommand, RegisterJobCommand, RemoveJobCommand,
-    SamplingSource, SchedulePublisher, ScheduleSpec,
+    JobSpec, JobWriteCondition, ListJobsCommand, OccPolicy, RegisterJobCommand, RemoveJobCommand,
+    SamplingSource, SchedulePublisher, ScheduleSpec, change_job_state,
     mocks::{MockCronStore, MockLeaderLock, MockSchedulePublisher},
+    register_job, remove_job,
 };
 
 fn job_id(id: &str) -> JobId {
@@ -34,10 +35,13 @@ async fn client_register_then_get() {
     let store = MockCronStore::new();
 
     let job = base_job("backup");
-    store
-        .register_job(RegisterJobCommand::new(job).unwrap())
-        .await
-        .unwrap();
+    register_job(
+        &store,
+        RegisterJobCommand::new(job).unwrap(),
+        OccPolicy::CommandDefault,
+    )
+    .await
+    .unwrap();
 
     let got = store
         .get_job(GetJobCommand {
@@ -52,17 +56,20 @@ async fn client_register_then_get() {
 async fn client_set_enabled_toggles_job() {
     let store = MockCronStore::new();
 
-    store
-        .register_job(RegisterJobCommand::new(base_job("toggle")).unwrap())
-        .await
-        .unwrap();
-    store
-        .change_job_state(ChangeJobStateCommand::new(
-            job_id("toggle"),
-            JobEnabledState::Disabled,
-        ))
-        .await
-        .unwrap();
+    register_job(
+        &store,
+        RegisterJobCommand::new(base_job("toggle")).unwrap(),
+        OccPolicy::CommandDefault,
+    )
+    .await
+    .unwrap();
+    change_job_state(
+        &store,
+        ChangeJobStateCommand::new(job_id("toggle"), JobEnabledState::Disabled),
+        OccPolicy::CommandDefault,
+    )
+    .await
+    .unwrap();
 
     let got = store
         .get_job(GetJobCommand {
@@ -78,22 +85,31 @@ async fn client_set_enabled_toggles_job() {
 async fn client_remove_and_list_jobs_use_store_paths() {
     let store = MockCronStore::new();
 
-    store
-        .register_job(RegisterJobCommand::new(base_job("alpha")).unwrap())
-        .await
-        .unwrap();
-    store
-        .register_job(RegisterJobCommand::new(base_job("beta")).unwrap())
-        .await
-        .unwrap();
+    register_job(
+        &store,
+        RegisterJobCommand::new(base_job("alpha")).unwrap(),
+        OccPolicy::CommandDefault,
+    )
+    .await
+    .unwrap();
+    register_job(
+        &store,
+        RegisterJobCommand::new(base_job("beta")).unwrap(),
+        OccPolicy::CommandDefault,
+    )
+    .await
+    .unwrap();
 
     let listed = store.list_jobs(ListJobsCommand).await.unwrap();
     assert_eq!(listed.len(), 2);
 
-    store
-        .remove_job(RemoveJobCommand::new(job_id("beta")))
-        .await
-        .unwrap();
+    remove_job(
+        &store,
+        RemoveJobCommand::new(job_id("beta")),
+        OccPolicy::CommandDefault,
+    )
+    .await
+    .unwrap();
 
     assert!(
         store
