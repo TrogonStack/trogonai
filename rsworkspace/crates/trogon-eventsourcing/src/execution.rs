@@ -30,7 +30,7 @@ pub trait SnapshotStateModel: CommandStateModel {
             .unwrap_or_else(Self::initial_state))
     }
 
-    fn snapshot_state(state: &Self::State, version: u64) -> Option<Snapshot<Self::Snapshot>>;
+    fn snapshot_state(state: &Self::State) -> Option<Self::Snapshot>;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -283,10 +283,13 @@ where
     }
 
     if snapshot_policy.should_snapshot(append_outcome.next_expected_version, &state, &events)
-        && let Some(snapshot) = C::snapshot_state(&state, append_outcome.next_expected_version)
+        && let Some(snapshot_payload) = C::snapshot_state(&state)
     {
         runtime
-            .save_snapshot(stream_id, snapshot)
+            .save_snapshot(
+                stream_id,
+                Snapshot::new(append_outcome.next_expected_version, snapshot_payload),
+            )
             .await
             .map_err(ExecuteError::SaveSnapshot)?;
     }
@@ -442,8 +445,8 @@ mod tests {
     impl SnapshotStateModel for TestCommand {
         type Snapshot = TestState;
 
-        fn snapshot_state(state: &Self::State, version: u64) -> Option<Snapshot<Self::Snapshot>> {
-            Some(Snapshot::new(version, *state))
+        fn snapshot_state(state: &Self::State) -> Option<Self::Snapshot> {
+            Some(*state)
         }
     }
 

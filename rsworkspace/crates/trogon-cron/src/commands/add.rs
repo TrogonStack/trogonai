@@ -3,8 +3,8 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::{
     AlwaysSnapshot, CommandStateModel, Decide, Decision, ExecuteError, ExecutionRuntime,
-    ExpectedState, ExpectedStateProvider, NonEmpty, Snapshot, SnapshotStateModel,
-    SnapshotStoreConfig, StreamCommand, execute_command_with_snapshots,
+    ExpectedState, ExpectedStateProvider, NonEmpty, SnapshotStateModel, SnapshotStoreConfig,
+    StreamCommand, execute_command_with_snapshots,
 };
 
 use crate::{
@@ -114,8 +114,8 @@ impl CommandStateModel for RegisterJobCommand {
 impl SnapshotStateModel for RegisterJobCommand {
     type Snapshot = RegisterJobState;
 
-    fn snapshot_state(state: &Self::State, version: u64) -> Option<Snapshot<Self::Snapshot>> {
-        Some(Snapshot::new(version, *state))
+    fn snapshot_state(state: &Self::State) -> Option<Self::Snapshot> {
+        Some(*state)
     }
 }
 
@@ -170,7 +170,7 @@ where
 mod tests {
     use std::collections::BTreeMap;
 
-    use trogon_eventsourcing::{Decision, NonEmpty, decide};
+    use trogon_eventsourcing::{Decision, NonEmpty, Snapshot, decide};
 
     use super::*;
     use crate::{DeliverySpec, GetJobCommand, JobEnabledState, ScheduleSpec, mocks::MockCronStore};
