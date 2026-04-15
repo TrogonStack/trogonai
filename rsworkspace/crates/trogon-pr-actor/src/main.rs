@@ -13,6 +13,7 @@ use trogon_std::env::SystemEnv;
 use trogon_std::fs::SystemFs;
 use trogon_transcript::publisher::NatsTranscriptPublisher;
 
+use reqwest;
 use trogon_pr_actor::actor::PrActor;
 
 const NATS_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -60,7 +61,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "actors.pr.>",
     );
 
-    let host = ActorHost::new(runtime, PrActor, capability);
+    let http = reqwest::Client::builder()
+        .timeout(Duration::from_secs(60))
+        .build()?;
+    let actor = PrActor::new(
+        http,
+        cfg.llm_api_url,
+        cfg.llm_api_key,
+        cfg.llm_model,
+        cfg.github_token,
+    );
+    let host = ActorHost::new(runtime, actor, capability);
 
     info!("PR actor registered, listening on actors.pr.>");
 

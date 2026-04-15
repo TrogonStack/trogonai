@@ -12,8 +12,9 @@ use trogon_std::fs::SystemFs;
 
 use trogon_registry::provision as provision_registry;
 use trogon_router::{
-    llm::{LlmConfig, OpenAiCompatClient},
+    llm::{LlmConfig, LLM_REQUEST_TIMEOUT, OpenAiCompatClient},
     router::Router,
+    unroutable::{UNROUTABLE_SUBJECT_PREFIX, provision_unroutable_stream},
 };
 use trogon_transcript::{
     publisher::NatsTranscriptPublisher,
@@ -63,9 +64,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let registry_store = provision_registry(&js).await?;
     info!("AGENT_REGISTRY KV bucket ready");
 
+    provision_unroutable_stream(&js).await.map_err(|e| e.as_str().to_string())?;
+    info!("UNROUTABLE_EVENTS stream ready");
+
     // ── Build router ──────────────────────────────────────────────────────────
+    let http = reqwest::Client::builder()
+        .timeout(LLM_REQUEST_TIMEOUT)
+        .build()?;
     let llm = OpenAiCompatClient::new(
-        reqwest::Client::new(),
+        http,
         LlmConfig {
             api_url: cfg.llm_api_url.clone(),
             api_key: cfg.llm_api_key.clone(),
@@ -74,7 +81,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     let registry = trogon_registry::Registry::new(registry_store);
     let publisher = NatsTranscriptPublisher::new(js);
-    let router = Router::new(llm, registry, publisher, nats);
+    let router = Router::new(llm, registry, publisher, nats)
+        .with_dlq(UNROUTABLE_SUBJECT_PREFIX);
 
     // ── Run ───────────────────────────────────────────────────────────────────
     info!(subject = %cfg.events_subject, "router listening");

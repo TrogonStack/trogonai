@@ -47,7 +47,7 @@ async fn pr_actor_first_event_creates_state() {
     let (nats, js, _container) = setup().await;
     let runtime = make_runtime(nats, js.clone()).await;
 
-    runtime.handle_event(&mut PrActor, "acme.repo.1").await.unwrap();
+    runtime.handle_event(&mut PrActor, "acme.repo.1", 0).await.unwrap();
 
     let kv = js.get_key_value("ACTOR_STATE").await.unwrap();
     let entry = kv.entry("pr.acme.repo.1").await.unwrap().expect("state entry missing");
@@ -63,7 +63,7 @@ async fn pr_actor_state_accumulates_across_events() {
     let runtime = make_runtime(nats, js.clone()).await;
 
     for _ in 0..3 {
-        runtime.handle_event(&mut PrActor, "acme.repo.99").await.unwrap();
+        runtime.handle_event(&mut PrActor, "acme.repo.99", 0).await.unwrap();
     }
 
     let kv = js.get_key_value("ACTOR_STATE").await.unwrap();
@@ -79,9 +79,9 @@ async fn pr_actor_different_entities_have_independent_state() {
     let (nats, js, _container) = setup().await;
     let runtime = make_runtime(nats, js.clone()).await;
 
-    runtime.handle_event(&mut PrActor, "acme.repo.10").await.unwrap();
-    runtime.handle_event(&mut PrActor, "acme.repo.10").await.unwrap();
-    runtime.handle_event(&mut PrActor, "acme.repo.20").await.unwrap();
+    runtime.handle_event(&mut PrActor, "acme.repo.10", 0).await.unwrap();
+    runtime.handle_event(&mut PrActor, "acme.repo.10", 0).await.unwrap();
+    runtime.handle_event(&mut PrActor, "acme.repo.20", 0).await.unwrap();
 
     let kv = js.get_key_value("ACTOR_STATE").await.unwrap();
 

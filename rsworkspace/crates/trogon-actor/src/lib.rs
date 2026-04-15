@@ -54,7 +54,7 @@
 //!     let registry     = Registry::new(reg_store);
 //!     let mut runtime  = ActorRuntime::new(state_store, publisher, nats, registry);
 //!     let mut actor    = PrActor;
-//!     runtime.handle_event(&mut actor, "owner/repo/456").await.unwrap();
+//!     runtime.handle_event(&mut actor, "owner/repo/456", 0).await.unwrap();
 //! }
 //! ```
 
@@ -62,13 +62,14 @@ pub mod actor;
 pub mod context;
 pub mod error;
 pub mod host;
+pub mod metrics;
 pub mod runtime;
 pub mod state;
 
 pub use actor::EntityActor;
-pub use context::ActorContext;
+pub use context::{ActorContext, MAX_SPAWN_DEPTH};
 pub use error::{ActorError, SaveError};
-pub use runtime::ActorRuntime;
+pub use runtime::{ActorRuntime, SPAWN_AGENT_TIMEOUT};
 pub use state::{
     MAX_OCC_RETRIES, StateStore, provision_state, state_kv_key,
 };

@@ -1,7 +1,15 @@
 use std::future::Future;
+use std::time::Duration;
 
 use crate::decision::LlmRoutingResponse;
 use crate::error::RouterError;
+
+/// Default timeout for a single LLM HTTP request.
+///
+/// If the remote endpoint does not respond within this window the request is
+/// cancelled and `RouterError::LlmRequest` is returned so the router loop can
+/// continue with the next event.
+pub const LLM_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Abstraction over the LLM HTTP call that produces a routing decision.
 ///
@@ -191,6 +199,32 @@ mod client_tests {
     async fn complete_returns_llm_parse_error_when_content_not_json() {
         let body_start = r#"{"choices": [{"message": {"content": "this is plain text, not json"}}]}"#;
         let addr = spawn_mock_llm(StatusCode::OK, body_start.to_string()).await;
+        let err = client(addr).complete("test".into()).await.unwrap_err();
+        assert!(matches!(err, RouterError::LlmParse(_)));
+    }
+
+    /// `choices[0]` is present but missing the `"message"` key entirely.
+    /// `pointer("/choices/0/message/content")` returns `None` → `LlmParse`.
+    #[tokio::test]
+    async fn complete_returns_llm_parse_error_when_message_key_missing() {
+        let addr = spawn_mock_llm(
+            StatusCode::OK,
+            r#"{"choices": [{"index": 0, "finish_reason": "stop"}]}"#.to_string(),
+        )
+        .await;
+        let err = client(addr).complete("test".into()).await.unwrap_err();
+        assert!(matches!(err, RouterError::LlmParse(_)));
+    }
+
+    /// `choices[0].message` is present but missing the `"content"` key.
+    /// `pointer("/choices/0/message/content")` returns `None` → `LlmParse`.
+    #[tokio::test]
+    async fn complete_returns_llm_parse_error_when_content_key_missing() {
+        let addr = spawn_mock_llm(
+            StatusCode::OK,
+            r#"{"choices": [{"message": {"role": "assistant"}}]}"#.to_string(),
+        )
+        .await;
         let err = client(addr).complete("test".into()).await.unwrap_err();
         assert!(matches!(err, RouterError::LlmParse(_)));
     }

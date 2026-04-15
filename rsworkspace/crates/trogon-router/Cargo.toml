@@ -17,6 +17,7 @@ bytes = { workspace = true }
 clap = { workspace = true }
 confique = { workspace = true }
 futures-util = { workspace = true }
+opentelemetry = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -31,8 +32,11 @@ trogon-transcript = { workspace = true }
 
 [dev-dependencies]
 axum = { workspace = true }
+bytes = { workspace = true }
 futures-util = { workspace = true }
+serde = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+trogon-actor = { workspace = true }
 trogon-nats = { workspace = true, features = ["test-support"] }
 trogon-registry = { workspace = true, features = ["test-helpers"] }
 trogon-transcript = { workspace = true, features = ["test-helpers"] }

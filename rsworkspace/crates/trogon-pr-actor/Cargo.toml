@@ -15,7 +15,9 @@ acp-telemetry = { workspace = true }
 async-nats = { workspace = true, features = ["jetstream", "kv"] }
 clap = { workspace = true, features = ["derive"] }
 confique = { workspace = true }
+reqwest = { workspace = true, features = ["json"] }
 serde = { workspace = true }
+serde_json = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tracing = { workspace = true }
 trogon-actor = { workspace = true }
