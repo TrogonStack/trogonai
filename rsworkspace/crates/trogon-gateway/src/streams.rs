@@ -39,6 +39,10 @@ pub(crate) async fn provision<C: JetStreamContext>(
         trogon_source_notion::provision(client, cfg).await?;
         info!(source = "notion", "stream provisioned");
     }
+    if let Some(ref cfg) = config.sentry {
+        trogon_source_sentry::provision(client, cfg).await?;
+        info!(source = "sentry", "stream provisioned");
+    }
     Ok(())
 }
 
@@ -85,6 +89,9 @@ webhook_secret = "linear-secret"
 
 [sources.notion]
 verification_token = "notion-verification-token-example"
+
+[sources.sentry]
+client_secret = "sentry-client-secret"
 "#
         .to_string()
     }
@@ -111,7 +118,7 @@ verification_token = "notion-verification-token-example"
             .await
             .expect("provision should succeed");
 
-        assert_eq!(js.created_streams().len(), 8);
+        assert_eq!(js.created_streams().len(), 9);
     }
 
     #[tokio::test]
@@ -141,6 +148,9 @@ webhook_secret = "linear-secret"
 
 [sources.notion]
 verification_token = "notion-verification-token-example"
+
+[sources.sentry]
+client_secret = "sentry-client-secret"
 "#;
         let f = write_toml(toml);
         let cfg = load(Some(f.path())).expect("load failed");
@@ -150,6 +160,6 @@ verification_token = "notion-verification-token-example"
             .await
             .expect("provision should succeed");
 
-        assert_eq!(js.created_streams().len(), 7);
+        assert_eq!(js.created_streams().len(), 8);
     }
 }
