@@ -42,19 +42,60 @@ pub enum ExpectedState {
 }
 
 impl ExpectedState {
-    pub const fn resolve(current_version: Option<u64>, override_state: Option<Self>) -> Self {
-        match override_state {
-            Some(expected_state) => expected_state,
-            None => match current_version {
-                Some(version) => Self::StreamRevision(version),
-                None => Self::NoStream,
-            },
+    pub const fn from_current_version(current_version: Option<u64>) -> Self {
+        match current_version {
+            Some(version) => Self::StreamRevision(version),
+            None => Self::NoStream,
         }
     }
 }
 
-pub trait ExpectedStateProvider: StreamCommand {
-    fn expected_state(&self) -> Option<ExpectedState> {
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum OccPolicy {
+    #[default]
+    CommandDefault,
+    ExactCurrentVersion,
+    Explicit(ExpectedState),
+}
+
+impl OccPolicy {
+    pub const fn resolve(
+        self,
+        current_version: Option<u64>,
+        command_default: Option<ExpectedState>,
+    ) -> ExpectedState {
+        match self {
+            Self::CommandDefault => match command_default {
+                Some(expected_state) => expected_state,
+                None => ExpectedState::from_current_version(current_version),
+            },
+            Self::ExactCurrentVersion => ExpectedState::from_current_version(current_version),
+            Self::Explicit(expected_state) => expected_state,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ExecuteOptions {
+    pub occ: OccPolicy,
+}
+
+impl ExecuteOptions {
+    pub const fn exact_current_version() -> Self {
+        Self {
+            occ: OccPolicy::ExactCurrentVersion,
+        }
+    }
+
+    pub const fn explicit(expected_state: ExpectedState) -> Self {
+        Self {
+            occ: OccPolicy::Explicit(expected_state),
+        }
+    }
+}
+
+pub trait DefaultExpectedStateProvider: StreamCommand {
+    fn default_expected_state(&self) -> Option<ExpectedState> {
         None
     }
 }
@@ -166,7 +207,20 @@ pub async fn execute_command<C, R>(
     command: &C,
 ) -> Result<ExecutionResult<C::State, C::Event>, ExecuteError<C::Error, C::DomainError, R::Error>>
 where
-    C: CommandStateModel + Decide<C::State, C::Event> + ExpectedStateProvider,
+    C: CommandStateModel + Decide<C::State, C::Event> + DefaultExpectedStateProvider,
+    C::Event: EventType + StreamEvent + Serialize + DeserializeOwned + Clone,
+    R: ExecutionRuntime<C::StreamId>,
+{
+    execute_command_with_options(runtime, command, ExecuteOptions::default()).await
+}
+
+pub async fn execute_command_with_options<C, R>(
+    runtime: &R,
+    command: &C,
+    options: ExecuteOptions,
+) -> Result<ExecutionResult<C::State, C::Event>, ExecuteError<C::Error, C::DomainError, R::Error>>
+where
+    C: CommandStateModel + Decide<C::State, C::Event> + DefaultExpectedStateProvider,
     C::Event: EventType + StreamEvent + Serialize + DeserializeOwned + Clone,
     R: ExecutionRuntime<C::StreamId>,
 {
@@ -196,7 +250,9 @@ where
 
     let Decision::Event(events) = C::decide(&state, command).map_err(ExecuteError::Decision)?;
     let encoded_events = encode_events(&events).map_err(ExecuteError::EncodeEvent)?;
-    let expected_state = ExpectedState::resolve(current_version, command.expected_state());
+    let expected_state = options
+        .occ
+        .resolve(current_version, command.default_expected_state());
     let append_outcome = runtime
         .append_events(stream_id, expected_state, encoded_events)
         .await
@@ -219,7 +275,30 @@ pub async fn execute_command_with_snapshots<C, R, P, E>(
     snapshot_policy: &P,
 ) -> Result<ExecutionResult<C::State, C::Event>, ExecuteError<C::Error, C::DomainError, E>>
 where
-    C: SnapshotStateModel + Decide<C::State, C::Event> + ExpectedStateProvider,
+    C: SnapshotStateModel + Decide<C::State, C::Event> + DefaultExpectedStateProvider,
+    C::Event: EventType + StreamEvent + Serialize + DeserializeOwned + Clone,
+    C::Snapshot: Into<C::State>,
+    R: ExecutionRuntime<C::StreamId, Error = E>
+        + SnapshotRuntime<C::Snapshot, C::StreamId, Error = E>,
+    P: SnapshotPolicy<C::State, C::Event>,
+{
+    execute_command_with_snapshots_and_options(
+        runtime,
+        command,
+        snapshot_policy,
+        ExecuteOptions::default(),
+    )
+    .await
+}
+
+pub async fn execute_command_with_snapshots_and_options<C, R, P, E>(
+    runtime: &R,
+    command: &C,
+    snapshot_policy: &P,
+    options: ExecuteOptions,
+) -> Result<ExecutionResult<C::State, C::Event>, ExecuteError<C::Error, C::DomainError, E>>
+where
+    C: SnapshotStateModel + Decide<C::State, C::Event> + DefaultExpectedStateProvider,
     C::Event: EventType + StreamEvent + Serialize + DeserializeOwned + Clone,
     C::Snapshot: Into<C::State>,
     R: ExecutionRuntime<C::StreamId, Error = E>
@@ -272,7 +351,9 @@ where
 
     let Decision::Event(events) = C::decide(&state, command).map_err(ExecuteError::Decision)?;
     let encoded_events = encode_events(&events).map_err(ExecuteError::EncodeEvent)?;
-    let expected_state = ExpectedState::resolve(current_version, command.expected_state());
+    let expected_state = options
+        .occ
+        .resolve(current_version, command.default_expected_state());
     let append_outcome = runtime
         .append_events(stream_id, expected_state, encoded_events)
         .await
@@ -341,6 +422,7 @@ mod tests {
     struct TestCommand {
         id: String,
         action: TestAction,
+        default_expected_state: Option<ExpectedState>,
         stream_id_calls: Arc<AtomicUsize>,
     }
 
@@ -400,8 +482,14 @@ mod tests {
             Self {
                 id: id.to_string(),
                 action,
+                default_expected_state: None,
                 stream_id_calls: Arc::new(AtomicUsize::new(0)),
             }
+        }
+
+        fn with_default_expected_state(mut self, expected_state: ExpectedState) -> Self {
+            self.default_expected_state = Some(expected_state);
+            self
         }
 
         fn stream_id_calls(&self) -> usize {
@@ -440,7 +528,11 @@ mod tests {
         }
     }
 
-    impl ExpectedStateProvider for TestCommand {}
+    impl DefaultExpectedStateProvider for TestCommand {
+        fn default_expected_state(&self) -> Option<ExpectedState> {
+            self.default_expected_state
+        }
+    }
 
     impl SnapshotStateModel for TestCommand {
         type Snapshot = TestState;
@@ -784,6 +876,74 @@ mod tests {
         assert_eq!(appended_events[0].event_type, "state_changed");
         assert_eq!(appended_events[0].stream_id, "alpha");
         assert_eq!(result.state, TestState::Present { enabled: false });
+    }
+
+    #[test]
+    fn uses_command_default_expected_state_when_requested() {
+        let runtime = FakeRuntime {
+            next_expected_version: 1,
+            ..Default::default()
+        };
+        let command = TestCommand::new("alpha", TestAction::Register)
+            .with_default_expected_state(ExpectedState::StreamExists);
+
+        let _ = block_on(execute_command(&runtime, &command)).unwrap();
+
+        assert_eq!(
+            runtime.expected_versions.lock().unwrap().as_slice(),
+            &[ExpectedState::StreamExists]
+        );
+    }
+
+    #[test]
+    fn explicit_occ_overrides_command_default() {
+        let runtime = FakeRuntime {
+            next_expected_version: 1,
+            ..Default::default()
+        };
+        let command = TestCommand::new("alpha", TestAction::Register)
+            .with_default_expected_state(ExpectedState::StreamExists);
+
+        let _ = block_on(execute_command_with_options(
+            &runtime,
+            &command,
+            ExecuteOptions::explicit(ExpectedState::Any),
+        ))
+        .unwrap();
+
+        assert_eq!(
+            runtime.expected_versions.lock().unwrap().as_slice(),
+            &[ExpectedState::Any]
+        );
+    }
+
+    #[test]
+    fn exact_current_version_overrides_command_default() {
+        let runtime = FakeRuntime {
+            current_version: Some(7),
+            recorded_events: vec![recorded_event(
+                7,
+                TestEvent::Registered {
+                    id: "alpha".to_string(),
+                },
+            )],
+            next_expected_version: 8,
+            ..Default::default()
+        };
+        let command = TestCommand::new("alpha", TestAction::Remove)
+            .with_default_expected_state(ExpectedState::StreamExists);
+
+        let _ = block_on(execute_command_with_options(
+            &runtime,
+            &command,
+            ExecuteOptions::exact_current_version(),
+        ))
+        .unwrap();
+
+        assert_eq!(
+            runtime.expected_versions.lock().unwrap().as_slice(),
+            &[ExpectedState::StreamRevision(7)]
+        );
     }
 
     #[test]

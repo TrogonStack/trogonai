@@ -24,8 +24,9 @@ pub mod mocks;
 pub use commands::{
     ChangeJobStateCommand, ChangeJobStateDecisionError, ChangeJobStateState, GetJobCommand,
     ListJobsCommand, RegisterJobCommand, RegisterJobDecisionError, RegisterJobState,
-    RemoveJobCommand, RemoveJobDecisionError, RemoveJobState, change_job_state, get_job, list_jobs,
-    register_job, remove_job,
+    RemoveJobCommand, RemoveJobDecisionError, RemoveJobState, change_job_state,
+    change_job_state_with_options, get_job, list_jobs, register_job, register_job_with_options,
+    remove_job, remove_job_with_options,
 };
 pub use config::{
     DeliverySpec, JobEnabledState, JobSpec, JobWriteCondition, SamplingSource, ScheduleSpec,

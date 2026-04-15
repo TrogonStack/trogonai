@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::{
-    AlwaysSnapshot, CommandStateModel, Decide, Decision, ExecuteError, ExpectedStateProvider,
-    NonEmpty, SnapshotStateModel, SnapshotStoreConfig, StreamCommand,
-    execute_command_with_snapshots,
+    AlwaysSnapshot, CommandStateModel, Decide, Decision, DefaultExpectedStateProvider,
+    ExecuteError, ExecuteOptions, NonEmpty, SnapshotStateModel, SnapshotStoreConfig, StreamCommand,
+    execute_command_with_snapshots_and_options,
 };
 
 use crate::{
@@ -117,16 +117,29 @@ impl SnapshotStateModel for ChangeJobStateCommand {
     }
 }
 
-impl ExpectedStateProvider for ChangeJobStateCommand {}
+impl DefaultExpectedStateProvider for ChangeJobStateCommand {}
 
 pub async fn run<R>(runtime: &R, command: ChangeJobStateCommand) -> Result<(), CronError>
+where
+    R: CronCommandRuntimePort + CronCommandSnapshotRuntime<ChangeJobStateState>,
+{
+    run_with_options(runtime, command, ExecuteOptions::default()).await
+}
+
+pub async fn run_with_options<R>(
+    runtime: &R,
+    command: ChangeJobStateCommand,
+    options: ExecuteOptions,
+) -> Result<(), CronError>
 where
     R: CronCommandRuntimePort + CronCommandSnapshotRuntime<ChangeJobStateState>,
 {
     let id = command.stream_id().to_string();
     let runtime = CronCommandRuntime::new(runtime, SNAPSHOT_STORE_CONFIG);
 
-    match execute_command_with_snapshots(&runtime, &command, &AlwaysSnapshot).await {
+    match execute_command_with_snapshots_and_options(&runtime, &command, &AlwaysSnapshot, options)
+        .await
+    {
         Ok(_) => Ok(()),
         Err(ExecuteError::Decision(ChangeJobStateDecisionError::JobNotFound { .. })) => {
             Err(CronError::JobNotFound { id })

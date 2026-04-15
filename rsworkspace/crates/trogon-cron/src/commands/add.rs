@@ -2,9 +2,9 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::{
-    AlwaysSnapshot, CommandStateModel, Decide, Decision, ExecuteError, ExecutionRuntime,
-    ExpectedState, ExpectedStateProvider, NonEmpty, SnapshotStateModel, SnapshotStoreConfig,
-    StreamCommand, execute_command_with_snapshots,
+    AlwaysSnapshot, CommandStateModel, Decide, Decision, DefaultExpectedStateProvider,
+    ExecuteError, ExecuteOptions, ExecutionRuntime, ExpectedState, NonEmpty, SnapshotStateModel,
+    SnapshotStoreConfig, StreamCommand, execute_command_with_snapshots_and_options,
 };
 
 use crate::{
@@ -119,8 +119,8 @@ impl SnapshotStateModel for RegisterJobCommand {
     }
 }
 
-impl ExpectedStateProvider for RegisterJobCommand {
-    fn expected_state(&self) -> Option<ExpectedState> {
+impl DefaultExpectedStateProvider for RegisterJobCommand {
+    fn default_expected_state(&self) -> Option<ExpectedState> {
         Some(ExpectedState::NoStream)
     }
 }
@@ -129,17 +129,33 @@ pub async fn run<R>(runtime: &R, command: RegisterJobCommand) -> Result<(), Cron
 where
     R: CronCommandRuntimePort + CronCommandSnapshotRuntime<RegisterJobState>,
 {
+    run_with_options(runtime, command, ExecuteOptions::default()).await
+}
+
+pub async fn run_with_options<R>(
+    runtime: &R,
+    command: RegisterJobCommand,
+    options: ExecuteOptions,
+) -> Result<(), CronError>
+where
+    R: CronCommandRuntimePort + CronCommandSnapshotRuntime<RegisterJobState>,
+{
     let id = command.stream_id().to_string();
     let runtime = CronCommandRuntime::new(runtime, SNAPSHOT_STORE_CONFIG);
 
-    match execute_command_with_snapshots(&runtime, &command, &AlwaysSnapshot).await {
+    match execute_command_with_snapshots_and_options(&runtime, &command, &AlwaysSnapshot, options)
+        .await
+    {
         Ok(_) => Ok(()),
         Err(ExecuteError::Decision(RegisterJobDecisionError::AlreadyRegistered { .. })) => {
-            return Err(CronError::OptimisticConcurrencyConflict {
+            let current_version = runtime.current_stream_version(command.stream_id()).await?;
+            Err(CronError::OptimisticConcurrencyConflict {
                 id: id.clone(),
-                expected: ExpectedState::NoStream,
-                current_version: runtime.current_stream_version(command.stream_id()).await?,
-            });
+                expected: options
+                    .occ
+                    .resolve(current_version, command.default_expected_state()),
+                current_version,
+            })
         }
         Err(ExecuteError::LoadSnapshot(error))
         | Err(ExecuteError::SaveSnapshot(error))
