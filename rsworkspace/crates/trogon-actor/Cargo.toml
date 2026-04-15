@@ -24,10 +24,10 @@ trogon-transcript = { workspace = true }
 futures-util = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 trogon-nats = { workspace = true, features = ["test-support"] }
-trogon-registry = { workspace = true, features = ["test-helpers"] }
-trogon-transcript = { workspace = true, features = ["test-helpers"] }
+trogon-registry = { workspace = true, features = ["test-support"] }
+trogon-transcript = { workspace = true, features = ["test-support"] }
 testcontainers-modules = { workspace = true }
 
 [features]
 default = []
-test-helpers = []
+test-support = []

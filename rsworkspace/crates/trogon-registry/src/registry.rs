@@ -55,6 +55,8 @@ impl<S: RegistryStore> Registry<S> {
         self.store
             .put(&capability.agent_type, Bytes::from(value))
             .await
+            .map(|_| ())
+            .map_err(|e| RegistryError::Put(Box::new(e)))
     }
 
     /// Re-publish a capability record to reset its TTL — the heartbeat.
@@ -72,7 +74,10 @@ impl<S: RegistryStore> Registry<S> {
     /// only on clean shutdown.
     #[instrument(skip(self), fields(agent_type), err)]
     pub async fn unregister(&self, agent_type: &str) -> Result<(), RegistryError> {
-        self.store.delete(agent_type).await
+        self.store
+            .delete(agent_type)
+            .await
+            .map_err(|e| RegistryError::Delete(Box::new(e)))
     }
 
     /// Return all agents that advertise `capability` (case-insensitive match).
@@ -91,11 +96,20 @@ impl<S: RegistryStore> Registry<S> {
     /// This is a snapshot — agents may register or expire between calls.
     #[instrument(skip(self), err)]
     pub async fn list_all(&self) -> Result<Vec<AgentCapability>, RegistryError> {
-        let keys = self.store.keys().await?;
+        let keys = self
+            .store
+            .keys()
+            .await
+            .map_err(|e| RegistryError::List(Box::new(e)))?;
         let mut capabilities = Vec::with_capacity(keys.len());
 
         for key in keys {
-            match self.store.get(&key).await? {
+            match self
+                .store
+                .get(&key)
+                .await
+                .map_err(|e| RegistryError::Get(Box::new(e)))?
+            {
                 Some(bytes) => match serde_json::from_slice::<AgentCapability>(&bytes) {
                     Ok(cap) => capabilities.push(cap),
                     Err(e) => {
@@ -131,16 +145,21 @@ mod tests {
     struct VanishingStore;
 
     impl crate::store::RegistryStore for VanishingStore {
-        async fn put(&self, _key: &str, _value: bytes::Bytes) -> Result<(), RegistryError> {
-            Ok(())
+        type PutError = std::convert::Infallible;
+        type GetError = std::convert::Infallible;
+        type DeleteError = std::convert::Infallible;
+        type KeysError = std::convert::Infallible;
+
+        async fn put(&self, _key: &str, _value: bytes::Bytes) -> Result<u64, Self::PutError> {
+            Ok(0)
         }
-        async fn get(&self, _key: &str) -> Result<Option<bytes::Bytes>, RegistryError> {
+        async fn get(&self, _key: &str) -> Result<Option<bytes::Bytes>, Self::GetError> {
             Ok(None) // simulate TTL expiry — key listed but then gone
         }
-        async fn delete(&self, _key: &str) -> Result<(), RegistryError> {
+        async fn delete(&self, _key: &str) -> Result<(), Self::DeleteError> {
             Ok(())
         }
-        async fn keys(&self) -> Result<Vec<String>, RegistryError> {
+        async fn keys(&self) -> Result<Vec<String>, Self::KeysError> {
             Ok(vec!["PhantomAgent".to_string()])
         }
     }

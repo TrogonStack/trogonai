@@ -164,7 +164,7 @@ impl ActorContext {
 
 // ── Test helpers ──────────────────────────────────────────────────────────────
 
-#[cfg(any(test, feature = "test-helpers"))]
+#[cfg(any(test, feature = "test-support"))]
 pub mod test_helpers {
     use super::*;
     use std::sync::Mutex;

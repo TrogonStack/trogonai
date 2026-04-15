@@ -156,7 +156,7 @@ impl<P: TranscriptPublisher> Session<P> {
     }
 }
 
-#[cfg(any(test, feature = "test-helpers"))]
+#[cfg(any(test, feature = "test-support"))]
 pub mod tests_util {
     use super::*;
     use crate::publisher::mock::MockTranscriptPublisher;

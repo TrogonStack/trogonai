@@ -56,12 +56,15 @@ pub struct StateEntry {
 ///
 /// The real implementation is `kv::Store`. The mock is `MockStateStore`.
 pub trait StateStore: Send + Sync + Clone + 'static {
+    type LoadError: std::error::Error + Send + Sync + 'static;
+    type DeleteError: std::error::Error + Send + Sync + 'static;
+
     /// Load the current state for `key`. Returns `None` if this is the first
     /// event for the entity.
     fn load(
         &self,
         key: &str,
-    ) -> impl Future<Output = Result<Option<StateEntry>, String>> + Send;
+    ) -> impl Future<Output = Result<Option<StateEntry>, Self::LoadError>> + Send;
 
     /// Persist `value` for `key`.
     ///
@@ -76,17 +79,17 @@ pub trait StateStore: Send + Sync + Clone + 'static {
     ) -> impl Future<Output = Result<u64, SaveError>> + Send;
 
     /// Delete the state for `key` (called by `on_destroy`).
-    fn delete(&self, key: &str) -> impl Future<Output = Result<(), String>> + Send;
+    fn delete(&self, key: &str) -> impl Future<Output = Result<(), Self::DeleteError>> + Send;
 }
 
 // ── Production implementation (kv::Store) ────────────────────────────────────
 
 impl StateStore for kv::Store {
-    async fn load(&self, key: &str) -> Result<Option<StateEntry>, String> {
-        match kv::Store::entry(self, key)
-            .await
-            .map_err(|e| e.to_string())?
-        {
+    type LoadError = kv::EntryError;
+    type DeleteError = kv::DeleteError;
+
+    async fn load(&self, key: &str) -> Result<Option<StateEntry>, Self::LoadError> {
+        match kv::Store::entry(self, key).await? {
             Some(entry) if entry.operation == kv::Operation::Put => Ok(Some(StateEntry {
                 value: entry.value,
                 revision: entry.revision,
@@ -105,7 +108,7 @@ impl StateStore for kv::Store {
                         if is_create_conflict(&e) {
                             SaveError::Conflict
                         } else {
-                            SaveError::Other(e.to_string())
+                            SaveError::Other(Box::new(e))
                         }
                     })
             }
@@ -117,17 +120,15 @@ impl StateStore for kv::Store {
                         if is_update_conflict(&e) {
                             SaveError::Conflict
                         } else {
-                            SaveError::Other(e.to_string())
+                            SaveError::Other(Box::new(e))
                         }
                     })
             }
         }
     }
 
-    async fn delete(&self, key: &str) -> Result<(), String> {
-        kv::Store::delete(self, key)
-            .await
-            .map_err(|e| e.to_string())
+    async fn delete(&self, key: &str) -> Result<(), Self::DeleteError> {
+        kv::Store::delete(self, key).await
     }
 }
 
@@ -184,11 +185,23 @@ fn is_bucket_already_exists(error: &CreateKeyValueError) -> bool {
 
 // ── Mock implementation ───────────────────────────────────────────────────────
 
-#[cfg(any(test, feature = "test-helpers"))]
+#[cfg(any(test, feature = "test-support"))]
 pub mod mock {
     use super::*;
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
+
+    /// Infallible error type for MockStateStore load and delete operations.
+    #[derive(Debug)]
+    pub struct MockLoadError(pub String);
+
+    impl std::fmt::Display for MockLoadError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{}", self.0)
+        }
+    }
+
+    impl std::error::Error for MockLoadError {}
 
     #[derive(Clone, Default)]
     pub struct MockStateStore {
@@ -232,11 +245,14 @@ pub mod mock {
     }
 
     impl StateStore for MockStateStore {
-        async fn load(&self, key: &str) -> Result<Option<StateEntry>, String> {
+        type LoadError = MockLoadError;
+        type DeleteError = std::convert::Infallible;
+
+        async fn load(&self, key: &str) -> Result<Option<StateEntry>, Self::LoadError> {
             let mut load_err = self.next_load_error.lock().unwrap();
             if *load_err {
                 *load_err = false;
-                return Err("injected load error".to_string());
+                return Err(MockLoadError("injected load error".to_string()));
             }
             drop(load_err);
             Ok(self
@@ -254,7 +270,7 @@ pub mod mock {
             let mut save_err = self.next_save_other_error.lock().unwrap();
             if *save_err {
                 *save_err = false;
-                return Err(SaveError::Other("injected save error".to_string()));
+                return Err(SaveError::Other(Box::new(MockLoadError("injected save error".to_string()))));
             }
             drop(save_err);
 
@@ -274,7 +290,7 @@ pub mod mock {
             Ok(next_rev)
         }
 
-        async fn delete(&self, key: &str) -> Result<(), String> {
+        async fn delete(&self, key: &str) -> Result<(), Self::DeleteError> {
             self.data.lock().unwrap().remove(key);
             Ok(())
         }

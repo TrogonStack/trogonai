@@ -6,7 +6,7 @@ use trogon_nats::{PublishClient, RequestClient, SubscribeClient};
 use trogon_registry::{AgentCapability, RegistryStore};
 use trogon_transcript::TranscriptPublisher;
 
-use crate::{EntityActor, StateStore, metrics, runtime::{ActorRuntime, SPAWN_DEPTH_HEADER}};
+use crate::{EntityActor, StateStore, telemetry::metrics, runtime::{ActorRuntime, SPAWN_DEPTH_HEADER}};
 
 /// Default maximum time allowed for a single `handle_event` invocation.
 ///
