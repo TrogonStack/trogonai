@@ -119,14 +119,7 @@ impl SnapshotStateModel for ChangeJobStateCommand {
 
 impl DefaultExpectedStateProvider for ChangeJobStateCommand {}
 
-pub async fn run<R>(runtime: &R, command: ChangeJobStateCommand) -> Result<(), CronError>
-where
-    R: CronCommandRuntimePort + CronCommandSnapshotRuntime<ChangeJobStateState>,
-{
-    run_with_occ(runtime, command, OccPolicy::CommandDefault).await
-}
-
-pub async fn run_with_occ<R>(
+pub async fn run<R>(
     runtime: &R,
     command: ChangeJobStateCommand,
     occ: OccPolicy,
@@ -250,6 +243,7 @@ mod tests {
         run(
             &store,
             ChangeJobStateCommand::new(JobId::parse("backup").unwrap(), JobEnabledState::Disabled),
+            OccPolicy::CommandDefault,
         )
         .await
         .unwrap();

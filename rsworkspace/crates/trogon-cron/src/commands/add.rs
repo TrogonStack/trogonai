@@ -125,14 +125,7 @@ impl DefaultExpectedStateProvider for RegisterJobCommand {
     }
 }
 
-pub async fn run<R>(runtime: &R, command: RegisterJobCommand) -> Result<(), CronError>
-where
-    R: CronCommandRuntimePort + CronCommandSnapshotRuntime<RegisterJobState>,
-{
-    run_with_occ(runtime, command, OccPolicy::CommandDefault).await
-}
-
-pub async fn run_with_occ<R>(
+pub async fn run<R>(
     runtime: &R,
     command: RegisterJobCommand,
     occ: OccPolicy,
@@ -238,9 +231,13 @@ mod tests {
     async fn run_registers_job_in_store() {
         let store = MockCronStore::new();
 
-        run(&store, RegisterJobCommand::new(job("backup")).unwrap())
-            .await
-            .unwrap();
+        run(
+            &store,
+            RegisterJobCommand::new(job("backup")).unwrap(),
+            OccPolicy::CommandDefault,
+        )
+        .await
+        .unwrap();
 
         let snapshot = store
             .get_job(GetJobCommand {
