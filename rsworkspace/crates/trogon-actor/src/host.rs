@@ -43,7 +43,7 @@ use crate::{EntityActor, StateStore, runtime::ActorRuntime};
 /// #     async fn handle(&mut self, _s: &mut PrState, _ctx: &ActorContext)
 /// #         -> Result<(), Self::Error> { Ok(()) }
 /// # }
-/// async fn main(nats: async_nats::Client, js: async_nats::jetstream::Context) {
+/// async fn run(nats: async_nats::Client, js: async_nats::jetstream::Context) {
 ///     let state_store  = provision_state(&js).await.unwrap();
 ///     let reg_store    = provision_registry(&js).await.unwrap();
 ///     let publisher    = NatsTranscriptPublisher::new(js);
