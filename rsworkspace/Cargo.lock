@@ -3469,6 +3469,7 @@ dependencies = [
  "trogon-source-incidentio",
  "trogon-source-linear",
  "trogon-source-notion",
+ "trogon-source-sentry",
  "trogon-source-slack",
  "trogon-source-telegram",
  "trogon-std",
@@ -3608,6 +3609,25 @@ dependencies = [
  "async-nats",
  "axum",
  "bytes",
+ "hex",
+ "hmac",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+ "trogon-nats",
+ "trogon-std",
+]
+
+[[package]]
+name = "trogon-source-sentry"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "axum",
  "hex",
  "hmac",
  "serde",
