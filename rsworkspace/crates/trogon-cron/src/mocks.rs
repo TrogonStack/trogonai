@@ -9,13 +9,14 @@ use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use serde::{Serialize, de::DeserializeOwned};
 use trogon_eventsourcing::{
-    AppendOutcome, EventData, ExpectedState, NonEmpty, RecordedEvent, Snapshot, StreamCommand,
+    AppendOutcome, EventData, ExpectedState, NonEmpty, RecordedEvent, Snapshot,
+    SnapshotStoreConfig, StreamCommand,
 };
 use trogon_nats::lease::{ReleaseLease, RenewLease, TryAcquireLease};
 
 use crate::{
     GetJobCommand, ListJobsCommand,
-    commands::{CronCommandRuntimePort, CronCommandSnapshotRuntime},
+    commands::runtime::{JobEventStoreRuntime, JobSnapshotStoreRuntime},
     config::{JobSpec, JobWriteCondition, JobWriteState},
     domain::ResolvedJobSpec,
     error::CronError,
@@ -222,7 +223,7 @@ impl MockCronStore {
     }
 }
 
-impl CronCommandRuntimePort for MockCronStore {
+impl JobEventStoreRuntime for MockCronStore {
     async fn current_job_stream_version(
         &self,
         stream_id: &crate::JobId,
@@ -367,13 +368,13 @@ impl CronCommandRuntimePort for MockCronStore {
     }
 }
 
-impl<Payload> CronCommandSnapshotRuntime<Payload> for MockCronStore
+impl<Payload> JobSnapshotStoreRuntime<Payload> for MockCronStore
 where
     Payload: Serialize + DeserializeOwned + Send,
 {
     async fn load_command_snapshot(
         &self,
-        config: trogon_eventsourcing::SnapshotStoreConfig<'static>,
+        config: SnapshotStoreConfig<'static>,
         stream_id: &crate::JobId,
     ) -> Result<Option<Snapshot<Payload>>, CronError> {
         self.read_command_snapshot(config, stream_id)
@@ -381,7 +382,7 @@ where
 
     async fn save_command_snapshot(
         &self,
-        config: trogon_eventsourcing::SnapshotStoreConfig<'static>,
+        config: SnapshotStoreConfig<'static>,
         stream_id: &crate::JobId,
         snapshot: Snapshot<Payload>,
     ) -> Result<(), CronError> {
