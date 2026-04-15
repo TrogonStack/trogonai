@@ -17,9 +17,69 @@ use trogon_agent::{
     agent_loop::{AgentLoop, ReqwestAnthropicClient},
     chat_api::{ChatAppState, router},
     flag_client::AlwaysOnFlagClient,
+    promise_store::{AgentPromise, PromiseEntry, PromiseRepository, PromiseStoreError},
     session::SessionStore,
     tools::{DefaultToolDispatcher, ToolContext},
 };
+
+// Minimal no-op promise store for integration tests — these tests exercise chat
+// session routes that don't use promise state.
+struct NoOpPromiseStore;
+
+impl PromiseRepository for NoOpPromiseStore {
+    fn get_promise<'a>(
+        &'a self,
+        _tenant_id: &'a str,
+        _promise_id: &'a str,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Option<PromiseEntry>, PromiseStoreError>> + Send + 'a>,
+    > {
+        Box::pin(async { Ok(None) })
+    }
+
+    fn put_promise<'a>(
+        &'a self,
+        _promise: &'a AgentPromise,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<u64, PromiseStoreError>> + Send + 'a>> {
+        Box::pin(async { Ok(1) })
+    }
+
+    fn update_promise<'a>(
+        &'a self,
+        _tenant_id: &'a str,
+        _promise_id: &'a str,
+        _promise: &'a AgentPromise,
+        _revision: u64,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<u64, PromiseStoreError>> + Send + 'a>> {
+        Box::pin(async { Ok(1) })
+    }
+
+    fn get_tool_result<'a>(
+        &'a self,
+        _tenant_id: &'a str,
+        _promise_id: &'a str,
+        _cache_key: &'a str,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<String>, PromiseStoreError>> + Send + 'a>> {
+        Box::pin(async { Ok(None) })
+    }
+
+    fn put_tool_result<'a>(
+        &'a self,
+        _tenant_id: &'a str,
+        _promise_id: &'a str,
+        _cache_key: &'a str,
+        _result: &'a str,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), PromiseStoreError>> + Send + 'a>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn list_running<'a>(
+        &'a self,
+        _tenant_id: &'a str,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<AgentPromise>, PromiseStoreError>> + Send + 'a>> {
+        Box::pin(async { Ok(vec![]) })
+    }
+}
 
 // ── Setup ─────────────────────────────────────────────────────────────────────
 
@@ -86,6 +146,7 @@ async fn start() -> TestEnv {
     let state = ChatAppState {
         agent,
         session_store,
+        promise_store: Arc::new(NoOpPromiseStore),
     };
     let app = router(state);
 
@@ -1061,6 +1122,35 @@ async fn delete_session_missing_tenant_returns_400() {
     let res = env
         .client
         .delete(format!("{}/sessions/{id}", env.base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 400);
+}
+
+// ── Promise admin ─────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn list_promises_returns_empty_json_array() {
+    let env = start().await;
+    let res = env
+        .client
+        .get(format!("{}/admin/promises", env.base_url))
+        .header("x-tenant-id", "acme")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let body: Vec<serde_json::Value> = res.json().await.unwrap();
+    assert!(body.is_empty(), "NoOpPromiseStore must return empty list; got {body:?}");
+}
+
+#[tokio::test]
+async fn list_promises_missing_tenant_returns_400() {
+    let env = start().await;
+    let res = env
+        .client
+        .get(format!("{}/admin/promises", env.base_url))
         .send()
         .await
         .unwrap();

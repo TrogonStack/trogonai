@@ -2788,6 +2788,103 @@ mod tests {
         );
     }
 
+    /// When `list_running` fails on the first attempt but succeeds on the
+    /// second (after `LIST_RUNNING_RETRY_DELAY`), recovery resumes normally
+    /// and processes stale promises found in the successful result.
+    ///
+    /// Uses a paused clock so the 15 s retry delay is skipped instantly.
+    #[tokio::test(start_paused = true)]
+    async fn recover_list_running_first_error_second_success_processes_stale_promise() {
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        // Delegates all operations to inner MockPromiseStore except
+        // list_running — first call errors, second call delegates to inner.
+        #[derive(Clone)]
+        struct FailOnceThenSucceedListRunningStore {
+            called: Arc<AtomicBool>,
+            inner: MockPromiseStore,
+        }
+        impl PromiseRepository for FailOnceThenSucceedListRunningStore {
+            fn get_promise<'a>(&'a self, t: &'a str, id: &'a str)
+            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<crate::promise_store::PromiseEntry>, crate::promise_store::PromiseStoreError>> + Send + 'a>> {
+                self.inner.get_promise(t, id)
+            }
+            fn put_promise<'a>(&'a self, p: &'a crate::promise_store::AgentPromise)
+            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<u64, crate::promise_store::PromiseStoreError>> + Send + 'a>> {
+                self.inner.put_promise(p)
+            }
+            fn update_promise<'a>(&'a self, t: &'a str, id: &'a str, p: &'a crate::promise_store::AgentPromise, rev: u64)
+            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<u64, crate::promise_store::PromiseStoreError>> + Send + 'a>> {
+                self.inner.update_promise(t, id, p, rev)
+            }
+            fn get_tool_result<'a>(&'a self, t: &'a str, id: &'a str, ck: &'a str)
+            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<String>, crate::promise_store::PromiseStoreError>> + Send + 'a>> {
+                self.inner.get_tool_result(t, id, ck)
+            }
+            fn put_tool_result<'a>(&'a self, t: &'a str, id: &'a str, ck: &'a str, r: &'a str)
+            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), crate::promise_store::PromiseStoreError>> + Send + 'a>> {
+                self.inner.put_tool_result(t, id, ck, r)
+            }
+            fn list_running<'a>(&'a self, tenant_id: &'a str)
+            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<crate::promise_store::AgentPromise>, crate::promise_store::PromiseStoreError>> + Send + 'a>> {
+                let first_call = !self.called.swap(true, Ordering::SeqCst);
+                let inner_fut = self.inner.list_running(tenant_id);
+                Box::pin(async move {
+                    if first_call {
+                        Err(crate::promise_store::PromiseStoreError(
+                            "injected first-call list_running error".to_string(),
+                        ))
+                    } else {
+                        inner_fut.await
+                    }
+                })
+            }
+        }
+
+        // Pre-populate with a stale promise (unknown subject → PermanentFailed,
+        // no network needed).
+        let inner = MockPromiseStore::new();
+        let mut p = make_stale_promise("p-list-retry");
+        p.nats_subject = "completely.unknown.subject".to_string();
+        inner.insert_promise(p);
+        let store_for_assert = inner.clone();
+
+        let promise_store: Arc<dyn PromiseRepository> = Arc::new(FailOnceThenSucceedListRunningStore {
+            called: Arc::new(AtomicBool::new(false)),
+            inner,
+        });
+
+        let auto_store = Arc::new(EmptyAutomationStore);
+        let run_store = Arc::new(ErrorRecordRunStore);
+        let agent = make_agent("http://127.0.0.1:1");
+
+        // Tokio auto-advance skips the 15 s LIST_RUNNING_RETRY_DELAY.
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &run_store,
+            "acme",
+        )
+        .await
+        .expect("spawn handle must be returned when second list_running succeeds");
+
+        handle.await.expect("recovery task must not panic");
+
+        let (p_after, _) = store_for_assert
+            .get_promise("acme", "p-list-retry")
+            .await
+            .unwrap()
+            .expect("promise must exist after recovery");
+        assert_eq!(
+            p_after.status,
+            PromiseStatus::PermanentFailed,
+            "stale promise with unknown subject must be PermanentFailed after retry-success path"
+        );
+    }
+
     /// When `list_running` returns an empty list (no Running promises at all),
     /// `recover_stale_promises` must return `None`.
     #[tokio::test]
@@ -3678,6 +3775,269 @@ mod tests {
             p.status,
             PromiseStatus::Running,
             "automation_store.list() error must skip the promise, not mark it PermanentFailed"
+        );
+    }
+
+    /// When `automation_store.list()` fails on the first call during startup
+    /// recovery, the promise is queued to `auto_store_backlog`.  On the retry
+    /// (after `AUTO_RETRY_DELAY`) the store succeeds, finds the automation is
+    /// disabled, and marks the promise `PermanentFailed`.
+    ///
+    /// Uses a paused clock so the 30 s `AUTO_RETRY_DELAY` is skipped instantly.
+    #[tokio::test(start_paused = true)]
+    async fn recover_automation_list_error_backlog_retried_and_marks_permanent_failed_when_disabled(
+    ) {
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        // First list() → Err; subsequent calls → [disabled automation].
+        #[derive(Clone)]
+        struct FailOnceThenDisabledStore {
+            called: Arc<AtomicBool>,
+            auto_id: String,
+        }
+        impl trogon_automations::AutomationRepository for FailOnceThenDisabledStore {
+            fn put<'a>(&'a self, _: &'a trogon_automations::Automation)
+            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), trogon_automations::store::StoreError>> + Send + 'a>> {
+                Box::pin(async { Ok(()) })
+            }
+            fn get<'a>(&'a self, _: &'a str, _: &'a str)
+            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<trogon_automations::Automation>, trogon_automations::store::StoreError>> + Send + 'a>> {
+                Box::pin(async { Ok(None) })
+            }
+            fn delete<'a>(&'a self, _: &'a str, _: &'a str)
+            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), trogon_automations::store::StoreError>> + Send + 'a>> {
+                Box::pin(async { Ok(()) })
+            }
+            fn list<'a>(&'a self, _: &'a str)
+            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<trogon_automations::Automation>, trogon_automations::store::StoreError>> + Send + 'a>> {
+                let first_call = !self.called.swap(true, Ordering::SeqCst);
+                let auto_id = self.auto_id.clone();
+                Box::pin(async move {
+                    if first_call {
+                        Err(trogon_automations::store::StoreError(
+                            "injected first-call error".to_string(),
+                        ))
+                    } else {
+                        Ok(vec![trogon_automations::Automation {
+                            id: auto_id,
+                            tenant_id: "acme".to_string(),
+                            name: "disabled-auto".to_string(),
+                            trigger: "github.pull_request".to_string(),
+                            prompt: String::new(),
+                            model: None,
+                            tools: vec![],
+                            memory_path: None,
+                            mcp_servers: vec![],
+                            enabled: false,
+                            visibility: trogon_automations::Visibility::Private,
+                            created_at: "2026-01-01T00:00:00Z".to_string(),
+                            updated_at: "2026-01-01T00:00:00Z".to_string(),
+                        }])
+                    }
+                })
+            }
+            fn matching<'a>(&'a self, _: &'a str, _: &'a str, _: &'a serde_json::Value)
+            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<trogon_automations::Automation>, trogon_automations::store::StoreError>> + Send + 'a>> {
+                Box::pin(async { Ok(vec![]) })
+            }
+        }
+
+        let auto_id = "auto-disabled-id".to_string();
+        let auto_store = Arc::new(FailOnceThenDisabledStore {
+            called: Arc::new(AtomicBool::new(false)),
+            auto_id: auto_id.clone(),
+        });
+        let run_store = Arc::new(ErrorRecordRunStore);
+
+        let inner = MockPromiseStore::new();
+        let mut p = make_stale_promise("p-backlog-retry");
+        p.automation_id = auto_id.clone();
+        inner.insert_promise(p);
+        let store_for_assert = inner.clone();
+        let promise_store: Arc<dyn PromiseRepository> = Arc::new(inner) as _;
+
+        let agent = make_agent("http://127.0.0.1:1");
+
+        // recover_stale_promises spawns the recovery task (which contains the
+        // backlog retry loop) and returns the JoinHandle.  The tokio auto-
+        // advance feature will skip the 30 s AUTO_RETRY_DELAY when no tasks
+        // can make progress.
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &run_store,
+            "acme",
+        )
+        .await
+        .expect("spawn handle must be returned when stale promises exist");
+
+        handle.await.expect("recovery task must not panic");
+
+        let (p_after, _) = store_for_assert
+            .get_promise("acme", "p-backlog-retry")
+            .await
+            .unwrap()
+            .expect("promise must still exist after recovery");
+        assert_eq!(
+            p_after.status,
+            PromiseStatus::PermanentFailed,
+            "promise must be PermanentFailed after backlog retry finds disabled automation"
+        );
+        assert!(
+            p_after
+                .failure_reason
+                .as_deref()
+                .unwrap_or("")
+                .contains("disabled"),
+            "failure_reason must mention the automation is disabled; got: {:?}",
+            p_after.failure_reason
+        );
+    }
+
+    /// When `auto_store_backlog` retry finds an enabled automation, it must
+    /// call `handlers::run_automation` and persist a `RunRecord`.
+    ///
+    /// Uses a paused clock to skip the 30 s `AUTO_RETRY_DELAY` instantly, and
+    /// a `SequencedMockAnthropicClient` so no real HTTP server is needed.
+    #[tokio::test(start_paused = true)]
+    async fn recover_automation_backlog_retry_dispatches_enabled_automation() {
+        use crate::agent_loop::{AgentLoop, mock::SequencedMockAnthropicClient};
+        use crate::flag_client::AlwaysOnFlagClient;
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+        use crate::tools::{DefaultToolDispatcher, ToolContext};
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        // First list() → Err; subsequent calls → [enabled automation].
+        #[derive(Clone)]
+        struct FailOnceThenEnabledStore {
+            called: Arc<AtomicBool>,
+            auto_id: String,
+        }
+        impl trogon_automations::AutomationRepository for FailOnceThenEnabledStore {
+            fn put<'a>(&'a self, _: &'a trogon_automations::Automation)
+            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), trogon_automations::store::StoreError>> + Send + 'a>> {
+                Box::pin(async { Ok(()) })
+            }
+            fn get<'a>(&'a self, _: &'a str, _: &'a str)
+            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<trogon_automations::Automation>, trogon_automations::store::StoreError>> + Send + 'a>> {
+                Box::pin(async { Ok(None) })
+            }
+            fn delete<'a>(&'a self, _: &'a str, _: &'a str)
+            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), trogon_automations::store::StoreError>> + Send + 'a>> {
+                Box::pin(async { Ok(()) })
+            }
+            fn list<'a>(&'a self, _: &'a str)
+            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<trogon_automations::Automation>, trogon_automations::store::StoreError>> + Send + 'a>> {
+                let first_call = !self.called.swap(true, Ordering::SeqCst);
+                let auto_id = self.auto_id.clone();
+                Box::pin(async move {
+                    if first_call {
+                        Err(trogon_automations::store::StoreError(
+                            "injected first-call error".to_string(),
+                        ))
+                    } else {
+                        Ok(vec![trogon_automations::Automation {
+                            id: auto_id,
+                            tenant_id: "acme".to_string(),
+                            name: "enabled-auto".to_string(),
+                            trigger: "github.pull_request".to_string(),
+                            prompt: "Do the thing.".to_string(),
+                            model: None,
+                            tools: vec![],
+                            memory_path: None,
+                            mcp_servers: vec![],
+                            enabled: true,
+                            visibility: trogon_automations::Visibility::Private,
+                            created_at: "2026-01-01T00:00:00Z".to_string(),
+                            updated_at: "2026-01-01T00:00:00Z".to_string(),
+                        }])
+                    }
+                })
+            }
+            fn matching<'a>(&'a self, _: &'a str, _: &'a str, _: &'a serde_json::Value)
+            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<trogon_automations::Automation>, trogon_automations::store::StoreError>> + Send + 'a>> {
+                Box::pin(async { Ok(vec![]) })
+            }
+        }
+
+        let auto_id = "id-enabled-backlog".to_string();
+        let auto_store = Arc::new(FailOnceThenEnabledStore {
+            called: Arc::new(AtomicBool::new(false)),
+            auto_id: auto_id.clone(),
+        });
+        let run_store = Arc::new(CapturingRunStore::new());
+
+        // Stale promise that belongs to the enabled automation.
+        let inner = MockPromiseStore::new();
+        let mut p = make_stale_promise("p-enabled-backlog");
+        p.automation_id = auto_id.clone();
+        p.nats_subject = "github.pull_request".to_string();
+        inner.insert_promise(p);
+        let store_for_assert = inner.clone();
+        let promise_store: Arc<dyn PromiseRepository> = Arc::new(inner) as _;
+
+        // Agent with SequencedMockAnthropicClient — returns end_turn so the
+        // run completes successfully without any real HTTP calls.
+        let anthropic = Arc::new(SequencedMockAnthropicClient::new(vec![serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "automation completed"}]
+        })]));
+        let tool_ctx = Arc::new(ToolContext::for_test("http://127.0.0.1:1", "", "", ""));
+        let agent = Arc::new(AgentLoop {
+            anthropic_client: anthropic,
+            model: "test-model".to_string(),
+            max_iterations: 2,
+            tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),
+            tool_context: tool_ctx,
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            flag_client: Arc::new(AlwaysOnFlagClient),
+            tenant_id: "acme".to_string(),
+            promise_store: None,
+            promise_id: None,
+        });
+
+        // Auto-advance handles the 30 s AUTO_RETRY_DELAY inside the spawned task.
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &run_store,
+            "acme",
+        )
+        .await
+        .expect("spawn handle must be returned when stale promises exist");
+
+        handle.await.expect("recovery task must not panic");
+
+        // The retry dispatched the automation → RunRecord persisted.
+        let records = run_store.snapshot();
+        assert_eq!(records.len(), 1, "exactly one RunRecord must be captured; got {records:?}");
+        assert_eq!(records[0].automation_id, auto_id);
+        assert_eq!(
+            records[0].status,
+            trogon_automations::RunStatus::Success,
+            "run must succeed when SequencedMockAnthropicClient returns end_turn"
+        );
+
+        // Promise must be Resolved after the successful run.
+        let (p_after, _) = store_for_assert
+            .get_promise("acme", "p-enabled-backlog")
+            .await
+            .unwrap()
+            .expect("promise must exist after recovery");
+        assert_eq!(
+            p_after.status,
+            PromiseStatus::Resolved,
+            "promise must be Resolved after successful agent run; got {:?}",
+            p_after.status
         );
     }
 
@@ -5716,5 +6076,194 @@ mod tests {
         );
 
         unexpected.assert_hits_async(0).await;
+    }
+
+    // ── recovery_count lifecycle via recover_stale_promises ───────────────────
+
+    /// `recover_stale_promises` must increment `recovery_count` on every
+    /// Running promise it processes, regardless of the terminal outcome.
+    ///
+    /// Here the automation is not found → PermanentFailed. We verify that
+    /// `recovery_count` advances from 0 to 1 through the full flow:
+    /// list_running → re-fetch → CAS-claim (prepare_agent_with_promise)
+    /// → automation lookup → PermanentFailed write.
+    #[tokio::test(start_paused = true)]
+    async fn recover_stale_promise_increments_recovery_count_through_full_flow() {
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+
+        let store = Arc::new(MockPromiseStore::new());
+        let mut p = make_stale_promise("p-rec-count");
+        p.automation_id = "auto-id-not-found".to_string();
+        p.recovery_count = 0;
+        store.insert_promise(p);
+        let store_for_assert = store.clone();
+
+        let promise_store: Arc<dyn PromiseRepository> = Arc::clone(&store) as _;
+        let auto_store = Arc::new(EmptyAutomationStore); // not found → PermanentFailed
+        let run_store = Arc::new(ErrorRecordRunStore);
+        let agent = make_agent("http://127.0.0.1:1");
+
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &run_store,
+            "acme",
+        )
+        .await
+        .expect("spawn handle must be returned when stale promises exist");
+
+        handle.await.expect("recovery task must not panic");
+
+        let (p, _) = store_for_assert
+            .get_promise("acme", "p-rec-count")
+            .await
+            .unwrap()
+            .expect("promise must still exist after recovery");
+
+        assert_eq!(
+            p.status,
+            PromiseStatus::PermanentFailed,
+            "automation not found → PermanentFailed"
+        );
+        assert_eq!(
+            p.recovery_count,
+            1,
+            "recovery_count must be incremented by prepare_agent_with_promise; got {}",
+            p.recovery_count
+        );
+    }
+
+    // ── checkpoint_degraded via recover_stale_promises ────────────────────────
+
+    /// When a recovered stale promise has a message history so large that the
+    /// checkpoint payload would exceed `CHECKPOINT_MAX_BYTES`, the agent must
+    /// set `checkpoint_degraded = true` on the promise and still complete the
+    /// run successfully.
+    ///
+    /// This covers the `recover_stale_promises` → `prepare_agent_with_promise`
+    /// → `agent.run()` path, complementing the agent_loop-only tests in
+    /// `agent_loop.rs`.
+    #[tokio::test(start_paused = true)]
+    async fn recover_stale_oversized_checkpoint_sets_checkpoint_degraded_flag() {
+        use crate::agent_loop::{AgentLoop, Message, mock::SequencedMockAnthropicClient};
+        use crate::flag_client::AlwaysOnFlagClient;
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+        use crate::tools::{mock::MockToolDispatcher, ToolContext};
+
+        // Automation store that always returns the automation.
+        #[derive(Clone)]
+        struct AlwaysFoundStore {
+            auto: trogon_automations::Automation,
+        }
+        impl trogon_automations::AutomationRepository for AlwaysFoundStore {
+            fn put<'a>(&'a self, _: &'a trogon_automations::Automation)
+            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), trogon_automations::store::StoreError>> + Send + 'a>> {
+                Box::pin(async { Ok(()) })
+            }
+            fn get<'a>(&'a self, _: &'a str, _: &'a str)
+            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<trogon_automations::Automation>, trogon_automations::store::StoreError>> + Send + 'a>> {
+                let auto = self.auto.clone();
+                Box::pin(async move { Ok(Some(auto)) })
+            }
+            fn delete<'a>(&'a self, _: &'a str, _: &'a str)
+            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), trogon_automations::store::StoreError>> + Send + 'a>> {
+                Box::pin(async { Ok(()) })
+            }
+            fn list<'a>(&'a self, _: &'a str)
+            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<trogon_automations::Automation>, trogon_automations::store::StoreError>> + Send + 'a>> {
+                let auto = self.auto.clone();
+                Box::pin(async move { Ok(vec![auto]) })
+            }
+            fn matching<'a>(&'a self, _: &'a str, _: &'a str, _: &'a serde_json::Value)
+            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<trogon_automations::Automation>, trogon_automations::store::StoreError>> + Send + 'a>> {
+                let auto = self.auto.clone();
+                Box::pin(async move { Ok(vec![auto]) })
+            }
+        }
+
+        // Agent with SequencedMockAnthropicClient: tool_use → end_turn.
+        // MockToolDispatcher avoids HTTP calls.
+        let anthropic = Arc::new(SequencedMockAnthropicClient::new(vec![
+            serde_json::json!({
+                "stop_reason": "tool_use",
+                "content": [{"type": "tool_use", "id": "tu1", "name": "get_pr_diff",
+                             "input": {"owner": "o", "repo": "r", "pr_number": 1}}]
+            }),
+            serde_json::json!({
+                "stop_reason": "end_turn",
+                "content": [{"type": "text", "text": "done"}]
+            }),
+        ]));
+        let tool_ctx = Arc::new(ToolContext::for_test("http://127.0.0.1:1", "tok", "", ""));
+        let agent = Arc::new(AgentLoop {
+            anthropic_client: anthropic,
+            model: "test-model".to_string(),
+            max_iterations: 3,
+            tool_dispatcher: Arc::new(MockToolDispatcher::new("tool result")),
+            tool_context: tool_ctx,
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            flag_client: Arc::new(AlwaysOnFlagClient),
+            tenant_id: "test".to_string(),
+            promise_store: None,
+            promise_id: None,
+        });
+
+        // Stale promise with a message history large enough to exceed
+        // CHECKPOINT_MAX_BYTES when a new LLM turn is appended.
+        // tenant_id must match agent.tenant_id ("test") so checkpoint
+        // writes in agent.run() land at the correct KV key.
+        let auto = make_automation("chk-deg-auto");
+        let auto_store = Arc::new(AlwaysFoundStore { auto: auto.clone() });
+        let run_store = Arc::new(CapturingRunStore::new());
+
+        let store = Arc::new(MockPromiseStore::new());
+        let mut p = make_stale_promise("p-chk-deg");
+        p.tenant_id = agent.tenant_id.clone(); // "test"
+        p.automation_id = auto.id.clone();
+        p.nats_subject = "github.push".to_string();
+        // Seed with a message large enough that appending a tool turn exceeds the limit.
+        p.messages = vec![Message::user_text(
+            "a".repeat(crate::agent_loop::CHECKPOINT_MAX_BYTES),
+        )];
+        store.insert_promise(p);
+        let store_for_assert = store.clone();
+
+        let promise_store: Arc<dyn PromiseRepository> = Arc::clone(&store) as _;
+
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &run_store,
+            &agent.tenant_id, // "test"
+        )
+        .await
+        .expect("spawn handle must be returned when stale promises exist");
+
+        handle.await.expect("recovery task must not panic");
+
+        let (p, _) = store_for_assert
+            .get_promise(&agent.tenant_id, "p-chk-deg")
+            .await
+            .unwrap()
+            .expect("promise must still exist after recovery");
+
+        assert_eq!(
+            p.status,
+            PromiseStatus::Resolved,
+            "run must complete even with oversized checkpoint; got {:?}",
+            p.status
+        );
+        assert!(
+            p.checkpoint_degraded,
+            "checkpoint_degraded must be set when payload exceeds CHECKPOINT_MAX_BYTES"
+        );
     }
 }

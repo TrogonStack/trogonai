@@ -991,6 +991,8 @@ async fn startup_recovery_resumes_stale_automation_promise_to_resolved() {
         nats_subject: "github.pull_request".to_string(),
         system_prompt: None,
         recovery_count: 0,
+        checkpoint_degraded: false,
+        failure_reason: None,
     };
     ps.put_promise(&stale).await.expect("seed stale promise");
 
@@ -1676,6 +1678,8 @@ async fn tool_cache_dedup_on_recovery_skips_tool_reexecution() {
         nats_subject: "github.pull_request".to_string(),
         system_prompt: None,
         recovery_count: 0,
+        checkpoint_degraded: false,
+        failure_reason: None,
     };
     ps.put_promise(&stale).await.expect("seed stale promise");
 
@@ -1850,6 +1854,8 @@ async fn resolved_promise_skips_redelivered_nats_message() {
         nats_subject: "github.pull_request".to_string(),
         system_prompt: None,
         recovery_count: 0,
+        checkpoint_degraded: false,
+        failure_reason: None,
     };
     ps.put_promise(&resolved).await.expect("seed resolved promise");
 

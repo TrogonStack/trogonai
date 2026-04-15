@@ -525,3 +525,66 @@ pub async fn post_pr_comment(
     let url_str = response["html_url"].as_str().unwrap_or("(no url)");
     Ok(format!("Comment posted: {url_str}"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn make_ctx() -> crate::tools::ToolContext<crate::tools::mock::MockHttpClient> {
+        crate::tools::ToolContext::for_test("http://proxy.test", "tok_github", "", "")
+    }
+
+    /// When the dedup scan reaches `DEDUP_PAGE_CAP` (10 pages × 100 comments)
+    /// without finding the idempotency marker, the function emits a warning and
+    /// still posts the comment — verifying it does not hang or skip the POST.
+    #[tokio::test]
+    async fn post_pr_comment_dedup_page_cap_reached_still_posts() {
+        let ctx = make_ctx();
+
+        // Build a page of 100 comments, none containing the idempotency marker.
+        let page_items: Vec<serde_json::Value> = (0u32..100)
+            .map(|i| {
+                json!({
+                    "id": i,
+                    "body": format!("comment body {i} — no marker here"),
+                    "html_url": format!("https://github.com/owner/repo/issues/1#comment-{i}")
+                })
+            })
+            .collect();
+        let page_json = serde_json::to_string(&page_items).unwrap();
+
+        // Enqueue 10 full pages (DEDUP_PAGE_CAP = 10).
+        for _ in 0..10 {
+            ctx.http_client.enqueue_ok(200, page_json.clone());
+        }
+
+        // Final POST — the actual comment creation.
+        ctx.http_client.enqueue_ok(
+            200,
+            json!({
+                "id": 99999,
+                "html_url": "https://github.com/owner/repo/issues/1#issuecomment-99999"
+            })
+            .to_string(),
+        );
+
+        let input = json!({
+            "owner": "owner",
+            "repo": "repo",
+            "pr_number": 1,
+            "body": "New review comment",
+            "_idempotency_key": "dedup-cap-test-key"
+        });
+
+        let result = post_pr_comment(&ctx, &input).await;
+        assert!(
+            result.is_ok(),
+            "post_pr_comment must succeed even after reaching dedup page cap: {result:?}"
+        );
+        assert!(
+            result.unwrap().contains("Comment posted"),
+            "must return a 'Comment posted' message after the page-cap scan"
+        );
+    }
+}
