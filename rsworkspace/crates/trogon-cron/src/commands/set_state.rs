@@ -1,14 +1,13 @@
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::{
-    AlwaysSnapshot, CommandStateModel, Decide, Decision, ExecuteError, ExpectedVersionProvider,
-    NonEmpty, Snapshot, SnapshotStoreConfig, StreamCommand, execute_command,
+    AlwaysSnapshot, CommandStateModel, Decide, Decision, ExecuteError, ExpectedStateProvider,
+    NonEmpty, Snapshot, SnapshotStateModel, SnapshotStoreConfig, StreamCommand,
+    execute_command_with_snapshots,
 };
 
 use crate::{
-    JobEnabledState, JobId, JobWriteCondition,
-    commands::{
-        CronCommandExecutionRuntime, CronCommandRuntime, expected_version_from_write_condition,
-    },
+    JobEnabledState, JobId,
+    commands::{CronCommandRuntime, CronCommandRuntimePort, CronCommandSnapshotRuntime},
     error::CronError,
     events::JobEvent,
 };
@@ -20,7 +19,6 @@ pub(crate) const SNAPSHOT_STORE_CONFIG: SnapshotStoreConfig<'static> =
 pub struct ChangeJobStateCommand {
     pub id: JobId,
     pub state: JobEnabledState,
-    write_condition: Option<JobWriteCondition>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -37,23 +35,7 @@ pub enum ChangeJobStateDecisionError {
 
 impl ChangeJobStateCommand {
     pub const fn new(id: JobId, state: JobEnabledState) -> Self {
-        Self {
-            id,
-            state,
-            write_condition: None,
-        }
-    }
-
-    pub const fn with_write_condition(
-        id: JobId,
-        state: JobEnabledState,
-        write_condition: JobWriteCondition,
-    ) -> Self {
-        Self {
-            id,
-            state,
-            write_condition: Some(write_condition),
-        }
+        Self { id, state }
     }
 }
 
@@ -108,7 +90,6 @@ impl Decide<ChangeJobStateState, JobEvent> for ChangeJobStateCommand {
 impl CommandStateModel for ChangeJobStateCommand {
     type State = ChangeJobStateState;
     type Event = JobEvent;
-    type Snapshot = ChangeJobStateState;
     type DomainError = CronError;
 
     fn initial_state() -> Self::State {
@@ -126,27 +107,26 @@ impl CommandStateModel for ChangeJobStateCommand {
             JobEvent::JobRemoved { .. } => Ok(ChangeJobStateState::Missing),
         }
     }
+}
+
+impl SnapshotStateModel for ChangeJobStateCommand {
+    type Snapshot = ChangeJobStateState;
 
     fn snapshot_state(state: &Self::State, version: u64) -> Option<Snapshot<Self::Snapshot>> {
         Some(Snapshot::new(version, *state))
     }
 }
 
-impl ExpectedVersionProvider for ChangeJobStateCommand {
-    fn expected_version(&self) -> Option<trogon_eventsourcing::ExpectedVersion> {
-        self.write_condition
-            .map(expected_version_from_write_condition)
-    }
-}
+impl ExpectedStateProvider for ChangeJobStateCommand {}
 
 pub async fn run<R>(runtime: &R, command: ChangeJobStateCommand) -> Result<(), CronError>
 where
-    R: CronCommandExecutionRuntime<ChangeJobStateState>,
+    R: CronCommandRuntimePort + CronCommandSnapshotRuntime<ChangeJobStateState>,
 {
     let id = command.stream_id().to_string();
     let runtime = CronCommandRuntime::new(runtime, SNAPSHOT_STORE_CONFIG);
 
-    match execute_command(&runtime, &command, &AlwaysSnapshot).await {
+    match execute_command_with_snapshots(&runtime, &command, &AlwaysSnapshot).await {
         Ok(_) => Ok(()),
         Err(ExecuteError::Decision(ChangeJobStateDecisionError::JobNotFound { .. })) => {
             Err(CronError::JobNotFound { id })
@@ -207,11 +187,8 @@ mod tests {
         let state = ChangeJobStateState::Present {
             current: JobEnabledState::Enabled,
         };
-        let command = ChangeJobStateCommand::with_write_condition(
-            JobId::parse("backup").unwrap(),
-            JobEnabledState::Disabled,
-            JobWriteCondition::MustBeAtVersion(1),
-        );
+        let command =
+            ChangeJobStateCommand::new(JobId::parse("backup").unwrap(), JobEnabledState::Disabled);
 
         let decision = decide(&state, &command).unwrap();
         assert_eq!(
@@ -228,11 +205,8 @@ mod tests {
         let state = ChangeJobStateState::Present {
             current: JobEnabledState::Enabled,
         };
-        let command = ChangeJobStateCommand::with_write_condition(
-            JobId::parse("backup").unwrap(),
-            JobEnabledState::Enabled,
-            JobWriteCondition::MustBeAtVersion(1),
-        );
+        let command =
+            ChangeJobStateCommand::new(JobId::parse("backup").unwrap(), JobEnabledState::Enabled);
 
         assert!(matches!(
             decide(&state, &command).unwrap_err(),
@@ -243,11 +217,8 @@ mod tests {
     #[test]
     fn rejects_state_changes_for_missing_jobs() {
         let state = ChangeJobStateState::Missing;
-        let command = ChangeJobStateCommand::with_write_condition(
-            JobId::parse("backup").unwrap(),
-            JobEnabledState::Enabled,
-            JobWriteCondition::MustBeAtVersion(1),
-        );
+        let command =
+            ChangeJobStateCommand::new(JobId::parse("backup").unwrap(), JobEnabledState::Enabled);
 
         assert!(matches!(
             decide(&state, &command).unwrap_err(),

@@ -141,7 +141,7 @@ where
         Err(StreamStoreError::WrongExpectedVersion) => {
             return Err(CronError::OptimisticConcurrencyConflict {
                 id: job_id.to_string(),
-                expected: write_condition,
+                expected: write_condition.into(),
                 current_version: stream_subject_state(js, job_id)
                     .await?
                     .write_state
