@@ -1,16 +1,11 @@
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::{
     AlwaysSnapshot, CommandExecution, CommandStateModel, Decide, Decision,
-    DefaultExpectedStateProvider, ExecuteError, NonEmpty, OccPolicy, SnapshotStateModel,
-    SnapshotStoreConfig, StreamCommand,
+    DefaultExpectedStateProvider, EventStore, ExecuteError, NonEmpty, OccPolicy,
+    SnapshotStateModel, SnapshotStore, SnapshotStoreConfig, StreamCommand,
 };
 
-use crate::{
-    JobId,
-    commands::runtime::{CommandRuntime, event_store, snapshot_store},
-    error::CronError,
-    events::JobEvent,
-};
+use crate::{JobId, error::CronError, events::JobEvent};
 
 #[derive(Debug, Clone)]
 pub struct RemoveJobCommand {
@@ -99,17 +94,21 @@ impl SnapshotStateModel for RemoveJobCommand {
 
 impl DefaultExpectedStateProvider for RemoveJobCommand {}
 
-pub async fn run<R>(runtime: &R, command: RemoveJobCommand, occ: OccPolicy) -> Result<(), CronError>
+pub async fn run<E, S>(
+    event_store: &E,
+    snapshot_store: &S,
+    command: RemoveJobCommand,
+    occ: OccPolicy,
+) -> Result<(), CronError>
 where
-    R: CommandRuntime,
+    E: EventStore<JobId, Error = CronError>,
+    S: SnapshotStore<RemoveJobState, JobId, Error = CronError>,
 {
     let id = command.stream_id().to_string();
-    let event_store = event_store(runtime);
-    let snapshot_store = snapshot_store::<_, RemoveJobState>(runtime);
 
-    match CommandExecution::new(&event_store, &command)
+    match CommandExecution::new(event_store, &command)
         .occ(occ)
-        .snapshots(&snapshot_store, SNAPSHOT_STORE_CONFIG, AlwaysSnapshot)
+        .snapshots(snapshot_store, SNAPSHOT_STORE_CONFIG, AlwaysSnapshot)
         .execute()
         .await
     {
@@ -200,6 +199,7 @@ mod tests {
         store.seed_job(job("backup"));
 
         run(
+            &store,
             &store,
             RemoveJobCommand::new(JobId::parse("backup").unwrap()),
             OccPolicy::CommandDefault,

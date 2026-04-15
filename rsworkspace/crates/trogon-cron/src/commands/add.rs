@@ -4,12 +4,11 @@ use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::{
     AlwaysSnapshot, CommandExecution, CommandStateModel, Decide, Decision,
     DefaultExpectedStateProvider, EventStore, ExecuteError, ExpectedState, NonEmpty, OccPolicy,
-    SnapshotStateModel, SnapshotStoreConfig, StreamCommand,
+    SnapshotStateModel, SnapshotStore, SnapshotStoreConfig, StreamCommand,
 };
 
 use crate::{
     JobId, JobSpec, ResolvedJobSpec,
-    commands::runtime::{CommandRuntime, event_store, snapshot_store},
     error::CronError,
     events::{JobEvent, RegisteredJobSpec},
 };
@@ -125,21 +124,21 @@ impl DefaultExpectedStateProvider for RegisterJobCommand {
     }
 }
 
-pub async fn run<R>(
-    runtime: &R,
+pub async fn run<E, S>(
+    event_store: &E,
+    snapshot_store: &S,
     command: RegisterJobCommand,
     occ: OccPolicy,
 ) -> Result<(), CronError>
 where
-    R: CommandRuntime,
+    E: EventStore<JobId, Error = CronError>,
+    S: SnapshotStore<RegisterJobState, JobId, Error = CronError>,
 {
     let id = command.stream_id().to_string();
-    let event_store = event_store(runtime);
-    let snapshot_store = snapshot_store::<_, RegisterJobState>(runtime);
 
-    match CommandExecution::new(&event_store, &command)
+    match CommandExecution::new(event_store, &command)
         .occ(occ)
-        .snapshots(&snapshot_store, SNAPSHOT_STORE_CONFIG, AlwaysSnapshot)
+        .snapshots(snapshot_store, SNAPSHOT_STORE_CONFIG, AlwaysSnapshot)
         .execute()
         .await
     {
@@ -235,6 +234,7 @@ mod tests {
         let store = MockCronStore::new();
 
         run(
+            &store,
             &store,
             RegisterJobCommand::new(job("backup")).unwrap(),
             OccPolicy::CommandDefault,

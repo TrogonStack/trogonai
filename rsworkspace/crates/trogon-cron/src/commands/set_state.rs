@@ -1,16 +1,11 @@
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::{
     AlwaysSnapshot, CommandExecution, CommandStateModel, Decide, Decision,
-    DefaultExpectedStateProvider, ExecuteError, NonEmpty, OccPolicy, SnapshotStateModel,
-    SnapshotStoreConfig, StreamCommand,
+    DefaultExpectedStateProvider, EventStore, ExecuteError, NonEmpty, OccPolicy,
+    SnapshotStateModel, SnapshotStore, SnapshotStoreConfig, StreamCommand,
 };
 
-use crate::{
-    JobEnabledState, JobId,
-    commands::runtime::{CommandRuntime, event_store, snapshot_store},
-    error::CronError,
-    events::JobEvent,
-};
+use crate::{JobEnabledState, JobId, error::CronError, events::JobEvent};
 
 pub(crate) const SNAPSHOT_STORE_CONFIG: SnapshotStoreConfig<'static> =
     SnapshotStoreConfig::new("cron.command.change_job_state.v1.", None);
@@ -119,21 +114,21 @@ impl SnapshotStateModel for ChangeJobStateCommand {
 
 impl DefaultExpectedStateProvider for ChangeJobStateCommand {}
 
-pub async fn run<R>(
-    runtime: &R,
+pub async fn run<E, S>(
+    event_store: &E,
+    snapshot_store: &S,
     command: ChangeJobStateCommand,
     occ: OccPolicy,
 ) -> Result<(), CronError>
 where
-    R: CommandRuntime,
+    E: EventStore<JobId, Error = CronError>,
+    S: SnapshotStore<ChangeJobStateState, JobId, Error = CronError>,
 {
     let id = command.stream_id().to_string();
-    let event_store = event_store(runtime);
-    let snapshot_store = snapshot_store::<_, ChangeJobStateState>(runtime);
 
-    match CommandExecution::new(&event_store, &command)
+    match CommandExecution::new(event_store, &command)
         .occ(occ)
-        .snapshots(&snapshot_store, SNAPSHOT_STORE_CONFIG, AlwaysSnapshot)
+        .snapshots(snapshot_store, SNAPSHOT_STORE_CONFIG, AlwaysSnapshot)
         .execute()
         .await
     {
@@ -242,6 +237,7 @@ mod tests {
         store.seed_job(job("backup"));
 
         run(
+            &store,
             &store,
             ChangeJobStateCommand::new(JobId::parse("backup").unwrap(), JobEnabledState::Disabled),
             OccPolicy::CommandDefault,
