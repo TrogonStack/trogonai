@@ -54,6 +54,19 @@ where
         Self { state, publisher, nats, registry }
     }
 
+    /// Borrow the registry — used by [`crate::host::ActorHost`] for registration
+    /// and heartbeat calls.
+    pub fn registry(&self) -> &Registry<R> {
+        &self.registry
+    }
+
+    /// Borrow the NATS client — used by [`crate::host::ActorHost`] to subscribe
+    /// to the actor inbox. The caller is responsible for requiring the appropriate
+    /// `SubscribeClient` bound on `N`.
+    pub fn nats(&self) -> &N {
+        &self.nats
+    }
+
     /// Run the full event-handling cycle for one actor invocation.
     ///
     /// The cycle is:
