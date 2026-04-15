@@ -14,70 +14,76 @@ use crate::{
 };
 
 #[doc(hidden)]
-pub trait JobEventStoreRuntime: Send + Sync {
-    fn current_job_stream_version(
+pub trait CommandRuntime: Send + Sync {
+    fn current_command_stream_version(
         &self,
         stream_id: &JobId,
     ) -> impl std::future::Future<Output = Result<Option<u64>, CronError>> + Send;
 
-    fn read_job_stream_from(
+    fn read_command_stream_from(
         &self,
         stream_id: &JobId,
         from_sequence: u64,
     ) -> impl std::future::Future<Output = Result<Vec<RecordedEvent>, CronError>> + Send;
 
-    fn append_job_events(
+    fn append_command_events(
         &self,
         stream_id: &JobId,
         expected_state: ExpectedState,
         events: NonEmpty<EventData>,
     ) -> impl std::future::Future<Output = Result<AppendOutcome, CronError>> + Send;
-}
 
-#[doc(hidden)]
-pub trait JobSnapshotStoreRuntime<Payload>: Send + Sync {
-    fn load_command_snapshot(
+    fn load_command_snapshot<Payload>(
         &self,
         config: SnapshotStoreConfig<'static>,
         stream_id: &JobId,
-    ) -> impl std::future::Future<Output = Result<Option<Snapshot<Payload>>, CronError>> + Send;
+    ) -> impl std::future::Future<Output = Result<Option<Snapshot<Payload>>, CronError>> + Send
+    where
+        Payload: DeserializeOwned + Send;
 
-    fn save_command_snapshot(
+    fn save_command_snapshot<Payload>(
         &self,
         config: SnapshotStoreConfig<'static>,
         stream_id: &JobId,
         snapshot: Snapshot<Payload>,
-    ) -> impl std::future::Future<Output = Result<(), CronError>> + Send;
+    ) -> impl std::future::Future<Output = Result<(), CronError>> + Send
+    where
+        Payload: Serialize + Send;
 }
 
-pub(crate) struct JobEventStore<'a, R> {
+struct EventStoreAdapter<'a, R> {
     runtime: &'a R,
 }
 
-impl<'a, R> JobEventStore<'a, R> {
-    pub(crate) const fn new(runtime: &'a R) -> Self {
-        Self { runtime }
-    }
-}
-
-pub(crate) struct JobSnapshotStore<'a, R> {
+struct SnapshotStoreAdapter<'a, R> {
     runtime: &'a R,
 }
 
-impl<'a, R> JobSnapshotStore<'a, R> {
-    pub(crate) const fn new(runtime: &'a R) -> Self {
-        Self { runtime }
-    }
-}
-
-impl<R> EventStore<JobId> for JobEventStore<'_, R>
+pub(crate) fn event_store<R>(runtime: &R) -> impl EventStore<JobId, Error = CronError> + use<'_, R>
 where
-    R: JobEventStoreRuntime,
+    R: CommandRuntime,
+{
+    EventStoreAdapter { runtime }
+}
+
+pub(crate) fn snapshot_store<R, Payload>(
+    runtime: &R,
+) -> impl SnapshotStore<Payload, JobId, Error = CronError> + use<'_, R, Payload>
+where
+    R: CommandRuntime,
+    Payload: Serialize + DeserializeOwned + Send,
+{
+    SnapshotStoreAdapter { runtime }
+}
+
+impl<R> EventStore<JobId> for EventStoreAdapter<'_, R>
+where
+    R: CommandRuntime,
 {
     type Error = CronError;
 
     async fn current_stream_version(&self, stream_id: &JobId) -> Result<Option<u64>, Self::Error> {
-        self.runtime.current_job_stream_version(stream_id).await
+        self.runtime.current_command_stream_version(stream_id).await
     }
 
     async fn read_stream_from(
@@ -86,7 +92,7 @@ where
         from_sequence: u64,
     ) -> Result<Vec<RecordedEvent>, Self::Error> {
         self.runtime
-            .read_job_stream_from(stream_id, from_sequence)
+            .read_command_stream_from(stream_id, from_sequence)
             .await
     }
 
@@ -97,15 +103,15 @@ where
         events: NonEmpty<EventData>,
     ) -> Result<AppendOutcome, Self::Error> {
         self.runtime
-            .append_job_events(stream_id, expected_state, events)
+            .append_command_events(stream_id, expected_state, events)
             .await
     }
 }
 
-impl<Payload, R> SnapshotStore<Payload, JobId> for JobSnapshotStore<'_, R>
+impl<Payload, R> SnapshotStore<Payload, JobId> for SnapshotStoreAdapter<'_, R>
 where
-    R: JobSnapshotStoreRuntime<Payload>,
-    Payload: Send,
+    R: CommandRuntime,
+    Payload: Serialize + DeserializeOwned + Send,
 {
     type Error = CronError;
 
@@ -129,7 +135,7 @@ where
     }
 }
 
-impl<J> JobEventStoreRuntime for J
+impl<J> CommandRuntime for J
 where
     J: JetStreamGetKeyValue<Store = kv::Store>
         + JetStreamGetStream<Stream = jetstream::stream::Stream>
@@ -139,7 +145,7 @@ where
         > + Send
         + Sync,
 {
-    async fn current_job_stream_version(
+    async fn current_command_stream_version(
         &self,
         stream_id: &JobId,
     ) -> Result<Option<u64>, CronError> {
@@ -149,7 +155,7 @@ where
             .current_version())
     }
 
-    async fn read_job_stream_from(
+    async fn read_command_stream_from(
         &self,
         stream_id: &JobId,
         from_sequence: u64,
@@ -171,7 +177,7 @@ where
             })
     }
 
-    async fn append_job_events(
+    async fn append_command_events(
         &self,
         stream_id: &JobId,
         expected_state: ExpectedState,
@@ -209,36 +215,30 @@ where
             next_expected_version: current_version.unwrap_or(0) + appended_events,
         })
     }
-}
 
-impl<Payload, J> JobSnapshotStoreRuntime<Payload> for J
-where
-    J: JetStreamGetKeyValue<Store = kv::Store>
-        + JetStreamGetStream<Stream = jetstream::stream::Stream>
-        + JetStreamPublishMessage<
-            PublishError = context::PublishError,
-            AckFuture = context::PublishAckFuture,
-        > + Send
-        + Sync,
-    Payload: Serialize + DeserializeOwned + Send,
-{
-    async fn load_command_snapshot(
+    async fn load_command_snapshot<Payload>(
         &self,
         config: SnapshotStoreConfig<'static>,
         stream_id: &JobId,
-    ) -> Result<Option<Snapshot<Payload>>, CronError> {
+    ) -> Result<Option<Snapshot<Payload>>, CronError>
+    where
+        Payload: DeserializeOwned + Send,
+    {
         let bucket = open_snapshot_bucket(self).await?;
         load_snapshot(&bucket, config, stream_id.as_str())
             .await
             .map_err(CronError::from)
     }
 
-    async fn save_command_snapshot(
+    async fn save_command_snapshot<Payload>(
         &self,
         config: SnapshotStoreConfig<'static>,
         stream_id: &JobId,
         snapshot: Snapshot<Payload>,
-    ) -> Result<(), CronError> {
+    ) -> Result<(), CronError>
+    where
+        Payload: Serialize + Send,
+    {
         let bucket = open_snapshot_bucket(self).await?;
         persist_snapshot_change(
             &bucket,

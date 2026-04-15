@@ -9,9 +9,7 @@ use trogon_eventsourcing::{
 
 use crate::{
     JobId, JobSpec, ResolvedJobSpec,
-    commands::runtime::{
-        JobEventStore, JobEventStoreRuntime, JobSnapshotStore, JobSnapshotStoreRuntime,
-    },
+    commands::runtime::{CommandRuntime, event_store, snapshot_store},
     error::CronError,
     events::{JobEvent, RegisteredJobSpec},
 };
@@ -133,11 +131,11 @@ pub async fn run<R>(
     occ: OccPolicy,
 ) -> Result<(), CronError>
 where
-    R: JobEventStoreRuntime + JobSnapshotStoreRuntime<RegisterJobState>,
+    R: CommandRuntime,
 {
     let id = command.stream_id().to_string();
-    let event_store = JobEventStore::new(runtime);
-    let snapshot_store = JobSnapshotStore::new(runtime);
+    let event_store = event_store(runtime);
+    let snapshot_store = snapshot_store::<_, RegisterJobState>(runtime);
 
     match CommandExecution::new(&event_store, &command)
         .occ(occ)
