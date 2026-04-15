@@ -16,7 +16,7 @@ use trogon_nats::lease::{ReleaseLease, RenewLease, TryAcquireLease};
 
 use crate::{
     GetJobCommand, ListJobsCommand,
-    commands::runtime::{JobEventStoreRuntime, JobSnapshotStoreRuntime},
+    commands::runtime::CommandRuntime,
     config::{JobSpec, JobWriteCondition, JobWriteState},
     domain::ResolvedJobSpec,
     error::CronError,
@@ -223,8 +223,8 @@ impl MockCronStore {
     }
 }
 
-impl JobEventStoreRuntime for MockCronStore {
-    async fn current_job_stream_version(
+impl CommandRuntime for MockCronStore {
+    async fn current_command_stream_version(
         &self,
         stream_id: &crate::JobId,
     ) -> Result<Option<u64>, CronError> {
@@ -236,7 +236,7 @@ impl JobEventStoreRuntime for MockCronStore {
             .copied())
     }
 
-    async fn read_job_stream_from(
+    async fn read_command_stream_from(
         &self,
         stream_id: &crate::JobId,
         from_sequence: u64,
@@ -275,7 +275,7 @@ impl JobEventStoreRuntime for MockCronStore {
         Ok(recorded)
     }
 
-    async fn append_job_events(
+    async fn append_command_events(
         &self,
         stream_id: &crate::JobId,
         expected_state: ExpectedState,
@@ -366,26 +366,26 @@ impl JobEventStoreRuntime for MockCronStore {
             next_expected_version: current_version.unwrap_or(0) + appended_events,
         })
     }
-}
-
-impl<Payload> JobSnapshotStoreRuntime<Payload> for MockCronStore
-where
-    Payload: Serialize + DeserializeOwned + Send,
-{
-    async fn load_command_snapshot(
+    async fn load_command_snapshot<Payload>(
         &self,
         config: SnapshotStoreConfig<'static>,
         stream_id: &crate::JobId,
-    ) -> Result<Option<Snapshot<Payload>>, CronError> {
+    ) -> Result<Option<Snapshot<Payload>>, CronError>
+    where
+        Payload: DeserializeOwned + Send,
+    {
         self.read_command_snapshot(config, stream_id)
     }
 
-    async fn save_command_snapshot(
+    async fn save_command_snapshot<Payload>(
         &self,
         config: SnapshotStoreConfig<'static>,
         stream_id: &crate::JobId,
         snapshot: Snapshot<Payload>,
-    ) -> Result<(), CronError> {
+    ) -> Result<(), CronError>
+    where
+        Payload: Serialize + Send,
+    {
         let snapshot = serde_json::to_string(&snapshot)?;
         self.command_snapshots
             .lock()
