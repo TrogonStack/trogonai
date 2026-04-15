@@ -28,6 +28,7 @@ use serde_json::json;
 
 use crate::agent_loop::{AgentLoop, Message};
 use crate::handlers::{DEFAULT_MEMORY_PATH, fetch_memory};
+use crate::promise_store::{AgentPromise, PromiseRepository, PromiseStatus};
 use crate::session::{ChatSession, SessionRepository};
 use crate::tools::all_tool_defs;
 
@@ -37,6 +38,7 @@ use crate::tools::all_tool_defs;
 pub struct ChatAppState<R: SessionRepository> {
     pub agent: Arc<AgentLoop>,
     pub session_store: R,
+    pub promise_store: Arc<dyn PromiseRepository>,
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -403,6 +405,74 @@ async fn send_message<R: SessionRepository>(
 
 // ── Router ────────────────────────────────────────────────────────────────────
 
+// ── Promise admin ─────────────────────────────────────────────────────────────
+
+/// Summary view of a running promise returned by `GET /admin/promises`.
+///
+/// Excludes `messages` and `system_prompt` — both can be very large and are
+/// not useful for operational inspection.
+#[derive(Serialize)]
+struct PromiseView {
+    id: String,
+    automation_id: String,
+    status: PromiseStatus,
+    iteration: u32,
+    worker_id: String,
+    claimed_at: u64,
+    nats_subject: String,
+    recovery_count: u32,
+    checkpoint_degraded: bool,
+    failure_reason: Option<String>,
+}
+
+impl From<AgentPromise> for PromiseView {
+    fn from(p: AgentPromise) -> Self {
+        Self {
+            id: p.id,
+            automation_id: p.automation_id,
+            status: p.status,
+            iteration: p.iteration,
+            worker_id: p.worker_id,
+            claimed_at: p.claimed_at,
+            nats_subject: p.nats_subject,
+            recovery_count: p.recovery_count,
+            checkpoint_degraded: p.checkpoint_degraded,
+            failure_reason: p.failure_reason,
+        }
+    }
+}
+
+/// `GET /admin/promises` — list all Running promises for the tenant.
+///
+/// Useful for operators to identify stuck promises without direct NATS CLI
+/// access. Only returns Running promises; terminal ones (Resolved,
+/// PermanentFailed) are cleaned up by KV TTL and not returned.
+async fn list_promises<R: SessionRepository>(
+    State(state): State<ChatAppState<R>>,
+    headers: HeaderMap,
+) -> Response {
+    let tenant_id = match tenant_id(&headers) {
+        Ok(t) => t,
+        Err(r) => return r,
+    };
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        state.promise_store.list_running(&tenant_id),
+    )
+    .await
+    {
+        Ok(Ok(promises)) => {
+            let views: Vec<PromiseView> = promises.into_iter().map(PromiseView::from).collect();
+            axum::Json(views).into_response()
+        }
+        Ok(Err(e)) => err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("promise store error: {e}"),
+        ),
+        Err(_) => err(StatusCode::GATEWAY_TIMEOUT, "promise store timed out"),
+    }
+}
+
 pub fn router<R: SessionRepository>(state: ChatAppState<R>) -> Router {
     Router::new()
         .route(
@@ -416,6 +486,7 @@ pub fn router<R: SessionRepository>(state: ChatAppState<R>) -> Router {
                 .delete(delete_session::<R>),
         )
         .route("/sessions/{id}/messages", post(send_message::<R>))
+        .route("/admin/promises", get(list_promises::<R>))
         .with_state(state)
 }
 
