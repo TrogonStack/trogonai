@@ -79,23 +79,58 @@ impl PrActor {
         }
         let owner = parts[0].to_string();
         let repo_and_number = parts[2];
-        // Last dot-segment is the PR number
-        let (repo, number_str) = repo_and_number.rsplit_once('.')?;
-        let number: u64 = number_str.parse().ok()?;
-        let repo = if repo.is_empty() { parts[1].to_string() } else { repo.to_string() };
-        Some((owner, repo, number))
+
+        // Two cases:
+        //   "owner.repo.42"         → parts[2]="42"         (no dot → simple case)
+        //   "owner.sub.repo.42"     → parts[2]="repo.42"    (dot present)
+        if let Some((repo_part, number_str)) = repo_and_number.rsplit_once('.') {
+            let number: u64 = number_str.parse().ok()?;
+            let repo = if repo_part.is_empty() {
+                parts[1].to_string()
+            } else {
+                format!("{}.{}", parts[1], repo_part)
+            };
+            Some((owner, repo, number))
+        } else {
+            // Simple "owner.repo.number" — parts[2] is purely the PR number.
+            let number: u64 = repo_and_number.parse().ok()?;
+            Some((owner, parts[1].to_string(), number))
+        }
     }
 
-    /// Fetch the unified diff for a GitHub pull request.
+    /// Fetch the HEAD commit SHA and unified diff for a GitHub pull request.
     ///
-    /// Uses `Accept: application/vnd.github.diff` to get the raw diff.
-    async fn fetch_pr_diff(
+    /// Returns `(head_sha, diff_text)`. The diff uses
+    /// `Accept: application/vnd.github.diff`.
+    async fn fetch_pr_diff_and_sha(
         &self,
         owner: &str,
         repo: &str,
         number: u64,
-    ) -> Result<String, String> {
+    ) -> Result<(String, String), String> {
         let url = format!("https://api.github.com/repos/{owner}/{repo}/pulls/{number}");
+
+        // First call: JSON to get HEAD SHA.
+        let info: serde_json::Value = self
+            .http
+            .get(&url)
+            .header("Accept", "application/vnd.github+json")
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "trogon-pr-actor/0.1")
+            .send()
+            .await
+            .map_err(|e| format!("GitHub API request failed: {e}"))?
+            .json()
+            .await
+            .map_err(|e| format!("parsing PR info JSON failed: {e}"))?;
+
+        let head_sha = info
+            .pointer("/head/sha")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        // Second call: raw diff.
         let resp = self
             .http
             .get(&url)
@@ -112,9 +147,12 @@ impl PrActor {
             return Err(format!("GitHub API returned {status}: {body}"));
         }
 
-        resp.text()
+        let diff = resp
+            .text()
             .await
-            .map_err(|e| format!("reading GitHub diff body failed: {e}"))
+            .map_err(|e| format!("reading GitHub diff body failed: {e}"))?;
+
+        Ok((head_sha, diff))
     }
 
     /// Ask the LLM to review the diff and return a list of issues found.
@@ -267,8 +305,9 @@ impl EntityActor for PrActor {
 
         if !self.github_token.is_empty() && !self.llm_api_key.is_empty() {
             if let Some((owner, repo, number)) = Self::parse_entity_key(&ctx.entity_key) {
-                match self.fetch_pr_diff(&owner, &repo, number).await {
-                    Ok(diff) => {
+                match self.fetch_pr_diff_and_sha(&owner, &repo, number).await {
+                    Ok((head_sha, diff)) => {
+                        state.last_reviewed_sha = Some(head_sha);
                         match self
                             .review_with_llm(&ctx.entity_key, state.events_processed, &diff)
                             .await
@@ -344,6 +383,7 @@ impl EntityActor for PrActor {
                             "failed to fetch PR diff"
                         );
                         review_summary = format!("Diff fetch failed: {e}");
+                        state.last_reviewed_sha = None;
                     }
                 }
             } else {
