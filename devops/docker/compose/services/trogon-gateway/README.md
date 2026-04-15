@@ -16,6 +16,7 @@ prefix:
 | incident.io | `/incidentio/webhook` | `TROGON_SOURCE_INCIDENTIO_SIGNING_SECRET` |
 | Linear | `/linear/webhook` | `TROGON_SOURCE_LINEAR_WEBHOOK_SECRET` |
 | Notion | `/notion/webhook` | `TROGON_SOURCE_NOTION_VERIFICATION_TOKEN` |
+| Sentry | `/sentry/webhook` | `TROGON_SOURCE_SENTRY_CLIENT_SECRET` |
 
 The gateway port is configured via `TROGON_GATEWAY_PORT` (default `8080`).
 Liveness and readiness probes are available at `GET /-/liveness` and `GET /-/readiness`.
@@ -66,6 +67,13 @@ Configure `TROGON_SOURCE_NOTION_VERIFICATION_TOKEN` before starting the gateway,
 then point the Notion webhook endpoint at `/notion/webhook`. Verified events
 are forwarded to NATS on `{subject_prefix}.{type}` subjects such as
 `notion.page.created`.
+
+## Sentry webhooks
+
+Sentry integration-platform webhooks sign the raw JSON body with the app client
+secret. Configure `TROGON_SOURCE_SENTRY_CLIENT_SECRET`, point the webhook URL
+at `/sentry/webhook`, and the gateway will forward verified payloads to NATS on
+`{subject_prefix}.{resource}.{action}` subjects such as `sentry.issue.created`.
 
 ## Exposing webhooks with ngrok
 
