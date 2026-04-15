@@ -383,7 +383,6 @@ impl EntityActor for PrActor {
                             "failed to fetch PR diff"
                         );
                         review_summary = format!("Diff fetch failed: {e}");
-                        state.last_reviewed_sha = None;
                     }
                 }
             } else {
