@@ -14,11 +14,8 @@ use trogon_eventsourcing::{
 use trogon_nats::lease::{ReleaseLease, RenewLease, TryAcquireLease};
 
 use crate::{
-    ChangeJobStateCommand, GetJobCommand, ListJobsCommand, RegisterJobCommand, RemoveJobCommand,
-    commands::{
-        CronCommandRuntimePort, CronCommandSnapshotRuntime, change_job_state, register_job,
-        remove_job,
-    },
+    GetJobCommand, ListJobsCommand,
+    commands::{CronCommandRuntimePort, CronCommandSnapshotRuntime},
     config::{JobSpec, JobWriteCondition, JobWriteState},
     domain::ResolvedJobSpec,
     error::CronError,
@@ -190,14 +187,6 @@ impl MockCronStore {
             .map_err(CronError::from)
     }
 
-    pub async fn register_job(&self, command: RegisterJobCommand) -> Result<(), CronError> {
-        register_job(self, command).await
-    }
-
-    pub async fn change_job_state(&self, command: ChangeJobStateCommand) -> Result<(), CronError> {
-        change_job_state(self, command).await
-    }
-
     pub async fn get_job(
         &self,
         command: GetJobCommand,
@@ -208,10 +197,6 @@ impl MockCronStore {
             .unwrap()
             .get(command.stream_id().as_str())
             .cloned())
-    }
-
-    pub async fn remove_job(&self, command: RemoveJobCommand) -> Result<(), CronError> {
-        remove_job(self, command).await
     }
 
     pub async fn list_jobs(
@@ -420,7 +405,8 @@ mod tests {
         DeliverySpec, JobEnabledState, JobWriteCondition, SamplingSource, ScheduleSpec,
     };
     use crate::{
-        ChangeJobStateCommand, GetJobCommand, ListJobsCommand, RegisterJobCommand, RemoveJobCommand,
+        ChangeJobStateCommand, GetJobCommand, ListJobsCommand, OccPolicy, RegisterJobCommand,
+        RemoveJobCommand, change_job_state, register_job, remove_job,
     };
     use futures::StreamExt;
 
@@ -503,10 +489,13 @@ mod tests {
             .unwrap();
         assert_eq!(seeded.version, 1);
 
-        store
-            .register_job(RegisterJobCommand::new(base_job("alpha")).unwrap())
-            .await
-            .unwrap();
+        register_job(
+            &store,
+            RegisterJobCommand::new(base_job("alpha")).unwrap(),
+            OccPolicy::CommandDefault,
+        )
+        .await
+        .unwrap();
         let alpha = store
             .get_job(GetJobCommand {
                 id: job_id("alpha"),
@@ -516,13 +505,13 @@ mod tests {
             .unwrap();
         assert_eq!(alpha.version, 1);
 
-        store
-            .change_job_state(ChangeJobStateCommand::new(
-                job_id("alpha"),
-                JobEnabledState::Disabled,
-            ))
-            .await
-            .unwrap();
+        change_job_state(
+            &store,
+            ChangeJobStateCommand::new(job_id("alpha"), JobEnabledState::Disabled),
+            OccPolicy::CommandDefault,
+        )
+        .await
+        .unwrap();
         assert_eq!(
             store
                 .get_job(GetJobCommand {
@@ -554,10 +543,13 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        store
-            .remove_job(RemoveJobCommand::new(job_id("alpha")))
-            .await
-            .unwrap();
+        remove_job(
+            &store,
+            RemoveJobCommand::new(job_id("alpha")),
+            OccPolicy::CommandDefault,
+        )
+        .await
+        .unwrap();
         assert!(
             store
                 .get_job(GetJobCommand {
@@ -568,10 +560,13 @@ mod tests {
                 .is_none()
         );
 
-        store
-            .register_job(RegisterJobCommand::new(base_job("alpha")).unwrap())
-            .await
-            .unwrap();
+        register_job(
+            &store,
+            RegisterJobCommand::new(base_job("alpha")).unwrap(),
+            OccPolicy::CommandDefault,
+        )
+        .await
+        .unwrap();
         let re_registered = store
             .get_job(GetJobCommand {
                 id: job_id("alpha"),
@@ -598,29 +593,32 @@ mod tests {
         let invalid_error = RegisterJobCommand::new(invalid).unwrap_err();
         assert!(invalid_error.to_string().contains("sampling source"));
 
-        store
-            .register_job(RegisterJobCommand::new(base_job("alpha")).unwrap())
-            .await
-            .unwrap();
-        let same_state_error = store
-            .change_job_state(ChangeJobStateCommand::new(
-                job_id("alpha"),
-                JobEnabledState::Enabled,
-            ))
-            .await
-            .unwrap_err();
+        register_job(
+            &store,
+            RegisterJobCommand::new(base_job("alpha")).unwrap(),
+            OccPolicy::CommandDefault,
+        )
+        .await
+        .unwrap();
+        let same_state_error = change_job_state(
+            &store,
+            ChangeJobStateCommand::new(job_id("alpha"), JobEnabledState::Enabled),
+            OccPolicy::CommandDefault,
+        )
+        .await
+        .unwrap_err();
         assert!(matches!(
             same_state_error,
             CronError::JobStateAlreadySet { .. }
         ));
 
-        let missing_error = store
-            .change_job_state(ChangeJobStateCommand::new(
-                job_id("missing"),
-                JobEnabledState::Disabled,
-            ))
-            .await
-            .unwrap_err();
+        let missing_error = change_job_state(
+            &store,
+            ChangeJobStateCommand::new(job_id("missing"), JobEnabledState::Disabled),
+            OccPolicy::CommandDefault,
+        )
+        .await
+        .unwrap_err();
         assert!(matches!(missing_error, CronError::JobNotFound { .. }));
     }
 
