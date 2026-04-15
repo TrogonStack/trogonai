@@ -21,6 +21,7 @@ trogon-source-gitlab = { path = "crates/trogon-source-gitlab" }
 trogon-source-incidentio = { path = "crates/trogon-source-incidentio" }
 trogon-source-linear = { path = "crates/trogon-source-linear" }
 trogon-source-notion = { path = "crates/trogon-source-notion" }
+trogon-source-sentry = { path = "crates/trogon-source-sentry" }
 trogon-source-slack = { path = "crates/trogon-source-slack" }
 trogon-source-telegram = { path = "crates/trogon-source-telegram" }
 trogon-std = { path = "crates/trogon-std" }

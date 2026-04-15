@@ -15,6 +15,7 @@ use trogon_source_incidentio::config::IncidentioConfig as IncidentioSourceConfig
 use trogon_source_incidentio::incidentio_signing_secret::IncidentioSigningSecret;
 use trogon_source_linear::config::LinearWebhookSecret;
 use trogon_source_notion::NotionVerificationToken;
+use trogon_source_sentry::SentryClientSecret;
 use trogon_source_slack::config::SlackSigningSecret;
 use trogon_source_telegram::config::TelegramWebhookSecret;
 use trogon_std::{NonZeroDuration, ZeroDuration};
@@ -39,6 +40,10 @@ pub enum ConfigValidationError {
         field: &'static str,
         error: Box<dyn std::error::Error + 'static>,
     },
+    MissingField {
+        source: &'static str,
+        field: &'static str,
+    },
     InvalidSubjectToken {
         source: &'static str,
         field: &'static str,
@@ -56,6 +61,10 @@ impl ConfigValidationError {
             field,
             error: Box::new(error),
         }
+    }
+
+    fn missing(source: &'static str, field: &'static str) -> Self {
+        Self::MissingField { source, field }
     }
 
     fn invalid_subject_token(
@@ -90,6 +99,7 @@ impl fmt::Display for ConfigValidationError {
                     write!(f, "{source}: invalid {field}: {error}")
                 }
             }
+            Self::MissingField { source, field } => write!(f, "{source}: missing {field}"),
             Self::InvalidSubjectToken {
                 source,
                 field,
@@ -103,6 +113,7 @@ impl std::error::Error for ConfigValidationError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::InvalidField { error, .. } => Some(error.as_ref()),
+            Self::MissingField { .. } => None,
             Self::InvalidSubjectToken { .. } => None,
         }
     }
@@ -169,6 +180,8 @@ struct SourcesConfig {
     linear: LinearConfig,
     #[config(nested)]
     notion: NotionConfig,
+    #[config(nested)]
+    sentry: SentryConfig,
 }
 
 #[derive(Config)]
@@ -316,6 +329,22 @@ struct NotionConfig {
     nats_ack_timeout_secs: u64,
 }
 
+#[derive(Config)]
+struct SentryConfig {
+    #[config(env = "TROGON_SOURCE_SENTRY_STATUS")]
+    status: Option<String>,
+    #[config(env = "TROGON_SOURCE_SENTRY_CLIENT_SECRET")]
+    client_secret: Option<String>,
+    #[config(env = "TROGON_SOURCE_SENTRY_SUBJECT_PREFIX", default = "sentry")]
+    subject_prefix: String,
+    #[config(env = "TROGON_SOURCE_SENTRY_STREAM_NAME", default = "SENTRY")]
+    stream_name: String,
+    #[config(env = "TROGON_SOURCE_SENTRY_STREAM_MAX_AGE_SECS", default = 604_800)]
+    stream_max_age_secs: u64,
+    #[config(env = "TROGON_SOURCE_SENTRY_NATS_ACK_TIMEOUT_SECS", default = 10)]
+    nats_ack_timeout_secs: u64,
+}
+
 pub struct ResolvedHttpServerConfig {
     pub port: u16,
 }
@@ -332,6 +361,7 @@ pub struct ResolvedConfig {
     pub incidentio: Option<trogon_source_incidentio::IncidentioConfig>,
     pub linear: Option<trogon_source_linear::LinearConfig>,
     pub notion: Option<trogon_source_notion::NotionConfig>,
+    pub sentry: Option<trogon_source_sentry::SentryConfig>,
 }
 
 impl ResolvedConfig {
@@ -344,6 +374,7 @@ impl ResolvedConfig {
             || self.incidentio.is_some()
             || self.linear.is_some()
             || self.notion.is_some()
+            || self.sentry.is_some()
     }
 }
 
@@ -372,6 +403,7 @@ fn resolve(cfg: GatewayConfig, nats_overrides: &NatsArgs) -> Result<ResolvedConf
     let incidentio = resolve_incidentio(cfg.sources.incidentio, &mut errors);
     let linear = resolve_linear(cfg.sources.linear, &mut errors);
     let notion = resolve_notion(cfg.sources.notion, &mut errors);
+    let sentry = resolve_sentry(cfg.sources.sentry, &mut errors);
 
     let nats_max_payload_bytes = match NonZeroUsize::new(cfg.nats_max_payload_bytes) {
         Some(v) => v,
@@ -403,6 +435,7 @@ fn resolve(cfg: GatewayConfig, nats_overrides: &NatsArgs) -> Result<ResolvedConf
         incidentio,
         linear,
         notion,
+        sentry,
     })
 }
 
@@ -1072,6 +1105,96 @@ fn resolve_notion(
     })
 }
 
+fn resolve_sentry(
+    section: SentryConfig,
+    errors: &mut Vec<ConfigValidationError>,
+) -> Option<trogon_source_sentry::SentryConfig> {
+    let explicitly_enabled = matches!(
+        section.status.as_deref(),
+        Some(status) if status.trim().eq_ignore_ascii_case("enabled")
+    );
+
+    if !resolve_source_status("sentry", section.status.as_deref(), errors) {
+        return None;
+    }
+
+    let client_secret = match section.client_secret {
+        Some(secret) => match SentryClientSecret::new(secret) {
+            Ok(secret) => secret,
+            Err(error) => {
+                errors.push(ConfigValidationError::invalid(
+                    "sentry",
+                    "client_secret",
+                    error,
+                ));
+                return None;
+            }
+        },
+        None => {
+            if explicitly_enabled {
+                errors.push(ConfigValidationError::missing("sentry", "client_secret"));
+            }
+            return None;
+        }
+    };
+
+    let subject_prefix = match NatsToken::new(section.subject_prefix) {
+        Ok(token) => token,
+        Err(error) => {
+            errors.push(ConfigValidationError::invalid_subject_token(
+                "sentry",
+                "subject_prefix",
+                error,
+            ));
+            return None;
+        }
+    };
+
+    let stream_name = match NatsToken::new(section.stream_name) {
+        Ok(token) => token,
+        Err(error) => {
+            errors.push(ConfigValidationError::invalid_subject_token(
+                "sentry",
+                "stream_name",
+                error,
+            ));
+            return None;
+        }
+    };
+
+    let nats_ack_timeout = match NonZeroDuration::from_secs(section.nats_ack_timeout_secs) {
+        Ok(duration) => duration,
+        Err(error) => {
+            errors.push(ConfigValidationError::invalid(
+                "sentry",
+                "nats_ack_timeout_secs",
+                error,
+            ));
+            return None;
+        }
+    };
+
+    let stream_max_age = match StreamMaxAge::from_secs(section.stream_max_age_secs) {
+        Ok(age) => age,
+        Err(error) => {
+            errors.push(ConfigValidationError::invalid(
+                "sentry",
+                "stream_max_age_secs",
+                error,
+            ));
+            return None;
+        }
+    };
+
+    Some(trogon_source_sentry::SentryConfig {
+        client_secret,
+        subject_prefix,
+        stream_name,
+        stream_max_age,
+        nats_ack_timeout,
+    })
+}
+
 fn resolve_source_status(
     source: &'static str,
     status: Option<&str>,
@@ -1181,6 +1304,15 @@ signing_secret = "{secret}"
             r#"
 [sources.notion]
 verification_token = "{token}"
+"#
+        )
+    }
+
+    fn sentry_toml(secret: &str) -> String {
+        format!(
+            r#"
+[sources.sentry]
+client_secret = "{secret}"
 "#
         )
     }
@@ -1448,6 +1580,61 @@ verification_token = "notion-verification-token-example"
         let f = write_toml(toml);
         let cfg = load(Some(f.path())).expect("load failed");
         assert!(cfg.notion.is_none());
+    }
+
+    #[test]
+    fn sentry_resolves_with_valid_secret() {
+        let f = write_toml(&sentry_toml("sentry-client-secret"));
+        let cfg = load(Some(f.path())).expect("load failed");
+        assert!(cfg.sentry.is_some());
+    }
+
+    #[test]
+    fn sentry_disabled_returns_none() {
+        let toml = r#"
+[sources.sentry]
+status = "disabled"
+client_secret = "sentry-client-secret"
+"#;
+        let f = write_toml(toml);
+        let cfg = load(Some(f.path())).expect("load failed");
+        assert!(cfg.sentry.is_none());
+    }
+
+    #[test]
+    fn sentry_missing_client_secret_returns_none_when_status_unspecified() {
+        let toml = r#"
+[sources.sentry]
+"#;
+        let f = write_toml(toml);
+        let cfg = load(Some(f.path())).expect("load failed");
+        assert!(cfg.sentry.is_none());
+    }
+
+    #[test]
+    fn sentry_enabled_without_client_secret_is_invalid() {
+        let toml = r#"
+[sources.sentry]
+status = "enabled"
+"#;
+        let f = write_toml(toml);
+        let result = load(Some(f.path()));
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("sentry: missing client_secret")))
+        );
+    }
+
+    #[test]
+    fn sentry_enabled_with_surrounding_whitespace_without_client_secret_is_invalid() {
+        let toml = r#"
+[sources.sentry]
+status = " enabled "
+"#;
+        let f = write_toml(toml);
+        let result = load(Some(f.path()));
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("sentry: missing client_secret")))
+        );
     }
 
     #[test]
@@ -1902,6 +2089,14 @@ webhook_secret = "gh-secret"
     }
 
     #[test]
+    fn config_validation_error_missing_field_has_no_source() {
+        let err = ConfigValidationError::missing("sentry", "client_secret");
+
+        assert_eq!(err.to_string(), "sentry: missing client_secret");
+        assert!(err.source().is_none());
+    }
+
+    #[test]
     fn config_error_is_std_error() {
         let err = ConfigError::Validation(vec![ConfigValidationError::invalid(
             "github",
@@ -1989,6 +2184,15 @@ port = 9090
         let result = load(Some(f.path()));
         assert!(
             matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("notion: invalid verification_token")))
+        );
+    }
+
+    #[test]
+    fn sentry_empty_client_secret_is_invalid() {
+        let f = write_toml(&sentry_toml(""));
+        let result = load(Some(f.path()));
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("sentry: invalid client_secret")))
         );
     }
 
@@ -2126,6 +2330,20 @@ subject_prefix = "has.dots"
     }
 
     #[test]
+    fn sentry_invalid_subject_prefix() {
+        let toml = r#"
+[sources.sentry]
+client_secret = "sentry-client-secret"
+subject_prefix = "has.dots"
+"#;
+        let f = write_toml(toml);
+        let result = load(Some(f.path()));
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("sentry: invalid subject_prefix")))
+        );
+    }
+
+    #[test]
     fn slack_invalid_stream_name() {
         let toml = r#"
 [sources.slack]
@@ -2213,6 +2431,20 @@ stream_name = "has.dots"
     }
 
     #[test]
+    fn sentry_invalid_stream_name() {
+        let toml = r#"
+[sources.sentry]
+client_secret = "sentry-client-secret"
+stream_name = "has.dots"
+"#;
+        let f = write_toml(toml);
+        let result = load(Some(f.path()));
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("sentry: invalid stream_name")))
+        );
+    }
+
+    #[test]
     fn incidentio_zero_nats_ack_timeout_is_error() {
         let toml = format!(
             r#"
@@ -2271,6 +2503,34 @@ stream_max_age_secs = 0
         let result = load(Some(f.path()));
         assert!(
             matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("notion: stream_max_age_secs must not be zero")))
+        );
+    }
+
+    #[test]
+    fn sentry_zero_nats_ack_timeout_is_error() {
+        let toml = r#"
+[sources.sentry]
+client_secret = "sentry-client-secret"
+nats_ack_timeout_secs = 0
+"#;
+        let f = write_toml(toml);
+        let result = load(Some(f.path()));
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("sentry: nats_ack_timeout_secs must not be zero")))
+        );
+    }
+
+    #[test]
+    fn sentry_zero_stream_max_age_is_error() {
+        let toml = r#"
+[sources.sentry]
+client_secret = "sentry-client-secret"
+stream_max_age_secs = 0
+"#;
+        let f = write_toml(toml);
+        let result = load(Some(f.path()));
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("sentry: stream_max_age_secs must not be zero")))
         );
     }
 

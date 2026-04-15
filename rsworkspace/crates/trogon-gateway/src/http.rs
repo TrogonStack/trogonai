@@ -78,6 +78,14 @@ where
         info!(source = "notion", "mounted at /notion");
     }
 
+    if let Some(ref cfg) = config.sentry {
+        app = app.nest(
+            "/sentry",
+            trogon_source_sentry::router(publisher.clone(), cfg),
+        );
+        info!(source = "sentry", "mounted at /sentry");
+    }
+
     app
 }
 
@@ -137,6 +145,9 @@ webhook_secret = "linear-secret"
 
 [sources.notion]
 verification_token = "notion-verification-token-example"
+
+[sources.sentry]
+client_secret = "sentry-client-secret"
 "#
         .to_string()
     }
