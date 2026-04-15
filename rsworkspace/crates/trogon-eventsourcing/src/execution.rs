@@ -8,10 +8,15 @@ use crate::{
 pub trait CommandStateModel: StreamCommand + Sized {
     type State;
     type Event;
-    type Snapshot;
     type DomainError;
 
     fn initial_state() -> Self::State;
+
+    fn evolve(state: Self::State, event: Self::Event) -> Result<Self::State, Self::DomainError>;
+}
+
+pub trait SnapshotStateModel: CommandStateModel {
+    type Snapshot;
 
     fn restore_state(
         _command: &Self,
@@ -25,48 +30,37 @@ pub trait CommandStateModel: StreamCommand + Sized {
             .unwrap_or_else(Self::initial_state))
     }
 
-    fn evolve(state: Self::State, event: Self::Event) -> Result<Self::State, Self::DomainError>;
-
     fn snapshot_state(state: &Self::State, version: u64) -> Option<Snapshot<Self::Snapshot>>;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ExpectedVersion {
+pub enum ExpectedState {
+    Any,
+    StreamExists,
     NoStream,
-    StreamVersion(u64),
+    StreamRevision(u64),
 }
 
-impl ExpectedVersion {
-    pub const fn resolve(current_version: Option<u64>, override_version: Option<Self>) -> Self {
-        match override_version {
-            Some(expected_version) => expected_version,
+impl ExpectedState {
+    pub const fn resolve(current_version: Option<u64>, override_state: Option<Self>) -> Self {
+        match override_state {
+            Some(expected_state) => expected_state,
             None => match current_version {
-                Some(version) => Self::StreamVersion(version),
+                Some(version) => Self::StreamRevision(version),
                 None => Self::NoStream,
             },
         }
     }
 }
 
-pub trait ExpectedVersionProvider: StreamCommand {
-    fn expected_version(&self) -> Option<ExpectedVersion> {
+pub trait ExpectedStateProvider: StreamCommand {
+    fn expected_state(&self) -> Option<ExpectedState> {
         None
     }
 }
 
-pub trait ExecutionRuntime<SnapshotPayload, StreamId: ?Sized>: Send + Sync {
+pub trait ExecutionRuntime<StreamId: ?Sized>: Send + Sync {
     type Error;
-
-    fn load_snapshot(
-        &self,
-        stream_id: &StreamId,
-    ) -> impl std::future::Future<Output = Result<Option<Snapshot<SnapshotPayload>>, Self::Error>> + Send;
-
-    fn save_snapshot(
-        &self,
-        stream_id: &StreamId,
-        snapshot: Snapshot<SnapshotPayload>,
-    ) -> impl std::future::Future<Output = Result<(), Self::Error>> + Send;
 
     fn current_stream_version(
         &self,
@@ -82,9 +76,24 @@ pub trait ExecutionRuntime<SnapshotPayload, StreamId: ?Sized>: Send + Sync {
     fn append_events(
         &self,
         stream_id: &StreamId,
-        expected_version: ExpectedVersion,
+        expected_state: ExpectedState,
         events: NonEmpty<EventData>,
     ) -> impl std::future::Future<Output = Result<AppendOutcome, Self::Error>> + Send;
+}
+
+pub trait SnapshotRuntime<SnapshotPayload, StreamId: ?Sized>: Send + Sync {
+    type Error;
+
+    fn load_snapshot(
+        &self,
+        stream_id: &StreamId,
+    ) -> impl std::future::Future<Output = Result<Option<Snapshot<SnapshotPayload>>, Self::Error>> + Send;
+
+    fn save_snapshot(
+        &self,
+        stream_id: &StreamId,
+        snapshot: Snapshot<SnapshotPayload>,
+    ) -> impl std::future::Future<Output = Result<(), Self::Error>> + Send;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -152,16 +161,69 @@ pub enum ExecuteError<DecisionError, DomainError, RuntimeError> {
     },
 }
 
-pub async fn execute_command<C, R, P>(
+pub async fn execute_command<C, R>(
+    runtime: &R,
+    command: &C,
+) -> Result<ExecutionResult<C::State, C::Event>, ExecuteError<C::Error, C::DomainError, R::Error>>
+where
+    C: CommandStateModel + Decide<C::State, C::Event> + ExpectedStateProvider,
+    C::Event: EventType + StreamEvent + Serialize + DeserializeOwned + Clone,
+    R: ExecutionRuntime<C::StreamId>,
+{
+    let stream_id = command.stream_id();
+    let current_version = runtime
+        .current_stream_version(stream_id)
+        .await
+        .map_err(ExecuteError::ReadStream)?;
+    let mut state = C::initial_state();
+
+    if let Some(current_version) = current_version {
+        let recorded_events = runtime
+            .read_stream_from(stream_id, 1)
+            .await
+            .map_err(ExecuteError::ReadStream)?;
+
+        for recorded_event in recorded_events
+            .into_iter()
+            .filter(|event| event.log_position.unwrap_or(0) <= current_version)
+        {
+            let event = recorded_event
+                .decode_data::<C::Event>()
+                .map_err(ExecuteError::DecodeEvent)?;
+            state = C::evolve(state, event).map_err(ExecuteError::Domain)?;
+        }
+    }
+
+    let Decision::Event(events) = C::decide(&state, command).map_err(ExecuteError::Decision)?;
+    let encoded_events = encode_events(&events).map_err(ExecuteError::EncodeEvent)?;
+    let expected_state = ExpectedState::resolve(current_version, command.expected_state());
+    let append_outcome = runtime
+        .append_events(stream_id, expected_state, encoded_events)
+        .await
+        .map_err(ExecuteError::Append)?;
+
+    for event in events.iter().cloned() {
+        state = C::evolve(state, event).map_err(ExecuteError::Domain)?;
+    }
+
+    Ok(ExecutionResult {
+        next_expected_version: append_outcome.next_expected_version,
+        events,
+        state,
+    })
+}
+
+pub async fn execute_command_with_snapshots<C, R, P, E>(
     runtime: &R,
     command: &C,
     snapshot_policy: &P,
-) -> Result<ExecutionResult<C::State, C::Event>, ExecuteError<C::Error, C::DomainError, R::Error>>
+) -> Result<ExecutionResult<C::State, C::Event>, ExecuteError<C::Error, C::DomainError, E>>
 where
-    C: CommandStateModel + Decide<C::State, C::Event> + ExpectedVersionProvider,
+    C: SnapshotStateModel + Decide<C::State, C::Event> + ExpectedStateProvider,
     C::Event: EventType + StreamEvent + Serialize + DeserializeOwned + Clone,
     C::Snapshot: Into<C::State>,
-    R: ExecutionRuntime<C::Snapshot, C::StreamId>,
+    R: ExecutionRuntime<C::StreamId, Error = E>
+        + SnapshotRuntime<C::Snapshot, C::StreamId, Error = E>,
     P: SnapshotPolicy<C::State, C::Event>,
 {
     let stream_id = command.stream_id();
@@ -210,9 +272,9 @@ where
 
     let Decision::Event(events) = C::decide(&state, command).map_err(ExecuteError::Decision)?;
     let encoded_events = encode_events(&events).map_err(ExecuteError::EncodeEvent)?;
-    let expected_version = ExpectedVersion::resolve(current_version, command.expected_version());
+    let expected_state = ExpectedState::resolve(current_version, command.expected_state());
     let append_outcome = runtime
-        .append_events(stream_id, expected_version, encoded_events)
+        .append_events(stream_id, expected_state, encoded_events)
         .await
         .map_err(ExecuteError::Append)?;
 
@@ -325,7 +387,7 @@ mod tests {
         fail_append: bool,
         loaded_stream_ids: Arc<Mutex<Vec<String>>>,
         read_from_sequences: Arc<Mutex<Vec<u64>>>,
-        expected_versions: Arc<Mutex<Vec<ExpectedVersion>>>,
+        expected_versions: Arc<Mutex<Vec<ExpectedState>>>,
         appended_events: Arc<Mutex<Vec<EventData>>>,
         saved_snapshots: Arc<Mutex<Vec<Snapshot<TestState>>>>,
     }
@@ -356,7 +418,6 @@ mod tests {
     impl CommandStateModel for TestCommand {
         type State = TestState;
         type Event = TestEvent;
-        type Snapshot = TestState;
         type DomainError = TestDomainError;
 
         fn initial_state() -> Self::State {
@@ -374,13 +435,17 @@ mod tests {
                 TestEvent::Broken { .. } => Err(TestDomainError::BrokenEvent),
             }
         }
+    }
+
+    impl ExpectedStateProvider for TestCommand {}
+
+    impl SnapshotStateModel for TestCommand {
+        type Snapshot = TestState;
 
         fn snapshot_state(state: &Self::State, version: u64) -> Option<Snapshot<Self::Snapshot>> {
             Some(Snapshot::new(version, *state))
         }
     }
-
-    impl ExpectedVersionProvider for TestCommand {}
 
     impl Decide<TestState, TestEvent> for TestCommand {
         type Error = TestDecisionError;
@@ -438,34 +503,8 @@ mod tests {
         }
     }
 
-    impl ExecutionRuntime<TestState, str> for FakeRuntime {
+    impl ExecutionRuntime<str> for FakeRuntime {
         type Error = &'static str;
-
-        async fn load_snapshot(
-            &self,
-            stream_id: &str,
-        ) -> Result<Option<Snapshot<TestState>>, Self::Error> {
-            if self.fail_load_snapshot {
-                return Err("load_snapshot");
-            }
-            self.loaded_stream_ids
-                .lock()
-                .unwrap()
-                .push(stream_id.to_string());
-            Ok(self.snapshot.clone())
-        }
-
-        async fn save_snapshot(
-            &self,
-            _stream_id: &str,
-            snapshot: Snapshot<TestState>,
-        ) -> Result<(), Self::Error> {
-            if self.fail_save_snapshot {
-                return Err("save_snapshot");
-            }
-            self.saved_snapshots.lock().unwrap().push(snapshot);
-            Ok(())
-        }
 
         async fn current_stream_version(
             &self,
@@ -494,7 +533,7 @@ mod tests {
         async fn append_events(
             &self,
             _stream_id: &str,
-            expected_version: ExpectedVersion,
+            expected_version: ExpectedState,
             events: NonEmpty<EventData>,
         ) -> Result<AppendOutcome, Self::Error> {
             if self.fail_append {
@@ -511,6 +550,36 @@ mod tests {
             Ok(AppendOutcome {
                 next_expected_version: self.next_expected_version,
             })
+        }
+    }
+
+    impl SnapshotRuntime<TestState, str> for FakeRuntime {
+        type Error = &'static str;
+
+        async fn load_snapshot(
+            &self,
+            stream_id: &str,
+        ) -> Result<Option<Snapshot<TestState>>, Self::Error> {
+            if self.fail_load_snapshot {
+                return Err("load_snapshot");
+            }
+            self.loaded_stream_ids
+                .lock()
+                .unwrap()
+                .push(stream_id.to_string());
+            Ok(self.snapshot.clone())
+        }
+
+        async fn save_snapshot(
+            &self,
+            _stream_id: &str,
+            snapshot: Snapshot<TestState>,
+        ) -> Result<(), Self::Error> {
+            if self.fail_save_snapshot {
+                return Err("save_snapshot");
+            }
+            self.saved_snapshots.lock().unwrap().push(snapshot);
+            Ok(())
         }
     }
 
@@ -531,7 +600,7 @@ mod tests {
         };
         let command = TestCommand::new("alpha", TestAction::Register);
 
-        let result = block_on(execute_command(&runtime, &command, &NoSnapshot)).unwrap();
+        let result = block_on(execute_command(&runtime, &command)).unwrap();
 
         assert_eq!(result.next_expected_version, 1);
         assert_eq!(result.state, TestState::Present { enabled: true });
@@ -543,7 +612,7 @@ mod tests {
         );
         assert_eq!(
             runtime.expected_versions.lock().unwrap().as_slice(),
-            &[ExpectedVersion::NoStream]
+            &[ExpectedState::NoStream]
         );
         assert_eq!(
             runtime.read_from_sequences.lock().unwrap().as_slice(),
@@ -576,12 +645,17 @@ mod tests {
         };
         let command = TestCommand::new("alpha", TestAction::Remove);
 
-        let result = block_on(execute_command(&runtime, &command, &NoSnapshot)).unwrap();
+        let result = block_on(execute_command_with_snapshots(
+            &runtime,
+            &command,
+            &NoSnapshot,
+        ))
+        .unwrap();
 
         assert_eq!(runtime.read_from_sequences.lock().unwrap().as_slice(), &[2]);
         assert_eq!(
             runtime.expected_versions.lock().unwrap().as_slice(),
-            &[ExpectedVersion::StreamVersion(2)]
+            &[ExpectedState::StreamRevision(2)]
         );
         assert_eq!(result.state, TestState::Missing);
     }
@@ -595,7 +669,12 @@ mod tests {
         };
         let command = TestCommand::new("alpha", TestAction::Remove);
 
-        let error = block_on(execute_command(&runtime, &command, &NoSnapshot)).unwrap_err();
+        let error = block_on(execute_command_with_snapshots(
+            &runtime,
+            &command,
+            &NoSnapshot,
+        ))
+        .unwrap_err();
 
         assert!(matches!(
             error,
@@ -615,7 +694,12 @@ mod tests {
         };
         let command = TestCommand::new("alpha", TestAction::Remove);
 
-        let error = block_on(execute_command(&runtime, &command, &NoSnapshot)).unwrap_err();
+        let error = block_on(execute_command_with_snapshots(
+            &runtime,
+            &command,
+            &NoSnapshot,
+        ))
+        .unwrap_err();
 
         assert!(matches!(
             error,
@@ -640,7 +724,7 @@ mod tests {
         };
         let command = TestCommand::new("alpha", TestAction::Register);
 
-        let error = block_on(execute_command(&runtime, &command, &NoSnapshot)).unwrap_err();
+        let error = block_on(execute_command(&runtime, &command)).unwrap_err();
 
         assert!(matches!(
             error,
@@ -657,7 +741,12 @@ mod tests {
         };
         let command = TestCommand::new("alpha", TestAction::Register);
 
-        let error = block_on(execute_command(&runtime, &command, &NoSnapshot)).unwrap_err();
+        let error = block_on(execute_command_with_snapshots(
+            &runtime,
+            &command,
+            &NoSnapshot,
+        ))
+        .unwrap_err();
 
         assert!(matches!(
             error,
@@ -675,13 +764,18 @@ mod tests {
         };
         let command = TestCommand::new("alpha", TestAction::Disable);
 
-        let result = block_on(execute_command(&runtime, &command, &NoSnapshot)).unwrap();
+        let result = block_on(execute_command_with_snapshots(
+            &runtime,
+            &command,
+            &NoSnapshot,
+        ))
+        .unwrap();
         let appended_events = runtime.appended_events.lock().unwrap();
 
         assert_eq!(result.next_expected_version, 2);
         assert_eq!(
             runtime.expected_versions.lock().unwrap().as_slice(),
-            &[ExpectedVersion::StreamVersion(1)]
+            &[ExpectedState::StreamRevision(1)]
         );
         assert_eq!(appended_events.len(), 1);
         assert_eq!(appended_events[0].event_type, "state_changed");
@@ -697,7 +791,12 @@ mod tests {
         };
         let command = TestCommand::new("alpha", TestAction::Register);
 
-        let result = block_on(execute_command(&runtime, &command, &AlwaysSnapshot)).unwrap();
+        let result = block_on(execute_command_with_snapshots(
+            &runtime,
+            &command,
+            &AlwaysSnapshot,
+        ))
+        .unwrap();
 
         assert_eq!(result.state, TestState::Present { enabled: true });
         assert_eq!(
@@ -714,7 +813,12 @@ mod tests {
         };
         let command = TestCommand::new("alpha", TestAction::Register);
 
-        let _ = block_on(execute_command(&runtime, &command, &NoSnapshot)).unwrap();
+        let _ = block_on(execute_command_with_snapshots(
+            &runtime,
+            &command,
+            &NoSnapshot,
+        ))
+        .unwrap();
 
         assert!(runtime.saved_snapshots.lock().unwrap().is_empty());
     }
@@ -728,7 +832,12 @@ mod tests {
         };
         let command = TestCommand::new("alpha", TestAction::Register);
 
-        let error = block_on(execute_command(&runtime, &command, &AlwaysSnapshot)).unwrap_err();
+        let error = block_on(execute_command_with_snapshots(
+            &runtime,
+            &command,
+            &AlwaysSnapshot,
+        ))
+        .unwrap_err();
 
         assert!(matches!(error, ExecuteError::SaveSnapshot("save_snapshot")));
     }
@@ -741,12 +850,9 @@ mod tests {
         };
         let command = TestCommand::new("alpha", TestAction::Register);
 
-        let _ = block_on(execute_command(&runtime, &command, &NoSnapshot)).unwrap();
+        let _ = block_on(execute_command(&runtime, &command)).unwrap();
 
         assert_eq!(command.stream_id_calls(), 1);
-        assert_eq!(
-            runtime.loaded_stream_ids.lock().unwrap().as_slice(),
-            ["alpha"]
-        );
+        assert!(runtime.loaded_stream_ids.lock().unwrap().is_empty());
     }
 }
