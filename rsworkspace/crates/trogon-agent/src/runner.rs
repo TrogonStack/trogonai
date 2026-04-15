@@ -1072,12 +1072,12 @@ async fn recover_stale_promises<A: AutomationRepository, R: RunRepository>(
     // in a single turn:
     //   LLM hard timeout:              300 s (HARD_TIMEOUT)
     //   tool execution per tool:        60 s (TOOL_EXECUTION_TIMEOUT)
-    //   typical tools per turn (worst): ~5  → 300 s of tool time
-    //   total worst-case gap:          ~600 s
-    // Using 600 s as the threshold gives zero margin. 15 minutes (900 s)
-    // keeps a 300 s safety buffer so a worst-case turn (slow LLM + many
-    // tools) never triggers a spurious startup recovery.
-    const STALE_AFTER_SECS: u64 = 15 * 60;
+    //   worst-case tools per turn:      10  → 600 s of tool time
+    //   total worst-case gap:          ~900 s
+    // Using 900 s as the threshold gives zero margin in the true worst case
+    // (slow Anthropic response + 10 sequential tool calls each taking the
+    // full 60 s timeout). 20 minutes (1200 s) keeps a 300 s safety buffer.
+    const STALE_AFTER_SECS: u64 = 20 * 60;
     let now = trogon_automations::now_unix();
 
     // list_running does N+1 KV reads (one keys() scan + one get_promise per key).
@@ -1086,20 +1086,29 @@ async fn recover_stale_promises<A: AutomationRepository, R: RunRepository>(
     // mild load, easily 10 s+ under degradation. Recovery runs in a background task
     // so a longer timeout does not block fresh event processing.
     const LIST_RUNNING_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2 * 60);
-    let promises = match tokio::time::timeout(
-        LIST_RUNNING_TIMEOUT,
-        promise_store.list_running(tenant_id),
-    )
-    .await
-    {
-        Ok(Ok(p)) => p,
-        Ok(Err(e)) => {
-            warn!(error = %e, "Startup recovery: failed to list running promises");
-            return None;
+    // Retry once after a short pause: a transient NATS spike that caused the
+    // first attempt to fail may have cleared by then. Silently skipping
+    // recovery on a single timeout would leave stale promises orphaned until
+    // the next restart, which may never come if the process is stable.
+    const LIST_RUNNING_RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(15);
+    let promises = {
+        let mut found = None;
+        for attempt in 0u32..2 {
+            if attempt > 0 {
+                tokio::time::sleep(LIST_RUNNING_RETRY_DELAY).await;
+            }
+            match tokio::time::timeout(LIST_RUNNING_TIMEOUT, promise_store.list_running(tenant_id)).await {
+                Ok(Ok(p)) => { found = Some(p); break; }
+                Ok(Err(e)) => warn!(error = %e, attempt, "Startup recovery: failed to list running promises"),
+                Err(_) => warn!(attempt, "Startup recovery: list_running timed out after 2 min"),
+            }
         }
-        Err(_) => {
-            warn!("Startup recovery: list_running timed out after 2 min — skipping recovery this startup");
-            return None;
+        match found {
+            Some(p) => p,
+            None => {
+                error!("Startup recovery: list_running failed after 2 attempts — stale promises will not be recovered this startup");
+                return None;
+            }
         }
     };
 

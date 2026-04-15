@@ -9,6 +9,7 @@
 
 use base64::{Engine as _, engine::general_purpose};
 use serde_json::Value;
+use tracing::warn;
 
 use super::{HttpClient, ToolContext};
 
@@ -464,7 +465,8 @@ pub async fn post_pr_comment(
         // Without pagination, a comment on a PR with >30 comments may be on page 2+
         // and the dedup check misses it, causing a duplicate post.
         // Cap at 10 pages (1000 comments) to guard against unbounded loops.
-        'dedup: for page in 1u32..=10 {
+        const DEDUP_PAGE_CAP: u32 = 10;
+        'dedup: for page in 1u32..=DEDUP_PAGE_CAP {
             let page_url = format!("{url}?per_page=100&page={page}");
             match ctx.http_client.get(&page_url, auth_headers.clone()).await {
                 Ok(resp) => {
@@ -483,6 +485,17 @@ pub async fn post_pr_comment(
                             }
                             if arr.len() < 100 {
                                 break 'dedup; // last page — marker not found
+                            }
+                            if page == DEDUP_PAGE_CAP {
+                                // Reached the scan limit without finding the marker.
+                                // A duplicate may be posted if the marker is beyond
+                                // this page. This is extremely unlikely in practice.
+                                warn!(
+                                    pr = %format!("{owner}/{repo}#{pr_number}"),
+                                    pages_scanned = DEDUP_PAGE_CAP,
+                                    "post_pr_comment dedup scan reached page cap — \
+                                    marker may exist beyond scanned range; duplicate comment possible"
+                                );
                             }
                         }
                         _ => break 'dedup, // unexpected shape — stop paginating

@@ -542,22 +542,22 @@ async fn write_promise_terminal(
                     .await
                     {
                         Ok(Ok(_)) => {}
-                        Ok(Err(e)) => warn!(error = %e, context, "Failed to write terminal promise status after revision reload"),
-                        Err(_) => warn!(promise_id = %pid, context, "NATS KV timed out writing terminal promise status after revision reload"),
+                        Ok(Err(e)) => error!(error = %e, context, promise_id = %pid, "Failed to write terminal promise status after revision reload — promise will stay Running until TTL"),
+                        Err(_) => error!(promise_id = %pid, context, "NATS KV timed out writing terminal promise status after revision reload — promise will stay Running until TTL"),
                     }
                 }
                 Ok(Ok(None)) => {
                     warn!(promise_id = %pid, context, "Promise vanished from KV — terminal status write skipped");
                 }
                 Ok(Err(e)) => {
-                    warn!(error = %e, context, "Could not reload KV revision for terminal write retry");
+                    error!(error = %e, context, promise_id = %pid, "Could not reload KV revision for terminal write retry — promise will stay Running until TTL");
                 }
                 Err(_) => {
-                    warn!(promise_id = %pid, context, "KV timeout reloading revision for terminal write retry");
+                    error!(promise_id = %pid, context, "KV timeout reloading revision for terminal write retry — promise will stay Running until TTL");
                 }
             }
         }
-        Err(_) => warn!(promise_id = %pid, context, "NATS KV write timed out writing terminal promise status"),
+        Err(_) => error!(promise_id = %pid, context, "NATS KV write timed out writing terminal promise status — promise will stay Running until TTL"),
     }
 }
 
@@ -1411,11 +1411,14 @@ impl AgentLoop {
                                 // p.messages is now set to the final slice (summary+kept or plain kept).
                             } else {
                                 p.messages = prev_messages; // restore — p must stay clean
-                                warn!(
+                                error!(
                                     promise_id = %pid,
                                     size_bytes = serialized_len,
                                     limit_bytes = CHECKPOINT_MAX_BYTES,
-                                    "Checkpoint payload exceeds NATS KV size limit — disabling checkpointing for this run"
+                                    checkpoint_degraded = true,
+                                    "Checkpoint payload exceeds NATS KV size limit after all trim attempts — \
+                                    checkpointing disabled for this run; a crash will resume from the last \
+                                    successful checkpoint"
                                 );
                                 checkpointing_disabled = true;
                                 // Persist the degraded flag so operators can observe
@@ -1807,12 +1810,25 @@ impl AgentLoop {
                     {
                         Ok(r) => r,
                         Err(_) => {
-                            warn!(
+                            // Cannot determine if this tool already executed.
+                            // Re-executing risks duplicate side effects on write
+                            // tools (Slack messages, Linear comments, GitHub
+                            // comments). Return an error result so the LLM can
+                            // stop the run; the promise is retried from the last
+                            // checkpoint on recovery.
+                            error!(
                                 tool = %name,
                                 promise_id = %pid,
-                                "NATS KV get_tool_result timed out — re-executing tool"
+                                "NATS KV get_tool_result timed out — skipping tool execution to avoid duplicate side effects"
                             );
-                            Ok(None) // treat timeout as cache miss: re-execute
+                            results.push(ToolResult {
+                                tool_use_id: id.clone(),
+                                content: "Tool cache lookup failed (NATS timeout). \
+                                    The previous execution of this tool may have already \
+                                    produced side effects. Stop this run immediately \
+                                    and do not call any further tools.".to_string(),
+                            });
+                            continue;
                         }
                     };
                     match cache_result {
@@ -1825,7 +1841,24 @@ impl AgentLoop {
                             continue;
                         }
                         Ok(None) => {}
-                        Err(e) => warn!(error = %e, "Failed to read tool result cache"),
+                        Err(e) => {
+                            // Same risk as timeout: cannot tell if tool already ran.
+                            error!(
+                                error = %e,
+                                tool = %name,
+                                promise_id = %pid,
+                                "Failed to read tool result cache — skipping tool execution to avoid duplicate side effects"
+                            );
+                            results.push(ToolResult {
+                                tool_use_id: id.clone(),
+                                content: format!(
+                                    "Tool cache lookup failed: {e}. \
+                                    The previous execution may have produced side effects. \
+                                    Stop this run immediately and do not call any further tools."
+                                ),
+                            });
+                            continue;
+                        }
                     }
                 }
 
@@ -1870,7 +1903,17 @@ impl AgentLoop {
                 // Both paths are wrapped with `TOOL_EXECUTION_TIMEOUT` so a
                 // hung external API cannot block the run indefinitely while the
                 // heartbeat keeps the NATS message alive.
-                let output = if let Some((_, original, client)) = self
+                // `timed_out` is set when the tool execution hit the deadline
+                // before returning. It controls caching below: a timeout result
+                // must NOT be persisted because we cannot know whether the
+                // server processed the request before we stopped waiting.
+                // Caching it would permanently prevent recovery from retrying
+                // the call — the LLM would see "timed out" from the cache and
+                // have no way to issue the call again. Leaving the cache empty
+                // lets recovery re-execute the tool; the per-tool idempotency
+                // mechanisms (comment marker scan, Linear header, Slack history
+                // check) safely deduplicate if the server did process it.
+                let (output, timed_out) = if let Some((_, original, client)) = self
                     .mcp_dispatch
                     .iter()
                     .find(|(prefixed, _, _)| prefixed == name)
@@ -1881,17 +1924,20 @@ impl AgentLoop {
                     )
                     .await
                     {
-                        Ok(Ok(out)) => out,
-                        Ok(Err(e)) => format!("Tool error: {e}"),
+                        Ok(Ok(out)) => (out, false),
+                        Ok(Err(e)) => (format!("Tool error: {e}"), false),
                         Err(_) => {
                             warn!(
                                 tool = %name,
                                 timeout_secs = TOOL_EXECUTION_TIMEOUT.as_secs(),
                                 "Tool execution timed out"
                             );
-                            format!(
-                                "Tool error: execution timed out after {}s",
-                                TOOL_EXECUTION_TIMEOUT.as_secs()
+                            (
+                                format!(
+                                    "Tool error: execution timed out after {}s",
+                                    TOOL_EXECUTION_TIMEOUT.as_secs()
+                                ),
+                                true,
                             )
                         }
                     }
@@ -1902,16 +1948,19 @@ impl AgentLoop {
                     )
                     .await
                     {
-                        Ok(output) => output,
+                        Ok(output) => (output, false),
                         Err(_) => {
                             warn!(
                                 tool = %name,
                                 timeout_secs = TOOL_EXECUTION_TIMEOUT.as_secs(),
                                 "Tool execution timed out"
                             );
-                            format!(
-                                "Tool error: execution timed out after {}s",
-                                TOOL_EXECUTION_TIMEOUT.as_secs()
+                            (
+                                format!(
+                                    "Tool error: execution timed out after {}s",
+                                    TOOL_EXECUTION_TIMEOUT.as_secs()
+                                ),
+                                true,
                             )
                         }
                     }
@@ -1921,7 +1970,8 @@ impl AgentLoop {
                 // Store the result keyed by (tool_name, input) so that on crash
                 // recovery — when Anthropic re-generates a fresh tool_use_id for
                 // the same call — the cache still matches and the tool is not
-                // re-executed.
+                // re-executed. Skipped for timeout results (see `timed_out`).
+                if !timed_out {
                 if let (Some(store), Some(pid)) = (&self.promise_store, &self.promise_id) {
                     let ck = tool_cache_key(name, input);
                     match tokio::time::timeout(
@@ -1961,6 +2011,7 @@ impl AgentLoop {
                         }
                     }
                 }
+                } // end if !timed_out
 
                 results.push(ToolResult {
                     tool_use_id: id.clone(),
