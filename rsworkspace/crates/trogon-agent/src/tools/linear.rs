@@ -264,3 +264,101 @@ async fn graphql_request<H: HttpClient>(
 
     Ok(response)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn make_ctx() -> crate::tools::ToolContext<crate::tools::mock::MockHttpClient> {
+        crate::tools::ToolContext::for_test("http://proxy.test", "", "tok_linear", "")
+    }
+
+    /// When the first `get_comments` call fails transiently, `post_comment`
+    /// sleeps 200 ms and retries. If the retry succeeds and the idempotency
+    /// marker is found, the function must return early without posting.
+    #[tokio::test(start_paused = true)]
+    async fn post_comment_retry_finds_duplicate_on_second_get_comments_call() {
+        let ctx = make_ctx();
+
+        // First get_comments → HTTP error (triggers the 200 ms retry).
+        ctx.http_client.enqueue_err("transient network error");
+
+        // Second get_comments → returns a comment containing the marker.
+        let marker = crate::tools::idempotency_marker("idem-key-abc");
+        ctx.http_client.enqueue_ok(
+            200,
+            json!({
+                "data": {
+                    "issue": {
+                        "comments": {
+                            "nodes": [
+                                {
+                                    "id": "c1",
+                                    "body": format!("Previously posted.\n\n{marker}"),
+                                    "createdAt": "2026-01-01T00:00:00Z",
+                                    "user": null
+                                }
+                            ]
+                        }
+                    }
+                }
+            })
+            .to_string(),
+        );
+
+        let input = json!({
+            "issue_id": "ISS-123",
+            "body": "New comment",
+            "_idempotency_key": "idem-key-abc"
+        });
+
+        let result = post_comment(&ctx, &input).await;
+        assert!(result.is_ok(), "post_comment must succeed: {result:?}");
+        assert!(
+            result.unwrap().contains("already posted"),
+            "must detect duplicate on the retried get_comments call"
+        );
+    }
+
+    /// When both `get_comments` attempts fail, `post_comment` degrades
+    /// gracefully and proceeds with the POST rather than returning an error.
+    #[tokio::test(start_paused = true)]
+    async fn post_comment_both_get_comments_fail_proceeds_with_post() {
+        let ctx = make_ctx();
+
+        // First get_comments → HTTP error.
+        ctx.http_client.enqueue_err("transient error 1");
+        // Second get_comments (retry) → HTTP error.
+        ctx.http_client.enqueue_err("transient error 2");
+        // commentCreate mutation → success.
+        ctx.http_client.enqueue_ok(
+            200,
+            json!({
+                "data": {
+                    "commentCreate": {
+                        "success": true,
+                        "comment": {
+                            "id": "c99",
+                            "url": "https://linear.app/acme/issue/ISS-123/comment/c99"
+                        }
+                    }
+                }
+            })
+            .to_string(),
+        );
+
+        let input = json!({
+            "issue_id": "ISS-123",
+            "body": "Hello world",
+            "_idempotency_key": "idem-key-xyz"
+        });
+
+        let result = post_comment(&ctx, &input).await;
+        assert!(result.is_ok(), "post_comment must succeed: {result:?}");
+        assert!(
+            result.unwrap().contains("Comment posted"),
+            "must post comment after both get_comments attempts fail"
+        );
+    }
+}

@@ -2850,17 +2850,14 @@ mod tests {
             "run must complete normally after the tool timeout fires"
         );
 
-        // The error result was cached in KV so crash recovery does not
-        // re-execute the hanging tool.
+        // Timed-out results must NOT be cached — caching them would permanently
+        // block the LLM from retrying the tool in future turns.  On crash
+        // recovery the tool re-executes (acceptable: it never completed anyway).
         let ck = super::tool_cache_key("slow_tool", &serde_json::json!({}));
-        let cached = store
-            .get_tool_result("acme", "p1", &ck)
-            .await
-            .unwrap()
-            .expect("timed-out tool result must be persisted to KV");
+        let cached = store.get_tool_result("acme", "p1", &ck).await.unwrap();
         assert!(
-            cached.contains("timed out"),
-            "cached result must describe the timeout; got: {cached}"
+            cached.is_none(),
+            "timed-out tool result must NOT be cached; got: {cached:?}"
         );
     }
 
@@ -4027,13 +4024,12 @@ mod tests {
 
     // ── get_tool_result KV timeout ────────────────────────────────────────────
 
-    /// When `get_tool_result` times out during recovery, the timeout is treated
-    /// as a cache miss and the tool is re-executed rather than blocking the run.
-    ///
-    /// This ensures a degraded NATS connection does not permanently stall a
-    /// recovering run — worst case is one extra tool execution, not a hang.
+    /// When `get_tool_result` times out during recovery, the run skips tool
+    /// execution and injects an error ToolResult instead.  This prevents
+    /// duplicate side effects when the previous execution may have already
+    /// completed — the LLM receives a message telling it to stop the run.
     #[tokio::test(start_paused = true)]
-    async fn get_tool_result_kv_timeout_treats_as_cache_miss_and_reexecutes() {
+    async fn get_tool_result_kv_timeout_skips_execution_and_injects_error() {
         use crate::promise_store::mock::HangingGetToolResultStore;
         use crate::promise_store::PromiseRepository;
         use crate::tools::mock::CountingMockToolDispatcher;
@@ -4052,7 +4048,7 @@ mod tests {
         });
         let end_turn_resp = serde_json::json!({
             "stop_reason": "end_turn",
-            "content": [{"type": "text", "text": "done after cache miss"}]
+            "content": [{"type": "text", "text": "stopping due to cache error"}]
         });
         let anthropic = Arc::new(mock::SequencedMockAnthropicClient::new(vec![
             tool_use_resp,
@@ -4072,11 +4068,12 @@ mod tests {
             tokio::time::advance(NATS_KV_TIMEOUT + std::time::Duration::from_millis(1)),
         );
 
-        assert_eq!(result.unwrap(), "done after cache miss");
+        assert_eq!(result.unwrap(), "stopping due to cache error");
         assert_eq!(
             call_count.load(Ordering::SeqCst),
-            1,
-            "tool must be re-executed when get_tool_result KV read times out"
+            0,
+            "tool must NOT be re-executed when get_tool_result KV read times out — \
+             previous execution may have already produced side effects"
         );
     }
 
@@ -4603,9 +4600,10 @@ mod tests {
     // ── get_tool_result Err during recovery ──────────────────────────────────
 
     /// When `get_tool_result` returns an error (not timeout) during recovery,
-    /// the Err arm is treated as a cache miss and the tool is re-executed.
+    /// the run skips tool execution and injects an error ToolResult.  Re-executing
+    /// the tool risks duplicate side effects if the prior run already completed it.
     #[tokio::test]
-    async fn get_tool_result_error_treats_as_cache_miss_and_reexecutes() {
+    async fn get_tool_result_error_skips_execution_and_injects_error() {
         use crate::promise_store::mock::ErrorGetToolResultStore;
         use crate::promise_store::PromiseRepository;
         use crate::tools::mock::CountingMockToolDispatcher;
@@ -4624,7 +4622,7 @@ mod tests {
         });
         let end_turn_resp = serde_json::json!({
             "stop_reason": "end_turn",
-            "content": [{"type": "text", "text": "done after error"}]
+            "content": [{"type": "text", "text": "stopping due to cache error"}]
         });
         let anthropic = Arc::new(mock::SequencedMockAnthropicClient::new(vec![
             tool_use_resp,
@@ -4640,11 +4638,12 @@ mod tests {
         );
 
         let result = agent.run(vec![], &[], None).await.unwrap();
-        assert_eq!(result, "done after error");
+        assert_eq!(result, "stopping due to cache error");
         assert_eq!(
             call_count.load(Ordering::SeqCst),
-            1,
-            "tool must be re-executed when get_tool_result returns an error"
+            0,
+            "tool must NOT be re-executed when get_tool_result returns an error — \
+             previous execution may have already produced side effects"
         );
     }
 
@@ -4731,17 +4730,13 @@ mod tests {
 
         assert_eq!(result.unwrap(), "done after mcp timeout");
 
-        // Timed-out result must be cached so crash recovery does not re-hang.
-        // Cache key uses the prefixed name from the LLM response, not `original`.
+        // Timed-out results must NOT be cached — caching them would permanently
+        // block the LLM from retrying the MCP tool in future turns.
         let ck = tool_cache_key("mcp__srv__search", &serde_json::json!({}));
-        let cached = store
-            .get_tool_result("acme", "p1", &ck)
-            .await
-            .unwrap()
-            .expect("timed-out MCP result must be cached");
+        let cached = store.get_tool_result("acme", "p1", &ck).await.unwrap();
         assert!(
-            cached.contains("timed out"),
-            "cached result must describe the timeout; got: {cached}"
+            cached.is_none(),
+            "timed-out MCP result must NOT be cached; got: {cached:?}"
         );
     }
 

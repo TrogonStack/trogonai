@@ -572,6 +572,7 @@ mod tests {
         let state = ChatAppState {
             agent: make_test_agent(),
             session_store: store,
+            promise_store: Arc::new(crate::promise_store::mock::MockPromiseStore::new()),
         };
         router(state)
     }
@@ -784,6 +785,113 @@ mod tests {
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::NO_CONTENT);
         assert!(store.snapshot().is_empty());
+    }
+
+    // list_promises
+
+    fn mock_app_with_promise_store(
+        session_store: MockSessionStore,
+        promise_store: Arc<dyn crate::promise_store::PromiseRepository>,
+    ) -> axum::Router {
+        let state = ChatAppState {
+            agent: make_test_agent(),
+            session_store,
+            promise_store,
+        };
+        router(state)
+    }
+
+    fn make_running_promise(id: &str, tenant: &str) -> crate::promise_store::AgentPromise {
+        crate::promise_store::AgentPromise {
+            id: id.to_string(),
+            tenant_id: tenant.to_string(),
+            automation_id: "auto-1".to_string(),
+            status: crate::promise_store::PromiseStatus::Running,
+            messages: vec![crate::agent_loop::Message::user_text("big message hidden")],
+            iteration: 3,
+            worker_id: "host-pid".to_string(),
+            claimed_at: 1000,
+            trigger: serde_json::json!({}),
+            nats_subject: "github.pull_request".to_string(),
+            system_prompt: Some("long prompt hidden".to_string()),
+            recovery_count: 1,
+            checkpoint_degraded: false,
+            failure_reason: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn list_promises_empty_returns_empty_array() {
+        let ps = Arc::new(crate::promise_store::mock::MockPromiseStore::new());
+        let app = mock_app_with_promise_store(MockSessionStore::new(), ps);
+        let resp = app.oneshot(get_req("/admin/promises", "acme")).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json, serde_json::json!([]));
+    }
+
+    #[tokio::test]
+    async fn list_promises_returns_running_promises_without_messages_or_system_prompt() {
+        let ps = Arc::new(crate::promise_store::mock::MockPromiseStore::new());
+        ps.insert_promise(make_running_promise("p1", "acme"));
+        let app = mock_app_with_promise_store(MockSessionStore::new(), Arc::clone(&ps) as _);
+        let resp = app.oneshot(get_req("/admin/promises", "acme")).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let arr = json.as_array().unwrap();
+        assert_eq!(arr.len(), 1);
+        let view = &arr[0];
+        // Required fields are present.
+        assert_eq!(view["id"], "p1");
+        assert_eq!(view["automation_id"], "auto-1");
+        assert_eq!(view["iteration"], 3);
+        assert_eq!(view["recovery_count"], 1);
+        assert_eq!(view["checkpoint_degraded"], false);
+        // messages and system_prompt must NOT appear in the response.
+        assert!(view.get("messages").is_none(), "messages must be excluded from view");
+        assert!(view.get("system_prompt").is_none(), "system_prompt must be excluded from view");
+    }
+
+    #[tokio::test]
+    async fn list_promises_missing_tenant_returns_400() {
+        let ps = Arc::new(crate::promise_store::mock::MockPromiseStore::new());
+        let app = mock_app_with_promise_store(MockSessionStore::new(), ps);
+        let req = Request::builder()
+            .method("GET")
+            .uri("/admin/promises")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn list_promises_store_error_returns_500() {
+        use crate::promise_store::mock::ErrorListRunningStore;
+        let ps = Arc::new(ErrorListRunningStore::new());
+        let app = mock_app_with_promise_store(
+            MockSessionStore::new(),
+            Arc::clone(&ps) as Arc<dyn crate::promise_store::PromiseRepository>,
+        );
+        let resp = app.oneshot(get_req("/admin/promises", "acme")).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn list_promises_store_timeout_returns_504() {
+        use crate::promise_store::mock::HangingListRunningStore;
+        let ps = Arc::new(HangingListRunningStore::new());
+        let app = mock_app_with_promise_store(
+            MockSessionStore::new(),
+            Arc::clone(&ps) as Arc<dyn crate::promise_store::PromiseRepository>,
+        );
+        let (resp, _) = tokio::join!(
+            app.oneshot(get_req("/admin/promises", "acme")),
+            tokio::time::advance(std::time::Duration::from_secs(11)),
+        );
+        assert_eq!(resp.unwrap().status(), StatusCode::GATEWAY_TIMEOUT);
     }
 
     // send_message
