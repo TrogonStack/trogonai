@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::{
     AlwaysSnapshot, CommandStateModel, Decide, Decision, ExecuteError, ExpectedStateProvider,
-    NonEmpty, Snapshot, SnapshotStateModel, SnapshotStoreConfig, StreamCommand,
+    NonEmpty, SnapshotStateModel, SnapshotStoreConfig, StreamCommand,
     execute_command_with_snapshots,
 };
 
@@ -112,8 +112,8 @@ impl CommandStateModel for ChangeJobStateCommand {
 impl SnapshotStateModel for ChangeJobStateCommand {
     type Snapshot = ChangeJobStateState;
 
-    fn snapshot_state(state: &Self::State, version: u64) -> Option<Snapshot<Self::Snapshot>> {
-        Some(Snapshot::new(version, *state))
+    fn snapshot_state(state: &Self::State) -> Option<Self::Snapshot> {
+        Some(*state)
     }
 }
 
@@ -161,7 +161,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use trogon_eventsourcing::{Decision, NonEmpty, decide};
+    use trogon_eventsourcing::{Decision, NonEmpty, Snapshot, decide};
 
     use super::*;
     use crate::{DeliverySpec, GetJobCommand, JobSpec, ScheduleSpec, mocks::MockCronStore};
