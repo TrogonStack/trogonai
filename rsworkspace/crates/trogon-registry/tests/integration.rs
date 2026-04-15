@@ -255,3 +255,47 @@ async fn register_overwrites_previous_registration() {
     assert_eq!(all[0].current_load, 3);
     assert!(all[0].has_capability("dependency_check"));
 }
+
+/// Pre-create the AGENT_REGISTRY bucket with a history of 5 (different from
+/// provision()'s history of 1). When provision() then calls create_key_value
+/// with the different config, NATS returns STREAM_NAME_EXIST, triggering the
+/// is_already_exists() fallback that opens the existing bucket instead.
+#[tokio::test]
+async fn provision_falls_back_to_existing_bucket_on_config_mismatch() {
+    let (js, _container) = setup().await;
+
+    // Pre-create the bucket with different history so provision() gets STREAM_NAME_EXIST.
+    js.create_key_value(async_nats::jetstream::kv::Config {
+        bucket: "AGENT_REGISTRY".to_string(),
+        history: 5,
+        max_age: Duration::from_secs(30),
+        storage: async_nats::jetstream::stream::StorageType::Memory,
+        ..Default::default()
+    })
+    .await
+    .expect("pre-create should succeed");
+
+    // provision() should open the existing bucket via the is_already_exists() path.
+    let store = provision(&js).await.expect("provision should succeed via fallback");
+
+    // Verify the returned store is functional.
+    let registry = Registry::new(store);
+    registry.register(&AgentCapability::new("X", ["cap"], "x.>")).await.unwrap();
+    assert_eq!(registry.list_all().await.unwrap().len(), 1);
+}
+
+/// Drop the NATS container before calling provision() to verify that a
+/// JetStream error is surfaced as RegistryError::Provision — covers provision.rs line 36.
+#[tokio::test]
+async fn provision_returns_generic_error_when_nats_is_down() {
+    use trogon_registry::RegistryError;
+    let (js, container) = setup().await;
+    drop(container);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    let result = provision(&js).await;
+    assert!(
+        matches!(result, Err(RegistryError::Provision(_))),
+        "expected Provision error when NATS is down, got: {result:?}"
+    );
+}
