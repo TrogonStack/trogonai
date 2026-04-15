@@ -7,9 +7,7 @@ use trogon_eventsourcing::{
 
 use crate::{
     JobId,
-    commands::runtime::{
-        JobEventStore, JobEventStoreRuntime, JobSnapshotStore, JobSnapshotStoreRuntime,
-    },
+    commands::runtime::{CommandRuntime, event_store, snapshot_store},
     error::CronError,
     events::JobEvent,
 };
@@ -103,11 +101,11 @@ impl DefaultExpectedStateProvider for RemoveJobCommand {}
 
 pub async fn run<R>(runtime: &R, command: RemoveJobCommand, occ: OccPolicy) -> Result<(), CronError>
 where
-    R: JobEventStoreRuntime + JobSnapshotStoreRuntime<RemoveJobState>,
+    R: CommandRuntime,
 {
     let id = command.stream_id().to_string();
-    let event_store = JobEventStore::new(runtime);
-    let snapshot_store = JobSnapshotStore::new(runtime);
+    let event_store = event_store(runtime);
+    let snapshot_store = snapshot_store::<_, RemoveJobState>(runtime);
 
     match CommandExecution::new(&event_store, &command)
         .occ(occ)
