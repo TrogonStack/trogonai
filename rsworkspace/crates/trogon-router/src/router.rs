@@ -489,5 +489,11 @@ mod tests {
         let event = crate::event::RouterEvent::new("trogon.events.x", b"{}".as_ref());
         let err = router.route_event(event).await.unwrap_err();
         assert!(matches!(err, RouterError::Registry(_)));
+
+        // Cover the otherwise-dead put/get/delete methods on AlwaysFailStore.
+        let s = AlwaysFailStore;
+        assert!(RegistryStore::put(&s, "k", Bytes::new()).await.is_err());
+        assert!(RegistryStore::get(&s, "k").await.is_err());
+        assert!(RegistryStore::delete(&s, "k").await.is_err());
     }
 }

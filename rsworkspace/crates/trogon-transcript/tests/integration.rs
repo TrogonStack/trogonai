@@ -254,3 +254,24 @@ async fn corrupted_entry_among_valid_entries_returns_error() {
         "expected Deserialization error on mixed stream, got: {result:?}"
     );
 }
+
+/// Drop the NATS container before calling provision() to verify that a
+/// JetStream error is surfaced as TranscriptError::Provision (line 52 of store.rs).
+#[tokio::test]
+async fn provision_returns_error_when_nats_is_down() {
+    let (nats, container) = setup().await;
+    let js = async_nats::jetstream::new(nats);
+    let store = TranscriptStore::new(js);
+
+    // Kill the NATS server before provisioning.
+    drop(container);
+
+    // Give the container a moment to stop.
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+    let result = store.provision().await;
+    assert!(
+        matches!(result, Err(TranscriptError::Provision(_))),
+        "expected Provision error when NATS is down, got: {result:?}"
+    );
+}

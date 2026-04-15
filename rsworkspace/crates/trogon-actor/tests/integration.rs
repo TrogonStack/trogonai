@@ -137,6 +137,30 @@ async fn provision_state_is_idempotent() {
     provision_state(&js).await.expect("second provision should not fail");
 }
 
+/// Pre-create the ACTOR_STATE bucket with Memory storage (provision_state uses File),
+/// causing create_key_value to return STREAM_NAME_EXIST. The is_bucket_already_exists()
+/// fallback should open the existing bucket and return Ok.
+#[tokio::test]
+async fn provision_state_falls_back_to_existing_bucket_on_config_mismatch() {
+    let (_nats, js, _container) = setup().await;
+
+    // Pre-create with different storage type to force a config-mismatch error.
+    js.create_key_value(async_nats::jetstream::kv::Config {
+        bucket: "ACTOR_STATE".to_string(),
+        history: 1,
+        max_age: std::time::Duration::ZERO,
+        storage: async_nats::jetstream::stream::StorageType::Memory, // differs from File
+        ..Default::default()
+    })
+    .await
+    .expect("pre-create should succeed");
+
+    // provision_state() should open the existing bucket via the fallback path.
+    provision_state(&js)
+        .await
+        .expect("provision_state should succeed via fallback");
+}
+
 #[tokio::test]
 async fn state_persists_across_events() {
     let (nats, js, _container) = setup().await;
@@ -506,4 +530,72 @@ async fn spawn_agent_no_capability_no_transcript_entry() {
         entries.is_empty(),
         "expected no transcript entries when no capable agent is found, got: {entries:?}"
     );
+}
+
+/// Deleting the backing JetStream stream causes `kv::Store::create` to return a
+/// non-OCC error. `StateStore::save(key, val, None)` must surface that as
+/// `SaveError::Other` — covers state.rs line 108.
+#[tokio::test]
+async fn state_store_save_create_returns_other_error_when_stream_deleted() {
+    let (_nats, js, _container) = setup().await;
+    let state_store = provision_state(&js).await.unwrap();
+
+    // Blow away the backing stream so subsequent KV operations fail.
+    js.delete_stream("KV_ACTOR_STATE").await.unwrap();
+
+    use trogon_actor::{SaveError, state::StateStore};
+    let result = StateStore::save(&state_store, "counter.ghost", Bytes::from_static(b"{}"), None).await;
+    assert!(
+        matches!(result, Err(SaveError::Other(_))),
+        "expected SaveError::Other when stream is gone (create path), got: {result:?}"
+    );
+}
+
+/// Same as above but for the `update` path — calls `StateStore::save` with a
+/// revision number so the code takes the `kv::Store::update` branch, whose
+/// non-OCC failure maps to `SaveError::Other` — covers state.rs line 120.
+#[tokio::test]
+async fn state_store_save_update_returns_other_error_when_stream_deleted() {
+    let (nats, js, _container) = setup().await;
+    let state_store = provision_state(&js).await.unwrap();
+    let registry_store = provision_registry(&js).await.unwrap();
+    let publisher = NatsTranscriptPublisher::new(js.clone());
+    let registry = Registry::new(registry_store);
+
+    // Create initial state so we have a valid revision.
+    let runtime = ActorRuntime::new(state_store.clone(), publisher, nats, registry);
+    runtime.handle_event(&mut CounterActor, "ghost-update").await.unwrap();
+
+    // Read back the revision so we can pass it to save().
+    let kv = js.get_key_value("ACTOR_STATE").await.unwrap();
+    let entry = kv.entry("counter.ghost-update").await.unwrap().unwrap();
+    let rev = entry.revision;
+
+    // Now delete the stream — the update call will fail with a non-OCC error.
+    js.delete_stream("KV_ACTOR_STATE").await.unwrap();
+
+    use trogon_actor::{SaveError, state::StateStore};
+    let result = StateStore::save(
+        &state_store,
+        "counter.ghost-update",
+        Bytes::from_static(b"{}"),
+        Some(rev),
+    )
+    .await;
+    assert!(
+        matches!(result, Err(SaveError::Other(_))),
+        "expected SaveError::Other when stream is gone (update path), got: {result:?}"
+    );
+}
+
+/// Drop the NATS container before calling provision_state() to verify that a
+/// JetStream error is surfaced as a String error — covers state.rs line 168.
+#[tokio::test]
+async fn provision_state_returns_error_when_nats_is_down() {
+    let (_nats, js, container) = setup().await;
+    drop(container);
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+    let result = provision_state(&js).await;
+    assert!(result.is_err(), "expected error when NATS is down, got Ok");
 }
