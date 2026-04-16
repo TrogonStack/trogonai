@@ -82,9 +82,17 @@ mod tests {
     }
 
     #[test]
-    fn write_condition_allows_recreating_deleted_stream() {
-        JobWriteCondition::MustNotExist
-            .ensure("alpha", JobWriteState::new(Some(7), false))
-            .unwrap();
+    fn write_condition_rejects_reusing_deleted_stream_ids() {
+        let error = JobWriteCondition::MustNotExist
+            .ensure("alpha", JobWriteState::new(Some(7), true))
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            CronError::OptimisticConcurrencyConflict {
+                current_version: Some(7),
+                ..
+            }
+        ));
     }
 }

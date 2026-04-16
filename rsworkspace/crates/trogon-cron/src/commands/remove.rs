@@ -19,11 +19,13 @@ pub(crate) const SNAPSHOT_STORE_CONFIG: SnapshotStoreConfig<'static> =
 pub enum RemoveJobState {
     Missing,
     Present,
+    Deleted,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RemoveJobDecisionError {
     JobNotFound { id: JobId },
+    JobDeleted { id: JobId },
 }
 
 impl RemoveJobCommand {
@@ -36,6 +38,12 @@ impl std::fmt::Display for RemoveJobDecisionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::JobNotFound { id } => write!(f, "missing job for removal '{id}'"),
+            Self::JobDeleted { id } => {
+                write!(
+                    f,
+                    "job '{id}' was already deleted and cannot be removed again"
+                )
+            }
         }
     }
 }
@@ -66,6 +74,9 @@ impl Decide<RemoveJobState, JobEvent> for RemoveJobCommand {
             RemoveJobState::Present => Ok(Decision::Event(NonEmpty::one(JobEvent::JobRemoved {
                 id: command.stream_id().to_string(),
             }))),
+            RemoveJobState::Deleted => Err(RemoveJobDecisionError::JobDeleted {
+                id: command.stream_id().clone(),
+            }),
         }
     }
 }
@@ -79,12 +90,13 @@ impl CommandState for RemoveJobCommand {
         RemoveJobState::Missing
     }
 
-    fn evolve(_state: Self::State, event: JobEvent) -> Result<Self::State, Self::DomainError> {
+    fn evolve(state: Self::State, event: JobEvent) -> Result<Self::State, Self::DomainError> {
         match event {
-            JobEvent::JobRegistered { .. } | JobEvent::JobStateChanged { .. } => {
-                Ok(RemoveJobState::Present)
-            }
-            JobEvent::JobRemoved { .. } => Ok(RemoveJobState::Missing),
+            JobEvent::JobRegistered { .. } | JobEvent::JobStateChanged { .. } => match state {
+                RemoveJobState::Deleted => Ok(RemoveJobState::Deleted),
+                RemoveJobState::Missing | RemoveJobState::Present => Ok(RemoveJobState::Present),
+            },
+            JobEvent::JobRemoved { .. } => Ok(RemoveJobState::Deleted),
         }
     }
 }
@@ -179,6 +191,17 @@ mod tests {
     }
 
     #[test]
+    fn rejects_removing_deleted_job() {
+        let state = RemoveJobState::Deleted;
+        let command = RemoveJobCommand::new(JobId::parse("backup").unwrap());
+
+        assert!(matches!(
+            decide(&state, &command).unwrap_err(),
+            RemoveJobDecisionError::JobDeleted { .. }
+        ));
+    }
+
+    #[test]
     fn given_when_then_supports_remove_job_decider() {
         TestCase::new(decider::<RemoveJobCommand>())
             .given([JobEvent::JobRegistered {
@@ -239,6 +262,6 @@ mod tests {
             )
             .unwrap()
             .unwrap();
-        assert_eq!(command_snapshot, Snapshot::new(2, RemoveJobState::Missing));
+        assert_eq!(command_snapshot, Snapshot::new(2, RemoveJobState::Deleted));
     }
 }

@@ -20,11 +20,13 @@ pub struct ChangeJobStateCommand {
 pub enum ChangeJobStateState {
     Missing,
     Present { current: JobEnabledState },
+    Deleted,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ChangeJobStateDecisionError {
     JobNotFound { id: JobId },
+    JobDeleted { id: JobId },
     StateAlreadySet { id: JobId, state: JobEnabledState },
 }
 
@@ -38,6 +40,9 @@ impl std::fmt::Display for ChangeJobStateDecisionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::JobNotFound { id } => write!(f, "missing job for state change '{id}'"),
+            Self::JobDeleted { id } => {
+                write!(f, "job '{id}' was deleted and cannot change state")
+            }
             Self::StateAlreadySet { id, state } => {
                 write!(f, "job '{id}' is already {}", state.as_str())
             }
@@ -106,6 +111,9 @@ impl Decide<ChangeJobStateState, JobEvent> for ChangeJobStateCommand {
             ChangeJobStateState::Missing => Err(ChangeJobStateDecisionError::JobNotFound {
                 id: command.stream_id().clone(),
             }),
+            ChangeJobStateState::Deleted => Err(ChangeJobStateDecisionError::JobDeleted {
+                id: command.stream_id().clone(),
+            }),
             ChangeJobStateState::Present { current } if *current == command.state => {
                 Err(ChangeJobStateDecisionError::StateAlreadySet {
                     id: command.stream_id().clone(),
@@ -131,9 +139,12 @@ impl CommandState for ChangeJobStateCommand {
         ChangeJobStateState::Missing
     }
 
-    fn evolve(_state: Self::State, event: JobEvent) -> Result<Self::State, Self::DomainError> {
+    fn evolve(state: Self::State, event: JobEvent) -> Result<Self::State, Self::DomainError> {
         match event {
             JobEvent::JobRegistered { id, spec } => {
+                if matches!(state, ChangeJobStateState::Deleted) {
+                    return Ok(ChangeJobStateState::Deleted);
+                }
                 let job_id = JobId::parse(&id).map_err(|source| {
                     ChangeJobStateError::InvalidRegistrationEventId {
                         id: id.clone(),
@@ -144,10 +155,18 @@ impl CommandState for ChangeJobStateCommand {
                     current: spec.into_job_spec(job_id).state,
                 })
             }
-            JobEvent::JobStateChanged { state, .. } => {
-                Ok(ChangeJobStateState::Present { current: state })
-            }
-            JobEvent::JobRemoved { .. } => Ok(ChangeJobStateState::Missing),
+            JobEvent::JobStateChanged {
+                state: current_state,
+                ..
+            } => match state {
+                ChangeJobStateState::Deleted => Ok(ChangeJobStateState::Deleted),
+                ChangeJobStateState::Missing | ChangeJobStateState::Present { .. } => {
+                    Ok(ChangeJobStateState::Present {
+                        current: current_state,
+                    })
+                }
+            },
+            JobEvent::JobRemoved { .. } => Ok(ChangeJobStateState::Deleted),
         }
     }
 }
@@ -256,6 +275,18 @@ mod tests {
         assert!(matches!(
             decide(&state, &command).unwrap_err(),
             ChangeJobStateDecisionError::JobNotFound { .. }
+        ));
+    }
+
+    #[test]
+    fn rejects_state_changes_for_deleted_jobs() {
+        let state = ChangeJobStateState::Deleted;
+        let command =
+            ChangeJobStateCommand::new(JobId::parse("backup").unwrap(), JobEnabledState::Enabled);
+
+        assert!(matches!(
+            decide(&state, &command).unwrap_err(),
+            ChangeJobStateDecisionError::JobDeleted { .. }
         ));
     }
 

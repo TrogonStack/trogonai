@@ -33,7 +33,7 @@ const DEFAULT_LEADER_TTL: Duration = Duration::from_secs(10);
 const SCHEDULER_CONSUMER_NAME: &str = "cron_scheduler";
 const SCHEDULER_CONSUMER_INACTIVE_THRESHOLD: Duration = Duration::from_secs(30);
 
-type DesiredJobs = HashMap<String, JobSpec>;
+type DesiredJobs = HashMap<String, DesiredJobState>;
 type SchedulerEventWatcher =
     Pin<Box<dyn Stream<Item = Result<jetstream::Message, CronError>> + Send + 'static>>;
 
@@ -46,6 +46,12 @@ enum ReestablishedProcessor {
 enum SchedulerChange {
     Upsert(JobSpec),
     Delete(String),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum DesiredJobState {
+    Present(Box<JobSpec>),
+    Deleted,
 }
 
 pub struct CronController<C = Store, P = NatsSchedulePublisher, L = NatsKvLease> {
@@ -332,6 +338,12 @@ fn apply_scheduler_event(
 ) -> Result<SchedulerChange, CronError> {
     match event {
         JobEvent::JobRegistered { id, spec } => {
+            if matches!(desired_jobs.get(&id), Some(DesiredJobState::Deleted)) {
+                return Err(CronError::event_source(
+                    "scheduler received a registration for a deleted job stream",
+                    std::io::Error::other(id),
+                ));
+            }
             let job_id = JobId::parse(&id).map_err(|source| {
                 CronError::event_source(
                     "failed to rebuild scheduler state from job registration",
@@ -339,7 +351,10 @@ fn apply_scheduler_event(
                 )
             })?;
             let job = spec.into_job_spec(job_id);
-            desired_jobs.insert(job.id.to_string(), job.clone());
+            desired_jobs.insert(
+                job.id.to_string(),
+                DesiredJobState::Present(Box::new(job.clone())),
+            );
             Ok(SchedulerChange::Upsert(job))
         }
         JobEvent::JobStateChanged { id, state } => {
@@ -349,15 +364,23 @@ fn apply_scheduler_event(
                     std::io::Error::other(id.clone()),
                 )
             })?;
-            job.state = state;
-            if job.state.is_enabled() {
-                Ok(SchedulerChange::Upsert(job.clone()))
-            } else {
-                Ok(SchedulerChange::Delete(id))
+            match job {
+                DesiredJobState::Present(job) => {
+                    job.state = state;
+                    if job.state.is_enabled() {
+                        Ok(SchedulerChange::Upsert(job.as_ref().clone()))
+                    } else {
+                        Ok(SchedulerChange::Delete(id))
+                    }
+                }
+                DesiredJobState::Deleted => Err(CronError::event_source(
+                    "scheduler received a state change for a deleted job stream",
+                    std::io::Error::other(id),
+                )),
             }
         }
         JobEvent::JobRemoved { id } => {
-            desired_jobs.remove(&id);
+            desired_jobs.insert(id.clone(), DesiredJobState::Deleted);
             Ok(SchedulerChange::Delete(id))
         }
     }
@@ -416,11 +439,14 @@ async fn reconcile_snapshot<P: SchedulePublisher<Error = CronError>>(
     let mut resolved_jobs = Vec::new();
 
     for job in desired_jobs.values() {
+        let DesiredJobState::Present(job) = job else {
+            continue;
+        };
         if !job.state.is_enabled() {
             continue;
         }
 
-        match ResolvedJobSpec::try_from(job) {
+        match ResolvedJobSpec::try_from(job.as_ref()) {
             Ok(resolved) => {
                 desired_active_ids.insert(job.id.to_string());
                 resolved_jobs.push(resolved);
@@ -641,9 +667,9 @@ mod tests {
     use async_nats::jetstream::consumer::{AckPolicy, DeliverPolicy, ReplayPolicy};
 
     use super::{
-        CronController, SchedulerChange, apply_scheduler_change, apply_scheduler_event,
-        default_leader_timing, next_scheduler_start_sequence, reconcile_snapshot,
-        scheduler_consumer_config,
+        CronController, DesiredJobState, SchedulerChange, apply_scheduler_change,
+        apply_scheduler_event, default_leader_timing, next_scheduler_start_sequence,
+        reconcile_snapshot, scheduler_consumer_config,
     };
     use crate::{
         DeliverySpec, JobEnabledState, JobId, JobSpec, RegisteredJobSpec, ScheduleSpec,
@@ -677,7 +703,10 @@ mod tests {
         publisher.seed_active_job("orphan");
         publisher.seed_active_job("heartbeat");
 
-        let desired_jobs = HashMap::from([("heartbeat".to_string(), base_job("heartbeat"))]);
+        let desired_jobs = HashMap::from([(
+            "heartbeat".to_string(),
+            DesiredJobState::Present(Box::new(base_job("heartbeat"))),
+        )]);
 
         reconcile_snapshot(&publisher, &desired_jobs).await.unwrap();
 
@@ -698,7 +727,10 @@ mod tests {
             ttl_sec: None,
             source: None,
         };
-        let desired_jobs = HashMap::from([("disabled".to_string(), disabled)]);
+        let desired_jobs = HashMap::from([(
+            "disabled".to_string(),
+            DesiredJobState::Present(Box::new(disabled)),
+        )]);
 
         reconcile_snapshot(&publisher, &desired_jobs).await.unwrap();
 
@@ -727,12 +759,15 @@ mod tests {
 
     #[test]
     fn desired_jobs_map_tracks_snapshot_state() {
-        let jobs = HashMap::from([("alpha".to_string(), base_job("alpha"))]);
+        let jobs = HashMap::from([(
+            "alpha".to_string(),
+            DesiredJobState::Present(Box::new(base_job("alpha"))),
+        )]);
         assert_eq!(jobs.keys().cloned().collect::<Vec<_>>(), vec!["alpha"]);
     }
 
     #[test]
-    fn apply_scheduler_event_tracks_register_disable_enable_remove_and_recreate() {
+    fn apply_scheduler_event_tracks_register_disable_enable_and_terminal_delete() {
         let mut desired_jobs = HashMap::new();
 
         let registered = apply_scheduler_event(
@@ -744,7 +779,10 @@ mod tests {
         )
         .unwrap();
         assert_eq!(registered, SchedulerChange::Upsert(base_job("alpha")));
-        assert!(desired_jobs.contains_key("alpha"));
+        assert!(matches!(
+            desired_jobs.get("alpha"),
+            Some(DesiredJobState::Present(_))
+        ));
 
         let disabled = apply_scheduler_event(
             &mut desired_jobs,
@@ -756,7 +794,10 @@ mod tests {
         .unwrap();
         assert_eq!(disabled, SchedulerChange::Delete("alpha".to_string()));
         assert_eq!(
-            desired_jobs.get("alpha").unwrap().state,
+            match desired_jobs.get("alpha").unwrap() {
+                DesiredJobState::Present(job) => job.state,
+                DesiredJobState::Deleted => panic!("expected present job"),
+            },
             JobEnabledState::Disabled
         );
 
@@ -778,18 +819,20 @@ mod tests {
         )
         .unwrap();
         assert_eq!(removed, SchedulerChange::Delete("alpha".to_string()));
-        assert!(!desired_jobs.contains_key("alpha"));
+        assert!(matches!(
+            desired_jobs.get("alpha"),
+            Some(DesiredJobState::Deleted)
+        ));
 
-        let recreated = apply_scheduler_event(
+        let error = apply_scheduler_event(
             &mut desired_jobs,
             JobEvent::JobRegistered {
                 id: "alpha".to_string(),
                 spec: RegisteredJobSpec::from(base_job("alpha")),
             },
         )
-        .unwrap();
-        assert_eq!(recreated, SchedulerChange::Upsert(base_job("alpha")));
-        assert!(desired_jobs.contains_key("alpha"));
+        .unwrap_err();
+        assert!(error.to_string().contains("deleted job stream"));
     }
 
     #[test]
@@ -868,8 +911,14 @@ mod tests {
             source: None,
         };
         let desired_jobs = HashMap::from([
-            ("valid".to_string(), base_job("valid")),
-            ("invalid".to_string(), invalid),
+            (
+                "valid".to_string(),
+                DesiredJobState::Present(Box::new(base_job("valid"))),
+            ),
+            (
+                "invalid".to_string(),
+                DesiredJobState::Present(Box::new(invalid)),
+            ),
         ]);
 
         reconcile_snapshot(&publisher, &desired_jobs).await.unwrap();
