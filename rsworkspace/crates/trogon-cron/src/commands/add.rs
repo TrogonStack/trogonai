@@ -3,8 +3,8 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::{
     AlwaysSnapshot, CommandExecution, CommandFailure, CommandInfraError, CommandOutcome,
-    CommandStateModel, Decide, Decision, DefaultExpectedStateProvider, EventStore, ExpectedState,
-    NonEmpty, OccPolicy, SnapshotStateModel, SnapshotStore, SnapshotStoreConfig, StreamCommand,
+    CommandStateModel, Decide, Decision, EventStore, ExpectedState, ExpectedStateRule, NonEmpty,
+    OccPolicy, SnapshotStateModel, SnapshotStore, SnapshotStoreConfig, StreamCommand,
 };
 
 use crate::{
@@ -67,6 +67,10 @@ impl StreamCommand for RegisterJobCommand {
     fn stream_id(&self) -> &Self::StreamId {
         &self.id
     }
+
+    fn expected_state_rule(&self) -> Option<ExpectedStateRule> {
+        Some(ExpectedStateRule::Required(ExpectedState::NoStream))
+    }
 }
 
 impl Decide<RegisterJobState, JobEvent> for RegisterJobCommand {
@@ -114,12 +118,6 @@ impl SnapshotStateModel for RegisterJobCommand {
 
     fn snapshot_state(state: &Self::State) -> Option<Self::Snapshot> {
         Some(*state)
-    }
-}
-
-impl DefaultExpectedStateProvider for RegisterJobCommand {
-    fn default_expected_state(&self) -> Option<ExpectedState> {
-        Some(ExpectedState::NoStream)
     }
 }
 
@@ -231,7 +229,7 @@ mod tests {
             &store,
             &store,
             RegisterJobCommand::new(job("backup")).unwrap(),
-            OccPolicy::CommandDefault,
+            OccPolicy::UseCommandRule,
         )
         .await
         .unwrap();
@@ -274,7 +272,7 @@ mod tests {
             &store,
             &store,
             RegisterJobCommand::new(job("backup")).unwrap(),
-            OccPolicy::CommandDefault,
+            OccPolicy::UseCommandRule,
         )
         .await
         .unwrap();
@@ -283,7 +281,7 @@ mod tests {
             &store,
             &store,
             RegisterJobCommand::new(job("backup")).unwrap(),
-            OccPolicy::CommandDefault,
+            OccPolicy::UseCommandRule,
         )
         .await
         .unwrap_err();
