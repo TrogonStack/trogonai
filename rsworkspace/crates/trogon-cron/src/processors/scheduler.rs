@@ -333,8 +333,14 @@ fn apply_scheduler_event(
 ) -> Result<SchedulerChange, CronError> {
     match event {
         JobEvent::JobRegistered { id, spec } => {
-            let job = spec.into_job_spec(id);
-            desired_jobs.insert(job.id.clone(), job.clone());
+            let job_id = JobId::parse(&id).map_err(|source| {
+                CronError::event_source(
+                    "failed to rebuild scheduler state from job registration",
+                    source,
+                )
+            })?;
+            let job = spec.into_job_spec(job_id);
+            desired_jobs.insert(job.id.to_string(), job.clone());
             Ok(SchedulerChange::Upsert(job))
         }
         JobEvent::JobStateChanged { id, state } => {
@@ -388,11 +394,11 @@ async fn apply_scheduler_change<P: SchedulePublisher<Error = CronError>>(
                             job_id = %job.id,
                             "Skipping invalid enabled scheduler job and removing any existing schedule"
                         );
-                        publisher.remove_schedule(&job.id).await?;
+                        publisher.remove_schedule(job.id.as_str()).await?;
                     }
                 }
             } else {
-                publisher.remove_schedule(&job.id).await?;
+                publisher.remove_schedule(job.id.as_str()).await?;
             }
         }
         SchedulerChange::Delete(id) => {
@@ -417,7 +423,7 @@ async fn reconcile_snapshot<P: SchedulePublisher<Error = CronError>>(
 
         match ResolvedJobSpec::try_from(job) {
             Ok(resolved) => {
-                desired_active_ids.insert(job.id.clone());
+                desired_active_ids.insert(job.id.to_string());
                 resolved_jobs.push(resolved);
             }
             Err(error) => {
@@ -641,15 +647,19 @@ mod tests {
         scheduler_consumer_config,
     };
     use crate::{
-        RegisteredJobSpec,
+        JobId, RegisteredJobSpec,
         config::{DeliverySpec, JobEnabledState, JobSpec, ScheduleSpec},
         events::JobEvent,
         mocks::{MockCronStore, MockLeaderLock, MockSchedulePublisher},
     };
 
+    fn job_id(id: &str) -> JobId {
+        JobId::parse(id).unwrap()
+    }
+
     fn base_job(id: &str) -> JobSpec {
         JobSpec {
-            id: id.to_string(),
+            id: job_id(id),
             state: crate::config::JobEnabledState::Enabled,
             schedule: ScheduleSpec::Every { every_sec: 30 },
             delivery: DeliverySpec::NatsEvent {

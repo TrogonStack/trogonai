@@ -6,6 +6,7 @@ use bytes::Bytes;
 use trogon_nats::{DottedNatsToken, NatsToken};
 
 use crate::{
+    JobId,
     config::{DeliverySpec, JobSpec, SamplingSource, ScheduleSpec},
     error::{CronError, JobSpecError},
     kv::{FIRE_SUBJECT_PREFIX, SCHEDULE_SUBJECT_PREFIX},
@@ -92,7 +93,7 @@ impl TryFrom<&JobSpec> for ResolvedJobSpec {
 }
 
 fn validated_job_spec_parts(spec: &JobSpec) -> Result<ValidatedJobSpecParts, CronError> {
-    let job_id = parse_job_id(&spec.id)?;
+    let job_id = parse_job_id(&spec.id);
     let schedule_expression = schedule_expression(&spec.schedule)?;
     let timezone = match &spec.schedule {
         ScheduleSpec::Cron { timezone, .. } => validate_timezone(timezone.clone())?,
@@ -123,13 +124,8 @@ fn validated_job_spec_parts(spec: &JobSpec) -> Result<ValidatedJobSpecParts, Cro
     })
 }
 
-fn parse_job_id(id: &str) -> Result<NatsToken, CronError> {
-    NatsToken::new(id).map_err(|source| {
-        CronError::invalid_job_spec(JobSpecError::InvalidId {
-            id: id.to_string(),
-            source,
-        })
-    })
+fn parse_job_id(id: &JobId) -> NatsToken {
+    id.as_token().clone()
 }
 
 impl ResolvedJobSpec {
@@ -312,11 +308,15 @@ mod tests {
     use chrono::{TimeZone, Utc};
 
     use super::*;
-    use crate::config::JobSpec;
+    use crate::{JobId, config::JobSpec};
+
+    fn job_id(id: &str) -> JobId {
+        JobId::parse(id).unwrap()
+    }
 
     fn base_job() -> JobSpec {
         JobSpec {
-            id: "heartbeat".to_string(),
+            id: job_id("heartbeat"),
             state: crate::config::JobEnabledState::Enabled,
             schedule: ScheduleSpec::Every { every_sec: 30 },
             delivery: DeliverySpec::NatsEvent {
@@ -451,7 +451,7 @@ mod tests {
 
         let resolved = ResolvedJobSpec::try_from(&job).unwrap();
 
-        assert_eq!(resolved.spec().id, "heartbeat");
+        assert_eq!(resolved.spec().id.as_str(), "heartbeat");
         assert_eq!(resolved.id(), "heartbeat");
         assert!(!resolved.enabled());
         assert_eq!(resolved.route(), "agent.run");
