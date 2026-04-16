@@ -300,7 +300,7 @@ impl EventStore<crate::JobId> for MockCronStore {
 
         let current_snapshot = jobs.get(stream_id.as_str()).cloned();
         let current_version = stream_versions.get(stream_id.as_str()).copied();
-        let write_state = JobWriteState::new(current_version, current_snapshot.as_ref().is_some());
+        let write_state = JobWriteState::new(current_version, current_version.is_some());
         match expected_state {
             ExpectedState::Any => {}
             ExpectedState::StreamExists if write_state.exists() => {}
@@ -540,13 +540,6 @@ mod tests {
                 .is_err()
         );
 
-        let alpha = store
-            .get_job(GetJobCommand {
-                id: job_id("alpha"),
-            })
-            .await
-            .unwrap()
-            .unwrap();
         remove_job(
             &store,
             &store,
@@ -565,22 +558,18 @@ mod tests {
                 .is_none()
         );
 
-        register_job(
+        let deleted_error = register_job(
             &store,
             &store,
             RegisterJobCommand::new(base_job("alpha")).unwrap(),
             OccPolicy::UseCommandRule,
         )
         .await
-        .unwrap();
-        let re_registered = store
-            .get_job(GetJobCommand {
-                id: job_id("alpha"),
-            })
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(re_registered.version, alpha.version + 2);
+        .unwrap_err();
+        assert!(matches!(
+            deleted_error,
+            CommandFailure::Domain(crate::RegisterJobDecisionError::JobDeleted { .. })
+        ));
     }
 
     #[tokio::test]
@@ -643,12 +632,20 @@ mod tests {
         JobWriteCondition::MustNotExist
             .ensure("alpha", JobWriteState::new(None, false))
             .unwrap();
-        JobWriteCondition::MustNotExist
-            .ensure("alpha", JobWriteState::new(Some(4), false))
-            .unwrap();
         JobWriteCondition::MustBeAtVersion(3)
             .ensure("alpha", JobWriteState::new(Some(3), true))
             .unwrap();
+
+        let error = JobWriteCondition::MustNotExist
+            .ensure("alpha", JobWriteState::new(Some(4), true))
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            CronError::OptimisticConcurrencyConflict {
+                current_version: Some(4),
+                ..
+            }
+        ));
 
         let error = JobWriteCondition::MustBeAtVersion(3)
             .ensure("alpha", JobWriteState::new(Some(4), true))

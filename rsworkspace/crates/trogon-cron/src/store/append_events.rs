@@ -53,11 +53,10 @@ where
         Ok(message) => {
             let version = message.sequence;
             let event = decode_recorded_job_event(message)?;
-            let event = event.decode_data::<JobEvent>().map_err(|source| {
+            let _event = event.decode_data::<JobEvent>().map_err(|source| {
                 CronError::event_source("failed to decode latest job event payload", source)
             })?;
-            let exists = !matches!(event, JobEvent::JobRemoved { .. });
-            Ok(Some(JobWriteState::new(Some(version), exists)))
+            Ok(Some(JobWriteState::new(Some(version), true)))
         }
         Err(error)
             if matches!(
