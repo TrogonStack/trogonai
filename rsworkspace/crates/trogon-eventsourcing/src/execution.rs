@@ -213,10 +213,24 @@ pub enum CommandInfraError<RuntimeError> {
 pub struct WithoutSnapshots;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct WithSnapshots<'a, S, P> {
+pub struct Snapshots<'a, S, P> {
     snapshot_store: &'a S,
     snapshot_config: SnapshotStoreConfig<'static>,
     policy: P,
+}
+
+impl<'a, S, P> Snapshots<'a, S, P> {
+    pub const fn new(
+        snapshot_store: &'a S,
+        snapshot_config: SnapshotStoreConfig<'static>,
+        policy: P,
+    ) -> Self {
+        Self {
+            snapshot_store,
+            snapshot_config,
+            policy,
+        }
+    }
 }
 
 pub struct CommandExecution<'a, E, C, S = WithoutSnapshots> {
@@ -238,19 +252,13 @@ impl<'a, E, C> CommandExecution<'a, E, C, WithoutSnapshots> {
 
     pub fn snapshots<S, P>(
         self,
-        snapshot_store: &'a S,
-        snapshot_config: SnapshotStoreConfig<'static>,
-        policy: P,
-    ) -> CommandExecution<'a, E, C, WithSnapshots<'a, S, P>> {
+        snapshots: Snapshots<'a, S, P>,
+    ) -> CommandExecution<'a, E, C, Snapshots<'a, S, P>> {
         CommandExecution {
             event_store: self.event_store,
             command: self.command,
             occ: self.occ,
-            snapshots: WithSnapshots {
-                snapshot_store,
-                snapshot_config,
-                policy,
-            },
+            snapshots,
         }
     }
 }
@@ -332,7 +340,7 @@ where
     }
 }
 
-impl<E, S, C, P, SErr> CommandExecution<'_, E, C, WithSnapshots<'_, S, P>>
+impl<E, S, C, P, SErr> CommandExecution<'_, E, C, Snapshots<'_, S, P>>
 where
     C: SnapshotState + Decide<C::State, C::Event>,
     C::Event: EventType + StreamEvent + Serialize + DeserializeOwned + Clone,
@@ -829,7 +837,7 @@ mod tests {
 
         let result = block_on(
             CommandExecution::new(&runtime, &command)
-                .snapshots(&runtime, TEST_SNAPSHOT_CONFIG, NoSnapshot)
+                .snapshots(Snapshots::new(&runtime, TEST_SNAPSHOT_CONFIG, NoSnapshot))
                 .execute(),
         )
         .unwrap();
@@ -853,7 +861,7 @@ mod tests {
 
         let error = block_on(
             CommandExecution::new(&runtime, &command)
-                .snapshots(&runtime, TEST_SNAPSHOT_CONFIG, NoSnapshot)
+                .snapshots(Snapshots::new(&runtime, TEST_SNAPSHOT_CONFIG, NoSnapshot))
                 .execute(),
         )
         .unwrap_err();
@@ -878,7 +886,7 @@ mod tests {
 
         let error = block_on(
             CommandExecution::new(&runtime, &command)
-                .snapshots(&runtime, TEST_SNAPSHOT_CONFIG, NoSnapshot)
+                .snapshots(Snapshots::new(&runtime, TEST_SNAPSHOT_CONFIG, NoSnapshot))
                 .execute(),
         )
         .unwrap_err();
@@ -925,7 +933,7 @@ mod tests {
 
         let error = block_on(
             CommandExecution::new(&runtime, &command)
-                .snapshots(&runtime, TEST_SNAPSHOT_CONFIG, NoSnapshot)
+                .snapshots(Snapshots::new(&runtime, TEST_SNAPSHOT_CONFIG, NoSnapshot))
                 .execute(),
         )
         .unwrap_err();
@@ -948,7 +956,7 @@ mod tests {
 
         let result = block_on(
             CommandExecution::new(&runtime, &command)
-                .snapshots(&runtime, TEST_SNAPSHOT_CONFIG, NoSnapshot)
+                .snapshots(Snapshots::new(&runtime, TEST_SNAPSHOT_CONFIG, NoSnapshot))
                 .execute(),
         )
         .unwrap();
@@ -1065,7 +1073,11 @@ mod tests {
 
         let result = block_on(
             CommandExecution::new(&runtime, &command)
-                .snapshots(&runtime, TEST_SNAPSHOT_CONFIG, AlwaysSnapshot)
+                .snapshots(Snapshots::new(
+                    &runtime,
+                    TEST_SNAPSHOT_CONFIG,
+                    AlwaysSnapshot,
+                ))
                 .execute(),
         )
         .unwrap();
@@ -1087,7 +1099,7 @@ mod tests {
 
         let _ = block_on(
             CommandExecution::new(&runtime, &command)
-                .snapshots(&runtime, TEST_SNAPSHOT_CONFIG, NoSnapshot)
+                .snapshots(Snapshots::new(&runtime, TEST_SNAPSHOT_CONFIG, NoSnapshot))
                 .execute(),
         )
         .unwrap();
@@ -1106,7 +1118,11 @@ mod tests {
 
         let error = block_on(
             CommandExecution::new(&runtime, &command)
-                .snapshots(&runtime, TEST_SNAPSHOT_CONFIG, AlwaysSnapshot)
+                .snapshots(Snapshots::new(
+                    &runtime,
+                    TEST_SNAPSHOT_CONFIG,
+                    AlwaysSnapshot,
+                ))
                 .execute(),
         )
         .unwrap_err();

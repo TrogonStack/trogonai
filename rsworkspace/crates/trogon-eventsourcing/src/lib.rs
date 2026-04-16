@@ -14,7 +14,7 @@ pub use decision::{Act, Decide, Decision, NonEmpty, StreamCommand, decide};
 pub use execution::{
     AlwaysSnapshot, AppendOutcome, CommandExecution, CommandFailure, CommandInfraError,
     CommandOutcome, CommandState, EventStore, ExecutionResult, ExpectedState, ExpectedStateRule,
-    NoSnapshot, OccPolicy, SnapshotPolicy, SnapshotState, SnapshotStore, WithSnapshots,
+    NoSnapshot, OccPolicy, SnapshotPolicy, SnapshotState, SnapshotStore, Snapshots,
     WithoutSnapshots,
 };
 pub use snapshots::{
