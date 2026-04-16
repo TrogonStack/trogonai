@@ -1,11 +1,13 @@
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::{
     AlwaysSnapshot, CommandExecution, CommandStateModel, Decide, Decision,
-    DefaultExpectedStateProvider, EventStore, ExecuteError, NonEmpty, OccPolicy,
-    SnapshotStateModel, SnapshotStore, SnapshotStoreConfig, StreamCommand,
+    DefaultExpectedStateProvider, EventStore, NonEmpty, OccPolicy, SnapshotStateModel,
+    SnapshotStore, SnapshotStoreConfig, StreamCommand,
 };
 
-use crate::{JobEnabledState, JobId, error::CronError, events::JobEvent};
+use crate::{
+    JobEnabledState, JobId, commands::JobCommandResult, error::CronError, events::JobEvent,
+};
 
 pub(crate) const SNAPSHOT_STORE_CONFIG: SnapshotStoreConfig<'static> =
     SnapshotStoreConfig::new("cron.command.change_job_state.v1.", None);
@@ -46,6 +48,22 @@ impl std::fmt::Display for ChangeJobStateDecisionError {
 }
 
 impl std::error::Error for ChangeJobStateDecisionError {}
+
+impl From<ChangeJobStateDecisionError> for CronError {
+    fn from(value: ChangeJobStateDecisionError) -> Self {
+        match value {
+            ChangeJobStateDecisionError::JobNotFound { id } => {
+                Self::JobNotFound { id: id.to_string() }
+            }
+            ChangeJobStateDecisionError::StateAlreadySet { id, state } => {
+                Self::JobStateAlreadySet {
+                    id: id.to_string(),
+                    state,
+                }
+            }
+        }
+    }
+}
 
 impl StreamCommand for ChangeJobStateCommand {
     type StreamId = JobId;
@@ -127,49 +145,17 @@ pub async fn run<E, S>(
     snapshot_store: &S,
     command: ChangeJobStateCommand,
     occ: OccPolicy,
-) -> Result<(), CronError>
+) -> JobCommandResult
 where
     E: EventStore<JobId, Error = CronError>,
     S: SnapshotStore<ChangeJobStateState, JobId, Error = CronError>,
 {
-    let id = command.stream_id().to_string();
-
-    match CommandExecution::new(event_store, &command)
+    Ok(CommandExecution::new(event_store, &command)
         .occ(occ)
         .snapshots(snapshot_store, SNAPSHOT_STORE_CONFIG, AlwaysSnapshot)
         .execute()
-        .await
-    {
-        Ok(_) => Ok(()),
-        Err(ExecuteError::Decision(ChangeJobStateDecisionError::JobNotFound { .. })) => {
-            Err(CronError::JobNotFound { id })
-        }
-        Err(ExecuteError::Decision(ChangeJobStateDecisionError::StateAlreadySet {
-            state, ..
-        })) => Err(CronError::JobStateAlreadySet { id, state }),
-        Err(ExecuteError::LoadSnapshot(error))
-        | Err(ExecuteError::SaveSnapshot(error))
-        | Err(ExecuteError::ReadStream(error))
-        | Err(ExecuteError::Append(error))
-        | Err(ExecuteError::Domain(error)) => Err(error),
-        Err(ExecuteError::EncodeEvent(source)) => Err(CronError::event_source(
-            "failed to encode job state change event",
-            source,
-        )),
-        Err(ExecuteError::DecodeEvent(source)) => Err(CronError::event_source(
-            "failed to decode job event while catching up change-job-state state",
-            source,
-        )),
-        Err(ExecuteError::SnapshotAheadOfStream {
-            snapshot_version,
-            stream_version,
-        }) => Err(CronError::event_source(
-            "loaded change-job-state snapshot is ahead of the stream state",
-            std::io::Error::other(format!(
-                "job '{id}' snapshot version {snapshot_version} > stream version {stream_version:?}"
-            )),
-        )),
-    }
+        .await?
+        .into_outcome())
 }
 
 #[cfg(test)]
@@ -324,7 +310,7 @@ mod tests {
         let store = MockCronStore::new();
         store.seed_job(job("backup"));
 
-        run(
+        let outcome = run(
             &store,
             &store,
             ChangeJobStateCommand::new(JobId::parse("backup").unwrap(), JobEnabledState::Disabled),
@@ -332,6 +318,14 @@ mod tests {
         )
         .await
         .unwrap();
+        assert_eq!(outcome.next_expected_version, 2);
+        assert_eq!(
+            outcome.events,
+            NonEmpty::one(JobEvent::JobStateChanged {
+                id: "backup".to_string(),
+                state: JobEnabledState::Disabled,
+            })
+        );
 
         let snapshot = store
             .get_job(GetJobCommand {
