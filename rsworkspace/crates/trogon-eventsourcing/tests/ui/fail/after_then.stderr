@@ -1,4 +1,4 @@
-error[E0599]: no method named `when` found for unit type `()` in the current scope
+error[E0599]: no method named `when` found for struct `ThenEvents<Event>` in the current scope
   --> tests/ui/fail/after_then.rs:13:10
    |
  9 |       TestCase::new(decider::<TestCommand>())
@@ -9,9 +9,9 @@ error[E0599]: no method named `when` found for unit type `()` in the current sco
 10 | |         .given([])
    | |          --------- method `when` is available on `TestCase<TestCommand, Given<TestEvent>>`
 11 | |         .when(TestCommand)
-   | |          ----------------- method `when` is available on `TestCase<TestCommand, When<TestState, TestCommand>>`
+   | |          ----------------- method `when` is available on `TestCase<TestCommand, When<TestEvent, TestState, TestCommand>>`
 12 | |         .then([TestEvent::Registered])
 13 | |         .when(TestCommand);
-   | |         -^^^^ method not found in `()`
+   | |         -^^^^ method not found in `ThenEvents<TestEvent>`
    | |_________|
    |
