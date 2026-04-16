@@ -3778,6 +3778,55 @@ mod tests {
         );
     }
 
+    /// When `automation_store.list()` ALWAYS fails (all 3 backlog retry
+    /// attempts exhaust), the automation promise must stay `Running` — it will
+    /// be recovered on the next restart once the store is available again.
+    ///
+    /// Uses `start_paused = true` so the 3 × 30 s `AUTO_RETRY_DELAY` sleeps
+    /// are advanced instantly, keeping the test sub-second.
+    #[tokio::test(start_paused = true)]
+    async fn recover_automation_backlog_all_retries_exhausted_promise_stays_running() {
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+
+        // ErrorListAutomationStore always returns Err — simulates a store that
+        // is permanently unavailable during this recovery attempt.
+        let auto_store = Arc::new(ErrorListAutomationStore);
+        let run_store = Arc::new(ErrorRecordRunStore);
+
+        let inner = MockPromiseStore::new();
+        let mut p = make_stale_promise("p-backlog-exhaust");
+        p.automation_id = "auto-gone".to_string();
+        inner.insert_promise(p);
+        let store_for_assert = inner.clone();
+        let promise_store: Arc<dyn PromiseRepository> = Arc::new(inner) as _;
+
+        let agent = make_agent("http://127.0.0.1:1");
+
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &run_store,
+            "acme",
+        )
+        .await
+        .expect("spawn handle must be returned when stale promises exist");
+
+        handle.await.expect("recovery task must not panic");
+
+        let (p_after, _) = store_for_assert
+            .get_promise("acme", "p-backlog-exhaust")
+            .await
+            .unwrap()
+            .expect("promise must still exist");
+        assert_eq!(
+            p_after.status,
+            PromiseStatus::Running,
+            "promise must stay Running when automation store is unavailable after all retries"
+        );
+    }
+
     /// When `automation_store.list()` fails on the first call during startup
     /// recovery, the promise is queued to `auto_store_backlog`.  On the retry
     /// (after `AUTO_RETRY_DELAY`) the store succeeds, finds the automation is
