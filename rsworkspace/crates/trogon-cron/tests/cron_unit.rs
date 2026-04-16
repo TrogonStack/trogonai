@@ -16,7 +16,7 @@ fn job_id(id: &str) -> JobId {
 
 fn base_job(id: &str) -> JobSpec {
     JobSpec {
-        id: id.to_string(),
+        id: job_id(id),
         state: JobEnabledState::Enabled,
         schedule: ScheduleSpec::Every { every_sec: 30 },
         delivery: DeliverySpec::NatsEvent {

@@ -149,24 +149,19 @@ impl MockCronStore {
     }
 
     pub fn seed_job(&self, spec: JobSpec) {
-        self.stream_versions
-            .lock()
-            .unwrap()
-            .insert(spec.id.clone(), 1);
+        let id = spec.id.to_string();
+        self.stream_versions.lock().unwrap().insert(id.clone(), 1);
         self.events.lock().unwrap().insert(
-            spec.id.clone(),
+            id.clone(),
             vec![
                 JobEventData::new(JobEvent::JobRegistered {
-                    id: spec.id.clone(),
+                    id: id.clone(),
                     spec: crate::RegisteredJobSpec::from(&spec),
                 })
                 .unwrap(),
             ],
         );
-        self.jobs
-            .lock()
-            .unwrap()
-            .insert(spec.id.clone(), Snapshot::new(1, spec));
+        self.jobs.lock().unwrap().insert(id, Snapshot::new(1, spec));
     }
 
     pub(crate) fn read_command_snapshot<Payload>(
@@ -338,7 +333,10 @@ impl EventStore<crate::JobId> for MockCronStore {
             stored_events.push(event_data);
             match event {
                 JobEvent::JobRegistered { id, spec } => {
-                    projected_snapshot = Some(Snapshot::new(version, spec.into_job_spec(id)));
+                    let job_id = crate::JobId::parse(&id).map_err(|source| {
+                        CronError::event_source("failed to project mocked job registration", source)
+                    })?;
+                    projected_snapshot = Some(Snapshot::new(version, spec.into_job_spec(job_id)));
                 }
                 JobEvent::JobStateChanged { state, .. } => {
                     let mut snapshot = projected_snapshot.take().ok_or_else(|| {
@@ -420,7 +418,7 @@ mod tests {
 
     fn base_job(id: &str) -> JobSpec {
         JobSpec {
-            id: id.to_string(),
+            id: job_id(id),
             state: JobEnabledState::Enabled,
             schedule: ScheduleSpec::Every { every_sec: 30 },
             delivery: DeliverySpec::NatsEvent {

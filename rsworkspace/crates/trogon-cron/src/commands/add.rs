@@ -45,14 +45,8 @@ impl std::error::Error for RegisterJobDecisionError {}
 
 impl RegisterJobCommand {
     pub fn new(spec: JobSpec) -> Result<Self, CronError> {
-        let id = JobId::parse(&spec.id).map_err(|source| {
-            CronError::event_source(
-                "failed to build register job command from validated spec",
-                source,
-            )
-        })?;
         Ok(Self {
-            id,
+            id: spec.id.clone(),
             job: ResolvedJobSpec::try_from(&spec)?,
         })
     }
@@ -187,9 +181,13 @@ mod tests {
     use super::*;
     use crate::{DeliverySpec, GetJobCommand, JobEnabledState, ScheduleSpec, mocks::MockCronStore};
 
+    fn job_id(id: &str) -> JobId {
+        JobId::parse(id).unwrap()
+    }
+
     fn job(id: &str) -> JobSpec {
         JobSpec {
-            id: id.to_string(),
+            id: job_id(id),
             state: JobEnabledState::Enabled,
             schedule: ScheduleSpec::Every { every_sec: 30 },
             delivery: DeliverySpec::NatsEvent {

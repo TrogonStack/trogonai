@@ -120,7 +120,7 @@ async fn wait_for_stream_subject(js: &jetstream::Context, stream_name: &str, sub
 
 fn base_job(id: &str) -> JobSpec {
     JobSpec {
-        id: id.to_string(),
+        id: job_id(id),
         state: JobEnabledState::Enabled,
         schedule: ScheduleSpec::Every { every_sec: 2 },
         delivery: DeliverySpec::NatsEvent {

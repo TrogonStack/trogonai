@@ -93,9 +93,17 @@ impl CommandStateModel for ChangeJobStateCommand {
 
     fn evolve(_state: Self::State, event: JobEvent) -> Result<Self::State, Self::DomainError> {
         match event {
-            JobEvent::JobRegistered { id, spec } => Ok(ChangeJobStateState::Present {
-                current: spec.into_job_spec(id).state,
-            }),
+            JobEvent::JobRegistered { id, spec } => {
+                let job_id = JobId::parse(&id).map_err(|source| {
+                    CronError::event_source(
+                        "failed to rebuild change-job-state state from registration event",
+                        source,
+                    )
+                })?;
+                Ok(ChangeJobStateState::Present {
+                    current: spec.into_job_spec(job_id).state,
+                })
+            }
             JobEvent::JobStateChanged { state, .. } => {
                 Ok(ChangeJobStateState::Present { current: state })
             }
@@ -171,9 +179,13 @@ mod tests {
     use super::*;
     use crate::{DeliverySpec, GetJobCommand, JobSpec, ScheduleSpec, mocks::MockCronStore};
 
+    fn job_id(id: &str) -> JobId {
+        JobId::parse(id).unwrap()
+    }
+
     fn job(id: &str) -> JobSpec {
         JobSpec {
-            id: id.to_string(),
+            id: job_id(id),
             state: JobEnabledState::Enabled,
             schedule: ScheduleSpec::Every { every_sec: 30 },
             delivery: DeliverySpec::NatsEvent {

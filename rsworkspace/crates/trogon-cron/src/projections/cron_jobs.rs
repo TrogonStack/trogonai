@@ -65,7 +65,7 @@ pub fn apply(state: JobStreamState, event: JobEvent) -> Result<JobStreamState, J
     match (state, event) {
         (JobStreamState::Initial, JobEvent::JobRegistered { id, spec }) => JobId::parse(&id)
             .map_err(|source| JobTransitionError::InvalidEventId { id, source })
-            .map(|job_id| JobStreamState::Present(spec.into_job_spec(job_id.to_string()))),
+            .map(|job_id| JobStreamState::Present(spec.into_job_spec(job_id))),
         (JobStreamState::Initial, event @ JobEvent::JobStateChanged { .. }) => {
             Err(JobTransitionError::MissingJobForStateChange {
                 id: parse_event_job_id(&event)?,
@@ -77,10 +77,9 @@ pub fn apply(state: JobStreamState, event: JobEvent) -> Result<JobStreamState, J
             })
         }
         (JobStreamState::Present(spec), JobEvent::JobRegistered { .. }) => {
-            let id = spec.id.clone();
-            let job_id = JobId::parse(&id)
-                .map_err(|source| JobTransitionError::InvalidEventId { id, source })?;
-            Err(JobTransitionError::CannotRegisterExistingJob { id: job_id })
+            Err(JobTransitionError::CannotRegisterExistingJob {
+                id: spec.id.clone(),
+            })
         }
         (JobStreamState::Present(mut spec), JobEvent::JobStateChanged { state, .. }) => {
             spec.state = state;
@@ -98,7 +97,7 @@ pub fn projection_change(
         (JobStreamState::Initial, JobStreamState::Initial) => None,
         (_, JobStreamState::Present(spec)) => Some(ProjectionChange::Upsert(spec.clone())),
         (JobStreamState::Present(spec), JobStreamState::Initial) => {
-            Some(ProjectionChange::Delete(spec.id.clone()))
+            Some(ProjectionChange::Delete(spec.id.to_string()))
         }
     }
 }
@@ -120,7 +119,6 @@ impl TryFrom<JobSpec> for JobStreamState {
     type Error = JobIdError;
 
     fn try_from(spec: JobSpec) -> Result<Self, Self::Error> {
-        JobId::parse(&spec.id)?;
         Ok(Self::Present(spec))
     }
 }
@@ -189,7 +187,12 @@ where
     let state = initial_jobs
         .iter()
         .cloned()
-        .map(|job| (job.payload.id.clone(), JobStreamState::Present(job.payload)))
+        .map(|job| {
+            (
+                job.payload.id.to_string(),
+                JobStreamState::Present(job.payload),
+            )
+        })
         .collect::<BTreeMap<_, _>>();
     let state = Arc::new(Mutex::new(state));
     let watcher: CronJobWatchStream = Box::pin(subscriber.then(move |result| {
@@ -447,7 +450,7 @@ where
 
     for job in jobs {
         let value = serde_json::to_vec(&job.payload)?;
-        kv.put(job.payload.id.clone(), value.into())
+        kv.put(job.payload.id.to_string(), value.into())
             .await
             .map_err(|source| {
                 CronError::kv_source("failed to write projected job state", source)
@@ -576,7 +579,7 @@ async fn apply_projection_change(
     match change {
         ProjectionChange::Upsert(job) => {
             let value = serde_json::to_vec(job)?;
-            kv.put(job.id.clone(), value.into())
+            kv.put(job.id.to_string(), value.into())
                 .await
                 .map_err(|source| {
                     CronError::kv_source("failed to store projected job state", source)
@@ -672,13 +675,17 @@ mod tests {
 
     use super::*;
     use crate::{
-        RegisteredJobSpec,
+        JobId, RegisteredJobSpec,
         config::{DeliverySpec, JobEnabledState, ScheduleSpec},
     };
 
+    fn job_id(id: &str) -> JobId {
+        JobId::parse(id).unwrap()
+    }
+
     fn job(id: &str) -> JobSpec {
         JobSpec {
-            id: id.to_string(),
+            id: job_id(id),
             state: JobEnabledState::Enabled,
             schedule: ScheduleSpec::Every { every_sec: 30 },
             delivery: DeliverySpec::NatsEvent {

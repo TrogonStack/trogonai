@@ -3,7 +3,10 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::{EventData, EventType, RecordedEvent, StreamEvent};
 
-use crate::config::{DeliverySpec, JobEnabledState, JobSpec, ScheduleSpec};
+use crate::{
+    JobId,
+    config::{DeliverySpec, JobEnabledState, JobSpec, ScheduleSpec},
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RegisteredJobSpec {
@@ -17,9 +20,9 @@ pub struct RegisteredJobSpec {
 }
 
 impl RegisteredJobSpec {
-    pub fn into_job_spec(self, id: impl Into<String>) -> JobSpec {
+    pub fn into_job_spec(self, id: JobId) -> JobSpec {
         JobSpec {
-            id: id.into(),
+            id,
             state: self.state,
             schedule: self.schedule,
             delivery: self.delivery,
