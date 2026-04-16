@@ -3,8 +3,8 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::{
     AlwaysSnapshot, CommandExecution, CommandFailure, CommandInfraError, CommandOutcome,
-    CommandStateModel, Decide, Decision, EventStore, ExpectedState, ExpectedStateRule, NonEmpty,
-    OccPolicy, SnapshotStateModel, SnapshotStore, SnapshotStoreConfig, StreamCommand,
+    CommandState, Decide, Decision, EventStore, ExpectedState, ExpectedStateRule, NonEmpty,
+    OccPolicy, SnapshotState, SnapshotStore, SnapshotStoreConfig, StreamCommand,
 };
 
 use crate::{
@@ -91,7 +91,7 @@ impl Decide<RegisterJobState, JobEvent> for RegisterJobCommand {
     }
 }
 
-impl CommandStateModel for RegisterJobCommand {
+impl CommandState for RegisterJobCommand {
     type State = RegisterJobState;
     type Event = JobEvent;
     type DomainError = RegisterJobDecisionError;
@@ -113,7 +113,7 @@ impl CommandStateModel for RegisterJobCommand {
     }
 }
 
-impl SnapshotStateModel for RegisterJobCommand {
+impl SnapshotState for RegisterJobCommand {
     type Snapshot = RegisterJobState;
 
     fn snapshot_state(state: &Self::State) -> Option<Self::Snapshot> {
