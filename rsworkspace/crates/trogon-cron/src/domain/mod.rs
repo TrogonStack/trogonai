@@ -1,6 +1,6 @@
 mod job_id;
+mod spec;
 
-use std::collections::BTreeMap;
 use std::str::FromStr;
 
 use async_nats::{HeaderMap, HeaderValue};
@@ -8,12 +8,14 @@ use bytes::Bytes;
 use trogon_nats::{DottedNatsToken, NatsToken};
 
 use crate::{
-    config::{DeliverySpec, JobSpec, SamplingSource, ScheduleSpec},
     error::{CronError, JobSpecError},
     kv::{FIRE_SUBJECT_PREFIX, SCHEDULE_SUBJECT_PREFIX},
 };
 
 pub use job_id::{JobId, JobIdError};
+pub use spec::{DeliverySpec, JobEnabledState, JobSpec, SamplingSource, ScheduleSpec};
+
+use std::collections::BTreeMap;
 
 const NATS_SCHEDULE: &str = "Nats-Schedule";
 const NATS_SCHEDULE_SOURCE: &str = "Nats-Schedule-Source";
@@ -311,7 +313,7 @@ mod tests {
     use chrono::{TimeZone, Utc};
 
     use super::*;
-    use crate::{JobId, config::JobSpec};
+    use crate::{JobEnabledState, JobId, JobSpec};
 
     fn job_id(id: &str) -> JobId {
         JobId::parse(id).unwrap()
@@ -320,7 +322,7 @@ mod tests {
     fn base_job() -> JobSpec {
         JobSpec {
             id: job_id("heartbeat"),
-            state: crate::config::JobEnabledState::Enabled,
+            state: JobEnabledState::Enabled,
             schedule: ScheduleSpec::Every { every_sec: 30 },
             delivery: DeliverySpec::NatsEvent {
                 route: "agent.run".to_string(),
@@ -450,7 +452,7 @@ mod tests {
     #[test]
     fn resolved_job_accessors_expose_validated_values() {
         let mut job = base_job();
-        job.state = crate::config::JobEnabledState::Disabled;
+        job.state = JobEnabledState::Disabled;
 
         let resolved = ResolvedJobSpec::try_from(&job).unwrap();
 

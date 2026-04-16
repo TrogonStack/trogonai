@@ -1,6 +1,6 @@
 use trogon_eventsourcing::ExpectedState;
 
-use crate::config::JobEnabledState;
+use crate::JobEnabledState;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 

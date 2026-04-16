@@ -17,8 +17,7 @@ use trogon_nats::lease::{
 use uuid::Uuid;
 
 use crate::{
-    JobId,
-    config::JobSpec,
+    JobId, JobSpec,
     domain::ResolvedJobSpec,
     error::CronError,
     events::{JobEvent, JobEventData, RecordedJobEvent},
@@ -647,8 +646,7 @@ mod tests {
         scheduler_consumer_config,
     };
     use crate::{
-        JobId, RegisteredJobSpec,
-        config::{DeliverySpec, JobEnabledState, JobSpec, ScheduleSpec},
+        DeliverySpec, JobEnabledState, JobId, JobSpec, RegisteredJobSpec, ScheduleSpec,
         events::JobEvent,
         mocks::{MockCronStore, MockLeaderLock, MockSchedulePublisher},
     };
@@ -660,7 +658,7 @@ mod tests {
     fn base_job(id: &str) -> JobSpec {
         JobSpec {
             id: job_id(id),
-            state: crate::config::JobEnabledState::Enabled,
+            state: JobEnabledState::Enabled,
             schedule: ScheduleSpec::Every { every_sec: 30 },
             delivery: DeliverySpec::NatsEvent {
                 route: "agent.run".to_string(),
@@ -693,7 +691,7 @@ mod tests {
         publisher.seed_active_job("disabled");
 
         let mut disabled = base_job("disabled");
-        disabled.state = crate::config::JobEnabledState::Disabled;
+        disabled.state = JobEnabledState::Disabled;
         disabled.delivery = DeliverySpec::NatsEvent {
             route: "agent.>".to_string(),
             headers: BTreeMap::new(),
