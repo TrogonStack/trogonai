@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::{
     AlwaysSnapshot, CommandExecution, CommandFailure, CommandInfraError, CommandOutcome,
-    CommandStateModel, Decide, Decision, EventStore, NonEmpty, OccPolicy, SnapshotStateModel,
-    SnapshotStore, SnapshotStoreConfig, StreamCommand,
+    CommandState, Decide, Decision, EventStore, NonEmpty, OccPolicy, SnapshotState, SnapshotStore,
+    SnapshotStoreConfig, StreamCommand,
 };
 
 use crate::{JobEnabledState, JobId, JobIdError, error::CronError, events::JobEvent};
@@ -122,7 +122,7 @@ impl Decide<ChangeJobStateState, JobEvent> for ChangeJobStateCommand {
     }
 }
 
-impl CommandStateModel for ChangeJobStateCommand {
+impl CommandState for ChangeJobStateCommand {
     type State = ChangeJobStateState;
     type Event = JobEvent;
     type DomainError = ChangeJobStateError;
@@ -152,7 +152,7 @@ impl CommandStateModel for ChangeJobStateCommand {
     }
 }
 
-impl SnapshotStateModel for ChangeJobStateCommand {
+impl SnapshotState for ChangeJobStateCommand {
     type Snapshot = ChangeJobStateState;
 
     fn snapshot_state(state: &Self::State) -> Option<Self::Snapshot> {

@@ -2,7 +2,7 @@
 
 use std::{collections::HashMap, fmt::Debug, marker::PhantomData};
 
-use crate::{CommandStateModel, Decide, Decision, NonEmpty, StreamCommand};
+use crate::{CommandState, Decide, Decision, NonEmpty, StreamCommand};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Decider<C>(PhantomData<fn() -> C>);
@@ -193,7 +193,7 @@ impl<C> TestCase<C, Start> {
 
 impl<C> TestCase<C, Start>
 where
-    C: CommandStateModel + Decide<C::State, C::Event>,
+    C: CommandState + Decide<C::State, C::Event>,
 {
     pub fn given<I>(mut self, events: I) -> TestCase<C, Given<C::Event>>
     where
@@ -212,7 +212,7 @@ where
 
 impl<C> TestCase<C, Given<C::Event>>
 where
-    C: CommandStateModel + Decide<C::State, C::Event>,
+    C: CommandState + Decide<C::State, C::Event>,
     C::Event: Clone + Debug,
     C::DomainError: Debug,
 {
@@ -247,7 +247,7 @@ where
 
 impl<C> TestCase<C, When<C::Event, C::State, C>>
 where
-    C: CommandStateModel + Decide<C::State, C::Event> + StreamCommand,
+    C: CommandState + Decide<C::State, C::Event> + StreamCommand,
     C::Event: Clone + PartialEq + Debug,
     C::Error: PartialEq + Debug,
     C::StreamId: std::fmt::Display,
@@ -277,7 +277,7 @@ impl<C, Stage> Drop for TestCase<C, Stage> {
 
 pub trait ThenExpectation<C>: private::Sealed<C>
 where
-    C: CommandStateModel + Decide<C::State, C::Event> + StreamCommand,
+    C: CommandState + Decide<C::State, C::Event> + StreamCommand,
     C::StreamId: std::fmt::Display,
 {
     type Output;
@@ -292,7 +292,7 @@ where
 
 impl<C> ThenExpectation<C> for NonEmpty<C::Event>
 where
-    C: CommandStateModel + Decide<C::State, C::Event> + StreamCommand,
+    C: CommandState + Decide<C::State, C::Event> + StreamCommand,
     C::Event: Clone + PartialEq + Debug,
     C::Error: PartialEq + Debug,
     C::StreamId: std::fmt::Display,
@@ -311,7 +311,7 @@ where
 
 impl<C> ThenExpectation<C> for Vec<C::Event>
 where
-    C: CommandStateModel + Decide<C::State, C::Event> + StreamCommand,
+    C: CommandState + Decide<C::State, C::Event> + StreamCommand,
     C::Event: Clone + PartialEq + Debug,
     C::Error: PartialEq + Debug,
     C::StreamId: std::fmt::Display,
@@ -334,7 +334,7 @@ where
 
 impl<C, const N: usize> ThenExpectation<C> for [C::Event; N]
 where
-    C: CommandStateModel + Decide<C::State, C::Event> + StreamCommand,
+    C: CommandState + Decide<C::State, C::Event> + StreamCommand,
     C::Event: Clone + PartialEq + Debug,
     C::Error: PartialEq + Debug,
     C::StreamId: std::fmt::Display,
@@ -357,7 +357,7 @@ where
 
 impl<C> ThenExpectation<C> for ExpectedError<C::Error>
 where
-    C: CommandStateModel + Decide<C::State, C::Event> + StreamCommand,
+    C: CommandState + Decide<C::State, C::Event> + StreamCommand,
     C::Event: Clone + PartialEq + Debug,
     C::Error: PartialEq + Debug,
     C::StreamId: std::fmt::Display,
@@ -397,7 +397,7 @@ fn assert_events_match<C>(
     actual: Result<Decision<C::Event>, C::Error>,
 ) -> ThenEvents<C::Event>
 where
-    C: CommandStateModel + Decide<C::State, C::Event> + StreamCommand,
+    C: CommandState + Decide<C::State, C::Event> + StreamCommand,
     C::Event: Clone + PartialEq + Debug,
     C::Error: PartialEq + Debug,
     C::StreamId: std::fmt::Display,
@@ -423,27 +423,26 @@ where
 }
 
 mod private {
-    use crate::{CommandStateModel, Decide, NonEmpty};
+    use crate::{CommandState, Decide, NonEmpty};
 
     use super::ExpectedError;
 
     pub trait Sealed<C>
     where
-        C: CommandStateModel + Decide<C::State, C::Event>,
+        C: CommandState + Decide<C::State, C::Event>,
     {
     }
 
-    impl<C> Sealed<C> for NonEmpty<C::Event> where C: CommandStateModel + Decide<C::State, C::Event> {}
+    impl<C> Sealed<C> for NonEmpty<C::Event> where C: CommandState + Decide<C::State, C::Event> {}
 
-    impl<C> Sealed<C> for Vec<C::Event> where C: CommandStateModel + Decide<C::State, C::Event> {}
+    impl<C> Sealed<C> for Vec<C::Event> where C: CommandState + Decide<C::State, C::Event> {}
 
     impl<C, const N: usize> Sealed<C> for [C::Event; N] where
-        C: CommandStateModel + Decide<C::State, C::Event>
+        C: CommandState + Decide<C::State, C::Event>
     {
     }
 
-    impl<C> Sealed<C> for ExpectedError<C::Error> where C: CommandStateModel + Decide<C::State, C::Event>
-    {}
+    impl<C> Sealed<C> for ExpectedError<C::Error> where C: CommandState + Decide<C::State, C::Event> {}
 }
 
 #[cfg(test)]
@@ -523,7 +522,7 @@ mod tests {
         }
     }
 
-    impl CommandStateModel for TestCommand {
+    impl CommandState for TestCommand {
         type State = TestState;
         type Event = TestEvent;
         type DomainError = TestDomainError;
