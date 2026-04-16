@@ -323,14 +323,14 @@ mod tests {
     }
 
     #[test]
-    fn deleted_streams_can_be_recreated_without_changing_subject() {
+    fn deleted_streams_keep_their_subject_and_still_count_as_existing() {
         let state =
-            resolve_event_subject_state("alpha", Some(JobWriteState::new(Some(12), false)), None)
+            resolve_event_subject_state("alpha", Some(JobWriteState::new(Some(12), true)), None)
                 .unwrap();
 
         assert_eq!(state.prefix, EventSubjectPrefix::Canonical);
         assert_eq!(state.write_state.current_version(), Some(12));
-        assert!(!state.write_state.exists());
+        assert!(state.write_state.exists());
     }
 
     #[test]

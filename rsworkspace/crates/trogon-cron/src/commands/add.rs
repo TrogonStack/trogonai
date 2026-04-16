@@ -26,17 +26,22 @@ pub(crate) const SNAPSHOT_STORE_CONFIG: SnapshotStoreConfig<'static> =
 pub enum RegisterJobState {
     Missing,
     Present,
+    Deleted,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RegisterJobDecisionError {
     AlreadyRegistered { id: JobId },
+    JobDeleted { id: JobId },
 }
 
 impl fmt::Display for RegisterJobDecisionError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::AlreadyRegistered { id } => write!(f, "job '{id}' is already registered"),
+            Self::JobDeleted { id } => {
+                write!(f, "job '{id}' was deleted and cannot be registered again")
+            }
         }
     }
 }
@@ -87,6 +92,9 @@ impl Decide<RegisterJobState, JobEvent> for RegisterJobCommand {
             RegisterJobState::Present => Err(RegisterJobDecisionError::AlreadyRegistered {
                 id: command.stream_id().clone(),
             }),
+            RegisterJobState::Deleted => Err(RegisterJobDecisionError::JobDeleted {
+                id: command.stream_id().clone(),
+            }),
         }
     }
 }
@@ -102,13 +110,13 @@ impl CommandState for RegisterJobCommand {
 
     fn evolve(state: Self::State, event: JobEvent) -> Result<Self::State, Self::DomainError> {
         match event {
-            JobEvent::JobRegistered { .. } | JobEvent::JobStateChanged { .. } => {
-                Ok(RegisterJobState::Present)
-            }
-            JobEvent::JobRemoved { .. } => match state {
-                RegisterJobState::Missing => Ok(RegisterJobState::Missing),
-                RegisterJobState::Present => Ok(RegisterJobState::Missing),
+            JobEvent::JobRegistered { .. } | JobEvent::JobStateChanged { .. } => match state {
+                RegisterJobState::Deleted => Ok(RegisterJobState::Deleted),
+                RegisterJobState::Missing | RegisterJobState::Present => {
+                    Ok(RegisterJobState::Present)
+                }
             },
+            JobEvent::JobRemoved { .. } => Ok(RegisterJobState::Deleted),
         }
     }
 }
@@ -225,6 +233,24 @@ mod tests {
             }));
     }
 
+    #[test]
+    fn rejects_registering_deleted_job_ids() {
+        TestCase::new(decider::<RegisterJobCommand>())
+            .given([
+                JobEvent::JobRegistered {
+                    id: "backup".to_string(),
+                    spec: RegisteredJobSpec::from(job("backup")),
+                },
+                JobEvent::JobRemoved {
+                    id: "backup".to_string(),
+                },
+            ])
+            .when(RegisterJobCommand::new(job("backup")).unwrap())
+            .then(expect_error(RegisterJobDecisionError::JobDeleted {
+                id: JobId::parse("backup").unwrap(),
+            }));
+    }
+
     #[tokio::test]
     async fn run_registers_job_in_store() {
         let store = MockCronStore::new();
@@ -293,6 +319,43 @@ mod tests {
         assert!(matches!(
             error,
             CommandFailure::Domain(RegisterJobDecisionError::AlreadyRegistered { ref id })
+                if id.to_string() == "backup"
+        ));
+    }
+
+    #[tokio::test]
+    async fn run_rejects_registering_deleted_job_id() {
+        let store = MockCronStore::new();
+
+        run(
+            &store,
+            &store,
+            RegisterJobCommand::new(job("backup")).unwrap(),
+            OccPolicy::UseCommandRule,
+        )
+        .await
+        .unwrap();
+        crate::remove_job(
+            &store,
+            &store,
+            crate::RemoveJobCommand::new(JobId::parse("backup").unwrap()),
+            OccPolicy::UseCommandRule,
+        )
+        .await
+        .unwrap();
+
+        let error = run(
+            &store,
+            &store,
+            RegisterJobCommand::new(job("backup")).unwrap(),
+            OccPolicy::UseCommandRule,
+        )
+        .await
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            CommandFailure::Domain(RegisterJobDecisionError::JobDeleted { ref id })
                 if id.to_string() == "backup"
         ));
     }
