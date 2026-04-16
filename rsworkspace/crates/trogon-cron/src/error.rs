@@ -22,6 +22,9 @@ pub enum CronError {
         context: &'static str,
         source: BoxError,
     },
+    JobAlreadyRegistered {
+        id: String,
+    },
     JobNotFound {
         id: String,
     },
@@ -83,6 +86,9 @@ impl std::fmt::Display for CronError {
             Self::Schedule { context, source } => {
                 write!(f, "Schedule error: {context}: {source}")
             }
+            Self::JobAlreadyRegistered { id } => {
+                write!(f, "Job '{id}' is already registered")
+            }
             Self::JobNotFound { id } => write!(f, "Job '{id}' not found"),
             Self::JobStateAlreadySet { id, state } => {
                 write!(f, "Job '{id}' is already {}", state.as_str())
@@ -116,7 +122,8 @@ impl std::error::Error for CronError {
             Self::Schedule { source, .. } => Some(source.as_ref()),
             Self::Serde(error) => Some(error),
             Self::InvalidJobSpec { source } => Some(source),
-            Self::JobNotFound { .. }
+            Self::JobAlreadyRegistered { .. }
+            | Self::JobNotFound { .. }
             | Self::JobStateAlreadySet { .. }
             | Self::OptimisticConcurrencyConflict { .. } => None,
         }
@@ -276,6 +283,15 @@ mod tests {
         let schedule = CronError::schedule_source("upsert", std::io::Error::other("rejected"));
         assert_eq!(schedule.to_string(), "Schedule error: upsert: rejected");
         assert!(std::error::Error::source(&schedule).is_some());
+
+        let already_registered = CronError::JobAlreadyRegistered {
+            id: "job-1".to_string(),
+        };
+        assert_eq!(
+            already_registered.to_string(),
+            "Job 'job-1' is already registered"
+        );
+        assert!(std::error::Error::source(&already_registered).is_none());
 
         let not_found = CronError::JobNotFound {
             id: "missing".to_string(),

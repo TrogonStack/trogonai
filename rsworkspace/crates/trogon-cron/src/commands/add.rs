@@ -138,14 +138,7 @@ where
     {
         Ok(_) => Ok(()),
         Err(ExecuteError::Decision(RegisterJobDecisionError::AlreadyRegistered { .. })) => {
-            let current_version = event_store
-                .current_stream_version(command.stream_id())
-                .await?;
-            Err(CronError::OptimisticConcurrencyConflict {
-                id: id.clone(),
-                expected: occ.resolve(current_version, command.default_expected_state()),
-                current_version,
-            })
+            Err(CronError::JobAlreadyRegistered { id })
         }
         Err(ExecuteError::LoadSnapshot(error))
         | Err(ExecuteError::SaveSnapshot(error))
@@ -287,5 +280,33 @@ mod tests {
             command_snapshot,
             Snapshot::new(1, RegisterJobState::Present)
         );
+    }
+
+    #[tokio::test]
+    async fn run_rejects_registering_existing_job_with_domain_error() {
+        let store = MockCronStore::new();
+
+        run(
+            &store,
+            &store,
+            RegisterJobCommand::new(job("backup")).unwrap(),
+            OccPolicy::CommandDefault,
+        )
+        .await
+        .unwrap();
+
+        let error = run(
+            &store,
+            &store,
+            RegisterJobCommand::new(job("backup")).unwrap(),
+            OccPolicy::CommandDefault,
+        )
+        .await
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            CronError::JobAlreadyRegistered { ref id } if id == "backup"
+        ));
     }
 }
