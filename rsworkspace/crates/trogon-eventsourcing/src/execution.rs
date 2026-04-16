@@ -5,7 +5,7 @@ use crate::{
     StreamCommand, StreamEvent,
 };
 
-pub trait CommandStateModel: StreamCommand + Sized {
+pub trait CommandState: StreamCommand + Sized {
     type State;
     type Event;
     type DomainError;
@@ -15,7 +15,7 @@ pub trait CommandStateModel: StreamCommand + Sized {
     fn evolve(state: Self::State, event: Self::Event) -> Result<Self::State, Self::DomainError>;
 }
 
-pub trait SnapshotStateModel: CommandStateModel {
+pub trait SnapshotState: CommandState {
     type Snapshot;
 
     fn restore_state(
@@ -264,7 +264,7 @@ impl<E, C, S> CommandExecution<'_, E, C, S> {
 
 impl<E, C> CommandExecution<'_, E, C, WithoutSnapshots>
 where
-    C: CommandStateModel + Decide<C::State, C::Event>,
+    C: CommandState + Decide<C::State, C::Event>,
     C::Event: EventType + StreamEvent + Serialize + DeserializeOwned + Clone,
     E: EventStore<C::StreamId>,
     C::DomainError: From<C::Error>,
@@ -334,7 +334,7 @@ where
 
 impl<E, S, C, P, SErr> CommandExecution<'_, E, C, WithSnapshots<'_, S, P>>
 where
-    C: SnapshotStateModel + Decide<C::State, C::Event>,
+    C: SnapshotState + Decide<C::State, C::Event>,
     C::Event: EventType + StreamEvent + Serialize + DeserializeOwned + Clone,
     C::Snapshot: Into<C::State>,
     E: EventStore<C::StreamId, Error = SErr>,
@@ -594,7 +594,7 @@ mod tests {
         }
     }
 
-    impl CommandStateModel for TestCommand {
+    impl CommandState for TestCommand {
         type State = TestState;
         type Event = TestEvent;
         type DomainError = TestCommandError;
@@ -616,7 +616,7 @@ mod tests {
         }
     }
 
-    impl SnapshotStateModel for TestCommand {
+    impl SnapshotState for TestCommand {
         type Snapshot = TestState;
 
         fn snapshot_state(state: &Self::State) -> Option<Self::Snapshot> {
