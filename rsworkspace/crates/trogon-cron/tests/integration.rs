@@ -195,7 +195,7 @@ async fn controller_reconciles_one_time_job() {
         &store,
         &store,
         RegisterJobCommand::new(job).unwrap(),
-        OccPolicy::CommandDefault,
+        OccPolicy::UseCommandRule,
     )
     .await
     .unwrap();
@@ -239,7 +239,7 @@ async fn controller_reconciles_sampling_job() {
         &store,
         &store,
         RegisterJobCommand::new(job).unwrap(),
-        OccPolicy::CommandDefault,
+        OccPolicy::UseCommandRule,
     )
     .await
     .unwrap();
@@ -285,7 +285,7 @@ async fn controller_reconciles_cron_job_with_timezone() {
         &store,
         &store,
         RegisterJobCommand::new(job).unwrap(),
-        OccPolicy::CommandDefault,
+        OccPolicy::UseCommandRule,
     )
     .await
     .unwrap();
@@ -320,7 +320,7 @@ async fn disabling_job_removes_schedule_subject() {
         &store,
         &store,
         RegisterJobCommand::new(job).unwrap(),
-        OccPolicy::CommandDefault,
+        OccPolicy::UseCommandRule,
     )
     .await
     .unwrap();
@@ -335,7 +335,7 @@ async fn disabling_job_removes_schedule_subject() {
         &store,
         &store,
         ChangeJobStateCommand::new(job_id("disabled"), JobEnabledState::Disabled),
-        OccPolicy::CommandDefault,
+        OccPolicy::UseCommandRule,
     )
     .await
     .unwrap();
@@ -365,7 +365,7 @@ async fn removing_job_removes_schedule_subject() {
         &store,
         &store,
         RegisterJobCommand::new(job).unwrap(),
-        OccPolicy::CommandDefault,
+        OccPolicy::UseCommandRule,
     )
     .await
     .unwrap();
@@ -380,7 +380,7 @@ async fn removing_job_removes_schedule_subject() {
         &store,
         &store,
         RemoveJobCommand::new(job_id("removed")),
-        OccPolicy::CommandDefault,
+        OccPolicy::UseCommandRule,
     )
     .await
     .unwrap();
@@ -407,7 +407,7 @@ async fn event_store_rebuilds_current_state_for_new_client() {
         &store,
         &store,
         RegisterJobCommand::new(job).unwrap(),
-        OccPolicy::CommandDefault,
+        OccPolicy::UseCommandRule,
     )
     .await
     .unwrap();
@@ -415,7 +415,7 @@ async fn event_store_rebuilds_current_state_for_new_client() {
         &store,
         &store,
         ChangeJobStateCommand::new(job_id("eventful"), JobEnabledState::Disabled),
-        OccPolicy::CommandDefault,
+        OccPolicy::UseCommandRule,
     )
     .await
     .unwrap();

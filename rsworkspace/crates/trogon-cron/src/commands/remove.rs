@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::{
     AlwaysSnapshot, CommandExecution, CommandFailure, CommandInfraError, CommandOutcome,
-    CommandStateModel, Decide, Decision, DefaultExpectedStateProvider, EventStore, NonEmpty,
-    OccPolicy, SnapshotStateModel, SnapshotStore, SnapshotStoreConfig, StreamCommand,
+    CommandStateModel, Decide, Decision, EventStore, NonEmpty, OccPolicy, SnapshotStateModel,
+    SnapshotStore, SnapshotStoreConfig, StreamCommand,
 };
 
 use crate::{JobId, error::CronError, events::JobEvent};
@@ -96,8 +96,6 @@ impl SnapshotStateModel for RemoveJobCommand {
         Some(*state)
     }
 }
-
-impl DefaultExpectedStateProvider for RemoveJobCommand {}
 
 pub async fn run<E, S>(
     event_store: &E,
@@ -208,7 +206,7 @@ mod tests {
             &store,
             &store,
             RemoveJobCommand::new(JobId::parse("backup").unwrap()),
-            OccPolicy::CommandDefault,
+            OccPolicy::UseCommandRule,
         )
         .await
         .unwrap();

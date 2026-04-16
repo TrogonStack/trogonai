@@ -53,31 +53,36 @@ impl ExpectedState {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum OccPolicy {
     #[default]
-    CommandDefault,
+    UseCommandRule,
     ExactCurrentVersion,
     Explicit(ExpectedState),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExpectedStateRule {
+    Default(ExpectedState),
+    Required(ExpectedState),
 }
 
 impl OccPolicy {
     pub const fn resolve(
         self,
         current_version: Option<u64>,
-        command_default: Option<ExpectedState>,
+        command_rule: Option<ExpectedStateRule>,
     ) -> ExpectedState {
+        if let Some(ExpectedStateRule::Required(expected_state)) = command_rule {
+            return expected_state;
+        }
+
         match self {
-            Self::CommandDefault => match command_default {
-                Some(expected_state) => expected_state,
+            Self::UseCommandRule => match command_rule {
+                Some(ExpectedStateRule::Default(expected_state)) => expected_state,
+                Some(ExpectedStateRule::Required(expected_state)) => expected_state,
                 None => ExpectedState::from_current_version(current_version),
             },
             Self::ExactCurrentVersion => ExpectedState::from_current_version(current_version),
             Self::Explicit(expected_state) => expected_state,
         }
-    }
-}
-
-pub trait DefaultExpectedStateProvider: StreamCommand {
-    fn default_expected_state(&self) -> Option<ExpectedState> {
-        None
     }
 }
 
@@ -226,7 +231,7 @@ impl<'a, E, C> CommandExecution<'a, E, C, WithoutSnapshots> {
         Self {
             event_store,
             command,
-            occ: OccPolicy::CommandDefault,
+            occ: OccPolicy::UseCommandRule,
             snapshots: WithoutSnapshots,
         }
     }
@@ -259,7 +264,7 @@ impl<E, C, S> CommandExecution<'_, E, C, S> {
 
 impl<E, C> CommandExecution<'_, E, C, WithoutSnapshots>
 where
-    C: CommandStateModel + Decide<C::State, C::Event> + DefaultExpectedStateProvider,
+    C: CommandStateModel + Decide<C::State, C::Event>,
     C::Event: EventType + StreamEvent + Serialize + DeserializeOwned + Clone,
     E: EventStore<C::StreamId>,
     C::DomainError: From<C::Error>,
@@ -307,7 +312,7 @@ where
             .map_err(CommandFailure::Infra)?;
         let expected_state = self
             .occ
-            .resolve(current_version, self.command.default_expected_state());
+            .resolve(current_version, self.command.expected_state_rule());
         let append_outcome = self
             .event_store
             .append_events(stream_id, expected_state, encoded_events)
@@ -329,7 +334,7 @@ where
 
 impl<E, S, C, P, SErr> CommandExecution<'_, E, C, WithSnapshots<'_, S, P>>
 where
-    C: SnapshotStateModel + Decide<C::State, C::Event> + DefaultExpectedStateProvider,
+    C: SnapshotStateModel + Decide<C::State, C::Event>,
     C::Event: EventType + StreamEvent + Serialize + DeserializeOwned + Clone,
     C::Snapshot: Into<C::State>,
     E: EventStore<C::StreamId, Error = SErr>,
@@ -405,7 +410,7 @@ where
             .map_err(CommandFailure::Infra)?;
         let expected_state = self
             .occ
-            .resolve(current_version, self.command.default_expected_state());
+            .resolve(current_version, self.command.expected_state_rule());
         let append_outcome = self
             .event_store
             .append_events(stream_id, expected_state, encoded_events)
@@ -483,7 +488,7 @@ mod tests {
     struct TestCommand {
         id: String,
         action: TestAction,
-        default_expected_state: Option<ExpectedState>,
+        expected_state_rule: Option<ExpectedStateRule>,
         stream_id_calls: Arc<AtomicUsize>,
     }
 
@@ -556,13 +561,18 @@ mod tests {
             Self {
                 id: id.to_string(),
                 action,
-                default_expected_state: None,
+                expected_state_rule: None,
                 stream_id_calls: Arc::new(AtomicUsize::new(0)),
             }
         }
 
         fn with_default_expected_state(mut self, expected_state: ExpectedState) -> Self {
-            self.default_expected_state = Some(expected_state);
+            self.expected_state_rule = Some(ExpectedStateRule::Default(expected_state));
+            self
+        }
+
+        fn with_required_expected_state(mut self, expected_state: ExpectedState) -> Self {
+            self.expected_state_rule = Some(ExpectedStateRule::Required(expected_state));
             self
         }
 
@@ -577,6 +587,10 @@ mod tests {
         fn stream_id(&self) -> &Self::StreamId {
             self.stream_id_calls.fetch_add(1, Ordering::SeqCst);
             &self.id
+        }
+
+        fn expected_state_rule(&self) -> Option<ExpectedStateRule> {
+            self.expected_state_rule
         }
     }
 
@@ -599,12 +613,6 @@ mod tests {
                 TestEvent::Removed { .. } => Ok(TestState::Missing),
                 TestEvent::Broken { .. } => Err(TestCommandError::BrokenEvent),
             }
-        }
-    }
-
-    impl DefaultExpectedStateProvider for TestCommand {
-        fn default_expected_state(&self) -> Option<ExpectedState> {
-            self.default_expected_state
         }
     }
 
@@ -958,7 +966,7 @@ mod tests {
     }
 
     #[test]
-    fn uses_command_default_expected_state_when_requested() {
+    fn uses_command_default_expected_state_when_using_command_rule() {
         let runtime = FakeRuntime {
             next_expected_version: 1,
             ..Default::default()
@@ -975,7 +983,7 @@ mod tests {
     }
 
     #[test]
-    fn explicit_occ_overrides_command_default() {
+    fn explicit_occ_overrides_default_command_rule() {
         let runtime = FakeRuntime {
             next_expected_version: 1,
             ..Default::default()
@@ -997,7 +1005,7 @@ mod tests {
     }
 
     #[test]
-    fn exact_current_version_overrides_command_default() {
+    fn exact_current_version_overrides_default_command_rule() {
         let runtime = FakeRuntime {
             current_version: Some(7),
             recorded_events: vec![recorded_event(
@@ -1022,6 +1030,28 @@ mod tests {
         assert_eq!(
             runtime.expected_versions.lock().unwrap().as_slice(),
             &[ExpectedState::StreamRevision(7)]
+        );
+    }
+
+    #[test]
+    fn required_command_rule_ignores_explicit_occ() {
+        let runtime = FakeRuntime {
+            next_expected_version: 1,
+            ..Default::default()
+        };
+        let command = TestCommand::new("alpha", TestAction::Register)
+            .with_required_expected_state(ExpectedState::NoStream);
+
+        let _ = block_on(
+            CommandExecution::new(&runtime, &command)
+                .occ(OccPolicy::Explicit(ExpectedState::Any))
+                .execute(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            runtime.expected_versions.lock().unwrap().as_slice(),
+            &[ExpectedState::NoStream]
         );
     }
 

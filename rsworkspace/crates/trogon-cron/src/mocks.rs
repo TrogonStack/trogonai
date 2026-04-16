@@ -497,7 +497,7 @@ mod tests {
             &store,
             &store,
             RegisterJobCommand::new(base_job("alpha")).unwrap(),
-            OccPolicy::CommandDefault,
+            OccPolicy::UseCommandRule,
         )
         .await
         .unwrap();
@@ -514,7 +514,7 @@ mod tests {
             &store,
             &store,
             ChangeJobStateCommand::new(job_id("alpha"), JobEnabledState::Disabled),
-            OccPolicy::CommandDefault,
+            OccPolicy::UseCommandRule,
         )
         .await
         .unwrap();
@@ -553,7 +553,7 @@ mod tests {
             &store,
             &store,
             RemoveJobCommand::new(job_id("alpha")),
-            OccPolicy::CommandDefault,
+            OccPolicy::UseCommandRule,
         )
         .await
         .unwrap();
@@ -571,7 +571,7 @@ mod tests {
             &store,
             &store,
             RegisterJobCommand::new(base_job("alpha")).unwrap(),
-            OccPolicy::CommandDefault,
+            OccPolicy::UseCommandRule,
         )
         .await
         .unwrap();
@@ -605,7 +605,7 @@ mod tests {
             &store,
             &store,
             RegisterJobCommand::new(base_job("alpha")).unwrap(),
-            OccPolicy::CommandDefault,
+            OccPolicy::UseCommandRule,
         )
         .await
         .unwrap();
@@ -613,7 +613,7 @@ mod tests {
             &store,
             &store,
             ChangeJobStateCommand::new(job_id("alpha"), JobEnabledState::Enabled),
-            OccPolicy::CommandDefault,
+            OccPolicy::UseCommandRule,
         )
         .await
         .unwrap_err();
@@ -628,7 +628,7 @@ mod tests {
             &store,
             &store,
             ChangeJobStateCommand::new(job_id("missing"), JobEnabledState::Disabled),
-            OccPolicy::CommandDefault,
+            OccPolicy::UseCommandRule,
         )
         .await
         .unwrap_err();
