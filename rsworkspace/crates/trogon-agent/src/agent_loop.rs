@@ -8149,4 +8149,669 @@ mod tests {
             "promise must be PermanentFailed after retry succeeds"
         );
     }
+
+    // ── Pre-pin system prompt ─────────────────────────────────────────────────
+    //
+    // The pre-pin block (lines 908–1017) writes system_prompt to KV before the
+    // first LLM call on fresh (non-recovering) runs. It has a full
+    // CAS-conflict path and an initial-timeout path, each with reload + retry.
+    //
+    // Call sequence for a fresh run WITH a system_prompt:
+    //   update_promise [Initial] → pre-pin write        (configurable)
+    //   get_promise    [Reload]  → reload after failure (configurable)
+    //   update_promise [Retry]   → retry write          (configurable)
+    //   update_promise [Done]    → heartbeat write      (delegates to inner)
+    //   (LLM call → end_turn)
+    //   update_promise [Done]    → terminal Resolved    (delegates to inner)
+
+    #[derive(Clone, PartialEq)]
+    enum PrePinPhase {
+        Initial,
+        Reload,
+        Retry,
+        Done,
+    }
+
+    #[derive(Clone)]
+    enum PrePinInitial {
+        Succeed,
+        CasConflict,
+        Hang,
+    }
+
+    #[derive(Clone)]
+    enum PrePinReload {
+        /// get_promise returns the inner promise (system_prompt = None) → Retry.
+        Succeed,
+        /// get_promise returns the inner promise but with system_prompt set →
+        /// simulates the timed-out write having landed before we observed it.
+        AlreadyWritten,
+        /// get_promise returns Ok(None) → fallback, no retry.
+        None_,
+        /// get_promise returns Err → fallback, no retry.
+        Err_,
+        /// get_promise returns pending() → NATS_KV_TIMEOUT fires → fallback.
+        Hang,
+    }
+
+    #[derive(Clone)]
+    enum PrePinRetry {
+        Succeed,
+        Err_,
+        Hang,
+    }
+
+    struct PrePinTestStore {
+        inner: crate::promise_store::mock::MockPromiseStore,
+        phase: Arc<std::sync::Mutex<PrePinPhase>>,
+        initial: PrePinInitial,
+        reload: PrePinReload,
+        retry: PrePinRetry,
+    }
+
+    impl PrePinTestStore {
+        fn new(initial: PrePinInitial, reload: PrePinReload, retry: PrePinRetry) -> Self {
+            Self {
+                inner: crate::promise_store::mock::MockPromiseStore::new(),
+                phase: Arc::new(std::sync::Mutex::new(PrePinPhase::Initial)),
+                initial,
+                reload,
+                retry,
+            }
+        }
+    }
+
+    impl crate::promise_store::PromiseRepository for PrePinTestStore {
+        fn get_promise<'a>(
+            &'a self,
+            tenant_id: &'a str,
+            promise_id: &'a str,
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<
+                        Output = Result<
+                            Option<crate::promise_store::PromiseEntry>,
+                            crate::promise_store::PromiseStoreError,
+                        >,
+                    > + Send
+                    + 'a,
+            >,
+        > {
+            let mut phase = self.phase.lock().unwrap();
+            if *phase != PrePinPhase::Reload {
+                drop(phase);
+                return self.inner.get_promise(tenant_id, promise_id);
+            }
+            // Reload phase — fire configured behavior and advance to next phase.
+            match &self.reload {
+                PrePinReload::Succeed => {
+                    *phase = PrePinPhase::Retry;
+                    drop(phase);
+                    // inner has the promise with system_prompt = None — correct for retry path
+                    self.inner.get_promise(tenant_id, promise_id)
+                }
+                PrePinReload::AlreadyWritten => {
+                    *phase = PrePinPhase::Done;
+                    let inner = self.inner.clone();
+                    let t = tenant_id.to_string();
+                    let p_id = promise_id.to_string();
+                    drop(phase);
+                    Box::pin(async move {
+                        match inner.get_promise(&t, &p_id).await {
+                            Ok(Some((mut entry, rev))) => {
+                                // Simulate the write having landed: return the same
+                                // revision so subsequent writes don't CAS-conflict.
+                                entry.system_prompt = Some("test system prompt".into());
+                                Ok(Some((entry, rev)))
+                            }
+                            other => other,
+                        }
+                    })
+                }
+                PrePinReload::None_ => {
+                    *phase = PrePinPhase::Done;
+                    drop(phase);
+                    Box::pin(async { Ok(None) })
+                }
+                PrePinReload::Err_ => {
+                    *phase = PrePinPhase::Done;
+                    drop(phase);
+                    Box::pin(async {
+                        Err(crate::promise_store::PromiseStoreError(
+                            "injected pre-pin reload error".into(),
+                        ))
+                    })
+                }
+                PrePinReload::Hang => {
+                    *phase = PrePinPhase::Done;
+                    drop(phase);
+                    Box::pin(std::future::pending())
+                }
+            }
+        }
+
+        fn put_promise<'a>(
+            &'a self,
+            promise: &'a crate::promise_store::AgentPromise,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<u64, crate::promise_store::PromiseStoreError>> + Send + 'a>,
+        > {
+            self.inner.put_promise(promise)
+        }
+
+        fn update_promise<'a>(
+            &'a self,
+            tenant_id: &'a str,
+            promise_id: &'a str,
+            promise: &'a crate::promise_store::AgentPromise,
+            revision: u64,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<u64, crate::promise_store::PromiseStoreError>> + Send + 'a>,
+        > {
+            let mut phase = self.phase.lock().unwrap();
+            match &*phase {
+                PrePinPhase::Initial => match &self.initial {
+                    PrePinInitial::Succeed => {
+                        *phase = PrePinPhase::Done;
+                        drop(phase);
+                        self.inner.update_promise(tenant_id, promise_id, promise, revision)
+                    }
+                    PrePinInitial::CasConflict => {
+                        *phase = PrePinPhase::Reload;
+                        drop(phase);
+                        Box::pin(async {
+                            Err(crate::promise_store::PromiseStoreError(
+                                "injected pre-pin CAS conflict".into(),
+                            ))
+                        })
+                    }
+                    PrePinInitial::Hang => {
+                        // Set phase before returning pending so the reload
+                        // get_promise call sees Reload when the timeout fires.
+                        *phase = PrePinPhase::Reload;
+                        drop(phase);
+                        Box::pin(std::future::pending())
+                    }
+                },
+                PrePinPhase::Retry => match &self.retry {
+                    PrePinRetry::Succeed => {
+                        *phase = PrePinPhase::Done;
+                        let inner = self.inner.clone();
+                        let t = tenant_id.to_string();
+                        let p_id = promise_id.to_string();
+                        let p_clone = promise.clone();
+                        drop(phase);
+                        Box::pin(async move {
+                            inner.update_promise(&t, &p_id, &p_clone, revision).await
+                        })
+                    }
+                    PrePinRetry::Err_ => {
+                        *phase = PrePinPhase::Done;
+                        drop(phase);
+                        Box::pin(async {
+                            Err(crate::promise_store::PromiseStoreError(
+                                "injected pre-pin retry error".into(),
+                            ))
+                        })
+                    }
+                    PrePinRetry::Hang => {
+                        *phase = PrePinPhase::Done;
+                        drop(phase);
+                        Box::pin(std::future::pending())
+                    }
+                },
+                // Done (heartbeat, terminal) and Reload (shouldn't receive writes)
+                // — delegate to inner.
+                PrePinPhase::Done | PrePinPhase::Reload => {
+                    drop(phase);
+                    self.inner.update_promise(tenant_id, promise_id, promise, revision)
+                }
+            }
+        }
+
+        fn get_tool_result<'a>(
+            &'a self,
+            tenant_id: &'a str,
+            promise_id: &'a str,
+            cache_key: &'a str,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<Option<String>, crate::promise_store::PromiseStoreError>> + Send + 'a>,
+        > {
+            self.inner.get_tool_result(tenant_id, promise_id, cache_key)
+        }
+
+        fn put_tool_result<'a>(
+            &'a self,
+            tenant_id: &'a str,
+            promise_id: &'a str,
+            cache_key: &'a str,
+            result: &'a str,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<(), crate::promise_store::PromiseStoreError>> + Send + 'a>,
+        > {
+            self.inner.put_tool_result(tenant_id, promise_id, cache_key, result)
+        }
+
+        fn list_running<'a>(
+            &'a self,
+            tenant_id: &'a str,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<Vec<crate::promise_store::AgentPromise>, crate::promise_store::PromiseStoreError>> + Send + 'a>,
+        > {
+            self.inner.list_running(tenant_id)
+        }
+    }
+
+    fn make_pre_pin_agent(
+        anthropic: Arc<dyn AnthropicClient>,
+        store: Arc<PrePinTestStore>,
+    ) -> AgentLoop {
+        use crate::flag_client::AlwaysOnFlagClient;
+        use crate::promise_store::PromiseRepository;
+        use crate::tools::ToolContext;
+
+        let tool_ctx = Arc::new(ToolContext::for_test("http://127.0.0.1:1", "", "", ""));
+        AgentLoop {
+            anthropic_client: anthropic,
+            model: "test".to_string(),
+            max_iterations: 5,
+            tool_dispatcher: Arc::new(crate::tools::mock::MockToolDispatcher::new("unused")),
+            tool_context: tool_ctx,
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            flag_client: Arc::new(AlwaysOnFlagClient),
+            tenant_id: "acme".to_string(),
+            promise_store: Some(Arc::clone(&store) as Arc<dyn PromiseRepository>),
+            promise_id: Some("p1".to_string()),
+        }
+    }
+
+    /// Happy path: pre-pin write succeeds on the first try — system_prompt is
+    /// persisted to KV and the run completes normally.
+    #[tokio::test]
+    async fn pre_pin_success_writes_system_prompt_to_store() {
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+
+        let store = Arc::new(PrePinTestStore::new(
+            PrePinInitial::Succeed,
+            PrePinReload::None_,  // not reached
+            PrePinRetry::Succeed, // not reached
+        ));
+        store.inner.insert_promise(make_test_promise("p1"));
+
+        let agent = make_pre_pin_agent(end_turn_anthropic(), Arc::clone(&store));
+        let result = agent
+            .run(vec![Message::user_text("go")], &[], Some("test system prompt"))
+            .await;
+        assert_eq!(result.unwrap(), "done");
+
+        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        assert_eq!(p.status, PromiseStatus::Resolved);
+        assert_eq!(
+            p.system_prompt.as_deref(),
+            Some("test system prompt"),
+            "system_prompt must be persisted to KV on successful pre-pin write"
+        );
+    }
+
+    /// CAS conflict on pre-pin write → reload the current revision → retry
+    /// write succeeds — system_prompt is persisted and the run completes.
+    #[tokio::test]
+    async fn pre_pin_cas_conflict_reload_retry_success_writes_system_prompt() {
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+
+        let store = Arc::new(PrePinTestStore::new(
+            PrePinInitial::CasConflict,
+            PrePinReload::Succeed,
+            PrePinRetry::Succeed,
+        ));
+        store.inner.insert_promise(make_test_promise("p1"));
+
+        let agent = make_pre_pin_agent(end_turn_anthropic(), Arc::clone(&store));
+        let result = agent
+            .run(vec![Message::user_text("go")], &[], Some("test system prompt"))
+            .await;
+        assert_eq!(result.unwrap(), "done");
+
+        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        assert_eq!(p.status, PromiseStatus::Resolved);
+        assert_eq!(
+            p.system_prompt.as_deref(),
+            Some("test system prompt"),
+            "system_prompt must be persisted via retry write after CAS conflict"
+        );
+    }
+
+    /// CAS conflict on pre-pin write → reload → retry write fails — run still
+    /// completes; system_prompt stays in-memory for the first checkpoint write.
+    #[tokio::test]
+    async fn pre_pin_cas_conflict_reload_retry_error_run_completes() {
+        use crate::promise_store::PromiseStatus;
+
+        let store = Arc::new(PrePinTestStore::new(
+            PrePinInitial::CasConflict,
+            PrePinReload::Succeed,
+            PrePinRetry::Err_,
+        ));
+        store.inner.insert_promise(make_test_promise("p1"));
+
+        let agent = make_pre_pin_agent(end_turn_anthropic(), Arc::clone(&store));
+        let result = agent
+            .run(vec![Message::user_text("go")], &[], Some("test system prompt"))
+            .await;
+        assert_eq!(result.unwrap(), "done", "run must complete even when pre-pin retry fails");
+
+        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        assert_eq!(p.status, PromiseStatus::Resolved);
+    }
+
+    /// CAS conflict on pre-pin write → reload → retry write hangs past
+    /// `NATS_KV_TIMEOUT` — run still completes.
+    #[tokio::test(start_paused = true)]
+    async fn pre_pin_cas_conflict_reload_retry_timeout_run_completes() {
+        use crate::promise_store::PromiseStatus;
+        use std::time::Duration;
+
+        let store = Arc::new(PrePinTestStore::new(
+            PrePinInitial::CasConflict,
+            PrePinReload::Succeed,
+            PrePinRetry::Hang,
+        ));
+        store.inner.insert_promise(make_test_promise("p1"));
+
+        let agent = make_pre_pin_agent(end_turn_anthropic(), Arc::clone(&store));
+        let (result, _) = tokio::join!(
+            agent.run(vec![Message::user_text("go")], &[], Some("test system prompt")),
+            tokio::time::advance(NATS_KV_TIMEOUT + Duration::from_millis(1)),
+        );
+        assert_eq!(result.unwrap(), "done", "run must complete even when pre-pin retry times out");
+
+        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        assert_eq!(p.status, PromiseStatus::Resolved);
+    }
+
+    /// CAS conflict on pre-pin write → reload returns `None` (promise vanished)
+    /// — run still completes (system_prompt kept in-memory only).
+    #[tokio::test]
+    async fn pre_pin_cas_conflict_reload_none_run_completes() {
+        use crate::promise_store::PromiseStatus;
+
+        let store = Arc::new(PrePinTestStore::new(
+            PrePinInitial::CasConflict,
+            PrePinReload::None_,
+            PrePinRetry::Succeed, // not reached
+        ));
+        store.inner.insert_promise(make_test_promise("p1"));
+
+        let agent = make_pre_pin_agent(end_turn_anthropic(), Arc::clone(&store));
+        let result = agent
+            .run(vec![Message::user_text("go")], &[], Some("test system prompt"))
+            .await;
+        assert_eq!(result.unwrap(), "done", "run must complete when reload returns None");
+
+        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        assert_eq!(p.status, PromiseStatus::Resolved);
+    }
+
+    /// CAS conflict on pre-pin write → reload returns `Err` — run still
+    /// completes; system_prompt kept in-memory only.
+    #[tokio::test]
+    async fn pre_pin_cas_conflict_reload_error_run_completes() {
+        use crate::promise_store::PromiseStatus;
+
+        let store = Arc::new(PrePinTestStore::new(
+            PrePinInitial::CasConflict,
+            PrePinReload::Err_,
+            PrePinRetry::Succeed, // not reached
+        ));
+        store.inner.insert_promise(make_test_promise("p1"));
+
+        let agent = make_pre_pin_agent(end_turn_anthropic(), Arc::clone(&store));
+        let result = agent
+            .run(vec![Message::user_text("go")], &[], Some("test system prompt"))
+            .await;
+        assert_eq!(result.unwrap(), "done", "run must complete when reload errors");
+
+        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        assert_eq!(p.status, PromiseStatus::Resolved);
+    }
+
+    /// CAS conflict on pre-pin write → reload hangs past `NATS_KV_TIMEOUT` —
+    /// run still completes.
+    #[tokio::test(start_paused = true)]
+    async fn pre_pin_cas_conflict_reload_timeout_run_completes() {
+        use crate::promise_store::PromiseStatus;
+        use std::time::Duration;
+
+        let store = Arc::new(PrePinTestStore::new(
+            PrePinInitial::CasConflict,
+            PrePinReload::Hang,
+            PrePinRetry::Succeed, // not reached
+        ));
+        store.inner.insert_promise(make_test_promise("p1"));
+
+        let agent = make_pre_pin_agent(end_turn_anthropic(), Arc::clone(&store));
+        let (result, _) = tokio::join!(
+            agent.run(vec![Message::user_text("go")], &[], Some("test system prompt")),
+            tokio::time::advance(NATS_KV_TIMEOUT + Duration::from_millis(1)),
+        );
+        assert_eq!(result.unwrap(), "done", "run must complete when pre-pin reload times out");
+
+        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        assert_eq!(p.status, PromiseStatus::Resolved);
+    }
+
+    /// Initial pre-pin write times out → reload shows the write already landed
+    /// (system_prompt is set) — no retry needed, run completes.
+    #[tokio::test(start_paused = true)]
+    async fn pre_pin_initial_timeout_reload_already_written_run_completes() {
+        use crate::promise_store::PromiseStatus;
+        use std::time::Duration;
+
+        let store = Arc::new(PrePinTestStore::new(
+            PrePinInitial::Hang,
+            PrePinReload::AlreadyWritten,
+            PrePinRetry::Succeed, // not reached
+        ));
+        store.inner.insert_promise(make_test_promise("p1"));
+
+        let agent = make_pre_pin_agent(end_turn_anthropic(), Arc::clone(&store));
+        let (result, _) = tokio::join!(
+            agent.run(vec![Message::user_text("go")], &[], Some("test system prompt")),
+            tokio::time::advance(NATS_KV_TIMEOUT + Duration::from_millis(1)),
+        );
+        assert_eq!(result.unwrap(), "done", "run must complete when write landed before timeout was observed");
+
+        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        assert_eq!(p.status, PromiseStatus::Resolved);
+    }
+
+    /// Initial pre-pin write times out → reload shows write did not land →
+    /// retry write succeeds — system_prompt is persisted and run completes.
+    #[tokio::test(start_paused = true)]
+    async fn pre_pin_initial_timeout_reload_retry_success_writes_system_prompt() {
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+        use std::time::Duration;
+
+        let store = Arc::new(PrePinTestStore::new(
+            PrePinInitial::Hang,
+            PrePinReload::Succeed,
+            PrePinRetry::Succeed,
+        ));
+        store.inner.insert_promise(make_test_promise("p1"));
+
+        let agent = make_pre_pin_agent(end_turn_anthropic(), Arc::clone(&store));
+        let (result, _) = tokio::join!(
+            agent.run(vec![Message::user_text("go")], &[], Some("test system prompt")),
+            tokio::time::advance(NATS_KV_TIMEOUT + Duration::from_millis(1)),
+        );
+        assert_eq!(result.unwrap(), "done");
+
+        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        assert_eq!(p.status, PromiseStatus::Resolved);
+        assert_eq!(
+            p.system_prompt.as_deref(),
+            Some("test system prompt"),
+            "system_prompt must be persisted via retry after initial write timeout"
+        );
+    }
+
+    /// Initial pre-pin write times out → reload shows write did not land →
+    /// retry write fails — run still completes; system_prompt kept in-memory.
+    #[tokio::test(start_paused = true)]
+    async fn pre_pin_initial_timeout_reload_retry_error_run_completes() {
+        use crate::promise_store::PromiseStatus;
+        use std::time::Duration;
+
+        let store = Arc::new(PrePinTestStore::new(
+            PrePinInitial::Hang,
+            PrePinReload::Succeed,
+            PrePinRetry::Err_,
+        ));
+        store.inner.insert_promise(make_test_promise("p1"));
+
+        let agent = make_pre_pin_agent(end_turn_anthropic(), Arc::clone(&store));
+        let (result, _) = tokio::join!(
+            agent.run(vec![Message::user_text("go")], &[], Some("test system prompt")),
+            tokio::time::advance(NATS_KV_TIMEOUT + Duration::from_millis(1)),
+        );
+        assert_eq!(result.unwrap(), "done", "run must complete when retry write errors after initial timeout");
+
+        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        assert_eq!(p.status, PromiseStatus::Resolved);
+    }
+
+    /// Initial pre-pin write times out → reload shows write did not land →
+    /// retry write also times out — run still completes.
+    #[tokio::test(start_paused = true)]
+    async fn pre_pin_initial_timeout_reload_retry_timeout_run_completes() {
+        use crate::promise_store::PromiseStatus;
+        use std::time::Duration;
+
+        let store = Arc::new(PrePinTestStore::new(
+            PrePinInitial::Hang,
+            PrePinReload::Succeed,
+            PrePinRetry::Hang,
+        ));
+        store.inner.insert_promise(make_test_promise("p1"));
+
+        let agent = make_pre_pin_agent(end_turn_anthropic(), Arc::clone(&store));
+        // Two NATS_KV_TIMEOUT waits fire: initial write + retry write.
+        let (result, _) = tokio::join!(
+            agent.run(vec![Message::user_text("go")], &[], Some("test system prompt")),
+            tokio::time::advance(NATS_KV_TIMEOUT * 2 + Duration::from_millis(2)),
+        );
+        assert_eq!(result.unwrap(), "done", "run must complete when both pre-pin writes time out");
+
+        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        assert_eq!(p.status, PromiseStatus::Resolved);
+    }
+
+    /// Initial pre-pin write times out → reload fails — run still completes;
+    /// system_prompt kept in-memory for the first checkpoint write.
+    #[tokio::test(start_paused = true)]
+    async fn pre_pin_initial_timeout_reload_error_run_completes() {
+        use crate::promise_store::PromiseStatus;
+        use std::time::Duration;
+
+        let store = Arc::new(PrePinTestStore::new(
+            PrePinInitial::Hang,
+            PrePinReload::Err_,
+            PrePinRetry::Succeed, // not reached
+        ));
+        store.inner.insert_promise(make_test_promise("p1"));
+
+        let agent = make_pre_pin_agent(end_turn_anthropic(), Arc::clone(&store));
+        let (result, _) = tokio::join!(
+            agent.run(vec![Message::user_text("go")], &[], Some("test system prompt")),
+            tokio::time::advance(NATS_KV_TIMEOUT + Duration::from_millis(1)),
+        );
+        assert_eq!(result.unwrap(), "done", "run must complete when reload errors after initial timeout");
+
+        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        assert_eq!(p.status, PromiseStatus::Resolved);
+    }
+
+    // ── Checkpoint trim: summarize timeout ────────────────────────────────────
+    //
+    // When the checkpoint payload exceeds CHECKPOINT_MAX_BYTES, the agent trims
+    // old messages and calls the LLM to summarize the dropped messages.  That
+    // call is wrapped in a 30-second timeout; on timeout `unwrap_or_default()`
+    // yields an empty Vec and the code falls back to a plain trim.
+
+    /// Summarize LLM call hangs past the 30-second cap → `unwrap_or_default()`
+    /// triggers plain-trim fallback → checkpoint is written and run completes.
+    #[tokio::test(start_paused = true)]
+    async fn checkpoint_trim_summarize_timeout_falls_back_to_plain_trim() {
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+        use crate::tools::mock::MockToolDispatcher;
+        use std::future::Future;
+        use std::pin::Pin;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        // Anthropic client: call 0 → tool_use, call 1 → tool_use,
+        // call 2 → pending() (summarize), call 3+ → end_turn.
+        struct SummarizeHangClient {
+            count: Arc<AtomicUsize>,
+        }
+        impl AnthropicClient for SummarizeHangClient {
+            fn complete<'a>(
+                &'a self,
+                _body: serde_json::Value,
+            ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, reqwest::Error>> + Send + 'a>>
+            {
+                let n = self.count.fetch_add(1, Ordering::SeqCst);
+                let tool_use_resp = serde_json::json!({
+                    "stop_reason": "tool_use",
+                    "content": [{"type": "tool_use", "id": "tu1", "name": "my_tool", "input": {}}]
+                });
+                let end_turn_resp = serde_json::json!({
+                    "stop_reason": "end_turn",
+                    "content": [{"type": "text", "text": "done"}]
+                });
+                match n {
+                    0 | 1 => Box::pin(async move { Ok(tool_use_resp) }),
+                    2 => Box::pin(std::future::pending()),
+                    _ => Box::pin(async move { Ok(end_turn_resp) }),
+                }
+            }
+        }
+
+        let store = Arc::new(MockPromiseStore::new());
+        store.insert_promise(make_test_promise("p1"));
+
+        let anthropic = Arc::new(SummarizeHangClient {
+            count: Arc::new(AtomicUsize::new(0)),
+        });
+        let agent = make_durable_agent(
+            anthropic,
+            Arc::new(MockToolDispatcher::new("ok")),
+            Arc::clone(&store) as Arc<dyn PromiseRepository>,
+            "p1",
+        );
+
+        // Initial message large enough that after two tool turns the checkpoint
+        // (5 messages including this) exceeds CHECKPOINT_MAX_BYTES and triggers
+        // trimming on turn 2.  Turn 1 has only 3 messages (< MIN_TRIM_KEEP=4)
+        // so checkpointing is disabled there; turn 2 gets 5 messages and trim
+        // succeeds by dropping the large initial message.
+        let large_text = "a".repeat(CHECKPOINT_MAX_BYTES + 1);
+
+        // The summarize call (LLM call 2) hangs for 30 s before timing out.
+        // tokio's paused clock auto-advances through the 30-second timeout and
+        // any subsequent NATS_KV_TIMEOUT waits without manual clock control.
+        let result = agent.run(vec![Message::user_text(large_text)], &[], None).await;
+        assert_eq!(result.unwrap(), "done", "run must complete even when summarize times out");
+
+        let (p, _) = store.get_promise("acme", "p1").await.unwrap().unwrap();
+        assert_eq!(p.status, PromiseStatus::Resolved, "promise must be Resolved after successful run");
+        assert!(
+            !p.messages.is_empty(),
+            "checkpoint must be written with trimmed messages after plain-trim fallback"
+        );
+    }
 }
