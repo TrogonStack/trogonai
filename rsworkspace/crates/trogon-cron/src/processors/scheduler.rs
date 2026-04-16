@@ -2,42 +2,54 @@ use std::collections::HashMap;
 use std::pin::Pin;
 use std::time::Duration;
 
-use async_nats::jetstream;
+use async_nats::jetstream::{
+    self,
+    consumer::{AckPolicy, DeliverPolicy, ReplayPolicy, pull},
+    context::ConsumerInfoErrorKind,
+};
+use chrono::{DateTime, Utc};
 use futures::{Stream, StreamExt};
-use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream};
+use trogon_eventsourcing::StreamEvent;
+use trogon_nats::jetstream::JetStreamGetStream;
 use trogon_nats::lease::{
     LeaderElection, LeaseRenewInterval, LeaseTiming, LeaseTtl, NatsKvLease, NatsKvLeaseConfig,
 };
-use trogon_std::time::GetElapsed;
 use uuid::Uuid;
 
 use crate::{
+    JobId,
     config::JobSpec,
     domain::ResolvedJobSpec,
     error::CronError,
-    kv::{LEADER_BUCKET, LEADER_KEY},
+    events::{JobEvent, JobEventData, RecordedJobEvent},
+    kv::{EVENTS_SUBJECT_PREFIX, LEADER_BUCKET, LEADER_KEY, LEGACY_EVENTS_SUBJECT_PREFIX},
     nats::NatsSchedulePublisher,
-    projections::{CronJobChange, load_and_watch_cron_jobs},
-    store::{Store, connect_store},
+    store::{Store, connect_store, open_events_stream},
     traits::{LeaderLock, SchedulePublisher},
 };
 
 const WATCH_RETRY_INTERVAL: Duration = Duration::from_secs(1);
 const DEFAULT_LEADER_RENEW_INTERVAL: Duration = Duration::from_secs(5);
 const DEFAULT_LEADER_TTL: Duration = Duration::from_secs(10);
+const SCHEDULER_CONSUMER_NAME: &str = "cron_scheduler";
+const SCHEDULER_CONSUMER_INACTIVE_THRESHOLD: Duration = Duration::from_secs(30);
 
-type CronJobWatcher = Pin<Box<dyn Stream<Item = CronJobChange> + Send + 'static>>;
+type DesiredJobs = HashMap<String, JobSpec>;
+type SchedulerEventWatcher =
+    Pin<Box<dyn Stream<Item = Result<jetstream::Message, CronError>> + Send + 'static>>;
 
-enum ReestablishedWatch {
-    Ready((Vec<JobSpec>, CronJobWatcher)),
+enum ReestablishedProcessor {
+    Ready((DesiredJobs, SchedulerEventWatcher)),
     Shutdown,
 }
 
-pub struct CronController<
-    C = Store,
-    P = NatsSchedulePublisher,
-    L = NatsKvLease,
-> {
+#[derive(Debug, Clone, PartialEq)]
+enum SchedulerChange {
+    Upsert(JobSpec),
+    Delete(String),
+}
+
+pub struct CronController<C = Store, P = NatsSchedulePublisher, L = NatsKvLease> {
     store: C,
     schedule_publisher: P,
     leader_lock: L,
@@ -96,15 +108,13 @@ impl<C, P, L> CronController<C, P, L> {
 
 impl<C, P, L> CronController<C, P, L>
 where
-    C: JetStreamGetKeyValue<Store = jetstream::kv::Store>
-        + JetStreamGetStream<Stream = jetstream::stream::Stream>,
+    C: JetStreamGetStream<Stream = jetstream::stream::Stream>,
     P: SchedulePublisher<Error = CronError>,
     L: LeaderLock,
 {
     pub async fn run(self) -> Result<(), CronError> {
-        let (initial_jobs, mut cron_job_watcher): (Vec<JobSpec>, CronJobWatcher) =
-            load_and_watch_cron_jobs(&self.store).await?;
-        let mut desired_jobs = to_job_map(initial_jobs);
+        let mut desired_jobs = DesiredJobs::new();
+        let mut scheduler_watcher = inactive_scheduler_watcher();
         let mut leader =
             LeaderElection::new(self.leader_lock, self.node_id.clone(), self.leader_timing);
         let mut currently_leader = false;
@@ -120,46 +130,82 @@ where
                     break;
                 }
                 _ = heartbeat.tick() => {
-                    handle_heartbeat(
-                        &mut leader,
-                        &self.node_id,
-                        &self.schedule_publisher,
-                        &desired_jobs,
-                        &mut currently_leader,
-                    )
-                    .await?;
-                }
-                change = cron_job_watcher.next() => {
-                    match change {
-                        Some(change) => {
-                            apply_local_change(&mut desired_jobs, &change);
-                            if currently_leader {
-                                apply_remote_change(
+                    match leader.ensure_leader().await {
+                        Ok(is_leader) => {
+                            if is_leader && !currently_leader {
+                                tracing::info!(node_id = %self.node_id, "Controller became leader");
+                                let (rebuilt_jobs, watcher) = establish_scheduler_processor(
+                                    &self.store,
                                     &self.schedule_publisher,
-                                    &change,
-                                )
-                                .await?;
+                                ).await?;
+                                desired_jobs = rebuilt_jobs;
+                                scheduler_watcher = watcher;
+                            } else if !is_leader && currently_leader {
+                                tracing::info!(node_id = %self.node_id, "Controller lost leadership");
+                                desired_jobs.clear();
+                                scheduler_watcher = inactive_scheduler_watcher();
+                            }
+                            currently_leader = is_leader;
+                        }
+                        Err(source) => {
+                            tracing::warn!(
+                                error = %source,
+                                node_id = %self.node_id,
+                                was_leader = currently_leader,
+                                "Controller leadership check failed, stepping down and retrying"
+                            );
+                            currently_leader = false;
+                            desired_jobs.clear();
+                            scheduler_watcher = inactive_scheduler_watcher();
+                        }
+                    }
+                }
+                message = scheduler_watcher.next() => {
+                    match message {
+                        Some(Ok(message)) => {
+                            let change = match handle_scheduler_message(&mut desired_jobs, &message).await {
+                                Ok(change) => change,
+                                Err(error) => {
+                                    tracing::error!(error = %error, "Failed to apply scheduler event");
+                                    ack_scheduler_message(&message).await;
+                                    continue;
+                                }
+                            };
+                            apply_scheduler_change(&self.schedule_publisher, &change).await?;
+                            ack_scheduler_message(&message).await;
+                        }
+                        Some(Err(error)) => {
+                            tracing::warn!(
+                                error = %error,
+                                retry_ms = WATCH_RETRY_INTERVAL.as_millis(),
+                                "Scheduler event watcher returned an error, attempting to re-establish it"
+                            );
+                            match reestablish_scheduler_processor(&self.store, &self.schedule_publisher).await? {
+                                ReestablishedProcessor::Ready((jobs, watcher)) => {
+                                    desired_jobs = jobs;
+                                    scheduler_watcher = watcher;
+                                }
+                                ReestablishedProcessor::Shutdown => {
+                                    tracing::info!("Shutdown received while re-establishing scheduler processor, releasing leader lease");
+                                    if let Err(error) = leader.release().await {
+                                        tracing::warn!(error = %error, "Failed to release leader lease");
+                                    }
+                                    break;
+                                }
                             }
                         }
                         None => {
                             tracing::warn!(
                                 retry_ms = WATCH_RETRY_INTERVAL.as_millis(),
-                                "Cron jobs watcher ended, attempting to re-establish it"
+                                "Scheduler event watcher ended, attempting to re-establish it"
                             );
-                            match reestablish_cron_jobs_watch(&self.store).await? {
-                                ReestablishedWatch::Ready((jobs, watcher)) => {
-                                    desired_jobs = to_job_map(jobs);
-                                    cron_job_watcher = watcher;
-                                    if currently_leader {
-                                        reconcile_snapshot(
-                                            &self.schedule_publisher,
-                                            &desired_jobs,
-                                        )
-                                        .await?;
-                                    }
+                            match reestablish_scheduler_processor(&self.store, &self.schedule_publisher).await? {
+                                ReestablishedProcessor::Ready((jobs, watcher)) => {
+                                    desired_jobs = jobs;
+                                    scheduler_watcher = watcher;
                                 }
-                                ReestablishedWatch::Shutdown => {
-                                    tracing::info!("Shutdown received while re-establishing cron jobs watcher, releasing leader lease");
+                                ReestablishedProcessor::Shutdown => {
+                                    tracing::info!("Shutdown received while re-establishing scheduler processor, releasing leader lease");
                                     if let Err(error) = leader.release().await {
                                         tracing::warn!(error = %error, "Failed to release leader lease");
                                     }
@@ -188,61 +234,149 @@ fn default_leader_timing() -> Result<LeaseTiming, CronError> {
         .map_err(|source| CronError::lease_source("invalid default leader timing", source))
 }
 
-fn to_job_map(jobs: Vec<JobSpec>) -> HashMap<String, JobSpec> {
-    jobs.into_iter().map(|job| (job.id.clone(), job)).collect()
-}
-
-fn apply_local_change(desired_jobs: &mut HashMap<String, JobSpec>, change: &CronJobChange) {
-    match change {
-        CronJobChange::Put(job) => {
-            desired_jobs.insert(job.id.clone(), job.clone());
-        }
-        CronJobChange::Delete(id) => {
-            desired_jobs.remove(id);
-        }
-    }
-}
-
-async fn handle_heartbeat<P, L, C>(
-    leader: &mut LeaderElection<L, C>,
-    node_id: &str,
+async fn establish_scheduler_processor<C, P>(
+    store: &C,
     publisher: &P,
-    desired_jobs: &HashMap<String, JobSpec>,
-    currently_leader: &mut bool,
-) -> Result<(), CronError>
+) -> Result<(DesiredJobs, SchedulerEventWatcher), CronError>
 where
+    C: JetStreamGetStream<Stream = jetstream::stream::Stream>,
     P: SchedulePublisher<Error = CronError>,
-    L: LeaderLock,
-    C: GetElapsed,
 {
-    match leader.ensure_leader().await {
-        Ok(is_leader) => {
-            if is_leader && !*currently_leader {
-                tracing::info!(node_id = %node_id, job_count = desired_jobs.len(), "Controller became leader");
-                reconcile_snapshot(publisher, desired_jobs).await?;
-            }
-            *currently_leader = is_leader;
-        }
-        Err(source) => {
-            tracing::warn!(
-                error = %source,
-                node_id = %node_id,
-                was_leader = *currently_leader,
-                "Controller leadership check failed, stepping down and retrying"
-            );
-            *currently_leader = false;
-        }
-    }
-
-    Ok(())
+    let stream = open_events_stream(store).await?;
+    let info = stream
+        .get_info()
+        .await
+        .map_err(|source| CronError::event_source("failed to query events stream info", source))?;
+    let desired_jobs = rebuild_scheduler_state_from_stream(
+        &stream,
+        info.state.first_sequence,
+        info.state.last_sequence,
+    )
+    .await?;
+    reconcile_snapshot(publisher, &desired_jobs).await?;
+    let watcher = open_scheduler_event_watcher(
+        &stream,
+        next_scheduler_start_sequence(info.state.last_sequence),
+    )
+    .await?;
+    Ok((desired_jobs, watcher))
 }
 
-async fn apply_remote_change<P: SchedulePublisher<Error = CronError>>(
+async fn reestablish_scheduler_processor<C, P>(
+    store: &C,
     publisher: &P,
-    change: &CronJobChange,
+) -> Result<ReestablishedProcessor, CronError>
+where
+    C: JetStreamGetStream<Stream = jetstream::stream::Stream>,
+    P: SchedulePublisher<Error = CronError>,
+{
+    loop {
+        tokio::select! {
+            _ = trogon_telemetry::signal::shutdown_signal() => {
+                return Ok(ReestablishedProcessor::Shutdown);
+            }
+            result = establish_scheduler_processor(store, publisher) => {
+                match result {
+                    Ok((jobs, watcher)) => {
+                        return Ok(ReestablishedProcessor::Ready((jobs, watcher)));
+                    }
+                    Err(error) => {
+                        tracing::error!(
+                            error = %error,
+                            retry_ms = WATCH_RETRY_INTERVAL.as_millis(),
+                            "Failed to re-establish scheduler processor"
+                        );
+                    }
+                }
+            }
+        }
+
+        tokio::time::sleep(WATCH_RETRY_INTERVAL).await;
+    }
+}
+
+async fn rebuild_scheduler_state_from_stream(
+    stream: &jetstream::stream::Stream,
+    first_sequence: u64,
+    last_sequence: u64,
+) -> Result<DesiredJobs, CronError> {
+    let mut desired_jobs = DesiredJobs::new();
+    if last_sequence == 0 || first_sequence == 0 || first_sequence > last_sequence {
+        return Ok(desired_jobs);
+    }
+
+    for sequence in first_sequence..=last_sequence {
+        let Some(message) = read_raw_scheduler_event_message(
+            stream,
+            sequence,
+            "failed to read job event from stream",
+        )
+        .await?
+        else {
+            continue;
+        };
+        let event = decode_recorded_job_event(message)?;
+        let stream_id = job_id_from_event_subject(&event.recorded_stream_id)?;
+        let data = event.decode_data::<JobEvent>().map_err(|source| {
+            CronError::event_source("failed to decode recorded job event payload", source)
+        })?;
+        ensure_event_matches_stream(&stream_id, &data)?;
+        let _ = apply_scheduler_event(&mut desired_jobs, data)?;
+    }
+
+    Ok(desired_jobs)
+}
+
+fn apply_scheduler_event(
+    desired_jobs: &mut DesiredJobs,
+    event: JobEvent,
+) -> Result<SchedulerChange, CronError> {
+    match event {
+        JobEvent::JobRegistered { id, spec } => {
+            let job = spec.into_job_spec(id);
+            desired_jobs.insert(job.id.clone(), job.clone());
+            Ok(SchedulerChange::Upsert(job))
+        }
+        JobEvent::JobStateChanged { id, state } => {
+            let job = desired_jobs.get_mut(&id).ok_or_else(|| {
+                CronError::event_source(
+                    "scheduler received a state change without current job state",
+                    std::io::Error::other(id.clone()),
+                )
+            })?;
+            job.state = state;
+            if job.state.is_enabled() {
+                Ok(SchedulerChange::Upsert(job.clone()))
+            } else {
+                Ok(SchedulerChange::Delete(id))
+            }
+        }
+        JobEvent::JobRemoved { id } => {
+            desired_jobs.remove(&id);
+            Ok(SchedulerChange::Delete(id))
+        }
+    }
+}
+
+async fn handle_scheduler_message(
+    desired_jobs: &mut DesiredJobs,
+    message: &jetstream::Message,
+) -> Result<SchedulerChange, CronError> {
+    let event = decode_recorded_watch_message(message)?;
+    let stream_id = job_id_from_event_subject(&event.recorded_stream_id)?;
+    let data = event.decode_data::<JobEvent>().map_err(|source| {
+        CronError::event_source("failed to decode watched scheduler event payload", source)
+    })?;
+    ensure_event_matches_stream(&stream_id, &data)?;
+    apply_scheduler_event(desired_jobs, data)
+}
+
+async fn apply_scheduler_change<P: SchedulePublisher<Error = CronError>>(
+    publisher: &P,
+    change: &SchedulerChange,
 ) -> Result<(), CronError> {
     match change {
-        CronJobChange::Put(job) => {
+        SchedulerChange::Upsert(job) => {
             if job.state.is_enabled() {
                 match ResolvedJobSpec::try_from(job) {
                     Ok(resolved) => {
@@ -252,7 +386,7 @@ async fn apply_remote_change<P: SchedulePublisher<Error = CronError>>(
                         tracing::error!(
                             error = %error,
                             job_id = %job.id,
-                            "Skipping invalid enabled job change and removing any existing schedule"
+                            "Skipping invalid enabled scheduler job and removing any existing schedule"
                         );
                         publisher.remove_schedule(&job.id).await?;
                     }
@@ -261,16 +395,17 @@ async fn apply_remote_change<P: SchedulePublisher<Error = CronError>>(
                 publisher.remove_schedule(&job.id).await?;
             }
         }
-        CronJobChange::Delete(id) => {
+        SchedulerChange::Delete(id) => {
             publisher.remove_schedule(id).await?;
         }
     }
+
     Ok(())
 }
 
 async fn reconcile_snapshot<P: SchedulePublisher<Error = CronError>>(
     publisher: &P,
-    desired_jobs: &HashMap<String, JobSpec>,
+    desired_jobs: &DesiredJobs,
 ) -> Result<(), CronError> {
     let mut desired_active_ids = std::collections::HashSet::new();
     let mut resolved_jobs = Vec::new();
@@ -312,77 +447,205 @@ async fn reconcile_snapshot<P: SchedulePublisher<Error = CronError>>(
     Ok(())
 }
 
-async fn reestablish_cron_jobs_watch<C>(store: &C) -> Result<ReestablishedWatch, CronError>
-where
-    C: JetStreamGetKeyValue<Store = jetstream::kv::Store>
-        + JetStreamGetStream<Stream = jetstream::stream::Stream>,
-{
-    loop {
-        tokio::select! {
-            _ = trogon_telemetry::signal::shutdown_signal() => {
-                return Ok(ReestablishedWatch::Shutdown);
-            }
-            result = load_and_watch_cron_jobs(store) => {
-                match result {
-                    Ok((jobs, watcher)) => return Ok(ReestablishedWatch::Ready((jobs, watcher))),
-                    Err(error) => {
-                        tracing::error!(
-                            error = %error,
-                            retry_ms = WATCH_RETRY_INTERVAL.as_millis(),
-                            "Failed to re-establish cron jobs watcher"
-                        );
-                    }
-                }
-            }
-        }
+fn inactive_scheduler_watcher() -> SchedulerEventWatcher {
+    Box::pin(futures::stream::pending::<
+        Result<jetstream::Message, CronError>,
+    >())
+}
 
-        tokio::time::sleep(WATCH_RETRY_INTERVAL).await;
+async fn open_scheduler_event_watcher(
+    stream: &jetstream::stream::Stream,
+    start_sequence: u64,
+) -> Result<SchedulerEventWatcher, CronError> {
+    recreate_scheduler_consumer(stream, start_sequence).await?;
+    let consumer = stream
+        .get_consumer::<pull::Config>(SCHEDULER_CONSUMER_NAME)
+        .await
+        .map_err(|source| {
+            CronError::event_source(
+                "failed to open scheduler event consumer",
+                std::io::Error::other(source.to_string()),
+            )
+        })?;
+    let messages = consumer.messages().await.map_err(|source| {
+        CronError::event_source("failed to open scheduler event watch stream", source)
+    })?;
+
+    Ok(Box::pin(messages.map(|result| {
+        result.map_err(|source| {
+            CronError::event_source("failed to read scheduler event from consumer", source)
+        })
+    })))
+}
+
+async fn recreate_scheduler_consumer(
+    stream: &jetstream::stream::Stream,
+    start_sequence: u64,
+) -> Result<(), CronError> {
+    match stream.consumer_info(SCHEDULER_CONSUMER_NAME).await {
+        Ok(_) => {
+            stream
+                .delete_consumer(SCHEDULER_CONSUMER_NAME)
+                .await
+                .map_err(|source| {
+                    CronError::event_source("failed to delete existing scheduler consumer", source)
+                })?;
+        }
+        Err(error) if matches!(error.kind(), ConsumerInfoErrorKind::NotFound) => {}
+        Err(error) => {
+            return Err(CronError::event_source(
+                "failed to query existing scheduler consumer",
+                error,
+            ));
+        }
+    }
+
+    stream
+        .create_consumer(scheduler_consumer_config(start_sequence))
+        .await
+        .map_err(|source| {
+            CronError::event_source("failed to create scheduler event consumer", source)
+        })?;
+
+    Ok(())
+}
+
+async fn read_raw_scheduler_event_message(
+    stream: &jetstream::stream::Stream,
+    sequence: u64,
+    context: &'static str,
+) -> Result<Option<async_nats::jetstream::message::StreamMessage>, CronError> {
+    match stream.get_raw_message(sequence).await {
+        Ok(message) => Ok(Some(message)),
+        Err(source)
+            if matches!(
+                source.kind(),
+                async_nats::jetstream::stream::RawMessageErrorKind::NoMessageFound
+            ) =>
+        {
+            Ok(None)
+        }
+        Err(source) => Err(CronError::event_source(context, source)),
+    }
+}
+
+fn decode_job_event_data(payload: &[u8]) -> Result<JobEventData, CronError> {
+    JobEventData::decode(payload)
+        .map_err(|source| CronError::event_source("failed to decode stored job event", source))
+}
+
+fn decode_recorded_job_event(
+    message: async_nats::jetstream::message::StreamMessage,
+) -> Result<RecordedJobEvent, CronError> {
+    let recorded_at = recorded_at_from_message(&message)?;
+    let stream_id = message.subject.to_string();
+    let log_position = Some(message.sequence);
+    let event = decode_job_event_data(&message.payload)?;
+
+    Ok(event.record(stream_id, None, log_position, recorded_at))
+}
+
+fn decode_recorded_watch_message(
+    message: &async_nats::jetstream::Message,
+) -> Result<RecordedJobEvent, CronError> {
+    let stream_message = async_nats::jetstream::message::StreamMessage::try_from(
+        message.message.clone(),
+    )
+    .map_err(|source| {
+        CronError::event_source(
+            "failed to reconstruct stream message from scheduler watch delivery",
+            source,
+        )
+    })?;
+
+    decode_recorded_job_event(stream_message)
+}
+
+fn recorded_at_from_message(
+    message: &async_nats::jetstream::message::StreamMessage,
+) -> Result<DateTime<Utc>, CronError> {
+    DateTime::<Utc>::from_timestamp(message.time.unix_timestamp(), message.time.nanosecond())
+        .ok_or_else(|| {
+            CronError::event_source(
+                "failed to convert message timestamp into recorded event time",
+                std::io::Error::other(message.subject.to_string()),
+            )
+        })
+}
+
+fn next_scheduler_start_sequence(last_sequence: u64) -> u64 {
+    last_sequence.saturating_add(1).max(1)
+}
+
+fn scheduler_consumer_config(start_sequence: u64) -> pull::Config {
+    pull::Config {
+        durable_name: Some(SCHEDULER_CONSUMER_NAME.to_string()),
+        name: Some(SCHEDULER_CONSUMER_NAME.to_string()),
+        deliver_policy: DeliverPolicy::ByStartSequence { start_sequence },
+        ack_policy: AckPolicy::Explicit,
+        replay_policy: ReplayPolicy::Instant,
+        inactive_threshold: SCHEDULER_CONSUMER_INACTIVE_THRESHOLD,
+        ..Default::default()
+    }
+}
+
+async fn ack_scheduler_message(message: &jetstream::Message) {
+    if let Err(error) = message.ack().await {
+        tracing::error!(error = %error, "Failed to acknowledge scheduler event");
+    }
+}
+
+fn job_id_from_event_subject(subject: &str) -> Result<JobId, CronError> {
+    let raw_id = subject
+        .strip_prefix(EVENTS_SUBJECT_PREFIX)
+        .or_else(|| subject.strip_prefix(LEGACY_EVENTS_SUBJECT_PREFIX))
+        .ok_or_else(|| {
+            CronError::event_source(
+                "failed to derive job stream id from event subject",
+                std::io::Error::other(subject.to_string()),
+            )
+        })?;
+
+    JobId::parse(raw_id).map_err(|source| {
+        CronError::event_source("failed to parse job stream id from event subject", source)
+    })
+}
+
+fn ensure_event_matches_stream(
+    expected_stream_id: &JobId,
+    event: &JobEvent,
+) -> Result<(), CronError> {
+    if event.stream_id() == expected_stream_id.as_str() {
+        Ok(())
+    } else {
+        Err(CronError::event_source(
+            "event payload stream id does not match the expected stream",
+            std::io::Error::other(format!(
+                "expected '{}' but event carried '{}'",
+                expected_stream_id,
+                event.stream_id()
+            )),
+        ))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use std::collections::{BTreeMap, HashMap};
-    use std::sync::{Arc, Mutex};
-    use std::time::Duration;
+
+    use async_nats::jetstream::consumer::{AckPolicy, DeliverPolicy, ReplayPolicy};
 
     use super::{
-        CronController, apply_local_change, apply_remote_change, default_leader_timing,
-        handle_heartbeat, reconcile_snapshot, to_job_map,
+        CronController, SchedulerChange, apply_scheduler_change, apply_scheduler_event,
+        default_leader_timing, next_scheduler_start_sequence, reconcile_snapshot,
+        scheduler_consumer_config,
     };
     use crate::{
+        RegisteredJobSpec,
         config::{DeliverySpec, JobEnabledState, JobSpec, ScheduleSpec},
+        events::JobEvent,
         mocks::{MockCronStore, MockLeaderLock, MockSchedulePublisher},
-        projections::CronJobChange,
     };
-    use trogon_nats::lease::{LeaderElection, LeaseRenewInterval, LeaseTiming, LeaseTtl};
-    use trogon_std::time::{GetElapsed, GetNow};
-
-    #[derive(Clone, Default)]
-    struct TestClock {
-        now: Arc<Mutex<Duration>>,
-    }
-
-    impl TestClock {
-        fn advance(&self, duration: Duration) {
-            let mut now = self.now.lock().unwrap();
-            *now += duration;
-        }
-    }
-
-    impl GetNow for TestClock {
-        type Instant = Duration;
-
-        fn now(&self) -> Self::Instant {
-            *self.now.lock().unwrap()
-        }
-    }
-
-    impl GetElapsed for TestClock {
-        fn elapsed(&self, since: Self::Instant) -> Duration {
-            self.now().saturating_sub(since)
-        }
-    }
 
     fn base_job(id: &str) -> JobSpec {
         JobSpec {
@@ -455,22 +718,92 @@ mod tests {
     }
 
     #[test]
-    fn to_job_map_and_apply_local_change_track_snapshot_state() {
-        let mut jobs = to_job_map(vec![base_job("alpha")]);
+    fn desired_jobs_map_tracks_snapshot_state() {
+        let jobs = HashMap::from([("alpha".to_string(), base_job("alpha"))]);
         assert_eq!(jobs.keys().cloned().collect::<Vec<_>>(), vec!["alpha"]);
+    }
 
-        apply_local_change(&mut jobs, &CronJobChange::Put(base_job("beta")));
-        assert!(jobs.contains_key("beta"));
+    #[test]
+    fn apply_scheduler_event_tracks_register_disable_enable_remove_and_recreate() {
+        let mut desired_jobs = HashMap::new();
 
-        apply_local_change(&mut jobs, &CronJobChange::Delete("alpha".to_string()));
-        assert!(!jobs.contains_key("alpha"));
+        let registered = apply_scheduler_event(
+            &mut desired_jobs,
+            JobEvent::JobRegistered {
+                id: "alpha".to_string(),
+                spec: RegisteredJobSpec::from(base_job("alpha")),
+            },
+        )
+        .unwrap();
+        assert_eq!(registered, SchedulerChange::Upsert(base_job("alpha")));
+        assert!(desired_jobs.contains_key("alpha"));
+
+        let disabled = apply_scheduler_event(
+            &mut desired_jobs,
+            JobEvent::JobStateChanged {
+                id: "alpha".to_string(),
+                state: JobEnabledState::Disabled,
+            },
+        )
+        .unwrap();
+        assert_eq!(disabled, SchedulerChange::Delete("alpha".to_string()));
+        assert_eq!(
+            desired_jobs.get("alpha").unwrap().state,
+            JobEnabledState::Disabled
+        );
+
+        let enabled = apply_scheduler_event(
+            &mut desired_jobs,
+            JobEvent::JobStateChanged {
+                id: "alpha".to_string(),
+                state: JobEnabledState::Enabled,
+            },
+        )
+        .unwrap();
+        assert_eq!(enabled, SchedulerChange::Upsert(base_job("alpha")));
+
+        let removed = apply_scheduler_event(
+            &mut desired_jobs,
+            JobEvent::JobRemoved {
+                id: "alpha".to_string(),
+            },
+        )
+        .unwrap();
+        assert_eq!(removed, SchedulerChange::Delete("alpha".to_string()));
+        assert!(!desired_jobs.contains_key("alpha"));
+
+        let recreated = apply_scheduler_event(
+            &mut desired_jobs,
+            JobEvent::JobRegistered {
+                id: "alpha".to_string(),
+                spec: RegisteredJobSpec::from(base_job("alpha")),
+            },
+        )
+        .unwrap();
+        assert_eq!(recreated, SchedulerChange::Upsert(base_job("alpha")));
+        assert!(desired_jobs.contains_key("alpha"));
+    }
+
+    #[test]
+    fn apply_scheduler_event_rejects_state_change_without_current_job() {
+        let mut desired_jobs = HashMap::new();
+        let error = apply_scheduler_event(
+            &mut desired_jobs,
+            JobEvent::JobStateChanged {
+                id: "missing".to_string(),
+                state: JobEnabledState::Disabled,
+            },
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("state change"));
     }
 
     #[tokio::test]
-    async fn apply_remote_change_upserts_enabled_jobs() {
+    async fn apply_scheduler_change_upserts_enabled_jobs() {
         let publisher = MockSchedulePublisher::new();
 
-        apply_remote_change(&publisher, &CronJobChange::Put(base_job("enabled")))
+        apply_scheduler_change(&publisher, &SchedulerChange::Upsert(base_job("enabled")))
             .await
             .unwrap();
 
@@ -479,15 +812,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn apply_remote_change_removes_disabled_and_deleted_jobs() {
+    async fn apply_scheduler_change_removes_disabled_and_deleted_jobs() {
         let publisher = MockSchedulePublisher::new();
         let mut disabled = base_job("disabled");
         disabled.state = JobEnabledState::Disabled;
 
-        apply_remote_change(&publisher, &CronJobChange::Put(disabled))
+        apply_scheduler_change(&publisher, &SchedulerChange::Upsert(disabled))
             .await
             .unwrap();
-        apply_remote_change(&publisher, &CronJobChange::Delete("deleted".to_string()))
+        apply_scheduler_change(&publisher, &SchedulerChange::Delete("deleted".to_string()))
             .await
             .unwrap();
 
@@ -496,7 +829,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn apply_remote_change_skips_invalid_enabled_jobs_and_removes_existing_schedule() {
+    async fn apply_scheduler_change_skips_invalid_enabled_jobs_and_removes_existing_schedule() {
         let publisher = MockSchedulePublisher::new();
         publisher.seed_active_job("invalid");
         let mut invalid = base_job("invalid");
@@ -507,7 +840,7 @@ mod tests {
             source: None,
         };
 
-        apply_remote_change(&publisher, &CronJobChange::Put(invalid))
+        apply_scheduler_change(&publisher, &SchedulerChange::Upsert(invalid))
             .await
             .unwrap();
 
@@ -537,48 +870,18 @@ mod tests {
         assert_eq!(publisher.upserts(), vec!["cron.schedules.valid"]);
     }
 
-    #[tokio::test]
-    async fn heartbeat_demotes_and_continues_on_renew_error() {
-        let publisher = MockSchedulePublisher::new();
-        let desired_jobs = HashMap::from([("valid".to_string(), base_job("valid"))]);
-        let lock = MockLeaderLock::new();
-        let clock = TestClock::default();
-        let timing = LeaseTiming::new(
-            LeaseTtl::from_secs(10).unwrap(),
-            LeaseRenewInterval::from_secs(5).unwrap(),
-        )
-        .unwrap();
-        let mut leader =
-            LeaderElection::with_clock(lock.clone(), "node-1".to_string(), timing, clock.clone());
-        let mut currently_leader = false;
-
-        handle_heartbeat(
-            &mut leader,
-            "node-1",
-            &publisher,
-            &desired_jobs,
-            &mut currently_leader,
-        )
-        .await
-        .unwrap();
-
-        assert!(currently_leader);
-        assert_eq!(publisher.upserts(), vec!["cron.schedules.valid"]);
-
-        clock.advance(Duration::from_secs(5));
-        lock.set_allow_renew(false);
-
-        handle_heartbeat(
-            &mut leader,
-            "node-1",
-            &publisher,
-            &desired_jobs,
-            &mut currently_leader,
-        )
-        .await
-        .unwrap();
-
-        assert!(!currently_leader);
-        assert_eq!(publisher.upserts(), vec!["cron.schedules.valid"]);
+    #[test]
+    fn scheduler_consumer_helpers_use_expected_values() {
+        let config = scheduler_consumer_config(42);
+        assert_eq!(config.durable_name.as_deref(), Some("cron_scheduler"));
+        assert_eq!(config.name.as_deref(), Some("cron_scheduler"));
+        assert_eq!(next_scheduler_start_sequence(0), 1);
+        assert_eq!(next_scheduler_start_sequence(41), 42);
+        assert!(matches!(
+            config.deliver_policy,
+            DeliverPolicy::ByStartSequence { start_sequence: 42 }
+        ));
+        assert_eq!(config.ack_policy, AckPolicy::Explicit);
+        assert_eq!(config.replay_policy, ReplayPolicy::Instant);
     }
 }
