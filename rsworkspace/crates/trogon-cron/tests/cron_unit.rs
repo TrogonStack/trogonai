@@ -39,7 +39,7 @@ async fn client_register_then_get() {
         &store,
         &store,
         RegisterJobCommand::new(job).unwrap(),
-        OccPolicy::CommandDefault,
+        OccPolicy::UseCommandRule,
     )
     .await
     .unwrap();
@@ -61,7 +61,7 @@ async fn client_set_enabled_toggles_job() {
         &store,
         &store,
         RegisterJobCommand::new(base_job("toggle")).unwrap(),
-        OccPolicy::CommandDefault,
+        OccPolicy::UseCommandRule,
     )
     .await
     .unwrap();
@@ -69,7 +69,7 @@ async fn client_set_enabled_toggles_job() {
         &store,
         &store,
         ChangeJobStateCommand::new(job_id("toggle"), JobEnabledState::Disabled),
-        OccPolicy::CommandDefault,
+        OccPolicy::UseCommandRule,
     )
     .await
     .unwrap();
@@ -92,7 +92,7 @@ async fn client_remove_and_list_jobs_use_store_paths() {
         &store,
         &store,
         RegisterJobCommand::new(base_job("alpha")).unwrap(),
-        OccPolicy::CommandDefault,
+        OccPolicy::UseCommandRule,
     )
     .await
     .unwrap();
@@ -100,7 +100,7 @@ async fn client_remove_and_list_jobs_use_store_paths() {
         &store,
         &store,
         RegisterJobCommand::new(base_job("beta")).unwrap(),
-        OccPolicy::CommandDefault,
+        OccPolicy::UseCommandRule,
     )
     .await
     .unwrap();
@@ -112,7 +112,7 @@ async fn client_remove_and_list_jobs_use_store_paths() {
         &store,
         &store,
         RemoveJobCommand::new(job_id("beta")),
-        OccPolicy::CommandDefault,
+        OccPolicy::UseCommandRule,
     )
     .await
     .unwrap();
