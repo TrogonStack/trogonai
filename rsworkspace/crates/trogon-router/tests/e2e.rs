@@ -11,8 +11,10 @@ use testcontainers_modules::{
     testcontainers::{runners::AsyncRunner, ImageExt},
 };
 use trogon_actor::{
-    ActorContext, ActorRuntime, EntityActor, StateStore, host::ActorHost, provision_state,
+    ActorContext, ActorRuntime, EntityActor, StateStore, host::ActorHost,
+    inbox::provision_actor_inbox, provision_state,
 };
+use trogon_nats::jetstream::NatsJetStreamClient;
 use trogon_registry::{AgentCapability, Registry, provision as provision_registry};
 use trogon_router::{
     Router,
@@ -82,7 +84,7 @@ impl LlmClient for MockLlmClient {
 
 // ── Setup ─────────────────────────────────────────────────────────────────────
 
-async fn setup() -> (async_nats::Client, async_nats::jetstream::Context, impl Drop) {
+async fn setup() -> (async_nats::Client, async_nats::jetstream::Context, NatsJetStreamClient, impl Drop) {
     let container = Nats::default()
         .with_cmd(["-js"])
         .start()
@@ -93,7 +95,9 @@ async fn setup() -> (async_nats::Client, async_nats::jetstream::Context, impl Dr
         .await
         .expect("connect");
     let js = async_nats::jetstream::new(nats.clone());
-    (nats, js, container)
+    let js_client = NatsJetStreamClient::new(js.clone());
+    provision_actor_inbox(&js_client).await.expect("failed to provision ACTOR_INBOX");
+    (nats, js, js_client, container)
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -103,7 +107,7 @@ async fn setup() -> (async_nats::Client, async_nats::jetstream::Context, impl Dr
 /// must be present in the TRANSCRIPTS JetStream stream.
 #[tokio::test]
 async fn router_routes_to_actor_and_both_write_transcript() {
-    let (nats, js, _container) = setup().await;
+    let (nats, js, js_client, _container) = setup().await;
 
     // ── Provision shared infrastructure ──────────────────────────────────────
     let state_store = provision_state(&js).await.unwrap();
@@ -138,7 +142,7 @@ async fn router_routes_to_actor_and_both_write_transcript() {
         entity_key: "test/entity/1".into(),
         reasoning: "this is a scribing event".into(),
     });
-    let router = Router::new(llm, registry_for_router, publisher, nats.clone());
+    let router = Router::new(llm, registry_for_router, publisher, nats.clone(), js_client);
     let router_handle = tokio::spawn(async move {
         router.run("trogon.events.>").await.ok();
     });
@@ -210,7 +214,7 @@ async fn router_routes_to_actor_and_both_write_transcript() {
 /// the event is processed.
 #[tokio::test]
 async fn actor_state_is_persisted_after_routing() {
-    let (nats, js, _container) = setup().await;
+    let (nats, js, js_client, _container) = setup().await;
 
     let state_store = provision_state(&js).await.unwrap();
     let reg_store = provision_registry(&js).await.unwrap();
@@ -240,7 +244,7 @@ async fn actor_state_is_persisted_after_routing() {
         entity_key: "acme/app/7".into(),
         reasoning: "test state persistence".into(),
     });
-    let router = Router::new(llm, registry_for_router, publisher, nats.clone());
+    let router = Router::new(llm, registry_for_router, publisher, nats.clone(), js_client);
     let router_handle = tokio::spawn(async move {
         router.run("trogon.events.>").await.ok();
     });

@@ -62,6 +62,7 @@ pub mod actor;
 pub mod context;
 pub mod error;
 pub mod host;
+pub mod inbox;
 pub mod runtime;
 pub mod state;
 pub mod telemetry;

@@ -1,7 +1,11 @@
+use std::future::IntoFuture;
+use std::time::Duration;
+
 use async_nats::HeaderMap;
 use futures_util::StreamExt;
 use tracing::{instrument, warn};
 use trogon_nats::{PublishClient, SubscribeClient};
+use trogon_nats::jetstream::JetStreamPublisher;
 use trogon_registry::{AgentCapability, Registry, RegistryStore};
 use trogon_transcript::{Session, TranscriptPublisher, entry::now_ms};
 
@@ -14,11 +18,17 @@ use crate::{
     prompt::build_routing_prompt,
 };
 
+/// How long the router waits for the JetStream server to confirm it has
+/// persisted a dispatched actor message.  This is distinct from the
+/// actor-side ACK_WAIT (the time the actor gets to process the message).
+const DISPATCH_ACK_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// The Router Agent.
 ///
 /// Subscribes to `trogon.events.>`, calls the LLM for each event to determine
 /// which Entity Actor should handle it, records the routing decision in the
-/// transcript, then forwards the event payload to the actor's NATS subject.
+/// transcript, then forwards the event payload to the actor's NATS subject via
+/// JetStream (durable delivery).
 ///
 /// ## Type parameters
 ///
@@ -27,33 +37,37 @@ use crate::{
 /// | `L` | LLM client (`OpenAiCompatClient` in prod, `MockLlmClient` in tests) |
 /// | `R` | Registry store (`kv::Store` in prod, `MockRegistryStore` in tests) |
 /// | `P` | Transcript publisher (`NatsTranscriptPublisher` / `MockTranscriptPublisher`) |
-/// | `N` | NATS client (`async_nats::Client` in prod, `MockNatsClient` in tests) |
+/// | `N` | NATS client — subscribe to event stream + DLQ publish |
+/// | `J` | JetStream publisher — durable actor dispatch |
 #[derive(Clone)]
-pub struct Router<L, R, P, N>
+pub struct Router<L, R, P, N, J>
 where
     L: LlmClient,
     R: RegistryStore,
     P: TranscriptPublisher,
     N: SubscribeClient + PublishClient,
+    J: JetStreamPublisher,
 {
     llm: L,
     registry: Registry<R>,
     publisher: P,
     nats: N,
+    js: J,
     /// When `Some`, unroutable events are published to
     /// `{dlq_subject_prefix}.{event_type}` in addition to being logged.
     dlq_subject_prefix: Option<String>,
 }
 
-impl<L, R, P, N> Router<L, R, P, N>
+impl<L, R, P, N, J> Router<L, R, P, N, J>
 where
     L: LlmClient,
     R: RegistryStore,
     P: TranscriptPublisher,
     N: SubscribeClient + PublishClient,
+    J: JetStreamPublisher,
 {
-    pub fn new(llm: L, registry: Registry<R>, publisher: P, nats: N) -> Self {
-        Self { llm, registry, publisher, nats, dlq_subject_prefix: None }
+    pub fn new(llm: L, registry: Registry<R>, publisher: P, nats: N, js: J) -> Self {
+        Self { llm, registry, publisher, nats, js, dlq_subject_prefix: None }
     }
 
     /// Enable the dead-letter queue.
@@ -210,9 +224,17 @@ where
             now_ms().to_string().as_str(),
         );
 
-        self.nats
+        // Publish via JetStream so the message is persisted until the actor ACKs it.
+        let ack_future = self
+            .js
             .publish_with_headers(target_subject, headers, event.payload.clone())
             .await
+            .map_err(|e| RouterError::Publish(e.to_string()))?;
+
+        // Await the server-side ACK confirming the message is durable.
+        tokio::time::timeout(DISPATCH_ACK_TIMEOUT, ack_future.into_future())
+            .await
+            .map_err(|_| RouterError::Publish("JetStream dispatch ACK timed out".into()))?
             .map_err(|e| RouterError::Publish(e.to_string()))?;
 
         Ok(())
@@ -225,6 +247,7 @@ where
 mod tests {
     use super::*;
     use trogon_nats::MockNatsClient;
+    use trogon_nats::jetstream::MockJetStreamPublisher;
     use trogon_registry::{AgentCapability, MockRegistryStore};
     use trogon_transcript::publisher::mock::MockTranscriptPublisher;
 
@@ -234,19 +257,21 @@ mod tests {
     };
 
     fn make_router() -> (
-        Router<MockLlmClient, MockRegistryStore, MockTranscriptPublisher, MockNatsClient>,
+        Router<MockLlmClient, MockRegistryStore, MockTranscriptPublisher, MockNatsClient, MockJetStreamPublisher>,
         MockLlmClient,
         MockRegistryStore,
         MockTranscriptPublisher,
         MockNatsClient,
+        MockJetStreamPublisher,
     ) {
         let llm = MockLlmClient::new();
         let store = MockRegistryStore::new();
         let publisher = MockTranscriptPublisher::new();
         let nats = MockNatsClient::new();
+        let js = MockJetStreamPublisher::new();
         let registry = Registry::new(store.clone());
-        let router = Router::new(llm.clone(), registry, publisher.clone(), nats.clone());
-        (router, llm, store, publisher, nats)
+        let router = Router::new(llm.clone(), registry, publisher.clone(), nats.clone(), js.clone());
+        (router, llm, store, publisher, nats, js)
     }
 
     fn pr_actor() -> AgentCapability {
@@ -255,7 +280,7 @@ mod tests {
 
     #[tokio::test]
     async fn routes_event_to_registered_agent() {
-        let (router, llm, store, publisher, nats) = make_router();
+        let (router, llm, store, publisher, _nats, js) = make_router();
 
         // Register an agent.
         let registry = Registry::new(store.clone());
@@ -288,15 +313,15 @@ mod tests {
         let published = publisher.take_published();
         assert_eq!(published.len(), 1);
 
-        // NATS should have one published message to the actor subject.
-        let subjects = nats.published_messages();
+        // JetStream should have dispatched one message to the actor subject.
+        let subjects = js.published_subjects();
         assert_eq!(subjects.len(), 1);
         assert_eq!(subjects[0], "actors.pr.owner.repo.42");
     }
 
     #[tokio::test]
     async fn unroutable_event_does_not_publish() {
-        let (router, llm, store, publisher, nats) = make_router();
+        let (router, llm, store, publisher, _nats, js) = make_router();
 
         let registry = Registry::new(store.clone());
         registry.register(&pr_actor()).await.unwrap();
@@ -310,8 +335,8 @@ mod tests {
 
         assert!(matches!(result, RouteResult::Unroutable { .. }));
 
-        // Nothing published to actors.
-        let subjects = nats.published_messages();
+        // Nothing dispatched to any actor via JetStream.
+        let subjects = js.published_subjects();
         assert!(subjects.is_empty());
 
         // But transcript still gets one unroutable entry.
@@ -321,7 +346,7 @@ mod tests {
 
     #[tokio::test]
     async fn llm_receives_prompt_with_agent_info() {
-        let (router, llm, store, _, _nats) = make_router();
+        let (router, llm, store, _, _nats, _js) = make_router();
 
         let registry = Registry::new(store.clone());
         registry.register(&pr_actor()).await.unwrap();
@@ -345,7 +370,7 @@ mod tests {
 
     #[tokio::test]
     async fn unknown_agent_type_in_decision_returns_error() {
-        let (router, llm, _store, _, _nats) = make_router();
+        let (router, llm, _store, _, _nats, _js) = make_router();
         // Registry is empty — no agents registered.
 
         llm.push_response(LlmRoutingResponse::Routed {
@@ -377,22 +402,24 @@ mod tests {
     }
 
     fn make_router_fail_publisher() -> (
-        Router<MockLlmClient, MockRegistryStore, FailPublisher, MockNatsClient>,
+        Router<MockLlmClient, MockRegistryStore, FailPublisher, MockNatsClient, MockJetStreamPublisher>,
         MockLlmClient,
         MockRegistryStore,
         MockNatsClient,
+        MockJetStreamPublisher,
     ) {
         let llm = MockLlmClient::new();
         let store = MockRegistryStore::new();
         let nats = MockNatsClient::new();
+        let js = MockJetStreamPublisher::new();
         let registry = Registry::new(store.clone());
-        let router = Router::new(llm.clone(), registry, FailPublisher, nats.clone());
-        (router, llm, store, nats)
+        let router = Router::new(llm.clone(), registry, FailPublisher, nats.clone(), js.clone());
+        (router, llm, store, nats, js)
     }
 
     #[tokio::test]
     async fn routed_transcript_write_failure_does_not_fail_route() {
-        let (router, llm, store, nats) = make_router_fail_publisher();
+        let (router, llm, store, _nats, js) = make_router_fail_publisher();
         let registry = Registry::new(store.clone());
         registry.register(&pr_actor()).await.unwrap();
 
@@ -406,12 +433,12 @@ mod tests {
         // Even though transcript write fails, dispatch must still succeed.
         let result = router.route_event(event).await.unwrap();
         assert!(matches!(result, RouteResult::Routed(_)));
-        assert_eq!(nats.published_messages().len(), 1);
+        assert_eq!(js.published_subjects().len(), 1);
     }
 
     #[tokio::test]
     async fn unroutable_transcript_write_failure_does_not_fail_route() {
-        let (router, llm, store, _nats) = make_router_fail_publisher();
+        let (router, llm, store, _nats, _js) = make_router_fail_publisher();
         let registry = Registry::new(store.clone());
         registry.register(&pr_actor()).await.unwrap();
 
@@ -428,7 +455,7 @@ mod tests {
     /// end the subscription and verify `run()` returns Ok.
     #[tokio::test]
     async fn run_processes_message_then_exits_on_closed_subscription() {
-        let (router, llm, store, _publisher, nats) = make_router();
+        let (router, llm, store, _publisher, nats, js) = make_router();
 
         let registry = Registry::new(store.clone());
         registry.register(&pr_actor()).await.unwrap();
@@ -455,8 +482,8 @@ mod tests {
 
         router.run("trogon.events.>").await.unwrap();
 
-        // The message was dispatched to the actor subject.
-        let subjects = nats.published_messages();
+        // The message was dispatched to the actor subject via JetStream.
+        let subjects = js.published_subjects();
         assert_eq!(subjects.len(), 1);
         assert_eq!(subjects[0], "actors.pr.owner.repo.1");
     }
@@ -464,7 +491,7 @@ mod tests {
     /// Test that `run()` continues after a `route_event` error (warn path).
     #[tokio::test]
     async fn run_continues_after_route_error() {
-        let (router, llm, _store, _publisher, nats) = make_router();
+        let (router, llm, _store, _publisher, nats, _js) = make_router();
         // No agent registered → routing will error with UnknownAgentType.
 
         llm.push_response(LlmRoutingResponse::Routed {
@@ -493,7 +520,7 @@ mod tests {
     /// Line 63: MockNatsClient.subscribe() returns Err when no stream is injected.
     #[tokio::test]
     async fn run_returns_subscribe_error_when_subscribe_fails() {
-        let (router, _llm, _store, _publisher, _nats) = make_router();
+        let (router, _llm, _store, _publisher, _nats, _js) = make_router();
         // No inject_messages() call → subscribe() returns MockError → mapped to RouterError::Subscribe
         let err = router.run("trogon.events.>").await.unwrap_err();
         assert!(matches!(err, RouterError::Subscribe(_)));
@@ -540,7 +567,8 @@ mod tests {
         let registry = trogon_registry::Registry::new(AlwaysFailStore);
         let publisher = MockTranscriptPublisher::new();
         let nats = MockNatsClient::new();
-        let router = Router::new(llm, registry, publisher, nats);
+        let js = MockJetStreamPublisher::new();
+        let router = Router::new(llm, registry, publisher, nats, js);
 
         let event = crate::event::RouterEvent::new("trogon.events.x", b"{}".as_ref());
         let err = router.route_event(event).await.unwrap_err();

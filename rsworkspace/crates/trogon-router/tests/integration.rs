@@ -6,6 +6,8 @@ use testcontainers_modules::{
     nats::Nats,
     testcontainers::{runners::AsyncRunner, ImageExt},
 };
+use trogon_actor::inbox::provision_actor_inbox;
+use trogon_nats::jetstream::NatsJetStreamClient;
 use trogon_registry::{AgentCapability, Registry, provision as provision_registry};
 use trogon_router::{
     Router,
@@ -50,7 +52,7 @@ impl LlmClient for MockLlmClient {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-async fn setup() -> (async_nats::Client, async_nats::jetstream::Context, impl Drop) {
+async fn setup() -> (async_nats::Client, async_nats::jetstream::Context, NatsJetStreamClient, impl Drop) {
     let container = Nats::default()
         .with_cmd(["-js"])
         .start()
@@ -61,7 +63,9 @@ async fn setup() -> (async_nats::Client, async_nats::jetstream::Context, impl Dr
         .await
         .expect("failed to connect to NATS");
     let js = async_nats::jetstream::new(nats.clone());
-    (nats, js, container)
+    let js_client = NatsJetStreamClient::new(js.clone());
+    provision_actor_inbox(&js_client).await.expect("failed to provision ACTOR_INBOX stream");
+    (nats, js, js_client, container)
 }
 
 fn pr_actor() -> AgentCapability {
@@ -82,7 +86,7 @@ async fn publish_after_subscribe(
 
 #[tokio::test]
 async fn router_forwards_event_to_actor_subject() {
-    let (nats, js, _container) = setup().await;
+    let (nats, js, js_client, _container) = setup().await;
 
     let store = provision_registry(&js).await.unwrap();
     let registry = Registry::new(store);
@@ -98,7 +102,7 @@ async fn router_forwards_event_to_actor_subject() {
     });
 
     let publisher = MockTranscriptPublisher::new();
-    let router = Router::new(llm, registry, publisher, nats.clone());
+    let router = Router::new(llm, registry, publisher, nats.clone(), js_client);
 
     // Spawn router first, then publish after it has subscribed.
     let nats_clone = nats.clone();
@@ -125,7 +129,7 @@ async fn router_forwards_event_to_actor_subject() {
 
 #[tokio::test]
 async fn router_records_routing_decision_in_transcript() {
-    let (nats, js, _container) = setup().await;
+    let (nats, js, js_client, _container) = setup().await;
 
     let store = provision_registry(&js).await.unwrap();
     let registry = Registry::new(store);
@@ -141,7 +145,7 @@ async fn router_records_routing_decision_in_transcript() {
     });
 
     let publisher = MockTranscriptPublisher::new();
-    let router = Router::new(llm, registry, publisher.clone(), nats.clone());
+    let router = Router::new(llm, registry, publisher.clone(), nats.clone(), js_client);
 
     let nats_clone = nats.clone();
     let router_handle = tokio::spawn(async move {
@@ -164,7 +168,7 @@ async fn router_records_routing_decision_in_transcript() {
 
 #[tokio::test]
 async fn unroutable_event_does_not_forward_to_any_actor() {
-    let (nats, js, _container) = setup().await;
+    let (nats, js, js_client, _container) = setup().await;
 
     let store = provision_registry(&js).await.unwrap();
     let registry = Registry::new(store);
@@ -178,7 +182,7 @@ async fn unroutable_event_does_not_forward_to_any_actor() {
     });
 
     let publisher = MockTranscriptPublisher::new();
-    let router = Router::new(llm, registry, publisher.clone(), nats.clone());
+    let router = Router::new(llm, registry, publisher.clone(), nats.clone(), js_client);
 
     let nats_clone = nats.clone();
     let router_handle = tokio::spawn(async move {
@@ -206,7 +210,7 @@ async fn unroutable_event_does_not_forward_to_any_actor() {
 
 #[tokio::test]
 async fn router_records_unroutable_entry_in_transcript() {
-    let (nats, js, _container) = setup().await;
+    let (nats, js, js_client, _container) = setup().await;
 
     let store = provision_registry(&js).await.unwrap();
     let registry = Registry::new(store);
@@ -217,7 +221,7 @@ async fn router_records_unroutable_entry_in_transcript() {
     });
 
     let publisher = MockTranscriptPublisher::new();
-    let router = Router::new(llm, registry, publisher.clone(), nats.clone());
+    let router = Router::new(llm, registry, publisher.clone(), nats.clone(), js_client);
 
     let nats_clone = nats.clone();
     let router_handle = tokio::spawn(async move {
@@ -240,7 +244,7 @@ async fn router_records_unroutable_entry_in_transcript() {
 
 #[tokio::test]
 async fn router_uses_real_jetstream_transcript() {
-    let (nats, js, _container) = setup().await;
+    let (nats, js, js_client, _container) = setup().await;
 
     let transcript_store = TranscriptStore::new(js.clone());
     transcript_store.provision().await.unwrap();
@@ -260,7 +264,7 @@ async fn router_uses_real_jetstream_transcript() {
 
     use trogon_transcript::publisher::NatsTranscriptPublisher;
     let publisher = NatsTranscriptPublisher::new(js.clone());
-    let router = Router::new(llm, registry, publisher, nats.clone());
+    let router = Router::new(llm, registry, publisher, nats.clone(), js_client);
 
     let nats_clone = nats.clone();
     let router_handle = tokio::spawn(async move {
@@ -298,7 +302,7 @@ async fn router_uses_real_jetstream_transcript() {
 /// with the expected values.
 #[tokio::test]
 async fn forwarded_message_carries_routing_headers() {
-    let (nats, js, _container) = setup().await;
+    let (nats, js, js_client, _container) = setup().await;
 
     let store = provision_registry(&js).await.unwrap();
     let registry = Registry::new(store);
@@ -314,7 +318,7 @@ async fn forwarded_message_carries_routing_headers() {
     });
 
     let publisher = MockTranscriptPublisher::new();
-    let router = Router::new(llm, registry, publisher, nats.clone());
+    let router = Router::new(llm, registry, publisher, nats.clone(), js_client);
 
     let nats_clone = nats.clone();
     let router_handle = tokio::spawn(async move {
@@ -361,7 +365,7 @@ async fn forwarded_message_carries_routing_headers() {
 /// second event is still processed even after the first fails.
 #[tokio::test]
 async fn router_loop_continues_after_routing_error() {
-    let (nats, js, _container) = setup().await;
+    let (nats, js, js_client, _container) = setup().await;
 
     let store = provision_registry(&js).await.unwrap();
     let registry = Registry::new(store);
@@ -384,7 +388,7 @@ async fn router_loop_continues_after_routing_error() {
     });
 
     let publisher = MockTranscriptPublisher::new();
-    let router = Router::new(llm, registry, publisher, nats.clone());
+    let router = Router::new(llm, registry, publisher, nats.clone(), js_client);
 
     let nats_clone = nats.clone();
     let router_handle = tokio::spawn(async move {
@@ -427,7 +431,7 @@ async fn router_loop_continues_after_routing_error() {
 
 #[tokio::test]
 async fn router_prompt_contains_live_registry_data() {
-    let (nats, js, _container) = setup().await;
+    let (nats, js, js_client, _container) = setup().await;
 
     let store = provision_registry(&js).await.unwrap();
     let registry = Registry::new(store);
@@ -439,7 +443,7 @@ async fn router_prompt_contains_live_registry_data() {
     });
 
     let publisher = MockTranscriptPublisher::new();
-    let router = Router::new(llm.clone(), registry, publisher, nats.clone());
+    let router = Router::new(llm.clone(), registry, publisher, nats.clone(), js_client);
 
     let nats_clone = nats.clone();
     let router_handle = tokio::spawn(async move {

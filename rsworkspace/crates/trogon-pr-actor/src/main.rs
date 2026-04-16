@@ -5,8 +5,8 @@ use std::time::Duration;
 use acp_telemetry::ServiceName;
 use clap::Parser;
 use tracing::info;
-use trogon_actor::{ActorRuntime, host::ActorHost, provision_state};
-use trogon_nats::connect;
+use trogon_actor::{ActorRuntime, host::ActorHost, inbox::provision_actor_inbox, provision_state};
+use trogon_nats::{connect, jetstream::NatsJetStreamClient};
 use trogon_registry::{AgentCapability, Registry, provision as provision_registry};
 use trogon_service_config::{NatsArgs, RuntimeConfigArgs, load_config, resolve_nats};
 use trogon_std::env::SystemEnv;
@@ -50,6 +50,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let registry_store = provision_registry(&js).await.map_err(|e| e.to_string())?;
     info!("AGENT_REGISTRY KV bucket ready");
 
+    let js_client = NatsJetStreamClient::new(js.clone());
+    provision_actor_inbox(&js_client).await?;
+    info!("ACTOR_INBOX stream ready");
+
     // ── Build runtime and host ────────────────────────────────────────────────
     let publisher = NatsTranscriptPublisher::new(js);
     let registry = Registry::new(registry_store);
@@ -77,7 +81,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // ── Run until SIGTERM / SIGINT ────────────────────────────────────────────
     tokio::select! {
-        result = host.run() => {
+        result = host.run_durable(&js_client) => {
             result?;
         }
         _ = acp_telemetry::signal::shutdown_signal() => {
