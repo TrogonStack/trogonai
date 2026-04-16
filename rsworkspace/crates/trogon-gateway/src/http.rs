@@ -46,6 +46,14 @@ where
         info!(source = "telegram", "mounted at /telegram");
     }
 
+    if let Some(ref cfg) = config.twitter {
+        app = app.nest(
+            "/twitter",
+            trogon_source_twitter::router(publisher.clone(), cfg),
+        );
+        info!(source = "twitter", "mounted at /twitter");
+    }
+
     if let Some(ref cfg) = config.gitlab {
         app = app.nest(
             "/gitlab",
@@ -133,6 +141,9 @@ signing_secret = "slack-secret"
 
 [sources.telegram]
 webhook_secret = "tg-secret"
+
+[sources.twitter]
+consumer_secret = "twitter-consumer-secret"
 
 [sources.gitlab]
 webhook_secret = "gl-secret"
