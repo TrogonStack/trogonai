@@ -2887,7 +2887,7 @@ dependencies = [
  "toml_datetime 1.1.1+spec-1.1.0",
  "toml_parser",
  "toml_writer",
- "winnow 1.0.1",
+ "winnow 1.0.2",
 ]
 
 [[package]]
@@ -3124,9 +3124,6 @@ dependencies = [
 [[package]]
 name = "trogon-decider"
 version = "0.1.0"
-dependencies = [
- "trybuild",
-]
 
 [[package]]
 name = "trogon-eventsourcing"
@@ -3138,6 +3135,7 @@ dependencies = [
  "serde",
  "serde_json",
  "trogon-nats",
+ "trybuild",
  "uuid",
 ]
 
