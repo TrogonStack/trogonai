@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::{
     AlwaysSnapshot, CommandExecution, CommandFailure, CommandInfraError, CommandOutcome,
     CommandState, Decide, Decision, EventStore, ExpectedState, ExpectedStateRule, NonEmpty,
-    OccPolicy, SnapshotState, SnapshotStore, SnapshotStoreConfig, StreamCommand,
+    OccPolicy, SnapshotState, SnapshotStore, SnapshotStoreConfig, Snapshots, StreamCommand,
 };
 
 use crate::{
@@ -133,7 +133,11 @@ where
 {
     Ok(CommandExecution::new(event_store, &command)
         .occ(occ)
-        .snapshots(snapshot_store, SNAPSHOT_STORE_CONFIG, AlwaysSnapshot)
+        .snapshots(Snapshots::new(
+            snapshot_store,
+            SNAPSHOT_STORE_CONFIG,
+            AlwaysSnapshot,
+        ))
         .execute()
         .await?
         .into_outcome())
