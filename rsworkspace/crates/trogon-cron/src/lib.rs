@@ -22,9 +22,9 @@ pub mod mocks;
 
 pub use commands::{
     ChangeJobStateCommand, ChangeJobStateDecisionError, ChangeJobStateState, GetJobCommand,
-    ListJobsCommand, RegisterJobCommand, RegisterJobDecisionError, RegisterJobState,
-    RemoveJobCommand, RemoveJobDecisionError, RemoveJobState, change_job_state, get_job, list_jobs,
-    register_job, remove_job,
+    JobCommandResult, ListJobsCommand, RegisterJobCommand, RegisterJobDecisionError,
+    RegisterJobState, RemoveJobCommand, RemoveJobDecisionError, RemoveJobState, change_job_state,
+    get_job, list_jobs, register_job, remove_job,
 };
 pub use config::{
     DeliverySpec, JobEnabledState, JobSpec, JobWriteCondition, SamplingSource, ScheduleSpec,
@@ -41,4 +41,4 @@ pub use projections::{
 };
 pub use store::{SNAPSHOT_STORE_CONFIG, Store, append_events, connect_store, open_snapshot_bucket};
 pub use traits::{LeaderLock, SchedulePublisher};
-pub use trogon_eventsourcing::OccPolicy;
+pub use trogon_eventsourcing::{CommandFailure, CommandInfraError, CommandOutcome, OccPolicy};
