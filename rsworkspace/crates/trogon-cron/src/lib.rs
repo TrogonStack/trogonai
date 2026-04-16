@@ -27,10 +27,11 @@ pub use commands::{
     RemoveJobDecisionError, RemoveJobResult, RemoveJobState, change_job_state, get_job, list_jobs,
     register_job, remove_job,
 };
-pub use config::{
-    DeliverySpec, JobEnabledState, JobSpec, JobWriteCondition, SamplingSource, ScheduleSpec,
+pub use config::JobWriteCondition;
+pub use domain::{
+    DeliverySpec, JobEnabledState, JobId, JobIdError, JobSpec, ResolvedJobSpec, SamplingSource,
+    ScheduleSpec,
 };
-pub use domain::{JobId, JobIdError, ResolvedJobSpec};
 pub use error::{CronError, JobSpecError};
 pub use events::{JobEvent, JobEventData, RecordedJobEvent, RegisteredJobSpec};
 pub use nats::NatsSchedulePublisher;

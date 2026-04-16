@@ -674,10 +674,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
-    use crate::{
-        JobId, RegisteredJobSpec,
-        config::{DeliverySpec, JobEnabledState, ScheduleSpec},
-    };
+    use crate::{DeliverySpec, JobEnabledState, JobId, RegisteredJobSpec, ScheduleSpec};
 
     fn job_id(id: &str) -> JobId {
         JobId::parse(id).unwrap()
