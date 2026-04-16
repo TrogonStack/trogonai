@@ -389,3 +389,43 @@ async fn stats_skips_invalid_json_entries() {
     assert_eq!(stats.total, 1, "corrupted entry must be skipped, only valid run counted");
     assert_eq!(stats.successful_7d, 1);
 }
+
+/// `list()` must silently skip entries whose bytes are not valid JSON rather
+/// than returning an error. The pattern `let Ok(run) = serde_json::from_slice`
+/// in the implementation means bad entries are discarded, not propagated.
+#[tokio::test]
+async fn list_skips_invalid_json_entries() {
+    use async_nats::jetstream;
+    use testcontainers_modules::{nats::Nats, testcontainers::{ImageExt, runners::AsyncRunner}};
+
+    let container = Nats::default()
+        .with_cmd(["--jetstream"])
+        .start()
+        .await
+        .expect("NATS");
+    let port = container.get_host_port_ipv4(4222).await.expect("port");
+    let nats = async_nats::connect(format!("nats://127.0.0.1:{port}"))
+        .await
+        .expect("connect");
+    let js = jetstream::new(nats);
+    let store = RunStore::open(&js).await.expect("open");
+
+    // Write a valid run.
+    store.record(&run("r-good", "auto-1", "acme", RunStatus::Success))
+        .await
+        .unwrap();
+
+    // Inject two corrupted entries directly into the KV bucket.
+    let kv = js.get_key_value("RUNS").await.expect("kv bucket");
+    kv.put("acme.corrupt-1", bytes::Bytes::from(b"not valid json".to_vec()))
+        .await
+        .expect("inject corrupt-1");
+    kv.put("acme.corrupt-2", bytes::Bytes::from(b"{broken".to_vec()))
+        .await
+        .expect("inject corrupt-2");
+
+    // list() must succeed and return only the valid run.
+    let list = store.list("acme", None).await.expect("list must not error on corrupt entries");
+    assert_eq!(list.len(), 1, "corrupted entries must be skipped; only the valid run counts");
+    assert_eq!(list[0].id, "r-good");
+}
