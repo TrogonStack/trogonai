@@ -5380,6 +5380,294 @@ mod tests {
         );
     }
 
+    // ── write_promise_terminal CAS conflict sub-paths ─────────────────────────
+    //
+    // The existing test `end_turn_resolved_write_error_run_still_completes`
+    // covers the happy-retry path (CAS conflict → reload → retry succeeds).
+    // The five tests below cover every other branch inside the
+    // `Ok(Err(e))` arm of `write_promise_terminal`:
+    //
+    //   CAS → reload → None  (promise vanished)
+    //   CAS → reload → Err   (reload itself errors)
+    //   CAS → reload → hang  (reload times out)
+    //   CAS → reload → Some  → retry write → Err
+    //   CAS → reload → Some  → retry write → hang  (retry times out)
+    //
+    // In all five cases the run must still complete with Ok(text), and the
+    // promise stays Running (terminal write failed non-fatally).
+
+    /// Shared configurable mock for the five CAS-conflict branch tests.
+    ///
+    /// `update_promise`:
+    ///   - Call 0:  always returns a CAS-conflict Err (enters retry branch)
+    ///   - Call 1+: depends on `retry_write`
+    ///
+    /// `get_promise`:
+    ///   - Call 0:  always delegates to inner (initial load in `run()`)
+    ///   - Call 1+: depends on `get_after_first`
+    #[derive(Clone)]
+    enum GetAfterFirstBehavior { ReturnNone, ReturnErr, Hang, Delegate }
+    #[derive(Clone)]
+    enum RetryWriteBehavior { ReturnErr, Hang }
+
+    struct CasConflictBranchStore {
+        inner: crate::promise_store::mock::MockPromiseStore,
+        get_count: Arc<std::sync::atomic::AtomicUsize>,
+        update_count: Arc<std::sync::atomic::AtomicUsize>,
+        get_after_first: GetAfterFirstBehavior,
+        retry_write: RetryWriteBehavior,
+    }
+
+    impl CasConflictBranchStore {
+        fn new(get_after_first: GetAfterFirstBehavior, retry_write: RetryWriteBehavior) -> Self {
+            Self {
+                inner: crate::promise_store::mock::MockPromiseStore::new(),
+                get_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+                update_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+                get_after_first,
+                retry_write,
+            }
+        }
+    }
+
+    impl crate::promise_store::PromiseRepository for CasConflictBranchStore {
+        fn get_promise<'a>(
+            &'a self,
+            tenant_id: &'a str,
+            promise_id: &'a str,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<crate::promise_store::PromiseEntry>, crate::promise_store::PromiseStoreError>> + Send + 'a>>
+        {
+            use std::sync::atomic::Ordering;
+            let n = self.get_count.fetch_add(1, Ordering::SeqCst);
+            if n == 0 {
+                return self.inner.get_promise(tenant_id, promise_id);
+            }
+            match &self.get_after_first {
+                GetAfterFirstBehavior::ReturnNone => Box::pin(async { Ok(None) }),
+                GetAfterFirstBehavior::ReturnErr => Box::pin(async {
+                    Err(crate::promise_store::PromiseStoreError("injected reload error".to_string()))
+                }),
+                GetAfterFirstBehavior::Hang => Box::pin(std::future::pending()),
+                GetAfterFirstBehavior::Delegate => self.inner.get_promise(tenant_id, promise_id),
+            }
+        }
+
+        fn put_promise<'a>(
+            &'a self,
+            promise: &'a crate::promise_store::AgentPromise,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<u64, crate::promise_store::PromiseStoreError>> + Send + 'a>>
+        {
+            self.inner.put_promise(promise)
+        }
+
+        fn update_promise<'a>(
+            &'a self,
+            _tenant_id: &'a str,
+            _promise_id: &'a str,
+            _promise: &'a crate::promise_store::AgentPromise,
+            _revision: u64,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<u64, crate::promise_store::PromiseStoreError>> + Send + 'a>>
+        {
+            use std::sync::atomic::Ordering;
+            let n = self.update_count.fetch_add(1, Ordering::SeqCst);
+            if n == 0 {
+                return Box::pin(async {
+                    Err(crate::promise_store::PromiseStoreError("injected CAS conflict".to_string()))
+                });
+            }
+            match &self.retry_write {
+                RetryWriteBehavior::ReturnErr => Box::pin(async {
+                    Err(crate::promise_store::PromiseStoreError("injected retry write error".to_string()))
+                }),
+                RetryWriteBehavior::Hang => Box::pin(std::future::pending()),
+            }
+        }
+
+        fn get_tool_result<'a>(
+            &'a self,
+            tenant_id: &'a str,
+            promise_id: &'a str,
+            cache_key: &'a str,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<String>, crate::promise_store::PromiseStoreError>> + Send + 'a>>
+        {
+            self.inner.get_tool_result(tenant_id, promise_id, cache_key)
+        }
+
+        fn put_tool_result<'a>(
+            &'a self,
+            tenant_id: &'a str,
+            promise_id: &'a str,
+            cache_key: &'a str,
+            result: &'a str,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), crate::promise_store::PromiseStoreError>> + Send + 'a>>
+        {
+            self.inner.put_tool_result(tenant_id, promise_id, cache_key, result)
+        }
+
+        fn list_running<'a>(
+            &'a self,
+            tenant_id: &'a str,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<crate::promise_store::AgentPromise>, crate::promise_store::PromiseStoreError>> + Send + 'a>>
+        {
+            self.inner.list_running(tenant_id)
+        }
+    }
+
+    /// CAS conflict on terminal write → reload returns `None` (promise vanished).
+    /// Run must still complete with Ok(text); promise status unchanged (Running).
+    #[tokio::test]
+    async fn write_promise_terminal_cas_conflict_promise_vanished_run_completes() {
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+        use crate::tools::mock::MockToolDispatcher;
+
+        let store = Arc::new(CasConflictBranchStore::new(
+            GetAfterFirstBehavior::ReturnNone,
+            RetryWriteBehavior::ReturnErr, // never reached
+        ));
+        store.inner.insert_promise(make_test_promise("p1"));
+
+        let resp = serde_json::json!({"stop_reason": "end_turn", "content": [{"type": "text", "text": "done"}]});
+        let anthropic = Arc::new(mock::SequencedMockAnthropicClient::new(vec![resp]));
+        let agent = make_durable_agent(
+            anthropic,
+            Arc::new(MockToolDispatcher::new("unused")),
+            Arc::clone(&store) as Arc<dyn PromiseRepository>,
+            "p1",
+        );
+
+        let result = agent.run(vec![Message::user_text("go")], &[], None).await;
+        assert_eq!(result.unwrap(), "done", "run must complete even when reload returns None");
+
+        // update_promise failed → promise never written → still Running
+        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        assert_eq!(p.status, PromiseStatus::Running, "promise must stay Running when reload returns None");
+    }
+
+    /// CAS conflict on terminal write → reload returns `Err`.
+    /// Run must still complete; promise stays Running.
+    #[tokio::test]
+    async fn write_promise_terminal_cas_conflict_reload_error_run_completes() {
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+        use crate::tools::mock::MockToolDispatcher;
+
+        let store = Arc::new(CasConflictBranchStore::new(
+            GetAfterFirstBehavior::ReturnErr,
+            RetryWriteBehavior::ReturnErr, // never reached
+        ));
+        store.inner.insert_promise(make_test_promise("p1"));
+
+        let resp = serde_json::json!({"stop_reason": "end_turn", "content": [{"type": "text", "text": "done"}]});
+        let anthropic = Arc::new(mock::SequencedMockAnthropicClient::new(vec![resp]));
+        let agent = make_durable_agent(
+            anthropic,
+            Arc::new(MockToolDispatcher::new("unused")),
+            Arc::clone(&store) as Arc<dyn PromiseRepository>,
+            "p1",
+        );
+
+        let result = agent.run(vec![Message::user_text("go")], &[], None).await;
+        assert_eq!(result.unwrap(), "done", "run must complete even when reload returns Err");
+
+        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        assert_eq!(p.status, PromiseStatus::Running, "promise must stay Running when reload errors");
+    }
+
+    /// CAS conflict on terminal write → reload hangs past `NATS_KV_TIMEOUT`.
+    /// Run must still complete; promise stays Running.
+    #[tokio::test(start_paused = true)]
+    async fn write_promise_terminal_cas_conflict_reload_timeout_run_completes() {
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+        use crate::tools::mock::MockToolDispatcher;
+        use std::time::Duration;
+
+        let store = Arc::new(CasConflictBranchStore::new(
+            GetAfterFirstBehavior::Hang,
+            RetryWriteBehavior::ReturnErr, // never reached
+        ));
+        store.inner.insert_promise(make_test_promise("p1"));
+
+        let resp = serde_json::json!({"stop_reason": "end_turn", "content": [{"type": "text", "text": "done"}]});
+        let anthropic = Arc::new(mock::SequencedMockAnthropicClient::new(vec![resp]));
+        let agent = make_durable_agent(
+            anthropic,
+            Arc::new(MockToolDispatcher::new("unused")),
+            Arc::clone(&store) as Arc<dyn PromiseRepository>,
+            "p1",
+        );
+
+        let (result, _) = tokio::join!(
+            agent.run(vec![Message::user_text("go")], &[], None),
+            tokio::time::advance(NATS_KV_TIMEOUT + Duration::from_millis(1)),
+        );
+        assert_eq!(result.unwrap(), "done", "run must complete even when reload times out");
+
+        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        assert_eq!(p.status, PromiseStatus::Running, "promise must stay Running when reload times out");
+    }
+
+    /// CAS conflict on terminal write → reload succeeds → retry write returns `Err`.
+    /// Run must still complete; promise stays Running.
+    #[tokio::test]
+    async fn write_promise_terminal_cas_conflict_retry_write_error_run_completes() {
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+        use crate::tools::mock::MockToolDispatcher;
+
+        let store = Arc::new(CasConflictBranchStore::new(
+            GetAfterFirstBehavior::Delegate, // reload returns the real promise
+            RetryWriteBehavior::ReturnErr,
+        ));
+        store.inner.insert_promise(make_test_promise("p1"));
+
+        let resp = serde_json::json!({"stop_reason": "end_turn", "content": [{"type": "text", "text": "done"}]});
+        let anthropic = Arc::new(mock::SequencedMockAnthropicClient::new(vec![resp]));
+        let agent = make_durable_agent(
+            anthropic,
+            Arc::new(MockToolDispatcher::new("unused")),
+            Arc::clone(&store) as Arc<dyn PromiseRepository>,
+            "p1",
+        );
+
+        let result = agent.run(vec![Message::user_text("go")], &[], None).await;
+        assert_eq!(result.unwrap(), "done", "run must complete even when retry write errors");
+
+        // retry write Err → promise status not written by the store (inner never called by update)
+        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        assert_eq!(p.status, PromiseStatus::Running, "promise must stay Running when retry write errors");
+    }
+
+    /// CAS conflict on terminal write → reload succeeds → retry write hangs past `NATS_KV_TIMEOUT`.
+    /// Run must still complete; promise stays Running.
+    #[tokio::test(start_paused = true)]
+    async fn write_promise_terminal_cas_conflict_retry_write_timeout_run_completes() {
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+        use crate::tools::mock::MockToolDispatcher;
+        use std::time::Duration;
+
+        let store = Arc::new(CasConflictBranchStore::new(
+            GetAfterFirstBehavior::Delegate,
+            RetryWriteBehavior::Hang,
+        ));
+        store.inner.insert_promise(make_test_promise("p1"));
+
+        let resp = serde_json::json!({"stop_reason": "end_turn", "content": [{"type": "text", "text": "done"}]});
+        let anthropic = Arc::new(mock::SequencedMockAnthropicClient::new(vec![resp]));
+        let agent = make_durable_agent(
+            anthropic,
+            Arc::new(MockToolDispatcher::new("unused")),
+            Arc::clone(&store) as Arc<dyn PromiseRepository>,
+            "p1",
+        );
+
+        let (result, _) = tokio::join!(
+            agent.run(vec![Message::user_text("go")], &[], None),
+            tokio::time::advance(NATS_KV_TIMEOUT + Duration::from_millis(1)),
+        );
+        assert_eq!(result.unwrap(), "done", "run must complete even when retry write times out");
+
+        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        assert_eq!(p.status, PromiseStatus::Running, "promise must stay Running when retry write times out");
+    }
+
     // ── end_turn multi-block text join ────────────────────────────────────────
 
     /// When `end_turn` content contains multiple `Text` blocks they are joined
