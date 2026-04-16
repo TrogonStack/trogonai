@@ -15,8 +15,8 @@ use trogon_eventsourcing::{
 use trogon_nats::lease::{ReleaseLease, RenewLease, TryAcquireLease};
 
 use crate::{
-    GetJobCommand, ListJobsCommand,
-    config::{JobSpec, JobWriteCondition, JobWriteState},
+    GetJobCommand, JobSpec, ListJobsCommand,
+    config::{JobWriteCondition, JobWriteState},
     domain::ResolvedJobSpec,
     error::CronError,
     events::{JobEvent, JobEventData},
@@ -405,12 +405,10 @@ mod tests {
     use trogon_eventsourcing::CommandFailure;
 
     use super::*;
-    use crate::config::{
-        DeliverySpec, JobEnabledState, JobWriteCondition, SamplingSource, ScheduleSpec,
-    };
     use crate::{
-        ChangeJobStateCommand, GetJobCommand, ListJobsCommand, OccPolicy, RegisterJobCommand,
-        RemoveJobCommand, change_job_state, register_job, remove_job,
+        ChangeJobStateCommand, DeliverySpec, GetJobCommand, JobEnabledState, JobWriteCondition,
+        ListJobsCommand, OccPolicy, RegisterJobCommand, RemoveJobCommand, SamplingSource,
+        ScheduleSpec, change_job_state, register_job, remove_job,
     };
     use futures::StreamExt;
 
