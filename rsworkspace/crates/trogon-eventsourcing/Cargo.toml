@@ -21,3 +21,6 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 trogon-nats = { path = "../trogon-nats" }
 uuid = { workspace = true }
+
+[dev-dependencies]
+trybuild = "1"

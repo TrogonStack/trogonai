@@ -176,7 +176,10 @@ where
 mod tests {
     use std::collections::BTreeMap;
 
-    use trogon_eventsourcing::{Decision, NonEmpty, Snapshot, decide};
+    use trogon_eventsourcing::{
+        Decision, NonEmpty, Snapshot, decide,
+        testing::{TestCase, decider, expect_error},
+    };
 
     use super::*;
     use crate::{DeliverySpec, GetJobCommand, JobEnabledState, ScheduleSpec, mocks::MockCronStore};
@@ -225,6 +228,30 @@ mod tests {
             decide(&state, &command).unwrap_err(),
             RegisterJobDecisionError::AlreadyRegistered { .. }
         ));
+    }
+
+    #[test]
+    fn given_when_then_supports_register_job_decider() {
+        TestCase::new(decider::<RegisterJobCommand>())
+            .given([])
+            .when(RegisterJobCommand::new(job("backup")).unwrap())
+            .then([JobEvent::JobRegistered {
+                id: "backup".to_string(),
+                spec: RegisteredJobSpec::from(job("backup")),
+            }]);
+    }
+
+    #[test]
+    fn given_when_then_supports_register_job_failures() {
+        TestCase::new(decider::<RegisterJobCommand>())
+            .given([JobEvent::JobRegistered {
+                id: "backup".to_string(),
+                spec: RegisteredJobSpec::from(job("backup")),
+            }])
+            .when(RegisterJobCommand::new(job("backup")).unwrap())
+            .then(expect_error(RegisterJobDecisionError::AlreadyRegistered {
+                id: JobId::parse("backup").unwrap(),
+            }));
     }
 
     #[tokio::test]

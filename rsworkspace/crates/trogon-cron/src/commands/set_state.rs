@@ -174,7 +174,10 @@ where
 
 #[cfg(test)]
 mod tests {
-    use trogon_eventsourcing::{Decision, NonEmpty, Snapshot, decide};
+    use trogon_eventsourcing::{
+        Decision, NonEmpty, Snapshot, decide,
+        testing::{TestCase, decider, expect_error},
+    };
 
     use super::*;
     use crate::{DeliverySpec, GetJobCommand, JobSpec, ScheduleSpec, mocks::MockCronStore};
@@ -241,6 +244,40 @@ mod tests {
             decide(&state, &command).unwrap_err(),
             ChangeJobStateDecisionError::JobNotFound { .. }
         ));
+    }
+
+    #[test]
+    fn given_when_then_supports_change_state_decider() {
+        TestCase::new(decider::<ChangeJobStateCommand>())
+            .given([JobEvent::JobRegistered {
+                id: "backup".to_string(),
+                spec: crate::RegisteredJobSpec::from(job("backup")),
+            }])
+            .when(ChangeJobStateCommand::new(
+                JobId::parse("backup").unwrap(),
+                JobEnabledState::Disabled,
+            ))
+            .then([JobEvent::JobStateChanged {
+                id: "backup".to_string(),
+                state: JobEnabledState::Disabled,
+            }]);
+    }
+
+    #[test]
+    fn given_when_then_supports_change_state_failures() {
+        TestCase::new(decider::<ChangeJobStateCommand>())
+            .given([JobEvent::JobRegistered {
+                id: "backup".to_string(),
+                spec: crate::RegisteredJobSpec::from(job("backup")),
+            }])
+            .when(ChangeJobStateCommand::new(
+                JobId::parse("backup").unwrap(),
+                JobEnabledState::Enabled,
+            ))
+            .then(expect_error(ChangeJobStateDecisionError::StateAlreadySet {
+                id: JobId::parse("backup").unwrap(),
+                state: JobEnabledState::Enabled,
+            }));
     }
 
     #[tokio::test]

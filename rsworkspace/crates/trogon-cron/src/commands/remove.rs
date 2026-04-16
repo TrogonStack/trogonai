@@ -145,7 +145,10 @@ where
 mod tests {
     use std::collections::BTreeMap;
 
-    use trogon_eventsourcing::{Decision, NonEmpty, Snapshot, decide};
+    use trogon_eventsourcing::{
+        Decision, NonEmpty, Snapshot, decide,
+        testing::{TestCase, decider, expect_error},
+    };
 
     use super::*;
     use crate::{
@@ -195,6 +198,29 @@ mod tests {
             decide(&state, &command).unwrap_err(),
             RemoveJobDecisionError::JobNotFound { .. }
         ));
+    }
+
+    #[test]
+    fn given_when_then_supports_remove_job_decider() {
+        TestCase::new(decider::<RemoveJobCommand>())
+            .given([JobEvent::JobRegistered {
+                id: "backup".to_string(),
+                spec: crate::RegisteredJobSpec::from(job("backup")),
+            }])
+            .when(RemoveJobCommand::new(JobId::parse("backup").unwrap()))
+            .then([JobEvent::JobRemoved {
+                id: "backup".to_string(),
+            }]);
+    }
+
+    #[test]
+    fn given_when_then_supports_remove_job_failures() {
+        TestCase::new(decider::<RemoveJobCommand>())
+            .given([])
+            .when(RemoveJobCommand::new(JobId::parse("backup").unwrap()))
+            .then(expect_error(RemoveJobDecisionError::JobNotFound {
+                id: JobId::parse("backup").unwrap(),
+            }));
     }
 
     #[tokio::test]
