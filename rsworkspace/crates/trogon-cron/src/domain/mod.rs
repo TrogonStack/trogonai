@@ -1,3 +1,5 @@
+mod job_id;
+
 use std::collections::BTreeMap;
 use std::str::FromStr;
 
@@ -6,11 +8,12 @@ use bytes::Bytes;
 use trogon_nats::{DottedNatsToken, NatsToken};
 
 use crate::{
-    JobId,
     config::{DeliverySpec, JobSpec, SamplingSource, ScheduleSpec},
     error::{CronError, JobSpecError},
     kv::{FIRE_SUBJECT_PREFIX, SCHEDULE_SUBJECT_PREFIX},
 };
+
+pub use job_id::{JobId, JobIdError};
 
 const NATS_SCHEDULE: &str = "Nats-Schedule";
 const NATS_SCHEDULE_SOURCE: &str = "Nats-Schedule-Source";
