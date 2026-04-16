@@ -721,6 +721,12 @@ pub mod mock {
     /// side-effects.
     pub struct TerminalOnCasReloadStore {
         pub inner: MockPromiseStore,
+        /// Counts `update_promise` calls.  Call 0 is the pre-LLM heartbeat and
+        /// is delegated.  Call 1 is the first checkpoint write and gets the
+        /// injected CAS conflict.  Subsequent calls delegate normally.
+        update_count: Arc<std::sync::atomic::AtomicUsize>,
+        /// Set to `true` after the CAS conflict fires (call 1) so `get_promise`
+        /// can simulate another worker having resolved the promise.
         conflict_fired: Arc<std::sync::atomic::AtomicBool>,
     }
 
@@ -728,6 +734,7 @@ pub mod mock {
         pub fn new() -> Self {
             Self {
                 inner: MockPromiseStore::new(),
+                update_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
                 conflict_fired: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             }
         }
@@ -770,9 +777,13 @@ pub mod mock {
             promise: &'a super::AgentPromise,
             revision: u64,
         ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>> {
-            let already = self
-                .conflict_fired
-                .swap(true, std::sync::atomic::Ordering::SeqCst);
+            use std::sync::atomic::Ordering;
+            let n = self.update_count.fetch_add(1, Ordering::SeqCst);
+            if n == 0 {
+                // Call 0 is the pre-LLM heartbeat — let it succeed.
+                return self.inner.update_promise(tenant_id, promise_id, promise, revision);
+            }
+            let already = self.conflict_fired.swap(true, Ordering::SeqCst);
             if !already {
                 return Box::pin(async move {
                     Err(super::PromiseStoreError(
@@ -821,6 +832,10 @@ pub mod mock {
     /// further checkpointing for the run, but the run still completes normally.
     pub struct DisappearedOnCasReloadStore {
         pub inner: MockPromiseStore,
+        /// Counts `update_promise` calls.  Call 0 is the pre-LLM heartbeat and
+        /// is delegated.  Call 1 is the first checkpoint write and gets the
+        /// injected CAS conflict.
+        update_count: Arc<std::sync::atomic::AtomicUsize>,
         conflict_fired: Arc<std::sync::atomic::AtomicBool>,
     }
 
@@ -828,6 +843,7 @@ pub mod mock {
         pub fn new() -> Self {
             Self {
                 inner: MockPromiseStore::new(),
+                update_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
                 conflict_fired: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             }
         }
@@ -867,9 +883,13 @@ pub mod mock {
             promise: &'a super::AgentPromise,
             revision: u64,
         ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>> {
-            let already = self
-                .conflict_fired
-                .swap(true, std::sync::atomic::Ordering::SeqCst);
+            use std::sync::atomic::Ordering;
+            let n = self.update_count.fetch_add(1, Ordering::SeqCst);
+            if n == 0 {
+                // Call 0 is the pre-LLM heartbeat — let it succeed.
+                return self.inner.update_promise(tenant_id, promise_id, promise, revision);
+            }
+            let already = self.conflict_fired.swap(true, Ordering::SeqCst);
             if !already {
                 return Box::pin(async move {
                     Err(super::PromiseStoreError(
@@ -1427,6 +1447,10 @@ pub mod mock {
     /// `checkpoint = None` and the run continues to completion.
     pub struct ErrorReloadStore {
         pub inner: MockPromiseStore,
+        /// Counts `update_promise` calls.  Call 0 is the pre-LLM heartbeat and
+        /// is delegated.  Call 1 is the first checkpoint write and gets the
+        /// injected CAS conflict.
+        update_count: Arc<std::sync::atomic::AtomicUsize>,
         conflict_fired: Arc<std::sync::atomic::AtomicBool>,
     }
 
@@ -1434,6 +1458,7 @@ pub mod mock {
         pub fn new() -> Self {
             Self {
                 inner: MockPromiseStore::new(),
+                update_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
                 conflict_fired: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             }
         }
@@ -1474,9 +1499,13 @@ pub mod mock {
             promise: &'a super::AgentPromise,
             revision: u64,
         ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>> {
-            let already = self
-                .conflict_fired
-                .swap(true, std::sync::atomic::Ordering::SeqCst);
+            use std::sync::atomic::Ordering;
+            let n = self.update_count.fetch_add(1, Ordering::SeqCst);
+            if n == 0 {
+                // Call 0 is the pre-LLM heartbeat — let it succeed.
+                return self.inner.update_promise(tenant_id, promise_id, promise, revision);
+            }
+            let already = self.conflict_fired.swap(true, Ordering::SeqCst);
             if !already {
                 return Box::pin(async {
                     Err(super::PromiseStoreError(
@@ -1527,6 +1556,10 @@ pub mod mock {
     /// disables further checkpointing while the run still completes normally.
     pub struct HangingCasReloadStore {
         pub inner: MockPromiseStore,
+        /// Counts `update_promise` calls.  Call 0 is the pre-LLM heartbeat and
+        /// is delegated.  Call 1 is the first checkpoint write and gets the
+        /// injected CAS conflict.
+        update_count: Arc<std::sync::atomic::AtomicUsize>,
         conflict_fired: Arc<std::sync::atomic::AtomicBool>,
     }
 
@@ -1534,6 +1567,7 @@ pub mod mock {
         pub fn new() -> Self {
             Self {
                 inner: MockPromiseStore::new(),
+                update_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
                 conflict_fired: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             }
         }
@@ -1574,9 +1608,13 @@ pub mod mock {
             promise: &'a super::AgentPromise,
             revision: u64,
         ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>> {
-            let already = self
-                .conflict_fired
-                .swap(true, std::sync::atomic::Ordering::SeqCst);
+            use std::sync::atomic::Ordering;
+            let n = self.update_count.fetch_add(1, Ordering::SeqCst);
+            if n == 0 {
+                // Call 0 is the pre-LLM heartbeat — let it succeed.
+                return self.inner.update_promise(tenant_id, promise_id, promise, revision);
+            }
+            let already = self.conflict_fired.swap(true, Ordering::SeqCst);
             if !already {
                 return Box::pin(async move {
                     Err(super::PromiseStoreError(
