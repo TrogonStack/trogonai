@@ -169,16 +169,35 @@ pub struct ExecutionResult<State, Event> {
     pub state: State,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandOutcome<Event> {
+    pub next_expected_version: u64,
+    pub events: NonEmpty<Event>,
+}
+
+impl<State, Event> ExecutionResult<State, Event> {
+    pub fn into_outcome(self) -> CommandOutcome<Event> {
+        CommandOutcome {
+            next_expected_version: self.next_expected_version,
+            events: self.events,
+        }
+    }
+}
+
 #[derive(Debug)]
-pub enum ExecuteError<DecisionError, DomainError, RuntimeError> {
+pub enum CommandFailure<DomainError, InfraError> {
+    Domain(DomainError),
+    Infra(InfraError),
+}
+
+#[derive(Debug)]
+pub enum CommandInfraError<RuntimeError> {
     LoadSnapshot(RuntimeError),
     SaveSnapshot(RuntimeError),
     ReadStream(RuntimeError),
     Append(RuntimeError),
     EncodeEvent(serde_json::Error),
     DecodeEvent(serde_json::Error),
-    Decision(DecisionError),
-    Domain(DomainError),
     SnapshotAheadOfStream {
         snapshot_version: u64,
         stream_version: Option<u64>,
@@ -243,17 +262,21 @@ where
     C: CommandStateModel + Decide<C::State, C::Event> + DefaultExpectedStateProvider,
     C::Event: EventType + StreamEvent + Serialize + DeserializeOwned + Clone,
     E: EventStore<C::StreamId>,
+    C::DomainError: From<C::Error>,
 {
     pub async fn execute(
         self,
-    ) -> Result<ExecutionResult<C::State, C::Event>, ExecuteError<C::Error, C::DomainError, E::Error>>
-    {
+    ) -> Result<
+        ExecutionResult<C::State, C::Event>,
+        CommandFailure<C::DomainError, CommandInfraError<E::Error>>,
+    > {
         let stream_id = self.command.stream_id();
         let current_version = self
             .event_store
             .current_stream_version(stream_id)
             .await
-            .map_err(ExecuteError::ReadStream)?;
+            .map_err(CommandInfraError::ReadStream)
+            .map_err(CommandFailure::Infra)?;
         let mut state = C::initial_state();
 
         if let Some(current_version) = current_version {
@@ -261,7 +284,8 @@ where
                 .event_store
                 .read_stream_from(stream_id, 1)
                 .await
-                .map_err(ExecuteError::ReadStream)?;
+                .map_err(CommandInfraError::ReadStream)
+                .map_err(CommandFailure::Infra)?;
 
             for recorded_event in recorded_events
                 .into_iter()
@@ -269,14 +293,18 @@ where
             {
                 let event = recorded_event
                     .decode_data::<C::Event>()
-                    .map_err(ExecuteError::DecodeEvent)?;
-                state = C::evolve(state, event).map_err(ExecuteError::Domain)?;
+                    .map_err(CommandInfraError::DecodeEvent)
+                    .map_err(CommandFailure::Infra)?;
+                state = C::evolve(state, event).map_err(CommandFailure::Domain)?;
             }
         }
 
-        let Decision::Event(events) =
-            C::decide(&state, self.command).map_err(ExecuteError::Decision)?;
-        let encoded_events = encode_events(&events).map_err(ExecuteError::EncodeEvent)?;
+        let Decision::Event(events) = C::decide(&state, self.command)
+            .map_err(C::DomainError::from)
+            .map_err(CommandFailure::Domain)?;
+        let encoded_events = encode_events(&events)
+            .map_err(CommandInfraError::EncodeEvent)
+            .map_err(CommandFailure::Infra)?;
         let expected_state = self
             .occ
             .resolve(current_version, self.command.default_expected_state());
@@ -284,10 +312,11 @@ where
             .event_store
             .append_events(stream_id, expected_state, encoded_events)
             .await
-            .map_err(ExecuteError::Append)?;
+            .map_err(CommandInfraError::Append)
+            .map_err(CommandFailure::Infra)?;
 
         for event in events.iter().cloned() {
-            state = C::evolve(state, event).map_err(ExecuteError::Domain)?;
+            state = C::evolve(state, event).map_err(CommandFailure::Domain)?;
         }
 
         Ok(ExecutionResult {
@@ -306,34 +335,41 @@ where
     E: EventStore<C::StreamId, Error = SErr>,
     S: SnapshotStore<C::Snapshot, C::StreamId, Error = SErr>,
     P: SnapshotPolicy<C::State, C::Event>,
+    C::DomainError: From<C::Error>,
 {
     pub async fn execute(
         self,
-    ) -> Result<ExecutionResult<C::State, C::Event>, ExecuteError<C::Error, C::DomainError, SErr>>
-    {
+    ) -> Result<
+        ExecutionResult<C::State, C::Event>,
+        CommandFailure<C::DomainError, CommandInfraError<SErr>>,
+    > {
         let stream_id = self.command.stream_id();
         let snapshot = self
             .snapshots
             .snapshot_store
             .load_snapshot(self.snapshots.snapshot_config, stream_id)
             .await
-            .map_err(ExecuteError::LoadSnapshot)?;
+            .map_err(CommandInfraError::LoadSnapshot)
+            .map_err(CommandFailure::Infra)?;
         let snapshot_version = snapshot.as_ref().map(|snapshot| snapshot.version);
-        let mut state = C::restore_state(self.command, snapshot).map_err(ExecuteError::Domain)?;
+        let mut state = C::restore_state(self.command, snapshot).map_err(CommandFailure::Domain)?;
         let current_version = self
             .event_store
             .current_stream_version(stream_id)
             .await
-            .map_err(ExecuteError::ReadStream)?;
+            .map_err(CommandInfraError::ReadStream)
+            .map_err(CommandFailure::Infra)?;
 
         if let Some(snapshot_version) = snapshot_version {
             match current_version {
                 Some(stream_version) if snapshot_version <= stream_version => {}
                 stream_version => {
-                    return Err(ExecuteError::SnapshotAheadOfStream {
-                        snapshot_version,
-                        stream_version,
-                    });
+                    return Err(CommandFailure::Infra(
+                        CommandInfraError::SnapshotAheadOfStream {
+                            snapshot_version,
+                            stream_version,
+                        },
+                    ));
                 }
             }
         }
@@ -348,20 +384,25 @@ where
                     .event_store
                     .read_stream_from(stream_id, start_sequence)
                     .await
-                    .map_err(ExecuteError::ReadStream)?;
+                    .map_err(CommandInfraError::ReadStream)
+                    .map_err(CommandFailure::Infra)?;
 
                 for recorded_event in recorded_events {
                     let event = recorded_event
                         .decode_data::<C::Event>()
-                        .map_err(ExecuteError::DecodeEvent)?;
-                    state = C::evolve(state, event).map_err(ExecuteError::Domain)?;
+                        .map_err(CommandInfraError::DecodeEvent)
+                        .map_err(CommandFailure::Infra)?;
+                    state = C::evolve(state, event).map_err(CommandFailure::Domain)?;
                 }
             }
         }
 
-        let Decision::Event(events) =
-            C::decide(&state, self.command).map_err(ExecuteError::Decision)?;
-        let encoded_events = encode_events(&events).map_err(ExecuteError::EncodeEvent)?;
+        let Decision::Event(events) = C::decide(&state, self.command)
+            .map_err(C::DomainError::from)
+            .map_err(CommandFailure::Domain)?;
+        let encoded_events = encode_events(&events)
+            .map_err(CommandInfraError::EncodeEvent)
+            .map_err(CommandFailure::Infra)?;
         let expected_state = self
             .occ
             .resolve(current_version, self.command.default_expected_state());
@@ -369,10 +410,11 @@ where
             .event_store
             .append_events(stream_id, expected_state, encoded_events)
             .await
-            .map_err(ExecuteError::Append)?;
+            .map_err(CommandInfraError::Append)
+            .map_err(CommandFailure::Infra)?;
 
         for event in events.iter().cloned() {
-            state = C::evolve(state, event).map_err(ExecuteError::Domain)?;
+            state = C::evolve(state, event).map_err(CommandFailure::Domain)?;
         }
 
         if self.snapshots.policy.should_snapshot(
@@ -389,7 +431,8 @@ where
                     Snapshot::new(append_outcome.next_expected_version, snapshot_payload),
                 )
                 .await
-                .map_err(ExecuteError::SaveSnapshot)?;
+                .map_err(CommandInfraError::SaveSnapshot)
+                .map_err(CommandFailure::Infra)?;
         }
 
         Ok(ExecutionResult {
@@ -474,8 +517,21 @@ mod tests {
     }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    enum TestDomainError {
+    enum TestCommandError {
         BrokenEvent,
+        AlreadyRegistered,
+        Missing,
+        AlreadyDisabled,
+    }
+
+    impl From<TestDecisionError> for TestCommandError {
+        fn from(value: TestDecisionError) -> Self {
+            match value {
+                TestDecisionError::AlreadyRegistered => Self::AlreadyRegistered,
+                TestDecisionError::Missing => Self::Missing,
+                TestDecisionError::AlreadyDisabled => Self::AlreadyDisabled,
+            }
+        }
     }
 
     #[derive(Debug, Default, Clone)]
@@ -527,7 +583,7 @@ mod tests {
     impl CommandStateModel for TestCommand {
         type State = TestState;
         type Event = TestEvent;
-        type DomainError = TestDomainError;
+        type DomainError = TestCommandError;
 
         fn initial_state() -> Self::State {
             TestState::Missing
@@ -541,7 +597,7 @@ mod tests {
                 TestEvent::Registered { .. } => Ok(TestState::Present { enabled: true }),
                 TestEvent::StateChanged { enabled, .. } => Ok(TestState::Present { enabled }),
                 TestEvent::Removed { .. } => Ok(TestState::Missing),
-                TestEvent::Broken { .. } => Err(TestDomainError::BrokenEvent),
+                TestEvent::Broken { .. } => Err(TestCommandError::BrokenEvent),
             }
         }
     }
@@ -796,10 +852,10 @@ mod tests {
 
         assert!(matches!(
             error,
-            ExecuteError::SnapshotAheadOfStream {
+            CommandFailure::Infra(CommandInfraError::SnapshotAheadOfStream {
                 snapshot_version: 3,
                 stream_version: Some(2),
-            }
+            })
         ));
     }
 
@@ -821,10 +877,10 @@ mod tests {
 
         assert!(matches!(
             error,
-            ExecuteError::SnapshotAheadOfStream {
+            CommandFailure::Infra(CommandInfraError::SnapshotAheadOfStream {
                 snapshot_version: 1,
                 stream_version: None,
-            }
+            })
         ));
     }
 
@@ -846,7 +902,7 @@ mod tests {
 
         assert!(matches!(
             error,
-            ExecuteError::Domain(TestDomainError::BrokenEvent)
+            CommandFailure::Domain(TestCommandError::BrokenEvent)
         ));
     }
 
@@ -868,7 +924,7 @@ mod tests {
 
         assert!(matches!(
             error,
-            ExecuteError::Decision(TestDecisionError::AlreadyRegistered)
+            CommandFailure::Domain(TestCommandError::AlreadyRegistered)
         ));
     }
 
@@ -1025,7 +1081,10 @@ mod tests {
         )
         .unwrap_err();
 
-        assert!(matches!(error, ExecuteError::SaveSnapshot("save_snapshot")));
+        assert!(matches!(
+            error,
+            CommandFailure::Infra(CommandInfraError::SaveSnapshot("save_snapshot"))
+        ));
     }
 
     #[test]

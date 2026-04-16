@@ -1,11 +1,11 @@
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::{
     AlwaysSnapshot, CommandExecution, CommandStateModel, Decide, Decision,
-    DefaultExpectedStateProvider, EventStore, ExecuteError, NonEmpty, OccPolicy,
-    SnapshotStateModel, SnapshotStore, SnapshotStoreConfig, StreamCommand,
+    DefaultExpectedStateProvider, EventStore, NonEmpty, OccPolicy, SnapshotStateModel,
+    SnapshotStore, SnapshotStoreConfig, StreamCommand,
 };
 
-use crate::{JobId, error::CronError, events::JobEvent};
+use crate::{JobId, commands::JobCommandResult, error::CronError, events::JobEvent};
 
 #[derive(Debug, Clone)]
 pub struct RemoveJobCommand {
@@ -41,6 +41,14 @@ impl std::fmt::Display for RemoveJobDecisionError {
 }
 
 impl std::error::Error for RemoveJobDecisionError {}
+
+impl From<RemoveJobDecisionError> for CronError {
+    fn from(value: RemoveJobDecisionError) -> Self {
+        match value {
+            RemoveJobDecisionError::JobNotFound { id } => Self::JobNotFound { id: id.to_string() },
+        }
+    }
+}
 
 impl StreamCommand for RemoveJobCommand {
     type StreamId = JobId;
@@ -99,46 +107,17 @@ pub async fn run<E, S>(
     snapshot_store: &S,
     command: RemoveJobCommand,
     occ: OccPolicy,
-) -> Result<(), CronError>
+) -> JobCommandResult
 where
     E: EventStore<JobId, Error = CronError>,
     S: SnapshotStore<RemoveJobState, JobId, Error = CronError>,
 {
-    let id = command.stream_id().to_string();
-
-    match CommandExecution::new(event_store, &command)
+    Ok(CommandExecution::new(event_store, &command)
         .occ(occ)
         .snapshots(snapshot_store, SNAPSHOT_STORE_CONFIG, AlwaysSnapshot)
         .execute()
-        .await
-    {
-        Ok(_) => Ok(()),
-        Err(ExecuteError::Decision(RemoveJobDecisionError::JobNotFound { .. })) => {
-            Err(CronError::JobNotFound { id })
-        }
-        Err(ExecuteError::LoadSnapshot(error))
-        | Err(ExecuteError::SaveSnapshot(error))
-        | Err(ExecuteError::ReadStream(error))
-        | Err(ExecuteError::Append(error))
-        | Err(ExecuteError::Domain(error)) => Err(error),
-        Err(ExecuteError::EncodeEvent(source)) => Err(CronError::event_source(
-            "failed to encode job removal event",
-            source,
-        )),
-        Err(ExecuteError::DecodeEvent(source)) => Err(CronError::event_source(
-            "failed to decode job event while catching up remove-job state",
-            source,
-        )),
-        Err(ExecuteError::SnapshotAheadOfStream {
-            snapshot_version,
-            stream_version,
-        }) => Err(CronError::event_source(
-            "loaded remove-job snapshot is ahead of the stream state",
-            std::io::Error::other(format!(
-                "job '{id}' snapshot version {snapshot_version} > stream version {stream_version:?}"
-            )),
-        )),
-    }
+        .await?
+        .into_outcome())
 }
 
 #[cfg(test)]
@@ -228,7 +207,7 @@ mod tests {
         let store = MockCronStore::new();
         store.seed_job(job("backup"));
 
-        run(
+        let outcome = run(
             &store,
             &store,
             RemoveJobCommand::new(JobId::parse("backup").unwrap()),
@@ -236,6 +215,13 @@ mod tests {
         )
         .await
         .unwrap();
+        assert_eq!(outcome.next_expected_version, 2);
+        assert_eq!(
+            outcome.events,
+            NonEmpty::one(JobEvent::JobRemoved {
+                id: "backup".to_string(),
+            })
+        );
 
         assert!(
             store

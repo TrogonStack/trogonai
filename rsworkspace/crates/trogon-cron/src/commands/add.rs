@@ -3,12 +3,13 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::{
     AlwaysSnapshot, CommandExecution, CommandStateModel, Decide, Decision,
-    DefaultExpectedStateProvider, EventStore, ExecuteError, ExpectedState, NonEmpty, OccPolicy,
+    DefaultExpectedStateProvider, EventStore, ExpectedState, NonEmpty, OccPolicy,
     SnapshotStateModel, SnapshotStore, SnapshotStoreConfig, StreamCommand,
 };
 
 use crate::{
     JobId, JobSpec, ResolvedJobSpec,
+    commands::JobCommandResult,
     error::CronError,
     events::{JobEvent, RegisteredJobSpec},
 };
@@ -42,6 +43,16 @@ impl fmt::Display for RegisterJobDecisionError {
 }
 
 impl std::error::Error for RegisterJobDecisionError {}
+
+impl From<RegisterJobDecisionError> for CronError {
+    fn from(value: RegisterJobDecisionError) -> Self {
+        match value {
+            RegisterJobDecisionError::AlreadyRegistered { id } => {
+                Self::JobAlreadyRegistered { id: id.to_string() }
+            }
+        }
+    }
+}
 
 impl RegisterJobCommand {
     pub fn new(spec: JobSpec) -> Result<Self, CronError> {
@@ -123,46 +134,17 @@ pub async fn run<E, S>(
     snapshot_store: &S,
     command: RegisterJobCommand,
     occ: OccPolicy,
-) -> Result<(), CronError>
+) -> JobCommandResult
 where
     E: EventStore<JobId, Error = CronError>,
     S: SnapshotStore<RegisterJobState, JobId, Error = CronError>,
 {
-    let id = command.stream_id().to_string();
-
-    match CommandExecution::new(event_store, &command)
+    Ok(CommandExecution::new(event_store, &command)
         .occ(occ)
         .snapshots(snapshot_store, SNAPSHOT_STORE_CONFIG, AlwaysSnapshot)
         .execute()
-        .await
-    {
-        Ok(_) => Ok(()),
-        Err(ExecuteError::Decision(RegisterJobDecisionError::AlreadyRegistered { .. })) => {
-            Err(CronError::JobAlreadyRegistered { id })
-        }
-        Err(ExecuteError::LoadSnapshot(error))
-        | Err(ExecuteError::SaveSnapshot(error))
-        | Err(ExecuteError::ReadStream(error))
-        | Err(ExecuteError::Append(error))
-        | Err(ExecuteError::Domain(error)) => Err(error),
-        Err(ExecuteError::EncodeEvent(source)) => Err(CronError::event_source(
-            "failed to encode job registration event",
-            source,
-        )),
-        Err(ExecuteError::DecodeEvent(source)) => Err(CronError::event_source(
-            "failed to decode job event while catching up register-job state",
-            source,
-        )),
-        Err(ExecuteError::SnapshotAheadOfStream {
-            snapshot_version,
-            stream_version,
-        }) => Err(CronError::event_source(
-            "loaded register-job snapshot is ahead of the stream state",
-            std::io::Error::other(format!(
-                "job '{id}' snapshot version {snapshot_version} > stream version {stream_version:?}"
-            )),
-        )),
-    }
+        .await?
+        .into_outcome())
 }
 
 #[cfg(test)]
@@ -170,7 +152,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use trogon_eventsourcing::{
-        Decision, NonEmpty, Snapshot, decide,
+        CommandFailure, Decision, NonEmpty, Snapshot, decide,
         testing::{TestCase, decider, expect_error},
     };
 
@@ -251,7 +233,7 @@ mod tests {
     async fn run_registers_job_in_store() {
         let store = MockCronStore::new();
 
-        run(
+        let outcome = run(
             &store,
             &store,
             RegisterJobCommand::new(job("backup")).unwrap(),
@@ -259,6 +241,14 @@ mod tests {
         )
         .await
         .unwrap();
+        assert_eq!(outcome.next_expected_version, 1);
+        assert_eq!(
+            outcome.events,
+            NonEmpty::one(JobEvent::JobRegistered {
+                id: "backup".to_string(),
+                spec: RegisteredJobSpec::from(job("backup")),
+            })
+        );
 
         let snapshot = store
             .get_job(GetJobCommand {
@@ -306,7 +296,7 @@ mod tests {
 
         assert!(matches!(
             error,
-            CronError::JobAlreadyRegistered { ref id } if id == "backup"
+            CommandFailure::Domain(CronError::JobAlreadyRegistered { ref id }) if id == "backup"
         ));
     }
 }

@@ -402,6 +402,8 @@ where
 mod tests {
     use std::collections::BTreeMap;
 
+    use trogon_eventsourcing::CommandFailure;
+
     use super::*;
     use crate::config::{
         DeliverySpec, JobEnabledState, JobWriteCondition, SamplingSource, ScheduleSpec,
@@ -617,7 +619,7 @@ mod tests {
         .unwrap_err();
         assert!(matches!(
             same_state_error,
-            CronError::JobStateAlreadySet { .. }
+            CommandFailure::Domain(CronError::JobStateAlreadySet { .. })
         ));
 
         let missing_error = change_job_state(
@@ -628,7 +630,10 @@ mod tests {
         )
         .await
         .unwrap_err();
-        assert!(matches!(missing_error, CronError::JobNotFound { .. }));
+        assert!(matches!(
+            missing_error,
+            CommandFailure::Domain(CronError::JobNotFound { .. })
+        ));
     }
 
     #[test]

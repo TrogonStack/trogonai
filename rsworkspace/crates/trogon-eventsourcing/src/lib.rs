@@ -12,10 +12,10 @@ pub mod testing;
 
 pub use decision::{Act, Decide, Decision, NonEmpty, StreamCommand, decide};
 pub use execution::{
-    AlwaysSnapshot, AppendOutcome, CommandExecution, CommandStateModel,
-    DefaultExpectedStateProvider, EventStore, ExecuteError, ExecutionResult, ExpectedState,
-    NoSnapshot, OccPolicy, SnapshotPolicy, SnapshotStateModel, SnapshotStore, WithSnapshots,
-    WithoutSnapshots,
+    AlwaysSnapshot, AppendOutcome, CommandExecution, CommandFailure, CommandInfraError,
+    CommandOutcome, CommandStateModel, DefaultExpectedStateProvider, EventStore, ExecutionResult,
+    ExpectedState, NoSnapshot, OccPolicy, SnapshotPolicy, SnapshotStateModel, SnapshotStore,
+    WithSnapshots, WithoutSnapshots,
 };
 pub use snapshots::{
     Snapshot, SnapshotChange, SnapshotLoader, SnapshotStoreConfig, SnapshotStoreError,
