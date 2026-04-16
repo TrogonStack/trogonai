@@ -8,6 +8,7 @@ mod decision;
 mod execution;
 mod snapshots;
 mod streams;
+pub mod testing;
 
 pub use decision::{Act, Decide, Decision, NonEmpty, StreamCommand, decide};
 pub use execution::{
@@ -23,6 +24,7 @@ pub use snapshots::{
     write_checkpoint,
 };
 pub use streams::{StreamStoreError, append_stream, read_stream_from, read_stream_range};
+pub use testing::{Decider, ExpectedError, TestCase, ThenExpectation, decider, expect_error};
 
 pub trait StreamEvent {
     fn stream_id(&self) -> &str;
