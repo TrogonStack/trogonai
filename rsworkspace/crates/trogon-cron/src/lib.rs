@@ -10,7 +10,6 @@ pub mod config;
 mod domain;
 pub mod error;
 pub mod events;
-mod job_id;
 pub mod kv;
 pub mod nats;
 mod processors;
@@ -30,10 +29,9 @@ pub use commands::{
 pub use config::{
     DeliverySpec, JobEnabledState, JobSpec, JobWriteCondition, SamplingSource, ScheduleSpec,
 };
-pub use domain::ResolvedJobSpec;
+pub use domain::{JobId, JobIdError, ResolvedJobSpec};
 pub use error::{CronError, JobSpecError};
 pub use events::{JobEvent, JobEventData, RecordedJobEvent, RegisteredJobSpec};
-pub use job_id::{JobId, JobIdError};
 pub use nats::NatsSchedulePublisher;
 pub use processors::CronController;
 pub use projections::{
