@@ -608,6 +608,96 @@ mod tests {
         assert_eq!(epoch_to_iso8601(55845), "1970-01-01T15:30:45Z");
     }
 
+    /// Dec 31 — last day of a non-leap year (2023-12-31).
+    /// Verifies the December month boundary is handled correctly.
+    #[test]
+    fn epoch_to_iso8601_dec_31_non_leap_year() {
+        // 2023-01-01T00:00:00Z = 1672531200
+        // Jan(31)+Feb(28)+Mar(31)+Apr(30)+May(31)+Jun(30)+Jul(31)+Aug(31)+Sep(30)+Oct(31)+Nov(30)
+        // = 334 days → day 334 is Dec 1 (0-indexed).  Dec 31 is day 364.
+        let epoch = 1672531200u64 + 364 * 86400;
+        assert_eq!(epoch_to_iso8601(epoch), "2023-12-31T00:00:00Z");
+    }
+
+    /// Mar 1 in a non-leap year (2023-03-01) — the day immediately after Feb 28.
+    /// Verifies no off-by-one when transitioning out of February in a regular year.
+    #[test]
+    fn epoch_to_iso8601_mar_01_after_feb_28_non_leap() {
+        // 2023-01-01T00:00:00Z = 1672531200
+        // Jan(31) + Feb(28) = 59 days → 0-indexed day 59 is Mar 1.
+        let epoch = 1672531200u64 + 59 * 86400;
+        assert_eq!(epoch_to_iso8601(epoch), "2023-03-01T00:00:00Z");
+    }
+
+    /// Mar 1 in a leap year (2024-03-01) — the day immediately after Feb 29.
+    /// Verifies no off-by-one when transitioning out of February in a leap year.
+    #[test]
+    fn epoch_to_iso8601_mar_01_after_feb_29_leap() {
+        // 2024-01-01T00:00:00Z = 1704067200
+        // Jan(31) + Feb(29, leap) = 60 days → 0-indexed day 60 is Mar 1.
+        let epoch = 1704067200u64 + 60 * 86400;
+        assert_eq!(epoch_to_iso8601(epoch), "2024-03-01T00:00:00Z");
+    }
+
+    /// Year 2100 is divisible by 4 and 100 but NOT 400 → NOT a leap year.
+    /// Verifies the "divisible by 100 but not 400 → not leap" branch of the
+    /// leap-year formula.  If 2100 were (incorrectly) treated as a leap year
+    /// this epoch would map to "2100-02-29", not "2100-03-01".
+    #[test]
+    fn epoch_to_iso8601_year_2100_is_not_leap() {
+        // Days from 1970-01-01 to 2100-01-01:
+        //   130 years × 365 = 47450 days
+        //   + 32 leap years in [1970, 2099]: 1972,1976,...,2096 (all ÷4, none ÷100 except
+        //     2000 which is ÷400 and therefore IS leap) = 32 leap days
+        //   = 47482 days  →  epoch 47482 × 86400 = 4102444800
+        //
+        // Jan(31) + Feb(28, NOT leap) = 59 days → Mar 1 is 0-indexed day 59.
+        let epoch = 4102444800u64 + 59 * 86400;
+        assert_eq!(
+            epoch_to_iso8601(epoch),
+            "2100-03-01T00:00:00Z",
+            "2100 must NOT be treated as a leap year (÷100 but not ÷400)"
+        );
+    }
+
+    /// Last second of a day (23:59:59) — verifies that the time decomposition
+    /// does not bleed into the next day.
+    #[test]
+    fn epoch_to_iso8601_last_second_of_day() {
+        // 1970-01-01T23:59:59Z = 86399
+        assert_eq!(epoch_to_iso8601(86399), "1970-01-01T23:59:59Z");
+    }
+
+    // ── Backward-compat deserialization ──────────────────────────────────────
+
+    /// A `ChatSession` serialized without the `model` field (as stored by an
+    /// older version of the service) must deserialize successfully with
+    /// `model = None`.  This validates the serde `default` attribute on the
+    /// field keeps old records readable after the field was added.
+    #[test]
+    fn chat_session_without_model_field_deserializes_to_none() {
+        use crate::session::ChatSession;
+
+        let json = r#"{
+            "id": "sess-1",
+            "tenant_id": "acme",
+            "name": "old-session",
+            "tools": [],
+            "messages": [],
+            "created_at": "2025-01-01T00:00:00Z",
+            "updated_at": "2025-01-01T00:00:00Z"
+        }"#;
+
+        let session: ChatSession = serde_json::from_str(json)
+            .expect("ChatSession must deserialize even when 'model' field is absent");
+
+        assert_eq!(session.id, "sess-1");
+        assert!(
+            session.model.is_none(),
+            "model must be None when absent from the stored JSON"
+        );
+    }
+
     // ── Handler tests ─────────────────────────────────────────────────────────
 
     fn make_test_agent() -> Arc<AgentLoop> {
