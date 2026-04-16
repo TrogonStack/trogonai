@@ -1,5 +1,7 @@
 use std::fmt;
+use std::str::FromStr;
 
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use trogon_nats::{NatsToken, SubjectTokenViolation};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,6 +22,43 @@ impl JobId {
 
     pub fn as_str(&self) -> &str {
         self.0.as_str()
+    }
+
+    pub fn as_token(&self) -> &NatsToken {
+        &self.0
+    }
+}
+
+impl AsRef<str> for JobId {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl FromStr for JobId {
+    type Err = JobIdError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s)
+    }
+}
+
+impl Serialize for JobId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for JobId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let raw = String::deserialize(deserializer)?;
+        Self::parse(&raw).map_err(serde::de::Error::custom)
     }
 }
 

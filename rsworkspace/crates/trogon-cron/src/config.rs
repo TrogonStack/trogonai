@@ -4,11 +4,11 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::ExpectedState;
 
-use crate::error::CronError;
+use crate::{JobId, error::CronError};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct JobSpec {
-    pub id: String,
+    pub id: JobId,
     #[serde(default)]
     pub state: JobEnabledState,
     pub schedule: ScheduleSpec,
@@ -133,6 +133,10 @@ mod tests {
     use super::*;
     use trogon_eventsourcing::Snapshot;
 
+    fn job_id(id: &str) -> JobId {
+        JobId::parse(id).unwrap()
+    }
+
     #[test]
     fn job_spec_state_defaults_to_enabled() {
         let raw = r#"{
@@ -150,7 +154,7 @@ mod tests {
     #[test]
     fn job_spec_round_trips() {
         let job = JobSpec {
-            id: "compact".to_string(),
+            id: job_id("compact"),
             state: JobEnabledState::Enabled,
             schedule: ScheduleSpec::Cron {
                 expr: "0 */5 * * * *".to_string(),
@@ -177,7 +181,7 @@ mod tests {
     #[test]
     fn empty_metadata_and_headers_are_omitted() {
         let job = JobSpec {
-            id: "compact".to_string(),
+            id: job_id("compact"),
             state: JobEnabledState::Enabled,
             schedule: ScheduleSpec::Every { every_sec: 30 },
             delivery: DeliverySpec::NatsEvent {
@@ -202,7 +206,7 @@ mod tests {
         let snapshot = Snapshot::new(
             9,
             JobSpec {
-                id: "compact".to_string(),
+                id: job_id("compact"),
                 state: JobEnabledState::Enabled,
                 schedule: ScheduleSpec::Every { every_sec: 30 },
                 delivery: DeliverySpec::NatsEvent {
