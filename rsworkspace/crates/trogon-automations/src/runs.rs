@@ -457,6 +457,106 @@ mod tests {
         assert_eq!(r.finished_at - r.started_at, 5);
     }
 
+    /// The 7-day window filter uses `>= seven_days_ago`.  A record at exactly
+    /// the boundary must be counted; one second before must not.
+    #[test]
+    fn stats_boundary_records_counted_at_boundary_excluded_just_outside() {
+        let now = now_unix();
+        let seven_days_ago = now.saturating_sub(7 * 86_400);
+
+        let runs = [
+            sample_run("r1", RunStatus::Success, seven_days_ago),     // exactly at boundary — in
+            sample_run("r2", RunStatus::Failed, seven_days_ago - 1),  // 1 s before — out
+            sample_run("r3", RunStatus::Success, now),                 // now — in
+        ];
+
+        let successful_7d = runs
+            .iter()
+            .filter(|r| r.started_at >= seven_days_ago && r.status == RunStatus::Success)
+            .count() as u64;
+        let failed_7d = runs
+            .iter()
+            .filter(|r| r.started_at >= seven_days_ago && r.status == RunStatus::Failed)
+            .count() as u64;
+
+        assert_eq!(successful_7d, 2, "r1 (boundary) and r3 (now) must be counted");
+        assert_eq!(failed_7d, 0, "r2 (just before boundary) must not be counted");
+        assert_eq!(runs.len() as u64, 3, "total includes all records regardless of age");
+    }
+
+    /// When all runs are older than 7 days the 7d counters must be zero but
+    /// `total` still reflects the full history.
+    #[test]
+    fn stats_all_outside_7d_window_gives_zero_7d_counts() {
+        let now = now_unix();
+        let eight_days_ago = now.saturating_sub(8 * 86_400);
+        let seven_days_ago = now.saturating_sub(7 * 86_400);
+
+        let runs = [
+            sample_run("r1", RunStatus::Success, eight_days_ago),
+            sample_run("r2", RunStatus::Failed, eight_days_ago),
+        ];
+
+        let successful_7d = runs
+            .iter()
+            .filter(|r| r.started_at >= seven_days_ago && r.status == RunStatus::Success)
+            .count() as u64;
+        let failed_7d = runs
+            .iter()
+            .filter(|r| r.started_at >= seven_days_ago && r.status == RunStatus::Failed)
+            .count() as u64;
+
+        assert_eq!(successful_7d, 0);
+        assert_eq!(failed_7d, 0);
+        assert_eq!(runs.len() as u64, 2, "total must still count older runs");
+    }
+
+    /// Concurrent `record()` calls on `MockRunStore` must all land without
+    /// data races — the `Arc<Mutex<Vec<...>>>` must serialise concurrent inserts.
+    #[tokio::test]
+    async fn mock_run_store_concurrent_records_are_safe() {
+        use super::mock::MockRunStore;
+        use super::RunRepository as _;
+
+        let store = std::sync::Arc::new(MockRunStore::new());
+        let now = now_unix();
+
+        let handles: Vec<_> = (0..20u64)
+            .map(|i| {
+                let s = std::sync::Arc::clone(&store);
+                let run = RunRecord {
+                    id: format!("run-{i}"),
+                    automation_id: "auto-1".to_string(),
+                    automation_name: "concurrent test".to_string(),
+                    tenant_id: "acme".to_string(),
+                    nats_subject: "github.push".to_string(),
+                    started_at: now + i,
+                    finished_at: now + i + 1,
+                    status: if i % 2 == 0 {
+                        RunStatus::Success
+                    } else {
+                        RunStatus::Failed
+                    },
+                    output: format!("out-{i}"),
+                };
+                tokio::spawn(async move { s.record(&run).await })
+            })
+            .collect();
+
+        for h in handles {
+            h.await.expect("task must not panic").expect("record must succeed");
+        }
+
+        let all = store.list("acme", None).await.unwrap();
+        assert_eq!(all.len(), 20, "all 20 concurrent records must be present");
+
+        // Half successful, half failed
+        let successes = all.iter().filter(|r| r.status == RunStatus::Success).count();
+        let failures = all.iter().filter(|r| r.status == RunStatus::Failed).count();
+        assert_eq!(successes, 10);
+        assert_eq!(failures, 10);
+    }
+
     #[test]
     fn run_stats_struct_fields() {
         let stats = RunStats {
