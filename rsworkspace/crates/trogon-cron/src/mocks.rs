@@ -619,7 +619,9 @@ mod tests {
         .unwrap_err();
         assert!(matches!(
             same_state_error,
-            CommandFailure::Domain(CronError::JobStateAlreadySet { .. })
+            CommandFailure::Domain(crate::ChangeJobStateError::Decision(
+                crate::ChangeJobStateDecisionError::StateAlreadySet { .. }
+            ))
         ));
 
         let missing_error = change_job_state(
@@ -632,7 +634,9 @@ mod tests {
         .unwrap_err();
         assert!(matches!(
             missing_error,
-            CommandFailure::Domain(CronError::JobNotFound { .. })
+            CommandFailure::Domain(crate::ChangeJobStateError::Decision(
+                crate::ChangeJobStateDecisionError::JobNotFound { .. }
+            ))
         ));
     }
 

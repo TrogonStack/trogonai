@@ -1,11 +1,11 @@
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::{
-    AlwaysSnapshot, CommandExecution, CommandStateModel, Decide, Decision,
-    DefaultExpectedStateProvider, EventStore, NonEmpty, OccPolicy, SnapshotStateModel,
-    SnapshotStore, SnapshotStoreConfig, StreamCommand,
+    AlwaysSnapshot, CommandExecution, CommandFailure, CommandInfraError, CommandOutcome,
+    CommandStateModel, Decide, Decision, DefaultExpectedStateProvider, EventStore, NonEmpty,
+    OccPolicy, SnapshotStateModel, SnapshotStore, SnapshotStoreConfig, StreamCommand,
 };
 
-use crate::{JobId, commands::JobCommandResult, error::CronError, events::JobEvent};
+use crate::{JobId, error::CronError, events::JobEvent};
 
 #[derive(Debug, Clone)]
 pub struct RemoveJobCommand {
@@ -42,13 +42,10 @@ impl std::fmt::Display for RemoveJobDecisionError {
 
 impl std::error::Error for RemoveJobDecisionError {}
 
-impl From<RemoveJobDecisionError> for CronError {
-    fn from(value: RemoveJobDecisionError) -> Self {
-        match value {
-            RemoveJobDecisionError::JobNotFound { id } => Self::JobNotFound { id: id.to_string() },
-        }
-    }
-}
+pub type RemoveJobResult = Result<
+    CommandOutcome<JobEvent>,
+    CommandFailure<RemoveJobDecisionError, CommandInfraError<CronError>>,
+>;
 
 impl StreamCommand for RemoveJobCommand {
     type StreamId = JobId;
@@ -76,7 +73,7 @@ impl Decide<RemoveJobState, JobEvent> for RemoveJobCommand {
 impl CommandStateModel for RemoveJobCommand {
     type State = RemoveJobState;
     type Event = JobEvent;
-    type DomainError = CronError;
+    type DomainError = RemoveJobDecisionError;
 
     fn initial_state() -> Self::State {
         RemoveJobState::Missing
@@ -107,7 +104,7 @@ pub async fn run<E, S>(
     snapshot_store: &S,
     command: RemoveJobCommand,
     occ: OccPolicy,
-) -> JobCommandResult
+) -> RemoveJobResult
 where
     E: EventStore<JobId, Error = CronError>,
     S: SnapshotStore<RemoveJobState, JobId, Error = CronError>,

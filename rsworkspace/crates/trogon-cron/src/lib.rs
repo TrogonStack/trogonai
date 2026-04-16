@@ -21,10 +21,11 @@ pub mod traits;
 pub mod mocks;
 
 pub use commands::{
-    ChangeJobStateCommand, ChangeJobStateDecisionError, ChangeJobStateState, GetJobCommand,
-    JobCommandResult, ListJobsCommand, RegisterJobCommand, RegisterJobDecisionError,
-    RegisterJobState, RemoveJobCommand, RemoveJobDecisionError, RemoveJobState, change_job_state,
-    get_job, list_jobs, register_job, remove_job,
+    ChangeJobStateCommand, ChangeJobStateDecisionError, ChangeJobStateError, ChangeJobStateResult,
+    ChangeJobStateState, GetJobCommand, ListJobsCommand, RegisterJobCommand,
+    RegisterJobDecisionError, RegisterJobResult, RegisterJobState, RemoveJobCommand,
+    RemoveJobDecisionError, RemoveJobResult, RemoveJobState, change_job_state, get_job, list_jobs,
+    register_job, remove_job,
 };
 pub use config::{
     DeliverySpec, JobEnabledState, JobSpec, JobWriteCondition, SamplingSource, ScheduleSpec,

@@ -2,14 +2,13 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::{
-    AlwaysSnapshot, CommandExecution, CommandStateModel, Decide, Decision,
-    DefaultExpectedStateProvider, EventStore, ExpectedState, NonEmpty, OccPolicy,
-    SnapshotStateModel, SnapshotStore, SnapshotStoreConfig, StreamCommand,
+    AlwaysSnapshot, CommandExecution, CommandFailure, CommandInfraError, CommandOutcome,
+    CommandStateModel, Decide, Decision, DefaultExpectedStateProvider, EventStore, ExpectedState,
+    NonEmpty, OccPolicy, SnapshotStateModel, SnapshotStore, SnapshotStoreConfig, StreamCommand,
 };
 
 use crate::{
     JobId, JobSpec, ResolvedJobSpec,
-    commands::JobCommandResult,
     error::CronError,
     events::{JobEvent, RegisteredJobSpec},
 };
@@ -44,15 +43,10 @@ impl fmt::Display for RegisterJobDecisionError {
 
 impl std::error::Error for RegisterJobDecisionError {}
 
-impl From<RegisterJobDecisionError> for CronError {
-    fn from(value: RegisterJobDecisionError) -> Self {
-        match value {
-            RegisterJobDecisionError::AlreadyRegistered { id } => {
-                Self::JobAlreadyRegistered { id: id.to_string() }
-            }
-        }
-    }
-}
+pub type RegisterJobResult = Result<
+    CommandOutcome<JobEvent>,
+    CommandFailure<RegisterJobDecisionError, CommandInfraError<CronError>>,
+>;
 
 impl RegisterJobCommand {
     pub fn new(spec: JobSpec) -> Result<Self, CronError> {
@@ -96,7 +90,7 @@ impl Decide<RegisterJobState, JobEvent> for RegisterJobCommand {
 impl CommandStateModel for RegisterJobCommand {
     type State = RegisterJobState;
     type Event = JobEvent;
-    type DomainError = CronError;
+    type DomainError = RegisterJobDecisionError;
 
     fn initial_state() -> Self::State {
         RegisterJobState::Missing
@@ -134,7 +128,7 @@ pub async fn run<E, S>(
     snapshot_store: &S,
     command: RegisterJobCommand,
     occ: OccPolicy,
-) -> JobCommandResult
+) -> RegisterJobResult
 where
     E: EventStore<JobId, Error = CronError>,
     S: SnapshotStore<RegisterJobState, JobId, Error = CronError>,
@@ -296,7 +290,8 @@ mod tests {
 
         assert!(matches!(
             error,
-            CommandFailure::Domain(CronError::JobAlreadyRegistered { ref id }) if id == "backup"
+            CommandFailure::Domain(RegisterJobDecisionError::AlreadyRegistered { ref id })
+                if id.to_string() == "backup"
         ));
     }
 }

@@ -1,13 +1,11 @@
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::{
-    AlwaysSnapshot, CommandExecution, CommandStateModel, Decide, Decision,
-    DefaultExpectedStateProvider, EventStore, NonEmpty, OccPolicy, SnapshotStateModel,
-    SnapshotStore, SnapshotStoreConfig, StreamCommand,
+    AlwaysSnapshot, CommandExecution, CommandFailure, CommandInfraError, CommandOutcome,
+    CommandStateModel, Decide, Decision, DefaultExpectedStateProvider, EventStore, NonEmpty,
+    OccPolicy, SnapshotStateModel, SnapshotStore, SnapshotStoreConfig, StreamCommand,
 };
 
-use crate::{
-    JobEnabledState, JobId, commands::JobCommandResult, error::CronError, events::JobEvent,
-};
+use crate::{JobEnabledState, JobId, JobIdError, error::CronError, events::JobEvent};
 
 pub(crate) const SNAPSHOT_STORE_CONFIG: SnapshotStoreConfig<'static> =
     SnapshotStoreConfig::new("cron.command.change_job_state.v1.", None);
@@ -49,21 +47,45 @@ impl std::fmt::Display for ChangeJobStateDecisionError {
 
 impl std::error::Error for ChangeJobStateDecisionError {}
 
-impl From<ChangeJobStateDecisionError> for CronError {
-    fn from(value: ChangeJobStateDecisionError) -> Self {
-        match value {
-            ChangeJobStateDecisionError::JobNotFound { id } => {
-                Self::JobNotFound { id: id.to_string() }
-            }
-            ChangeJobStateDecisionError::StateAlreadySet { id, state } => {
-                Self::JobStateAlreadySet {
-                    id: id.to_string(),
-                    state,
-                }
+#[derive(Debug)]
+pub enum ChangeJobStateError {
+    Decision(ChangeJobStateDecisionError),
+    InvalidRegistrationEventId { id: String, source: JobIdError },
+}
+
+impl std::fmt::Display for ChangeJobStateError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Decision(error) => write!(f, "{error}"),
+            Self::InvalidRegistrationEventId { id, .. } => {
+                write!(
+                    f,
+                    "invalid job id '{id}' in registration event while changing job state"
+                )
             }
         }
     }
 }
+
+impl std::error::Error for ChangeJobStateError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Decision(error) => Some(error),
+            Self::InvalidRegistrationEventId { source, .. } => Some(source),
+        }
+    }
+}
+
+impl From<ChangeJobStateDecisionError> for ChangeJobStateError {
+    fn from(value: ChangeJobStateDecisionError) -> Self {
+        Self::Decision(value)
+    }
+}
+
+pub type ChangeJobStateResult = Result<
+    CommandOutcome<JobEvent>,
+    CommandFailure<ChangeJobStateError, CommandInfraError<CronError>>,
+>;
 
 impl StreamCommand for ChangeJobStateCommand {
     type StreamId = JobId;
@@ -103,7 +125,7 @@ impl Decide<ChangeJobStateState, JobEvent> for ChangeJobStateCommand {
 impl CommandStateModel for ChangeJobStateCommand {
     type State = ChangeJobStateState;
     type Event = JobEvent;
-    type DomainError = CronError;
+    type DomainError = ChangeJobStateError;
 
     fn initial_state() -> Self::State {
         ChangeJobStateState::Missing
@@ -113,10 +135,10 @@ impl CommandStateModel for ChangeJobStateCommand {
         match event {
             JobEvent::JobRegistered { id, spec } => {
                 let job_id = JobId::parse(&id).map_err(|source| {
-                    CronError::event_source(
-                        "failed to rebuild change-job-state state from registration event",
+                    ChangeJobStateError::InvalidRegistrationEventId {
+                        id: id.clone(),
                         source,
-                    )
+                    }
                 })?;
                 Ok(ChangeJobStateState::Present {
                     current: spec.into_job_spec(job_id).state,
@@ -145,7 +167,7 @@ pub async fn run<E, S>(
     snapshot_store: &S,
     command: ChangeJobStateCommand,
     occ: OccPolicy,
-) -> JobCommandResult
+) -> ChangeJobStateResult
 where
     E: EventStore<JobId, Error = CronError>,
     S: SnapshotStore<ChangeJobStateState, JobId, Error = CronError>,
