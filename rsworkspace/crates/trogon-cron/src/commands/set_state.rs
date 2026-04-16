@@ -176,11 +176,14 @@ where
 mod tests {
     use trogon_eventsourcing::{
         Decision, NonEmpty, Snapshot, decide,
-        testing::{TestCase, decider, expect_error},
+        testing::{TestCase, Timeline, decider, expect_error},
     };
 
     use super::*;
-    use crate::{DeliverySpec, GetJobCommand, JobSpec, ScheduleSpec, mocks::MockCronStore};
+    use crate::{
+        DeliverySpec, GetJobCommand, JobSpec, RegisterJobCommand, ScheduleSpec,
+        mocks::MockCronStore,
+    };
 
     fn job_id(id: &str) -> JobId {
         JobId::parse(id).unwrap()
@@ -278,6 +281,42 @@ mod tests {
                 id: JobId::parse("backup").unwrap(),
                 state: JobEnabledState::Enabled,
             }));
+    }
+
+    #[test]
+    fn timeline_matches_cases_by_command_stream() {
+        let register = TestCase::new(decider::<RegisterJobCommand>())
+            .given([])
+            .when(RegisterJobCommand::new(job("backup")).unwrap())
+            .then([JobEvent::JobRegistered {
+                id: "backup".to_string(),
+                spec: crate::RegisteredJobSpec::from(job("backup")),
+            }]);
+
+        let disable = TestCase::new(decider::<ChangeJobStateCommand>())
+            .given(register.history())
+            .when(ChangeJobStateCommand::new(
+                JobId::parse("backup").unwrap(),
+                JobEnabledState::Disabled,
+            ))
+            .then([JobEvent::JobStateChanged {
+                id: "backup".to_string(),
+                state: JobEnabledState::Disabled,
+            }]);
+
+        Timeline::new().given([register, disable]).then_stream(
+            "backup",
+            [
+                JobEvent::JobRegistered {
+                    id: "backup".to_string(),
+                    spec: crate::RegisteredJobSpec::from(job("backup")),
+                },
+                JobEvent::JobStateChanged {
+                    id: "backup".to_string(),
+                    state: JobEnabledState::Disabled,
+                },
+            ],
+        );
     }
 
     #[tokio::test]
