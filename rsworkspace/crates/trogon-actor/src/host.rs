@@ -127,6 +127,167 @@ where
         let _ = self.cancel.send(true);
     }
 
+    /// Like [`run`][Self::run] but consumes from a durable JetStream pull
+    /// consumer on the [`ACTOR_INBOX_STREAM`][crate::inbox::ACTOR_INBOX_STREAM]
+    /// stream instead of a core NATS subscription.
+    ///
+    /// Messages are held in the stream while the actor is down and redelivered
+    /// on reconnection — guaranteeing at-least-once delivery.  On successful
+    /// `handle_event` the message is ACKed; on error or timeout it is NAKed
+    /// (returned for redelivery, up to [`crate::inbox::MAX_DELIVER`] attempts).
+    ///
+    /// **Prerequisite:** call [`crate::inbox::provision_actor_inbox`] at
+    /// startup before calling this method.
+    #[instrument(
+        skip(self, js),
+        fields(actor_type = A::actor_type(), subject = %self.capability.nats_subject),
+        err
+    )]
+    pub async fn run_durable<J>(&self, js: &J) -> Result<(), HostError>
+    where
+        J: trogon_nats::jetstream::JetStreamGetStream,
+    {
+        use async_nats::jetstream::AckKind;
+        use async_nats::jetstream::consumer::pull;
+        use trogon_nats::jetstream::message::{JsAck, JsAckWith, JsMessageRef};
+        // Bring JetStreamCreateConsumer and JetStreamConsumer into scope so
+        // their methods are callable on the associated Stream and Consumer types.
+        use trogon_nats::jetstream::{JetStreamCreateConsumer as _, JetStreamConsumer as _};
+
+        let registry = self.runtime.registry().clone();
+        registry
+            .register(&self.capability)
+            .await
+            .map_err(|e| HostError::Register(e.to_string()))?;
+
+        tracing::info!(
+            actor_type = A::actor_type(),
+            subject = %self.capability.nats_subject,
+            "actor registered, starting heartbeat and durable consumer"
+        );
+
+        // ── Background heartbeat ──────────────────────────────────────────────
+        let heartbeat_registry = registry.clone();
+        let heartbeat_cap = self.capability.clone();
+        let mut cancel_rx_hb = self.cancel_rx.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(
+                trogon_registry::provision::HEARTBEAT_INTERVAL,
+            );
+            interval.tick().await; // skip the first immediate tick
+            loop {
+                tokio::select! {
+                    _ = interval.tick() => {
+                        if let Err(e) = heartbeat_registry.refresh(&heartbeat_cap).await {
+                            warn!(error = %e, "registry heartbeat failed");
+                        }
+                    }
+                    _ = cancel_rx_hb.changed() => break,
+                }
+            }
+        });
+
+        // ── Create durable pull consumer ──────────────────────────────────────
+        let stream = js
+            .get_stream(crate::inbox::ACTOR_INBOX_STREAM)
+            .await
+            .map_err(|e| HostError::Durable(e.to_string()))?;
+
+        let consumer = stream
+            .create_consumer(pull::Config {
+                durable_name: Some(format!("actor-{}", A::actor_type())),
+                filter_subject: format!("actors.{}.>", A::actor_type()),
+                ack_wait: crate::inbox::ACK_WAIT,
+                max_deliver: crate::inbox::MAX_DELIVER,
+                ..Default::default()
+            })
+            .await
+            .map_err(|e| HostError::Durable(e.to_string()))?;
+
+        let mut messages = consumer
+            .messages()
+            .await
+            .map_err(|e| HostError::Durable(e.to_string()))?;
+
+        let key_prefix = format!("actors.{}.", A::actor_type());
+        let mut cancel_rx = self.cancel_rx.clone();
+
+        loop {
+            tokio::select! {
+                maybe_item = messages.next() => {
+                    match maybe_item {
+                        None => break,
+                        Some(Err(e)) => {
+                            warn!(error = %e, "JetStream message stream error — continuing");
+                        }
+                        Some(Ok(msg)) => {
+                            // Extract entity key and spawn depth while holding the
+                            // borrow of nats_msg, then release the borrow so `msg`
+                            // is free for the ACK call after handle_event.
+                            let nats_msg: &async_nats::Message = msg.message();
+                            let entity_key = nats_msg
+                                .subject
+                                .as_str()
+                                .strip_prefix(&key_prefix)
+                                .unwrap_or(nats_msg.subject.as_str())
+                                .to_string();
+                            let spawn_depth: u32 = nats_msg
+                                .headers
+                                .as_ref()
+                                .and_then(|h: &async_nats::HeaderMap| h.get(SPAWN_DEPTH_HEADER))
+                                .and_then(|v| v.as_str().parse().ok())
+                                .unwrap_or(0);
+                            let mut actor = self.actor.clone();
+                            let handle_start = std::time::Instant::now();
+                            let event_result = tokio::time::timeout(
+                                self.event_timeout,
+                                self.runtime.handle_event(&mut actor, &entity_key, spawn_depth),
+                            )
+                            .await;
+                            let latency_ms = handle_start.elapsed().as_millis() as f64;
+
+                            match event_result {
+                                Ok(Ok(())) => {
+                                    metrics::record_handle_latency(A::actor_type(), latency_ms);
+                                    if let Err(e) = msg.ack().await {
+                                        warn!(error = %e, "failed to ACK JetStream message");
+                                    }
+                                }
+                                Ok(Err(e)) => {
+                                    metrics::inc_handle_error(A::actor_type());
+                                    warn!(
+                                        error = %e,
+                                        entity_key = %entity_key,
+                                        "handle_event error — NAKing message"
+                                    );
+                                    let _ = msg.ack_with(AckKind::Nak(None)).await;
+                                }
+                                Err(_elapsed) => {
+                                    metrics::inc_handle_timeout(A::actor_type());
+                                    warn!(
+                                        entity_key = %entity_key,
+                                        timeout_secs = self.event_timeout.as_secs(),
+                                        "handle_event timed out — NAKing message"
+                                    );
+                                    let _ = msg.ack_with(AckKind::Nak(None)).await;
+                                }
+                            }
+                        }
+                    }
+                }
+                _ = cancel_rx.changed() => break,
+            }
+        }
+
+        // ── Unregister on clean shutdown ──────────────────────────────────────
+        if let Err(e) = registry.unregister(A::actor_type()).await {
+            warn!(error = %e, "failed to unregister on shutdown");
+        }
+
+        tracing::info!(actor_type = A::actor_type(), "actor host stopped");
+        Ok(())
+    }
+
     /// Register in the registry, subscribe to the actor inbox, and process
     /// events until the subscription ends or [`cancel`][Self::cancel] is called.
     #[instrument(
@@ -251,6 +412,9 @@ where
 pub enum HostError {
     Register(String),
     Subscribe(String),
+    /// Failed to set up the durable JetStream consumer (get_stream,
+    /// create_consumer, or messages() call).
+    Durable(String),
 }
 
 impl std::fmt::Display for HostError {
@@ -258,6 +422,7 @@ impl std::fmt::Display for HostError {
         match self {
             HostError::Register(e) => write!(f, "actor host register error: {e}"),
             HostError::Subscribe(e) => write!(f, "actor host subscribe error: {e}"),
+            HostError::Durable(e) => write!(f, "actor host durable consumer error: {e}"),
         }
     }
 }
