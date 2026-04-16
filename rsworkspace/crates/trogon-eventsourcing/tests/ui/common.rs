@@ -1,4 +1,4 @@
-use trogon_eventsourcing::{CommandStateModel, Decide, Decision, NonEmpty, StreamCommand};
+use trogon_eventsourcing::{CommandState, Decide, Decision, NonEmpty, StreamCommand};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TestState {
@@ -32,7 +32,7 @@ impl StreamCommand for TestCommand {
     }
 }
 
-impl CommandStateModel for TestCommand {
+impl CommandState for TestCommand {
     type State = TestState;
     type Event = TestEvent;
     type DomainError = TestDomainError;

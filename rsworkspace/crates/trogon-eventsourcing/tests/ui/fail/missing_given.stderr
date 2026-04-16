@@ -5,4 +5,4 @@ error[E0599]: no method named `when` found for struct `TestCase<TestCommand>` in
   |                                             ^^^^ method not found in `TestCase<TestCommand>`
   |
   = note: the method was found for
-          - `TestCase<C, Given<<C as CommandStateModel>::Event>>`
+          - `TestCase<C, Given<<C as CommandState>::Event>>`

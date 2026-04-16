@@ -8,4 +8,4 @@ error[E0599]: no method named `then` found for struct `TestCase<TestCommand>` in
    |
    |
    = note: the method was found for
-           - `TestCase<C, When<<C as CommandStateModel>::Event, <C as CommandStateModel>::State, C>>`
+           - `TestCase<C, When<<C as CommandState>::Event, <C as CommandState>::State, C>>`
