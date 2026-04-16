@@ -519,6 +519,21 @@ pub(crate) const TOOL_EXECUTION_TIMEOUT: std::time::Duration =
 /// checkpoint.
 pub(crate) const CHECKPOINT_MAX_BYTES: usize = 768 * 1024;
 
+/// How often the agent refreshes `claimed_at` in KV before starting each LLM
+/// call.
+///
+/// 3 minutes keeps the heartbeat well under the 15-minute stale threshold used
+/// by startup recovery, with generous margin even if two consecutive heartbeats
+/// miss.
+///
+/// In test builds this is overridden to [`std::time::Duration::ZERO`] so the
+/// heartbeat fires on every loop iteration without needing to wait 3 real
+/// minutes.
+#[cfg(not(test))]
+const HEARTBEAT_REFRESH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(3 * 60);
+#[cfg(test)]
+const HEARTBEAT_REFRESH_INTERVAL: std::time::Duration = std::time::Duration::ZERO;
+
 /// Write a terminal status (`Failed` or `PermanentFailed`) to KV, with a
 /// `NATS_KV_TIMEOUT` deadline.
 ///
@@ -1010,8 +1025,6 @@ impl AgentLoop {
         // gap, we refresh `claimed_at` in KV every HEARTBEAT_REFRESH_INTERVAL —
         // well under the 10-minute stale threshold — so recovery never fires
         // while the LLM is legitimately working.
-        const HEARTBEAT_REFRESH_INTERVAL: std::time::Duration =
-            std::time::Duration::from_secs(3 * 60); // 3 min — 12 min margin under 15-min stale threshold
         // Track the last time we successfully wrote `claimed_at` to KV
         // (either via a checkpoint or a heartbeat). Initialised to now because
         // the promise was just claimed moments ago at the call site.
@@ -5462,19 +5475,26 @@ mod tests {
 
         fn update_promise<'a>(
             &'a self,
-            _tenant_id: &'a str,
-            _promise_id: &'a str,
-            _promise: &'a crate::promise_store::AgentPromise,
-            _revision: u64,
+            tenant_id: &'a str,
+            promise_id: &'a str,
+            promise: &'a crate::promise_store::AgentPromise,
+            revision: u64,
         ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<u64, crate::promise_store::PromiseStoreError>> + Send + 'a>>
         {
             use std::sync::atomic::Ordering;
             let n = self.update_count.fetch_add(1, Ordering::SeqCst);
             if n == 0 {
+                // Call 0 is the pre-LLM heartbeat write — let it succeed so these
+                // tests exercise the terminal-write CAS conflict in isolation.
+                return self.inner.update_promise(tenant_id, promise_id, promise, revision);
+            }
+            if n == 1 {
+                // Call 1 is the terminal (Resolved) write — inject the CAS conflict.
                 return Box::pin(async {
                     Err(crate::promise_store::PromiseStoreError("injected CAS conflict".to_string()))
                 });
             }
+            // Call 2+ is the retry write after the reload.
             match &self.retry_write {
                 RetryWriteBehavior::ReturnErr => Box::pin(async {
                     Err(crate::promise_store::PromiseStoreError("injected retry write error".to_string()))
@@ -5666,6 +5686,444 @@ mod tests {
 
         let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
         assert_eq!(p.status, PromiseStatus::Running, "promise must stay Running when retry write times out");
+    }
+
+    // ── Pre-LLM heartbeat ─────────────────────────────────────────────────────
+    //
+    // HEARTBEAT_REFRESH_INTERVAL is Duration::ZERO in test builds, so the
+    // heartbeat fires on every iteration.  Each test runs one iteration (single
+    // end_turn response) and uses HeartbeatTestStore to drive a specific branch.
+    //
+    // Call sequence for a single end_turn run with a durable agent:
+    //   get_promise   call 0  → initial checkpoint load (always delegates)
+    //   update_promise call 0 → heartbeat initial write  (HbInitial)
+    //   get_promise   call 1  → heartbeat reload after failure (HbReload)
+    //   update_promise call 1 → heartbeat retry write    (HbRetry)
+    //   update_promise call 2+→ terminal (Resolved) write (delegates to inner)
+
+    #[derive(Clone)]
+    enum HbInitial { Succeed, CasConflict, Hang }
+    #[derive(Clone)]
+    enum HbReload { None_, NonRunning, Err_, HangTimeout, Running }
+    #[derive(Clone)]
+    enum HbRetry { Succeed, Err_, Hang }
+
+    struct HeartbeatTestStore {
+        inner: crate::promise_store::mock::MockPromiseStore,
+        get_count: Arc<std::sync::atomic::AtomicUsize>,
+        update_count: Arc<std::sync::atomic::AtomicUsize>,
+        hb_initial: HbInitial,
+        hb_reload: HbReload,
+        hb_retry: HbRetry,
+    }
+
+    impl HeartbeatTestStore {
+        fn new(hb_initial: HbInitial, hb_reload: HbReload, hb_retry: HbRetry) -> Self {
+            Self {
+                inner: crate::promise_store::mock::MockPromiseStore::new(),
+                get_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+                update_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+                hb_initial,
+                hb_reload,
+                hb_retry,
+            }
+        }
+    }
+
+    impl crate::promise_store::PromiseRepository for HeartbeatTestStore {
+        fn get_promise<'a>(
+            &'a self,
+            tenant_id: &'a str,
+            promise_id: &'a str,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<crate::promise_store::PromiseEntry>, crate::promise_store::PromiseStoreError>> + Send + 'a>>
+        {
+            use std::sync::atomic::Ordering;
+            let n = self.get_count.fetch_add(1, Ordering::SeqCst);
+            if n == 0 {
+                return self.inner.get_promise(tenant_id, promise_id);
+            }
+            if n == 1 {
+                return match &self.hb_reload {
+                    HbReload::None_ => Box::pin(async { Ok(None) }),
+                    HbReload::NonRunning => {
+                        let pid = promise_id.to_string();
+                        Box::pin(async move {
+                            let p = crate::promise_store::AgentPromise {
+                                id: pid,
+                                tenant_id: "acme".to_string(),
+                                automation_id: String::new(),
+                                status: crate::promise_store::PromiseStatus::Resolved,
+                                messages: vec![],
+                                iteration: 0,
+                                worker_id: "test-worker".to_string(),
+                                claimed_at: 0,
+                                trigger: serde_json::Value::Null,
+                                nats_subject: "test.subject".to_string(),
+                                system_prompt: None,
+                                recovery_count: 0,
+                                checkpoint_degraded: false,
+                                failure_reason: None,
+                            };
+                            Ok(Some((p, 99)))
+                        })
+                    },
+                    HbReload::Err_ => Box::pin(async {
+                        Err(crate::promise_store::PromiseStoreError(
+                            "injected heartbeat reload error".to_string(),
+                        ))
+                    }),
+                    HbReload::HangTimeout => Box::pin(std::future::pending()),
+                    HbReload::Running => self.inner.get_promise(tenant_id, promise_id),
+                };
+            }
+            self.inner.get_promise(tenant_id, promise_id)
+        }
+
+        fn put_promise<'a>(
+            &'a self,
+            promise: &'a crate::promise_store::AgentPromise,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<u64, crate::promise_store::PromiseStoreError>> + Send + 'a>>
+        {
+            self.inner.put_promise(promise)
+        }
+
+        fn update_promise<'a>(
+            &'a self,
+            tenant_id: &'a str,
+            promise_id: &'a str,
+            promise: &'a crate::promise_store::AgentPromise,
+            revision: u64,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<u64, crate::promise_store::PromiseStoreError>> + Send + 'a>>
+        {
+            use std::sync::atomic::Ordering;
+            let n = self.update_count.fetch_add(1, Ordering::SeqCst);
+            match n {
+                0 => match &self.hb_initial {
+                    HbInitial::Succeed => {
+                        self.inner.update_promise(tenant_id, promise_id, promise, revision)
+                    }
+                    HbInitial::CasConflict => Box::pin(async {
+                        Err(crate::promise_store::PromiseStoreError(
+                            "injected heartbeat CAS conflict".to_string(),
+                        ))
+                    }),
+                    HbInitial::Hang => Box::pin(std::future::pending()),
+                },
+                1 => match &self.hb_retry {
+                    HbRetry::Succeed => {
+                        self.inner.update_promise(tenant_id, promise_id, promise, revision)
+                    }
+                    HbRetry::Err_ => Box::pin(async {
+                        Err(crate::promise_store::PromiseStoreError(
+                            "injected heartbeat retry error".to_string(),
+                        ))
+                    }),
+                    HbRetry::Hang => Box::pin(std::future::pending()),
+                },
+                // call 2+ = terminal (Resolved) write and any retries — always delegate
+                _ => self.inner.update_promise(tenant_id, promise_id, promise, revision),
+            }
+        }
+
+        fn get_tool_result<'a>(
+            &'a self,
+            tenant_id: &'a str,
+            promise_id: &'a str,
+            cache_key: &'a str,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<String>, crate::promise_store::PromiseStoreError>> + Send + 'a>>
+        {
+            self.inner.get_tool_result(tenant_id, promise_id, cache_key)
+        }
+
+        fn put_tool_result<'a>(
+            &'a self,
+            tenant_id: &'a str,
+            promise_id: &'a str,
+            cache_key: &'a str,
+            result: &'a str,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), crate::promise_store::PromiseStoreError>> + Send + 'a>>
+        {
+            self.inner.put_tool_result(tenant_id, promise_id, cache_key, result)
+        }
+
+        fn list_running<'a>(
+            &'a self,
+            tenant_id: &'a str,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<crate::promise_store::AgentPromise>, crate::promise_store::PromiseStoreError>> + Send + 'a>>
+        {
+            self.inner.list_running(tenant_id)
+        }
+    }
+
+    /// Helper: build a durable agent backed by a `HeartbeatTestStore`.
+    fn make_hb_agent(
+        anthropic: Arc<dyn AnthropicClient>,
+        store: Arc<HeartbeatTestStore>,
+    ) -> AgentLoop {
+        use crate::flag_client::AlwaysOnFlagClient;
+        use crate::tools::ToolContext;
+        use crate::promise_store::PromiseRepository;
+
+        let tool_ctx = Arc::new(ToolContext::for_test("http://127.0.0.1:1", "", "", ""));
+        AgentLoop {
+            anthropic_client: anthropic,
+            model: "test".to_string(),
+            max_iterations: 5,
+            tool_dispatcher: Arc::new(crate::tools::mock::MockToolDispatcher::new("unused")),
+            tool_context: tool_ctx,
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            flag_client: Arc::new(AlwaysOnFlagClient),
+            tenant_id: "acme".to_string(),
+            promise_store: Some(Arc::clone(&store) as Arc<dyn PromiseRepository>),
+            promise_id: Some("p1".to_string()),
+        }
+    }
+
+    fn end_turn_anthropic() -> Arc<mock::SequencedMockAnthropicClient> {
+        Arc::new(mock::SequencedMockAnthropicClient::new(vec![
+            serde_json::json!({"stop_reason": "end_turn", "content": [{"type": "text", "text": "done"}]}),
+        ]))
+    }
+
+    /// Happy path: heartbeat write succeeds on the first try — run completes and
+    /// the promise is marked `Resolved`.
+    #[tokio::test]
+    async fn pre_llm_heartbeat_success_updates_rev_and_run_completes() {
+        use crate::promise_store::PromiseStatus;
+
+        let store = Arc::new(HeartbeatTestStore::new(
+            HbInitial::Succeed,
+            HbReload::None_,   // not reached
+            HbRetry::Succeed,  // not reached (call 1 = terminal write, delegates)
+        ));
+        store.inner.insert_promise(make_test_promise("p1"));
+
+        let agent = make_hb_agent(end_turn_anthropic(), Arc::clone(&store));
+        let result = agent.run(vec![Message::user_text("go")], &[], None).await;
+        assert_eq!(result.unwrap(), "done");
+
+        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        assert_eq!(p.status, PromiseStatus::Resolved, "promise must be Resolved after successful run");
+    }
+
+    /// CAS conflict on heartbeat write → reload returns `None` (promise vanished)
+    /// → `run()` returns `Ok("")` immediately to avoid duplicate side-effects.
+    #[tokio::test]
+    async fn pre_llm_heartbeat_cas_conflict_reload_none_stops_run() {
+        let store = Arc::new(HeartbeatTestStore::new(
+            HbInitial::CasConflict,
+            HbReload::None_,
+            HbRetry::Succeed, // not reached
+        ));
+        store.inner.insert_promise(make_test_promise("p1"));
+
+        let agent = make_hb_agent(end_turn_anthropic(), Arc::clone(&store));
+        let result = agent.run(vec![Message::user_text("go")], &[], None).await;
+        assert_eq!(result.unwrap(), "", "run must stop when promise vanishes during heartbeat reload");
+    }
+
+    /// CAS conflict on heartbeat write → reload returns a non-`Running` status
+    /// → `run()` returns `Ok("")` to avoid racing with the other worker.
+    #[tokio::test]
+    async fn pre_llm_heartbeat_cas_conflict_reload_non_running_stops_run() {
+        let store = Arc::new(HeartbeatTestStore::new(
+            HbInitial::CasConflict,
+            HbReload::NonRunning,
+            HbRetry::Succeed, // not reached
+        ));
+        store.inner.insert_promise(make_test_promise("p1"));
+
+        let agent = make_hb_agent(end_turn_anthropic(), Arc::clone(&store));
+        let result = agent.run(vec![Message::user_text("go")], &[], None).await;
+        assert_eq!(result.unwrap(), "", "run must stop when promise is no longer Running during heartbeat");
+    }
+
+    /// CAS conflict on heartbeat write → reload returns `Err` → run continues
+    /// (claimed_at may be stale but that is non-fatal).
+    #[tokio::test]
+    async fn pre_llm_heartbeat_cas_conflict_reload_error_run_continues() {
+        use crate::promise_store::PromiseStatus;
+
+        let store = Arc::new(HeartbeatTestStore::new(
+            HbInitial::CasConflict,
+            HbReload::Err_,
+            HbRetry::Succeed, // call 1 = terminal write, delegates to inner
+        ));
+        store.inner.insert_promise(make_test_promise("p1"));
+
+        let agent = make_hb_agent(end_turn_anthropic(), Arc::clone(&store));
+        let result = agent.run(vec![Message::user_text("go")], &[], None).await;
+        assert_eq!(result.unwrap(), "done", "run must complete even when heartbeat reload errors");
+
+        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        assert_eq!(p.status, PromiseStatus::Resolved, "promise must be Resolved after run completes");
+    }
+
+    /// CAS conflict on heartbeat write → reload returns `Running` → retry write
+    /// succeeds → run completes normally.
+    #[tokio::test]
+    async fn pre_llm_heartbeat_cas_conflict_retry_success_run_completes() {
+        use crate::promise_store::PromiseStatus;
+
+        let store = Arc::new(HeartbeatTestStore::new(
+            HbInitial::CasConflict,
+            HbReload::Running,
+            HbRetry::Succeed,
+        ));
+        store.inner.insert_promise(make_test_promise("p1"));
+
+        let agent = make_hb_agent(end_turn_anthropic(), Arc::clone(&store));
+        let result = agent.run(vec![Message::user_text("go")], &[], None).await;
+        assert_eq!(result.unwrap(), "done", "run must complete after successful heartbeat retry");
+
+        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        assert_eq!(p.status, PromiseStatus::Resolved, "promise must be Resolved after run completes");
+    }
+
+    /// CAS conflict on heartbeat write → reload returns `Running` → retry write
+    /// returns `Err` → run continues (non-fatal).
+    #[tokio::test]
+    async fn pre_llm_heartbeat_cas_conflict_retry_error_run_continues() {
+        use crate::promise_store::PromiseStatus;
+
+        let store = Arc::new(HeartbeatTestStore::new(
+            HbInitial::CasConflict,
+            HbReload::Running,
+            HbRetry::Err_,
+        ));
+        store.inner.insert_promise(make_test_promise("p1"));
+
+        let agent = make_hb_agent(end_turn_anthropic(), Arc::clone(&store));
+        let result = agent.run(vec![Message::user_text("go")], &[], None).await;
+        assert_eq!(result.unwrap(), "done", "run must complete even when heartbeat retry write errors");
+
+        // Retry write Err → rev not updated; terminal write at call 2 delegates
+        // to inner and uses the original rev — should still succeed.
+        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        assert_eq!(p.status, PromiseStatus::Resolved, "promise must be Resolved after run completes");
+    }
+
+    /// Initial heartbeat write times out → `NATS_KV_TIMEOUT` fires → reload
+    /// returns `None` → `run()` returns `Ok("")` immediately.
+    #[tokio::test(start_paused = true)]
+    async fn pre_llm_heartbeat_initial_timeout_reload_none_stops_run() {
+        use std::time::Duration;
+
+        let store = Arc::new(HeartbeatTestStore::new(
+            HbInitial::Hang,
+            HbReload::None_,
+            HbRetry::Succeed, // not reached
+        ));
+        store.inner.insert_promise(make_test_promise("p1"));
+
+        let agent = make_hb_agent(end_turn_anthropic(), Arc::clone(&store));
+        let (result, _) = tokio::join!(
+            agent.run(vec![Message::user_text("go")], &[], None),
+            tokio::time::advance(NATS_KV_TIMEOUT + Duration::from_millis(1)),
+        );
+        assert_eq!(result.unwrap(), "", "run must stop when promise vanishes after heartbeat timeout");
+    }
+
+    /// Initial heartbeat write times out → reload returns a non-`Running` status
+    /// → `run()` returns `Ok("")`.
+    #[tokio::test(start_paused = true)]
+    async fn pre_llm_heartbeat_initial_timeout_reload_non_running_stops_run() {
+        use std::time::Duration;
+
+        let store = Arc::new(HeartbeatTestStore::new(
+            HbInitial::Hang,
+            HbReload::NonRunning,
+            HbRetry::Succeed, // not reached
+        ));
+        store.inner.insert_promise(make_test_promise("p1"));
+
+        let agent = make_hb_agent(end_turn_anthropic(), Arc::clone(&store));
+        let (result, _) = tokio::join!(
+            agent.run(vec![Message::user_text("go")], &[], None),
+            tokio::time::advance(NATS_KV_TIMEOUT + Duration::from_millis(1)),
+        );
+        assert_eq!(result.unwrap(), "", "run must stop when promise is no longer Running after heartbeat timeout");
+    }
+
+    /// CAS conflict on heartbeat write → reload hangs past `NATS_KV_TIMEOUT` →
+    /// run continues (claimed_at may be stale, non-fatal).
+    #[tokio::test(start_paused = true)]
+    async fn pre_llm_heartbeat_cas_conflict_reload_timeout_run_continues() {
+        use crate::promise_store::PromiseStatus;
+        use std::time::Duration;
+
+        let store = Arc::new(HeartbeatTestStore::new(
+            HbInitial::CasConflict,
+            HbReload::HangTimeout,
+            HbRetry::Succeed, // not reached; call 1 = terminal write delegates
+        ));
+        store.inner.insert_promise(make_test_promise("p1"));
+
+        let agent = make_hb_agent(end_turn_anthropic(), Arc::clone(&store));
+        let (result, _) = tokio::join!(
+            agent.run(vec![Message::user_text("go")], &[], None),
+            tokio::time::advance(NATS_KV_TIMEOUT + Duration::from_millis(1)),
+        );
+        assert_eq!(result.unwrap(), "done", "run must complete even when heartbeat reload times out");
+
+        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        assert_eq!(p.status, PromiseStatus::Resolved, "promise must be Resolved after run completes");
+    }
+
+    /// CAS conflict on heartbeat write → reload returns `Running` → retry write
+    /// hangs past `NATS_KV_TIMEOUT` → run continues (non-fatal).
+    #[tokio::test(start_paused = true)]
+    async fn pre_llm_heartbeat_cas_conflict_retry_timeout_run_continues() {
+        use crate::promise_store::PromiseStatus;
+        use std::time::Duration;
+
+        let store = Arc::new(HeartbeatTestStore::new(
+            HbInitial::CasConflict,
+            HbReload::Running,
+            HbRetry::Hang,
+        ));
+        store.inner.insert_promise(make_test_promise("p1"));
+
+        let agent = make_hb_agent(end_turn_anthropic(), Arc::clone(&store));
+        let (result, _) = tokio::join!(
+            agent.run(vec![Message::user_text("go")], &[], None),
+            tokio::time::advance(NATS_KV_TIMEOUT + Duration::from_millis(1)),
+        );
+        assert_eq!(result.unwrap(), "done", "run must complete even when heartbeat retry write times out");
+
+        // Retry write timed out → rev not updated from reload; terminal write at
+        // call 2 delegates to inner using original rev — should still succeed.
+        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        assert_eq!(p.status, PromiseStatus::Resolved, "promise must be Resolved after run completes");
+    }
+
+    /// Initial heartbeat write times out → reload returns `Running` → retry write
+    /// succeeds → run completes normally.
+    #[tokio::test(start_paused = true)]
+    async fn pre_llm_heartbeat_initial_timeout_reload_succeeds_run_completes() {
+        use crate::promise_store::PromiseStatus;
+        use std::time::Duration;
+
+        let store = Arc::new(HeartbeatTestStore::new(
+            HbInitial::Hang,
+            HbReload::Running,
+            HbRetry::Succeed,
+        ));
+        store.inner.insert_promise(make_test_promise("p1"));
+
+        let agent = make_hb_agent(end_turn_anthropic(), Arc::clone(&store));
+        let (result, _) = tokio::join!(
+            agent.run(vec![Message::user_text("go")], &[], None),
+            tokio::time::advance(NATS_KV_TIMEOUT + Duration::from_millis(1)),
+        );
+        assert_eq!(result.unwrap(), "done", "run must complete after heartbeat timeout → reload → retry");
+
+        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        assert_eq!(p.status, PromiseStatus::Resolved, "promise must be Resolved after run completes");
     }
 
     // ── end_turn multi-block text join ────────────────────────────────────────
@@ -7588,6 +8046,107 @@ mod tests {
             p.status,
             PromiseStatus::PermanentFailed,
             "promise must be PermanentFailed after try_mark_permanent_failed_fresh"
+        );
+    }
+
+    /// First `get_promise` call returns `Err` (transient KV error) — the function
+    /// sleeps the 2-second backoff and retries.  On the second attempt it finds
+    /// the promise and marks it `PermanentFailed`.
+    ///
+    /// Uses `start_paused = true` so the 2-second back-off resolves instantly.
+    #[tokio::test(start_paused = true)]
+    async fn try_mark_permanent_failed_first_error_second_succeeds_marks_permanent_failed() {
+        use crate::promise_store::{
+            AgentPromise, PromiseRepository, PromiseStatus, PromiseStoreError, PromiseEntry,
+        };
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::future::Future;
+        use std::pin::Pin;
+
+        // Store wrapper: get_promise call 0 → Err; call 1+ → delegate.
+        struct FirstErrThenOkStore {
+            inner: crate::promise_store::mock::MockPromiseStore,
+            get_count: Arc<AtomicUsize>,
+        }
+
+        impl PromiseRepository for FirstErrThenOkStore {
+            fn get_promise<'a>(
+                &'a self,
+                tenant_id: &'a str,
+                promise_id: &'a str,
+            ) -> Pin<Box<dyn Future<Output = Result<Option<PromiseEntry>, PromiseStoreError>> + Send + 'a>>
+            {
+                let n = self.get_count.fetch_add(1, Ordering::SeqCst);
+                if n == 0 {
+                    return Box::pin(async {
+                        Err(PromiseStoreError("transient KV error on first attempt".to_string()))
+                    });
+                }
+                self.inner.get_promise(tenant_id, promise_id)
+            }
+
+            fn put_promise<'a>(
+                &'a self,
+                promise: &'a AgentPromise,
+            ) -> Pin<Box<dyn Future<Output = Result<u64, PromiseStoreError>> + Send + 'a>> {
+                self.inner.put_promise(promise)
+            }
+
+            fn update_promise<'a>(
+                &'a self,
+                tenant_id: &'a str,
+                promise_id: &'a str,
+                promise: &'a AgentPromise,
+                revision: u64,
+            ) -> Pin<Box<dyn Future<Output = Result<u64, PromiseStoreError>> + Send + 'a>> {
+                self.inner.update_promise(tenant_id, promise_id, promise, revision)
+            }
+
+            fn get_tool_result<'a>(
+                &'a self,
+                tenant_id: &'a str,
+                promise_id: &'a str,
+                cache_key: &'a str,
+            ) -> Pin<Box<dyn Future<Output = Result<Option<String>, PromiseStoreError>> + Send + 'a>>
+            {
+                self.inner.get_tool_result(tenant_id, promise_id, cache_key)
+            }
+
+            fn put_tool_result<'a>(
+                &'a self,
+                tenant_id: &'a str,
+                promise_id: &'a str,
+                cache_key: &'a str,
+                result: &'a str,
+            ) -> Pin<Box<dyn Future<Output = Result<(), PromiseStoreError>> + Send + 'a>> {
+                self.inner.put_tool_result(tenant_id, promise_id, cache_key, result)
+            }
+
+            fn list_running<'a>(
+                &'a self,
+                tenant_id: &'a str,
+            ) -> Pin<Box<dyn Future<Output = Result<Vec<AgentPromise>, PromiseStoreError>> + Send + 'a>>
+            {
+                self.inner.list_running(tenant_id)
+            }
+        }
+
+        let store = Arc::new(FirstErrThenOkStore {
+            inner: crate::promise_store::mock::MockPromiseStore::new(),
+            get_count: Arc::new(AtomicUsize::new(0)),
+        });
+        store.inner.insert_promise(make_test_promise("pid-retry"));
+        let store_as_repo: Arc<dyn PromiseRepository> =
+            Arc::clone(&store) as Arc<dyn PromiseRepository>;
+
+        // With start_paused=true the 2-second back-off (attempt 1) resolves instantly.
+        try_mark_permanent_failed_fresh(store_as_repo.as_ref(), "acme", "pid-retry", "test ctx").await;
+
+        let (p, _) = store.inner.get_promise("acme", "pid-retry").await.unwrap().unwrap();
+        assert_eq!(
+            p.status,
+            PromiseStatus::PermanentFailed,
+            "promise must be PermanentFailed after retry succeeds"
         );
     }
 }
