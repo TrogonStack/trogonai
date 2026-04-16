@@ -6316,6 +6316,289 @@ mod tests {
         );
     }
 
+    // ── GetErrorsAfterNthCallStore ────────────────────────────────────────────
+
+    /// Promise store where `get_promise` returns `Err` starting at call number
+    /// `error_from_call` (0-indexed). Earlier calls are delegated to the inner
+    /// `MockPromiseStore` and succeed normally.
+    ///
+    /// Used to exercise the `Ok(Err(e))` arm in the PermanentFailed-marking
+    /// code path, which exists alongside the `Ok(Ok(None))` and timeout arms
+    /// that are tested separately.
+    struct GetErrorsAfterNthCallStore {
+        inner: crate::promise_store::mock::MockPromiseStore,
+        get_count: Arc<std::sync::atomic::AtomicUsize>,
+        error_from_call: usize,
+    }
+
+    impl GetErrorsAfterNthCallStore {
+        fn new(
+            error_from_call: usize,
+            inner: crate::promise_store::mock::MockPromiseStore,
+        ) -> Self {
+            Self {
+                inner,
+                get_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+                error_from_call,
+            }
+        }
+    }
+
+    impl crate::promise_store::PromiseRepository for GetErrorsAfterNthCallStore {
+        fn get_promise<'a>(
+            &'a self,
+            tenant_id: &'a str,
+            promise_id: &'a str,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<crate::promise_store::PromiseEntry>, crate::promise_store::PromiseStoreError>> + Send + 'a>>
+        {
+            let n = self.get_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if n >= self.error_from_call {
+                return Box::pin(async {
+                    Err(crate::promise_store::PromiseStoreError(
+                        "injected get_promise error".to_string(),
+                    ))
+                });
+            }
+            self.inner.get_promise(tenant_id, promise_id)
+        }
+
+        fn put_promise<'a>(
+            &'a self,
+            promise: &'a crate::promise_store::AgentPromise,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<u64, crate::promise_store::PromiseStoreError>> + Send + 'a>>
+        {
+            self.inner.put_promise(promise)
+        }
+
+        fn update_promise<'a>(
+            &'a self,
+            tenant_id: &'a str,
+            promise_id: &'a str,
+            promise: &'a crate::promise_store::AgentPromise,
+            revision: u64,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<u64, crate::promise_store::PromiseStoreError>> + Send + 'a>>
+        {
+            self.inner.update_promise(tenant_id, promise_id, promise, revision)
+        }
+
+        fn get_tool_result<'a>(
+            &'a self,
+            tenant_id: &'a str,
+            promise_id: &'a str,
+            cache_key: &'a str,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<String>, crate::promise_store::PromiseStoreError>> + Send + 'a>>
+        {
+            self.inner.get_tool_result(tenant_id, promise_id, cache_key)
+        }
+
+        fn put_tool_result<'a>(
+            &'a self,
+            tenant_id: &'a str,
+            promise_id: &'a str,
+            cache_key: &'a str,
+            result: &'a str,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), crate::promise_store::PromiseStoreError>> + Send + 'a>>
+        {
+            self.inner.put_tool_result(tenant_id, promise_id, cache_key, result)
+        }
+
+        fn list_running<'a>(
+            &'a self,
+            tenant_id: &'a str,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<crate::promise_store::AgentPromise>, crate::promise_store::PromiseStoreError>> + Send + 'a>>
+        {
+            self.inner.list_running(tenant_id)
+        }
+    }
+
+    /// When `get_promise` returns `Err` (not `None`, not a timeout) during the
+    /// PermanentFailed-marking phase for a deleted automation, recovery must log
+    /// a warning and continue — the promise stays `Running`.
+    ///
+    /// This exercises the `Ok(Err(e))` arm in the marking block, complementing
+    /// the existing tests for `Ok(Ok(None))` and the timeout path.
+    #[tokio::test]
+    async fn recover_automation_deleted_get_promise_error_in_marking_continues() {
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+
+        // Call 0: prepare_agent_with_promise reload → success
+        // Call 1: perm_fail marking → Err
+        let inner = crate::promise_store::mock::MockPromiseStore::new();
+        let mut p = make_stale_promise("p-del-get-err");
+        p.automation_id = "auto-gone".to_string();
+        inner.insert_promise(p);
+        let store_inner = inner.clone();
+
+        let store = Arc::new(GetErrorsAfterNthCallStore::new(1, inner));
+        let promise_store: Arc<dyn PromiseRepository> = Arc::clone(&store) as _;
+
+        let auto_store = Arc::new(EmptyAutomationStore); // automation not found → PermanentFailed path
+        let run_store = Arc::new(ErrorRecordRunStore);
+        let agent = make_agent("http://127.0.0.1:1");
+
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &run_store,
+            "acme",
+        )
+        .await
+        .expect("spawn handle must be returned when stale promises exist");
+
+        handle.await.expect("recovery task must not panic");
+
+        let (p_after, _) = store_inner
+            .get_promise("acme", "p-del-get-err")
+            .await
+            .unwrap()
+            .expect("promise must still exist");
+        assert_eq!(
+            p_after.status,
+            PromiseStatus::Running,
+            "get_promise Err in marking must leave promise Running, not PermanentFailed"
+        );
+    }
+
+    /// Same as above but for the unknown built-in subject path.
+    /// When `get_promise` returns `Err` in the marking block for an unknown
+    /// `nats_subject`, recovery logs a warning and continues — promise stays Running.
+    #[tokio::test]
+    async fn recover_unknown_subject_get_promise_error_in_marking_continues() {
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+
+        let inner = crate::promise_store::mock::MockPromiseStore::new();
+        let mut p = make_stale_promise("p-unk-get-err");
+        p.automation_id = String::new(); // built-in handler path
+        p.nats_subject = "completely.unknown.subject".to_string();
+        inner.insert_promise(p);
+        let store_inner = inner.clone();
+
+        let store = Arc::new(GetErrorsAfterNthCallStore::new(1, inner));
+        let promise_store: Arc<dyn PromiseRepository> = Arc::clone(&store) as _;
+
+        let auto_store = Arc::new(EmptyAutomationStore);
+        let run_store = Arc::new(ErrorRecordRunStore);
+        let agent = make_agent("http://127.0.0.1:1");
+
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &run_store,
+            "acme",
+        )
+        .await
+        .expect("spawn handle must be returned when stale promises exist");
+
+        handle.await.expect("recovery task must not panic");
+
+        let (p_after, _) = store_inner
+            .get_promise("acme", "p-unk-get-err")
+            .await
+            .unwrap()
+            .expect("promise must still exist");
+        assert_eq!(
+            p_after.status,
+            PromiseStatus::Running,
+            "get_promise Err in marking (unknown subject) must leave promise Running"
+        );
+    }
+
+    // ── real KV: corrupted data ──────────────────────────────────────────────
+
+    /// Injecting non-JSON bytes into `AGENT_PROMISES` and calling `get_promise`
+    /// must return a `PromiseStoreError` — the deserialization failure must
+    /// propagate rather than silently succeed.
+    #[tokio::test]
+    async fn real_kv_get_promise_corrupted_json_returns_error() {
+        use crate::promise_store::AGENT_PROMISES_BUCKET;
+
+        let (ps, _, _, js, _c) = make_all_stores_with_promise().await;
+
+        // Inject raw invalid JSON bytes directly via the KV bucket.
+        let kv = js
+            .get_key_value(AGENT_PROMISES_BUCKET)
+            .await
+            .expect("kv bucket");
+        kv.put(
+            "test.corrupted-p",
+            bytes::Bytes::from(b"not valid json at all".to_vec()),
+        )
+        .await
+        .expect("inject corrupt entry");
+
+        let result = ps.get_promise("test", "corrupted-p").await;
+        assert!(
+            result.is_err(),
+            "get_promise must return Err for a corrupted KV entry; got Ok"
+        );
+    }
+
+    /// Injecting non-UTF-8 bytes into `AGENT_TOOL_RESULTS` and calling
+    /// `get_tool_result` must return a `PromiseStoreError`.
+    #[tokio::test]
+    async fn real_kv_get_tool_result_invalid_utf8_returns_error() {
+        use crate::promise_store::AGENT_TOOL_RESULTS_BUCKET;
+
+        let (ps, _, _, js, _c) = make_all_stores_with_promise().await;
+
+        let kv = js
+            .get_key_value(AGENT_TOOL_RESULTS_BUCKET)
+            .await
+            .expect("kv bucket");
+        // 0xFF 0xFE are invalid leading UTF-8 bytes.
+        kv.put(
+            "test.p-utf8-err.deadbeef01",
+            bytes::Bytes::from(vec![0xFFu8, 0xFEu8, 0x00u8]),
+        )
+        .await
+        .expect("inject invalid UTF-8");
+
+        let result = ps.get_tool_result("test", "p-utf8-err", "deadbeef01").await;
+        assert!(
+            result.is_err(),
+            "get_tool_result must return Err for invalid UTF-8 bytes; got Ok"
+        );
+    }
+
+    /// Injecting a corrupted entry into `AGENT_PROMISES` causes `list_running`
+    /// to propagate the deserialization error (via `?` in `list_running_inner`).
+    ///
+    /// This test documents the current behaviour: a single bad entry kills the
+    /// whole scan. Callers that cannot tolerate this should wrap `list_running`
+    /// with a fallback.
+    #[tokio::test]
+    async fn real_kv_list_running_corrupted_entry_propagates_error() {
+        use crate::promise_store::{PromiseRepository, AGENT_PROMISES_BUCKET};
+
+        let (ps, _, _, js, _c) = make_all_stores_with_promise().await;
+        let promise_repo: Arc<dyn PromiseRepository> = ps.clone();
+
+        // Write a valid Running promise so the scan has something to iterate.
+        let mut p = make_stale_promise("p-valid-lr");
+        p.tenant_id = "test".to_string();
+        promise_repo.put_promise(&p).await.unwrap();
+
+        // Inject a corrupted entry under the same tenant prefix.
+        let kv = js
+            .get_key_value(AGENT_PROMISES_BUCKET)
+            .await
+            .expect("kv bucket");
+        kv.put(
+            "test.p-corrupt-lr",
+            bytes::Bytes::from(b"{{not json}}".to_vec()),
+        )
+        .await
+        .expect("inject corrupt entry");
+
+        let result = promise_repo.list_running("test").await;
+        assert!(
+            result.is_err(),
+            "list_running must propagate the error from a corrupted KV entry"
+        );
+    }
+
     #[test]
     fn subject_slug_replaces_dots_with_underscores() {
         assert_eq!(subject_slug("github.pull_request"), "github_pull_request");
