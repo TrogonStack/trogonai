@@ -24,7 +24,10 @@ pub use snapshots::{
     write_checkpoint,
 };
 pub use streams::{StreamStoreError, append_stream, read_stream_from, read_stream_range};
-pub use testing::{Decider, ExpectedError, TestCase, ThenExpectation, decider, expect_error};
+pub use testing::{
+    Decider, ExpectedError, TestCase, ThenError, ThenEvents, ThenExpectation, Timeline, decider,
+    expect_error,
+};
 
 pub trait StreamEvent {
     fn stream_id(&self) -> &str;

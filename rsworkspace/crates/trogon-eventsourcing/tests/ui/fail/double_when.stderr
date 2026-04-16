@@ -1,4 +1,4 @@
-error[E0599]: no method named `when` found for struct `TestCase<TestCommand, When<TestState, TestCommand>>` in the current scope
+error[E0599]: no method named `when` found for struct `TestCase<TestCommand, When<TestEvent, TestState, TestCommand>>` in the current scope
   --> tests/ui/fail/double_when.rs:12:10
    |
  9 |       TestCase::new(decider::<TestCommand>())
