@@ -10,7 +10,7 @@ use trogon_eventsourcing::{
 use crate::{
     JobId, JobSpec, ResolvedJobSpec,
     error::CronError,
-    events::{JobEvent, RegisteredJobSpec},
+    events::{JobEvent, JobEventCodec, RegisteredJobSpec},
 };
 
 #[derive(Debug, Clone)]
@@ -140,6 +140,7 @@ where
     S: SnapshotStore<RegisterJobState, JobId, Error = CronError>,
 {
     Ok(CommandExecution::new(event_store, &command)
+        .codec(JobEventCodec)
         .occ(occ)
         .snapshots(Snapshots::new(
             snapshot_store,

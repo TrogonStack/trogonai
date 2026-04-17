@@ -19,7 +19,7 @@ use crate::{
     config::{JobWriteCondition, JobWriteState},
     domain::ResolvedJobSpec,
     error::CronError,
-    events::{JobEvent, JobEventData},
+    events::{JobEvent, JobEventCodec, JobEventData},
     projections::{CronJobWatchStream, LoadAndWatchCronJobsResult},
     traits::SchedulePublisher,
 };
@@ -154,10 +154,13 @@ impl MockCronStore {
         self.events.lock().unwrap().insert(
             id.clone(),
             vec![
-                JobEventData::new(JobEvent::JobRegistered {
-                    id: id.clone(),
-                    spec: crate::RegisteredJobSpec::from(&spec),
-                })
+                JobEventData::new_with_codec(
+                    &JobEventCodec,
+                    JobEvent::JobRegistered {
+                        id: id.clone(),
+                        spec: crate::RegisteredJobSpec::from(&spec),
+                    },
+                )
                 .unwrap(),
             ],
         );
@@ -326,9 +329,11 @@ impl EventStore<crate::JobId> for MockCronStore {
         let appended_events = events.len() as u64;
 
         for event_data in events {
-            let event = event_data.decode_data::<JobEvent>().map_err(|source| {
-                CronError::event_source("failed to decode mocked job event payload", source)
-            })?;
+            let event = event_data
+                .decode_data_with(&JobEventCodec)
+                .map_err(|source| {
+                    CronError::event_source("failed to decode mocked job event payload", source)
+                })?;
             version += 1;
             stored_events.push(event_data);
             match event {

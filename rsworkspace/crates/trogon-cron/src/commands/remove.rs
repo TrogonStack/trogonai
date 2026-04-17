@@ -5,7 +5,11 @@ use trogon_eventsourcing::{
     SnapshotStoreConfig, Snapshots, StreamCommand,
 };
 
-use crate::{JobId, error::CronError, events::JobEvent};
+use crate::{
+    JobId,
+    error::CronError,
+    events::{JobEvent, JobEventCodec},
+};
 
 #[derive(Debug, Clone)]
 pub struct RemoveJobCommand {
@@ -120,6 +124,7 @@ where
     S: SnapshotStore<RemoveJobState, JobId, Error = CronError>,
 {
     Ok(CommandExecution::new(event_store, &command)
+        .codec(JobEventCodec)
         .occ(occ)
         .snapshots(Snapshots::new(
             snapshot_store,
