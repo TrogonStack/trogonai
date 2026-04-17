@@ -119,31 +119,39 @@ pub trait SnapshotStore<SnapshotPayload, StreamId: ?Sized>: Send + Sync {
     ) -> impl std::future::Future<Output = Result<(), Self::Error>> + Send;
 }
 
+use std::num::NonZeroU64;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AppendOutcome {
     pub next_expected_version: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SnapshotDecision {
+    Skip,
+    Take,
+}
+
 pub trait SnapshotPolicy<State, Event> {
-    fn should_snapshot(
+    fn snapshot_decision(
         &self,
         next_expected_version: u64,
         state: &State,
         events: &NonEmpty<Event>,
-    ) -> bool;
+    ) -> SnapshotDecision;
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct AlwaysSnapshot;
 
 impl<State, Event> SnapshotPolicy<State, Event> for AlwaysSnapshot {
-    fn should_snapshot(
+    fn snapshot_decision(
         &self,
         _next_expected_version: u64,
         _state: &State,
         _events: &NonEmpty<Event>,
-    ) -> bool {
-        true
+    ) -> SnapshotDecision {
+        SnapshotDecision::Take
     }
 }
 
@@ -151,18 +159,48 @@ impl<State, Event> SnapshotPolicy<State, Event> for AlwaysSnapshot {
 pub struct NoSnapshot;
 
 impl<State, Event> SnapshotPolicy<State, Event> for NoSnapshot {
-    fn should_snapshot(
+    fn snapshot_decision(
         &self,
         _next_expected_version: u64,
         _state: &State,
         _events: &NonEmpty<Event>,
-    ) -> bool {
-        false
+    ) -> SnapshotDecision {
+        SnapshotDecision::Skip
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FrequencySnapshot {
+    frequency: NonZeroU64,
+}
+
+impl FrequencySnapshot {
+    pub const fn new(frequency: NonZeroU64) -> Self {
+        Self { frequency }
+    }
+
+    pub const fn frequency(self) -> NonZeroU64 {
+        self.frequency
+    }
+}
+
+impl<State, Event> SnapshotPolicy<State, Event> for FrequencySnapshot {
+    fn snapshot_decision(
+        &self,
+        next_expected_version: u64,
+        _state: &State,
+        _events: &NonEmpty<Event>,
+    ) -> SnapshotDecision {
+        if next_expected_version.is_multiple_of(self.frequency.get()) {
+            SnapshotDecision::Take
+        } else {
+            SnapshotDecision::Skip
+        }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExecutionResult<State, Event> {
+struct ExecutionResult<State, Event> {
     pub next_expected_version: u64,
     pub events: NonEmpty<Event>,
     pub state: State,
@@ -175,7 +213,7 @@ pub struct CommandOutcome<Event> {
 }
 
 impl<State, Event> ExecutionResult<State, Event> {
-    pub fn into_outcome(self) -> CommandOutcome<Event> {
+    fn into_outcome(self) -> CommandOutcome<Event> {
         CommandOutcome {
             next_expected_version: self.next_expected_version,
             events: self.events,
@@ -261,8 +299,11 @@ impl<'a, E, C> CommandExecution<'a, E, C, WithoutSnapshots> {
 }
 
 impl<'a, E, C, S> CommandExecution<'a, E, C, S> {
-    pub fn occ(mut self, occ: OccPolicy) -> Self {
-        self.occ = Some(occ);
+    pub fn occ<O>(mut self, occ: O) -> Self
+    where
+        O: Into<Option<OccPolicy>>,
+    {
+        self.occ = occ.into();
         self
     }
 }
@@ -288,8 +329,11 @@ pub struct CommandExecutionWithCodec<'a, E, C, S, EC> {
 }
 
 impl<'a, E, C, S, EC> CommandExecutionWithCodec<'a, E, C, S, EC> {
-    pub fn occ(mut self, occ: OccPolicy) -> Self {
-        self.occ = Some(occ);
+    pub fn occ<O>(mut self, occ: O) -> Self
+    where
+        O: Into<Option<OccPolicy>>,
+    {
+        self.occ = occ.into();
         self
     }
 
@@ -318,12 +362,21 @@ where
 {
     pub async fn execute(
         self,
+    ) -> Result<CommandOutcome<C::Event>, CommandFailure<C::DomainError, CommandInfraError<E::Error>>>
+    {
+        self.execute_result()
+            .await
+            .map(ExecutionResult::into_outcome)
+    }
+
+    async fn execute_result(
+        self,
     ) -> Result<
         ExecutionResult<C::State, C::Event>,
         CommandFailure<C::DomainError, CommandInfraError<E::Error>>,
     > {
         let event_codec = self.event_codec;
-        self.codec(event_codec).execute().await
+        self.codec(event_codec).execute_result().await
     }
 }
 
@@ -337,6 +390,15 @@ where
     EC::Error: Into<E::Error>,
 {
     pub async fn execute(
+        self,
+    ) -> Result<CommandOutcome<C::Event>, CommandFailure<C::DomainError, CommandInfraError<E::Error>>>
+    {
+        self.execute_result()
+            .await
+            .map(ExecutionResult::into_outcome)
+    }
+
+    async fn execute_result(
         self,
     ) -> Result<
         ExecutionResult<C::State, C::Event>,
@@ -414,12 +476,21 @@ where
 {
     pub async fn execute(
         self,
+    ) -> Result<CommandOutcome<C::Event>, CommandFailure<C::DomainError, CommandInfraError<SErr>>>
+    {
+        self.execute_result()
+            .await
+            .map(ExecutionResult::into_outcome)
+    }
+
+    async fn execute_result(
+        self,
     ) -> Result<
         ExecutionResult<C::State, C::Event>,
         CommandFailure<C::DomainError, CommandInfraError<SErr>>,
     > {
         let event_codec = self.event_codec;
-        self.codec(event_codec).execute().await
+        self.codec(event_codec).execute_result().await
     }
 }
 
@@ -436,6 +507,15 @@ where
     EC::Error: Into<SErr>,
 {
     pub async fn execute(
+        self,
+    ) -> Result<CommandOutcome<C::Event>, CommandFailure<C::DomainError, CommandInfraError<SErr>>>
+    {
+        self.execute_result()
+            .await
+            .map(ExecutionResult::into_outcome)
+    }
+
+    async fn execute_result(
         self,
     ) -> Result<
         ExecutionResult<C::State, C::Event>,
@@ -516,10 +596,13 @@ where
             state = C::evolve(state, event).map_err(CommandFailure::Domain)?;
         }
 
-        if self.snapshots.policy.should_snapshot(
-            append_outcome.next_expected_version,
-            &state,
-            &events,
+        if matches!(
+            self.snapshots.policy.snapshot_decision(
+                append_outcome.next_expected_version,
+                &state,
+                &events,
+            ),
+            SnapshotDecision::Take
         ) && let Some(snapshot_payload) = C::snapshot_state(&state)
         {
             self.snapshots
@@ -894,7 +977,7 @@ mod tests {
         };
         let command = TestCommand::new("alpha", TestAction::Register);
 
-        let result = block_on(CommandExecution::new(&runtime, &command).execute()).unwrap();
+        let result = block_on(CommandExecution::new(&runtime, &command).execute_result()).unwrap();
 
         assert_eq!(result.next_expected_version, 1);
         assert_eq!(result.state, TestState::Present { enabled: true });
@@ -942,7 +1025,7 @@ mod tests {
         let result = block_on(
             CommandExecution::new(&runtime, &command)
                 .snapshots(Snapshots::new(&runtime, TEST_SNAPSHOT_CONFIG, NoSnapshot))
-                .execute(),
+                .execute_result(),
         )
         .unwrap();
 
@@ -966,7 +1049,7 @@ mod tests {
         let error = block_on(
             CommandExecution::new(&runtime, &command)
                 .snapshots(Snapshots::new(&runtime, TEST_SNAPSHOT_CONFIG, NoSnapshot))
-                .execute(),
+                .execute_result(),
         )
         .unwrap_err();
 
@@ -991,7 +1074,7 @@ mod tests {
         let error = block_on(
             CommandExecution::new(&runtime, &command)
                 .snapshots(Snapshots::new(&runtime, TEST_SNAPSHOT_CONFIG, NoSnapshot))
-                .execute(),
+                .execute_result(),
         )
         .unwrap_err();
 
@@ -1018,7 +1101,8 @@ mod tests {
         };
         let command = TestCommand::new("alpha", TestAction::Register);
 
-        let error = block_on(CommandExecution::new(&runtime, &command).execute()).unwrap_err();
+        let error =
+            block_on(CommandExecution::new(&runtime, &command).execute_result()).unwrap_err();
 
         assert!(matches!(
             error,
@@ -1038,7 +1122,7 @@ mod tests {
         let error = block_on(
             CommandExecution::new(&runtime, &command)
                 .snapshots(Snapshots::new(&runtime, TEST_SNAPSHOT_CONFIG, NoSnapshot))
-                .execute(),
+                .execute_result(),
         )
         .unwrap_err();
 
@@ -1061,7 +1145,7 @@ mod tests {
         let result = block_on(
             CommandExecution::new(&runtime, &command)
                 .snapshots(Snapshots::new(&runtime, TEST_SNAPSHOT_CONFIG, NoSnapshot))
-                .execute(),
+                .execute_result(),
         )
         .unwrap();
         let appended_events = runtime.appended_events.lock().unwrap();
@@ -1104,7 +1188,7 @@ mod tests {
         let result = block_on(
             CommandExecution::new(&runtime, &command)
                 .codec(WrappedJsonCodec)
-                .execute(),
+                .execute_result(),
         )
         .unwrap();
         let appended_events = runtime.appended_events.lock().unwrap();
@@ -1123,7 +1207,7 @@ mod tests {
         let command = TestCommand::new("alpha", TestAction::Register)
             .with_default_stream_state(StreamState::StreamExists);
 
-        let _ = block_on(CommandExecution::new(&runtime, &command).execute()).unwrap();
+        let _ = block_on(CommandExecution::new(&runtime, &command).execute_result()).unwrap();
 
         assert_eq!(
             runtime.stream_states.lock().unwrap().as_slice(),
@@ -1143,7 +1227,7 @@ mod tests {
         let _ = block_on(
             CommandExecution::new(&runtime, &command)
                 .occ(OccPolicy::Explicit(StreamState::Any))
-                .execute(),
+                .execute_result(),
         )
         .unwrap();
 
@@ -1172,7 +1256,7 @@ mod tests {
         let _ = block_on(
             CommandExecution::new(&runtime, &command)
                 .occ(OccPolicy::ExactCurrentVersion)
-                .execute(),
+                .execute_result(),
         )
         .unwrap();
 
@@ -1194,7 +1278,7 @@ mod tests {
         let _ = block_on(
             CommandExecution::new(&runtime, &command)
                 .occ(OccPolicy::Explicit(StreamState::Any))
-                .execute(),
+                .execute_result(),
         )
         .unwrap();
 
@@ -1219,7 +1303,7 @@ mod tests {
                     TEST_SNAPSHOT_CONFIG,
                     AlwaysSnapshot,
                 ))
-                .execute(),
+                .execute_result(),
         )
         .unwrap();
 
@@ -1228,6 +1312,53 @@ mod tests {
             runtime.saved_snapshots.lock().unwrap().as_slice(),
             &[Snapshot::new(1, TestState::Present { enabled: true })]
         );
+    }
+
+    #[test]
+    fn frequency_snapshot_saves_on_matching_revision() {
+        let runtime = FakeRuntime {
+            next_expected_version: 3,
+            ..Default::default()
+        };
+        let command = TestCommand::new("alpha", TestAction::Register);
+
+        let _ = block_on(
+            CommandExecution::new(&runtime, &command)
+                .snapshots(Snapshots::new(
+                    &runtime,
+                    TEST_SNAPSHOT_CONFIG,
+                    FrequencySnapshot::new(NonZeroU64::new(3).unwrap()),
+                ))
+                .execute_result(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            runtime.saved_snapshots.lock().unwrap().as_slice(),
+            &[Snapshot::new(3, TestState::Present { enabled: true })]
+        );
+    }
+
+    #[test]
+    fn frequency_snapshot_skips_non_matching_revision() {
+        let runtime = FakeRuntime {
+            next_expected_version: 2,
+            ..Default::default()
+        };
+        let command = TestCommand::new("alpha", TestAction::Register);
+
+        let _ = block_on(
+            CommandExecution::new(&runtime, &command)
+                .snapshots(Snapshots::new(
+                    &runtime,
+                    TEST_SNAPSHOT_CONFIG,
+                    FrequencySnapshot::new(NonZeroU64::new(3).unwrap()),
+                ))
+                .execute_result(),
+        )
+        .unwrap();
+
+        assert!(runtime.saved_snapshots.lock().unwrap().is_empty());
     }
 
     #[test]
@@ -1241,7 +1372,7 @@ mod tests {
         let _ = block_on(
             CommandExecution::new(&runtime, &command)
                 .snapshots(Snapshots::new(&runtime, TEST_SNAPSHOT_CONFIG, NoSnapshot))
-                .execute(),
+                .execute_result(),
         )
         .unwrap();
 
@@ -1264,7 +1395,7 @@ mod tests {
                     TEST_SNAPSHOT_CONFIG,
                     AlwaysSnapshot,
                 ))
-                .execute(),
+                .execute_result(),
         )
         .unwrap_err();
 
@@ -1284,7 +1415,7 @@ mod tests {
         };
         let command = TestCommand::new("alpha", TestAction::Register);
 
-        let _ = block_on(CommandExecution::new(&runtime, &command).execute()).unwrap();
+        let _ = block_on(CommandExecution::new(&runtime, &command).execute_result()).unwrap();
 
         assert_eq!(command.stream_id_calls(), 1);
         assert!(runtime.loaded_stream_ids.lock().unwrap().is_empty());

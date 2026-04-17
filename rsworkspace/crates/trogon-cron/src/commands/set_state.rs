@@ -193,22 +193,16 @@ where
     E: EventStore<JobId, Error = CronError>,
     S: SnapshotStore<ChangeJobStateState, JobId, Error = CronError>,
 {
-    let execution = CommandExecution::new(event_store, &command).codec(JobEventCodec);
-    let execution = if let Some(occ) = occ {
-        execution.occ(occ)
-    } else {
-        execution
-    };
-
-    Ok(execution
+    CommandExecution::new(event_store, &command)
+        .codec(JobEventCodec)
+        .occ(occ)
         .snapshots(Snapshots::new(
             snapshot_store,
             SNAPSHOT_STORE_CONFIG,
             AlwaysSnapshot,
         ))
         .execute()
-        .await?
-        .into_outcome())
+        .await
 }
 
 #[cfg(test)]
