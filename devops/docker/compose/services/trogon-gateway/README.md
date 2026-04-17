@@ -12,6 +12,7 @@ prefix:
 | GitHub | `/github/webhook` | `TROGON_SOURCE_GITHUB_WEBHOOK_SECRET` |
 | Slack | `/slack/webhook` | `TROGON_SOURCE_SLACK_SIGNING_SECRET` |
 | Telegram | `/telegram/webhook` | `TROGON_SOURCE_TELEGRAM_WEBHOOK_SECRET` |
+| Twitter/X | `/twitter/webhook` | `TROGON_SOURCE_TWITTER_CONSUMER_SECRET` |
 | GitLab | `/gitlab/webhook` | `TROGON_SOURCE_GITLAB_WEBHOOK_SECRET` |
 | incident.io | `/incidentio/webhook` | `TROGON_SOURCE_INCIDENTIO_SIGNING_SECRET` |
 | Linear | `/linear/webhook` | `TROGON_SOURCE_LINEAR_WEBHOOK_SECRET` |
@@ -60,6 +61,13 @@ contain only resource IDs rather than full objects. The gateway forwards the raw
 verified payload to NATS and leaves any enrichment or reordering to downstream
 consumers.
 
+## Twitter/X webhooks
+
+X uses the app consumer secret for both the `GET /twitter/webhook` CRC challenge
+response and the `POST /twitter/webhook` `x-twitter-webhooks-signature`
+verification. Configure `TROGON_SOURCE_TWITTER_CONSUMER_SECRET` before you
+register the webhook URL with X.
+
 ## Notion webhooks
 
 Notion signs webhook payloads with the subscription `verification_token`.
@@ -83,7 +91,8 @@ docker compose --profile dev up
 
 This starts ngrok alongside the gateway. Check `docker compose logs ngrok`
 for the public URL. Append the source prefix path when configuring each
-platform's webhook settings (e.g. `https://<ngrok-url>/github/webhook`).
+platform's webhook settings (e.g. `https://<ngrok-url>/github/webhook` or
+`https://<ngrok-url>/twitter/webhook`).
 
 ## Verify
 
