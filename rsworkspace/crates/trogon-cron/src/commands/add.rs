@@ -139,22 +139,16 @@ where
     E: EventStore<JobId, Error = CronError>,
     S: SnapshotStore<RegisterJobState, JobId, Error = CronError>,
 {
-    let execution = CommandExecution::new(event_store, &command).codec(JobEventCodec);
-    let execution = if let Some(occ) = occ {
-        execution.occ(occ)
-    } else {
-        execution
-    };
-
-    Ok(execution
+    CommandExecution::new(event_store, &command)
+        .codec(JobEventCodec)
+        .occ(occ)
         .snapshots(Snapshots::new(
             snapshot_store,
             SNAPSHOT_STORE_CONFIG,
             AlwaysSnapshot,
         ))
         .execute()
-        .await?
-        .into_outcome())
+        .await
 }
 
 #[cfg(test)]
@@ -265,7 +259,7 @@ mod tests {
             &store,
             &store,
             RegisterJobCommand::new(job("backup")).unwrap(),
-            OccPolicy::FromCommand,
+            None,
         )
         .await
         .unwrap();
@@ -308,7 +302,7 @@ mod tests {
             &store,
             &store,
             RegisterJobCommand::new(job("backup")).unwrap(),
-            OccPolicy::FromCommand,
+            None,
         )
         .await
         .unwrap();
@@ -317,7 +311,7 @@ mod tests {
             &store,
             &store,
             RegisterJobCommand::new(job("backup")).unwrap(),
-            OccPolicy::FromCommand,
+            None,
         )
         .await
         .unwrap_err();
@@ -337,7 +331,7 @@ mod tests {
             &store,
             &store,
             RegisterJobCommand::new(job("backup")).unwrap(),
-            OccPolicy::FromCommand,
+            None,
         )
         .await
         .unwrap();
@@ -345,7 +339,7 @@ mod tests {
             &store,
             &store,
             crate::RemoveJobCommand::new(JobId::parse("backup").unwrap()),
-            OccPolicy::FromCommand,
+            None,
         )
         .await
         .unwrap();
@@ -354,7 +348,7 @@ mod tests {
             &store,
             &store,
             RegisterJobCommand::new(job("backup")).unwrap(),
-            OccPolicy::FromCommand,
+            None,
         )
         .await
         .unwrap_err();
