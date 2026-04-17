@@ -23,7 +23,7 @@ use tokio::net::TcpListener;
 use tokio::sync::{RwLock, mpsc, watch};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
-use trogon_acp_runner::{SessionStore, TrogonAgent};
+use trogon_acp_runner::{NatsSessionNotifier, NatsSessionStore, SessionStore as _, TrogonAgent};
 use trogon_agent_core::agent_loop::AgentLoop;
 use trogon_agent_core::tools::ToolContext;
 
@@ -80,19 +80,26 @@ fn make_agent_loop() -> AgentLoop {
     }
 }
 
-async fn start_rpc_server(nats: async_nats::Client, js: jetstream::Context) -> SessionStore {
-    let store = SessionStore::open(&js).await.unwrap();
+async fn start_rpc_server(nats: async_nats::Client, js: jetstream::Context) -> NatsSessionStore {
+    // Open a verification store in the outer (test) runtime.
+    let verification_store = NatsSessionStore::open(&js).await.unwrap();
     let gateway_config = Arc::new(RwLock::new(None));
-    let store_clone = store.clone();
+
+    // The agent runs in its own thread with its own Tokio runtime.
+    // Its NatsSessionStore must be opened inside that runtime to avoid cross-runtime issues.
     std::thread::spawn(move || {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .unwrap();
         let local = tokio::task::LocalSet::new();
+        let store = rt.block_on(async {
+            let js = jetstream::new(nats.clone());
+            NatsSessionStore::open(&js).await.unwrap()
+        });
         let ta = TrogonAgent::new(
-            nats.clone(),
-            store_clone,
+            NatsSessionNotifier::new(nats.clone()),
+            store,
             make_agent_loop(),
             "acp",
             "claude-opus-4-6",
@@ -106,7 +113,7 @@ async fn start_rpc_server(nats: async_nats::Client, js: jetstream::Context) -> S
         rt.block_on(local.run_until(async move { io_task.await.ok(); }));
     });
     tokio::time::sleep(Duration::from_millis(500)).await;
-    store
+    verification_store
 }
 
 async fn start_ws_server(
