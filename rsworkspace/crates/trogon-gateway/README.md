@@ -36,6 +36,7 @@ All webhook sources share one HTTP port (`TROGON_GATEWAY_PORT`, default `8080`) 
 | GitHub | `/github/webhook` |
 | Slack | `/slack/webhook` |
 | Telegram | `/telegram/webhook` |
+| Twitter/X | `/twitter/webhook` |
 | GitLab | `/gitlab/webhook` |
 | Linear | `/linear/webhook` |
 
@@ -49,6 +50,7 @@ A source is enabled only when its required setting is present:
 | Discord | `TROGON_SOURCE_DISCORD_BOT_TOKEN` |
 | Slack | `TROGON_SOURCE_SLACK_SIGNING_SECRET` |
 | Telegram | `TROGON_SOURCE_TELEGRAM_WEBHOOK_SECRET` |
+| Twitter/X | `TROGON_SOURCE_TWITTER_CONSUMER_SECRET` |
 | GitLab | `TROGON_SOURCE_GITLAB_WEBHOOK_SECRET` |
 | Linear | `TROGON_SOURCE_LINEAR_WEBHOOK_SECRET` |
 
@@ -69,7 +71,7 @@ NATS auth is resolved in this priority order:
 Per-source optional tuning (with defaults):
 
 - `TROGON_SOURCE_<SOURCE>_SUBJECT_PREFIX` (defaults: `github`, `discord`, `slack`, `telegram`, `gitlab`, `linear`)
-- `TROGON_SOURCE_<SOURCE>_STREAM_NAME` (defaults: `GITHUB`, `DISCORD`, `SLACK`, `TELEGRAM`, `GITLAB`, `LINEAR`)
+- `TROGON_SOURCE_<SOURCE>_STREAM_NAME` (defaults: `GITHUB`, `DISCORD`, `SLACK`, `TELEGRAM`, `TWITTER`, `GITLAB`, `LINEAR`)
 - `TROGON_SOURCE_<SOURCE>_STREAM_MAX_AGE_SECS` (default: `604800`)
 - `TROGON_SOURCE_<SOURCE>_NATS_ACK_TIMEOUT_SECS` (default: `10`)
 
@@ -78,6 +80,7 @@ Source-specific extras:
 - `TROGON_SOURCE_DISCORD_GATEWAY_INTENTS`
 - `TROGON_SOURCE_SLACK_TIMESTAMP_MAX_DRIFT_SECS` (default: `300`)
 - `TROGON_SOURCE_LINEAR_TIMESTAMP_TOLERANCE_SECS` (default: `60`, `0` disables tolerance)
+- `TROGON_SOURCE_TWITTER_CONSUMER_SECRET` is used for both CRC responses and `x-twitter-webhooks-signature` validation
 
 ## Config file shape
 
@@ -106,6 +109,9 @@ signing_secret = "slack-secret"
 
 [sources.telegram]
 webhook_secret = "telegram-secret"
+
+[sources.twitter]
+consumer_secret = "twitter-consumer-secret"
 
 [sources.gitlab]
 webhook_secret = "gitlab-secret"
