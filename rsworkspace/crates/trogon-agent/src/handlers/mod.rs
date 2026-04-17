@@ -157,9 +157,14 @@ pub async fn run_automation(
         .map(|v| serde_json::to_string_pretty(&v).unwrap_or_default())
         .unwrap_or_else(|_| String::from_utf8_lossy(payload).to_string());
 
+    // Substitute {{key}} → value for each variable defined on the automation.
+    let resolved_prompt = automation.variables.iter().fold(
+        automation.prompt.clone(),
+        |acc, (k, v)| acc.replace(&format!("{{{{{k}}}}}"), v),
+    );
+
     let full_prompt = format!(
-        "Event subject: {nats_subject}\n\nEvent payload:\n```json\n{event_json}\n```\n\n{}",
-        automation.prompt
+        "Event subject: {nats_subject}\n\nEvent payload:\n```json\n{event_json}\n```\n\n{resolved_prompt}"
     );
 
     // Resolve the memory path: automation override → agent default → built-in default.
@@ -208,6 +213,7 @@ mod tests {
             mcp_servers: vec![],
             enabled: true,
             visibility: trogon_automations::Visibility::Private,
+            variables: std::collections::HashMap::new(),
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         }

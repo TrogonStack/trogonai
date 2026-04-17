@@ -1962,6 +1962,7 @@ mod tests {
             mcp_servers: vec![],
             enabled: true,
             visibility: trogon_automations::Visibility::Private,
+            variables: std::collections::HashMap::new(),
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         }
@@ -3881,6 +3882,7 @@ mod tests {
                             mcp_servers: vec![],
                             enabled: false,
                             visibility: trogon_automations::Visibility::Private,
+                            variables: std::collections::HashMap::new(),
                             created_at: "2026-01-01T00:00:00Z".to_string(),
                             updated_at: "2026-01-01T00:00:00Z".to_string(),
                         }])
@@ -4001,6 +4003,7 @@ mod tests {
                             mcp_servers: vec![],
                             enabled: true,
                             visibility: trogon_automations::Visibility::Private,
+                            variables: std::collections::HashMap::new(),
                             created_at: "2026-01-01T00:00:00Z".to_string(),
                             updated_at: "2026-01-01T00:00:00Z".to_string(),
                         }])

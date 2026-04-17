@@ -478,6 +478,7 @@ async fn datadog_automation_dispatch_takes_precedence_over_fallback() {
         mcp_servers: vec![],
         enabled: true,
         visibility: trogon_automations::Visibility::Private,
+        variables: std::collections::HashMap::new(),
         created_at: "2026-01-01T00:00:00Z".to_string(),
         updated_at: "2026-01-01T00:00:00Z".to_string(),
     };
@@ -883,6 +884,7 @@ async fn datadog_event_automation_dispatch() {
         mcp_servers: vec![],
         enabled: true,
         visibility: trogon_automations::Visibility::Private,
+        variables: std::collections::HashMap::new(),
         created_at: "2026-01-01T00:00:00Z".to_string(),
         updated_at: "2026-01-01T00:00:00Z".to_string(),
     };

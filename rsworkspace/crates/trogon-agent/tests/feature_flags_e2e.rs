@@ -669,6 +669,7 @@ async fn register_datadog_automation(js: &jetstream::Context) {
         mcp_servers: vec![],
         enabled: true,
         visibility: Visibility::Private,
+        variables: std::collections::HashMap::new(),
         created_at: "2026-01-01T00:00:00Z".to_string(),
         updated_at: "2026-01-01T00:00:00Z".to_string(),
     };
