@@ -1,8 +1,6 @@
-use serde::{Serialize, de::DeserializeOwned};
-
 use crate::{
-    Decide, Decision, EventData, EventType, NonEmpty, RecordedEvent, Snapshot, SnapshotStoreConfig,
-    StreamCommand, StreamEvent,
+    Decide, Decision, EventCodec, EventData, EventType, JsonEventCodec, NonEmpty, RecordedEvent,
+    Snapshot, SnapshotStoreConfig, StreamCommand, StreamEvent,
 };
 
 pub trait CommandState: StreamCommand + Sized {
@@ -201,8 +199,8 @@ pub enum CommandInfraError<RuntimeError> {
     SaveSnapshot(RuntimeError),
     ReadStream(RuntimeError),
     Append(RuntimeError),
-    EncodeEvent(serde_json::Error),
-    DecodeEvent(serde_json::Error),
+    EncodeEvent(RuntimeError),
+    DecodeEvent(RuntimeError),
     SnapshotAheadOfStream {
         snapshot_version: u64,
         stream_version: Option<u64>,
@@ -238,6 +236,7 @@ pub struct CommandExecution<'a, E, C, S = WithoutSnapshots> {
     command: &'a C,
     occ: OccPolicy,
     snapshots: S,
+    event_codec: JsonEventCodec,
 }
 
 impl<'a, E, C> CommandExecution<'a, E, C, WithoutSnapshots> {
@@ -247,6 +246,7 @@ impl<'a, E, C> CommandExecution<'a, E, C, WithoutSnapshots> {
             command,
             occ: OccPolicy::UseCommandRule,
             snapshots: WithoutSnapshots,
+            event_codec: JsonEventCodec,
         }
     }
 
@@ -259,23 +259,86 @@ impl<'a, E, C> CommandExecution<'a, E, C, WithoutSnapshots> {
             command: self.command,
             occ: self.occ,
             snapshots,
+            event_codec: self.event_codec,
         }
     }
 }
 
-impl<E, C, S> CommandExecution<'_, E, C, S> {
+impl<'a, E, C, S> CommandExecution<'a, E, C, S> {
     pub fn occ(mut self, occ: OccPolicy) -> Self {
         self.occ = occ;
         self
     }
 }
 
+impl<'a, E, C, S> CommandExecution<'a, E, C, S> {
+    pub fn codec<EC>(self, event_codec: EC) -> CommandExecutionWithCodec<'a, E, C, S, EC> {
+        CommandExecutionWithCodec {
+            event_store: self.event_store,
+            command: self.command,
+            occ: self.occ,
+            snapshots: self.snapshots,
+            event_codec,
+        }
+    }
+}
+
+pub struct CommandExecutionWithCodec<'a, E, C, S, EC> {
+    event_store: &'a E,
+    command: &'a C,
+    occ: OccPolicy,
+    snapshots: S,
+    event_codec: EC,
+}
+
+impl<'a, E, C, S, EC> CommandExecutionWithCodec<'a, E, C, S, EC> {
+    pub fn occ(mut self, occ: OccPolicy) -> Self {
+        self.occ = occ;
+        self
+    }
+
+    pub fn snapshots<S2, P>(
+        self,
+        snapshots: Snapshots<'a, S2, P>,
+    ) -> CommandExecutionWithCodec<'a, E, C, Snapshots<'a, S2, P>, EC> {
+        CommandExecutionWithCodec {
+            event_store: self.event_store,
+            command: self.command,
+            occ: self.occ,
+            snapshots,
+            event_codec: self.event_codec,
+        }
+    }
+}
+
 impl<E, C> CommandExecution<'_, E, C, WithoutSnapshots>
 where
     C: CommandState + Decide<C::State, C::Event>,
-    C::Event: EventType + StreamEvent + Serialize + DeserializeOwned + Clone,
+    C::Event: EventType + StreamEvent + Clone,
     E: EventStore<C::StreamId>,
     C::DomainError: From<C::Error>,
+    JsonEventCodec: EventCodec<C::Event>,
+    <JsonEventCodec as EventCodec<C::Event>>::Error: Into<E::Error>,
+{
+    pub async fn execute(
+        self,
+    ) -> Result<
+        ExecutionResult<C::State, C::Event>,
+        CommandFailure<C::DomainError, CommandInfraError<E::Error>>,
+    > {
+        let event_codec = self.event_codec;
+        self.codec(event_codec).execute().await
+    }
+}
+
+impl<E, C, EC> CommandExecutionWithCodec<'_, E, C, WithoutSnapshots, EC>
+where
+    C: CommandState + Decide<C::State, C::Event>,
+    C::Event: EventType + StreamEvent + Clone,
+    E: EventStore<C::StreamId>,
+    C::DomainError: From<C::Error>,
+    EC: EventCodec<C::Event>,
+    EC::Error: Into<E::Error>,
 {
     pub async fn execute(
         self,
@@ -305,7 +368,8 @@ where
                 .filter(|event| event.log_position.unwrap_or(0) <= current_version)
             {
                 let event = recorded_event
-                    .decode_data::<C::Event>()
+                    .decode_data_with(&self.event_codec)
+                    .map_err(Into::into)
                     .map_err(CommandInfraError::DecodeEvent)
                     .map_err(CommandFailure::Infra)?;
                 state = C::evolve(state, event).map_err(CommandFailure::Domain)?;
@@ -315,7 +379,8 @@ where
         let Decision::Event(events) = C::decide(&state, self.command)
             .map_err(C::DomainError::from)
             .map_err(CommandFailure::Domain)?;
-        let encoded_events = encode_events(&events)
+        let encoded_events = encode_events(&self.event_codec, &events)
+            .map_err(Into::into)
             .map_err(CommandInfraError::EncodeEvent)
             .map_err(CommandFailure::Infra)?;
         let expected_state = self
@@ -343,12 +408,37 @@ where
 impl<E, S, C, P, SErr> CommandExecution<'_, E, C, Snapshots<'_, S, P>>
 where
     C: SnapshotState + Decide<C::State, C::Event>,
-    C::Event: EventType + StreamEvent + Serialize + DeserializeOwned + Clone,
+    C::Event: EventType + StreamEvent + Clone,
     C::Snapshot: Into<C::State>,
     E: EventStore<C::StreamId, Error = SErr>,
     S: SnapshotStore<C::Snapshot, C::StreamId, Error = SErr>,
     P: SnapshotPolicy<C::State, C::Event>,
     C::DomainError: From<C::Error>,
+    JsonEventCodec: EventCodec<C::Event>,
+    <JsonEventCodec as EventCodec<C::Event>>::Error: Into<SErr>,
+{
+    pub async fn execute(
+        self,
+    ) -> Result<
+        ExecutionResult<C::State, C::Event>,
+        CommandFailure<C::DomainError, CommandInfraError<SErr>>,
+    > {
+        let event_codec = self.event_codec;
+        self.codec(event_codec).execute().await
+    }
+}
+
+impl<E, S, C, P, SErr, EC> CommandExecutionWithCodec<'_, E, C, Snapshots<'_, S, P>, EC>
+where
+    C: SnapshotState + Decide<C::State, C::Event>,
+    C::Event: EventType + StreamEvent + Clone,
+    C::Snapshot: Into<C::State>,
+    E: EventStore<C::StreamId, Error = SErr>,
+    S: SnapshotStore<C::Snapshot, C::StreamId, Error = SErr>,
+    P: SnapshotPolicy<C::State, C::Event>,
+    C::DomainError: From<C::Error>,
+    EC: EventCodec<C::Event>,
+    EC::Error: Into<SErr>,
 {
     pub async fn execute(
         self,
@@ -402,7 +492,8 @@ where
 
                 for recorded_event in recorded_events {
                     let event = recorded_event
-                        .decode_data::<C::Event>()
+                        .decode_data_with(&self.event_codec)
+                        .map_err(Into::into)
                         .map_err(CommandInfraError::DecodeEvent)
                         .map_err(CommandFailure::Infra)?;
                     state = C::evolve(state, event).map_err(CommandFailure::Domain)?;
@@ -413,7 +504,8 @@ where
         let Decision::Event(events) = C::decide(&state, self.command)
             .map_err(C::DomainError::from)
             .map_err(CommandFailure::Domain)?;
-        let encoded_events = encode_events(&events)
+        let encoded_events = encode_events(&self.event_codec, &events)
+            .map_err(Into::into)
             .map_err(CommandInfraError::EncodeEvent)
             .map_err(CommandFailure::Infra)?;
         let expected_state = self
@@ -456,26 +548,14 @@ where
     }
 }
 
-fn encode_events<E>(events: &NonEmpty<E>) -> serde_json::Result<NonEmpty<EventData>>
+fn encode_events<E, C>(codec: &C, events: &NonEmpty<E>) -> Result<NonEmpty<EventData>, C::Error>
 where
-    E: EventType + StreamEvent + Serialize,
+    E: EventType + StreamEvent + Clone,
+    C: EventCodec<E>,
 {
-    let mut encoded_events = Vec::with_capacity(events.len());
-    for event in events.iter() {
-        encoded_events.push(EventData {
-            event_id: uuid::Uuid::new_v4().to_string(),
-            event_type: event.event_type().to_string(),
-            stream_id: event.stream_id().to_string(),
-            data: serde_json::to_string(event)?,
-            metadata: None,
-        });
-    }
-
-    NonEmpty::from_vec(encoded_events).ok_or_else(|| {
-        serde_json::Error::io(std::io::Error::other(
-            "failed to encode a non-empty event decision",
-        ))
-    })
+    events
+        .clone()
+        .try_map(|event| EventData::new_with_codec(codec, event))
 }
 
 #[cfg(test)]
@@ -535,6 +615,21 @@ mod tests {
         AlreadyRegistered,
         Missing,
         AlreadyDisabled,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum TestInfraError {
+        LoadSnapshot,
+        SaveSnapshot,
+        ReadStream,
+        Append,
+        Json,
+    }
+
+    impl From<serde_json::Error> for TestInfraError {
+        fn from(_value: serde_json::Error) -> Self {
+            Self::Json
+        }
     }
 
     impl From<TestDecisionError> for TestCommandError {
@@ -688,11 +783,29 @@ mod tests {
         }
     }
 
+    #[derive(Debug, Clone, Copy, Default)]
+    struct WrappedJsonCodec;
+
+    impl EventCodec<TestEvent> for WrappedJsonCodec {
+        type Error = TestInfraError;
+
+        fn encode(&self, value: &TestEvent) -> Result<String, Self::Error> {
+            serde_json::to_string(value)
+                .map(|json| format!("wrapped:{json}"))
+                .map_err(Into::into)
+        }
+
+        fn decode(&self, value: &str) -> Result<TestEvent, Self::Error> {
+            let json = value.strip_prefix("wrapped:").ok_or(TestInfraError::Json)?;
+            serde_json::from_str(json).map_err(Into::into)
+        }
+    }
+
     const TEST_SNAPSHOT_CONFIG: SnapshotStoreConfig<'static> =
         SnapshotStoreConfig::new("test.command.", None);
 
     impl EventStore<str> for FakeRuntime {
-        type Error = &'static str;
+        type Error = TestInfraError;
 
         async fn current_stream_version(
             &self,
@@ -707,7 +820,7 @@ mod tests {
             from_sequence: u64,
         ) -> Result<Vec<RecordedEvent>, Self::Error> {
             if self.fail_read_stream {
-                return Err("read_stream");
+                return Err(TestInfraError::ReadStream);
             }
             self.read_from_sequences.lock().unwrap().push(from_sequence);
             Ok(self
@@ -725,7 +838,7 @@ mod tests {
             events: NonEmpty<EventData>,
         ) -> Result<AppendOutcome, Self::Error> {
             if self.fail_append {
-                return Err("append");
+                return Err(TestInfraError::Append);
             }
             self.expected_versions
                 .lock()
@@ -742,7 +855,7 @@ mod tests {
     }
 
     impl SnapshotStore<TestState, str> for FakeRuntime {
-        type Error = &'static str;
+        type Error = TestInfraError;
 
         async fn load_snapshot(
             &self,
@@ -750,7 +863,7 @@ mod tests {
             stream_id: &str,
         ) -> Result<Option<Snapshot<TestState>>, Self::Error> {
             if self.fail_load_snapshot {
-                return Err("load_snapshot");
+                return Err(TestInfraError::LoadSnapshot);
             }
             self.loaded_stream_ids
                 .lock()
@@ -766,7 +879,7 @@ mod tests {
             snapshot: Snapshot<TestState>,
         ) -> Result<(), Self::Error> {
             if self.fail_save_snapshot {
-                return Err("save_snapshot");
+                return Err(TestInfraError::SaveSnapshot);
             }
             self.saved_snapshots.lock().unwrap().push(snapshot);
             Ok(())
@@ -974,6 +1087,43 @@ mod tests {
     }
 
     #[test]
+    fn supports_custom_event_codecs() {
+        let runtime = FakeRuntime {
+            current_version: Some(1),
+            recorded_events: vec![
+                EventData::new_with_codec(
+                    &WrappedJsonCodec,
+                    TestEvent::Registered {
+                        id: "alpha".to_string(),
+                    },
+                )
+                .unwrap()
+                .record(
+                    "stream-alpha",
+                    Some(1),
+                    Some(1),
+                    DateTime::<Utc>::from_timestamp(1_700_000_001, 0).unwrap(),
+                ),
+            ],
+            next_expected_version: 2,
+            ..Default::default()
+        };
+        let command = TestCommand::new("alpha", TestAction::Disable);
+
+        let result = block_on(
+            CommandExecution::new(&runtime, &command)
+                .codec(WrappedJsonCodec)
+                .execute(),
+        )
+        .unwrap();
+        let appended_events = runtime.appended_events.lock().unwrap();
+
+        assert_eq!(result.state, TestState::Present { enabled: false });
+        assert_eq!(appended_events.len(), 1);
+        assert!(appended_events[0].data.starts_with("wrapped:"));
+    }
+
+    #[test]
     fn uses_command_default_expected_state_when_using_command_rule() {
         let runtime = FakeRuntime {
             next_expected_version: 1,
@@ -1129,7 +1279,9 @@ mod tests {
 
         assert!(matches!(
             error,
-            CommandFailure::Infra(CommandInfraError::SaveSnapshot("save_snapshot"))
+            CommandFailure::Infra(CommandInfraError::SaveSnapshot(
+                TestInfraError::SaveSnapshot
+            ))
         ));
     }
 
