@@ -7,9 +7,10 @@ use async_nats::Request;
 use async_nats::jetstream;
 use chrono::{Duration as ChronoDuration, Utc};
 use trogon_cron::{
-    ChangeJobStateCommand, CronController, DeliverySpec, GetJobCommand, JobEnabledState, JobId,
-    JobSpec, RegisterJobCommand, RemoveJobCommand, SamplingSource, ScheduleSpec, change_job_state,
-    connect_store, get_job, register_job, remove_job,
+    ChangeJobStateCommand, CronController, DeliveryHeaders, DeliveryRoute, DeliverySpec,
+    GetJobCommand, JobEnabledState, JobId, JobSpec, RegisterJobCommand, RemoveJobCommand,
+    SamplingSource, ScheduleSpec, TtlSeconds, change_job_state, connect_store, get_job,
+    register_job, remove_job,
 };
 use trogon_nats::{NatsConfig, connect as nats_connect};
 
@@ -124,9 +125,9 @@ fn base_job(id: &str) -> JobSpec {
         state: JobEnabledState::Enabled,
         schedule: ScheduleSpec::Every { every_sec: 2 },
         delivery: DeliverySpec::NatsEvent {
-            route: "agent.run".to_string(),
-            headers: BTreeMap::new(),
-            ttl_sec: Some(30),
+            route: DeliveryRoute::new("agent.run").unwrap(),
+            headers: DeliveryHeaders::default(),
+            ttl_sec: Some(TtlSeconds::new(30).unwrap()),
             source: None,
         },
         payload: serde_json::json!({"kind": "heartbeat"}),
@@ -222,12 +223,10 @@ async fn controller_reconciles_sampling_job() {
 
     let mut job = base_job("sampling");
     job.delivery = DeliverySpec::NatsEvent {
-        route: "agent.run".to_string(),
-        headers: BTreeMap::new(),
+        route: DeliveryRoute::new("agent.run").unwrap(),
+        headers: DeliveryHeaders::default(),
         ttl_sec: None,
-        source: Some(SamplingSource::LatestFromSubject {
-            subject: "sensors.latest".to_string(),
-        }),
+        source: Some(SamplingSource::latest_from_subject("sensors.latest").unwrap()),
     };
 
     register_job(&store, &store, RegisterJobCommand::new(job).unwrap(), None)
