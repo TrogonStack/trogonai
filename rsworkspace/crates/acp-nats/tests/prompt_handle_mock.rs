@@ -14,7 +14,8 @@ use agent_client_protocol::{Agent, PromptRequest};
 use futures::channel::mpsc;
 use futures::stream::BoxStream;
 use trogon_nats::jetstream::{
-    MockJetStreamConsumerFactory, MockJetStreamPublisher, MockJetStreamStream,
+    MockJetStreamConsumer, MockJetStreamConsumerFactory, MockJetStreamPublisher,
+    MockJetStreamStream,
 };
 use trogon_nats::mocks::MockError;
 use trogon_std::time::SystemClock;
@@ -154,7 +155,7 @@ impl trogon_nats::client::RequestClient for MultiStreamMock {
 
 // ── bridge builder ────────────────────────────────────────────────────────────
 
-fn make_mock_bridge(mock: MultiStreamMock) -> Bridge<MultiStreamMock, SystemClock, MockJs> {
+fn make_mock_bridge(mock: MultiStreamMock, js: MockJs) -> Bridge<MultiStreamMock, SystemClock, MockJs> {
     let config = Config::new(
         AcpPrefix::new("acp").unwrap(),
         NatsConfig {
@@ -163,27 +164,29 @@ fn make_mock_bridge(mock: MultiStreamMock) -> Bridge<MultiStreamMock, SystemCloc
         },
     );
     let meter = opentelemetry::global::meter("prompt-handle-mock-test");
-    // Drop rx immediately — notification sends during these tests will fail,
-    // but we're testing the subscribe/stream/timeout paths, not notifications.
     let (tx, _rx) = tokio::sync::mpsc::channel(1);
-    Bridge::new(mock, MockJs::new(), SystemClock, &meter, config, tx)
+    Bridge::new(mock, js, SystemClock, &meter, config, tx)
 }
 
 // ── tests ─────────────────────────────────────────────────────────────────────
 
-/// When the third `subscribe()` call (for `session_cancelled`) fails, `handle`
-/// must return an `InternalError` describing the failure.
+/// When the NATS Core subscribe for `session_cancelled` fails, `handle_js` must
+/// return an `InternalError` describing the failure.
 ///
-/// Covers: lines 69-73 in `agent/prompt.rs`
+/// handle_js uses JetStream for notifications and responses, NATS Core for cancel.
+/// With two JS consumers queued and no NATS Core stream, the cancel subscribe fails.
 #[tokio::test]
 async fn subscribe_cancel_notify_failure_returns_error() {
-    let mock = MultiStreamMock::new();
-    // Inject two streams → first subscribe (notifications) and second (response) succeed,
-    // third subscribe (cancel) fails.
-    let _notifications_tx = mock.inject();
-    let _response_tx = mock.inject();
+    let js = MockJs::new();
+    let (notif_consumer, _notif_tx) = MockJetStreamConsumer::new();
+    let (resp_consumer, _resp_tx) = MockJetStreamConsumer::new();
+    js.consumer_factory.add_consumer(notif_consumer);
+    js.consumer_factory.add_consumer(resp_consumer);
 
-    let bridge = make_mock_bridge(mock);
+    // No NATS Core stream injected → cancel subscribe fails.
+    let mock = MultiStreamMock::new();
+
+    let bridge = make_mock_bridge(mock, js);
     let err = bridge
         .prompt(PromptRequest::new("session-123", vec![]))
         .await
@@ -195,21 +198,24 @@ async fn subscribe_cancel_notify_failure_returns_error() {
     );
 }
 
-/// When the event stream closes before any message arrives (sender dropped),
-/// `handle` must return an `InternalError` about the stream closing.
-///
-/// Covers: lines 124-128 in `agent/prompt.rs`
+/// When the JetStream notifications stream closes before any message arrives,
+/// `handle_js` must return an `InternalError` about the stream closing.
 #[tokio::test]
 async fn event_stream_closed_before_message_returns_error() {
+    let js = MockJs::new();
+    let (notif_consumer, notif_tx) = MockJetStreamConsumer::new();
+    let (resp_consumer, _resp_tx) = MockJetStreamConsumer::new();
+    js.consumer_factory.add_consumer(notif_consumer);
+    js.consumer_factory.add_consumer(resp_consumer);
+
+    // Drop sender so the notifications stream is already closed when polled.
+    drop(notif_tx);
+
+    // Inject one NATS Core stream so cancel subscribe succeeds.
     let mock = MultiStreamMock::new();
-    let notifications_tx = mock.inject(); // first subscribe → notifications stream
-    let _response_tx = mock.inject(); // second subscribe → response stream (never fires)
-    let _cancel_tx = mock.inject(); // third subscribe → cancel stream (never fires)
+    let _cancel_tx = mock.inject();
 
-    // Drop immediately so the notifications stream is already closed when polled.
-    drop(notifications_tx);
-
-    let bridge = make_mock_bridge(mock);
+    let bridge = make_mock_bridge(mock, js);
     let err = bridge
         .prompt(PromptRequest::new("session-123", vec![]))
         .await
@@ -221,33 +227,49 @@ async fn event_stream_closed_before_message_returns_error() {
     );
 }
 
-/// When no event arrives within 600 seconds, `handle` must return a timeout error.
+/// When no response arrives within the prompt timeout, `handle_js` must return
+/// a timeout error.
 ///
 /// Uses `start_paused = true` + `spawn_local` so the clock can be fast-forwarded
-/// without waiting real time.
-///
-/// Covers: lines 129-133 in `agent/prompt.rs`
+/// without waiting real time. The bridge is configured with a short 5-second
+/// prompt timeout so we only need to advance 6 seconds.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn event_stream_timeout_after_600_seconds_returns_error() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
             let handle = tokio::task::spawn_local(async {
+                let js = MockJs::new();
+                let (notif_consumer, _notif_tx) = MockJetStreamConsumer::new();
+                let (resp_consumer, _resp_tx) = MockJetStreamConsumer::new();
+                js.consumer_factory.add_consumer(notif_consumer);
+                js.consumer_factory.add_consumer(resp_consumer);
+
                 let mock = MultiStreamMock::new();
-                let _notifications_tx = mock.inject(); // first subscribe → never sends (no drop → no close)
-                let _response_tx = mock.inject(); // second subscribe → never sends (timeout path)
-                let _cancel_tx = mock.inject(); // third subscribe → never fires
-                let bridge = make_mock_bridge(mock);
+                let _cancel_tx = mock.inject(); // cancel subscribe succeeds, never fires
+
+                let config = acp_nats::Config::new(
+                    AcpPrefix::new("acp").unwrap(),
+                    acp_nats::NatsConfig {
+                        servers: vec!["unused".to_string()],
+                        auth: acp_nats::NatsAuth::None,
+                    },
+                )
+                .with_prompt_timeout(Duration::from_secs(5));
+                let meter = opentelemetry::global::meter("prompt-handle-mock-test");
+                let (tx, _rx) = tokio::sync::mpsc::channel(1);
+                let bridge = Bridge::new(mock, js, SystemClock, &meter, config, tx);
+
                 bridge
                     .prompt(PromptRequest::new("session-123", vec![]))
                     .await
             });
 
-            // Yield to let the spawned task start and register the 600-second timer.
+            // Yield to let the spawned task start and register the timer.
             tokio::task::yield_now().await;
 
-            // Jump the clock past the 600-second prompt timeout.
-            tokio::time::advance(Duration::from_secs(601)).await;
+            // Jump the clock past the 5-second prompt timeout.
+            tokio::time::advance(Duration::from_secs(6)).await;
 
             // Yield again to let the timer fire and the task produce its result.
             tokio::task::yield_now().await;
