@@ -3,8 +3,8 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::{
     AlwaysSnapshot, CommandExecution, CommandFailure, CommandInfraError, CommandOutcome,
-    CommandState, Decide, Decision, EventStore, ExpectedState, ExpectedStateRule, NonEmpty,
-    OccPolicy, SnapshotState, SnapshotStore, SnapshotStoreConfig, Snapshots, StreamCommand,
+    CommandState, CommandStreamState, Decide, Decision, EventStore, NonEmpty, OccPolicy,
+    SnapshotState, SnapshotStore, SnapshotStoreConfig, Snapshots, StreamCommand, StreamState,
 };
 
 use crate::{
@@ -73,8 +73,8 @@ impl StreamCommand for RegisterJobCommand {
         &self.id
     }
 
-    fn expected_state_rule(&self) -> Option<ExpectedStateRule> {
-        Some(ExpectedStateRule::Required(ExpectedState::NoStream))
+    fn stream_state(&self) -> Option<CommandStreamState> {
+        Some(CommandStreamState::Require(StreamState::NoStream))
     }
 }
 
@@ -133,15 +133,20 @@ pub async fn run<E, S>(
     event_store: &E,
     snapshot_store: &S,
     command: RegisterJobCommand,
-    occ: OccPolicy,
+    occ: Option<OccPolicy>,
 ) -> RegisterJobResult
 where
     E: EventStore<JobId, Error = CronError>,
     S: SnapshotStore<RegisterJobState, JobId, Error = CronError>,
 {
-    Ok(CommandExecution::new(event_store, &command)
-        .codec(JobEventCodec)
-        .occ(occ)
+    let execution = CommandExecution::new(event_store, &command).codec(JobEventCodec);
+    let execution = if let Some(occ) = occ {
+        execution.occ(occ)
+    } else {
+        execution
+    };
+
+    Ok(execution
         .snapshots(Snapshots::new(
             snapshot_store,
             SNAPSHOT_STORE_CONFIG,
@@ -260,7 +265,7 @@ mod tests {
             &store,
             &store,
             RegisterJobCommand::new(job("backup")).unwrap(),
-            OccPolicy::UseCommandRule,
+            OccPolicy::FromCommand,
         )
         .await
         .unwrap();
@@ -303,7 +308,7 @@ mod tests {
             &store,
             &store,
             RegisterJobCommand::new(job("backup")).unwrap(),
-            OccPolicy::UseCommandRule,
+            OccPolicy::FromCommand,
         )
         .await
         .unwrap();
@@ -312,7 +317,7 @@ mod tests {
             &store,
             &store,
             RegisterJobCommand::new(job("backup")).unwrap(),
-            OccPolicy::UseCommandRule,
+            OccPolicy::FromCommand,
         )
         .await
         .unwrap_err();
@@ -332,7 +337,7 @@ mod tests {
             &store,
             &store,
             RegisterJobCommand::new(job("backup")).unwrap(),
-            OccPolicy::UseCommandRule,
+            OccPolicy::FromCommand,
         )
         .await
         .unwrap();
@@ -340,7 +345,7 @@ mod tests {
             &store,
             &store,
             crate::RemoveJobCommand::new(JobId::parse("backup").unwrap()),
-            OccPolicy::UseCommandRule,
+            OccPolicy::FromCommand,
         )
         .await
         .unwrap();
@@ -349,7 +354,7 @@ mod tests {
             &store,
             &store,
             RegisterJobCommand::new(job("backup")).unwrap(),
-            OccPolicy::UseCommandRule,
+            OccPolicy::FromCommand,
         )
         .await
         .unwrap_err();

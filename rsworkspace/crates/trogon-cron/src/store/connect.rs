@@ -3,8 +3,8 @@
 use async_nats::jetstream::{self, context, kv};
 use serde::{Serialize, de::DeserializeOwned};
 use trogon_eventsourcing::{
-    AppendOutcome, EventData, EventStore, ExpectedState, NonEmpty, RecordedEvent, Snapshot,
-    SnapshotChange, SnapshotStore, SnapshotStoreConfig, load_snapshot, persist_snapshot_change,
+    AppendOutcome, EventData, EventStore, NonEmpty, RecordedEvent, Snapshot, SnapshotChange,
+    SnapshotStore, SnapshotStoreConfig, StreamState, load_snapshot, persist_snapshot_change,
     read_stream_from,
 };
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream, JetStreamPublishMessage};
@@ -105,25 +105,25 @@ impl EventStore<JobId> for Store {
     async fn append_events(
         &self,
         stream_id: &JobId,
-        expected_state: ExpectedState,
+        expected_state: StreamState,
         events: NonEmpty<EventData>,
     ) -> Result<AppendOutcome, Self::Error> {
         let stream_state = stream_subject_state(self, stream_id.as_str()).await?;
         let current_version = stream_state.write_state.current_version();
         let appended_events = events.len() as u64;
         let write_condition = match expected_state {
-            ExpectedState::Any => None,
-            ExpectedState::StreamExists => Some(
+            StreamState::Any => None,
+            StreamState::StreamExists => Some(
                 current_version
                     .map(JobWriteCondition::MustBeAtVersion)
                     .ok_or_else(|| CronError::OptimisticConcurrencyConflict {
                         id: stream_id.to_string(),
-                        expected: ExpectedState::StreamExists,
+                        expected: StreamState::StreamExists,
                         current_version,
                     })?,
             ),
-            ExpectedState::NoStream => Some(JobWriteCondition::MustNotExist),
-            ExpectedState::StreamRevision(version) => {
+            StreamState::NoStream => Some(JobWriteCondition::MustNotExist),
+            StreamState::StreamRevision(version) => {
                 Some(JobWriteCondition::MustBeAtVersion(version))
             }
         };
