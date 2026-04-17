@@ -256,11 +256,26 @@ pub mod mock {
 
 // ── Wire types ────────────────────────────────────────────────────────────────
 
+/// Token usage reported by the Anthropic API for a single response.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct Usage {
+    #[serde(default)]
+    pub input_tokens: u32,
+    #[serde(default)]
+    pub output_tokens: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_creation_input_tokens: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_read_input_tokens: Option<u32>,
+}
+
 /// A single message in the Anthropic conversation history.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
     pub role: String,
     pub content: Vec<ContentBlock>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<Usage>,
 }
 
 impl Message {
@@ -269,6 +284,7 @@ impl Message {
         Self {
             role: "user".to_string(),
             content: vec![ContentBlock::Text { text: text.into() }],
+            usage: None,
         }
     }
 
@@ -277,6 +293,7 @@ impl Message {
         Self {
             role: "assistant".to_string(),
             content,
+            usage: None,
         }
     }
 
@@ -291,6 +308,7 @@ impl Message {
                     content: r.content,
                 })
                 .collect(),
+            usage: None,
         }
     }
 }
@@ -363,6 +381,8 @@ struct AnthropicRequest<'a> {
 struct AnthropicResponse {
     stop_reason: String,
     content: Vec<ContentBlock>,
+    #[serde(default)]
+    usage: Option<Usage>,
 }
 
 // ── Errors ────────────────────────────────────────────────────────────────────
@@ -1328,7 +1348,9 @@ impl AgentLoop {
                     // if trimming still cannot bring the payload under CHECKPOINT_MAX_BYTES.
                     let mut checkpointing_disabled = false;
                     let results = self.execute_tools(&response.content).await;
-                    messages.push(Message::assistant(response.content));
+                    let mut assistant_msg = Message::assistant(response.content);
+                    assistant_msg.usage = response.usage;
+                    messages.push(assistant_msg);
                     messages.push(Message::tool_results(results));
                     // `recovering` is flipped to `false` inside the successful
                     // checkpoint write arm below, not here. This ensures the tool
@@ -1780,13 +1802,17 @@ impl AgentLoop {
                         .collect::<Vec<_>>()
                         .join("\n");
 
-                    messages.push(Message::assistant(response.content));
+                    let mut assistant_msg = Message::assistant(response.content);
+                    assistant_msg.usage = response.usage;
+                    messages.push(assistant_msg);
                     info!(iterations = iteration + 1, "Chat completed");
                     return Ok((text, messages));
                 }
                 "tool_use" => {
                     let results = self.execute_tools(&response.content).await;
-                    messages.push(Message::assistant(response.content));
+                    let mut assistant_msg = Message::assistant(response.content);
+                    assistant_msg.usage = response.usage;
+                    messages.push(assistant_msg);
                     messages.push(Message::tool_results(results));
                 }
                 other => {
@@ -7884,6 +7910,7 @@ mod tests {
         let msgs = vec![Message {
             role: "system".to_string(),
             content: vec![ContentBlock::Text { text: "sys msg".to_string() }],
+            usage: None,
         }];
         let out = render_messages_for_summary(&msgs);
         // Unknown role is passed through verbatim.
@@ -7912,7 +7939,7 @@ mod tests {
     #[tokio::test]
     async fn summarize_dropped_messages_empty_rendered_returns_empty_vec() {
         // Message with no content blocks → render produces "".
-        let msgs = vec![Message { role: "user".to_string(), content: vec![] }];
+        let msgs = vec![Message { role: "user".to_string(), content: vec![], usage: None }];
         // Empty response queue — panics if LLM is called.
         let client = mock::SequencedMockAnthropicClient::new(vec![]);
         let result = summarize_dropped_messages(&client, "model", &msgs).await;

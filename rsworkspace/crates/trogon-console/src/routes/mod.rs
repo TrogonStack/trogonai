@@ -4,3 +4,6 @@ pub mod environments;
 pub mod mcp_registry;
 pub mod sessions;
 pub mod skills;
+
+#[cfg(test)]
+mod tests;

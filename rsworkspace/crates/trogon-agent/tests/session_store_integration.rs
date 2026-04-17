@@ -43,6 +43,9 @@ fn sample_session(id: &str, tenant_id: &str) -> ChatSession {
         ],
         created_at: "2026-01-01T00:00:00Z".to_string(),
         updated_at: "2026-01-01T00:00:00Z".to_string(),
+        started_at_secs: 0,
+        duration_ms: 0,
+        agent_id: None,
     }
 }
 

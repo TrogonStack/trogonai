@@ -13,20 +13,91 @@ use crate::{
     server::AppState,
 };
 
+fn is_leap_year(year: u64) -> bool {
+    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
+}
+
+/// Returns today's date as `YYYYMMDD` — used as a version key for skill versions.
 fn now_version() -> String {
-    let t = std::time::SystemTime::now()
+    let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-    let secs = t.as_secs();
-    // Format as YYYYMMDD
-    let days = secs / 86400;
-    let epoch_days_to_2000: u64 = 10957;
-    let days_since_2000 = days.saturating_sub(epoch_days_to_2000);
-    let year = 2000 + days_since_2000 / 365;
-    let rem = days_since_2000 % 365;
-    let month = rem / 30 + 1;
-    let day = rem % 30 + 1;
+        .unwrap_or_default()
+        .as_secs();
+    let mut remaining = secs / 86400;
+    let mut year = 1970u64;
+    loop {
+        let days_in_year = if is_leap_year(year) { 366 } else { 365 };
+        if remaining < days_in_year {
+            break;
+        }
+        remaining -= days_in_year;
+        year += 1;
+    }
+    let days_in_month = [
+        31u64,
+        if is_leap_year(year) { 29 } else { 28 },
+        31, 30, 31, 30, 31, 31, 30, 31, 30, 31,
+    ];
+    let mut month = 1u64;
+    for &dim in &days_in_month {
+        if remaining < dim {
+            break;
+        }
+        remaining -= dim;
+        month += 1;
+    }
+    let day = remaining + 1;
     format!("{year:04}{month:02}{day:02}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn now_version_format_is_valid_yyyymmdd() {
+        let v = now_version();
+        assert_eq!(v.len(), 8, "version must be 8 digits: {v}");
+        assert!(v.chars().all(|c| c.is_ascii_digit()), "version must be all digits: {v}");
+        let year: u32 = v[0..4].parse().unwrap();
+        let month: u32 = v[4..6].parse().unwrap();
+        let day: u32 = v[6..8].parse().unwrap();
+        assert!(year >= 2025, "year must be >= 2025: {v}");
+        assert!((1..=12).contains(&month), "month must be 1-12: {v}");
+        assert!((1..=31).contains(&day), "day must be 1-31: {v}");
+    }
+
+    #[test]
+    fn version_for_known_epoch_is_correct() {
+        // 2026-04-17T00:00:00Z:
+        //   days to 2026-01-01: 20454 (accounting for all leap years 1970-2025)
+        //   days Jan(31)+Feb(28)+Mar(31)+16 = 106 days into 2026
+        //   total: 20560 days * 86400 = 1776384000 secs
+        let secs: u64 = 1776384000; // 2026-04-17T00:00:00Z
+        let mut remaining = secs / 86400;
+        let mut year = 1970u64;
+        loop {
+            let days_in_year = if is_leap_year(year) { 366 } else { 365 };
+            if remaining < days_in_year { break; }
+            remaining -= days_in_year;
+            year += 1;
+        }
+        let days_in_month = [
+            31u64,
+            if is_leap_year(year) { 29 } else { 28 },
+            31, 30, 31, 30, 31, 31, 30, 31, 30, 31,
+        ];
+        let mut month = 1u64;
+        for &dim in &days_in_month {
+            if remaining < dim { break; }
+            remaining -= dim;
+            month += 1;
+        }
+        let day = remaining + 1;
+        assert_eq!(year, 2026);
+        assert_eq!(month, 4);
+        assert_eq!(day, 17);
+    }
 }
 
 fn now_iso() -> String {

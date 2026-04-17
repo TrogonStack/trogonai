@@ -187,11 +187,22 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
     // Open the console skill KV store. Skill loading is best-effort: the bucket
     // is created idempotently so the loader is always available when NATS is
     // reachable. Automations without skill_ids are unaffected either way.
-    let skill_loader: Option<Arc<crate::skill_loader::SkillLoader>> =
+    let skill_loader: Option<Arc<dyn crate::skill_loader::SkillLoading>> =
         match crate::skill_loader::SkillLoader::open(&js).await {
-            Ok(loader) => Some(Arc::new(loader)),
+            Ok(loader) => Some(Arc::new(loader) as Arc<dyn crate::skill_loader::SkillLoading>),
             Err(e) => {
                 warn!(error = %e, "SkillLoader init failed — automation skill injection disabled");
+                None
+            }
+        };
+
+    // Open the agent loader so that chat sessions can read skill_ids from
+    // CONSOLE_AGENTS on every request — enabling live updates without restart.
+    let agent_loader: Option<Arc<dyn crate::agent_loader::AgentLoading>> =
+        match crate::agent_loader::AgentLoader::open(&js).await {
+            Ok(loader) => Some(Arc::new(loader) as Arc<dyn crate::agent_loader::AgentLoading>),
+            Err(e) => {
+                warn!(error = %e, "AgentLoader init failed — chat skill injection disabled");
                 None
             }
         };
@@ -241,7 +252,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
     let tenant_id = Arc::new(cfg.tenant_id.clone());
 
     // Recover any stale promises from a previous process run.
-    let _ = recover_stale_promises(&agent, &promise_store, &store, &run_store, &tenant_id).await;
+    let _ = recover_stale_promises(&agent, &promise_store, &store, &run_store, &tenant_id, skill_loader.clone()).await;
 
     // Start the combined HTTP API server unless disabled (port == 0).
     // Automations + run history + interactive chat sessions are all on the same port.
@@ -254,6 +265,9 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
             agent: Arc::clone(&agent),
             session_store,
             promise_store: Arc::clone(&promise_store),
+            agent_id: cfg.agent_id.clone(),
+            agent_loader: agent_loader.clone(),
+            skill_loader: skill_loader.clone(),
         };
         let api_port = cfg.api_port;
         tokio::spawn(async move {
@@ -1086,6 +1100,7 @@ async fn recover_stale_promises<A: AutomationRepository, R: RunRepository>(
     automation_store: &Arc<A>,
     run_store: &Arc<R>,
     tenant_id: &str,
+    skill_loader: Option<Arc<dyn crate::skill_loader::SkillLoading>>,
 ) -> Option<tokio::task::JoinHandle<()>> {
     // Must be strictly greater than the maximum time between two consecutive
     // checkpoint writes. Between checkpoints, `claimed_at` does not update.
@@ -1425,9 +1440,15 @@ async fn recover_stale_promises<A: AutomationRepository, R: RunRepository>(
                 }
                 // Safety: perm_fail_reason == None only when auto_opt == Some(enabled).
                 if let Some(auto) = auto_opt {
+                    let skill_content = match &skill_loader {
+                        Some(loader) if !auto.skill_ids.is_empty() => {
+                            loader.load(&auto.skill_ids).await
+                        }
+                        _ => None,
+                    };
                     let started_at = trogon_automations::now_unix();
                     let result =
-                        handlers::run_automation(&agent, &auto, &promise.nats_subject, &payload, None)
+                        handlers::run_automation(&agent, &auto, &promise.nats_subject, &payload, skill_content.as_deref())
                             .await;
                     let finished_at = trogon_automations::now_unix();
                     let (status, output) = match &result {
@@ -1619,13 +1640,19 @@ async fn recover_stale_promises<A: AutomationRepository, R: RunRepository>(
                     continue;
                 }
                 if let Some(auto) = auto_opt {
+                    let skill_content = match &skill_loader {
+                        Some(loader) if !auto.skill_ids.is_empty() => {
+                            loader.load(&auto.skill_ids).await
+                        }
+                        _ => None,
+                    };
                     let started_at = trogon_automations::now_unix();
                     let result = handlers::run_automation(
                         &agent,
                         &auto,
                         &promise.nats_subject,
                         &payload,
-                        None,
+                        skill_content.as_deref(),
                     )
                     .await;
                     let finished_at = trogon_automations::now_unix();
@@ -1681,7 +1708,7 @@ pub(crate) async fn dispatch_automations<R: RunRepository>(
     automations: Vec<trogon_automations::Automation>,
     nats_subject: &str,
     payload: &bytes::Bytes,
-    skill_loader: Option<Arc<crate::skill_loader::SkillLoader>>,
+    skill_loader: Option<Arc<dyn crate::skill_loader::SkillLoading>>,
 ) {
     let handles: Vec<_> = automations
         .into_iter()
@@ -2190,6 +2217,234 @@ mod tests {
             None,
         )
         .await;
+    }
+
+    // ── skill injection ───────────────────────────────────────────────────────
+
+    /// When an automation has `skill_ids` and the loader returns content, that
+    /// content must appear in the system prompt sent to the Anthropic API.
+    #[tokio::test]
+    async fn dispatch_automations_injects_skill_content() {
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::skill_loader::mock::MockSkillLoader;
+
+        let server = httpmock::MockServer::start_async().await;
+        // This mock only matches when the request body contains the skill header.
+        // If skill injection is broken the mock gets 0 hits → assert fails.
+        let mock = server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages")
+                .body_contains("Available Skills")
+                .body_contains("how to review pull requests");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(serde_json::json!({
+                    "stop_reason": "end_turn",
+                    "content": [{"type": "text", "text": "done"}]
+                }));
+        });
+
+        let (rs, _container) = make_run_store().await;
+        let agent = make_agent(&server.base_url());
+
+        let mut loader = MockSkillLoader::new();
+        loader.insert("skill-pr-review", "how to review pull requests");
+        let loader: Arc<dyn crate::skill_loader::SkillLoading> = Arc::new(loader);
+
+        let mut auto = make_automation("with-skills");
+        auto.skill_ids = vec!["skill-pr-review".to_string()];
+
+        let payload = bytes::Bytes::from_static(b"{}");
+        let promise_store: Arc<dyn crate::promise_store::PromiseRepository> =
+            Arc::new(MockPromiseStore::new());
+
+        dispatch_automations(
+            &agent,
+            &Arc::new(rs),
+            &promise_store,
+            "github.1",
+            vec![auto],
+            "github.push",
+            &payload,
+            Some(loader),
+        )
+        .await;
+
+        mock.assert_hits_async(1).await;
+    }
+
+    /// When `skill_ids` is empty the loader must not be called and no skill
+    /// block must appear in the Anthropic request.
+    #[tokio::test]
+    async fn dispatch_automations_no_injection_when_skill_ids_empty() {
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::skill_loader::mock::MockSkillLoader;
+
+        let server = httpmock::MockServer::start_async().await;
+        // General mock — matches any request to this path.
+        let general = server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(serde_json::json!({
+                    "stop_reason": "end_turn",
+                    "content": [{"type": "text", "text": "done"}]
+                }));
+        });
+        // This mock only matches if skill content is present — must be hit 0 times.
+        let skill_mock = server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages")
+                .body_contains("Available Skills");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(serde_json::json!({
+                    "stop_reason": "end_turn",
+                    "content": [{"type": "text", "text": "done"}]
+                }));
+        });
+
+        let (rs, _container) = make_run_store().await;
+        let agent = make_agent(&server.base_url());
+
+        let mut loader = MockSkillLoader::new();
+        loader.insert("skill-pr-review", "how to review pull requests");
+        let loader: Arc<dyn crate::skill_loader::SkillLoading> = Arc::new(loader);
+
+        // skill_ids is empty — loader should not be consulted.
+        let auto = make_automation("no-skills");
+
+        let payload = bytes::Bytes::from_static(b"{}");
+        let promise_store: Arc<dyn crate::promise_store::PromiseRepository> =
+            Arc::new(MockPromiseStore::new());
+
+        dispatch_automations(
+            &agent,
+            &Arc::new(rs),
+            &promise_store,
+            "github.2",
+            vec![auto],
+            "github.push",
+            &payload,
+            Some(loader),
+        )
+        .await;
+
+        general.assert_hits_async(1).await;
+        skill_mock.assert_hits_async(0).await;
+    }
+
+    /// When the skill loader is `None`, no skill content must be injected.
+    #[tokio::test]
+    async fn dispatch_automations_no_injection_when_loader_none() {
+        use crate::promise_store::mock::MockPromiseStore;
+
+        let server = httpmock::MockServer::start_async().await;
+        let general = server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(serde_json::json!({
+                    "stop_reason": "end_turn",
+                    "content": [{"type": "text", "text": "done"}]
+                }));
+        });
+        let skill_mock = server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages")
+                .body_contains("Available Skills");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(serde_json::json!({
+                    "stop_reason": "end_turn",
+                    "content": [{"type": "text", "text": "done"}]
+                }));
+        });
+
+        let (rs, _container) = make_run_store().await;
+        let agent = make_agent(&server.base_url());
+
+        let mut auto = make_automation("loader-none");
+        auto.skill_ids = vec!["skill-x".to_string()];
+
+        let payload = bytes::Bytes::from_static(b"{}");
+        let promise_store: Arc<dyn crate::promise_store::PromiseRepository> =
+            Arc::new(MockPromiseStore::new());
+
+        dispatch_automations(
+            &agent,
+            &Arc::new(rs),
+            &promise_store,
+            "github.3",
+            vec![auto],
+            "github.push",
+            &payload,
+            None,
+        )
+        .await;
+
+        general.assert_hits_async(1).await;
+        skill_mock.assert_hits_async(0).await;
+    }
+
+    /// The recovery path (`recover_stale_promises`) must also inject skill
+    /// content when the automation has `skill_ids`.
+    #[tokio::test]
+    async fn recover_stale_promises_injects_skill_content() {
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::skill_loader::mock::MockSkillLoader;
+
+        let server = httpmock::MockServer::start_async().await;
+        let mock = server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/anthropic/v1/messages")
+                .body_contains("Available Skills")
+                .body_contains("deploy checklist");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(serde_json::json!({
+                    "stop_reason": "end_turn",
+                    "content": [{"type": "text", "text": "done"}]
+                }));
+        });
+
+        let (auto_store, run_store, _container) = make_all_stores().await;
+        let agent = make_agent(&server.base_url());
+
+        // Register an automation with skill_ids.
+        let mut auto = make_automation("recovery-skill");
+        auto.tenant_id = agent.tenant_id.clone();
+        auto.skill_ids = vec!["skill-deploy".to_string()];
+        auto_store.put(&auto).await.expect("put automation");
+
+        // Create a stale Running promise pointing to that automation.
+        let promise_store: Arc<dyn crate::promise_store::PromiseRepository> =
+            Arc::new(MockPromiseStore::new());
+        let mut promise = make_stale_promise("prom-skill-recovery");
+        promise.tenant_id = agent.tenant_id.clone();
+        promise.automation_id = auto.id.clone();
+        promise.nats_subject = "github.push".to_string();
+        promise_store.put_promise(&promise).await.unwrap();
+
+        let mut loader = MockSkillLoader::new();
+        loader.insert("skill-deploy", "deploy checklist");
+        let loader: Arc<dyn crate::skill_loader::SkillLoading> = Arc::new(loader);
+
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &run_store,
+            &agent.tenant_id,
+            Some(loader),
+        )
+        .await
+        .expect("must return a handle for the stale promise");
+
+        handle.await.expect("recovery task must not panic");
+        mock.assert_hits_async(1).await;
     }
 
     #[test]
@@ -2792,6 +3047,7 @@ mod tests {
                 &auto_store,
                 &run_store,
                 "acme",
+                None,
             ),
             tokio::time::advance(
                 crate::agent_loop::NATS_KV_TIMEOUT + Duration::from_millis(1)
@@ -2822,6 +3078,7 @@ mod tests {
             &auto_store,
             &run_store,
             "acme",
+            None,
         )
         .await;
 
@@ -2910,6 +3167,7 @@ mod tests {
             &auto_store,
             &run_store,
             "acme",
+            None,
         )
         .await
         .expect("spawn handle must be returned when second list_running succeeds");
@@ -2946,6 +3204,7 @@ mod tests {
             &auto_store,
             &run_store,
             "acme",
+            None,
         )
         .await;
 
@@ -2994,6 +3253,7 @@ mod tests {
             &auto_store,
             &run_store,
             "acme",
+            None,
         )
         .await;
 
@@ -3025,6 +3285,7 @@ mod tests {
             &auto_store,
             &run_store,
             "acme",
+            None,
         )
         .await
         .expect("spawn handle must be returned when stale promises exist");
@@ -3066,6 +3327,7 @@ mod tests {
             &auto_store,
             &run_store,
             "acme",
+            None,
         )
         .await
         .expect("spawn handle must be returned when stale promises exist");
@@ -3108,6 +3370,7 @@ mod tests {
             &auto_store,
             &run_store,
             "acme",
+            None,
         )
         .await
         .expect("spawn handle must be returned when stale promises exist");
@@ -3138,6 +3401,7 @@ mod tests {
             &auto_store,
             &run_store,
             "acme",
+            None,
         )
         .await
         .expect("spawn handle must be returned when stale promises exist");
@@ -3181,6 +3445,7 @@ mod tests {
             &auto_store,
             &run_store,
             "acme",
+            None,
         )
         .await
         .expect("spawn handle must be returned when stale promises exist");
@@ -3220,6 +3485,7 @@ mod tests {
             &auto_store,
             &run_store,
             "acme",
+            None,
         )
         .await
         .expect("spawn handle must be returned when stale promises exist");
@@ -3277,6 +3543,7 @@ mod tests {
             &auto_store,
             &run_store,
             "acme",
+            None,
         )
         .await
         .expect("spawn handle must be returned when stale promises exist");
@@ -3336,6 +3603,7 @@ mod tests {
             &auto_store,
             &run_store,
             "acme",
+            None,
         )
         .await
         .expect("spawn handle must be returned when stale promises exist");
@@ -3390,6 +3658,7 @@ mod tests {
             &auto_store,
             &run_store,
             "acme",
+            None,
         )
         .await
         .expect("spawn handle must be returned when stale promises exist");
@@ -3806,6 +4075,7 @@ mod tests {
             &auto_store,
             &run_store,
             "acme",
+            None,
         )
         .await
         .expect("spawn handle must be returned when stale promises exist");
@@ -3855,6 +4125,7 @@ mod tests {
             &auto_store,
             &run_store,
             "acme",
+            None,
         )
         .await
         .expect("spawn handle must be returned when stale promises exist");
@@ -3967,6 +4238,7 @@ mod tests {
             &auto_store,
             &run_store,
             "acme",
+            None,
         )
         .await
         .expect("spawn handle must be returned when stale promises exist");
@@ -4110,6 +4382,7 @@ mod tests {
             &auto_store,
             &run_store,
             "acme",
+            None,
         )
         .await
         .expect("spawn handle must be returned when stale promises exist");
@@ -4165,6 +4438,7 @@ mod tests {
             &auto_store,
             &run_store,
             "acme",
+            None,
         )
         .await
         .expect("spawn handle must be returned when stale promises exist");
@@ -4210,6 +4484,7 @@ mod tests {
             &auto_store,
             &run_store,
             "acme",
+            None,
         )
         .await
         .expect("spawn handle must be returned when stale promises exist");
@@ -4356,6 +4631,7 @@ mod tests {
             &auto_store,
             &Arc::new(ErrorRecordRunStore),
             "acme",
+            None,
         )
         .await
         .expect("spawn handle must be returned when stale promises exist");
@@ -4411,7 +4687,8 @@ mod tests {
             &promise_store,
             &auto_store,
             &run_store,
-            &agent.tenant_id, // "test"
+            &agent.tenant_id,
+            None,
         )
         .await
         .expect("spawn handle must be returned when stale promises exist");
@@ -5044,6 +5321,7 @@ mod tests {
             &auto_store,
             &run_store,
             &agent.tenant_id,
+            None,
         )
         .await
         .expect("spawn handle must be returned when stale promises exist");
@@ -5194,6 +5472,7 @@ mod tests {
             &auto_store,
             &run_store,
             "acme",
+            None,
         )
         .await
         .expect("spawn handle");
@@ -5240,6 +5519,7 @@ mod tests {
             &auto_store,
             &run_store,
             "acme",
+            None,
         )
         .await
         .expect("spawn handle");
@@ -5292,6 +5572,7 @@ mod tests {
             &auto_store,
             &run_store,
             "acme",
+            None,
         )
         .await
         .expect("spawn handle");
@@ -5347,6 +5628,7 @@ mod tests {
             &auto_store,
             &run_store,
             "acme",
+            None,
         )
         .await
         .expect("spawn handle");
@@ -5642,6 +5924,7 @@ mod tests {
             &auto_store,
             &run_store,
             &agent.tenant_id,
+            None,
         )
         .await
         .expect("must return a handle when stale promises exist");
@@ -5743,6 +6026,7 @@ mod tests {
             &auto_store,
             &run_store,
             &agent.tenant_id,
+            None,
         )
         .await
         .expect("must return a handle for the stale promise");
@@ -5973,6 +6257,7 @@ mod tests {
             &auto_store,
             &run_store,
             &agent.tenant_id,
+            None,
         )
         .await
         .expect("must return a handle when 3 stale promises exist");
@@ -6103,6 +6388,7 @@ mod tests {
             &auto_store,
             &run_store,
             &agent.tenant_id,
+            None,
         )
         .await
         .expect("must return a handle for the orphaned promise");
@@ -6162,6 +6448,7 @@ mod tests {
             &auto_store,
             &run_store,
             &agent.tenant_id,
+            None,
         )
         .await
         .expect("must return a handle for the unknown-subject promise");
@@ -6214,6 +6501,7 @@ mod tests {
             &auto_store,
             &run_store,
             "acme",
+            None,
         )
         .await
         .expect("spawn handle must be returned when stale promises exist");
@@ -6346,7 +6634,8 @@ mod tests {
             &promise_store,
             &auto_store,
             &run_store,
-            &agent.tenant_id, // "test"
+            &agent.tenant_id,
+            None,
         )
         .await
         .expect("spawn handle must be returned when stale promises exist");
@@ -6497,6 +6786,7 @@ mod tests {
             &auto_store,
             &run_store,
             "acme",
+            None,
         )
         .await
         .expect("spawn handle must be returned when stale promises exist");
@@ -6542,6 +6832,7 @@ mod tests {
             &auto_store,
             &run_store,
             "acme",
+            None,
         )
         .await
         .expect("spawn handle must be returned when stale promises exist");

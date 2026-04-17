@@ -147,6 +147,9 @@ async fn start() -> TestEnv {
         agent,
         session_store,
         promise_store: Arc::new(NoOpPromiseStore),
+        agent_id: None,
+        agent_loader: None,
+        skill_loader: None,
     };
     let app = router(state);
 

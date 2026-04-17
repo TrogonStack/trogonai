@@ -47,6 +47,15 @@ pub struct ChatSession {
     pub created_at: String,
     /// ISO-8601 last-updated timestamp.
     pub updated_at: String,
+    /// Unix epoch seconds when the session was created (used to compute duration_ms).
+    #[serde(default)]
+    pub started_at_secs: u64,
+    /// Cumulative duration in milliseconds from creation to last message turn.
+    #[serde(default)]
+    pub duration_ms: u64,
+    /// ID of the agent definition from the console (populated when `AGENT_ID` is set).
+    #[serde(default)]
+    pub agent_id: Option<String>,
 }
 
 /// An error from the session store.
@@ -317,6 +326,9 @@ pub mod mock {
                 messages: vec![],
                 created_at: "2026-01-01T00:00:00Z".into(),
                 updated_at: "2026-01-01T00:00:00Z".into(),
+                started_at_secs: 0,
+                duration_ms: 0,
+                agent_id: None,
             }
         }
     }
@@ -435,6 +447,9 @@ mod tests {
             ],
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
+            started_at_secs: 0,
+            duration_ms: 0,
+            agent_id: None,
         }
     }
 
