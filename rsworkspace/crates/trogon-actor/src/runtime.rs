@@ -3,18 +3,21 @@ use std::time::Duration;
 
 use async_nats::HeaderMap;
 use bytes::Bytes;
+use futures_util::StreamExt as _;
 use futures_util::future::BoxFuture;
 use tracing::instrument;
-use trogon_nats::RequestClient;
+use trogon_nats::SubscribeClient;
+use trogon_nats::jetstream::JetStreamPublisher;
 use trogon_registry::{Registry, RegistryStore};
 use trogon_transcript::{Session, TranscriptEntry, TranscriptPublisher, entry::now_ms};
 
-/// Maximum time to wait for a sub-agent to respond to a NATS request-reply.
-///
-/// If the sub-agent does not reply within this window `spawn_agent` returns
-/// `Err(ActorError::SpawnFailed(...))` so the actor can handle the timeout
-/// gracefully instead of blocking indefinitely.
+/// Maximum time to wait for a sub-agent to respond to a spawn request.
 pub const SPAWN_AGENT_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// NATS header name used to carry the reply-inbox subject for JetStream spawn
+/// requests.  The spawning actor subscribes to the inbox before publishing and
+/// waits for the sub-agent's `ActorHost` to post the reply after handling.
+pub const TROGON_REPLY_TO_HEADER: &str = "Trogon-Reply-To";
 
 use crate::{
     actor::EntityActor,
@@ -26,41 +29,41 @@ use crate::{
 
 /// Orchestrates a single event invocation for an [`EntityActor`].
 ///
-/// The runtime is generic over the infrastructure components but the actor
-/// implementor never interacts with it directly — they only implement
-/// [`EntityActor`] and use [`ActorContext`].
-///
 /// ## Type parameters
 ///
 /// | Param | Role |
 /// |---|---|
 /// | `S` | State store (NATS KV in production, `MockStateStore` in tests) |
 /// | `P` | Transcript publisher (`NatsTranscriptPublisher` / `MockTranscriptPublisher`) |
-/// | `N` | NATS client for sub-agent request-reply |
+/// | `N` | NATS subscribe client for sub-agent reply inbox |
 /// | `R` | Registry store for discovering sub-agents |
+/// | `J` | JetStream publisher for durable sub-agent spawn requests |
 #[derive(Clone)]
-pub struct ActorRuntime<S, P, N, R>
+pub struct ActorRuntime<S, P, N, R, J>
 where
     S: StateStore,
     P: TranscriptPublisher,
-    N: RequestClient,
+    N: SubscribeClient,
     R: RegistryStore,
+    J: JetStreamPublisher,
 {
     state: S,
     publisher: P,
     nats: N,
     registry: Registry<R>,
+    js: J,
 }
 
-impl<S, P, N, R> ActorRuntime<S, P, N, R>
+impl<S, P, N, R, J> ActorRuntime<S, P, N, R, J>
 where
     S: StateStore,
     P: TranscriptPublisher,
-    N: RequestClient,
+    N: SubscribeClient,
     R: RegistryStore,
+    J: JetStreamPublisher,
 {
-    pub fn new(state: S, publisher: P, nats: N, registry: Registry<R>) -> Self {
-        Self { state, publisher, nats, registry }
+    pub fn new(state: S, publisher: P, nats: N, registry: Registry<R>, js: J) -> Self {
+        Self { state, publisher, nats, registry, js }
     }
 
     /// Borrow the registry — used by [`crate::host::ActorHost`] for registration
@@ -70,25 +73,17 @@ where
     }
 
     /// Borrow the NATS client — used by [`crate::host::ActorHost`] to subscribe
-    /// to the actor inbox. The caller is responsible for requiring the appropriate
-    /// `SubscribeClient` bound on `N`.
+    /// to the actor inbox and to send spawn replies.
     pub fn nats(&self) -> &N {
         &self.nats
     }
 
-    /// Run the full event-handling cycle for one actor invocation.
-    ///
-    /// The cycle is:
-    /// 1. Load entity state from KV (call `on_create` if first event).
-    /// 2. Open a transcript session.
-    /// 3. Call `actor.handle(state, ctx)`.
-    /// 4. Save updated state with optimistic concurrency.
-    /// 5. On conflict: reload state and retry (up to [`MAX_OCC_RETRIES`] times).
-    ///
-    /// `spawn_depth` is `0` for top-level invocations (dispatched by the router)
-    /// and increments by one for each nested `spawn_agent` hop. Passing it
-    /// through here allows [`ActorContext::spawn_agent`] to enforce
-    /// [`MAX_SPAWN_DEPTH`].
+    /// Borrow the state store — used by [`crate::host::ActorHost`] to load the
+    /// saved state after `handle_event` so it can be forwarded as a spawn reply.
+    pub fn state(&self) -> &S {
+        &self.state
+    }
+
     #[instrument(
         skip(self, actor),
         fields(
@@ -143,12 +138,13 @@ where
             let session_id = session.id().to_string();
 
             // ── 3. Build ActorContext (type-erased closures) ──────────────────
-            let ctx = build_context::<A, P, N, R>(
+            let ctx = build_context::<A, P, N, R, J>(
                 entity_key,
                 session_id,
                 Arc::clone(&session),
                 self.nats.clone(),
                 self.registry.clone(),
+                self.js.clone(),
                 spawn_depth,
             );
 
@@ -177,19 +173,21 @@ where
 /// NATS header name used to propagate spawn depth across actor boundaries.
 pub(crate) const SPAWN_DEPTH_HEADER: &str = "Trogon-Spawn-Depth";
 
-fn build_context<A, P, N, R>(
+fn build_context<A, P, N, R, J>(
     entity_key: &str,
     session_id: String,
     session: Arc<Session<P>>,
     nats: N,
     registry: Registry<R>,
+    js: J,
     spawn_depth: u32,
 ) -> ActorContext
 where
     A: EntityActor,
     P: TranscriptPublisher,
-    N: RequestClient,
+    N: SubscribeClient,
     R: RegistryStore,
+    J: JetStreamPublisher,
 {
     let parent_id = format!("{}/{}", A::actor_type(), entity_key);
     let session_for_spawn = Arc::clone(&session);
@@ -204,20 +202,20 @@ where
         })
     };
 
-    // Spawn function: registry lookup → request-reply → transcript entry.
-    // `next_depth` is the depth the *child* actor will receive (current + 1),
-    // embedded in the NATS request headers so the child's ActorHost can read it.
+    // Spawn function: registry lookup → JetStream publish → inbox reply → transcript.
     let actor_type_str = A::actor_type();
     let spawn_fn: Arc<dyn Fn(String, Bytes, u32) -> BoxFuture<'static, Result<Bytes, String>> + Send + Sync> = {
         Arc::new(move |capability: String, payload: Bytes, next_depth: u32| {
             let reg = registry.clone();
             let nats = nats.clone();
+            let js = js.clone();
             let parent = parent_id.clone();
             let session = Arc::clone(&session_for_spawn);
             let actor_type = actor_type_str;
 
             Box::pin(async move {
                 metrics::inc_spawn_call(actor_type, &capability);
+
                 // Find the first agent with the requested capability.
                 let agents = reg
                     .discover(&capability)
@@ -245,30 +243,42 @@ where
                     })
                     .await;
 
-                // Embed the child's spawn depth in the request headers so the
-                // receiving ActorHost can thread it through to the child context.
+                // Build request headers: spawn depth + reply inbox.
                 let mut headers = HeaderMap::new();
-                headers.insert(
-                    SPAWN_DEPTH_HEADER,
-                    next_depth.to_string().as_str(),
-                );
+                headers.insert(SPAWN_DEPTH_HEADER, next_depth.to_string().as_str());
 
-                // Send request to the sub-agent's inbox and await reply.
-                // A bounded timeout prevents the actor from blocking indefinitely
-                // when a sub-agent is slow or unresponsive.
-                let reply = tokio::time::timeout(
-                    SPAWN_AGENT_TIMEOUT,
-                    nats.request_with_headers(subject, headers, payload),
-                )
-                .await
-                .map_err(|_| {
+                // Subscribe to a unique inbox *before* publishing so we never
+                // miss the reply.
+                let inbox = format!("_INBOX.spawn.{}", uuid::Uuid::new_v4());
+                headers.insert(TROGON_REPLY_TO_HEADER, inbox.as_str());
+
+                let mut reply_sub = nats.subscribe(inbox).await.map_err(|e| {
                     metrics::inc_spawn_error(actor_type, &capability);
-                    format!("sub-agent request timed out after {SPAWN_AGENT_TIMEOUT:?}")
-                })?
-                .map_err(|e| {
-                    metrics::inc_spawn_error(actor_type, &capability);
-                    format!("sub-agent request failed: {e}")
+                    format!("failed to subscribe to spawn reply inbox: {e}")
                 })?;
+
+                // Publish via JetStream for durable delivery; discard the
+                // AckFuture (fire-and-forget ACK) to avoid lifetime complexity
+                // inside BoxFuture<'static>.  The sub-agent's reply serves as
+                // the implicit confirmation that the message was processed.
+                js.publish_with_headers(subject, headers, payload)
+                    .await
+                    .map_err(|e| {
+                        metrics::inc_spawn_error(actor_type, &capability);
+                        format!("JetStream spawn publish failed: {e}")
+                    })?;
+
+                // Wait for the sub-agent to post its reply on the inbox.
+                let reply = tokio::time::timeout(SPAWN_AGENT_TIMEOUT, reply_sub.next())
+                    .await
+                    .map_err(|_| {
+                        metrics::inc_spawn_error(actor_type, &capability);
+                        format!("sub-agent request timed out after {SPAWN_AGENT_TIMEOUT:?}")
+                    })?
+                    .ok_or_else(|| {
+                        metrics::inc_spawn_error(actor_type, &capability);
+                        "spawn inbox subscription closed before reply arrived".to_string()
+                    })?;
 
                 Ok(reply.payload)
             })
@@ -284,6 +294,7 @@ where
 mod tests {
     use super::*;
     use std::sync::Mutex;
+    use trogon_nats::jetstream::MockJetStreamPublisher;
     use trogon_registry::MockRegistryStore;
     use trogon_transcript::publisher::mock::MockTranscriptPublisher;
 
@@ -335,12 +346,14 @@ mod tests {
         MockTranscriptPublisher,
         trogon_nats::MockNatsClient,
         MockRegistryStore,
+        MockJetStreamPublisher,
     > {
         let state = MockStateStore::new();
         let publisher = MockTranscriptPublisher::new();
         let nats = trogon_nats::MockNatsClient::new();
         let registry = Registry::new(MockRegistryStore::new());
-        ActorRuntime::new(state, publisher, nats, registry)
+        let js = MockJetStreamPublisher::new();
+        ActorRuntime::new(state, publisher, nats, registry, js)
     }
 
     // ── Basic flow ────────────────────────────────────────────────────────────
@@ -357,7 +370,6 @@ mod tests {
 
         assert_eq!(*handled.lock().unwrap(), 1);
 
-        // State should be persisted.
         let kv_key = state_kv_key("counter", "entity-1");
         let entry = runtime.state.load(&kv_key).await.unwrap().unwrap();
         let saved: Counter = serde_json::from_slice(&entry.value).unwrap();
@@ -381,13 +393,11 @@ mod tests {
     #[tokio::test]
     async fn retries_on_occ_conflict() {
         let runtime = make_runtime();
-        // Inject 2 conflicts — the runtime should retry and eventually succeed.
         runtime.state.inject_conflicts(2);
 
         let (mut actor, handled) = CounterActor::new();
         runtime.handle_event(&mut actor, "entity-1", 0).await.unwrap();
 
-        // handle() was called 3 times (2 retried + 1 success).
         assert_eq!(*handled.lock().unwrap(), 3);
     }
 
@@ -425,7 +435,6 @@ mod tests {
 
     #[tokio::test]
     async fn transcript_entries_are_published() {
-        // Actor that writes transcript entries.
         struct Scribe;
         impl EntityActor for Scribe {
             type State = Counter;
@@ -446,7 +455,8 @@ mod tests {
         let publisher = MockTranscriptPublisher::new();
         let nats = trogon_nats::MockNatsClient::new();
         let registry = Registry::new(MockRegistryStore::new());
-        let runtime = ActorRuntime::new(state, publisher.clone(), nats, registry);
+        let js = MockJetStreamPublisher::new();
+        let runtime = ActorRuntime::new(state, publisher.clone(), nats, registry, js);
 
         runtime.handle_event(&mut Scribe, "e-1", 0).await.unwrap();
 
@@ -456,13 +466,34 @@ mod tests {
 
     // ── spawn_fn closure coverage ─────────────────────────────────────────────
 
+    /// Successful spawn: agent discovered, JetStream publish succeeds, inbox
+    /// receives reply.
     #[tokio::test]
     async fn spawn_agent_through_runtime_succeeds() {
-        use trogon_nats::AdvancedMockNatsClient;
         use trogon_registry::AgentCapability;
 
-        let nats = AdvancedMockNatsClient::new();
-        nats.set_response("sub.inbox", bytes::Bytes::from("pong"));
+        let nats = trogon_nats::MockNatsClient::new();
+        let js = MockJetStreamPublisher::new();
+
+        // Pre-inject a channel for the inbox subscription.  MockNatsClient
+        // pops from the queue on subscribe(), so the first subscribe call
+        // (from spawn_fn) gets this stream.
+        let tx = nats.inject_messages();
+
+        // After a short delay, inject the reply message so the spawn_fn's
+        // inbox-wait completes.
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            let _ = tx.unbounded_send(async_nats::Message {
+                subject: "reply".into(),
+                reply: None,
+                payload: bytes::Bytes::from_static(b"pong"),
+                headers: None,
+                length: 4,
+                status: None,
+                description: None,
+            });
+        });
 
         let store = MockRegistryStore::new();
         let registry = Registry::new(store.clone());
@@ -473,7 +504,7 @@ mod tests {
 
         let state_store = MockStateStore::new();
         let publisher = MockTranscriptPublisher::new();
-        let runtime = ActorRuntime::new(state_store, publisher.clone(), nats, registry);
+        let runtime = ActorRuntime::new(state_store, publisher.clone(), nats, registry, js);
 
         struct Spawner;
         impl EntityActor for Spawner {
@@ -501,19 +532,19 @@ mod tests {
         assert_eq!(published.len(), 1);
     }
 
+    /// No capability registered → spawn_agent fails with no-agent error.
     #[tokio::test]
     async fn spawn_agent_no_capability_returns_spawn_failed() {
-        use trogon_nats::AdvancedMockNatsClient;
-
-        let nats = AdvancedMockNatsClient::new();
+        let nats = trogon_nats::MockNatsClient::new();
+        let js = MockJetStreamPublisher::new();
         let registry = Registry::new(MockRegistryStore::new());
-        // No agents registered.
 
         let runtime = ActorRuntime::new(
             MockStateStore::new(),
             MockTranscriptPublisher::new(),
             nats,
             registry,
+            js,
         );
 
         struct NoCapActor;
@@ -537,13 +568,16 @@ mod tests {
         runtime.handle_event(&mut NoCapActor, "e-1", 0).await.unwrap();
     }
 
+    /// Transport failure (subscribe returns error because no stream is
+    /// pre-injected) → spawn_agent fails gracefully.
     #[tokio::test]
     async fn spawn_agent_request_failure_returns_spawn_failed() {
-        use trogon_nats::AdvancedMockNatsClient;
         use trogon_registry::AgentCapability;
 
-        let nats = AdvancedMockNatsClient::new();
-        nats.fail_next_request();
+        // No stream pre-injected → MockNatsClient.subscribe() returns an error,
+        // which simulates a transport failure in the spawn path.
+        let nats = trogon_nats::MockNatsClient::new();
+        let js = MockJetStreamPublisher::new();
 
         let store = MockRegistryStore::new();
         let registry = Registry::new(store.clone());
@@ -557,6 +591,7 @@ mod tests {
             MockTranscriptPublisher::new(),
             nats,
             registry,
+            js,
         );
 
         struct ReqFailActor;

@@ -1,41 +1,32 @@
 use std::time::Duration;
 
+use async_nats::HeaderMap;
+use bytes::Bytes;
 use futures_util::StreamExt as _;
 use tracing::{instrument, warn};
 use trogon_nats::{PublishClient, RequestClient, SubscribeClient};
+use trogon_nats::jetstream::JetStreamPublisher;
 use trogon_registry::{AgentCapability, RegistryStore};
 use trogon_transcript::TranscriptPublisher;
 
-use crate::{EntityActor, StateStore, telemetry::metrics, runtime::{ActorRuntime, SPAWN_DEPTH_HEADER}};
+use crate::{
+    EntityActor, StateStore,
+    state::state_kv_key,
+    telemetry::metrics,
+    runtime::{ActorRuntime, SPAWN_DEPTH_HEADER, TROGON_REPLY_TO_HEADER},
+};
 
 /// Default maximum time allowed for a single `handle_event` invocation.
-///
-/// If an actor's `handle()` implementation (or its sub-agent spawns) does not
-/// complete within this window, `handle_event` is cancelled and a warning is
-/// logged.  The host then continues with the next message.
-///
-/// This bound also serves as the effective **shutdown grace period**: once
-/// `cancel()` is called the host waits at most this long for any in-progress
-/// event before stopping.
 pub const DEFAULT_EVENT_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Hosts a single `EntityActor` type: subscribes to its NATS inbox, registers
 /// the actor's capabilities in the live registry, and dispatches every incoming
 /// message to [`ActorRuntime::handle_event`].
 ///
-/// ## Lifecycle
-///
-/// 1. On [`run`][ActorHost::run] the host registers the actor in the registry
-///    and subscribes to `actors.{type}.>`.
-/// 2. A background task calls [`Registry::refresh`] every
-///    [`HEARTBEAT_INTERVAL`][trogon_registry::provision::HEARTBEAT_INTERVAL]
-///    to keep the registry entry alive.
-/// 3. For each incoming message the entity key is extracted from the subject
-///    (the portion after the `actors.{type}.` prefix).
-/// 4. A new actor instance is created via `Clone` and
-///    `ActorRuntime::handle_event` is called.
-/// 5. `run` returns when the NATS subscription closes or
-///    [`cancel`][ActorHost::cancel] is called.
+/// After a successful `handle_event`, the host checks for a
+/// [`TROGON_REPLY_TO_HEADER`] header on the incoming message.  If present, it
+/// loads the actor's post-event state from KV and publishes it to that inbox
+/// subject so that the spawning actor's `spawn_agent` call can unblock.
 ///
 /// ## Example
 ///
@@ -57,9 +48,9 @@ pub const DEFAULT_EVENT_TIMEOUT: Duration = Duration::from_secs(60);
 /// async fn run(nats: async_nats::Client, js: async_nats::jetstream::Context) {
 ///     let state_store  = provision_state(&js).await.unwrap();
 ///     let reg_store    = provision_registry(&js).await.unwrap();
-///     let publisher    = NatsTranscriptPublisher::new(js);
+///     let publisher    = NatsTranscriptPublisher::new(js.clone());
 ///     let registry     = Registry::new(reg_store.clone());
-///     let runtime      = trogon_actor::ActorRuntime::new(state_store, publisher, nats, registry);
+///     let runtime      = trogon_actor::ActorRuntime::new(state_store, publisher, nats.clone(), registry, js.clone());
 ///
 ///     let capability = AgentCapability::new(
 ///         "PrActor",
@@ -70,37 +61,37 @@ pub const DEFAULT_EVENT_TIMEOUT: Duration = Duration::from_secs(60);
 ///     host.run().await.unwrap();
 /// }
 /// ```
-pub struct ActorHost<A, S, P, N, R>
+pub struct ActorHost<A, S, P, N, R, JP>
 where
     A: EntityActor + Clone,
     S: StateStore,
     P: TranscriptPublisher,
     N: SubscribeClient + PublishClient + RequestClient + Clone + Send + Sync + 'static,
     R: RegistryStore,
+    JP: JetStreamPublisher,
 {
-    runtime: ActorRuntime<S, P, N, R>,
-    /// Template actor — cloned once per incoming message so each invocation
-    /// gets a fresh `&mut self`.
+    runtime: ActorRuntime<S, P, N, R, JP>,
+    /// Template actor — cloned once per incoming message.
     actor: A,
     capability: AgentCapability,
     /// Maximum time allowed for a single `handle_event` invocation.
-    /// See [`DEFAULT_EVENT_TIMEOUT`].
     event_timeout: Duration,
     cancel: tokio::sync::watch::Sender<bool>,
     cancel_rx: tokio::sync::watch::Receiver<bool>,
 }
 
-impl<A, S, P, N, R> ActorHost<A, S, P, N, R>
+impl<A, S, P, N, R, JP> ActorHost<A, S, P, N, R, JP>
 where
     A: EntityActor + Clone,
     S: StateStore,
     P: TranscriptPublisher,
     N: SubscribeClient + PublishClient + RequestClient + Clone + Send + Sync + 'static,
     R: RegistryStore,
+    JP: JetStreamPublisher,
 {
     /// Create a host with the [`DEFAULT_EVENT_TIMEOUT`].
     pub fn new(
-        runtime: ActorRuntime<S, P, N, R>,
+        runtime: ActorRuntime<S, P, N, R, JP>,
         actor: A,
         capability: AgentCapability,
     ) -> Self {
@@ -108,12 +99,8 @@ where
     }
 
     /// Create a host with a custom per-event timeout.
-    ///
-    /// The timeout applies to every `handle_event` call.  Set it low in tests
-    /// that want fast failure, or increase it for actors that call long-running
-    /// LLMs or external APIs.
     pub fn with_event_timeout(
-        runtime: ActorRuntime<S, P, N, R>,
+        runtime: ActorRuntime<S, P, N, R, JP>,
         actor: A,
         capability: AgentCapability,
         event_timeout: Duration,
@@ -131,13 +118,10 @@ where
     /// consumer on the [`ACTOR_INBOX_STREAM`][crate::inbox::ACTOR_INBOX_STREAM]
     /// stream instead of a core NATS subscription.
     ///
-    /// Messages are held in the stream while the actor is down and redelivered
-    /// on reconnection — guaranteeing at-least-once delivery.  On successful
-    /// `handle_event` the message is ACKed; on error or timeout it is NAKed
-    /// (returned for redelivery, up to [`crate::inbox::MAX_DELIVER`] attempts).
-    ///
-    /// **Prerequisite:** call [`crate::inbox::provision_actor_inbox`] at
-    /// startup before calling this method.
+    /// On successful `handle_event` the message is ACKed; on error or timeout
+    /// it is NAKed (returned for redelivery).  If the message carries a
+    /// [`TROGON_REPLY_TO_HEADER`] header the actor's saved state is published
+    /// to that inbox so the spawning actor can unblock.
     #[instrument(
         skip(self, js),
         fields(actor_type = A::actor_type(), subject = %self.capability.nats_subject),
@@ -150,8 +134,6 @@ where
         use async_nats::jetstream::AckKind;
         use async_nats::jetstream::consumer::pull;
         use trogon_nats::jetstream::message::{JsAck, JsAckWith, JsMessageRef};
-        // Bring JetStreamCreateConsumer and JetStreamConsumer into scope so
-        // their methods are callable on the associated Stream and Consumer types.
         use trogon_nats::jetstream::{JetStreamCreateConsumer as _, JetStreamConsumer as _};
 
         let registry = self.runtime.registry().clone();
@@ -174,7 +156,7 @@ where
             let mut interval = tokio::time::interval(
                 trogon_registry::provision::HEARTBEAT_INTERVAL,
             );
-            interval.tick().await; // skip the first immediate tick
+            interval.tick().await;
             loop {
                 tokio::select! {
                     _ = interval.tick() => {
@@ -221,9 +203,8 @@ where
                             warn!(error = %e, "JetStream message stream error — continuing");
                         }
                         Some(Ok(msg)) => {
-                            // Extract entity key and spawn depth while holding the
-                            // borrow of nats_msg, then release the borrow so `msg`
-                            // is free for the ACK call after handle_event.
+                            // Extract all needed fields while holding the borrow,
+                            // then release it so `msg` is free for the ACK call.
                             let nats_msg: &async_nats::Message = msg.message();
                             let entity_key = nats_msg
                                 .subject
@@ -237,6 +218,12 @@ where
                                 .and_then(|h: &async_nats::HeaderMap| h.get(SPAWN_DEPTH_HEADER))
                                 .and_then(|v| v.as_str().parse().ok())
                                 .unwrap_or(0);
+                            let reply_to: Option<String> = nats_msg
+                                .headers
+                                .as_ref()
+                                .and_then(|h| h.get(TROGON_REPLY_TO_HEADER))
+                                .map(|v| v.as_str().to_string());
+
                             let mut actor = self.actor.clone();
                             let handle_start = std::time::Instant::now();
                             let event_result = tokio::time::timeout(
@@ -251,6 +238,17 @@ where
                                     metrics::record_handle_latency(A::actor_type(), latency_ms);
                                     if let Err(e) = msg.ack().await {
                                         warn!(error = %e, "failed to ACK JetStream message");
+                                    }
+                                    // Send spawn reply if the caller is waiting.
+                                    if let Some(reply_subject) = reply_to {
+                                        send_spawn_reply(
+                                            self.runtime.nats(),
+                                            self.runtime.state(),
+                                            A::actor_type(),
+                                            &entity_key,
+                                            reply_subject,
+                                        )
+                                        .await;
                                     }
                                 }
                                 Ok(Err(e)) => {
@@ -279,7 +277,6 @@ where
             }
         }
 
-        // ── Unregister on clean shutdown ──────────────────────────────────────
         if let Err(e) = registry.unregister(A::actor_type()).await {
             warn!(error = %e, "failed to unregister on shutdown");
         }
@@ -288,8 +285,13 @@ where
         Ok(())
     }
 
-    /// Register in the registry, subscribe to the actor inbox, and process
-    /// events until the subscription ends or [`cancel`][Self::cancel] is called.
+    /// Register in the registry, subscribe to the actor inbox (core NATS), and
+    /// process events until the subscription ends or [`cancel`][Self::cancel]
+    /// is called.
+    ///
+    /// After a successful `handle_event`, the host checks for a
+    /// [`TROGON_REPLY_TO_HEADER`] header and sends the actor's saved state to
+    /// that inbox so the spawning actor can unblock.
     #[instrument(
         skip(self),
         fields(actor_type = A::actor_type(), subject = %self.capability.nats_subject),
@@ -316,7 +318,7 @@ where
             let mut interval = tokio::time::interval(
                 trogon_registry::provision::HEARTBEAT_INTERVAL,
             );
-            interval.tick().await; // skip the first immediate tick
+            interval.tick().await;
             loop {
                 tokio::select! {
                     _ = interval.tick() => {
@@ -348,19 +350,21 @@ where
             tokio::select! {
                 msg = sub.next() => {
                     let Some(msg) = msg else { break };
-                    // Extract entity key from subject, e.g. "actors.pr.owner.repo.1" → "owner.repo.1"
+
                     let entity_key = msg.subject.as_str()
                         .strip_prefix(&key_prefix)
                         .unwrap_or(msg.subject.as_str());
-
-                    // Extract spawn depth propagated by the caller (0 for
-                    // top-level messages dispatched by the router).
                     let spawn_depth: u32 = msg
                         .headers
                         .as_ref()
                         .and_then(|h| h.get(SPAWN_DEPTH_HEADER))
                         .and_then(|v| v.as_str().parse().ok())
                         .unwrap_or(0);
+                    let reply_to: Option<String> = msg
+                        .headers
+                        .as_ref()
+                        .and_then(|h| h.get(TROGON_REPLY_TO_HEADER))
+                        .map(|v| v.as_str().to_string());
 
                     let mut actor = self.actor.clone();
                     let handle_start = std::time::Instant::now();
@@ -373,6 +377,16 @@ where
                     match event_result {
                         Ok(Ok(())) => {
                             metrics::record_handle_latency(A::actor_type(), latency_ms);
+                            if let Some(reply_subject) = reply_to {
+                                send_spawn_reply(
+                                    self.runtime.nats(),
+                                    self.runtime.state(),
+                                    A::actor_type(),
+                                    entity_key,
+                                    reply_subject,
+                                )
+                                .await;
+                            }
                         }
                         Ok(Err(e)) => {
                             metrics::inc_handle_error(A::actor_type());
@@ -396,7 +410,6 @@ where
             }
         }
 
-        // ── Unregister on clean shutdown ──────────────────────────────────────
         if let Err(e) = registry.unregister(A::actor_type()).await {
             warn!(error = %e, "failed to unregister on shutdown");
         }
@@ -406,14 +419,47 @@ where
     }
 }
 
+// ── Helper ────────────────────────────────────────────────────────────────────
+
+/// Load the actor's saved state from KV and publish it to `reply_subject` so
+/// that the spawning actor's inbox-wait can unblock.
+///
+/// Failures are logged as warnings — the spawning actor will time out and NAK
+/// its own event for retry if it doesn't receive the reply in time.
+async fn send_spawn_reply<N, S>(
+    nats: &N,
+    state: &S,
+    actor_type: &str,
+    entity_key: &str,
+    reply_subject: String,
+) where
+    N: PublishClient,
+    S: StateStore,
+{
+    let kv_key = state_kv_key(actor_type, entity_key);
+    let reply_payload = match state.load(&kv_key).await {
+        Ok(Some(entry)) => entry.value,
+        Ok(None) => Bytes::new(),
+        Err(e) => {
+            warn!(error = %e, "failed to load state for spawn reply — sending empty payload");
+            Bytes::new()
+        }
+    };
+    if let Err(e) = nats
+        .publish_with_headers(reply_subject, HeaderMap::new(), reply_payload)
+        .await
+    {
+        warn!(error = %e, "failed to publish spawn reply");
+    }
+}
+
 // ── HostError ─────────────────────────────────────────────────────────────────
 
 #[derive(Debug)]
 pub enum HostError {
     Register(String),
     Subscribe(String),
-    /// Failed to set up the durable JetStream consumer (get_stream,
-    /// create_consumer, or messages() call).
+    /// Failed to set up the durable JetStream consumer.
     Durable(String),
 }
 

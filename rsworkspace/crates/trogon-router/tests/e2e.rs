@@ -129,6 +129,7 @@ async fn router_routes_to_actor_and_both_write_transcript() {
         publisher.clone(),
         nats.clone(),
         registry_for_actor,
+        js.clone(),
     );
     let host = ActorHost::new(actor_runtime, ScribeActor, scribe_cap.clone());
     let host_handle = tokio::spawn(async move {
@@ -233,6 +234,7 @@ async fn actor_state_is_persisted_after_routing() {
         publisher.clone(),
         nats.clone(),
         registry_for_actor,
+        js.clone(),
     );
     let host = ActorHost::new(actor_runtime, ScribeActor, scribe_cap.clone());
     let host_handle = tokio::spawn(async move {
