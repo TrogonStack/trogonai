@@ -8,7 +8,7 @@ use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream, JetStream
 use crate::{
     config::{JobWriteCondition, JobWriteState},
     error::CronError,
-    events::{JobEvent, JobEventData},
+    events::{JobEventCodec, JobEventData},
     nats::{EventSubjectPrefix, StreamSubjectState, resolve_event_subject_state},
     projections::project_appended_events,
 };
@@ -53,7 +53,7 @@ where
         Ok(message) => {
             let version = message.sequence;
             let event = decode_recorded_job_event(message)?;
-            let _event = event.decode_data::<JobEvent>().map_err(|source| {
+            let _event = event.decode_data_with(&JobEventCodec).map_err(|source| {
                 CronError::event_source("failed to decode latest job event payload", source)
             })?;
             Ok(Some(JobWriteState::new(Some(version), true)))

@@ -19,7 +19,7 @@ use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream};
 use crate::{
     JobId, JobIdError, JobSpec,
     error::CronError,
-    events::{JobEvent, JobEventData, RecordedJobEvent},
+    events::{JobEvent, JobEventCodec, JobEventData, RecordedJobEvent},
     kv::{EVENTS_SUBJECT_PREFIX, LEGACY_EVENTS_SUBJECT_PREFIX},
     store::{
         SNAPSHOT_STORE_CONFIG, open_cron_jobs_bucket, open_events_stream, open_snapshot_bucket,
@@ -521,7 +521,7 @@ async fn rebuild_jobs_from_stream(
         let version = message.sequence;
         let event = decode_recorded_job_event(message)?;
         let stream_id = job_id_from_event_subject(&event.recorded_stream_id)?;
-        let data = event.decode_data::<JobEvent>().map_err(|source| {
+        let data = event.decode_data_with(&JobEventCodec).map_err(|source| {
             CronError::event_source("failed to decode recorded job event payload", source)
         })?;
         apply_event_to_snapshot_map(&mut states, &mut snapshots, &stream_id, &data, version)?;

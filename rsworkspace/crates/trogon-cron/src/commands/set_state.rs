@@ -5,7 +5,11 @@ use trogon_eventsourcing::{
     SnapshotStoreConfig, Snapshots, StreamCommand,
 };
 
-use crate::{JobEnabledState, JobId, JobIdError, error::CronError, events::JobEvent};
+use crate::{
+    JobEnabledState, JobId, JobIdError,
+    error::CronError,
+    events::{JobEvent, JobEventCodec},
+};
 
 pub(crate) const SNAPSHOT_STORE_CONFIG: SnapshotStoreConfig<'static> =
     SnapshotStoreConfig::new("cron.command.change_job_state.v1.", None);
@@ -190,6 +194,7 @@ where
     S: SnapshotStore<ChangeJobStateState, JobId, Error = CronError>,
 {
     Ok(CommandExecution::new(event_store, &command)
+        .codec(JobEventCodec)
         .occ(occ)
         .snapshots(Snapshots::new(
             snapshot_store,
