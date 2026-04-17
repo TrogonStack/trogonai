@@ -3,6 +3,7 @@ use bytes::Bytes;
 use futures_util::StreamExt as _;
 
 use crate::models::credential::{Credential, CredentialVault};
+use crate::store::traits::CredentialRepository;
 
 pub const CREDS_BUCKET: &str = "CONSOLE_CREDS";
 pub const VAULTS_BUCKET: &str = "CONSOLE_VAULTS";
@@ -107,6 +108,24 @@ impl CredentialStore {
     pub async fn delete(&self, env_id: &str, cred_id: &str) -> Result<(), String> {
         let key = format!("{env_id}.{cred_id}");
         self.creds_kv.delete(&key).await.map_err(|e| e.to_string())
+    }
+}
+
+impl CredentialRepository for CredentialStore {
+    fn get_or_create_vault<'a>(&'a self, env_id: &'a str) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<CredentialVault, String>> + Send + 'a>> {
+        Box::pin(async move { self.get_or_create_vault(env_id).await })
+    }
+    fn get_vault<'a>(&'a self, env_id: &'a str) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<CredentialVault>, String>> + Send + 'a>> {
+        Box::pin(async move { self.get_vault(env_id).await })
+    }
+    fn list<'a>(&'a self, env_id: &'a str) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<Credential>, String>> + Send + 'a>> {
+        Box::pin(async move { self.list(env_id).await })
+    }
+    fn put<'a>(&'a self, cred: &'a Credential) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
+        Box::pin(async move { self.put(cred).await })
+    }
+    fn delete<'a>(&'a self, env_id: &'a str, cred_id: &'a str) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
+        Box::pin(async move { self.delete(env_id, cred_id).await })
     }
 }
 

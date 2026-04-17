@@ -3,6 +3,7 @@ use bytes::Bytes;
 use futures_util::StreamExt as _;
 
 use crate::models::environment::Environment;
+use crate::store::traits::EnvironmentRepository;
 
 pub const ENVS_BUCKET: &str = "CONSOLE_ENVS";
 
@@ -57,5 +58,20 @@ impl EnvironmentStore {
 
     pub async fn delete(&self, id: &str) -> Result<(), String> {
         self.kv.delete(id).await.map_err(|e| e.to_string())
+    }
+}
+
+impl EnvironmentRepository for EnvironmentStore {
+    fn list(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<Environment>, String>> + Send + '_>> {
+        Box::pin(async move { self.list().await })
+    }
+    fn get<'a>(&'a self, id: &'a str) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<Environment>, String>> + Send + 'a>> {
+        Box::pin(async move { self.get(id).await })
+    }
+    fn put<'a>(&'a self, env: &'a Environment) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
+        Box::pin(async move { self.put(env).await })
+    }
+    fn delete<'a>(&'a self, id: &'a str) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
+        Box::pin(async move { self.delete(id).await })
     }
 }

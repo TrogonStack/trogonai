@@ -3,6 +3,7 @@ use bytes::Bytes;
 use futures_util::StreamExt as _;
 
 use crate::models::agent::{AgentDefinition, AgentVersion};
+use crate::store::traits::AgentRepository;
 
 pub const AGENTS_BUCKET: &str = "CONSOLE_AGENTS";
 pub const AGENT_VERSIONS_BUCKET: &str = "CONSOLE_AGENT_VERSIONS";
@@ -104,5 +105,23 @@ impl AgentStore {
         }
         versions.sort_by_key(|v| v.version);
         Ok(versions)
+    }
+}
+
+impl AgentRepository for AgentStore {
+    fn list(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<AgentDefinition>, String>> + Send + '_>> {
+        Box::pin(async move { self.list().await })
+    }
+    fn get<'a>(&'a self, id: &'a str) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<AgentDefinition>, String>> + Send + 'a>> {
+        Box::pin(async move { self.get(id).await })
+    }
+    fn put<'a>(&'a self, agent: &'a AgentDefinition) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
+        Box::pin(async move { self.put(agent).await })
+    }
+    fn delete<'a>(&'a self, id: &'a str) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
+        Box::pin(async move { self.delete(id).await })
+    }
+    fn list_versions<'a>(&'a self, agent_id: &'a str) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<AgentVersion>, String>> + Send + 'a>> {
+        Box::pin(async move { self.list_versions(agent_id).await })
     }
 }

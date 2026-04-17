@@ -28,6 +28,7 @@
 //! | `AGENT_MODEL` | `claude-opus-4-6` | Anthropic model ID |
 //! | `AGENT_MAX_ITERATIONS` | `10` | Max loop iterations per event |
 
+pub mod agent_loader;
 pub mod agent_loop;
 pub mod chat_api;
 pub mod config;

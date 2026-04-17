@@ -1,7 +1,20 @@
+use std::future::Future;
+use std::pin::Pin;
+
 use async_nats::jetstream::{self, kv};
 
 const CONSOLE_SKILLS_BUCKET: &str = "CONSOLE_SKILLS";
 const CONSOLE_SKILL_VERSIONS_BUCKET: &str = "CONSOLE_SKILL_VERSIONS";
+
+type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+
+// ── Trait ─────────────────────────────────────────────────────────────────────
+
+pub trait SkillLoading: Send + Sync + 'static {
+    fn load<'a>(&'a self, skill_ids: &'a [String]) -> BoxFuture<'a, Option<String>>;
+}
+
+// ── Real implementation ───────────────────────────────────────────────────────
 
 /// Reads skill content from the console KV store and formats it for injection
 /// into the agent's system prompt.
@@ -35,10 +48,7 @@ impl SkillLoader {
         Ok(Self { skills_kv, versions_kv })
     }
 
-    /// Load content for each skill ID and return a formatted block suitable
-    /// for injection into the system prompt. Returns `None` when no skill IDs
-    /// are provided or none have content.
-    pub async fn load(&self, skill_ids: &[String]) -> Option<String> {
+    async fn load_impl(&self, skill_ids: &[String]) -> Option<String> {
         if skill_ids.is_empty() {
             return None;
         }
@@ -46,7 +56,6 @@ impl SkillLoader {
         let mut sections = Vec::new();
 
         for skill_id in skill_ids {
-            // Fetch the skill metadata to get the latest_version and display name.
             let (latest_version, skill_name) = match self.skills_kv.get(skill_id).await {
                 Ok(Some(bytes)) => {
                     let Ok(meta) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
@@ -91,5 +100,56 @@ impl SkillLoader {
             "# Available Skills\n\nThe following skills define specialized knowledge and procedures you must follow:\n\n{}",
             sections.join("\n\n---\n\n")
         ))
+    }
+}
+
+impl SkillLoading for SkillLoader {
+    fn load<'a>(&'a self, skill_ids: &'a [String]) -> BoxFuture<'a, Option<String>> {
+        Box::pin(self.load_impl(skill_ids))
+    }
+}
+
+// ── Mock (test only) ──────────────────────────────────────────────────────────
+
+#[cfg(test)]
+pub mod mock {
+    use super::SkillLoading;
+    use std::collections::HashMap;
+
+    pub struct MockSkillLoader {
+        content: HashMap<String, String>,
+    }
+
+    impl MockSkillLoader {
+        pub fn new() -> Self {
+            Self { content: HashMap::new() }
+        }
+
+        pub fn insert(&mut self, skill_id: &str, content: &str) {
+            self.content.insert(skill_id.to_string(), content.to_string());
+        }
+    }
+
+    impl SkillLoading for MockSkillLoader {
+        fn load<'a>(
+            &'a self,
+            skill_ids: &'a [String],
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<String>> + Send + 'a>> {
+            let mut sections = Vec::new();
+            for id in skill_ids {
+                if let Some(c) = self.content.get(id) {
+                    sections.push(format!("## Skill: {id}\n\n{c}"));
+                }
+            }
+            let result = if sections.is_empty() {
+                None
+            } else {
+                Some(format!(
+                    "# Available Skills\n\nThe following skills define specialized knowledge and procedures you must follow:\n\n{}",
+                    sections.join("\n\n---\n\n")
+                ))
+            };
+            Box::pin(std::future::ready(result))
+        }
     }
 }

@@ -3,6 +3,7 @@ use bytes::Bytes;
 use futures_util::StreamExt as _;
 
 use crate::models::skill::{Skill, SkillVersion};
+use crate::store::traits::SkillRepository;
 
 pub const SKILLS_BUCKET: &str = "CONSOLE_SKILLS";
 pub const SKILL_VERSIONS_BUCKET: &str = "CONSOLE_SKILL_VERSIONS";
@@ -100,5 +101,23 @@ impl SkillStore {
             .await
             .map_err(|e| e.to_string())?;
         Ok(())
+    }
+}
+
+impl SkillRepository for SkillStore {
+    fn list(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<Skill>, String>> + Send + '_>> {
+        Box::pin(async move { self.list().await })
+    }
+    fn get<'a>(&'a self, id: &'a str) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<Skill>, String>> + Send + 'a>> {
+        Box::pin(async move { self.get(id).await })
+    }
+    fn put<'a>(&'a self, skill: &'a Skill) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
+        Box::pin(async move { self.put(skill).await })
+    }
+    fn list_versions<'a>(&'a self, skill_id: &'a str) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<SkillVersion>, String>> + Send + 'a>> {
+        Box::pin(async move { self.list_versions(skill_id).await })
+    }
+    fn put_version<'a>(&'a self, version: &'a SkillVersion) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
+        Box::pin(async move { self.put_version(version).await })
     }
 }

@@ -87,6 +87,10 @@ pub struct AgentConfig {
     /// Auth token for the Split Evaluator (`Authorization` header).
     /// Must match `SPLIT_EVALUATOR_AUTH_TOKEN` configured on the evaluator.
     pub split_auth_token: Option<String>,
+    /// ID of the agent definition in the console's `CONSOLE_AGENTS` KV bucket.
+    /// When set, `skill_ids` from that definition are loaded and injected into
+    /// chat session system prompts. Set via `AGENT_ID`.
+    pub agent_id: Option<String>,
 }
 
 impl AgentConfig {
@@ -132,6 +136,7 @@ impl AgentConfig {
                 .unwrap_or_else(|_| "default".to_string()),
             split_evaluator_url: env.var("SPLIT_EVALUATOR_URL").ok(),
             split_auth_token: env.var("SPLIT_EVALUATOR_AUTH_TOKEN").ok(),
+            agent_id: env.var("AGENT_ID").ok(),
         }
     }
 }

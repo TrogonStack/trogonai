@@ -39,6 +39,13 @@ pub struct ChatAppState<R: SessionRepository> {
     pub agent: Arc<AgentLoop>,
     pub session_store: R,
     pub promise_store: Arc<dyn PromiseRepository>,
+    /// Agent definition ID from CONSOLE_AGENTS (populated when `AGENT_ID` is set).
+    pub agent_id: Option<String>,
+    /// Reads current skill_ids for this agent from CONSOLE_AGENTS on each request
+    /// so that updates to the agent definition propagate without a restart.
+    pub agent_loader: Option<Arc<dyn crate::agent_loader::AgentLoading>>,
+    /// Skill loader shared with the automation dispatcher.
+    pub skill_loader: Option<Arc<dyn crate::skill_loader::SkillLoading>>,
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -55,13 +62,16 @@ fn err(status: StatusCode, msg: impl std::fmt::Display) -> Response {
     (status, axum::Json(json!({"error": msg.to_string()}))).into_response()
 }
 
-fn now_iso8601() -> String {
+fn now_epoch_secs() -> u64 {
     use std::time::{SystemTime, UNIX_EPOCH};
-    let secs = SystemTime::now()
+    SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
-        .as_secs();
-    epoch_to_iso8601(secs)
+        .as_secs()
+}
+
+fn now_iso8601() -> String {
+    epoch_to_iso8601(now_epoch_secs())
 }
 
 pub(crate) fn epoch_to_iso8601(secs: u64) -> String {
@@ -212,7 +222,8 @@ async fn create_session<R: SessionRepository>(
         Ok(t) => t,
         Err(r) => return r,
     };
-    let now = now_iso8601();
+    let now_secs = now_epoch_secs();
+    let now = epoch_to_iso8601(now_secs);
     let session = ChatSession {
         id: uuid::Uuid::new_v4().to_string(),
         tenant_id: tid,
@@ -223,6 +234,9 @@ async fn create_session<R: SessionRepository>(
         messages: vec![],
         created_at: now.clone(),
         updated_at: now,
+        started_at_secs: now_secs,
+        duration_ms: 0,
+        agent_id: state.agent_id.clone(),
     };
     match state.session_store.put(&session).await {
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e),
@@ -379,16 +393,43 @@ async fn send_message<R: SessionRepository>(
         _ => None,
     };
 
+    // Fetch current skill_ids from the agent definition (reads CONSOLE_AGENTS KV
+    // on every turn so console updates propagate without an agent restart).
+    let skill_ids: Vec<String> = match (&state.agent_loader, &state.agent_id) {
+        (Some(loader), Some(agent_id)) => loader.get_skill_ids(agent_id).await,
+        _ => vec![],
+    };
+
+    // Load skills for this agent definition and combine with memory.
+    let skill_content: Option<String> = match &state.skill_loader {
+        Some(loader) if !skill_ids.is_empty() => loader.load(&skill_ids).await,
+        _ => None,
+    };
+    let system_prompt: Option<String> = match (skill_content.as_deref(), memory.as_deref()) {
+        (Some(skills), Some(mem)) => Some(format!("{skills}\n\n---\n\n{mem}")),
+        (Some(skills), None) => Some(skills.to_string()),
+        (None, Some(mem)) => Some(mem.to_string()),
+        (None, None) => None,
+    };
+
     // Run the chat loop — returns (final_text, updated_messages).
     match agent
-        .run_chat(session.messages.clone(), &tools, memory.as_deref())
+        .run_chat(session.messages.clone(), &tools, system_prompt.as_deref())
         .await
     {
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
         Ok((text, updated_messages)) => {
             let message_count = updated_messages.len();
             session.messages = updated_messages;
-            session.updated_at = now_iso8601();
+            let now_secs = now_epoch_secs();
+            session.updated_at = epoch_to_iso8601(now_secs);
+            // Only compute duration for sessions that have a valid start time.
+            // Legacy sessions with started_at_secs == 0 are skipped to avoid
+            // reporting a nonsensical ~55-year duration.
+            if session.started_at_secs > 0 {
+                session.duration_ms =
+                    now_secs.saturating_sub(session.started_at_secs).saturating_mul(1000);
+            }
 
             if let Err(e) = state.session_store.put(&session).await {
                 return err(StatusCode::INTERNAL_SERVER_ERROR, e);
@@ -522,6 +563,9 @@ mod tests {
             messages: vec![Message::user_text("hi"), Message::user_text("hey")],
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
+            started_at_secs: 0,
+            duration_ms: 0,
+            agent_id: None,
         };
         let summary = SessionSummary::from(&s);
         assert_eq!(summary.message_count, 2);
@@ -734,6 +778,9 @@ mod tests {
             agent: make_test_agent(),
             session_store: GetOkPutErrorSessionStore::new(),
             promise_store: Arc::new(crate::promise_store::mock::MockPromiseStore::new()),
+            agent_id: None,
+            agent_loader: None,
+            skill_loader: None,
         };
         router(state)
     }
@@ -743,6 +790,9 @@ mod tests {
             agent: make_test_agent(),
             session_store: ErrorSessionStore::new(),
             promise_store: Arc::new(crate::promise_store::mock::MockPromiseStore::new()),
+            agent_id: None,
+            agent_loader: None,
+            skill_loader: None,
         };
         router(state)
     }
@@ -752,6 +802,9 @@ mod tests {
             agent: make_test_agent(),
             session_store: store,
             promise_store: Arc::new(crate::promise_store::mock::MockPromiseStore::new()),
+            agent_id: None,
+            agent_loader: None,
+            skill_loader: None,
         };
         router(state)
     }
@@ -776,6 +829,9 @@ mod tests {
             messages: vec![],
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-02T00:00:00Z".to_string(),
+            started_at_secs: 0,
+            duration_ms: 0,
+            agent_id: None,
         }
     }
 
@@ -1128,6 +1184,9 @@ mod tests {
             agent: make_test_agent(),
             session_store,
             promise_store,
+            agent_id: None,
+            agent_loader: None,
+            skill_loader: None,
         };
         router(state)
     }

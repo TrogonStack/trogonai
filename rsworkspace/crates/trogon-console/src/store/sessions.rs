@@ -2,6 +2,7 @@ use async_nats::jetstream::{self, kv};
 use futures_util::StreamExt as _;
 
 use crate::models::session::{ConsoleSession, RawSession};
+use crate::store::traits::SessionRepository;
 
 pub const SESSIONS_BUCKET: &str = "SESSIONS";
 
@@ -52,5 +53,17 @@ impl SessionReader {
                 .map(|r| Some(ConsoleSession::from(r)))
                 .map_err(|e| e.to_string()),
         }
+    }
+}
+
+impl SessionRepository for SessionReader {
+    fn list(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<ConsoleSession>, String>> + Send + '_>> {
+        Box::pin(async move { self.list().await })
+    }
+    fn list_by_tenant<'a>(&'a self, tenant_id: &'a str) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<ConsoleSession>, String>> + Send + 'a>> {
+        Box::pin(async move { self.list_by_tenant(tenant_id).await })
+    }
+    fn get<'a>(&'a self, tenant_id: &'a str, session_id: &'a str) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<ConsoleSession>, String>> + Send + 'a>> {
+        Box::pin(async move { self.get(tenant_id, session_id).await })
     }
 }

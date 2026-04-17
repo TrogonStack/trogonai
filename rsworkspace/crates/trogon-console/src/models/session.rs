@@ -18,6 +18,10 @@ pub struct ConsoleSession {
     pub message_count: usize,
     pub input_tokens: u32,
     pub output_tokens: u32,
+    pub cache_read_tokens: u32,
+    pub cache_write_tokens: u32,
+    pub duration_ms: u64,
+    pub agent_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -34,6 +38,10 @@ pub(crate) struct RawSession {
     pub messages: Vec<RawMessage>,
     pub created_at: String,
     pub updated_at: String,
+    #[serde(default)]
+    pub duration_ms: u64,
+    #[serde(default)]
+    pub agent_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -49,6 +57,10 @@ pub(crate) struct RawUsage {
     pub input_tokens: u32,
     #[serde(default)]
     pub output_tokens: u32,
+    #[serde(default)]
+    pub cache_creation_input_tokens: u32,
+    #[serde(default)]
+    pub cache_read_input_tokens: u32,
 }
 
 impl From<RawSession> for ConsoleSession {
@@ -60,6 +72,14 @@ impl From<RawSession> for ConsoleSession {
         let output_tokens: u32 = r.messages.iter()
             .filter_map(|m| m.usage.as_ref())
             .map(|u| u.output_tokens)
+            .sum();
+        let cache_read_tokens: u32 = r.messages.iter()
+            .filter_map(|m| m.usage.as_ref())
+            .map(|u| u.cache_read_input_tokens)
+            .sum();
+        let cache_write_tokens: u32 = r.messages.iter()
+            .filter_map(|m| m.usage.as_ref())
+            .map(|u| u.cache_creation_input_tokens)
             .sum();
 
         // A session is "running" if the last message is from the user
@@ -77,6 +97,10 @@ impl From<RawSession> for ConsoleSession {
             message_count: r.messages.len(),
             input_tokens,
             output_tokens,
+            cache_read_tokens,
+            cache_write_tokens,
+            duration_ms: r.duration_ms,
+            agent_id: r.agent_id,
             created_at: r.created_at,
             updated_at: r.updated_at,
         }
