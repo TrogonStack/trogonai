@@ -92,11 +92,14 @@ pub fn make_tool_context(
 ///   otherwise only the named tools are included.
 /// - `automation.memory_path` overrides the per-handler default; if both are
 ///   `None` the global [`DEFAULT_MEMORY_PATH`] is used.
+/// - `skill_content` is injected into the system prompt before memory,
+///   allowing reusable skill definitions to provide persistent context.
 pub async fn run_automation(
     agent: &AgentLoop,
     automation: &trogon_automations::Automation,
     nats_subject: &str,
     payload: &[u8],
+    skill_content: Option<&str>,
 ) -> Result<String, String> {
     // Build the built-in tool list (optionally filtered by the automation config).
     let all = crate::tools::all_tool_defs();
@@ -189,7 +192,16 @@ pub async fn run_automation(
         _ => None,
     };
 
-    run_agent(effective, full_prompt, tools, memory)
+    // Compose system prompt: skill definitions first, then the memory file.
+    // Skills provide structural knowledge; memory provides project-specific context.
+    let system_prompt = match (skill_content, memory) {
+        (Some(s), Some(m)) => Some(format!("{s}\n\n---\n\n{m}")),
+        (Some(s), None)    => Some(s.to_string()),
+        (None, Some(m))    => Some(m),
+        (None, None)       => None,
+    };
+
+    run_agent(effective, full_prompt, tools, system_prompt)
         .await
         .map_err(|e| e.to_string())
 }
@@ -216,6 +228,7 @@ mod tests {
             variables: std::collections::HashMap::new(),
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
+            skill_ids: vec![],
         }
     }
 
@@ -243,7 +256,7 @@ mod tests {
         let agent = make_agent(&server.base_url());
         let automation = make_automation(vec![]);
         let payload = serde_json::to_vec(&serde_json::json!({"ref_name": "main"})).unwrap();
-        let result = run_automation(&agent, &automation, "github.push", &payload).await;
+        let result = run_automation(&agent, &automation, "github.push", &payload, None).await;
         assert!(result.is_ok(), "expected Ok: {result:?}");
         assert_eq!(result.unwrap(), "automation output");
     }
@@ -265,7 +278,7 @@ mod tests {
 
         let agent = make_agent(&server.base_url());
         let automation = make_automation(vec![]); // empty = all tools
-        let result = run_automation(&agent, &automation, "github.push", b"{}").await;
+        let result = run_automation(&agent, &automation, "github.push", b"{}", None).await;
         assert!(result.is_ok(), "expected Ok: {result:?}");
         mock.assert_async().await;
     }
@@ -297,7 +310,7 @@ mod tests {
             "get_pr_diff".to_string(),
             "post_pr_comment".to_string(),
         ]);
-        let result = run_automation(&agent, &automation, "github.push", b"{}").await;
+        let result = run_automation(&agent, &automation, "github.push", b"{}", None).await;
         assert!(
             result.is_ok(),
             "list_pr_files was incorrectly included: {result:?}"
@@ -362,7 +375,7 @@ mod tests {
         let mut automation = make_automation(vec![]);
         automation.memory_path = Some("custom/notes.md".to_string()); // override
 
-        let result = run_automation(&agent, &automation, "github.push", b"{}").await;
+        let result = run_automation(&agent, &automation, "github.push", b"{}", None).await;
         assert!(result.is_ok(), "expected Ok: {result:?}");
     }
 
@@ -641,7 +654,7 @@ mod tests {
         let mut automation = make_automation(vec![]);
         automation.model = Some("claude-haiku-override".to_string());
 
-        let result = run_automation(&agent, &automation, "github.push", b"{}").await;
+        let result = run_automation(&agent, &automation, "github.push", b"{}", None).await;
         assert!(result.is_ok(), "expected Ok with model override: {result:?}");
         mock.assert_async().await;
     }

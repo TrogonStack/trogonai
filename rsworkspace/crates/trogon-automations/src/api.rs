@@ -74,6 +74,8 @@ pub struct CreateRequest {
     pub visibility: Visibility,
     #[serde(default)]
     pub variables: std::collections::HashMap<String, String>,
+    #[serde(default)]
+    pub skill_ids: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -93,6 +95,8 @@ pub struct UpdateRequest {
     pub visibility: Visibility,
     #[serde(default)]
     pub variables: std::collections::HashMap<String, String>,
+    #[serde(default)]
+    pub skill_ids: Vec<String>,
 }
 
 fn default_true() -> bool {
@@ -115,6 +119,7 @@ struct AutomationResponse {
     enabled: bool,
     visibility: Visibility,
     variables: std::collections::HashMap<String, String>,
+    skill_ids: Vec<String>,
     created_at: String,
     updated_at: String,
 }
@@ -134,6 +139,7 @@ impl From<Automation> for AutomationResponse {
             enabled: a.enabled,
             visibility: a.visibility,
             variables: a.variables,
+            skill_ids: a.skill_ids,
             created_at: a.created_at,
             updated_at: a.updated_at,
         }
@@ -238,6 +244,7 @@ async fn create_automation<A: AutomationRepository, R: RunRepository>(
         enabled: body.enabled,
         visibility: body.visibility,
         variables: body.variables,
+        skill_ids: body.skill_ids,
         created_at: now.clone(),
         updated_at: now,
     };
@@ -295,6 +302,7 @@ async fn update_automation<A: AutomationRepository, R: RunRepository>(
         enabled: body.enabled,
         visibility: body.visibility,
         variables: body.variables,
+        skill_ids: body.skill_ids,
         created_at: existing.created_at,
         updated_at: now_iso8601(),
     };
@@ -488,6 +496,7 @@ mod tests {
             variables: std::collections::HashMap::new(),
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
+            skill_ids: vec![],
         }
     }
 
