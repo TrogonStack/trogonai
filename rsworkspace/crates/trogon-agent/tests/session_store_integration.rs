@@ -173,6 +173,71 @@ async fn messages_are_preserved_across_put_get() {
     assert_eq!(got.messages[2].role, "user");
 }
 
+// ── New field round-trips ─────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn session_metadata_fields_round_trip() {
+    let (store, _c) = make_store().await;
+    let s = ChatSession {
+        id: "sess-meta".to_string(),
+        tenant_id: "acme".to_string(),
+        name: "Meta session".to_string(),
+        model: None,
+        tools: vec![],
+        memory_path: None,
+        messages: vec![],
+        created_at: "2026-04-17T00:00:00Z".to_string(),
+        updated_at: "2026-04-17T00:00:00Z".to_string(),
+        started_at_secs: 1776384000,
+        duration_ms: 42500,
+        agent_id: Some("agent_abc123".to_string()),
+    };
+    store.put(&s).await.expect("put");
+
+    let got = store.get("acme", "sess-meta").await.expect("get").expect("exists");
+    assert_eq!(got.started_at_secs, 1776384000, "started_at_secs must survive KV round-trip");
+    assert_eq!(got.duration_ms, 42500,          "duration_ms must survive KV round-trip");
+    assert_eq!(got.agent_id, Some("agent_abc123".to_string()), "agent_id must survive KV round-trip");
+}
+
+#[tokio::test]
+async fn message_usage_round_trips_through_kv() {
+    use trogon_agent::agent_loop::{ContentBlock, Usage};
+
+    let (store, _c) = make_store().await;
+    let mut s = sample_session("sess-usage", "acme");
+    s.messages[1] = Message {
+        role: "assistant".to_string(),
+        content: vec![ContentBlock::Text { text: "Hi!".to_string() }],
+        usage: Some(Usage {
+            input_tokens: 100,
+            output_tokens: 50,
+            cache_creation_input_tokens: Some(10),
+            cache_read_input_tokens: Some(5),
+        }),
+    };
+    store.put(&s).await.expect("put");
+
+    let got = store.get("acme", "sess-usage").await.expect("get").expect("exists");
+    let usage = got.messages[1].usage.as_ref().expect("usage must be present");
+    assert_eq!(usage.input_tokens, 100);
+    assert_eq!(usage.output_tokens, 50);
+    assert_eq!(usage.cache_creation_input_tokens, Some(10));
+    assert_eq!(usage.cache_read_input_tokens, Some(5));
+}
+
+#[tokio::test]
+async fn session_agent_id_none_round_trips() {
+    let (store, _c) = make_store().await;
+    // Default sample_session has agent_id: None — verify it survives round-trip
+    let s = sample_session("sess-no-agent", "acme");
+    store.put(&s).await.expect("put");
+    let got = store.get("acme", "sess-no-agent").await.expect("get").expect("exists");
+    assert_eq!(got.agent_id, None, "agent_id None must round-trip as None");
+    assert_eq!(got.started_at_secs, 0, "zero started_at_secs must round-trip");
+    assert_eq!(got.duration_ms, 0, "zero duration_ms must round-trip");
+}
+
 /// `list()` must silently skip entries whose bytes cannot be deserialized,
 /// warning rather than failing, and return the other valid sessions.
 #[tokio::test]
