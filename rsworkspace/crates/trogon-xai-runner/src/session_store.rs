@@ -144,6 +144,13 @@ pub struct MemorySessionStore {
 }
 
 #[cfg(feature = "test-helpers")]
+impl Default for MemorySessionStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(feature = "test-helpers")]
 impl MemorySessionStore {
     pub fn new() -> Self {
         Self {
