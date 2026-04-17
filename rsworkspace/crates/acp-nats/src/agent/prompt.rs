@@ -390,13 +390,25 @@ where
             resp = timeout(op_timeout, resp_messages.next()) => {
                 match resp {
                     Ok(Some(Ok(js_msg))) => {
-                        match serde_json::from_slice::<PromptResponse>(js_msg.message().payload.as_ref()) {
+                        let payload = js_msg.message().payload.as_ref();
+                        // Check for runner error envelope {"error": "..."} first.
+                        if let Ok(env) = serde_json::from_slice::<serde_json::Value>(payload)
+                            && let Some(err_msg) = env.get("error").and_then(|v| v.as_str())
+                        {
+                            let _ = js_msg.ack().await;
+                            bridge.metrics.record_error("prompt", "runner_error");
+                            break Err(Error::new(
+                                ErrorCode::InternalError.into(),
+                                err_msg.to_string(),
+                            ));
+                        }
+                        match serde_json::from_slice::<PromptResponse>(payload) {
                             Ok(response) => {
                                 let _ = js_msg.ack().await;
                                 break Ok(response);
                             }
                             Err(_) => {
-                                if let Ok(agent_err) = serde_json::from_slice::<Error>(js_msg.message().payload.as_ref()) {
+                                if let Ok(agent_err) = serde_json::from_slice::<Error>(payload) {
                                     let _ = js_msg.ack().await;
                                     break Err(agent_err);
                                 }

@@ -30,11 +30,12 @@ use acp_nats::{AcpPrefix, AcpSessionId, Bridge};
 use acp_nats::nats::{FlushClient, PublishClient, RequestClient, SubscribeClient, session as session_subjects};
 use trogon_nats::jetstream::{JetStreamGetStream, JetStreamPublisher, JsRequestMessage, JsMessageOf};
 use agent_client_protocol::McpServer;
-use trogon_acp_runner::{GatewayConfig, SessionState, SessionStore, StoredMcpServer};
+use trogon_acp_runner::{GatewayConfig, NatsSessionNotifier, NatsSessionStore, SessionNotifier, SessionState, SessionStore, StoredMcpServer};
 use trogon_agent_core::agent_loop::ContentBlock as AgentContentBlock;
 use trogon_std::time::GetElapsed;
 
 const SESSION_READY_DELAY: Duration = Duration::from_millis(100);
+
 
 /// Hardcoded available Claude models exposed by this agent.
 /// Built-in Claude Code slash commands sent in `available_commands_update`.
@@ -75,16 +76,18 @@ const AVAILABLE_MODELS: &[(&str, &str)] = &[
 
 /// ACP `Agent` implementation that handles lifecycle methods locally and
 /// routes `prompt`/`cancel` through NATS via the inner `Bridge`.
-pub struct TrogonAcpAgent<N, C, J>
+pub struct TrogonAcpAgent<N, C, J, S = NatsSessionStore, Notif = NatsSessionNotifier>
 where
     N: RequestClient + PublishClient + SubscribeClient + FlushClient,
     C: GetElapsed,
     J: JetStreamPublisher + JetStreamGetStream,
     JsMessageOf<J>: JsRequestMessage,
+    S: SessionStore,
+    Notif: SessionNotifier,
 {
     pub(crate) bridge: Bridge<N, C, J>,
-    pub(crate) store: SessionStore,
-    pub(crate) nats: async_nats::Client,
+    pub(crate) store: S,
+    pub(crate) notifier: Notif,
     pub(crate) prefix: String,
     pub(crate) notification_sender: mpsc::Sender<SessionNotification>,
     /// Default model configured for this agent instance (from AGENT_MODEL env var).
@@ -96,7 +99,7 @@ where
     pub(crate) terminal_output_cap: std::cell::Cell<bool>,
 }
 
-impl<N, C, J> TrogonAcpAgent<N, C, J>
+impl<N, C, J, S: SessionStore + 'static, Notif: SessionNotifier + 'static> TrogonAcpAgent<N, C, J, S, Notif>
 where
     N: RequestClient + PublishClient + SubscribeClient + FlushClient,
     C: GetElapsed,
@@ -105,8 +108,8 @@ where
 {
     pub fn new(
         bridge: Bridge<N, C, J>,
-        store: SessionStore,
-        nats: async_nats::Client,
+        store: S,
+        notifier: Notif,
         prefix: impl Into<String>,
         notification_sender: mpsc::Sender<SessionNotification>,
         default_model: impl Into<String>,
@@ -115,7 +118,7 @@ where
         Self {
             bridge,
             store,
-            nats,
+            notifier,
             prefix: prefix.into(),
             notification_sender,
             default_model: default_model.into(),
@@ -184,21 +187,13 @@ where
         ]
     }
 
+    #[cfg_attr(coverage, coverage(off))]
     async fn publish_session_ready(&self, session_id: &str) {
-        let nats = self.nats.clone();
         let subject = format!("{}.{}.agent.ext.session.ready", self.prefix, session_id);
         let body =
             serde_json::to_vec(&serde_json::json!({ "sessionId": session_id })).unwrap_or_default();
-
-        tokio::spawn(
-            #[cfg_attr(coverage, coverage(off))]
-            async move {
-                tokio::time::sleep(SESSION_READY_DELAY).await;
-                if let Err(e) = nats.publish(subject.clone(), body.into()).await {
-                    warn!(subject = %subject, error = %e, "Failed to publish session.ready");
-                }
-            },
-        );
+        self.notifier
+            .schedule_publish(subject, bytes::Bytes::from(body), SESSION_READY_DELAY);
     }
 
     /// Send an `available_commands_update` notification asynchronously.
@@ -530,10 +525,10 @@ where
     async fn close_session_impl(&self, session_id: &str) {
         let acp_prefix = AcpPrefix::new(&self.prefix).expect("valid prefix");
         let acp_session_id = AcpSessionId::new(session_id).expect("valid session_id");
-        let cancel_subject = session_subjects::agent::CancelSubject::new(&acp_prefix, &acp_session_id);
-        let _ = self.nats.publish(cancel_subject, vec![].into()).await;
-        let cancelled_subject = session_subjects::agent::CancelledSubject::new(&acp_prefix, &acp_session_id);
-        let _ = self.nats.publish(cancelled_subject, vec![].into()).await;
+        let cancel_subject = session_subjects::agent::CancelSubject::new(&acp_prefix, &acp_session_id).to_string();
+        self.notifier.publish(cancel_subject, bytes::Bytes::new()).await;
+        let cancelled_subject = session_subjects::agent::CancelledSubject::new(&acp_prefix, &acp_session_id).to_string();
+        self.notifier.publish(cancelled_subject, bytes::Bytes::new()).await;
         if let Err(e) = self.store.delete(session_id).await {
             Self::warn_delete_session_failed(session_id, &e);
         }
@@ -566,7 +561,7 @@ where
 }
 
 #[async_trait::async_trait(?Send)]
-impl<N, C, J> agent_client_protocol::Agent for TrogonAcpAgent<N, C, J>
+impl<N, C, J, S, Notif> agent_client_protocol::Agent for TrogonAcpAgent<N, C, J, S, Notif>
 where
     N: RequestClient
         + PublishClient
@@ -579,6 +574,8 @@ where
     C: GetElapsed + Send + Sync + 'static,
     J: JetStreamPublisher + JetStreamGetStream + Send + Sync + 'static,
     JsMessageOf<J>: JsRequestMessage,
+    S: SessionStore + Send + Sync + 'static,
+    Notif: SessionNotifier + Send + Sync + 'static,
 {
     async fn initialize(&self, args: InitializeRequest) -> Result<InitializeResponse> {
         let client = args
@@ -1850,6 +1847,168 @@ mod tests {
         assert_eq!(result, Some("claude-opus-4-6"));
     }
 
+    // ── Unit tests (no NATS required — use in-memory mocks) ──────────────────
+
+    mod unit {
+        use super::super::*;
+        use super::MockJs;
+        use acp_nats::{AcpPrefix, Bridge, Config, NatsAuth, NatsConfig};
+        use agent_client_protocol::{
+            Agent, NewSessionRequest, SessionConfigOptionValue, SetSessionConfigOptionRequest,
+            SetSessionModeRequest,
+        };
+        use std::sync::Arc;
+        use tokio::sync::{RwLock, mpsc};
+        use trogon_acp_runner::session_notifier::mock::MockSessionNotifier;
+        use trogon_acp_runner::session_store::mock::MemorySessionStore;
+        use trogon_nats::AdvancedMockNatsClient;
+        use trogon_std::time::SystemClock;
+
+        type MockAgent = TrogonAcpAgent<
+            AdvancedMockNatsClient,
+            SystemClock,
+            MockJs,
+            MemorySessionStore,
+            MockSessionNotifier,
+        >;
+
+        async fn run_in_local<F, Fut>(f: F)
+        where
+            F: FnOnce() -> Fut,
+            Fut: std::future::Future<Output = ()>,
+        {
+            tokio::task::LocalSet::new().run_until(f()).await;
+        }
+
+        fn make_mock_agent() -> (MockAgent, mpsc::Receiver<agent_client_protocol::SessionNotification>) {
+            let nats = AdvancedMockNatsClient::new();
+            let js = MockJs::new();
+            let store = MemorySessionStore::new();
+            let notifier = MockSessionNotifier::new();
+            let (notif_tx, notif_rx) = mpsc::channel(64);
+            let gateway_config = Arc::new(RwLock::new(None));
+            let config = Config::new(
+                AcpPrefix::new("acp").unwrap(),
+                NatsConfig { servers: vec!["unused".into()], auth: NatsAuth::None },
+            );
+            let js_client = js.clone();
+            let bridge = Bridge::new(
+                nats,
+                js_client,
+                SystemClock,
+                &opentelemetry::global::meter("unit-test"),
+                config,
+                notif_tx.clone(),
+            );
+            let agent = TrogonAcpAgent::new(
+                bridge,
+                store,
+                notifier,
+                "acp",
+                notif_tx,
+                "claude-opus-4-6",
+                gateway_config,
+            );
+            (agent, notif_rx)
+        }
+
+        #[tokio::test(flavor = "current_thread")]
+        async fn new_session_saves_to_store_and_returns_session_id() {
+            run_in_local(|| async {
+                let (agent, _rx) = make_mock_agent();
+                let resp = agent
+                    .new_session(NewSessionRequest::new("/test/cwd").mcp_servers(vec![]))
+                    .await
+                    .unwrap();
+                let sid = resp.session_id.to_string();
+                assert!(!sid.is_empty(), "session_id must be non-empty");
+                let state = agent.store.load(&sid).await.unwrap();
+                assert_eq!(state.cwd, "/test/cwd");
+                assert_eq!(state.mode, "default");
+            }).await;
+        }
+
+        #[tokio::test(flavor = "current_thread")]
+        async fn set_session_mode_persists_to_store() {
+            run_in_local(|| async {
+                let (agent, _rx) = make_mock_agent();
+                let new_resp = agent
+                    .new_session(NewSessionRequest::new("/cwd").mcp_servers(vec![]))
+                    .await
+                    .unwrap();
+                let sid = new_resp.session_id.clone();
+
+                agent
+                    .set_session_mode(SetSessionModeRequest::new(sid.clone(), "plan"))
+                    .await
+                    .unwrap();
+
+                let state = agent.store.load(&sid.to_string()).await.unwrap();
+                assert_eq!(state.mode, "plan");
+            }).await;
+        }
+
+        #[tokio::test(flavor = "current_thread")]
+        async fn set_session_config_option_model_persists_to_store() {
+            run_in_local(|| async {
+                let (agent, _rx) = make_mock_agent();
+                let new_resp = agent
+                    .new_session(NewSessionRequest::new("/cwd").mcp_servers(vec![]))
+                    .await
+                    .unwrap();
+                let sid = new_resp.session_id.clone();
+
+                let req = SetSessionConfigOptionRequest::new(
+                    sid.clone(),
+                    "model",
+                    SessionConfigOptionValue::ValueId { value: "sonnet".into() },
+                );
+                agent.set_session_config_option(req).await.unwrap();
+
+                let state = agent.store.load(&sid.to_string()).await.unwrap();
+                assert_eq!(state.model.as_deref(), Some("claude-sonnet-4-6"));
+            }).await;
+        }
+
+        #[tokio::test(flavor = "current_thread")]
+        async fn set_session_mode_invalid_returns_error() {
+            run_in_local(|| async {
+                let (agent, _rx) = make_mock_agent();
+                let new_resp = agent
+                    .new_session(NewSessionRequest::new("/cwd").mcp_servers(vec![]))
+                    .await
+                    .unwrap();
+                let sid = new_resp.session_id.clone();
+
+                let result = agent
+                    .set_session_mode(SetSessionModeRequest::new(sid, "invalid_mode"))
+                    .await;
+                assert!(result.is_err(), "invalid mode must return error");
+            }).await;
+        }
+
+        #[tokio::test(flavor = "current_thread")]
+        async fn list_sessions_returns_saved_sessions() {
+            run_in_local(|| async {
+                let (agent, _rx) = make_mock_agent();
+                agent
+                    .new_session(NewSessionRequest::new("/project/a").mcp_servers(vec![]))
+                    .await
+                    .unwrap();
+                agent
+                    .new_session(NewSessionRequest::new("/project/b").mcp_servers(vec![]))
+                    .await
+                    .unwrap();
+
+                let resp = agent
+                    .list_sessions(agent_client_protocol::ListSessionsRequest::new())
+                    .await
+                    .unwrap();
+                assert_eq!(resp.sessions.len(), 2);
+            }).await;
+        }
+    }
+
     // ── Integration tests (require Docker) ────────────────────────────────────
     //
     // These tests spin up a real NATS server via testcontainers and exercise
@@ -1871,7 +2030,7 @@ mod tests {
         use testcontainers_modules::testcontainers::runners::AsyncRunner;
         use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt};
         use tokio::sync::{RwLock, mpsc};
-        use trogon_acp_runner::{GatewayConfig, SessionState, SessionStore};
+        use trogon_acp_runner::{GatewayConfig, NatsSessionNotifier, NatsSessionStore, SessionState};
         use trogon_std::time::SystemClock;
 
         type RealAgent = TrogonAcpAgent<async_nats::Client, SystemClock, trogon_nats::jetstream::NatsJetStreamClient>;
@@ -1897,7 +2056,7 @@ mod tests {
             RealAgent,
             tokio::sync::mpsc::Receiver<agent_client_protocol::SessionNotification>,
         ) {
-            let store = SessionStore::open(js).await.unwrap();
+            let store = NatsSessionStore::open(js).await.unwrap();
             let (notif_tx, notif_rx) = mpsc::channel(64);
             let gateway_config = Arc::new(RwLock::new(None::<GatewayConfig>));
 
@@ -1921,7 +2080,7 @@ mod tests {
             let agent = TrogonAcpAgent::new(
                 bridge,
                 store,
-                nats,
+                NatsSessionNotifier::new(nats),
                 "acp",
                 notif_tx,
                 "claude-opus-4-6",
@@ -2150,7 +2309,7 @@ mod tests {
             let sid = resp.session_id.to_string();
 
             // Read back from the same KV bucket
-            let store2 = SessionStore::open(&js).await.unwrap();
+            let store2 = NatsSessionStore::open(&js).await.unwrap();
             let state = store2.load(&sid).await.unwrap();
             assert_eq!(state.cwd, "/workspace/myproject");
             assert_eq!(state.mode, "default");
@@ -2186,7 +2345,7 @@ mod tests {
             let resp = agent.new_session(req).await.unwrap();
             let sid = resp.session_id.to_string();
 
-            let store2 = SessionStore::open(&js).await.unwrap();
+            let store2 = NatsSessionStore::open(&js).await.unwrap();
             let state = store2.load(&sid).await.unwrap();
             assert_eq!(
                 state.system_prompt.as_deref(),
@@ -2217,7 +2376,7 @@ mod tests {
             let resp = agent.new_session(req).await.unwrap();
             let sid = resp.session_id.to_string();
 
-            let store2 = SessionStore::open(&js).await.unwrap();
+            let store2 = NatsSessionStore::open(&js).await.unwrap();
             let state = store2.load(&sid).await.unwrap();
             assert_eq!(
                 state.system_prompt.as_deref(),
@@ -2275,7 +2434,7 @@ mod tests {
             let req = SetSessionModeRequest::new(sid.clone(), "acceptEdits");
             agent.set_session_mode(req).await.unwrap();
 
-            let store = SessionStore::open(&js).await.unwrap();
+            let store = NatsSessionStore::open(&js).await.unwrap();
             let state = store.load(&sid.to_string()).await.unwrap();
             assert_eq!(state.mode, "acceptEdits");
         }
@@ -2312,7 +2471,7 @@ mod tests {
             let req = SetSessionConfigOptionRequest::new(sid.clone(), "mode", "plan");
             agent.set_session_config_option(req).await.unwrap();
 
-            let store = SessionStore::open(&js).await.unwrap();
+            let store = NatsSessionStore::open(&js).await.unwrap();
             let state = store.load(&sid.to_string()).await.unwrap();
             assert_eq!(state.mode, "plan");
         }
@@ -2374,7 +2533,7 @@ mod tests {
             let req = SetSessionConfigOptionRequest::new(sid.clone(), "model", "claude-opus-4-6");
             agent.set_session_config_option(req).await.unwrap();
 
-            let store = SessionStore::open(&js).await.unwrap();
+            let store = NatsSessionStore::open(&js).await.unwrap();
             let state = store.load(&sid.to_string()).await.unwrap();
             assert_eq!(state.model.as_deref(), Some("claude-opus-4-6"));
         }
@@ -2433,7 +2592,7 @@ mod tests {
             let req = SetSessionModelRequest::new(sid.clone(), "sonnet");
             agent.set_session_model(req).await.unwrap();
 
-            let store = SessionStore::open(&js).await.unwrap();
+            let store = NatsSessionStore::open(&js).await.unwrap();
             let state = store.load(&sid.to_string()).await.unwrap();
             assert_eq!(state.model.as_deref(), Some("claude-sonnet-4-6"));
         }
@@ -2490,7 +2649,7 @@ mod tests {
             let (agent, _rx) = make_agent(nats, &js).await;
 
             // Manually save a session with empty cwd
-            let store = SessionStore::open(&js).await.unwrap();
+            let store = NatsSessionStore::open(&js).await.unwrap();
             store
                 .save(
                     "no-cwd",
@@ -2532,7 +2691,7 @@ mod tests {
             let src_id = new_resp.session_id.clone();
 
             // Patch source session's mode and model via store
-            let store = SessionStore::open(&js).await.unwrap();
+            let store = NatsSessionStore::open(&js).await.unwrap();
             let mut state = store.load(&src_id.to_string()).await.unwrap();
             state.mode = "plan".to_string();
             state.model = Some("claude-opus-4-6".to_string());
@@ -2595,7 +2754,7 @@ mod tests {
             let fork_resp = agent.fork_session(fork_req).await.unwrap();
             let forked_id = fork_resp.session_id.to_string();
 
-            let store2 = SessionStore::open(&js).await.unwrap();
+            let store2 = NatsSessionStore::open(&js).await.unwrap();
             let state = store2.load(&forked_id).await.unwrap();
             assert_eq!(
                 state.system_prompt.as_deref(),
@@ -2638,7 +2797,7 @@ mod tests {
             let sid = new_resp.session_id.clone();
 
             // Update mode and model in the store before resuming
-            let store = SessionStore::open(&js).await.unwrap();
+            let store = NatsSessionStore::open(&js).await.unwrap();
             let mut state = store.load(&sid.to_string()).await.unwrap();
             state.mode = "plan".to_string();
             state.model = Some("claude-sonnet-4-6".to_string());
@@ -2679,7 +2838,7 @@ mod tests {
             let src_id = new_resp.session_id.clone();
 
             // Inject some message history into the source session
-            let store = SessionStore::open(&js).await.unwrap();
+            let store = NatsSessionStore::open(&js).await.unwrap();
             let mut state = store.load(&src_id.to_string()).await.unwrap();
             state.messages = vec![
                 AgentMsg {
@@ -2743,7 +2902,7 @@ mod tests {
                 .await
                 .unwrap();
 
-            let store = SessionStore::open(&js).await.unwrap();
+            let store = NatsSessionStore::open(&js).await.unwrap();
             let state = store.load(&sid).await.unwrap();
             assert_eq!(state.cwd, "", "deleted session must return empty default");
         }
@@ -2760,8 +2919,8 @@ mod tests {
             let sid = new_resp.session_id.to_string();
 
             // Subscribe to cancel and cancelled NATS subjects BEFORE calling close.
-            let cancel_sub_subject = format!("acp.{}.agent.session.cancel", sid);
-            let cancelled_sub_subject = format!("acp.{}.agent.session.cancelled", sid);
+            let cancel_sub_subject = format!("acp.session.{}.agent.cancel", sid);
+            let cancelled_sub_subject = format!("acp.session.{}.agent.cancelled", sid);
             let mut cancel_sub = nats.subscribe(cancel_sub_subject.clone()).await.unwrap();
             let mut cancelled_sub = nats.subscribe(cancelled_sub_subject.clone()).await.unwrap();
 
@@ -3535,6 +3694,7 @@ mod tests {
     use async_nats::jetstream;
     use testcontainers_modules::nats::Nats;
     use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
+    use trogon_acp_runner::{NatsSessionNotifier, NatsSessionStore};
     use trogon_std::time::SystemClock;
 
     async fn start_nats_js() -> (ContainerAsync<Nats>, async_nats::Client, jetstream::Context) {
@@ -3558,7 +3718,7 @@ mod tests {
         TrogonAcpAgent<async_nats::Client, SystemClock, trogon_nats::jetstream::NatsJetStreamClient>,
         mpsc::Receiver<SessionNotification>,
     ) {
-        let store = trogon_acp_runner::SessionStore::open(&js).await.unwrap();
+        let store = NatsSessionStore::open(&js).await.unwrap();
         let config = Config::new(
             AcpPrefix::new("acp").unwrap(),
             NatsConfig {
@@ -3577,7 +3737,7 @@ mod tests {
             TrogonAcpAgent::new(
                 bridge,
                 store,
-                nats,
+                NatsSessionNotifier::new(nats),
                 "acp",
                 tx,
                 "claude-sonnet-4-6",
@@ -3617,7 +3777,7 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn authenticate_gateway_sets_gateway_config() {
         let (_container, nats, js) = start_nats_js().await;
-        let store = trogon_acp_runner::SessionStore::open(&js).await.unwrap();
+        let store = NatsSessionStore::open(&js).await.unwrap();
         let config = Config::new(
             AcpPrefix::new("acp").unwrap(),
             NatsConfig {
@@ -3634,7 +3794,7 @@ mod tests {
         let agent = TrogonAcpAgent::new(
             bridge,
             store,
-            nats,
+            NatsSessionNotifier::new(nats),
             "acp",
             tx,
             "claude-sonnet-4-6",
