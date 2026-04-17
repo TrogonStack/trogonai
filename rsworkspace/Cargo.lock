@@ -3472,6 +3472,7 @@ dependencies = [
  "trogon-source-sentry",
  "trogon-source-slack",
  "trogon-source-telegram",
+ "trogon-source-twitter",
  "trogon-std",
 ]
 
@@ -3674,6 +3675,26 @@ dependencies = [
  "serde_json",
  "sha2",
  "subtle",
+ "tokio",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+ "trogon-nats",
+ "trogon-std",
+]
+
+[[package]]
+name = "trogon-source-twitter"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "axum",
+ "base64 0.22.1",
+ "bytes",
+ "hmac",
+ "serde",
+ "serde_json",
+ "sha2",
  "tokio",
  "tower",
  "tracing",
