@@ -212,7 +212,7 @@ async fn fs_read_text_file_through_proxy_returns_file_content() {
             };
             let payload = serde_json::to_vec(&envelope).unwrap();
             let reply = nats1
-                .request("acp.sess-1.client.fs.read_text_file", Bytes::from(payload))
+                .request("acp.session.sess-1.client.fs.read_text_file", Bytes::from(payload))
                 .await
                 .expect("request must succeed");
 
@@ -262,7 +262,7 @@ async fn fs_write_text_file_through_proxy_returns_success() {
             };
             let payload = serde_json::to_vec(&envelope).unwrap();
             let reply = nats1
-                .request("acp.sess-1.client.fs.write_text_file", Bytes::from(payload))
+                .request("acp.session.sess-1.client.fs.write_text_file", Bytes::from(payload))
                 .await
                 .expect("request must succeed");
 
@@ -311,7 +311,7 @@ async fn request_permission_through_proxy_returns_outcome() {
             let payload = serde_json::to_vec(&envelope).unwrap();
             let reply = nats1
                 .request(
-                    "acp.sess-1.client.session.request_permission",
+                    "acp.session.sess-1.client.session.request_permission",
                     Bytes::from(payload),
                 )
                 .await
@@ -390,7 +390,7 @@ async fn session_update_through_proxy_calls_client() {
             );
             let payload = serde_json::to_vec(&notification).unwrap();
             nats1
-                .publish("acp.sess-1.client.session.update", Bytes::from(payload))
+                .publish("acp.session.sess-1.client.session.update", Bytes::from(payload))
                 .await
                 .unwrap();
 
@@ -433,7 +433,7 @@ async fn terminal_create_through_proxy_returns_terminal_id() {
             };
             let payload = serde_json::to_vec(&envelope).unwrap();
             let reply = nats1
-                .request("acp.sess-1.client.terminal.create", Bytes::from(payload))
+                .request("acp.session.sess-1.client.terminal.create", Bytes::from(payload))
                 .await
                 .expect("request must succeed");
 
@@ -483,7 +483,7 @@ async fn terminal_output_through_proxy_returns_success() {
             };
             let payload = serde_json::to_vec(&envelope).unwrap();
             let reply = nats1
-                .request("acp.sess-1.client.terminal.output", Bytes::from(payload))
+                .request("acp.session.sess-1.client.terminal.output", Bytes::from(payload))
                 .await
                 .expect("request must succeed");
 
@@ -533,7 +533,7 @@ async fn terminal_release_through_proxy_returns_success() {
             };
             let payload = serde_json::to_vec(&envelope).unwrap();
             let reply = nats1
-                .request("acp.sess-1.client.terminal.release", Bytes::from(payload))
+                .request("acp.session.sess-1.client.terminal.release", Bytes::from(payload))
                 .await
                 .expect("request must succeed");
 
@@ -584,7 +584,7 @@ async fn terminal_wait_for_exit_through_proxy_returns_exit_code() {
             let payload = serde_json::to_vec(&envelope).unwrap();
             let reply = nats1
                 .request(
-                    "acp.sess-1.client.terminal.wait_for_exit",
+                    "acp.session.sess-1.client.terminal.wait_for_exit",
                     Bytes::from(payload),
                 )
                 .await
@@ -631,7 +631,7 @@ async fn ext_session_prompt_response_through_proxy_does_not_panic() {
             let payload = serde_json::to_vec(&response).unwrap();
             nats1
                 .publish(
-                    "acp.sess-1.client.ext.session.prompt_response",
+                    "acp.session.sess-1.client.ext.session.prompt_response",
                     Bytes::from(payload),
                 )
                 .await
@@ -675,7 +675,7 @@ async fn terminal_kill_through_proxy_returns_success() {
             };
             let payload = serde_json::to_vec(&envelope).unwrap();
             let reply = nats1
-                .request("acp.sess-1.client.terminal.kill", Bytes::from(payload))
+                .request("acp.session.sess-1.client.terminal.kill", Bytes::from(payload))
                 .await
                 .expect("request must succeed");
 

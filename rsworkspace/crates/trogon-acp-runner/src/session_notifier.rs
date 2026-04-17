@@ -31,6 +31,12 @@ pub trait SessionNotifier: Clone {
     /// Publish `payload` to `subject` (fire-and-forget; errors are swallowed).
     async fn publish(&self, subject: String, payload: Bytes);
 
+    /// Schedule a fire-and-forget publish after `delay`.
+    ///
+    /// The real implementation uses `tokio::spawn` (NATS client is `Send`).
+    /// Test mocks record the publish synchronously and ignore the delay.
+    fn schedule_publish(&self, subject: String, payload: Bytes, delay: Duration);
+
     /// Subscribe to `subject` for a cancel signal.
     ///
     /// Returns a `oneshot::Receiver` that resolves the first time a message
@@ -66,6 +72,16 @@ impl NatsSessionNotifier {
 impl SessionNotifier for NatsSessionNotifier {
     async fn publish(&self, subject: String, payload: Bytes) {
         let _ = self.client.publish(subject, payload).await;
+    }
+
+    fn schedule_publish(&self, subject: String, payload: Bytes, delay: Duration) {
+        let client = self.client.clone();
+        tokio::spawn(async move {
+            if !delay.is_zero() {
+                tokio::time::sleep(delay).await;
+            }
+            let _ = client.publish(subject, payload).await;
+        });
     }
 
     async fn subscribe_cancel(
@@ -154,6 +170,10 @@ pub mod mock {
     #[async_trait::async_trait(?Send)]
     impl SessionNotifier for MockSessionNotifier {
         async fn publish(&self, subject: String, payload: Bytes) {
+            self.published.lock().unwrap().push((subject, payload));
+        }
+
+        fn schedule_publish(&self, subject: String, payload: Bytes, _delay: Duration) {
             self.published.lock().unwrap().push((subject, payload));
         }
 
