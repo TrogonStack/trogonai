@@ -249,11 +249,11 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
 
         let max_turns = match std::env::var("XAI_MAX_TURNS") {
             Ok(s) => match s.parse::<u32>() {
-                Ok(0) => None,       // 0 = server default: omit max_turns field
-                Ok(n) => Some(n),    // explicit positive value
-                Err(_) => Some(10),  // invalid → app default
+                Ok(0) => None,      // 0 = server default: omit max_turns field
+                Ok(n) => Some(n),   // explicit positive value
+                Err(_) => Some(10), // invalid → app default
             },
-            Err(_) => Some(10),      // unset → app default
+            Err(_) => Some(10), // unset → app default
         };
 
         Self {
@@ -1242,129 +1242,6 @@ fn parse_tool_arguments(arguments: &str) -> serde_json::Value {
         .unwrap_or_else(|_| serde_json::Value::String(arguments.to_string()))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parse_tool_arguments_valid_json_returns_object() {
-        let val = parse_tool_arguments(r#"{"q":"test","limit":5}"#);
-        assert!(val.is_object(), "expected object, got {val:?}");
-        assert_eq!(val["q"], "test");
-        assert_eq!(val["limit"], 5);
-    }
-
-    #[test]
-    fn parse_tool_arguments_invalid_json_falls_back_to_string() {
-        let val = parse_tool_arguments("not-json");
-        assert_eq!(val, serde_json::Value::String("not-json".to_string()));
-    }
-
-    #[test]
-    fn parse_tool_arguments_empty_string_falls_back_to_string() {
-        let val = parse_tool_arguments("");
-        assert_eq!(val, serde_json::Value::String(String::new()));
-    }
-
-    // ── trim_history ──────────────────────────────────────────────────────────
-
-    fn msg(role: &str, content: &str) -> Message {
-        Message {
-            role: role.to_string(),
-            content: Some(content.to_string()),
-        }
-    }
-
-    fn roles(history: &[Message]) -> Vec<&str> {
-        history.iter().map(|m| m.role.as_str()).collect()
-    }
-
-    #[test]
-    fn trim_history_no_op_when_at_or_below_max() {
-        let mut h = vec![msg("user", "a"), msg("assistant", "b")];
-        trim_history(&mut h, 2);
-        assert_eq!(h.len(), 2);
-        trim_history(&mut h, 4);
-        assert_eq!(h.len(), 2);
-    }
-
-    #[test]
-    fn trim_history_removes_oldest_pair() {
-        // [u1,a1, u2,a2, u3,a3], max=4 → remove first pair → [u2,a2, u3,a3]
-        let mut h = vec![
-            msg("user", "u1"),
-            msg("assistant", "a1"),
-            msg("user", "u2"),
-            msg("assistant", "a2"),
-            msg("user", "u3"),
-            msg("assistant", "a3"),
-        ];
-        trim_history(&mut h, 4);
-        assert_eq!(h.len(), 4);
-        assert_eq!(h[0].content_str(), "u2");
-    }
-
-    #[test]
-    fn trim_history_odd_max_removes_full_pair() {
-        // max=3, 4 messages → excess=1 → remove one pair → 2 remain (not 3)
-        let mut h = vec![
-            msg("user", "u1"),
-            msg("assistant", "a1"),
-            msg("user", "u2"),
-            msg("assistant", "a2"),
-        ];
-        trim_history(&mut h, 3);
-        assert_eq!(h.len(), 2);
-        assert_eq!(h[0].content_str(), "u2");
-        assert_eq!(h[1].content_str(), "a2");
-    }
-
-    #[test]
-    fn trim_history_orphaned_user_removed_individually() {
-        // [user_orphan, user_new, assistant_new], max=2
-        // → remove orphan → [user_new, assistant_new]
-        let mut h = vec![
-            msg("user", "orphan"),
-            msg("user", "new"),
-            msg("assistant", "reply"),
-        ];
-        trim_history(&mut h, 2);
-        assert_eq!(h.len(), 2);
-        assert_eq!(h[0].content_str(), "new");
-        assert_eq!(h[1].content_str(), "reply");
-    }
-
-    #[test]
-    fn trim_history_multiple_orphans_then_pair() {
-        // [orphan1, orphan2, user, assistant], max=2
-        // → remove orphan1 → remove orphan2 → [user, assistant]
-        let mut h = vec![
-            msg("user", "orphan1"),
-            msg("user", "orphan2"),
-            msg("user", "new"),
-            msg("assistant", "reply"),
-        ];
-        trim_history(&mut h, 2);
-        assert_eq!(roles(&h), vec!["user", "assistant"]);
-        assert_eq!(h[0].content_str(), "new");
-    }
-
-    #[test]
-    fn trim_history_stops_on_unexpected_leading_role() {
-        // assistant at front (malformed) — do not touch
-        let mut h = vec![msg("assistant", "a"), msg("user", "u")];
-        trim_history(&mut h, 1);
-        assert_eq!(h.len(), 2, "should not trim malformed leading assistant");
-    }
-
-    #[test]
-    fn trim_history_empty_is_noop() {
-        let mut h: Vec<Message> = vec![];
-        trim_history(&mut h, 0);
-        assert!(h.is_empty());
-    }
-}
-
 #[cfg(feature = "test-helpers")]
 impl XaiAgent<XaiClient, NatsSessionNotifier> {
     /// Creates an `XaiAgent` backed by a specific NATS KV bucket. For tests only.
@@ -1525,5 +1402,128 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
     pub fn with_max_history_messages(mut self, n: usize) -> Self {
         self.max_history_messages = n;
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_tool_arguments_valid_json_returns_object() {
+        let val = parse_tool_arguments(r#"{"q":"test","limit":5}"#);
+        assert!(val.is_object(), "expected object, got {val:?}");
+        assert_eq!(val["q"], "test");
+        assert_eq!(val["limit"], 5);
+    }
+
+    #[test]
+    fn parse_tool_arguments_invalid_json_falls_back_to_string() {
+        let val = parse_tool_arguments("not-json");
+        assert_eq!(val, serde_json::Value::String("not-json".to_string()));
+    }
+
+    #[test]
+    fn parse_tool_arguments_empty_string_falls_back_to_string() {
+        let val = parse_tool_arguments("");
+        assert_eq!(val, serde_json::Value::String(String::new()));
+    }
+
+    // ── trim_history ──────────────────────────────────────────────────────────
+
+    fn msg(role: &str, content: &str) -> Message {
+        Message {
+            role: role.to_string(),
+            content: Some(content.to_string()),
+        }
+    }
+
+    fn roles(history: &[Message]) -> Vec<&str> {
+        history.iter().map(|m| m.role.as_str()).collect()
+    }
+
+    #[test]
+    fn trim_history_no_op_when_at_or_below_max() {
+        let mut h = vec![msg("user", "a"), msg("assistant", "b")];
+        trim_history(&mut h, 2);
+        assert_eq!(h.len(), 2);
+        trim_history(&mut h, 4);
+        assert_eq!(h.len(), 2);
+    }
+
+    #[test]
+    fn trim_history_removes_oldest_pair() {
+        // [u1,a1, u2,a2, u3,a3], max=4 → remove first pair → [u2,a2, u3,a3]
+        let mut h = vec![
+            msg("user", "u1"),
+            msg("assistant", "a1"),
+            msg("user", "u2"),
+            msg("assistant", "a2"),
+            msg("user", "u3"),
+            msg("assistant", "a3"),
+        ];
+        trim_history(&mut h, 4);
+        assert_eq!(h.len(), 4);
+        assert_eq!(h[0].content_str(), "u2");
+    }
+
+    #[test]
+    fn trim_history_odd_max_removes_full_pair() {
+        // max=3, 4 messages → excess=1 → remove one pair → 2 remain (not 3)
+        let mut h = vec![
+            msg("user", "u1"),
+            msg("assistant", "a1"),
+            msg("user", "u2"),
+            msg("assistant", "a2"),
+        ];
+        trim_history(&mut h, 3);
+        assert_eq!(h.len(), 2);
+        assert_eq!(h[0].content_str(), "u2");
+        assert_eq!(h[1].content_str(), "a2");
+    }
+
+    #[test]
+    fn trim_history_orphaned_user_removed_individually() {
+        // [user_orphan, user_new, assistant_new], max=2
+        // → remove orphan → [user_new, assistant_new]
+        let mut h = vec![
+            msg("user", "orphan"),
+            msg("user", "new"),
+            msg("assistant", "reply"),
+        ];
+        trim_history(&mut h, 2);
+        assert_eq!(h.len(), 2);
+        assert_eq!(h[0].content_str(), "new");
+        assert_eq!(h[1].content_str(), "reply");
+    }
+
+    #[test]
+    fn trim_history_multiple_orphans_then_pair() {
+        // [orphan1, orphan2, user, assistant], max=2
+        // → remove orphan1 → remove orphan2 → [user, assistant]
+        let mut h = vec![
+            msg("user", "orphan1"),
+            msg("user", "orphan2"),
+            msg("user", "new"),
+            msg("assistant", "reply"),
+        ];
+        trim_history(&mut h, 2);
+        assert_eq!(roles(&h), vec!["user", "assistant"]);
+        assert_eq!(h[0].content_str(), "new");
+    }
+
+    #[test]
+    fn trim_history_stops_on_unexpected_leading_role() {
+        // assistant at front (malformed) — do not touch
+        let mut h = vec![msg("assistant", "a"), msg("user", "u")];
+        trim_history(&mut h, 1);
+        assert_eq!(h.len(), 2, "should not trim malformed leading assistant");
+    }
+
+    #[test]
+    fn trim_history_empty_is_noop() {
+        let mut h: Vec<Message> = vec![];
+        trim_history(&mut h, 0);
+        assert!(h.is_empty());
     }
 }

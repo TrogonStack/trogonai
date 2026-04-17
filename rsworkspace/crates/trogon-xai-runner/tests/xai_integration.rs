@@ -3,6 +3,9 @@
 //! All tests use an in-process `MockXaiHttpClient` — no TCP servers are needed
 //! for the xAI HTTP layer. A minimal fake NATS TCP stub is still used to obtain
 //! a real `async_nats::Client` (fire-and-forget PUBs are silently dropped).
+#![allow(clippy::await_holding_lock)]
+#![allow(clippy::useless_conversion)]
+#![allow(clippy::arc_with_non_send_sync)]
 //!
 //! Tests that need to inspect HTTP request parameters access `mock.calls` after
 //! each prompt. Tests that need request body control pre-load responses with
@@ -2314,10 +2317,16 @@ async fn xai_max_turns_zero_means_server_default() {
         std::env::set_var("XAI_MAX_TURNS", "0");
     }
     let agent = XaiAgent::new_in_memory(
-        MockSessionNotifier::new(), "grok-3", "fake-key",
+        MockSessionNotifier::new(),
+        "grok-3",
+        "fake-key",
         Arc::new(MockXaiHttpClient::new()),
     );
-    assert_eq!(agent.test_max_turns(), None, "XAI_MAX_TURNS=0 must produce None (server default)");
+    assert_eq!(
+        agent.test_max_turns(),
+        None,
+        "XAI_MAX_TURNS=0 must produce None (server default)"
+    );
 }
 
 #[tokio::test]
@@ -2339,7 +2348,9 @@ async fn xai_max_turns_custom_value_accepted() {
         std::env::set_var("XAI_MAX_TURNS", "5");
     }
     let agent = XaiAgent::new_in_memory(
-        MockSessionNotifier::new(), "grok-3", "fake-key",
+        MockSessionNotifier::new(),
+        "grok-3",
+        "fake-key",
         Arc::new(MockXaiHttpClient::new()),
     );
     assert_eq!(agent.test_max_turns(), Some(5));

@@ -630,16 +630,18 @@ async fn kv_stateful_multi_turn_uses_previous_response_id() {
         .await
         .unwrap();
 
-    let bodies = bodies.lock().unwrap();
-    assert_eq!(bodies.len(), 2, "expected two HTTP requests");
-    assert_eq!(
-        bodies[1]
-            .get("previous_response_id")
-            .and_then(|v| v.as_str()),
-        Some("resp_kv_0"),
-        "second turn must carry previous_response_id from KV: {:?}",
-        bodies[1],
-    );
+    {
+        let bodies = bodies.lock().unwrap();
+        assert_eq!(bodies.len(), 2, "expected two HTTP requests");
+        assert_eq!(
+            bodies[1]
+                .get("previous_response_id")
+                .and_then(|v| v.as_str()),
+            Some("resp_kv_0"),
+            "second turn must carry previous_response_id from KV: {:?}",
+            bodies[1],
+        );
+    }
 
     cleanup(&url, &bucket).await;
 }
@@ -1000,17 +1002,19 @@ async fn kv_crash_recovery_idempotency_check() {
     );
 
     // xAI must have received exactly ONE user message — no duplicate.
-    let captured = body.lock().unwrap();
-    let body_val = captured.as_ref().expect("xAI must have been called");
-    let input = body_val["input"]
-        .as_array()
-        .expect("input must be an array");
-    let user_msgs: Vec<_> = input.iter().filter(|m| m["role"] == "user").collect();
-    assert_eq!(
-        user_msgs.len(),
-        1,
-        "xAI request must contain exactly one user message (no duplicate): {input:?}"
-    );
+    {
+        let captured = body.lock().unwrap();
+        let body_val = captured.as_ref().expect("xAI must have been called");
+        let input = body_val["input"]
+            .as_array()
+            .expect("input must be an array");
+        let user_msgs: Vec<_> = input.iter().filter(|m| m["role"] == "user").collect();
+        assert_eq!(
+            user_msgs.len(),
+            1,
+            "xAI request must contain exactly one user message (no duplicate): {input:?}"
+        );
+    }
 
     // History: user + assistant (clean recovery, no duplicate).
     let history = agent_b.test_session_history(&sid).await;
