@@ -29,6 +29,31 @@ pub use testing::{
     expect_error,
 };
 
+pub trait EventCodec<T> {
+    type Error;
+
+    fn encode(&self, value: &T) -> Result<String, Self::Error>;
+    fn decode(&self, value: &str) -> Result<T, Self::Error>;
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct JsonEventCodec;
+
+impl<T> EventCodec<T> for JsonEventCodec
+where
+    T: Serialize + DeserializeOwned,
+{
+    type Error = serde_json::Error;
+
+    fn encode(&self, value: &T) -> Result<String, Self::Error> {
+        serde_json::to_string(value)
+    }
+
+    fn decode(&self, value: &str) -> Result<T, Self::Error> {
+        serde_json::from_str(value)
+    }
+}
+
 pub trait StreamEvent {
     fn stream_id(&self) -> &str;
 }
@@ -66,30 +91,57 @@ pub struct RecordedEvent {
 impl EventData {
     pub fn new<E>(event: E) -> serde_json::Result<Self>
     where
-        E: EventType + StreamEvent + Serialize,
+        E: EventType + StreamEvent + Serialize + DeserializeOwned,
+    {
+        Self::new_with_codec(&JsonEventCodec, event)
+    }
+
+    pub fn new_with_codec<E, C>(codec: &C, event: E) -> Result<Self, C::Error>
+    where
+        E: EventType + StreamEvent,
+        C: EventCodec<E>,
     {
         Ok(Self {
             event_id: Uuid::new_v4().to_string(),
             event_type: event.event_type().to_string(),
             stream_id: event.stream_id().to_string(),
-            data: serde_json::to_string(&event)?,
+            data: codec.encode(&event)?,
             metadata: None,
         })
     }
 
     pub fn with_metadata<E, M>(event: E, metadata: Option<M>) -> serde_json::Result<Self>
     where
-        E: EventType + StreamEvent + Serialize,
-        M: Serialize,
+        E: EventType + StreamEvent + Serialize + DeserializeOwned,
+        M: Serialize + DeserializeOwned,
+    {
+        Self::with_codecs(&JsonEventCodec, &JsonEventCodec, event, metadata).map_err(|error| {
+            match error {
+                CodecError::Data(source) | CodecError::Metadata(source) => source,
+            }
+        })
+    }
+
+    pub fn with_codecs<E, M, EC, MC>(
+        event_codec: &EC,
+        metadata_codec: &MC,
+        event: E,
+        metadata: Option<M>,
+    ) -> Result<Self, CodecError<EC::Error, MC::Error>>
+    where
+        E: EventType + StreamEvent,
+        EC: EventCodec<E>,
+        MC: EventCodec<M>,
     {
         Ok(Self {
             event_id: Uuid::new_v4().to_string(),
             event_type: event.event_type().to_string(),
             stream_id: event.stream_id().to_string(),
-            data: serde_json::to_string(&event)?,
+            data: event_codec.encode(&event).map_err(CodecError::Data)?,
             metadata: metadata
-                .map(|value| serde_json::to_string(&value))
-                .transpose()?,
+                .map(|value| metadata_codec.encode(&value))
+                .transpose()
+                .map_err(CodecError::Metadata)?,
         })
     }
 
@@ -123,18 +175,32 @@ impl EventData {
 
     pub fn decode_data<E>(&self) -> serde_json::Result<E>
     where
-        E: DeserializeOwned,
+        E: Serialize + DeserializeOwned,
     {
-        serde_json::from_str(&self.data)
+        self.decode_data_with(&JsonEventCodec)
+    }
+
+    pub fn decode_data_with<E, C>(&self, codec: &C) -> Result<E, C::Error>
+    where
+        C: EventCodec<E>,
+    {
+        codec.decode(&self.data)
     }
 
     pub fn decode_metadata<M>(&self) -> serde_json::Result<Option<M>>
     where
-        M: DeserializeOwned,
+        M: Serialize + DeserializeOwned,
+    {
+        self.decode_metadata_with(&JsonEventCodec)
+    }
+
+    pub fn decode_metadata_with<M, C>(&self, codec: &C) -> Result<Option<M>, C::Error>
+    where
+        C: EventCodec<M>,
     {
         self.metadata
             .as_deref()
-            .map(serde_json::from_str)
+            .map(|value| codec.decode(value))
             .transpose()
     }
 
@@ -154,24 +220,44 @@ impl RecordedEvent {
 
     pub fn decode_data<E>(&self) -> serde_json::Result<E>
     where
-        E: DeserializeOwned,
+        E: Serialize + DeserializeOwned,
     {
-        serde_json::from_str(&self.data)
+        self.decode_data_with(&JsonEventCodec)
+    }
+
+    pub fn decode_data_with<E, C>(&self, codec: &C) -> Result<E, C::Error>
+    where
+        C: EventCodec<E>,
+    {
+        codec.decode(&self.data)
     }
 
     pub fn decode_metadata<M>(&self) -> serde_json::Result<Option<M>>
     where
-        M: DeserializeOwned,
+        M: Serialize + DeserializeOwned,
+    {
+        self.decode_metadata_with(&JsonEventCodec)
+    }
+
+    pub fn decode_metadata_with<M, C>(&self, codec: &C) -> Result<Option<M>, C::Error>
+    where
+        C: EventCodec<M>,
     {
         self.metadata
             .as_deref()
-            .map(serde_json::from_str)
+            .map(|value| codec.decode(value))
             .transpose()
     }
 
     pub fn decode(payload: &[u8]) -> serde_json::Result<Self> {
         serde_json::from_slice::<Self>(payload)
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CodecError<DataError, MetadataError> {
+    Data(DataError),
+    Metadata(MetadataError),
 }
 
 #[cfg(test)]
