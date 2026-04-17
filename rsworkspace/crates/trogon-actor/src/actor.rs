@@ -104,6 +104,7 @@ mod tests {
             MockTranscriptPublisher::new(),
             trogon_nats::MockNatsClient::new(),
             Registry::new(MockRegistryStore::new()),
+            trogon_nats::jetstream::MockJetStreamPublisher::new(),
         );
         runtime.handle_event(&mut Minimal, "e-1", 0).await.unwrap();
     }

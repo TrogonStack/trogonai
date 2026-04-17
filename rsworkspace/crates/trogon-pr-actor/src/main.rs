@@ -55,9 +55,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("ACTOR_INBOX stream ready");
 
     // ── Build runtime and host ────────────────────────────────────────────────
-    let publisher = NatsTranscriptPublisher::new(js);
+    let publisher = NatsTranscriptPublisher::new(js.clone());
     let registry = Registry::new(registry_store);
-    let runtime = ActorRuntime::new(state_store, publisher, nats.clone(), registry);
+    let runtime = ActorRuntime::new(state_store, publisher, nats.clone(), registry, js.clone());
 
     let capability = AgentCapability::new(
         "PrActor",

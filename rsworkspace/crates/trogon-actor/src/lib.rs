@@ -50,9 +50,9 @@
 //! async fn run(nats: async_nats::Client, js: async_nats::jetstream::Context) {
 //!     let state_store  = provision_state(&js).await.unwrap();
 //!     let reg_store    = provision_registry(&js).await.unwrap();
-//!     let publisher    = NatsTranscriptPublisher::new(js);
+//!     let publisher    = NatsTranscriptPublisher::new(js.clone());
 //!     let registry     = Registry::new(reg_store);
-//!     let mut runtime  = ActorRuntime::new(state_store, publisher, nats, registry);
+//!     let mut runtime  = ActorRuntime::new(state_store, publisher, nats, registry, js);
 //!     let mut actor    = PrActor;
 //!     runtime.handle_event(&mut actor, "owner/repo/456", 0).await.unwrap();
 //! }
@@ -70,7 +70,7 @@ pub mod telemetry;
 pub use actor::EntityActor;
 pub use context::{ActorContext, MAX_SPAWN_DEPTH};
 pub use error::{ActorError, SaveError};
-pub use runtime::{ActorRuntime, SPAWN_AGENT_TIMEOUT};
+pub use runtime::{ActorRuntime, SPAWN_AGENT_TIMEOUT, TROGON_REPLY_TO_HEADER};
 pub use state::{
     MAX_OCC_RETRIES, StateStore, provision_state, state_kv_key,
 };

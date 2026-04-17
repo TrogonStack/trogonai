@@ -173,7 +173,7 @@ async fn state_persists_across_events() {
     let publisher = NatsTranscriptPublisher::new(js.clone());
     let registry = Registry::new(registry_store);
 
-    let runtime = ActorRuntime::new(state_store, publisher, nats, registry);
+    let runtime = ActorRuntime::new(state_store, publisher, nats, registry, js.clone());
 
     runtime.handle_event(&mut CounterActor, "entity-1", 0).await.unwrap();
     runtime.handle_event(&mut CounterActor, "entity-1", 0).await.unwrap();
@@ -195,7 +195,7 @@ async fn on_create_called_on_first_event_only() {
     let publisher = NatsTranscriptPublisher::new(js.clone());
     let registry = Registry::new(registry_store);
 
-    let runtime = ActorRuntime::new(state_store, publisher, nats, registry);
+    let runtime = ActorRuntime::new(state_store, publisher, nats, registry, js.clone());
 
     // First event: on_create sets initialized = true.
     runtime.handle_event(&mut InitActor, "e-1", 0).await.unwrap();
@@ -223,7 +223,7 @@ async fn different_entities_have_independent_state() {
     let publisher = NatsTranscriptPublisher::new(js.clone());
     let registry = Registry::new(registry_store);
 
-    let runtime = ActorRuntime::new(state_store, publisher, nats, registry);
+    let runtime = ActorRuntime::new(state_store, publisher, nats, registry, js.clone());
 
     runtime.handle_event(&mut CounterActor, "entity-A", 0).await.unwrap();
     runtime.handle_event(&mut CounterActor, "entity-A", 0).await.unwrap();
@@ -254,7 +254,7 @@ async fn concurrent_events_to_same_entity_no_lost_writes() {
     let publisher = NatsTranscriptPublisher::new(js.clone());
     let registry = Registry::new(registry_store);
 
-    let runtime = ActorRuntime::new(state_store, publisher, nats, registry);
+    let runtime = ActorRuntime::new(state_store, publisher, nats, registry, js.clone());
     let runtime2 = runtime.clone();
 
     // Fire two concurrent handle_event calls at the same entity.
@@ -286,7 +286,7 @@ async fn concurrent_updates_on_existing_state_trigger_update_occ() {
     let publisher = NatsTranscriptPublisher::new(js.clone());
     let registry = Registry::new(registry_store);
 
-    let runtime = ActorRuntime::new(state_store, publisher, nats, registry);
+    let runtime = ActorRuntime::new(state_store, publisher, nats, registry, js.clone());
     let runtime2 = runtime.clone();
 
     // Create initial state (count=1, revision=0).
@@ -412,7 +412,7 @@ async fn corrupted_state_in_kv_returns_deserialize_error() {
         .await
         .unwrap();
 
-    let runtime = ActorRuntime::new(state_store, publisher, nats, registry);
+    let runtime = ActorRuntime::new(state_store, publisher, nats, registry, js.clone());
     let err = runtime
         .handle_event(&mut CounterActor, "entity-corrupt", 0)
         .await
@@ -437,7 +437,7 @@ async fn transcript_entries_written_to_jetstream() {
     let transcript_store = TranscriptStore::new(js.clone());
     transcript_store.provision().await.unwrap();
 
-    let runtime = ActorRuntime::new(state_store, publisher, nats, registry);
+    let runtime = ActorRuntime::new(state_store, publisher, nats, registry, js.clone());
     runtime.handle_event(&mut Scribe, "entity-1", 0).await.unwrap();
 
     let entries = transcript_store.query("scribe", "entity-1").await.unwrap();
@@ -471,7 +471,12 @@ async fn spawn_agent_records_sub_agent_spawn_entry() {
     let mut responder_sub = nats.subscribe("sub-agents.security").await.unwrap();
     tokio::spawn(async move {
         while let Some(msg) = responder_sub.next().await {
-            if let Some(reply) = msg.reply {
+            // New spawn design uses Trogon-Reply-To header for the reply inbox.
+            let reply_to = msg.headers
+                .as_ref()
+                .and_then(|h| h.get("Trogon-Reply-To"))
+                .map(|v| v.as_str().to_string());
+            if let Some(reply) = reply_to {
                 nats_responder
                     .publish(reply, Bytes::from_static(b"security-ok"))
                     .await
@@ -480,7 +485,7 @@ async fn spawn_agent_records_sub_agent_spawn_entry() {
         }
     });
 
-    let runtime = ActorRuntime::new(state_store, publisher, nats, registry);
+    let runtime = ActorRuntime::new(state_store, publisher, nats, registry, js.clone());
     runtime.handle_event(&mut SpawnActor, "entity-1", 0).await.unwrap();
 
     // Actor state captured the sub-agent reply payload.
@@ -517,7 +522,7 @@ async fn spawn_agent_no_capability_no_transcript_entry() {
     let transcript_store = TranscriptStore::new(js.clone());
     transcript_store.provision().await.unwrap();
 
-    let runtime = ActorRuntime::new(state_store, publisher, nats, registry);
+    let runtime = ActorRuntime::new(state_store, publisher, nats, registry, js.clone());
     // NoCapActor ignores the spawn error — handle_event must still succeed.
     runtime.handle_event(&mut NoCapActor, "entity-1", 0).await.unwrap();
 
@@ -566,7 +571,7 @@ async fn state_store_save_update_returns_other_error_when_stream_deleted() {
     let registry = Registry::new(registry_store);
 
     // Create initial state so we have a valid revision.
-    let runtime = ActorRuntime::new(state_store.clone(), publisher, nats, registry);
+    let runtime = ActorRuntime::new(state_store.clone(), publisher, nats, registry, js.clone());
     runtime.handle_event(&mut CounterActor, "ghost-update", 0).await.unwrap();
 
     // Read back the revision so we can pass it to save().
@@ -719,7 +724,7 @@ async fn actor_transcript_append_failure_does_not_abort_handle_event() {
     let publisher = NatsTranscriptPublisher::new(js.clone());
     let registry = Registry::new(registry_store);
 
-    let runtime = ActorRuntime::new(state_store, publisher, nats, registry);
+    let runtime = ActorRuntime::new(state_store, publisher, nats, registry, js.clone());
     // Scribe calls ctx.append_user_message(...).ok() — if append fails the actor
     // still succeeds. handle_event must return Ok.
     let result = runtime.handle_event(&mut Scribe, "entity-no-transcript", 0).await;
@@ -746,7 +751,7 @@ async fn spawn_agent_discover_failure_is_propagated_as_error_string() {
     // Now destroy the AGENT_REGISTRY backing stream — discover() will fail.
     js.delete_stream("KV_AGENT_REGISTRY").await.unwrap();
 
-    let runtime = ActorRuntime::new(state_store, publisher, nats, registry);
+    let runtime = ActorRuntime::new(state_store, publisher, nats, registry, js.clone());
     // SpawnActor calls ctx.spawn_agent(...) and ignores errors — handle_event must succeed.
     let result = runtime.handle_event(&mut SpawnActor, "entity-discover-fail", 0).await;
     assert!(result.is_ok(), "handle_event must succeed when discover fails: {result:?}");
@@ -783,6 +788,7 @@ fn make_host(
         NatsTranscriptPublisher,
         async_nats::Client,
         async_nats::jetstream::kv::Store,
+        async_nats::jetstream::Context,
     >,
 ) -> ActorHost<
     HostCounterActor,
@@ -790,6 +796,7 @@ fn make_host(
     NatsTranscriptPublisher,
     async_nats::Client,
     async_nats::jetstream::kv::Store,
+    async_nats::jetstream::Context,
 > {
     let capability = AgentCapability::new(
         "HostCounterActor",
@@ -807,12 +814,13 @@ async fn make_runtime(
     NatsTranscriptPublisher,
     async_nats::Client,
     async_nats::jetstream::kv::Store,
+    async_nats::jetstream::Context,
 > {
     let state_store = provision_state(&js).await.unwrap();
     let registry_store = provision_registry(&js).await.unwrap();
-    let publisher = NatsTranscriptPublisher::new(js);
+    let publisher = NatsTranscriptPublisher::new(js.clone());
     let registry = Registry::new(registry_store);
-    ActorRuntime::new(state_store, publisher, nats, registry)
+    ActorRuntime::new(state_store, publisher, nats, registry, js)
 }
 
 /// Publish a NATS message to the actor's inbox and verify that:
@@ -996,7 +1004,7 @@ async fn spawn_fn_transcript_append_failure_does_not_abort_spawn() {
     });
 
     // Use a publisher that always fails — transcript appends are all discarded.
-    let runtime = ActorRuntime::new(state_store, FailPublisher, nats, registry);
+    let runtime = ActorRuntime::new(state_store, FailPublisher, nats, registry, js);
 
     let result = runtime
         .handle_event(&mut SpawnActor, "entity-fail-pub", 0)
