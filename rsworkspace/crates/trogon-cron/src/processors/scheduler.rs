@@ -20,7 +20,7 @@ use crate::{
     JobId, JobSpec,
     domain::ResolvedJobSpec,
     error::CronError,
-    events::{JobEvent, JobEventData, RecordedJobEvent},
+    events::{JobEvent, JobEventCodec, JobEventData, RecordedJobEvent},
     kv::{EVENTS_SUBJECT_PREFIX, LEADER_BUCKET, LEADER_KEY, LEGACY_EVENTS_SUBJECT_PREFIX},
     nats::NatsSchedulePublisher,
     store::{Store, connect_store, open_events_stream},
@@ -322,7 +322,7 @@ async fn rebuild_scheduler_state_from_stream(
         };
         let event = decode_recorded_job_event(message)?;
         let stream_id = job_id_from_event_subject(&event.recorded_stream_id)?;
-        let data = event.decode_data::<JobEvent>().map_err(|source| {
+        let data = event.decode_data_with(&JobEventCodec).map_err(|source| {
             CronError::event_source("failed to decode recorded job event payload", source)
         })?;
         ensure_event_matches_stream(&stream_id, &data)?;
@@ -392,7 +392,7 @@ async fn handle_scheduler_message(
 ) -> Result<SchedulerChange, CronError> {
     let event = decode_recorded_watch_message(message)?;
     let stream_id = job_id_from_event_subject(&event.recorded_stream_id)?;
-    let data = event.decode_data::<JobEvent>().map_err(|source| {
+    let data = event.decode_data_with(&JobEventCodec).map_err(|source| {
         CronError::event_source("failed to decode watched scheduler event payload", source)
     })?;
     ensure_event_matches_stream(&stream_id, &data)?;

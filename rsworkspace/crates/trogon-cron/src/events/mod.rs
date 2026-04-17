@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
-use trogon_eventsourcing::{EventData, EventType, RecordedEvent, StreamEvent};
+use trogon_eventsourcing::{EventCodec, EventData, EventType, RecordedEvent, StreamEvent};
 
 use crate::{DeliverySpec, JobEnabledState, JobId, JobSpec, ScheduleSpec};
 
@@ -64,6 +64,21 @@ pub enum JobEvent {
 pub type JobEventData = EventData;
 pub type RecordedJobEvent = RecordedEvent;
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct JobEventCodec;
+
+impl EventCodec<JobEvent> for JobEventCodec {
+    type Error = serde_json::Error;
+
+    fn encode(&self, value: &JobEvent) -> Result<String, Self::Error> {
+        serde_json::to_string(value)
+    }
+
+    fn decode(&self, value: &str) -> Result<JobEvent, Self::Error> {
+        serde_json::from_str(value)
+    }
+}
+
 impl StreamEvent for JobEvent {
     fn stream_id(&self) -> &str {
         match self {
@@ -91,9 +106,12 @@ mod tests {
 
     #[test]
     fn event_data_and_recorded_event_helpers_work() {
-        let event = JobEventData::new(JobEvent::JobRemoved {
-            id: "cleanup".to_string(),
-        })
+        let event = JobEventData::new_with_codec(
+            &JobEventCodec,
+            JobEvent::JobRemoved {
+                id: "cleanup".to_string(),
+            },
+        )
         .unwrap();
         assert_eq!(event.stream_id(), "cleanup");
         assert_eq!(event.event_type, "job_removed");
@@ -106,7 +124,7 @@ mod tests {
         let decoded = JobEventData::decode(&payload).unwrap();
         assert_eq!(decoded, event);
         assert_eq!(
-            decoded.decode_data::<JobEvent>().unwrap(),
+            decoded.decode_data_with(&JobEventCodec).unwrap(),
             JobEvent::JobRemoved {
                 id: "cleanup".to_string()
             }
@@ -129,7 +147,7 @@ mod tests {
         let decoded = RecordedJobEvent::decode(&recorded_payload).unwrap();
         assert_eq!(decoded, recorded);
         assert_eq!(
-            decoded.decode_data::<JobEvent>().unwrap(),
+            decoded.decode_data_with(&JobEventCodec).unwrap(),
             JobEvent::JobRemoved {
                 id: "cleanup".to_string()
             }
