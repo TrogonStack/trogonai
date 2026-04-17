@@ -267,14 +267,14 @@ mod tests {
             })
         );
 
-        let snapshot = store
+        let stored_job = store
             .get_job(GetJobCommand {
                 id: JobId::parse("backup").unwrap(),
             })
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(snapshot.payload, job("backup"));
+        assert_eq!(stored_job, job("backup"));
 
         let command_snapshot = store
             .read_command_snapshot::<RegisterJobState>(

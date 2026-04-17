@@ -1,12 +1,8 @@
 use async_nats::jetstream::kv;
-use trogon_eventsourcing::{Snapshot, StreamCommand, load_snapshot};
+use trogon_eventsourcing::StreamCommand;
 use trogon_nats::jetstream::JetStreamGetKeyValue;
 
-use crate::{
-    JobId, JobSpec,
-    error::CronError,
-    store::{SNAPSHOT_STORE_CONFIG, open_snapshot_bucket},
-};
+use crate::{JobId, JobSpec, error::CronError, store::open_cron_jobs_bucket};
 
 #[derive(Debug, Clone)]
 pub struct GetJobCommand {
@@ -21,12 +17,20 @@ impl StreamCommand for GetJobCommand {
     }
 }
 
-pub async fn run<J>(js: &J, command: GetJobCommand) -> Result<Option<Snapshot<JobSpec>>, CronError>
+pub async fn run<J>(js: &J, command: GetJobCommand) -> Result<Option<JobSpec>, CronError>
 where
     J: JetStreamGetKeyValue<Store = kv::Store>,
 {
-    let bucket = open_snapshot_bucket(js).await?;
-    load_snapshot(&bucket, SNAPSHOT_STORE_CONFIG, command.stream_id().as_str())
+    let bucket = open_cron_jobs_bucket(js).await?;
+    let Some(entry) = bucket
+        .entry(command.stream_id().as_str().to_string())
         .await
+        .map_err(|source| CronError::kv_source("failed to read projected cron job", source))?
+    else {
+        return Ok(None);
+    };
+
+    serde_json::from_slice(&entry.value)
+        .map(Some)
         .map_err(CronError::from)
 }

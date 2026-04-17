@@ -400,6 +400,6 @@ async fn event_store_rebuilds_current_state_for_new_client() {
     .unwrap()
     .unwrap();
 
-    assert_eq!(rebuilt.payload.state, JobEnabledState::Disabled);
-    assert_eq!(rebuilt.payload.schedule, expected_schedule);
+    assert_eq!(rebuilt.state, JobEnabledState::Disabled);
+    assert_eq!(rebuilt.schedule, expected_schedule);
 }

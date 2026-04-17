@@ -40,7 +40,7 @@ async fn client_register_then_get() {
         })
         .await
         .unwrap();
-    assert_eq!(got.map(|job| job.payload), Some(base_job("backup")));
+    assert_eq!(got, Some(base_job("backup")));
 }
 
 #[tokio::test]
@@ -71,7 +71,7 @@ async fn client_set_enabled_toggles_job() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(got.payload.state, JobEnabledState::Disabled);
+    assert_eq!(got.state, JobEnabledState::Disabled);
 }
 
 #[tokio::test]

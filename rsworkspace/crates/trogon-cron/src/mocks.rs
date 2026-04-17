@@ -184,23 +184,25 @@ impl MockCronStore {
             .map_err(CronError::from)
     }
 
-    pub async fn get_job(
-        &self,
-        command: GetJobCommand,
-    ) -> Result<Option<Snapshot<JobSpec>>, CronError> {
+    pub async fn get_job(&self, command: GetJobCommand) -> Result<Option<JobSpec>, CronError> {
         Ok(self
             .jobs
             .lock()
             .unwrap()
             .get(command.stream_id().as_str())
-            .cloned())
+            .cloned()
+            .map(|job| job.payload))
     }
 
-    pub async fn list_jobs(
-        &self,
-        _command: ListJobsCommand,
-    ) -> Result<Vec<Snapshot<JobSpec>>, CronError> {
-        Ok(self.jobs.lock().unwrap().values().cloned().collect())
+    pub async fn list_jobs(&self, _command: ListJobsCommand) -> Result<Vec<JobSpec>, CronError> {
+        Ok(self
+            .jobs
+            .lock()
+            .unwrap()
+            .values()
+            .cloned()
+            .map(|job| job.payload)
+            .collect())
     }
 
     pub async fn load_and_watch_cron_jobs(&self) -> LoadAndWatchCronJobsResult {
@@ -494,7 +496,7 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(seeded.version, 1);
+        assert_eq!(seeded, base_job("seeded"));
 
         register_job(
             &store,
@@ -511,7 +513,7 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(alpha.version, 1);
+        assert_eq!(alpha, base_job("alpha"));
 
         change_job_state(
             &store,
@@ -529,7 +531,6 @@ mod tests {
                 .await
                 .unwrap()
                 .unwrap()
-                .payload
                 .state,
             JobEnabledState::Disabled
         );
