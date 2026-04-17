@@ -15,9 +15,8 @@ use trogon_eventsourcing::{
 use trogon_nats::lease::{ReleaseLease, RenewLease, TryAcquireLease};
 
 use crate::{
-    GetJobCommand, JobSpec, ListJobsCommand,
+    GetJobCommand, JobSpec, ListJobsCommand, ResolvedJobSpec,
     config::{JobWriteCondition, JobWriteState},
-    domain::ResolvedJobSpec,
     error::CronError,
     events::{JobEvent, JobEventCodec, JobEventData},
     projections::{CronJobWatchStream, LoadAndWatchCronJobsResult},
@@ -341,7 +340,13 @@ impl EventStore<crate::JobId> for MockCronStore {
                     let job_id = crate::JobId::parse(&id).map_err(|source| {
                         CronError::event_source("failed to project mocked job registration", source)
                     })?;
-                    projected_snapshot = Some(Snapshot::new(version, spec.into_job_spec(job_id)));
+                    let spec = spec.try_into_job_spec(job_id).map_err(|source| {
+                        CronError::event_source(
+                            "failed to hydrate mocked job registration into the domain",
+                            source,
+                        )
+                    })?;
+                    projected_snapshot = Some(Snapshot::new(version, spec));
                 }
                 JobEvent::JobStateChanged { state, .. } => {
                     let mut snapshot = projected_snapshot.take().ok_or_else(|| {
@@ -351,7 +356,7 @@ impl EventStore<crate::JobId> for MockCronStore {
                         )
                     })?;
                     snapshot.version = version;
-                    snapshot.payload.state = state;
+                    snapshot.payload.state = state.into();
                     projected_snapshot = Some(snapshot);
                 }
                 JobEvent::JobRemoved { .. } => {
@@ -412,8 +417,8 @@ mod tests {
     use super::*;
     use crate::{
         ChangeJobStateCommand, DeliverySpec, GetJobCommand, JobEnabledState, JobWriteCondition,
-        ListJobsCommand, RegisterJobCommand, RemoveJobCommand, SamplingSource, ScheduleSpec,
-        change_job_state, register_job, remove_job,
+        ListJobsCommand, RegisterJobCommand, RemoveJobCommand, ScheduleSpec, change_job_state,
+        register_job, remove_job,
     };
     use futures::StreamExt;
 
@@ -426,12 +431,7 @@ mod tests {
             id: job_id(id),
             state: JobEnabledState::Enabled,
             schedule: ScheduleSpec::Every { every_sec: 30 },
-            delivery: DeliverySpec::NatsEvent {
-                route: "agent.run".to_string(),
-                headers: BTreeMap::new(),
-                ttl_sec: None,
-                source: None,
-            },
+            delivery: DeliverySpec::nats_event("agent.run").unwrap(),
             payload: serde_json::json!({"kind": "heartbeat"}),
             metadata: BTreeMap::new(),
         }
@@ -575,17 +575,17 @@ mod tests {
     #[tokio::test]
     async fn mock_cron_store_rejects_invalid_specs_and_state_errors() {
         let store = MockCronStore::new();
-        let mut invalid = base_job("bad");
-        invalid.delivery = DeliverySpec::NatsEvent {
-            route: "agent.run".to_string(),
-            headers: BTreeMap::new(),
-            ttl_sec: None,
-            source: Some(SamplingSource::LatestFromSubject {
-                subject: "sensors.>".to_string(),
-            }),
-        };
-
-        let invalid_error = RegisterJobCommand::new(invalid).unwrap_err();
+        let invalid_error = serde_json::from_value::<JobSpec>(serde_json::json!({
+            "id": "bad",
+            "schedule": { "type": "every", "every_sec": 30 },
+            "delivery": {
+                "type": "nats_event",
+                "route": "agent.run",
+                "source": { "type": "latest_from_subject", "subject": "sensors.>" }
+            },
+            "payload": { "kind": "heartbeat" }
+        }))
+        .unwrap_err();
         assert!(invalid_error.to_string().contains("sampling source"));
 
         register_job(

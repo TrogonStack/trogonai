@@ -127,7 +127,7 @@ impl Decide<ChangeJobStateState, JobEvent> for ChangeJobStateCommand {
             ChangeJobStateState::Present { .. } => {
                 Ok(Decision::Event(NonEmpty::one(JobEvent::JobStateChanged {
                     id: command.stream_id().to_string(),
-                    state: command.state,
+                    state: command.state.into(),
                 })))
             }
         }
@@ -149,14 +149,14 @@ impl CommandState for ChangeJobStateCommand {
                 if matches!(state, ChangeJobStateState::Deleted) {
                     return Ok(ChangeJobStateState::Deleted);
                 }
-                let job_id = JobId::parse(&id).map_err(|source| {
+                JobId::parse(&id).map_err(|source| {
                     ChangeJobStateError::InvalidRegistrationEventId {
                         id: id.clone(),
                         source,
                     }
                 })?;
                 Ok(ChangeJobStateState::Present {
-                    current: spec.into_job_spec(job_id).state,
+                    current: spec.state.into(),
                 })
             }
             JobEvent::JobStateChanged {
@@ -166,7 +166,7 @@ impl CommandState for ChangeJobStateCommand {
                 ChangeJobStateState::Deleted => Ok(ChangeJobStateState::Deleted),
                 ChangeJobStateState::Missing | ChangeJobStateState::Present { .. } => {
                     Ok(ChangeJobStateState::Present {
-                        current: current_state,
+                        current: current_state.into(),
                     })
                 }
             },
@@ -214,7 +214,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        DeliverySpec, GetJobCommand, JobSpec, RegisterJobCommand, ScheduleSpec,
+        DeliverySpec, GetJobCommand, JobEventState, JobSpec, RegisterJobCommand, ScheduleSpec,
         mocks::MockCronStore,
     };
 
@@ -227,12 +227,7 @@ mod tests {
             id: job_id(id),
             state: JobEnabledState::Enabled,
             schedule: ScheduleSpec::Every { every_sec: 30 },
-            delivery: DeliverySpec::NatsEvent {
-                route: "agent.run".to_string(),
-                headers: std::collections::BTreeMap::new(),
-                ttl_sec: None,
-                source: None,
-            },
+            delivery: DeliverySpec::nats_event("agent.run").unwrap(),
             payload: serde_json::json!({"kind": "heartbeat"}),
             metadata: std::collections::BTreeMap::new(),
         }
@@ -251,7 +246,7 @@ mod tests {
             decision,
             Decision::Event(NonEmpty::one(JobEvent::JobStateChanged {
                 id: "backup".to_string(),
-                state: JobEnabledState::Disabled,
+                state: JobEventState::Disabled,
             }))
         );
     }
@@ -307,7 +302,7 @@ mod tests {
             ))
             .then([JobEvent::JobStateChanged {
                 id: "backup".to_string(),
-                state: JobEnabledState::Disabled,
+                state: JobEventState::Disabled,
             }]);
     }
 
@@ -346,7 +341,7 @@ mod tests {
             ))
             .then([JobEvent::JobStateChanged {
                 id: "backup".to_string(),
-                state: JobEnabledState::Disabled,
+                state: JobEventState::Disabled,
             }]);
 
         Timeline::new().given([register, disable]).then_stream(
@@ -358,7 +353,7 @@ mod tests {
                 },
                 JobEvent::JobStateChanged {
                     id: "backup".to_string(),
-                    state: JobEnabledState::Disabled,
+                    state: JobEventState::Disabled,
                 },
             ],
         );
@@ -382,7 +377,7 @@ mod tests {
             outcome.events,
             NonEmpty::one(JobEvent::JobStateChanged {
                 id: "backup".to_string(),
-                state: JobEnabledState::Disabled,
+                state: JobEventState::Disabled,
             })
         );
 

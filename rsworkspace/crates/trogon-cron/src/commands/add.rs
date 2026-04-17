@@ -172,12 +172,7 @@ mod tests {
             id: job_id(id),
             state: JobEnabledState::Enabled,
             schedule: ScheduleSpec::Every { every_sec: 30 },
-            delivery: DeliverySpec::NatsEvent {
-                route: "agent.run".to_string(),
-                headers: BTreeMap::new(),
-                ttl_sec: None,
-                source: None,
-            },
+            delivery: DeliverySpec::nats_event("agent.run").unwrap(),
             payload: serde_json::json!({"kind": "heartbeat"}),
             metadata: BTreeMap::new(),
         }

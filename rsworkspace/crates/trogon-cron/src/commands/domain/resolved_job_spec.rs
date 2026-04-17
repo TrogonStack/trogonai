@@ -1,35 +1,21 @@
-mod job_id;
-mod spec;
-
+use std::collections::BTreeMap;
 use std::str::FromStr;
 
 use async_nats::{HeaderMap, HeaderValue};
 use bytes::Bytes;
 use trogon_nats::{DottedNatsToken, NatsToken};
 
+use super::{DeliverySpec, JobId, JobSpec, ScheduleSpec};
 use crate::{
     error::{CronError, JobSpecError},
     kv::{FIRE_SUBJECT_PREFIX, SCHEDULE_SUBJECT_PREFIX},
 };
-
-pub use job_id::{JobId, JobIdError};
-pub use spec::{DeliverySpec, JobEnabledState, JobSpec, SamplingSource, ScheduleSpec};
-
-use std::collections::BTreeMap;
 
 const NATS_SCHEDULE: &str = "Nats-Schedule";
 const NATS_SCHEDULE_SOURCE: &str = "Nats-Schedule-Source";
 const NATS_SCHEDULE_TARGET: &str = "Nats-Schedule-Target";
 const NATS_SCHEDULE_TIME_ZONE: &str = "Nats-Schedule-Time-Zone";
 const NATS_SCHEDULE_TTL: &str = "Nats-Schedule-TTL";
-const RESERVED_SCHEDULE_HEADERS: [&str; 5] = [
-    NATS_SCHEDULE,
-    NATS_SCHEDULE_SOURCE,
-    NATS_SCHEDULE_TARGET,
-    NATS_SCHEDULE_TIME_ZONE,
-    NATS_SCHEDULE_TTL,
-];
-
 #[derive(Debug, Clone)]
 pub struct ResolvedJobSpec {
     spec: JobSpec,
@@ -45,7 +31,7 @@ pub struct ResolvedJobSpec {
     body: Bytes,
 }
 
-struct ValidatedJobSpecParts {
+struct ResolvedJobSpecParts {
     job_id: NatsToken,
     route: DottedNatsToken,
     schedule_expression: String,
@@ -59,7 +45,7 @@ impl TryFrom<&JobSpec> for ResolvedJobSpec {
     type Error = CronError;
 
     fn try_from(spec: &JobSpec) -> Result<Self, Self::Error> {
-        let ValidatedJobSpecParts {
+        let ResolvedJobSpecParts {
             job_id,
             route,
             schedule_expression,
@@ -67,7 +53,7 @@ impl TryFrom<&JobSpec> for ResolvedJobSpec {
             ttl_sec,
             source_subject,
             headers,
-        } = validated_job_spec_parts(spec)?;
+        } = resolved_job_spec_parts(spec)?;
 
         let schedule_subject = format!("{SCHEDULE_SUBJECT_PREFIX}{}", job_id.as_str());
         let target_subject = format!(
@@ -97,7 +83,7 @@ impl TryFrom<&JobSpec> for ResolvedJobSpec {
     }
 }
 
-fn validated_job_spec_parts(spec: &JobSpec) -> Result<ValidatedJobSpecParts, CronError> {
+fn resolved_job_spec_parts(spec: &JobSpec) -> Result<ResolvedJobSpecParts, CronError> {
     let job_id = parse_job_id(&spec.id);
     let schedule_expression = schedule_expression(&spec.schedule)?;
     let timezone = match &spec.schedule {
@@ -111,14 +97,16 @@ fn validated_job_spec_parts(spec: &JobSpec) -> Result<ValidatedJobSpecParts, Cro
             ttl_sec,
             source,
         } => (
-            validate_route(route)?,
-            validate_headers(headers)?,
-            validate_ttl(*ttl_sec)?,
-            validate_source(source)?,
+            route.as_token().clone(),
+            headers.as_map().clone(),
+            ttl_sec.map(|ttl_sec| ttl_sec.get()),
+            source
+                .as_ref()
+                .map(|source| source.subject().as_str().to_string()),
         ),
     };
 
-    Ok(ValidatedJobSpecParts {
+    Ok(ResolvedJobSpecParts {
         job_id,
         route,
         schedule_expression,
@@ -223,42 +211,11 @@ fn schedule_expression(schedule: &ScheduleSpec) -> Result<String, CronError> {
     }
 }
 
-fn validate_route(route: &str) -> Result<DottedNatsToken, CronError> {
-    DottedNatsToken::new(route).map_err(|source| {
-        CronError::invalid_job_spec(JobSpecError::InvalidRoute {
-            route: route.to_string(),
-            source,
-        })
-    })
-}
-
-fn validate_source(source: &Option<SamplingSource>) -> Result<Option<String>, CronError> {
-    match source {
-        None => Ok(None),
-        Some(SamplingSource::LatestFromSubject { subject }) => {
-            DottedNatsToken::new(subject).map_err(|source| {
-                CronError::invalid_job_spec(JobSpecError::InvalidSamplingSource {
-                    subject: subject.clone(),
-                    source,
-                })
-            })?;
-            Ok(Some(subject.clone()))
-        }
-    }
-}
-
-fn validate_ttl(ttl_sec: Option<u64>) -> Result<Option<u64>, CronError> {
-    match ttl_sec {
-        Some(0) => Err(CronError::invalid_job_spec(JobSpecError::TtlMustBePositive)),
-        Some(ttl_sec) => Ok(Some(ttl_sec)),
-        None => Ok(None),
-    }
-}
-
 fn validate_timezone(timezone: Option<String>) -> Result<Option<String>, CronError> {
     let Some(timezone) = timezone else {
         return Ok(None);
     };
+
     let trimmed = timezone.trim();
     if trimmed.is_empty()
         || trimmed != timezone
@@ -273,50 +230,31 @@ fn validate_timezone(timezone: Option<String>) -> Result<Option<String>, CronErr
     Ok(Some(timezone))
 }
 
-fn validate_headers(
-    headers: &BTreeMap<String, String>,
-) -> Result<BTreeMap<String, String>, CronError> {
-    for (name, value) in headers {
-        if name.trim().is_empty()
-            || name.contains(':')
-            || name.chars().any(|ch| ch.is_control() || ch.is_whitespace())
-        {
-            return Err(CronError::invalid_job_spec(
-                JobSpecError::InvalidHeaderName { name: name.clone() },
-            ));
-        }
-        if RESERVED_SCHEDULE_HEADERS
-            .iter()
-            .any(|reserved| reserved.eq_ignore_ascii_case(name))
-        {
-            return Err(CronError::invalid_job_spec(
-                JobSpecError::ReservedHeaderName { name: name.clone() },
-            ));
-        }
-        if value
-            .chars()
-            .any(|ch| ch == '\r' || ch == '\n' || ch == '\0')
-        {
-            return Err(CronError::invalid_job_spec(
-                JobSpecError::InvalidHeaderValue { name: name.clone() },
-            ));
-        }
-    }
-
-    Ok(headers.clone())
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
 
     use chrono::{TimeZone, Utc};
 
+    use super::super::{
+        DeliveryHeaders, DeliveryRoute, JobEnabledState, SamplingSource, TtlSeconds,
+    };
     use super::*;
-    use crate::{JobEnabledState, JobId, JobSpec};
 
     fn job_id(id: &str) -> JobId {
         JobId::parse(id).unwrap()
+    }
+
+    fn route(value: &str) -> DeliveryRoute {
+        DeliveryRoute::new(value).unwrap()
+    }
+
+    fn ttl(value: u64) -> TtlSeconds {
+        TtlSeconds::new(value).unwrap()
+    }
+
+    fn source(value: &str) -> SamplingSource {
+        SamplingSource::latest_from_subject(value).unwrap()
     }
 
     fn base_job() -> JobSpec {
@@ -325,9 +263,13 @@ mod tests {
             state: JobEnabledState::Enabled,
             schedule: ScheduleSpec::Every { every_sec: 30 },
             delivery: DeliverySpec::NatsEvent {
-                route: "agent.run".to_string(),
-                headers: BTreeMap::from([("x-kind".to_string(), "heartbeat".to_string())]),
-                ttl_sec: Some(15),
+                route: route("agent.run"),
+                headers: DeliveryHeaders::new(BTreeMap::from([(
+                    "x-kind".to_string(),
+                    "heartbeat".to_string(),
+                )]))
+                .unwrap(),
+                ttl_sec: Some(ttl(15)),
                 source: None,
             },
             payload: serde_json::json!({"kind": "heartbeat"}),
@@ -379,12 +321,10 @@ mod tests {
     fn source_uses_placeholder_body() {
         let mut job = base_job();
         job.delivery = DeliverySpec::NatsEvent {
-            route: "agent.run".to_string(),
-            headers: BTreeMap::new(),
+            route: route("agent.run"),
+            headers: DeliveryHeaders::default(),
             ttl_sec: None,
-            source: Some(SamplingSource::LatestFromSubject {
-                subject: "sensors.latest".to_string(),
-            }),
+            source: Some(source("sensors.latest")),
         };
 
         let resolved = ResolvedJobSpec::try_from(&job).unwrap();
@@ -397,51 +337,6 @@ mod tests {
                 .map(|value| value.as_str()),
             Some("sensors.latest")
         );
-    }
-
-    #[test]
-    fn invalid_route_is_rejected() {
-        let mut job = base_job();
-        job.delivery = DeliverySpec::NatsEvent {
-            route: "agent.>".to_string(),
-            headers: BTreeMap::new(),
-            ttl_sec: None,
-            source: None,
-        };
-
-        let error = ResolvedJobSpec::try_from(&job).unwrap_err();
-        assert!(error.to_string().contains("route"));
-    }
-
-    #[test]
-    fn reserved_scheduler_headers_are_rejected() {
-        let mut job = base_job();
-        job.delivery = DeliverySpec::NatsEvent {
-            route: "agent.run".to_string(),
-            headers: BTreeMap::from([(
-                "Nats-Schedule-Target".to_string(),
-                "cron.fire.evil.target".to_string(),
-            )]),
-            ttl_sec: None,
-            source: None,
-        };
-
-        let error = ResolvedJobSpec::try_from(&job).unwrap_err();
-        assert!(error.to_string().contains("reserved"));
-    }
-
-    #[test]
-    fn reserved_scheduler_headers_are_rejected_case_insensitively() {
-        let mut job = base_job();
-        job.delivery = DeliverySpec::NatsEvent {
-            route: "agent.run".to_string(),
-            headers: BTreeMap::from([("nats-schedule".to_string(), "@every 1s".to_string())]),
-            ttl_sec: None,
-            source: None,
-        };
-
-        let error = ResolvedJobSpec::try_from(&job).unwrap_err();
-        assert!(error.to_string().contains("reserved"));
     }
 
     #[test]
@@ -498,63 +393,5 @@ mod tests {
 
         let error = ResolvedJobSpec::try_from(&job).unwrap_err();
         assert!(error.to_string().contains("timezone"));
-    }
-
-    #[test]
-    fn zero_ttl_is_rejected() {
-        let mut job = base_job();
-        job.delivery = DeliverySpec::NatsEvent {
-            route: "agent.run".to_string(),
-            headers: BTreeMap::new(),
-            ttl_sec: Some(0),
-            source: None,
-        };
-
-        let error = ResolvedJobSpec::try_from(&job).unwrap_err();
-        assert!(error.to_string().contains("ttl_sec"));
-    }
-
-    #[test]
-    fn invalid_sampling_source_is_rejected() {
-        let mut job = base_job();
-        job.delivery = DeliverySpec::NatsEvent {
-            route: "agent.run".to_string(),
-            headers: BTreeMap::new(),
-            ttl_sec: None,
-            source: Some(SamplingSource::LatestFromSubject {
-                subject: "sensors.>".to_string(),
-            }),
-        };
-
-        let error = ResolvedJobSpec::try_from(&job).unwrap_err();
-        assert!(error.to_string().contains("sampling source"));
-    }
-
-    #[test]
-    fn invalid_header_name_is_rejected() {
-        let mut job = base_job();
-        job.delivery = DeliverySpec::NatsEvent {
-            route: "agent.run".to_string(),
-            headers: BTreeMap::from([("bad:name".to_string(), "value".to_string())]),
-            ttl_sec: None,
-            source: None,
-        };
-
-        let error = ResolvedJobSpec::try_from(&job).unwrap_err();
-        assert!(error.to_string().contains("header name"));
-    }
-
-    #[test]
-    fn invalid_header_value_is_rejected() {
-        let mut job = base_job();
-        job.delivery = DeliverySpec::NatsEvent {
-            route: "agent.run".to_string(),
-            headers: BTreeMap::from([("x-kind".to_string(), "bad\nvalue".to_string())]),
-            ttl_sec: None,
-            source: None,
-        };
-
-        let error = ResolvedJobSpec::try_from(&job).unwrap_err();
-        assert!(error.to_string().contains("invalid value"));
     }
 }

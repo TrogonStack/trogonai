@@ -17,8 +17,7 @@ use trogon_nats::lease::{
 use uuid::Uuid;
 
 use crate::{
-    JobId, JobSpec,
-    domain::ResolvedJobSpec,
+    JobId, JobSpec, ResolvedJobSpec,
     error::CronError,
     events::{JobEvent, JobEventCodec, JobEventData, RecordedJobEvent},
     kv::{EVENTS_SUBJECT_PREFIX, LEADER_BUCKET, LEADER_KEY, LEGACY_EVENTS_SUBJECT_PREFIX},
@@ -350,7 +349,12 @@ fn apply_scheduler_event(
                     source,
                 )
             })?;
-            let job = spec.into_job_spec(job_id);
+            let job = spec.try_into_job_spec(job_id).map_err(|source| {
+                CronError::event_source(
+                    "failed to rebuild scheduler job state from registration event",
+                    source,
+                )
+            })?;
             desired_jobs.insert(
                 job.id.to_string(),
                 DesiredJobState::Present(Box::new(job.clone())),
@@ -366,7 +370,7 @@ fn apply_scheduler_event(
             })?;
             match job {
                 DesiredJobState::Present(job) => {
-                    job.state = state;
+                    job.state = state.into();
                     if job.state.is_enabled() {
                         Ok(SchedulerChange::Upsert(job.as_ref().clone()))
                     } else {
@@ -673,7 +677,7 @@ mod tests {
     };
     use crate::{
         DeliverySpec, JobEnabledState, JobId, JobSpec, RegisteredJobSpec, ScheduleSpec,
-        events::JobEvent,
+        events::{JobEvent, JobEventState},
         mocks::{MockCronStore, MockLeaderLock, MockSchedulePublisher},
     };
 
@@ -686,12 +690,7 @@ mod tests {
             id: job_id(id),
             state: JobEnabledState::Enabled,
             schedule: ScheduleSpec::Every { every_sec: 30 },
-            delivery: DeliverySpec::NatsEvent {
-                route: "agent.run".to_string(),
-                headers: BTreeMap::new(),
-                ttl_sec: None,
-                source: None,
-            },
+            delivery: DeliverySpec::nats_event("agent.run").unwrap(),
             payload: serde_json::json!({"kind": "heartbeat"}),
             metadata: BTreeMap::new(),
         }
@@ -721,11 +720,9 @@ mod tests {
 
         let mut disabled = base_job("disabled");
         disabled.state = JobEnabledState::Disabled;
-        disabled.delivery = DeliverySpec::NatsEvent {
-            route: "agent.>".to_string(),
-            headers: BTreeMap::new(),
-            ttl_sec: None,
-            source: None,
+        disabled.schedule = ScheduleSpec::Cron {
+            expr: "not-a-cron".to_string(),
+            timezone: None,
         };
         let desired_jobs = HashMap::from([(
             "disabled".to_string(),
@@ -788,7 +785,7 @@ mod tests {
             &mut desired_jobs,
             JobEvent::JobStateChanged {
                 id: "alpha".to_string(),
-                state: JobEnabledState::Disabled,
+                state: JobEventState::Disabled,
             },
         )
         .unwrap();
@@ -805,7 +802,7 @@ mod tests {
             &mut desired_jobs,
             JobEvent::JobStateChanged {
                 id: "alpha".to_string(),
-                state: JobEnabledState::Enabled,
+                state: JobEventState::Enabled,
             },
         )
         .unwrap();
@@ -842,7 +839,7 @@ mod tests {
             &mut desired_jobs,
             JobEvent::JobStateChanged {
                 id: "missing".to_string(),
-                state: JobEnabledState::Disabled,
+                state: JobEventState::Disabled,
             },
         )
         .unwrap_err();
@@ -884,11 +881,9 @@ mod tests {
         let publisher = MockSchedulePublisher::new();
         publisher.seed_active_job("invalid");
         let mut invalid = base_job("invalid");
-        invalid.delivery = DeliverySpec::NatsEvent {
-            route: "agent.>".to_string(),
-            headers: BTreeMap::new(),
-            ttl_sec: None,
-            source: None,
+        invalid.schedule = ScheduleSpec::Cron {
+            expr: "not-a-cron".to_string(),
+            timezone: None,
         };
 
         apply_scheduler_change(&publisher, &SchedulerChange::Upsert(invalid))
@@ -904,11 +899,9 @@ mod tests {
         let publisher = MockSchedulePublisher::new();
         publisher.seed_active_job("invalid");
         let mut invalid = base_job("invalid");
-        invalid.delivery = DeliverySpec::NatsEvent {
-            route: "agent.>".to_string(),
-            headers: BTreeMap::new(),
-            ttl_sec: None,
-            source: None,
+        invalid.schedule = ScheduleSpec::Cron {
+            expr: "not-a-cron".to_string(),
+            timezone: None,
         };
         let desired_jobs = HashMap::from([
             (

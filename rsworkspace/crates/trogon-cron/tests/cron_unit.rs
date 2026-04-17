@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use trogon_cron::{
     ChangeJobStateCommand, CronController, DeliverySpec, GetJobCommand, JobEnabledState, JobId,
     JobSpec, JobWriteCondition, ListJobsCommand, RegisterJobCommand, RemoveJobCommand,
-    SamplingSource, SchedulePublisher, ScheduleSpec, change_job_state,
+    SchedulePublisher, ScheduleSpec, change_job_state,
     mocks::{MockCronStore, MockLeaderLock, MockSchedulePublisher},
     register_job, remove_job,
 };
@@ -19,12 +19,7 @@ fn base_job(id: &str) -> JobSpec {
         id: job_id(id),
         state: JobEnabledState::Enabled,
         schedule: ScheduleSpec::Every { every_sec: 30 },
-        delivery: DeliverySpec::NatsEvent {
-            route: "agent.run".to_string(),
-            headers: BTreeMap::new(),
-            ttl_sec: None,
-            source: None,
-        },
+        delivery: DeliverySpec::nats_event("agent.run").unwrap(),
         payload: serde_json::json!({"kind": "heartbeat"}),
         metadata: BTreeMap::new(),
     }
@@ -119,31 +114,31 @@ async fn client_remove_and_list_jobs_use_store_paths() {
 
 #[tokio::test]
 async fn client_rejects_invalid_route() {
-    let mut job = base_job("bad");
-    job.delivery = DeliverySpec::NatsEvent {
-        route: "agent.>".to_string(),
-        headers: BTreeMap::new(),
-        ttl_sec: None,
-        source: None,
-    };
+    let error = serde_json::from_value::<JobSpec>(serde_json::json!({
+        "id": "bad",
+        "schedule": { "type": "every", "every_sec": 30 },
+        "delivery": { "type": "nats_event", "route": "agent.>" },
+        "payload": { "kind": "heartbeat" }
+    }))
+    .unwrap_err();
 
-    let error = RegisterJobCommand::new(job).unwrap_err();
     assert!(error.to_string().contains("route"));
 }
 
 #[tokio::test]
 async fn client_rejects_invalid_source_subject() {
-    let mut job = base_job("bad-source");
-    job.delivery = DeliverySpec::NatsEvent {
-        route: "agent.run".to_string(),
-        headers: BTreeMap::new(),
-        ttl_sec: None,
-        source: Some(SamplingSource::LatestFromSubject {
-            subject: "sensors.>".to_string(),
-        }),
-    };
+    let error = serde_json::from_value::<JobSpec>(serde_json::json!({
+        "id": "bad-source",
+        "schedule": { "type": "every", "every_sec": 30 },
+        "delivery": {
+            "type": "nats_event",
+            "route": "agent.run",
+            "source": { "type": "latest_from_subject", "subject": "sensors.>" }
+        },
+        "payload": { "kind": "heartbeat" }
+    }))
+    .unwrap_err();
 
-    let error = RegisterJobCommand::new(job).unwrap_err();
     assert!(error.to_string().contains("sampling source"));
 }
 

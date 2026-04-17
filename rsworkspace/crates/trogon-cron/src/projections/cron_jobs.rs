@@ -53,6 +53,7 @@ pub enum JobStreamState {
 #[derive(Debug)]
 pub enum JobTransitionError {
     InvalidEventId { id: String, source: JobIdError },
+    InvalidRegisteredJobSpec { id: JobId, source: CronError },
     CannotRegisterExistingJob { id: JobId },
     CannotRegisterDeletedJob { id: JobId },
     MissingJobForStateChange { id: JobId },
@@ -66,9 +67,17 @@ pub const fn initial_state() -> JobStreamState {
 
 pub fn apply(state: JobStreamState, event: JobEvent) -> Result<JobStreamState, JobTransitionError> {
     match (state, event) {
-        (JobStreamState::Initial, JobEvent::JobRegistered { id, spec }) => JobId::parse(&id)
-            .map_err(|source| JobTransitionError::InvalidEventId { id, source })
-            .map(|job_id| JobStreamState::Present(spec.into_job_spec(job_id))),
+        (JobStreamState::Initial, JobEvent::JobRegistered { id, spec }) => {
+            let job_id = JobId::parse(&id)
+                .map_err(|source| JobTransitionError::InvalidEventId { id, source })?;
+            let spec = spec.try_into_job_spec(job_id.clone()).map_err(|source| {
+                JobTransitionError::InvalidRegisteredJobSpec {
+                    id: job_id.clone(),
+                    source,
+                }
+            })?;
+            Ok(JobStreamState::Present(spec))
+        }
         (JobStreamState::Initial, event @ JobEvent::JobStateChanged { .. }) => {
             Err(JobTransitionError::MissingJobForStateChange {
                 id: parse_event_job_id(&event)?,
@@ -83,7 +92,7 @@ pub fn apply(state: JobStreamState, event: JobEvent) -> Result<JobStreamState, J
             })
         }
         (JobStreamState::Present(mut spec), JobEvent::JobStateChanged { state, .. }) => {
-            spec.state = state;
+            spec.state = state.into();
             Ok(JobStreamState::Present(spec))
         }
         (JobStreamState::Present(spec), JobEvent::JobRemoved { .. }) => {
@@ -151,6 +160,9 @@ impl std::fmt::Display for JobTransitionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InvalidEventId { id, .. } => write!(f, "job event id '{id}' is invalid"),
+            Self::InvalidRegisteredJobSpec { id, .. } => {
+                write!(f, "job '{id}' registration event contains an invalid spec")
+            }
             Self::CannotRegisterExistingJob { id } => {
                 write!(f, "job '{id}' is already registered")
             }
@@ -174,6 +186,7 @@ impl std::error::Error for JobTransitionError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::InvalidEventId { source, .. } => Some(source),
+            Self::InvalidRegisteredJobSpec { source, .. } => Some(source),
             _ => None,
         }
     }
@@ -724,7 +737,9 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
-    use crate::{DeliverySpec, JobEnabledState, JobId, RegisteredJobSpec, ScheduleSpec};
+    use crate::{
+        DeliverySpec, JobEnabledState, JobEventState, JobId, RegisteredJobSpec, ScheduleSpec,
+    };
 
     fn job_id(id: &str) -> JobId {
         JobId::parse(id).unwrap()
@@ -735,12 +750,7 @@ mod tests {
             id: job_id(id),
             state: JobEnabledState::Enabled,
             schedule: ScheduleSpec::Every { every_sec: 30 },
-            delivery: DeliverySpec::NatsEvent {
-                route: "agent.run".to_string(),
-                headers: BTreeMap::new(),
-                ttl_sec: None,
-                source: None,
-            },
+            delivery: DeliverySpec::nats_event("agent.run").unwrap(),
             payload: serde_json::json!({"kind": "heartbeat"}),
             metadata: BTreeMap::new(),
         }
@@ -755,7 +765,7 @@ mod tests {
             },
             JobEvent::JobStateChanged {
                 id: "backup".to_string(),
-                state: JobEnabledState::Disabled,
+                state: JobEventState::Disabled,
             },
             JobEvent::JobRemoved {
                 id: "backup".to_string(),
@@ -793,7 +803,7 @@ mod tests {
             initial_state(),
             JobEvent::JobStateChanged {
                 id: "missing".to_string(),
-                state: JobEnabledState::Disabled,
+                state: JobEventState::Disabled,
             },
         )
         .unwrap_err();
@@ -824,7 +834,7 @@ mod tests {
             after.clone(),
             JobEvent::JobStateChanged {
                 id: "backup".to_string(),
-                state: JobEnabledState::Disabled,
+                state: JobEventState::Disabled,
             },
         )
         .unwrap();
@@ -920,7 +930,7 @@ mod tests {
             &stream_id,
             &JobEvent::JobStateChanged {
                 id: "alpha".to_string(),
-                state: JobEnabledState::Disabled,
+                state: JobEventState::Disabled,
             },
             2,
         )
@@ -964,7 +974,7 @@ mod tests {
             &stream_id,
             &JobEvent::JobStateChanged {
                 id: "alpha".to_string(),
-                state: JobEnabledState::Disabled,
+                state: JobEventState::Disabled,
             },
             1,
         )
