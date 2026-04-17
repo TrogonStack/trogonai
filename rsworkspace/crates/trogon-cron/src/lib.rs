@@ -13,6 +13,7 @@ pub mod kv;
 pub mod nats;
 mod processors;
 pub mod projections;
+pub mod queries;
 pub mod store;
 pub mod traits;
 
@@ -25,10 +26,9 @@ pub use commands::domain::{
 };
 pub use commands::{
     ChangeJobStateCommand, ChangeJobStateDecisionError, ChangeJobStateError, ChangeJobStateResult,
-    ChangeJobStateState, GetJobCommand, ListJobsCommand, RegisterJobCommand,
-    RegisterJobDecisionError, RegisterJobResult, RegisterJobState, RemoveJobCommand,
-    RemoveJobDecisionError, RemoveJobResult, RemoveJobState, change_job_state, get_job, list_jobs,
-    register_job, remove_job,
+    ChangeJobStateState, RegisterJobCommand, RegisterJobDecisionError, RegisterJobResult,
+    RegisterJobState, RemoveJobCommand, RemoveJobDecisionError, RemoveJobResult, RemoveJobState,
+    change_job_state, register_job, remove_job,
 };
 pub use config::JobWriteCondition;
 pub use error::{CronError, JobSpecError};
@@ -43,6 +43,7 @@ pub use projections::{
     LoadAndWatchCronJobsResult, ProjectionChange, apply, initial_state, load_and_watch_cron_jobs,
     projection_change,
 };
+pub use queries::{GetJobCommand, ListJobsCommand, get_job, list_jobs};
 pub use store::{SNAPSHOT_STORE_CONFIG, Store, append_events, connect_store, open_snapshot_bucket};
 pub use traits::{LeaderLock, SchedulePublisher};
 pub use trogon_eventsourcing::{CommandFailure, CommandInfraError, CommandOutcome, OccPolicy};
