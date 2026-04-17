@@ -3,8 +3,8 @@
 use std::collections::HashSet;
 
 use crate::{
+    ResolvedJobSpec,
     config::JobWriteState,
-    domain::ResolvedJobSpec,
     error::CronError,
     kv::{
         EVENTS_STREAM, EVENTS_SUBJECT_PATTERN, EVENTS_SUBJECT_PREFIX,

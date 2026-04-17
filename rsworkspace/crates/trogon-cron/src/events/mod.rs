@@ -3,61 +3,66 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::{EventCodec, EventData, EventType, RecordedEvent, StreamEvent};
 
-use crate::{DeliverySpec, JobEnabledState, JobId, JobSpec, ScheduleSpec};
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum JobEventState {
+    #[default]
+    Enabled,
+    Disabled,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum JobEventSchedule {
+    At {
+        at: chrono::DateTime<chrono::Utc>,
+    },
+    Every {
+        every_sec: u64,
+    },
+    Cron {
+        expr: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        timezone: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum JobEventSamplingSource {
+    LatestFromSubject { subject: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum JobEventDelivery {
+    NatsEvent {
+        route: String,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        headers: BTreeMap<String, String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ttl_sec: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source: Option<JobEventSamplingSource>,
+    },
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RegisteredJobSpec {
     #[serde(default)]
-    pub state: JobEnabledState,
-    pub schedule: ScheduleSpec,
-    pub delivery: DeliverySpec,
+    pub state: JobEventState,
+    pub schedule: JobEventSchedule,
+    pub delivery: JobEventDelivery,
     pub payload: serde_json::Value,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub metadata: BTreeMap<String, String>,
-}
-
-impl RegisteredJobSpec {
-    pub fn into_job_spec(self, id: JobId) -> JobSpec {
-        JobSpec {
-            id,
-            state: self.state,
-            schedule: self.schedule,
-            delivery: self.delivery,
-            payload: self.payload,
-            metadata: self.metadata,
-        }
-    }
-}
-
-impl From<JobSpec> for RegisteredJobSpec {
-    fn from(spec: JobSpec) -> Self {
-        Self {
-            state: spec.state,
-            schedule: spec.schedule,
-            delivery: spec.delivery,
-            payload: spec.payload,
-            metadata: spec.metadata,
-        }
-    }
-}
-
-impl From<&JobSpec> for RegisteredJobSpec {
-    fn from(spec: &JobSpec) -> Self {
-        Self {
-            state: spec.state,
-            schedule: spec.schedule.clone(),
-            delivery: spec.delivery.clone(),
-            payload: spec.payload.clone(),
-            metadata: spec.metadata.clone(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum JobEvent {
     JobRegistered { id: String, spec: RegisteredJobSpec },
-    JobStateChanged { id: String, state: JobEnabledState },
+    JobStateChanged { id: String, state: JobEventState },
     JobRemoved { id: String },
 }
 
@@ -102,7 +107,6 @@ impl EventType for JobEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::SamplingSource;
 
     #[test]
     fn event_data_and_recorded_event_helpers_work() {
@@ -163,13 +167,13 @@ mod tests {
     #[test]
     fn registered_job_spec_round_trips_without_id() {
         let spec = RegisteredJobSpec {
-            state: JobEnabledState::Enabled,
-            schedule: ScheduleSpec::Every { every_sec: 30 },
-            delivery: DeliverySpec::NatsEvent {
+            state: JobEventState::Enabled,
+            schedule: JobEventSchedule::Every { every_sec: 30 },
+            delivery: JobEventDelivery::NatsEvent {
                 route: "agent.run".to_string(),
                 headers: BTreeMap::new(),
                 ttl_sec: None,
-                source: Some(SamplingSource::LatestFromSubject {
+                source: Some(JobEventSamplingSource::LatestFromSubject {
                     subject: "jobs.latest".to_string(),
                 }),
             },

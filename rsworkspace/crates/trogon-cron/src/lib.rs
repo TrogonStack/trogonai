@@ -7,7 +7,6 @@
 
 pub mod commands;
 pub mod config;
-mod domain;
 pub mod error;
 pub mod events;
 pub mod kv;
@@ -20,6 +19,10 @@ pub mod traits;
 #[cfg(any(test, feature = "test-support"))]
 pub mod mocks;
 
+pub use commands::domain::{
+    DeliveryHeaders, DeliveryRoute, DeliverySpec, JobEnabledState, JobId, JobIdError, JobSpec,
+    ResolvedJobSpec, SamplingSource, SamplingSubject, ScheduleSpec, TtlSeconds,
+};
 pub use commands::{
     ChangeJobStateCommand, ChangeJobStateDecisionError, ChangeJobStateError, ChangeJobStateResult,
     ChangeJobStateState, GetJobCommand, ListJobsCommand, RegisterJobCommand,
@@ -28,12 +31,11 @@ pub use commands::{
     register_job, remove_job,
 };
 pub use config::JobWriteCondition;
-pub use domain::{
-    DeliverySpec, JobEnabledState, JobId, JobIdError, JobSpec, ResolvedJobSpec, SamplingSource,
-    ScheduleSpec,
-};
 pub use error::{CronError, JobSpecError};
-pub use events::{JobEvent, JobEventCodec, JobEventData, RecordedJobEvent, RegisteredJobSpec};
+pub use events::{
+    JobEvent, JobEventCodec, JobEventData, JobEventDelivery, JobEventSamplingSource,
+    JobEventSchedule, JobEventState, RecordedJobEvent, RegisteredJobSpec,
+};
 pub use nats::NatsSchedulePublisher;
 pub use processors::CronController;
 pub use projections::{

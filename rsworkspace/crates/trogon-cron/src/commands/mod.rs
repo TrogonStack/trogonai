@@ -1,4 +1,5 @@
 mod add;
+pub mod domain;
 mod get;
 mod list;
 mod remove;
