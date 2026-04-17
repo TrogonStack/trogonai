@@ -1,4 +1,4 @@
-use crate::execution::ExpectedStateRule;
+use crate::execution::CommandStreamState;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Act;
@@ -8,7 +8,7 @@ pub trait StreamCommand {
 
     fn stream_id(&self) -> &Self::StreamId;
 
-    fn expected_state_rule(&self) -> Option<ExpectedStateRule> {
+    fn stream_state(&self) -> Option<CommandStreamState> {
         None
     }
 }

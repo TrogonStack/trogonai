@@ -9,8 +9,8 @@ use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use serde::{Serialize, de::DeserializeOwned};
 use trogon_eventsourcing::{
-    AppendOutcome, EventData, EventStore, ExpectedState, NonEmpty, RecordedEvent, Snapshot,
-    SnapshotStore, SnapshotStoreConfig, StreamCommand,
+    AppendOutcome, EventData, EventStore, NonEmpty, RecordedEvent, Snapshot, SnapshotStore,
+    SnapshotStoreConfig, StreamCommand, StreamState,
 };
 use trogon_nats::lease::{ReleaseLease, RenewLease, TryAcquireLease};
 
@@ -277,7 +277,7 @@ impl EventStore<crate::JobId> for MockCronStore {
     async fn append_events(
         &self,
         stream_id: &crate::JobId,
-        expected_state: ExpectedState,
+        expected_state: StreamState,
         events: NonEmpty<EventData>,
     ) -> Result<AppendOutcome, Self::Error> {
         let stream_id = stream_id.clone();
@@ -305,19 +305,19 @@ impl EventStore<crate::JobId> for MockCronStore {
         let current_version = stream_versions.get(stream_id.as_str()).copied();
         let write_state = JobWriteState::new(current_version, current_version.is_some());
         match expected_state {
-            ExpectedState::Any => {}
-            ExpectedState::StreamExists if write_state.exists() => {}
-            ExpectedState::StreamExists => {
+            StreamState::Any => {}
+            StreamState::StreamExists if write_state.exists() => {}
+            StreamState::StreamExists => {
                 return Err(CronError::OptimisticConcurrencyConflict {
                     id: stream_id.to_string(),
-                    expected: ExpectedState::StreamExists,
+                    expected: StreamState::StreamExists,
                     current_version,
                 });
             }
-            ExpectedState::NoStream => {
+            StreamState::NoStream => {
                 JobWriteCondition::MustNotExist.ensure(stream_id.as_str(), write_state)?;
             }
-            ExpectedState::StreamRevision(version) => {
+            StreamState::StreamRevision(version) => {
                 JobWriteCondition::MustBeAtVersion(version)
                     .ensure(stream_id.as_str(), write_state)?;
             }
@@ -412,8 +412,8 @@ mod tests {
     use super::*;
     use crate::{
         ChangeJobStateCommand, DeliverySpec, GetJobCommand, JobEnabledState, JobWriteCondition,
-        ListJobsCommand, OccPolicy, RegisterJobCommand, RemoveJobCommand, SamplingSource,
-        ScheduleSpec, change_job_state, register_job, remove_job,
+        ListJobsCommand, RegisterJobCommand, RemoveJobCommand, SamplingSource, ScheduleSpec,
+        change_job_state, register_job, remove_job,
     };
     use futures::StreamExt;
 
@@ -500,7 +500,7 @@ mod tests {
             &store,
             &store,
             RegisterJobCommand::new(base_job("alpha")).unwrap(),
-            OccPolicy::UseCommandRule,
+            None,
         )
         .await
         .unwrap();
@@ -517,7 +517,7 @@ mod tests {
             &store,
             &store,
             ChangeJobStateCommand::new(job_id("alpha"), JobEnabledState::Disabled),
-            OccPolicy::UseCommandRule,
+            None,
         )
         .await
         .unwrap();
@@ -545,14 +545,9 @@ mod tests {
                 .is_err()
         );
 
-        remove_job(
-            &store,
-            &store,
-            RemoveJobCommand::new(job_id("alpha")),
-            OccPolicy::UseCommandRule,
-        )
-        .await
-        .unwrap();
+        remove_job(&store, &store, RemoveJobCommand::new(job_id("alpha")), None)
+            .await
+            .unwrap();
         assert!(
             store
                 .get_job(GetJobCommand {
@@ -567,7 +562,7 @@ mod tests {
             &store,
             &store,
             RegisterJobCommand::new(base_job("alpha")).unwrap(),
-            OccPolicy::UseCommandRule,
+            None,
         )
         .await
         .unwrap_err();
@@ -597,7 +592,7 @@ mod tests {
             &store,
             &store,
             RegisterJobCommand::new(base_job("alpha")).unwrap(),
-            OccPolicy::UseCommandRule,
+            None,
         )
         .await
         .unwrap();
@@ -605,7 +600,7 @@ mod tests {
             &store,
             &store,
             ChangeJobStateCommand::new(job_id("alpha"), JobEnabledState::Enabled),
-            OccPolicy::UseCommandRule,
+            None,
         )
         .await
         .unwrap_err();
@@ -620,7 +615,7 @@ mod tests {
             &store,
             &store,
             ChangeJobStateCommand::new(job_id("missing"), JobEnabledState::Disabled),
-            OccPolicy::UseCommandRule,
+            None,
         )
         .await
         .unwrap_err();
