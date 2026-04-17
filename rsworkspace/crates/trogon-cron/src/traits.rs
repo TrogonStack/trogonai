@@ -3,7 +3,7 @@ use std::future::Future;
 
 pub use trogon_nats::lease::{ReleaseLease, RenewLease, TryAcquireLease};
 
-use crate::domain::ResolvedJobSpec;
+use crate::ResolvedJobSpec;
 
 pub trait LeaderLock:
     TryAcquireLease<Error = async_nats::jetstream::kv::CreateError>
