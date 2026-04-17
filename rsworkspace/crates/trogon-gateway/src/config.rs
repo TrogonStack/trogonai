@@ -1666,6 +1666,19 @@ consumer_secret = "twitter-consumer-secret"
     }
 
     #[test]
+    fn twitter_empty_consumer_secret_is_invalid() {
+        let toml = r#"
+[sources.twitter]
+consumer_secret = ""
+"#;
+        let f = write_toml(toml);
+        let result = load(Some(f.path()));
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("twitter: invalid consumer_secret")))
+        );
+    }
+
+    #[test]
     fn gitlab_resolves_with_valid_secret() {
         let f = write_toml(&gitlab_toml("gitlab-webhook-secret"));
         let cfg = load(Some(f.path())).expect("load failed");
@@ -2513,6 +2526,20 @@ subject_prefix = "has.dots"
     }
 
     #[test]
+    fn twitter_invalid_subject_prefix() {
+        let toml = r#"
+[sources.twitter]
+consumer_secret = "twitter-consumer-secret"
+subject_prefix = "has.dots"
+"#;
+        let f = write_toml(toml);
+        let result = load(Some(f.path()));
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("twitter: invalid subject_prefix")))
+        );
+    }
+
+    #[test]
     fn slack_invalid_stream_name() {
         let toml = r#"
 [sources.slack]
@@ -2614,6 +2641,20 @@ stream_name = "has.dots"
     }
 
     #[test]
+    fn twitter_invalid_stream_name() {
+        let toml = r#"
+[sources.twitter]
+consumer_secret = "twitter-consumer-secret"
+stream_name = "has.dots"
+"#;
+        let f = write_toml(toml);
+        let result = load(Some(f.path()));
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("twitter: invalid stream_name")))
+        );
+    }
+
+    #[test]
     fn incidentio_zero_nats_ack_timeout_is_error() {
         let toml = format!(
             r#"
@@ -2690,6 +2731,20 @@ nats_ack_timeout_secs = 0
     }
 
     #[test]
+    fn twitter_zero_nats_ack_timeout_is_error() {
+        let toml = r#"
+[sources.twitter]
+consumer_secret = "twitter-consumer-secret"
+nats_ack_timeout_secs = 0
+"#;
+        let f = write_toml(toml);
+        let result = load(Some(f.path()));
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("twitter: nats_ack_timeout_secs must not be zero")))
+        );
+    }
+
+    #[test]
     fn sentry_zero_stream_max_age_is_error() {
         let toml = r#"
 [sources.sentry]
@@ -2700,6 +2755,20 @@ stream_max_age_secs = 0
         let result = load(Some(f.path()));
         assert!(
             matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("sentry: stream_max_age_secs must not be zero")))
+        );
+    }
+
+    #[test]
+    fn twitter_zero_stream_max_age_is_error() {
+        let toml = r#"
+[sources.twitter]
+consumer_secret = "twitter-consumer-secret"
+stream_max_age_secs = 0
+"#;
+        let f = write_toml(toml);
+        let result = load(Some(f.path()));
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("twitter: stream_max_age_secs must not be zero")))
         );
     }
 

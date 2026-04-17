@@ -348,18 +348,23 @@ fn value_id(value: &serde_json::Value) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_nats::jetstream::publish::PublishAck;
+    use async_nats::subject::ToSubject;
     use axum::{body::Body, http::Request};
     use base64::Engine;
     use base64::engine::general_purpose::STANDARD;
     use hmac::{Hmac, Mac};
     use sha2::Sha256;
+    use std::future::{Future, IntoFuture};
+    use std::sync::{Arc, Mutex};
     use tower::ServiceExt;
     use tracing_subscriber::util::SubscriberInitExt;
     use trogon_nats::jetstream::StreamMaxAge;
     use trogon_nats::jetstream::{
-        ClaimCheckPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher,
-        MockObjectStore,
+        ClaimCheckPublisher, JetStreamPublisher, MaxPayload, MockJetStreamContext,
+        MockJetStreamPublisher, MockObjectStore,
     };
+    use trogon_nats::mocks::MockError;
 
     type HmacSha256 = Hmac<Sha256>;
 
@@ -427,6 +432,64 @@ mod tests {
             Some("unroutable"),
         );
     }
+
+    mod ack_test_support {
+        use super::*;
+
+        #[derive(Clone)]
+        enum AckBehavior {
+            Fail,
+        }
+
+        #[derive(Clone)]
+        pub struct AckFailPublisher {
+            behavior: Arc<Mutex<AckBehavior>>,
+        }
+
+        impl AckFailPublisher {
+            pub fn failing() -> Self {
+                Self {
+                    behavior: Arc::new(Mutex::new(AckBehavior::Fail)),
+                }
+            }
+        }
+
+        pub enum AckFuture {
+            Fail,
+        }
+
+        impl IntoFuture for AckFuture {
+            type Output = Result<PublishAck, MockError>;
+            type IntoFuture = std::pin::Pin<Box<dyn Future<Output = Self::Output> + Send>>;
+
+            fn into_future(self) -> Self::IntoFuture {
+                match self {
+                    AckFuture::Fail => {
+                        Box::pin(async { Err(MockError("simulated ack failure".to_string())) })
+                    }
+                }
+            }
+        }
+
+        impl JetStreamPublisher for AckFailPublisher {
+            type PublishError = MockError;
+            type AckFuture = AckFuture;
+
+            async fn publish_with_headers<S: ToSubject + Send>(
+                &self,
+                _subject: S,
+                _headers: async_nats::HeaderMap,
+                _payload: Bytes,
+            ) -> Result<AckFuture, MockError> {
+                let behavior = self.behavior.lock().unwrap().clone();
+                match behavior {
+                    AckBehavior::Fail => Ok(AckFuture::Fail),
+                }
+            }
+        }
+    }
+
+    use ack_test_support::AckFailPublisher;
 
     #[tokio::test]
     async fn provision_creates_stream() {
@@ -660,5 +723,164 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::OK);
         assert_unroutable(&publisher, "missing_event_type");
+    }
+
+    #[tokio::test]
+    async fn invalid_event_type_publishes_unroutable() {
+        let _guard = tracing_guard();
+        let publisher = MockJetStreamPublisher::new();
+        let app = mock_app(publisher.clone());
+        let body = br#"{
+            "data": {
+                "event_type": "invalid token"
+            }
+        }"#;
+        let signature = compute_sig(TEST_SECRET, body);
+
+        let response = app
+            .oneshot(webhook_request(body, Some(&signature)))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_unroutable(&publisher, "invalid_event_type");
+    }
+
+    #[tokio::test]
+    async fn publish_ack_failure_returns_internal_server_error() {
+        let _guard = tracing_guard();
+        let publisher = AckFailPublisher::failing();
+
+        let state = AppState {
+            publisher: ClaimCheckPublisher::new(
+                publisher,
+                MockObjectStore::new(),
+                "test-bucket".to_string(),
+                MaxPayload::from_server_limit(usize::MAX),
+            ),
+            consumer_secret: TwitterConsumerSecret::new(TEST_SECRET).unwrap(),
+            subject_prefix: NatsToken::new("twitter").unwrap(),
+            nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),
+        };
+
+        let app = Router::new()
+            .route(
+                "/webhook",
+                get(handle_crc::<AckFailPublisher, MockObjectStore>)
+                    .post(handle_webhook::<AckFailPublisher, MockObjectStore>),
+            )
+            .with_state(state);
+
+        let body = br#"{"data":{"event_type":"profile.update.bio"}}"#;
+        let signature = compute_sig(TEST_SECRET, body);
+
+        let response = app
+            .oneshot(webhook_request(body, Some(&signature)))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn unroutable_publish_ack_failure_returns_internal_server_error() {
+        let _guard = tracing_guard();
+        let publisher = AckFailPublisher::failing();
+
+        let state = AppState {
+            publisher: ClaimCheckPublisher::new(
+                publisher,
+                MockObjectStore::new(),
+                "test-bucket".to_string(),
+                MaxPayload::from_server_limit(usize::MAX),
+            ),
+            consumer_secret: TwitterConsumerSecret::new(TEST_SECRET).unwrap(),
+            subject_prefix: NatsToken::new("twitter").unwrap(),
+            nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),
+        };
+
+        let app = Router::new()
+            .route(
+                "/webhook",
+                get(handle_crc::<AckFailPublisher, MockObjectStore>)
+                    .post(handle_webhook::<AckFailPublisher, MockObjectStore>),
+            )
+            .with_state(state);
+
+        let body = b"{not-json";
+        let signature = compute_sig(TEST_SECRET, body);
+
+        let response = app
+            .oneshot(webhook_request(body, Some(&signature)))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[test]
+    fn resolve_event_type_rejects_non_object_payloads() {
+        let payload = serde_json::json!(42);
+
+        assert_eq!(
+            resolve_event_type(&payload),
+            Err(RejectReason::MissingEventType)
+        );
+    }
+
+    #[test]
+    fn resolve_event_type_falls_back_for_multiple_account_activity_keys() {
+        let payload = serde_json::json!({
+            "favorite_events": [{"id": "fav-1"}],
+            "follow_events": [{"id": "follow-1"}]
+        });
+
+        let (event_type, payload_kind) = resolve_event_type(&payload).expect("event type");
+        assert_eq!(event_type.as_str(), "account_activity");
+        assert_eq!(payload_kind, PayloadKind::AccountActivity);
+    }
+
+    #[test]
+    fn extract_message_id_uses_object_payload_ids() {
+        let payload = serde_json::json!({
+            "user_event": {
+                "id": "user-event-1"
+            }
+        });
+
+        assert_eq!(
+            extract_message_id(&payload).as_deref(),
+            Some("user-event-1")
+        );
+    }
+
+    #[test]
+    fn extract_message_id_skips_multi_item_account_activity_arrays() {
+        let payload = serde_json::json!({
+            "favorite_events": [
+                {"id": "fav-1"},
+                {"id": "fav-2"}
+            ]
+        });
+
+        assert_eq!(extract_message_id(&payload), None);
+    }
+
+    #[test]
+    fn value_id_supports_numeric_ids() {
+        let value = serde_json::json!({
+            "id": 12345
+        });
+
+        assert_eq!(value_id(&value).as_deref(), Some("12345"));
+    }
+
+    #[test]
+    fn value_id_rejects_non_string_and_non_numeric_ids() {
+        let value = serde_json::json!({
+            "id": true
+        });
+
+        assert_eq!(value_id(&value), None);
     }
 }
