@@ -187,15 +187,20 @@ pub async fn run<E, S>(
     event_store: &E,
     snapshot_store: &S,
     command: ChangeJobStateCommand,
-    occ: OccPolicy,
+    occ: Option<OccPolicy>,
 ) -> ChangeJobStateResult
 where
     E: EventStore<JobId, Error = CronError>,
     S: SnapshotStore<ChangeJobStateState, JobId, Error = CronError>,
 {
-    Ok(CommandExecution::new(event_store, &command)
-        .codec(JobEventCodec)
-        .occ(occ)
+    let execution = CommandExecution::new(event_store, &command).codec(JobEventCodec);
+    let execution = if let Some(occ) = occ {
+        execution.occ(occ)
+    } else {
+        execution
+    };
+
+    Ok(execution
         .snapshots(Snapshots::new(
             snapshot_store,
             SNAPSHOT_STORE_CONFIG,
@@ -374,7 +379,7 @@ mod tests {
             &store,
             &store,
             ChangeJobStateCommand::new(JobId::parse("backup").unwrap(), JobEnabledState::Disabled),
-            OccPolicy::UseCommandRule,
+            None,
         )
         .await
         .unwrap();

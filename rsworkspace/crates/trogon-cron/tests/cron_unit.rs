@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use trogon_cron::{
     ChangeJobStateCommand, CronController, DeliverySpec, GetJobCommand, JobEnabledState, JobId,
-    JobSpec, JobWriteCondition, ListJobsCommand, OccPolicy, RegisterJobCommand, RemoveJobCommand,
+    JobSpec, JobWriteCondition, ListJobsCommand, RegisterJobCommand, RemoveJobCommand,
     SamplingSource, SchedulePublisher, ScheduleSpec, change_job_state,
     mocks::{MockCronStore, MockLeaderLock, MockSchedulePublisher},
     register_job, remove_job,
@@ -35,14 +35,9 @@ async fn client_register_then_get() {
     let store = MockCronStore::new();
 
     let job = base_job("backup");
-    register_job(
-        &store,
-        &store,
-        RegisterJobCommand::new(job).unwrap(),
-        OccPolicy::UseCommandRule,
-    )
-    .await
-    .unwrap();
+    register_job(&store, &store, RegisterJobCommand::new(job).unwrap(), None)
+        .await
+        .unwrap();
 
     let got = store
         .get_job(GetJobCommand {
@@ -61,7 +56,7 @@ async fn client_set_enabled_toggles_job() {
         &store,
         &store,
         RegisterJobCommand::new(base_job("toggle")).unwrap(),
-        OccPolicy::UseCommandRule,
+        None,
     )
     .await
     .unwrap();
@@ -69,7 +64,7 @@ async fn client_set_enabled_toggles_job() {
         &store,
         &store,
         ChangeJobStateCommand::new(job_id("toggle"), JobEnabledState::Disabled),
-        OccPolicy::UseCommandRule,
+        None,
     )
     .await
     .unwrap();
@@ -92,7 +87,7 @@ async fn client_remove_and_list_jobs_use_store_paths() {
         &store,
         &store,
         RegisterJobCommand::new(base_job("alpha")).unwrap(),
-        OccPolicy::UseCommandRule,
+        None,
     )
     .await
     .unwrap();
@@ -100,7 +95,7 @@ async fn client_remove_and_list_jobs_use_store_paths() {
         &store,
         &store,
         RegisterJobCommand::new(base_job("beta")).unwrap(),
-        OccPolicy::UseCommandRule,
+        None,
     )
     .await
     .unwrap();
@@ -108,14 +103,9 @@ async fn client_remove_and_list_jobs_use_store_paths() {
     let listed = store.list_jobs(ListJobsCommand).await.unwrap();
     assert_eq!(listed.len(), 2);
 
-    remove_job(
-        &store,
-        &store,
-        RemoveJobCommand::new(job_id("beta")),
-        OccPolicy::UseCommandRule,
-    )
-    .await
-    .unwrap();
+    remove_job(&store, &store, RemoveJobCommand::new(job_id("beta")), None)
+        .await
+        .unwrap();
 
     assert!(
         store

@@ -1,4 +1,4 @@
-use trogon_eventsourcing::ExpectedState;
+use trogon_eventsourcing::StreamState;
 
 use crate::JobEnabledState;
 
@@ -34,7 +34,7 @@ pub enum CronError {
     },
     OptimisticConcurrencyConflict {
         id: String,
-        expected: ExpectedState,
+        expected: StreamState,
         current_version: Option<u64>,
     },
     Serde(serde_json::Error),
@@ -254,7 +254,7 @@ impl From<trogon_eventsourcing::SnapshotStoreError> for CronError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use trogon_eventsourcing::ExpectedState;
+    use trogon_eventsourcing::StreamState;
     use trogon_nats::SubjectTokenViolation;
 
     #[test]
@@ -308,7 +308,7 @@ mod tests {
 
         let occ_missing = CronError::OptimisticConcurrencyConflict {
             id: "job-1".to_string(),
-            expected: ExpectedState::NoStream,
+            expected: StreamState::NoStream,
             current_version: None,
         };
         assert!(
@@ -320,7 +320,7 @@ mod tests {
 
         let occ_current = CronError::OptimisticConcurrencyConflict {
             id: "job-1".to_string(),
-            expected: ExpectedState::StreamRevision(3),
+            expected: StreamState::StreamRevision(3),
             current_version: Some(4),
         };
         assert!(occ_current.to_string().contains("current version is 4"));

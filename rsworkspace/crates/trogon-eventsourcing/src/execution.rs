@@ -32,14 +32,14 @@ pub trait SnapshotState: CommandState {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ExpectedState {
+pub enum StreamState {
     Any,
     StreamExists,
     NoStream,
     StreamRevision(u64),
 }
 
-impl ExpectedState {
+impl StreamState {
     pub const fn from_current_version(current_version: Option<u64>) -> Self {
         match current_version {
             Some(version) => Self::StreamRevision(version),
@@ -48,39 +48,35 @@ impl ExpectedState {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OccPolicy {
-    #[default]
-    UseCommandRule,
     ExactCurrentVersion,
-    Explicit(ExpectedState),
+    Explicit(StreamState),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ExpectedStateRule {
-    Default(ExpectedState),
-    Required(ExpectedState),
+pub enum CommandStreamState {
+    Prefer(StreamState),
+    Require(StreamState),
 }
 
-impl OccPolicy {
-    pub const fn resolve(
-        self,
-        current_version: Option<u64>,
-        command_rule: Option<ExpectedStateRule>,
-    ) -> ExpectedState {
-        if let Some(ExpectedStateRule::Required(expected_state)) = command_rule {
-            return expected_state;
-        }
+pub const fn resolve_stream_state(
+    occ: Option<OccPolicy>,
+    current_version: Option<u64>,
+    command_stream_state: Option<CommandStreamState>,
+) -> StreamState {
+    if let Some(CommandStreamState::Require(stream_state)) = command_stream_state {
+        return stream_state;
+    }
 
-        match self {
-            Self::UseCommandRule => match command_rule {
-                Some(ExpectedStateRule::Default(expected_state)) => expected_state,
-                Some(ExpectedStateRule::Required(expected_state)) => expected_state,
-                None => ExpectedState::from_current_version(current_version),
-            },
-            Self::ExactCurrentVersion => ExpectedState::from_current_version(current_version),
-            Self::Explicit(expected_state) => expected_state,
-        }
+    match occ {
+        Some(OccPolicy::ExactCurrentVersion) => StreamState::from_current_version(current_version),
+        Some(OccPolicy::Explicit(stream_state)) => stream_state,
+        None => match command_stream_state {
+            Some(CommandStreamState::Prefer(stream_state)) => stream_state,
+            Some(CommandStreamState::Require(stream_state)) => stream_state,
+            None => StreamState::from_current_version(current_version),
+        },
     }
 }
 
@@ -101,7 +97,7 @@ pub trait EventStore<StreamId: ?Sized>: Send + Sync {
     fn append_events(
         &self,
         stream_id: &StreamId,
-        expected_state: ExpectedState,
+        stream_state: StreamState,
         events: NonEmpty<EventData>,
     ) -> impl std::future::Future<Output = Result<AppendOutcome, Self::Error>> + Send;
 }
@@ -234,7 +230,7 @@ impl<'a, S, P> Snapshots<'a, S, P> {
 pub struct CommandExecution<'a, E, C, S = WithoutSnapshots> {
     event_store: &'a E,
     command: &'a C,
-    occ: OccPolicy,
+    occ: Option<OccPolicy>,
     snapshots: S,
     event_codec: JsonEventCodec,
 }
@@ -244,7 +240,7 @@ impl<'a, E, C> CommandExecution<'a, E, C, WithoutSnapshots> {
         Self {
             event_store,
             command,
-            occ: OccPolicy::UseCommandRule,
+            occ: None,
             snapshots: WithoutSnapshots,
             event_codec: JsonEventCodec,
         }
@@ -266,7 +262,7 @@ impl<'a, E, C> CommandExecution<'a, E, C, WithoutSnapshots> {
 
 impl<'a, E, C, S> CommandExecution<'a, E, C, S> {
     pub fn occ(mut self, occ: OccPolicy) -> Self {
-        self.occ = occ;
+        self.occ = Some(occ);
         self
     }
 }
@@ -286,14 +282,14 @@ impl<'a, E, C, S> CommandExecution<'a, E, C, S> {
 pub struct CommandExecutionWithCodec<'a, E, C, S, EC> {
     event_store: &'a E,
     command: &'a C,
-    occ: OccPolicy,
+    occ: Option<OccPolicy>,
     snapshots: S,
     event_codec: EC,
 }
 
 impl<'a, E, C, S, EC> CommandExecutionWithCodec<'a, E, C, S, EC> {
     pub fn occ(mut self, occ: OccPolicy) -> Self {
-        self.occ = occ;
+        self.occ = Some(occ);
         self
     }
 
@@ -383,12 +379,11 @@ where
             .map_err(Into::into)
             .map_err(CommandInfraError::EncodeEvent)
             .map_err(CommandFailure::Infra)?;
-        let expected_state = self
-            .occ
-            .resolve(current_version, self.command.expected_state_rule());
+        let stream_state =
+            resolve_stream_state(self.occ, current_version, self.command.stream_state());
         let append_outcome = self
             .event_store
-            .append_events(stream_id, expected_state, encoded_events)
+            .append_events(stream_id, stream_state, encoded_events)
             .await
             .map_err(CommandInfraError::Append)
             .map_err(CommandFailure::Infra)?;
@@ -508,12 +503,11 @@ where
             .map_err(Into::into)
             .map_err(CommandInfraError::EncodeEvent)
             .map_err(CommandFailure::Infra)?;
-        let expected_state = self
-            .occ
-            .resolve(current_version, self.command.expected_state_rule());
+        let stream_state =
+            resolve_stream_state(self.occ, current_version, self.command.stream_state());
         let append_outcome = self
             .event_store
-            .append_events(stream_id, expected_state, encoded_events)
+            .append_events(stream_id, stream_state, encoded_events)
             .await
             .map_err(CommandInfraError::Append)
             .map_err(CommandFailure::Infra)?;
@@ -576,7 +570,7 @@ mod tests {
     struct TestCommand {
         id: String,
         action: TestAction,
-        expected_state_rule: Option<ExpectedStateRule>,
+        stream_state: Option<CommandStreamState>,
         stream_id_calls: Arc<AtomicUsize>,
     }
 
@@ -654,7 +648,7 @@ mod tests {
         fail_append: bool,
         loaded_stream_ids: Arc<Mutex<Vec<String>>>,
         read_from_sequences: Arc<Mutex<Vec<u64>>>,
-        expected_versions: Arc<Mutex<Vec<ExpectedState>>>,
+        stream_states: Arc<Mutex<Vec<StreamState>>>,
         appended_events: Arc<Mutex<Vec<EventData>>>,
         saved_snapshots: Arc<Mutex<Vec<Snapshot<TestState>>>>,
     }
@@ -664,18 +658,18 @@ mod tests {
             Self {
                 id: id.to_string(),
                 action,
-                expected_state_rule: None,
+                stream_state: None,
                 stream_id_calls: Arc::new(AtomicUsize::new(0)),
             }
         }
 
-        fn with_default_expected_state(mut self, expected_state: ExpectedState) -> Self {
-            self.expected_state_rule = Some(ExpectedStateRule::Default(expected_state));
+        fn with_default_stream_state(mut self, stream_state: StreamState) -> Self {
+            self.stream_state = Some(CommandStreamState::Prefer(stream_state));
             self
         }
 
-        fn with_required_expected_state(mut self, expected_state: ExpectedState) -> Self {
-            self.expected_state_rule = Some(ExpectedStateRule::Required(expected_state));
+        fn with_required_stream_state(mut self, stream_state: StreamState) -> Self {
+            self.stream_state = Some(CommandStreamState::Require(stream_state));
             self
         }
 
@@ -692,8 +686,8 @@ mod tests {
             &self.id
         }
 
-        fn expected_state_rule(&self) -> Option<ExpectedStateRule> {
-            self.expected_state_rule
+        fn stream_state(&self) -> Option<CommandStreamState> {
+            self.stream_state
         }
     }
 
@@ -834,16 +828,13 @@ mod tests {
         async fn append_events(
             &self,
             _stream_id: &str,
-            expected_version: ExpectedState,
+            stream_state: StreamState,
             events: NonEmpty<EventData>,
         ) -> Result<AppendOutcome, Self::Error> {
             if self.fail_append {
                 return Err(TestInfraError::Append);
             }
-            self.expected_versions
-                .lock()
-                .unwrap()
-                .push(expected_version);
+            self.stream_states.lock().unwrap().push(stream_state);
             self.appended_events
                 .lock()
                 .unwrap()
@@ -914,8 +905,8 @@ mod tests {
             })
         );
         assert_eq!(
-            runtime.expected_versions.lock().unwrap().as_slice(),
-            &[ExpectedState::NoStream]
+            runtime.stream_states.lock().unwrap().as_slice(),
+            &[StreamState::NoStream]
         );
         assert_eq!(
             runtime.read_from_sequences.lock().unwrap().as_slice(),
@@ -957,8 +948,8 @@ mod tests {
 
         assert_eq!(runtime.read_from_sequences.lock().unwrap().as_slice(), &[2]);
         assert_eq!(
-            runtime.expected_versions.lock().unwrap().as_slice(),
-            &[ExpectedState::StreamRevision(2)]
+            runtime.stream_states.lock().unwrap().as_slice(),
+            &[StreamState::StreamRevision(2)]
         );
         assert_eq!(result.state, TestState::Missing);
     }
@@ -1077,8 +1068,8 @@ mod tests {
 
         assert_eq!(result.next_expected_version, 2);
         assert_eq!(
-            runtime.expected_versions.lock().unwrap().as_slice(),
-            &[ExpectedState::StreamRevision(1)]
+            runtime.stream_states.lock().unwrap().as_slice(),
+            &[StreamState::StreamRevision(1)]
         );
         assert_eq!(appended_events.len(), 1);
         assert_eq!(appended_events[0].event_type, "state_changed");
@@ -1130,13 +1121,13 @@ mod tests {
             ..Default::default()
         };
         let command = TestCommand::new("alpha", TestAction::Register)
-            .with_default_expected_state(ExpectedState::StreamExists);
+            .with_default_stream_state(StreamState::StreamExists);
 
         let _ = block_on(CommandExecution::new(&runtime, &command).execute()).unwrap();
 
         assert_eq!(
-            runtime.expected_versions.lock().unwrap().as_slice(),
-            &[ExpectedState::StreamExists]
+            runtime.stream_states.lock().unwrap().as_slice(),
+            &[StreamState::StreamExists]
         );
     }
 
@@ -1147,18 +1138,18 @@ mod tests {
             ..Default::default()
         };
         let command = TestCommand::new("alpha", TestAction::Register)
-            .with_default_expected_state(ExpectedState::StreamExists);
+            .with_default_stream_state(StreamState::StreamExists);
 
         let _ = block_on(
             CommandExecution::new(&runtime, &command)
-                .occ(OccPolicy::Explicit(ExpectedState::Any))
+                .occ(OccPolicy::Explicit(StreamState::Any))
                 .execute(),
         )
         .unwrap();
 
         assert_eq!(
-            runtime.expected_versions.lock().unwrap().as_slice(),
-            &[ExpectedState::Any]
+            runtime.stream_states.lock().unwrap().as_slice(),
+            &[StreamState::Any]
         );
     }
 
@@ -1176,7 +1167,7 @@ mod tests {
             ..Default::default()
         };
         let command = TestCommand::new("alpha", TestAction::Remove)
-            .with_default_expected_state(ExpectedState::StreamExists);
+            .with_default_stream_state(StreamState::StreamExists);
 
         let _ = block_on(
             CommandExecution::new(&runtime, &command)
@@ -1186,8 +1177,8 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            runtime.expected_versions.lock().unwrap().as_slice(),
-            &[ExpectedState::StreamRevision(7)]
+            runtime.stream_states.lock().unwrap().as_slice(),
+            &[StreamState::StreamRevision(7)]
         );
     }
 
@@ -1198,18 +1189,18 @@ mod tests {
             ..Default::default()
         };
         let command = TestCommand::new("alpha", TestAction::Register)
-            .with_required_expected_state(ExpectedState::NoStream);
+            .with_required_stream_state(StreamState::NoStream);
 
         let _ = block_on(
             CommandExecution::new(&runtime, &command)
-                .occ(OccPolicy::Explicit(ExpectedState::Any))
+                .occ(OccPolicy::Explicit(StreamState::Any))
                 .execute(),
         )
         .unwrap();
 
         assert_eq!(
-            runtime.expected_versions.lock().unwrap().as_slice(),
-            &[ExpectedState::NoStream]
+            runtime.stream_states.lock().unwrap().as_slice(),
+            &[StreamState::NoStream]
         );
     }
 

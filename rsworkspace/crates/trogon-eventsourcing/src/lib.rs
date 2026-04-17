@@ -13,8 +13,8 @@ pub mod testing;
 pub use decision::{Act, Decide, Decision, NonEmpty, StreamCommand, decide};
 pub use execution::{
     AlwaysSnapshot, AppendOutcome, CommandExecution, CommandFailure, CommandInfraError,
-    CommandOutcome, CommandState, EventStore, ExecutionResult, ExpectedState, ExpectedStateRule,
-    NoSnapshot, OccPolicy, SnapshotPolicy, SnapshotState, SnapshotStore, Snapshots,
+    CommandOutcome, CommandState, CommandStreamState, EventStore, ExecutionResult, NoSnapshot,
+    OccPolicy, SnapshotPolicy, SnapshotState, SnapshotStore, Snapshots, StreamState,
     WithoutSnapshots,
 };
 pub use snapshots::{
