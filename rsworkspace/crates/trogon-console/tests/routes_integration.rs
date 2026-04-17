@@ -911,3 +911,35 @@ async fn session_list_sorted_by_updated_at_desc() {
     assert_eq!(arr[1]["id"], "sess_mid");
     assert_eq!(arr[2]["id"], "sess_old");
 }
+
+// ── MCP registry ──────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn mcp_registry_returns_known_servers() {
+    let env = start().await;
+    let resp = env
+        .client
+        .get(format!("{}/mcp-registry", env.base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status().as_u16(), 200);
+
+    let servers: Value = resp.json().await.unwrap();
+    let arr = servers.as_array().expect("response must be a JSON array");
+    assert!(!arr.is_empty(), "MCP registry must not be empty");
+
+    // Every entry must have name and url fields.
+    for entry in arr {
+        assert!(entry["name"].is_string(), "each server must have a name field");
+        assert!(entry["url"].is_string(), "each server must have a url field");
+    }
+
+    // Well-known entries must be present.
+    let names: Vec<&str> = arr
+        .iter()
+        .filter_map(|e| e["name"].as_str())
+        .collect();
+    assert!(names.contains(&"GitHub"), "GitHub must be in the MCP registry");
+    assert!(names.contains(&"Linear"), "Linear must be in the MCP registry");
+}

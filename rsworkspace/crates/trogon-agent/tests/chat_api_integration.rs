@@ -14,13 +14,46 @@ use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::{ImageExt, runners::AsyncRunner};
 use tokio::net::TcpListener;
 use trogon_agent::{
+    agent_loader::AgentLoading,
     agent_loop::{AgentLoop, ReqwestAnthropicClient},
     chat_api::{ChatAppState, router},
     flag_client::AlwaysOnFlagClient,
     promise_store::{AgentPromise, PromiseEntry, PromiseRepository, PromiseStoreError},
     session::SessionStore,
+    skill_loader::SkillLoading,
     tools::{DefaultToolDispatcher, ToolContext},
 };
+
+// ── Inline loader stubs for skill-injection tests ─────────────────────────────
+
+struct FixedAgentLoader {
+    target_id: String,
+    skill_ids: Vec<String>,
+}
+
+impl AgentLoading for FixedAgentLoader {
+    fn get_skill_ids<'a>(
+        &'a self,
+        agent_id: &'a str,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Vec<String>> + Send + 'a>> {
+        let ids = if agent_id == self.target_id { self.skill_ids.clone() } else { vec![] };
+        Box::pin(std::future::ready(ids))
+    }
+}
+
+struct FixedSkillLoader {
+    content: Option<String>,
+}
+
+impl SkillLoading for FixedSkillLoader {
+    fn load<'a>(
+        &'a self,
+        _skill_ids: &'a [String],
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<String>> + Send + 'a>> {
+        let c = self.content.clone();
+        Box::pin(std::future::ready(c))
+    }
+}
 
 // Minimal no-op promise store for integration tests — these tests exercise chat
 // session routes that don't use promise state.
@@ -81,6 +114,16 @@ impl PromiseRepository for NoOpPromiseStore {
     }
 }
 
+// ── Response helpers ──────────────────────────────────────────────────────────
+
+fn end_turn_with_usage(text: &str, input_tokens: u32, output_tokens: u32) -> serde_json::Value {
+    json!({
+        "stop_reason": "end_turn",
+        "content": [{ "type": "text", "text": text }],
+        "usage": { "input_tokens": input_tokens, "output_tokens": output_tokens }
+    })
+}
+
 // ── Setup ─────────────────────────────────────────────────────────────────────
 
 struct TestEnv {
@@ -99,6 +142,14 @@ fn end_turn(text: &str) -> serde_json::Value {
 }
 
 async fn start() -> TestEnv {
+    start_with_options(None, None, None).await
+}
+
+async fn start_with_options(
+    agent_id: Option<String>,
+    agent_loader: Option<Arc<dyn AgentLoading>>,
+    skill_loader: Option<Arc<dyn SkillLoading>>,
+) -> TestEnv {
     let container = Nats::default()
         .with_cmd(["--jetstream"])
         .start()
@@ -147,9 +198,9 @@ async fn start() -> TestEnv {
         agent,
         session_store,
         promise_store: Arc::new(NoOpPromiseStore),
-        agent_id: None,
-        agent_loader: None,
-        skill_loader: None,
+        agent_id,
+        agent_loader,
+        skill_loader,
     };
     let app = router(state);
 
@@ -1158,4 +1209,248 @@ async fn list_promises_missing_tenant_returns_400() {
         .await
         .unwrap();
     assert_eq!(res.status(), 400);
+}
+
+// ── New-field behaviors ───────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn create_session_sets_started_at_secs() {
+    let env = start().await;
+    let created: Value = env
+        .client
+        .post(format!("{}/sessions", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = created["id"].as_str().unwrap();
+
+    // GET returns the full ChatSession which includes started_at_secs.
+    let got: Value = env
+        .client
+        .get(format!("{}/sessions/{id}", env.base_url))
+        .header("x-tenant-id", "acme")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let started = got["started_at_secs"].as_u64().unwrap_or(0);
+    assert!(started > 0, "started_at_secs must be set to current epoch on creation: {started}");
+}
+
+#[tokio::test]
+async fn send_message_computes_duration_ms() {
+    let env = start().await;
+
+    env.mock_server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(end_turn("ok"));
+    });
+
+    let created: Value = env
+        .client
+        .post(format!("{}/sessions", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = created["id"].as_str().unwrap();
+
+    // Sleep 1s so duration_ms = (now - started_at_secs) * 1000 >= 1000.
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+    env.client
+        .post(format!("{}/sessions/{id}/messages", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({"content": "hello"}))
+        .send()
+        .await
+        .unwrap();
+
+    let got: Value = env
+        .client
+        .get(format!("{}/sessions/{id}", env.base_url))
+        .header("x-tenant-id", "acme")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let duration = got["duration_ms"].as_u64().unwrap_or(0);
+    assert!(
+        duration >= 1000,
+        "duration_ms must be >= 1000 after a 1s sleep; got {duration}"
+    );
+}
+
+#[tokio::test]
+async fn create_session_stores_agent_id_from_state() {
+    let env = start_with_options(
+        Some("agent_test_001".to_string()),
+        None,
+        None,
+    )
+    .await;
+
+    let created: Value = env
+        .client
+        .post(format!("{}/sessions", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = created["id"].as_str().unwrap();
+
+    let got: Value = env
+        .client
+        .get(format!("{}/sessions/{id}", env.base_url))
+        .header("x-tenant-id", "acme")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        got["agent_id"], "agent_test_001",
+        "agent_id must be copied from ChatAppState into the session"
+    );
+}
+
+#[tokio::test]
+async fn send_message_persists_usage_on_assistant_message() {
+    let env = start().await;
+
+    env.mock_server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(end_turn_with_usage("Paris", 42, 7));
+    });
+
+    let created: Value = env
+        .client
+        .post(format!("{}/sessions", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = created["id"].as_str().unwrap();
+
+    env.client
+        .post(format!("{}/sessions/{id}/messages", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({"content": "Capital of France?"}))
+        .send()
+        .await
+        .unwrap();
+
+    let got: Value = env
+        .client
+        .get(format!("{}/sessions/{id}", env.base_url))
+        .header("x-tenant-id", "acme")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let messages = got["messages"].as_array().unwrap();
+    let assistant = messages
+        .iter()
+        .find(|m| m["role"] == "assistant")
+        .expect("assistant message must be present");
+
+    let usage = &assistant["usage"];
+    assert_eq!(usage["input_tokens"], 42, "input_tokens from Anthropic response must be persisted");
+    assert_eq!(usage["output_tokens"], 7,  "output_tokens from Anthropic response must be persisted");
+}
+
+#[tokio::test]
+async fn send_message_injects_skill_content_into_system_prompt() {
+    let env = start_with_options(
+        Some("agent_skills_test".to_string()),
+        Some(Arc::new(FixedAgentLoader {
+            target_id: "agent_skills_test".to_string(),
+            skill_ids: vec!["skill_pdf".to_string()],
+        })),
+        Some(Arc::new(FixedSkillLoader {
+            content: Some("# Available Skills\n\nThe following skills define specialized knowledge and procedures you must follow:\n\n## Skill: pdf-reader\n\nUse this to read PDFs.".to_string()),
+        })),
+    )
+    .await;
+
+    // Mock fires only when system prompt contains the skill header — must fire exactly once.
+    let skill_mock = env.mock_server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages")
+            .body_contains("Available Skills");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(end_turn("skills received"));
+    });
+
+    // Must NOT fire — if skill content is absent the test fails.
+    let no_skill_mock = env.mock_server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages")
+            .body_not_contains("Available Skills");
+        then.status(500).body("skill content missing from request");
+    });
+
+    let created: Value = env
+        .client
+        .post(format!("{}/sessions", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = created["id"].as_str().unwrap();
+
+    let res: Value = env
+        .client
+        .post(format!("{}/sessions/{id}/messages", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({"content": "summarize the PDF"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(res["content"], "skills received");
+    skill_mock.assert_hits_async(1).await;
+    no_skill_mock.assert_hits_async(0).await;
 }
