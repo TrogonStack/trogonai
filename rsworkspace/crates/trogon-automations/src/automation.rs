@@ -67,6 +67,13 @@ pub struct Automation {
     #[serde(default)]
     pub visibility: Visibility,
 
+    /// Named variables for prompt interpolation.
+    ///
+    /// Keys are substituted for `{{key}}` placeholders in `prompt` before the
+    /// agent is invoked.  Unknown placeholders are left as-is.
+    #[serde(default)]
+    pub variables: std::collections::HashMap<String, String>,
+
     /// ISO-8601 creation timestamp.
     pub created_at: String,
 
@@ -103,6 +110,7 @@ mod tests {
             }],
             enabled: true,
             visibility: Visibility::Private,
+            variables: std::collections::HashMap::new(),
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         }
@@ -245,6 +253,33 @@ mod tests {
         a.mcp_servers = vec![];
         let v: serde_json::Value = serde_json::to_value(&a).unwrap();
         assert_eq!(v["mcp_servers"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn variables_empty_by_default() {
+        let a = sample();
+        assert!(a.variables.is_empty());
+    }
+
+    #[test]
+    fn variables_round_trips_through_json() {
+        let mut a = sample();
+        a.variables.insert("repo".to_string(), "myrepo".to_string());
+        a.variables.insert("env".to_string(), "prod".to_string());
+        let json = serde_json::to_string(&a).unwrap();
+        let b: Automation = serde_json::from_str(&json).unwrap();
+        assert_eq!(b.variables["repo"], "myrepo");
+        assert_eq!(b.variables["env"], "prod");
+    }
+
+    #[test]
+    fn variables_defaults_to_empty_when_field_missing_in_json() {
+        let json = r#"{"id":"x","tenant_id":"t","name":"n","trigger":"github.push",
+                       "prompt":"p","tools":[],"memory_path":null,"mcp_servers":[],
+                       "enabled":true,"created_at":"2026-01-01T00:00:00Z",
+                       "updated_at":"2026-01-01T00:00:00Z"}"#;
+        let a: Automation = serde_json::from_str(json).unwrap();
+        assert!(a.variables.is_empty());
     }
 
     #[test]

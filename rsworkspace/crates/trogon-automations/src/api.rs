@@ -72,6 +72,8 @@ pub struct CreateRequest {
     pub enabled: bool,
     #[serde(default)]
     pub visibility: Visibility,
+    #[serde(default)]
+    pub variables: std::collections::HashMap<String, String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -89,6 +91,8 @@ pub struct UpdateRequest {
     pub enabled: bool,
     #[serde(default)]
     pub visibility: Visibility,
+    #[serde(default)]
+    pub variables: std::collections::HashMap<String, String>,
 }
 
 fn default_true() -> bool {
@@ -110,6 +114,7 @@ struct AutomationResponse {
     mcp_servers: Vec<McpServer>,
     enabled: bool,
     visibility: Visibility,
+    variables: std::collections::HashMap<String, String>,
     created_at: String,
     updated_at: String,
 }
@@ -128,6 +133,7 @@ impl From<Automation> for AutomationResponse {
             mcp_servers: a.mcp_servers,
             enabled: a.enabled,
             visibility: a.visibility,
+            variables: a.variables,
             created_at: a.created_at,
             updated_at: a.updated_at,
         }
@@ -231,6 +237,7 @@ async fn create_automation<A: AutomationRepository, R: RunRepository>(
         mcp_servers: body.mcp_servers,
         enabled: body.enabled,
         visibility: body.visibility,
+        variables: body.variables,
         created_at: now.clone(),
         updated_at: now,
     };
@@ -287,6 +294,7 @@ async fn update_automation<A: AutomationRepository, R: RunRepository>(
         mcp_servers: body.mcp_servers,
         enabled: body.enabled,
         visibility: body.visibility,
+        variables: body.variables,
         created_at: existing.created_at,
         updated_at: now_iso8601(),
     };
@@ -477,6 +485,7 @@ mod tests {
             mcp_servers: vec![],
             enabled: true,
             visibility: crate::automation::Visibility::default(),
+            variables: std::collections::HashMap::new(),
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         }
@@ -1056,5 +1065,105 @@ mod tests {
         // 2024-02-29 12:00:00 UTC = 1709208000
         let (y, mo, d, h, mi, s) = epoch_to_parts(1_709_208_000);
         assert_eq!((y, mo, d, h, mi, s), (2024, 2, 29, 12, 0, 0));
+    }
+
+    // ── variables ─────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn create_automation_with_variables_persists_them() {
+        let store = MockAutomationStore::new();
+        let app = mock_app(store.clone(), MockRunStore::new());
+        let body = serde_json::json!({
+            "name": "Var Auto",
+            "trigger": "github.push",
+            "prompt": "Hello {{name}}",
+            "variables": {"name": "world", "env": "prod"}
+        });
+        let req = Request::builder()
+            .method("POST")
+            .uri("/automations")
+            .header("x-tenant-id", "acme")
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let snap = store.snapshot();
+        let (_, saved) = snap.iter().next().unwrap();
+        assert_eq!(saved.variables["name"], "world");
+        assert_eq!(saved.variables["env"], "prod");
+    }
+
+    #[tokio::test]
+    async fn create_automation_response_includes_variables() {
+        let store = MockAutomationStore::new();
+        let app = mock_app(store.clone(), MockRunStore::new());
+        let body = serde_json::json!({
+            "name": "Var Auto",
+            "trigger": "github.push",
+            "prompt": "p",
+            "variables": {"repo": "myrepo"}
+        });
+        let req = Request::builder()
+            .method("POST")
+            .uri("/automations")
+            .header("x-tenant-id", "acme")
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let resp_body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&resp_body).unwrap();
+        assert_eq!(json["variables"]["repo"], "myrepo");
+    }
+
+    #[tokio::test]
+    async fn create_automation_without_variables_defaults_to_empty() {
+        let store = MockAutomationStore::new();
+        let app = mock_app(store.clone(), MockRunStore::new());
+        let body = serde_json::json!({"name": "X", "trigger": "t", "prompt": "p"});
+        let req = Request::builder()
+            .method("POST")
+            .uri("/automations")
+            .header("x-tenant-id", "acme")
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let snap = store.snapshot();
+        let (_, saved) = snap.iter().next().unwrap();
+        assert!(saved.variables.is_empty());
+    }
+
+    #[tokio::test]
+    async fn update_automation_replaces_variables() {
+        let mut auto = sample_automation("a1", "acme");
+        auto.variables.insert("x".to_string(), "old".to_string());
+        let store = MockAutomationStore::new();
+        store.insert(auto);
+        let app = mock_app(store.clone(), MockRunStore::new());
+        let body = serde_json::json!({
+            "name": "Updated",
+            "trigger": "github.push",
+            "prompt": "p",
+            "enabled": true,
+            "variables": {"x": "new", "y": "added"}
+        });
+        let req = Request::builder()
+            .method("PUT")
+            .uri("/automations/a1")
+            .header("x-tenant-id", "acme")
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let snap = store.snapshot();
+        assert_eq!(snap["acme.a1"].variables["x"], "new");
+        assert_eq!(snap["acme.a1"].variables["y"], "added");
     }
 }

@@ -698,6 +698,106 @@ async fn get_runs_filtered_by_automation_id() {
     assert_eq!(stats["failed_7d"], 0);
 }
 
+// ── /automations/{id}/runs endpoint ──────────────────────────────────────────
+
+#[tokio::test]
+async fn get_runs_for_automation_path_returns_filtered_runs() {
+    let s = start_server().await;
+    s.run_store
+        .record(&seed_run("r1", "auto-A", "acme", RunStatus::Success))
+        .await
+        .unwrap();
+    s.run_store
+        .record(&seed_run("r2", "auto-A", "acme", RunStatus::Failed))
+        .await
+        .unwrap();
+    s.run_store
+        .record(&seed_run("r3", "auto-B", "acme", RunStatus::Success))
+        .await
+        .unwrap();
+
+    let res: Value = s
+        .client
+        .get(format!("{}/automations/auto-A/runs", s.base_url))
+        .header("x-tenant-id", "acme")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let arr = res.as_array().unwrap();
+    assert_eq!(arr.len(), 2, "/automations/auto-A/runs must return only auto-A runs");
+    assert!(arr.iter().all(|r| r["automation_id"] == "auto-A"));
+}
+
+#[tokio::test]
+async fn get_runs_for_automation_path_missing_tenant_returns_400() {
+    let s = start_server().await;
+    let res = s
+        .client
+        .get(format!("{}/automations/auto-1/runs", s.base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 400);
+}
+
+#[tokio::test]
+async fn get_runs_for_automation_path_empty_when_no_runs() {
+    let s = start_server().await;
+    let res: Value = s
+        .client
+        .get(format!("{}/automations/no-such-auto/runs", s.base_url))
+        .header("x-tenant-id", "acme")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(res, json!([]));
+}
+
+#[tokio::test]
+async fn get_runs_for_automation_path_tenant_isolation() {
+    let s = start_server().await;
+    s.run_store
+        .record(&seed_run("r1", "auto-1", "acme", RunStatus::Success))
+        .await
+        .unwrap();
+    s.run_store
+        .record(&seed_run("r2", "auto-1", "other", RunStatus::Success))
+        .await
+        .unwrap();
+
+    let acme: Value = s
+        .client
+        .get(format!("{}/automations/auto-1/runs", s.base_url))
+        .header("x-tenant-id", "acme")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let other: Value = s
+        .client
+        .get(format!("{}/automations/auto-1/runs", s.base_url))
+        .header("x-tenant-id", "other")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(acme.as_array().unwrap().len(), 1);
+    assert_eq!(acme[0]["tenant_id"], "acme");
+    assert_eq!(other.as_array().unwrap().len(), 1);
+    assert_eq!(other[0]["tenant_id"], "other");
+}
+
 // ── /stats endpoint ───────────────────────────────────────────────────────────
 
 #[tokio::test]
@@ -913,4 +1013,169 @@ async fn get_stats_tenant_isolation() {
     assert_eq!(acme_stats["successful_7d"], 1);
     assert_eq!(other_stats["total"], 1);
     assert_eq!(other_stats["failed_7d"], 1);
+}
+
+// ── variables field ───────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn create_with_variables_returns_variables_in_response() {
+    let s = start_server().await;
+    let body = json!({
+        "name": "Var automation",
+        "trigger": "github.push",
+        "prompt": "Hello {{name}} in {{env}}",
+        "variables": {"name": "world", "env": "prod"}
+    });
+    let res: Value = s
+        .client
+        .post(format!("{}/automations", s.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&body)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(res["variables"]["name"], "world");
+    assert_eq!(res["variables"]["env"], "prod");
+}
+
+#[tokio::test]
+async fn create_without_variables_returns_empty_object() {
+    let s = start_server().await;
+    let res: Value = s
+        .client
+        .post(format!("{}/automations", s.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&create_body())
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(res["variables"], json!({}));
+}
+
+#[tokio::test]
+async fn get_automation_preserves_variables() {
+    let s = start_server().await;
+    let created: Value = s
+        .client
+        .post(format!("{}/automations", s.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({
+            "name": "Var get",
+            "trigger": "github.push",
+            "prompt": "Hi {{user}}",
+            "variables": {"user": "alice"}
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = created["id"].as_str().unwrap();
+
+    let fetched: Value = s
+        .client
+        .get(format!("{}/automations/{id}", s.base_url))
+        .header("x-tenant-id", "acme")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(fetched["variables"]["user"], "alice");
+}
+
+#[tokio::test]
+async fn update_sets_variables() {
+    let s = start_server().await;
+    let created: Value = s
+        .client
+        .post(format!("{}/automations", s.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&create_body())
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = created["id"].as_str().unwrap();
+
+    let update = json!({
+        "name": "PR review",
+        "trigger": "github.pull_request:opened",
+        "prompt": "Review for {{repo}}",
+        "tools": [],
+        "mcp_servers": [],
+        "enabled": true,
+        "variables": {"repo": "my-service"}
+    });
+    let updated: Value = s
+        .client
+        .put(format!("{}/automations/{id}", s.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&update)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(updated["variables"]["repo"], "my-service");
+}
+
+#[tokio::test]
+async fn update_clears_variables_when_empty() {
+    let s = start_server().await;
+    let created: Value = s
+        .client
+        .post(format!("{}/automations", s.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({
+            "name": "Clear vars",
+            "trigger": "github.push",
+            "prompt": "Hi {{user}}",
+            "variables": {"user": "bob"}
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = created["id"].as_str().unwrap();
+
+    let update = json!({
+        "name": "Clear vars",
+        "trigger": "github.push",
+        "prompt": "Hi",
+        "tools": [],
+        "mcp_servers": [],
+        "enabled": true,
+        "variables": {}
+    });
+    let updated: Value = s
+        .client
+        .put(format!("{}/automations/{id}", s.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&update)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(updated["variables"], json!({}));
 }
