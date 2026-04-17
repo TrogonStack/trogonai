@@ -4157,6 +4157,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-console"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "axum 0.8.8",
+ "bytes",
+ "futures-util",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "trogon-nats",
+ "trogon-vault",
+ "uuid",
+]
+
+[[package]]
 name = "trogon-datadog"
 version = "0.1.0"
 dependencies = [
