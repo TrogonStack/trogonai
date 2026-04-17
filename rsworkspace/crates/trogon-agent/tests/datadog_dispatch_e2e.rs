@@ -481,6 +481,7 @@ async fn datadog_automation_dispatch_takes_precedence_over_fallback() {
         variables: std::collections::HashMap::new(),
         created_at: "2026-01-01T00:00:00Z".to_string(),
         updated_at: "2026-01-01T00:00:00Z".to_string(),
+        skill_ids: vec![],
     };
     store.put(&auto).await.unwrap();
 
@@ -887,6 +888,7 @@ async fn datadog_event_automation_dispatch() {
         variables: std::collections::HashMap::new(),
         created_at: "2026-01-01T00:00:00Z".to_string(),
         updated_at: "2026-01-01T00:00:00Z".to_string(),
+        skill_ids: vec![],
     };
     store.put(&auto).await.unwrap();
 

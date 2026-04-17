@@ -138,6 +138,7 @@ fn make_automation(id: &str, tenant_id: &str, trigger: &str, prompt: &str) -> Au
         variables: std::collections::HashMap::new(),
         created_at: "2026-01-01T00:00:00Z".to_string(),
         updated_at: "2026-01-01T00:00:00Z".to_string(),
+        skill_ids: vec![],
     }
 }
 
@@ -2611,6 +2612,7 @@ async fn automation_variables_substituted_in_prompt_before_model_call() {
             variables: vars,
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
+            skill_ids: vec![],
         })
         .await
         .expect("put automation");

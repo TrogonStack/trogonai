@@ -74,6 +74,12 @@ pub struct Automation {
     #[serde(default)]
     pub variables: std::collections::HashMap<String, String>,
 
+    /// Skill IDs from the console skill library to inject into the system prompt.
+    /// Content of each skill's latest version is prepended to the system prompt
+    /// so the agent has access to specialized knowledge during this automation.
+    #[serde(default)]
+    pub skill_ids: Vec<String>,
+
     /// ISO-8601 creation timestamp.
     pub created_at: String,
 
@@ -113,6 +119,7 @@ mod tests {
             variables: std::collections::HashMap::new(),
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
+            skill_ids: vec![],
         }
     }
 

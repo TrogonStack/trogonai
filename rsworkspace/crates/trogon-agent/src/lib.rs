@@ -37,6 +37,7 @@ pub mod handlers;
 pub mod promise_store;
 pub mod runner;
 pub mod session;
+pub mod skill_loader;
 pub mod tools;
 
 pub use config::{AgentConfig, McpServerConfig};

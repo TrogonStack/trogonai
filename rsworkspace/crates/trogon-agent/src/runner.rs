@@ -184,6 +184,18 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
             .map_err(|e| RunnerError::JetStream(format!("PromiseStore: {e}")))?,
     );
 
+    // Open the console skill KV store. Skill loading is best-effort: the bucket
+    // is created idempotently so the loader is always available when NATS is
+    // reachable. Automations without skill_ids are unaffected either way.
+    let skill_loader: Option<Arc<crate::skill_loader::SkillLoader>> =
+        match crate::skill_loader::SkillLoader::open(&js).await {
+            Ok(loader) => Some(Arc::new(loader)),
+            Err(e) => {
+                warn!(error = %e, "SkillLoader init failed — automation skill injection disabled");
+                None
+            }
+        };
+
     // ── OS-crash durability check ────────────────────────────────────────────
     // `async-nats` 0.47.0 cannot set `sync_always` on a KV bucket config, so
     // NATS fsyncs every ~2 minutes by default. A checkpoint acknowledged by
@@ -363,6 +375,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                         let run_store = Arc::clone(&run_store);
                         let promise_store = Arc::clone(&promise_store);
                         let tenant_id = Arc::clone(&tenant_id);
+                        let skill_loader = skill_loader.clone();
                         tasks.spawn(async move {
                             let subject = "github.pull_request";
                             let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_else(|e| {
@@ -410,7 +423,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     }
                                 }
                             } else {
-                                dispatch_automations(&agent, &run_store, &promise_store, &promise_id_prefix, autos, subject, &msg.payload).await;
+                                dispatch_automations(&agent, &run_store, &promise_store, &promise_id_prefix, autos, subject, &msg.payload, skill_loader.clone()).await;
                             }
                             heartbeat.abort();
                             if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack PR message"); }
@@ -428,6 +441,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                         let run_store = Arc::clone(&run_store);
                         let promise_store = Arc::clone(&promise_store);
                         let tenant_id = Arc::clone(&tenant_id);
+                        let skill_loader = skill_loader.clone();
                         tasks.spawn(async move {
                             let subject = "github.issue_comment";
                             let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_else(|e| {
@@ -465,7 +479,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     }
                                 }
                             } else {
-                                dispatch_automations(&agent, &run_store, &promise_store, &promise_id_prefix, autos, subject, &msg.payload).await;
+                                dispatch_automations(&agent, &run_store, &promise_store, &promise_id_prefix, autos, subject, &msg.payload, skill_loader.clone()).await;
                             }
                             heartbeat.abort();
                             if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack comment message"); }
@@ -483,6 +497,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                         let run_store = Arc::clone(&run_store);
                         let promise_store = Arc::clone(&promise_store);
                         let tenant_id = Arc::clone(&tenant_id);
+                        let skill_loader = skill_loader.clone();
                         tasks.spawn(async move {
                             let subject = "github.push";
                             let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_else(|e| {
@@ -520,7 +535,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     }
                                 }
                             } else {
-                                dispatch_automations(&agent, &run_store, &promise_store, &promise_id_prefix, autos, subject, &msg.payload).await;
+                                dispatch_automations(&agent, &run_store, &promise_store, &promise_id_prefix, autos, subject, &msg.payload, skill_loader.clone()).await;
                             }
                             heartbeat.abort();
                             if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack push message"); }
@@ -538,6 +553,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                         let run_store = Arc::clone(&run_store);
                         let promise_store = Arc::clone(&promise_store);
                         let tenant_id = Arc::clone(&tenant_id);
+                        let skill_loader = skill_loader.clone();
                         tasks.spawn(async move {
                             let subject = "github.check_run";
                             let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_else(|e| {
@@ -575,7 +591,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     }
                                 }
                             } else {
-                                dispatch_automations(&agent, &run_store, &promise_store, &promise_id_prefix, autos, subject, &msg.payload).await;
+                                dispatch_automations(&agent, &run_store, &promise_store, &promise_id_prefix, autos, subject, &msg.payload, skill_loader.clone()).await;
                             }
                             heartbeat.abort();
                             if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack CI message"); }
@@ -593,6 +609,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                         let run_store = Arc::clone(&run_store);
                         let promise_store = Arc::clone(&promise_store);
                         let tenant_id = Arc::clone(&tenant_id);
+                        let skill_loader = skill_loader.clone();
                         tasks.spawn(async move {
                             let subject = "linear.Issue";
                             let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_else(|e| {
@@ -630,7 +647,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     }
                                 }
                             } else {
-                                dispatch_automations(&agent, &run_store, &promise_store, &promise_id_prefix, autos, subject, &msg.payload).await;
+                                dispatch_automations(&agent, &run_store, &promise_store, &promise_id_prefix, autos, subject, &msg.payload, skill_loader.clone()).await;
                             }
                             heartbeat.abort();
                             if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack issue message"); }
@@ -649,6 +666,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                         let promise_store = Arc::clone(&promise_store);
                         let tenant_id = Arc::clone(&tenant_id);
                         let nats_subject = msg.subject.to_string();
+                        let skill_loader = skill_loader.clone();
                         tasks.spawn(async move {
                             let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_else(|e| {
                                 warn!(error = %e, "Failed to parse NATS message payload as JSON — processing with empty value");
@@ -674,7 +692,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                             if autos.is_empty() {
                                 info!(subject = %nats_subject, "Cron tick with no matching automations — skipping");
                             } else {
-                                dispatch_automations(&agent, &run_store, &promise_store, &promise_id_prefix, autos, &nats_subject, &msg.payload).await;
+                                dispatch_automations(&agent, &run_store, &promise_store, &promise_id_prefix, autos, &nats_subject, &msg.payload, skill_loader.clone()).await;
                             }
                             heartbeat.abort();
                             if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack cron message"); }
@@ -693,6 +711,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                         let promise_store = Arc::clone(&promise_store);
                         let tenant_id = Arc::clone(&tenant_id);
                         let nats_subject = msg.subject.to_string();
+                        let skill_loader = skill_loader.clone();
                         tasks.spawn(async move {
                             let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_else(|e| {
                                 warn!(error = %e, "Failed to parse NATS message payload as JSON — processing with empty value");
@@ -729,7 +748,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     }
                                 }
                             } else {
-                                dispatch_automations(&agent, &run_store, &promise_store, &promise_id_prefix, autos, &nats_subject, &msg.payload).await;
+                                dispatch_automations(&agent, &run_store, &promise_store, &promise_id_prefix, autos, &nats_subject, &msg.payload, skill_loader.clone()).await;
                             }
                             heartbeat.abort();
                             if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack Datadog message"); }
@@ -753,6 +772,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                         let promise_store = Arc::clone(&promise_store);
                         let tenant_id = Arc::clone(&tenant_id);
                         let nats_subject = msg.subject.to_string();
+                        let skill_loader = skill_loader.clone();
                         tasks.spawn(async move {
                             let pv: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_else(|e| {
                                 warn!(error = %e, "Failed to parse NATS message payload as JSON — processing with empty value");
@@ -789,7 +809,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     }
                                 }
                             } else {
-                                dispatch_automations(&agent, &run_store, &promise_store, &promise_id_prefix, autos, &nats_subject, &msg.payload).await;
+                                dispatch_automations(&agent, &run_store, &promise_store, &promise_id_prefix, autos, &nats_subject, &msg.payload, skill_loader.clone()).await;
                             }
                             heartbeat.abort();
                             if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack incident.io message"); }
@@ -1407,7 +1427,7 @@ async fn recover_stale_promises<A: AutomationRepository, R: RunRepository>(
                 if let Some(auto) = auto_opt {
                     let started_at = trogon_automations::now_unix();
                     let result =
-                        handlers::run_automation(&agent, &auto, &promise.nats_subject, &payload)
+                        handlers::run_automation(&agent, &auto, &promise.nats_subject, &payload, None)
                             .await;
                     let finished_at = trogon_automations::now_unix();
                     let (status, output) = match &result {
@@ -1605,6 +1625,7 @@ async fn recover_stale_promises<A: AutomationRepository, R: RunRepository>(
                         &auto,
                         &promise.nats_subject,
                         &payload,
+                        None,
                     )
                     .await;
                     let finished_at = trogon_automations::now_unix();
@@ -1660,6 +1681,7 @@ pub(crate) async fn dispatch_automations<R: RunRepository>(
     automations: Vec<trogon_automations::Automation>,
     nats_subject: &str,
     payload: &bytes::Bytes,
+    skill_loader: Option<Arc<crate::skill_loader::SkillLoader>>,
 ) {
     let handles: Vec<_> = automations
         .into_iter()
@@ -1671,6 +1693,7 @@ pub(crate) async fn dispatch_automations<R: RunRepository>(
             let subject = nats_subject.to_string();
             let trigger: serde_json::Value = serde_json::from_slice(&payload).unwrap_or_default();
             let promise_id_prefix = promise_id_prefix.to_string();
+            let skill_loader = skill_loader.clone();
             tokio::spawn(async move {
                 // Each automation gets its own promise so concurrent automations
                 // triggered by the same NATS message checkpoint independently.
@@ -1699,9 +1722,25 @@ pub(crate) async fn dispatch_automations<R: RunRepository>(
                     return;
                 };
 
+                // Load skill content from the console KV store if the automation
+                // has skill IDs configured and a loader is available.
+                let skill_content = match &skill_loader {
+                    Some(loader) if !auto.skill_ids.is_empty() => {
+                        loader.load(&auto.skill_ids).await
+                    }
+                    _ => None,
+                };
+
                 info!(automation = %auto.name, "Running automation");
                 let started_at = trogon_automations::now_unix();
-                let result = handlers::run_automation(&agent, &auto, &subject, &payload).await;
+                let result = handlers::run_automation(
+                    &agent,
+                    &auto,
+                    &subject,
+                    &payload,
+                    skill_content.as_deref(),
+                )
+                .await;
                 let finished_at = trogon_automations::now_unix();
 
                 let (status, output) = match &result {
@@ -1965,6 +2004,7 @@ mod tests {
             variables: std::collections::HashMap::new(),
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
+            skill_ids: vec![],
         }
     }
 
@@ -2121,6 +2161,7 @@ mod tests {
             automations,
             "github.push",
             &payload,
+            None,
         )
         .await;
 
@@ -2146,6 +2187,7 @@ mod tests {
             vec![],
             "github.push",
             &payload,
+            None,
         )
         .await;
     }
@@ -3405,6 +3447,7 @@ mod tests {
             vec![make_automation("auto-1")],
             "github.push",
             &payload,
+            None,
         )
         .await;
 
@@ -3455,6 +3498,7 @@ mod tests {
             vec![make_automation("auto-A"), make_automation("auto-B")],
             "github.push",
             &payload,
+            None,
         )
         .await;
 
@@ -3535,6 +3579,7 @@ mod tests {
             vec![make_automation("panic-auto")],
             "github.push",
             &payload,
+            None,
         )
         .await;
     }
@@ -3885,6 +3930,7 @@ mod tests {
                             variables: std::collections::HashMap::new(),
                             created_at: "2026-01-01T00:00:00Z".to_string(),
                             updated_at: "2026-01-01T00:00:00Z".to_string(),
+                            skill_ids: vec![],
                         }])
                     }
                 })
@@ -4006,6 +4052,7 @@ mod tests {
                             variables: std::collections::HashMap::new(),
                             created_at: "2026-01-01T00:00:00Z".to_string(),
                             updated_at: "2026-01-01T00:00:00Z".to_string(),
+                            skill_ids: vec![],
                         }])
                     }
                 })
@@ -4262,6 +4309,7 @@ mod tests {
             vec![make_automation("rec-err-auto")],
             "github.push",
             &payload,
+            None,
         )
         .await;
 
@@ -5047,6 +5095,7 @@ mod tests {
             vec![auto.clone()],
             "github.push",
             &payload,
+            None,
         )
         .await;
 
@@ -5107,6 +5156,7 @@ mod tests {
             vec![auto],
             "github.push",
             &payload,
+            None,
         )
         .await;
 
@@ -5531,6 +5581,7 @@ mod tests {
             vec![auto.clone()],
             "github.push",
             &payload,
+            None,
         )
         .await;
 
@@ -5988,6 +6039,7 @@ mod tests {
             autos,
             "github.push",
             &bytes::Bytes::from_static(b"{}"),
+            None,
         )
         .await;
 
