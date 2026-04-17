@@ -251,7 +251,7 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
     nats_headers.insert(NATS_HEADER_EVENT_TYPE, event_type.as_str());
     nats_headers.insert(NATS_HEADER_PAYLOAD_KIND, payload_kind.as_str());
 
-    if let Some(message_id) = extract_message_id(&payload) {
+    if let Some(message_id) = extract_message_id(&payload, event_type.as_str()) {
         nats_headers.insert(async_nats::header::NATS_MESSAGE_ID, message_id.as_str());
     }
 
@@ -308,7 +308,7 @@ fn resolve_event_type(
         .map_err(|_| RejectReason::InvalidEventType)
 }
 
-fn extract_message_id(payload: &serde_json::Value) -> Option<String> {
+fn extract_message_id(payload: &serde_json::Value, event_type: &str) -> Option<String> {
     payload
         .get("data")
         .and_then(value_id)
@@ -319,16 +319,19 @@ fn extract_message_id(payload: &serde_json::Value) -> Option<String> {
                 .and_then(value_id)
         })
         .or_else(|| {
-            ACCOUNT_ACTIVITY_EVENT_TYPES.iter().find_map(|event_type| {
-                payload
-                    .get(*event_type)
-                    .and_then(|event_value| match event_value {
-                        serde_json::Value::Array(items) if items.len() == 1 => value_id(&items[0]),
-                        serde_json::Value::Object(_) => value_id(event_value),
-                        _ => None,
-                    })
-            })
+            if event_type == PayloadKind::AccountActivity.as_str() {
+                return None;
+            }
+
+            payload
+                .get(event_type)
+                .and_then(|event_value| match event_value {
+                    serde_json::Value::Array(items) if items.len() == 1 => value_id(&items[0]),
+                    serde_json::Value::Object(_) => value_id(event_value),
+                    _ => None,
+                })
         })
+        .map(|message_id| format!("{event_type}:{message_id}"))
 }
 
 fn value_id(value: &serde_json::Value) -> Option<String> {
@@ -628,7 +631,38 @@ mod tests {
                 .headers
                 .get(async_nats::header::NATS_MESSAGE_ID)
                 .map(|value| value.as_str()),
-            Some("fav-1"),
+            Some("favorite_events:fav-1"),
+        );
+    }
+
+    #[tokio::test]
+    async fn generic_account_activity_fallback_omits_message_id() {
+        let _guard = tracing_guard();
+        let publisher = MockJetStreamPublisher::new();
+        let app = mock_app(publisher.clone());
+        let body = br#"{
+            "for_user_id": "2244994945",
+            "favorite_events": [{
+                "id": "fav-1"
+            }],
+            "follow_events": [{
+                "id": "follow-1"
+            }]
+        }"#;
+        let signature = compute_sig(TEST_SECRET, body);
+
+        let response = app
+            .oneshot(webhook_request(body, Some(&signature)))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let messages = publisher.published_messages();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].subject, "twitter.account_activity");
+        assert_eq!(
+            messages[0].headers.get(async_nats::header::NATS_MESSAGE_ID),
+            None
         );
     }
 
@@ -669,7 +703,7 @@ mod tests {
                 .headers
                 .get(async_nats::header::NATS_MESSAGE_ID)
                 .map(|value| value.as_str()),
-            Some("1234567890"),
+            Some("filtered_stream:1234567890"),
         );
     }
 
@@ -849,8 +883,8 @@ mod tests {
         });
 
         assert_eq!(
-            extract_message_id(&payload).as_deref(),
-            Some("user-event-1")
+            extract_message_id(&payload, "user_event").as_deref(),
+            Some("user_event:user-event-1")
         );
     }
 
@@ -863,7 +897,31 @@ mod tests {
             ]
         });
 
-        assert_eq!(extract_message_id(&payload), None);
+        assert_eq!(extract_message_id(&payload, "favorite_events"), None);
+    }
+
+    #[test]
+    fn extract_message_id_omits_generic_account_activity_bucket() {
+        let payload = serde_json::json!({
+            "favorite_events": [{"id": "fav-1"}],
+            "follow_events": [{"id": "follow-1"}]
+        });
+
+        assert_eq!(extract_message_id(&payload, "account_activity"), None);
+    }
+
+    #[test]
+    fn extract_message_id_prefixes_data_ids_with_event_type() {
+        let payload = serde_json::json!({
+            "data": {
+                "id": "1234567890"
+            }
+        });
+
+        assert_eq!(
+            extract_message_id(&payload, "filtered_stream").as_deref(),
+            Some("filtered_stream:1234567890")
+        );
     }
 
     #[test]
