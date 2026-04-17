@@ -381,14 +381,14 @@ mod tests {
             })
         );
 
-        let snapshot = store
+        let job = store
             .get_job(GetJobCommand {
                 id: JobId::parse("backup").unwrap(),
             })
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(snapshot.payload.state, JobEnabledState::Disabled);
+        assert_eq!(job.state, JobEnabledState::Disabled);
 
         let command_snapshot = store
             .read_command_snapshot::<ChangeJobStateState>(
