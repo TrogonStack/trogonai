@@ -33,7 +33,7 @@ pub use domain::{
     ScheduleSpec,
 };
 pub use error::{CronError, JobSpecError};
-pub use events::{JobEvent, JobEventData, RecordedJobEvent, RegisteredJobSpec};
+pub use events::{JobEvent, JobEventCodec, JobEventData, RecordedJobEvent, RegisteredJobSpec};
 pub use nats::NatsSchedulePublisher;
 pub use processors::CronController;
 pub use projections::{
