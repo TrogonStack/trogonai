@@ -117,15 +117,20 @@ pub async fn run<E, S>(
     event_store: &E,
     snapshot_store: &S,
     command: RemoveJobCommand,
-    occ: OccPolicy,
+    occ: Option<OccPolicy>,
 ) -> RemoveJobResult
 where
     E: EventStore<JobId, Error = CronError>,
     S: SnapshotStore<RemoveJobState, JobId, Error = CronError>,
 {
-    Ok(CommandExecution::new(event_store, &command)
-        .codec(JobEventCodec)
-        .occ(occ)
+    let execution = CommandExecution::new(event_store, &command).codec(JobEventCodec);
+    let execution = if let Some(occ) = occ {
+        execution.occ(occ)
+    } else {
+        execution
+    };
+
+    Ok(execution
         .snapshots(Snapshots::new(
             snapshot_store,
             SNAPSHOT_STORE_CONFIG,
@@ -238,7 +243,7 @@ mod tests {
             &store,
             &store,
             RemoveJobCommand::new(JobId::parse("backup").unwrap()),
-            OccPolicy::UseCommandRule,
+            None,
         )
         .await
         .unwrap();
