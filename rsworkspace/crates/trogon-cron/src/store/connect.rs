@@ -3,9 +3,9 @@
 use async_nats::jetstream::{self, context, kv};
 use serde::{Serialize, de::DeserializeOwned};
 use trogon_eventsourcing::{
-    AppendOutcome, EventData, EventStore, NonEmpty, RecordedEvent, Snapshot, SnapshotChange,
-    SnapshotStore, SnapshotStoreConfig, StreamState, load_snapshot, persist_snapshot_change,
-    read_stream_from,
+    AppendOutcome, EventData, NonEmpty, Snapshot, SnapshotChange, SnapshotStore,
+    SnapshotStoreConfig, StreamAppend, StreamRead, StreamReadResult, StreamState, load_snapshot,
+    persist_snapshot_change, read_stream_from,
 };
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream, JetStreamPublishMessage};
 
@@ -91,22 +91,19 @@ impl JetStreamPublishMessage for Store {
     }
 }
 
-impl EventStore<JobId> for Store {
+impl StreamRead<JobId> for Store {
     type Error = CronError;
-
-    async fn current_stream_version(&self, stream_id: &JobId) -> Result<Option<u64>, Self::Error> {
-        Ok(stream_subject_state(self, stream_id.as_str())
-            .await?
-            .write_state
-            .current_version())
-    }
 
     async fn read_stream_from(
         &self,
         stream_id: &JobId,
         from_sequence: u64,
-    ) -> Result<Vec<RecordedEvent>, Self::Error> {
-        read_stream_from(self.events_stream(), from_sequence)
+    ) -> Result<StreamReadResult, Self::Error> {
+        let current_version = stream_subject_state(self, stream_id.as_str())
+            .await?
+            .write_state
+            .current_version();
+        let events = read_stream_from(self.events_stream(), from_sequence)
             .await
             .map_err(|source| {
                 CronError::event_source(
@@ -119,8 +116,16 @@ impl EventStore<JobId> for Store {
                     .into_iter()
                     .filter(|event| event.stream_id() == stream_id.as_str())
                     .collect()
-            })
+            })?;
+        Ok(StreamReadResult {
+            current_version,
+            events,
+        })
     }
+}
+
+impl StreamAppend<JobId> for Store {
+    type Error = CronError;
 
     async fn append_events(
         &self,
