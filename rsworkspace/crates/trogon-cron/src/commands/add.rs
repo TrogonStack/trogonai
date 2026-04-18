@@ -2,8 +2,8 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::{
-    AlwaysSnapshot, CommandExecution, CommandFailure, CommandInfraError, CommandOutcome,
-    CommandState, CommandStreamState, Decide, Decision, NonEmpty, OccPolicy, SnapshotState,
+    AlwaysSnapshot, CommandExecution, CommandFailure, CommandInfraError, CommandState,
+    CommandStreamState, Decide, Decision, ExecutionResult, NonEmpty, OccPolicy, SnapshotState,
     SnapshotStore, SnapshotStoreConfig, Snapshots, StreamAppend, StreamCommand, StreamRead,
     StreamState,
 };
@@ -50,7 +50,7 @@ impl fmt::Display for RegisterJobDecisionError {
 impl std::error::Error for RegisterJobDecisionError {}
 
 pub type RegisterJobResult = Result<
-    CommandOutcome<JobEvent>,
+    ExecutionResult<RegisterJobState, JobEvent>,
     CommandFailure<RegisterJobDecisionError, CommandInfraError<CronError>>,
 >;
 

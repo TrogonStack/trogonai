@@ -205,25 +205,10 @@ impl<State, Event> SnapshotPolicy<State, Event> for FrequencySnapshot {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct ExecutionResult<State, Event> {
+pub struct ExecutionResult<State, Event> {
     pub next_expected_version: u64,
     pub events: NonEmpty<Event>,
     pub state: State,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CommandOutcome<Event> {
-    pub next_expected_version: u64,
-    pub events: NonEmpty<Event>,
-}
-
-impl<State, Event> ExecutionResult<State, Event> {
-    fn into_outcome(self) -> CommandOutcome<Event> {
-        CommandOutcome {
-            next_expected_version: self.next_expected_version,
-            events: self.events,
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -367,11 +352,11 @@ where
 {
     pub async fn execute(
         self,
-    ) -> Result<CommandOutcome<C::Event>, CommandFailure<C::DomainError, CommandInfraError<SErr>>>
-    {
-        self.execute_result()
-            .await
-            .map(ExecutionResult::into_outcome)
+    ) -> Result<
+        ExecutionResult<C::State, C::Event>,
+        CommandFailure<C::DomainError, CommandInfraError<SErr>>,
+    > {
+        self.execute_result().await
     }
 
     async fn execute_result(
@@ -396,11 +381,11 @@ where
 {
     pub async fn execute(
         self,
-    ) -> Result<CommandOutcome<C::Event>, CommandFailure<C::DomainError, CommandInfraError<SErr>>>
-    {
-        self.execute_result()
-            .await
-            .map(ExecutionResult::into_outcome)
+    ) -> Result<
+        ExecutionResult<C::State, C::Event>,
+        CommandFailure<C::DomainError, CommandInfraError<SErr>>,
+    > {
+        self.execute_result().await
     }
 
     async fn execute_result(
@@ -470,11 +455,11 @@ where
 {
     pub async fn execute(
         self,
-    ) -> Result<CommandOutcome<C::Event>, CommandFailure<C::DomainError, CommandInfraError<SErr>>>
-    {
-        self.execute_result()
-            .await
-            .map(ExecutionResult::into_outcome)
+    ) -> Result<
+        ExecutionResult<C::State, C::Event>,
+        CommandFailure<C::DomainError, CommandInfraError<SErr>>,
+    > {
+        self.execute_result().await
     }
 
     async fn execute_result(
@@ -502,11 +487,11 @@ where
 {
     pub async fn execute(
         self,
-    ) -> Result<CommandOutcome<C::Event>, CommandFailure<C::DomainError, CommandInfraError<SErr>>>
-    {
-        self.execute_result()
-            .await
-            .map(ExecutionResult::into_outcome)
+    ) -> Result<
+        ExecutionResult<C::State, C::Event>,
+        CommandFailure<C::DomainError, CommandInfraError<SErr>>,
+    > {
+        self.execute_result().await
     }
 
     async fn execute_result(

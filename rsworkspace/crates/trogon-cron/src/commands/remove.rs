@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::{
-    AlwaysSnapshot, CommandExecution, CommandFailure, CommandInfraError, CommandOutcome,
-    CommandState, Decide, Decision, NonEmpty, OccPolicy, SnapshotState, SnapshotStore,
+    AlwaysSnapshot, CommandExecution, CommandFailure, CommandInfraError, CommandState, Decide,
+    Decision, ExecutionResult, NonEmpty, OccPolicy, SnapshotState, SnapshotStore,
     SnapshotStoreConfig, Snapshots, StreamAppend, StreamCommand, StreamRead,
 };
 
@@ -55,7 +55,7 @@ impl std::fmt::Display for RemoveJobDecisionError {
 impl std::error::Error for RemoveJobDecisionError {}
 
 pub type RemoveJobResult = Result<
-    CommandOutcome<JobEvent>,
+    ExecutionResult<RemoveJobState, JobEvent>,
     CommandFailure<RemoveJobDecisionError, CommandInfraError<CronError>>,
 >;
 

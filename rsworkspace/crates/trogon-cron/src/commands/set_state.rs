@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::{
-    AlwaysSnapshot, CommandExecution, CommandFailure, CommandInfraError, CommandOutcome,
-    CommandState, Decide, Decision, NonEmpty, OccPolicy, SnapshotState, SnapshotStore,
+    AlwaysSnapshot, CommandExecution, CommandFailure, CommandInfraError, CommandState, Decide,
+    Decision, ExecutionResult, NonEmpty, OccPolicy, SnapshotState, SnapshotStore,
     SnapshotStoreConfig, Snapshots, StreamAppend, StreamCommand, StreamRead,
 };
 
@@ -92,7 +92,7 @@ impl From<ChangeJobStateDecisionError> for ChangeJobStateError {
 }
 
 pub type ChangeJobStateResult = Result<
-    CommandOutcome<JobEvent>,
+    ExecutionResult<ChangeJobStateState, JobEvent>,
     CommandFailure<ChangeJobStateError, CommandInfraError<CronError>>,
 >;
 
