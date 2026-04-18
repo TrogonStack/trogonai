@@ -1,5 +1,3 @@
-use std::convert::Infallible;
-
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::{
     AlwaysSnapshot, CommandExecution, CommandFailure, CommandInfraError, CommandState, Decide,
@@ -90,12 +88,6 @@ impl std::error::Error for ChangeJobStateError {
             Self::Decision(error) => Some(error),
             Self::InvalidRegistrationEventId { source, .. } => Some(source),
         }
-    }
-}
-
-impl From<Infallible> for ChangeJobStateError {
-    fn from(value: Infallible) -> Self {
-        match value {}
     }
 }
 

@@ -431,8 +431,7 @@ impl<E, S, C, P, SErr> CommandExecution<'_, E, C, Snapshots<'_, S, P>>
 where
     C: SnapshotState + Decide<C::State, C::Event>,
     C::Event: EventType + StreamEvent + Clone,
-    C::State: TryFrom<C::Snapshot>,
-    <C::State as TryFrom<C::Snapshot>>::Error: Into<C::DomainError>,
+    C::State: From<C::Snapshot>,
     for<'a> C::Snapshot: From<&'a C::State>,
     E: StreamRead<C::StreamId, Error = SErr> + StreamAppend<C::StreamId, Error = SErr>,
     S: SnapshotStore<C::Snapshot, C::StreamId, Error = SErr>,
@@ -465,8 +464,7 @@ impl<E, S, C, P, SErr, EC> CommandExecutionWithCodec<'_, E, C, Snapshots<'_, S, 
 where
     C: SnapshotState + Decide<C::State, C::Event>,
     C::Event: EventType + StreamEvent + Clone,
-    C::State: TryFrom<C::Snapshot>,
-    <C::State as TryFrom<C::Snapshot>>::Error: Into<C::DomainError>,
+    C::State: From<C::Snapshot>,
     for<'a> C::Snapshot: From<&'a C::State>,
     E: StreamRead<C::StreamId, Error = SErr> + StreamAppend<C::StreamId, Error = SErr>,
     S: SnapshotStore<C::Snapshot, C::StreamId, Error = SErr>,
@@ -500,9 +498,7 @@ where
             .map_err(CommandFailure::Infra)?;
         let snapshot_version = snapshot.as_ref().map(|snapshot| snapshot.version);
         let mut state = snapshot
-            .map(|snapshot| C::State::try_from(snapshot.payload).map_err(Into::into))
-            .transpose()
-            .map_err(CommandFailure::Domain)?
+            .map(|snapshot| C::State::from(snapshot.payload))
             .unwrap_or_else(C::initial_state);
         let start_sequence = snapshot_version
             .map(|version| version.saturating_add(1))
@@ -599,7 +595,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::convert::Infallible;
     use std::sync::{
         Arc, Mutex,
         atomic::{AtomicUsize, Ordering},
@@ -670,12 +665,6 @@ mod tests {
         ReadStream,
         Append,
         Json,
-    }
-
-    impl From<Infallible> for TestCommandError {
-        fn from(value: Infallible) -> Self {
-            match value {}
-        }
     }
 
     impl From<serde_json::Error> for TestInfraError {
