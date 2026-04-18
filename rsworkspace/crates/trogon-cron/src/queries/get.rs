@@ -1,8 +1,6 @@
-use async_nats::jetstream::kv;
 use trogon_eventsourcing::StreamCommand;
-use trogon_nats::jetstream::JetStreamGetKeyValue;
 
-use crate::{JobId, JobSpec, error::CronError, store::open_cron_jobs_bucket};
+use crate::{JobId, JobSpec, error::CronError, store::GetCronJobsBucket};
 
 #[derive(Debug, Clone)]
 pub struct GetJobCommand {
@@ -17,12 +15,12 @@ impl StreamCommand for GetJobCommand {
     }
 }
 
-pub async fn run<J>(js: &J, command: GetJobCommand) -> Result<Option<JobSpec>, CronError>
+pub async fn run<J>(store: &J, command: GetJobCommand) -> Result<Option<JobSpec>, CronError>
 where
-    J: JetStreamGetKeyValue<Store = kv::Store>,
+    J: GetCronJobsBucket<Store = async_nats::jetstream::kv::Store>,
 {
-    let bucket = open_cron_jobs_bucket(js).await?;
-    let Some(entry) = bucket
+    let Some(entry) = store
+        .cron_jobs_bucket()
         .entry(command.stream_id().as_str().to_string())
         .await
         .map_err(|source| CronError::kv_source("failed to read projected cron job", source))?
