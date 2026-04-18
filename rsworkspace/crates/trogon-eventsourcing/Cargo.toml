@@ -20,7 +20,7 @@ futures = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 trogon-nats = { path = "../trogon-nats" }
-uuid = { workspace = true }
+trogon-std = { path = "../trogon-std", features = ["uuid"] }
 
 [dev-dependencies]
 trybuild = "1"

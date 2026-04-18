@@ -14,7 +14,7 @@ use trogon_nats::jetstream::JetStreamGetStream;
 use trogon_nats::lease::{
     LeaderElection, LeaseRenewInterval, LeaseTiming, LeaseTtl, NatsKvLease, NatsKvLeaseConfig,
 };
-use uuid::Uuid;
+use trogon_std::{NowV7, UuidV7Generator};
 
 use crate::{
     JobId, JobSpec, ResolvedJobSpec,
@@ -87,7 +87,7 @@ impl CronController<Store, NatsSchedulePublisher, NatsKvLease> {
             store,
             schedule_publisher,
             leader_lock,
-            node_id: Uuid::new_v4().to_string(),
+            node_id: UuidV7Generator.now_v7().to_string(),
             leader_timing,
         })
     }
@@ -99,7 +99,7 @@ impl<C, P, L> CronController<C, P, L> {
             store,
             schedule_publisher,
             leader_lock,
-            node_id: Uuid::new_v4().to_string(),
+            node_id: UuidV7Generator.now_v7().to_string(),
             leader_timing: default_leader_timing()?,
         })
     }
