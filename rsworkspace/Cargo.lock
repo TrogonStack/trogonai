@@ -3118,7 +3118,6 @@ dependencies = [
  "trogon-service-config",
  "trogon-std",
  "trogon-telemetry",
- "uuid",
 ]
 
 [[package]]
@@ -3135,8 +3134,8 @@ dependencies = [
  "serde",
  "serde_json",
  "trogon-nats",
+ "trogon-std",
  "trybuild",
- "uuid",
 ]
 
 [[package]]

@@ -2,7 +2,7 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use uuid::Uuid;
+use trogon_std::{NowV7, UuidV7Generator};
 
 mod decision;
 mod execution;
@@ -93,7 +93,7 @@ impl EventData {
     where
         E: EventType + StreamEvent + Serialize + DeserializeOwned,
     {
-        Self::new_with_codec(&JsonEventCodec, event)
+        Self::new_with_codec_and_generator(&JsonEventCodec, &UuidV7Generator, event)
     }
 
     pub fn new_with_codec<E, C>(codec: &C, event: E) -> Result<Self, C::Error>
@@ -101,8 +101,21 @@ impl EventData {
         E: EventType + StreamEvent,
         C: EventCodec<E>,
     {
+        Self::new_with_codec_and_generator(codec, &UuidV7Generator, event)
+    }
+
+    pub fn new_with_codec_and_generator<E, C, N>(
+        codec: &C,
+        now_v7: &N,
+        event: E,
+    ) -> Result<Self, C::Error>
+    where
+        E: EventType + StreamEvent,
+        C: EventCodec<E>,
+        N: NowV7,
+    {
         Ok(Self {
-            event_id: Uuid::new_v4().to_string(),
+            event_id: now_v7.now_v7().to_string(),
             event_type: event.event_type().to_string(),
             stream_id: event.stream_id().to_string(),
             data: codec.encode(&event)?,
@@ -115,10 +128,15 @@ impl EventData {
         E: EventType + StreamEvent + Serialize + DeserializeOwned,
         M: Serialize + DeserializeOwned,
     {
-        Self::with_codecs(&JsonEventCodec, &JsonEventCodec, event, metadata).map_err(|error| {
-            match error {
-                CodecError::Data(source) | CodecError::Metadata(source) => source,
-            }
+        Self::with_codecs_and_generator(
+            &JsonEventCodec,
+            &JsonEventCodec,
+            &UuidV7Generator,
+            event,
+            metadata,
+        )
+        .map_err(|error| match error {
+            CodecError::Data(source) | CodecError::Metadata(source) => source,
         })
     }
 
@@ -133,8 +151,30 @@ impl EventData {
         EC: EventCodec<E>,
         MC: EventCodec<M>,
     {
+        Self::with_codecs_and_generator(
+            event_codec,
+            metadata_codec,
+            &UuidV7Generator,
+            event,
+            metadata,
+        )
+    }
+
+    pub fn with_codecs_and_generator<E, M, EC, MC, N>(
+        event_codec: &EC,
+        metadata_codec: &MC,
+        now_v7: &N,
+        event: E,
+        metadata: Option<M>,
+    ) -> Result<Self, CodecError<EC::Error, MC::Error>>
+    where
+        E: EventType + StreamEvent,
+        EC: EventCodec<E>,
+        MC: EventCodec<M>,
+        N: NowV7,
+    {
         Ok(Self {
-            event_id: Uuid::new_v4().to_string(),
+            event_id: now_v7.now_v7().to_string(),
             event_type: event.event_type().to_string(),
             stream_id: event.stream_id().to_string(),
             data: event_codec.encode(&event).map_err(CodecError::Data)?,

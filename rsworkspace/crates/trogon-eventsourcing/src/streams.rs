@@ -3,7 +3,7 @@ use async_nats::jetstream::{
 };
 use chrono::{DateTime, Utc};
 use trogon_nats::jetstream::JetStreamPublishMessage;
-use uuid::Uuid;
+use trogon_std::{NowV7, UuidV7Generator};
 
 use crate::{EventData, NonEmpty, RecordedEvent};
 
@@ -92,6 +92,30 @@ where
             AckFuture = context::PublishAckFuture,
         >,
 {
+    append_stream_with_uuid_generator(
+        js,
+        subject,
+        expected_last_subject_sequence,
+        events,
+        &UuidV7Generator,
+    )
+    .await
+}
+
+async fn append_stream_with_uuid_generator<J, N>(
+    js: &J,
+    subject: String,
+    expected_last_subject_sequence: u64,
+    events: &NonEmpty<EventData>,
+    now_v7: &N,
+) -> Result<(), StreamStoreError>
+where
+    J: JetStreamPublishMessage<
+            PublishError = context::PublishError,
+            AckFuture = context::PublishAckFuture,
+        >,
+    N: NowV7,
+{
     let first_stream_id = events.first().stream_id().to_string();
     if events
         .iter()
@@ -103,7 +127,7 @@ where
         ));
     }
 
-    let batch_id = Uuid::new_v4().to_string();
+    let batch_id = now_v7.now_v7().to_string();
     let mut ack_futures = Vec::with_capacity(events.len());
 
     for (index, event) in events.iter().enumerate() {
