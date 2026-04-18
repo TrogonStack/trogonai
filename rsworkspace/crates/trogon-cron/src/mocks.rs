@@ -9,8 +9,8 @@ use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use serde::{Serialize, de::DeserializeOwned};
 use trogon_eventsourcing::{
-    AppendOutcome, EventData, EventStore, NonEmpty, RecordedEvent, Snapshot, SnapshotStore,
-    SnapshotStoreConfig, StreamCommand, StreamState,
+    AppendOutcome, EventData, NonEmpty, Snapshot, SnapshotStore, SnapshotStoreConfig, StreamAppend,
+    StreamCommand, StreamRead, StreamReadResult, StreamState,
 };
 use trogon_nats::lease::{ReleaseLease, RenewLease, TryAcquireLease};
 
@@ -221,26 +221,20 @@ impl MockCronStore {
     }
 }
 
-impl EventStore<crate::JobId> for MockCronStore {
+impl StreamRead<crate::JobId> for MockCronStore {
     type Error = CronError;
-
-    async fn current_stream_version(
-        &self,
-        stream_id: &crate::JobId,
-    ) -> Result<Option<u64>, Self::Error> {
-        Ok(self
-            .stream_versions
-            .lock()
-            .unwrap()
-            .get(stream_id.as_str())
-            .copied())
-    }
 
     async fn read_stream_from(
         &self,
         stream_id: &crate::JobId,
         from_sequence: u64,
-    ) -> Result<Vec<RecordedEvent>, Self::Error> {
+    ) -> Result<StreamReadResult, Self::Error> {
+        let current_version = self
+            .stream_versions
+            .lock()
+            .unwrap()
+            .get(stream_id.as_str())
+            .copied();
         let stream_events = self
             .events
             .lock()
@@ -249,7 +243,10 @@ impl EventStore<crate::JobId> for MockCronStore {
             .cloned()
             .unwrap_or_default();
         if from_sequence == 0 {
-            return Ok(Vec::new());
+            return Ok(StreamReadResult {
+                current_version,
+                events: Vec::new(),
+            });
         }
 
         let mut recorded = Vec::new();
@@ -272,8 +269,15 @@ impl EventStore<crate::JobId> for MockCronStore {
                 )?,
             ));
         }
-        Ok(recorded)
+        Ok(StreamReadResult {
+            current_version,
+            events: recorded,
+        })
     }
+}
+
+impl StreamAppend<crate::JobId> for MockCronStore {
+    type Error = CronError;
 
     async fn append_events(
         &self,

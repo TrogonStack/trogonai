@@ -80,19 +80,24 @@ pub const fn resolve_stream_state(
     }
 }
 
-pub trait EventStore<StreamId: ?Sized>: Send + Sync {
-    type Error;
+#[derive(Debug, Clone, PartialEq)]
+pub struct StreamReadResult {
+    pub current_version: Option<u64>,
+    pub events: Vec<RecordedEvent>,
+}
 
-    fn current_stream_version(
-        &self,
-        stream_id: &StreamId,
-    ) -> impl std::future::Future<Output = Result<Option<u64>, Self::Error>> + Send;
+pub trait StreamRead<StreamId: ?Sized>: Send + Sync {
+    type Error;
 
     fn read_stream_from(
         &self,
         stream_id: &StreamId,
         from_sequence: u64,
-    ) -> impl std::future::Future<Output = Result<Vec<RecordedEvent>, Self::Error>> + Send;
+    ) -> impl std::future::Future<Output = Result<StreamReadResult, Self::Error>> + Send;
+}
+
+pub trait StreamAppend<StreamId: ?Sized>: Send + Sync {
+    type Error;
 
     fn append_events(
         &self,
@@ -351,18 +356,18 @@ impl<'a, E, C, S, EC> CommandExecutionWithCodec<'a, E, C, S, EC> {
     }
 }
 
-impl<E, C> CommandExecution<'_, E, C, WithoutSnapshots>
+impl<E, C, SErr> CommandExecution<'_, E, C, WithoutSnapshots>
 where
     C: CommandState + Decide<C::State, C::Event>,
     C::Event: EventType + StreamEvent + Clone,
-    E: EventStore<C::StreamId>,
+    E: StreamRead<C::StreamId, Error = SErr> + StreamAppend<C::StreamId, Error = SErr>,
     C::DomainError: From<C::Error>,
     JsonEventCodec: EventCodec<C::Event>,
-    <JsonEventCodec as EventCodec<C::Event>>::Error: Into<E::Error>,
+    <JsonEventCodec as EventCodec<C::Event>>::Error: Into<SErr>,
 {
     pub async fn execute(
         self,
-    ) -> Result<CommandOutcome<C::Event>, CommandFailure<C::DomainError, CommandInfraError<E::Error>>>
+    ) -> Result<CommandOutcome<C::Event>, CommandFailure<C::DomainError, CommandInfraError<SErr>>>
     {
         self.execute_result()
             .await
@@ -373,25 +378,25 @@ where
         self,
     ) -> Result<
         ExecutionResult<C::State, C::Event>,
-        CommandFailure<C::DomainError, CommandInfraError<E::Error>>,
+        CommandFailure<C::DomainError, CommandInfraError<SErr>>,
     > {
         let event_codec = self.event_codec;
         self.codec(event_codec).execute_result().await
     }
 }
 
-impl<E, C, EC> CommandExecutionWithCodec<'_, E, C, WithoutSnapshots, EC>
+impl<E, C, EC, SErr> CommandExecutionWithCodec<'_, E, C, WithoutSnapshots, EC>
 where
     C: CommandState + Decide<C::State, C::Event>,
     C::Event: EventType + StreamEvent + Clone,
-    E: EventStore<C::StreamId>,
+    E: StreamRead<C::StreamId, Error = SErr> + StreamAppend<C::StreamId, Error = SErr>,
     C::DomainError: From<C::Error>,
     EC: EventCodec<C::Event>,
-    EC::Error: Into<E::Error>,
+    EC::Error: Into<SErr>,
 {
     pub async fn execute(
         self,
-    ) -> Result<CommandOutcome<C::Event>, CommandFailure<C::DomainError, CommandInfraError<E::Error>>>
+    ) -> Result<CommandOutcome<C::Event>, CommandFailure<C::DomainError, CommandInfraError<SErr>>>
     {
         self.execute_result()
             .await
@@ -402,36 +407,25 @@ where
         self,
     ) -> Result<
         ExecutionResult<C::State, C::Event>,
-        CommandFailure<C::DomainError, CommandInfraError<E::Error>>,
+        CommandFailure<C::DomainError, CommandInfraError<SErr>>,
     > {
         let stream_id = self.command.stream_id();
-        let current_version = self
+        let stream_read = self
             .event_store
-            .current_stream_version(stream_id)
+            .read_stream_from(stream_id, 1)
             .await
             .map_err(CommandInfraError::ReadStream)
             .map_err(CommandFailure::Infra)?;
+        let current_version = stream_read.current_version;
         let mut state = C::initial_state();
 
-        if let Some(current_version) = current_version {
-            let recorded_events = self
-                .event_store
-                .read_stream_from(stream_id, 1)
-                .await
-                .map_err(CommandInfraError::ReadStream)
+        for recorded_event in stream_read.events {
+            let event = recorded_event
+                .decode_data_with(&self.event_codec)
+                .map_err(Into::into)
+                .map_err(CommandInfraError::DecodeEvent)
                 .map_err(CommandFailure::Infra)?;
-
-            for recorded_event in recorded_events
-                .into_iter()
-                .filter(|event| event.log_position.unwrap_or(0) <= current_version)
-            {
-                let event = recorded_event
-                    .decode_data_with(&self.event_codec)
-                    .map_err(Into::into)
-                    .map_err(CommandInfraError::DecodeEvent)
-                    .map_err(CommandFailure::Infra)?;
-                state = C::evolve(state, event).map_err(CommandFailure::Domain)?;
-            }
+            state = C::evolve(state, event).map_err(CommandFailure::Domain)?;
         }
 
         let Decision::Event(events) = C::decide(&state, self.command)
@@ -467,7 +461,7 @@ where
     C: SnapshotState + Decide<C::State, C::Event>,
     C::Event: EventType + StreamEvent + Clone,
     C::Snapshot: Into<C::State>,
-    E: EventStore<C::StreamId, Error = SErr>,
+    E: StreamRead<C::StreamId, Error = SErr> + StreamAppend<C::StreamId, Error = SErr>,
     S: SnapshotStore<C::Snapshot, C::StreamId, Error = SErr>,
     P: SnapshotPolicy<C::State, C::Event>,
     C::DomainError: From<C::Error>,
@@ -499,7 +493,7 @@ where
     C: SnapshotState + Decide<C::State, C::Event>,
     C::Event: EventType + StreamEvent + Clone,
     C::Snapshot: Into<C::State>,
-    E: EventStore<C::StreamId, Error = SErr>,
+    E: StreamRead<C::StreamId, Error = SErr> + StreamAppend<C::StreamId, Error = SErr>,
     S: SnapshotStore<C::Snapshot, C::StreamId, Error = SErr>,
     P: SnapshotPolicy<C::State, C::Event>,
     C::DomainError: From<C::Error>,
@@ -531,12 +525,16 @@ where
             .map_err(CommandFailure::Infra)?;
         let snapshot_version = snapshot.as_ref().map(|snapshot| snapshot.version);
         let mut state = C::restore_state(self.command, snapshot).map_err(CommandFailure::Domain)?;
-        let current_version = self
+        let start_sequence = snapshot_version
+            .map(|version| version.saturating_add(1))
+            .unwrap_or(1);
+        let stream_read = self
             .event_store
-            .current_stream_version(stream_id)
+            .read_stream_from(stream_id, start_sequence)
             .await
             .map_err(CommandInfraError::ReadStream)
             .map_err(CommandFailure::Infra)?;
+        let current_version = stream_read.current_version;
 
         if let Some(snapshot_version) = snapshot_version {
             match current_version {
@@ -552,28 +550,13 @@ where
             }
         }
 
-        if let Some(current_version) = current_version {
-            let start_sequence = snapshot_version
-                .map(|version| version.saturating_add(1))
-                .unwrap_or(1);
-
-            if start_sequence <= current_version {
-                let recorded_events = self
-                    .event_store
-                    .read_stream_from(stream_id, start_sequence)
-                    .await
-                    .map_err(CommandInfraError::ReadStream)
-                    .map_err(CommandFailure::Infra)?;
-
-                for recorded_event in recorded_events {
-                    let event = recorded_event
-                        .decode_data_with(&self.event_codec)
-                        .map_err(Into::into)
-                        .map_err(CommandInfraError::DecodeEvent)
-                        .map_err(CommandFailure::Infra)?;
-                    state = C::evolve(state, event).map_err(CommandFailure::Domain)?;
-                }
-            }
+        for recorded_event in stream_read.events {
+            let event = recorded_event
+                .decode_data_with(&self.event_codec)
+                .map_err(Into::into)
+                .map_err(CommandInfraError::DecodeEvent)
+                .map_err(CommandFailure::Infra)?;
+            state = C::evolve(state, event).map_err(CommandFailure::Domain)?;
         }
 
         let Decision::Event(events) = C::decide(&state, self.command)
@@ -881,32 +864,32 @@ mod tests {
     const TEST_SNAPSHOT_CONFIG: SnapshotStoreConfig<'static> =
         SnapshotStoreConfig::new("test.command.", None);
 
-    impl EventStore<str> for FakeRuntime {
+    impl StreamRead<str> for FakeRuntime {
         type Error = TestInfraError;
-
-        async fn current_stream_version(
-            &self,
-            _stream_id: &str,
-        ) -> Result<Option<u64>, Self::Error> {
-            Ok(self.current_version)
-        }
 
         async fn read_stream_from(
             &self,
             _stream_id: &str,
             from_sequence: u64,
-        ) -> Result<Vec<RecordedEvent>, Self::Error> {
+        ) -> Result<StreamReadResult, Self::Error> {
             if self.fail_read_stream {
                 return Err(TestInfraError::ReadStream);
             }
             self.read_from_sequences.lock().unwrap().push(from_sequence);
-            Ok(self
-                .recorded_events
-                .iter()
-                .filter(|event| event.log_position.unwrap_or(0) >= from_sequence)
-                .cloned()
-                .collect())
+            Ok(StreamReadResult {
+                current_version: self.current_version,
+                events: self
+                    .recorded_events
+                    .iter()
+                    .filter(|event| event.log_position.unwrap_or(0) >= from_sequence)
+                    .cloned()
+                    .collect(),
+            })
         }
+    }
+
+    impl StreamAppend<str> for FakeRuntime {
+        type Error = TestInfraError;
 
         async fn append_events(
             &self,
@@ -991,10 +974,7 @@ mod tests {
             runtime.stream_states.lock().unwrap().as_slice(),
             &[StreamState::NoStream]
         );
-        assert_eq!(
-            runtime.read_from_sequences.lock().unwrap().as_slice(),
-            &[] as &[u64]
-        );
+        assert_eq!(runtime.read_from_sequences.lock().unwrap().as_slice(), &[1]);
     }
 
     #[test]
