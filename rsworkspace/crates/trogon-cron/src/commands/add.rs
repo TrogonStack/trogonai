@@ -1,4 +1,4 @@
-use std::{convert::Infallible, fmt};
+use std::fmt;
 
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::{
@@ -54,12 +54,6 @@ impl fmt::Display for RegisterJobDecisionError {
 }
 
 impl std::error::Error for RegisterJobDecisionError {}
-
-impl From<Infallible> for RegisterJobDecisionError {
-    fn from(value: Infallible) -> Self {
-        match value {}
-    }
-}
 
 pub type RegisterJobResult = Result<
     ExecutionResult<RegisterJobState, JobEvent>,
