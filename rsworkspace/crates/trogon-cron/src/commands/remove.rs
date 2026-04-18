@@ -1,5 +1,3 @@
-use std::convert::Infallible;
-
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::{
     AlwaysSnapshot, CommandExecution, CommandFailure, CommandInfraError, CommandState, Decide,
@@ -61,12 +59,6 @@ impl std::fmt::Display for RemoveJobDecisionError {
 }
 
 impl std::error::Error for RemoveJobDecisionError {}
-
-impl From<Infallible> for RemoveJobDecisionError {
-    fn from(value: Infallible) -> Self {
-        match value {}
-    }
-}
 
 pub type RemoveJobResult = Result<
     ExecutionResult<RemoveJobState, JobEvent>,
