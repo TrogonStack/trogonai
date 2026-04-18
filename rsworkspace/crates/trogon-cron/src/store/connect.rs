@@ -19,19 +19,40 @@ use crate::{
     projections::catch_up_snapshots,
 };
 
-use super::{
-    append_events::run as append_job_events, append_events::stream_subject_state,
-    events_stream::run as open_events_stream, snapshot_bucket::run as open_snapshot_bucket,
-};
+use super::GetCronJobsBucket;
+use super::{append_events::run as append_job_events, append_events::stream_subject_state};
 
 #[derive(Clone)]
 pub struct Store {
     js: jetstream::Context,
+    events_stream: jetstream::stream::Stream,
+    snapshot_bucket: kv::Store,
+    cron_jobs_bucket: kv::Store,
 }
 
 impl Store {
     pub const fn as_jetstream(&self) -> &jetstream::Context {
         &self.js
+    }
+
+    pub(crate) const fn events_stream(&self) -> &jetstream::stream::Stream {
+        &self.events_stream
+    }
+
+    pub(crate) const fn snapshot_bucket(&self) -> &kv::Store {
+        &self.snapshot_bucket
+    }
+
+    pub(crate) const fn cron_jobs_bucket_ref(&self) -> &kv::Store {
+        &self.cron_jobs_bucket
+    }
+}
+
+impl GetCronJobsBucket for Store {
+    type Store = kv::Store;
+
+    fn cron_jobs_bucket(&self) -> &Self::Store {
+        self.cron_jobs_bucket_ref()
     }
 }
 
@@ -85,8 +106,7 @@ impl EventStore<JobId> for Store {
         stream_id: &JobId,
         from_sequence: u64,
     ) -> Result<Vec<RecordedEvent>, Self::Error> {
-        let stream = open_events_stream(self).await?;
-        read_stream_from(&stream, from_sequence)
+        read_stream_from(self.events_stream(), from_sequence)
             .await
             .map_err(|source| {
                 CronError::event_source(
@@ -155,8 +175,7 @@ where
         config: SnapshotStoreConfig<'static>,
         stream_id: &JobId,
     ) -> Result<Option<Snapshot<Payload>>, Self::Error> {
-        let bucket = open_snapshot_bucket(self).await?;
-        load_snapshot(&bucket, config, stream_id.as_str())
+        load_snapshot(self.snapshot_bucket(), config, stream_id.as_str())
             .await
             .map_err(CronError::from)
     }
@@ -167,9 +186,8 @@ where
         stream_id: &JobId,
         snapshot: Snapshot<Payload>,
     ) -> Result<(), Self::Error> {
-        let bucket = open_snapshot_bucket(self).await?;
         persist_snapshot_change(
-            &bucket,
+            self.snapshot_bucket(),
             config,
             SnapshotChange::upsert(stream_id.as_str(), snapshot),
         )
@@ -181,11 +199,17 @@ where
 #[cfg(not(coverage))]
 pub async fn connect_store(nats: async_nats::Client) -> Result<Store, CronError> {
     let js = jetstream::new(nats);
-    get_or_create_cron_jobs_bucket(&js).await?;
-    get_or_create_snapshot_bucket(&js).await?;
-    validate_events_stream(&get_or_create_events_stream(&js).await?)?;
+    let cron_jobs_bucket = get_or_create_cron_jobs_bucket(&js).await?;
+    let snapshot_bucket = get_or_create_snapshot_bucket(&js).await?;
+    let events_stream = get_or_create_events_stream(&js).await?;
+    validate_events_stream(&events_stream)?;
     catch_up_snapshots(&js).await?;
-    Ok(Store { js })
+    Ok(Store {
+        js,
+        events_stream,
+        snapshot_bucket,
+        cron_jobs_bucket,
+    })
 }
 
 #[cfg(coverage)]
