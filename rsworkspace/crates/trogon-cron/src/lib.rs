@@ -46,4 +46,4 @@ pub use projections::{
 pub use queries::{GetJobCommand, ListJobsCommand, get_job, list_jobs};
 pub use store::{SNAPSHOT_STORE_CONFIG, Store, append_events, connect_store, open_snapshot_bucket};
 pub use traits::{LeaderLock, SchedulePublisher};
-pub use trogon_eventsourcing::{CommandFailure, CommandInfraError, CommandOutcome, OccPolicy};
+pub use trogon_eventsourcing::{CommandFailure, CommandInfraError, ExecutionResult, OccPolicy};
