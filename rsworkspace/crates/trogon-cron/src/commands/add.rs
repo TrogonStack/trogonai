@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{convert::Infallible, fmt};
 
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::{
@@ -30,6 +30,12 @@ pub enum RegisterJobState {
     Deleted,
 }
 
+impl From<&RegisterJobState> for RegisterJobState {
+    fn from(state: &RegisterJobState) -> Self {
+        *state
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RegisterJobDecisionError {
     AlreadyRegistered { id: JobId },
@@ -48,6 +54,12 @@ impl fmt::Display for RegisterJobDecisionError {
 }
 
 impl std::error::Error for RegisterJobDecisionError {}
+
+impl From<Infallible> for RegisterJobDecisionError {
+    fn from(value: Infallible) -> Self {
+        match value {}
+    }
+}
 
 pub type RegisterJobResult = Result<
     ExecutionResult<RegisterJobState, JobEvent>,
@@ -124,10 +136,6 @@ impl CommandState for RegisterJobCommand {
 
 impl SnapshotState for RegisterJobCommand {
     type Snapshot = RegisterJobState;
-
-    fn snapshot_state(state: &Self::State) -> Option<Self::Snapshot> {
-        Some(*state)
-    }
 }
 
 pub async fn run<E, S>(

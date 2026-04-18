@@ -1,3 +1,5 @@
+use std::convert::Infallible;
+
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::{
     AlwaysSnapshot, CommandExecution, CommandFailure, CommandInfraError, CommandState, Decide,
@@ -24,6 +26,12 @@ pub enum RemoveJobState {
     Missing,
     Present,
     Deleted,
+}
+
+impl From<&RemoveJobState> for RemoveJobState {
+    fn from(state: &RemoveJobState) -> Self {
+        *state
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,6 +61,12 @@ impl std::fmt::Display for RemoveJobDecisionError {
 }
 
 impl std::error::Error for RemoveJobDecisionError {}
+
+impl From<Infallible> for RemoveJobDecisionError {
+    fn from(value: Infallible) -> Self {
+        match value {}
+    }
+}
 
 pub type RemoveJobResult = Result<
     ExecutionResult<RemoveJobState, JobEvent>,
@@ -107,10 +121,6 @@ impl CommandState for RemoveJobCommand {
 
 impl SnapshotState for RemoveJobCommand {
     type Snapshot = RemoveJobState;
-
-    fn snapshot_state(state: &Self::State) -> Option<Self::Snapshot> {
-        Some(*state)
-    }
 }
 
 pub async fn run<E, S>(

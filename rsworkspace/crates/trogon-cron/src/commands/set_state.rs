@@ -1,3 +1,5 @@
+use std::convert::Infallible;
+
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::{
     AlwaysSnapshot, CommandExecution, CommandFailure, CommandInfraError, CommandState, Decide,
@@ -25,6 +27,12 @@ pub enum ChangeJobStateState {
     Missing,
     Present { current: JobEnabledState },
     Deleted,
+}
+
+impl From<&ChangeJobStateState> for ChangeJobStateState {
+    fn from(state: &ChangeJobStateState) -> Self {
+        *state
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -82,6 +90,12 @@ impl std::error::Error for ChangeJobStateError {
             Self::Decision(error) => Some(error),
             Self::InvalidRegistrationEventId { source, .. } => Some(source),
         }
+    }
+}
+
+impl From<Infallible> for ChangeJobStateError {
+    fn from(value: Infallible) -> Self {
+        match value {}
     }
 }
 
@@ -177,10 +191,6 @@ impl CommandState for ChangeJobStateCommand {
 
 impl SnapshotState for ChangeJobStateCommand {
     type Snapshot = ChangeJobStateState;
-
-    fn snapshot_state(state: &Self::State) -> Option<Self::Snapshot> {
-        Some(*state)
-    }
 }
 
 pub async fn run<E, S>(
