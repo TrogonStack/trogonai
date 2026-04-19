@@ -13,14 +13,6 @@ use trogon_nats::DottedNatsToken;
 
 use super::JobId;
 
-const RESERVED_SCHEDULE_HEADERS: [&str; 5] = [
-    "Nats-Schedule",
-    "Nats-Schedule-Source",
-    "Nats-Schedule-Target",
-    "Nats-Schedule-Time-Zone",
-    "Nats-Schedule-TTL",
-];
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct JobSpec {
     pub id: JobId,
@@ -193,12 +185,6 @@ impl DeliveryHeaders {
                 || name.chars().any(|ch| ch.is_control() || ch.is_whitespace())
             {
                 return Err(JobSpecError::InvalidHeaderName { name: name.clone() });
-            }
-            if RESERVED_SCHEDULE_HEADERS
-                .iter()
-                .any(|reserved| reserved.eq_ignore_ascii_case(name))
-            {
-                return Err(JobSpecError::ReservedHeaderName { name: name.clone() });
             }
             if value
                 .chars()
@@ -708,8 +694,8 @@ mod tests {
     }
 
     #[test]
-    fn reserved_header_is_rejected_during_deserialization() {
-        let error = serde_json::from_value::<JobSpec>(serde_json::json!({
+    fn reserved_header_is_allowed_in_generic_job_spec_deserialization() {
+        let spec = serde_json::from_value::<JobSpec>(serde_json::json!({
             "id": "heartbeat",
             "schedule": { "type": "every", "every_sec": 30 },
             "delivery": {
@@ -719,9 +705,13 @@ mod tests {
             },
             "payload": { "kind": "heartbeat" }
         }))
-        .unwrap_err();
+        .unwrap();
 
-        assert!(error.to_string().contains("reserved"));
+        let DeliverySpec::NatsEvent { headers, .. } = spec.delivery;
+        assert_eq!(
+            headers.as_map()["Nats-Schedule-Target"],
+            "cron.fire.evil.target"
+        );
     }
 
     #[test]

@@ -1,5 +1,4 @@
 mod add;
-pub mod domain;
 mod remove;
 mod set_state;
 

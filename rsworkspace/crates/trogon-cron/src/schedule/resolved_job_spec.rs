@@ -5,9 +5,9 @@ use async_nats::{HeaderMap, HeaderValue};
 use bytes::Bytes;
 use trogon_nats::{DottedNatsToken, NatsToken};
 
-use super::{DeliverySpec, JobId, JobSpec, ScheduleSpec};
 use crate::{
     error::{CronError, JobSpecError},
+    jobs::{DeliverySpec, JobId, JobSpec, ScheduleSpec},
     kv::{FIRE_SUBJECT_PREFIX, SCHEDULE_SUBJECT_PREFIX},
 };
 
@@ -16,6 +16,13 @@ const NATS_SCHEDULE_SOURCE: &str = "Nats-Schedule-Source";
 const NATS_SCHEDULE_TARGET: &str = "Nats-Schedule-Target";
 const NATS_SCHEDULE_TIME_ZONE: &str = "Nats-Schedule-Time-Zone";
 const NATS_SCHEDULE_TTL: &str = "Nats-Schedule-TTL";
+const RESERVED_SCHEDULE_HEADERS: [&str; 5] = [
+    NATS_SCHEDULE,
+    NATS_SCHEDULE_SOURCE,
+    NATS_SCHEDULE_TARGET,
+    NATS_SCHEDULE_TIME_ZONE,
+    NATS_SCHEDULE_TTL,
+];
 #[derive(Debug, Clone)]
 pub struct ResolvedJobSpec {
     spec: JobSpec,
@@ -105,6 +112,7 @@ fn resolved_job_spec_parts(spec: &JobSpec) -> Result<ResolvedJobSpecParts, CronE
                 .map(|source| source.subject().as_str().to_string()),
         ),
     };
+    validate_scheduler_headers(&headers)?;
 
     Ok(ResolvedJobSpecParts {
         job_id,
@@ -230,16 +238,31 @@ fn validate_timezone(timezone: Option<String>) -> Result<Option<String>, CronErr
     Ok(Some(timezone))
 }
 
+fn validate_scheduler_headers(headers: &BTreeMap<String, String>) -> Result<(), CronError> {
+    for name in headers.keys() {
+        if RESERVED_SCHEDULE_HEADERS
+            .iter()
+            .any(|reserved| reserved.eq_ignore_ascii_case(name))
+        {
+            return Err(CronError::invalid_job_spec(
+                JobSpecError::ReservedHeaderName { name: name.clone() },
+            ));
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
 
     use chrono::{TimeZone, Utc};
 
-    use super::super::{
+    use super::*;
+    use crate::jobs::{
         DeliveryHeaders, DeliveryRoute, JobEnabledState, SamplingSource, TtlSeconds,
     };
-    use super::*;
 
     fn job_id(id: &str) -> JobId {
         JobId::parse(id).unwrap()
@@ -393,5 +416,23 @@ mod tests {
 
         let error = ResolvedJobSpec::try_from(&job).unwrap_err();
         assert!(error.to_string().contains("timezone"));
+    }
+
+    #[test]
+    fn reserved_scheduler_header_is_rejected_during_schedule_resolution() {
+        let mut job = base_job();
+        job.delivery = DeliverySpec::NatsEvent {
+            route: route("agent.run"),
+            headers: DeliveryHeaders::new(BTreeMap::from([(
+                "Nats-Schedule-Target".to_string(),
+                "cron.fire.evil.target".to_string(),
+            )]))
+            .unwrap(),
+            ttl_sec: None,
+            source: None,
+        };
+
+        let error = ResolvedJobSpec::try_from(&job).unwrap_err();
+        assert!(error.to_string().contains("reserved"));
     }
 }

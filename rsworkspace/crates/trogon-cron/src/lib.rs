@@ -9,21 +9,19 @@ pub mod commands;
 pub mod config;
 pub mod error;
 pub mod events;
+mod jobs;
 pub mod kv;
 pub mod nats;
 mod processors;
 pub mod projections;
 pub mod queries;
+mod schedule;
 pub mod store;
 pub mod traits;
 
 #[cfg(any(test, feature = "test-support"))]
 pub mod mocks;
 
-pub use commands::domain::{
-    DeliveryHeaders, DeliveryRoute, DeliverySpec, JobEnabledState, JobId, JobIdError, JobSpec,
-    ResolvedJobSpec, SamplingSource, SamplingSubject, ScheduleSpec, TtlSeconds,
-};
 pub use commands::{
     ChangeJobStateCommand, ChangeJobStateDecisionError, ChangeJobStateError, ChangeJobStateState,
     RegisterJobCommand, RegisterJobDecisionError, RegisterJobState, RemoveJobCommand,
@@ -35,6 +33,10 @@ pub use events::{
     JobEvent, JobEventCodec, JobEventData, JobEventDelivery, JobEventSamplingSource,
     JobEventSchedule, JobEventState, RecordedJobEvent, RegisteredJobSpec,
 };
+pub use jobs::{
+    DeliveryHeaders, DeliveryRoute, DeliverySpec, JobEnabledState, JobId, JobIdError, JobSpec,
+    SamplingSource, SamplingSubject, ScheduleSpec, TtlSeconds,
+};
 pub use nats::NatsSchedulePublisher;
 pub use processors::CronController;
 pub use projections::{
@@ -43,6 +45,7 @@ pub use projections::{
     projection_change,
 };
 pub use queries::{GetJobCommand, ListJobsCommand, get_job, list_jobs};
+pub use schedule::ResolvedJobSpec;
 pub use store::{SNAPSHOT_STORE_CONFIG, Store, append_events, connect_store, open_snapshot_bucket};
 pub use traits::{LeaderLock, SchedulePublisher};
 pub use trogon_eventsourcing::{
