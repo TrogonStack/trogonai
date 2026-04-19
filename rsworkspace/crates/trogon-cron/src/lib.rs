@@ -25,10 +25,9 @@ pub use commands::domain::{
     ResolvedJobSpec, SamplingSource, SamplingSubject, ScheduleSpec, TtlSeconds,
 };
 pub use commands::{
-    ChangeJobStateCommand, ChangeJobStateDecisionError, ChangeJobStateError, ChangeJobStateResult,
-    ChangeJobStateState, RegisterJobCommand, RegisterJobDecisionError, RegisterJobResult,
-    RegisterJobState, RemoveJobCommand, RemoveJobDecisionError, RemoveJobResult, RemoveJobState,
-    change_job_state, register_job, remove_job,
+    ChangeJobStateCommand, ChangeJobStateDecisionError, ChangeJobStateError, ChangeJobStateState,
+    RegisterJobCommand, RegisterJobDecisionError, RegisterJobState, RemoveJobCommand,
+    RemoveJobDecisionError, RemoveJobState, change_job_state, register_job, remove_job,
 };
 pub use config::JobWriteCondition;
 pub use error::{CronError, JobSpecError};
@@ -46,4 +45,6 @@ pub use projections::{
 pub use queries::{GetJobCommand, ListJobsCommand, get_job, list_jobs};
 pub use store::{SNAPSHOT_STORE_CONFIG, Store, append_events, connect_store, open_snapshot_bucket};
 pub use traits::{LeaderLock, SchedulePublisher};
-pub use trogon_eventsourcing::{CommandFailure, CommandInfraError, ExecutionResult, OccPolicy};
+pub use trogon_eventsourcing::{
+    CommandFailure, CommandInfraError, CommandResult, ExecutionResult, OccPolicy,
+};

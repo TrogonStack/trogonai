@@ -13,10 +13,6 @@ pub trait CommandState: StreamCommand + Sized {
     fn evolve(state: Self::State, event: Self::Event) -> Result<Self::State, Self::DomainError>;
 }
 
-pub trait SnapshotState: CommandState {
-    type Snapshot;
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StreamState {
     Any,
@@ -196,6 +192,11 @@ pub struct ExecutionResult<State, Event> {
     pub events: NonEmpty<Event>,
     pub state: State,
 }
+
+pub type CommandResult<State, Event, DomainError, InfraError> = Result<
+    ExecutionResult<State, Event>,
+    CommandFailure<DomainError, CommandInfraError<InfraError>>,
+>;
 
 #[derive(Debug)]
 pub enum CommandFailure<DomainError, InfraError> {
@@ -429,12 +430,11 @@ where
 
 impl<E, S, C, P, SErr> CommandExecution<'_, E, C, Snapshots<'_, S, P>>
 where
-    C: SnapshotState + Decide<C::State, C::Event>,
+    C: CommandState + Decide<C::State, C::Event>,
     C::Event: EventType + StreamEvent + Clone,
-    C::State: From<C::Snapshot>,
-    for<'a> C::Snapshot: From<&'a C::State>,
+    C::State: Clone,
     E: StreamRead<C::StreamId, Error = SErr> + StreamAppend<C::StreamId, Error = SErr>,
-    S: SnapshotStore<C::Snapshot, C::StreamId, Error = SErr>,
+    S: SnapshotStore<C::State, C::StreamId, Error = SErr>,
     P: SnapshotPolicy<C::State, C::Event>,
     C::DomainError: From<C::Error>,
     JsonEventCodec: EventCodec<C::Event>,
@@ -462,12 +462,11 @@ where
 
 impl<E, S, C, P, SErr, EC> CommandExecutionWithCodec<'_, E, C, Snapshots<'_, S, P>, EC>
 where
-    C: SnapshotState + Decide<C::State, C::Event>,
+    C: CommandState + Decide<C::State, C::Event>,
     C::Event: EventType + StreamEvent + Clone,
-    C::State: From<C::Snapshot>,
-    for<'a> C::Snapshot: From<&'a C::State>,
+    C::State: Clone,
     E: StreamRead<C::StreamId, Error = SErr> + StreamAppend<C::StreamId, Error = SErr>,
-    S: SnapshotStore<C::Snapshot, C::StreamId, Error = SErr>,
+    S: SnapshotStore<C::State, C::StreamId, Error = SErr>,
     P: SnapshotPolicy<C::State, C::Event>,
     C::DomainError: From<C::Error>,
     EC: EventCodec<C::Event>,
@@ -498,7 +497,7 @@ where
             .map_err(CommandFailure::Infra)?;
         let snapshot_version = snapshot.as_ref().map(|snapshot| snapshot.version);
         let mut state = snapshot
-            .map(|snapshot| C::State::from(snapshot.payload))
+            .map(|snapshot| snapshot.payload)
             .unwrap_or_else(C::initial_state);
         let start_sequence = snapshot_version
             .map(|version| version.saturating_add(1))
@@ -562,13 +561,12 @@ where
             ),
             SnapshotDecision::Take
         ) {
-            let snapshot_payload = C::Snapshot::from(&state);
             self.snapshots
                 .snapshot_store
                 .save_snapshot(
                     self.snapshots.snapshot_config,
                     stream_id,
-                    Snapshot::new(append_outcome.next_expected_version, snapshot_payload),
+                    Snapshot::new(append_outcome.next_expected_version, state.clone()),
                 )
                 .await
                 .map_err(CommandInfraError::SaveSnapshot)
@@ -626,12 +624,6 @@ mod tests {
     enum TestState {
         Missing,
         Present { enabled: bool },
-    }
-
-    impl From<&TestState> for TestState {
-        fn from(state: &TestState) -> Self {
-            *state
-        }
     }
 
     #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -758,10 +750,6 @@ mod tests {
                 TestEvent::Broken { .. } => Err(TestCommandError::BrokenEvent),
             }
         }
-    }
-
-    impl SnapshotState for TestCommand {
-        type Snapshot = TestState;
     }
 
     impl Decide<TestState, TestEvent> for TestCommand {

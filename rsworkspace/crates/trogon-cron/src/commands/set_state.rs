@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::{
-    AlwaysSnapshot, CommandExecution, CommandFailure, CommandInfraError, CommandState, Decide,
-    Decision, ExecutionResult, NonEmpty, OccPolicy, SnapshotState, SnapshotStore,
-    SnapshotStoreConfig, Snapshots, StreamAppend, StreamCommand, StreamRead,
+    AlwaysSnapshot, CommandExecution, CommandResult, CommandState, Decide, Decision, NonEmpty,
+    OccPolicy, SnapshotStore, SnapshotStoreConfig, Snapshots, StreamAppend, StreamCommand,
+    StreamRead,
 };
 
 use crate::{
@@ -25,12 +25,6 @@ pub enum ChangeJobStateState {
     Missing,
     Present { current: JobEnabledState },
     Deleted,
-}
-
-impl From<&ChangeJobStateState> for ChangeJobStateState {
-    fn from(state: &ChangeJobStateState) -> Self {
-        *state
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -96,11 +90,6 @@ impl From<ChangeJobStateDecisionError> for ChangeJobStateError {
         Self::Decision(value)
     }
 }
-
-pub type ChangeJobStateResult = Result<
-    ExecutionResult<ChangeJobStateState, JobEvent>,
-    CommandFailure<ChangeJobStateError, CommandInfraError<CronError>>,
->;
 
 impl StreamCommand for ChangeJobStateCommand {
     type StreamId = JobId;
@@ -181,16 +170,12 @@ impl CommandState for ChangeJobStateCommand {
     }
 }
 
-impl SnapshotState for ChangeJobStateCommand {
-    type Snapshot = ChangeJobStateState;
-}
-
 pub async fn run<E, S>(
     event_store: &E,
     snapshot_store: &S,
     command: ChangeJobStateCommand,
     occ: Option<OccPolicy>,
-) -> ChangeJobStateResult
+) -> CommandResult<ChangeJobStateState, JobEvent, ChangeJobStateError, CronError>
 where
     E: StreamRead<JobId, Error = CronError> + StreamAppend<JobId, Error = CronError>,
     S: SnapshotStore<ChangeJobStateState, JobId, Error = CronError>,

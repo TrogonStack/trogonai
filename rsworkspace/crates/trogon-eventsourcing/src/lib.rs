@@ -13,9 +13,9 @@ pub mod testing;
 pub use decision::{Act, Decide, Decision, NonEmpty, StreamCommand, decide};
 pub use execution::{
     AlwaysSnapshot, AppendOutcome, CommandExecution, CommandFailure, CommandInfraError,
-    CommandState, CommandStreamState, ExecutionResult, FrequencySnapshot, NoSnapshot, OccPolicy,
-    SnapshotDecision, SnapshotPolicy, SnapshotState, SnapshotStore, Snapshots, StreamAppend,
-    StreamRead, StreamReadResult, StreamState, WithoutSnapshots,
+    CommandResult, CommandState, CommandStreamState, ExecutionResult, FrequencySnapshot,
+    NoSnapshot, OccPolicy, SnapshotDecision, SnapshotPolicy, SnapshotStore, Snapshots,
+    StreamAppend, StreamRead, StreamReadResult, StreamState, WithoutSnapshots,
 };
 pub use snapshots::{
     Snapshot, SnapshotChange, SnapshotLoader, SnapshotStoreConfig, SnapshotStoreError,
