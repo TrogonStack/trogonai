@@ -685,7 +685,7 @@ fn validate_event_job_id(id: &str) -> Result<(), SubjectTokenViolation> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{BTreeMap, HashMap};
+    use std::collections::HashMap;
 
     use async_nats::jetstream::consumer::{AckPolicy, DeliverPolicy, ReplayPolicy};
 
@@ -695,7 +695,8 @@ mod tests {
         reconcile_snapshot, scheduler_consumer_config,
     };
     use crate::{
-        CronJob, DeliverySpec, JobEnabledState, JobId, JobSpec, RegisteredJobSpec, ScheduleSpec,
+        CronJob, DeliverySpec, JobEnabledState, JobId, JobSpec, MessageContent, MessageHeaders,
+        RegisteredJobSpec, ScheduleSpec,
         events::{JobEvent, JobEventState},
         mocks::{MockCronStore, MockLeaderLock, MockSchedulePublisher},
     };
@@ -710,8 +711,8 @@ mod tests {
             state: JobEnabledState::Enabled,
             schedule: ScheduleSpec::Every { every_sec: 30 },
             delivery: DeliverySpec::nats_event("agent.run").unwrap(),
-            payload: serde_json::json!({"kind": "heartbeat"}),
-            metadata: BTreeMap::new(),
+            content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
+            headers: MessageHeaders::default(),
         }
     }
 
