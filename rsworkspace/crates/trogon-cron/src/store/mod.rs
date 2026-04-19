@@ -1,8 +1,8 @@
-mod append_events;
 mod connect;
 mod cron_jobs_bucket;
 mod events_stream;
 mod snapshot_bucket;
+mod stream_subject;
 
 use trogon_eventsourcing::SnapshotStoreConfig;
 
@@ -14,8 +14,6 @@ pub trait GetCronJobsBucket {
     fn cron_jobs_bucket(&self) -> &Self::Store;
 }
 
-pub use append_events::run as append_events;
-pub(crate) use append_events::stream_subject_state;
 pub use connect::{Store, connect_store};
 pub(crate) use cron_jobs_bucket::run as open_cron_jobs_bucket;
 pub(crate) use events_stream::run as open_events_stream;
