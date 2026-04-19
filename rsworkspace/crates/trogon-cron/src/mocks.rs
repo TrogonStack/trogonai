@@ -155,9 +155,9 @@ impl MockCronStore {
             vec![
                 JobEventData::new_with_codec(
                     &JobEventCodec,
-                    JobEvent::JobRegistered {
+                    JobEvent::JobAdded {
                         id: id.clone(),
-                        spec: crate::RegisteredJobSpec::from(&spec),
+                        job: crate::JobDetails::from(&spec),
                     },
                 )
                 .unwrap(),
@@ -165,10 +165,7 @@ impl MockCronStore {
         );
         self.jobs.lock().unwrap().insert(
             id.clone(),
-            Snapshot::new(
-                1,
-                CronJob::from((id, crate::RegisteredJobSpec::from(&spec))),
-            ),
+            Snapshot::new(1, CronJob::from((id, crate::JobDetails::from(&spec)))),
         );
     }
 
@@ -348,8 +345,8 @@ impl StreamAppend<crate::JobId> for MockCronStore {
             version += 1;
             stored_events.push(event_data);
             match event {
-                JobEvent::JobRegistered { id, spec } => {
-                    projected_snapshot = Some(Snapshot::new(version, CronJob::from((id, spec))));
+                JobEvent::JobAdded { id, job } => {
+                    projected_snapshot = Some(Snapshot::new(version, CronJob::from((id, job))));
                 }
                 JobEvent::JobPaused { .. } => {
                     let mut snapshot = projected_snapshot.take().ok_or_else(|| {
@@ -428,10 +425,10 @@ mod tests {
 
     use super::*;
     use crate::{
-        AddJobCommand, CronJob, DeliverySpec, GetJobCommand, JobEnabledState, JobEventState,
-        JobSpec, JobWriteCondition, ListJobsCommand, MessageContent, MessageHeaders,
-        PauseJobCommand, RegisteredJobSpec, RemoveJobCommand, ResumeJobCommand, ScheduleSpec,
-        add_job, pause_job, remove_job, resume_job,
+        AddJobCommand, CronJob, DeliverySpec, GetJobCommand, JobDetails, JobEnabledState,
+        JobEventState, JobSpec, JobWriteCondition, ListJobsCommand, MessageContent, MessageHeaders,
+        PauseJobCommand, RemoveJobCommand, ResumeJobCommand, ScheduleSpec, add_job, pause_job,
+        remove_job, resume_job,
     };
     use futures::StreamExt;
 
@@ -451,7 +448,7 @@ mod tests {
     }
 
     fn expected_job(id: &str) -> CronJob {
-        CronJob::from((id.to_string(), RegisteredJobSpec::from(base_job(id))))
+        CronJob::from((id.to_string(), JobDetails::from(base_job(id))))
     }
 
     #[tokio::test]

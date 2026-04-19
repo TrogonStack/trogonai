@@ -3,10 +3,9 @@ use std::num::NonZeroU64;
 use crate::{
     error::{CronError, JobSpecError},
     events::{
-        JobEventDelivery, JobEventSamplingSource, JobEventSchedule, JobEventState,
-        RegisteredJobSpec,
+        JobDetails, JobEventDelivery, JobEventSamplingSource, JobEventSchedule, JobEventState,
+        MessageContent, MessageHeaders,
     },
-    message::{MessageContent, MessageHeaders},
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
@@ -394,7 +393,7 @@ impl TryFrom<JobEventDelivery> for DeliverySpec {
     }
 }
 
-impl RegisteredJobSpec {
+impl JobDetails {
     pub fn try_into_job_spec(self, id: JobId) -> Result<JobSpec, CronError> {
         Ok(JobSpec {
             id,
@@ -410,7 +409,7 @@ impl RegisteredJobSpec {
     }
 }
 
-impl From<JobSpec> for RegisteredJobSpec {
+impl From<JobSpec> for JobDetails {
     fn from(spec: JobSpec) -> Self {
         Self {
             state: spec.state.into(),
@@ -422,7 +421,7 @@ impl From<JobSpec> for RegisteredJobSpec {
     }
 }
 
-impl From<&JobSpec> for RegisteredJobSpec {
+impl From<&JobSpec> for JobDetails {
     fn from(spec: &JobSpec) -> Self {
         Self {
             state: spec.state.into(),
@@ -539,8 +538,8 @@ mod tests {
     }
 
     #[test]
-    fn registered_job_spec_round_trips_through_domain_conversion() {
-        let registered = RegisteredJobSpec {
+    fn job_details_round_trip_through_domain_conversion() {
+        let details = JobDetails {
             state: JobEventState::Enabled,
             schedule: JobEventSchedule::Every { every_sec: 30 },
             delivery: JobEventDelivery::NatsEvent {
@@ -554,13 +553,13 @@ mod tests {
             headers: MessageHeaders::new([("x-kind", "heartbeat")]).unwrap(),
         };
 
-        let job = registered
+        let job = details
             .clone()
             .try_into_job_spec(job_id("heartbeat"))
             .unwrap();
 
         assert_eq!(job.id.as_str(), "heartbeat");
-        assert_eq!(RegisteredJobSpec::from(&job), registered);
+        assert_eq!(JobDetails::from(&job), details);
     }
 
     #[test]
@@ -650,7 +649,7 @@ mod tests {
 
     #[test]
     fn invalid_event_delivery_is_rejected_when_hydrating_domain_spec() {
-        let error = RegisteredJobSpec {
+        let error = JobDetails {
             state: JobEventState::Enabled,
             schedule: JobEventSchedule::Every { every_sec: 30 },
             delivery: JobEventDelivery::NatsEvent {

@@ -10,7 +10,6 @@ pub mod config;
 pub mod error;
 pub mod events;
 pub mod kv;
-mod message;
 pub mod nats;
 mod processors;
 pub mod projections;
@@ -36,10 +35,10 @@ pub use commands::{
 pub use config::JobWriteCondition;
 pub use error::{CronError, JobSpecError};
 pub use events::{
-    JobEvent, JobEventCodec, JobEventData, JobEventDelivery, JobEventSamplingSource,
-    JobEventSchedule, JobEventState, RecordedJobEvent, RegisteredJobSpec,
+    JobDetails, JobEvent, JobEventCodec, JobEventData, JobEventDelivery, JobEventSamplingSource,
+    JobEventSchedule, JobEventState, MessageContent, MessageHeaders, MessageHeadersError,
+    RecordedJobEvent,
 };
-pub use message::{MessageContent, MessageHeaders};
 pub use nats::NatsSchedulePublisher;
 pub use processors::CronController;
 pub use projections::{

@@ -1,9 +1,9 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
 use trogon_cron::{
-    AddJobCommand, CronController, CronJob, DeliverySpec, GetJobCommand, JobEnabledState,
-    JobEventState, JobId, JobSpec, JobWriteCondition, ListJobsCommand, MessageContent,
-    MessageHeaders, PauseJobCommand, RegisteredJobSpec, RemoveJobCommand, SchedulePublisher,
+    AddJobCommand, CronController, CronJob, DeliverySpec, GetJobCommand, JobDetails,
+    JobEnabledState, JobEventState, JobId, JobSpec, JobWriteCondition, ListJobsCommand,
+    MessageContent, MessageHeaders, PauseJobCommand, RemoveJobCommand, SchedulePublisher,
     ScheduleSpec, add_job,
     mocks::{MockCronStore, MockLeaderLock, MockSchedulePublisher},
     pause_job, remove_job,
@@ -25,7 +25,7 @@ fn base_job(id: &str) -> JobSpec {
 }
 
 fn expected_job(id: &str) -> CronJob {
-    CronJob::from((id.to_string(), RegisteredJobSpec::from(base_job(id))))
+    CronJob::from((id.to_string(), JobDetails::from(base_job(id))))
 }
 
 #[tokio::test]

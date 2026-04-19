@@ -57,10 +57,10 @@ pub enum JobTransitionError {
         id: String,
         source: SubjectTokenViolation,
     },
-    CannotRegisterExistingJob {
+    CannotAddExistingJob {
         id: String,
     },
-    CannotRegisterDeletedJob {
+    CannotAddDeletedJob {
         id: String,
     },
     MissingJobForStateChange {
@@ -80,12 +80,12 @@ pub const fn initial_state() -> JobStreamState {
 
 pub fn apply(state: JobStreamState, event: JobEvent) -> Result<JobStreamState, JobTransitionError> {
     match (state, event) {
-        (JobStreamState::Initial, JobEvent::JobRegistered { id, spec }) => {
+        (JobStreamState::Initial, JobEvent::JobAdded { id, job }) => {
             validate_event_job_id(&id).map_err(|source| JobTransitionError::InvalidEventId {
                 id: id.clone(),
                 source,
             })?;
-            Ok(JobStreamState::Present(CronJob::from((id, spec))))
+            Ok(JobStreamState::Present(CronJob::from((id, job))))
         }
         (JobStreamState::Initial, event @ JobEvent::JobPaused { .. }) => {
             Err(JobTransitionError::MissingJobForStateChange {
@@ -100,8 +100,8 @@ pub fn apply(state: JobStreamState, event: JobEvent) -> Result<JobStreamState, J
         (JobStreamState::Initial, event @ JobEvent::JobRemoved { .. }) => {
             Ok(JobStreamState::Deleted(parse_event_job_id(&event)?))
         }
-        (JobStreamState::Present(job), JobEvent::JobRegistered { .. }) => {
-            Err(JobTransitionError::CannotRegisterExistingJob { id: job.id })
+        (JobStreamState::Present(job), JobEvent::JobAdded { .. }) => {
+            Err(JobTransitionError::CannotAddExistingJob { id: job.id })
         }
         (JobStreamState::Present(mut job), JobEvent::JobPaused { .. }) => {
             job.state = JobEventState::Disabled;
@@ -114,8 +114,8 @@ pub fn apply(state: JobStreamState, event: JobEvent) -> Result<JobStreamState, J
         (JobStreamState::Present(job), JobEvent::JobRemoved { .. }) => {
             Ok(JobStreamState::Deleted(job.id))
         }
-        (JobStreamState::Deleted(id), JobEvent::JobRegistered { .. }) => {
-            Err(JobTransitionError::CannotRegisterDeletedJob { id })
+        (JobStreamState::Deleted(id), JobEvent::JobAdded { .. }) => {
+            Err(JobTransitionError::CannotAddDeletedJob { id })
         }
         (JobStreamState::Deleted(id), JobEvent::JobPaused { .. }) => {
             Err(JobTransitionError::DeletedJobForStateChange { id })
@@ -175,11 +175,9 @@ impl std::fmt::Display for JobTransitionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InvalidEventId { id, .. } => write!(f, "job event id '{id}' is invalid"),
-            Self::CannotRegisterExistingJob { id } => {
-                write!(f, "job '{id}' is already registered")
-            }
-            Self::CannotRegisterDeletedJob { id } => {
-                write!(f, "job '{id}' was deleted and cannot be registered again")
+            Self::CannotAddExistingJob { id } => write!(f, "job '{id}' already exists"),
+            Self::CannotAddDeletedJob { id } => {
+                write!(f, "job '{id}' was deleted and cannot be added again")
             }
             Self::MissingJobForStateChange { id } => {
                 write!(f, "missing job for state change '{id}'")
@@ -740,8 +738,8 @@ fn validate_event_job_id(id: &str) -> Result<(), SubjectTokenViolation> {
 mod tests {
     use super::*;
     use crate::{
-        CronJob, DeliverySpec, JobEnabledState, JobEventState, JobId, JobSpec, MessageContent,
-        MessageHeaders, RegisteredJobSpec, ScheduleSpec,
+        CronJob, DeliverySpec, JobDetails, JobEnabledState, JobEventState, JobId, JobSpec,
+        MessageContent, MessageHeaders, ScheduleSpec,
     };
 
     fn job_id(id: &str) -> JobId {
@@ -760,15 +758,15 @@ mod tests {
     }
 
     fn expected_job(id: &str) -> CronJob {
-        CronJob::from((id.to_string(), RegisteredJobSpec::from(job(id))))
+        CronJob::from((id.to_string(), JobDetails::from(job(id))))
     }
 
     #[test]
     fn event_projection_replays_latest_state() {
         let events = [
-            JobEvent::JobRegistered {
+            JobEvent::JobAdded {
                 id: "backup".to_string(),
-                spec: job("backup").into(),
+                job: job("backup").into(),
             },
             JobEvent::JobPaused {
                 id: "backup".to_string(),
@@ -790,16 +788,16 @@ mod tests {
     fn event_projection_rejects_recreating_deleted_job() {
         let error = apply(
             JobStreamState::Deleted("backup".to_string()),
-            JobEvent::JobRegistered {
+            JobEvent::JobAdded {
                 id: "backup".to_string(),
-                spec: job("backup").into(),
+                job: job("backup").into(),
             },
         )
         .unwrap_err();
 
         assert!(matches!(
             error,
-            JobTransitionError::CannotRegisterDeletedJob { .. }
+            JobTransitionError::CannotAddDeletedJob { .. }
         ));
     }
 
@@ -824,9 +822,9 @@ mod tests {
         let before = initial_state();
         let after = apply(
             before.clone(),
-            JobEvent::JobRegistered {
+            JobEvent::JobAdded {
                 id: "backup".to_string(),
-                spec: job("backup").into(),
+                job: job("backup").into(),
             },
         )
         .unwrap();
@@ -849,18 +847,18 @@ mod tests {
     }
 
     #[test]
-    fn initial_state_rejects_registering_existing_job() {
+    fn initial_state_rejects_adding_existing_job() {
         let error = apply(
             JobStreamState::Present(expected_job("backup")),
-            JobEvent::JobRegistered {
+            JobEvent::JobAdded {
                 id: "backup".to_string(),
-                spec: job("backup").into(),
+                job: job("backup").into(),
             },
         )
         .unwrap_err();
         assert!(matches!(
             error,
-            JobTransitionError::CannotRegisterExistingJob { .. }
+            JobTransitionError::CannotAddExistingJob { .. }
         ));
     }
 
@@ -921,9 +919,9 @@ mod tests {
             &mut states,
             &mut snapshots,
             &stream_id,
-            &JobEvent::JobRegistered {
+            &JobEvent::JobAdded {
                 id: "alpha".to_string(),
-                spec: RegisteredJobSpec::from(job("alpha")),
+                job: JobDetails::from(job("alpha")),
             },
             1,
         )
@@ -952,9 +950,9 @@ mod tests {
             &mut states,
             &mut snapshots,
             &stream_id,
-            &JobEvent::JobRegistered {
+            &JobEvent::JobAdded {
                 id: "alpha".to_string(),
-                spec: RegisteredJobSpec::from(job("alpha")),
+                job: JobDetails::from(job("alpha")),
             },
             4,
         )

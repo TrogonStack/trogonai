@@ -1,13 +1,28 @@
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 
-use crate::error::JobSpecError;
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MessageHeadersError {
+    InvalidName { name: String },
+    InvalidValue { name: String },
+}
+
+impl std::fmt::Display for MessageHeadersError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidName { name } => write!(f, "header name '{name}' is invalid"),
+            Self::InvalidValue { name } => write!(f, "header '{name}' contains an invalid value"),
+        }
+    }
+}
+
+impl std::error::Error for MessageHeadersError {}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MessageHeaders(Vec<(String, String)>);
 
 impl MessageHeaders {
-    pub fn new<I, N, V>(headers: I) -> Result<Self, JobSpecError>
+    pub fn new<I, N, V>(headers: I) -> Result<Self, MessageHeadersError>
     where
         I: IntoIterator<Item = (N, V)>,
         N: Into<String>,
@@ -23,13 +38,13 @@ impl MessageHeaders {
                 || name.contains(':')
                 || name.chars().any(|ch| ch.is_control() || ch.is_whitespace())
             {
-                return Err(JobSpecError::InvalidHeaderName { name: name.clone() });
+                return Err(MessageHeadersError::InvalidName { name: name.clone() });
             }
             if value
                 .chars()
                 .any(|ch| ch == '\r' || ch == '\n' || ch == '\0')
             {
-                return Err(JobSpecError::InvalidHeaderValue { name: name.clone() });
+                return Err(MessageHeadersError::InvalidValue { name: name.clone() });
             }
         }
 
@@ -50,7 +65,7 @@ impl MessageHeaders {
 }
 
 impl TryFrom<Vec<(String, String)>> for MessageHeaders {
-    type Error = JobSpecError;
+    type Error = MessageHeadersError;
 
     fn try_from(value: Vec<(String, String)>) -> Result<Self, Self::Error> {
         Self::new(value)
