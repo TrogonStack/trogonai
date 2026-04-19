@@ -1,5 +1,7 @@
 use trogon_eventsourcing::StreamState;
 
+use crate::events::MessageHeadersError;
+
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 #[derive(Debug)]
@@ -20,7 +22,7 @@ pub enum CronError {
         context: &'static str,
         source: BoxError,
     },
-    JobAlreadyRegistered {
+    JobAlreadyExists {
         id: String,
     },
     JobNotFound {
@@ -80,9 +82,7 @@ impl std::fmt::Display for CronError {
             Self::Schedule { context, source } => {
                 write!(f, "Schedule error: {context}: {source}")
             }
-            Self::JobAlreadyRegistered { id } => {
-                write!(f, "Job '{id}' is already registered")
-            }
+            Self::JobAlreadyExists { id } => write!(f, "Job '{id}' already exists"),
             Self::JobNotFound { id } => write!(f, "Job '{id}' not found"),
             Self::OptimisticConcurrencyConflict {
                 id,
@@ -113,7 +113,7 @@ impl std::error::Error for CronError {
             Self::Schedule { source, .. } => Some(source.as_ref()),
             Self::Serde(error) => Some(error),
             Self::InvalidJobSpec { source } => Some(source),
-            Self::JobAlreadyRegistered { .. }
+            Self::JobAlreadyExists { .. }
             | Self::JobNotFound { .. }
             | Self::OptimisticConcurrencyConflict { .. } => None,
         }
@@ -218,6 +218,15 @@ impl From<serde_json::Error> for CronError {
     }
 }
 
+impl From<MessageHeadersError> for JobSpecError {
+    fn from(value: MessageHeadersError) -> Self {
+        match value {
+            MessageHeadersError::InvalidName { name } => Self::InvalidHeaderName { name },
+            MessageHeadersError::InvalidValue { name } => Self::InvalidHeaderValue { name },
+        }
+    }
+}
+
 impl From<trogon_eventsourcing::SnapshotStoreError> for CronError {
     fn from(value: trogon_eventsourcing::SnapshotStoreError) -> Self {
         match value {
@@ -274,14 +283,11 @@ mod tests {
         assert_eq!(schedule.to_string(), "Schedule error: upsert: rejected");
         assert!(std::error::Error::source(&schedule).is_some());
 
-        let already_registered = CronError::JobAlreadyRegistered {
+        let already_exists = CronError::JobAlreadyExists {
             id: "job-1".to_string(),
         };
-        assert_eq!(
-            already_registered.to_string(),
-            "Job 'job-1' is already registered"
-        );
-        assert!(std::error::Error::source(&already_registered).is_none());
+        assert_eq!(already_exists.to_string(), "Job 'job-1' already exists");
+        assert!(std::error::Error::source(&already_exists).is_none());
 
         let not_found = CronError::JobNotFound {
             id: "missing".to_string(),

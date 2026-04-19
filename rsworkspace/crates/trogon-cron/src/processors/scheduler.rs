@@ -337,10 +337,10 @@ fn apply_scheduler_event(
     event: JobEvent,
 ) -> Result<SchedulerChange, CronError> {
     match event {
-        JobEvent::JobRegistered { id, spec } => {
+        JobEvent::JobAdded { id, job } => {
             if matches!(desired_jobs.get(&id), Some(DesiredJobState::Deleted)) {
                 return Err(CronError::event_source(
-                    "scheduler received a registration for a deleted job stream",
+                    "scheduler received an add event for a deleted job stream",
                     std::io::Error::other(id),
                 ));
             }
@@ -350,7 +350,7 @@ fn apply_scheduler_event(
                     source,
                 })
             })?;
-            let job = CronJob::from((id.clone(), spec));
+            let job = CronJob::from((id.clone(), job));
             desired_jobs.insert(
                 job.id.clone(),
                 DesiredJobState::Present(Box::new(job.clone())),
@@ -695,8 +695,8 @@ mod tests {
         reconcile_snapshot, scheduler_consumer_config,
     };
     use crate::{
-        CronJob, DeliverySpec, JobEnabledState, JobId, JobSpec, MessageContent, MessageHeaders,
-        RegisteredJobSpec, ScheduleSpec,
+        CronJob, DeliverySpec, JobDetails, JobEnabledState, JobId, JobSpec, MessageContent,
+        MessageHeaders, ScheduleSpec,
         events::{JobEvent, JobEventState},
         mocks::{MockCronStore, MockLeaderLock, MockSchedulePublisher},
     };
@@ -717,7 +717,7 @@ mod tests {
     }
 
     fn expected_job(id: &str) -> CronJob {
-        CronJob::from((id.to_string(), RegisteredJobSpec::from(base_job(id))))
+        CronJob::from((id.to_string(), JobDetails::from(base_job(id))))
     }
 
     #[tokio::test]
@@ -752,7 +752,7 @@ mod tests {
             "disabled".to_string(),
             DesiredJobState::Present(Box::new(CronJob::from((
                 "disabled".to_string(),
-                RegisteredJobSpec::from(disabled),
+                JobDetails::from(disabled),
             )))),
         )]);
 
@@ -794,15 +794,15 @@ mod tests {
     fn apply_scheduler_event_tracks_register_disable_enable_and_terminal_delete() {
         let mut desired_jobs = HashMap::new();
 
-        let registered = apply_scheduler_event(
+        let added = apply_scheduler_event(
             &mut desired_jobs,
-            JobEvent::JobRegistered {
+            JobEvent::JobAdded {
                 id: "alpha".to_string(),
-                spec: RegisteredJobSpec::from(base_job("alpha")),
+                job: JobDetails::from(base_job("alpha")),
             },
         )
         .unwrap();
-        assert_eq!(registered, SchedulerChange::Upsert(expected_job("alpha")));
+        assert_eq!(added, SchedulerChange::Upsert(expected_job("alpha")));
         assert!(matches!(
             desired_jobs.get("alpha"),
             Some(DesiredJobState::Present(_))
@@ -848,9 +848,9 @@ mod tests {
 
         let error = apply_scheduler_event(
             &mut desired_jobs,
-            JobEvent::JobRegistered {
+            JobEvent::JobAdded {
                 id: "alpha".to_string(),
-                spec: RegisteredJobSpec::from(base_job("alpha")),
+                job: JobDetails::from(base_job("alpha")),
             },
         )
         .unwrap_err();
@@ -896,7 +896,7 @@ mod tests {
             &publisher,
             &SchedulerChange::Upsert(CronJob::from((
                 "disabled".to_string(),
-                RegisteredJobSpec::from(disabled),
+                JobDetails::from(disabled),
             ))),
         )
         .await
@@ -923,7 +923,7 @@ mod tests {
             &publisher,
             &SchedulerChange::Upsert(CronJob::from((
                 "invalid".to_string(),
-                RegisteredJobSpec::from(invalid),
+                JobDetails::from(invalid),
             ))),
         )
         .await
@@ -951,7 +951,7 @@ mod tests {
                 "invalid".to_string(),
                 DesiredJobState::Present(Box::new(CronJob::from((
                     "invalid".to_string(),
-                    RegisteredJobSpec::from(invalid),
+                    JobDetails::from(invalid),
                 )))),
             ),
         ]);
