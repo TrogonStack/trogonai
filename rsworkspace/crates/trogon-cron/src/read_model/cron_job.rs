@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-use crate::events::{JobEventDelivery, JobEventSchedule, JobEventState, RegisteredJobSpec};
-use crate::message::{MessageContent, MessageHeaders};
+use crate::events::{
+    JobDetails, JobEventDelivery, JobEventSchedule, JobEventState, MessageContent, MessageHeaders,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct CronJob {
@@ -21,15 +22,15 @@ impl CronJob {
     }
 }
 
-impl From<(String, RegisteredJobSpec)> for CronJob {
-    fn from((id, spec): (String, RegisteredJobSpec)) -> Self {
+impl From<(String, JobDetails)> for CronJob {
+    fn from((id, job): (String, JobDetails)) -> Self {
         Self {
             id,
-            state: spec.state,
-            schedule: spec.schedule,
-            delivery: spec.delivery,
-            content: spec.content,
-            headers: spec.headers,
+            state: job.state,
+            schedule: job.schedule,
+            delivery: job.delivery,
+            content: job.content,
+            headers: job.headers,
         }
     }
 }

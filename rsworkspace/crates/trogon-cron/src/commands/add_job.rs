@@ -10,7 +10,7 @@ use trogon_eventsourcing::{
 use crate::{
     CronJob, JobId, JobSpec, ResolvedJobSpec,
     error::CronError,
-    events::{JobEvent, JobEventCodec, RegisteredJobSpec},
+    events::{JobDetails, JobEvent, JobEventCodec},
 };
 
 #[derive(Debug, Clone)]
@@ -31,16 +31,16 @@ pub enum AddJobState {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AddJobDecisionError {
-    AlreadyRegistered { id: JobId },
+    AlreadyExists { id: JobId },
     JobDeleted { id: JobId },
 }
 
 impl fmt::Display for AddJobDecisionError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::AlreadyRegistered { id } => write!(f, "job '{id}' is already registered"),
+            Self::AlreadyExists { id } => write!(f, "job '{id}' already exists"),
             Self::JobDeleted { id } => {
-                write!(f, "job '{id}' was deleted and cannot be registered again")
+                write!(f, "job '{id}' was deleted and cannot be added again")
             }
         }
     }
@@ -52,7 +52,7 @@ impl AddJobCommand {
     pub fn new(spec: JobSpec) -> Result<Self, CronError> {
         ResolvedJobSpec::try_from(&CronJob::from((
             spec.id.to_string(),
-            RegisteredJobSpec::from(&spec),
+            JobDetails::from(&spec),
         )))?;
 
         Ok(Self {
@@ -83,11 +83,11 @@ impl Decide<AddJobState, JobEvent> for AddJobCommand {
 
     fn decide(state: &AddJobState, command: &Self) -> Result<Decision<JobEvent>, Self::Error> {
         match state {
-            AddJobState::Missing => Ok(Decision::Event(NonEmpty::one(JobEvent::JobRegistered {
+            AddJobState::Missing => Ok(Decision::Event(NonEmpty::one(JobEvent::JobAdded {
                 id: command.stream_id().to_string(),
-                spec: RegisteredJobSpec::from(command.spec()),
+                job: JobDetails::from(command.spec()),
             }))),
-            AddJobState::Present => Err(AddJobDecisionError::AlreadyRegistered {
+            AddJobState::Present => Err(AddJobDecisionError::AlreadyExists {
                 id: command.stream_id().clone(),
             }),
             AddJobState::Deleted => Err(AddJobDecisionError::JobDeleted {
@@ -108,7 +108,7 @@ impl CommandState for AddJobCommand {
 
     fn evolve(state: Self::State, event: JobEvent) -> Result<Self::State, Self::DomainError> {
         match event {
-            JobEvent::JobRegistered { .. }
+            JobEvent::JobAdded { .. }
             | JobEvent::JobPaused { .. }
             | JobEvent::JobResumed { .. } => match state {
                 AddJobState::Deleted => Ok(AddJobState::Deleted),
@@ -170,32 +170,32 @@ mod tests {
     }
 
     fn expected_job(id: &str) -> CronJob {
-        CronJob::from((id.to_string(), RegisteredJobSpec::from(job(id))))
+        CronJob::from((id.to_string(), JobDetails::from(job(id))))
     }
 
     #[test]
-    fn decides_registration_from_missing_state() {
+    fn decides_add_from_missing_state() {
         let state = AddJobState::Missing;
         let command = AddJobCommand::new(job("backup")).unwrap();
 
         let decision = decide(&state, &command).unwrap();
         assert_eq!(
             decision,
-            Decision::Event(NonEmpty::one(JobEvent::JobRegistered {
+            Decision::Event(NonEmpty::one(JobEvent::JobAdded {
                 id: "backup".to_string(),
-                spec: RegisteredJobSpec::from(job("backup")),
+                job: JobDetails::from(job("backup")),
             }))
         );
     }
 
     #[test]
-    fn rejects_registering_existing_job() {
+    fn rejects_adding_existing_job() {
         let state = AddJobState::Present;
         let command = AddJobCommand::new(job("backup")).unwrap();
 
         assert!(matches!(
             decide(&state, &command).unwrap_err(),
-            AddJobDecisionError::AlreadyRegistered { .. }
+            AddJobDecisionError::AlreadyExists { .. }
         ));
     }
 
@@ -204,32 +204,32 @@ mod tests {
         TestCase::new(decider::<AddJobCommand>())
             .given([])
             .when(AddJobCommand::new(job("backup")).unwrap())
-            .then([JobEvent::JobRegistered {
+            .then([JobEvent::JobAdded {
                 id: "backup".to_string(),
-                spec: RegisteredJobSpec::from(job("backup")),
+                job: JobDetails::from(job("backup")),
             }]);
     }
 
     #[test]
     fn given_when_then_supports_register_job_failures() {
         TestCase::new(decider::<AddJobCommand>())
-            .given([JobEvent::JobRegistered {
+            .given([JobEvent::JobAdded {
                 id: "backup".to_string(),
-                spec: RegisteredJobSpec::from(job("backup")),
+                job: JobDetails::from(job("backup")),
             }])
             .when(AddJobCommand::new(job("backup")).unwrap())
-            .then(expect_error(AddJobDecisionError::AlreadyRegistered {
+            .then(expect_error(AddJobDecisionError::AlreadyExists {
                 id: JobId::parse("backup").unwrap(),
             }));
     }
 
     #[test]
-    fn rejects_registering_deleted_job_ids() {
+    fn rejects_adding_deleted_job_ids() {
         TestCase::new(decider::<AddJobCommand>())
             .given([
-                JobEvent::JobRegistered {
+                JobEvent::JobAdded {
                     id: "backup".to_string(),
-                    spec: RegisteredJobSpec::from(job("backup")),
+                    job: JobDetails::from(job("backup")),
                 },
                 JobEvent::JobRemoved {
                     id: "backup".to_string(),
@@ -256,9 +256,9 @@ mod tests {
         assert_eq!(outcome.next_expected_version, 1);
         assert_eq!(
             outcome.events,
-            NonEmpty::one(JobEvent::JobRegistered {
+            NonEmpty::one(JobEvent::JobAdded {
                 id: "backup".to_string(),
-                spec: RegisteredJobSpec::from(job("backup")),
+                job: JobDetails::from(job("backup")),
             })
         );
 
@@ -282,7 +282,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn run_rejects_registering_existing_job_with_domain_error() {
+    async fn run_rejects_adding_existing_job_with_domain_error() {
         let store = MockCronStore::new();
 
         run(
@@ -305,13 +305,13 @@ mod tests {
 
         assert!(matches!(
             error,
-            CommandFailure::Domain(AddJobDecisionError::AlreadyRegistered { ref id })
+            CommandFailure::Domain(AddJobDecisionError::AlreadyExists { ref id })
                 if id.to_string() == "backup"
         ));
     }
 
     #[tokio::test]
-    async fn run_rejects_registering_deleted_job_id() {
+    async fn run_rejects_adding_deleted_job_id() {
         let store = MockCronStore::new();
 
         run(
