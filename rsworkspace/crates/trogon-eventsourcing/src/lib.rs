@@ -6,6 +6,7 @@ use trogon_std::{NowV7, UuidV7Generator};
 
 mod decision;
 mod execution;
+pub mod jetstream;
 mod snapshots;
 mod streams;
 pub mod testing;
