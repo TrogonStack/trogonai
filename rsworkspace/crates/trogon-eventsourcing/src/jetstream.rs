@@ -80,6 +80,7 @@ pub enum JetStreamStoreError<Error> {
     AppendStream(StreamStoreError),
     ProjectAppend(Error),
     Snapshot(SnapshotStoreError),
+    Codec(serde_json::Error),
     OptimisticConcurrencyConflict {
         stream_id: String,
         expected: StreamState,
@@ -102,6 +103,7 @@ where
                 write!(f, "failed to project appended stream events: {source}")
             }
             Self::Snapshot(source) => write!(f, "failed to access snapshots: {source}"),
+            Self::Codec(source) => write!(f, "codec error: {source}"),
             Self::OptimisticConcurrencyConflict {
                 stream_id,
                 expected,
@@ -129,8 +131,15 @@ where
             Self::ResolveSubject(source) | Self::ProjectAppend(source) => Some(source),
             Self::ReadStream(source) | Self::AppendStream(source) => Some(source),
             Self::Snapshot(source) => Some(source),
+            Self::Codec(source) => Some(source),
             Self::OptimisticConcurrencyConflict { .. } => None,
         }
+    }
+}
+
+impl<Error> From<serde_json::Error> for JetStreamStoreError<Error> {
+    fn from(value: serde_json::Error) -> Self {
+        Self::Codec(value)
     }
 }
 
