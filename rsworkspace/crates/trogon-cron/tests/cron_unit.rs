@@ -33,7 +33,7 @@ async fn client_register_then_get() {
     let store = MockCronStore::new();
 
     let job = base_job("backup");
-    add_job(&store, &store, AddJobCommand::new(job).unwrap(), None)
+    add_job(&store, AddJobCommand::new(job).unwrap(), None)
         .await
         .unwrap();
 
@@ -52,13 +52,12 @@ async fn client_pause_job_toggles_job() {
 
     add_job(
         &store,
-        &store,
         AddJobCommand::new(base_job("toggle")).unwrap(),
         None,
     )
     .await
     .unwrap();
-    pause_job(&store, &store, PauseJobCommand::new(job_id("toggle")), None)
+    pause_job(&store, PauseJobCommand::new(job_id("toggle")), None)
         .await
         .unwrap();
 
@@ -76,27 +75,17 @@ async fn client_pause_job_toggles_job() {
 async fn client_remove_and_list_jobs_use_store_paths() {
     let store = MockCronStore::new();
 
-    add_job(
-        &store,
-        &store,
-        AddJobCommand::new(base_job("alpha")).unwrap(),
-        None,
-    )
-    .await
-    .unwrap();
-    add_job(
-        &store,
-        &store,
-        AddJobCommand::new(base_job("beta")).unwrap(),
-        None,
-    )
-    .await
-    .unwrap();
+    add_job(&store, AddJobCommand::new(base_job("alpha")).unwrap(), None)
+        .await
+        .unwrap();
+    add_job(&store, AddJobCommand::new(base_job("beta")).unwrap(), None)
+        .await
+        .unwrap();
 
     let listed = store.list_jobs(ListJobsCommand).await.unwrap();
     assert_eq!(listed.len(), 2);
 
-    remove_job(&store, &store, RemoveJobCommand::new(job_id("beta")), None)
+    remove_job(&store, RemoveJobCommand::new(job_id("beta")), None)
         .await
         .unwrap();
 
