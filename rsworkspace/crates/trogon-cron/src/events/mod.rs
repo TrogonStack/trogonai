@@ -1,7 +1,9 @@
+mod message;
+
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::{EventCodec, EventData, EventType, RecordedEvent, StreamEvent};
 
-use crate::message::{MessageContent, MessageHeaders};
+pub use message::{MessageContent, MessageHeaders, MessageHeadersError};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
@@ -46,7 +48,7 @@ pub enum JobEventDelivery {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct RegisteredJobSpec {
+pub struct JobDetails {
     #[serde(default)]
     pub state: JobEventState,
     pub schedule: JobEventSchedule,
@@ -59,7 +61,7 @@ pub struct RegisteredJobSpec {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum JobEvent {
-    JobRegistered { id: String, spec: RegisteredJobSpec },
+    JobAdded { id: String, job: JobDetails },
     JobPaused { id: String },
     JobResumed { id: String },
     JobRemoved { id: String },
@@ -86,7 +88,7 @@ impl EventCodec<JobEvent> for JobEventCodec {
 impl StreamEvent for JobEvent {
     fn stream_id(&self) -> &str {
         match self {
-            Self::JobRegistered { id, .. } => id,
+            Self::JobAdded { id, .. } => id,
             Self::JobPaused { id } => id,
             Self::JobResumed { id } => id,
             Self::JobRemoved { id } => id,
@@ -97,7 +99,7 @@ impl StreamEvent for JobEvent {
 impl EventType for JobEvent {
     fn event_type(&self) -> &'static str {
         match self {
-            Self::JobRegistered { .. } => "job_registered",
+            Self::JobAdded { .. } => "job_added",
             Self::JobPaused { .. } => "job_paused",
             Self::JobResumed { .. } => "job_resumed",
             Self::JobRemoved { .. } => "job_removed",
@@ -166,8 +168,8 @@ mod tests {
     }
 
     #[test]
-    fn registered_job_spec_round_trips_without_id() {
-        let spec = RegisteredJobSpec {
+    fn job_details_round_trip_without_id() {
+        let details = JobDetails {
             state: JobEventState::Enabled,
             schedule: JobEventSchedule::Every { every_sec: 30 },
             delivery: JobEventDelivery::NatsEvent {
@@ -181,10 +183,10 @@ mod tests {
             headers: MessageHeaders::new([("owner", "ops")]).unwrap(),
         };
 
-        let json = serde_json::to_string(&spec).unwrap();
-        let decoded: RegisteredJobSpec = serde_json::from_str(&json).unwrap();
+        let json = serde_json::to_string(&details).unwrap();
+        let decoded: JobDetails = serde_json::from_str(&json).unwrap();
 
-        assert_eq!(decoded, spec);
+        assert_eq!(decoded, details);
         assert!(!json.contains("\"id\""));
     }
 }

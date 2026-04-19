@@ -54,18 +54,15 @@ impl std::error::Error for PauseJobDecisionError {}
 #[derive(Debug)]
 pub enum PauseJobError {
     Decision(PauseJobDecisionError),
-    InvalidRegistrationEventId { id: String, source: JobIdError },
+    InvalidAddEventId { id: String, source: JobIdError },
 }
 
 impl std::fmt::Display for PauseJobError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Decision(error) => write!(f, "{error}"),
-            Self::InvalidRegistrationEventId { id, .. } => {
-                write!(
-                    f,
-                    "invalid job id '{id}' in registration event while pausing job"
-                )
+            Self::InvalidAddEventId { id, .. } => {
+                write!(f, "invalid job id '{id}' in add event while pausing job")
             }
         }
     }
@@ -75,7 +72,7 @@ impl std::error::Error for PauseJobError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Decision(error) => Some(error),
-            Self::InvalidRegistrationEventId { source, .. } => Some(source),
+            Self::InvalidAddEventId { source, .. } => Some(source),
         }
     }
 }
@@ -130,16 +127,16 @@ impl CommandState for PauseJobCommand {
 
     fn evolve(state: Self::State, event: JobEvent) -> Result<Self::State, Self::DomainError> {
         match event {
-            JobEvent::JobRegistered { id, spec } => {
+            JobEvent::JobAdded { id, job } => {
                 if matches!(state, PauseJobState::Deleted) {
                     return Ok(PauseJobState::Deleted);
                 }
-                JobId::parse(&id).map_err(|source| PauseJobError::InvalidRegistrationEventId {
+                JobId::parse(&id).map_err(|source| PauseJobError::InvalidAddEventId {
                     id: id.clone(),
                     source,
                 })?;
                 Ok(PauseJobState::Present {
-                    current: spec.state.into(),
+                    current: job.state.into(),
                 })
             }
             JobEvent::JobPaused { .. } => match state {
@@ -267,9 +264,9 @@ mod tests {
     #[test]
     fn given_when_then_supports_pause_job_decider() {
         TestCase::new(decider::<PauseJobCommand>())
-            .given([JobEvent::JobRegistered {
+            .given([JobEvent::JobAdded {
                 id: "backup".to_string(),
-                spec: crate::RegisteredJobSpec::from(job("backup")),
+                job: crate::JobDetails::from(job("backup")),
             }])
             .when(PauseJobCommand::new(JobId::parse("backup").unwrap()))
             .then([JobEvent::JobPaused {
@@ -281,9 +278,9 @@ mod tests {
     fn given_when_then_supports_pause_job_failures() {
         TestCase::new(decider::<PauseJobCommand>())
             .given([
-                JobEvent::JobRegistered {
+                JobEvent::JobAdded {
                     id: "backup".to_string(),
-                    spec: crate::RegisteredJobSpec::from(job("backup")),
+                    job: crate::JobDetails::from(job("backup")),
                 },
                 JobEvent::JobPaused {
                     id: "backup".to_string(),
@@ -300,9 +297,9 @@ mod tests {
         let register = TestCase::new(decider::<AddJobCommand>())
             .given([])
             .when(AddJobCommand::new(job("backup")).unwrap())
-            .then([JobEvent::JobRegistered {
+            .then([JobEvent::JobAdded {
                 id: "backup".to_string(),
-                spec: crate::RegisteredJobSpec::from(job("backup")),
+                job: crate::JobDetails::from(job("backup")),
             }]);
 
         let pause = TestCase::new(decider::<PauseJobCommand>())
@@ -315,9 +312,9 @@ mod tests {
         Timeline::new().given([register, pause]).then_stream(
             "backup",
             [
-                JobEvent::JobRegistered {
+                JobEvent::JobAdded {
                     id: "backup".to_string(),
-                    spec: crate::RegisteredJobSpec::from(job("backup")),
+                    job: crate::JobDetails::from(job("backup")),
                 },
                 JobEvent::JobPaused {
                     id: "backup".to_string(),

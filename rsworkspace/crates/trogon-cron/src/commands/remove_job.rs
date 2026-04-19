@@ -91,7 +91,7 @@ impl CommandState for RemoveJobCommand {
 
     fn evolve(state: Self::State, event: JobEvent) -> Result<Self::State, Self::DomainError> {
         match event {
-            JobEvent::JobRegistered { .. }
+            JobEvent::JobAdded { .. }
             | JobEvent::JobPaused { .. }
             | JobEvent::JobResumed { .. } => match state {
                 RemoveJobState::Deleted => Ok(RemoveJobState::Deleted),
@@ -191,9 +191,9 @@ mod tests {
     #[test]
     fn given_when_then_supports_remove_job_decider() {
         TestCase::new(decider::<RemoveJobCommand>())
-            .given([JobEvent::JobRegistered {
+            .given([JobEvent::JobAdded {
                 id: "backup".to_string(),
-                spec: crate::RegisteredJobSpec::from(job("backup")),
+                job: crate::JobDetails::from(job("backup")),
             }])
             .when(RemoveJobCommand::new(JobId::parse("backup").unwrap()))
             .then([JobEvent::JobRemoved {
