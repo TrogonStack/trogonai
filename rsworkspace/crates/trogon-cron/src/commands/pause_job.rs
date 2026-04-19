@@ -194,7 +194,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        DeliverySpec, GetJobCommand, JobEventState, JobSpec, RegisterJobCommand, ScheduleSpec,
+        AddJobCommand, DeliverySpec, GetJobCommand, JobEventState, JobSpec, ScheduleSpec,
         mocks::MockCronStore,
     };
 
@@ -297,9 +297,9 @@ mod tests {
 
     #[test]
     fn timeline_matches_cases_by_command_stream() {
-        let register = TestCase::new(decider::<RegisterJobCommand>())
+        let register = TestCase::new(decider::<AddJobCommand>())
             .given([])
-            .when(RegisterJobCommand::new(job("backup")).unwrap())
+            .when(AddJobCommand::new(job("backup")).unwrap())
             .then([JobEvent::JobRegistered {
                 id: "backup".to_string(),
                 spec: crate::RegisteredJobSpec::from(job("backup")),

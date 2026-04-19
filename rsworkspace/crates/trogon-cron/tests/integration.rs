@@ -7,9 +7,9 @@ use async_nats::Request;
 use async_nats::jetstream;
 use chrono::{Duration as ChronoDuration, Utc};
 use trogon_cron::{
-    CronController, DeliveryHeaders, DeliveryRoute, DeliverySpec, GetJobCommand, JobEnabledState,
-    JobEventState, JobId, JobSpec, PauseJobCommand, RegisterJobCommand, RemoveJobCommand,
-    SamplingSource, ScheduleSpec, TtlSeconds, connect_store, get_job, pause_job, register_job,
+    AddJobCommand, CronController, DeliveryHeaders, DeliveryRoute, DeliverySpec, GetJobCommand,
+    JobEnabledState, JobEventState, JobId, JobSpec, PauseJobCommand, RemoveJobCommand,
+    SamplingSource, ScheduleSpec, TtlSeconds, add_job, connect_store, get_job, pause_job,
     remove_job,
 };
 use trogon_nats::{NatsConfig, connect as nats_connect};
@@ -192,7 +192,7 @@ async fn controller_reconciles_one_time_job() {
         at: Utc::now() + ChronoDuration::seconds(2),
     };
 
-    register_job(&store, &store, RegisterJobCommand::new(job).unwrap(), None)
+    add_job(&store, &store, AddJobCommand::new(job).unwrap(), None)
         .await
         .unwrap();
 
@@ -229,7 +229,7 @@ async fn controller_reconciles_sampling_job() {
         source: Some(SamplingSource::latest_from_subject("sensors.latest").unwrap()),
     };
 
-    register_job(&store, &store, RegisterJobCommand::new(job).unwrap(), None)
+    add_job(&store, &store, AddJobCommand::new(job).unwrap(), None)
         .await
         .unwrap();
     wait_for_stream_subject(&js, trogon_cron::kv::SCHEDULES_STREAM, "sensors.latest").await;
@@ -270,7 +270,7 @@ async fn controller_reconciles_cron_job_with_timezone() {
         timezone: Some("UTC".to_string()),
     };
 
-    register_job(&store, &store, RegisterJobCommand::new(job).unwrap(), None)
+    add_job(&store, &store, AddJobCommand::new(job).unwrap(), None)
         .await
         .unwrap();
 
@@ -300,7 +300,7 @@ async fn disabling_job_removes_schedule_subject() {
     });
 
     let job = base_job("disabled");
-    register_job(&store, &store, RegisterJobCommand::new(job).unwrap(), None)
+    add_job(&store, &store, AddJobCommand::new(job).unwrap(), None)
         .await
         .unwrap();
 
@@ -340,7 +340,7 @@ async fn removing_job_removes_schedule_subject() {
     });
 
     let job = base_job("removed");
-    register_job(&store, &store, RegisterJobCommand::new(job).unwrap(), None)
+    add_job(&store, &store, AddJobCommand::new(job).unwrap(), None)
         .await
         .unwrap();
 
@@ -377,7 +377,7 @@ async fn event_store_rebuilds_current_state_for_new_client() {
     };
     let expected_schedule = job.schedule.clone();
 
-    register_job(&store, &store, RegisterJobCommand::new(job).unwrap(), None)
+    add_job(&store, &store, AddJobCommand::new(job).unwrap(), None)
         .await
         .unwrap();
     pause_job(

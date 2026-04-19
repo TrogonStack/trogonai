@@ -27,10 +27,10 @@ pub use commands::domain::{
     SamplingSource, SamplingSubject, ScheduleSpec, TtlSeconds,
 };
 pub use commands::{
-    PauseJobCommand, PauseJobDecisionError, PauseJobError, PauseJobState, RegisterJobCommand,
-    RegisterJobDecisionError, RegisterJobState, RemoveJobCommand, RemoveJobDecisionError,
-    RemoveJobState, ResumeJobCommand, ResumeJobDecisionError, ResumeJobError, ResumeJobState,
-    pause_job, register_job, remove_job, resume_job,
+    AddJobCommand, AddJobDecisionError, AddJobState, PauseJobCommand, PauseJobDecisionError,
+    PauseJobError, PauseJobState, RemoveJobCommand, RemoveJobDecisionError, RemoveJobState,
+    ResumeJobCommand, ResumeJobDecisionError, ResumeJobError, ResumeJobState, add_job, pause_job,
+    remove_job, resume_job,
 };
 pub use config::JobWriteCondition;
 pub use error::{CronError, JobSpecError};

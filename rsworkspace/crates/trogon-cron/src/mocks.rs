@@ -430,9 +430,9 @@ mod tests {
 
     use super::*;
     use crate::{
-        CronJob, DeliverySpec, GetJobCommand, JobEnabledState, JobEventState, JobSpec,
-        JobWriteCondition, ListJobsCommand, PauseJobCommand, RegisterJobCommand, RegisteredJobSpec,
-        RemoveJobCommand, ResumeJobCommand, ScheduleSpec, pause_job, register_job, remove_job,
+        AddJobCommand, CronJob, DeliverySpec, GetJobCommand, JobEnabledState, JobEventState,
+        JobSpec, JobWriteCondition, ListJobsCommand, PauseJobCommand, RegisteredJobSpec,
+        RemoveJobCommand, ResumeJobCommand, ScheduleSpec, add_job, pause_job, remove_job,
         resume_job,
     };
     use futures::StreamExt;
@@ -515,10 +515,10 @@ mod tests {
             .unwrap();
         assert_eq!(seeded, expected_job("seeded"));
 
-        register_job(
+        add_job(
             &store,
             &store,
-            RegisterJobCommand::new(base_job("alpha")).unwrap(),
+            AddJobCommand::new(base_job("alpha")).unwrap(),
             None,
         )
         .await
@@ -571,17 +571,17 @@ mod tests {
                 .is_none()
         );
 
-        let deleted_error = register_job(
+        let deleted_error = add_job(
             &store,
             &store,
-            RegisterJobCommand::new(base_job("alpha")).unwrap(),
+            AddJobCommand::new(base_job("alpha")).unwrap(),
             None,
         )
         .await
         .unwrap_err();
         assert!(matches!(
             deleted_error,
-            CommandFailure::Domain(crate::RegisterJobDecisionError::JobDeleted { .. })
+            CommandFailure::Domain(crate::AddJobDecisionError::JobDeleted { .. })
         ));
     }
 
@@ -601,10 +601,10 @@ mod tests {
         .unwrap_err();
         assert!(invalid_error.to_string().contains("sampling source"));
 
-        register_job(
+        add_job(
             &store,
             &store,
-            RegisterJobCommand::new(base_job("alpha")).unwrap(),
+            AddJobCommand::new(base_job("alpha")).unwrap(),
             None,
         )
         .await
