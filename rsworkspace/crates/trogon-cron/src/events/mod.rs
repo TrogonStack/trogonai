@@ -1,7 +1,7 @@
-use std::collections::BTreeMap;
-
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::{EventCodec, EventData, EventType, RecordedEvent, StreamEvent};
+
+use crate::message::{MessageContent, MessageHeaders};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
@@ -38,8 +38,6 @@ pub enum JobEventSamplingSource {
 pub enum JobEventDelivery {
     NatsEvent {
         route: String,
-        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-        headers: BTreeMap<String, String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         ttl_sec: Option<u64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -53,9 +51,9 @@ pub struct RegisteredJobSpec {
     pub state: JobEventState,
     pub schedule: JobEventSchedule,
     pub delivery: JobEventDelivery,
-    pub payload: serde_json::Value,
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub metadata: BTreeMap<String, String>,
+    pub content: MessageContent,
+    #[serde(default, skip_serializing_if = "MessageHeaders::is_empty")]
+    pub headers: MessageHeaders,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -174,14 +172,13 @@ mod tests {
             schedule: JobEventSchedule::Every { every_sec: 30 },
             delivery: JobEventDelivery::NatsEvent {
                 route: "agent.run".to_string(),
-                headers: BTreeMap::new(),
                 ttl_sec: None,
                 source: Some(JobEventSamplingSource::LatestFromSubject {
                     subject: "jobs.latest".to_string(),
                 }),
             },
-            payload: serde_json::json!({"kind": "heartbeat"}),
-            metadata: BTreeMap::from([("owner".to_string(), "ops".to_string())]),
+            content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
+            headers: MessageHeaders::new([("owner", "ops")]).unwrap(),
         };
 
         let json = serde_json::to_string(&spec).unwrap();

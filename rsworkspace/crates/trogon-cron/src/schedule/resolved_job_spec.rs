@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::str::FromStr;
 
 use async_nats::{HeaderMap, HeaderValue};
@@ -36,7 +35,7 @@ pub struct ResolvedJobSpec {
     timezone: Option<String>,
     ttl_sec: Option<u64>,
     source_subject: Option<String>,
-    headers: BTreeMap<String, String>,
+    headers: Vec<(String, String)>,
     body: Bytes,
 }
 
@@ -47,7 +46,7 @@ struct ResolvedJobSpecParts {
     timezone: Option<String>,
     ttl_sec: Option<u64>,
     source_subject: Option<String>,
-    headers: BTreeMap<String, String>,
+    headers: Vec<(String, String)>,
 }
 
 impl TryFrom<&CronJob> for ResolvedJobSpec {
@@ -73,7 +72,7 @@ impl TryFrom<&CronJob> for ResolvedJobSpec {
         let body = if source_subject.is_some() {
             Bytes::from_static(br#"{}"#)
         } else {
-            serde_json::to_vec(&job.payload)?.into()
+            Bytes::copy_from_slice(job.content.as_slice())
         };
 
         Ok(Self {
@@ -99,10 +98,9 @@ fn resolved_job_spec_parts(job: &CronJob) -> Result<ResolvedJobSpecParts, CronEr
         JobEventSchedule::Cron { timezone, .. } => validate_timezone(timezone.clone())?,
         JobEventSchedule::At { .. } | JobEventSchedule::Every { .. } => None,
     };
-    let (route, headers, ttl_sec, source_subject) = match &job.delivery {
+    let (route, ttl_sec, source_subject) = match &job.delivery {
         JobEventDelivery::NatsEvent {
             route,
-            headers,
             ttl_sec,
             source,
         } => (
@@ -112,13 +110,13 @@ fn resolved_job_spec_parts(job: &CronJob) -> Result<ResolvedJobSpecParts, CronEr
                     source,
                 })
             })?,
-            headers.clone(),
             *ttl_sec,
             source.as_ref().map(|source| match source {
                 crate::JobEventSamplingSource::LatestFromSubject { subject } => subject.clone(),
             }),
         ),
     };
+    let headers = job.headers.as_slice().to_vec();
     validate_scheduler_headers(&headers)?;
 
     Ok(ResolvedJobSpecParts {
@@ -201,7 +199,7 @@ impl ResolvedJobSpec {
             );
         }
         for (name, value) in &self.headers {
-            headers.insert(name.as_str(), value.as_str());
+            headers.append(name.as_str(), value.as_str());
         }
 
         headers
@@ -250,8 +248,8 @@ fn validate_timezone(timezone: Option<String>) -> Result<Option<String>, CronErr
     Ok(Some(timezone))
 }
 
-fn validate_scheduler_headers(headers: &BTreeMap<String, String>) -> Result<(), CronError> {
-    for name in headers.keys() {
+fn validate_scheduler_headers(headers: &[(String, String)]) -> Result<(), CronError> {
+    for (name, _) in headers {
         if RESERVED_SCHEDULE_HEADERS
             .iter()
             .any(|reserved| reserved.eq_ignore_ascii_case(name))
@@ -267,14 +265,13 @@ fn validate_scheduler_headers(headers: &BTreeMap<String, String>) -> Result<(), 
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
     use chrono::{TimeZone, Utc};
 
     use super::*;
     use crate::events::{
         JobEventDelivery, JobEventSamplingSource, JobEventSchedule, JobEventState,
     };
+    use crate::{MessageContent, MessageHeaders};
 
     fn base_job() -> CronJob {
         CronJob {
@@ -283,35 +280,44 @@ mod tests {
             schedule: JobEventSchedule::Every { every_sec: 30 },
             delivery: JobEventDelivery::NatsEvent {
                 route: "agent.run".to_string(),
-                headers: BTreeMap::from([("x-kind".to_string(), "heartbeat".to_string())]),
                 ttl_sec: Some(15),
                 source: None,
             },
-            payload: serde_json::json!({"kind": "heartbeat"}),
-            metadata: BTreeMap::new(),
+            content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
+            headers: MessageHeaders::new([("x-kind", "heartbeat")]).unwrap(),
         }
     }
 
     #[test]
     fn resolved_job_derives_subjects_and_headers() {
         let resolved = ResolvedJobSpec::try_from(&base_job()).unwrap();
+        let headers = resolved.schedule_headers();
 
         assert_eq!(resolved.schedule_subject(), "cron.schedules.heartbeat");
         assert_eq!(resolved.target_subject(), "cron.fire.agent.run.heartbeat");
         assert_eq!(
-            resolved
-                .schedule_headers()
-                .get(NATS_SCHEDULE)
-                .map(|value| value.as_str()),
+            headers.get(NATS_SCHEDULE).map(|value| value.as_str()),
             Some("@every 30s")
         );
         assert_eq!(
-            resolved
-                .schedule_headers()
-                .get(NATS_SCHEDULE_TTL)
-                .map(|value| value.as_str()),
+            headers.get(NATS_SCHEDULE_TTL).map(|value| value.as_str()),
             Some("15s")
         );
+    }
+
+    #[test]
+    fn resolved_job_preserves_duplicate_headers() {
+        let mut job = base_job();
+        job.headers = MessageHeaders::new([("x-kind", "heartbeat"), ("x-kind", "retry")]).unwrap();
+
+        let resolved = ResolvedJobSpec::try_from(&job).unwrap();
+        let schedule_headers = resolved.schedule_headers();
+        let values = schedule_headers
+            .get_all("x-kind")
+            .map(|value| value.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(values, vec!["heartbeat", "retry"]);
     }
 
     #[test]
@@ -337,7 +343,6 @@ mod tests {
         let mut job = base_job();
         job.delivery = JobEventDelivery::NatsEvent {
             route: "agent.run".to_string(),
-            headers: BTreeMap::new(),
             ttl_sec: None,
             source: Some(JobEventSamplingSource::LatestFromSubject {
                 subject: "sensors.latest".to_string(),
@@ -415,15 +420,8 @@ mod tests {
     #[test]
     fn reserved_scheduler_header_is_rejected_during_schedule_resolution() {
         let mut job = base_job();
-        job.delivery = JobEventDelivery::NatsEvent {
-            route: "agent.run".to_string(),
-            headers: BTreeMap::from([(
-                "Nats-Schedule-Target".to_string(),
-                "cron.fire.evil.target".to_string(),
-            )]),
-            ttl_sec: None,
-            source: None,
-        };
+        job.headers =
+            MessageHeaders::new([("Nats-Schedule-Target", "cron.fire.evil.target")]).unwrap();
 
         let error = ResolvedJobSpec::try_from(&job).unwrap_err();
         assert!(error.to_string().contains("reserved"));

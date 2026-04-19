@@ -1,8 +1,7 @@
-use std::collections::BTreeMap;
-
 use serde::{Deserialize, Serialize};
 
 use crate::events::{JobEventDelivery, JobEventSchedule, JobEventState, RegisteredJobSpec};
+use crate::message::{MessageContent, MessageHeaders};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct CronJob {
@@ -11,9 +10,9 @@ pub struct CronJob {
     pub state: JobEventState,
     pub schedule: JobEventSchedule,
     pub delivery: JobEventDelivery,
-    pub payload: serde_json::Value,
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub metadata: BTreeMap<String, String>,
+    pub content: MessageContent,
+    #[serde(default, skip_serializing_if = "MessageHeaders::is_empty")]
+    pub headers: MessageHeaders,
 }
 
 impl CronJob {
@@ -29,8 +28,8 @@ impl From<(String, RegisteredJobSpec)> for CronJob {
             state: spec.state,
             schedule: spec.schedule,
             delivery: spec.delivery,
-            payload: spec.payload,
-            metadata: spec.metadata,
+            content: spec.content,
+            headers: spec.headers,
         }
     }
 }

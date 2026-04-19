@@ -1,11 +1,10 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
-use std::collections::BTreeMap;
-
 use trogon_cron::{
     AddJobCommand, CronController, CronJob, DeliverySpec, GetJobCommand, JobEnabledState,
-    JobEventState, JobId, JobSpec, JobWriteCondition, ListJobsCommand, PauseJobCommand,
-    RegisteredJobSpec, RemoveJobCommand, SchedulePublisher, ScheduleSpec, add_job,
+    JobEventState, JobId, JobSpec, JobWriteCondition, ListJobsCommand, MessageContent,
+    MessageHeaders, PauseJobCommand, RegisteredJobSpec, RemoveJobCommand, SchedulePublisher,
+    ScheduleSpec, add_job,
     mocks::{MockCronStore, MockLeaderLock, MockSchedulePublisher},
     pause_job, remove_job,
 };
@@ -20,8 +19,8 @@ fn base_job(id: &str) -> JobSpec {
         state: JobEnabledState::Enabled,
         schedule: ScheduleSpec::Every { every_sec: 30 },
         delivery: DeliverySpec::nats_event("agent.run").unwrap(),
-        payload: serde_json::json!({"kind": "heartbeat"}),
-        metadata: BTreeMap::new(),
+        content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
+        headers: MessageHeaders::default(),
     }
 }
 
@@ -119,7 +118,7 @@ async fn client_rejects_invalid_route() {
         "id": "bad",
         "schedule": { "type": "every", "every_sec": 30 },
         "delivery": { "type": "nats_event", "route": "agent.>" },
-        "payload": { "kind": "heartbeat" }
+        "content": "eyJraW5kIjoiaGVhcnRiZWF0In0="
     }))
     .unwrap_err();
 
@@ -136,7 +135,7 @@ async fn client_rejects_invalid_source_subject() {
             "route": "agent.run",
             "source": { "type": "latest_from_subject", "subject": "sensors.>" }
         },
-        "payload": { "kind": "heartbeat" }
+        "content": "eyJraW5kIjoiaGVhcnRiZWF0In0="
     }))
     .unwrap_err();
 

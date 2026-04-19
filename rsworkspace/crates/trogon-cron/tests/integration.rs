@@ -1,16 +1,15 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
-use std::collections::BTreeMap;
 use std::time::Duration;
 
 use async_nats::Request;
 use async_nats::jetstream;
 use chrono::{Duration as ChronoDuration, Utc};
 use trogon_cron::{
-    AddJobCommand, CronController, DeliveryHeaders, DeliveryRoute, DeliverySpec, GetJobCommand,
-    JobEnabledState, JobEventState, JobId, JobSpec, PauseJobCommand, RemoveJobCommand,
-    SamplingSource, ScheduleSpec, TtlSeconds, add_job, connect_store, get_job, pause_job,
-    remove_job,
+    AddJobCommand, CronController, DeliveryRoute, DeliverySpec, GetJobCommand, JobEnabledState,
+    JobEventState, JobId, JobSpec, MessageContent, MessageHeaders, PauseJobCommand,
+    RemoveJobCommand, SamplingSource, ScheduleSpec, TtlSeconds, add_job, connect_store, get_job,
+    pause_job, remove_job,
 };
 use trogon_nats::{NatsConfig, connect as nats_connect};
 
@@ -126,12 +125,11 @@ fn base_job(id: &str) -> JobSpec {
         schedule: ScheduleSpec::Every { every_sec: 2 },
         delivery: DeliverySpec::NatsEvent {
             route: DeliveryRoute::new("agent.run").unwrap(),
-            headers: DeliveryHeaders::default(),
             ttl_sec: Some(TtlSeconds::new(30).unwrap()),
             source: None,
         },
-        payload: serde_json::json!({"kind": "heartbeat"}),
-        metadata: BTreeMap::new(),
+        content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
+        headers: MessageHeaders::default(),
     }
 }
 
@@ -224,7 +222,6 @@ async fn controller_reconciles_sampling_job() {
     let mut job = base_job("sampling");
     job.delivery = DeliverySpec::NatsEvent {
         route: DeliveryRoute::new("agent.run").unwrap(),
-        headers: DeliveryHeaders::default(),
         ttl_sec: None,
         source: Some(SamplingSource::latest_from_subject("sensors.latest").unwrap()),
     };

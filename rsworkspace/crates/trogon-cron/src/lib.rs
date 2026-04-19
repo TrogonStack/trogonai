@@ -10,6 +10,7 @@ pub mod config;
 pub mod error;
 pub mod events;
 pub mod kv;
+mod message;
 pub mod nats;
 mod processors;
 pub mod projections;
@@ -23,8 +24,8 @@ pub mod traits;
 pub mod mocks;
 
 pub use commands::domain::{
-    DeliveryHeaders, DeliveryRoute, DeliverySpec, JobEnabledState, JobId, JobIdError, JobSpec,
-    SamplingSource, SamplingSubject, ScheduleSpec, TtlSeconds,
+    DeliveryRoute, DeliverySpec, JobEnabledState, JobId, JobIdError, JobSpec, SamplingSource,
+    SamplingSubject, ScheduleSpec, TtlSeconds,
 };
 pub use commands::{
     AddJobCommand, AddJobDecisionError, AddJobState, PauseJobCommand, PauseJobDecisionError,
@@ -38,6 +39,7 @@ pub use events::{
     JobEvent, JobEventCodec, JobEventData, JobEventDelivery, JobEventSamplingSource,
     JobEventSchedule, JobEventState, RecordedJobEvent, RegisteredJobSpec,
 };
+pub use message::{MessageContent, MessageHeaders};
 pub use nats::NatsSchedulePublisher;
 pub use processors::CronController;
 pub use projections::{

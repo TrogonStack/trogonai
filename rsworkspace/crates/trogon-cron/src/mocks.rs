@@ -424,16 +424,14 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
     use trogon_eventsourcing::CommandFailure;
 
     use super::*;
     use crate::{
         AddJobCommand, CronJob, DeliverySpec, GetJobCommand, JobEnabledState, JobEventState,
-        JobSpec, JobWriteCondition, ListJobsCommand, PauseJobCommand, RegisteredJobSpec,
-        RemoveJobCommand, ResumeJobCommand, ScheduleSpec, add_job, pause_job, remove_job,
-        resume_job,
+        JobSpec, JobWriteCondition, ListJobsCommand, MessageContent, MessageHeaders,
+        PauseJobCommand, RegisteredJobSpec, RemoveJobCommand, ResumeJobCommand, ScheduleSpec,
+        add_job, pause_job, remove_job, resume_job,
     };
     use futures::StreamExt;
 
@@ -447,8 +445,8 @@ mod tests {
             state: JobEnabledState::Enabled,
             schedule: ScheduleSpec::Every { every_sec: 30 },
             delivery: DeliverySpec::nats_event("agent.run").unwrap(),
-            payload: serde_json::json!({"kind": "heartbeat"}),
-            metadata: BTreeMap::new(),
+            content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
+            headers: MessageHeaders::default(),
         }
     }
 
@@ -596,7 +594,7 @@ mod tests {
                 "route": "agent.run",
                 "source": { "type": "latest_from_subject", "subject": "sensors.>" }
             },
-            "payload": { "kind": "heartbeat" }
+            "content": "eyJraW5kIjoiaGVhcnRiZWF0In0="
         }))
         .unwrap_err();
         assert!(invalid_error.to_string().contains("sampling source"));

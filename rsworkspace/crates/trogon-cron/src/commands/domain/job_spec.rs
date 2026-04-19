@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, num::NonZeroU64};
+use std::num::NonZeroU64;
 
 use crate::{
     error::{CronError, JobSpecError},
@@ -6,6 +6,7 @@ use crate::{
         JobEventDelivery, JobEventSamplingSource, JobEventSchedule, JobEventState,
         RegisteredJobSpec,
     },
+    message::{MessageContent, MessageHeaders},
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
@@ -20,9 +21,9 @@ pub struct JobSpec {
     pub state: JobEnabledState,
     pub schedule: ScheduleSpec,
     pub delivery: DeliverySpec,
-    pub payload: serde_json::Value,
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub metadata: BTreeMap<String, String>,
+    pub content: MessageContent,
+    #[serde(default, skip_serializing_if = "MessageHeaders::is_empty")]
+    pub headers: MessageHeaders,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -174,69 +175,6 @@ impl<'de> Deserialize<'de> for SamplingSubject {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct DeliveryHeaders(BTreeMap<String, String>);
-
-impl DeliveryHeaders {
-    pub fn new(headers: BTreeMap<String, String>) -> Result<Self, JobSpecError> {
-        for (name, value) in &headers {
-            if name.trim().is_empty()
-                || name.contains(':')
-                || name.chars().any(|ch| ch.is_control() || ch.is_whitespace())
-            {
-                return Err(JobSpecError::InvalidHeaderName { name: name.clone() });
-            }
-            if value
-                .chars()
-                .any(|ch| ch == '\r' || ch == '\n' || ch == '\0')
-            {
-                return Err(JobSpecError::InvalidHeaderValue { name: name.clone() });
-            }
-        }
-
-        Ok(Self(headers))
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
-    pub fn as_map(&self) -> &BTreeMap<String, String> {
-        &self.0
-    }
-
-    pub fn into_map(self) -> BTreeMap<String, String> {
-        self.0
-    }
-}
-
-impl TryFrom<BTreeMap<String, String>> for DeliveryHeaders {
-    type Error = JobSpecError;
-
-    fn try_from(value: BTreeMap<String, String>) -> Result<Self, Self::Error> {
-        Self::new(value)
-    }
-}
-
-impl Serialize for DeliveryHeaders {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        self.0.serialize(serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for DeliveryHeaders {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let headers = BTreeMap::<String, String>::deserialize(deserializer)?;
-        Self::new(headers).map_err(D::Error::custom)
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TtlSeconds(NonZeroU64);
 
@@ -304,8 +242,6 @@ impl SamplingSource {
 pub enum DeliverySpec {
     NatsEvent {
         route: DeliveryRoute,
-        #[serde(default, skip_serializing_if = "DeliveryHeaders::is_empty")]
-        headers: DeliveryHeaders,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         ttl_sec: Option<TtlSeconds>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -317,7 +253,6 @@ impl DeliverySpec {
     pub fn nats_event(route: impl AsRef<str>) -> Result<Self, JobSpecError> {
         Ok(Self::NatsEvent {
             route: DeliveryRoute::new(route)?,
-            headers: DeliveryHeaders::default(),
             ttl_sec: None,
             source: None,
         })
@@ -414,12 +349,10 @@ impl From<DeliverySpec> for JobEventDelivery {
         match value {
             DeliverySpec::NatsEvent {
                 route,
-                headers,
                 ttl_sec,
                 source,
             } => Self::NatsEvent {
                 route: route.as_str().to_string(),
-                headers: headers.into_map(),
                 ttl_sec: ttl_sec.map(TtlSeconds::get),
                 source: source.map(Into::into),
             },
@@ -432,12 +365,10 @@ impl From<&DeliverySpec> for JobEventDelivery {
         match value {
             DeliverySpec::NatsEvent {
                 route,
-                headers,
                 ttl_sec,
                 source,
             } => Self::NatsEvent {
                 route: route.as_str().to_string(),
-                headers: headers.as_map().clone(),
                 ttl_sec: ttl_sec.map(TtlSeconds::get),
                 source: source.as_ref().map(Into::into),
             },
@@ -452,12 +383,10 @@ impl TryFrom<JobEventDelivery> for DeliverySpec {
         match value {
             JobEventDelivery::NatsEvent {
                 route,
-                headers,
                 ttl_sec,
                 source,
             } => Ok(Self::NatsEvent {
                 route: DeliveryRoute::new(route)?,
-                headers: DeliveryHeaders::new(headers)?,
                 ttl_sec: ttl_sec.map(TtlSeconds::new).transpose()?,
                 source: source.map(TryInto::try_into).transpose()?,
             }),
@@ -475,8 +404,8 @@ impl RegisteredJobSpec {
                 .delivery
                 .try_into()
                 .map_err(CronError::invalid_job_spec)?,
-            payload: self.payload,
-            metadata: self.metadata,
+            content: self.content,
+            headers: self.headers,
         })
     }
 }
@@ -487,8 +416,8 @@ impl From<JobSpec> for RegisteredJobSpec {
             state: spec.state.into(),
             schedule: spec.schedule.into(),
             delivery: spec.delivery.into(),
-            payload: spec.payload,
-            metadata: spec.metadata,
+            content: spec.content,
+            headers: spec.headers,
         }
     }
 }
@@ -499,8 +428,8 @@ impl From<&JobSpec> for RegisteredJobSpec {
             state: spec.state.into(),
             schedule: (&spec.schedule).into(),
             delivery: (&spec.delivery).into(),
-            payload: spec.payload.clone(),
-            metadata: spec.metadata.clone(),
+            content: spec.content.clone(),
+            headers: spec.headers.clone(),
         }
     }
 }
@@ -532,7 +461,7 @@ mod tests {
             "id": "heartbeat",
             "schedule": { "type": "every", "every_sec": 30 },
             "delivery": { "type": "nats_event", "route": "agent.run" },
-            "payload": { "kind": "heartbeat" }
+            "content": "eyJraW5kIjoiaGVhcnRiZWF0In0="
         }"#;
 
         let job: JobSpec = serde_json::from_str(raw).unwrap();
@@ -551,16 +480,11 @@ mod tests {
             },
             delivery: DeliverySpec::NatsEvent {
                 route: route("workflow.compact"),
-                headers: DeliveryHeaders::new(BTreeMap::from([(
-                    "x-kind".to_string(),
-                    "compact".to_string(),
-                )]))
-                .unwrap(),
                 ttl_sec: Some(ttl(30)),
                 source: Some(source("sensors.latest")),
             },
-            payload: serde_json::json!({"workflow": "compact"}),
-            metadata: BTreeMap::from([("owner".to_string(), "ops".to_string())]),
+            content: MessageContent::from_static(br#"{"workflow":"compact"}"#),
+            headers: MessageHeaders::new([("owner", "ops")]).unwrap(),
         };
 
         let json = serde_json::to_string(&job).unwrap();
@@ -570,24 +494,22 @@ mod tests {
     }
 
     #[test]
-    fn empty_metadata_and_headers_are_omitted() {
+    fn empty_headers_are_omitted() {
         let job = JobSpec {
             id: job_id("compact"),
             state: JobEnabledState::Enabled,
             schedule: ScheduleSpec::Every { every_sec: 30 },
             delivery: DeliverySpec::NatsEvent {
                 route: route("agent.run"),
-                headers: DeliveryHeaders::default(),
                 ttl_sec: None,
                 source: None,
             },
-            payload: serde_json::json!({"kind": "heartbeat"}),
-            metadata: BTreeMap::new(),
+            content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
+            headers: MessageHeaders::default(),
         };
 
         let json = serde_json::to_string(&job).unwrap();
 
-        assert!(!json.contains("\"metadata\""));
         assert!(!json.contains("\"headers\""));
         assert!(json.contains("\"state\":\"enabled\""));
     }
@@ -602,12 +524,11 @@ mod tests {
                 schedule: ScheduleSpec::Every { every_sec: 30 },
                 delivery: DeliverySpec::NatsEvent {
                     route: route("agent.run"),
-                    headers: DeliveryHeaders::default(),
                     ttl_sec: None,
                     source: None,
                 },
-                payload: serde_json::json!({"kind": "heartbeat"}),
-                metadata: BTreeMap::new(),
+                content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
+                headers: MessageHeaders::default(),
             },
         );
 
@@ -624,14 +545,13 @@ mod tests {
             schedule: JobEventSchedule::Every { every_sec: 30 },
             delivery: JobEventDelivery::NatsEvent {
                 route: "agent.run".to_string(),
-                headers: BTreeMap::from([("x-kind".to_string(), "heartbeat".to_string())]),
                 ttl_sec: Some(15),
                 source: Some(JobEventSamplingSource::LatestFromSubject {
                     subject: "jobs.latest".to_string(),
                 }),
             },
-            payload: serde_json::json!({"kind": "heartbeat"}),
-            metadata: BTreeMap::new(),
+            content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
+            headers: MessageHeaders::new([("x-kind", "heartbeat")]).unwrap(),
         };
 
         let job = registered
@@ -649,7 +569,7 @@ mod tests {
             "id": "heartbeat",
             "schedule": { "type": "every", "every_sec": 30 },
             "delivery": { "type": "nats_event", "route": "agent.>" },
-            "payload": { "kind": "heartbeat" }
+            "content": "eyJraW5kIjoiaGVhcnRiZWF0In0="
         }))
         .unwrap_err();
 
@@ -669,7 +589,7 @@ mod tests {
                     "subject": "jobs.>"
                 }
             },
-            "payload": { "kind": "heartbeat" }
+            "content": "eyJraW5kIjoiaGVhcnRiZWF0In0="
         }))
         .unwrap_err();
 
@@ -686,7 +606,7 @@ mod tests {
                 "route": "agent.run",
                 "ttl_sec": 0
             },
-            "payload": { "kind": "heartbeat" }
+            "content": "eyJraW5kIjoiaGVhcnRiZWF0In0="
         }))
         .unwrap_err();
 
@@ -698,19 +618,19 @@ mod tests {
         let spec = serde_json::from_value::<JobSpec>(serde_json::json!({
             "id": "heartbeat",
             "schedule": { "type": "every", "every_sec": 30 },
-            "delivery": {
-                "type": "nats_event",
-                "route": "agent.run",
-                "headers": { "Nats-Schedule-Target": "cron.fire.evil.target" }
-            },
-            "payload": { "kind": "heartbeat" }
+            "delivery": { "type": "nats_event", "route": "agent.run" },
+            "headers": [["Nats-Schedule-Target", "cron.fire.evil.target"]],
+            "content": "eyJraW5kIjoiaGVhcnRiZWF0In0="
         }))
         .unwrap();
 
-        let DeliverySpec::NatsEvent { headers, .. } = spec.delivery;
+        let headers = spec.headers;
         assert_eq!(
-            headers.as_map()["Nats-Schedule-Target"],
-            "cron.fire.evil.target"
+            headers.as_slice(),
+            [(
+                "Nats-Schedule-Target".to_string(),
+                "cron.fire.evil.target".to_string(),
+            )]
         );
     }
 
@@ -719,12 +639,9 @@ mod tests {
         let error = serde_json::from_value::<JobSpec>(serde_json::json!({
             "id": "heartbeat",
             "schedule": { "type": "every", "every_sec": 30 },
-            "delivery": {
-                "type": "nats_event",
-                "route": "agent.run",
-                "headers": { "x-kind": "bad\nvalue" }
-            },
-            "payload": { "kind": "heartbeat" }
+            "delivery": { "type": "nats_event", "route": "agent.run" },
+            "headers": [["x-kind", "bad\nvalue"]],
+            "content": "eyJraW5kIjoiaGVhcnRiZWF0In0="
         }))
         .unwrap_err();
 
@@ -738,12 +655,11 @@ mod tests {
             schedule: JobEventSchedule::Every { every_sec: 30 },
             delivery: JobEventDelivery::NatsEvent {
                 route: "agent.run".to_string(),
-                headers: BTreeMap::new(),
                 ttl_sec: Some(0),
                 source: None,
             },
-            payload: serde_json::json!({"kind": "heartbeat"}),
-            metadata: BTreeMap::new(),
+            content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
+            headers: MessageHeaders::default(),
         }
         .try_into_job_spec(job_id("heartbeat"))
         .unwrap_err();
