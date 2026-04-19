@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::{
-    AlwaysSnapshot, CommandExecution, CommandFailure, CommandInfraError, CommandState, Decide,
-    Decision, ExecutionResult, NonEmpty, OccPolicy, SnapshotState, SnapshotStore,
-    SnapshotStoreConfig, Snapshots, StreamAppend, StreamCommand, StreamRead,
+    AlwaysSnapshot, CommandExecution, CommandResult, CommandState, Decide, Decision, NonEmpty,
+    OccPolicy, SnapshotStore, SnapshotStoreConfig, Snapshots, StreamAppend, StreamCommand,
+    StreamRead,
 };
 
 use crate::{
@@ -24,12 +24,6 @@ pub enum RemoveJobState {
     Missing,
     Present,
     Deleted,
-}
-
-impl From<&RemoveJobState> for RemoveJobState {
-    fn from(state: &RemoveJobState) -> Self {
-        *state
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -59,11 +53,6 @@ impl std::fmt::Display for RemoveJobDecisionError {
 }
 
 impl std::error::Error for RemoveJobDecisionError {}
-
-pub type RemoveJobResult = Result<
-    ExecutionResult<RemoveJobState, JobEvent>,
-    CommandFailure<RemoveJobDecisionError, CommandInfraError<CronError>>,
->;
 
 impl StreamCommand for RemoveJobCommand {
     type StreamId = JobId;
@@ -111,16 +100,12 @@ impl CommandState for RemoveJobCommand {
     }
 }
 
-impl SnapshotState for RemoveJobCommand {
-    type Snapshot = RemoveJobState;
-}
-
 pub async fn run<E, S>(
     event_store: &E,
     snapshot_store: &S,
     command: RemoveJobCommand,
     occ: Option<OccPolicy>,
-) -> RemoveJobResult
+) -> CommandResult<RemoveJobState, JobEvent, RemoveJobDecisionError, CronError>
 where
     E: StreamRead<JobId, Error = CronError> + StreamAppend<JobId, Error = CronError>,
     S: SnapshotStore<RemoveJobState, JobId, Error = CronError>,
