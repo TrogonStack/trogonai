@@ -7,7 +7,6 @@ use trogon_eventsourcing::{
 
 use crate::{
     JobEnabledState, JobId, JobIdError,
-    error::CronError,
     events::{JobEvent, JobEventCodec},
 };
 
@@ -160,24 +159,21 @@ impl CommandState for ResumeJobCommand {
     }
 }
 
-pub async fn run<E, S>(
-    event_store: &E,
-    snapshot_store: &S,
+pub async fn run<S, SErr>(
+    store: &S,
     command: ResumeJobCommand,
     occ: Option<OccPolicy>,
-) -> CommandResult<ResumeJobState, JobEvent, ResumeJobError, CronError>
+) -> CommandResult<ResumeJobState, JobEvent, ResumeJobError, SErr>
 where
-    E: StreamRead<JobId, Error = CronError> + StreamAppend<JobId, Error = CronError>,
-    S: SnapshotStore<ResumeJobState, JobId, Error = CronError>,
+    S: StreamRead<JobId, Error = SErr>
+        + StreamAppend<JobId, Error = SErr>
+        + SnapshotStore<ResumeJobState, JobId, Error = SErr>,
+    serde_json::Error: Into<SErr>,
 {
-    CommandExecution::new(event_store, &command)
+    CommandExecution::new(store, &command)
         .codec(JobEventCodec)
         .occ(occ)
-        .snapshots(Snapshots::new(
-            snapshot_store,
-            SNAPSHOT_STORE_CONFIG,
-            AlwaysSnapshot,
-        ))
+        .snapshots(Snapshots::new(store, SNAPSHOT_STORE_CONFIG, AlwaysSnapshot))
         .execute()
         .await
 }
@@ -347,7 +343,6 @@ mod tests {
         store.seed_job(paused_job("backup"));
 
         let outcome = run(
-            &store,
             &store,
             ResumeJobCommand::new(JobId::parse("backup").unwrap()),
             None,
