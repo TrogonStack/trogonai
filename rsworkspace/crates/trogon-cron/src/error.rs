@@ -1,4 +1,5 @@
 use trogon_eventsourcing::StreamState;
+use trogon_eventsourcing::jetstream::JetStreamStoreError;
 
 use crate::events::MessageHeadersError;
 
@@ -246,6 +247,32 @@ impl From<trogon_eventsourcing::SnapshotStoreError> for CronError {
                 )
             }
             trogon_eventsourcing::SnapshotStoreError::Serde(source) => Self::Serde(source),
+        }
+    }
+}
+
+impl From<JetStreamStoreError<CronError>> for CronError {
+    fn from(value: JetStreamStoreError<CronError>) -> Self {
+        match value {
+            JetStreamStoreError::ResolveSubject(source)
+            | JetStreamStoreError::ProjectAppend(source) => source,
+            JetStreamStoreError::ReadStream(source) => Self::event_source(
+                "failed to read job stream while catching up command state",
+                source,
+            ),
+            JetStreamStoreError::AppendStream(source) => {
+                Self::event_source("failed to append job event batch", source)
+            }
+            JetStreamStoreError::Snapshot(source) => Self::from(source),
+            JetStreamStoreError::OptimisticConcurrencyConflict {
+                stream_id,
+                expected,
+                current_version,
+            } => Self::OptimisticConcurrencyConflict {
+                id: stream_id,
+                expected,
+                current_version,
+            },
         }
     }
 }
