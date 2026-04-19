@@ -2,10 +2,9 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::{
-    AlwaysSnapshot, CommandExecution, CommandFailure, CommandInfraError, CommandState,
-    CommandStreamState, Decide, Decision, ExecutionResult, NonEmpty, OccPolicy, SnapshotState,
-    SnapshotStore, SnapshotStoreConfig, Snapshots, StreamAppend, StreamCommand, StreamRead,
-    StreamState,
+    AlwaysSnapshot, CommandExecution, CommandResult, CommandState, CommandStreamState, Decide,
+    Decision, NonEmpty, OccPolicy, SnapshotStore, SnapshotStoreConfig, Snapshots, StreamAppend,
+    StreamCommand, StreamRead, StreamState,
 };
 
 use crate::{
@@ -30,12 +29,6 @@ pub enum RegisterJobState {
     Deleted,
 }
 
-impl From<&RegisterJobState> for RegisterJobState {
-    fn from(state: &RegisterJobState) -> Self {
-        *state
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RegisterJobDecisionError {
     AlreadyRegistered { id: JobId },
@@ -54,11 +47,6 @@ impl fmt::Display for RegisterJobDecisionError {
 }
 
 impl std::error::Error for RegisterJobDecisionError {}
-
-pub type RegisterJobResult = Result<
-    ExecutionResult<RegisterJobState, JobEvent>,
-    CommandFailure<RegisterJobDecisionError, CommandInfraError<CronError>>,
->;
 
 impl RegisterJobCommand {
     pub fn new(spec: JobSpec) -> Result<Self, CronError> {
@@ -128,16 +116,12 @@ impl CommandState for RegisterJobCommand {
     }
 }
 
-impl SnapshotState for RegisterJobCommand {
-    type Snapshot = RegisterJobState;
-}
-
 pub async fn run<E, S>(
     event_store: &E,
     snapshot_store: &S,
     command: RegisterJobCommand,
     occ: Option<OccPolicy>,
-) -> RegisterJobResult
+) -> CommandResult<RegisterJobState, JobEvent, RegisterJobDecisionError, CronError>
 where
     E: StreamRead<JobId, Error = CronError> + StreamAppend<JobId, Error = CronError>,
     S: SnapshotStore<RegisterJobState, JobId, Error = CronError>,
