@@ -1,11 +1,11 @@
 use futures::StreamExt;
 
-use crate::{JobSpec, error::CronError, store::GetCronJobsBucket};
+use crate::{CronJob, error::CronError, store::GetCronJobsBucket};
 
 #[derive(Debug, Clone, Default)]
 pub struct ListJobsCommand;
 
-pub async fn run<J>(store: &J, _command: ListJobsCommand) -> Result<Vec<JobSpec>, CronError>
+pub async fn run<J>(store: &J, _command: ListJobsCommand) -> Result<Vec<CronJob>, CronError>
 where
     J: GetCronJobsBucket<Store = async_nats::jetstream::kv::Store>,
 {

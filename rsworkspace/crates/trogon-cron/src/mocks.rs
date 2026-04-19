@@ -10,12 +10,12 @@ use chrono::{DateTime, Utc};
 use serde::{Serialize, de::DeserializeOwned};
 use trogon_eventsourcing::{
     AppendOutcome, EventData, NonEmpty, Snapshot, SnapshotStore, SnapshotStoreConfig, StreamAppend,
-    StreamCommand, StreamRead, StreamReadResult, StreamState,
+    StreamRead, StreamReadResult, StreamState,
 };
 use trogon_nats::lease::{ReleaseLease, RenewLease, TryAcquireLease};
 
 use crate::{
-    GetJobCommand, JobSpec, ListJobsCommand, ResolvedJobSpec,
+    CronJob, GetJobCommand, ListJobsCommand, ResolvedJobSpec,
     config::{JobWriteCondition, JobWriteState},
     error::CronError,
     events::{JobEvent, JobEventCodec, JobEventData},
@@ -136,7 +136,7 @@ impl ReleaseLease for MockLeaderLock {
 
 #[derive(Clone, Default)]
 pub struct MockCronStore {
-    jobs: Arc<Mutex<HashMap<String, Snapshot<JobSpec>>>>,
+    jobs: Arc<Mutex<HashMap<String, Snapshot<CronJob>>>>,
     stream_versions: Arc<Mutex<HashMap<String, u64>>>,
     events: Arc<Mutex<HashMap<String, Vec<JobEventData>>>>,
     command_snapshots: Arc<Mutex<HashMap<String, HashMap<String, String>>>>,
@@ -147,7 +147,7 @@ impl MockCronStore {
         Self::default()
     }
 
-    pub fn seed_job(&self, spec: JobSpec) {
+    pub fn seed_job(&self, spec: crate::JobSpec) {
         let id = spec.id.to_string();
         self.stream_versions.lock().unwrap().insert(id.clone(), 1);
         self.events.lock().unwrap().insert(
@@ -163,7 +163,13 @@ impl MockCronStore {
                 .unwrap(),
             ],
         );
-        self.jobs.lock().unwrap().insert(id, Snapshot::new(1, spec));
+        self.jobs.lock().unwrap().insert(
+            id.clone(),
+            Snapshot::new(
+                1,
+                CronJob::from((id, crate::RegisteredJobSpec::from(&spec))),
+            ),
+        );
     }
 
     pub(crate) fn read_command_snapshot<Payload>(
@@ -184,17 +190,17 @@ impl MockCronStore {
             .map_err(CronError::from)
     }
 
-    pub async fn get_job(&self, command: GetJobCommand) -> Result<Option<JobSpec>, CronError> {
+    pub async fn get_job(&self, command: GetJobCommand) -> Result<Option<CronJob>, CronError> {
         Ok(self
             .jobs
             .lock()
             .unwrap()
-            .get(command.stream_id().as_str())
+            .get(&command.id)
             .cloned()
             .map(|job| job.payload))
     }
 
-    pub async fn list_jobs(&self, _command: ListJobsCommand) -> Result<Vec<JobSpec>, CronError> {
+    pub async fn list_jobs(&self, _command: ListJobsCommand) -> Result<Vec<CronJob>, CronError> {
         Ok(self
             .jobs
             .lock()
@@ -343,26 +349,28 @@ impl StreamAppend<crate::JobId> for MockCronStore {
             stored_events.push(event_data);
             match event {
                 JobEvent::JobRegistered { id, spec } => {
-                    let job_id = crate::JobId::parse(&id).map_err(|source| {
-                        CronError::event_source("failed to project mocked job registration", source)
-                    })?;
-                    let spec = spec.try_into_job_spec(job_id).map_err(|source| {
-                        CronError::event_source(
-                            "failed to hydrate mocked job registration into the domain",
-                            source,
-                        )
-                    })?;
-                    projected_snapshot = Some(Snapshot::new(version, spec));
+                    projected_snapshot = Some(Snapshot::new(version, CronJob::from((id, spec))));
                 }
-                JobEvent::JobStateChanged { state, .. } => {
+                JobEvent::JobPaused { .. } => {
                     let mut snapshot = projected_snapshot.take().ok_or_else(|| {
                         CronError::event_source(
-                            "failed to project mocked job state change without current snapshot",
+                            "failed to project mocked job pause without current snapshot",
                             std::io::Error::other(stream_id.to_string()),
                         )
                     })?;
                     snapshot.version = version;
-                    snapshot.payload.state = state.into();
+                    snapshot.payload.state = crate::JobEventState::Disabled;
+                    projected_snapshot = Some(snapshot);
+                }
+                JobEvent::JobResumed { .. } => {
+                    let mut snapshot = projected_snapshot.take().ok_or_else(|| {
+                        CronError::event_source(
+                            "failed to project mocked job resume without current snapshot",
+                            std::io::Error::other(stream_id.to_string()),
+                        )
+                    })?;
+                    snapshot.version = version;
+                    snapshot.payload.state = crate::JobEventState::Enabled;
                     projected_snapshot = Some(snapshot);
                 }
                 JobEvent::JobRemoved { .. } => {
@@ -422,9 +430,10 @@ mod tests {
 
     use super::*;
     use crate::{
-        ChangeJobStateCommand, DeliverySpec, GetJobCommand, JobEnabledState, JobWriteCondition,
-        ListJobsCommand, RegisterJobCommand, RemoveJobCommand, ScheduleSpec, change_job_state,
-        register_job, remove_job,
+        CronJob, DeliverySpec, GetJobCommand, JobEnabledState, JobEventState, JobSpec,
+        JobWriteCondition, ListJobsCommand, PauseJobCommand, RegisterJobCommand, RegisteredJobSpec,
+        RemoveJobCommand, ResumeJobCommand, ScheduleSpec, pause_job, register_job, remove_job,
+        resume_job,
     };
     use futures::StreamExt;
 
@@ -443,11 +452,15 @@ mod tests {
         }
     }
 
+    fn expected_job(id: &str) -> CronJob {
+        CronJob::from((id.to_string(), RegisteredJobSpec::from(base_job(id))))
+    }
+
     #[tokio::test]
     async fn mock_schedule_publisher_tracks_active_jobs() {
         let publisher = MockSchedulePublisher::new();
         publisher.seed_active_job("orphan");
-        let resolved = ResolvedJobSpec::try_from(&base_job("alpha")).unwrap();
+        let resolved = ResolvedJobSpec::try_from(&expected_job("alpha")).unwrap();
 
         let active = publisher.active_schedule_ids().await.unwrap();
         assert!(active.contains("orphan"));
@@ -495,12 +508,12 @@ mod tests {
 
         let seeded = store
             .get_job(GetJobCommand {
-                id: job_id("seeded"),
+                id: "seeded".to_string(),
             })
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(seeded, base_job("seeded"));
+        assert_eq!(seeded, expected_job("seeded"));
 
         register_job(
             &store,
@@ -512,31 +525,26 @@ mod tests {
         .unwrap();
         let alpha = store
             .get_job(GetJobCommand {
-                id: job_id("alpha"),
+                id: "alpha".to_string(),
             })
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(alpha, base_job("alpha"));
+        assert_eq!(alpha, expected_job("alpha"));
 
-        change_job_state(
-            &store,
-            &store,
-            ChangeJobStateCommand::new(job_id("alpha"), JobEnabledState::Disabled),
-            None,
-        )
-        .await
-        .unwrap();
+        pause_job(&store, &store, PauseJobCommand::new(job_id("alpha")), None)
+            .await
+            .unwrap();
         assert_eq!(
             store
                 .get_job(GetJobCommand {
-                    id: job_id("alpha"),
+                    id: "alpha".to_string(),
                 })
                 .await
                 .unwrap()
                 .unwrap()
                 .state,
-            JobEnabledState::Disabled
+            JobEventState::Disabled
         );
 
         let listed = store.list_jobs(ListJobsCommand).await.unwrap();
@@ -556,7 +564,7 @@ mod tests {
         assert!(
             store
                 .get_job(GetJobCommand {
-                    id: job_id("alpha"),
+                    id: "alpha".to_string(),
                 })
                 .await
                 .unwrap()
@@ -601,33 +609,29 @@ mod tests {
         )
         .await
         .unwrap();
-        let same_state_error = change_job_state(
-            &store,
-            &store,
-            ChangeJobStateCommand::new(job_id("alpha"), JobEnabledState::Enabled),
-            None,
-        )
-        .await
-        .unwrap_err();
+        let same_state_error =
+            resume_job(&store, &store, ResumeJobCommand::new(job_id("alpha")), None)
+                .await
+                .unwrap_err();
         assert!(matches!(
             same_state_error,
-            CommandFailure::Domain(crate::ChangeJobStateError::Decision(
-                crate::ChangeJobStateDecisionError::StateAlreadySet { .. }
+            CommandFailure::Domain(crate::ResumeJobError::Decision(
+                crate::ResumeJobDecisionError::AlreadyActive { .. }
             ))
         ));
 
-        let missing_error = change_job_state(
+        let missing_error = pause_job(
             &store,
             &store,
-            ChangeJobStateCommand::new(job_id("missing"), JobEnabledState::Disabled),
+            PauseJobCommand::new(job_id("missing")),
             None,
         )
         .await
         .unwrap_err();
         assert!(matches!(
             missing_error,
-            CommandFailure::Domain(crate::ChangeJobStateError::Decision(
-                crate::ChangeJobStateDecisionError::JobNotFound { .. }
+            CommandFailure::Domain(crate::PauseJobError::Decision(
+                crate::PauseJobDecisionError::JobNotFound { .. }
             ))
         ));
     }

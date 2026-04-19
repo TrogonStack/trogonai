@@ -9,12 +9,12 @@ pub mod commands;
 pub mod config;
 pub mod error;
 pub mod events;
-mod jobs;
 pub mod kv;
 pub mod nats;
 mod processors;
 pub mod projections;
 pub mod queries;
+mod read_model;
 mod schedule;
 pub mod store;
 pub mod traits;
@@ -22,20 +22,21 @@ pub mod traits;
 #[cfg(any(test, feature = "test-support"))]
 pub mod mocks;
 
+pub use commands::domain::{
+    DeliveryHeaders, DeliveryRoute, DeliverySpec, JobEnabledState, JobId, JobIdError, JobSpec,
+    SamplingSource, SamplingSubject, ScheduleSpec, TtlSeconds,
+};
 pub use commands::{
-    ChangeJobStateCommand, ChangeJobStateDecisionError, ChangeJobStateError, ChangeJobStateState,
-    RegisterJobCommand, RegisterJobDecisionError, RegisterJobState, RemoveJobCommand,
-    RemoveJobDecisionError, RemoveJobState, change_job_state, register_job, remove_job,
+    PauseJobCommand, PauseJobDecisionError, PauseJobError, PauseJobState, RegisterJobCommand,
+    RegisterJobDecisionError, RegisterJobState, RemoveJobCommand, RemoveJobDecisionError,
+    RemoveJobState, ResumeJobCommand, ResumeJobDecisionError, ResumeJobError, ResumeJobState,
+    pause_job, register_job, remove_job, resume_job,
 };
 pub use config::JobWriteCondition;
 pub use error::{CronError, JobSpecError};
 pub use events::{
     JobEvent, JobEventCodec, JobEventData, JobEventDelivery, JobEventSamplingSource,
     JobEventSchedule, JobEventState, RecordedJobEvent, RegisteredJobSpec,
-};
-pub use jobs::{
-    DeliveryHeaders, DeliveryRoute, DeliverySpec, JobEnabledState, JobId, JobIdError, JobSpec,
-    SamplingSource, SamplingSubject, ScheduleSpec, TtlSeconds,
 };
 pub use nats::NatsSchedulePublisher;
 pub use processors::CronController;
@@ -45,6 +46,7 @@ pub use projections::{
     projection_change,
 };
 pub use queries::{GetJobCommand, ListJobsCommand, get_job, list_jobs};
+pub use read_model::CronJob;
 pub use schedule::ResolvedJobSpec;
 pub use store::{SNAPSHOT_STORE_CONFIG, Store, append_events, connect_store, open_snapshot_bucket};
 pub use traits::{LeaderLock, SchedulePublisher};
