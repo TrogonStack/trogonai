@@ -10,26 +10,49 @@ use async_nats::jetstream::{
 };
 use chrono::{DateTime, Utc};
 use futures::{Stream, StreamExt, future};
+use trogon_eventsourcing::jetstream::AppendProjector;
 use trogon_eventsourcing::{
-    Snapshot, SnapshotChange, StreamEvent, load_snapshot, load_snapshot_map,
+    EventData, Snapshot, SnapshotChange, StreamEvent, load_snapshot, load_snapshot_map,
     maybe_advance_checkpoint, persist_snapshot_change, read_checkpoint, write_checkpoint,
 };
 use trogon_nats::SubjectTokenViolation;
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream};
 
 use crate::{
-    CronJob,
+    CronJob, JobId,
     error::CronError,
     events::{JobEvent, JobEventCodec, JobEventData, JobEventState, RecordedJobEvent},
     kv::{EVENTS_SUBJECT_PREFIX, LEGACY_EVENTS_SUBJECT_PREFIX},
     store::{
         SNAPSHOT_STORE_CONFIG, open_cron_jobs_bucket, open_events_stream, open_snapshot_bucket,
-        stream_subject_state,
     },
 };
 
 pub type CronJobWatchStream = Pin<Box<dyn Stream<Item = CronJobChange> + Send + 'static>>;
 pub type LoadAndWatchCronJobsResult = Result<(Vec<CronJob>, CronJobWatchStream), CronError>;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct CronJobSnapshotProjector;
+
+impl AppendProjector<JobId> for CronJobSnapshotProjector {
+    type Error = CronError;
+
+    async fn project_appended(
+        &self,
+        snapshot_bucket: &kv::Store,
+        stream_id: &JobId,
+        events: &[EventData],
+        next_expected_version: u64,
+    ) -> Result<(), Self::Error> {
+        project_appended_events(
+            snapshot_bucket,
+            stream_id.as_str(),
+            events,
+            next_expected_version,
+        )
+        .await
+    }
+}
 
 #[derive(Debug, Clone)]
 pub enum CronJobChange {
@@ -407,15 +430,12 @@ where
     Ok(())
 }
 
-pub(crate) async fn project_appended_events<J>(
-    js: &J,
+pub(crate) async fn project_appended_events(
+    bucket: &kv::Store,
     job_id: &str,
     events: &[JobEventData],
-) -> Result<(), CronError>
-where
-    J: JetStreamGetKeyValue<Store = kv::Store>
-        + JetStreamGetStream<Stream = jetstream::stream::Stream>,
-{
+    final_version: u64,
+) -> Result<(), CronError> {
     if events.is_empty() {
         return Ok(());
     }
@@ -426,10 +446,9 @@ where
         })
     })?;
 
-    let bucket = open_snapshot_bucket(js).await?;
     let mut snapshots = BTreeMap::new();
     let mut states = BTreeMap::new();
-    if let Some(snapshot) = load_snapshot(&bucket, SNAPSHOT_STORE_CONFIG, job_id)
+    if let Some(snapshot) = load_snapshot(bucket, SNAPSHOT_STORE_CONFIG, job_id)
         .await
         .map_err(CronError::from)?
     {
@@ -437,13 +456,6 @@ where
         snapshots.insert(job_id.to_string(), snapshot);
     }
 
-    let stream = stream_subject_state(js, job_id).await?;
-    let final_version = stream.write_state.current_version().ok_or_else(|| {
-        CronError::event_source(
-            "stream snapshot projection requires an event version",
-            std::io::Error::other(format!("job '{job_id}'")),
-        )
-    })?;
     let start_version = final_version
         .checked_sub(events.len() as u64 - 1)
         .ok_or_else(|| {
@@ -464,11 +476,11 @@ where
             &decoded,
             start_version + index as u64,
         )?;
-        persist_snapshot_change(&bucket, SNAPSHOT_STORE_CONFIG, change)
+        persist_snapshot_change(bucket, SNAPSHOT_STORE_CONFIG, change)
             .await
             .map_err(CronError::from)?;
     }
-    maybe_advance_checkpoint(&bucket, SNAPSHOT_STORE_CONFIG, final_version)
+    maybe_advance_checkpoint(bucket, SNAPSHOT_STORE_CONFIG, final_version)
         .await
         .map_err(CronError::from)
 }

@@ -2,48 +2,40 @@
 
 use async_nats::jetstream::{self, context, kv};
 use serde::{Serialize, de::DeserializeOwned};
+use trogon_eventsourcing::jetstream::JetStreamStore;
 use trogon_eventsourcing::{
-    AppendOutcome, EventData, NonEmpty, Snapshot, SnapshotChange, SnapshotStore,
-    SnapshotStoreConfig, StreamAppend, StreamRead, StreamReadResult, StreamState, load_snapshot,
-    persist_snapshot_change, read_stream_from,
+    AppendOutcome, NonEmpty, Snapshot, SnapshotStore, SnapshotStoreConfig, StreamAppend,
+    StreamRead, StreamReadResult, StreamState,
 };
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream, JetStreamPublishMessage};
 
 use crate::{
-    JobId, JobWriteCondition,
+    JobId,
     error::CronError,
     kv::{
         get_or_create_cron_jobs_bucket, get_or_create_events_stream, get_or_create_snapshot_bucket,
     },
     nats::validate_events_stream,
-    projections::catch_up_snapshots,
+    projections::{CronJobSnapshotProjector, catch_up_snapshots},
 };
 
 use super::GetCronJobsBucket;
-use super::{append_events::run as append_job_events, append_events::stream_subject_state};
+use super::stream_subject::JobEventSubjectResolver;
+
+type EventStore = JetStreamStore<JobEventSubjectResolver, CronJobSnapshotProjector>;
 
 #[derive(Clone)]
 pub struct Store {
-    js: jetstream::Context,
-    events_stream: jetstream::stream::Stream,
-    snapshot_bucket: kv::Store,
+    event_store: EventStore,
     cron_jobs_bucket: kv::Store,
 }
 
 impl Store {
-    pub const fn as_jetstream(&self) -> &jetstream::Context {
-        &self.js
+    pub fn as_jetstream(&self) -> &jetstream::Context {
+        self.event_store.as_jetstream()
     }
 
-    pub(crate) const fn events_stream(&self) -> &jetstream::stream::Stream {
-        &self.events_stream
-    }
-
-    pub(crate) const fn snapshot_bucket(&self) -> &kv::Store {
-        &self.snapshot_bucket
-    }
-
-    pub(crate) const fn cron_jobs_bucket_ref(&self) -> &kv::Store {
+    pub(crate) fn cron_jobs_bucket_ref(&self) -> &kv::Store {
         &self.cron_jobs_bucket
     }
 }
@@ -63,7 +55,7 @@ impl JetStreamGetKeyValue for Store {
         &self,
         bucket: T,
     ) -> impl std::future::Future<Output = Result<Self::Store, context::KeyValueError>> + Send {
-        self.js.get_key_value(bucket)
+        self.as_jetstream().get_key_value(bucket)
     }
 }
 
@@ -75,7 +67,7 @@ impl JetStreamGetStream for Store {
         &self,
         stream_name: T,
     ) -> impl std::future::Future<Output = Result<Self::Stream, Self::Error>> + Send {
-        self.js.get_stream(stream_name)
+        self.as_jetstream().get_stream(stream_name)
     }
 }
 
@@ -87,7 +79,7 @@ impl JetStreamPublishMessage for Store {
         &self,
         message: async_nats::jetstream::message::OutboundMessage,
     ) -> impl std::future::Future<Output = Result<Self::AckFuture, Self::PublishError>> + Send {
-        self.js.publish_message(message)
+        self.as_jetstream().publish_message(message)
     }
 }
 
@@ -99,28 +91,10 @@ impl StreamRead<JobId> for Store {
         stream_id: &JobId,
         from_sequence: u64,
     ) -> Result<StreamReadResult, Self::Error> {
-        let current_version = stream_subject_state(self, stream_id.as_str())
-            .await?
-            .write_state
-            .current_version();
-        let events = read_stream_from(self.events_stream(), from_sequence)
+        self.event_store
+            .read_events_from(stream_id, from_sequence)
             .await
-            .map_err(|source| {
-                CronError::event_source(
-                    "failed to read job stream while catching up command state",
-                    source,
-                )
-            })
-            .map(|events| {
-                events
-                    .into_iter()
-                    .filter(|event| event.stream_id() == stream_id.as_str())
-                    .collect()
-            })?;
-        Ok(StreamReadResult {
-            current_version,
-            events,
-        })
+            .map_err(CronError::from)
     }
 }
 
@@ -131,41 +105,12 @@ impl StreamAppend<JobId> for Store {
         &self,
         stream_id: &JobId,
         expected_state: StreamState,
-        events: NonEmpty<EventData>,
+        events: NonEmpty<trogon_eventsourcing::EventData>,
     ) -> Result<AppendOutcome, Self::Error> {
-        let stream_state = stream_subject_state(self, stream_id.as_str()).await?;
-        let current_version = stream_state.write_state.current_version();
-        let appended_events = events.len() as u64;
-        let write_condition = match expected_state {
-            StreamState::Any => None,
-            StreamState::StreamExists => Some(
-                current_version
-                    .map(JobWriteCondition::MustBeAtVersion)
-                    .ok_or_else(|| CronError::OptimisticConcurrencyConflict {
-                        id: stream_id.to_string(),
-                        expected: StreamState::StreamExists,
-                        current_version,
-                    })?,
-            ),
-            StreamState::NoStream => Some(JobWriteCondition::MustNotExist),
-            StreamState::StreamRevision(version) => {
-                Some(JobWriteCondition::MustBeAtVersion(version))
-            }
-        };
-
-        append_job_events(
-            self,
-            stream_id.as_str(),
-            write_condition.unwrap_or(JobWriteCondition::MustBeAtVersion(
-                current_version.unwrap_or(0),
-            )),
-            events,
-        )
-        .await?;
-
-        Ok(AppendOutcome {
-            next_expected_version: current_version.unwrap_or(0) + appended_events,
-        })
+        self.event_store
+            .append_to_stream(stream_id, expected_state, events)
+            .await
+            .map_err(CronError::from)
     }
 }
 
@@ -180,7 +125,8 @@ where
         config: SnapshotStoreConfig<'static>,
         stream_id: &JobId,
     ) -> Result<Option<Snapshot<Payload>>, Self::Error> {
-        load_snapshot(self.snapshot_bucket(), config, stream_id.as_str())
+        self.event_store
+            .load_snapshot_entry(config, stream_id)
             .await
             .map_err(CronError::from)
     }
@@ -191,13 +137,10 @@ where
         stream_id: &JobId,
         snapshot: Snapshot<Payload>,
     ) -> Result<(), Self::Error> {
-        persist_snapshot_change(
-            self.snapshot_bucket(),
-            config,
-            SnapshotChange::upsert(stream_id.as_str(), snapshot),
-        )
-        .await
-        .map_err(CronError::from)
+        self.event_store
+            .save_snapshot_entry(config, stream_id, snapshot)
+            .await
+            .map_err(CronError::from)
     }
 }
 
@@ -210,9 +153,13 @@ pub async fn connect_store(nats: async_nats::Client) -> Result<Store, CronError>
     validate_events_stream(&events_stream)?;
     catch_up_snapshots(&js).await?;
     Ok(Store {
-        js,
-        events_stream,
-        snapshot_bucket,
+        event_store: JetStreamStore::new(
+            js,
+            events_stream,
+            snapshot_bucket,
+            JobEventSubjectResolver,
+            CronJobSnapshotProjector,
+        ),
         cron_jobs_bucket,
     })
 }
