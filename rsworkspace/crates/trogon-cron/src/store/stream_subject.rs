@@ -33,7 +33,7 @@ pub(crate) async fn stream_subject_state(
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) struct JobEventSubjectResolver;
+pub struct JobEventSubjectResolver;
 
 impl StreamSubjectResolver<JobId> for JobEventSubjectResolver {
     type Error = CronError;

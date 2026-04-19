@@ -190,13 +190,9 @@ async fn controller_reconciles_one_time_job() {
         at: Utc::now() + ChronoDuration::seconds(2),
     };
 
-    add_job(
-        store.command_runtime(),
-        AddJobCommand::new(job).unwrap(),
-        None,
-    )
-    .await
-    .unwrap();
+    add_job(&store.event_store, AddJobCommand::new(job).unwrap(), None)
+        .await
+        .unwrap();
 
     let stream = js
         .get_stream(trogon_cron::kv::SCHEDULES_STREAM)
@@ -230,13 +226,9 @@ async fn controller_reconciles_sampling_job() {
         source: Some(SamplingSource::latest_from_subject("sensors.latest").unwrap()),
     };
 
-    add_job(
-        store.command_runtime(),
-        AddJobCommand::new(job).unwrap(),
-        None,
-    )
-    .await
-    .unwrap();
+    add_job(&store.event_store, AddJobCommand::new(job).unwrap(), None)
+        .await
+        .unwrap();
     wait_for_stream_subject(&js, trogon_cron::kv::SCHEDULES_STREAM, "sensors.latest").await;
     js.publish("sensors.latest", br#"{"value":42}"#.as_slice().into())
         .await
@@ -275,13 +267,9 @@ async fn controller_reconciles_cron_job_with_timezone() {
         timezone: Some("UTC".to_string()),
     };
 
-    add_job(
-        store.command_runtime(),
-        AddJobCommand::new(job).unwrap(),
-        None,
-    )
-    .await
-    .unwrap();
+    add_job(&store.event_store, AddJobCommand::new(job).unwrap(), None)
+        .await
+        .unwrap();
 
     let stream = js
         .get_stream(trogon_cron::kv::SCHEDULES_STREAM)
@@ -309,13 +297,9 @@ async fn disabling_job_removes_schedule_subject() {
     });
 
     let job = base_job("disabled");
-    add_job(
-        store.command_runtime(),
-        AddJobCommand::new(job).unwrap(),
-        None,
-    )
-    .await
-    .unwrap();
+    add_job(&store.event_store, AddJobCommand::new(job).unwrap(), None)
+        .await
+        .unwrap();
 
     let stream = js
         .get_stream(trogon_cron::kv::SCHEDULES_STREAM)
@@ -324,7 +308,7 @@ async fn disabling_job_removes_schedule_subject() {
     wait_for_subject(&stream, "cron.schedules.disabled").await;
 
     pause_job(
-        store.command_runtime(),
+        &store.event_store,
         PauseJobCommand::new(job_id("disabled")),
         None,
     )
@@ -352,13 +336,9 @@ async fn removing_job_removes_schedule_subject() {
     });
 
     let job = base_job("removed");
-    add_job(
-        store.command_runtime(),
-        AddJobCommand::new(job).unwrap(),
-        None,
-    )
-    .await
-    .unwrap();
+    add_job(&store.event_store, AddJobCommand::new(job).unwrap(), None)
+        .await
+        .unwrap();
 
     let stream = js
         .get_stream(trogon_cron::kv::SCHEDULES_STREAM)
@@ -367,7 +347,7 @@ async fn removing_job_removes_schedule_subject() {
     wait_for_subject(&stream, "cron.schedules.removed").await;
 
     remove_job(
-        store.command_runtime(),
+        &store.event_store,
         RemoveJobCommand::new(job_id("removed")),
         None,
     )
@@ -392,15 +372,11 @@ async fn event_store_rebuilds_current_state_for_new_client() {
     };
     let expected_schedule = job.schedule.clone();
 
-    add_job(
-        store.command_runtime(),
-        AddJobCommand::new(job).unwrap(),
-        None,
-    )
-    .await
-    .unwrap();
+    add_job(&store.event_store, AddJobCommand::new(job).unwrap(), None)
+        .await
+        .unwrap();
     pause_job(
-        store.command_runtime(),
+        &store.event_store,
         PauseJobCommand::new(job_id("eventful")),
         None,
     )
@@ -409,7 +385,7 @@ async fn event_store_rebuilds_current_state_for_new_client() {
 
     let fresh = connect_store(nats).await.unwrap();
     let rebuilt = get_job(
-        &fresh,
+        &fresh.cron_jobs_bucket,
         GetJobCommand {
             id: "eventful".to_string(),
         },
