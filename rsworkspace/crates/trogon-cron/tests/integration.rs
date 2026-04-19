@@ -7,10 +7,10 @@ use async_nats::Request;
 use async_nats::jetstream;
 use chrono::{Duration as ChronoDuration, Utc};
 use trogon_cron::{
-    ChangeJobStateCommand, CronController, DeliveryHeaders, DeliveryRoute, DeliverySpec,
-    GetJobCommand, JobEnabledState, JobId, JobSpec, RegisterJobCommand, RemoveJobCommand,
-    SamplingSource, ScheduleSpec, TtlSeconds, change_job_state, connect_store, get_job,
-    register_job, remove_job,
+    CronController, DeliveryHeaders, DeliveryRoute, DeliverySpec, GetJobCommand, JobEnabledState,
+    JobEventState, JobId, JobSpec, PauseJobCommand, RegisterJobCommand, RemoveJobCommand,
+    SamplingSource, ScheduleSpec, TtlSeconds, connect_store, get_job, pause_job, register_job,
+    remove_job,
 };
 use trogon_nats::{NatsConfig, connect as nats_connect};
 
@@ -310,10 +310,10 @@ async fn disabling_job_removes_schedule_subject() {
         .unwrap();
     wait_for_subject(&stream, "cron.schedules.disabled").await;
 
-    change_job_state(
+    pause_job(
         &store,
         &store,
-        ChangeJobStateCommand::new(job_id("disabled"), JobEnabledState::Disabled),
+        PauseJobCommand::new(job_id("disabled")),
         None,
     )
     .await
@@ -380,10 +380,10 @@ async fn event_store_rebuilds_current_state_for_new_client() {
     register_job(&store, &store, RegisterJobCommand::new(job).unwrap(), None)
         .await
         .unwrap();
-    change_job_state(
+    pause_job(
         &store,
         &store,
-        ChangeJobStateCommand::new(job_id("eventful"), JobEnabledState::Disabled),
+        PauseJobCommand::new(job_id("eventful")),
         None,
     )
     .await
@@ -393,13 +393,13 @@ async fn event_store_rebuilds_current_state_for_new_client() {
     let rebuilt = get_job(
         &fresh,
         GetJobCommand {
-            id: job_id("eventful"),
+            id: "eventful".to_string(),
         },
     )
     .await
     .unwrap()
     .unwrap();
 
-    assert_eq!(rebuilt.state, JobEnabledState::Disabled);
-    assert_eq!(rebuilt.schedule, expected_schedule);
+    assert_eq!(rebuilt.state, JobEventState::Disabled);
+    assert_eq!(rebuilt.schedule, expected_schedule.into());
 }

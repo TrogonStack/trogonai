@@ -10,6 +10,7 @@ use async_nats::jetstream::{
 use chrono::{DateTime, Utc};
 use futures::{Stream, StreamExt};
 use trogon_eventsourcing::StreamEvent;
+use trogon_nats::SubjectTokenViolation;
 use trogon_nats::jetstream::JetStreamGetStream;
 use trogon_nats::lease::{
     LeaderElection, LeaseRenewInterval, LeaseTiming, LeaseTtl, NatsKvLease, NatsKvLeaseConfig,
@@ -17,9 +18,9 @@ use trogon_nats::lease::{
 use trogon_std::{NowV7, UuidV7Generator};
 
 use crate::{
-    JobId, JobSpec, ResolvedJobSpec,
+    CronJob, ResolvedJobSpec,
     error::CronError,
-    events::{JobEvent, JobEventCodec, JobEventData, RecordedJobEvent},
+    events::{JobEvent, JobEventCodec, JobEventData, JobEventState, RecordedJobEvent},
     kv::{EVENTS_SUBJECT_PREFIX, LEADER_BUCKET, LEADER_KEY, LEGACY_EVENTS_SUBJECT_PREFIX},
     nats::NatsSchedulePublisher,
     store::{Store, connect_store, open_events_stream},
@@ -43,13 +44,13 @@ enum ReestablishedProcessor {
 
 #[derive(Debug, Clone, PartialEq)]
 enum SchedulerChange {
-    Upsert(JobSpec),
+    Upsert(CronJob),
     Delete(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
 enum DesiredJobState {
-    Present(Box<JobSpec>),
+    Present(Box<CronJob>),
     Deleted,
 }
 
@@ -343,42 +344,51 @@ fn apply_scheduler_event(
                     std::io::Error::other(id),
                 ));
             }
-            let job_id = JobId::parse(&id).map_err(|source| {
-                CronError::event_source(
-                    "failed to rebuild scheduler state from job registration",
+            validate_event_job_id(&id).map_err(|source| {
+                CronError::invalid_job_spec(crate::JobSpecError::InvalidId {
+                    id: id.clone(),
                     source,
-                )
+                })
             })?;
-            let job = spec.try_into_job_spec(job_id).map_err(|source| {
-                CronError::event_source(
-                    "failed to rebuild scheduler job state from registration event",
-                    source,
-                )
-            })?;
+            let job = CronJob::from((id.clone(), spec));
             desired_jobs.insert(
-                job.id.to_string(),
+                job.id.clone(),
                 DesiredJobState::Present(Box::new(job.clone())),
             );
             Ok(SchedulerChange::Upsert(job))
         }
-        JobEvent::JobStateChanged { id, state } => {
+        JobEvent::JobPaused { id } => {
             let job = desired_jobs.get_mut(&id).ok_or_else(|| {
                 CronError::event_source(
-                    "scheduler received a state change without current job state",
+                    "scheduler received a pause without current job state",
                     std::io::Error::other(id.clone()),
                 )
             })?;
             match job {
                 DesiredJobState::Present(job) => {
-                    job.state = state.into();
-                    if job.state.is_enabled() {
-                        Ok(SchedulerChange::Upsert(job.as_ref().clone()))
-                    } else {
-                        Ok(SchedulerChange::Delete(id))
-                    }
+                    job.state = JobEventState::Disabled;
+                    Ok(SchedulerChange::Delete(id))
                 }
                 DesiredJobState::Deleted => Err(CronError::event_source(
-                    "scheduler received a state change for a deleted job stream",
+                    "scheduler received a pause for a deleted job stream",
+                    std::io::Error::other(id),
+                )),
+            }
+        }
+        JobEvent::JobResumed { id } => {
+            let job = desired_jobs.get_mut(&id).ok_or_else(|| {
+                CronError::event_source(
+                    "scheduler received a resume without current job state",
+                    std::io::Error::other(id.clone()),
+                )
+            })?;
+            match job {
+                DesiredJobState::Present(job) => {
+                    job.state = JobEventState::Enabled;
+                    Ok(SchedulerChange::Upsert(job.as_ref().clone()))
+                }
+                DesiredJobState::Deleted => Err(CronError::event_source(
+                    "scheduler received a resume for a deleted job stream",
                     std::io::Error::other(id),
                 )),
             }
@@ -409,7 +419,7 @@ async fn apply_scheduler_change<P: SchedulePublisher<Error = CronError>>(
 ) -> Result<(), CronError> {
     match change {
         SchedulerChange::Upsert(job) => {
-            if job.state.is_enabled() {
+            if job.is_enabled() {
                 match ResolvedJobSpec::try_from(job) {
                     Ok(resolved) => {
                         publisher.upsert_schedule(&resolved).await?;
@@ -420,11 +430,11 @@ async fn apply_scheduler_change<P: SchedulePublisher<Error = CronError>>(
                             job_id = %job.id,
                             "Skipping invalid enabled scheduler job and removing any existing schedule"
                         );
-                        publisher.remove_schedule(job.id.as_str()).await?;
+                        publisher.remove_schedule(&job.id).await?;
                     }
                 }
             } else {
-                publisher.remove_schedule(job.id.as_str()).await?;
+                publisher.remove_schedule(&job.id).await?;
             }
         }
         SchedulerChange::Delete(id) => {
@@ -446,7 +456,7 @@ async fn reconcile_snapshot<P: SchedulePublisher<Error = CronError>>(
         let DesiredJobState::Present(job) = job else {
             continue;
         };
-        if !job.state.is_enabled() {
+        if !job.is_enabled() {
             continue;
         }
 
@@ -630,7 +640,7 @@ async fn ack_scheduler_message(message: &jetstream::Message) {
     }
 }
 
-fn job_id_from_event_subject(subject: &str) -> Result<JobId, CronError> {
+fn job_id_from_event_subject(subject: &str) -> Result<String, CronError> {
     let raw_id = subject
         .strip_prefix(EVENTS_SUBJECT_PREFIX)
         .or_else(|| subject.strip_prefix(LEGACY_EVENTS_SUBJECT_PREFIX))
@@ -641,16 +651,21 @@ fn job_id_from_event_subject(subject: &str) -> Result<JobId, CronError> {
             )
         })?;
 
-    JobId::parse(raw_id).map_err(|source| {
-        CronError::event_source("failed to parse job stream id from event subject", source)
-    })
+    validate_event_job_id(raw_id)
+        .map(|()| raw_id.to_string())
+        .map_err(|source| {
+            CronError::invalid_job_spec(crate::JobSpecError::InvalidId {
+                id: raw_id.to_string(),
+                source,
+            })
+        })
 }
 
 fn ensure_event_matches_stream(
-    expected_stream_id: &JobId,
+    expected_stream_id: &str,
     event: &JobEvent,
 ) -> Result<(), CronError> {
-    if event.stream_id() == expected_stream_id.as_str() {
+    if event.stream_id() == expected_stream_id {
         Ok(())
     } else {
         Err(CronError::event_source(
@@ -662,6 +677,10 @@ fn ensure_event_matches_stream(
             )),
         ))
     }
+}
+
+fn validate_event_job_id(id: &str) -> Result<(), SubjectTokenViolation> {
+    trogon_nats::NatsToken::new(id).map(|_| ())
 }
 
 #[cfg(test)]
@@ -676,7 +695,7 @@ mod tests {
         reconcile_snapshot, scheduler_consumer_config,
     };
     use crate::{
-        DeliverySpec, JobEnabledState, JobId, JobSpec, RegisteredJobSpec, ScheduleSpec,
+        CronJob, DeliverySpec, JobEnabledState, JobId, JobSpec, RegisteredJobSpec, ScheduleSpec,
         events::{JobEvent, JobEventState},
         mocks::{MockCronStore, MockLeaderLock, MockSchedulePublisher},
     };
@@ -696,6 +715,10 @@ mod tests {
         }
     }
 
+    fn expected_job(id: &str) -> CronJob {
+        CronJob::from((id.to_string(), RegisteredJobSpec::from(base_job(id))))
+    }
+
     #[tokio::test]
     async fn reconcile_snapshot_removes_orphaned_schedules_from_previous_leader() {
         let publisher = MockSchedulePublisher::new();
@@ -704,7 +727,7 @@ mod tests {
 
         let desired_jobs = HashMap::from([(
             "heartbeat".to_string(),
-            DesiredJobState::Present(Box::new(base_job("heartbeat"))),
+            DesiredJobState::Present(Box::new(expected_job("heartbeat"))),
         )]);
 
         reconcile_snapshot(&publisher, &desired_jobs).await.unwrap();
@@ -726,7 +749,10 @@ mod tests {
         };
         let desired_jobs = HashMap::from([(
             "disabled".to_string(),
-            DesiredJobState::Present(Box::new(disabled)),
+            DesiredJobState::Present(Box::new(CronJob::from((
+                "disabled".to_string(),
+                RegisteredJobSpec::from(disabled),
+            )))),
         )]);
 
         reconcile_snapshot(&publisher, &desired_jobs).await.unwrap();
@@ -758,7 +784,7 @@ mod tests {
     fn desired_jobs_map_tracks_snapshot_state() {
         let jobs = HashMap::from([(
             "alpha".to_string(),
-            DesiredJobState::Present(Box::new(base_job("alpha"))),
+            DesiredJobState::Present(Box::new(expected_job("alpha"))),
         )]);
         assert_eq!(jobs.keys().cloned().collect::<Vec<_>>(), vec!["alpha"]);
     }
@@ -775,7 +801,7 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(registered, SchedulerChange::Upsert(base_job("alpha")));
+        assert_eq!(registered, SchedulerChange::Upsert(expected_job("alpha")));
         assert!(matches!(
             desired_jobs.get("alpha"),
             Some(DesiredJobState::Present(_))
@@ -783,9 +809,8 @@ mod tests {
 
         let disabled = apply_scheduler_event(
             &mut desired_jobs,
-            JobEvent::JobStateChanged {
+            JobEvent::JobPaused {
                 id: "alpha".to_string(),
-                state: JobEventState::Disabled,
             },
         )
         .unwrap();
@@ -795,18 +820,17 @@ mod tests {
                 DesiredJobState::Present(job) => job.state,
                 DesiredJobState::Deleted => panic!("expected present job"),
             },
-            JobEnabledState::Disabled
+            JobEventState::Disabled
         );
 
         let enabled = apply_scheduler_event(
             &mut desired_jobs,
-            JobEvent::JobStateChanged {
+            JobEvent::JobResumed {
                 id: "alpha".to_string(),
-                state: JobEventState::Enabled,
             },
         )
         .unwrap();
-        assert_eq!(enabled, SchedulerChange::Upsert(base_job("alpha")));
+        assert_eq!(enabled, SchedulerChange::Upsert(expected_job("alpha")));
 
         let removed = apply_scheduler_event(
             &mut desired_jobs,
@@ -833,27 +857,29 @@ mod tests {
     }
 
     #[test]
-    fn apply_scheduler_event_rejects_state_change_without_current_job() {
+    fn apply_scheduler_event_rejects_pause_without_current_job() {
         let mut desired_jobs = HashMap::new();
         let error = apply_scheduler_event(
             &mut desired_jobs,
-            JobEvent::JobStateChanged {
+            JobEvent::JobPaused {
                 id: "missing".to_string(),
-                state: JobEventState::Disabled,
             },
         )
         .unwrap_err();
 
-        assert!(error.to_string().contains("state change"));
+        assert!(error.to_string().contains("pause"));
     }
 
     #[tokio::test]
     async fn apply_scheduler_change_upserts_enabled_jobs() {
         let publisher = MockSchedulePublisher::new();
 
-        apply_scheduler_change(&publisher, &SchedulerChange::Upsert(base_job("enabled")))
-            .await
-            .unwrap();
+        apply_scheduler_change(
+            &publisher,
+            &SchedulerChange::Upsert(expected_job("enabled")),
+        )
+        .await
+        .unwrap();
 
         assert_eq!(publisher.upserts(), vec!["cron.schedules.enabled"]);
         assert!(publisher.removals().is_empty());
@@ -865,9 +891,15 @@ mod tests {
         let mut disabled = base_job("disabled");
         disabled.state = JobEnabledState::Disabled;
 
-        apply_scheduler_change(&publisher, &SchedulerChange::Upsert(disabled))
-            .await
-            .unwrap();
+        apply_scheduler_change(
+            &publisher,
+            &SchedulerChange::Upsert(CronJob::from((
+                "disabled".to_string(),
+                RegisteredJobSpec::from(disabled),
+            ))),
+        )
+        .await
+        .unwrap();
         apply_scheduler_change(&publisher, &SchedulerChange::Delete("deleted".to_string()))
             .await
             .unwrap();
@@ -886,9 +918,15 @@ mod tests {
             timezone: None,
         };
 
-        apply_scheduler_change(&publisher, &SchedulerChange::Upsert(invalid))
-            .await
-            .unwrap();
+        apply_scheduler_change(
+            &publisher,
+            &SchedulerChange::Upsert(CronJob::from((
+                "invalid".to_string(),
+                RegisteredJobSpec::from(invalid),
+            ))),
+        )
+        .await
+        .unwrap();
 
         assert!(publisher.upserts().is_empty());
         assert_eq!(publisher.removals(), vec!["invalid"]);
@@ -906,11 +944,14 @@ mod tests {
         let desired_jobs = HashMap::from([
             (
                 "valid".to_string(),
-                DesiredJobState::Present(Box::new(base_job("valid"))),
+                DesiredJobState::Present(Box::new(expected_job("valid"))),
             ),
             (
                 "invalid".to_string(),
-                DesiredJobState::Present(Box::new(invalid)),
+                DesiredJobState::Present(Box::new(CronJob::from((
+                    "invalid".to_string(),
+                    RegisteredJobSpec::from(invalid),
+                )))),
             ),
         ]);
 

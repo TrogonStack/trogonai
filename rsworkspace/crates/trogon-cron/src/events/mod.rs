@@ -62,7 +62,8 @@ pub struct RegisteredJobSpec {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum JobEvent {
     JobRegistered { id: String, spec: RegisteredJobSpec },
-    JobStateChanged { id: String, state: JobEventState },
+    JobPaused { id: String },
+    JobResumed { id: String },
     JobRemoved { id: String },
 }
 
@@ -88,7 +89,8 @@ impl StreamEvent for JobEvent {
     fn stream_id(&self) -> &str {
         match self {
             Self::JobRegistered { id, .. } => id,
-            Self::JobStateChanged { id, .. } => id,
+            Self::JobPaused { id } => id,
+            Self::JobResumed { id } => id,
             Self::JobRemoved { id } => id,
         }
     }
@@ -98,7 +100,8 @@ impl EventType for JobEvent {
     fn event_type(&self) -> &'static str {
         match self {
             Self::JobRegistered { .. } => "job_registered",
-            Self::JobStateChanged { .. } => "job_state_changed",
+            Self::JobPaused { .. } => "job_paused",
+            Self::JobResumed { .. } => "job_resumed",
             Self::JobRemoved { .. } => "job_removed",
         }
     }

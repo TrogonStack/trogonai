@@ -3,11 +3,11 @@
 use std::collections::BTreeMap;
 
 use trogon_cron::{
-    ChangeJobStateCommand, CronController, DeliverySpec, GetJobCommand, JobEnabledState, JobId,
-    JobSpec, JobWriteCondition, ListJobsCommand, RegisterJobCommand, RemoveJobCommand,
-    SchedulePublisher, ScheduleSpec, change_job_state,
+    CronController, CronJob, DeliverySpec, GetJobCommand, JobEnabledState, JobEventState, JobId,
+    JobSpec, JobWriteCondition, ListJobsCommand, PauseJobCommand, RegisterJobCommand,
+    RegisteredJobSpec, RemoveJobCommand, SchedulePublisher, ScheduleSpec,
     mocks::{MockCronStore, MockLeaderLock, MockSchedulePublisher},
-    register_job, remove_job,
+    pause_job, register_job, remove_job,
 };
 
 fn job_id(id: &str) -> JobId {
@@ -25,6 +25,10 @@ fn base_job(id: &str) -> JobSpec {
     }
 }
 
+fn expected_job(id: &str) -> CronJob {
+    CronJob::from((id.to_string(), RegisteredJobSpec::from(base_job(id))))
+}
+
 #[tokio::test]
 async fn client_register_then_get() {
     let store = MockCronStore::new();
@@ -36,15 +40,15 @@ async fn client_register_then_get() {
 
     let got = store
         .get_job(GetJobCommand {
-            id: job_id("backup"),
+            id: "backup".to_string(),
         })
         .await
         .unwrap();
-    assert_eq!(got, Some(base_job("backup")));
+    assert_eq!(got, Some(expected_job("backup")));
 }
 
 #[tokio::test]
-async fn client_set_enabled_toggles_job() {
+async fn client_pause_job_toggles_job() {
     let store = MockCronStore::new();
 
     register_job(
@@ -55,23 +59,18 @@ async fn client_set_enabled_toggles_job() {
     )
     .await
     .unwrap();
-    change_job_state(
-        &store,
-        &store,
-        ChangeJobStateCommand::new(job_id("toggle"), JobEnabledState::Disabled),
-        None,
-    )
-    .await
-    .unwrap();
+    pause_job(&store, &store, PauseJobCommand::new(job_id("toggle")), None)
+        .await
+        .unwrap();
 
     let got = store
         .get_job(GetJobCommand {
-            id: job_id("toggle"),
+            id: "toggle".to_string(),
         })
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(got.state, JobEnabledState::Disabled);
+    assert_eq!(got.state, JobEventState::Disabled);
 }
 
 #[tokio::test]
@@ -104,7 +103,9 @@ async fn client_remove_and_list_jobs_use_store_paths() {
 
     assert!(
         store
-            .get_job(GetJobCommand { id: job_id("beta") })
+            .get_job(GetJobCommand {
+                id: "beta".to_string(),
+            })
             .await
             .unwrap()
             .is_none()
@@ -160,7 +161,7 @@ async fn client_rejects_stale_version() {
 #[tokio::test]
 async fn mock_schedule_publisher_records_changes() {
     let publisher = MockSchedulePublisher::new();
-    let resolved = trogon_cron::ResolvedJobSpec::try_from(&base_job("alpha")).unwrap();
+    let resolved = trogon_cron::ResolvedJobSpec::try_from(&expected_job("alpha")).unwrap();
 
     publisher.upsert_schedule(&resolved).await.unwrap();
     publisher.remove_schedule("alpha").await.unwrap();
