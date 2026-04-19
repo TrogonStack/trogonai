@@ -14,12 +14,13 @@ use trogon_eventsourcing::{
     Snapshot, SnapshotChange, StreamEvent, load_snapshot, load_snapshot_map,
     maybe_advance_checkpoint, persist_snapshot_change, read_checkpoint, write_checkpoint,
 };
+use trogon_nats::SubjectTokenViolation;
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream};
 
 use crate::{
-    JobId, JobIdError, JobSpec,
+    CronJob,
     error::CronError,
-    events::{JobEvent, JobEventCodec, JobEventData, RecordedJobEvent},
+    events::{JobEvent, JobEventCodec, JobEventData, JobEventState, RecordedJobEvent},
     kv::{EVENTS_SUBJECT_PREFIX, LEGACY_EVENTS_SUBJECT_PREFIX},
     store::{
         SNAPSHOT_STORE_CONFIG, open_cron_jobs_bucket, open_events_stream, open_snapshot_bucket,
@@ -28,17 +29,17 @@ use crate::{
 };
 
 pub type CronJobWatchStream = Pin<Box<dyn Stream<Item = CronJobChange> + Send + 'static>>;
-pub type LoadAndWatchCronJobsResult = Result<(Vec<JobSpec>, CronJobWatchStream), CronError>;
+pub type LoadAndWatchCronJobsResult = Result<(Vec<CronJob>, CronJobWatchStream), CronError>;
 
 #[derive(Debug, Clone)]
 pub enum CronJobChange {
-    Put(JobSpec),
+    Put(CronJob),
     Delete(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ProjectionChange {
-    Upsert(JobSpec),
+    Upsert(CronJob),
     Delete(String),
 }
 
@@ -46,19 +47,31 @@ pub enum ProjectionChange {
 #[derive(Debug, Clone, PartialEq)]
 pub enum JobStreamState {
     Initial,
-    Present(JobSpec),
-    Deleted(JobId),
+    Present(CronJob),
+    Deleted(String),
 }
 
 #[derive(Debug)]
 pub enum JobTransitionError {
-    InvalidEventId { id: String, source: JobIdError },
-    InvalidRegisteredJobSpec { id: JobId, source: CronError },
-    CannotRegisterExistingJob { id: JobId },
-    CannotRegisterDeletedJob { id: JobId },
-    MissingJobForStateChange { id: JobId },
-    DeletedJobForStateChange { id: JobId },
-    DeletedJobForRemoval { id: JobId },
+    InvalidEventId {
+        id: String,
+        source: SubjectTokenViolation,
+    },
+    CannotRegisterExistingJob {
+        id: String,
+    },
+    CannotRegisterDeletedJob {
+        id: String,
+    },
+    MissingJobForStateChange {
+        id: String,
+    },
+    DeletedJobForStateChange {
+        id: String,
+    },
+    DeletedJobForRemoval {
+        id: String,
+    },
 }
 
 pub const fn initial_state() -> JobStreamState {
@@ -68,17 +81,18 @@ pub const fn initial_state() -> JobStreamState {
 pub fn apply(state: JobStreamState, event: JobEvent) -> Result<JobStreamState, JobTransitionError> {
     match (state, event) {
         (JobStreamState::Initial, JobEvent::JobRegistered { id, spec }) => {
-            let job_id = JobId::parse(&id)
-                .map_err(|source| JobTransitionError::InvalidEventId { id, source })?;
-            let spec = spec.try_into_job_spec(job_id.clone()).map_err(|source| {
-                JobTransitionError::InvalidRegisteredJobSpec {
-                    id: job_id.clone(),
-                    source,
-                }
+            validate_event_job_id(&id).map_err(|source| JobTransitionError::InvalidEventId {
+                id: id.clone(),
+                source,
             })?;
-            Ok(JobStreamState::Present(spec))
+            Ok(JobStreamState::Present(CronJob::from((id, spec))))
         }
-        (JobStreamState::Initial, event @ JobEvent::JobStateChanged { .. }) => {
+        (JobStreamState::Initial, event @ JobEvent::JobPaused { .. }) => {
+            Err(JobTransitionError::MissingJobForStateChange {
+                id: parse_event_job_id(&event)?,
+            })
+        }
+        (JobStreamState::Initial, event @ JobEvent::JobResumed { .. }) => {
             Err(JobTransitionError::MissingJobForStateChange {
                 id: parse_event_job_id(&event)?,
             })
@@ -86,22 +100,27 @@ pub fn apply(state: JobStreamState, event: JobEvent) -> Result<JobStreamState, J
         (JobStreamState::Initial, event @ JobEvent::JobRemoved { .. }) => {
             Ok(JobStreamState::Deleted(parse_event_job_id(&event)?))
         }
-        (JobStreamState::Present(spec), JobEvent::JobRegistered { .. }) => {
-            Err(JobTransitionError::CannotRegisterExistingJob {
-                id: spec.id.clone(),
-            })
+        (JobStreamState::Present(job), JobEvent::JobRegistered { .. }) => {
+            Err(JobTransitionError::CannotRegisterExistingJob { id: job.id })
         }
-        (JobStreamState::Present(mut spec), JobEvent::JobStateChanged { state, .. }) => {
-            spec.state = state.into();
-            Ok(JobStreamState::Present(spec))
+        (JobStreamState::Present(mut job), JobEvent::JobPaused { .. }) => {
+            job.state = JobEventState::Disabled;
+            Ok(JobStreamState::Present(job))
         }
-        (JobStreamState::Present(spec), JobEvent::JobRemoved { .. }) => {
-            Ok(JobStreamState::Deleted(spec.id))
+        (JobStreamState::Present(mut job), JobEvent::JobResumed { .. }) => {
+            job.state = JobEventState::Enabled;
+            Ok(JobStreamState::Present(job))
+        }
+        (JobStreamState::Present(job), JobEvent::JobRemoved { .. }) => {
+            Ok(JobStreamState::Deleted(job.id))
         }
         (JobStreamState::Deleted(id), JobEvent::JobRegistered { .. }) => {
             Err(JobTransitionError::CannotRegisterDeletedJob { id })
         }
-        (JobStreamState::Deleted(id), JobEvent::JobStateChanged { .. }) => {
+        (JobStreamState::Deleted(id), JobEvent::JobPaused { .. }) => {
+            Err(JobTransitionError::DeletedJobForStateChange { id })
+        }
+        (JobStreamState::Deleted(id), JobEvent::JobResumed { .. }) => {
             Err(JobTransitionError::DeletedJobForStateChange { id })
         }
         (JobStreamState::Deleted(id), JobEvent::JobRemoved { .. }) => {
@@ -127,32 +146,28 @@ pub fn projection_change(
 }
 
 impl JobStreamState {
-    pub fn into_spec(self) -> Option<JobSpec> {
+    pub fn into_job(self) -> Option<CronJob> {
         match self {
             Self::Initial => None,
             Self::Deleted(_) => None,
-            Self::Present(spec) => Some(spec),
+            Self::Present(job) => Some(job),
         }
     }
 
-    pub fn into_snapshot(self, version: u64) -> Option<Snapshot<JobSpec>> {
-        self.into_spec().map(|spec| Snapshot::new(version, spec))
+    pub fn into_snapshot(self, version: u64) -> Option<Snapshot<CronJob>> {
+        self.into_job().map(|job| Snapshot::new(version, job))
     }
 }
 
-impl TryFrom<JobSpec> for JobStreamState {
-    type Error = JobIdError;
-
-    fn try_from(spec: JobSpec) -> Result<Self, Self::Error> {
-        Ok(Self::Present(spec))
+impl From<CronJob> for JobStreamState {
+    fn from(job: CronJob) -> Self {
+        Self::Present(job)
     }
 }
 
-impl TryFrom<Snapshot<JobSpec>> for JobStreamState {
-    type Error = JobIdError;
-
-    fn try_from(value: Snapshot<JobSpec>) -> Result<Self, Self::Error> {
-        Self::try_from(value.payload)
+impl From<Snapshot<CronJob>> for JobStreamState {
+    fn from(value: Snapshot<CronJob>) -> Self {
+        Self::Present(value.payload)
     }
 }
 
@@ -160,9 +175,6 @@ impl std::fmt::Display for JobTransitionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InvalidEventId { id, .. } => write!(f, "job event id '{id}' is invalid"),
-            Self::InvalidRegisteredJobSpec { id, .. } => {
-                write!(f, "job '{id}' registration event contains an invalid spec")
-            }
             Self::CannotRegisterExistingJob { id } => {
                 write!(f, "job '{id}' is already registered")
             }
@@ -185,8 +197,7 @@ impl std::fmt::Display for JobTransitionError {
 impl std::error::Error for JobTransitionError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::InvalidEventId { source, .. } => Some(source),
-            Self::InvalidRegisteredJobSpec { source, .. } => Some(source),
+            Self::InvalidEventId { .. } => None,
             _ => None,
         }
     }
@@ -364,12 +375,7 @@ where
     let mut snapshots = load_snapshot_map(&bucket, SNAPSHOT_STORE_CONFIG)
         .await
         .map_err(CronError::from)?;
-    let mut states = snapshot_state_map(&snapshots).map_err(|source| {
-        CronError::event_source(
-            "failed to decode job snapshots into stream state during snapshot catch-up",
-            source,
-        )
-    })?;
+    let mut states = snapshot_state_map(&snapshots);
     let start = checkpoint.max(info.state.first_sequence.saturating_sub(1)) + 1;
 
     for sequence in start..=info.state.last_sequence {
@@ -415,11 +421,11 @@ where
     if events.is_empty() {
         return Ok(());
     }
-    let stream_id = JobId::parse(job_id).map_err(|source| {
-        CronError::event_source(
-            "failed to parse job stream id for snapshot projection",
+    validate_event_job_id(job_id).map_err(|source| {
+        CronError::invalid_job_spec(crate::JobSpecError::InvalidId {
+            id: job_id.to_string(),
             source,
-        )
+        })
     })?;
 
     let bucket = open_snapshot_bucket(js).await?;
@@ -429,15 +435,7 @@ where
         .await
         .map_err(CronError::from)?
     {
-        states.insert(
-            job_id.to_string(),
-            JobStreamState::try_from(snapshot.clone()).map_err(|source| {
-                CronError::event_source(
-                    "failed to decode job snapshot into stream state for projection",
-                    source,
-                )
-            })?,
-        );
+        states.insert(job_id.to_string(), JobStreamState::from(snapshot.clone()));
         snapshots.insert(job_id.to_string(), snapshot);
     }
 
@@ -464,7 +462,7 @@ where
         let change = apply_event_to_snapshot_map(
             &mut states,
             &mut snapshots,
-            &stream_id,
+            job_id,
             &decoded,
             start_version + index as u64,
         )?;
@@ -477,14 +475,16 @@ where
         .map_err(CronError::from)
 }
 
-fn parse_event_job_id(event: &JobEvent) -> Result<JobId, JobTransitionError> {
+fn parse_event_job_id(event: &JobEvent) -> Result<String, JobTransitionError> {
     let id = event.stream_id().to_string();
-    JobId::parse(&id).map_err(|source| JobTransitionError::InvalidEventId { id, source })
+    validate_event_job_id(&id)
+        .map(|()| id.clone())
+        .map_err(|source| JobTransitionError::InvalidEventId { id, source })
 }
 
 async fn rewrite_cron_jobs_projection<J>(
     js: &J,
-    jobs: &[Snapshot<JobSpec>],
+    jobs: &[Snapshot<CronJob>],
 ) -> Result<(), CronError>
 where
     J: JetStreamGetKeyValue<Store = kv::Store>,
@@ -517,7 +517,7 @@ async fn rebuild_jobs_from_stream(
     stream: &jetstream::stream::Stream,
     first_sequence: u64,
     last_sequence: u64,
-) -> Result<Vec<Snapshot<JobSpec>>, CronError> {
+) -> Result<Vec<Snapshot<CronJob>>, CronError> {
     let mut snapshots = BTreeMap::new();
     let mut states = BTreeMap::new();
     if last_sequence == 0 || first_sequence == 0 || first_sequence > last_sequence {
@@ -658,16 +658,13 @@ fn change_from_projection_change(change: ProjectionChange) -> CronJobChange {
 
 fn apply_event_to_snapshot_map(
     states: &mut BTreeMap<String, JobStreamState>,
-    snapshots: &mut BTreeMap<String, Snapshot<JobSpec>>,
-    stream_id: &JobId,
+    snapshots: &mut BTreeMap<String, Snapshot<CronJob>>,
+    stream_id: &str,
     event: &JobEvent,
     version: u64,
-) -> Result<SnapshotChange<JobSpec>, CronError> {
+) -> Result<SnapshotChange<CronJob>, CronError> {
     ensure_event_matches_stream(stream_id, event)?;
-    let current_state = states
-        .get(stream_id.as_str())
-        .cloned()
-        .unwrap_or_else(initial_state);
+    let current_state = states.get(stream_id).cloned().unwrap_or_else(initial_state);
     let next_state = apply(current_state, event.clone()).map_err(|source| {
         CronError::event_source("failed to apply job event to stream snapshot state", source)
     })?;
@@ -675,30 +672,28 @@ fn apply_event_to_snapshot_map(
     states.insert(stream_id.to_string(), next_state.clone());
 
     match next_state {
-        JobStreamState::Present(spec) => {
-            let snapshot = Snapshot::new(version, spec);
+        JobStreamState::Present(job) => {
+            let snapshot = Snapshot::new(version, job);
             snapshots.insert(stream_id.to_string(), snapshot.clone());
             Ok(SnapshotChange::upsert(stream_id.to_string(), snapshot))
         }
         JobStreamState::Initial | JobStreamState::Deleted(_) => {
-            snapshots.remove(stream_id.as_str());
+            snapshots.remove(stream_id);
             Ok(SnapshotChange::delete(stream_id.to_string()))
         }
     }
 }
 
 fn snapshot_state_map(
-    snapshots: &BTreeMap<String, Snapshot<JobSpec>>,
-) -> Result<BTreeMap<String, JobStreamState>, JobIdError> {
+    snapshots: &BTreeMap<String, Snapshot<CronJob>>,
+) -> BTreeMap<String, JobStreamState> {
     snapshots
         .iter()
-        .map(|(stream_id, snapshot)| {
-            JobStreamState::try_from(snapshot.clone()).map(|state| (stream_id.clone(), state))
-        })
+        .map(|(stream_id, snapshot)| (stream_id.clone(), JobStreamState::from(snapshot.clone())))
         .collect()
 }
 
-fn job_id_from_event_subject(subject: &str) -> Result<JobId, CronError> {
+fn job_id_from_event_subject(subject: &str) -> Result<String, CronError> {
     let raw_id = subject
         .strip_prefix(EVENTS_SUBJECT_PREFIX)
         .or_else(|| subject.strip_prefix(LEGACY_EVENTS_SUBJECT_PREFIX))
@@ -709,16 +704,21 @@ fn job_id_from_event_subject(subject: &str) -> Result<JobId, CronError> {
             )
         })?;
 
-    JobId::parse(raw_id).map_err(|source| {
-        CronError::event_source("failed to parse job stream id from event subject", source)
-    })
+    validate_event_job_id(raw_id)
+        .map(|()| raw_id.to_string())
+        .map_err(|source| {
+            CronError::invalid_job_spec(crate::JobSpecError::InvalidId {
+                id: raw_id.to_string(),
+                source,
+            })
+        })
 }
 
 fn ensure_event_matches_stream(
-    expected_stream_id: &JobId,
+    expected_stream_id: &str,
     event: &JobEvent,
 ) -> Result<(), CronError> {
-    if event.stream_id() == expected_stream_id.as_str() {
+    if event.stream_id() == expected_stream_id {
         Ok(())
     } else {
         Err(CronError::event_source(
@@ -732,13 +732,18 @@ fn ensure_event_matches_stream(
     }
 }
 
+fn validate_event_job_id(id: &str) -> Result<(), SubjectTokenViolation> {
+    trogon_nats::NatsToken::new(id).map(|_| ())
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
     use crate::{
-        DeliverySpec, JobEnabledState, JobEventState, JobId, RegisteredJobSpec, ScheduleSpec,
+        CronJob, DeliverySpec, JobEnabledState, JobEventState, JobId, JobSpec, RegisteredJobSpec,
+        ScheduleSpec,
     };
 
     fn job_id(id: &str) -> JobId {
@@ -756,6 +761,10 @@ mod tests {
         }
     }
 
+    fn expected_job(id: &str) -> CronJob {
+        CronJob::from((id.to_string(), RegisteredJobSpec::from(job(id))))
+    }
+
     #[test]
     fn event_projection_replays_latest_state() {
         let events = [
@@ -763,9 +772,8 @@ mod tests {
                 id: "backup".to_string(),
                 spec: job("backup").into(),
             },
-            JobEvent::JobStateChanged {
+            JobEvent::JobPaused {
                 id: "backup".to_string(),
-                state: JobEventState::Disabled,
             },
             JobEvent::JobRemoved {
                 id: "backup".to_string(),
@@ -777,13 +785,13 @@ mod tests {
             state = apply(state, event).unwrap();
         }
 
-        assert_eq!(state, JobStreamState::Deleted(job_id("backup")));
+        assert_eq!(state, JobStreamState::Deleted("backup".to_string()));
     }
 
     #[test]
     fn event_projection_rejects_recreating_deleted_job() {
         let error = apply(
-            JobStreamState::Deleted(job_id("backup")),
+            JobStreamState::Deleted("backup".to_string()),
             JobEvent::JobRegistered {
                 id: "backup".to_string(),
                 spec: job("backup").into(),
@@ -801,9 +809,8 @@ mod tests {
     fn state_change_requires_existing_job() {
         let error = apply(
             initial_state(),
-            JobEvent::JobStateChanged {
+            JobEvent::JobPaused {
                 id: "missing".to_string(),
-                state: JobEventState::Disabled,
             },
         )
         .unwrap_err();
@@ -827,19 +834,18 @@ mod tests {
         .unwrap();
         assert_eq!(
             projection_change(&before, &after),
-            Some(ProjectionChange::Upsert(job("backup")))
+            Some(ProjectionChange::Upsert(expected_job("backup")))
         );
 
         let updated = apply(
             after.clone(),
-            JobEvent::JobStateChanged {
+            JobEvent::JobPaused {
                 id: "backup".to_string(),
-                state: JobEventState::Disabled,
             },
         )
         .unwrap();
         match projection_change(&after, &updated).unwrap() {
-            ProjectionChange::Upsert(job) => assert_eq!(job.state, JobEnabledState::Disabled),
+            ProjectionChange::Upsert(job) => assert_eq!(job.state, JobEventState::Disabled),
             ProjectionChange::Delete(_) => panic!("expected upsert change"),
         }
     }
@@ -847,7 +853,7 @@ mod tests {
     #[test]
     fn initial_state_rejects_registering_existing_job() {
         let error = apply(
-            JobStreamState::Present(job("backup")),
+            JobStreamState::Present(expected_job("backup")),
             JobEvent::JobRegistered {
                 id: "backup".to_string(),
                 spec: job("backup").into(),
@@ -869,12 +875,12 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(state, JobStreamState::Deleted(job_id("backup")));
+        assert_eq!(state, JobStreamState::Deleted("backup".to_string()));
     }
 
     #[test]
     fn reducer_rejects_stream_id_mismatch() {
-        let stream_id = JobId::parse("alpha").unwrap();
+        let stream_id = "alpha".to_string();
         let error = ensure_event_matches_stream(
             &stream_id,
             &JobEvent::JobRemoved {
@@ -911,7 +917,7 @@ mod tests {
     fn snapshot_projection_rejects_recreating_deleted_job() {
         let mut states = BTreeMap::new();
         let mut snapshots = BTreeMap::new();
-        let stream_id = JobId::parse("alpha").unwrap();
+        let stream_id = "alpha".to_string();
 
         apply_event_to_snapshot_map(
             &mut states,
@@ -928,9 +934,8 @@ mod tests {
             &mut states,
             &mut snapshots,
             &stream_id,
-            &JobEvent::JobStateChanged {
+            &JobEvent::JobPaused {
                 id: "alpha".to_string(),
-                state: JobEventState::Disabled,
             },
             2,
         )
@@ -967,14 +972,13 @@ mod tests {
 
     #[test]
     fn snapshot_projection_rejects_invalid_transition_sequence() {
-        let stream_id = JobId::parse("alpha").unwrap();
+        let stream_id = "alpha".to_string();
         let error = apply_event_to_snapshot_map(
             &mut BTreeMap::new(),
             &mut BTreeMap::new(),
             &stream_id,
-            &JobEvent::JobStateChanged {
+            &JobEvent::JobPaused {
                 id: "alpha".to_string(),
-                state: JobEventState::Disabled,
             },
             1,
         )

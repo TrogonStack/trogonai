@@ -8,7 +8,7 @@ use trogon_eventsourcing::{
 };
 
 use crate::{
-    JobId, JobSpec, ResolvedJobSpec,
+    CronJob, JobId, JobSpec, ResolvedJobSpec,
     error::CronError,
     events::{JobEvent, JobEventCodec, RegisteredJobSpec},
 };
@@ -16,7 +16,7 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct RegisterJobCommand {
     id: JobId,
-    job: ResolvedJobSpec,
+    spec: JobSpec,
 }
 
 pub(crate) const SNAPSHOT_STORE_CONFIG: SnapshotStoreConfig<'static> =
@@ -50,14 +50,19 @@ impl std::error::Error for RegisterJobDecisionError {}
 
 impl RegisterJobCommand {
     pub fn new(spec: JobSpec) -> Result<Self, CronError> {
+        ResolvedJobSpec::try_from(&CronJob::from((
+            spec.id.to_string(),
+            RegisteredJobSpec::from(&spec),
+        )))?;
+
         Ok(Self {
             id: spec.id.clone(),
-            job: ResolvedJobSpec::try_from(&spec)?,
+            spec,
         })
     }
 
-    pub fn job(&self) -> &ResolvedJobSpec {
-        &self.job
+    pub fn spec(&self) -> &JobSpec {
+        &self.spec
     }
 }
 
@@ -81,7 +86,7 @@ impl Decide<RegisterJobState, JobEvent> for RegisterJobCommand {
             RegisterJobState::Missing => {
                 Ok(Decision::Event(NonEmpty::one(JobEvent::JobRegistered {
                     id: command.stream_id().to_string(),
-                    spec: RegisteredJobSpec::from(command.job().spec()),
+                    spec: RegisteredJobSpec::from(command.spec()),
                 })))
             }
             RegisterJobState::Present => Err(RegisterJobDecisionError::AlreadyRegistered {
@@ -105,7 +110,9 @@ impl CommandState for RegisterJobCommand {
 
     fn evolve(state: Self::State, event: JobEvent) -> Result<Self::State, Self::DomainError> {
         match event {
-            JobEvent::JobRegistered { .. } | JobEvent::JobStateChanged { .. } => match state {
+            JobEvent::JobRegistered { .. }
+            | JobEvent::JobPaused { .. }
+            | JobEvent::JobResumed { .. } => match state {
                 RegisterJobState::Deleted => Ok(RegisterJobState::Deleted),
                 RegisterJobState::Missing | RegisterJobState::Present => {
                     Ok(RegisterJobState::Present)
@@ -148,7 +155,9 @@ mod tests {
     };
 
     use super::*;
-    use crate::{DeliverySpec, GetJobCommand, JobEnabledState, ScheduleSpec, mocks::MockCronStore};
+    use crate::{
+        CronJob, DeliverySpec, GetJobCommand, JobEnabledState, ScheduleSpec, mocks::MockCronStore,
+    };
 
     fn job_id(id: &str) -> JobId {
         JobId::parse(id).unwrap()
@@ -163,6 +172,10 @@ mod tests {
             payload: serde_json::json!({"kind": "heartbeat"}),
             metadata: BTreeMap::new(),
         }
+    }
+
+    fn expected_job(id: &str) -> CronJob {
+        CronJob::from((id.to_string(), RegisteredJobSpec::from(job(id))))
     }
 
     #[test]
@@ -256,12 +269,12 @@ mod tests {
 
         let stored_job = store
             .get_job(GetJobCommand {
-                id: JobId::parse("backup").unwrap(),
+                id: "backup".to_string(),
             })
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(stored_job, job("backup"));
+        assert_eq!(stored_job, expected_job("backup"));
 
         let command_snapshot = store
             .read_command_snapshot::<RegisterJobState>(

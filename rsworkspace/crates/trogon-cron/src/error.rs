@@ -1,7 +1,5 @@
 use trogon_eventsourcing::StreamState;
 
-use crate::JobEnabledState;
-
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 #[derive(Debug)]
@@ -27,10 +25,6 @@ pub enum CronError {
     },
     JobNotFound {
         id: String,
-    },
-    JobStateAlreadySet {
-        id: String,
-        state: JobEnabledState,
     },
     OptimisticConcurrencyConflict {
         id: String,
@@ -90,9 +84,6 @@ impl std::fmt::Display for CronError {
                 write!(f, "Job '{id}' is already registered")
             }
             Self::JobNotFound { id } => write!(f, "Job '{id}' not found"),
-            Self::JobStateAlreadySet { id, state } => {
-                write!(f, "Job '{id}' is already {}", state.as_str())
-            }
             Self::OptimisticConcurrencyConflict {
                 id,
                 expected,
@@ -124,7 +115,6 @@ impl std::error::Error for CronError {
             Self::InvalidJobSpec { source } => Some(source),
             Self::JobAlreadyRegistered { .. }
             | Self::JobNotFound { .. }
-            | Self::JobStateAlreadySet { .. }
             | Self::OptimisticConcurrencyConflict { .. } => None,
         }
     }
@@ -298,13 +288,6 @@ mod tests {
         };
         assert_eq!(not_found.to_string(), "Job 'missing' not found");
         assert!(std::error::Error::source(&not_found).is_none());
-
-        let already_set = CronError::JobStateAlreadySet {
-            id: "job-1".to_string(),
-            state: JobEnabledState::Enabled,
-        };
-        assert_eq!(already_set.to_string(), "Job 'job-1' is already enabled");
-        assert!(std::error::Error::source(&already_set).is_none());
 
         let occ_missing = CronError::OptimisticConcurrencyConflict {
             id: "job-1".to_string(),
