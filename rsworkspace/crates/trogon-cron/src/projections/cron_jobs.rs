@@ -32,7 +32,7 @@ pub type CronJobWatchStream = Pin<Box<dyn Stream<Item = CronJobChange> + Send + 
 pub type LoadAndWatchCronJobsResult = Result<(Vec<CronJob>, CronJobWatchStream), CronError>;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) struct CronJobSnapshotProjector;
+pub struct CronJobSnapshotProjector;
 
 impl AppendProjector<JobId> for CronJobSnapshotProjector {
     type Error = CronError;
