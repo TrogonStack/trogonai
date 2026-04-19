@@ -264,6 +264,7 @@ impl From<JetStreamStoreError<CronError>> for CronError {
                 Self::event_source("failed to append job event batch", source)
             }
             JetStreamStoreError::Snapshot(source) => Self::from(source),
+            JetStreamStoreError::Codec(source) => Self::Serde(source),
             JetStreamStoreError::OptimisticConcurrencyConflict {
                 stream_id,
                 expected,

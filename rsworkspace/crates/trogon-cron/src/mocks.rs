@@ -510,14 +510,9 @@ mod tests {
             .unwrap();
         assert_eq!(seeded, expected_job("seeded"));
 
-        add_job(
-            &store,
-            &store,
-            AddJobCommand::new(base_job("alpha")).unwrap(),
-            None,
-        )
-        .await
-        .unwrap();
+        add_job(&store, AddJobCommand::new(base_job("alpha")).unwrap(), None)
+            .await
+            .unwrap();
         let alpha = store
             .get_job(GetJobCommand {
                 id: "alpha".to_string(),
@@ -527,7 +522,7 @@ mod tests {
             .unwrap();
         assert_eq!(alpha, expected_job("alpha"));
 
-        pause_job(&store, &store, PauseJobCommand::new(job_id("alpha")), None)
+        pause_job(&store, PauseJobCommand::new(job_id("alpha")), None)
             .await
             .unwrap();
         assert_eq!(
@@ -553,7 +548,7 @@ mod tests {
                 .is_err()
         );
 
-        remove_job(&store, &store, RemoveJobCommand::new(job_id("alpha")), None)
+        remove_job(&store, RemoveJobCommand::new(job_id("alpha")), None)
             .await
             .unwrap();
         assert!(
@@ -566,14 +561,9 @@ mod tests {
                 .is_none()
         );
 
-        let deleted_error = add_job(
-            &store,
-            &store,
-            AddJobCommand::new(base_job("alpha")).unwrap(),
-            None,
-        )
-        .await
-        .unwrap_err();
+        let deleted_error = add_job(&store, AddJobCommand::new(base_job("alpha")).unwrap(), None)
+            .await
+            .unwrap_err();
         assert!(matches!(
             deleted_error,
             CommandFailure::Domain(crate::AddJobDecisionError::JobDeleted { .. })
@@ -596,18 +586,12 @@ mod tests {
         .unwrap_err();
         assert!(invalid_error.to_string().contains("sampling source"));
 
-        add_job(
-            &store,
-            &store,
-            AddJobCommand::new(base_job("alpha")).unwrap(),
-            None,
-        )
-        .await
-        .unwrap();
-        let same_state_error =
-            resume_job(&store, &store, ResumeJobCommand::new(job_id("alpha")), None)
-                .await
-                .unwrap_err();
+        add_job(&store, AddJobCommand::new(base_job("alpha")).unwrap(), None)
+            .await
+            .unwrap();
+        let same_state_error = resume_job(&store, ResumeJobCommand::new(job_id("alpha")), None)
+            .await
+            .unwrap_err();
         assert!(matches!(
             same_state_error,
             CommandFailure::Domain(crate::ResumeJobError::Decision(
@@ -615,14 +599,9 @@ mod tests {
             ))
         ));
 
-        let missing_error = pause_job(
-            &store,
-            &store,
-            PauseJobCommand::new(job_id("missing")),
-            None,
-        )
-        .await
-        .unwrap_err();
+        let missing_error = pause_job(&store, PauseJobCommand::new(job_id("missing")), None)
+            .await
+            .unwrap_err();
         assert!(matches!(
             missing_error,
             CommandFailure::Domain(crate::PauseJobError::Decision(

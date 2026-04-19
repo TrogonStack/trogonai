@@ -2,11 +2,8 @@
 
 use async_nats::jetstream::{self, context, kv};
 use serde::{Serialize, de::DeserializeOwned};
-use trogon_eventsourcing::jetstream::JetStreamStore;
-use trogon_eventsourcing::{
-    AppendOutcome, NonEmpty, Snapshot, SnapshotStore, SnapshotStoreConfig, StreamAppend,
-    StreamRead, StreamReadResult, StreamState,
-};
+use trogon_eventsourcing::jetstream::{JetStreamStore, JetStreamStoreError};
+use trogon_eventsourcing::{SnapshotStore, StreamAppend, StreamRead};
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream, JetStreamPublishMessage};
 
 use crate::{
@@ -33,6 +30,20 @@ pub struct Store {
 impl Store {
     pub fn as_jetstream(&self) -> &jetstream::Context {
         self.event_store.as_jetstream()
+    }
+
+    pub fn command_runtime<Payload>(
+        &self,
+    ) -> &(
+         impl StreamRead<JobId, Error = JetStreamStoreError<CronError>>
+         + StreamAppend<JobId, Error = JetStreamStoreError<CronError>>
+         + SnapshotStore<Payload, JobId, Error = JetStreamStoreError<CronError>>
+         + '_
+     )
+    where
+        Payload: Serialize + DeserializeOwned + Send,
+    {
+        &self.event_store
     }
 
     pub(crate) fn cron_jobs_bucket_ref(&self) -> &kv::Store {
@@ -80,67 +91,6 @@ impl JetStreamPublishMessage for Store {
         message: async_nats::jetstream::message::OutboundMessage,
     ) -> impl std::future::Future<Output = Result<Self::AckFuture, Self::PublishError>> + Send {
         self.as_jetstream().publish_message(message)
-    }
-}
-
-impl StreamRead<JobId> for Store {
-    type Error = CronError;
-
-    async fn read_stream_from(
-        &self,
-        stream_id: &JobId,
-        from_sequence: u64,
-    ) -> Result<StreamReadResult, Self::Error> {
-        self.event_store
-            .read_events_from(stream_id, from_sequence)
-            .await
-            .map_err(CronError::from)
-    }
-}
-
-impl StreamAppend<JobId> for Store {
-    type Error = CronError;
-
-    async fn append_events(
-        &self,
-        stream_id: &JobId,
-        expected_state: StreamState,
-        events: NonEmpty<trogon_eventsourcing::EventData>,
-    ) -> Result<AppendOutcome, Self::Error> {
-        self.event_store
-            .append_to_stream(stream_id, expected_state, events)
-            .await
-            .map_err(CronError::from)
-    }
-}
-
-impl<Payload> SnapshotStore<Payload, JobId> for Store
-where
-    Payload: Serialize + DeserializeOwned + Send,
-{
-    type Error = CronError;
-
-    async fn load_snapshot(
-        &self,
-        config: SnapshotStoreConfig<'static>,
-        stream_id: &JobId,
-    ) -> Result<Option<Snapshot<Payload>>, Self::Error> {
-        self.event_store
-            .load_snapshot_entry(config, stream_id)
-            .await
-            .map_err(CronError::from)
-    }
-
-    async fn save_snapshot(
-        &self,
-        config: SnapshotStoreConfig<'static>,
-        stream_id: &JobId,
-        snapshot: Snapshot<Payload>,
-    ) -> Result<(), Self::Error> {
-        self.event_store
-            .save_snapshot_entry(config, stream_id, snapshot)
-            .await
-            .map_err(CronError::from)
     }
 }
 
