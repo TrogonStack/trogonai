@@ -126,8 +126,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
     use trogon_eventsourcing::{
         Decision, NonEmpty, Snapshot, decide,
         testing::{TestCase, decider, expect_error},
@@ -135,7 +133,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        DeliverySpec, GetJobCommand, JobEnabledState, JobSpec, ScheduleSpec, mocks::MockCronStore,
+        DeliverySpec, GetJobCommand, JobEnabledState, JobSpec, MessageContent, MessageHeaders,
+        ScheduleSpec, mocks::MockCronStore,
     };
 
     fn job_id(id: &str) -> JobId {
@@ -148,8 +147,8 @@ mod tests {
             state: JobEnabledState::Enabled,
             schedule: ScheduleSpec::Every { every_sec: 30 },
             delivery: DeliverySpec::nats_event("agent.run").unwrap(),
-            payload: serde_json::json!({"kind": "heartbeat"}),
-            metadata: BTreeMap::new(),
+            content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
+            headers: MessageHeaders::default(),
         }
     }
 

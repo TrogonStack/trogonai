@@ -194,8 +194,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        AddJobCommand, DeliverySpec, GetJobCommand, JobEventState, JobSpec, PauseJobCommand,
-        ScheduleSpec, mocks::MockCronStore,
+        AddJobCommand, DeliverySpec, GetJobCommand, JobEventState, JobSpec, MessageContent,
+        MessageHeaders, PauseJobCommand, ScheduleSpec, mocks::MockCronStore,
     };
 
     fn job_id(id: &str) -> JobId {
@@ -208,8 +208,8 @@ mod tests {
             state: JobEnabledState::Enabled,
             schedule: ScheduleSpec::Every { every_sec: 30 },
             delivery: DeliverySpec::nats_event("agent.run").unwrap(),
-            payload: serde_json::json!({"kind": "heartbeat"}),
-            metadata: std::collections::BTreeMap::new(),
+            content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
+            headers: MessageHeaders::default(),
         }
     }
 

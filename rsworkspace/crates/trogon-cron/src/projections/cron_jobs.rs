@@ -738,12 +738,10 @@ fn validate_event_job_id(id: &str) -> Result<(), SubjectTokenViolation> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
     use super::*;
     use crate::{
-        CronJob, DeliverySpec, JobEnabledState, JobEventState, JobId, JobSpec, RegisteredJobSpec,
-        ScheduleSpec,
+        CronJob, DeliverySpec, JobEnabledState, JobEventState, JobId, JobSpec, MessageContent,
+        MessageHeaders, RegisteredJobSpec, ScheduleSpec,
     };
 
     fn job_id(id: &str) -> JobId {
@@ -756,8 +754,8 @@ mod tests {
             state: JobEnabledState::Enabled,
             schedule: ScheduleSpec::Every { every_sec: 30 },
             delivery: DeliverySpec::nats_event("agent.run").unwrap(),
-            payload: serde_json::json!({"kind": "heartbeat"}),
-            metadata: BTreeMap::new(),
+            content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
+            headers: MessageHeaders::default(),
         }
     }
 

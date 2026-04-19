@@ -3,6 +3,6 @@ mod job_spec;
 
 pub use job_id::{JobId, JobIdError};
 pub use job_spec::{
-    DeliveryHeaders, DeliveryRoute, DeliverySpec, JobEnabledState, JobSpec, SamplingSource,
-    SamplingSubject, ScheduleSpec, TtlSeconds,
+    DeliveryRoute, DeliverySpec, JobEnabledState, JobSpec, SamplingSource, SamplingSubject,
+    ScheduleSpec, TtlSeconds,
 };
