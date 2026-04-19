@@ -11,7 +11,6 @@ use chrono::{DateTime, Utc};
 use futures::{Stream, StreamExt};
 use trogon_eventsourcing::StreamEvent;
 use trogon_nats::SubjectTokenViolation;
-use trogon_nats::jetstream::JetStreamGetStream;
 use trogon_nats::lease::{
     LeaderElection, LeaseRenewInterval, LeaseTiming, LeaseTtl, NatsKvLease, NatsKvLeaseConfig,
 };
@@ -23,7 +22,7 @@ use crate::{
     events::{JobEvent, JobEventCodec, JobEventData, JobEventState, RecordedJobEvent},
     kv::{EVENTS_SUBJECT_PREFIX, LEADER_BUCKET, LEADER_KEY, LEGACY_EVENTS_SUBJECT_PREFIX},
     nats::NatsSchedulePublisher,
-    store::{Store, connect_store, open_events_stream},
+    store::{Store, connect_store},
     traits::{LeaderLock, SchedulePublisher},
 };
 
@@ -111,9 +110,8 @@ impl<C, P, L> CronController<C, P, L> {
     }
 }
 
-impl<C, P, L> CronController<C, P, L>
+impl<P, L> CronController<Store, P, L>
 where
-    C: JetStreamGetStream<Stream = jetstream::stream::Stream>,
     P: SchedulePublisher<Error = CronError>,
     L: LeaderLock,
 {
@@ -239,15 +237,14 @@ fn default_leader_timing() -> Result<LeaseTiming, CronError> {
         .map_err(|source| CronError::lease_source("invalid default leader timing", source))
 }
 
-async fn establish_scheduler_processor<C, P>(
-    store: &C,
+async fn establish_scheduler_processor<P>(
+    store: &Store,
     publisher: &P,
 ) -> Result<(DesiredJobs, SchedulerEventWatcher), CronError>
 where
-    C: JetStreamGetStream<Stream = jetstream::stream::Stream>,
     P: SchedulePublisher<Error = CronError>,
 {
-    let stream = open_events_stream(store).await?;
+    let stream = store.event_store.events_stream().clone();
     let info = stream
         .get_info()
         .await
@@ -267,12 +264,11 @@ where
     Ok((desired_jobs, watcher))
 }
 
-async fn reestablish_scheduler_processor<C, P>(
-    store: &C,
+async fn reestablish_scheduler_processor<P>(
+    store: &Store,
     publisher: &P,
 ) -> Result<ReestablishedProcessor, CronError>
 where
-    C: JetStreamGetStream<Stream = jetstream::stream::Stream>,
     P: SchedulePublisher<Error = CronError>,
 {
     loop {

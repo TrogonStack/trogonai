@@ -8,13 +8,7 @@ use trogon_eventsourcing::SnapshotStoreConfig;
 
 use crate::kv::{CRON_JOBS_SNAPSHOT_KEY_PREFIX, CRON_JOBS_SNAPSHOT_LAST_EVENT_SEQUENCE_KEY};
 
-pub trait GetCronJobsBucket {
-    type Store;
-
-    fn cron_jobs_bucket(&self) -> &Self::Store;
-}
-
-pub use connect::{Store, connect_store};
+pub use connect::{EventStore, Store, connect_store};
 pub(crate) use cron_jobs_bucket::run as open_cron_jobs_bucket;
 pub(crate) use events_stream::run as open_events_stream;
 pub use snapshot_bucket::run as open_snapshot_bucket;
