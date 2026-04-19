@@ -91,7 +91,9 @@ impl CommandState for RemoveJobCommand {
 
     fn evolve(state: Self::State, event: JobEvent) -> Result<Self::State, Self::DomainError> {
         match event {
-            JobEvent::JobRegistered { .. } | JobEvent::JobStateChanged { .. } => match state {
+            JobEvent::JobRegistered { .. }
+            | JobEvent::JobPaused { .. }
+            | JobEvent::JobResumed { .. } => match state {
                 RemoveJobState::Deleted => Ok(RemoveJobState::Deleted),
                 RemoveJobState::Missing | RemoveJobState::Present => Ok(RemoveJobState::Present),
             },
@@ -234,7 +236,7 @@ mod tests {
         assert!(
             store
                 .get_job(GetJobCommand {
-                    id: JobId::parse("backup").unwrap(),
+                    id: "backup".to_string(),
                 })
                 .await
                 .unwrap()

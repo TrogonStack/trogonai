@@ -6,8 +6,9 @@ use bytes::Bytes;
 use trogon_nats::{DottedNatsToken, NatsToken};
 
 use crate::{
+    CronJob,
     error::{CronError, JobSpecError},
-    jobs::{DeliverySpec, JobId, JobSpec, ScheduleSpec},
+    events::{JobEventDelivery, JobEventSchedule, JobEventState},
     kv::{FIRE_SUBJECT_PREFIX, SCHEDULE_SUBJECT_PREFIX},
 };
 
@@ -23,9 +24,10 @@ const RESERVED_SCHEDULE_HEADERS: [&str; 5] = [
     NATS_SCHEDULE_TIME_ZONE,
     NATS_SCHEDULE_TTL,
 ];
+
 #[derive(Debug, Clone)]
 pub struct ResolvedJobSpec {
-    spec: JobSpec,
+    job: CronJob,
     job_id: NatsToken,
     route: DottedNatsToken,
     schedule_subject: String,
@@ -48,10 +50,10 @@ struct ResolvedJobSpecParts {
     headers: BTreeMap<String, String>,
 }
 
-impl TryFrom<&JobSpec> for ResolvedJobSpec {
+impl TryFrom<&CronJob> for ResolvedJobSpec {
     type Error = CronError;
 
-    fn try_from(spec: &JobSpec) -> Result<Self, Self::Error> {
+    fn try_from(job: &CronJob) -> Result<Self, Self::Error> {
         let ResolvedJobSpecParts {
             job_id,
             route,
@@ -60,7 +62,7 @@ impl TryFrom<&JobSpec> for ResolvedJobSpec {
             ttl_sec,
             source_subject,
             headers,
-        } = resolved_job_spec_parts(spec)?;
+        } = resolved_job_spec_parts(job)?;
 
         let schedule_subject = format!("{SCHEDULE_SUBJECT_PREFIX}{}", job_id.as_str());
         let target_subject = format!(
@@ -71,11 +73,11 @@ impl TryFrom<&JobSpec> for ResolvedJobSpec {
         let body = if source_subject.is_some() {
             Bytes::from_static(br#"{}"#)
         } else {
-            serde_json::to_vec(&spec.payload)?.into()
+            serde_json::to_vec(&job.payload)?.into()
         };
 
         Ok(Self {
-            spec: spec.clone(),
+            job: job.clone(),
             job_id,
             route,
             schedule_subject,
@@ -90,26 +92,31 @@ impl TryFrom<&JobSpec> for ResolvedJobSpec {
     }
 }
 
-fn resolved_job_spec_parts(spec: &JobSpec) -> Result<ResolvedJobSpecParts, CronError> {
-    let job_id = parse_job_id(&spec.id);
-    let schedule_expression = schedule_expression(&spec.schedule)?;
-    let timezone = match &spec.schedule {
-        ScheduleSpec::Cron { timezone, .. } => validate_timezone(timezone.clone())?,
-        ScheduleSpec::At { .. } | ScheduleSpec::Every { .. } => None,
+fn resolved_job_spec_parts(job: &CronJob) -> Result<ResolvedJobSpecParts, CronError> {
+    let job_id = parse_job_id(&job.id)?;
+    let schedule_expression = schedule_expression(&job.schedule)?;
+    let timezone = match &job.schedule {
+        JobEventSchedule::Cron { timezone, .. } => validate_timezone(timezone.clone())?,
+        JobEventSchedule::At { .. } | JobEventSchedule::Every { .. } => None,
     };
-    let (route, headers, ttl_sec, source_subject) = match &spec.delivery {
-        DeliverySpec::NatsEvent {
+    let (route, headers, ttl_sec, source_subject) = match &job.delivery {
+        JobEventDelivery::NatsEvent {
             route,
             headers,
             ttl_sec,
             source,
         } => (
-            route.as_token().clone(),
-            headers.as_map().clone(),
-            ttl_sec.map(|ttl_sec| ttl_sec.get()),
-            source
-                .as_ref()
-                .map(|source| source.subject().as_str().to_string()),
+            DottedNatsToken::new(route).map_err(|source| {
+                CronError::invalid_job_spec(JobSpecError::InvalidRoute {
+                    route: route.clone(),
+                    source,
+                })
+            })?,
+            headers.clone(),
+            *ttl_sec,
+            source.as_ref().map(|source| match source {
+                crate::JobEventSamplingSource::LatestFromSubject { subject } => subject.clone(),
+            }),
         ),
     };
     validate_scheduler_headers(&headers)?;
@@ -125,13 +132,18 @@ fn resolved_job_spec_parts(spec: &JobSpec) -> Result<ResolvedJobSpecParts, CronE
     })
 }
 
-fn parse_job_id(id: &JobId) -> NatsToken {
-    id.as_token().clone()
+fn parse_job_id(id: &str) -> Result<NatsToken, CronError> {
+    NatsToken::new(id).map_err(|source| {
+        CronError::invalid_job_spec(JobSpecError::InvalidId {
+            id: id.to_string(),
+            source,
+        })
+    })
 }
 
 impl ResolvedJobSpec {
-    pub fn spec(&self) -> &JobSpec {
-        &self.spec
+    pub fn job(&self) -> &CronJob {
+        &self.job
     }
 
     pub fn id(&self) -> &str {
@@ -139,7 +151,7 @@ impl ResolvedJobSpec {
     }
 
     pub fn enabled(&self) -> bool {
-        self.spec.state.is_enabled()
+        matches!(self.job.state, JobEventState::Enabled)
     }
 
     pub fn route(&self) -> &str {
@@ -196,10 +208,10 @@ impl ResolvedJobSpec {
     }
 }
 
-fn schedule_expression(schedule: &ScheduleSpec) -> Result<String, CronError> {
+fn schedule_expression(schedule: &JobEventSchedule) -> Result<String, CronError> {
     match schedule {
-        ScheduleSpec::At { at } => Ok(format!("@at {}", at.to_rfc3339())),
-        ScheduleSpec::Every { every_sec } => {
+        JobEventSchedule::At { at } => Ok(format!("@at {}", at.to_rfc3339())),
+        JobEventSchedule::Every { every_sec } => {
             if *every_sec == 0 {
                 return Err(CronError::invalid_job_spec(
                     JobSpecError::EverySecondsMustBePositive,
@@ -207,7 +219,7 @@ fn schedule_expression(schedule: &ScheduleSpec) -> Result<String, CronError> {
             }
             Ok(format!("@every {every_sec}s"))
         }
-        ScheduleSpec::Cron { expr, .. } => {
+        JobEventSchedule::Cron { expr, .. } => {
             cron::Schedule::from_str(expr).map_err(|source| {
                 CronError::invalid_job_spec(JobSpecError::InvalidCronExpression {
                     expr: expr.clone(),
@@ -260,39 +272,19 @@ mod tests {
     use chrono::{TimeZone, Utc};
 
     use super::*;
-    use crate::jobs::{
-        DeliveryHeaders, DeliveryRoute, JobEnabledState, SamplingSource, TtlSeconds,
+    use crate::events::{
+        JobEventDelivery, JobEventSamplingSource, JobEventSchedule, JobEventState,
     };
 
-    fn job_id(id: &str) -> JobId {
-        JobId::parse(id).unwrap()
-    }
-
-    fn route(value: &str) -> DeliveryRoute {
-        DeliveryRoute::new(value).unwrap()
-    }
-
-    fn ttl(value: u64) -> TtlSeconds {
-        TtlSeconds::new(value).unwrap()
-    }
-
-    fn source(value: &str) -> SamplingSource {
-        SamplingSource::latest_from_subject(value).unwrap()
-    }
-
-    fn base_job() -> JobSpec {
-        JobSpec {
-            id: job_id("heartbeat"),
-            state: JobEnabledState::Enabled,
-            schedule: ScheduleSpec::Every { every_sec: 30 },
-            delivery: DeliverySpec::NatsEvent {
-                route: route("agent.run"),
-                headers: DeliveryHeaders::new(BTreeMap::from([(
-                    "x-kind".to_string(),
-                    "heartbeat".to_string(),
-                )]))
-                .unwrap(),
-                ttl_sec: Some(ttl(15)),
+    fn base_job() -> CronJob {
+        CronJob {
+            id: "heartbeat".to_string(),
+            state: JobEventState::Enabled,
+            schedule: JobEventSchedule::Every { every_sec: 30 },
+            delivery: JobEventDelivery::NatsEvent {
+                route: "agent.run".to_string(),
+                headers: BTreeMap::from([("x-kind".to_string(), "heartbeat".to_string())]),
+                ttl_sec: Some(15),
                 source: None,
             },
             payload: serde_json::json!({"kind": "heartbeat"}),
@@ -325,7 +317,7 @@ mod tests {
     #[test]
     fn at_schedule_maps_to_rfc3339() {
         let mut job = base_job();
-        job.schedule = ScheduleSpec::At {
+        job.schedule = JobEventSchedule::At {
             at: Utc.with_ymd_and_hms(2026, 4, 11, 12, 0, 0).unwrap(),
         };
 
@@ -343,11 +335,13 @@ mod tests {
     #[test]
     fn source_uses_placeholder_body() {
         let mut job = base_job();
-        job.delivery = DeliverySpec::NatsEvent {
-            route: route("agent.run"),
-            headers: DeliveryHeaders::default(),
+        job.delivery = JobEventDelivery::NatsEvent {
+            route: "agent.run".to_string(),
+            headers: BTreeMap::new(),
             ttl_sec: None,
-            source: Some(source("sensors.latest")),
+            source: Some(JobEventSamplingSource::LatestFromSubject {
+                subject: "sensors.latest".to_string(),
+            }),
         };
 
         let resolved = ResolvedJobSpec::try_from(&job).unwrap();
@@ -370,11 +364,11 @@ mod tests {
     #[test]
     fn resolved_job_accessors_expose_validated_values() {
         let mut job = base_job();
-        job.state = JobEnabledState::Disabled;
+        job.state = JobEventState::Disabled;
 
         let resolved = ResolvedJobSpec::try_from(&job).unwrap();
 
-        assert_eq!(resolved.spec().id.as_str(), "heartbeat");
+        assert_eq!(resolved.job().id, "heartbeat");
         assert_eq!(resolved.id(), "heartbeat");
         assert!(!resolved.enabled());
         assert_eq!(resolved.route(), "agent.run");
@@ -388,7 +382,7 @@ mod tests {
     #[test]
     fn zero_every_seconds_is_rejected() {
         let mut job = base_job();
-        job.schedule = ScheduleSpec::Every { every_sec: 0 };
+        job.schedule = JobEventSchedule::Every { every_sec: 0 };
 
         let error = ResolvedJobSpec::try_from(&job).unwrap_err();
         assert!(error.to_string().contains("every_sec"));
@@ -397,7 +391,7 @@ mod tests {
     #[test]
     fn invalid_cron_expression_is_rejected() {
         let mut job = base_job();
-        job.schedule = ScheduleSpec::Cron {
+        job.schedule = JobEventSchedule::Cron {
             expr: "not-a-cron".to_string(),
             timezone: None,
         };
@@ -409,7 +403,7 @@ mod tests {
     #[test]
     fn invalid_timezone_is_rejected() {
         let mut job = base_job();
-        job.schedule = ScheduleSpec::Cron {
+        job.schedule = JobEventSchedule::Cron {
             expr: "0 * * * * *".to_string(),
             timezone: Some(" America/New_York ".to_string()),
         };
@@ -421,13 +415,12 @@ mod tests {
     #[test]
     fn reserved_scheduler_header_is_rejected_during_schedule_resolution() {
         let mut job = base_job();
-        job.delivery = DeliverySpec::NatsEvent {
-            route: route("agent.run"),
-            headers: DeliveryHeaders::new(BTreeMap::from([(
+        job.delivery = JobEventDelivery::NatsEvent {
+            route: "agent.run".to_string(),
+            headers: BTreeMap::from([(
                 "Nats-Schedule-Target".to_string(),
                 "cron.fire.evil.target".to_string(),
-            )]))
-            .unwrap(),
+            )]),
             ttl_sec: None,
             source: None,
         };
