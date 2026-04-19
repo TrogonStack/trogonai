@@ -3,11 +3,11 @@
 use std::collections::BTreeMap;
 
 use trogon_cron::{
-    CronController, CronJob, DeliverySpec, GetJobCommand, JobEnabledState, JobEventState, JobId,
-    JobSpec, JobWriteCondition, ListJobsCommand, PauseJobCommand, RegisterJobCommand,
-    RegisteredJobSpec, RemoveJobCommand, SchedulePublisher, ScheduleSpec,
+    AddJobCommand, CronController, CronJob, DeliverySpec, GetJobCommand, JobEnabledState,
+    JobEventState, JobId, JobSpec, JobWriteCondition, ListJobsCommand, PauseJobCommand,
+    RegisteredJobSpec, RemoveJobCommand, SchedulePublisher, ScheduleSpec, add_job,
     mocks::{MockCronStore, MockLeaderLock, MockSchedulePublisher},
-    pause_job, register_job, remove_job,
+    pause_job, remove_job,
 };
 
 fn job_id(id: &str) -> JobId {
@@ -34,7 +34,7 @@ async fn client_register_then_get() {
     let store = MockCronStore::new();
 
     let job = base_job("backup");
-    register_job(&store, &store, RegisterJobCommand::new(job).unwrap(), None)
+    add_job(&store, &store, AddJobCommand::new(job).unwrap(), None)
         .await
         .unwrap();
 
@@ -51,10 +51,10 @@ async fn client_register_then_get() {
 async fn client_pause_job_toggles_job() {
     let store = MockCronStore::new();
 
-    register_job(
+    add_job(
         &store,
         &store,
-        RegisterJobCommand::new(base_job("toggle")).unwrap(),
+        AddJobCommand::new(base_job("toggle")).unwrap(),
         None,
     )
     .await
@@ -77,18 +77,18 @@ async fn client_pause_job_toggles_job() {
 async fn client_remove_and_list_jobs_use_store_paths() {
     let store = MockCronStore::new();
 
-    register_job(
+    add_job(
         &store,
         &store,
-        RegisterJobCommand::new(base_job("alpha")).unwrap(),
+        AddJobCommand::new(base_job("alpha")).unwrap(),
         None,
     )
     .await
     .unwrap();
-    register_job(
+    add_job(
         &store,
         &store,
-        RegisterJobCommand::new(base_job("beta")).unwrap(),
+        AddJobCommand::new(base_job("beta")).unwrap(),
         None,
     )
     .await
