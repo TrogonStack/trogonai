@@ -226,6 +226,7 @@ async fn datadog_webhook_http_triggers_full_pipeline_with_real_key() {
         incidentio_stream_name: None,
         split_evaluator_url: None,
         split_auth_token: None,
+        agent_id: None,
     };
     tokio::spawn(async move {
         run(agent_cfg).await.ok();
@@ -395,6 +396,7 @@ async fn datadog_recovered_alert_triggers_full_pipeline() {
         incidentio_stream_name: None,
         split_evaluator_url: None,
         split_auth_token: None,
+        agent_id: None,
     };
     tokio::spawn(async move {
         run(agent_cfg).await.ok();
@@ -537,6 +539,7 @@ async fn datadog_automation_dispatch_takes_precedence_over_fallback() {
         incidentio_stream_name: None,
         split_evaluator_url: None,
         split_auth_token: None,
+        agent_id: None,
     };
     tokio::spawn(async move {
         run(agent_cfg).await.ok();
@@ -685,6 +688,7 @@ async fn datadog_event_subject_triggers_full_pipeline() {
         incidentio_stream_name: None,
         split_evaluator_url: None,
         split_auth_token: None,
+        agent_id: None,
     };
     tokio::spawn(async move {
         run(agent_cfg).await.ok();
@@ -797,6 +801,7 @@ async fn datadog_handler_error_still_acks_and_continues() {
         incidentio_stream_name: None,
         split_evaluator_url: None,
         split_auth_token: None,
+        agent_id: None,
     };
     tokio::spawn(async move {
         run(agent_cfg).await.ok();
@@ -942,6 +947,7 @@ async fn datadog_event_automation_dispatch() {
         incidentio_stream_name: None,
         split_evaluator_url: None,
         split_auth_token: None,
+        agent_id: None,
     };
     tokio::spawn(async move {
         run(agent_cfg).await.ok();

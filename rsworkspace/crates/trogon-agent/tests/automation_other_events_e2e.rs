@@ -81,6 +81,7 @@ fn runner_cfg(nats_port: u16, proxy_url: String) -> AgentConfig {
         incidentio_stream_name: None,
         split_evaluator_url: None,
         split_auth_token: None,
+        agent_id: None,
     }
 }
 
@@ -98,6 +99,7 @@ fn make_automation(id: &str, trigger: &str, prompt: &str) -> Automation {
         enabled: true,
         visibility: trogon_automations::Visibility::Private,
         variables: std::collections::HashMap::new(),
+        skill_ids: vec![],
         created_at: "2026-01-01T00:00:00Z".to_string(),
         updated_at: "2026-01-01T00:00:00Z".to_string(),
     }

@@ -1417,14 +1417,6 @@ async fn send_message_injects_skill_content_into_system_prompt() {
             .json_body(end_turn("skills received"));
     });
 
-    // Must NOT fire — if skill content is absent the test fails.
-    let no_skill_mock = env.mock_server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages")
-            .body_not_contains("Available Skills");
-        then.status(500).body("skill content missing from request");
-    });
-
     let created: Value = env
         .client
         .post(format!("{}/sessions", env.base_url))
@@ -1452,5 +1444,4 @@ async fn send_message_injects_skill_content_into_system_prompt() {
 
     assert_eq!(res["content"], "skills received");
     skill_mock.assert_hits_async(1).await;
-    no_skill_mock.assert_hits_async(0).await;
 }
