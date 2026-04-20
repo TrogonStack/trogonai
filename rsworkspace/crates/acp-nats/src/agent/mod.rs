@@ -171,4 +171,19 @@ mod tests {
         check_internal!(bridge.load_session(LoadSessionRequest::new("s1", ".")));
         check_internal!(bridge.set_session_mode(SetSessionModeRequest::new("s1", "m1")));
     }
+
+    /// cancel is fire-and-forget: it must return Ok(()) even when the underlying
+    /// NATS publish fails, so callers are never blocked by backend unavailability.
+    #[tokio::test]
+    async fn cancel_returns_ok_even_when_nats_publish_fails() {
+        use agent_client_protocol::CancelNotification;
+
+        let (mock, _js, bridge) = mock_bridge();
+        mock.fail_publish_count(99);
+
+        assert!(
+            bridge.cancel(CancelNotification::new("s1")).await.is_ok(),
+            "cancel must return Ok(()) regardless of NATS publish failure"
+        );
+    }
 }
