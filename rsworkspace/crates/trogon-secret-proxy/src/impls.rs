@@ -5,9 +5,9 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use async_nats::jetstream;
-use async_nats::jetstream::consumer::{AckPolicy, DeliverPolicy};
-use async_nats::jetstream::consumer::pull;
 use async_nats::jetstream::AckKind;
+use async_nats::jetstream::consumer::pull;
+use async_nats::jetstream::consumer::{AckPolicy, DeliverPolicy};
 use bytes::Bytes;
 use futures_util::{Stream, StreamExt};
 
@@ -58,7 +58,9 @@ impl<T: JetStreamPublisher> JetStreamPublisher for Arc<T> {
         headers: async_nats::HeaderMap,
         payload: Bytes,
     ) -> Result<(), String> {
-        (**self).publish_with_headers(subject, headers, payload).await
+        (**self)
+            .publish_with_headers(subject, headers, payload)
+            .await
     }
 }
 

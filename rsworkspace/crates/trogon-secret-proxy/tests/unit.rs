@@ -12,10 +12,8 @@ use bytes::Bytes;
 use trogon_vault::{ApiKeyToken, MemoryVault, VaultStore};
 
 use trogon_secret_proxy::messages::{OutboundHttpRequest, OutboundHttpResponse};
-use trogon_secret_proxy::mocks::{
-    MockHttpClient, MockJetStreamConsumerClient, MockNatsClient,
-};
-use trogon_secret_proxy::{worker, vault_admin};
+use trogon_secret_proxy::mocks::{MockHttpClient, MockJetStreamConsumerClient, MockNatsClient};
+use trogon_secret_proxy::{vault_admin, worker};
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -54,7 +52,11 @@ async fn worker_processes_message_and_publishes_reply() {
     let vault = Arc::new(MemoryVault::new());
     seed_vault(&vault, "tok_anthropic_prod_abc123", "sk-ant-realkey").await;
 
-    let request = make_request("https://api.anthropic.com/v1/messages", "Bearer tok_anthropic_prod_abc123", "test.reply");
+    let request = make_request(
+        "https://api.anthropic.com/v1/messages",
+        "Bearer tok_anthropic_prod_abc123",
+        "test.reply",
+    );
     let payload = serde_json::to_vec(&request).unwrap();
 
     let js = MockJetStreamConsumerClient::new();
@@ -64,9 +66,16 @@ async fn worker_processes_message_and_publishes_reply() {
     let http = MockHttpClient::new();
     http.push_ok(r#"{"id":"msg_1"}"#);
 
-    worker::run(js, nats.clone(), vault, http, "proxy-workers", "PROXY_REQUESTS")
-        .await
-        .unwrap();
+    worker::run(
+        js,
+        nats.clone(),
+        vault,
+        http,
+        "proxy-workers",
+        "PROXY_REQUESTS",
+    )
+    .await
+    .unwrap();
 
     let published = nats.published();
     assert_eq!(published.len(), 1);
@@ -81,7 +90,11 @@ async fn worker_processes_message_and_publishes_reply() {
 async fn worker_returns_401_for_unknown_token() {
     let vault = Arc::new(MemoryVault::new()); // empty vault
 
-    let request = make_request("https://api.anthropic.com/v1/messages", "Bearer tok_anthropic_prod_notfound", "test.reply");
+    let request = make_request(
+        "https://api.anthropic.com/v1/messages",
+        "Bearer tok_anthropic_prod_notfound",
+        "test.reply",
+    );
     let payload = serde_json::to_vec(&request).unwrap();
 
     let js = MockJetStreamConsumerClient::new();
@@ -90,9 +103,16 @@ async fn worker_returns_401_for_unknown_token() {
     let nats = MockNatsClient::new();
     let http = MockHttpClient::new(); // no responses queued — must not be called
 
-    worker::run(js, nats.clone(), vault, http, "proxy-workers", "PROXY_REQUESTS")
-        .await
-        .unwrap();
+    worker::run(
+        js,
+        nats.clone(),
+        vault,
+        http,
+        "proxy-workers",
+        "PROXY_REQUESTS",
+    )
+    .await
+    .unwrap();
 
     let published = nats.published();
     assert_eq!(published.len(), 1);
@@ -111,9 +131,16 @@ async fn worker_nacks_and_skips_malformed_json() {
     let nats = MockNatsClient::new();
     let http = MockHttpClient::new();
 
-    worker::run(js, nats.clone(), vault, http, "proxy-workers", "PROXY_REQUESTS")
-        .await
-        .unwrap();
+    worker::run(
+        js,
+        nats.clone(),
+        vault,
+        http,
+        "proxy-workers",
+        "PROXY_REQUESTS",
+    )
+    .await
+    .unwrap();
 
     // malformed message gets nacked and skipped — no reply published
     assert!(nats.published().is_empty());
@@ -124,7 +151,11 @@ async fn worker_skips_jetstream_error_and_continues() {
     let vault = Arc::new(MemoryVault::new());
     seed_vault(&vault, "tok_openai_prod_abc123", "sk-openai-real").await;
 
-    let request = make_request("https://api.openai.com/v1/chat", "Bearer tok_openai_prod_abc123", "test.reply.2");
+    let request = make_request(
+        "https://api.openai.com/v1/chat",
+        "Bearer tok_openai_prod_abc123",
+        "test.reply.2",
+    );
     let payload = serde_json::to_vec(&request).unwrap();
 
     let js = MockJetStreamConsumerClient::new();
@@ -135,9 +166,16 @@ async fn worker_skips_jetstream_error_and_continues() {
     let http = MockHttpClient::new();
     http.push_ok(r#"{"choices":[]}"#);
 
-    worker::run(js, nats.clone(), vault, http, "proxy-workers", "PROXY_REQUESTS")
-        .await
-        .unwrap();
+    worker::run(
+        js,
+        nats.clone(),
+        vault,
+        http,
+        "proxy-workers",
+        "PROXY_REQUESTS",
+    )
+    .await
+    .unwrap();
 
     // The error message is skipped; the valid message after it is processed.
     let published = nats.published();
@@ -152,8 +190,16 @@ async fn worker_processes_multiple_messages_in_order() {
     seed_vault(&vault, "tok_anthropic_prod_a1b2c3", "sk-ant-key1").await;
     seed_vault(&vault, "tok_openai_prod_d4e5f6", "sk-openai-key2").await;
 
-    let req1 = make_request("https://api.anthropic.com/v1/messages", "Bearer tok_anthropic_prod_a1b2c3", "reply.1");
-    let req2 = make_request("https://api.openai.com/v1/chat", "Bearer tok_openai_prod_d4e5f6", "reply.2");
+    let req1 = make_request(
+        "https://api.anthropic.com/v1/messages",
+        "Bearer tok_anthropic_prod_a1b2c3",
+        "reply.1",
+    );
+    let req2 = make_request(
+        "https://api.openai.com/v1/chat",
+        "Bearer tok_openai_prod_d4e5f6",
+        "reply.2",
+    );
 
     let js = MockJetStreamConsumerClient::new();
     js.push_msg(&serde_json::to_vec(&req1).unwrap());
@@ -164,9 +210,16 @@ async fn worker_processes_multiple_messages_in_order() {
     http.push_ok(r#"{"id":"msg_1"}"#);
     http.push_ok(r#"{"id":"msg_2"}"#);
 
-    worker::run(js, nats.clone(), vault, http, "proxy-workers", "PROXY_REQUESTS")
-        .await
-        .unwrap();
+    worker::run(
+        js,
+        nats.clone(),
+        vault,
+        http,
+        "proxy-workers",
+        "PROXY_REQUESTS",
+    )
+    .await
+    .unwrap();
 
     let published = nats.published();
     assert_eq!(published.len(), 2);
@@ -180,7 +233,11 @@ async fn worker_strips_real_key_from_upstream_response_headers() {
     let real_key = "sk-ant-secretkey123";
     seed_vault(&vault, "tok_anthropic_prod_abc123", real_key).await;
 
-    let request = make_request("https://api.anthropic.com/v1/messages", "Bearer tok_anthropic_prod_abc123", "test.reply");
+    let request = make_request(
+        "https://api.anthropic.com/v1/messages",
+        "Bearer tok_anthropic_prod_abc123",
+        "test.reply",
+    );
     let payload = serde_json::to_vec(&request).unwrap();
 
     let js = MockJetStreamConsumerClient::new();
@@ -199,9 +256,16 @@ async fn worker_strips_real_key_from_upstream_response_headers() {
         body: b"{}".to_vec(),
     });
 
-    worker::run(js, nats.clone(), vault, http, "proxy-workers", "PROXY_REQUESTS")
-        .await
-        .unwrap();
+    worker::run(
+        js,
+        nats.clone(),
+        vault,
+        http,
+        "proxy-workers",
+        "PROXY_REQUESTS",
+    )
+    .await
+    .unwrap();
 
     let published = nats.published();
     let resp: OutboundHttpResponse = serde_json::from_slice(&published[0].1).unwrap();
@@ -235,7 +299,11 @@ async fn vault_admin_store_token_publishes_ok_reply() {
 
     nats.seed_messages(
         "trogon.vault.store",
-        vec![make_nats_message("trogon.vault.store", Some("test.reply"), &payload)],
+        vec![make_nats_message(
+            "trogon.vault.store",
+            Some("test.reply"),
+            &payload,
+        )],
     );
 
     tokio::time::timeout(
@@ -322,10 +390,16 @@ async fn mock_http_client_returns_queued_responses_in_order() {
     http.push_ok(r#"{"first":true}"#);
     http.push_error(503, "service unavailable");
 
-    let r1 = http.send_request("POST", "http://any", &[], b"").await.unwrap();
+    let r1 = http
+        .send_request("POST", "http://any", &[], b"")
+        .await
+        .unwrap();
     assert_eq!(r1.status, 200);
 
-    let r2 = http.send_request("POST", "http://any", &[], b"").await.unwrap();
+    let r2 = http
+        .send_request("POST", "http://any", &[], b"")
+        .await
+        .unwrap();
     assert_eq!(r2.status, 503);
 
     // Queue exhausted — next call returns an error.

@@ -174,7 +174,8 @@ mod tests {
         drop(w1);
 
         let mut w2 = fs.open_append(&file).expect("second open should succeed");
-        w2.write_all(b" world").expect("second write should succeed");
+        w2.write_all(b" world")
+            .expect("second write should succeed");
         drop(w2);
 
         assert_eq!(

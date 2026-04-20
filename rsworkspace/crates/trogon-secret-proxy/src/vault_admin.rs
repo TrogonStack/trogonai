@@ -46,11 +46,17 @@ pub struct VaultAdminResponse {
 
 impl VaultAdminResponse {
     pub fn ok() -> Self {
-        Self { ok: true, error: None }
+        Self {
+            ok: true,
+            error: None,
+        }
     }
 
     pub fn err(msg: impl Into<String>) -> Self {
-        Self { ok: false, error: Some(msg.into()) }
+        Self {
+            ok: false,
+            error: Some(msg.into()),
+        }
     }
 }
 
@@ -77,11 +83,7 @@ impl std::error::Error for VaultAdminError {}
 
 /// Subscribe to vault admin subjects and serve requests until the NATS client
 /// is closed or an unrecoverable error occurs.
-pub async fn run<V, N>(
-    nats: N,
-    vault: Arc<V>,
-    prefix: &str,
-) -> Result<(), VaultAdminError>
+pub async fn run<V, N>(nats: N, vault: Arc<V>, prefix: &str) -> Result<(), VaultAdminError>
 where
     V: VaultStore + 'static,
     V::Error: std::fmt::Display,
@@ -93,29 +95,29 @@ where
     let rotate_subject = subjects::vault_rotate(prefix);
     let revoke_subject = subjects::vault_revoke(prefix);
 
-    let mut store_sub = nats
-        .subscribe(store_subject.clone())
-        .await
-        .map_err(|e| VaultAdminError::Subscribe {
-            subject: store_subject.clone(),
-            source: e,
-        })?;
+    let mut store_sub =
+        nats.subscribe(store_subject.clone())
+            .await
+            .map_err(|e| VaultAdminError::Subscribe {
+                subject: store_subject.clone(),
+                source: e,
+            })?;
 
-    let mut rotate_sub = nats
-        .subscribe(rotate_subject.clone())
-        .await
-        .map_err(|e| VaultAdminError::Subscribe {
-            subject: rotate_subject.clone(),
-            source: e,
-        })?;
+    let mut rotate_sub =
+        nats.subscribe(rotate_subject.clone())
+            .await
+            .map_err(|e| VaultAdminError::Subscribe {
+                subject: rotate_subject.clone(),
+                source: e,
+            })?;
 
-    let mut revoke_sub = nats
-        .subscribe(revoke_subject.clone())
-        .await
-        .map_err(|e| VaultAdminError::Subscribe {
-            subject: revoke_subject.clone(),
-            source: e,
-        })?;
+    let mut revoke_sub =
+        nats.subscribe(revoke_subject.clone())
+            .await
+            .map_err(|e| VaultAdminError::Subscribe {
+                subject: revoke_subject.clone(),
+                source: e,
+            })?;
 
     tracing::info!(
         store = %store_subject,
@@ -221,11 +223,7 @@ where
     publish_response(nats, reply.to_string(), &response).await;
 }
 
-async fn publish_response<N: NatsClient>(
-    nats: &N,
-    reply: String,
-    response: &VaultAdminResponse,
-) {
+async fn publish_response<N: NatsClient>(nats: &N, reply: String, response: &VaultAdminResponse) {
     let bytes = match serde_json::to_vec(response) {
         Ok(b) => b,
         Err(e) => {
@@ -274,7 +272,10 @@ mod tests {
         let json = serde_json::to_string(&resp).unwrap();
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["ok"], true);
-        assert!(v.get("error").is_none(), "error key must be absent when None");
+        assert!(
+            v.get("error").is_none(),
+            "error key must be absent when None"
+        );
     }
 
     #[test]
@@ -293,8 +294,14 @@ mod tests {
             source: "connection refused".to_string(),
         };
         let msg = err.to_string();
-        assert!(msg.contains("trogon.vault.store"), "display must include subject");
-        assert!(msg.contains("connection refused"), "display must include source error");
+        assert!(
+            msg.contains("trogon.vault.store"),
+            "display must include subject"
+        );
+        assert!(
+            msg.contains("connection refused"),
+            "display must include source error"
+        );
     }
 
     #[test]
@@ -306,7 +313,10 @@ mod tests {
     #[test]
     fn vault_admin_response_ok_serializes_without_error_key() {
         let json = serde_json::to_string(&VaultAdminResponse::ok()).unwrap();
-        assert!(!json.contains("error"), "ok response must not contain 'error' key");
+        assert!(
+            !json.contains("error"),
+            "ok response must not contain 'error' key"
+        );
         assert!(json.contains("\"ok\":true"));
     }
 
@@ -332,7 +342,10 @@ mod tests {
     fn vault_store_request_rejects_missing_plaintext() {
         let json = r#"{"token":"tok_anthropic_prod_abc123"}"#;
         let result = serde_json::from_str::<VaultStoreRequest>(json);
-        assert!(result.is_err(), "missing plaintext must fail to deserialize");
+        assert!(
+            result.is_err(),
+            "missing plaintext must fail to deserialize"
+        );
     }
 
     #[test]
@@ -346,7 +359,10 @@ mod tests {
     fn vault_rotate_request_rejects_missing_new_plaintext() {
         let json = r#"{"token":"tok_openai_prod_xyz789"}"#;
         let result = serde_json::from_str::<VaultRotateRequest>(json);
-        assert!(result.is_err(), "missing new_plaintext must fail to deserialize");
+        assert!(
+            result.is_err(),
+            "missing new_plaintext must fail to deserialize"
+        );
     }
 
     #[test]

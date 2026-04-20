@@ -140,8 +140,7 @@ where
         .headers
         .iter()
         .filter(|(k, _)| {
-            !k.eq_ignore_ascii_case("authorization")
-                && !k.eq_ignore_ascii_case("x-request-id")
+            !k.eq_ignore_ascii_case("authorization") && !k.eq_ignore_ascii_case("x-request-id")
         })
         .cloned()
         .collect();
@@ -169,10 +168,7 @@ where
 }
 
 /// Extract the `tok_...` token from the Authorization header and resolve it.
-async fn resolve_token<V>(
-    vault: &V,
-    headers: &[(String, String)],
-) -> Result<String, String>
+async fn resolve_token<V>(vault: &V, headers: &[(String, String)]) -> Result<String, String>
 where
     V: VaultStore,
     V::Error: std::fmt::Display,
@@ -206,10 +202,7 @@ where
         .ok_or_else(|| format!("Token not found in vault: {}", token))?;
 
     if real_key.is_empty() {
-        return Err(format!(
-            "Vault returned an empty key for token: {}",
-            token
-        ));
+        return Err(format!("Vault returned an empty key for token: {}", token));
     }
 
     Ok(real_key)
@@ -324,7 +317,10 @@ mod tests {
     use crate::messages::OutboundHttpRequest;
     use crate::traits::HttpClient;
 
-    use super::{forward_request, forward_request_with_retry, process_request, resolve_token, HTTP_INITIAL_RETRY_DELAY};
+    use super::{
+        HTTP_INITIAL_RETRY_DELAY, forward_request, forward_request_with_retry, process_request,
+        resolve_token,
+    };
 
     fn make_headers(auth: &str) -> Vec<(String, String)> {
         vec![("Authorization".to_string(), auth.to_string())]
@@ -385,27 +381,23 @@ mod tests {
         let headers = make_headers("Bearer sk-ant-realkey");
         let result = resolve_token(&vault, &headers).await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("does not look like a proxy token"));
+        assert!(
+            result
+                .unwrap_err()
+                .contains("does not look like a proxy token")
+        );
     }
 
     #[tokio::test]
     async fn resolve_token_malformed_tok_missing_parts_is_rejected() {
         let vault = MemoryVault::new();
 
-        let cases = [
-            "tok_",
-            "tok_provider",
-            "tok_provider_env",
-        ];
+        let cases = ["tok_", "tok_provider", "tok_provider_env"];
 
         for bad_token in cases {
             let headers = make_headers(&format!("Bearer {bad_token}"));
             let result = resolve_token(&vault, &headers).await;
-            assert!(
-                result.is_err(),
-                "token '{}' must be rejected",
-                bad_token
-            );
+            assert!(result.is_err(), "token '{}' must be rejected", bad_token);
         }
     }
 
@@ -441,7 +433,10 @@ mod tests {
             "Bearer tok_anthropic_prod_abc123",
             "idem-1",
         );
-        let headers = vec![("Authorization".to_string(), "Bearer sk-real-key".to_string())];
+        let headers = vec![(
+            "Authorization".to_string(),
+            "Bearer sk-real-key".to_string(),
+        )];
         let resp = forward_request(&client, &request, &headers).await.unwrap();
         assert_eq!(resp.status, 200);
     }
@@ -464,7 +459,10 @@ mod tests {
             "Bearer tok_anthropic_prod_abc123",
             "idem-retry",
         );
-        let headers = vec![("Authorization".to_string(), "Bearer sk-real-key".to_string())];
+        let headers = vec![(
+            "Authorization".to_string(),
+            "Bearer sk-real-key".to_string(),
+        )];
         let resp = forward_request_with_retry(&http, &request, &headers)
             .await
             .unwrap();
@@ -495,9 +493,7 @@ mod tests {
         server
             .mock_async(|when, then| {
                 when.method("POST").path("/v1/messages");
-                then.status(200)
-                    .header("x-leaked-key", real_key)
-                    .body("{}");
+                then.status(200).header("x-leaked-key", real_key).body("{}");
             })
             .await;
 

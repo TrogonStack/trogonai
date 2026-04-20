@@ -83,8 +83,14 @@ mod tests {
         let json = serde_json::to_string(&req).unwrap();
         let decoded: OutboundHttpRequest = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded.headers.len(), 2);
-        assert_eq!(decoded.headers[0], ("accept".to_string(), "application/json".to_string()));
-        assert_eq!(decoded.headers[1], ("accept".to_string(), "text/plain".to_string()));
+        assert_eq!(
+            decoded.headers[0],
+            ("accept".to_string(), "application/json".to_string())
+        );
+        assert_eq!(
+            decoded.headers[1],
+            ("accept".to_string(), "text/plain".to_string())
+        );
     }
 
     #[test]
@@ -122,7 +128,11 @@ mod tests {
             .iter()
             .filter(|(k, _)| k == "set-cookie")
             .collect();
-        assert_eq!(cookies.len(), 2, "Both Set-Cookie values must survive round-trip");
+        assert_eq!(
+            cookies.len(),
+            2,
+            "Both Set-Cookie values must survive round-trip"
+        );
     }
 
     #[test]
