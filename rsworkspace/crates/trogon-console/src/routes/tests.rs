@@ -1519,3 +1519,51 @@ async fn create_skill_version_put_error_returns_500() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
 }
+
+// ── None-branch coverage for optional PUT fields ──────────────────────────────
+
+#[tokio::test]
+async fn update_agent_without_name_covers_none_branch() {
+    let state = mock_state();
+
+    let resp = build_router(Arc::clone(&state))
+        .oneshot(json_request(
+            "POST",
+            "/agents",
+            json!({ "name": "Original", "description": "d", "model": { "id": "m" }, "system_prompt": "s" }),
+        ))
+        .await
+        .unwrap();
+    let created: Value = body_json(resp.into_body()).await;
+    let id = created["id"].as_str().unwrap();
+
+    let resp = build_router(Arc::clone(&state))
+        .oneshot(json_request("PUT", &format!("/agents/{id}"), json!({ "description": "updated" })))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let updated: Value = body_json(resp.into_body()).await;
+    assert_eq!(updated["name"], "Original");
+    assert_eq!(updated["description"], "updated");
+}
+
+#[tokio::test]
+async fn update_environment_without_name_covers_none_branch() {
+    let state = mock_state();
+
+    let resp = build_router(Arc::clone(&state))
+        .oneshot(json_request("POST", "/environments", json!({ "name": "Env", "description": "old" })))
+        .await
+        .unwrap();
+    let created: Value = body_json(resp.into_body()).await;
+    let id = created["id"].as_str().unwrap();
+
+    let resp = build_router(Arc::clone(&state))
+        .oneshot(json_request("PUT", &format!("/environments/{id}"), json!({ "description": "new desc" })))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let updated: Value = body_json(resp.into_body()).await;
+    assert_eq!(updated["name"], "Env");
+    assert_eq!(updated["description"], "new desc");
+}
