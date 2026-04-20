@@ -49,3 +49,22 @@ pub async fn run_with(nats_url: &str, port: u16) -> Result<(), String> {
         .await
         .map_err(|e| e.to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn run_bad_nats_returns_error() {
+        unsafe {
+            std::env::set_var("NATS_URL", "nats://127.0.0.1:1");
+            std::env::set_var("CONSOLE_PORT", "0");
+        }
+        let result = run().await;
+        unsafe {
+            std::env::remove_var("NATS_URL");
+            std::env::remove_var("CONSOLE_PORT");
+        }
+        assert!(result.is_err());
+    }
+}
