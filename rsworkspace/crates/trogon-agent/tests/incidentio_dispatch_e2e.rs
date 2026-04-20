@@ -119,6 +119,7 @@ fn base_agent_config(nats_port: u16, proxy_url: String) -> AgentConfig {
         tenant_id: "default".to_string(),
         split_evaluator_url: None,
         split_auth_token: None,
+        agent_id: None,
     }
 }
 
