@@ -44,19 +44,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     // ── Config from environment ───────────────────────────────────────────────
 
-    let nats_url =
-        std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
+    let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
 
-    let proxy_url =
-        std::env::var("PROXY_URL").unwrap_or_else(|_| "http://localhost:8080".into());
+    let proxy_url = std::env::var("PROXY_URL").unwrap_or_else(|_| "http://localhost:8080".into());
 
     let anthropic_token = std::env::var("ANTHROPIC_TOKEN").unwrap_or_else(|_| {
-        eprintln!("error: ANTHROPIC_TOKEN is required — set it to your trogon-secret-proxy bearer token");
+        eprintln!(
+            "error: ANTHROPIC_TOKEN is required — set it to your trogon-secret-proxy bearer token"
+        );
         std::process::exit(1);
     });
 
-    let model = std::env::var("COMPACTOR_MODEL")
-        .unwrap_or_else(|_| "claude-haiku-4-5-20251001".into());
+    let model =
+        std::env::var("COMPACTOR_MODEL").unwrap_or_else(|_| "claude-haiku-4-5-20251001".into());
 
     let max_summary_tokens: u32 = std::env::var("COMPACTOR_MAX_SUMMARY_TOKENS")
         .ok()
@@ -85,10 +85,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     // ── Compactor ─────────────────────────────────────────────────────────────
 
-    let api_url = format!(
-        "{}/anthropic/v1/messages",
-        proxy_url.trim_end_matches('/')
-    );
+    let api_url = format!("{}/anthropic/v1/messages", proxy_url.trim_end_matches('/'));
 
     let compactor = Compactor::new(CompactorConfig {
         settings: CompactionSettings {

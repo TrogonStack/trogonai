@@ -81,8 +81,10 @@ pub async fn run(nats: Client, compactor: Compactor) -> Result<(), async_nats::E
             Ok(resp) => serde_json::to_vec(&resp).unwrap_or_default(),
             Err(e) => {
                 error!(error = %e, "compaction failed");
-                serde_json::to_vec(&ErrorResponse { error: e.to_string() })
-                    .unwrap_or_default()
+                serde_json::to_vec(&ErrorResponse {
+                    error: e.to_string(),
+                })
+                .unwrap_or_default()
             }
         };
 
@@ -92,10 +94,7 @@ pub async fn run(nats: Client, compactor: Compactor) -> Result<(), async_nats::E
     Ok(())
 }
 
-async fn handle(
-    compactor: &Compactor,
-    payload: &[u8],
-) -> Result<CompactResponse, CompactorError> {
+async fn handle(compactor: &Compactor, payload: &[u8]) -> Result<CompactResponse, CompactorError> {
     let req: CompactRequest = serde_json::from_slice(payload)
         .map_err(|e| CompactorError::InvalidRequest(e.to_string()))?;
 

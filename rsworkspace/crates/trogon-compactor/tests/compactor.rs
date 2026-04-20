@@ -50,7 +50,10 @@ fn tool_use_conversation(settings: &CompactionSettings) -> Vec<Message> {
                 content: format!("output {i}: {}", "r".repeat(chars)),
             }],
         });
-        msgs.push(Message::assistant(format!("done {i}: {}", "a".repeat(chars))));
+        msgs.push(Message::assistant(format!(
+            "done {i}: {}",
+            "a".repeat(chars)
+        )));
     }
     msgs
 }
@@ -133,7 +136,10 @@ async fn compact_if_needed_calls_llm_and_replaces_old_messages() {
     let ContentBlock::Text { text } = &result[0].content[0] else {
         panic!("expected text block in summary message");
     };
-    assert!(text.contains(expected_summary), "summary not embedded in first message");
+    assert!(
+        text.contains(expected_summary),
+        "summary not embedded in first message"
+    );
 }
 
 #[tokio::test]
@@ -156,10 +162,7 @@ async fn no_llm_call_when_under_threshold() {
     };
 
     // Tiny conversation — nowhere near the threshold
-    let messages = vec![
-        Message::user("hi"),
-        Message::assistant("hello"),
-    ];
+    let messages = vec![Message::user("hi"), Message::assistant("hello")];
 
     let compactor = compactor_with_client(config, reqwest::Client::new());
     let result = compactor.compact_if_needed(messages.clone()).await.unwrap();
@@ -213,8 +216,14 @@ async fn incremental_update_when_previous_summary_exists() {
     ];
     // Add new messages to push it over the threshold
     for i in 0..4 {
-        messages.push(Message::user(format!("new question {i}: {}", "q".repeat(settings.context_window))));
-        messages.push(Message::assistant(format!("new answer {i}: {}", "a".repeat(settings.context_window))));
+        messages.push(Message::user(format!(
+            "new question {i}: {}",
+            "q".repeat(settings.context_window)
+        )));
+        messages.push(Message::assistant(format!(
+            "new answer {i}: {}",
+            "a".repeat(settings.context_window)
+        )));
     }
 
     let compactor = compactor_with_client(config, reqwest::Client::new());
@@ -264,7 +273,9 @@ async fn unexpected_stop_reason_returns_error() {
     };
 
     let compactor = compactor_with_client(config, reqwest::Client::new());
-    let result = compactor.compact_if_needed(large_conversation(&settings)).await;
+    let result = compactor
+        .compact_if_needed(large_conversation(&settings))
+        .await;
 
     assert!(
         matches!(result, Err(CompactorError::UnexpectedStopReason(ref r)) if r == "max_tokens"),
@@ -306,7 +317,9 @@ async fn empty_response_content_returns_error() {
     };
 
     let compactor = compactor_with_client(config, reqwest::Client::new());
-    let result = compactor.compact_if_needed(large_conversation(&settings)).await;
+    let result = compactor
+        .compact_if_needed(large_conversation(&settings))
+        .await;
 
     assert!(
         matches!(result, Err(CompactorError::EmptyResponse)),
@@ -338,7 +351,9 @@ async fn http_5xx_error_returns_http_error() {
     };
 
     let compactor = compactor_with_client(config, reqwest::Client::new());
-    let result = compactor.compact_if_needed(large_conversation(&settings)).await;
+    let result = compactor
+        .compact_if_needed(large_conversation(&settings))
+        .await;
 
     assert!(
         matches!(result, Err(CompactorError::Http(_))),
@@ -380,9 +395,14 @@ async fn x_api_key_auth_sends_correct_header() {
     };
 
     let compactor = compactor_with_client(config, reqwest::Client::new());
-    let result = compactor.compact_if_needed(large_conversation(&settings)).await;
+    let result = compactor
+        .compact_if_needed(large_conversation(&settings))
+        .await;
 
-    assert!(result.is_ok(), "expected success with x-api-key auth, got {result:?}");
+    assert!(
+        result.is_ok(),
+        "expected success with x-api-key auth, got {result:?}"
+    );
 }
 
 #[tokio::test]
@@ -416,9 +436,14 @@ async fn bearer_auth_sends_authorization_header() {
     };
 
     let compactor = compactor_with_client(config, reqwest::Client::new());
-    let result = compactor.compact_if_needed(large_conversation(&settings)).await;
+    let result = compactor
+        .compact_if_needed(large_conversation(&settings))
+        .await;
 
-    assert!(result.is_ok(), "expected success with Bearer auth, got {result:?}");
+    assert!(
+        result.is_ok(),
+        "expected success with Bearer auth, got {result:?}"
+    );
 }
 
 #[tokio::test]
@@ -458,7 +483,10 @@ async fn multiple_text_blocks_in_response_are_joined() {
     };
 
     let compactor = compactor_with_client(config, reqwest::Client::new());
-    let result = compactor.compact_if_needed(large_conversation(&settings)).await.unwrap();
+    let result = compactor
+        .compact_if_needed(large_conversation(&settings))
+        .await
+        .unwrap();
 
     let ContentBlock::Text { text } = &result[0].content[0] else {
         panic!("expected text block in summary message");
@@ -506,12 +534,18 @@ async fn non_text_response_blocks_are_filtered_out() {
     };
 
     let compactor = compactor_with_client(config, reqwest::Client::new());
-    let result = compactor.compact_if_needed(large_conversation(&settings)).await.unwrap();
+    let result = compactor
+        .compact_if_needed(large_conversation(&settings))
+        .await
+        .unwrap();
 
     let ContentBlock::Text { text } = &result[0].content[0] else {
         panic!("expected text block in summary message");
     };
-    assert!(!text.contains("internal reasoning"), "thinking block leaked into summary");
+    assert!(
+        !text.contains("internal reasoning"),
+        "thinking block leaked into summary"
+    );
     assert!(text.contains("## Goal\nActual summary content"));
 }
 
@@ -536,7 +570,10 @@ async fn summary_is_wrapped_in_exact_context_summary_xml_tags() {
     };
     let url = format!("{}/v1/messages", server.base_url());
     let compactor = compactor_with_client(make_config(&url, &settings), reqwest::Client::new());
-    let result = compactor.compact_if_needed(large_conversation(&settings)).await.unwrap();
+    let result = compactor
+        .compact_if_needed(large_conversation(&settings))
+        .await
+        .unwrap();
 
     let ContentBlock::Text { text } = &result[0].content[0] else {
         panic!("expected text block");
@@ -562,7 +599,10 @@ async fn ack_assistant_message_has_exact_expected_text() {
     };
     let url = format!("{}/v1/messages", server.base_url());
     let compactor = compactor_with_client(make_config(&url, &settings), reqwest::Client::new());
-    let result = compactor.compact_if_needed(large_conversation(&settings)).await.unwrap();
+    let result = compactor
+        .compact_if_needed(large_conversation(&settings))
+        .await
+        .unwrap();
 
     assert_eq!(result[1].role, "assistant");
     let ContentBlock::Text { text } = &result[1].content[0] else {
@@ -646,14 +686,23 @@ async fn chained_compaction_detects_xml_marker_and_uses_update_prompt() {
 
     // First compaction
     let c1 = compactor_with_client(make_config(&url, &settings), reqwest::Client::new());
-    let after_first = c1.compact_if_needed(large_conversation(&settings)).await.unwrap();
+    let after_first = c1
+        .compact_if_needed(large_conversation(&settings))
+        .await
+        .unwrap();
 
     // after_first[0] now holds <context-summary>\n…\n</context-summary>.
     // Extend with new large messages to push it over the threshold again.
     let mut second_input = after_first;
     for i in 0..4 {
-        second_input.push(Message::user(format!("new q {i}: {}", "q".repeat(settings.context_window))));
-        second_input.push(Message::assistant(format!("new a {i}: {}", "a".repeat(settings.context_window))));
+        second_input.push(Message::user(format!(
+            "new q {i}: {}",
+            "q".repeat(settings.context_window)
+        )));
+        second_input.push(Message::assistant(format!(
+            "new a {i}: {}",
+            "a".repeat(settings.context_window)
+        )));
     }
 
     // Second compaction — must detect the marker and use the UPDATE prompt
@@ -665,7 +714,10 @@ async fn chained_compaction_detects_xml_marker_and_uses_update_prompt() {
     let ContentBlock::Text { text } = &after_second[0].content[0] else {
         panic!("expected text block");
     };
-    assert!(text.contains("Second-pass summary"), "expected updated summary in output");
+    assert!(
+        text.contains("Second-pass summary"),
+        "expected updated summary in output"
+    );
 }
 
 // ── tool-use conversation ─────────────────────────────────────────────────────
@@ -694,10 +746,7 @@ async fn cut_point_never_lands_on_tool_result_message() {
 
     // result = [summary, ack, ...kept_messages]
     // The first kept message must be a real user turn, not a pure tool-result
-    assert!(
-        result.len() > 2,
-        "expected kept messages after compaction"
-    );
+    assert!(result.len() > 2, "expected kept messages after compaction");
     let first_kept = &result[2];
     assert_eq!(first_kept.role, "user");
     assert!(
@@ -724,7 +773,9 @@ async fn http_4xx_error_returns_http_error() {
     };
     let url = format!("{}/v1/messages", server.base_url());
     let compactor = compactor_with_client(make_config(&url, &settings), reqwest::Client::new());
-    let result = compactor.compact_if_needed(large_conversation(&settings)).await;
+    let result = compactor
+        .compact_if_needed(large_conversation(&settings))
+        .await;
 
     assert!(
         matches!(result, Err(CompactorError::Http(_))),

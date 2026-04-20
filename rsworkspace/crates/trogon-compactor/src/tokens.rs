@@ -38,8 +38,8 @@ mod tests {
 
     #[test]
     fn estimate_tokens_rounds_up() {
-        assert_eq!(estimate_tokens("abcd"), 1);   // exactly 4 chars → 1 token
-        assert_eq!(estimate_tokens("abcde"), 2);  // 5 chars → 2 tokens (ceil)
+        assert_eq!(estimate_tokens("abcd"), 1); // exactly 4 chars → 1 token
+        assert_eq!(estimate_tokens("abcde"), 2); // 5 chars → 2 tokens (ceil)
         assert_eq!(estimate_tokens(""), 0);
     }
 
@@ -61,7 +61,9 @@ mod tests {
         use crate::types::ContentBlock;
         let msg = crate::types::Message {
             role: "user".into(),
-            content: vec![ContentBlock::Image { source: serde_json::json!({}) }],
+            content: vec![ContentBlock::Image {
+                source: serde_json::json!({}),
+            }],
         };
         // image = 300 (hardcoded) + 4 overhead = 304
         assert_eq!(estimate_message_tokens(&msg), 304);
