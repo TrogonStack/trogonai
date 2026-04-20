@@ -48,7 +48,7 @@ impl EnvironmentStore {
     }
 
     pub async fn put(&self, env: &Environment) -> Result<(), String> {
-        let bytes = serde_json::to_vec(env).map_err(|e| e.to_string())?;
+        let bytes = serde_json::to_vec(env).expect("Environment serialization");
         self.kv
             .put(&env.id, Bytes::from(bytes))
             .await

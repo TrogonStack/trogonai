@@ -47,7 +47,7 @@ impl CredentialStore {
             env_id: env_id.to_string(),
             created_at: chrono_now(),
         };
-        let bytes = serde_json::to_vec(&vault).map_err(|e| e.to_string())?;
+        let bytes = serde_json::to_vec(&vault).expect("CredentialVault serialization");
         self.vaults_kv
             .put(env_id, Bytes::from(bytes))
             .await
@@ -96,7 +96,7 @@ impl CredentialStore {
 
     pub async fn put(&self, cred: &Credential) -> Result<(), String> {
         let key = format!("{}.{}", cred.env_id, cred.id);
-        let bytes = serde_json::to_vec(cred).map_err(|e| e.to_string())?;
+        let bytes = serde_json::to_vec(cred).expect("Credential serialization");
         self.creds_kv
             .put(&key, Bytes::from(bytes))
             .await

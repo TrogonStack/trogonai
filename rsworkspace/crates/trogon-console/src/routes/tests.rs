@@ -1233,3 +1233,86 @@ async fn update_environment_only_description_leaves_other_fields_unchanged() {
     assert_eq!(updated["name"], "Prod");
     assert_eq!(updated["description"], "updated desc");
 }
+
+// ── multi-item sort coverage ──────────────────────────────────────────────────
+
+#[tokio::test]
+async fn list_agents_with_two_items_invokes_sort() {
+    let state = mock_state();
+    for name in ["Agent B", "Agent A"] {
+        build_router(Arc::clone(&state))
+            .oneshot(json_request(
+                "POST",
+                "/agents",
+                json!({ "name": name, "description": "", "model": { "id": "m" }, "system_prompt": "" }),
+            ))
+            .await
+            .unwrap();
+    }
+    let resp = build_router(Arc::clone(&state)).oneshot(get_request("/agents")).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let agents: Value = body_json(resp.into_body()).await;
+    assert_eq!(agents.as_array().unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn list_skills_with_two_items_invokes_sort() {
+    let state = mock_state();
+    for name in ["Skill Z", "Skill A"] {
+        build_router(Arc::clone(&state))
+            .oneshot(json_request(
+                "POST",
+                "/skills",
+                json!({ "name": name, "description": "", "content": "c" }),
+            ))
+            .await
+            .unwrap();
+    }
+    let resp = build_router(Arc::clone(&state)).oneshot(get_request("/skills")).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let skills: Value = body_json(resp.into_body()).await;
+    let arr = skills.as_array().unwrap();
+    assert_eq!(arr.len(), 2);
+    assert_eq!(arr[0]["name"], "Skill A");
+    assert_eq!(arr[1]["name"], "Skill Z");
+}
+
+#[tokio::test]
+async fn list_environments_with_two_items_invokes_sort() {
+    let state = mock_state();
+    for name in ["Prod", "Dev"] {
+        build_router(Arc::clone(&state))
+            .oneshot(json_request("POST", "/environments", json!({ "name": name })))
+            .await
+            .unwrap();
+    }
+    let resp = build_router(Arc::clone(&state)).oneshot(get_request("/environments")).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let envs: Value = body_json(resp.into_body()).await;
+    let arr = envs.as_array().unwrap();
+    assert_eq!(arr.len(), 2);
+    assert_eq!(arr[0]["name"], "Dev");
+    assert_eq!(arr[1]["name"], "Prod");
+}
+
+#[tokio::test]
+async fn list_credentials_with_two_items_invokes_sort() {
+    let state = mock_state();
+    for name in ["Token A", "Token B"] {
+        build_router(Arc::clone(&state))
+            .oneshot(json_request(
+                "POST",
+                "/environments/env_sort/credentials",
+                json!({ "name": name, "type": "bearer_token", "mcp_server_url": "https://example.com" }),
+            ))
+            .await
+            .unwrap();
+    }
+    let resp = build_router(Arc::clone(&state))
+        .oneshot(get_request("/environments/env_sort/credentials"))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let creds: Value = body_json(resp.into_body()).await;
+    assert_eq!(creds.as_array().unwrap().len(), 2);
+}

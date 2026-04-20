@@ -60,7 +60,7 @@ impl SkillStore {
     }
 
     pub async fn put(&self, skill: &Skill) -> Result<(), String> {
-        let bytes = serde_json::to_vec(skill).map_err(|e| e.to_string())?;
+        let bytes = serde_json::to_vec(skill).expect("Skill serialization");
         self.kv
             .put(&skill.id, Bytes::from(bytes))
             .await
@@ -94,7 +94,7 @@ impl SkillStore {
 
     pub async fn put_version(&self, version: &SkillVersion) -> Result<(), String> {
         let key = format!("{}.{}", version.skill_id, version.version);
-        let bytes = serde_json::to_vec(version).map_err(|e| e.to_string())?;
+        let bytes = serde_json::to_vec(version).expect("SkillVersion serialization");
         self.versions_kv
             .put(&key, Bytes::from(bytes))
             .await
