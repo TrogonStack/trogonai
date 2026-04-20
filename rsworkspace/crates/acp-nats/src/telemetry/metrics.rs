@@ -151,7 +151,10 @@ mod tests {
                 })
             });
 
-        assert!(found, "acp.requests must be recorded with method=initialize, success=true");
+        assert!(
+            found,
+            "acp.requests must be recorded with method=initialize, success=true"
+        );
         provider.shutdown().unwrap();
     }
 
