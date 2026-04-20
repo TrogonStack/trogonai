@@ -17,8 +17,11 @@
 use std::time::Duration;
 
 use trogon_nats::{NatsConfig, connect};
+use trogon_secret_proxy::{
+    proxy::{ProxyState, router},
+    stream, subjects,
+};
 use trogon_std::SystemEnv;
-use trogon_secret_proxy::{proxy::{ProxyState, router}, stream, subjects};
 
 #[tokio::main]
 async fn main() {

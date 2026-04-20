@@ -19,10 +19,7 @@ use futures_util::Stream;
 pub trait NatsClient: Clone + Send + Sync + 'static {
     type Sub: Stream<Item = async_nats::Message> + Send + Unpin + 'static;
 
-    fn subscribe(
-        &self,
-        subject: String,
-    ) -> impl Future<Output = Result<Self::Sub, String>> + Send;
+    fn subscribe(&self, subject: String) -> impl Future<Output = Result<Self::Sub, String>> + Send;
 
     fn publish(
         &self,
