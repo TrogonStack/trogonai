@@ -7,11 +7,11 @@ use trogon_console::models::agent::{AgentDefinition, AgentModel, AgentStatus};
 use trogon_console::models::credential::{Credential, CredentialStatus, CredentialType};
 use trogon_console::models::environment::{Environment, EnvironmentType, NetworkingType};
 use trogon_console::models::skill::{Skill, SkillVersion};
-use trogon_console::store::agents::{AgentStore, AGENTS_BUCKET};
-use trogon_console::store::credentials::CredentialStore;
+use trogon_console::store::agents::{AgentStore, AGENT_VERSIONS_BUCKET, AGENTS_BUCKET};
+use trogon_console::store::credentials::{CredentialStore, CREDS_BUCKET, VAULTS_BUCKET};
 use trogon_console::store::environments::{EnvironmentStore, ENVS_BUCKET};
 use trogon_console::store::sessions::{SessionReader, SESSIONS_BUCKET};
-use trogon_console::store::skills::{SkillStore, SKILLS_BUCKET};
+use trogon_console::store::skills::{SkillStore, SKILL_VERSIONS_BUCKET, SKILLS_BUCKET};
 
 async fn nats_js() -> (jetstream::Context, Box<dyn std::any::Any>) {
     let container = Nats::default()
@@ -293,4 +293,140 @@ async fn session_reader_list_by_tenant_filters_correctly() {
     assert_eq!(tenant_a.len(), 2);
     let tenant_b = reader.list_by_tenant("t_b").await.unwrap();
     assert_eq!(tenant_b.len(), 1);
+}
+
+// ── silent-skip on bad JSON during list ──────────────────────────────────────
+
+#[tokio::test]
+async fn agent_store_list_versions_skips_invalid_json() {
+    let (js, _c) = nats_js().await;
+    let store = AgentStore::open(&js).await.unwrap();
+    let mut a = make_agent("ag_x", "t");
+    a.version = 1;
+    store.put(&a).await.unwrap();
+    // overwrite the version entry with bad JSON
+    let kv = js.get_key_value(AGENT_VERSIONS_BUCKET).await.unwrap();
+    kv.put("ag_x.v1", Bytes::from_static(b"notjson")).await.unwrap();
+    // list_versions silently skips unparseable entries
+    let versions = store.list_versions("ag_x").await.unwrap();
+    assert!(versions.is_empty());
+}
+
+#[tokio::test]
+async fn skill_store_list_versions_skips_invalid_json() {
+    let (js, _c) = nats_js().await;
+    let store = SkillStore::open(&js).await.unwrap();
+    // put bad JSON at a key that matches the prefix filter
+    let kv = js.get_key_value(SKILL_VERSIONS_BUCKET).await.unwrap();
+    kv.put("pdf.20260101", Bytes::from_static(b"notjson")).await.unwrap();
+    let versions = store.list_versions("pdf").await.unwrap();
+    assert!(versions.is_empty());
+}
+
+#[tokio::test]
+async fn credential_store_list_skips_invalid_json() {
+    let (js, _c) = nats_js().await;
+    let store = CredentialStore::open(&js).await.unwrap();
+    // put bad JSON at a key matching the prefix
+    let kv = js.get_key_value(CREDS_BUCKET).await.unwrap();
+    kv.put("env1.crd_bad", Bytes::from_static(b"notjson")).await.unwrap();
+    let creds = store.list("env1").await.unwrap();
+    assert!(creds.is_empty());
+}
+
+// ── NATS error simulation (stream deletion) ───────────────────────────────────
+
+#[tokio::test]
+async fn agent_store_nats_error_agents_bucket() {
+    let (js, _c) = nats_js().await;
+    let store = AgentStore::open(&js).await.unwrap();
+    js.delete_stream(format!("KV_{AGENTS_BUCKET}")).await.unwrap();
+
+    assert!(store.get("x").await.is_err());
+    assert!(store.delete("x").await.is_err());
+    assert!(store.put(&make_agent("x", "t")).await.is_err());
+    assert!(store.list().await.is_err());
+}
+
+#[tokio::test]
+async fn agent_store_nats_error_versions_bucket() {
+    let (js, _c) = nats_js().await;
+    let store = AgentStore::open(&js).await.unwrap();
+    js.delete_stream(format!("KV_{AGENT_VERSIONS_BUCKET}")).await.unwrap();
+
+    assert!(store.list_versions("agent_a").await.is_err());
+    // put writes to agents bucket first, then versions bucket
+    assert!(store.put(&make_agent("a", "t")).await.is_err());
+}
+
+#[tokio::test]
+async fn skill_store_nats_error_skills_bucket() {
+    let (js, _c) = nats_js().await;
+    let store = SkillStore::open(&js).await.unwrap();
+    js.delete_stream(format!("KV_{SKILLS_BUCKET}")).await.unwrap();
+
+    assert!(store.get("x").await.is_err());
+    assert!(store.put(&make_skill("x")).await.is_err());
+    assert!(store.list().await.is_err());
+}
+
+#[tokio::test]
+async fn skill_store_nats_error_versions_bucket() {
+    let (js, _c) = nats_js().await;
+    let store = SkillStore::open(&js).await.unwrap();
+    js.delete_stream(format!("KV_{SKILL_VERSIONS_BUCKET}")).await.unwrap();
+
+    let sv = SkillVersion {
+        skill_id: "sk".to_string(),
+        version: "20260101".to_string(),
+        content: "c".to_string(),
+        is_latest: true,
+        created_at: "t".to_string(),
+    };
+    assert!(store.put_version(&sv).await.is_err());
+    assert!(store.list_versions("sk").await.is_err());
+}
+
+#[tokio::test]
+async fn credential_store_nats_error_creds_bucket() {
+    let (js, _c) = nats_js().await;
+    let store = CredentialStore::open(&js).await.unwrap();
+    js.delete_stream(format!("KV_{CREDS_BUCKET}")).await.unwrap();
+
+    assert!(store.list("env1").await.is_err());
+    assert!(store.put(&make_credential("c1", "env1", "vlt1")).await.is_err());
+    assert!(store.delete("env1", "c1").await.is_err());
+}
+
+#[tokio::test]
+async fn credential_store_nats_error_vaults_bucket() {
+    let (js, _c) = nats_js().await;
+    let store = CredentialStore::open(&js).await.unwrap();
+    js.delete_stream(format!("KV_{VAULTS_BUCKET}")).await.unwrap();
+
+    assert!(store.get_vault("env1").await.is_err());
+    assert!(store.get_or_create_vault("env1").await.is_err());
+}
+
+#[tokio::test]
+async fn env_store_nats_error() {
+    let (js, _c) = nats_js().await;
+    let store = EnvironmentStore::open(&js).await.unwrap();
+    js.delete_stream(format!("KV_{ENVS_BUCKET}")).await.unwrap();
+
+    assert!(store.get("x").await.is_err());
+    assert!(store.put(&make_env("x", "X")).await.is_err());
+    assert!(store.list().await.is_err());
+    assert!(store.delete("x").await.is_err());
+}
+
+#[tokio::test]
+async fn session_store_nats_error() {
+    let (js, _c) = nats_js().await;
+    let reader = SessionReader::open(&js).await.unwrap();
+    js.delete_stream(format!("KV_{SESSIONS_BUCKET}")).await.unwrap();
+
+    assert!(reader.get("t", "s").await.is_err());
+    assert!(reader.list().await.is_err());
+    assert!(reader.list_by_tenant("t").await.is_err());
 }
