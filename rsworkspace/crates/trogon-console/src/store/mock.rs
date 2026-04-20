@@ -29,6 +29,7 @@ pub struct MockAgentStore {
     agents: Arc<Mutex<HashMap<String, AgentDefinition>>>,
     versions: Arc<Mutex<HashMap<String, Vec<AgentVersion>>>>,
     should_fail: bool,
+    should_fail_put: bool,
 }
 
 impl MockAgentStore {
@@ -38,6 +39,14 @@ impl MockAgentStore {
 
     pub fn failing() -> Self {
         Self { should_fail: true, ..Default::default() }
+    }
+
+    pub fn failing_put() -> Self {
+        Self { should_fail_put: true, ..Default::default() }
+    }
+
+    pub fn insert(&self, agent: AgentDefinition) {
+        self.agents.lock().unwrap().insert(agent.id.clone(), agent);
     }
 }
 
@@ -57,6 +66,9 @@ impl AgentRepository for MockAgentStore {
 
     fn put<'a>(&'a self, agent: &'a AgentDefinition) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
         fail_if!(self);
+        if self.should_fail_put {
+            return Box::pin(ready(Err("simulated put error".to_string())));
+        }
         let ver = AgentVersion {
             version: agent.version,
             updated_at: agent.updated_at.clone(),
@@ -99,6 +111,8 @@ pub struct MockSkillStore {
     skills: Arc<Mutex<HashMap<String, Skill>>>,
     versions: Arc<Mutex<HashMap<String, SkillVersion>>>,
     should_fail: bool,
+    should_fail_put: bool,
+    should_fail_put_version: bool,
 }
 
 impl MockSkillStore {
@@ -108,6 +122,18 @@ impl MockSkillStore {
 
     pub fn failing() -> Self {
         Self { should_fail: true, ..Default::default() }
+    }
+
+    pub fn failing_put() -> Self {
+        Self { should_fail_put: true, ..Default::default() }
+    }
+
+    pub fn failing_put_version() -> Self {
+        Self { should_fail_put_version: true, ..Default::default() }
+    }
+
+    pub fn insert_skill(&self, skill: Skill) {
+        self.skills.lock().unwrap().insert(skill.id.clone(), skill);
     }
 }
 
@@ -127,6 +153,9 @@ impl SkillRepository for MockSkillStore {
 
     fn put<'a>(&'a self, skill: &'a Skill) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
         fail_if!(self);
+        if self.should_fail_put {
+            return Box::pin(ready(Err("simulated put error".to_string())));
+        }
         self.skills.lock().unwrap().insert(skill.id.clone(), skill.clone());
         Box::pin(ready(Ok(())))
     }
@@ -152,6 +181,9 @@ impl SkillRepository for MockSkillStore {
 
     fn put_version<'a>(&'a self, version: &'a SkillVersion) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
         fail_if!(self);
+        if self.should_fail_put_version {
+            return Box::pin(ready(Err("simulated put_version error".to_string())));
+        }
         let key = format!("{}.{}", version.skill_id, version.version);
         self.versions.lock().unwrap().insert(key, version.clone());
         Box::pin(ready(Ok(())))
@@ -164,6 +196,7 @@ impl SkillRepository for MockSkillStore {
 pub struct MockEnvironmentStore {
     envs: Arc<Mutex<HashMap<String, Environment>>>,
     should_fail: bool,
+    should_fail_put: bool,
 }
 
 impl MockEnvironmentStore {
@@ -173,6 +206,14 @@ impl MockEnvironmentStore {
 
     pub fn failing() -> Self {
         Self { should_fail: true, ..Default::default() }
+    }
+
+    pub fn failing_put() -> Self {
+        Self { should_fail_put: true, ..Default::default() }
+    }
+
+    pub fn insert(&self, env: Environment) {
+        self.envs.lock().unwrap().insert(env.id.clone(), env);
     }
 }
 
@@ -192,6 +233,9 @@ impl EnvironmentRepository for MockEnvironmentStore {
 
     fn put<'a>(&'a self, env: &'a Environment) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
         fail_if!(self);
+        if self.should_fail_put {
+            return Box::pin(ready(Err("simulated put error".to_string())));
+        }
         self.envs.lock().unwrap().insert(env.id.clone(), env.clone());
         Box::pin(ready(Ok(())))
     }
@@ -210,6 +254,7 @@ pub struct MockCredentialStore {
     vaults: Arc<Mutex<HashMap<String, CredentialVault>>>,
     creds: Arc<Mutex<HashMap<String, Credential>>>,
     should_fail: bool,
+    should_fail_put: bool,
 }
 
 impl MockCredentialStore {
@@ -219,6 +264,10 @@ impl MockCredentialStore {
 
     pub fn failing() -> Self {
         Self { should_fail: true, ..Default::default() }
+    }
+
+    pub fn failing_put() -> Self {
+        Self { should_fail_put: true, ..Default::default() }
     }
 }
 
@@ -263,6 +312,9 @@ impl CredentialRepository for MockCredentialStore {
 
     fn put<'a>(&'a self, cred: &'a Credential) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
         fail_if!(self);
+        if self.should_fail_put {
+            return Box::pin(ready(Err("simulated put error".to_string())));
+        }
         let key = format!("{}.{}", cred.env_id, cred.id);
         self.creds.lock().unwrap().insert(key, cred.clone());
         Box::pin(ready(Ok(())))

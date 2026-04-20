@@ -1316,3 +1316,206 @@ async fn list_credentials_with_two_items_invokes_sort() {
     let creds: Value = body_json(resp.into_body()).await;
     assert_eq!(creds.as_array().unwrap().len(), 2);
 }
+
+// ── put-error branch coverage ─────────────────────────────────────────────────
+
+#[tokio::test]
+async fn update_agent_put_error_returns_500() {
+    use crate::models::agent::{AgentDefinition, AgentModel, AgentStatus};
+    let store = MockAgentStore::failing_put();
+    store.insert(AgentDefinition {
+        id: "agent_put_fail".to_string(),
+        name: "X".to_string(),
+        description: "".to_string(),
+        status: AgentStatus::Active,
+        version: 1,
+        model: AgentModel { id: "m".to_string(), speed: "standard".to_string() },
+        system_prompt: "".to_string(),
+        skill_ids: vec![],
+        tools: vec![],
+        mcp_servers: vec![],
+        metadata: serde_json::Value::Null,
+        created_at: "0".to_string(),
+        updated_at: "0".to_string(),
+    });
+    let app = build_router(Arc::new(AppState {
+        agents:       Arc::new(store),
+        skills:       Arc::new(MockSkillStore::new()),
+        environments: Arc::new(MockEnvironmentStore::new()),
+        credentials:  Arc::new(MockCredentialStore::new()),
+        sessions:     Arc::new(MockSessionStore::new()),
+    }));
+    let resp = app
+        .oneshot(json_request("PUT", "/agents/agent_put_fail", json!({ "name": "Y" })))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+}
+
+#[tokio::test]
+async fn update_environment_put_error_returns_500() {
+    use crate::models::environment::{Environment, EnvironmentType, NetworkingType};
+    let store = MockEnvironmentStore::failing_put();
+    store.insert(Environment {
+        id: "env_put_fail".to_string(),
+        name: "E".to_string(),
+        description: "".to_string(),
+        env_type: EnvironmentType::Cloud,
+        networking: NetworkingType::Unrestricted,
+        packages: vec![],
+        metadata: Default::default(),
+        archived: false,
+        created_at: "0".to_string(),
+        updated_at: "0".to_string(),
+    });
+    let app = build_router(Arc::new(AppState {
+        agents:       Arc::new(MockAgentStore::new()),
+        skills:       Arc::new(MockSkillStore::new()),
+        environments: Arc::new(store),
+        credentials:  Arc::new(MockCredentialStore::new()),
+        sessions:     Arc::new(MockSessionStore::new()),
+    }));
+    let resp = app
+        .oneshot(json_request("PUT", "/environments/env_put_fail", json!({ "name": "E2" })))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+}
+
+#[tokio::test]
+async fn archive_environment_put_error_returns_500() {
+    use crate::models::environment::{Environment, EnvironmentType, NetworkingType};
+    let store = MockEnvironmentStore::failing_put();
+    store.insert(Environment {
+        id: "env_arch_fail".to_string(),
+        name: "E".to_string(),
+        description: "".to_string(),
+        env_type: EnvironmentType::Cloud,
+        networking: NetworkingType::Unrestricted,
+        packages: vec![],
+        metadata: Default::default(),
+        archived: false,
+        created_at: "0".to_string(),
+        updated_at: "0".to_string(),
+    });
+    let app = build_router(Arc::new(AppState {
+        agents:       Arc::new(MockAgentStore::new()),
+        skills:       Arc::new(MockSkillStore::new()),
+        environments: Arc::new(store),
+        credentials:  Arc::new(MockCredentialStore::new()),
+        sessions:     Arc::new(MockSessionStore::new()),
+    }));
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/environments/env_arch_fail/archive")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+}
+
+#[tokio::test]
+async fn create_credential_put_error_returns_500() {
+    let app = build_router(Arc::new(AppState {
+        agents:       Arc::new(MockAgentStore::new()),
+        skills:       Arc::new(MockSkillStore::new()),
+        environments: Arc::new(MockEnvironmentStore::new()),
+        credentials:  Arc::new(MockCredentialStore::failing_put()),
+        sessions:     Arc::new(MockSessionStore::new()),
+    }));
+    let resp = app
+        .oneshot(json_request(
+            "POST",
+            "/environments/env_cred_fail/credentials",
+            json!({ "name": "T", "type": "bearer_token", "mcp_server_url": "https://x.com" }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+}
+
+#[tokio::test]
+async fn create_skill_put_version_error_returns_500() {
+    let app = build_router(Arc::new(AppState {
+        agents:       Arc::new(MockAgentStore::new()),
+        skills:       Arc::new(MockSkillStore::failing_put_version()),
+        environments: Arc::new(MockEnvironmentStore::new()),
+        credentials:  Arc::new(MockCredentialStore::new()),
+        sessions:     Arc::new(MockSessionStore::new()),
+    }));
+    let resp = app
+        .oneshot(json_request(
+            "POST",
+            "/skills",
+            json!({ "name": "S", "description": "", "content": "c" }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+}
+
+#[tokio::test]
+async fn create_skill_version_put_version_error_returns_500() {
+    use crate::models::skill::Skill;
+    let store = MockSkillStore::failing_put_version();
+    store.insert_skill(Skill {
+        id: "skill_pvfail".to_string(),
+        name: "S".to_string(),
+        description: "".to_string(),
+        provider: "custom".to_string(),
+        latest_version: "20260101".to_string(),
+        created_at: "0".to_string(),
+        updated_at: "0".to_string(),
+    });
+    let app = build_router(Arc::new(AppState {
+        agents:       Arc::new(MockAgentStore::new()),
+        skills:       Arc::new(store),
+        environments: Arc::new(MockEnvironmentStore::new()),
+        credentials:  Arc::new(MockCredentialStore::new()),
+        sessions:     Arc::new(MockSessionStore::new()),
+    }));
+    let resp = app
+        .oneshot(json_request(
+            "POST",
+            "/skills/skill_pvfail/versions",
+            json!({ "content": "v2" }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+}
+
+#[tokio::test]
+async fn create_skill_version_put_error_returns_500() {
+    use crate::models::skill::Skill;
+    let store = MockSkillStore::failing_put();
+    store.insert_skill(Skill {
+        id: "skill_pfail".to_string(),
+        name: "S".to_string(),
+        description: "".to_string(),
+        provider: "custom".to_string(),
+        latest_version: "20260101".to_string(),
+        created_at: "0".to_string(),
+        updated_at: "0".to_string(),
+    });
+    let app = build_router(Arc::new(AppState {
+        agents:       Arc::new(MockAgentStore::new()),
+        skills:       Arc::new(store),
+        environments: Arc::new(MockEnvironmentStore::new()),
+        credentials:  Arc::new(MockCredentialStore::new()),
+        sessions:     Arc::new(MockSessionStore::new()),
+    }));
+    let resp = app
+        .oneshot(json_request(
+            "POST",
+            "/skills/skill_pfail/versions",
+            json!({ "content": "v2" }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+}
