@@ -39,7 +39,7 @@ mod tests {
     fn mock_bridge() -> (
         AdvancedMockNatsClient,
         MockJs,
-        Bridge<AdvancedMockNatsClient, trogon_std::time::SystemClock, MockJs>,
+        Bridge<AdvancedMockNatsClient, trogon_std::time::MockClock, MockJs>,
     ) {
         let mock = AdvancedMockNatsClient::new();
         let js = MockJs::new();
@@ -47,7 +47,7 @@ mod tests {
         let bridge = Bridge::new(
             mock.clone(),
             js.clone(),
-            trogon_std::time::SystemClock,
+            trogon_std::time::MockClock::new(),
             &opentelemetry::global::meter("acp-nats-test"),
             Config::for_test("acp"),
             tx,
