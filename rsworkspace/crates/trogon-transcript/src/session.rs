@@ -30,11 +30,7 @@ pub struct Session<P: TranscriptPublisher> {
 }
 
 impl<P: TranscriptPublisher> Session<P> {
-    pub fn new(
-        publisher: P,
-        actor_type: impl Into<String>,
-        actor_key: impl Into<String>,
-    ) -> Self {
+    pub fn new(publisher: P, actor_type: impl Into<String>, actor_key: impl Into<String>) -> Self {
         Self {
             publisher,
             actor_type: actor_type.into(),
@@ -60,9 +56,7 @@ impl<P: TranscriptPublisher> Session<P> {
     pub async fn append(&self, entry: TranscriptEntry) -> Result<(), TranscriptError> {
         let subject = transcript_subject(&self.actor_type, &self.actor_key, &self.session_id);
         let payload = serde_json::to_vec(&entry).map_err(TranscriptError::Serialization)?;
-        self.publisher
-            .publish(subject, Bytes::from(payload))
-            .await
+        self.publisher.publish(subject, Bytes::from(payload)).await
     }
 
     // ── Convenience helpers ──────────────────────────────────────────────────
@@ -218,34 +212,54 @@ mod tests {
     #[tokio::test]
     async fn append_assistant_message_records_entry() {
         let (session, mock) = mock_session("pr", "owner/repo/1");
-        session.append_assistant_message("LGTM", Some(7)).await.unwrap();
+        session
+            .append_assistant_message("LGTM", Some(7))
+            .await
+            .unwrap();
         let published = mock.take_published();
         assert_eq!(published.len(), 1);
         let entry: TranscriptEntry = serde_json::from_slice(&published[0].1).unwrap();
-        assert!(matches!(entry, TranscriptEntry::Message { role: crate::entry::Role::Assistant, tokens: Some(7), .. }));
+        assert!(matches!(
+            entry,
+            TranscriptEntry::Message {
+                role: crate::entry::Role::Assistant,
+                tokens: Some(7),
+                ..
+            }
+        ));
     }
 
     #[tokio::test]
     async fn append_tool_call_records_entry() {
         let (session, mock) = mock_session("pr", "owner/repo/1");
         session
-            .append_tool_call("search", serde_json::json!({"q": "foo"}), serde_json::json!([]), 99)
+            .append_tool_call(
+                "search",
+                serde_json::json!({"q": "foo"}),
+                serde_json::json!([]),
+                99,
+            )
             .await
             .unwrap();
         let published = mock.take_published();
         let entry: TranscriptEntry = serde_json::from_slice(&published[0].1).unwrap();
-        assert!(matches!(entry, TranscriptEntry::ToolCall { name, duration_ms: 99, .. } if name == "search"));
+        assert!(
+            matches!(entry, TranscriptEntry::ToolCall { name, duration_ms: 99, .. } if name == "search")
+        );
     }
 
     #[tokio::test]
     async fn append_sub_agent_spawn_records_entry() {
         let (session, mock) = mock_session("pr", "owner/repo/1");
-        session.append_sub_agent_spawn("pr/owner/repo/1", "SecurityActor", "security_analysis")
+        session
+            .append_sub_agent_spawn("pr/owner/repo/1", "SecurityActor", "security_analysis")
             .await
             .unwrap();
         let published = mock.take_published();
         let entry: TranscriptEntry = serde_json::from_slice(&published[0].1).unwrap();
-        assert!(matches!(entry, TranscriptEntry::SubAgentSpawn { capability, .. } if capability == "security_analysis"));
+        assert!(
+            matches!(entry, TranscriptEntry::SubAgentSpawn { capability, .. } if capability == "security_analysis")
+        );
     }
 
     #[tokio::test]
@@ -260,7 +274,12 @@ mod tests {
         let (_, payload) = &published[0];
         let entry: TranscriptEntry = serde_json::from_slice(payload).unwrap();
         match entry {
-            TranscriptEntry::RoutingDecision { from, to, reasoning, .. } => {
+            TranscriptEntry::RoutingDecision {
+                from,
+                to,
+                reasoning,
+                ..
+            } => {
                 assert_eq!(from, "gateway");
                 assert_eq!(to, "PrActor");
                 assert_eq!(reasoning, "event is a pull_request");
@@ -272,13 +291,20 @@ mod tests {
     #[tokio::test]
     async fn append_system_message_records_entry() {
         let (session, mock) = mock_session("pr", "owner/repo/1");
-        session.append_system_message("You are a helpful assistant.").await.unwrap();
+        session
+            .append_system_message("You are a helpful assistant.")
+            .await
+            .unwrap();
         let published = mock.take_published();
         assert_eq!(published.len(), 1);
         let entry: TranscriptEntry = serde_json::from_slice(&published[0].1).unwrap();
         assert!(matches!(
             entry,
-            TranscriptEntry::Message { role: crate::entry::Role::System, tokens: None, .. }
+            TranscriptEntry::Message {
+                role: crate::entry::Role::System,
+                tokens: None,
+                ..
+            }
         ));
     }
 }

@@ -57,7 +57,7 @@ mod tests {
     }
 
     fn boxed(msg: &'static str) -> Box<dyn std::error::Error + Send + Sync> {
-        Box::new(std::io::Error::new(std::io::ErrorKind::Other, msg))
+        Box::new(std::io::Error::other(msg))
     }
 
     #[test]
@@ -87,13 +87,16 @@ mod tests {
 
     #[test]
     fn display_serialization() {
-        assert!(format!("{}", RegistryError::Serialization(json_err()))
-            .contains("serialization error"));
+        assert!(
+            format!("{}", RegistryError::Serialization(json_err())).contains("serialization error")
+        );
     }
 
     #[test]
     fn display_deserialization() {
-        assert!(format!("{}", RegistryError::Deserialization(json_err()))
-            .contains("deserialization error"));
+        assert!(
+            format!("{}", RegistryError::Deserialization(json_err()))
+                .contains("deserialization error")
+        );
     }
 }

@@ -41,9 +41,9 @@
 //!         model: "grok-3-mini".into(),
 //!     };
 //!     let llm = OpenAiCompatClient::new(http, llm_config);
-//!     let publisher = NatsTranscriptPublisher::new(js);
+//!     let publisher = NatsTranscriptPublisher::new(js.clone());
 //!
-//!     let router = Router::new(llm, registry, publisher, nats);
+//!     let router = Router::new(llm, registry, publisher, nats, js);
 //!     router.run("trogon.events.>").await.unwrap();
 //! }
 //! ```

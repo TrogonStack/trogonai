@@ -4,16 +4,16 @@ use async_nats::HeaderMap;
 use bytes::Bytes;
 use futures_util::StreamExt as _;
 use tracing::{instrument, warn};
-use trogon_nats::{PublishClient, RequestClient, SubscribeClient};
 use trogon_nats::jetstream::JetStreamPublisher;
+use trogon_nats::{PublishClient, RequestClient, SubscribeClient};
 use trogon_registry::{AgentCapability, RegistryStore};
 use trogon_transcript::TranscriptPublisher;
 
 use crate::{
     EntityActor, StateStore,
+    runtime::{ActorRuntime, SPAWN_DEPTH_HEADER, TROGON_REPLY_TO_HEADER},
     state::state_kv_key,
     telemetry::metrics,
-    runtime::{ActorRuntime, SPAWN_DEPTH_HEADER, TROGON_REPLY_TO_HEADER},
 };
 
 /// Default maximum time allowed for a single `handle_event` invocation.
@@ -106,7 +106,14 @@ where
         event_timeout: Duration,
     ) -> Self {
         let (cancel, cancel_rx) = tokio::sync::watch::channel(false);
-        Self { runtime, actor, capability, event_timeout, cancel, cancel_rx }
+        Self {
+            runtime,
+            actor,
+            capability,
+            event_timeout,
+            cancel,
+            cancel_rx,
+        }
     }
 
     /// Signal the host to stop after the current event (if any) completes.
@@ -134,7 +141,7 @@ where
         use async_nats::jetstream::AckKind;
         use async_nats::jetstream::consumer::pull;
         use trogon_nats::jetstream::message::{JsAck, JsAckWith, JsMessageRef};
-        use trogon_nats::jetstream::{JetStreamCreateConsumer as _, JetStreamConsumer as _};
+        use trogon_nats::jetstream::{JetStreamConsumer as _, JetStreamCreateConsumer as _};
 
         let registry = self.runtime.registry().clone();
         registry
@@ -153,9 +160,8 @@ where
         let heartbeat_cap = self.capability.clone();
         let mut cancel_rx_hb = self.cancel_rx.clone();
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(
-                trogon_registry::provision::HEARTBEAT_INTERVAL,
-            );
+            let mut interval =
+                tokio::time::interval(trogon_registry::provision::HEARTBEAT_INTERVAL);
             interval.tick().await;
             loop {
                 tokio::select! {
@@ -315,9 +321,8 @@ where
         let heartbeat_cap = self.capability.clone();
         let mut cancel_rx_hb = self.cancel_rx.clone();
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(
-                trogon_registry::provision::HEARTBEAT_INTERVAL,
-            );
+            let mut interval =
+                tokio::time::interval(trogon_registry::provision::HEARTBEAT_INTERVAL);
             interval.tick().await;
             loop {
                 tokio::select! {
@@ -487,10 +492,14 @@ mod tests {
     #[test]
     fn host_error_display() {
         assert!(
-            HostError::Register("x".into()).to_string().contains("register")
+            HostError::Register("x".into())
+                .to_string()
+                .contains("register")
         );
         assert!(
-            HostError::Subscribe("x".into()).to_string().contains("subscribe")
+            HostError::Subscribe("x".into())
+                .to_string()
+                .contains("subscribe")
         );
     }
 }

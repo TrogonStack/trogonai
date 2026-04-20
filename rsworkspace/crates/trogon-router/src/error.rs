@@ -62,13 +62,17 @@ mod tests {
 
     #[test]
     fn display_llm_parse() {
-        assert!(format!("{}", RouterError::LlmParse("x".into())).contains("LLM response parse error"));
+        assert!(
+            format!("{}", RouterError::LlmParse("x".into())).contains("LLM response parse error")
+        );
     }
 
     #[test]
     fn display_unknown_agent_type() {
-        assert!(format!("{}", RouterError::UnknownAgentType("Ghost".into()))
-            .contains("unknown agent type"));
+        assert!(
+            format!("{}", RouterError::UnknownAgentType("Ghost".into()))
+                .contains("unknown agent type")
+        );
     }
 
     #[test]

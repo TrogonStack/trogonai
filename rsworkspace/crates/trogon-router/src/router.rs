@@ -4,8 +4,8 @@ use std::time::Duration;
 use async_nats::HeaderMap;
 use futures_util::StreamExt;
 use tracing::{instrument, warn};
-use trogon_nats::{PublishClient, SubscribeClient};
 use trogon_nats::jetstream::JetStreamPublisher;
+use trogon_nats::{PublishClient, SubscribeClient};
 use trogon_registry::{AgentCapability, Registry, RegistryStore};
 use trogon_transcript::{Session, TranscriptPublisher, entry::now_ms};
 
@@ -14,8 +14,8 @@ use crate::{
     error::RouterError,
     event::RouterEvent,
     llm::LlmClient,
-    telemetry::metrics,
     prompt::build_routing_prompt,
+    telemetry::metrics,
 };
 
 /// How long the router waits for the JetStream server to confirm it has
@@ -67,7 +67,14 @@ where
     J: JetStreamPublisher,
 {
     pub fn new(llm: L, registry: Registry<R>, publisher: P, nats: N, js: J) -> Self {
-        Self { llm, registry, publisher, nats, js, dlq_subject_prefix: None }
+        Self {
+            llm,
+            registry,
+            publisher,
+            nats,
+            js,
+            dlq_subject_prefix: None,
+        }
     }
 
     /// Enable the dead-letter queue.
@@ -124,10 +131,7 @@ where
         let llm_response = self.llm.complete(prompt).await.inspect_err(|_| {
             metrics::inc_events_error(event.event_type(), "llm");
         })?;
-        metrics::record_llm_latency(
-            event.event_type(),
-            llm_start.elapsed().as_millis() as f64,
-        );
+        metrics::record_llm_latency(event.event_type(), llm_start.elapsed().as_millis() as f64);
         let result: RouteResult = llm_response.into();
 
         // ── 3. Record routing decision in transcript (best-effort) ────────────
@@ -147,9 +151,11 @@ where
                 // ── 4. Forward to actor ───────────────────────────────────────
                 // Pass the already-fetched agent list so dispatch() does not
                 // perform a second registry lookup (eliminates TOCTOU race).
-                self.dispatch(&event, decision, &agents).await.inspect_err(|_| {
-                    metrics::inc_events_error(event.event_type(), "dispatch");
-                })?;
+                self.dispatch(&event, decision, &agents)
+                    .await
+                    .inspect_err(|_| {
+                        metrics::inc_events_error(event.event_type(), "dispatch");
+                    })?;
                 metrics::inc_events_routed(event.event_type(), &decision.agent_type);
             }
             RouteResult::Unroutable { reasoning } => {
@@ -159,11 +165,7 @@ where
                     "event is unroutable"
                 );
                 if let Err(e) = session
-                    .append_routing_decision(
-                        event.event_type(),
-                        "unroutable",
-                        reasoning,
-                    )
+                    .append_routing_decision(event.event_type(), "unroutable", reasoning)
                     .await
                 {
                     warn!(error = %e, "failed to write unroutable entry to transcript");
@@ -174,11 +176,7 @@ where
                     let dlq_subject = format!("{prefix}.{}", event.event_type());
                     if let Err(e) = self
                         .nats
-                        .publish_with_headers(
-                            dlq_subject,
-                            HeaderMap::new(),
-                            event.payload.clone(),
-                        )
+                        .publish_with_headers(dlq_subject, HeaderMap::new(), event.payload.clone())
                         .await
                     {
                         warn!(error = %e, "failed to publish unroutable event to DLQ");
@@ -219,10 +217,7 @@ where
         // Build headers: carry the original event subject and a timestamp.
         let mut headers = HeaderMap::new();
         headers.insert("Trogon-Original-Subject", event.subject.as_str());
-        headers.insert(
-            "Trogon-Routed-At",
-            now_ms().to_string().as_str(),
-        );
+        headers.insert("Trogon-Routed-At", now_ms().to_string().as_str());
 
         // Publish via JetStream so the message is persisted until the actor ACKs it.
         let ack_future = self
@@ -256,8 +251,24 @@ mod tests {
         llm::mock::MockLlmClient,
     };
 
+    type TestRouter = Router<
+        MockLlmClient,
+        MockRegistryStore,
+        MockTranscriptPublisher,
+        MockNatsClient,
+        MockJetStreamPublisher,
+    >;
+
+    type TestRouterFailPub = Router<
+        MockLlmClient,
+        MockRegistryStore,
+        FailPublisher,
+        MockNatsClient,
+        MockJetStreamPublisher,
+    >;
+
     fn make_router() -> (
-        Router<MockLlmClient, MockRegistryStore, MockTranscriptPublisher, MockNatsClient, MockJetStreamPublisher>,
+        TestRouter,
         MockLlmClient,
         MockRegistryStore,
         MockTranscriptPublisher,
@@ -270,7 +281,13 @@ mod tests {
         let nats = MockNatsClient::new();
         let js = MockJetStreamPublisher::new();
         let registry = Registry::new(store.clone());
-        let router = Router::new(llm.clone(), registry, publisher.clone(), nats.clone(), js.clone());
+        let router = Router::new(
+            llm.clone(),
+            registry,
+            publisher.clone(),
+            nats.clone(),
+            js.clone(),
+        );
         (router, llm, store, publisher, nats, js)
     }
 
@@ -402,7 +419,7 @@ mod tests {
     }
 
     fn make_router_fail_publisher() -> (
-        Router<MockLlmClient, MockRegistryStore, FailPublisher, MockNatsClient, MockJetStreamPublisher>,
+        TestRouterFailPub,
         MockLlmClient,
         MockRegistryStore,
         MockNatsClient,
@@ -413,7 +430,13 @@ mod tests {
         let nats = MockNatsClient::new();
         let js = MockJetStreamPublisher::new();
         let registry = Registry::new(store.clone());
-        let router = Router::new(llm.clone(), registry, FailPublisher, nats.clone(), js.clone());
+        let router = Router::new(
+            llm.clone(),
+            registry,
+            FailPublisher,
+            nats.clone(),
+            js.clone(),
+        );
         (router, llm, store, nats, js)
     }
 
@@ -529,8 +552,8 @@ mod tests {
     /// Line 90: registry.list_all() error is mapped to RouterError::Registry.
     #[tokio::test]
     async fn route_event_returns_registry_error_when_list_all_fails() {
-        use trogon_registry::store::RegistryStore;
         use bytes::Bytes;
+        use trogon_registry::store::RegistryStore;
 
         #[derive(Debug)]
         struct StoreError(&'static str);

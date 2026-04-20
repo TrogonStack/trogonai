@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use testcontainers_modules::{
     nats::Nats,
-    testcontainers::{runners::AsyncRunner, ImageExt},
+    testcontainers::{ImageExt, runners::AsyncRunner},
 };
 use trogon_actor::{
     ActorContext, ActorRuntime, EntityActor, StateStore, host::ActorHost,
@@ -16,16 +16,9 @@ use trogon_actor::{
 };
 use trogon_nats::jetstream::NatsJetStreamClient;
 use trogon_registry::{AgentCapability, Registry, provision as provision_registry};
-use trogon_router::{
-    Router,
-    decision::LlmRoutingResponse,
-    error::RouterError,
-    llm::LlmClient,
-};
+use trogon_router::{Router, decision::LlmRoutingResponse, error::RouterError, llm::LlmClient};
 use trogon_transcript::{
-    entry::TranscriptEntry,
-    publisher::NatsTranscriptPublisher,
-    store::TranscriptStore,
+    entry::TranscriptEntry, publisher::NatsTranscriptPublisher, store::TranscriptStore,
 };
 
 // ── Test actor ────────────────────────────────────────────────────────────────
@@ -52,13 +45,12 @@ impl EntityActor for ScribeActor {
         ctx: &ActorContext,
     ) -> Result<(), Self::Error> {
         state.count += 1;
-        ctx.append_user_message(
-            &format!("event received (count={})", state.count),
-            None,
-        )
-        .await
-        .ok();
-        ctx.append_assistant_message("acknowledged", None).await.ok();
+        ctx.append_user_message(&format!("event received (count={})", state.count), None)
+            .await
+            .ok();
+        ctx.append_assistant_message("acknowledged", None)
+            .await
+            .ok();
         Ok(())
     }
 }
@@ -72,7 +64,9 @@ struct MockLlmClient {
 
 impl MockLlmClient {
     fn with_response(r: LlmRoutingResponse) -> Self {
-        Self { responses: Arc::new(Mutex::new(vec![r])) }
+        Self {
+            responses: Arc::new(Mutex::new(vec![r])),
+        }
     }
 }
 
@@ -84,7 +78,12 @@ impl LlmClient for MockLlmClient {
 
 // ── Setup ─────────────────────────────────────────────────────────────────────
 
-async fn setup() -> (async_nats::Client, async_nats::jetstream::Context, NatsJetStreamClient, impl Drop) {
+async fn setup() -> (
+    async_nats::Client,
+    async_nats::jetstream::Context,
+    NatsJetStreamClient,
+    impl Drop,
+) {
     let container = Nats::default()
         .with_cmd(["-js"])
         .start()
@@ -96,7 +95,9 @@ async fn setup() -> (async_nats::Client, async_nats::jetstream::Context, NatsJet
         .expect("connect");
     let js = async_nats::jetstream::new(nats.clone());
     let js_client = NatsJetStreamClient::new(js.clone());
-    provision_actor_inbox(&js_client).await.expect("failed to provision ACTOR_INBOX");
+    provision_actor_inbox(&js_client)
+        .await
+        .expect("failed to provision ACTOR_INBOX");
     (nats, js, js_client, container)
 }
 
@@ -117,8 +118,7 @@ async fn router_routes_to_actor_and_both_write_transcript() {
     let publisher = NatsTranscriptPublisher::new(js.clone());
 
     // ── Register the scribe capability so the router can discover it ──────────
-    let scribe_cap =
-        AgentCapability::new("ScribeActor", ["scribing"], "actors.scribe.>");
+    let scribe_cap = AgentCapability::new("ScribeActor", ["scribing"], "actors.scribe.>");
     let registry_for_router = Registry::new(reg_store.clone());
     registry_for_router.register(&scribe_cap).await.unwrap();
 
@@ -202,11 +202,23 @@ async fn router_routes_to_actor_and_both_write_transcript() {
         "actor should write user + assistant transcript entries"
     );
     assert!(
-        matches!(&actor_entries[0], TranscriptEntry::Message { role: trogon_transcript::entry::Role::User, .. }),
+        matches!(
+            &actor_entries[0],
+            TranscriptEntry::Message {
+                role: trogon_transcript::entry::Role::User,
+                ..
+            }
+        ),
         "first actor entry should be a User message"
     );
     assert!(
-        matches!(&actor_entries[1], TranscriptEntry::Message { role: trogon_transcript::entry::Role::Assistant, .. }),
+        matches!(
+            &actor_entries[1],
+            TranscriptEntry::Message {
+                role: trogon_transcript::entry::Role::Assistant,
+                ..
+            }
+        ),
         "second actor entry should be an Assistant message"
     );
 }
@@ -223,8 +235,7 @@ async fn actor_state_is_persisted_after_routing() {
     transcript_store.provision().await.unwrap();
     let publisher = NatsTranscriptPublisher::new(js.clone());
 
-    let scribe_cap =
-        AgentCapability::new("ScribeActor", ["scribing"], "actors.scribe.>");
+    let scribe_cap = AgentCapability::new("ScribeActor", ["scribing"], "actors.scribe.>");
     let registry_for_router = Registry::new(reg_store.clone());
     registry_for_router.register(&scribe_cap).await.unwrap();
 
@@ -274,5 +285,8 @@ async fn actor_state_is_persisted_after_routing() {
     router_handle.abort();
 
     let state: ScribeState = serde_json::from_slice(&raw_state).unwrap();
-    assert_eq!(state.count, 1, "actor should have processed exactly one event");
+    assert_eq!(
+        state.count, 1,
+        "actor should have processed exactly one event"
+    );
 }

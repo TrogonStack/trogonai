@@ -232,8 +232,7 @@ impl PrActor {
         number: u64,
         body: &str,
     ) -> Result<(), String> {
-        let url =
-            format!("https://api.github.com/repos/{owner}/{repo}/pulls/{number}/reviews");
+        let url = format!("https://api.github.com/repos/{owner}/{repo}/pulls/{number}/reviews");
 
         let payload = serde_json::json!({
             "body": body,
@@ -271,11 +270,7 @@ impl EntityActor for PrActor {
         "pr"
     }
 
-    async fn handle(
-        &mut self,
-        state: &mut PrState,
-        ctx: &ActorContext,
-    ) -> Result<(), Self::Error> {
+    async fn handle(&mut self, state: &mut PrState, ctx: &ActorContext) -> Result<(), Self::Error> {
         state.events_processed += 1;
 
         tracing::info!(
@@ -298,10 +293,7 @@ impl EntityActor for PrActor {
         // Only runs when both credentials are configured. Degrades gracefully
         // when running without credentials (e.g. in tests or during bootstrap).
 
-        let mut review_summary = format!(
-            "Acknowledged event #{n}.",
-            n = state.events_processed
-        );
+        let mut review_summary = format!("Acknowledged event #{n}.", n = state.events_processed);
 
         if !self.github_token.is_empty() && !self.llm_api_key.is_empty() {
             if let Some((owner, repo, number)) = Self::parse_entity_key(&ctx.entity_key) {
@@ -393,7 +385,9 @@ impl EntityActor for PrActor {
             }
         }
 
-        ctx.append_assistant_message(&review_summary, None).await.ok();
+        ctx.append_assistant_message(&review_summary, None)
+            .await
+            .ok();
 
         Ok(())
     }

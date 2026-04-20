@@ -1,9 +1,9 @@
 use async_nats::jetstream::{
-    self,
-    context::{CreateKeyValueError, CreateKeyValueErrorKind, CreateStreamError, CreateStreamErrorKind},
-    ErrorCode,
-    kv,
-    stream,
+    self, ErrorCode,
+    context::{
+        CreateKeyValueError, CreateKeyValueErrorKind, CreateStreamError, CreateStreamErrorKind,
+    },
+    kv, stream,
 };
 use bytes::Bytes;
 use std::future::Future;
@@ -102,27 +102,23 @@ impl StateStore for kv::Store {
         match revision {
             None => {
                 // First event — create new entry
-                kv::Store::create(self, key, value)
-                    .await
-                    .map_err(|e| {
-                        if is_create_conflict(&e) {
-                            SaveError::Conflict
-                        } else {
-                            SaveError::Other(Box::new(e))
-                        }
-                    })
+                kv::Store::create(self, key, value).await.map_err(|e| {
+                    if is_create_conflict(&e) {
+                        SaveError::Conflict
+                    } else {
+                        SaveError::Other(Box::new(e))
+                    }
+                })
             }
             Some(rev) => {
                 // Subsequent event — update with revision check
-                kv::Store::update(self, key, value, rev)
-                    .await
-                    .map_err(|e| {
-                        if is_update_conflict(&e) {
-                            SaveError::Conflict
-                        } else {
-                            SaveError::Other(Box::new(e))
-                        }
-                    })
+                kv::Store::update(self, key, value, rev).await.map_err(|e| {
+                    if is_update_conflict(&e) {
+                        SaveError::Conflict
+                    } else {
+                        SaveError::Other(Box::new(e))
+                    }
+                })
             }
         }
     }
@@ -136,7 +132,9 @@ impl StateStore for kv::Store {
 fn is_create_conflict(error: &kv::CreateError) -> bool {
     // async-nats surfaces this as a wrong-last-sequence JetStream error.
     let msg = error.to_string().to_lowercase();
-    msg.contains("wrong last") || msg.contains("already exists") || msg.contains("expected sequence")
+    msg.contains("wrong last")
+        || msg.contains("already exists")
+        || msg.contains("expected sequence")
 }
 
 /// An `update` fails with "wrong last sequence" when the revision we read is stale.
@@ -266,11 +264,18 @@ pub mod mock {
                 }))
         }
 
-        async fn save(&self, key: &str, value: Bytes, _revision: Option<u64>) -> Result<u64, SaveError> {
+        async fn save(
+            &self,
+            key: &str,
+            value: Bytes,
+            _revision: Option<u64>,
+        ) -> Result<u64, SaveError> {
             let mut save_err = self.next_save_other_error.lock().unwrap();
             if *save_err {
                 *save_err = false;
-                return Err(SaveError::Other(Box::new(MockLoadError("injected save error".to_string()))));
+                return Err(SaveError::Other(Box::new(MockLoadError(
+                    "injected save error".to_string(),
+                ))));
             }
             drop(save_err);
 
@@ -282,10 +287,7 @@ pub mod mock {
             drop(count);
 
             let mut data = self.data.lock().unwrap();
-            let next_rev = data
-                .get(key)
-                .map(|(_, r)| r + 1)
-                .unwrap_or(1);
+            let next_rev = data.get(key).map(|(_, r)| r + 1).unwrap_or(1);
             data.insert(key.to_string(), (value, next_rev));
             Ok(next_rev)
         }
@@ -347,7 +349,10 @@ mod tests {
     #[tokio::test]
     async fn mock_delete_removes_entry() {
         let store = MockStateStore::new();
-        store.save("k", Bytes::from_static(b"v"), None).await.unwrap();
+        store
+            .save("k", Bytes::from_static(b"v"), None)
+            .await
+            .unwrap();
         store.delete("k").await.unwrap();
         assert!(store.load("k").await.unwrap().is_none());
     }
@@ -355,8 +360,14 @@ mod tests {
     #[tokio::test]
     async fn mock_snapshot_reflects_saved_state() {
         let store = MockStateStore::new();
-        store.save("a", Bytes::from_static(b"1"), None).await.unwrap();
-        store.save("b", Bytes::from_static(b"2"), None).await.unwrap();
+        store
+            .save("a", Bytes::from_static(b"1"), None)
+            .await
+            .unwrap();
+        store
+            .save("b", Bytes::from_static(b"2"), None)
+            .await
+            .unwrap();
         let snap = store.snapshot();
         assert_eq!(snap.len(), 2);
         assert_eq!(snap["a"], Bytes::from_static(b"1"));

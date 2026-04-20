@@ -1,22 +1,26 @@
 use testcontainers_modules::{
     nats::Nats,
-    testcontainers::{runners::AsyncRunner, ImageExt},
+    testcontainers::{ImageExt, runners::AsyncRunner},
 };
-use trogon_actor::{
-    runtime::ActorRuntime,
-    state::provision_state,
-};
+use trogon_actor::{runtime::ActorRuntime, state::provision_state};
+use trogon_pr_actor::actor::{PrActor, PrState};
 use trogon_registry::{Registry, provision as provision_registry};
 use trogon_transcript::publisher::NatsTranscriptPublisher;
-use trogon_pr_actor::actor::{PrActor, PrState};
 
-async fn setup() -> (async_nats::Client, async_nats::jetstream::Context, impl Drop) {
+async fn setup() -> (
+    async_nats::Client,
+    async_nats::jetstream::Context,
+    impl Drop,
+) {
     let container = Nats::default()
         .with_cmd(["-js"])
         .start()
         .await
         .expect("failed to start NATS");
-    let port = container.get_host_port_ipv4(4222).await.expect("failed to get port");
+    let port = container
+        .get_host_port_ipv4(4222)
+        .await
+        .expect("failed to get port");
     let nats = async_nats::connect(format!("nats://127.0.0.1:{port}"))
         .await
         .expect("failed to connect to NATS");
@@ -32,12 +36,13 @@ async fn make_runtime(
     NatsTranscriptPublisher,
     async_nats::Client,
     async_nats::jetstream::kv::Store,
+    async_nats::jetstream::Context,
 > {
     let state_store = provision_state(&js).await.unwrap();
     let registry_store = provision_registry(&js).await.unwrap();
-    let publisher = NatsTranscriptPublisher::new(js);
+    let publisher = NatsTranscriptPublisher::new(js.clone());
     let registry = Registry::new(registry_store);
-    ActorRuntime::new(state_store, publisher, nats, registry)
+    ActorRuntime::new(state_store, publisher, nats, registry, js)
 }
 
 /// The first `handle_event` call on a new entity key creates an entry in the
@@ -47,10 +52,17 @@ async fn pr_actor_first_event_creates_state() {
     let (nats, js, _container) = setup().await;
     let runtime = make_runtime(nats, js.clone()).await;
 
-    runtime.handle_event(&mut PrActor::default(), "acme.repo.1", 0).await.unwrap();
+    runtime
+        .handle_event(&mut PrActor::default(), "acme.repo.1", 0)
+        .await
+        .unwrap();
 
     let kv = js.get_key_value("ACTOR_STATE").await.unwrap();
-    let entry = kv.entry("pr.acme.repo.1").await.unwrap().expect("state entry missing");
+    let entry = kv
+        .entry("pr.acme.repo.1")
+        .await
+        .unwrap()
+        .expect("state entry missing");
     let state: PrState = serde_json::from_slice(&entry.value).unwrap();
     assert_eq!(state.events_processed, 1);
 }
@@ -63,13 +75,19 @@ async fn pr_actor_state_accumulates_across_events() {
     let runtime = make_runtime(nats, js.clone()).await;
 
     for _ in 0..3 {
-        runtime.handle_event(&mut PrActor::default(), "acme.repo.99", 0).await.unwrap();
+        runtime
+            .handle_event(&mut PrActor::default(), "acme.repo.99", 0)
+            .await
+            .unwrap();
     }
 
     let kv = js.get_key_value("ACTOR_STATE").await.unwrap();
     let bytes = kv.entry("pr.acme.repo.99").await.unwrap().unwrap().value;
     let state: PrState = serde_json::from_slice(&bytes).unwrap();
-    assert_eq!(state.events_processed, 3, "all three events must be counted");
+    assert_eq!(
+        state.events_processed, 3,
+        "all three events must be counted"
+    );
 }
 
 /// Two distinct entity keys produce independent state entries — they do not
@@ -79,9 +97,18 @@ async fn pr_actor_different_entities_have_independent_state() {
     let (nats, js, _container) = setup().await;
     let runtime = make_runtime(nats, js.clone()).await;
 
-    runtime.handle_event(&mut PrActor::default(), "acme.repo.10", 0).await.unwrap();
-    runtime.handle_event(&mut PrActor::default(), "acme.repo.10", 0).await.unwrap();
-    runtime.handle_event(&mut PrActor::default(), "acme.repo.20", 0).await.unwrap();
+    runtime
+        .handle_event(&mut PrActor::default(), "acme.repo.10", 0)
+        .await
+        .unwrap();
+    runtime
+        .handle_event(&mut PrActor::default(), "acme.repo.10", 0)
+        .await
+        .unwrap();
+    runtime
+        .handle_event(&mut PrActor::default(), "acme.repo.20", 0)
+        .await
+        .unwrap();
 
     let kv = js.get_key_value("ACTOR_STATE").await.unwrap();
 

@@ -1,14 +1,12 @@
 use std::time::Duration;
 
 use async_nats::jetstream::{
-    self,
-    ErrorCode,
+    self, ErrorCode,
     context::{
         CreateKeyValueError, CreateKeyValueErrorKind, CreateStreamError, CreateStreamErrorKind,
         KeyValueError,
     },
-    kv,
-    stream,
+    kv, stream,
 };
 
 use crate::error::RegistryError;
