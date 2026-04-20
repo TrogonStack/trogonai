@@ -10,7 +10,7 @@ use trogon_eventsourcing::{
 use crate::{
     CronJob, JobId, JobSpec, ResolvedJobSpec,
     error::CronError,
-    events::{JobDetails, JobEvent, JobEventCodec},
+    events::{JobAdded, JobDetails, JobEvent, JobEventCodec, JobPaused, JobRemoved, JobResumed},
 };
 
 #[derive(Debug, Clone)]
@@ -83,10 +83,12 @@ impl Decide<AddJobState, JobEvent> for AddJobCommand {
 
     fn decide(state: &AddJobState, command: &Self) -> Result<Decision<JobEvent>, Self::Error> {
         match state {
-            AddJobState::Missing => Ok(Decision::Event(NonEmpty::one(JobEvent::JobAdded {
-                id: command.stream_id().to_string(),
-                job: JobDetails::from(command.spec()),
-            }))),
+            AddJobState::Missing => Ok(Decision::Event(NonEmpty::one(JobEvent::JobAdded(
+                JobAdded {
+                    id: command.stream_id().to_string(),
+                    job: JobDetails::from(command.spec()),
+                },
+            )))),
             AddJobState::Present => Err(AddJobDecisionError::AlreadyExists {
                 id: command.stream_id().clone(),
             }),
@@ -108,13 +110,13 @@ impl CommandState for AddJobCommand {
 
     fn evolve(state: Self::State, event: JobEvent) -> Result<Self::State, Self::DomainError> {
         match event {
-            JobEvent::JobAdded { .. }
-            | JobEvent::JobPaused { .. }
-            | JobEvent::JobResumed { .. } => match state {
+            JobEvent::JobAdded(JobAdded { .. })
+            | JobEvent::JobPaused(JobPaused { .. })
+            | JobEvent::JobResumed(JobResumed { .. }) => match state {
                 AddJobState::Deleted => Ok(AddJobState::Deleted),
                 AddJobState::Missing | AddJobState::Present => Ok(AddJobState::Present),
             },
-            JobEvent::JobRemoved { .. } => Ok(AddJobState::Deleted),
+            JobEvent::JobRemoved(JobRemoved { .. }) => Ok(AddJobState::Deleted),
         }
     }
 }
@@ -179,10 +181,10 @@ mod tests {
         let decision = decide(&state, &command).unwrap();
         assert_eq!(
             decision,
-            Decision::Event(NonEmpty::one(JobEvent::JobAdded {
+            Decision::Event(NonEmpty::one(JobEvent::JobAdded(JobAdded {
                 id: "backup".to_string(),
                 job: JobDetails::from(job("backup")),
-            }))
+            })))
         );
     }
 
@@ -202,19 +204,19 @@ mod tests {
         TestCase::new(decider::<AddJobCommand>())
             .given([])
             .when(AddJobCommand::new(job("backup")).unwrap())
-            .then([JobEvent::JobAdded {
+            .then([JobEvent::JobAdded(JobAdded {
                 id: "backup".to_string(),
                 job: JobDetails::from(job("backup")),
-            }]);
+            })]);
     }
 
     #[test]
     fn given_when_then_supports_register_job_failures() {
         TestCase::new(decider::<AddJobCommand>())
-            .given([JobEvent::JobAdded {
+            .given([JobEvent::JobAdded(JobAdded {
                 id: "backup".to_string(),
                 job: JobDetails::from(job("backup")),
-            }])
+            })])
             .when(AddJobCommand::new(job("backup")).unwrap())
             .then(expect_error(AddJobDecisionError::AlreadyExists {
                 id: JobId::parse("backup").unwrap(),
@@ -225,13 +227,13 @@ mod tests {
     fn rejects_adding_deleted_job_ids() {
         TestCase::new(decider::<AddJobCommand>())
             .given([
-                JobEvent::JobAdded {
+                JobEvent::JobAdded(JobAdded {
                     id: "backup".to_string(),
                     job: JobDetails::from(job("backup")),
-                },
-                JobEvent::JobRemoved {
+                }),
+                JobEvent::JobRemoved(JobRemoved {
                     id: "backup".to_string(),
-                },
+                }),
             ])
             .when(AddJobCommand::new(job("backup")).unwrap())
             .then(expect_error(AddJobDecisionError::JobDeleted {
@@ -249,10 +251,10 @@ mod tests {
         assert_eq!(outcome.next_expected_version, 1);
         assert_eq!(
             outcome.events,
-            NonEmpty::one(JobEvent::JobAdded {
+            NonEmpty::one(JobEvent::JobAdded(JobAdded {
                 id: "backup".to_string(),
                 job: JobDetails::from(job("backup")),
-            })
+            }))
         );
 
         let stored_job = store

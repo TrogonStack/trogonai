@@ -7,7 +7,7 @@ use trogon_eventsourcing::{
 
 use crate::{
     JobEnabledState, JobId, JobIdError,
-    events::{JobEvent, JobEventCodec},
+    events::{JobAdded, JobEvent, JobEventCodec, JobPaused, JobRemoved, JobResumed},
 };
 
 pub(crate) const SNAPSHOT_STORE_CONFIG: SnapshotStoreConfig<'static> =
@@ -106,11 +106,11 @@ impl Decide<PauseJobState, JobEvent> for PauseJobCommand {
             } => Err(PauseJobDecisionError::AlreadyPaused {
                 id: command.stream_id().clone(),
             }),
-            PauseJobState::Present { .. } => {
-                Ok(Decision::Event(NonEmpty::one(JobEvent::JobPaused {
+            PauseJobState::Present { .. } => Ok(Decision::Event(NonEmpty::one(
+                JobEvent::JobPaused(JobPaused {
                     id: command.stream_id().to_string(),
-                })))
-            }
+                }),
+            ))),
         }
     }
 }
@@ -126,7 +126,7 @@ impl CommandState for PauseJobCommand {
 
     fn evolve(state: Self::State, event: JobEvent) -> Result<Self::State, Self::DomainError> {
         match event {
-            JobEvent::JobAdded { id, job } => {
+            JobEvent::JobAdded(JobAdded { id, job }) => {
                 if matches!(state, PauseJobState::Deleted) {
                     return Ok(PauseJobState::Deleted);
                 }
@@ -138,7 +138,7 @@ impl CommandState for PauseJobCommand {
                     current: job.state.into(),
                 })
             }
-            JobEvent::JobPaused { .. } => match state {
+            JobEvent::JobPaused(JobPaused { .. }) => match state {
                 PauseJobState::Deleted => Ok(PauseJobState::Deleted),
                 PauseJobState::Missing | PauseJobState::Present { .. } => {
                     Ok(PauseJobState::Present {
@@ -146,7 +146,7 @@ impl CommandState for PauseJobCommand {
                     })
                 }
             },
-            JobEvent::JobResumed { .. } => match state {
+            JobEvent::JobResumed(JobResumed { .. }) => match state {
                 PauseJobState::Deleted => Ok(PauseJobState::Deleted),
                 PauseJobState::Missing | PauseJobState::Present { .. } => {
                     Ok(PauseJobState::Present {
@@ -154,7 +154,7 @@ impl CommandState for PauseJobCommand {
                     })
                 }
             },
-            JobEvent::JobRemoved { .. } => Ok(PauseJobState::Deleted),
+            JobEvent::JobRemoved(JobRemoved { .. }) => Ok(PauseJobState::Deleted),
         }
     }
 }
@@ -217,9 +217,9 @@ mod tests {
         let decision = decide(&state, &command).unwrap();
         assert_eq!(
             decision,
-            Decision::Event(NonEmpty::one(JobEvent::JobPaused {
+            Decision::Event(NonEmpty::one(JobEvent::JobPaused(JobPaused {
                 id: "backup".to_string(),
-            }))
+            })))
         );
     }
 
@@ -261,27 +261,27 @@ mod tests {
     #[test]
     fn given_when_then_supports_pause_job_decider() {
         TestCase::new(decider::<PauseJobCommand>())
-            .given([JobEvent::JobAdded {
+            .given([JobEvent::JobAdded(JobAdded {
                 id: "backup".to_string(),
                 job: crate::JobDetails::from(job("backup")),
-            }])
+            })])
             .when(PauseJobCommand::new(JobId::parse("backup").unwrap()))
-            .then([JobEvent::JobPaused {
+            .then([JobEvent::JobPaused(JobPaused {
                 id: "backup".to_string(),
-            }]);
+            })]);
     }
 
     #[test]
     fn given_when_then_supports_pause_job_failures() {
         TestCase::new(decider::<PauseJobCommand>())
             .given([
-                JobEvent::JobAdded {
+                JobEvent::JobAdded(JobAdded {
                     id: "backup".to_string(),
                     job: crate::JobDetails::from(job("backup")),
-                },
-                JobEvent::JobPaused {
+                }),
+                JobEvent::JobPaused(JobPaused {
                     id: "backup".to_string(),
-                },
+                }),
             ])
             .when(PauseJobCommand::new(JobId::parse("backup").unwrap()))
             .then(expect_error(PauseJobDecisionError::AlreadyPaused {
@@ -294,28 +294,28 @@ mod tests {
         let register = TestCase::new(decider::<AddJobCommand>())
             .given([])
             .when(AddJobCommand::new(job("backup")).unwrap())
-            .then([JobEvent::JobAdded {
+            .then([JobEvent::JobAdded(JobAdded {
                 id: "backup".to_string(),
                 job: crate::JobDetails::from(job("backup")),
-            }]);
+            })]);
 
         let pause = TestCase::new(decider::<PauseJobCommand>())
             .given(register.history())
             .when(PauseJobCommand::new(JobId::parse("backup").unwrap()))
-            .then([JobEvent::JobPaused {
+            .then([JobEvent::JobPaused(JobPaused {
                 id: "backup".to_string(),
-            }]);
+            })]);
 
         Timeline::new().given([register, pause]).then_stream(
             "backup",
             [
-                JobEvent::JobAdded {
+                JobEvent::JobAdded(JobAdded {
                     id: "backup".to_string(),
                     job: crate::JobDetails::from(job("backup")),
-                },
-                JobEvent::JobPaused {
+                }),
+                JobEvent::JobPaused(JobPaused {
                     id: "backup".to_string(),
-                },
+                }),
             ],
         );
     }
@@ -335,9 +335,9 @@ mod tests {
         assert_eq!(outcome.next_expected_version, 2);
         assert_eq!(
             outcome.events,
-            NonEmpty::one(JobEvent::JobPaused {
+            NonEmpty::one(JobEvent::JobPaused(JobPaused {
                 id: "backup".to_string(),
-            })
+            }))
         );
 
         let job = store

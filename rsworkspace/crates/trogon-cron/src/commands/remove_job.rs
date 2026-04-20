@@ -7,7 +7,7 @@ use trogon_eventsourcing::{
 
 use crate::{
     JobId,
-    events::{JobEvent, JobEventCodec},
+    events::{JobAdded, JobEvent, JobEventCodec, JobPaused, JobRemoved, JobResumed},
 };
 
 #[derive(Debug, Clone)]
@@ -69,9 +69,11 @@ impl Decide<RemoveJobState, JobEvent> for RemoveJobCommand {
             RemoveJobState::Missing => Err(RemoveJobDecisionError::JobNotFound {
                 id: command.stream_id().clone(),
             }),
-            RemoveJobState::Present => Ok(Decision::Event(NonEmpty::one(JobEvent::JobRemoved {
-                id: command.stream_id().to_string(),
-            }))),
+            RemoveJobState::Present => Ok(Decision::Event(NonEmpty::one(JobEvent::JobRemoved(
+                JobRemoved {
+                    id: command.stream_id().to_string(),
+                },
+            )))),
             RemoveJobState::Deleted => Err(RemoveJobDecisionError::JobDeleted {
                 id: command.stream_id().clone(),
             }),
@@ -90,13 +92,13 @@ impl CommandState for RemoveJobCommand {
 
     fn evolve(state: Self::State, event: JobEvent) -> Result<Self::State, Self::DomainError> {
         match event {
-            JobEvent::JobAdded { .. }
-            | JobEvent::JobPaused { .. }
-            | JobEvent::JobResumed { .. } => match state {
+            JobEvent::JobAdded(JobAdded { .. })
+            | JobEvent::JobPaused(JobPaused { .. })
+            | JobEvent::JobResumed(JobResumed { .. }) => match state {
                 RemoveJobState::Deleted => Ok(RemoveJobState::Deleted),
                 RemoveJobState::Missing | RemoveJobState::Present => Ok(RemoveJobState::Present),
             },
-            JobEvent::JobRemoved { .. } => Ok(RemoveJobState::Deleted),
+            JobEvent::JobRemoved(JobRemoved { .. }) => Ok(RemoveJobState::Deleted),
         }
     }
 }
@@ -157,9 +159,9 @@ mod tests {
         let decision = decide(&state, &command).unwrap();
         assert_eq!(
             decision,
-            Decision::Event(NonEmpty::one(JobEvent::JobRemoved {
+            Decision::Event(NonEmpty::one(JobEvent::JobRemoved(JobRemoved {
                 id: "backup".to_string(),
-            }))
+            })))
         );
     }
 
@@ -188,14 +190,14 @@ mod tests {
     #[test]
     fn given_when_then_supports_remove_job_decider() {
         TestCase::new(decider::<RemoveJobCommand>())
-            .given([JobEvent::JobAdded {
+            .given([JobEvent::JobAdded(JobAdded {
                 id: "backup".to_string(),
                 job: crate::JobDetails::from(job("backup")),
-            }])
+            })])
             .when(RemoveJobCommand::new(JobId::parse("backup").unwrap()))
-            .then([JobEvent::JobRemoved {
+            .then([JobEvent::JobRemoved(JobRemoved {
                 id: "backup".to_string(),
-            }]);
+            })]);
     }
 
     #[test]
@@ -223,9 +225,9 @@ mod tests {
         assert_eq!(outcome.next_expected_version, 2);
         assert_eq!(
             outcome.events,
-            NonEmpty::one(JobEvent::JobRemoved {
+            NonEmpty::one(JobEvent::JobRemoved(JobRemoved {
                 id: "backup".to_string(),
-            })
+            }))
         );
 
         assert!(

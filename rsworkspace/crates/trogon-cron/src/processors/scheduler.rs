@@ -19,7 +19,10 @@ use trogon_std::{NowV7, UuidV7Generator};
 use crate::{
     CronJob, ResolvedJobSpec,
     error::CronError,
-    events::{JobEvent, JobEventCodec, JobEventData, JobEventState, RecordedJobEvent},
+    events::{
+        JobAdded, JobEvent, JobEventCodec, JobEventData, JobEventState, JobPaused, JobRemoved,
+        JobResumed, RecordedJobEvent,
+    },
     kv::{EVENTS_SUBJECT_PREFIX, LEADER_BUCKET, LEADER_KEY, LEGACY_EVENTS_SUBJECT_PREFIX},
     nats::NatsSchedulePublisher,
     store::{Store, connect_store},
@@ -333,7 +336,7 @@ fn apply_scheduler_event(
     event: JobEvent,
 ) -> Result<SchedulerChange, CronError> {
     match event {
-        JobEvent::JobAdded { id, job } => {
+        JobEvent::JobAdded(JobAdded { id, job }) => {
             if matches!(desired_jobs.get(&id), Some(DesiredJobState::Deleted)) {
                 return Err(CronError::event_source(
                     "scheduler received an add event for a deleted job stream",
@@ -353,7 +356,7 @@ fn apply_scheduler_event(
             );
             Ok(SchedulerChange::Upsert(job))
         }
-        JobEvent::JobPaused { id } => {
+        JobEvent::JobPaused(JobPaused { id }) => {
             let job = desired_jobs.get_mut(&id).ok_or_else(|| {
                 CronError::event_source(
                     "scheduler received a pause without current job state",
@@ -371,7 +374,7 @@ fn apply_scheduler_event(
                 )),
             }
         }
-        JobEvent::JobResumed { id } => {
+        JobEvent::JobResumed(JobResumed { id }) => {
             let job = desired_jobs.get_mut(&id).ok_or_else(|| {
                 CronError::event_source(
                     "scheduler received a resume without current job state",
@@ -389,7 +392,7 @@ fn apply_scheduler_event(
                 )),
             }
         }
-        JobEvent::JobRemoved { id } => {
+        JobEvent::JobRemoved(JobRemoved { id }) => {
             desired_jobs.insert(id.clone(), DesiredJobState::Deleted);
             Ok(SchedulerChange::Delete(id))
         }
@@ -693,7 +696,7 @@ mod tests {
     use crate::{
         CronJob, DeliverySpec, JobDetails, JobEnabledState, JobId, JobSpec, MessageContent,
         MessageHeaders, ScheduleSpec,
-        events::{JobEvent, JobEventState},
+        events::{JobAdded, JobEvent, JobEventState, JobPaused, JobRemoved, JobResumed},
         mocks::{MockCronStore, MockLeaderLock, MockSchedulePublisher},
     };
 
@@ -792,10 +795,10 @@ mod tests {
 
         let added = apply_scheduler_event(
             &mut desired_jobs,
-            JobEvent::JobAdded {
+            JobEvent::JobAdded(JobAdded {
                 id: "alpha".to_string(),
                 job: JobDetails::from(base_job("alpha")),
-            },
+            }),
         )
         .unwrap();
         assert_eq!(added, SchedulerChange::Upsert(expected_job("alpha")));
@@ -806,9 +809,9 @@ mod tests {
 
         let disabled = apply_scheduler_event(
             &mut desired_jobs,
-            JobEvent::JobPaused {
+            JobEvent::JobPaused(JobPaused {
                 id: "alpha".to_string(),
-            },
+            }),
         )
         .unwrap();
         assert_eq!(disabled, SchedulerChange::Delete("alpha".to_string()));
@@ -822,18 +825,18 @@ mod tests {
 
         let enabled = apply_scheduler_event(
             &mut desired_jobs,
-            JobEvent::JobResumed {
+            JobEvent::JobResumed(JobResumed {
                 id: "alpha".to_string(),
-            },
+            }),
         )
         .unwrap();
         assert_eq!(enabled, SchedulerChange::Upsert(expected_job("alpha")));
 
         let removed = apply_scheduler_event(
             &mut desired_jobs,
-            JobEvent::JobRemoved {
+            JobEvent::JobRemoved(JobRemoved {
                 id: "alpha".to_string(),
-            },
+            }),
         )
         .unwrap();
         assert_eq!(removed, SchedulerChange::Delete("alpha".to_string()));
@@ -844,10 +847,10 @@ mod tests {
 
         let error = apply_scheduler_event(
             &mut desired_jobs,
-            JobEvent::JobAdded {
+            JobEvent::JobAdded(JobAdded {
                 id: "alpha".to_string(),
                 job: JobDetails::from(base_job("alpha")),
-            },
+            }),
         )
         .unwrap_err();
         assert!(error.to_string().contains("deleted job stream"));
@@ -858,9 +861,9 @@ mod tests {
         let mut desired_jobs = HashMap::new();
         let error = apply_scheduler_event(
             &mut desired_jobs,
-            JobEvent::JobPaused {
+            JobEvent::JobPaused(JobPaused {
                 id: "missing".to_string(),
-            },
+            }),
         )
         .unwrap_err();
 

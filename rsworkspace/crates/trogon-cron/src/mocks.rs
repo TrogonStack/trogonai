@@ -18,7 +18,7 @@ use crate::{
     CronJob, GetJobCommand, ListJobsCommand, ResolvedJobSpec,
     config::{JobWriteCondition, JobWriteState},
     error::CronError,
-    events::{JobEvent, JobEventCodec, JobEventData},
+    events::{JobAdded, JobEvent, JobEventCodec, JobEventData, JobPaused, JobRemoved, JobResumed},
     projections::{CronJobWatchStream, LoadAndWatchCronJobsResult},
     traits::SchedulePublisher,
 };
@@ -155,10 +155,10 @@ impl MockCronStore {
             vec![
                 JobEventData::new_with_codec(
                     &JobEventCodec,
-                    JobEvent::JobAdded {
+                    JobEvent::JobAdded(JobAdded {
                         id: id.clone(),
                         job: crate::JobDetails::from(&spec),
-                    },
+                    }),
                 )
                 .unwrap(),
             ],
@@ -345,10 +345,10 @@ impl StreamAppend<crate::JobId> for MockCronStore {
             version += 1;
             stored_events.push(event_data);
             match event {
-                JobEvent::JobAdded { id, job } => {
+                JobEvent::JobAdded(JobAdded { id, job }) => {
                     projected_snapshot = Some(Snapshot::new(version, CronJob::from((id, job))));
                 }
-                JobEvent::JobPaused { .. } => {
+                JobEvent::JobPaused(JobPaused { .. }) => {
                     let mut snapshot = projected_snapshot.take().ok_or_else(|| {
                         CronError::event_source(
                             "failed to project mocked job pause without current snapshot",
@@ -359,7 +359,7 @@ impl StreamAppend<crate::JobId> for MockCronStore {
                     snapshot.payload.state = crate::JobEventState::Disabled;
                     projected_snapshot = Some(snapshot);
                 }
-                JobEvent::JobResumed { .. } => {
+                JobEvent::JobResumed(JobResumed { .. }) => {
                     let mut snapshot = projected_snapshot.take().ok_or_else(|| {
                         CronError::event_source(
                             "failed to project mocked job resume without current snapshot",
@@ -370,7 +370,7 @@ impl StreamAppend<crate::JobId> for MockCronStore {
                     snapshot.payload.state = crate::JobEventState::Enabled;
                     projected_snapshot = Some(snapshot);
                 }
-                JobEvent::JobRemoved { .. } => {
+                JobEvent::JobRemoved(JobRemoved { .. }) => {
                     projected_snapshot = None;
                 }
             }
