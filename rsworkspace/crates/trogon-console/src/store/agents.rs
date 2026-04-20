@@ -62,7 +62,7 @@ impl AgentStore {
     }
 
     pub async fn put(&self, agent: &AgentDefinition) -> Result<(), String> {
-        let bytes = serde_json::to_vec(agent).map_err(|e| e.to_string())?;
+        let bytes = serde_json::to_vec(agent).expect("AgentDefinition serialization");
         self.kv
             .put(&agent.id, Bytes::from(bytes))
             .await
@@ -75,7 +75,7 @@ impl AgentStore {
             updated_at: agent.updated_at.clone(),
             model_id: agent.model.id.clone(),
         };
-        let vbytes = serde_json::to_vec(&version).map_err(|e| e.to_string())?;
+        let vbytes = serde_json::to_vec(&version).expect("AgentVersion serialization");
         self.versions_kv
             .put(&version_key, Bytes::from(vbytes))
             .await
