@@ -912,6 +912,75 @@ async fn session_list_sorted_by_updated_at_desc() {
     assert_eq!(arr[2]["id"], "sess_old");
 }
 
+// ── GET credential by id ─────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn credential_get_by_id() {
+    let env = start().await;
+    let base = &env.base_url;
+
+    let resp = env.client.post(format!("{base}/environments"))
+        .json(&json!({ "name": "GetCredEnv" }))
+        .send().await.unwrap();
+    let env_id = resp.json::<Value>().await.unwrap()["id"].as_str().unwrap().to_string();
+
+    // Create a credential
+    let resp = env.client.post(format!("{base}/environments/{env_id}/credentials"))
+        .json(&json!({
+            "name": "My Token",
+            "type": "bearer_token",
+            "mcp_server_url": "https://example.com"
+        }))
+        .send().await.unwrap();
+    assert_eq!(resp.status().as_u16(), 201);
+    let created: Value = resp.json().await.unwrap();
+    let cred_id = created["id"].as_str().unwrap().to_string();
+
+    // GET it by id
+    let resp = env.client
+        .get(format!("{base}/environments/{env_id}/credentials/{cred_id}"))
+        .send().await.unwrap();
+    assert_eq!(resp.status().as_u16(), 200);
+    let fetched: Value = resp.json().await.unwrap();
+    assert_eq!(fetched["id"], cred_id.as_str());
+    assert_eq!(fetched["name"], "My Token");
+    assert_eq!(fetched["env_id"], env_id.as_str());
+
+    // GET non-existent returns 404
+    let resp = env.client
+        .get(format!("{base}/environments/{env_id}/credentials/crd_ghost"))
+        .send().await.unwrap();
+    assert_eq!(resp.status().as_u16(), 404);
+}
+
+// ── DELETE skill ──────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn skill_delete() {
+    let env = start().await;
+    let base = &env.base_url;
+
+    // Create a skill
+    let resp = env.client.post(format!("{base}/skills"))
+        .json(&json!({ "name": "Deletable", "description": "", "content": "c" }))
+        .send().await.unwrap();
+    assert_eq!(resp.status().as_u16(), 201);
+    let created: Value = resp.json().await.unwrap();
+    let skill_id = created["id"].as_str().unwrap().to_string();
+
+    // Confirm it exists
+    let resp = env.client.get(format!("{base}/skills/{skill_id}")).send().await.unwrap();
+    assert_eq!(resp.status().as_u16(), 200);
+
+    // Delete it
+    let resp = env.client.delete(format!("{base}/skills/{skill_id}")).send().await.unwrap();
+    assert_eq!(resp.status().as_u16(), 204);
+
+    // Confirm it's gone
+    let resp = env.client.get(format!("{base}/skills/{skill_id}")).send().await.unwrap();
+    assert_eq!(resp.status().as_u16(), 404);
+}
+
 // ── MCP registry ──────────────────────────────────────────────────────────────
 
 #[tokio::test]

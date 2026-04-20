@@ -1,4 +1,4 @@
-use axum::{Router, routing::get, routing::post, routing::delete};
+use axum::{Router, routing::get, routing::post};
 use std::sync::Arc;
 
 use crate::{
@@ -34,7 +34,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/agents/{id}/sessions", get(agents::list_agent_sessions))
         // Skills
         .route("/skills", get(skills::list_skills).post(skills::create_skill))
-        .route("/skills/{id}", get(skills::get_skill))
+        .route("/skills/{id}", get(skills::get_skill).delete(skills::delete_skill))
         .route(
             "/skills/{id}/versions",
             get(skills::list_skill_versions).post(skills::create_skill_version),
@@ -58,7 +58,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         )
         .route(
             "/environments/{id}/credentials/{cred_id}",
-            delete(credentials::delete_credential),
+            get(credentials::get_credential).delete(credentials::delete_credential),
         )
         // MCP registry
         .route("/mcp-registry", get(mcp_registry::list_mcp_servers))

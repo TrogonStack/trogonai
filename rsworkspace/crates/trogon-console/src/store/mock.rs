@@ -131,6 +131,12 @@ impl SkillRepository for MockSkillStore {
         Box::pin(ready(Ok(())))
     }
 
+    fn delete<'a>(&'a self, id: &'a str) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
+        fail_if!(self);
+        self.skills.lock().unwrap().remove(id);
+        Box::pin(ready(Ok(())))
+    }
+
     fn list_versions<'a>(&'a self, skill_id: &'a str) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<SkillVersion>, String>> + Send + 'a>> {
         fail_if!(self);
         let prefix = format!("{skill_id}.");
@@ -246,6 +252,13 @@ impl CredentialRepository for MockCredentialStore {
             .map(|(_, v)| v.clone())
             .collect();
         Box::pin(ready(Ok(creds)))
+    }
+
+    fn get<'a>(&'a self, env_id: &'a str, cred_id: &'a str) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<Credential>, String>> + Send + 'a>> {
+        fail_if!(self);
+        let key = format!("{env_id}.{cred_id}");
+        let result = self.creds.lock().unwrap().get(&key).cloned();
+        Box::pin(ready(Ok(result)))
     }
 
     fn put<'a>(&'a self, cred: &'a Credential) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
