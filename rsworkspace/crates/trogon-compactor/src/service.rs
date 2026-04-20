@@ -35,6 +35,7 @@ use tracing::{error, info, warn};
 
 use crate::error::CompactorError;
 use crate::tokens::estimate_total_tokens;
+use crate::traits::LlmProvider;
 use crate::{Compactor, Message};
 
 /// NATS subject on which the compactor listens for requests.
@@ -67,7 +68,10 @@ struct ErrorResponse {
 ///
 /// Each incoming request is handled synchronously (one at a time).  For
 /// higher throughput, spawn multiple instances behind a NATS queue group.
-pub async fn run(nats: Client, compactor: Compactor) -> Result<(), async_nats::Error> {
+pub async fn run<L: LlmProvider>(
+    nats: Client,
+    compactor: Compactor<L>,
+) -> Result<(), async_nats::Error> {
     let mut sub = nats.subscribe(COMPACT_SUBJECT).await?;
     info!(subject = COMPACT_SUBJECT, "compactor service listening");
 
@@ -94,7 +98,10 @@ pub async fn run(nats: Client, compactor: Compactor) -> Result<(), async_nats::E
     Ok(())
 }
 
-async fn handle(compactor: &Compactor, payload: &[u8]) -> Result<CompactResponse, CompactorError> {
+async fn handle<L: LlmProvider>(
+    compactor: &Compactor<L>,
+    payload: &[u8],
+) -> Result<CompactResponse, CompactorError> {
     let req: CompactRequest = serde_json::from_slice(payload)
         .map_err(|e| CompactorError::InvalidRequest(e.to_string()))?;
 
@@ -113,11 +120,28 @@ async fn handle(compactor: &Compactor, payload: &[u8]) -> Result<CompactResponse
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::CompactorConfig;
+    use crate::CompactionSettings;
+    use crate::traits::LlmProvider;
+
+    struct MockLlmProvider;
+
+    impl LlmProvider for MockLlmProvider {
+        fn generate_summary<'a>(
+            &'a self,
+            _messages: &'a [Message],
+            _previous_summary: Option<&'a str>,
+        ) -> impl std::future::Future<Output = Result<String, CompactorError>> + Send + 'a {
+            async { Ok("mock summary".into()) }
+        }
+    }
+
+    fn mock_compactor() -> Compactor<MockLlmProvider> {
+        Compactor::with_provider(CompactionSettings::default(), MockLlmProvider)
+    }
 
     #[tokio::test]
     async fn handle_invalid_json_returns_invalid_request_error() {
-        let compactor = Compactor::new(CompactorConfig::default());
+        let compactor = mock_compactor();
         let result = handle(&compactor, b"not valid json {{{").await;
         assert!(
             matches!(result, Err(CompactorError::InvalidRequest(_))),
@@ -127,7 +151,7 @@ mod tests {
 
     #[tokio::test]
     async fn handle_tiny_conversation_returns_not_compacted() {
-        let compactor = Compactor::new(CompactorConfig::default());
+        let compactor = mock_compactor();
         let req = CompactRequest {
             messages: vec![Message::user("hello"), Message::assistant("world")],
         };
@@ -142,7 +166,7 @@ mod tests {
 
     #[tokio::test]
     async fn handle_empty_messages_array_returns_not_compacted() {
-        let compactor = Compactor::new(CompactorConfig::default());
+        let compactor = mock_compactor();
         let payload = serde_json::to_vec(&CompactRequest { messages: vec![] }).unwrap();
         let resp = handle(&compactor, &payload).await.unwrap();
 
