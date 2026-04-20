@@ -55,6 +55,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn leap_year_divisible_by_400_is_leap() {
+        assert!(is_leap_year(2000));
+    }
+
+    #[test]
+    fn leap_year_divisible_by_100_not_400_is_not_leap() {
+        assert!(!is_leap_year(1900));
+    }
+
+    #[test]
     fn now_version_format_is_valid_yyyymmdd() {
         let v = now_version();
         assert_eq!(v.len(), 8, "version must be 8 digits: {v}");
@@ -163,6 +173,14 @@ pub async fn list_skill_versions(
 ) -> Result<impl IntoResponse, AppError> {
     let versions = state.skills.list_versions(&id).await.map_err(AppError::Store)?;
     Ok(Json(versions))
+}
+
+pub async fn delete_skill(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<impl IntoResponse, AppError> {
+    state.skills.delete(&id).await.map_err(AppError::Store)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 pub async fn create_skill_version(

@@ -28,6 +28,7 @@ pub trait SkillRepository: Send + Sync + 'static {
     fn list(&self) -> BoxFuture<'_, Res<Vec<Skill>>>;
     fn get<'a>(&'a self, id: &'a str) -> BoxFuture<'a, Res<Option<Skill>>>;
     fn put<'a>(&'a self, skill: &'a Skill) -> BoxFuture<'a, Res<()>>;
+    fn delete<'a>(&'a self, id: &'a str) -> BoxFuture<'a, Res<()>>;
     fn list_versions<'a>(&'a self, skill_id: &'a str) -> BoxFuture<'a, Res<Vec<SkillVersion>>>;
     fn put_version<'a>(&'a self, version: &'a SkillVersion) -> BoxFuture<'a, Res<()>>;
 }
@@ -47,6 +48,7 @@ pub trait CredentialRepository: Send + Sync + 'static {
     fn get_or_create_vault<'a>(&'a self, env_id: &'a str) -> BoxFuture<'a, Res<CredentialVault>>;
     fn get_vault<'a>(&'a self, env_id: &'a str) -> BoxFuture<'a, Res<Option<CredentialVault>>>;
     fn list<'a>(&'a self, env_id: &'a str) -> BoxFuture<'a, Res<Vec<Credential>>>;
+    fn get<'a>(&'a self, env_id: &'a str, cred_id: &'a str) -> BoxFuture<'a, Res<Option<Credential>>>;
     fn put<'a>(&'a self, cred: &'a Credential) -> BoxFuture<'a, Res<()>>;
     fn delete<'a>(&'a self, env_id: &'a str, cred_id: &'a str) -> BoxFuture<'a, Res<()>>;
 }

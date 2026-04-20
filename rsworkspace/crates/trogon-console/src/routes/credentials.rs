@@ -70,6 +70,19 @@ pub async fn create_credential(
     Ok((StatusCode::CREATED, Json(cred)))
 }
 
+pub async fn get_credential(
+    State(state): State<Arc<AppState>>,
+    Path((env_id, cred_id)): Path<(String, String)>,
+) -> Result<impl IntoResponse, AppError> {
+    state
+        .credentials
+        .get(&env_id, &cred_id)
+        .await
+        .map_err(AppError::Store)?
+        .map(Json)
+        .ok_or_else(|| AppError::NotFound(format!("credential {cred_id} not found")))
+}
+
 pub async fn delete_credential(
     State(state): State<Arc<AppState>>,
     Path((env_id, cred_id)): Path<(String, String)>,

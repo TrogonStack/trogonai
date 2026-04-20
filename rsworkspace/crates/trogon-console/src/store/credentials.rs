@@ -84,7 +84,6 @@ impl CredentialStore {
         Ok(creds)
     }
 
-    #[allow(dead_code)]
     pub async fn get(&self, env_id: &str, cred_id: &str) -> Result<Option<Credential>, String> {
         let key = format!("{env_id}.{cred_id}");
         match self.creds_kv.get(&key).await.map_err(|e| e.to_string())? {
@@ -120,6 +119,9 @@ impl CredentialRepository for CredentialStore {
     }
     fn list<'a>(&'a self, env_id: &'a str) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<Credential>, String>> + Send + 'a>> {
         Box::pin(async move { self.list(env_id).await })
+    }
+    fn get<'a>(&'a self, env_id: &'a str, cred_id: &'a str) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<Credential>, String>> + Send + 'a>> {
+        Box::pin(async move { self.get(env_id, cred_id).await })
     }
     fn put<'a>(&'a self, cred: &'a Credential) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
         Box::pin(async move { self.put(cred).await })

@@ -68,7 +68,6 @@ impl SkillStore {
         Ok(())
     }
 
-    #[allow(dead_code)]
     pub async fn delete(&self, id: &str) -> Result<(), String> {
         self.kv.delete(id).await.map_err(|e| e.to_string())
     }
@@ -113,6 +112,9 @@ impl SkillRepository for SkillStore {
     }
     fn put<'a>(&'a self, skill: &'a Skill) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
         Box::pin(async move { self.put(skill).await })
+    }
+    fn delete<'a>(&'a self, id: &'a str) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
+        Box::pin(async move { self.delete(id).await })
     }
     fn list_versions<'a>(&'a self, skill_id: &'a str) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<SkillVersion>, String>> + Send + 'a>> {
         Box::pin(async move { self.list_versions(skill_id).await })

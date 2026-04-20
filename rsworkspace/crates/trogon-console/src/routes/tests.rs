@@ -1077,3 +1077,159 @@ async fn get_session_store_error_returns_500() {
     let resp = app.oneshot(get_request("/sessions/t/s")).await.unwrap();
     assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
 }
+
+// ── delete skill ──────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn delete_skill() {
+    let state = mock_state();
+
+    let resp = build_router(Arc::clone(&state))
+        .oneshot(json_request(
+            "POST",
+            "/skills",
+            json!({ "name": "Temp Skill", "description": "", "content": "c" }),
+        ))
+        .await
+        .unwrap();
+    let created: Value = body_json(resp.into_body()).await;
+    let id = created["id"].as_str().unwrap();
+
+    let resp = build_router(Arc::clone(&state))
+        .oneshot(delete_request(&format!("/skills/{id}")))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+
+    let resp = build_router(Arc::clone(&state))
+        .oneshot(get_request(&format!("/skills/{id}")))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn delete_skill_store_error_returns_500() {
+    let app = build_router(fail_skills_state());
+    let resp = app.oneshot(delete_request("/skills/any_id")).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+}
+
+// ── get credential ────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn get_credential_found() {
+    let state = mock_state();
+
+    let resp = build_router(Arc::clone(&state))
+        .oneshot(json_request(
+            "POST",
+            "/environments/env_get/credentials",
+            json!({
+                "name": "My Token",
+                "type": "bearer_token",
+                "mcp_server_url": "https://example.com"
+            }),
+        ))
+        .await
+        .unwrap();
+    let created: Value = body_json(resp.into_body()).await;
+    let cred_id = created["id"].as_str().unwrap();
+
+    let resp = build_router(Arc::clone(&state))
+        .oneshot(get_request(&format!("/environments/env_get/credentials/{cred_id}")))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let fetched: Value = body_json(resp.into_body()).await;
+    assert_eq!(fetched["id"], created["id"]);
+    assert_eq!(fetched["name"], "My Token");
+}
+
+#[tokio::test]
+async fn get_credential_not_found_returns_404() {
+    let app = build_router(mock_state());
+    let resp = app
+        .oneshot(get_request("/environments/env1/credentials/ghost"))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn get_credential_store_error_returns_500() {
+    let app = build_router(fail_credentials_state());
+    let resp = app
+        .oneshot(get_request("/environments/env1/credentials/crd1"))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+}
+
+// ── partial field updates ─────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn update_agent_only_name_leaves_other_fields_unchanged() {
+    let state = mock_state();
+
+    let resp = build_router(Arc::clone(&state))
+        .oneshot(json_request(
+            "POST",
+            "/agents",
+            json!({
+                "name": "Original",
+                "description": "original desc",
+                "model": { "id": "m1" },
+                "system_prompt": "original prompt"
+            }),
+        ))
+        .await
+        .unwrap();
+    let created: Value = body_json(resp.into_body()).await;
+    let id = created["id"].as_str().unwrap();
+
+    let resp = build_router(Arc::clone(&state))
+        .oneshot(json_request(
+            "PUT",
+            &format!("/agents/{id}"),
+            json!({ "name": "Renamed" }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let updated: Value = body_json(resp.into_body()).await;
+    assert_eq!(updated["name"], "Renamed");
+    assert_eq!(updated["description"], "original desc");
+    assert_eq!(updated["system_prompt"], "original prompt");
+    assert_eq!(updated["model"]["id"], "m1");
+    assert_eq!(updated["version"], 2);
+}
+
+#[tokio::test]
+async fn update_environment_only_description_leaves_other_fields_unchanged() {
+    let state = mock_state();
+
+    let resp = build_router(Arc::clone(&state))
+        .oneshot(json_request(
+            "POST",
+            "/environments",
+            json!({ "name": "Prod", "description": "original" }),
+        ))
+        .await
+        .unwrap();
+    let created: Value = body_json(resp.into_body()).await;
+    let id = created["id"].as_str().unwrap();
+
+    let resp = build_router(Arc::clone(&state))
+        .oneshot(json_request(
+            "PUT",
+            &format!("/environments/{id}"),
+            json!({ "description": "updated desc" }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let updated: Value = body_json(resp.into_body()).await;
+    assert_eq!(updated["name"], "Prod");
+    assert_eq!(updated["description"], "updated desc");
+}
