@@ -168,5 +168,4 @@ mod tests {
         let result = bridge.initialize(request).await;
         assert!(result.is_ok());
     }
-
 }

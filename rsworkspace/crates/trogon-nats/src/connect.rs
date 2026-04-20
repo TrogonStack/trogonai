@@ -256,9 +256,7 @@ mod tests {
 
         // Call async_nats directly — without retry_on_initial_connect() the
         // connection attempt fails immediately when the server is absent.
-        let result = async_nats::ConnectOptions::new()
-            .connect(bad_addr)
-            .await;
+        let result = async_nats::ConnectOptions::new().connect(bad_addr).await;
 
         match result {
             Err(nats_err) => {
@@ -272,7 +270,11 @@ mod tests {
                     "display must mention the failure: {}",
                     msg
                 );
-                assert!(msg.contains("19122"), "display must include the server: {}", msg);
+                assert!(
+                    msg.contains("19122"),
+                    "display must include the server: {}",
+                    msg
+                );
                 assert!(
                     std::error::Error::source(&err).is_some(),
                     "source() must expose the inner async_nats error"

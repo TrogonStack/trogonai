@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use testcontainers_modules::nats::Nats;
-use testcontainers_modules::testcontainers::{runners::AsyncRunner, ContainerAsync};
+use testcontainers_modules::testcontainers::{ContainerAsync, runners::AsyncRunner};
 use trogon_secret_proxy::{subjects, vault_admin};
 use trogon_vault::{ApiKeyToken, MemoryVault, VaultStore};
 
@@ -39,10 +39,7 @@ const PREFIX: &str = "test";
 
 /// Spawn the vault admin listener as a background task.
 /// Returns the vault so tests can inspect its state.
-async fn spawn_admin(
-    nats: async_nats::Client,
-    vault: Arc<MemoryVault>,
-) {
+async fn spawn_admin(nats: async_nats::Client, vault: Arc<MemoryVault>) {
     tokio::spawn(async move {
         vault_admin::run(nats, vault, PREFIX)
             .await
@@ -366,7 +363,10 @@ async fn vault_admin_store_rotate_revoke_lifecycle() {
         .unwrap();
     let v: serde_json::Value = serde_json::from_slice(&resp.payload).unwrap();
     assert_eq!(v["ok"], true, "store: expected ok:true, got: {v}");
-    assert_eq!(vault.resolve(&token).await.unwrap(), Some("initial-key".to_string()));
+    assert_eq!(
+        vault.resolve(&token).await.unwrap(),
+        Some("initial-key".to_string())
+    );
 
     // 2. Rotate to a new key.
     let rotate_payload = serde_json::json!({
@@ -382,7 +382,10 @@ async fn vault_admin_store_rotate_revoke_lifecycle() {
         .unwrap();
     let v: serde_json::Value = serde_json::from_slice(&resp.payload).unwrap();
     assert_eq!(v["ok"], true, "rotate: expected ok:true, got: {v}");
-    assert_eq!(vault.resolve(&token).await.unwrap(), Some("rotated-key".to_string()));
+    assert_eq!(
+        vault.resolve(&token).await.unwrap(),
+        Some("rotated-key".to_string())
+    );
 
     // 3. Revoke the token.
     let revoke_payload = serde_json::json!({ "token": "tok_gemini_prod_lifecycle1" });
@@ -440,7 +443,10 @@ async fn vault_admin_message_without_reply_subject_is_ignored_and_listener_conti
         .expect("NATS request failed — listener may have crashed");
 
     let v: serde_json::Value = serde_json::from_slice(&resp.payload).unwrap();
-    assert_eq!(v["ok"], true, "expected ok:true after no-reply message, got: {v}");
+    assert_eq!(
+        v["ok"], true,
+        "expected ok:true after no-reply message, got: {v}"
+    );
 }
 
 // ── Gap: multiple tokens managed independently ────────────────────────────────
@@ -472,7 +478,10 @@ async fn vault_admin_multiple_tokens_managed_independently() {
             .await
             .unwrap();
         let v: serde_json::Value = serde_json::from_slice(&resp.payload).unwrap();
-        assert_eq!(v["ok"], true, "store {token_str}: expected ok:true, got: {v}");
+        assert_eq!(
+            v["ok"], true,
+            "store {token_str}: expected ok:true, got: {v}"
+        );
     }
 
     // Rotate token A.
@@ -526,9 +535,7 @@ async fn vault_admin_run_task_is_abortable() {
     let nats = nats_client(port).await;
     let vault = Arc::new(MemoryVault::new());
 
-    let handle = tokio::spawn(async move {
-        vault_admin::run(nats, vault, PREFIX).await
-    });
+    let handle = tokio::spawn(async move { vault_admin::run(nats, vault, PREFIX).await });
 
     // Let subscriptions settle.
     tokio::time::sleep(Duration::from_millis(50)).await;
@@ -558,9 +565,7 @@ async fn vault_admin_run_exits_when_nats_server_shuts_down() {
     let nats = nats_client(port).await;
     let vault = Arc::new(MemoryVault::new());
 
-    let run_handle = tokio::spawn(async move {
-        vault_admin::run(nats, vault, PREFIX).await
-    });
+    let run_handle = tokio::spawn(async move { vault_admin::run(nats, vault, PREFIX).await });
 
     // Let subscriptions settle.
     tokio::time::sleep(Duration::from_millis(50)).await;
@@ -571,7 +576,7 @@ async fn vault_admin_run_exits_when_nats_server_shuts_down() {
     // run() must complete within a reasonable deadline once the server dies.
     let outcome = tokio::time::timeout(Duration::from_secs(5), run_handle).await;
     match outcome {
-        Ok(Ok(Ok(()))) => {}         // clean exit
+        Ok(Ok(Ok(()))) => {} // clean exit
         Ok(Ok(Err(e))) => panic!("run() returned error: {e}"),
         Ok(Err(e)) if e.is_cancelled() => {} // aborted is also fine
         Ok(Err(e)) => panic!("task panicked: {e}"),
@@ -632,7 +637,10 @@ async fn vault_admin_store_then_immediate_rotate_reflects_latest_value() {
     // Store initial value.
     let store_payload = serde_json::json!({ "token": token_str, "plaintext": "initial-key" });
     let resp = nats
-        .request(subjects::vault_store(PREFIX), serde_json::to_vec(&store_payload).unwrap().into())
+        .request(
+            subjects::vault_store(PREFIX),
+            serde_json::to_vec(&store_payload).unwrap().into(),
+        )
         .await
         .unwrap();
     let v: serde_json::Value = serde_json::from_slice(&resp.payload).unwrap();
@@ -641,7 +649,10 @@ async fn vault_admin_store_then_immediate_rotate_reflects_latest_value() {
     // Immediately rotate to a new value.
     let rotate_payload = serde_json::json!({ "token": token_str, "new_plaintext": "rotated-key" });
     let resp = nats
-        .request(subjects::vault_rotate(PREFIX), serde_json::to_vec(&rotate_payload).unwrap().into())
+        .request(
+            subjects::vault_rotate(PREFIX),
+            serde_json::to_vec(&rotate_payload).unwrap().into(),
+        )
         .await
         .unwrap();
     let v: serde_json::Value = serde_json::from_slice(&resp.payload).unwrap();
