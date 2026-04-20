@@ -3,8 +3,6 @@ use futures::StreamExt;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::collections::BTreeMap;
 
-use crate::StreamCommand;
-
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -17,27 +15,6 @@ impl<T> Snapshot<T> {
     pub fn new(version: u64, payload: T) -> Self {
         Self { version, payload }
     }
-}
-
-pub trait SnapshotLoader<Payload>: Send + Sync {
-    type StreamId: ?Sized;
-    type Error;
-
-    fn load_snapshot(
-        &self,
-        stream_id: &Self::StreamId,
-    ) -> impl std::future::Future<Output = Result<Option<Snapshot<Payload>>, Self::Error>> + Send;
-}
-
-pub async fn load_snapshot_for<Payload, Loader, Command>(
-    loader: &Loader,
-    command: &Command,
-) -> Result<Option<Snapshot<Payload>>, Loader::Error>
-where
-    Loader: SnapshotLoader<Payload>,
-    Command: StreamCommand<StreamId = Loader::StreamId>,
-{
-    loader.load_snapshot(command.stream_id()).await
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -416,44 +393,7 @@ async fn delete_kv_value(bucket: &kv::Store, key: &str) -> Result<(), SnapshotSt
 #[cfg(test)]
 mod tests {
     use super::*;
-    use futures::executor::block_on;
     use serde::{Deserialize, Serialize};
-    use std::sync::Mutex;
-
-    #[derive(Debug)]
-    struct TestCommand {
-        id: String,
-    }
-
-    impl crate::StreamCommand for TestCommand {
-        type StreamId = str;
-
-        fn stream_id(&self) -> &Self::StreamId {
-            &self.id
-        }
-    }
-
-    #[derive(Debug)]
-    struct TestLoader {
-        requested_stream_ids: Mutex<Vec<String>>,
-        snapshot: Option<Snapshot<TestPayload>>,
-    }
-
-    impl SnapshotLoader<TestPayload> for TestLoader {
-        type StreamId = str;
-        type Error = ();
-
-        async fn load_snapshot(
-            &self,
-            stream_id: &Self::StreamId,
-        ) -> Result<Option<Snapshot<TestPayload>>, Self::Error> {
-            self.requested_stream_ids
-                .lock()
-                .unwrap()
-                .push(stream_id.to_string());
-            Ok(self.snapshot.clone())
-        }
-    }
 
     #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
     struct TestPayload {
@@ -553,38 +493,6 @@ mod tests {
         assert!(json.contains("\"version\":7"));
         assert!(json.contains("\"payload\""));
         assert_eq!(decoded, snapshot);
-    }
-
-    #[test]
-    fn load_snapshot_for_uses_command_stream_id() {
-        let loader = TestLoader {
-            requested_stream_ids: Mutex::new(Vec::new()),
-            snapshot: Some(Snapshot::new(
-                4,
-                TestPayload {
-                    id: "backup".to_string(),
-                },
-            )),
-        };
-        let command = TestCommand {
-            id: "backup".to_string(),
-        };
-
-        let snapshot = block_on(load_snapshot_for(&loader, &command)).unwrap();
-
-        assert_eq!(
-            snapshot,
-            Some(Snapshot::new(
-                4,
-                TestPayload {
-                    id: "backup".to_string(),
-                },
-            ))
-        );
-        assert_eq!(
-            loader.requested_stream_ids.lock().unwrap().as_slice(),
-            ["backup"]
-        );
     }
 
     #[test]
