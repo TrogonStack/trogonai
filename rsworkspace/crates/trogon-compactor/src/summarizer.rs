@@ -149,7 +149,10 @@ pub async fn generate_summary(
         model: &config.model,
         max_tokens: config.max_summary_tokens,
         system: SYSTEM_PROMPT,
-        messages: [SumMessage { role: "user", content: &prompt }],
+        messages: [SumMessage {
+            role: "user",
+            content: &prompt,
+        }],
     };
 
     let auth_value = match config.auth_style {

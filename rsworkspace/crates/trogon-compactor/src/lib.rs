@@ -48,18 +48,10 @@ use tracing::info;
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /// Configuration for a [`Compactor`] instance.
+#[derive(Default)]
 pub struct CompactorConfig {
     pub settings: CompactionSettings,
     pub llm: LlmConfig,
-}
-
-impl Default for CompactorConfig {
-    fn default() -> Self {
-        Self {
-            settings: CompactionSettings::default(),
-            llm: LlmConfig::default(),
-        }
-    }
 }
 
 /// Compacts long conversation histories by summarizing the oldest messages.
@@ -103,8 +95,7 @@ impl Compactor {
             return Ok(messages);
         }
 
-        let Some(cut_point) =
-            detector::find_cut_point(&messages, self.settings.keep_recent_tokens)
+        let Some(cut_point) = detector::find_cut_point(&messages, self.settings.keep_recent_tokens)
         else {
             return Ok(messages);
         };
@@ -152,13 +143,12 @@ fn extract_previous_summary(messages: &[Message]) -> Option<&str> {
         return None;
     }
     for block in &first.content {
-        if let ContentBlock::Text { text } = block {
-            if let Some(inner) = text
+        if let ContentBlock::Text { text } = block
+            && let Some(inner) = text
                 .strip_prefix("<context-summary>\n")
                 .and_then(|s| s.strip_suffix("\n</context-summary>"))
-            {
-                return Some(inner);
-            }
+        {
+            return Some(inner);
         }
     }
     None
@@ -189,7 +179,9 @@ mod tests {
             .flat_map(|(role, text)| {
                 [Message {
                     role: role.to_string(),
-                    content: vec![ContentBlock::Text { text: text.to_string() }],
+                    content: vec![ContentBlock::Text {
+                        text: text.to_string(),
+                    }],
                 }]
             })
             .collect()
@@ -323,7 +315,9 @@ mod tests {
         let messages = vec![Message {
             role: "user".into(),
             content: vec![
-                ContentBlock::Text { text: "regular intro".into() },
+                ContentBlock::Text {
+                    text: "regular intro".into(),
+                },
                 ContentBlock::Text {
                     text: "<context-summary>\n## Goal\nDo stuff\n</context-summary>".into(),
                 },

@@ -103,7 +103,10 @@ mod tests {
 
     #[test]
     fn is_tool_result_only_false_for_empty_content() {
-        let msg = Message { role: "user".into(), content: vec![] };
+        let msg = Message {
+            role: "user".into(),
+            content: vec![],
+        };
         assert!(!msg.is_tool_result_only());
     }
 
@@ -112,7 +115,9 @@ mod tests {
         let msg = Message {
             role: "user".into(),
             content: vec![
-                ContentBlock::Text { text: "hello".into() },
+                ContentBlock::Text {
+                    text: "hello".into(),
+                },
                 ContentBlock::ToolResult {
                     tool_use_id: "id".into(),
                     content: "result".into(),
@@ -138,13 +143,17 @@ mod tests {
 
     #[test]
     fn as_text_returns_text_content() {
-        let b = ContentBlock::Text { text: "hello".into() };
+        let b = ContentBlock::Text {
+            text: "hello".into(),
+        };
         assert_eq!(b.as_text(), Some("hello"));
     }
 
     #[test]
     fn as_text_returns_thinking_text() {
-        let b = ContentBlock::Thinking { thinking: "deep thought".into() };
+        let b = ContentBlock::Thinking {
+            thinking: "deep thought".into(),
+        };
         assert_eq!(b.as_text(), Some("deep thought"));
     }
 
@@ -170,7 +179,9 @@ mod tests {
 
     #[test]
     fn as_text_returns_none_for_image() {
-        let b = ContentBlock::Image { source: serde_json::json!({"type": "base64"}) };
+        let b = ContentBlock::Image {
+            source: serde_json::json!({"type": "base64"}),
+        };
         assert!(b.as_text().is_none());
     }
 
@@ -178,7 +189,9 @@ mod tests {
 
     #[test]
     fn content_block_text_serializes_with_snake_case_type_tag() {
-        let b = ContentBlock::Text { text: "hello".into() };
+        let b = ContentBlock::Text {
+            text: "hello".into(),
+        };
         let v = serde_json::to_value(&b).unwrap();
         assert_eq!(v["type"], "text");
         assert_eq!(v["text"], "hello");
@@ -216,7 +229,9 @@ mod tests {
         let original = Message {
             role: "user".into(),
             content: vec![
-                ContentBlock::Text { text: "question".into() },
+                ContentBlock::Text {
+                    text: "question".into(),
+                },
                 ContentBlock::ToolResult {
                     tool_use_id: "t1".into(),
                     content: "output".into(),

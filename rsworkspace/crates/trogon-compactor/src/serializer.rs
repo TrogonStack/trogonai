@@ -64,10 +64,7 @@ fn serialize_assistant_message(msg: &Message, out: &mut Vec<String>) {
         out.push(format!("[Assistant]: {}", text_parts.join("\n")));
     }
     if !tool_calls.is_empty() {
-        out.push(format!(
-            "[Assistant tool calls]: {}",
-            tool_calls.join("; ")
-        ));
+        out.push(format!("[Assistant tool calls]: {}", tool_calls.join("; ")));
     }
 }
 
@@ -137,7 +134,9 @@ mod tests {
     fn thinking_block_in_assistant_is_serialized() {
         let msg = Message {
             role: "assistant".into(),
-            content: vec![ContentBlock::Thinking { thinking: "deep thought".into() }],
+            content: vec![ContentBlock::Thinking {
+                thinking: "deep thought".into(),
+            }],
         };
         let out = serialize_for_prompt(&[msg]);
         assert!(out.contains("[Assistant thinking]: deep thought"));
@@ -161,7 +160,9 @@ mod tests {
     fn unknown_role_is_silently_skipped() {
         let msg = Message {
             role: "system".into(),
-            content: vec![ContentBlock::Text { text: "secret system prompt".into() }],
+            content: vec![ContentBlock::Text {
+                text: "secret system prompt".into(),
+            }],
         };
         let out = serialize_for_prompt(&[msg]);
         assert!(out.is_empty());

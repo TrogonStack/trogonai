@@ -27,7 +27,10 @@ impl Default for CompactionSettings {
 /// Returns `true` when the conversation is too close to the context window limit.
 pub fn should_compact(messages: &[Message], settings: &CompactionSettings) -> bool {
     let tokens = estimate_total_tokens(messages);
-    tokens > settings.context_window.saturating_sub(settings.reserve_tokens)
+    tokens
+        > settings
+            .context_window
+            .saturating_sub(settings.reserve_tokens)
 }
 
 /// Returns the index of the first message to **keep** verbatim.
@@ -78,7 +81,9 @@ mod tests {
     fn turn(role: &str, chars: usize) -> Message {
         Message {
             role: role.into(),
-            content: vec![ContentBlock::Text { text: "x".repeat(chars) }],
+            content: vec![ContentBlock::Text {
+                text: "x".repeat(chars),
+            }],
         }
     }
 
@@ -121,12 +126,7 @@ mod tests {
     #[test]
     fn cut_point_lands_on_user_turn() {
         let msgs: Vec<_> = (0..20)
-            .flat_map(|i| {
-                [
-                    turn("user", 50 * (i + 1)),
-                    turn("assistant", 50 * (i + 1)),
-                ]
-            })
+            .flat_map(|i| [turn("user", 50 * (i + 1)), turn("assistant", 50 * (i + 1))])
             .collect();
 
         if let Some(idx) = find_cut_point(&msgs, 300) {
@@ -142,10 +142,10 @@ mod tests {
             turn("user", 200),
             turn("assistant", 200),
             tool_result_msg(),
-            turn("user", 200),   // ← valid cut point
+            turn("user", 200), // ← valid cut point
             turn("assistant", 200),
             tool_result_msg(),
-            turn("user", 50),    // kept verbatim
+            turn("user", 50), // kept verbatim
         ];
         let cut = find_cut_point(&msgs, 120);
         if let Some(idx) = cut {
@@ -180,11 +180,7 @@ mod tests {
         // [0] real user turn — the only valid cut point, but j==0 → None
         // [1] assistant (big, triggers keep_recent accumulation)
         // [2] tool-result user (big, not a valid cut)
-        let msgs = vec![
-            turn("user", 400),
-            turn("assistant", 400),
-            tool_result_msg(),
-        ];
+        let msgs = vec![turn("user", 400), turn("assistant", 400), tool_result_msg()];
         // keep_recent_tokens = 10 → threshold hit at i=2 or i=1
         // backward scan only finds a valid user turn at index 0 → None
         let result = find_cut_point(&msgs, 10);
