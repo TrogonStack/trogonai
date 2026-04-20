@@ -130,6 +130,38 @@ struct SumBlock {
     text: String,
 }
 
+// ── AnthropicLlmProvider ──────────────────────────────────────────────────────
+
+/// Real [`LlmProvider`] that calls the Anthropic-compatible API.
+pub struct AnthropicLlmProvider {
+    config: LlmConfig,
+    client: Client,
+}
+
+impl AnthropicLlmProvider {
+    pub fn new(config: LlmConfig) -> Self {
+        Self {
+            config,
+            client: Client::new(),
+        }
+    }
+
+    pub fn with_client(config: LlmConfig, client: Client) -> Self {
+        Self { config, client }
+    }
+}
+
+impl crate::traits::LlmProvider for AnthropicLlmProvider {
+    fn generate_summary<'a>(
+        &'a self,
+        messages: &'a [crate::types::Message],
+        previous_summary: Option<&'a str>,
+    ) -> impl std::future::Future<Output = Result<String, crate::error::CompactorError>> + Send + 'a
+    {
+        generate_summary(messages, previous_summary, &self.config, &self.client)
+    }
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /// Calls the LLM to summarize `messages_to_summarize`.

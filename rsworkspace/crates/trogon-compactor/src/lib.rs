@@ -29,20 +29,24 @@ pub mod serializer;
 pub mod service;
 pub mod summarizer;
 pub mod tokens;
+pub mod traits;
 pub mod types;
 
 pub use detector::CompactionSettings;
 pub use error::CompactorError;
-pub use summarizer::{AuthStyle, LlmConfig};
+pub use summarizer::{AnthropicLlmProvider, AuthStyle, LlmConfig};
+pub use traits::LlmProvider;
 pub use types::{ContentBlock, Message};
 
 /// Convenience constructor that injects a pre-built [`reqwest::Client`].
-/// Primarily intended for tests that point the client at a mock server.
-pub fn compactor_with_client(config: CompactorConfig, client: reqwest::Client) -> Compactor {
+/// Primarily intended for integration tests that point the client at a mock server.
+pub fn compactor_with_client(
+    config: CompactorConfig,
+    client: reqwest::Client,
+) -> Compactor<AnthropicLlmProvider> {
     Compactor::with_client(config, client)
 }
 
-use reqwest::Client;
 use tracing::info;
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -55,30 +59,14 @@ pub struct CompactorConfig {
 }
 
 /// Compacts long conversation histories by summarizing the oldest messages.
-pub struct Compactor {
+pub struct Compactor<L: LlmProvider> {
     settings: CompactionSettings,
-    llm: LlmConfig,
-    client: Client,
+    provider: L,
 }
 
-impl Compactor {
-    pub fn new(config: CompactorConfig) -> Self {
-        Self {
-            settings: config.settings,
-            llm: config.llm,
-            client: Client::new(),
-        }
-    }
-
-    /// Like [`new`] but accepts a pre-built [`Client`].
-    ///
-    /// Useful in tests where the client is configured to point at a mock server.
-    pub fn with_client(config: CompactorConfig, client: Client) -> Self {
-        Self {
-            settings: config.settings,
-            llm: config.llm,
-            client,
-        }
+impl<L: LlmProvider> Compactor<L> {
+    pub fn with_provider(settings: CompactionSettings, provider: L) -> Self {
+        Self { settings, provider }
     }
 
     /// Returns `messages` unchanged when compaction is not needed.
@@ -122,15 +110,31 @@ impl Compactor {
             "compacting conversation history",
         );
 
-        let summary = summarizer::generate_summary(
-            messages_for_summary,
-            previous_summary,
-            &self.llm,
-            &self.client,
-        )
-        .await?;
+        let summary = self
+            .provider
+            .generate_summary(messages_for_summary, previous_summary)
+            .await?;
 
         Ok(build_compacted_history(summary, to_keep))
+    }
+}
+
+impl Compactor<AnthropicLlmProvider> {
+    pub fn new(config: CompactorConfig) -> Self {
+        Self {
+            settings: config.settings,
+            provider: AnthropicLlmProvider::new(config.llm),
+        }
+    }
+
+    /// Like [`new`] but accepts a pre-built [`reqwest::Client`].
+    ///
+    /// Useful in integration tests where the client is configured to point at a mock server.
+    pub fn with_client(config: CompactorConfig, client: reqwest::Client) -> Self {
+        Self {
+            settings: config.settings,
+            provider: AnthropicLlmProvider::with_client(config.llm, client),
+        }
     }
 }
 
@@ -172,6 +176,23 @@ fn build_compacted_history(summary: String, to_keep: &[Message]) -> Vec<Message>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── MockLlmProvider ─────────────────────────────────────────────────────
+
+    struct MockLlmProvider {
+        summary: String,
+    }
+
+    impl LlmProvider for MockLlmProvider {
+        fn generate_summary<'a>(
+            &'a self,
+            _messages: &'a [Message],
+            _previous_summary: Option<&'a str>,
+        ) -> impl std::future::Future<Output = Result<String, CompactorError>> + Send + 'a {
+            let s = self.summary.clone();
+            async move { Ok(s) }
+        }
+    }
 
     fn msgs(pairs: &[(&str, &str)]) -> Vec<Message> {
         pairs
@@ -235,11 +256,46 @@ mod tests {
 
     #[tokio::test]
     async fn returns_unchanged_when_under_threshold() {
-        let compactor = Compactor::new(CompactorConfig::default());
-        // Tiny conversation, nowhere near 200k tokens
+        let compactor = Compactor::with_provider(
+            CompactionSettings::default(),
+            MockLlmProvider {
+                summary: String::new(),
+            },
+        );
         let messages = msgs(&[("user", "hi"), ("assistant", "hello")]);
         let result = compactor.compact_if_needed(messages.clone()).await.unwrap();
         assert_eq!(result.len(), messages.len());
+    }
+
+    #[tokio::test]
+    async fn compact_if_needed_calls_provider_and_builds_compacted_history() {
+        let settings = CompactionSettings {
+            context_window: 100,
+            reserve_tokens: 0,
+            keep_recent_tokens: 10,
+        };
+        let compactor = Compactor::with_provider(
+            settings,
+            MockLlmProvider {
+                summary: "## Goal\nTest summary".into(),
+            },
+        );
+        // Build a conversation large enough to trigger compaction.
+        let big = "x".repeat(200);
+        let messages = vec![
+            Message::user(format!("q1 {big}")),
+            Message::assistant(format!("a1 {big}")),
+            Message::user(format!("q2 {big}")),
+            Message::assistant(format!("a2 {big}")),
+        ];
+        let result = compactor.compact_if_needed(messages).await.unwrap();
+        assert_eq!(result[0].role, "user");
+        let ContentBlock::Text { text } = &result[0].content[0] else {
+            panic!("expected text block");
+        };
+        assert!(text.contains("<context-summary>"));
+        assert!(text.contains("## Goal"));
+        assert_eq!(result[1].role, "assistant");
     }
 
     #[tokio::test]
@@ -251,11 +307,12 @@ mod tests {
             reserve_tokens: 0,
             keep_recent_tokens: 50,
         };
-        let config = CompactorConfig {
+        let compactor = Compactor::with_provider(
             settings,
-            llm: LlmConfig::default(), // must not be called
-        };
-        let compactor = Compactor::new(config);
+            MockLlmProvider {
+                summary: String::new(),
+            }, // must not be called
+        );
 
         // [0] real user turn (only valid cut candidate → j==0 → None)
         // [1] assistant (big)
