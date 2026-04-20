@@ -69,13 +69,19 @@ pub mod mock {
 
         /// Enqueue a normal response — the stream yields `events` then ends.
         pub fn push_response(&self, events: Vec<XaiEvent>) {
-            self.responses.lock().unwrap().push_back(MockResponse::Events(events));
+            self.responses
+                .lock()
+                .unwrap()
+                .push_back(MockResponse::Events(events));
         }
 
         /// Enqueue a slow response — yields `first` then blocks indefinitely.
         /// Used to test cancellation and timeout paths.
         pub fn push_slow_response(&self, first: XaiEvent) {
-            self.responses.lock().unwrap().push_back(MockResponse::Slow(first));
+            self.responses
+                .lock()
+                .unwrap()
+                .push_back(MockResponse::Slow(first));
         }
     }
 
@@ -140,7 +146,14 @@ pub mod mock {
             max_turns: Option<u32>,
         ) -> LocalBoxStream<'static, XaiEvent> {
             (**self)
-                .chat_stream(model, input, api_key, tools, previous_response_id, max_turns)
+                .chat_stream(
+                    model,
+                    input,
+                    api_key,
+                    tools,
+                    previous_response_id,
+                    max_turns,
+                )
                 .await
         }
     }
