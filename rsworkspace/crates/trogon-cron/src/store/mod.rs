@@ -14,8 +14,7 @@ pub use snapshot_bucket::run as open_snapshot_bucket;
 struct CronJobsSnapshotSchema;
 
 impl SnapshotSchema for CronJobsSnapshotSchema {
-    const NAMESPACE: &'static str = "cron_jobs";
-    const SCHEMA_SEGMENT: &'static str = "v2";
+    const SNAPSHOT_STREAM_PREFIX: &'static str = "cron_jobs.v2.";
     const CHECKPOINT_NAME: Option<&'static str> = Some("last_event_sequence");
 }
 

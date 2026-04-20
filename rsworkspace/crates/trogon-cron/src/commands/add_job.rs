@@ -2,9 +2,9 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::{
-    AlwaysSnapshot, CommandExecution, CommandResult, CommandState, CommandStreamState, Decide,
-    Decision, NonEmpty, OccPolicy, SnapshotRead, SnapshotSchema, SnapshotWrite, Snapshots,
-    StreamAppend, StreamCommand, StreamRead, StreamState,
+    AlwaysSnapshot, CommandExecution, CommandResult, CommandSnapshots, CommandState,
+    CommandStreamState, Decide, Decision, NonEmpty, OccPolicy, SnapshotRead, SnapshotSchema,
+    SnapshotWrite, StreamAppend, StreamCommand, StreamRead, StreamState,
 };
 
 use crate::{
@@ -27,8 +27,7 @@ pub enum AddJobState {
 }
 
 impl SnapshotSchema for AddJobState {
-    const NAMESPACE: &'static str = "cron.command";
-    const SCHEMA_SEGMENT: &'static str = "add_job.v1";
+    const SNAPSHOT_STREAM_PREFIX: &'static str = "cron.command.add_job.v1.";
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -123,6 +122,14 @@ impl CommandState for AddJobCommand {
     }
 }
 
+impl CommandSnapshots for AddJobCommand {
+    type SnapshotPolicy = AlwaysSnapshot;
+
+    fn snapshot_policy() -> Self::SnapshotPolicy {
+        AlwaysSnapshot
+    }
+}
+
 pub async fn run<S, SErr>(
     store: &S,
     command: AddJobCommand,
@@ -136,13 +143,9 @@ where
     serde_json::Error: Into<SErr>,
 {
     CommandExecution::new(store, &command)
-        .codec(JobEventCodec)
-        .occ(occ)
-        .snapshots(Snapshots::new(
-            store,
-            AddJobState::snapshot_store_config(),
-            AlwaysSnapshot,
-        ))
+        .with_codec(JobEventCodec)
+        .with_occ(occ)
+        .with_snapshot(store)
         .execute()
         .await
 }
