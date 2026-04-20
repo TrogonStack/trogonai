@@ -295,6 +295,46 @@ async fn session_reader_list_by_tenant_filters_correctly() {
     assert_eq!(tenant_b.len(), 1);
 }
 
+// ── serde error paths in get/get_vault/get_or_create_vault ───────────────────
+
+#[tokio::test]
+async fn credential_store_get_invalid_json_returns_error() {
+    let (js, _c) = nats_js().await;
+    let store = CredentialStore::open(&js).await.unwrap();
+    let kv = js.get_key_value(CREDS_BUCKET).await.unwrap();
+    kv.put("env1.crd_bad", Bytes::from_static(b"not json")).await.unwrap();
+    assert!(store.get("env1", "crd_bad").await.is_err());
+}
+
+#[tokio::test]
+async fn credential_store_get_vault_invalid_json_returns_error() {
+    let (js, _c) = nats_js().await;
+    let store = CredentialStore::open(&js).await.unwrap();
+    let kv = js.get_key_value(VAULTS_BUCKET).await.unwrap();
+    kv.put("env_bad", Bytes::from_static(b"not json")).await.unwrap();
+    assert!(store.get_vault("env_bad").await.is_err());
+}
+
+#[tokio::test]
+async fn credential_store_get_or_create_vault_existing_bad_json_returns_error() {
+    let (js, _c) = nats_js().await;
+    let store = CredentialStore::open(&js).await.unwrap();
+    // pre-populate vault bucket with bad JSON for this env
+    let kv = js.get_key_value(VAULTS_BUCKET).await.unwrap();
+    kv.put("env_corrupt", Bytes::from_static(b"not json")).await.unwrap();
+    // get_or_create sees existing bytes → tries to deserialize → error
+    assert!(store.get_or_create_vault("env_corrupt").await.is_err());
+}
+
+#[tokio::test]
+async fn session_reader_get_invalid_json_returns_error() {
+    let (js, _c) = nats_js().await;
+    let reader = SessionReader::open(&js).await.unwrap();
+    let kv = js.get_key_value(SESSIONS_BUCKET).await.unwrap();
+    kv.put("tenant.bad_sess", Bytes::from_static(b"not json")).await.unwrap();
+    assert!(reader.get("tenant", "bad_sess").await.is_err());
+}
+
 // ── silent-skip on bad JSON during list ──────────────────────────────────────
 
 #[tokio::test]

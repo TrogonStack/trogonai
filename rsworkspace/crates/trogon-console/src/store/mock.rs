@@ -326,3 +326,49 @@ impl SessionRepository for MockSessionStore {
         Box::pin(ready(Ok(result)))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::{
+        credential::{Credential, CredentialStatus, CredentialType},
+        skill::SkillVersion,
+    };
+
+    fn make_skill_version() -> SkillVersion {
+        SkillVersion {
+            skill_id: "sk1".to_string(),
+            version: "20260101".to_string(),
+            content: "content".to_string(),
+            is_latest: true,
+            created_at: "t".to_string(),
+        }
+    }
+
+    fn make_credential() -> Credential {
+        Credential {
+            id: "crd_1".to_string(),
+            vault_id: "vlt_1".to_string(),
+            env_id: "env_1".to_string(),
+            name: "Token".to_string(),
+            credential_type: CredentialType::BearerToken,
+            mcp_server_url: "https://example.com".to_string(),
+            status: CredentialStatus::Active,
+            rotation_policy_days: None,
+            created_at: "t".to_string(),
+            updated_at: "t".to_string(),
+        }
+    }
+
+    #[tokio::test]
+    async fn mock_skill_put_version_failing() {
+        let store = MockSkillStore::failing();
+        assert!(store.put_version(&make_skill_version()).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn mock_credential_put_failing() {
+        let store = MockCredentialStore::failing();
+        assert!(store.put(&make_credential()).await.is_err());
+    }
+}
