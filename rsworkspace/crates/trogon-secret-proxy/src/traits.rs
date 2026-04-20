@@ -91,13 +91,15 @@ impl JsMsg {
     }
 
     pub async fn ack(&self) {
-        if let Some(f) = self.ack.lock().unwrap().take() {
+        let f = self.ack.lock().unwrap().take();
+        if let Some(f) = f {
             f().await;
         }
     }
 
     pub async fn nack(&self) {
-        if let Some(f) = self.nack.lock().unwrap().take() {
+        let f = self.nack.lock().unwrap().take();
+        if let Some(f) = f {
             f().await;
         }
     }
