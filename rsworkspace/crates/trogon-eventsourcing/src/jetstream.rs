@@ -5,10 +5,10 @@ use async_nats::jetstream::{self, kv};
 use serde::{Serialize, de::DeserializeOwned};
 
 use crate::{
-    AppendOutcome, EventData, NonEmpty, Snapshot, SnapshotChange, SnapshotStore,
-    SnapshotStoreConfig, SnapshotStoreError, StreamAppend, StreamRead, StreamReadResult,
-    StreamState, StreamStoreError, append_stream, load_snapshot, persist_snapshot_change,
-    read_stream_from,
+    AppendOutcome, EventData, NonEmpty, Snapshot, SnapshotChange, SnapshotRead,
+    SnapshotStoreConfig, SnapshotStoreError, SnapshotWrite, StreamAppend, StreamRead,
+    StreamReadResult, StreamState, StreamStoreError, append_stream, load_snapshot,
+    persist_snapshot_change, read_stream_from,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -369,7 +369,7 @@ where
     }
 }
 
-impl<StreamId, Payload, Resolver, Projector> SnapshotStore<Payload, StreamId>
+impl<StreamId, Payload, Resolver, Projector> SnapshotRead<Payload, StreamId>
     for JetStreamStore<Resolver, Projector>
 where
     StreamId: AsRef<str> + Send + Sync + ?Sized,
@@ -386,6 +386,17 @@ where
     ) -> Result<Option<Snapshot<Payload>>, Self::Error> {
         self.load_snapshot_entry(config, stream_id).await
     }
+}
+
+impl<StreamId, Payload, Resolver, Projector> SnapshotWrite<Payload, StreamId>
+    for JetStreamStore<Resolver, Projector>
+where
+    StreamId: AsRef<str> + Send + Sync + ?Sized,
+    Payload: Serialize + DeserializeOwned + Send,
+    Resolver: StreamSubjectResolver<StreamId>,
+    Projector: AppendProjector<StreamId, Error = Resolver::Error>,
+{
+    type Error = JetStreamStoreError<Resolver::Error>;
 
     async fn save_snapshot(
         &self,

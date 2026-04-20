@@ -15,14 +15,13 @@ pub use decision::{Act, Decide, Decision, NonEmpty, StreamCommand, decide};
 pub use execution::{
     AlwaysSnapshot, AppendOutcome, CommandExecution, CommandFailure, CommandInfraError,
     CommandResult, CommandState, CommandStreamState, ExecutionResult, FrequencySnapshot,
-    NoSnapshot, OccPolicy, SnapshotDecision, SnapshotPolicy, SnapshotStore, Snapshots,
-    StreamAppend, StreamRead, StreamReadResult, StreamState, WithoutSnapshots,
+    NoSnapshot, OccPolicy, SnapshotDecision, SnapshotPolicy, SnapshotRead, SnapshotWrite,
+    Snapshots, StreamAppend, StreamRead, StreamReadResult, StreamState, WithoutSnapshots,
 };
 pub use snapshots::{
-    Snapshot, SnapshotChange, SnapshotLoader, SnapshotStoreConfig, SnapshotStoreError,
-    checkpoint_key, list_snapshots, load_snapshot, load_snapshot_for, load_snapshot_map,
-    maybe_advance_checkpoint, persist_snapshot_change, read_checkpoint, snapshot_key,
-    write_checkpoint,
+    Snapshot, SnapshotChange, SnapshotStoreConfig, SnapshotStoreError, checkpoint_key,
+    list_snapshots, load_snapshot, load_snapshot_map, maybe_advance_checkpoint,
+    persist_snapshot_change, read_checkpoint, snapshot_key, write_checkpoint,
 };
 pub use streams::{StreamStoreError, append_stream, read_stream_from, read_stream_range};
 pub use testing::{

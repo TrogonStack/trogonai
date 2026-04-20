@@ -89,7 +89,7 @@ pub trait StreamAppend<StreamId: ?Sized>: Send + Sync {
     ) -> impl std::future::Future<Output = Result<AppendOutcome, Self::Error>> + Send;
 }
 
-pub trait SnapshotStore<SnapshotPayload, StreamId: ?Sized>: Send + Sync {
+pub trait SnapshotRead<SnapshotPayload, StreamId: ?Sized>: Send + Sync {
     type Error;
 
     fn load_snapshot(
@@ -97,6 +97,10 @@ pub trait SnapshotStore<SnapshotPayload, StreamId: ?Sized>: Send + Sync {
         config: SnapshotStoreConfig<'static>,
         stream_id: &StreamId,
     ) -> impl std::future::Future<Output = Result<Option<Snapshot<SnapshotPayload>>, Self::Error>> + Send;
+}
+
+pub trait SnapshotWrite<SnapshotPayload, StreamId: ?Sized>: Send + Sync {
+    type Error;
 
     fn save_snapshot(
         &self,
@@ -434,7 +438,8 @@ where
     C::Event: EventType + StreamEvent + Clone,
     C::State: Clone,
     E: StreamRead<C::StreamId, Error = SErr> + StreamAppend<C::StreamId, Error = SErr>,
-    S: SnapshotStore<C::State, C::StreamId, Error = SErr>,
+    S: SnapshotRead<C::State, C::StreamId, Error = SErr>
+        + SnapshotWrite<C::State, C::StreamId, Error = SErr>,
     P: SnapshotPolicy<C::State, C::Event>,
     C::DomainError: From<C::Error>,
     JsonEventCodec: EventCodec<C::Event>,
@@ -466,7 +471,8 @@ where
     C::Event: EventType + StreamEvent + Clone,
     C::State: Clone,
     E: StreamRead<C::StreamId, Error = SErr> + StreamAppend<C::StreamId, Error = SErr>,
-    S: SnapshotStore<C::State, C::StreamId, Error = SErr>,
+    S: SnapshotRead<C::State, C::StreamId, Error = SErr>
+        + SnapshotWrite<C::State, C::StreamId, Error = SErr>,
     P: SnapshotPolicy<C::State, C::Event>,
     C::DomainError: From<C::Error>,
     EC: EventCodec<C::Event>,
@@ -876,7 +882,7 @@ mod tests {
         }
     }
 
-    impl SnapshotStore<TestState, str> for FakeRuntime {
+    impl SnapshotRead<TestState, str> for FakeRuntime {
         type Error = TestInfraError;
 
         async fn load_snapshot(
@@ -893,6 +899,10 @@ mod tests {
                 .push(stream_id.to_string());
             Ok(self.snapshot.clone())
         }
+    }
+
+    impl SnapshotWrite<TestState, str> for FakeRuntime {
+        type Error = TestInfraError;
 
         async fn save_snapshot(
             &self,

@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::{
     AlwaysSnapshot, CommandExecution, CommandResult, CommandState, Decide, Decision, NonEmpty,
-    OccPolicy, SnapshotStore, SnapshotStoreConfig, Snapshots, StreamAppend, StreamCommand,
-    StreamRead,
+    OccPolicy, SnapshotRead, SnapshotStoreConfig, SnapshotWrite, Snapshots, StreamAppend,
+    StreamCommand, StreamRead,
 };
 
 use crate::{
@@ -109,7 +109,8 @@ pub async fn run<S, SErr>(
 where
     S: StreamRead<JobId, Error = SErr>
         + StreamAppend<JobId, Error = SErr>
-        + SnapshotStore<RemoveJobState, JobId, Error = SErr>,
+        + SnapshotRead<RemoveJobState, JobId, Error = SErr>
+        + SnapshotWrite<RemoveJobState, JobId, Error = SErr>,
     serde_json::Error: Into<SErr>,
 {
     CommandExecution::new(store, &command)

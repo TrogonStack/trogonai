@@ -9,8 +9,8 @@ use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use serde::{Serialize, de::DeserializeOwned};
 use trogon_eventsourcing::{
-    AppendOutcome, EventData, NonEmpty, Snapshot, SnapshotStore, SnapshotStoreConfig, StreamAppend,
-    StreamRead, StreamReadResult, StreamState,
+    AppendOutcome, EventData, NonEmpty, Snapshot, SnapshotRead, SnapshotStoreConfig, SnapshotWrite,
+    StreamAppend, StreamRead, StreamReadResult, StreamState,
 };
 use trogon_nats::lease::{ReleaseLease, RenewLease, TryAcquireLease};
 
@@ -388,7 +388,7 @@ impl StreamAppend<crate::JobId> for MockCronStore {
     }
 }
 
-impl<Payload> SnapshotStore<Payload, crate::JobId> for MockCronStore
+impl<Payload> SnapshotRead<Payload, crate::JobId> for MockCronStore
 where
     Payload: Serialize + DeserializeOwned + Send,
 {
@@ -401,6 +401,13 @@ where
     ) -> Result<Option<Snapshot<Payload>>, Self::Error> {
         self.read_command_snapshot(config, stream_id)
     }
+}
+
+impl<Payload> SnapshotWrite<Payload, crate::JobId> for MockCronStore
+where
+    Payload: Serialize + DeserializeOwned + Send,
+{
+    type Error = CronError;
 
     async fn save_snapshot(
         &self,
