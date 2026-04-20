@@ -122,34 +122,53 @@ mod tests {
         );
     }
 
-    /// Every unimplemented stub must use `ErrorCode::InternalError` — not an
-    /// application-level code — so clients can distinguish "method not
-    /// available on this bridge" from domain errors.
+    /// Methods dispatched via core NATS request_with_timeout return AGENT_UNAVAILABLE
+    /// when the request fails — so clients can distinguish agent unavailability from
+    /// logic errors.
     #[tokio::test]
-    async fn stub_methods_use_internal_error_code() {
-        use agent_client_protocol::{
-            AuthenticateRequest, CancelNotification, ErrorCode, LoadSessionRequest,
-            NewSessionRequest, SetSessionModeRequest,
-        };
+    async fn core_nats_methods_return_agent_unavailable_on_failure() {
+        use agent_client_protocol::{AuthenticateRequest, ErrorCode, NewSessionRequest};
 
         let (_mock, _js, bridge) = mock_bridge();
 
-        macro_rules! check_code {
+        macro_rules! check_unavailable {
             ($fut:expr) => {{
                 let err = $fut.await.unwrap_err();
                 assert_eq!(
                     err.code,
-                    ErrorCode::InternalError.into(),
-                    "stub must return InternalError, got {:?}",
+                    ErrorCode::Other(crate::error::AGENT_UNAVAILABLE).into(),
+                    "core NATS failure must return AGENT_UNAVAILABLE, got {:?}",
                     err.code
                 );
             }};
         }
 
-        check_code!(bridge.authenticate(AuthenticateRequest::new("test")));
-        check_code!(bridge.new_session(NewSessionRequest::new(".")));
-        check_code!(bridge.load_session(LoadSessionRequest::new("s1", ".")));
-        check_code!(bridge.set_session_mode(SetSessionModeRequest::new("s1", "m1")));
-        check_code!(bridge.cancel(CancelNotification::new("s1")));
+        check_unavailable!(bridge.authenticate(AuthenticateRequest::new("test")));
+        check_unavailable!(bridge.new_session(NewSessionRequest::new(".")));
+    }
+
+    /// Methods dispatched via JetStream js_request return InternalError when the
+    /// JetStream operation fails — JetStream errors are infrastructure-level and
+    /// map to InternalError rather than AGENT_UNAVAILABLE.
+    #[tokio::test]
+    async fn jetstream_methods_return_internal_error_on_failure() {
+        use agent_client_protocol::{ErrorCode, LoadSessionRequest, SetSessionModeRequest};
+
+        let (_mock, _js, bridge) = mock_bridge();
+
+        macro_rules! check_internal {
+            ($fut:expr) => {{
+                let err = $fut.await.unwrap_err();
+                assert_eq!(
+                    err.code,
+                    ErrorCode::InternalError.into(),
+                    "JetStream failure must return InternalError, got {:?}",
+                    err.code
+                );
+            }};
+        }
+
+        check_internal!(bridge.load_session(LoadSessionRequest::new("s1", ".")));
+        check_internal!(bridge.set_session_mode(SetSessionModeRequest::new("s1", "m1")));
     }
 }

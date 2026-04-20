@@ -115,7 +115,7 @@ mod tests {
         (Metrics::new(&meter), exporter, provider)
     }
 
-    /// `record_request` must increment `acp.request.count` with the correct
+    /// `record_request` must increment `acp.requests` with the correct
     /// `method` and `success` attributes.
     #[test]
     fn record_request_increments_counter_with_method_and_success() {
@@ -131,7 +131,7 @@ mod tests {
             .flat_map(|rm| rm.scope_metrics())
             .flat_map(|sm| sm.metrics())
             .any(|m| {
-                if m.name() != "acp.request.count" {
+                if m.name() != "acp.requests" {
                     return false;
                 }
                 let AggregatedMetrics::U64(MetricData::Sum(s)) = m.data() else {
@@ -151,7 +151,7 @@ mod tests {
                 })
             });
 
-        assert!(found, "acp.request.count must be recorded with method=initialize, success=true");
+        assert!(found, "acp.requests must be recorded with method=initialize, success=true");
         provider.shutdown().unwrap();
     }
 
@@ -217,7 +217,7 @@ mod tests {
             .iter()
             .flat_map(|rm| rm.scope_metrics())
             .flat_map(|sm| sm.metrics())
-            .filter(|m| m.name() == "acp.request.count")
+            .filter(|m| m.name() == "acp.requests")
             .flat_map(|m| {
                 if let AggregatedMetrics::U64(MetricData::Sum(s)) = m.data() {
                     s.data_points()
