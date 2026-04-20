@@ -171,7 +171,7 @@ impl MockCronStore {
 
     pub(crate) fn read_command_snapshot<Payload>(
         &self,
-        config: trogon_eventsourcing::SnapshotStoreConfig<'static>,
+        config: trogon_eventsourcing::SnapshotStoreConfig,
         stream_id: &crate::JobId,
     ) -> Result<Option<Snapshot<Payload>>, CronError>
     where
@@ -396,7 +396,7 @@ where
 
     async fn load_snapshot(
         &self,
-        config: SnapshotStoreConfig<'static>,
+        config: SnapshotStoreConfig,
         stream_id: &crate::JobId,
     ) -> Result<Option<Snapshot<Payload>>, Self::Error> {
         self.read_command_snapshot(config, stream_id)
@@ -411,7 +411,7 @@ where
 
     async fn save_snapshot(
         &self,
-        config: SnapshotStoreConfig<'static>,
+        config: SnapshotStoreConfig,
         stream_id: &crate::JobId,
         snapshot: Snapshot<Payload>,
     ) -> Result<(), Self::Error> {

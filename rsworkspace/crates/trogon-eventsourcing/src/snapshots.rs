@@ -1,6 +1,7 @@
 use async_nats::jetstream::kv;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
@@ -17,26 +18,76 @@ impl<T> Snapshot<T> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SnapshotStoreConfig<'a> {
-    key_prefix: &'a str,
-    checkpoint_key: Option<&'a str>,
+pub trait SnapshotSchema {
+    const NAMESPACE: &'static str;
+    const SCHEMA_SEGMENT: &'static str;
+    const CHECKPOINT_NAME: Option<&'static str> = None;
+
+    fn snapshot_store_config() -> SnapshotStoreConfig
+    where
+        Self: Sized,
+    {
+        match Self::CHECKPOINT_NAME {
+            Some(checkpoint_name) => {
+                SnapshotStoreConfig::checkpointed::<Self>(Self::NAMESPACE, checkpoint_name)
+            }
+            None => SnapshotStoreConfig::scoped::<Self>(Self::NAMESPACE),
+        }
+    }
 }
 
-impl<'a> SnapshotStoreConfig<'a> {
-    pub const fn new(key_prefix: &'a str, checkpoint_key: Option<&'a str>) -> Self {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SnapshotStoreConfig {
+    key_prefix: Cow<'static, str>,
+    checkpoint_key: Option<Cow<'static, str>>,
+}
+
+impl SnapshotStoreConfig {
+    pub fn new(
+        key_prefix: impl Into<Cow<'static, str>>,
+        checkpoint_key: Option<&'static str>,
+    ) -> Self {
         Self {
-            key_prefix,
-            checkpoint_key,
+            key_prefix: key_prefix.into(),
+            checkpoint_key: checkpoint_key.map(Cow::Borrowed),
         }
     }
 
-    pub const fn key_prefix(self) -> &'a str {
-        self.key_prefix
+    pub fn without_checkpoint(key_prefix: impl Into<Cow<'static, str>>) -> Self {
+        Self {
+            key_prefix: key_prefix.into(),
+            checkpoint_key: None,
+        }
     }
 
-    pub const fn checkpoint_key(self) -> Option<&'a str> {
-        self.checkpoint_key
+    pub fn with_checkpoint(
+        key_prefix: impl Into<Cow<'static, str>>,
+        checkpoint_key: impl Into<Cow<'static, str>>,
+    ) -> Self {
+        Self {
+            key_prefix: key_prefix.into(),
+            checkpoint_key: Some(checkpoint_key.into()),
+        }
+    }
+
+    pub fn scoped<T: SnapshotSchema>(namespace: &str) -> Self {
+        Self::without_checkpoint(format!("{namespace}.{}.", T::SCHEMA_SEGMENT))
+    }
+
+    pub fn checkpointed<T: SnapshotSchema>(namespace: &str, checkpoint_name: &str) -> Self {
+        let schema = T::SCHEMA_SEGMENT;
+        Self::with_checkpoint(
+            format!("{namespace}.{schema}."),
+            format!("_snapshot.{namespace}.{schema}.{checkpoint_name}"),
+        )
+    }
+
+    pub fn key_prefix(&self) -> &str {
+        self.key_prefix.as_ref()
+    }
+
+    pub fn checkpoint_key(&self) -> Option<&str> {
+        self.checkpoint_key.as_deref()
     }
 }
 
@@ -127,11 +178,11 @@ impl From<serde_json::Error> for SnapshotStoreError {
     }
 }
 
-pub fn snapshot_key(config: SnapshotStoreConfig<'_>, id: &str) -> String {
+pub fn snapshot_key(config: &SnapshotStoreConfig, id: &str) -> String {
     format!("{}{}", config.key_prefix(), id)
 }
 
-pub fn checkpoint_key(config: SnapshotStoreConfig<'_>) -> Result<String, SnapshotStoreError> {
+pub fn checkpoint_key(config: &SnapshotStoreConfig) -> Result<String, SnapshotStoreError> {
     config
         .checkpoint_key()
         .map(ToString::to_string)
@@ -140,12 +191,12 @@ pub fn checkpoint_key(config: SnapshotStoreConfig<'_>) -> Result<String, Snapsho
         })
 }
 
-fn snapshot_key_prefix(config: SnapshotStoreConfig<'_>) -> String {
+fn snapshot_key_prefix(config: &SnapshotStoreConfig) -> String {
     config.key_prefix().to_string()
 }
 
 fn stream_id_from_snapshot_key(
-    config: SnapshotStoreConfig<'_>,
+    config: &SnapshotStoreConfig,
     key: &str,
 ) -> Result<Option<String>, SnapshotStoreError> {
     let prefix = snapshot_key_prefix(config);
@@ -164,7 +215,7 @@ fn stream_id_from_snapshot_key(
 
 async fn load_snapshot_entries<T>(
     bucket: &kv::Store,
-    config: SnapshotStoreConfig<'_>,
+    config: &SnapshotStoreConfig,
 ) -> Result<Vec<(String, Snapshot<T>)>, SnapshotStoreError>
 where
     T: DeserializeOwned,
@@ -198,7 +249,7 @@ where
 
 pub async fn load_snapshot<T>(
     bucket: &kv::Store,
-    config: SnapshotStoreConfig<'_>,
+    config: &SnapshotStoreConfig,
     id: &str,
 ) -> Result<Option<Snapshot<T>>, SnapshotStoreError>
 where
@@ -223,7 +274,7 @@ where
 
 pub async fn list_snapshots<T>(
     bucket: &kv::Store,
-    config: SnapshotStoreConfig<'_>,
+    config: &SnapshotStoreConfig,
 ) -> Result<Vec<Snapshot<T>>, SnapshotStoreError>
 where
     T: DeserializeOwned,
@@ -235,7 +286,7 @@ where
 
 pub async fn load_snapshot_map<T>(
     bucket: &kv::Store,
-    config: SnapshotStoreConfig<'_>,
+    config: &SnapshotStoreConfig,
 ) -> Result<BTreeMap<String, Snapshot<T>>, SnapshotStoreError>
 where
     T: DeserializeOwned,
@@ -247,7 +298,7 @@ where
 
 pub async fn read_checkpoint(
     bucket: &kv::Store,
-    config: SnapshotStoreConfig<'_>,
+    config: &SnapshotStoreConfig,
 ) -> Result<u64, SnapshotStoreError> {
     let (_revision, sequence) = read_checkpoint_entry(bucket, config).await?;
     Ok(sequence)
@@ -255,7 +306,7 @@ pub async fn read_checkpoint(
 
 pub async fn write_checkpoint(
     bucket: &kv::Store,
-    config: SnapshotStoreConfig<'_>,
+    config: &SnapshotStoreConfig,
     sequence: u64,
 ) -> Result<(), SnapshotStoreError> {
     write_kv_value(bucket, &checkpoint_key(config)?, checkpoint_value(sequence)).await
@@ -263,7 +314,7 @@ pub async fn write_checkpoint(
 
 pub async fn maybe_advance_checkpoint(
     bucket: &kv::Store,
-    config: SnapshotStoreConfig<'_>,
+    config: &SnapshotStoreConfig,
     sequence: u64,
 ) -> Result<(), SnapshotStoreError> {
     let expected_previous = sequence.saturating_sub(1);
@@ -298,7 +349,7 @@ pub async fn maybe_advance_checkpoint(
 
 pub async fn persist_snapshot_change<T>(
     bucket: &kv::Store,
-    config: SnapshotStoreConfig<'_>,
+    config: &SnapshotStoreConfig,
     change: SnapshotChange<T>,
 ) -> Result<(), SnapshotStoreError>
 where
@@ -326,7 +377,7 @@ fn checkpoint_value(sequence: u64) -> Vec<u8> {
 
 async fn read_checkpoint_entry(
     bucket: &kv::Store,
-    config: SnapshotStoreConfig<'_>,
+    config: &SnapshotStoreConfig,
 ) -> Result<(Option<u64>, u64), SnapshotStoreError> {
     let checkpoint_key = checkpoint_key(config)?;
     let Some(entry) = bucket
@@ -400,6 +451,14 @@ mod tests {
         id: String,
     }
 
+    struct TestSchema;
+
+    impl SnapshotSchema for TestSchema {
+        const NAMESPACE: &'static str = "snapshots";
+        const SCHEMA_SEGMENT: &'static str = "v2";
+        const CHECKPOINT_NAME: Option<&'static str> = Some("last_event_sequence");
+    }
+
     #[test]
     fn snapshot_store_config_exposes_values() {
         let config = SnapshotStoreConfig::new("snapshots.v2.", Some("_checkpoint.v2"));
@@ -409,17 +468,28 @@ mod tests {
     }
 
     #[test]
+    fn snapshot_store_config_derives_keys_from_schema() {
+        let config = TestSchema::snapshot_store_config();
+
+        assert_eq!(config.key_prefix(), "snapshots.v2.");
+        assert_eq!(
+            config.checkpoint_key(),
+            Some("_snapshot.snapshots.v2.last_event_sequence")
+        );
+    }
+
+    #[test]
     fn snapshot_key_uses_prefix() {
         let config = SnapshotStoreConfig::new("snapshots.v2.", Some("_checkpoint.v2"));
 
-        assert_eq!(snapshot_key(config, "backup"), "snapshots.v2.backup");
+        assert_eq!(snapshot_key(&config, "backup"), "snapshots.v2.backup");
     }
 
     #[test]
     fn checkpoint_key_uses_config_value() {
         let config = SnapshotStoreConfig::new("snapshots.v3.", Some("_checkpoint.v3"));
 
-        assert_eq!(checkpoint_key(config).unwrap(), "_checkpoint.v3");
+        assert_eq!(checkpoint_key(&config).unwrap(), "_checkpoint.v3");
     }
 
     #[test]
@@ -427,7 +497,7 @@ mod tests {
         let config = SnapshotStoreConfig::new("snapshots.v3.", None);
 
         assert_eq!(
-            checkpoint_key(config).unwrap_err().to_string(),
+            checkpoint_key(&config).unwrap_err().to_string(),
             "Missing checkpoint key for snapshot namespace: snapshots.v3."
         );
     }
@@ -500,11 +570,11 @@ mod tests {
         let config = SnapshotStoreConfig::new("snapshots.v2.", Some("_checkpoint.v2"));
 
         assert_eq!(
-            stream_id_from_snapshot_key(config, "snapshots.v2.backup").unwrap(),
+            stream_id_from_snapshot_key(&config, "snapshots.v2.backup").unwrap(),
             Some("backup".to_string())
         );
         assert_eq!(
-            stream_id_from_snapshot_key(config, "snapshots.v1.backup").unwrap(),
+            stream_id_from_snapshot_key(&config, "snapshots.v1.backup").unwrap(),
             None
         );
     }
@@ -514,7 +584,7 @@ mod tests {
         let config = SnapshotStoreConfig::new("snapshots.v2.", Some("_checkpoint.v2"));
 
         assert_eq!(
-            stream_id_from_snapshot_key(config, "snapshots.v2.")
+            stream_id_from_snapshot_key(&config, "snapshots.v2.")
                 .unwrap_err()
                 .to_string(),
             "Invalid stream snapshot key: snapshots.v2."

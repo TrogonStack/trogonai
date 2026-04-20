@@ -276,7 +276,7 @@ impl<Resolver, Projector> JetStreamStore<Resolver, Projector> {
 
     pub async fn load_snapshot_entry<StreamId, Payload>(
         &self,
-        config: SnapshotStoreConfig<'static>,
+        config: SnapshotStoreConfig,
         stream_id: &StreamId,
     ) -> Result<Option<Snapshot<Payload>>, JetStreamStoreError<Resolver::Error>>
     where
@@ -285,14 +285,14 @@ impl<Resolver, Projector> JetStreamStore<Resolver, Projector> {
         Resolver: StreamSubjectResolver<StreamId>,
         Projector: AppendProjector<StreamId, Error = Resolver::Error>,
     {
-        load_snapshot(self.snapshot_bucket(), config, stream_id.as_ref())
+        load_snapshot(self.snapshot_bucket(), &config, stream_id.as_ref())
             .await
             .map_err(JetStreamStoreError::Snapshot)
     }
 
     pub async fn save_snapshot_entry<StreamId, Payload>(
         &self,
-        config: SnapshotStoreConfig<'static>,
+        config: SnapshotStoreConfig,
         stream_id: &StreamId,
         snapshot: Snapshot<Payload>,
     ) -> Result<(), JetStreamStoreError<Resolver::Error>>
@@ -304,7 +304,7 @@ impl<Resolver, Projector> JetStreamStore<Resolver, Projector> {
     {
         persist_snapshot_change(
             self.snapshot_bucket(),
-            config,
+            &config,
             SnapshotChange::upsert(stream_id.as_ref(), snapshot),
         )
         .await
@@ -381,7 +381,7 @@ where
 
     async fn load_snapshot(
         &self,
-        config: SnapshotStoreConfig<'static>,
+        config: SnapshotStoreConfig,
         stream_id: &StreamId,
     ) -> Result<Option<Snapshot<Payload>>, Self::Error> {
         self.load_snapshot_entry(config, stream_id).await
@@ -400,7 +400,7 @@ where
 
     async fn save_snapshot(
         &self,
-        config: SnapshotStoreConfig<'static>,
+        config: SnapshotStoreConfig,
         stream_id: &StreamId,
         snapshot: Snapshot<Payload>,
     ) -> Result<(), Self::Error> {

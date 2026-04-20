@@ -49,7 +49,7 @@ pub use projections::{
 pub use queries::{GetJobCommand, ListJobsCommand, get_job, list_jobs};
 pub use read_model::CronJob;
 pub use schedule::ResolvedJobSpec;
-pub use store::{SNAPSHOT_STORE_CONFIG, Store, connect_store, open_snapshot_bucket};
+pub use store::{Store, connect_store, open_snapshot_bucket, snapshot_store_config};
 pub use traits::{LeaderLock, SchedulePublisher};
 pub use trogon_eventsourcing::{
     CommandFailure, CommandInfraError, CommandResult, ExecutionResult, OccPolicy,
