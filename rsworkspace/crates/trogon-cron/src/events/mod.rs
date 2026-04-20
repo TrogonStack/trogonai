@@ -59,12 +59,81 @@ pub struct JobDetails {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct JobAdded {
+    pub id: String,
+    pub job: JobDetails,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct JobPaused {
+    pub id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct JobResumed {
+    pub id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct JobRemoved {
+    pub id: String,
+}
+
+impl StreamEvent for JobAdded {
+    fn stream_id(&self) -> &str {
+        &self.id
+    }
+}
+
+impl StreamEvent for JobPaused {
+    fn stream_id(&self) -> &str {
+        &self.id
+    }
+}
+
+impl StreamEvent for JobResumed {
+    fn stream_id(&self) -> &str {
+        &self.id
+    }
+}
+
+impl StreamEvent for JobRemoved {
+    fn stream_id(&self) -> &str {
+        &self.id
+    }
+}
+
+impl EventType for JobAdded {
+    fn event_type(&self) -> &'static str {
+        "job_added"
+    }
+}
+
+impl EventType for JobPaused {
+    fn event_type(&self) -> &'static str {
+        "job_paused"
+    }
+}
+
+impl EventType for JobResumed {
+    fn event_type(&self) -> &'static str {
+        "job_resumed"
+    }
+}
+
+impl EventType for JobRemoved {
+    fn event_type(&self) -> &'static str {
+        "job_removed"
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum JobEvent {
-    JobAdded { id: String, job: JobDetails },
-    JobPaused { id: String },
-    JobResumed { id: String },
-    JobRemoved { id: String },
+    JobAdded(JobAdded),
+    JobPaused(JobPaused),
+    JobResumed(JobResumed),
+    JobRemoved(JobRemoved),
 }
 
 pub type JobEventData = EventData;
@@ -88,10 +157,10 @@ impl EventCodec<JobEvent> for JobEventCodec {
 impl StreamEvent for JobEvent {
     fn stream_id(&self) -> &str {
         match self {
-            Self::JobAdded { id, .. } => id,
-            Self::JobPaused { id } => id,
-            Self::JobResumed { id } => id,
-            Self::JobRemoved { id } => id,
+            Self::JobAdded(event) => &event.id,
+            Self::JobPaused(event) => &event.id,
+            Self::JobResumed(event) => &event.id,
+            Self::JobRemoved(event) => &event.id,
         }
     }
 }
@@ -99,11 +168,35 @@ impl StreamEvent for JobEvent {
 impl EventType for JobEvent {
     fn event_type(&self) -> &'static str {
         match self {
-            Self::JobAdded { .. } => "job_added",
-            Self::JobPaused { .. } => "job_paused",
-            Self::JobResumed { .. } => "job_resumed",
-            Self::JobRemoved { .. } => "job_removed",
+            Self::JobAdded(event) => event.event_type(),
+            Self::JobPaused(event) => event.event_type(),
+            Self::JobResumed(event) => event.event_type(),
+            Self::JobRemoved(event) => event.event_type(),
         }
+    }
+}
+
+impl From<JobAdded> for JobEvent {
+    fn from(value: JobAdded) -> Self {
+        Self::JobAdded(value)
+    }
+}
+
+impl From<JobPaused> for JobEvent {
+    fn from(value: JobPaused) -> Self {
+        Self::JobPaused(value)
+    }
+}
+
+impl From<JobResumed> for JobEvent {
+    fn from(value: JobResumed) -> Self {
+        Self::JobResumed(value)
+    }
+}
+
+impl From<JobRemoved> for JobEvent {
+    fn from(value: JobRemoved) -> Self {
+        Self::JobRemoved(value)
     }
 }
 
@@ -115,9 +208,9 @@ mod tests {
     fn event_data_and_recorded_event_helpers_work() {
         let event = JobEventData::new_with_codec(
             &JobEventCodec,
-            JobEvent::JobRemoved {
+            JobEvent::JobRemoved(JobRemoved {
                 id: "cleanup".to_string(),
-            },
+            }),
         )
         .unwrap();
         assert_eq!(event.stream_id(), "cleanup");
@@ -132,9 +225,9 @@ mod tests {
         assert_eq!(decoded, event);
         assert_eq!(
             decoded.decode_data_with(&JobEventCodec).unwrap(),
-            JobEvent::JobRemoved {
+            JobEvent::JobRemoved(JobRemoved {
                 id: "cleanup".to_string()
-            }
+            })
         );
 
         let recorded = event.record(
@@ -155,9 +248,9 @@ mod tests {
         assert_eq!(decoded, recorded);
         assert_eq!(
             decoded.decode_data_with(&JobEventCodec).unwrap(),
-            JobEvent::JobRemoved {
+            JobEvent::JobRemoved(JobRemoved {
                 id: "cleanup".to_string()
-            }
+            })
         );
     }
 
