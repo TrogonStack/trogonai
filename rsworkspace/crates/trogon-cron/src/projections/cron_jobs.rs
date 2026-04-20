@@ -27,7 +27,7 @@ use crate::{
     },
     kv::{EVENTS_SUBJECT_PREFIX, LEGACY_EVENTS_SUBJECT_PREFIX},
     store::{
-        SNAPSHOT_STORE_CONFIG, open_cron_jobs_bucket, open_events_stream, open_snapshot_bucket,
+        open_cron_jobs_bucket, open_events_stream, open_snapshot_bucket, snapshot_store_config,
     },
 };
 
@@ -389,14 +389,14 @@ where
     }
 
     let bucket = open_snapshot_bucket(js).await?;
-    let checkpoint = read_checkpoint(&bucket, SNAPSHOT_STORE_CONFIG)
+    let checkpoint = read_checkpoint(&bucket, &snapshot_store_config())
         .await
         .map_err(CronError::from)?;
     if checkpoint >= info.state.last_sequence {
         return Ok(());
     }
 
-    let mut snapshots = load_snapshot_map(&bucket, SNAPSHOT_STORE_CONFIG)
+    let mut snapshots = load_snapshot_map(&bucket, &snapshot_store_config())
         .await
         .map_err(CronError::from)?;
     let mut states = snapshot_state_map(&snapshots);
@@ -422,10 +422,10 @@ where
         })?;
         let change =
             apply_event_to_snapshot_map(&mut states, &mut snapshots, &stream_id, &data, sequence)?;
-        persist_snapshot_change(&bucket, SNAPSHOT_STORE_CONFIG, change)
+        persist_snapshot_change(&bucket, &snapshot_store_config(), change)
             .await
             .map_err(CronError::from)?;
-        write_checkpoint(&bucket, SNAPSHOT_STORE_CONFIG, sequence)
+        write_checkpoint(&bucket, &snapshot_store_config(), sequence)
             .await
             .map_err(CronError::from)?;
     }
@@ -451,7 +451,7 @@ pub(crate) async fn project_appended_events(
 
     let mut snapshots = BTreeMap::new();
     let mut states = BTreeMap::new();
-    if let Some(snapshot) = load_snapshot(bucket, SNAPSHOT_STORE_CONFIG, job_id)
+    if let Some(snapshot) = load_snapshot(bucket, &snapshot_store_config(), job_id)
         .await
         .map_err(CronError::from)?
     {
@@ -479,11 +479,11 @@ pub(crate) async fn project_appended_events(
             &decoded,
             start_version + index as u64,
         )?;
-        persist_snapshot_change(bucket, SNAPSHOT_STORE_CONFIG, change)
+        persist_snapshot_change(bucket, &snapshot_store_config(), change)
             .await
             .map_err(CronError::from)?;
     }
-    maybe_advance_checkpoint(bucket, SNAPSHOT_STORE_CONFIG, final_version)
+    maybe_advance_checkpoint(bucket, &snapshot_store_config(), final_version)
         .await
         .map_err(CronError::from)
 }

@@ -94,7 +94,7 @@ pub trait SnapshotRead<SnapshotPayload, StreamId: ?Sized>: Send + Sync {
 
     fn load_snapshot(
         &self,
-        config: SnapshotStoreConfig<'static>,
+        config: SnapshotStoreConfig,
         stream_id: &StreamId,
     ) -> impl std::future::Future<Output = Result<Option<Snapshot<SnapshotPayload>>, Self::Error>> + Send;
 }
@@ -104,7 +104,7 @@ pub trait SnapshotWrite<SnapshotPayload, StreamId: ?Sized>: Send + Sync {
 
     fn save_snapshot(
         &self,
-        config: SnapshotStoreConfig<'static>,
+        config: SnapshotStoreConfig,
         stream_id: &StreamId,
         snapshot: Snapshot<SnapshotPayload>,
     ) -> impl std::future::Future<Output = Result<(), Self::Error>> + Send;
@@ -225,19 +225,14 @@ pub enum CommandInfraError<RuntimeError> {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct WithoutSnapshots;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Snapshots<'a, S, P> {
     snapshot_store: &'a S,
-    snapshot_config: SnapshotStoreConfig<'static>,
+    snapshot_config: SnapshotStoreConfig,
     policy: P,
 }
 
 impl<'a, S, P> Snapshots<'a, S, P> {
-    pub const fn new(
-        snapshot_store: &'a S,
-        snapshot_config: SnapshotStoreConfig<'static>,
-        policy: P,
-    ) -> Self {
+    pub fn new(snapshot_store: &'a S, snapshot_config: SnapshotStoreConfig, policy: P) -> Self {
         Self {
             snapshot_store,
             snapshot_config,
@@ -497,7 +492,7 @@ where
         let snapshot = self
             .snapshots
             .snapshot_store
-            .load_snapshot(self.snapshots.snapshot_config, stream_id)
+            .load_snapshot(self.snapshots.snapshot_config.clone(), stream_id)
             .await
             .map_err(CommandInfraError::LoadSnapshot)
             .map_err(CommandFailure::Infra)?;
@@ -570,7 +565,7 @@ where
             self.snapshots
                 .snapshot_store
                 .save_snapshot(
-                    self.snapshots.snapshot_config,
+                    self.snapshots.snapshot_config.clone(),
                     stream_id,
                     Snapshot::new(append_outcome.next_expected_version, state.clone()),
                 )
@@ -609,7 +604,7 @@ mod tests {
     use serde::{Deserialize, Serialize};
 
     use super::*;
-    use crate::{EventType, StreamEvent};
+    use crate::{EventType, SnapshotSchema, StreamEvent};
 
     #[derive(Debug, Clone)]
     struct TestCommand {
@@ -630,6 +625,11 @@ mod tests {
     enum TestState {
         Missing,
         Present { enabled: bool },
+    }
+
+    impl SnapshotSchema for TestState {
+        const NAMESPACE: &'static str = "test.command";
+        const SCHEMA_SEGMENT: &'static str = "v1";
     }
 
     #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -832,8 +832,9 @@ mod tests {
         }
     }
 
-    const TEST_SNAPSHOT_CONFIG: SnapshotStoreConfig<'static> =
-        SnapshotStoreConfig::new("test.command.", None);
+    fn test_snapshot_config() -> SnapshotStoreConfig {
+        TestState::snapshot_store_config()
+    }
 
     impl StreamRead<str> for FakeRuntime {
         type Error = TestInfraError;
@@ -887,7 +888,7 @@ mod tests {
 
         async fn load_snapshot(
             &self,
-            _config: SnapshotStoreConfig<'static>,
+            _config: SnapshotStoreConfig,
             stream_id: &str,
         ) -> Result<Option<Snapshot<TestState>>, Self::Error> {
             if self.fail_load_snapshot {
@@ -906,7 +907,7 @@ mod tests {
 
         async fn save_snapshot(
             &self,
-            _config: SnapshotStoreConfig<'static>,
+            _config: SnapshotStoreConfig,
             _stream_id: &str,
             snapshot: Snapshot<TestState>,
         ) -> Result<(), Self::Error> {
@@ -979,7 +980,7 @@ mod tests {
 
         let result = block_on(
             CommandExecution::new(&runtime, &command)
-                .snapshots(Snapshots::new(&runtime, TEST_SNAPSHOT_CONFIG, NoSnapshot))
+                .snapshots(Snapshots::new(&runtime, test_snapshot_config(), NoSnapshot))
                 .execute_result(),
         )
         .unwrap();
@@ -1003,7 +1004,7 @@ mod tests {
 
         let error = block_on(
             CommandExecution::new(&runtime, &command)
-                .snapshots(Snapshots::new(&runtime, TEST_SNAPSHOT_CONFIG, NoSnapshot))
+                .snapshots(Snapshots::new(&runtime, test_snapshot_config(), NoSnapshot))
                 .execute_result(),
         )
         .unwrap_err();
@@ -1028,7 +1029,7 @@ mod tests {
 
         let error = block_on(
             CommandExecution::new(&runtime, &command)
-                .snapshots(Snapshots::new(&runtime, TEST_SNAPSHOT_CONFIG, NoSnapshot))
+                .snapshots(Snapshots::new(&runtime, test_snapshot_config(), NoSnapshot))
                 .execute_result(),
         )
         .unwrap_err();
@@ -1076,7 +1077,7 @@ mod tests {
 
         let error = block_on(
             CommandExecution::new(&runtime, &command)
-                .snapshots(Snapshots::new(&runtime, TEST_SNAPSHOT_CONFIG, NoSnapshot))
+                .snapshots(Snapshots::new(&runtime, test_snapshot_config(), NoSnapshot))
                 .execute_result(),
         )
         .unwrap_err();
@@ -1099,7 +1100,7 @@ mod tests {
 
         let result = block_on(
             CommandExecution::new(&runtime, &command)
-                .snapshots(Snapshots::new(&runtime, TEST_SNAPSHOT_CONFIG, NoSnapshot))
+                .snapshots(Snapshots::new(&runtime, test_snapshot_config(), NoSnapshot))
                 .execute_result(),
         )
         .unwrap();
@@ -1255,7 +1256,7 @@ mod tests {
             CommandExecution::new(&runtime, &command)
                 .snapshots(Snapshots::new(
                     &runtime,
-                    TEST_SNAPSHOT_CONFIG,
+                    test_snapshot_config(),
                     AlwaysSnapshot,
                 ))
                 .execute_result(),
@@ -1281,7 +1282,7 @@ mod tests {
             CommandExecution::new(&runtime, &command)
                 .snapshots(Snapshots::new(
                     &runtime,
-                    TEST_SNAPSHOT_CONFIG,
+                    test_snapshot_config(),
                     FrequencySnapshot::new(NonZeroU64::new(3).unwrap()),
                 ))
                 .execute_result(),
@@ -1306,7 +1307,7 @@ mod tests {
             CommandExecution::new(&runtime, &command)
                 .snapshots(Snapshots::new(
                     &runtime,
-                    TEST_SNAPSHOT_CONFIG,
+                    test_snapshot_config(),
                     FrequencySnapshot::new(NonZeroU64::new(3).unwrap()),
                 ))
                 .execute_result(),
@@ -1326,7 +1327,7 @@ mod tests {
 
         let _ = block_on(
             CommandExecution::new(&runtime, &command)
-                .snapshots(Snapshots::new(&runtime, TEST_SNAPSHOT_CONFIG, NoSnapshot))
+                .snapshots(Snapshots::new(&runtime, test_snapshot_config(), NoSnapshot))
                 .execute_result(),
         )
         .unwrap();
@@ -1347,7 +1348,7 @@ mod tests {
             CommandExecution::new(&runtime, &command)
                 .snapshots(Snapshots::new(
                     &runtime,
-                    TEST_SNAPSHOT_CONFIG,
+                    test_snapshot_config(),
                     AlwaysSnapshot,
                 ))
                 .execute_result(),
