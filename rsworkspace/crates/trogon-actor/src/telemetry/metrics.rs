@@ -56,7 +56,9 @@ fn spawn_errors() -> &'static Counter<u64> {
     SPAWN_ERRORS.get_or_init(|| {
         meter()
             .u64_counter("trogon.actor.spawn.errors")
-            .with_description("Number of spawn_agent failures (no capability, timeout, request error)")
+            .with_description(
+                "Number of spawn_agent failures (no capability, timeout, request error)",
+            )
             .build()
     })
 }

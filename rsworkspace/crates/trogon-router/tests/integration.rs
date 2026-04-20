@@ -4,21 +4,13 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use testcontainers_modules::{
     nats::Nats,
-    testcontainers::{runners::AsyncRunner, ImageExt},
+    testcontainers::{ImageExt, runners::AsyncRunner},
 };
 use trogon_actor::inbox::provision_actor_inbox;
 use trogon_nats::jetstream::NatsJetStreamClient;
 use trogon_registry::{AgentCapability, Registry, provision as provision_registry};
-use trogon_router::{
-    Router,
-    decision::LlmRoutingResponse,
-    error::RouterError,
-    llm::LlmClient,
-};
-use trogon_transcript::{
-    publisher::mock::MockTranscriptPublisher,
-    store::TranscriptStore,
-};
+use trogon_router::{Router, decision::LlmRoutingResponse, error::RouterError, llm::LlmClient};
+use trogon_transcript::{publisher::mock::MockTranscriptPublisher, store::TranscriptStore};
 
 // ── Inline mock LLM (cfg(test) is not set for integration tests) ──────────────
 
@@ -52,32 +44,42 @@ impl LlmClient for MockLlmClient {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-async fn setup() -> (async_nats::Client, async_nats::jetstream::Context, NatsJetStreamClient, impl Drop) {
+async fn setup() -> (
+    async_nats::Client,
+    async_nats::jetstream::Context,
+    NatsJetStreamClient,
+    impl Drop,
+) {
     let container = Nats::default()
         .with_cmd(["-js"])
         .start()
         .await
         .expect("failed to start NATS");
-    let port = container.get_host_port_ipv4(4222).await.expect("failed to get port");
+    let port = container
+        .get_host_port_ipv4(4222)
+        .await
+        .expect("failed to get port");
     let nats = async_nats::connect(format!("nats://127.0.0.1:{port}"))
         .await
         .expect("failed to connect to NATS");
     let js = async_nats::jetstream::new(nats.clone());
     let js_client = NatsJetStreamClient::new(js.clone());
-    provision_actor_inbox(&js_client).await.expect("failed to provision ACTOR_INBOX stream");
+    provision_actor_inbox(&js_client)
+        .await
+        .expect("failed to provision ACTOR_INBOX stream");
     (nats, js, js_client, container)
 }
 
 fn pr_actor() -> AgentCapability {
-    AgentCapability::new("PrActor", ["code_review", "security_analysis"], "actors.pr.>")
+    AgentCapability::new(
+        "PrActor",
+        ["code_review", "security_analysis"],
+        "actors.pr.>",
+    )
 }
 
 /// Publish a message after a brief delay so the router has time to subscribe.
-async fn publish_after_subscribe(
-    nats: &async_nats::Client,
-    subject: &str,
-    payload: Bytes,
-) {
+async fn publish_after_subscribe(nats: &async_nats::Client, subject: &str, payload: Bytes) {
     tokio::time::sleep(Duration::from_millis(100)).await;
     nats.publish(subject.to_string(), payload).await.unwrap();
 }
@@ -200,12 +202,11 @@ async fn unroutable_event_does_not_forward_to_any_actor() {
     router_handle.abort();
 
     // No messages should have been forwarded to any actor subject.
-    let received = tokio::time::timeout(
-        Duration::from_millis(50),
-        actors_sub.next(),
-    )
-    .await;
-    assert!(received.is_err(), "unroutable event should not be forwarded to any actor");
+    let received = tokio::time::timeout(Duration::from_millis(50), actors_sub.next()).await;
+    assert!(
+        received.is_err(),
+        "unroutable event should not be forwarded to any actor"
+    );
 }
 
 #[tokio::test]
@@ -239,7 +240,11 @@ async fn router_records_unroutable_entry_in_transcript() {
     router_handle.abort();
 
     let published = publisher.take_published();
-    assert_eq!(published.len(), 1, "should have one transcript entry for the unroutable event");
+    assert_eq!(
+        published.len(),
+        1,
+        "should have one transcript entry for the unroutable event"
+    );
 }
 
 #[tokio::test]
@@ -462,7 +467,16 @@ async fn router_prompt_contains_live_registry_data() {
 
     let prompts = llm.take_prompts();
     assert_eq!(prompts.len(), 1);
-    assert!(prompts[0].contains("PrActor"), "prompt should include registered agent");
-    assert!(prompts[0].contains("code_review"), "prompt should include agent capabilities");
-    assert!(prompts[0].contains("github.pull_request"), "prompt should include event type");
+    assert!(
+        prompts[0].contains("PrActor"),
+        "prompt should include registered agent"
+    );
+    assert!(
+        prompts[0].contains("code_review"),
+        "prompt should include agent capabilities"
+    );
+    assert!(
+        prompts[0].contains("github.pull_request"),
+        "prompt should include event type"
+    );
 }

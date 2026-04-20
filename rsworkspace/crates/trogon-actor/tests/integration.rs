@@ -1,13 +1,13 @@
 use bytes::Bytes;
 use futures_util::StreamExt;
+use std::sync::Arc;
 use testcontainers_modules::{
     nats::Nats,
-    testcontainers::{runners::AsyncRunner, ImageExt},
+    testcontainers::{ImageExt, runners::AsyncRunner},
 };
-use std::sync::Arc;
 use trogon_actor::{
-    context::ActorContext,
     actor::EntityActor,
+    context::ActorContext,
     error::ActorError,
     host::{ActorHost, HostError},
     runtime::ActorRuntime,
@@ -16,18 +16,25 @@ use trogon_actor::{
 use trogon_registry::{AgentCapability, Registry, provision as provision_registry};
 use trogon_transcript::{
     TranscriptError,
+    entry::TranscriptEntry,
     publisher::{NatsTranscriptPublisher, TranscriptPublisher},
     store::TranscriptStore,
-    entry::TranscriptEntry,
 };
 
-async fn setup() -> (async_nats::Client, async_nats::jetstream::Context, impl Drop) {
+async fn setup() -> (
+    async_nats::Client,
+    async_nats::jetstream::Context,
+    impl Drop,
+) {
     let container = Nats::default()
         .with_cmd(["-js"])
         .start()
         .await
         .expect("failed to start NATS");
-    let port = container.get_host_port_ipv4(4222).await.expect("failed to get port");
+    let port = container
+        .get_host_port_ipv4(4222)
+        .await
+        .expect("failed to get port");
     let nats = async_nats::connect(format!("nats://127.0.0.1:{port}"))
         .await
         .expect("failed to connect to NATS");
@@ -74,14 +81,12 @@ impl EntityActor for Scribe {
         "scribe"
     }
 
-    async fn handle(
-        &mut self,
-        state: &mut Counter,
-        ctx: &ActorContext,
-    ) -> Result<(), Self::Error> {
+    async fn handle(&mut self, state: &mut Counter, ctx: &ActorContext) -> Result<(), Self::Error> {
         state.count += 1;
         ctx.append_user_message("user prompt", None).await.ok();
-        ctx.append_assistant_message("assistant reply", Some(5)).await.ok();
+        ctx.append_assistant_message("assistant reply", Some(5))
+            .await
+            .ok();
         Ok(())
     }
 }
@@ -137,7 +142,9 @@ async fn provision_state_is_idempotent() {
     let (_nats, js, _container) = setup().await;
 
     provision_state(&js).await.expect("first provision failed");
-    provision_state(&js).await.expect("second provision should not fail");
+    provision_state(&js)
+        .await
+        .expect("second provision should not fail");
 }
 
 /// Pre-create the ACTOR_STATE bucket with Memory storage (provision_state uses File),
@@ -175,9 +182,18 @@ async fn state_persists_across_events() {
 
     let runtime = ActorRuntime::new(state_store, publisher, nats, registry, js.clone());
 
-    runtime.handle_event(&mut CounterActor, "entity-1", 0).await.unwrap();
-    runtime.handle_event(&mut CounterActor, "entity-1", 0).await.unwrap();
-    runtime.handle_event(&mut CounterActor, "entity-1", 0).await.unwrap();
+    runtime
+        .handle_event(&mut CounterActor, "entity-1", 0)
+        .await
+        .unwrap();
+    runtime
+        .handle_event(&mut CounterActor, "entity-1", 0)
+        .await
+        .unwrap();
+    runtime
+        .handle_event(&mut CounterActor, "entity-1", 0)
+        .await
+        .unwrap();
 
     // Load state directly to verify persistence.
     let kv = js.get_key_value("ACTOR_STATE").await.unwrap();
@@ -198,7 +214,10 @@ async fn on_create_called_on_first_event_only() {
     let runtime = ActorRuntime::new(state_store, publisher, nats, registry, js.clone());
 
     // First event: on_create sets initialized = true.
-    runtime.handle_event(&mut InitActor, "e-1", 0).await.unwrap();
+    runtime
+        .handle_event(&mut InitActor, "e-1", 0)
+        .await
+        .unwrap();
 
     let kv = js.get_key_value("ACTOR_STATE").await.unwrap();
     let bytes = kv.entry("init-actor.e-1").await.unwrap().unwrap().value;
@@ -207,7 +226,10 @@ async fn on_create_called_on_first_event_only() {
     assert_eq!(state.count, 1);
 
     // Second event: on_create is NOT called again.
-    runtime.handle_event(&mut InitActor, "e-1", 0).await.unwrap();
+    runtime
+        .handle_event(&mut InitActor, "e-1", 0)
+        .await
+        .unwrap();
     let bytes2 = kv.entry("init-actor.e-1").await.unwrap().unwrap().value;
     let state2: InitState = serde_json::from_slice(&bytes2).unwrap();
     assert!(state2.initialized);
@@ -225,9 +247,18 @@ async fn different_entities_have_independent_state() {
 
     let runtime = ActorRuntime::new(state_store, publisher, nats, registry, js.clone());
 
-    runtime.handle_event(&mut CounterActor, "entity-A", 0).await.unwrap();
-    runtime.handle_event(&mut CounterActor, "entity-A", 0).await.unwrap();
-    runtime.handle_event(&mut CounterActor, "entity-B", 0).await.unwrap();
+    runtime
+        .handle_event(&mut CounterActor, "entity-A", 0)
+        .await
+        .unwrap();
+    runtime
+        .handle_event(&mut CounterActor, "entity-A", 0)
+        .await
+        .unwrap();
+    runtime
+        .handle_event(&mut CounterActor, "entity-B", 0)
+        .await
+        .unwrap();
 
     let kv = js.get_key_value("ACTOR_STATE").await.unwrap();
 
@@ -269,9 +300,17 @@ async fn concurrent_events_to_same_entity_no_lost_writes() {
     assert!(r2.is_ok(), "second concurrent handler failed: {r2:?}");
 
     let kv = js.get_key_value("ACTOR_STATE").await.unwrap();
-    let bytes = kv.entry("counter.entity-concurrent").await.unwrap().unwrap().value;
+    let bytes = kv
+        .entry("counter.entity-concurrent")
+        .await
+        .unwrap()
+        .unwrap()
+        .value;
     let saved: Counter = serde_json::from_slice(&bytes).unwrap();
-    assert_eq!(saved.count, 2, "both events must be reflected in final state");
+    assert_eq!(
+        saved.count, 2,
+        "both events must be reflected in final state"
+    );
 }
 
 /// Like `concurrent_events_to_same_entity_no_lost_writes` but starts from an
@@ -290,7 +329,10 @@ async fn concurrent_updates_on_existing_state_trigger_update_occ() {
     let runtime2 = runtime.clone();
 
     // Create initial state (count=1, revision=0).
-    runtime.handle_event(&mut CounterActor, "entity-update-occ", 0).await.unwrap();
+    runtime
+        .handle_event(&mut CounterActor, "entity-update-occ", 0)
+        .await
+        .unwrap();
 
     // Now two concurrent events on the SAME existing entity. Both load
     // revision=0, both try to update, one fails with OCC and retries.
@@ -305,9 +347,17 @@ async fn concurrent_updates_on_existing_state_trigger_update_occ() {
     assert!(r2.is_ok(), "second concurrent update failed: {r2:?}");
 
     let kv = js.get_key_value("ACTOR_STATE").await.unwrap();
-    let bytes = kv.entry("counter.entity-update-occ").await.unwrap().unwrap().value;
+    let bytes = kv
+        .entry("counter.entity-update-occ")
+        .await
+        .unwrap()
+        .unwrap()
+        .value;
     let saved: Counter = serde_json::from_slice(&bytes).unwrap();
-    assert_eq!(saved.count, 3, "all 3 increments (initial + 2 concurrent) must be counted");
+    assert_eq!(
+        saved.count, 3,
+        "all 3 increments (initial + 2 concurrent) must be counted"
+    );
 }
 
 // ── Actor that spawns a sub-agent ─────────────────────────────────────────────
@@ -354,11 +404,7 @@ impl EntityActor for NoCapActor {
         "no-cap-actor"
     }
 
-    async fn handle(
-        &mut self,
-        state: &mut Counter,
-        ctx: &ActorContext,
-    ) -> Result<(), Self::Error> {
+    async fn handle(&mut self, state: &mut Counter, ctx: &ActorContext) -> Result<(), Self::Error> {
         state.count += 1;
         // The registry has no agent with this capability — ignore the error.
         ctx.spawn_agent::<Self::Error>("nonexistent_capability", Bytes::new())
@@ -388,7 +434,9 @@ async fn state_delete_removes_entry() {
 
     // Delete via the StateStore trait (using UFCS to avoid kv::Store's inherent delete()).
     use trogon_actor::state::StateStore;
-    StateStore::delete(&state_store, "counter.to-delete").await.unwrap();
+    StateStore::delete(&state_store, "counter.to-delete")
+        .await
+        .unwrap();
 
     // Entry must be gone after deletion.
     let after = state_store.load("counter.to-delete").await.unwrap();
@@ -408,9 +456,12 @@ async fn corrupted_state_in_kv_returns_deserialize_error() {
 
     // Write corrupt bytes directly into the KV store under the actor's key.
     let kv = js.get_key_value("ACTOR_STATE").await.unwrap();
-    kv.put("counter.entity-corrupt", Bytes::from_static(b"not valid json {{{{"))
-        .await
-        .unwrap();
+    kv.put(
+        "counter.entity-corrupt",
+        Bytes::from_static(b"not valid json {{{{"),
+    )
+    .await
+    .unwrap();
 
     let runtime = ActorRuntime::new(state_store, publisher, nats, registry, js.clone());
     let err = runtime
@@ -438,12 +489,28 @@ async fn transcript_entries_written_to_jetstream() {
     transcript_store.provision().await.unwrap();
 
     let runtime = ActorRuntime::new(state_store, publisher, nats, registry, js.clone());
-    runtime.handle_event(&mut Scribe, "entity-1", 0).await.unwrap();
+    runtime
+        .handle_event(&mut Scribe, "entity-1", 0)
+        .await
+        .unwrap();
 
     let entries = transcript_store.query("scribe", "entity-1").await.unwrap();
     assert_eq!(entries.len(), 2);
-    assert!(matches!(&entries[0], TranscriptEntry::Message { role: trogon_transcript::Role::User, .. }));
-    assert!(matches!(&entries[1], TranscriptEntry::Message { role: trogon_transcript::Role::Assistant, tokens: Some(5), .. }));
+    assert!(matches!(
+        &entries[0],
+        TranscriptEntry::Message {
+            role: trogon_transcript::Role::User,
+            ..
+        }
+    ));
+    assert!(matches!(
+        &entries[1],
+        TranscriptEntry::Message {
+            role: trogon_transcript::Role::Assistant,
+            tokens: Some(5),
+            ..
+        }
+    ));
 }
 
 /// An actor calls `ctx.spawn_agent()` with a registered capability. The runtime
@@ -463,7 +530,11 @@ async fn spawn_agent_records_sub_agent_spawn_entry() {
     transcript_store.provision().await.unwrap();
 
     // Register a sub-agent with a concrete (non-wildcard) inbox subject.
-    let cap = AgentCapability::new("SecurityActor", ["security_analysis"], "sub-agents.security");
+    let cap = AgentCapability::new(
+        "SecurityActor",
+        ["security_analysis"],
+        "sub-agents.security",
+    );
     registry.register(&cap).await.unwrap();
 
     // Spin up a NATS responder on that subject before calling handle_event.
@@ -472,7 +543,8 @@ async fn spawn_agent_records_sub_agent_spawn_entry() {
     tokio::spawn(async move {
         while let Some(msg) = responder_sub.next().await {
             // New spawn design uses Trogon-Reply-To header for the reply inbox.
-            let reply_to = msg.headers
+            let reply_to = msg
+                .headers
                 .as_ref()
                 .and_then(|h| h.get("Trogon-Reply-To"))
                 .map(|v| v.as_str().to_string());
@@ -486,23 +558,35 @@ async fn spawn_agent_records_sub_agent_spawn_entry() {
     });
 
     let runtime = ActorRuntime::new(state_store, publisher, nats, registry, js.clone());
-    runtime.handle_event(&mut SpawnActor, "entity-1", 0).await.unwrap();
+    runtime
+        .handle_event(&mut SpawnActor, "entity-1", 0)
+        .await
+        .unwrap();
 
     // Actor state captured the sub-agent reply payload.
     let kv = js.get_key_value("ACTOR_STATE").await.unwrap();
-    let bytes = kv.entry("spawn-actor.entity-1").await.unwrap().unwrap().value;
+    let bytes = kv
+        .entry("spawn-actor.entity-1")
+        .await
+        .unwrap()
+        .unwrap()
+        .value;
     let state: SpawnState = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(state.spawn_reply, "security-ok");
 
     // A SubAgentSpawn entry must have been written to the transcript.
-    let entries = transcript_store.query("spawn-actor", "entity-1").await.unwrap();
+    let entries = transcript_store
+        .query("spawn-actor", "entity-1")
+        .await
+        .unwrap();
     assert_eq!(entries.len(), 1);
     assert!(
         matches!(
             &entries[0],
             TranscriptEntry::SubAgentSpawn { capability, .. } if capability == "security_analysis"
         ),
-        "expected SubAgentSpawn entry, got: {:?}", entries[0]
+        "expected SubAgentSpawn entry, got: {:?}",
+        entries[0]
     );
 }
 
@@ -524,16 +608,27 @@ async fn spawn_agent_no_capability_no_transcript_entry() {
 
     let runtime = ActorRuntime::new(state_store, publisher, nats, registry, js.clone());
     // NoCapActor ignores the spawn error — handle_event must still succeed.
-    runtime.handle_event(&mut NoCapActor, "entity-1", 0).await.unwrap();
+    runtime
+        .handle_event(&mut NoCapActor, "entity-1", 0)
+        .await
+        .unwrap();
 
     // Actor state was saved (handle completed normally).
     let kv = js.get_key_value("ACTOR_STATE").await.unwrap();
-    let bytes = kv.entry("no-cap-actor.entity-1").await.unwrap().unwrap().value;
+    let bytes = kv
+        .entry("no-cap-actor.entity-1")
+        .await
+        .unwrap()
+        .unwrap()
+        .value;
     let saved: Counter = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(saved.count, 1);
 
     // No SubAgentSpawn entry should have been written.
-    let entries = transcript_store.query("no-cap-actor", "entity-1").await.unwrap();
+    let entries = transcript_store
+        .query("no-cap-actor", "entity-1")
+        .await
+        .unwrap();
     assert!(
         entries.is_empty(),
         "expected no transcript entries when no capable agent is found, got: {entries:?}"
@@ -552,7 +647,13 @@ async fn state_store_save_create_returns_other_error_when_stream_deleted() {
     js.delete_stream("KV_ACTOR_STATE").await.unwrap();
 
     use trogon_actor::{SaveError, state::StateStore};
-    let result = StateStore::save(&state_store, "counter.ghost", Bytes::from_static(b"{}"), None).await;
+    let result = StateStore::save(
+        &state_store,
+        "counter.ghost",
+        Bytes::from_static(b"{}"),
+        None,
+    )
+    .await;
     assert!(
         matches!(result, Err(SaveError::Other(_))),
         "expected SaveError::Other when stream is gone (create path), got: {result:?}"
@@ -572,7 +673,10 @@ async fn state_store_save_update_returns_other_error_when_stream_deleted() {
 
     // Create initial state so we have a valid revision.
     let runtime = ActorRuntime::new(state_store.clone(), publisher, nats, registry, js.clone());
-    runtime.handle_event(&mut CounterActor, "ghost-update", 0).await.unwrap();
+    runtime
+        .handle_event(&mut CounterActor, "ghost-update", 0)
+        .await
+        .unwrap();
 
     // Read back the revision so we can pass it to save().
     let kv = js.get_key_value("ACTOR_STATE").await.unwrap();
@@ -619,7 +723,10 @@ async fn state_store_load_returns_error_when_stream_deleted() {
 
     use trogon_actor::state::StateStore;
     let result = StateStore::load(&state_store, "counter.ghost").await;
-    assert!(result.is_err(), "expected Err from load when stream is gone");
+    assert!(
+        result.is_err(),
+        "expected Err from load when stream is gone"
+    );
 }
 
 /// Deleting the backing stream causes `kv::Store::delete()` to fail, propagating
@@ -633,7 +740,10 @@ async fn state_store_delete_returns_error_when_stream_deleted() {
 
     use trogon_actor::state::StateStore;
     let result = StateStore::delete(&state_store, "counter.ghost").await;
-    assert!(result.is_err(), "expected Err from delete when stream is gone, got: {result:?}");
+    assert!(
+        result.is_err(),
+        "expected Err from delete when stream is gone, got: {result:?}"
+    );
 }
 
 /// Calling `StateStore::save` with `revision = None` for a key that already
@@ -648,9 +758,14 @@ async fn state_store_create_conflict_returns_save_error_conflict() {
     use trogon_actor::{SaveError, state::StateStore};
 
     // First create succeeds.
-    StateStore::save(&state_store, "counter.occ-create", Bytes::from_static(b"{\"count\":0}"), None)
-        .await
-        .unwrap();
+    StateStore::save(
+        &state_store,
+        "counter.occ-create",
+        Bytes::from_static(b"{\"count\":0}"),
+        None,
+    )
+    .await
+    .unwrap();
 
     // Second create on the same key — KV returns an OCC error → Conflict.
     let result = StateStore::save(
@@ -727,8 +842,13 @@ async fn actor_transcript_append_failure_does_not_abort_handle_event() {
     let runtime = ActorRuntime::new(state_store, publisher, nats, registry, js.clone());
     // Scribe calls ctx.append_user_message(...).ok() — if append fails the actor
     // still succeeds. handle_event must return Ok.
-    let result = runtime.handle_event(&mut Scribe, "entity-no-transcript", 0).await;
-    assert!(result.is_ok(), "handle_event must succeed even when transcript appends fail");
+    let result = runtime
+        .handle_event(&mut Scribe, "entity-no-transcript", 0)
+        .await;
+    assert!(
+        result.is_ok(),
+        "handle_event must succeed even when transcript appends fail"
+    );
 }
 
 /// Deleting the AGENT_REGISTRY backing stream makes `registry.discover()` fail.
@@ -753,8 +873,13 @@ async fn spawn_agent_discover_failure_is_propagated_as_error_string() {
 
     let runtime = ActorRuntime::new(state_store, publisher, nats, registry, js.clone());
     // SpawnActor calls ctx.spawn_agent(...) and ignores errors — handle_event must succeed.
-    let result = runtime.handle_event(&mut SpawnActor, "entity-discover-fail", 0).await;
-    assert!(result.is_ok(), "handle_event must succeed when discover fails: {result:?}");
+    let result = runtime
+        .handle_event(&mut SpawnActor, "entity-discover-fail", 0)
+        .await;
+    assert!(
+        result.is_ok(),
+        "handle_event must succeed when discover fails: {result:?}"
+    );
 }
 
 // ── ActorHost integration tests ───────────────────────────────────────────────
@@ -770,7 +895,9 @@ impl EntityActor for HostCounterActor {
     type State = Counter;
     type Error = std::convert::Infallible;
 
-    fn actor_type() -> &'static str { "host-counter" }
+    fn actor_type() -> &'static str {
+        "host-counter"
+    }
 
     async fn handle(
         &mut self,
@@ -798,11 +925,8 @@ fn make_host(
     async_nats::jetstream::kv::Store,
     async_nats::jetstream::Context,
 > {
-    let capability = AgentCapability::new(
-        "HostCounterActor",
-        ["host_count"],
-        "actors.host-counter.>",
-    );
+    let capability =
+        AgentCapability::new("HostCounterActor", ["host_count"], "actors.host-counter.>");
     ActorHost::new(runtime, HostCounterActor, capability)
 }
 
@@ -848,14 +972,11 @@ async fn host_dispatches_nats_message_to_actor() {
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
     host.cancel();
-    tokio::time::timeout(
-        tokio::time::Duration::from_secs(2),
-        run_handle,
-    )
-    .await
-    .expect("host.run() did not stop within 2s")
-    .unwrap()  // JoinError
-    .unwrap(); // HostError
+    tokio::time::timeout(tokio::time::Duration::from_secs(2), run_handle)
+        .await
+        .expect("host.run() did not stop within 2s")
+        .unwrap() // JoinError
+        .unwrap(); // HostError
 
     // State for "host-counter" actor, entity "entity-1" must have count == 1.
     let entry = state_store
@@ -864,7 +985,10 @@ async fn host_dispatches_nats_message_to_actor() {
         .unwrap()
         .expect("state entry not found — actor may not have handled the message");
     let saved: Counter = serde_json::from_slice(&entry.value).unwrap();
-    assert_eq!(saved.count, 1, "actor should have handled exactly one message");
+    assert_eq!(
+        saved.count, 1,
+        "actor should have handled exactly one message"
+    );
 }
 
 /// Calling `cancel()` on a running host causes `run()` to return `Ok(())`.
@@ -881,13 +1005,10 @@ async fn host_cancel_stops_run_cleanly() {
     tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
     host.cancel();
 
-    let result = tokio::time::timeout(
-        tokio::time::Duration::from_secs(2),
-        run_handle,
-    )
-    .await
-    .expect("host.run() did not stop within 2s")
-    .unwrap(); // JoinError
+    let result = tokio::time::timeout(tokio::time::Duration::from_secs(2), run_handle)
+        .await
+        .expect("host.run() did not stop within 2s")
+        .unwrap(); // JoinError
 
     assert!(result.is_ok(), "expected Ok(()), got: {result:?}");
 }
@@ -915,14 +1036,11 @@ async fn host_entity_key_extracted_from_nats_subject() {
 
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
     host.cancel();
-    tokio::time::timeout(
-        tokio::time::Duration::from_secs(2),
-        run_handle,
-    )
-    .await
-    .expect("host.run() did not stop within 2s")
-    .unwrap()
-    .unwrap();
+    tokio::time::timeout(tokio::time::Duration::from_secs(2), run_handle)
+        .await
+        .expect("host.run() did not stop within 2s")
+        .unwrap()
+        .unwrap();
 
     // KV key: "host-counter.owner.repo.42"
     let entry = state_store
@@ -963,7 +1081,11 @@ async fn host_run_returns_register_error_when_registry_unavailable() {
 struct FailPublisher;
 
 impl TranscriptPublisher for FailPublisher {
-    async fn publish(&self, _subject: String, _payload: bytes::Bytes) -> Result<(), TranscriptError> {
+    async fn publish(
+        &self,
+        _subject: String,
+        _payload: bytes::Bytes,
+    ) -> Result<(), TranscriptError> {
         Err(TranscriptError::Publish("always fails".into()))
     }
 }
@@ -991,7 +1113,10 @@ async fn spawn_fn_transcript_append_failure_does_not_abort_spawn() {
 
     // Spin up a responder on the sub-agent's inbox.
     let nats_responder = nats.clone();
-    let mut responder_sub = nats.subscribe("sub-agents.security-fail-pub").await.unwrap();
+    let mut responder_sub = nats
+        .subscribe("sub-agents.security-fail-pub")
+        .await
+        .unwrap();
     tokio::spawn(async move {
         while let Some(msg) = responder_sub.next().await {
             if let Some(reply) = msg.reply {

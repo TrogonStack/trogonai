@@ -49,6 +49,49 @@ use crate::context::ActorContext;
 ///     }
 /// }
 /// ```
+pub trait EntityActor: Send + 'static {
+    /// The persistent state type. The runtime loads this from KV before each
+    /// event and saves it back afterwards. Must implement `Default` (returned
+    /// on first-ever event for this entity).
+    type State: Serialize + for<'de> Deserialize<'de> + Default + Send;
+
+    /// The error type returned by this actor's handler methods.
+    type Error: std::error::Error + Send + Sync + 'static;
+
+    /// A short, stable identifier for this actor type used as the KV key
+    /// prefix and as the `actor_type` in transcript subjects.
+    /// Example: `"pr"`, `"incident"`, `"deployment"`.
+    fn actor_type() -> &'static str;
+
+    /// Handle one incoming event.
+    ///
+    /// `state` is pre-loaded from KV (or freshly defaulted). Any mutations are
+    /// automatically persisted after this method returns.
+    ///
+    /// `ctx` provides transcript recording and sub-agent spawning.
+    fn handle(
+        &mut self,
+        state: &mut Self::State,
+        ctx: &ActorContext,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
+
+    /// Called exactly once when the very first event arrives for a new entity.
+    /// Use this to set non-default initial state or emit a "created" transcript
+    /// entry.
+    fn on_create(_state: &mut Self::State) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        std::future::ready(Ok(()))
+    }
+
+    /// Called when the entity is destroyed (PR closed, incident resolved, …).
+    /// The runtime does not call this automatically — it must be triggered
+    /// explicitly by the actor itself via `on_destroy_self`.
+    fn on_destroy(
+        _state: &mut Self::State,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        std::future::ready(Ok(()))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -92,10 +135,7 @@ mod tests {
     /// and the default `on_create` path is exercised through the runtime cycle.
     #[tokio::test]
     async fn minimal_actor_handle_is_callable() {
-        use crate::{
-            runtime::ActorRuntime,
-            state::mock::MockStateStore,
-        };
+        use crate::{runtime::ActorRuntime, state::mock::MockStateStore};
         use trogon_registry::{MockRegistryStore, Registry};
         use trogon_transcript::publisher::mock::MockTranscriptPublisher;
 
@@ -107,50 +147,5 @@ mod tests {
             trogon_nats::jetstream::MockJetStreamPublisher::new(),
         );
         runtime.handle_event(&mut Minimal, "e-1", 0).await.unwrap();
-    }
-}
-
-pub trait EntityActor: Send + 'static {
-    /// The persistent state type. The runtime loads this from KV before each
-    /// event and saves it back afterwards. Must implement `Default` (returned
-    /// on first-ever event for this entity).
-    type State: Serialize + for<'de> Deserialize<'de> + Default + Send;
-
-    /// The error type returned by this actor's handler methods.
-    type Error: std::error::Error + Send + Sync + 'static;
-
-    /// A short, stable identifier for this actor type used as the KV key
-    /// prefix and as the `actor_type` in transcript subjects.
-    /// Example: `"pr"`, `"incident"`, `"deployment"`.
-    fn actor_type() -> &'static str;
-
-    /// Handle one incoming event.
-    ///
-    /// `state` is pre-loaded from KV (or freshly defaulted). Any mutations are
-    /// automatically persisted after this method returns.
-    ///
-    /// `ctx` provides transcript recording and sub-agent spawning.
-    fn handle(
-        &mut self,
-        state: &mut Self::State,
-        ctx: &ActorContext,
-    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
-
-    /// Called exactly once when the very first event arrives for a new entity.
-    /// Use this to set non-default initial state or emit a "created" transcript
-    /// entry.
-    fn on_create(
-        _state: &mut Self::State,
-    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        std::future::ready(Ok(()))
-    }
-
-    /// Called when the entity is destroyed (PR closed, incident resolved, …).
-    /// The runtime does not call this automatically — it must be triggered
-    /// explicitly by the actor itself via `on_destroy_self`.
-    fn on_destroy(
-        _state: &mut Self::State,
-    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        std::future::ready(Ok(()))
     }
 }

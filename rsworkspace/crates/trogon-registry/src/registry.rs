@@ -1,11 +1,7 @@
 use bytes::Bytes;
 use tracing::instrument;
 
-use crate::{
-    capability::AgentCapability,
-    error::RegistryError,
-    store::RegistryStore,
-};
+use crate::{capability::AgentCapability, error::RegistryError, store::RegistryStore};
 
 /// Live index of every registered agent in the system.
 ///
@@ -50,8 +46,7 @@ impl<S: RegistryStore> Registry<S> {
     /// give the Router up-to-date load information.
     #[instrument(skip(self, capability), fields(agent_type = %capability.agent_type), err)]
     pub async fn register(&self, capability: &AgentCapability) -> Result<(), RegistryError> {
-        let value =
-            serde_json::to_vec(capability).map_err(RegistryError::Serialization)?;
+        let value = serde_json::to_vec(capability).map_err(RegistryError::Serialization)?;
         self.store
             .put(&capability.agent_type, Bytes::from(value))
             .await
@@ -312,7 +307,10 @@ mod tests {
         let store = MockRegistryStore::new();
         let r = Registry::new(store.clone());
         r.register(&pr_actor()).await.unwrap();
-        store.put("Corrupted", bytes::Bytes::from_static(b"not-valid-json")).await.unwrap();
+        store
+            .put("Corrupted", bytes::Bytes::from_static(b"not-valid-json"))
+            .await
+            .unwrap();
 
         let all = r.list_all().await.unwrap();
         assert_eq!(all.len(), 1);

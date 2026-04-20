@@ -1,7 +1,7 @@
 use std::time::Duration;
 use testcontainers_modules::{
     nats::Nats,
-    testcontainers::{runners::AsyncRunner, ImageExt},
+    testcontainers::{ImageExt, runners::AsyncRunner},
 };
 use trogon_registry::{AgentCapability, Registry, provision};
 
@@ -11,7 +11,10 @@ async fn setup() -> (async_nats::jetstream::Context, impl Drop) {
         .start()
         .await
         .expect("failed to start NATS");
-    let port = container.get_host_port_ipv4(4222).await.expect("failed to get port");
+    let port = container
+        .get_host_port_ipv4(4222)
+        .await
+        .expect("failed to get port");
     let nats = async_nats::connect(format!("nats://127.0.0.1:{port}"))
         .await
         .expect("failed to connect to NATS");
@@ -20,7 +23,11 @@ async fn setup() -> (async_nats::jetstream::Context, impl Drop) {
 }
 
 fn pr_actor() -> AgentCapability {
-    AgentCapability::new("PrActor", ["code_review", "security_analysis"], "actors.pr.>")
+    AgentCapability::new(
+        "PrActor",
+        ["code_review", "security_analysis"],
+        "actors.pr.>",
+    )
 }
 
 fn incident_actor() -> AgentCapability {
@@ -47,7 +54,9 @@ async fn provision_is_idempotent() {
     let (js, _container) = setup().await;
 
     provision(&js).await.expect("first provision failed");
-    provision(&js).await.expect("second provision should not fail");
+    provision(&js)
+        .await
+        .expect("second provision should not fail");
 }
 
 #[tokio::test]
@@ -276,11 +285,16 @@ async fn provision_falls_back_to_existing_bucket_on_config_mismatch() {
     .expect("pre-create should succeed");
 
     // provision() should open the existing bucket via the is_already_exists() path.
-    let store = provision(&js).await.expect("provision should succeed via fallback");
+    let store = provision(&js)
+        .await
+        .expect("provision should succeed via fallback");
 
     // Verify the returned store is functional.
     let registry = Registry::new(store);
-    registry.register(&AgentCapability::new("X", ["cap"], "x.>")).await.unwrap();
+    registry
+        .register(&AgentCapability::new("X", ["cap"], "x.>"))
+        .await
+        .unwrap();
     assert_eq!(registry.list_all().await.unwrap().len(), 1);
 }
 

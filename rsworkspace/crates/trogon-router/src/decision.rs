@@ -48,9 +48,7 @@ impl From<LlmRoutingResponse> for RouteResult {
                 entity_key,
                 reasoning,
             }),
-            LlmRoutingResponse::Unroutable { reasoning } => {
-                RouteResult::Unroutable { reasoning }
-            }
+            LlmRoutingResponse::Unroutable { reasoning } => RouteResult::Unroutable { reasoning },
         }
     }
 }

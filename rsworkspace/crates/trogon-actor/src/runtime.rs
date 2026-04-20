@@ -23,9 +23,12 @@ use crate::{
     actor::EntityActor,
     context::ActorContext,
     error::{ActorError, SaveError},
-    telemetry::metrics,
     state::{MAX_OCC_RETRIES, StateStore, state_kv_key},
+    telemetry::metrics,
 };
+
+type SpawnFn =
+    Arc<dyn Fn(String, Bytes, u32) -> BoxFuture<'static, Result<Bytes, String>> + Send + Sync>;
 
 /// Orchestrates a single event invocation for an [`EntityActor`].
 ///
@@ -63,7 +66,13 @@ where
     J: JetStreamPublisher,
 {
     pub fn new(state: S, publisher: P, nats: N, registry: Registry<R>, js: J) -> Self {
-        Self { state, publisher, nats, registry, js }
+        Self {
+            state,
+            publisher,
+            nats,
+            registry,
+            js,
+        }
     }
 
     /// Borrow the registry — used by [`crate::host::ActorHost`] for registration
@@ -106,7 +115,11 @@ where
 
         for attempt in 0..=MAX_OCC_RETRIES {
             if attempt > 0 {
-                tracing::warn!(attempt, entity_key, "optimistic concurrency conflict — retrying");
+                tracing::warn!(
+                    attempt,
+                    entity_key,
+                    "optimistic concurrency conflict — retrying"
+                );
                 metrics::inc_occ_retry(A::actor_type());
             }
 
@@ -149,15 +162,14 @@ where
             );
 
             // ── 4. Handle event ───────────────────────────────────────────────
-            actor.handle(&mut state, &ctx).await.map_err(ActorError::Actor)?;
+            actor
+                .handle(&mut state, &ctx)
+                .await
+                .map_err(ActorError::Actor)?;
 
             // ── 5. Save state with OCC ────────────────────────────────────────
             let bytes = serde_json::to_vec(&state).map_err(ActorError::Serialize)?;
-            match self
-                .state
-                .save(&kv_key, Bytes::from(bytes), revision)
-                .await
-            {
+            match self.state.save(&kv_key, Bytes::from(bytes), revision).await {
                 Ok(_) => return Ok(()),
                 Err(SaveError::Conflict) => continue,
                 Err(SaveError::Other(e)) => return Err(ActorError::State(e.to_string())),
@@ -193,18 +205,18 @@ where
     let session_for_spawn = Arc::clone(&session);
 
     // Append function: delegates to the session, converts error to String.
-    let append_fn: Arc<dyn Fn(TranscriptEntry) -> BoxFuture<'static, Result<(), String>> + Send + Sync> = {
+    let append_fn: Arc<
+        dyn Fn(TranscriptEntry) -> BoxFuture<'static, Result<(), String>> + Send + Sync,
+    > = {
         Arc::new(move |entry| {
             let s = Arc::clone(&session);
-            Box::pin(async move {
-                s.append(entry).await.map_err(|e| e.to_string())
-            })
+            Box::pin(async move { s.append(entry).await.map_err(|e| e.to_string()) })
         })
     };
 
     // Spawn function: registry lookup → JetStream publish → inbox reply → transcript.
     let actor_type_str = A::actor_type();
-    let spawn_fn: Arc<dyn Fn(String, Bytes, u32) -> BoxFuture<'static, Result<Bytes, String>> + Send + Sync> = {
+    let spawn_fn: SpawnFn = {
         Arc::new(move |capability: String, payload: Bytes, next_depth: u32| {
             let reg = registry.clone();
             let nats = nats.clone();
@@ -217,13 +229,10 @@ where
                 metrics::inc_spawn_call(actor_type, &capability);
 
                 // Find the first agent with the requested capability.
-                let agents = reg
-                    .discover(&capability)
-                    .await
-                    .map_err(|e| {
-                        metrics::inc_spawn_error(actor_type, &capability);
-                        e.to_string()
-                    })?;
+                let agents = reg.discover(&capability).await.map_err(|e| {
+                    metrics::inc_spawn_error(actor_type, &capability);
+                    e.to_string()
+                })?;
 
                 let agent = agents.first().ok_or_else(|| {
                     metrics::inc_spawn_error(actor_type, &capability);
@@ -285,7 +294,14 @@ where
         })
     };
 
-    ActorContext::new(entity_key, A::actor_type(), session_id, spawn_depth, append_fn, spawn_fn)
+    ActorContext::new(
+        entity_key,
+        A::actor_type(),
+        session_id,
+        spawn_depth,
+        append_fn,
+        spawn_fn,
+    )
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -298,11 +314,7 @@ mod tests {
     use trogon_registry::MockRegistryStore;
     use trogon_transcript::publisher::mock::MockTranscriptPublisher;
 
-    use crate::{
-        actor::EntityActor,
-        context::ActorContext,
-        state::mock::MockStateStore,
-    };
+    use crate::{actor::EntityActor, context::ActorContext, state::mock::MockStateStore};
 
     // ── Test actor ────────────────────────────────────────────────────────────
 
@@ -318,7 +330,12 @@ mod tests {
     impl CounterActor {
         fn new() -> (Self, Arc<Mutex<u32>>) {
             let handled = Arc::new(Mutex::new(0u32));
-            (Self { handled: Arc::clone(&handled) }, handled)
+            (
+                Self {
+                    handled: Arc::clone(&handled),
+                },
+                handled,
+            )
         }
     }
 
@@ -381,8 +398,14 @@ mod tests {
         let runtime = make_runtime();
         let (mut actor, _) = CounterActor::new();
 
-        runtime.handle_event(&mut actor, "entity-1", 0).await.unwrap();
-        runtime.handle_event(&mut actor, "entity-1", 0).await.unwrap();
+        runtime
+            .handle_event(&mut actor, "entity-1", 0)
+            .await
+            .unwrap();
+        runtime
+            .handle_event(&mut actor, "entity-1", 0)
+            .await
+            .unwrap();
 
         let kv_key = state_kv_key("counter", "entity-1");
         let entry = runtime.state.load(&kv_key).await.unwrap().unwrap();
@@ -396,7 +419,10 @@ mod tests {
         runtime.state.inject_conflicts(2);
 
         let (mut actor, handled) = CounterActor::new();
-        runtime.handle_event(&mut actor, "entity-1", 0).await.unwrap();
+        runtime
+            .handle_event(&mut actor, "entity-1", 0)
+            .await
+            .unwrap();
 
         assert_eq!(*handled.lock().unwrap(), 3);
     }
@@ -420,7 +446,10 @@ mod tests {
         let runtime = make_runtime();
         runtime.state.inject_save_error();
         let (mut actor, _) = CounterActor::new();
-        let err = runtime.handle_event(&mut actor, "entity-1", 0).await.unwrap_err();
+        let err = runtime
+            .handle_event(&mut actor, "entity-1", 0)
+            .await
+            .unwrap_err();
         assert!(matches!(err, ActorError::State(_)));
     }
 
@@ -429,7 +458,10 @@ mod tests {
         let runtime = make_runtime();
         runtime.state.inject_load_error();
         let (mut actor, _) = CounterActor::new();
-        let err = runtime.handle_event(&mut actor, "entity-1", 0).await.unwrap_err();
+        let err = runtime
+            .handle_event(&mut actor, "entity-1", 0)
+            .await
+            .unwrap_err();
         assert!(matches!(err, ActorError::State(_)));
     }
 
@@ -439,7 +471,9 @@ mod tests {
         impl EntityActor for Scribe {
             type State = Counter;
             type Error = std::convert::Infallible;
-            fn actor_type() -> &'static str { "scribe" }
+            fn actor_type() -> &'static str {
+                "scribe"
+            }
             async fn handle(
                 &mut self,
                 _state: &mut Counter,
@@ -510,7 +544,9 @@ mod tests {
         impl EntityActor for Spawner {
             type State = Counter;
             type Error = std::convert::Infallible;
-            fn actor_type() -> &'static str { "spawner" }
+            fn actor_type() -> &'static str {
+                "spawner"
+            }
             async fn handle(
                 &mut self,
                 _state: &mut Counter,
@@ -551,7 +587,9 @@ mod tests {
         impl EntityActor for NoCapActor {
             type State = Counter;
             type Error = std::convert::Infallible;
-            fn actor_type() -> &'static str { "no-cap" }
+            fn actor_type() -> &'static str {
+                "no-cap"
+            }
             async fn handle(
                 &mut self,
                 _state: &mut Counter,
@@ -565,7 +603,10 @@ mod tests {
             }
         }
 
-        runtime.handle_event(&mut NoCapActor, "e-1", 0).await.unwrap();
+        runtime
+            .handle_event(&mut NoCapActor, "e-1", 0)
+            .await
+            .unwrap();
     }
 
     /// Transport failure (subscribe returns error because no stream is
@@ -598,7 +639,9 @@ mod tests {
         impl EntityActor for ReqFailActor {
             type State = Counter;
             type Error = std::convert::Infallible;
-            fn actor_type() -> &'static str { "req-fail" }
+            fn actor_type() -> &'static str {
+                "req-fail"
+            }
             async fn handle(
                 &mut self,
                 _state: &mut Counter,
@@ -612,6 +655,9 @@ mod tests {
             }
         }
 
-        runtime.handle_event(&mut ReqFailActor, "e-1", 0).await.unwrap();
+        runtime
+            .handle_event(&mut ReqFailActor, "e-1", 0)
+            .await
+            .unwrap();
     }
 }

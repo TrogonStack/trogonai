@@ -71,9 +71,7 @@ pub use actor::EntityActor;
 pub use context::{ActorContext, MAX_SPAWN_DEPTH};
 pub use error::{ActorError, SaveError};
 pub use runtime::{ActorRuntime, SPAWN_AGENT_TIMEOUT, TROGON_REPLY_TO_HEADER};
-pub use state::{
-    MAX_OCC_RETRIES, StateStore, provision_state, state_kv_key,
-};
+pub use state::{MAX_OCC_RETRIES, StateStore, provision_state, state_kv_key};
 
 #[cfg(any(test, feature = "test-support"))]
 pub use context::test_helpers::ContextBuilder;

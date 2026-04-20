@@ -79,9 +79,7 @@ impl LlmClient for OpenAiCompatClient {
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
-            return Err(RouterError::LlmRequest(format!(
-                "HTTP {status}: {text}"
-            )));
+            return Err(RouterError::LlmRequest(format!("HTTP {status}: {text}")));
         }
 
         let json: serde_json::Value = resp
@@ -94,9 +92,7 @@ impl LlmClient for OpenAiCompatClient {
             .pointer("/choices/0/message/content")
             .and_then(|v| v.as_str())
             .ok_or_else(|| {
-                RouterError::LlmParse(format!(
-                    "missing choices[0].message.content in: {json}"
-                ))
+                RouterError::LlmParse(format!("missing choices[0].message.content in: {json}"))
             })?;
 
         serde_json::from_str::<LlmRoutingResponse>(content)
@@ -126,9 +122,7 @@ mod client_tests {
             "/chat/completions",
             post(move || {
                 let b = Arc::clone(&body);
-                async move {
-                    (status, [("content-type", "application/json")], (*b).clone())
-                }
+                async move { (status, [("content-type", "application/json")], (*b).clone()) }
             }),
         );
 
@@ -186,18 +180,15 @@ mod client_tests {
 
     #[tokio::test]
     async fn complete_returns_llm_parse_error_when_choices_missing() {
-        let addr = spawn_mock_llm(
-            StatusCode::OK,
-            r#"{"id":"x","choices":[]}"#.to_string(),
-        )
-        .await;
+        let addr = spawn_mock_llm(StatusCode::OK, r#"{"id":"x","choices":[]}"#.to_string()).await;
         let err = client(addr).complete("test".into()).await.unwrap_err();
         assert!(matches!(err, RouterError::LlmParse(_)));
     }
 
     #[tokio::test]
     async fn complete_returns_llm_parse_error_when_content_not_json() {
-        let body_start = r#"{"choices": [{"message": {"content": "this is plain text, not json"}}]}"#;
+        let body_start =
+            r#"{"choices": [{"message": {"content": "this is plain text, not json"}}]}"#;
         let addr = spawn_mock_llm(StatusCode::OK, body_start.to_string()).await;
         let err = client(addr).complete("test".into()).await.unwrap_err();
         assert!(matches!(err, RouterError::LlmParse(_)));
@@ -268,11 +259,7 @@ pub mod mock {
     impl LlmClient for MockLlmClient {
         async fn complete(&self, prompt: String) -> Result<LlmRoutingResponse, RouterError> {
             self.prompts.lock().unwrap().push(prompt);
-            let response = self
-                .responses
-                .lock()
-                .unwrap()
-                .remove(0); // panics on underflow — intentional
+            let response = self.responses.lock().unwrap().remove(0); // panics on underflow — intentional
             Ok(response)
         }
     }

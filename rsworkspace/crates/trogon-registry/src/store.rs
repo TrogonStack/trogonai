@@ -23,10 +23,7 @@ pub trait RegistryStore: Send + Sync + Clone + 'static {
 
     /// Read the current value of a key. Returns `None` if the key does not
     /// exist or has expired.
-    fn get(
-        &self,
-        key: &str,
-    ) -> impl Future<Output = Result<Option<Bytes>, Self::GetError>> + Send;
+    fn get(&self, key: &str) -> impl Future<Output = Result<Option<Bytes>, Self::GetError>> + Send;
 
     /// Mark a key as deleted. Expired keys are removed automatically by the
     /// bucket's `max_age` setting; `delete` is used for explicit de-registration.

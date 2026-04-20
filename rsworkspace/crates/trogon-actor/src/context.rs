@@ -194,8 +194,7 @@ pub mod test_helpers {
         /// Build the context. Returns the context and a shared handle to the
         /// collected transcript entries.
         pub fn build(self) -> (ActorContext, Arc<Mutex<Vec<TranscriptEntry>>>) {
-            let entries: Arc<Mutex<Vec<TranscriptEntry>>> =
-                Arc::new(Mutex::new(Vec::new()));
+            let entries: Arc<Mutex<Vec<TranscriptEntry>>> = Arc::new(Mutex::new(Vec::new()));
             let entries_clone = Arc::clone(&entries);
 
             let append_fn: AppendFn = Arc::new(move |entry| {
@@ -255,12 +254,18 @@ mod tests {
     #[tokio::test]
     async fn append_assistant_message_records_entry() {
         let (ctx, entries) = ContextBuilder::new("pr", "owner/repo/1").build();
-        ctx.append_assistant_message("LGTM", Some(12)).await.unwrap();
+        ctx.append_assistant_message("LGTM", Some(12))
+            .await
+            .unwrap();
         let snapshot = entries.lock().unwrap();
         assert_eq!(snapshot.len(), 1);
         assert!(matches!(
             &snapshot[0],
-            TranscriptEntry::Message { role: trogon_transcript::entry::Role::Assistant, tokens: Some(12), .. }
+            TranscriptEntry::Message {
+                role: trogon_transcript::entry::Role::Assistant,
+                tokens: Some(12),
+                ..
+            }
         ));
     }
 
@@ -282,5 +287,4 @@ mod tests {
             TranscriptEntry::ToolCall { name, duration_ms: 55, .. } if name == "search"
         ));
     }
-
 }

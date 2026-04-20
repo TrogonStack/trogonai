@@ -13,7 +13,6 @@ use trogon_std::env::SystemEnv;
 use trogon_std::fs::SystemFs;
 use trogon_transcript::publisher::NatsTranscriptPublisher;
 
-use reqwest;
 use trogon_pr_actor::actor::PrActor;
 
 const NATS_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -29,7 +28,12 @@ struct Cli {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
-    acp_telemetry::init_logger(ServiceName::TrogonPrActor, "pr-actor", &SystemEnv, &SystemFs);
+    acp_telemetry::init_logger(
+        ServiceName::TrogonPrActor,
+        "pr-actor",
+        &SystemEnv,
+        &SystemFs,
+    );
 
     info!("trogon-pr-actor starting");
 
@@ -59,11 +63,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let registry = Registry::new(registry_store);
     let runtime = ActorRuntime::new(state_store, publisher, nats.clone(), registry, js.clone());
 
-    let capability = AgentCapability::new(
-        "PrActor",
-        ["code_review", "pull_request"],
-        "actors.pr.>",
-    );
+    let capability =
+        AgentCapability::new("PrActor", ["code_review", "pull_request"], "actors.pr.>");
 
     let http = reqwest::Client::builder()
         .timeout(Duration::from_secs(60))
