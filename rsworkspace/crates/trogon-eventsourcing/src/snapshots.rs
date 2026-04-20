@@ -19,8 +19,7 @@ impl<T> Snapshot<T> {
 }
 
 pub trait SnapshotSchema {
-    const NAMESPACE: &'static str;
-    const SCHEMA_SEGMENT: &'static str;
+    const SNAPSHOT_STREAM_PREFIX: &'static str;
     const CHECKPOINT_NAME: Option<&'static str> = None;
 
     fn snapshot_store_config() -> SnapshotStoreConfig
@@ -28,10 +27,15 @@ pub trait SnapshotSchema {
         Self: Sized,
     {
         match Self::CHECKPOINT_NAME {
-            Some(checkpoint_name) => {
-                SnapshotStoreConfig::checkpointed::<Self>(Self::NAMESPACE, checkpoint_name)
-            }
-            None => SnapshotStoreConfig::scoped::<Self>(Self::NAMESPACE),
+            Some(checkpoint_name) => SnapshotStoreConfig::with_checkpoint(
+                Self::SNAPSHOT_STREAM_PREFIX,
+                format!(
+                    "_snapshot.{}.{}",
+                    Self::SNAPSHOT_STREAM_PREFIX.trim_end_matches('.'),
+                    checkpoint_name
+                ),
+            ),
+            None => SnapshotStoreConfig::without_checkpoint(Self::SNAPSHOT_STREAM_PREFIX),
         }
     }
 }
@@ -68,18 +72,6 @@ impl SnapshotStoreConfig {
             key_prefix: key_prefix.into(),
             checkpoint_key: Some(checkpoint_key.into()),
         }
-    }
-
-    pub fn scoped<T: SnapshotSchema>(namespace: &str) -> Self {
-        Self::without_checkpoint(format!("{namespace}.{}.", T::SCHEMA_SEGMENT))
-    }
-
-    pub fn checkpointed<T: SnapshotSchema>(namespace: &str, checkpoint_name: &str) -> Self {
-        let schema = T::SCHEMA_SEGMENT;
-        Self::with_checkpoint(
-            format!("{namespace}.{schema}."),
-            format!("_snapshot.{namespace}.{schema}.{checkpoint_name}"),
-        )
     }
 
     pub fn key_prefix(&self) -> &str {
@@ -454,8 +446,7 @@ mod tests {
     struct TestSchema;
 
     impl SnapshotSchema for TestSchema {
-        const NAMESPACE: &'static str = "snapshots";
-        const SCHEMA_SEGMENT: &'static str = "v2";
+        const SNAPSHOT_STREAM_PREFIX: &'static str = "snapshots.v2.";
         const CHECKPOINT_NAME: Option<&'static str> = Some("last_event_sequence");
     }
 

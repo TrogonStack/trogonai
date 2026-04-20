@@ -1,6 +1,6 @@
 use crate::{
     Decide, Decision, EventCodec, EventData, EventType, JsonEventCodec, NonEmpty, RecordedEvent,
-    Snapshot, SnapshotStoreConfig, StreamCommand, StreamEvent,
+    Snapshot, SnapshotSchema, SnapshotStoreConfig, StreamCommand, StreamEvent,
 };
 
 pub trait CommandState: StreamCommand + Sized {
@@ -132,6 +132,23 @@ pub trait SnapshotPolicy<State, Event> {
     ) -> SnapshotDecision;
 }
 
+pub trait CommandSnapshots: CommandState
+where
+    Self::State: SnapshotSchema,
+{
+    type SnapshotPolicy: SnapshotPolicy<Self::State, Self::Event>;
+
+    fn snapshot_policy() -> Self::SnapshotPolicy;
+
+    fn snapshots<'a, S>(snapshot_store: &'a S) -> Snapshots<'a, S, Self::SnapshotPolicy> {
+        Snapshots::new(
+            snapshot_store,
+            Self::State::snapshot_store_config(),
+            Self::snapshot_policy(),
+        )
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct AlwaysSnapshot;
 
@@ -241,6 +258,41 @@ impl<'a, S, P> Snapshots<'a, S, P> {
     }
 }
 
+pub trait IntoSnapshots<'a, C>: Sized
+where
+    C: CommandState,
+{
+    type Store;
+    type Policy;
+
+    fn into_snapshots(self) -> Snapshots<'a, Self::Store, Self::Policy>;
+}
+
+impl<'a, C, S, P> IntoSnapshots<'a, C> for Snapshots<'a, S, P>
+where
+    C: CommandState,
+{
+    type Store = S;
+    type Policy = P;
+
+    fn into_snapshots(self) -> Snapshots<'a, Self::Store, Self::Policy> {
+        self
+    }
+}
+
+impl<'a, C, S> IntoSnapshots<'a, C> for &'a S
+where
+    C: CommandSnapshots,
+    C::State: SnapshotSchema,
+{
+    type Store = S;
+    type Policy = C::SnapshotPolicy;
+
+    fn into_snapshots(self) -> Snapshots<'a, Self::Store, Self::Policy> {
+        C::snapshots(self)
+    }
+}
+
 pub struct CommandExecution<'a, E, C, S = WithoutSnapshots> {
     event_store: &'a E,
     command: &'a C,
@@ -249,7 +301,10 @@ pub struct CommandExecution<'a, E, C, S = WithoutSnapshots> {
     event_codec: JsonEventCodec,
 }
 
-impl<'a, E, C> CommandExecution<'a, E, C, WithoutSnapshots> {
+impl<'a, E, C> CommandExecution<'a, E, C, WithoutSnapshots>
+where
+    C: CommandState,
+{
     pub const fn new(event_store: &'a E, command: &'a C) -> Self {
         Self {
             event_store,
@@ -260,22 +315,25 @@ impl<'a, E, C> CommandExecution<'a, E, C, WithoutSnapshots> {
         }
     }
 
-    pub fn snapshots<S, P>(
+    pub fn with_snapshot<I>(
         self,
-        snapshots: Snapshots<'a, S, P>,
-    ) -> CommandExecution<'a, E, C, Snapshots<'a, S, P>> {
+        snapshots: I,
+    ) -> CommandExecution<'a, E, C, Snapshots<'a, I::Store, I::Policy>>
+    where
+        I: IntoSnapshots<'a, C>,
+    {
         CommandExecution {
             event_store: self.event_store,
             command: self.command,
             occ: self.occ,
-            snapshots,
+            snapshots: snapshots.into_snapshots(),
             event_codec: self.event_codec,
         }
     }
 }
 
 impl<'a, E, C, S> CommandExecution<'a, E, C, S> {
-    pub fn occ<O>(mut self, occ: O) -> Self
+    pub fn with_occ<O>(mut self, occ: O) -> Self
     where
         O: Into<Option<OccPolicy>>,
     {
@@ -285,7 +343,7 @@ impl<'a, E, C, S> CommandExecution<'a, E, C, S> {
 }
 
 impl<'a, E, C, S> CommandExecution<'a, E, C, S> {
-    pub fn codec<EC>(self, event_codec: EC) -> CommandExecutionWithCodec<'a, E, C, S, EC> {
+    pub fn with_codec<EC>(self, event_codec: EC) -> CommandExecutionWithCodec<'a, E, C, S, EC> {
         CommandExecutionWithCodec {
             event_store: self.event_store,
             command: self.command,
@@ -304,8 +362,11 @@ pub struct CommandExecutionWithCodec<'a, E, C, S, EC> {
     event_codec: EC,
 }
 
-impl<'a, E, C, S, EC> CommandExecutionWithCodec<'a, E, C, S, EC> {
-    pub fn occ<O>(mut self, occ: O) -> Self
+impl<'a, E, C, S, EC> CommandExecutionWithCodec<'a, E, C, S, EC>
+where
+    C: CommandState,
+{
+    pub fn with_occ<O>(mut self, occ: O) -> Self
     where
         O: Into<Option<OccPolicy>>,
     {
@@ -313,15 +374,18 @@ impl<'a, E, C, S, EC> CommandExecutionWithCodec<'a, E, C, S, EC> {
         self
     }
 
-    pub fn snapshots<S2, P>(
+    pub fn with_snapshot<I>(
         self,
-        snapshots: Snapshots<'a, S2, P>,
-    ) -> CommandExecutionWithCodec<'a, E, C, Snapshots<'a, S2, P>, EC> {
+        snapshots: I,
+    ) -> CommandExecutionWithCodec<'a, E, C, Snapshots<'a, I::Store, I::Policy>, EC>
+    where
+        I: IntoSnapshots<'a, C>,
+    {
         CommandExecutionWithCodec {
             event_store: self.event_store,
             command: self.command,
             occ: self.occ,
-            snapshots,
+            snapshots: snapshots.into_snapshots(),
             event_codec: self.event_codec,
         }
     }
@@ -352,7 +416,7 @@ where
         CommandFailure<C::DomainError, CommandInfraError<SErr>>,
     > {
         let event_codec = self.event_codec;
-        self.codec(event_codec).execute_result().await
+        self.with_codec(event_codec).execute_result().await
     }
 }
 
@@ -456,7 +520,7 @@ where
         CommandFailure<C::DomainError, CommandInfraError<SErr>>,
     > {
         let event_codec = self.event_codec;
-        self.codec(event_codec).execute_result().await
+        self.with_codec(event_codec).execute_result().await
     }
 }
 
@@ -628,8 +692,7 @@ mod tests {
     }
 
     impl SnapshotSchema for TestState {
-        const NAMESPACE: &'static str = "test.command";
-        const SCHEMA_SEGMENT: &'static str = "v1";
+        const SNAPSHOT_STREAM_PREFIX: &'static str = "test.command.v1.";
     }
 
     #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -980,7 +1043,7 @@ mod tests {
 
         let result = block_on(
             CommandExecution::new(&runtime, &command)
-                .snapshots(Snapshots::new(&runtime, test_snapshot_config(), NoSnapshot))
+                .with_snapshot(Snapshots::new(&runtime, test_snapshot_config(), NoSnapshot))
                 .execute_result(),
         )
         .unwrap();
@@ -1004,7 +1067,7 @@ mod tests {
 
         let error = block_on(
             CommandExecution::new(&runtime, &command)
-                .snapshots(Snapshots::new(&runtime, test_snapshot_config(), NoSnapshot))
+                .with_snapshot(Snapshots::new(&runtime, test_snapshot_config(), NoSnapshot))
                 .execute_result(),
         )
         .unwrap_err();
@@ -1029,7 +1092,7 @@ mod tests {
 
         let error = block_on(
             CommandExecution::new(&runtime, &command)
-                .snapshots(Snapshots::new(&runtime, test_snapshot_config(), NoSnapshot))
+                .with_snapshot(Snapshots::new(&runtime, test_snapshot_config(), NoSnapshot))
                 .execute_result(),
         )
         .unwrap_err();
@@ -1077,7 +1140,7 @@ mod tests {
 
         let error = block_on(
             CommandExecution::new(&runtime, &command)
-                .snapshots(Snapshots::new(&runtime, test_snapshot_config(), NoSnapshot))
+                .with_snapshot(Snapshots::new(&runtime, test_snapshot_config(), NoSnapshot))
                 .execute_result(),
         )
         .unwrap_err();
@@ -1100,7 +1163,7 @@ mod tests {
 
         let result = block_on(
             CommandExecution::new(&runtime, &command)
-                .snapshots(Snapshots::new(&runtime, test_snapshot_config(), NoSnapshot))
+                .with_snapshot(Snapshots::new(&runtime, test_snapshot_config(), NoSnapshot))
                 .execute_result(),
         )
         .unwrap();
@@ -1143,7 +1206,7 @@ mod tests {
 
         let result = block_on(
             CommandExecution::new(&runtime, &command)
-                .codec(WrappedJsonCodec)
+                .with_codec(WrappedJsonCodec)
                 .execute_result(),
         )
         .unwrap();
@@ -1182,7 +1245,7 @@ mod tests {
 
         let _ = block_on(
             CommandExecution::new(&runtime, &command)
-                .occ(OccPolicy::Explicit(StreamState::Any))
+                .with_occ(OccPolicy::Explicit(StreamState::Any))
                 .execute_result(),
         )
         .unwrap();
@@ -1211,7 +1274,7 @@ mod tests {
 
         let _ = block_on(
             CommandExecution::new(&runtime, &command)
-                .occ(OccPolicy::ExactCurrentVersion)
+                .with_occ(OccPolicy::ExactCurrentVersion)
                 .execute_result(),
         )
         .unwrap();
@@ -1233,7 +1296,7 @@ mod tests {
 
         let _ = block_on(
             CommandExecution::new(&runtime, &command)
-                .occ(OccPolicy::Explicit(StreamState::Any))
+                .with_occ(OccPolicy::Explicit(StreamState::Any))
                 .execute_result(),
         )
         .unwrap();
@@ -1254,7 +1317,7 @@ mod tests {
 
         let result = block_on(
             CommandExecution::new(&runtime, &command)
-                .snapshots(Snapshots::new(
+                .with_snapshot(Snapshots::new(
                     &runtime,
                     test_snapshot_config(),
                     AlwaysSnapshot,
@@ -1280,7 +1343,7 @@ mod tests {
 
         let _ = block_on(
             CommandExecution::new(&runtime, &command)
-                .snapshots(Snapshots::new(
+                .with_snapshot(Snapshots::new(
                     &runtime,
                     test_snapshot_config(),
                     FrequencySnapshot::new(NonZeroU64::new(3).unwrap()),
@@ -1305,7 +1368,7 @@ mod tests {
 
         let _ = block_on(
             CommandExecution::new(&runtime, &command)
-                .snapshots(Snapshots::new(
+                .with_snapshot(Snapshots::new(
                     &runtime,
                     test_snapshot_config(),
                     FrequencySnapshot::new(NonZeroU64::new(3).unwrap()),
@@ -1327,7 +1390,7 @@ mod tests {
 
         let _ = block_on(
             CommandExecution::new(&runtime, &command)
-                .snapshots(Snapshots::new(&runtime, test_snapshot_config(), NoSnapshot))
+                .with_snapshot(Snapshots::new(&runtime, test_snapshot_config(), NoSnapshot))
                 .execute_result(),
         )
         .unwrap();
@@ -1346,7 +1409,7 @@ mod tests {
 
         let error = block_on(
             CommandExecution::new(&runtime, &command)
-                .snapshots(Snapshots::new(
+                .with_snapshot(Snapshots::new(
                     &runtime,
                     test_snapshot_config(),
                     AlwaysSnapshot,
