@@ -65,26 +65,28 @@ impl SessionNotifier for NatsSessionNotifier {
 
 // ── Mock implementation ───────────────────────────────────────────────────────
 
-#[cfg(any(test, feature = "test-helpers"))]
+#[cfg(test)]
 pub struct MockSessionNotifier {
     pub notifications: std::sync::Mutex<Vec<SessionNotification>>,
 }
 
-#[cfg(any(test, feature = "test-helpers"))]
+#[cfg(test)]
 impl MockSessionNotifier {
     pub fn new() -> Self {
-        Self { notifications: std::sync::Mutex::new(Vec::new()) }
+        Self {
+            notifications: std::sync::Mutex::new(Vec::new()),
+        }
     }
 }
 
-#[cfg(any(test, feature = "test-helpers"))]
+#[cfg(test)]
 impl Default for MockSessionNotifier {
     fn default() -> Self {
         Self::new()
     }
 }
 
-#[cfg(any(test, feature = "test-helpers"))]
+#[cfg(test)]
 #[async_trait(?Send)]
 impl SessionNotifier for MockSessionNotifier {
     async fn notify(&self, notification: SessionNotification) {
