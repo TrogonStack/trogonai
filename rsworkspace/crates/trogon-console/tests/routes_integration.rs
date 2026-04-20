@@ -13,6 +13,7 @@ use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::{ImageExt, runners::AsyncRunner};
 use tokio::net::TcpListener;
 use trogon_console::{
+    run_with,
     server::{AppState, build_router},
     store::{
         agents::AgentStore,
@@ -1011,4 +1012,43 @@ async fn mcp_registry_returns_known_servers() {
         .collect();
     assert!(names.contains(&"GitHub"), "GitHub must be in the MCP registry");
     assert!(names.contains(&"Linear"), "Linear must be in the MCP registry");
+}
+
+// ── run_with entry point ──────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn run_with_starts_server_and_serves_health() {
+    let container = Nats::default()
+        .with_cmd(["--jetstream"])
+        .start()
+        .await
+        .expect("NATS container start");
+    let nats_port = container.get_host_port_ipv4(4222).await.expect("port");
+    let nats_url = format!("nats://127.0.0.1:{nats_port}");
+
+    // Grab a free ephemeral port then release it before run_with binds to it.
+    let tmp = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = tmp.local_addr().unwrap().port();
+    drop(tmp);
+
+    let url = nats_url.clone();
+    let handle = tokio::spawn(async move { run_with(&url, port).await.ok() });
+
+    // Poll until the server responds or timeout.
+    let client = Client::new();
+    let health = format!("http://127.0.0.1:{port}/-/health");
+    let mut ready = false;
+    for _ in 0..50 {
+        if let Ok(r) = client.get(&health).send().await {
+            if r.status().is_success() {
+                ready = true;
+                break;
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+
+    assert!(ready, "run_with server did not become ready within 5 s");
+    handle.abort();
+    let _ = container; // keep container alive until server is done
 }

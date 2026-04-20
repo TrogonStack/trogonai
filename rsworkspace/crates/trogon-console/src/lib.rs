@@ -20,9 +20,12 @@ pub async fn run() -> Result<(), String> {
         .ok()
         .and_then(|p| p.parse().ok())
         .unwrap_or(8090);
+    run_with(&nats_url, port).await
+}
 
+pub async fn run_with(nats_url: &str, port: u16) -> Result<(), String> {
     info!("connecting to NATS at {nats_url}");
-    let nats = async_nats::connect(&nats_url)
+    let nats = async_nats::connect(nats_url)
         .await
         .map_err(|e| e.to_string())?;
     let js = async_nats::jetstream::new(nats);
