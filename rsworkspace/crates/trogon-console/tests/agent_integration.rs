@@ -22,6 +22,7 @@
 //!   value: JSON with at least { "skill_ids": [string] }
 
 use async_nats::jetstream;
+use bytes::Bytes;
 use reqwest::Client;
 use serde_json::Value;
 use testcontainers_modules::nats::Nats;
@@ -320,4 +321,135 @@ async fn full_round_trip_kv_structure_is_complete() {
     let ver_entry = kv_get_json(&env.js, "CONSOLE_SKILL_VERSIONS", &ver_key).await;
     let content = ver_entry["content"].as_str().unwrap();
     assert_eq!(content, "Never expose secrets. Always validate inputs.");
+}
+
+// ── Session read contract: agent writes, console reads ────────────────────────
+//
+// The console's SessionReader deserializes RawSession (written by trogon-agent)
+// and derives status, message_count, and token totals. These tests write the
+// raw format directly into the SESSIONS KV bucket and verify the console API
+// returns the correct derived fields.
+
+async fn write_raw_session(js: &jetstream::Context, tenant_id: &str, raw: serde_json::Value) {
+    let id = raw["id"].as_str().unwrap().to_string();
+    let kv = js.get_key_value("SESSIONS").await.expect("SESSIONS bucket");
+    kv.put(
+        format!("{tenant_id}.{id}"),
+        Bytes::from(serde_json::to_vec(&raw).unwrap()),
+    )
+    .await
+    .expect("put raw session");
+}
+
+/// Full field mapping: token sums, message_count, duration_ms, agent_id, and
+/// idle status (last message is "assistant") are all derived correctly.
+#[tokio::test]
+async fn session_written_by_agent_is_readable_by_console_api() {
+    let env = start().await;
+
+    write_raw_session(&env.js, "tenant_abc", serde_json::json!({
+        "id": "sess_001",
+        "tenant_id": "tenant_abc",
+        "name": "Test Session",
+        "model": "claude-sonnet-4-6",
+        "messages": [
+            { "role": "user",      "usage": { "input_tokens": 100, "output_tokens": 0,   "cache_creation_input_tokens": 50, "cache_read_input_tokens": 0  } },
+            { "role": "assistant", "usage": { "input_tokens": 0,   "output_tokens": 200, "cache_creation_input_tokens": 0,  "cache_read_input_tokens": 25 } }
+        ],
+        "duration_ms": 1500,
+        "agent_id": "agent_xyz",
+        "created_at": "1000",
+        "updated_at": "2000"
+    })).await;
+
+    let resp = env.client
+        .get(format!("{}/sessions/tenant_abc/sess_001", env.base_url))
+        .send().await.unwrap();
+    assert_eq!(resp.status().as_u16(), 200);
+    let s: Value = resp.json().await.unwrap();
+
+    assert_eq!(s["id"],                "sess_001");
+    assert_eq!(s["tenant_id"],         "tenant_abc");
+    assert_eq!(s["model"],             "claude-sonnet-4-6");
+    assert_eq!(s["message_count"],     2);
+    assert_eq!(s["input_tokens"],      100);
+    assert_eq!(s["output_tokens"],     200);
+    assert_eq!(s["cache_write_tokens"], 50);
+    assert_eq!(s["cache_read_tokens"],  25);
+    assert_eq!(s["duration_ms"],       1500);
+    assert_eq!(s["agent_id"],          "agent_xyz");
+    assert_eq!(s["status"],            "idle"); // last message is "assistant"
+}
+
+/// A session whose last message is from "user" has status "running".
+#[tokio::test]
+async fn session_with_last_user_message_has_running_status() {
+    let env = start().await;
+
+    write_raw_session(&env.js, "tenant_run", serde_json::json!({
+        "id": "sess_running",
+        "tenant_id": "tenant_run",
+        "name": "Running Session",
+        "messages": [
+            { "role": "assistant", "usage": null },
+            { "role": "user",      "usage": null }
+        ],
+        "created_at": "1", "updated_at": "2"
+    })).await;
+
+    let s: Value = env.client
+        .get(format!("{}/sessions/tenant_run/sess_running", env.base_url))
+        .send().await.unwrap()
+        .json().await.unwrap();
+
+    assert_eq!(s["status"], "running");
+    assert_eq!(s["message_count"], 2);
+    assert_eq!(s["input_tokens"], 0);
+}
+
+/// A session with no messages has status "idle" and zero counts.
+#[tokio::test]
+async fn empty_session_has_idle_status_and_zero_counts() {
+    let env = start().await;
+
+    write_raw_session(&env.js, "tenant_empty", serde_json::json!({
+        "id": "sess_empty",
+        "tenant_id": "tenant_empty",
+        "name": "Empty",
+        "messages": [],
+        "created_at": "1", "updated_at": "2"
+    })).await;
+
+    let s: Value = env.client
+        .get(format!("{}/sessions/tenant_empty/sess_empty", env.base_url))
+        .send().await.unwrap()
+        .json().await.unwrap();
+
+    assert_eq!(s["status"],        "idle");
+    assert_eq!(s["message_count"], 0);
+    assert_eq!(s["input_tokens"],  0);
+    assert_eq!(s["output_tokens"], 0);
+}
+
+/// GET /sessions lists all sessions regardless of tenant.
+#[tokio::test]
+async fn list_sessions_returns_all_agent_written_sessions() {
+    let env = start().await;
+
+    for (tenant, id) in [("t1", "s1"), ("t2", "s2")] {
+        write_raw_session(&env.js, tenant, serde_json::json!({
+            "id": id,
+            "tenant_id": tenant,
+            "name": format!("Session {id}"),
+            "messages": [],
+            "created_at": "1", "updated_at": "1"
+        })).await;
+    }
+
+    let sessions: Value = env.client
+        .get(format!("{}/sessions", env.base_url))
+        .send().await.unwrap()
+        .json().await.unwrap();
+
+    assert_eq!(sessions.as_array().unwrap().len(), 2);
 }
