@@ -1,9 +1,8 @@
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::snapshot::SnapshotSchema;
 use trogon_eventsourcing::{
-    CommandExecution, CommandResult, CommandSnapshots, CommandState, Decide, Decision,
-    FrequencySnapshot, NonEmpty, OccPolicy, SnapshotRead, SnapshotWrite, StreamAppend,
-    StreamCommand, StreamRead,
+    CommandExecution, CommandResult, CommandSnapshots, Decide, Decision, FrequencySnapshot,
+    NonEmpty, OccPolicy, SnapshotRead, SnapshotWrite, StreamAppend, StreamCommand, StreamRead,
 };
 
 use crate::{
@@ -40,32 +39,10 @@ impl ResumeJobCommand {
     }
 }
 
-impl std::fmt::Display for ResumeJobDecisionError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::JobNotFound { id } => write!(f, "missing job for resume '{id}'"),
-            Self::JobDeleted { id } => write!(f, "job '{id}' was deleted and cannot be resumed"),
-            Self::AlreadyActive { id } => write!(f, "job '{id}' is already active"),
-        }
-    }
-}
-
 #[derive(Debug)]
 pub enum ResumeJobError {
     InvalidAddEventId { id: String, source: JobIdError },
 }
-
-impl std::fmt::Display for ResumeJobError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::InvalidAddEventId { id, .. } => {
-                write!(f, "invalid job id '{id}' in add event while resuming job")
-            }
-        }
-    }
-}
-
-impl std::error::Error for ResumeJobError {}
 
 impl StreamCommand for ResumeJobCommand {
     type StreamId = JobId;
@@ -75,7 +52,9 @@ impl StreamCommand for ResumeJobCommand {
     }
 }
 
-impl Decide<ResumeJobState, JobEvent> for ResumeJobCommand {
+impl Decide for ResumeJobCommand {
+    type State = ResumeJobState;
+    type Event = JobEvent;
     type EvolveError = ResumeJobError;
     type DecideError = ResumeJobDecisionError;
 
@@ -140,11 +119,6 @@ impl Decide<ResumeJobState, JobEvent> for ResumeJobCommand {
             ))),
         }
     }
-}
-
-impl CommandState for ResumeJobCommand {
-    type State = ResumeJobState;
-    type Event = JobEvent;
 }
 
 impl CommandSnapshots for ResumeJobCommand {

@@ -3,9 +3,8 @@ use std::convert::Infallible;
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::snapshot::SnapshotSchema;
 use trogon_eventsourcing::{
-    CommandExecution, CommandResult, CommandSnapshots, CommandState, Decide, Decision,
-    FrequencySnapshot, NonEmpty, OccPolicy, SnapshotRead, SnapshotWrite, StreamAppend,
-    StreamCommand, StreamRead,
+    CommandExecution, CommandResult, CommandSnapshots, Decide, Decision, FrequencySnapshot,
+    NonEmpty, OccPolicy, SnapshotRead, SnapshotWrite, StreamAppend, StreamCommand, StreamRead,
 };
 
 use crate::{
@@ -41,20 +40,6 @@ impl RemoveJobCommand {
     }
 }
 
-impl std::fmt::Display for RemoveJobDecisionError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::JobNotFound { id } => write!(f, "missing job for removal '{id}'"),
-            Self::JobDeleted { id } => {
-                write!(
-                    f,
-                    "job '{id}' was already deleted and cannot be removed again"
-                )
-            }
-        }
-    }
-}
-
 impl StreamCommand for RemoveJobCommand {
     type StreamId = JobId;
 
@@ -63,7 +48,9 @@ impl StreamCommand for RemoveJobCommand {
     }
 }
 
-impl Decide<RemoveJobState, JobEvent> for RemoveJobCommand {
+impl Decide for RemoveJobCommand {
+    type State = RemoveJobState;
+    type Event = JobEvent;
     type EvolveError = Infallible;
     type DecideError = RemoveJobDecisionError;
 
@@ -101,11 +88,6 @@ impl Decide<RemoveJobState, JobEvent> for RemoveJobCommand {
             }),
         }
     }
-}
-
-impl CommandState for RemoveJobCommand {
-    type State = RemoveJobState;
-    type Event = JobEvent;
 }
 
 impl CommandSnapshots for RemoveJobCommand {

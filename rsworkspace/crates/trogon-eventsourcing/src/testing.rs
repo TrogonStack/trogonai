@@ -2,7 +2,7 @@
 
 use std::{collections::HashMap, fmt::Debug, marker::PhantomData};
 
-use crate::{CommandState, Decide, Decision, NonEmpty, StreamCommand};
+use crate::{Decide, Decision, NonEmpty};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Decider<C>(PhantomData<fn() -> C>);
@@ -193,7 +193,7 @@ impl<C> TestCase<C, Start> {
 
 impl<C> TestCase<C, Start>
 where
-    C: CommandState + Decide<C::State, C::Event>,
+    C: Decide,
 {
     pub fn given<I>(mut self, events: I) -> TestCase<C, Given<C::Event>>
     where
@@ -212,7 +212,7 @@ where
 
 impl<C> TestCase<C, Given<C::Event>>
 where
-    C: CommandState + Decide<C::State, C::Event>,
+    C: Decide,
     C::Event: Clone + Debug,
     C::EvolveError: Debug,
 {
@@ -247,7 +247,7 @@ where
 
 impl<C> TestCase<C, When<C::Event, C::State, C>>
 where
-    C: CommandState + Decide<C::State, C::Event> + StreamCommand,
+    C: Decide,
     C::Event: Clone + PartialEq + Debug,
     C::DecideError: PartialEq + Debug,
     C::StreamId: std::fmt::Display,
@@ -277,7 +277,7 @@ impl<C, Stage> Drop for TestCase<C, Stage> {
 
 pub trait ThenExpectation<C>: private::Sealed<C>
 where
-    C: CommandState + Decide<C::State, C::Event> + StreamCommand,
+    C: Decide,
     C::StreamId: std::fmt::Display,
 {
     type Output;
@@ -292,7 +292,7 @@ where
 
 impl<C> ThenExpectation<C> for NonEmpty<C::Event>
 where
-    C: CommandState + Decide<C::State, C::Event> + StreamCommand,
+    C: Decide,
     C::Event: Clone + PartialEq + Debug,
     C::DecideError: PartialEq + Debug,
     C::StreamId: std::fmt::Display,
@@ -311,7 +311,7 @@ where
 
 impl<C> ThenExpectation<C> for Vec<C::Event>
 where
-    C: CommandState + Decide<C::State, C::Event> + StreamCommand,
+    C: Decide,
     C::Event: Clone + PartialEq + Debug,
     C::DecideError: PartialEq + Debug,
     C::StreamId: std::fmt::Display,
@@ -334,7 +334,7 @@ where
 
 impl<C, const N: usize> ThenExpectation<C> for [C::Event; N]
 where
-    C: CommandState + Decide<C::State, C::Event> + StreamCommand,
+    C: Decide,
     C::Event: Clone + PartialEq + Debug,
     C::DecideError: PartialEq + Debug,
     C::StreamId: std::fmt::Display,
@@ -357,7 +357,7 @@ where
 
 impl<C> ThenExpectation<C> for ExpectedError<C::DecideError>
 where
-    C: CommandState + Decide<C::State, C::Event> + StreamCommand,
+    C: Decide,
     C::Event: Clone + PartialEq + Debug,
     C::DecideError: PartialEq + Debug,
     C::StreamId: std::fmt::Display,
@@ -397,7 +397,7 @@ fn assert_events_match<C>(
     actual: Result<Decision<C::Event>, C::DecideError>,
 ) -> ThenEvents<C::Event>
 where
-    C: CommandState + Decide<C::State, C::Event> + StreamCommand,
+    C: Decide,
     C::Event: Clone + PartialEq + Debug,
     C::DecideError: PartialEq + Debug,
     C::StreamId: std::fmt::Display,
@@ -423,29 +423,23 @@ where
 }
 
 mod private {
-    use crate::{CommandState, Decide, NonEmpty};
+    use crate::{Decide, NonEmpty};
 
     use super::ExpectedError;
 
     pub trait Sealed<C>
     where
-        C: CommandState + Decide<C::State, C::Event>,
+        C: Decide,
     {
     }
 
-    impl<C> Sealed<C> for NonEmpty<C::Event> where C: CommandState + Decide<C::State, C::Event> {}
+    impl<C> Sealed<C> for NonEmpty<C::Event> where C: Decide {}
 
-    impl<C> Sealed<C> for Vec<C::Event> where C: CommandState + Decide<C::State, C::Event> {}
+    impl<C> Sealed<C> for Vec<C::Event> where C: Decide {}
 
-    impl<C, const N: usize> Sealed<C> for [C::Event; N] where
-        C: CommandState + Decide<C::State, C::Event>
-    {
-    }
+    impl<C, const N: usize> Sealed<C> for [C::Event; N] where C: Decide {}
 
-    impl<C> Sealed<C> for ExpectedError<C::DecideError> where
-        C: CommandState + Decide<C::State, C::Event>
-    {
-    }
+    impl<C> Sealed<C> for ExpectedError<C::DecideError> where C: Decide {}
 }
 
 #[cfg(test)]
@@ -525,12 +519,9 @@ mod tests {
         }
     }
 
-    impl CommandState for TestCommand {
+    impl Decide for TestCommand {
         type State = TestState;
         type Event = TestEvent;
-    }
-
-    impl Decide<TestState, TestEvent> for TestCommand {
         type EvolveError = TestDomainError;
         type DecideError = TestCommandError;
 
