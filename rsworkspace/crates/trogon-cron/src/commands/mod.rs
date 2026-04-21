@@ -16,10 +16,6 @@ fn command_snapshot_policy() -> FrequencySnapshot {
 }
 
 pub use add_job::{AddJobCommand, AddJobDecisionError, AddJobState, add_job};
-pub use pause_job::{
-    PauseJobCommand, PauseJobDecisionError, PauseJobError, PauseJobState, pause_job,
-};
+pub use pause_job::{PauseJobCommand, PauseJobDecisionError, PauseJobState, pause_job};
 pub use remove_job::{RemoveJobCommand, RemoveJobDecisionError, RemoveJobState, remove_job};
-pub use resume_job::{
-    ResumeJobCommand, ResumeJobDecisionError, ResumeJobError, ResumeJobState, resume_job,
-};
+pub use resume_job::{ResumeJobCommand, ResumeJobDecisionError, ResumeJobState, resume_job};
