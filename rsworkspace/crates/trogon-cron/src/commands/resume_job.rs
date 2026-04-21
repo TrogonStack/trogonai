@@ -1,8 +1,9 @@
 use serde::{Deserialize, Serialize};
+use trogon_eventsourcing::nats::kv::SnapshotSchema;
 use trogon_eventsourcing::{
     AlwaysSnapshot, CommandExecution, CommandResult, CommandSnapshots, CommandState, Decide,
-    Decision, NonEmpty, OccPolicy, SnapshotRead, SnapshotSchema, SnapshotWrite, StreamAppend,
-    StreamCommand, StreamRead,
+    Decision, NonEmpty, OccPolicy, SnapshotRead, SnapshotWrite, StreamAppend, StreamCommand,
+    StreamRead,
 };
 
 use crate::{
