@@ -91,6 +91,13 @@ impl<'de> Deserialize<'de> for MessageHeaders {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct MessageSpec {
+    pub content: MessageContent,
+    #[serde(default, skip_serializing_if = "MessageHeaders::is_empty")]
+    pub headers: MessageHeaders,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MessageContent(Vec<u8>);
 

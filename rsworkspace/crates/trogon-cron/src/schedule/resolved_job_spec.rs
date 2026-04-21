@@ -72,7 +72,7 @@ impl TryFrom<&CronJob> for ResolvedJobSpec {
         let body = if source_subject.is_some() {
             Bytes::from_static(br#"{}"#)
         } else {
-            Bytes::copy_from_slice(job.content.as_slice())
+            Bytes::copy_from_slice(job.message.content.as_slice())
         };
 
         Ok(Self {
@@ -116,7 +116,7 @@ fn resolved_job_spec_parts(job: &CronJob) -> Result<ResolvedJobSpecParts, CronEr
             }),
         ),
     };
-    let headers = job.headers.as_slice().to_vec();
+    let headers = job.message.headers.as_slice().to_vec();
     validate_scheduler_headers(&headers)?;
 
     Ok(ResolvedJobSpecParts {
@@ -271,7 +271,7 @@ mod tests {
     use crate::events::{
         JobEventDelivery, JobEventSamplingSource, JobEventSchedule, JobEventState,
     };
-    use crate::{MessageContent, MessageHeaders};
+    use crate::{MessageContent, MessageHeaders, MessageSpec};
 
     fn base_job() -> CronJob {
         CronJob {
@@ -283,8 +283,10 @@ mod tests {
                 ttl_sec: Some(15),
                 source: None,
             },
-            content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
-            headers: MessageHeaders::new([("x-kind", "heartbeat")]).unwrap(),
+            message: MessageSpec {
+                content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
+                headers: MessageHeaders::new([("x-kind", "heartbeat")]).unwrap(),
+            },
         }
     }
 
@@ -308,7 +310,8 @@ mod tests {
     #[test]
     fn resolved_job_preserves_duplicate_headers() {
         let mut job = base_job();
-        job.headers = MessageHeaders::new([("x-kind", "heartbeat"), ("x-kind", "retry")]).unwrap();
+        job.message.headers =
+            MessageHeaders::new([("x-kind", "heartbeat"), ("x-kind", "retry")]).unwrap();
 
         let resolved = ResolvedJobSpec::try_from(&job).unwrap();
         let schedule_headers = resolved.schedule_headers();
@@ -420,7 +423,7 @@ mod tests {
     #[test]
     fn reserved_scheduler_header_is_rejected_during_schedule_resolution() {
         let mut job = base_job();
-        job.headers =
+        job.message.headers =
             MessageHeaders::new([("Nats-Schedule-Target", "cron.fire.evil.target")]).unwrap();
 
         let error = ResolvedJobSpec::try_from(&job).unwrap_err();

@@ -132,8 +132,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        CronJob, DeliverySpec, GetJobCommand, JobEnabledState, JobHeaders, MessageContent,
-        ScheduleSpec, mocks::MockCronStore,
+        CronJob, DeliverySpec, GetJobCommand, JobEnabledState, JobHeaders, JobMessage,
+        MessageContent, ScheduleSpec, mocks::MockCronStore,
     };
 
     fn job_id(id: &str) -> JobId {
@@ -146,8 +146,10 @@ mod tests {
             state: JobEnabledState::Enabled,
             schedule: ScheduleSpec::every(30).unwrap(),
             delivery: DeliverySpec::nats_event("agent.run").unwrap(),
-            content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
-            headers: JobHeaders::default(),
+            message: JobMessage {
+                content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
+                headers: JobHeaders::default(),
+            },
         }
     }
 

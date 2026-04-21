@@ -2,8 +2,9 @@
 
 use trogon_cron::{
     AddJobCommand, CronController, CronJob, DeliverySpec, GetJobCommand, JobDetails,
-    JobEnabledState, JobEventState, JobHeaders, JobId, JobSpec, JobWriteCondition, ListJobsCommand,
-    MessageContent, PauseJobCommand, RemoveJobCommand, SchedulePublisher, ScheduleSpec, add_job,
+    JobEnabledState, JobEventState, JobHeaders, JobId, JobMessage, JobSpec, JobWriteCondition,
+    ListJobsCommand, MessageContent, PauseJobCommand, RemoveJobCommand, SchedulePublisher,
+    ScheduleSpec, add_job,
     mocks::{MockCronStore, MockLeaderLock, MockSchedulePublisher},
     pause_job, remove_job,
 };
@@ -18,8 +19,10 @@ fn base_job(id: &str) -> JobSpec {
         state: JobEnabledState::Enabled,
         schedule: ScheduleSpec::every(30).unwrap(),
         delivery: DeliverySpec::nats_event("agent.run").unwrap(),
-        content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
-        headers: JobHeaders::default(),
+        message: JobMessage {
+            content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
+            headers: JobHeaders::default(),
+        },
     }
 }
 
