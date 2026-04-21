@@ -1,5 +1,5 @@
 use trogon_eventsourcing::StreamState;
-use trogon_eventsourcing::jetstream::JetStreamStoreError;
+use trogon_eventsourcing::nats::jetstream::JetStreamStoreError;
 
 use crate::events::MessageHeadersError;
 

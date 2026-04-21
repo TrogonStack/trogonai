@@ -4,7 +4,7 @@ mod events_stream;
 mod snapshot_bucket;
 mod stream_subject;
 
-use trogon_eventsourcing::{SnapshotSchema, SnapshotStoreConfig};
+use trogon_eventsourcing::nats::kv::{SnapshotSchema, SnapshotStoreConfig};
 
 pub use connect::{EventStore, Store, connect_store};
 pub(crate) use cron_jobs_bucket::run as open_cron_jobs_bucket;
