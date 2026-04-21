@@ -29,9 +29,8 @@ pub use commands::domain::{
 };
 pub use commands::{
     AddJobCommand, AddJobDecisionError, AddJobState, PauseJobCommand, PauseJobDecisionError,
-    PauseJobError, PauseJobState, RemoveJobCommand, RemoveJobDecisionError, RemoveJobState,
-    ResumeJobCommand, ResumeJobDecisionError, ResumeJobError, ResumeJobState, add_job, pause_job,
-    remove_job, resume_job,
+    PauseJobState, RemoveJobCommand, RemoveJobDecisionError, RemoveJobState, ResumeJobCommand,
+    ResumeJobDecisionError, ResumeJobState, add_job, pause_job, remove_job, resume_job,
 };
 pub use config::JobWriteCondition;
 pub use error::{CronError, JobSpecError};
