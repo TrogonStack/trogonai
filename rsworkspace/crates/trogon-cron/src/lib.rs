@@ -23,8 +23,9 @@ pub mod traits;
 pub mod mocks;
 
 pub use commands::domain::{
-    DeliveryRoute, DeliverySpec, JobEnabledState, JobId, JobIdError, JobSpec, SamplingSource,
-    SamplingSubject, ScheduleSpec, TtlSeconds,
+    CronExpression, DeliveryRoute, DeliverySpec, EverySeconds, JobEnabledState, JobHeaders, JobId,
+    JobIdError, JobSpec, SamplingSource, SamplingSubject, ScheduleSpec, ScheduleTimezone,
+    TtlSeconds,
 };
 pub use commands::{
     AddJobCommand, AddJobDecisionError, AddJobState, PauseJobCommand, PauseJobDecisionError,

@@ -694,8 +694,8 @@ mod tests {
         reconcile_snapshot, scheduler_consumer_config,
     };
     use crate::{
-        CronJob, DeliverySpec, JobDetails, JobEnabledState, JobId, JobSpec, MessageContent,
-        MessageHeaders, ScheduleSpec,
+        CronJob, DeliverySpec, JobDetails, JobEnabledState, JobHeaders, JobId, JobSpec,
+        MessageContent, MessageHeaders, ScheduleSpec,
         events::{JobAdded, JobEvent, JobEventState, JobPaused, JobRemoved, JobResumed},
         mocks::{MockCronStore, MockLeaderLock, MockSchedulePublisher},
     };
@@ -708,15 +708,33 @@ mod tests {
         JobSpec {
             id: job_id(id),
             state: JobEnabledState::Enabled,
-            schedule: ScheduleSpec::Every { every_sec: 30 },
+            schedule: ScheduleSpec::every(30).unwrap(),
             delivery: DeliverySpec::nats_event("agent.run").unwrap(),
             content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
-            headers: MessageHeaders::default(),
+            headers: JobHeaders::default(),
         }
     }
 
     fn expected_job(id: &str) -> CronJob {
         CronJob::from((id.to_string(), JobDetails::from(base_job(id))))
+    }
+
+    fn invalid_enabled_job(id: &str) -> CronJob {
+        CronJob {
+            id: id.to_string(),
+            state: JobEventState::Enabled,
+            schedule: crate::JobEventSchedule::Cron {
+                expr: "not-a-cron".to_string(),
+                timezone: None,
+            },
+            delivery: crate::JobEventDelivery::NatsEvent {
+                route: "agent.run".to_string(),
+                ttl_sec: None,
+                source: None,
+            },
+            content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
+            headers: MessageHeaders::default(),
+        }
     }
 
     #[tokio::test]
@@ -743,10 +761,6 @@ mod tests {
 
         let mut disabled = base_job("disabled");
         disabled.state = JobEnabledState::Disabled;
-        disabled.schedule = ScheduleSpec::Cron {
-            expr: "not-a-cron".to_string(),
-            timezone: None,
-        };
         let desired_jobs = HashMap::from([(
             "disabled".to_string(),
             DesiredJobState::Present(Box::new(CronJob::from((
@@ -912,18 +926,10 @@ mod tests {
     async fn apply_scheduler_change_skips_invalid_enabled_jobs_and_removes_existing_schedule() {
         let publisher = MockSchedulePublisher::new();
         publisher.seed_active_job("invalid");
-        let mut invalid = base_job("invalid");
-        invalid.schedule = ScheduleSpec::Cron {
-            expr: "not-a-cron".to_string(),
-            timezone: None,
-        };
 
         apply_scheduler_change(
             &publisher,
-            &SchedulerChange::Upsert(CronJob::from((
-                "invalid".to_string(),
-                JobDetails::from(invalid),
-            ))),
+            &SchedulerChange::Upsert(invalid_enabled_job("invalid")),
         )
         .await
         .unwrap();
@@ -936,11 +942,6 @@ mod tests {
     async fn reconcile_snapshot_skips_invalid_enabled_jobs_without_blocking_valid_ones() {
         let publisher = MockSchedulePublisher::new();
         publisher.seed_active_job("invalid");
-        let mut invalid = base_job("invalid");
-        invalid.schedule = ScheduleSpec::Cron {
-            expr: "not-a-cron".to_string(),
-            timezone: None,
-        };
         let desired_jobs = HashMap::from([
             (
                 "valid".to_string(),
@@ -948,10 +949,7 @@ mod tests {
             ),
             (
                 "invalid".to_string(),
-                DesiredJobState::Present(Box::new(CronJob::from((
-                    "invalid".to_string(),
-                    JobDetails::from(invalid),
-                )))),
+                DesiredJobState::Present(Box::new(invalid_enabled_job("invalid"))),
             ),
         ]);
 
