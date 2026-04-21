@@ -52,14 +52,12 @@ impl std::fmt::Display for PauseJobDecisionError {
 
 #[derive(Debug)]
 pub enum PauseJobError {
-    Decision(PauseJobDecisionError),
     InvalidAddEventId { id: String, source: JobIdError },
 }
 
 impl std::fmt::Display for PauseJobError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Decision(error) => write!(f, "{error}"),
             Self::InvalidAddEventId { id, .. } => {
                 write!(f, "invalid job id '{id}' in add event while pausing job")
             }
@@ -68,12 +66,6 @@ impl std::fmt::Display for PauseJobError {
 }
 
 impl std::error::Error for PauseJobError {}
-
-impl From<PauseJobDecisionError> for PauseJobError {
-    fn from(value: PauseJobDecisionError) -> Self {
-        Self::Decision(value)
-    }
-}
 
 impl StreamCommand for PauseJobCommand {
     type StreamId = JobId;
@@ -84,40 +76,14 @@ impl StreamCommand for PauseJobCommand {
 }
 
 impl Decide<PauseJobState, JobEvent> for PauseJobCommand {
-    type Error = PauseJobDecisionError;
+    type EvolveError = PauseJobError;
+    type DecideError = PauseJobDecisionError;
 
-    fn decide(state: &PauseJobState, command: &Self) -> Result<Decision<JobEvent>, Self::Error> {
-        match state {
-            PauseJobState::Missing => Err(PauseJobDecisionError::JobNotFound {
-                id: command.stream_id().clone(),
-            }),
-            PauseJobState::Deleted => Err(PauseJobDecisionError::JobDeleted {
-                id: command.stream_id().clone(),
-            }),
-            PauseJobState::Present {
-                current: JobEnabledState::Disabled,
-            } => Err(PauseJobDecisionError::AlreadyPaused {
-                id: command.stream_id().clone(),
-            }),
-            PauseJobState::Present { .. } => Ok(Decision::Event(NonEmpty::one(
-                JobEvent::JobPaused(JobPaused {
-                    id: command.stream_id().to_string(),
-                }),
-            ))),
-        }
-    }
-}
-
-impl CommandState for PauseJobCommand {
-    type State = PauseJobState;
-    type Event = JobEvent;
-    type DomainError = PauseJobError;
-
-    fn initial_state() -> Self::State {
+    fn initial_state() -> PauseJobState {
         PauseJobState::Missing
     }
 
-    fn evolve(state: Self::State, event: JobEvent) -> Result<Self::State, Self::DomainError> {
+    fn evolve(state: PauseJobState, event: JobEvent) -> Result<PauseJobState, Self::EvolveError> {
         match event {
             JobEvent::JobAdded(JobAdded { id, job }) => {
                 if matches!(state, PauseJobState::Deleted) {
@@ -150,6 +116,35 @@ impl CommandState for PauseJobCommand {
             JobEvent::JobRemoved(JobRemoved { .. }) => Ok(PauseJobState::Deleted),
         }
     }
+
+    fn decide(
+        state: &PauseJobState,
+        command: &Self,
+    ) -> Result<Decision<JobEvent>, Self::DecideError> {
+        match state {
+            PauseJobState::Missing => Err(PauseJobDecisionError::JobNotFound {
+                id: command.stream_id().clone(),
+            }),
+            PauseJobState::Deleted => Err(PauseJobDecisionError::JobDeleted {
+                id: command.stream_id().clone(),
+            }),
+            PauseJobState::Present {
+                current: JobEnabledState::Disabled,
+            } => Err(PauseJobDecisionError::AlreadyPaused {
+                id: command.stream_id().clone(),
+            }),
+            PauseJobState::Present { .. } => Ok(Decision::Event(NonEmpty::one(
+                JobEvent::JobPaused(JobPaused {
+                    id: command.stream_id().to_string(),
+                }),
+            ))),
+        }
+    }
+}
+
+impl CommandState for PauseJobCommand {
+    type State = PauseJobState;
+    type Event = JobEvent;
 }
 
 impl CommandSnapshots for PauseJobCommand {
@@ -164,7 +159,7 @@ pub async fn pause_job<S, SErr>(
     store: &S,
     command: PauseJobCommand,
     occ: Option<OccPolicy>,
-) -> CommandResult<PauseJobState, JobEvent, PauseJobError, SErr>
+) -> CommandResult<PauseJobState, JobEvent, PauseJobDecisionError, PauseJobError, SErr>
 where
     S: StreamRead<JobId, Error = SErr>
         + StreamAppend<JobId, Error = SErr>

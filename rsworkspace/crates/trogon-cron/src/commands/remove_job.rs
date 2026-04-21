@@ -1,3 +1,5 @@
+use std::convert::Infallible;
+
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::snapshot::SnapshotSchema;
 use trogon_eventsourcing::{
@@ -62,9 +64,29 @@ impl StreamCommand for RemoveJobCommand {
 }
 
 impl Decide<RemoveJobState, JobEvent> for RemoveJobCommand {
-    type Error = RemoveJobDecisionError;
+    type EvolveError = Infallible;
+    type DecideError = RemoveJobDecisionError;
 
-    fn decide(state: &RemoveJobState, command: &Self) -> Result<Decision<JobEvent>, Self::Error> {
+    fn initial_state() -> RemoveJobState {
+        RemoveJobState::Missing
+    }
+
+    fn evolve(state: RemoveJobState, event: JobEvent) -> Result<RemoveJobState, Self::EvolveError> {
+        match event {
+            JobEvent::JobAdded(JobAdded { .. })
+            | JobEvent::JobPaused(JobPaused { .. })
+            | JobEvent::JobResumed(JobResumed { .. }) => match state {
+                RemoveJobState::Deleted => Ok(RemoveJobState::Deleted),
+                RemoveJobState::Missing | RemoveJobState::Present => Ok(RemoveJobState::Present),
+            },
+            JobEvent::JobRemoved(JobRemoved { .. }) => Ok(RemoveJobState::Deleted),
+        }
+    }
+
+    fn decide(
+        state: &RemoveJobState,
+        command: &Self,
+    ) -> Result<Decision<JobEvent>, Self::DecideError> {
         match state {
             RemoveJobState::Missing => Err(RemoveJobDecisionError::JobNotFound {
                 id: command.stream_id().clone(),
@@ -84,23 +106,6 @@ impl Decide<RemoveJobState, JobEvent> for RemoveJobCommand {
 impl CommandState for RemoveJobCommand {
     type State = RemoveJobState;
     type Event = JobEvent;
-    type DomainError = RemoveJobDecisionError;
-
-    fn initial_state() -> Self::State {
-        RemoveJobState::Missing
-    }
-
-    fn evolve(state: Self::State, event: JobEvent) -> Result<Self::State, Self::DomainError> {
-        match event {
-            JobEvent::JobAdded(JobAdded { .. })
-            | JobEvent::JobPaused(JobPaused { .. })
-            | JobEvent::JobResumed(JobResumed { .. }) => match state {
-                RemoveJobState::Deleted => Ok(RemoveJobState::Deleted),
-                RemoveJobState::Missing | RemoveJobState::Present => Ok(RemoveJobState::Present),
-            },
-            JobEvent::JobRemoved(JobRemoved { .. }) => Ok(RemoveJobState::Deleted),
-        }
-    }
 }
 
 impl CommandSnapshots for RemoveJobCommand {
@@ -115,7 +120,7 @@ pub async fn remove_job<S, SErr>(
     store: &S,
     command: RemoveJobCommand,
     occ: Option<OccPolicy>,
-) -> CommandResult<RemoveJobState, JobEvent, RemoveJobDecisionError, SErr>
+) -> CommandResult<RemoveJobState, JobEvent, RemoveJobDecisionError, Infallible, SErr>
 where
     S: StreamRead<JobId, Error = SErr>
         + StreamAppend<JobId, Error = SErr>
