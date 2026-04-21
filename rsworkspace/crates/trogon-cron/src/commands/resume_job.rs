@@ -50,8 +50,6 @@ impl std::fmt::Display for ResumeJobDecisionError {
     }
 }
 
-impl std::error::Error for ResumeJobDecisionError {}
-
 #[derive(Debug)]
 pub enum ResumeJobError {
     Decision(ResumeJobDecisionError),
@@ -69,14 +67,7 @@ impl std::fmt::Display for ResumeJobError {
     }
 }
 
-impl std::error::Error for ResumeJobError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Decision(error) => Some(error),
-            Self::InvalidAddEventId { source, .. } => Some(source),
-        }
-    }
-}
+impl std::error::Error for ResumeJobError {}
 
 impl From<ResumeJobDecisionError> for ResumeJobError {
     fn from(value: ResumeJobDecisionError) -> Self {
