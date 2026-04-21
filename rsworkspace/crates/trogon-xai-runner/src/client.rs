@@ -66,6 +66,10 @@ pub struct Message {
     pub role: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completion_tokens: Option<u64>,
 }
 
 impl Message {
@@ -73,6 +77,8 @@ impl Message {
         Self {
             role: "user".to_string(),
             content: Some(text.into()),
+            prompt_tokens: None,
+            completion_tokens: None,
         }
     }
 
@@ -80,6 +86,17 @@ impl Message {
         Self {
             role: "assistant".to_string(),
             content: Some(text.into()),
+            prompt_tokens: None,
+            completion_tokens: None,
+        }
+    }
+
+    pub fn assistant_with_usage(text: impl Into<String>, prompt_tokens: u64, completion_tokens: u64) -> Self {
+        Self {
+            role: "assistant".to_string(),
+            content: Some(text.into()),
+            prompt_tokens: Some(prompt_tokens),
+            completion_tokens: Some(completion_tokens),
         }
     }
 
@@ -1880,6 +1897,8 @@ mod tests {
         let msg = Message {
             role: "user".to_string(),
             content: None,
+            prompt_tokens: None,
+            completion_tokens: None,
         };
         assert_eq!(msg.content_str(), "");
     }

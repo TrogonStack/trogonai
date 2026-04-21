@@ -241,14 +241,17 @@ fn sample_snapshot(id: &str, tenant_id: &str) -> SessionSnapshot {
         model: Some("grok-3".to_string()),
         tools: vec![],
         memory_path: None,
+        agent_id: None,
         messages: vec![
             SnapshotMessage {
                 role: "user".to_string(),
                 content: vec![TextBlock::new("Hello")],
+                usage: None,
             },
             SnapshotMessage {
                 role: "assistant".to_string(),
                 content: vec![TextBlock::new("Hi!")],
+                usage: None,
             },
         ],
         created_at: "2026-01-01T00:00:00.000Z".to_string(),

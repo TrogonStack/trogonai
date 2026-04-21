@@ -28,6 +28,24 @@ pub struct SessionSnapshot {
     pub messages: Vec<SnapshotMessage>,
     pub created_at: String,
     pub updated_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
+}
+
+/// Per-message token usage written to the SESSIONS bucket.
+/// Field names match `RawUsage` in trogon-console so the console can sum totals.
+#[derive(Clone, Serialize)]
+pub struct MessageUsage {
+    pub input_tokens: u32,
+    pub output_tokens: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub cache_creation_input_tokens: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub cache_read_input_tokens: u32,
+}
+
+fn is_zero_u32(v: &u32) -> bool {
+    *v == 0
 }
 
 /// A message entry in the snapshot — `content` uses the same tagged-block format
@@ -36,6 +54,8 @@ pub struct SessionSnapshot {
 pub struct SnapshotMessage {
     pub role: String,
     pub content: Vec<TextBlock>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage: Option<MessageUsage>,
 }
 
 /// A plain-text content block (`{"type":"text","text":"..."}`).
@@ -200,14 +220,22 @@ mod tests {
             model: Some("grok-4".into()),
             tools: vec![],
             memory_path: None,
+            agent_id: Some("agent-42".into()),
             messages: vec![
                 SnapshotMessage {
                     role: "user".into(),
                     content: vec![TextBlock::new("Hello")],
+                    usage: None,
                 },
                 SnapshotMessage {
                     role: "assistant".into(),
                     content: vec![TextBlock::new("Hi there!")],
+                    usage: Some(MessageUsage {
+                        input_tokens: 10,
+                        output_tokens: 5,
+                        cache_creation_input_tokens: 0,
+                        cache_read_input_tokens: 0,
+                    }),
                 },
             ],
             created_at: "2026-01-01T00:00:00.000Z".into(),
@@ -217,9 +245,13 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["id"], "s1");
         assert_eq!(v["model"], "grok-4");
+        assert_eq!(v["agent_id"], "agent-42");
         assert_eq!(v["messages"][0]["role"], "user");
         assert_eq!(v["messages"][0]["content"][0]["type"], "text");
         assert_eq!(v["messages"][0]["content"][0]["text"], "Hello");
+        assert!(v["messages"][0].get("usage").is_none()); // skip_serializing_if None
+        assert_eq!(v["messages"][1]["usage"]["input_tokens"], 10);
+        assert_eq!(v["messages"][1]["usage"]["output_tokens"], 5);
         assert!(!json.contains("memory_path")); // skip_serializing_if None
     }
 
