@@ -7,22 +7,23 @@ use trogon_std::{NowV7, UuidV7Generator};
 mod decision;
 mod execution;
 pub mod nats;
+pub mod snapshot;
 pub mod testing;
 
 pub use decision::{Act, Decide, Decision, NonEmpty, StreamCommand, decide};
 pub use execution::{
-    AlwaysSnapshot, AppendOutcome, CommandExecution, CommandFailure, CommandInfraError,
-    CommandResult, CommandSnapshots, CommandState, CommandStreamState, ExecutionResult,
-    FrequencySnapshot, NoSnapshot, OccPolicy, SnapshotDecision, SnapshotPolicy, SnapshotRead,
-    SnapshotWrite, Snapshots, StreamAppend, StreamRead, StreamReadResult, StreamState,
-    WithoutSnapshots,
+    AppendOutcome, CommandExecution, CommandFailure, CommandInfraError, CommandResult,
+    CommandSnapshots, CommandState, CommandStreamState, ExecutionResult, FrequencySnapshot,
+    NoSnapshot, OccPolicy, SnapshotDecision, SnapshotPolicy, SnapshotRead, SnapshotWrite,
+    Snapshots, StreamAppend, StreamRead, StreamReadResult, StreamState, WithoutSnapshots,
 };
 pub use nats::kv::{
-    Snapshot, SnapshotChange, SnapshotSchema, SnapshotStoreConfig, SnapshotStoreError,
-    checkpoint_key, list_snapshots, load_snapshot, load_snapshot_map, maybe_advance_checkpoint,
-    persist_snapshot_change, read_checkpoint, snapshot_key, write_checkpoint,
+    SnapshotStoreError, checkpoint_key, list_snapshots, load_snapshot, load_snapshot_map,
+    maybe_advance_checkpoint, persist_snapshot_change, read_checkpoint, snapshot_key,
+    write_checkpoint,
 };
 pub use nats::streams::{StreamStoreError, append_stream, read_stream_from, read_stream_range};
+pub use snapshot::{Snapshot, SnapshotChange, SnapshotSchema, SnapshotStoreConfig};
 pub use testing::{
     Decider, ExpectedError, TestCase, ThenError, ThenEvents, ThenExpectation, Timeline, decider,
     expect_error,
