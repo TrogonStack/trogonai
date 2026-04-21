@@ -10,11 +10,14 @@ use async_nats::jetstream::{
 };
 use chrono::{DateTime, Utc};
 use futures::{Stream, StreamExt, future};
-use trogon_eventsourcing::jetstream::AppendProjector;
-use trogon_eventsourcing::{
-    EventData, Snapshot, SnapshotChange, StreamEvent, load_snapshot, load_snapshot_map,
-    maybe_advance_checkpoint, persist_snapshot_change, read_checkpoint, write_checkpoint,
+use trogon_eventsourcing::nats::{
+    jetstream::AppendProjector,
+    kv::{
+        Snapshot, SnapshotChange, load_snapshot, load_snapshot_map, maybe_advance_checkpoint,
+        persist_snapshot_change, read_checkpoint, write_checkpoint,
+    },
 };
+use trogon_eventsourcing::{EventData, StreamEvent};
 use trogon_nats::SubjectTokenViolation;
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream};
 

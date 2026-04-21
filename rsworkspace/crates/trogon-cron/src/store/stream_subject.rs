@@ -1,5 +1,5 @@
 use async_nats::jetstream;
-use trogon_eventsourcing::jetstream::{
+use trogon_eventsourcing::nats::jetstream::{
     StreamSubjectResolver, SubjectState, subject_current_version,
 };
 
