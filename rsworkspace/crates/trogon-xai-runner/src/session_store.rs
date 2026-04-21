@@ -25,6 +25,10 @@ pub struct XaiSessionData {
     /// forked (fork starts fresh without prior context reference).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_response_id: Option<String>,
+    /// Unix timestamp (seconds) when the session was created. Used to compute
+    /// `duration_ms` when publishing to the console SESSIONS KV bucket.
+    #[serde(default)]
+    pub created_at_secs: u64,
 }
 
 /// Persistent store for session data.

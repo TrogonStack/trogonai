@@ -1,6 +1,7 @@
 mod agent;
 mod agent_loader;
 mod client;
+mod console_session;
 mod http_client;
 mod session_notifier;
 mod session_store;
