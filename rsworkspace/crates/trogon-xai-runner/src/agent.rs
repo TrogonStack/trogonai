@@ -27,6 +27,9 @@ use uuid::Uuid;
 
 use crate::agent_loader::{AgentLoader, AgentLoading};
 use crate::client::{FinishReason, InputItem, Message, XaiClient, XaiEvent};
+use crate::console_session::{
+    ConsoleSessionWriting, KvConsoleSessionWriter, RawMessage, RawSession,
+};
 use crate::http_client::XaiHttpClient;
 use crate::session_notifier::{NatsSessionNotifier, SessionNotifier};
 use crate::session_store::{KvSessionStore, SessionStore, XaiSessionData};
@@ -128,6 +131,9 @@ pub struct XaiAgent<H = XaiClient, N = NatsSessionNotifier> {
     skill_loader: Option<Arc<SkillLoader>>,
     /// Agent ID to look up in `CONSOLE_AGENTS`. Read from `CONSOLE_AGENT_ID` env var.
     console_agent_id: Option<String>,
+    /// Writes `RawSession` entries to the console `SESSIONS` KV bucket so
+    /// trogon-console can display live session state.
+    console_session_writer: Option<Arc<dyn ConsoleSessionWriting>>,
 }
 
 impl XaiAgent<XaiClient, NatsSessionNotifier> {
@@ -160,15 +166,20 @@ impl XaiAgent<XaiClient, NatsSessionNotifier> {
 
         if let Ok(agent_id) = std::env::var("CONSOLE_AGENT_ID") {
             if !agent_id.is_empty() {
-                match (AgentLoader::open(&js).await, SkillLoader::open(&js).await) {
-                    (Ok(al), Ok(sl)) => {
-                        info!(agent_id = %agent_id, "xai: console skills loader enabled");
+                match (
+                    AgentLoader::open(&js).await,
+                    SkillLoader::open(&js).await,
+                    KvConsoleSessionWriter::open(&js).await,
+                ) {
+                    (Ok(al), Ok(sl), Ok(sw)) => {
+                        info!(agent_id = %agent_id, "xai: console integration enabled");
                         agent.agent_loader = Some(Arc::new(al));
                         agent.skill_loader = Some(Arc::new(sl));
+                        agent.console_session_writer = Some(Arc::new(sw));
                         agent.console_agent_id = Some(agent_id);
                     }
-                    (Err(e), _) | (_, Err(e)) => {
-                        warn!(error = %e, "xai: failed to open console KV buckets — skills disabled");
+                    (Err(e), _, _) | (_, Err(e), _) | (_, _, Err(e)) => {
+                        warn!(error = %e, "xai: failed to open console KV buckets — console integration disabled");
                     }
                 }
             }
@@ -294,6 +305,7 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
             agent_loader: None,
             skill_loader: None,
             console_agent_id: None,
+            console_session_writer: None,
         }
     }
 
@@ -331,6 +343,38 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
                 Self::tool_config_option(id, label, enabled)
             })
             .collect()
+    }
+
+    /// Write `data` to the console SESSIONS KV bucket as a `RawSession`.
+    /// No-op when console integration is disabled. Best-effort: errors are logged.
+    async fn write_console_session(&self, session_id: &str, data: &XaiSessionData) {
+        let Some(writer) = &self.console_session_writer else { return };
+        let Some(tenant_id) = self.console_agent_id.as_deref() else { return };
+
+        let now = crate::console_session::now_secs();
+        let messages = data
+            .history
+            .iter()
+            .map(|m| RawMessage {
+                role: m.role.clone(),
+                content: m.content.clone().unwrap_or_default(),
+            })
+            .collect();
+
+        let raw = RawSession {
+            id: session_id.to_string(),
+            tenant_id: tenant_id.to_string(),
+            name: format!("Session {}", &session_id[..8.min(session_id.len())]),
+            model: data.model.clone(),
+            agent_id: self.console_agent_id.clone(),
+            messages,
+            created_at: crate::console_session::secs_to_iso8601(data.created_at_secs),
+            updated_at: crate::console_session::secs_to_iso8601(now),
+            duration_ms: now.saturating_sub(data.created_at_secs) * 1000,
+        };
+
+        let key = format!("{tenant_id}.{session_id}");
+        writer.write(&key, &raw).await;
     }
 }
 
@@ -450,21 +494,22 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
             .flatten()
             .reduce(|acc, next| format!("{acc}\n\n---\n\n{next}"));
 
+        let created_at_secs = crate::console_session::now_secs();
+        let data = XaiSessionData {
+            cwd,
+            model: session_model,
+            history: Vec::new(),
+            api_key,
+            system_prompt: session_system_prompt,
+            enabled_tools: Vec::new(),
+            last_response_id: None,
+            created_at_secs,
+        };
         self.session_store
-            .put(
-                &session_id,
-                &XaiSessionData {
-                    cwd,
-                    model: session_model,
-                    history: Vec::new(),
-                    api_key,
-                    system_prompt: session_system_prompt,
-                    enabled_tools: Vec::new(),
-                    last_response_id: None,
-                },
-            )
+            .put(&session_id, &data)
             .await
             .map_err(store_error)?;
+        self.write_console_session(&session_id, &data).await;
 
         info!(session_id, "xai: new session");
         Ok(NewSessionResponse::new(SessionId::from(session_id))
@@ -528,8 +573,8 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
                     api_key: source.api_key,
                     system_prompt: source.system_prompt,
                     enabled_tools: inherited_tools.clone(),
-                    // Clear last_response_id — fork starts without prior xAI response context.
                     last_response_id: None,
+                    created_at_secs: crate::console_session::now_secs(),
                 },
             )
             .await
@@ -767,6 +812,8 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
                 .put(&session_id, &snapshot)
                 .await
                 .map_err(store_error)?;
+            // Publish user message so console shows Running status.
+            self.write_console_session(&session_id, &snapshot).await;
         }
 
         // Build the Responses API `input` array and choose `previous_response_id`.
@@ -1180,6 +1227,8 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
                     .put(&session_id, &current)
                     .await
                     .map_err(store_error)?;
+                // Publish completed turn so console shows Idle status.
+                self.write_console_session(&session_id, &current).await;
             }
         }
 
