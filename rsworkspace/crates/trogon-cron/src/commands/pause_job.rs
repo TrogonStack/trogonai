@@ -50,8 +50,6 @@ impl std::fmt::Display for PauseJobDecisionError {
     }
 }
 
-impl std::error::Error for PauseJobDecisionError {}
-
 #[derive(Debug)]
 pub enum PauseJobError {
     Decision(PauseJobDecisionError),
@@ -69,14 +67,7 @@ impl std::fmt::Display for PauseJobError {
     }
 }
 
-impl std::error::Error for PauseJobError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Decision(error) => Some(error),
-            Self::InvalidAddEventId { source, .. } => Some(source),
-        }
-    }
-}
+impl std::error::Error for PauseJobError {}
 
 impl From<PauseJobDecisionError> for PauseJobError {
     fn from(value: PauseJobDecisionError) -> Self {
