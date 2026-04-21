@@ -9,15 +9,13 @@ use trogon_eventsourcing::{
 };
 
 use crate::{
-    CronJob, JobId, JobSpec, ResolvedJobSpec,
-    error::CronError,
+    JobId, JobSpec,
     events::{JobAdded, JobDetails, JobEvent, JobPaused, JobRemoved, JobResumed},
 };
 
 #[derive(Debug, Clone)]
 pub struct AddJobCommand {
-    id: JobId,
-    spec: JobSpec,
+    pub spec: JobSpec,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -38,20 +36,8 @@ pub enum AddJobDecisionError {
 }
 
 impl AddJobCommand {
-    pub fn new(spec: JobSpec) -> Result<Self, CronError> {
-        ResolvedJobSpec::try_from(&CronJob::from((
-            spec.id.to_string(),
-            JobDetails::from(&spec),
-        )))?;
-
-        Ok(Self {
-            id: spec.id.clone(),
-            spec,
-        })
-    }
-
-    pub fn spec(&self) -> &JobSpec {
-        &self.spec
+    pub const fn new(spec: JobSpec) -> Self {
+        Self { spec }
     }
 }
 
@@ -59,7 +45,7 @@ impl StreamCommand for AddJobCommand {
     type StreamId = JobId;
 
     fn stream_id(&self) -> &Self::StreamId {
-        &self.id
+        &self.spec.id
     }
 
     fn stream_state(&self) -> Option<CommandStreamState> {
@@ -97,7 +83,7 @@ impl Decide for AddJobCommand {
             AddJobState::Missing => Ok(Decision::Event(NonEmpty::one(JobEvent::JobAdded(
                 JobAdded {
                     id: command.stream_id().to_string(),
-                    job: JobDetails::from(command.spec()),
+                    job: JobDetails::from(&command.spec),
                 },
             )))),
             AddJobState::Present => Err(AddJobDecisionError::AlreadyExists {
@@ -146,7 +132,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        CronJob, DeliverySpec, GetJobCommand, JobEnabledState, MessageContent, MessageHeaders,
+        CronJob, DeliverySpec, GetJobCommand, JobEnabledState, JobHeaders, MessageContent,
         ScheduleSpec, mocks::MockCronStore,
     };
 
@@ -158,10 +144,10 @@ mod tests {
         JobSpec {
             id: job_id(id),
             state: JobEnabledState::Enabled,
-            schedule: ScheduleSpec::Every { every_sec: 30 },
+            schedule: ScheduleSpec::every(30).unwrap(),
             delivery: DeliverySpec::nats_event("agent.run").unwrap(),
             content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
-            headers: MessageHeaders::default(),
+            headers: JobHeaders::default(),
         }
     }
 
@@ -172,7 +158,7 @@ mod tests {
     #[test]
     fn decides_add_from_missing_state() {
         let state = AddJobState::Missing;
-        let command = AddJobCommand::new(job("backup")).unwrap();
+        let command = AddJobCommand::new(job("backup"));
 
         let decision = decide(&state, &command).unwrap();
         assert_eq!(
@@ -187,7 +173,7 @@ mod tests {
     #[test]
     fn rejects_adding_existing_job() {
         let state = AddJobState::Present;
-        let command = AddJobCommand::new(job("backup")).unwrap();
+        let command = AddJobCommand::new(job("backup"));
 
         assert!(matches!(
             decide(&state, &command).unwrap_err(),
@@ -199,7 +185,7 @@ mod tests {
     fn given_when_then_supports_register_job_decider() {
         TestCase::new(decider::<AddJobCommand>())
             .given([])
-            .when(AddJobCommand::new(job("backup")).unwrap())
+            .when(AddJobCommand::new(job("backup")))
             .then([JobEvent::JobAdded(JobAdded {
                 id: "backup".to_string(),
                 job: JobDetails::from(job("backup")),
@@ -213,7 +199,7 @@ mod tests {
                 id: "backup".to_string(),
                 job: JobDetails::from(job("backup")),
             })])
-            .when(AddJobCommand::new(job("backup")).unwrap())
+            .when(AddJobCommand::new(job("backup")))
             .then(expect_error(AddJobDecisionError::AlreadyExists {
                 id: JobId::parse("backup").unwrap(),
             }));
@@ -231,7 +217,7 @@ mod tests {
                     id: "backup".to_string(),
                 }),
             ])
-            .when(AddJobCommand::new(job("backup")).unwrap())
+            .when(AddJobCommand::new(job("backup")))
             .then(expect_error(AddJobDecisionError::JobDeleted {
                 id: JobId::parse("backup").unwrap(),
             }));
@@ -241,7 +227,7 @@ mod tests {
     async fn run_registers_job_in_store() {
         let store = MockCronStore::new();
 
-        let outcome = add_job(&store, AddJobCommand::new(job("backup")).unwrap(), None)
+        let outcome = add_job(&store, AddJobCommand::new(job("backup")), None)
             .await
             .unwrap();
         assert_eq!(outcome.next_expected_version, 1);
@@ -275,11 +261,11 @@ mod tests {
     async fn run_rejects_adding_existing_job_with_domain_error() {
         let store = MockCronStore::new();
 
-        add_job(&store, AddJobCommand::new(job("backup")).unwrap(), None)
+        add_job(&store, AddJobCommand::new(job("backup")), None)
             .await
             .unwrap();
 
-        let error = add_job(&store, AddJobCommand::new(job("backup")).unwrap(), None)
+        let error = add_job(&store, AddJobCommand::new(job("backup")), None)
             .await
             .unwrap_err();
 
@@ -294,7 +280,7 @@ mod tests {
     async fn run_rejects_adding_deleted_job_id() {
         let store = MockCronStore::new();
 
-        add_job(&store, AddJobCommand::new(job("backup")).unwrap(), None)
+        add_job(&store, AddJobCommand::new(job("backup")), None)
             .await
             .unwrap();
         crate::remove_job(
@@ -305,7 +291,7 @@ mod tests {
         .await
         .unwrap();
 
-        let error = add_job(&store, AddJobCommand::new(job("backup")).unwrap(), None)
+        let error = add_job(&store, AddJobCommand::new(job("backup")), None)
             .await
             .unwrap_err();
 

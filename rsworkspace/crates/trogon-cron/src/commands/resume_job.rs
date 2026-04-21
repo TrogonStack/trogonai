@@ -157,8 +157,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        AddJobCommand, DeliverySpec, GetJobCommand, JobEventState, JobSpec, MessageContent,
-        MessageHeaders, PauseJobCommand, ScheduleSpec, mocks::MockCronStore,
+        AddJobCommand, DeliverySpec, GetJobCommand, JobEventState, JobHeaders, JobSpec,
+        MessageContent, PauseJobCommand, ScheduleSpec, mocks::MockCronStore,
     };
 
     fn job_id(id: &str) -> JobId {
@@ -169,10 +169,10 @@ mod tests {
         JobSpec {
             id: job_id(id),
             state: JobEnabledState::Enabled,
-            schedule: ScheduleSpec::Every { every_sec: 30 },
+            schedule: ScheduleSpec::every(30).unwrap(),
             delivery: DeliverySpec::nats_event("agent.run").unwrap(),
             content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
-            headers: MessageHeaders::default(),
+            headers: JobHeaders::default(),
         }
     }
 
@@ -268,7 +268,7 @@ mod tests {
     fn timeline_matches_cases_by_command_stream() {
         let register = TestCase::new(decider::<AddJobCommand>())
             .given([])
-            .when(AddJobCommand::new(active_job("backup")).unwrap())
+            .when(AddJobCommand::new(active_job("backup")))
             .then([JobEvent::JobAdded(JobAdded {
                 id: "backup".to_string(),
                 job: crate::JobDetails::from(active_job("backup")),

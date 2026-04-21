@@ -434,7 +434,7 @@ mod tests {
     use super::*;
     use crate::{
         AddJobCommand, CronJob, DeliverySpec, GetJobCommand, JobDetails, JobEnabledState,
-        JobEventState, JobSpec, JobWriteCondition, ListJobsCommand, MessageContent, MessageHeaders,
+        JobEventState, JobHeaders, JobSpec, JobWriteCondition, ListJobsCommand, MessageContent,
         PauseJobCommand, RemoveJobCommand, ResumeJobCommand, ScheduleSpec, add_job, pause_job,
         remove_job, resume_job,
     };
@@ -448,10 +448,10 @@ mod tests {
         JobSpec {
             id: job_id(id),
             state: JobEnabledState::Enabled,
-            schedule: ScheduleSpec::Every { every_sec: 30 },
+            schedule: ScheduleSpec::every(30).unwrap(),
             delivery: DeliverySpec::nats_event("agent.run").unwrap(),
             content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
-            headers: MessageHeaders::default(),
+            headers: JobHeaders::default(),
         }
     }
 
@@ -518,7 +518,7 @@ mod tests {
             .unwrap();
         assert_eq!(seeded, expected_job("seeded"));
 
-        add_job(&store, AddJobCommand::new(base_job("alpha")).unwrap(), None)
+        add_job(&store, AddJobCommand::new(base_job("alpha")), None)
             .await
             .unwrap();
         let alpha = store
@@ -569,7 +569,7 @@ mod tests {
                 .is_none()
         );
 
-        let deleted_error = add_job(&store, AddJobCommand::new(base_job("alpha")).unwrap(), None)
+        let deleted_error = add_job(&store, AddJobCommand::new(base_job("alpha")), None)
             .await
             .unwrap_err();
         assert!(matches!(
@@ -594,7 +594,7 @@ mod tests {
         .unwrap_err();
         assert!(invalid_error.to_string().contains("sampling source"));
 
-        add_job(&store, AddJobCommand::new(base_job("alpha")).unwrap(), None)
+        add_job(&store, AddJobCommand::new(base_job("alpha")), None)
             .await
             .unwrap();
         let same_state_error = resume_job(&store, ResumeJobCommand::new(job_id("alpha")), None)

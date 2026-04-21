@@ -2,9 +2,8 @@
 
 use trogon_cron::{
     AddJobCommand, CronController, CronJob, DeliverySpec, GetJobCommand, JobDetails,
-    JobEnabledState, JobEventState, JobId, JobSpec, JobWriteCondition, ListJobsCommand,
-    MessageContent, MessageHeaders, PauseJobCommand, RemoveJobCommand, SchedulePublisher,
-    ScheduleSpec, add_job,
+    JobEnabledState, JobEventState, JobHeaders, JobId, JobSpec, JobWriteCondition, ListJobsCommand,
+    MessageContent, PauseJobCommand, RemoveJobCommand, SchedulePublisher, ScheduleSpec, add_job,
     mocks::{MockCronStore, MockLeaderLock, MockSchedulePublisher},
     pause_job, remove_job,
 };
@@ -17,10 +16,10 @@ fn base_job(id: &str) -> JobSpec {
     JobSpec {
         id: job_id(id),
         state: JobEnabledState::Enabled,
-        schedule: ScheduleSpec::Every { every_sec: 30 },
+        schedule: ScheduleSpec::every(30).unwrap(),
         delivery: DeliverySpec::nats_event("agent.run").unwrap(),
         content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
-        headers: MessageHeaders::default(),
+        headers: JobHeaders::default(),
     }
 }
 
@@ -33,7 +32,7 @@ async fn client_register_then_get() {
     let store = MockCronStore::new();
 
     let job = base_job("backup");
-    add_job(&store, AddJobCommand::new(job).unwrap(), None)
+    add_job(&store, AddJobCommand::new(job), None)
         .await
         .unwrap();
 
@@ -50,13 +49,9 @@ async fn client_register_then_get() {
 async fn client_pause_job_toggles_job() {
     let store = MockCronStore::new();
 
-    add_job(
-        &store,
-        AddJobCommand::new(base_job("toggle")).unwrap(),
-        None,
-    )
-    .await
-    .unwrap();
+    add_job(&store, AddJobCommand::new(base_job("toggle")), None)
+        .await
+        .unwrap();
     pause_job(&store, PauseJobCommand::new(job_id("toggle")), None)
         .await
         .unwrap();
@@ -75,10 +70,10 @@ async fn client_pause_job_toggles_job() {
 async fn client_remove_and_list_jobs_use_store_paths() {
     let store = MockCronStore::new();
 
-    add_job(&store, AddJobCommand::new(base_job("alpha")).unwrap(), None)
+    add_job(&store, AddJobCommand::new(base_job("alpha")), None)
         .await
         .unwrap();
-    add_job(&store, AddJobCommand::new(base_job("beta")).unwrap(), None)
+    add_job(&store, AddJobCommand::new(base_job("beta")), None)
         .await
         .unwrap();
 

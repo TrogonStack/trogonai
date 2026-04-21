@@ -1,4 +1,4 @@
-use std::num::NonZeroU64;
+use std::{num::NonZeroU64, str::FromStr};
 
 use crate::{
     error::{CronError, JobSpecError},
@@ -21,8 +21,8 @@ pub struct JobSpec {
     pub schedule: ScheduleSpec,
     pub delivery: DeliverySpec,
     pub content: MessageContent,
-    #[serde(default, skip_serializing_if = "MessageHeaders::is_empty")]
-    pub headers: MessageHeaders,
+    #[serde(default, skip_serializing_if = "JobHeaders::is_empty")]
+    pub headers: JobHeaders,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -53,13 +53,251 @@ pub enum ScheduleSpec {
         at: DateTime<Utc>,
     },
     Every {
-        every_sec: u64,
+        every_sec: EverySeconds,
     },
     Cron {
-        expr: String,
+        expr: CronExpression,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        timezone: Option<String>,
+        timezone: Option<ScheduleTimezone>,
     },
+}
+
+impl ScheduleSpec {
+    pub fn every(every_sec: u64) -> Result<Self, JobSpecError> {
+        Ok(Self::Every {
+            every_sec: EverySeconds::new(every_sec)?,
+        })
+    }
+
+    pub fn cron(expr: impl Into<String>, timezone: Option<String>) -> Result<Self, JobSpecError> {
+        Ok(Self::Cron {
+            expr: CronExpression::new(expr)?,
+            timezone: timezone.map(ScheduleTimezone::new).transpose()?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct EverySeconds(NonZeroU64);
+
+impl EverySeconds {
+    pub fn new(every_sec: u64) -> Result<Self, JobSpecError> {
+        NonZeroU64::new(every_sec)
+            .map(Self)
+            .ok_or(JobSpecError::EverySecondsMustBePositive)
+    }
+
+    pub fn get(self) -> u64 {
+        self.0.get()
+    }
+}
+
+impl TryFrom<u64> for EverySeconds {
+    type Error = JobSpecError;
+
+    fn try_from(value: u64) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}
+
+impl Serialize for EverySeconds {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_u64(self.get())
+    }
+}
+
+impl<'de> Deserialize<'de> for EverySeconds {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let every_sec = u64::deserialize(deserializer)?;
+        Self::new(every_sec).map_err(D::Error::custom)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CronExpression(String);
+
+impl CronExpression {
+    pub fn new(expr: impl Into<String>) -> Result<Self, JobSpecError> {
+        let expr = expr.into();
+        cron::Schedule::from_str(&expr).map_err(|source| JobSpecError::InvalidCronExpression {
+            expr: expr.clone(),
+            source: Box::new(source),
+        })?;
+        Ok(Self(expr))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_string(self) -> String {
+        self.0
+    }
+}
+
+impl TryFrom<String> for CronExpression {
+    type Error = JobSpecError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}
+
+impl TryFrom<&str> for CronExpression {
+    type Error = JobSpecError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}
+
+impl Serialize for CronExpression {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for CronExpression {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let expr = String::deserialize(deserializer)?;
+        Self::new(expr).map_err(D::Error::custom)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScheduleTimezone(String);
+
+impl ScheduleTimezone {
+    pub fn new(timezone: impl Into<String>) -> Result<Self, JobSpecError> {
+        let timezone = timezone.into();
+        let trimmed = timezone.trim();
+        if trimmed.is_empty()
+            || trimmed != timezone
+            || trimmed
+                .chars()
+                .any(|ch| ch.is_control() || ch.is_whitespace())
+        {
+            return Err(JobSpecError::InvalidTimezone { timezone });
+        }
+
+        Ok(Self(timezone))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_string(self) -> String {
+        self.0
+    }
+}
+
+impl TryFrom<String> for ScheduleTimezone {
+    type Error = JobSpecError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}
+
+impl TryFrom<&str> for ScheduleTimezone {
+    type Error = JobSpecError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}
+
+impl Serialize for ScheduleTimezone {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ScheduleTimezone {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let timezone = String::deserialize(deserializer)?;
+        Self::new(timezone).map_err(D::Error::custom)
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct JobHeaders(MessageHeaders);
+
+impl JobHeaders {
+    pub fn new<I, N, V>(headers: I) -> Result<Self, JobSpecError>
+    where
+        I: IntoIterator<Item = (N, V)>,
+        N: Into<String>,
+        V: Into<String>,
+    {
+        let headers = MessageHeaders::new(headers).map_err(JobSpecError::from)?;
+        Self::try_from(headers)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn as_slice(&self) -> &[(String, String)] {
+        self.0.as_slice()
+    }
+
+    pub fn into_message_headers(self) -> MessageHeaders {
+        self.0
+    }
+}
+
+impl TryFrom<MessageHeaders> for JobHeaders {
+    type Error = JobSpecError;
+
+    fn try_from(value: MessageHeaders) -> Result<Self, Self::Error> {
+        validate_reserved_scheduler_headers(value.as_slice())?;
+        Ok(Self(value))
+    }
+}
+
+impl Serialize for JobHeaders {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.0.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for JobHeaders {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let headers = MessageHeaders::deserialize(deserializer)?;
+        Self::try_from(headers).map_err(D::Error::custom)
+    }
+}
+
+impl From<JobHeaders> for MessageHeaders {
+    fn from(value: JobHeaders) -> Self {
+        value.0
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -258,6 +496,27 @@ impl DeliverySpec {
     }
 }
 
+const RESERVED_SCHEDULE_HEADERS: [&str; 5] = [
+    "Nats-Schedule",
+    "Nats-Schedule-Source",
+    "Nats-Schedule-Target",
+    "Nats-Schedule-Time-Zone",
+    "Nats-Schedule-TTL",
+];
+
+fn validate_reserved_scheduler_headers(headers: &[(String, String)]) -> Result<(), JobSpecError> {
+    for (name, _) in headers {
+        if RESERVED_SCHEDULE_HEADERS
+            .iter()
+            .any(|reserved| reserved.eq_ignore_ascii_case(name))
+        {
+            return Err(JobSpecError::ReservedHeaderName { name: name.clone() });
+        }
+    }
+
+    Ok(())
+}
+
 impl From<JobEnabledState> for JobEventState {
     fn from(value: JobEnabledState) -> Self {
         match value {
@@ -280,8 +539,13 @@ impl From<ScheduleSpec> for JobEventSchedule {
     fn from(value: ScheduleSpec) -> Self {
         match value {
             ScheduleSpec::At { at } => Self::At { at },
-            ScheduleSpec::Every { every_sec } => Self::Every { every_sec },
-            ScheduleSpec::Cron { expr, timezone } => Self::Cron { expr, timezone },
+            ScheduleSpec::Every { every_sec } => Self::Every {
+                every_sec: every_sec.get(),
+            },
+            ScheduleSpec::Cron { expr, timezone } => Self::Cron {
+                expr: expr.into_string(),
+                timezone: timezone.map(ScheduleTimezone::into_string),
+            },
         }
     }
 }
@@ -291,22 +555,26 @@ impl From<&ScheduleSpec> for JobEventSchedule {
         match value {
             ScheduleSpec::At { at } => Self::At { at: *at },
             ScheduleSpec::Every { every_sec } => Self::Every {
-                every_sec: *every_sec,
+                every_sec: every_sec.get(),
             },
             ScheduleSpec::Cron { expr, timezone } => Self::Cron {
-                expr: expr.clone(),
-                timezone: timezone.clone(),
+                expr: expr.as_str().to_string(),
+                timezone: timezone
+                    .as_ref()
+                    .map(|timezone| timezone.as_str().to_string()),
             },
         }
     }
 }
 
-impl From<JobEventSchedule> for ScheduleSpec {
-    fn from(value: JobEventSchedule) -> Self {
+impl TryFrom<JobEventSchedule> for ScheduleSpec {
+    type Error = JobSpecError;
+
+    fn try_from(value: JobEventSchedule) -> Result<Self, Self::Error> {
         match value {
-            JobEventSchedule::At { at } => Self::At { at },
-            JobEventSchedule::Every { every_sec } => Self::Every { every_sec },
-            JobEventSchedule::Cron { expr, timezone } => Self::Cron { expr, timezone },
+            JobEventSchedule::At { at } => Ok(Self::At { at }),
+            JobEventSchedule::Every { every_sec } => Self::every(every_sec),
+            JobEventSchedule::Cron { expr, timezone } => Self::cron(expr, timezone),
         }
     }
 }
@@ -398,13 +666,19 @@ impl JobDetails {
         Ok(JobSpec {
             id,
             state: self.state.into(),
-            schedule: self.schedule.into(),
+            schedule: self
+                .schedule
+                .try_into()
+                .map_err(CronError::invalid_job_spec)?,
             delivery: self
                 .delivery
                 .try_into()
                 .map_err(CronError::invalid_job_spec)?,
             content: self.content,
-            headers: self.headers,
+            headers: self
+                .headers
+                .try_into()
+                .map_err(CronError::invalid_job_spec)?,
         })
     }
 }
@@ -416,7 +690,7 @@ impl From<JobSpec> for JobDetails {
             schedule: spec.schedule.into(),
             delivery: spec.delivery.into(),
             content: spec.content,
-            headers: spec.headers,
+            headers: spec.headers.into(),
         }
     }
 }
@@ -428,7 +702,7 @@ impl From<&JobSpec> for JobDetails {
             schedule: (&spec.schedule).into(),
             delivery: (&spec.delivery).into(),
             content: spec.content.clone(),
-            headers: spec.headers.clone(),
+            headers: spec.headers.clone().into(),
         }
     }
 }
@@ -473,17 +747,14 @@ mod tests {
         let job = JobSpec {
             id: job_id("compact"),
             state: JobEnabledState::Enabled,
-            schedule: ScheduleSpec::Cron {
-                expr: "0 */5 * * * *".to_string(),
-                timezone: Some("UTC".to_string()),
-            },
+            schedule: ScheduleSpec::cron("0 */5 * * * *", Some("UTC".to_string())).unwrap(),
             delivery: DeliverySpec::NatsEvent {
                 route: route("workflow.compact"),
                 ttl_sec: Some(ttl(30)),
                 source: Some(source("sensors.latest")),
             },
             content: MessageContent::from_static(br#"{"workflow":"compact"}"#),
-            headers: MessageHeaders::new([("owner", "ops")]).unwrap(),
+            headers: JobHeaders::new([("owner", "ops")]).unwrap(),
         };
 
         let json = serde_json::to_string(&job).unwrap();
@@ -497,14 +768,14 @@ mod tests {
         let job = JobSpec {
             id: job_id("compact"),
             state: JobEnabledState::Enabled,
-            schedule: ScheduleSpec::Every { every_sec: 30 },
+            schedule: ScheduleSpec::every(30).unwrap(),
             delivery: DeliverySpec::NatsEvent {
                 route: route("agent.run"),
                 ttl_sec: None,
                 source: None,
             },
             content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
-            headers: MessageHeaders::default(),
+            headers: JobHeaders::default(),
         };
 
         let json = serde_json::to_string(&job).unwrap();
@@ -520,14 +791,14 @@ mod tests {
             JobSpec {
                 id: job_id("compact"),
                 state: JobEnabledState::Enabled,
-                schedule: ScheduleSpec::Every { every_sec: 30 },
+                schedule: ScheduleSpec::every(30).unwrap(),
                 delivery: DeliverySpec::NatsEvent {
                     route: route("agent.run"),
                     ttl_sec: None,
                     source: None,
                 },
                 content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
-                headers: MessageHeaders::default(),
+                headers: JobHeaders::default(),
             },
         );
 
@@ -613,24 +884,60 @@ mod tests {
     }
 
     #[test]
-    fn reserved_header_is_allowed_in_generic_job_spec_deserialization() {
-        let spec = serde_json::from_value::<JobSpec>(serde_json::json!({
+    fn zero_every_seconds_is_rejected_during_deserialization() {
+        let error = serde_json::from_value::<JobSpec>(serde_json::json!({
+            "id": "heartbeat",
+            "schedule": { "type": "every", "every_sec": 0 },
+            "delivery": { "type": "nats_event", "route": "agent.run" },
+            "content": "eyJraW5kIjoiaGVhcnRiZWF0In0="
+        }))
+        .unwrap_err();
+
+        assert!(error.to_string().contains("every_sec"));
+    }
+
+    #[test]
+    fn invalid_cron_expression_is_rejected_during_deserialization() {
+        let error = serde_json::from_value::<JobSpec>(serde_json::json!({
+            "id": "heartbeat",
+            "schedule": { "type": "cron", "expr": "not-a-cron" },
+            "delivery": { "type": "nats_event", "route": "agent.run" },
+            "content": "eyJraW5kIjoiaGVhcnRiZWF0In0="
+        }))
+        .unwrap_err();
+
+        assert!(error.to_string().contains("cron expression"));
+    }
+
+    #[test]
+    fn invalid_timezone_is_rejected_during_deserialization() {
+        let error = serde_json::from_value::<JobSpec>(serde_json::json!({
+            "id": "heartbeat",
+            "schedule": {
+                "type": "cron",
+                "expr": "0 */5 * * * *",
+                "timezone": " America/New_York "
+            },
+            "delivery": { "type": "nats_event", "route": "agent.run" },
+            "content": "eyJraW5kIjoiaGVhcnRiZWF0In0="
+        }))
+        .unwrap_err();
+
+        assert!(error.to_string().contains("timezone"));
+    }
+
+    #[test]
+    fn reserved_header_is_rejected_during_deserialization() {
+        let error = serde_json::from_value::<JobSpec>(serde_json::json!({
             "id": "heartbeat",
             "schedule": { "type": "every", "every_sec": 30 },
             "delivery": { "type": "nats_event", "route": "agent.run" },
             "headers": [["Nats-Schedule-Target", "cron.fire.evil.target"]],
             "content": "eyJraW5kIjoiaGVhcnRiZWF0In0="
         }))
-        .unwrap();
+        .unwrap_err();
 
-        let headers = spec.headers;
-        assert_eq!(
-            headers.as_slice(),
-            [(
-                "Nats-Schedule-Target".to_string(),
-                "cron.fire.evil.target".to_string(),
-            )]
-        );
+        assert!(error.to_string().contains("reserved"));
     }
 
     #[test]
