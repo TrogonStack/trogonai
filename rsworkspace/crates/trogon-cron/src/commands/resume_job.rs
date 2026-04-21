@@ -89,10 +89,7 @@ impl Decide for ResumeJobCommand {
         }
     }
 
-    fn decide(
-        state: &ResumeJobState,
-        command: &Self,
-    ) -> Result<Decision<JobEvent>, Self::DecideError> {
+    fn decide(state: &ResumeJobState, command: &Self) -> Result<Decision<JobEvent>, Self::DecideError> {
         match state {
             ResumeJobState::Missing => Err(ResumeJobDecisionError::JobNotFound {
                 id: command.stream_id().clone(),

@@ -89,10 +89,7 @@ impl Decide for PauseJobCommand {
         }
     }
 
-    fn decide(
-        state: &PauseJobState,
-        command: &Self,
-    ) -> Result<Decision<JobEvent>, Self::DecideError> {
+    fn decide(state: &PauseJobState, command: &Self) -> Result<Decision<JobEvent>, Self::DecideError> {
         match state {
             PauseJobState::Missing => Err(PauseJobDecisionError::JobNotFound {
                 id: command.stream_id().clone(),

@@ -75,10 +75,7 @@ impl Decide for AddJobCommand {
         }
     }
 
-    fn decide(
-        state: &AddJobState,
-        command: &Self,
-    ) -> Result<Decision<JobEvent>, Self::DecideError> {
+    fn decide(state: &AddJobState, command: &Self) -> Result<Decision<JobEvent>, Self::DecideError> {
         match state {
             AddJobState::Missing => Ok(Decision::Event(NonEmpty::one(JobEvent::JobAdded(
                 JobAdded {

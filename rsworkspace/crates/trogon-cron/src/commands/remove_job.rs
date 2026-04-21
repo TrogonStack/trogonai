@@ -70,10 +70,7 @@ impl Decide for RemoveJobCommand {
         }
     }
 
-    fn decide(
-        state: &RemoveJobState,
-        command: &Self,
-    ) -> Result<Decision<JobEvent>, Self::DecideError> {
+    fn decide(state: &RemoveJobState, command: &Self) -> Result<Decision<JobEvent>, Self::DecideError> {
         match state {
             RemoveJobState::Missing => Err(RemoveJobDecisionError::JobNotFound {
                 id: command.stream_id().clone(),
