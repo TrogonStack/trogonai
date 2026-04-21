@@ -67,30 +67,35 @@ impl AgentLoader {
             return AgentConfig::empty();
         };
 
-        let skill_ids = val["skill_ids"]
-            .as_array()
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                    .collect()
-            })
-            .unwrap_or_default();
+        parse_agent_config(&val)
+    }
+}
 
-        let system_prompt = val["system_prompt"]
-            .as_str()
-            .filter(|s| !s.is_empty())
-            .map(|s| s.to_string());
+/// Parse an `AgentConfig` from the JSON value stored in CONSOLE_AGENTS.
+pub(crate) fn parse_agent_config(val: &serde_json::Value) -> AgentConfig {
+    let skill_ids = val["skill_ids"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
 
-        let model_id = val["model"]["id"]
-            .as_str()
-            .filter(|s| !s.is_empty())
-            .map(|s| s.to_string());
+    let system_prompt = val["system_prompt"]
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
 
-        AgentConfig {
-            skill_ids,
-            system_prompt,
-            model_id,
-        }
+    let model_id = val["model"]["id"]
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+
+    AgentConfig {
+        skill_ids,
+        system_prompt,
+        model_id,
     }
 }
 
@@ -161,5 +166,97 @@ pub mod mock {
                 .unwrap_or_else(AgentConfig::empty);
             Box::pin(std::future::ready(config))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(json: &str) -> AgentConfig {
+        let val: serde_json::Value = serde_json::from_str(json).unwrap();
+        parse_agent_config(&val)
+    }
+
+    #[test]
+    fn parse_full_config() {
+        let cfg = parse(
+            r#"{"skill_ids":["s1","s2"],"system_prompt":"Be helpful","model":{"id":"grok-4"}}"#,
+        );
+        assert_eq!(cfg.skill_ids, vec!["s1", "s2"]);
+        assert_eq!(cfg.system_prompt.as_deref(), Some("Be helpful"));
+        assert_eq!(cfg.model_id.as_deref(), Some("grok-4"));
+    }
+
+    #[test]
+    fn parse_empty_strings_become_none() {
+        let cfg = parse(r#"{"skill_ids":[],"system_prompt":"","model":{"id":""}}"#);
+        assert!(cfg.skill_ids.is_empty());
+        assert!(cfg.system_prompt.is_none());
+        assert!(cfg.model_id.is_none());
+    }
+
+    #[test]
+    fn parse_missing_fields_returns_defaults() {
+        let cfg = parse("{}");
+        assert!(cfg.skill_ids.is_empty());
+        assert!(cfg.system_prompt.is_none());
+        assert!(cfg.model_id.is_none());
+    }
+
+    #[test]
+    fn parse_skill_ids_skips_non_strings() {
+        let cfg = parse(r#"{"skill_ids":["ok", 42, null, "also-ok"]}"#);
+        assert_eq!(cfg.skill_ids, vec!["ok", "also-ok"]);
+    }
+
+    #[test]
+    fn parse_model_id_nested_under_model_key() {
+        let cfg = parse(r#"{"model":{"id":"grok-3-mini"}}"#);
+        assert_eq!(cfg.model_id.as_deref(), Some("grok-3-mini"));
+    }
+
+    #[test]
+    fn agent_config_empty() {
+        let cfg = AgentConfig::empty();
+        assert!(cfg.skill_ids.is_empty());
+        assert!(cfg.system_prompt.is_none());
+        assert!(cfg.model_id.is_none());
+    }
+
+    #[test]
+    fn mock_loader_returns_empty_for_unknown_agent() {
+        use mock::MockAgentLoader;
+        let loader = MockAgentLoader::new();
+        let cfg = futures::executor::block_on(loader.load_config("unknown"));
+        assert!(cfg.skill_ids.is_empty());
+        assert!(cfg.system_prompt.is_none());
+    }
+
+    #[test]
+    fn mock_loader_insert_returns_skill_ids() {
+        use mock::MockAgentLoader;
+        let mut loader = MockAgentLoader::new();
+        loader.insert("agent1", vec!["sk-a".into(), "sk-b".into()]);
+        let cfg = futures::executor::block_on(loader.load_config("agent1"));
+        assert_eq!(cfg.skill_ids, vec!["sk-a", "sk-b"]);
+        assert!(cfg.system_prompt.is_none());
+        assert!(cfg.model_id.is_none());
+    }
+
+    #[test]
+    fn mock_loader_insert_full_returns_all_fields() {
+        use mock::MockAgentLoader;
+        let mut loader = MockAgentLoader::new();
+        loader.insert_full(
+            "agent2",
+            vec!["sk-x".into()],
+            Some("You are an expert.".into()),
+            Some("grok-4".into()),
+        );
+        let cfg = futures::executor::block_on(loader.load_config("agent2"));
+        assert_eq!(cfg.skill_ids, vec!["sk-x"]);
+        assert_eq!(cfg.system_prompt.as_deref(), Some("You are an expert."));
+        assert_eq!(cfg.model_id.as_deref(), Some("grok-4"));
     }
 }
