@@ -88,12 +88,20 @@ pub enum Decision<E> {
 }
 
 pub trait Decide<State, Event> {
-    type Error;
+    type EvolveError;
+    type DecideError;
 
-    fn decide(state: &State, command: &Self) -> Result<Decision<Event>, Self::Error>;
+    fn initial_state() -> State;
+
+    fn evolve(state: State, event: Event) -> Result<State, Self::EvolveError>;
+
+    fn decide(state: &State, command: &Self) -> Result<Decision<Event>, Self::DecideError>;
 }
 
-pub fn decide<State, Event, C>(state: &State, command: &C) -> Result<Decision<Event>, C::Error>
+pub fn decide<State, Event, C>(
+    state: &State,
+    command: &C,
+) -> Result<Decision<Event>, C::DecideError>
 where
     C: Decide<State, Event>,
 {
@@ -116,9 +124,21 @@ mod tests {
     }
 
     impl Decide<u8, &'static str> for TestCommand {
-        type Error = ();
+        type EvolveError = ();
+        type DecideError = ();
 
-        fn decide(state: &u8, _command: &Self) -> Result<Decision<&'static str>, Self::Error> {
+        fn initial_state() -> u8 {
+            0
+        }
+
+        fn evolve(state: u8, _event: &'static str) -> Result<u8, Self::EvolveError> {
+            Ok(state)
+        }
+
+        fn decide(
+            state: &u8,
+            _command: &Self,
+        ) -> Result<Decision<&'static str>, Self::DecideError> {
             Ok(Decision::Event(NonEmpty::one(if *state == 1 {
                 "created"
             } else {

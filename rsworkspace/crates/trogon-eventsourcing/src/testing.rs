@@ -214,7 +214,7 @@ impl<C> TestCase<C, Given<C::Event>>
 where
     C: CommandState + Decide<C::State, C::Event>,
     C::Event: Clone + Debug,
-    C::DomainError: Debug,
+    C::EvolveError: Debug,
 {
     pub fn when(mut self, command: C) -> TestCase<C, When<C::Event, C::State, C>> {
         self.completed = true;
@@ -249,7 +249,7 @@ impl<C> TestCase<C, When<C::Event, C::State, C>>
 where
     C: CommandState + Decide<C::State, C::Event> + StreamCommand,
     C::Event: Clone + PartialEq + Debug,
-    C::Error: PartialEq + Debug,
+    C::DecideError: PartialEq + Debug,
     C::StreamId: std::fmt::Display,
 {
     pub fn then<E>(mut self, expectation: E) -> E::Output
@@ -286,7 +286,7 @@ where
         self,
         given: Vec<C::Event>,
         command: &C,
-        actual: Result<Decision<C::Event>, C::Error>,
+        actual: Result<Decision<C::Event>, C::DecideError>,
     ) -> Self::Output;
 }
 
@@ -294,7 +294,7 @@ impl<C> ThenExpectation<C> for NonEmpty<C::Event>
 where
     C: CommandState + Decide<C::State, C::Event> + StreamCommand,
     C::Event: Clone + PartialEq + Debug,
-    C::Error: PartialEq + Debug,
+    C::DecideError: PartialEq + Debug,
     C::StreamId: std::fmt::Display,
 {
     type Output = ThenEvents<C::Event>;
@@ -303,7 +303,7 @@ where
         self,
         given: Vec<C::Event>,
         command: &C,
-        actual: Result<Decision<C::Event>, C::Error>,
+        actual: Result<Decision<C::Event>, C::DecideError>,
     ) -> Self::Output {
         assert_events_match::<C>(self.into_vec(), given, command, actual)
     }
@@ -313,7 +313,7 @@ impl<C> ThenExpectation<C> for Vec<C::Event>
 where
     C: CommandState + Decide<C::State, C::Event> + StreamCommand,
     C::Event: Clone + PartialEq + Debug,
-    C::Error: PartialEq + Debug,
+    C::DecideError: PartialEq + Debug,
     C::StreamId: std::fmt::Display,
 {
     type Output = ThenEvents<C::Event>;
@@ -322,7 +322,7 @@ where
         self,
         given: Vec<C::Event>,
         command: &C,
-        actual: Result<Decision<C::Event>, C::Error>,
+        actual: Result<Decision<C::Event>, C::DecideError>,
     ) -> Self::Output {
         assert!(
             !self.is_empty(),
@@ -336,7 +336,7 @@ impl<C, const N: usize> ThenExpectation<C> for [C::Event; N]
 where
     C: CommandState + Decide<C::State, C::Event> + StreamCommand,
     C::Event: Clone + PartialEq + Debug,
-    C::Error: PartialEq + Debug,
+    C::DecideError: PartialEq + Debug,
     C::StreamId: std::fmt::Display,
 {
     type Output = ThenEvents<C::Event>;
@@ -345,7 +345,7 @@ where
         self,
         given: Vec<C::Event>,
         command: &C,
-        actual: Result<Decision<C::Event>, C::Error>,
+        actual: Result<Decision<C::Event>, C::DecideError>,
     ) -> Self::Output {
         assert!(
             N > 0,
@@ -355,20 +355,20 @@ where
     }
 }
 
-impl<C> ThenExpectation<C> for ExpectedError<C::Error>
+impl<C> ThenExpectation<C> for ExpectedError<C::DecideError>
 where
     C: CommandState + Decide<C::State, C::Event> + StreamCommand,
     C::Event: Clone + PartialEq + Debug,
-    C::Error: PartialEq + Debug,
+    C::DecideError: PartialEq + Debug,
     C::StreamId: std::fmt::Display,
 {
-    type Output = ThenError<C::Event, C::Error>;
+    type Output = ThenError<C::Event, C::DecideError>;
 
     fn assert_matches(
         self,
         given: Vec<C::Event>,
         command: &C,
-        actual: Result<Decision<C::Event>, C::Error>,
+        actual: Result<Decision<C::Event>, C::DecideError>,
     ) -> Self::Output {
         match actual {
             Err(error) => assert_eq!(
@@ -394,12 +394,12 @@ fn assert_events_match<C>(
     expected: Vec<C::Event>,
     given: Vec<C::Event>,
     command: &C,
-    actual: Result<Decision<C::Event>, C::Error>,
+    actual: Result<Decision<C::Event>, C::DecideError>,
 ) -> ThenEvents<C::Event>
 where
     C: CommandState + Decide<C::State, C::Event> + StreamCommand,
     C::Event: Clone + PartialEq + Debug,
-    C::Error: PartialEq + Debug,
+    C::DecideError: PartialEq + Debug,
     C::StreamId: std::fmt::Display,
 {
     match actual {
@@ -442,7 +442,10 @@ mod private {
     {
     }
 
-    impl<C> Sealed<C> for ExpectedError<C::Error> where C: CommandState + Decide<C::State, C::Event> {}
+    impl<C> Sealed<C> for ExpectedError<C::DecideError> where
+        C: CommandState + Decide<C::State, C::Event>
+    {
+    }
 }
 
 #[cfg(test)]
@@ -525,16 +528,17 @@ mod tests {
     impl CommandState for TestCommand {
         type State = TestState;
         type Event = TestEvent;
-        type DomainError = TestDomainError;
+    }
 
-        fn initial_state() -> Self::State {
+    impl Decide<TestState, TestEvent> for TestCommand {
+        type EvolveError = TestDomainError;
+        type DecideError = TestCommandError;
+
+        fn initial_state() -> TestState {
             TestState::Missing
         }
 
-        fn evolve(
-            state: Self::State,
-            event: Self::Event,
-        ) -> Result<Self::State, Self::DomainError> {
+        fn evolve(state: TestState, event: TestEvent) -> Result<TestState, Self::EvolveError> {
             match (state, event) {
                 (TestState::Missing, TestEvent::Registered { .. }) => {
                     Ok(TestState::Present { enabled: true })
@@ -554,12 +558,11 @@ mod tests {
                 (TestState::Present { .. }, TestEvent::Removed { .. }) => Ok(TestState::Missing),
             }
         }
-    }
 
-    impl Decide<TestState, TestEvent> for TestCommand {
-        type Error = TestCommandError;
-
-        fn decide(state: &TestState, command: &Self) -> Result<Decision<TestEvent>, Self::Error> {
+        fn decide(
+            state: &TestState,
+            command: &Self,
+        ) -> Result<Decision<TestEvent>, Self::DecideError> {
             match (&command.action, state) {
                 (TestAction::Register, TestState::Missing) => {
                     Ok(Decision::Event(NonEmpty::one(TestEvent::Registered {

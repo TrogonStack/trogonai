@@ -574,7 +574,7 @@ mod tests {
             .unwrap_err();
         assert!(matches!(
             deleted_error,
-            CommandFailure::Domain(crate::AddJobDecisionError::JobDeleted { .. })
+            CommandFailure::Decide(crate::AddJobDecisionError::JobDeleted { .. })
         ));
     }
 
@@ -602,9 +602,7 @@ mod tests {
             .unwrap_err();
         assert!(matches!(
             same_state_error,
-            CommandFailure::Domain(crate::ResumeJobError::Decision(
-                crate::ResumeJobDecisionError::AlreadyActive { .. }
-            ))
+            CommandFailure::Decide(crate::ResumeJobDecisionError::AlreadyActive { .. })
         ));
 
         let missing_error = pause_job(&store, PauseJobCommand::new(job_id("missing")), None)
@@ -612,9 +610,7 @@ mod tests {
             .unwrap_err();
         assert!(matches!(
             missing_error,
-            CommandFailure::Domain(crate::PauseJobError::Decision(
-                crate::PauseJobDecisionError::JobNotFound { .. }
-            ))
+            CommandFailure::Decide(crate::PauseJobDecisionError::JobNotFound { .. })
         ));
     }
 

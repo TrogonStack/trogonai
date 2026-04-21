@@ -52,14 +52,12 @@ impl std::fmt::Display for ResumeJobDecisionError {
 
 #[derive(Debug)]
 pub enum ResumeJobError {
-    Decision(ResumeJobDecisionError),
     InvalidAddEventId { id: String, source: JobIdError },
 }
 
 impl std::fmt::Display for ResumeJobError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Decision(error) => write!(f, "{error}"),
             Self::InvalidAddEventId { id, .. } => {
                 write!(f, "invalid job id '{id}' in add event while resuming job")
             }
@@ -68,12 +66,6 @@ impl std::fmt::Display for ResumeJobError {
 }
 
 impl std::error::Error for ResumeJobError {}
-
-impl From<ResumeJobDecisionError> for ResumeJobError {
-    fn from(value: ResumeJobDecisionError) -> Self {
-        Self::Decision(value)
-    }
-}
 
 impl StreamCommand for ResumeJobCommand {
     type StreamId = JobId;
@@ -84,40 +76,14 @@ impl StreamCommand for ResumeJobCommand {
 }
 
 impl Decide<ResumeJobState, JobEvent> for ResumeJobCommand {
-    type Error = ResumeJobDecisionError;
+    type EvolveError = ResumeJobError;
+    type DecideError = ResumeJobDecisionError;
 
-    fn decide(state: &ResumeJobState, command: &Self) -> Result<Decision<JobEvent>, Self::Error> {
-        match state {
-            ResumeJobState::Missing => Err(ResumeJobDecisionError::JobNotFound {
-                id: command.stream_id().clone(),
-            }),
-            ResumeJobState::Deleted => Err(ResumeJobDecisionError::JobDeleted {
-                id: command.stream_id().clone(),
-            }),
-            ResumeJobState::Present {
-                current: JobEnabledState::Enabled,
-            } => Err(ResumeJobDecisionError::AlreadyActive {
-                id: command.stream_id().clone(),
-            }),
-            ResumeJobState::Present { .. } => Ok(Decision::Event(NonEmpty::one(
-                JobEvent::JobResumed(JobResumed {
-                    id: command.stream_id().to_string(),
-                }),
-            ))),
-        }
-    }
-}
-
-impl CommandState for ResumeJobCommand {
-    type State = ResumeJobState;
-    type Event = JobEvent;
-    type DomainError = ResumeJobError;
-
-    fn initial_state() -> Self::State {
+    fn initial_state() -> ResumeJobState {
         ResumeJobState::Missing
     }
 
-    fn evolve(state: Self::State, event: JobEvent) -> Result<Self::State, Self::DomainError> {
+    fn evolve(state: ResumeJobState, event: JobEvent) -> Result<ResumeJobState, Self::EvolveError> {
         match event {
             JobEvent::JobAdded(JobAdded { id, job }) => {
                 if matches!(state, ResumeJobState::Deleted) {
@@ -150,6 +116,35 @@ impl CommandState for ResumeJobCommand {
             JobEvent::JobRemoved(JobRemoved { .. }) => Ok(ResumeJobState::Deleted),
         }
     }
+
+    fn decide(
+        state: &ResumeJobState,
+        command: &Self,
+    ) -> Result<Decision<JobEvent>, Self::DecideError> {
+        match state {
+            ResumeJobState::Missing => Err(ResumeJobDecisionError::JobNotFound {
+                id: command.stream_id().clone(),
+            }),
+            ResumeJobState::Deleted => Err(ResumeJobDecisionError::JobDeleted {
+                id: command.stream_id().clone(),
+            }),
+            ResumeJobState::Present {
+                current: JobEnabledState::Enabled,
+            } => Err(ResumeJobDecisionError::AlreadyActive {
+                id: command.stream_id().clone(),
+            }),
+            ResumeJobState::Present { .. } => Ok(Decision::Event(NonEmpty::one(
+                JobEvent::JobResumed(JobResumed {
+                    id: command.stream_id().to_string(),
+                }),
+            ))),
+        }
+    }
+}
+
+impl CommandState for ResumeJobCommand {
+    type State = ResumeJobState;
+    type Event = JobEvent;
 }
 
 impl CommandSnapshots for ResumeJobCommand {
@@ -164,7 +159,7 @@ pub async fn resume_job<S, SErr>(
     store: &S,
     command: ResumeJobCommand,
     occ: Option<OccPolicy>,
-) -> CommandResult<ResumeJobState, JobEvent, ResumeJobError, SErr>
+) -> CommandResult<ResumeJobState, JobEvent, ResumeJobDecisionError, ResumeJobError, SErr>
 where
     S: StreamRead<JobId, Error = SErr>
         + StreamAppend<JobId, Error = SErr>

@@ -1,5 +1,7 @@
 use std::fmt;
 
+use std::convert::Infallible;
+
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::snapshot::SnapshotSchema;
 use trogon_eventsourcing::{
@@ -79,9 +81,29 @@ impl StreamCommand for AddJobCommand {
 }
 
 impl Decide<AddJobState, JobEvent> for AddJobCommand {
-    type Error = AddJobDecisionError;
+    type EvolveError = Infallible;
+    type DecideError = AddJobDecisionError;
 
-    fn decide(state: &AddJobState, command: &Self) -> Result<Decision<JobEvent>, Self::Error> {
+    fn initial_state() -> AddJobState {
+        AddJobState::Missing
+    }
+
+    fn evolve(state: AddJobState, event: JobEvent) -> Result<AddJobState, Self::EvolveError> {
+        match event {
+            JobEvent::JobAdded(JobAdded { .. })
+            | JobEvent::JobPaused(JobPaused { .. })
+            | JobEvent::JobResumed(JobResumed { .. }) => match state {
+                AddJobState::Deleted => Ok(AddJobState::Deleted),
+                AddJobState::Missing | AddJobState::Present => Ok(AddJobState::Present),
+            },
+            JobEvent::JobRemoved(JobRemoved { .. }) => Ok(AddJobState::Deleted),
+        }
+    }
+
+    fn decide(
+        state: &AddJobState,
+        command: &Self,
+    ) -> Result<Decision<JobEvent>, Self::DecideError> {
         match state {
             AddJobState::Missing => Ok(Decision::Event(NonEmpty::one(JobEvent::JobAdded(
                 JobAdded {
@@ -102,23 +124,6 @@ impl Decide<AddJobState, JobEvent> for AddJobCommand {
 impl CommandState for AddJobCommand {
     type State = AddJobState;
     type Event = JobEvent;
-    type DomainError = AddJobDecisionError;
-
-    fn initial_state() -> Self::State {
-        AddJobState::Missing
-    }
-
-    fn evolve(state: Self::State, event: JobEvent) -> Result<Self::State, Self::DomainError> {
-        match event {
-            JobEvent::JobAdded(JobAdded { .. })
-            | JobEvent::JobPaused(JobPaused { .. })
-            | JobEvent::JobResumed(JobResumed { .. }) => match state {
-                AddJobState::Deleted => Ok(AddJobState::Deleted),
-                AddJobState::Missing | AddJobState::Present => Ok(AddJobState::Present),
-            },
-            JobEvent::JobRemoved(JobRemoved { .. }) => Ok(AddJobState::Deleted),
-        }
-    }
 }
 
 impl CommandSnapshots for AddJobCommand {
@@ -133,7 +138,7 @@ pub async fn add_job<S, SErr>(
     store: &S,
     command: AddJobCommand,
     occ: Option<OccPolicy>,
-) -> CommandResult<AddJobState, JobEvent, AddJobDecisionError, SErr>
+) -> CommandResult<AddJobState, JobEvent, AddJobDecisionError, Infallible, SErr>
 where
     S: StreamRead<JobId, Error = SErr>
         + StreamAppend<JobId, Error = SErr>
@@ -296,7 +301,7 @@ mod tests {
 
         assert!(matches!(
             error,
-            CommandFailure::Domain(AddJobDecisionError::AlreadyExists { ref id })
+            CommandFailure::Decide(AddJobDecisionError::AlreadyExists { ref id })
                 if id.to_string() == "backup"
         ));
     }
@@ -322,7 +327,7 @@ mod tests {
 
         assert!(matches!(
             error,
-            CommandFailure::Domain(AddJobDecisionError::JobDeleted { ref id })
+            CommandFailure::Decide(AddJobDecisionError::JobDeleted { ref id })
                 if id.to_string() == "backup"
         ));
     }

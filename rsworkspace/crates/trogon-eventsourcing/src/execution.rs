@@ -6,11 +6,6 @@ use crate::{
 pub trait CommandState: StreamCommand + Sized {
     type State;
     type Event;
-    type DomainError;
-
-    fn initial_state() -> Self::State;
-
-    fn evolve(state: Self::State, event: Self::Event) -> Result<Self::State, Self::DomainError>;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -200,14 +195,15 @@ pub struct ExecutionResult<State, Event> {
     pub state: State,
 }
 
-pub type CommandResult<State, Event, DomainError, InfraError> = Result<
+pub type CommandResult<State, Event, DecideError, EvolveError, InfraError> = Result<
     ExecutionResult<State, Event>,
-    CommandFailure<DomainError, CommandInfraError<InfraError>>,
+    CommandFailure<DecideError, EvolveError, CommandInfraError<InfraError>>,
 >;
 
 #[derive(Debug)]
-pub enum CommandFailure<DomainError, InfraError> {
-    Domain(DomainError),
+pub enum CommandFailure<DecideError, EvolveError, InfraError> {
+    Decide(DecideError),
+    Evolve(EvolveError),
     Infra(InfraError),
 }
 
@@ -379,7 +375,6 @@ where
     C: CommandState + Decide<C::State, C::Event>,
     C::Event: EventType + StreamEvent + Clone + CanonicalEventCodec,
     E: StreamRead<C::StreamId, Error = SErr> + StreamAppend<C::StreamId, Error = SErr>,
-    C::DomainError: From<C::Error>,
     <C::Event as CanonicalEventCodec>::Codec: EventCodec<C::Event>,
     <<C::Event as CanonicalEventCodec>::Codec as EventCodec<C::Event>>::Error: Into<SErr>,
 {
@@ -387,7 +382,7 @@ where
         self,
     ) -> Result<
         ExecutionResult<C::State, C::Event>,
-        CommandFailure<C::DomainError, CommandInfraError<SErr>>,
+        CommandFailure<C::DecideError, C::EvolveError, CommandInfraError<SErr>>,
     > {
         self.execute_result().await
     }
@@ -396,7 +391,7 @@ where
         self,
     ) -> Result<
         ExecutionResult<C::State, C::Event>,
-        CommandFailure<C::DomainError, CommandInfraError<SErr>>,
+        CommandFailure<C::DecideError, C::EvolveError, CommandInfraError<SErr>>,
     > {
         self.with_codec(C::Event::canonical_codec())
             .execute_result()
@@ -409,7 +404,6 @@ where
     C: CommandState + Decide<C::State, C::Event>,
     C::Event: EventType + StreamEvent + Clone,
     E: StreamRead<C::StreamId, Error = SErr> + StreamAppend<C::StreamId, Error = SErr>,
-    C::DomainError: From<C::Error>,
     EC: EventCodec<C::Event>,
     EC::Error: Into<SErr>,
 {
@@ -417,7 +411,7 @@ where
         self,
     ) -> Result<
         ExecutionResult<C::State, C::Event>,
-        CommandFailure<C::DomainError, CommandInfraError<SErr>>,
+        CommandFailure<C::DecideError, C::EvolveError, CommandInfraError<SErr>>,
     > {
         self.execute_result().await
     }
@@ -426,7 +420,7 @@ where
         self,
     ) -> Result<
         ExecutionResult<C::State, C::Event>,
-        CommandFailure<C::DomainError, CommandInfraError<SErr>>,
+        CommandFailure<C::DecideError, C::EvolveError, CommandInfraError<SErr>>,
     > {
         let stream_id = self.command.stream_id();
         let stream_read = self
@@ -444,12 +438,11 @@ where
                 .map_err(Into::into)
                 .map_err(CommandInfraError::DecodeEvent)
                 .map_err(CommandFailure::Infra)?;
-            state = C::evolve(state, event).map_err(CommandFailure::Domain)?;
+            state = C::evolve(state, event).map_err(CommandFailure::Evolve)?;
         }
 
-        let Decision::Event(events) = C::decide(&state, self.command)
-            .map_err(C::DomainError::from)
-            .map_err(CommandFailure::Domain)?;
+        let Decision::Event(events) =
+            C::decide(&state, self.command).map_err(CommandFailure::Decide)?;
         let encoded_events = encode_events(&self.event_codec, &events)
             .map_err(Into::into)
             .map_err(CommandInfraError::EncodeEvent)
@@ -464,7 +457,7 @@ where
             .map_err(CommandFailure::Infra)?;
 
         for event in events.iter().cloned() {
-            state = C::evolve(state, event).map_err(CommandFailure::Domain)?;
+            state = C::evolve(state, event).map_err(CommandFailure::Evolve)?;
         }
 
         Ok(ExecutionResult {
@@ -484,7 +477,6 @@ where
     S: SnapshotRead<C::State, C::StreamId, Error = SErr>
         + SnapshotWrite<C::State, C::StreamId, Error = SErr>,
     P: SnapshotPolicy<C::State, C::Event>,
-    C::DomainError: From<C::Error>,
     <C::Event as CanonicalEventCodec>::Codec: EventCodec<C::Event>,
     <<C::Event as CanonicalEventCodec>::Codec as EventCodec<C::Event>>::Error: Into<SErr>,
 {
@@ -492,7 +484,7 @@ where
         self,
     ) -> Result<
         ExecutionResult<C::State, C::Event>,
-        CommandFailure<C::DomainError, CommandInfraError<SErr>>,
+        CommandFailure<C::DecideError, C::EvolveError, CommandInfraError<SErr>>,
     > {
         self.execute_result().await
     }
@@ -501,7 +493,7 @@ where
         self,
     ) -> Result<
         ExecutionResult<C::State, C::Event>,
-        CommandFailure<C::DomainError, CommandInfraError<SErr>>,
+        CommandFailure<C::DecideError, C::EvolveError, CommandInfraError<SErr>>,
     > {
         self.with_codec(C::Event::canonical_codec())
             .execute_result()
@@ -518,7 +510,6 @@ where
     S: SnapshotRead<C::State, C::StreamId, Error = SErr>
         + SnapshotWrite<C::State, C::StreamId, Error = SErr>,
     P: SnapshotPolicy<C::State, C::Event>,
-    C::DomainError: From<C::Error>,
     EC: EventCodec<C::Event>,
     EC::Error: Into<SErr>,
 {
@@ -526,7 +517,7 @@ where
         self,
     ) -> Result<
         ExecutionResult<C::State, C::Event>,
-        CommandFailure<C::DomainError, CommandInfraError<SErr>>,
+        CommandFailure<C::DecideError, C::EvolveError, CommandInfraError<SErr>>,
     > {
         self.execute_result().await
     }
@@ -535,7 +526,7 @@ where
         self,
     ) -> Result<
         ExecutionResult<C::State, C::Event>,
-        CommandFailure<C::DomainError, CommandInfraError<SErr>>,
+        CommandFailure<C::DecideError, C::EvolveError, CommandInfraError<SErr>>,
     > {
         let stream_id = self.command.stream_id();
         let snapshot = self
@@ -580,12 +571,11 @@ where
                 .map_err(Into::into)
                 .map_err(CommandInfraError::DecodeEvent)
                 .map_err(CommandFailure::Infra)?;
-            state = C::evolve(state, event).map_err(CommandFailure::Domain)?;
+            state = C::evolve(state, event).map_err(CommandFailure::Evolve)?;
         }
 
-        let Decision::Event(events) = C::decide(&state, self.command)
-            .map_err(C::DomainError::from)
-            .map_err(CommandFailure::Domain)?;
+        let Decision::Event(events) =
+            C::decide(&state, self.command).map_err(CommandFailure::Decide)?;
         let encoded_events = encode_events(&self.event_codec, &events)
             .map_err(Into::into)
             .map_err(CommandInfraError::EncodeEvent)
@@ -600,7 +590,7 @@ where
             .map_err(CommandFailure::Infra)?;
 
         for event in events.iter().cloned() {
-            state = C::evolve(state, event).map_err(CommandFailure::Domain)?;
+            state = C::evolve(state, event).map_err(CommandFailure::Evolve)?;
         }
 
         if matches!(
@@ -787,16 +777,17 @@ mod tests {
     impl CommandState for TestCommand {
         type State = TestState;
         type Event = TestEvent;
-        type DomainError = TestCommandError;
+    }
 
-        fn initial_state() -> Self::State {
+    impl Decide<TestState, TestEvent> for TestCommand {
+        type EvolveError = TestCommandError;
+        type DecideError = TestDecisionError;
+
+        fn initial_state() -> TestState {
             TestState::Missing
         }
 
-        fn evolve(
-            _state: Self::State,
-            event: Self::Event,
-        ) -> Result<Self::State, Self::DomainError> {
+        fn evolve(_state: TestState, event: TestEvent) -> Result<TestState, Self::EvolveError> {
             match event {
                 TestEvent::Registered { .. } => Ok(TestState::Present { enabled: true }),
                 TestEvent::StateChanged { enabled, .. } => Ok(TestState::Present { enabled }),
@@ -804,12 +795,11 @@ mod tests {
                 TestEvent::Broken { .. } => Err(TestCommandError::BrokenEvent),
             }
         }
-    }
 
-    impl Decide<TestState, TestEvent> for TestCommand {
-        type Error = TestDecisionError;
-
-        fn decide(state: &TestState, command: &Self) -> Result<Decision<TestEvent>, Self::Error> {
+        fn decide(
+            state: &TestState,
+            command: &Self,
+        ) -> Result<Decision<TestEvent>, Self::DecideError> {
             match (state, command.action) {
                 (TestState::Missing, TestAction::Register) => {
                     Ok(Decision::Event(NonEmpty::one(TestEvent::Registered {
@@ -1118,7 +1108,7 @@ mod tests {
 
         assert!(matches!(
             error,
-            CommandFailure::Domain(TestCommandError::BrokenEvent)
+            CommandFailure::Evolve(TestCommandError::BrokenEvent)
         ));
     }
 
@@ -1140,7 +1130,7 @@ mod tests {
 
         assert!(matches!(
             error,
-            CommandFailure::Domain(TestCommandError::AlreadyRegistered)
+            CommandFailure::Decide(TestDecisionError::AlreadyRegistered)
         ));
     }
 
