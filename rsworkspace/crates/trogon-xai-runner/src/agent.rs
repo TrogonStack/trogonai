@@ -28,7 +28,7 @@ use crate::agent_loader::{AgentConfig, AgentLoading};
 use crate::client::{FinishReason, InputItem, Message, XaiClient, XaiEvent};
 use crate::http_client::XaiHttpClient;
 use crate::session_notifier::{NatsSessionNotifier, SessionNotifier};
-use crate::session_store::{SessionSnapshot, SessionStoring, SnapshotMessage, TextBlock, now_iso};
+use crate::session_store::{MessageUsage, SessionSnapshot, SessionStoring, SnapshotMessage, TextBlock, now_iso};
 use crate::skill_loader::SkillLoading;
 
 fn internal_error(msg: impl Into<String>) -> Error {
@@ -321,6 +321,12 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
                     .filter(|s| !s.is_empty())
                     .map(|s| vec![TextBlock::new(s)])
                     .unwrap_or_default(),
+                usage: m.prompt_tokens.map(|pt| MessageUsage {
+                    input_tokens: pt as u32,
+                    output_tokens: m.completion_tokens.unwrap_or(0) as u32,
+                    cache_creation_input_tokens: 0,
+                    cache_read_input_tokens: 0,
+                }),
             })
             .collect();
 
@@ -339,6 +345,7 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
             messages,
             created_at: session.created_at_iso.clone(),
             updated_at: now_iso(),
+            agent_id: self.agent_id.clone(),
         }
     }
 
@@ -830,6 +837,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
 
         let client = Arc::clone(&self.client);
         let mut assistant_text = String::new();
+        let mut current_turn_usage: Option<(u64, u64)> = None;
         let mut canceled = false;
         let mut pending_tool_calls: Vec<(String, String)> = Vec::new();
         // ID returned by xAI for this response; saved as `last_response_id` so
@@ -977,6 +985,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
                             session_id,
                             prompt_tokens, completion_tokens, "xai: token usage"
                         );
+                        current_turn_usage = Some((prompt_tokens, completion_tokens));
                         let notif = SessionNotification::new(
                             session_id.clone(),
                             SessionUpdate::UsageUpdate(UsageUpdate::new(
@@ -1007,6 +1016,8 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
                             stale_retry_done = true;
                             // Clear any text accumulated before the error.
                             assistant_text.clear();
+                            // Clear usage captured before the error.
+                            current_turn_usage = None;
                             // Clear any pending tool calls from the failed attempt.
                             pending_tool_calls.clear();
                             // Clear response ID from the failed request.
@@ -1074,7 +1085,11 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
             if let Some(s) = sessions.get_mut(&session_id) {
                 s.history.push(Message::user(user_input));
                 if !assistant_text.is_empty() {
-                    s.history.push(Message::assistant_text(assistant_text));
+                    let assistant_msg = match current_turn_usage {
+                        Some((pt, ct)) => Message::assistant_with_usage(assistant_text, pt, ct),
+                        None => Message::assistant_text(assistant_text),
+                    };
+                    s.history.push(assistant_msg);
                 }
                 trim_history(&mut s.history, self.max_history);
                 // Only update the response ID if we received one; keep the old
@@ -3115,6 +3130,8 @@ mod tests {
         let history = vec![Message {
             role: "system".to_string(),
             content: Some("injected".to_string()),
+            prompt_tokens: None,
+            completion_tokens: None,
         }];
         agent
             .test_insert_session_with_history("bi1", "/tmp", history)
@@ -3288,6 +3305,8 @@ mod tests {
         Message {
             role: role.to_string(),
             content: Some(content.to_string()),
+            prompt_tokens: None,
+            completion_tokens: None,
         }
     }
 
@@ -4403,6 +4422,60 @@ mod tests {
         let msgs = &saves[1].messages;
         assert_eq!(msgs[0].content[0].text, "What is the answer?");
         assert_eq!(msgs[1].content[0].text, "42 is the answer.");
+    }
+
+    // ── snapshot: agent_id and message usage ─────────────────────────────────
+
+    #[tokio::test]
+    async fn snapshot_includes_agent_id_when_set() {
+        use crate::agent_loader::mock::MockAgentLoader;
+        use crate::session_store::mock::MockSessionStore;
+        use crate::session_store::SessionStoring;
+        use crate::skill_loader::mock::MockSkillLoader;
+
+        let mock_http = Arc::new(MockXaiHttpClient::new());
+        let mock_notifier = Arc::new(MockSessionNotifier::new());
+        let store = Arc::new(MockSessionStore::new());
+
+        let al = MockAgentLoader::new();
+        let sl = MockSkillLoader::new();
+
+        let agent = XaiAgent::with_deps(mock_notifier, "grok-3", "test-key", mock_http)
+            .with_loaders("agent-99", Arc::new(al), Arc::new(sl))
+            .with_session_store(Arc::clone(&store) as Arc<dyn SessionStoring>);
+
+        agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+
+        let saves = store.saves.lock().unwrap();
+        assert_eq!(saves[0].agent_id.as_deref(), Some("agent-99"));
+    }
+
+    #[tokio::test]
+    async fn prompt_stores_token_usage_in_assistant_message() {
+        let (agent, store) = make_agent_with_store();
+
+        let resp = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+        let session_id = resp.session_id.to_string();
+
+        agent.client.push_response(vec![
+            XaiEvent::TextDelta { text: "Hello!".into() },
+            XaiEvent::Usage { prompt_tokens: 42, completion_tokens: 7 },
+            XaiEvent::Done,
+        ]);
+        agent
+            .prompt(PromptRequest::new(
+                session_id.clone(),
+                vec![ContentBlock::from("Hi".to_string())],
+            ))
+            .await
+            .unwrap();
+
+        let saves = store.saves.lock().unwrap();
+        let assistant_msg = &saves[1].messages[1];
+        assert_eq!(assistant_msg.role, "assistant");
+        let usage = assistant_msg.usage.as_ref().expect("usage must be set on assistant message");
+        assert_eq!(usage.input_tokens, 42);
+        assert_eq!(usage.output_tokens, 7);
     }
 
     // ── MockSessionStore.remove ───────────────────────────────────────────────
