@@ -3,9 +3,8 @@ use std::convert::Infallible;
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::snapshot::SnapshotSchema;
 use trogon_eventsourcing::{
-    CommandExecution, CommandResult, CommandSnapshots, CommandStreamState, Decide, Decision,
-    FrequencySnapshot, NonEmpty, OccPolicy, SnapshotRead, SnapshotWrite, StreamAppend,
-    StreamCommand, StreamRead, StreamState,
+    CommandExecution, CommandResult, CommandSnapshots, WritePrecondition, Decide, Decision, FrequencySnapshot,
+    NonEmpty, OccPolicy, SnapshotRead, SnapshotWrite, StreamAppend, StreamCommand, StreamRead, StreamState,
 };
 
 use crate::{
@@ -48,8 +47,8 @@ impl StreamCommand for AddJobCommand {
         &self.spec.id
     }
 
-    fn stream_state(&self) -> Option<CommandStreamState> {
-        Some(CommandStreamState::Require(StreamState::NoStream))
+    fn write_precondition(&self) -> Option<WritePrecondition> {
+        Some(WritePrecondition::Require(StreamState::NoStream))
     }
 }
 
