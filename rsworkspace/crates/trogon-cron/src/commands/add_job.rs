@@ -138,7 +138,7 @@ pub async fn add_job<S, SErr>(
     store: &S,
     command: AddJobCommand,
     occ: Option<OccPolicy>,
-) -> CommandResult<AddJobState, JobEvent, AddJobDecisionError, Infallible, SErr>
+) -> CommandResult<AddJobCommand, SErr>
 where
     S: StreamRead<JobId, Error = SErr>
         + StreamAppend<JobId, Error = SErr>
