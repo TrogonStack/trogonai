@@ -4,7 +4,7 @@ use crate::{
     error::{CronError, JobSpecError},
     events::{
         JobDetails, JobEventDelivery, JobEventSamplingSource, JobEventSchedule, JobEventState,
-        MessageContent, MessageHeaders,
+        MessageContent, MessageHeaders, MessageSpec,
     },
 };
 use chrono::{DateTime, Utc};
@@ -20,9 +20,7 @@ pub struct JobSpec {
     pub state: JobEnabledState,
     pub schedule: ScheduleSpec,
     pub delivery: DeliverySpec,
-    pub content: MessageContent,
-    #[serde(default, skip_serializing_if = "JobHeaders::is_empty")]
-    pub headers: JobHeaders,
+    pub message: JobMessage,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -298,6 +296,13 @@ impl From<JobHeaders> for MessageHeaders {
     fn from(value: JobHeaders) -> Self {
         value.0
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct JobMessage {
+    pub content: MessageContent,
+    #[serde(default, skip_serializing_if = "JobHeaders::is_empty")]
+    pub headers: JobHeaders,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -674,9 +679,8 @@ impl JobDetails {
                 .delivery
                 .try_into()
                 .map_err(CronError::invalid_job_spec)?,
-            content: self.content,
-            headers: self
-                .headers
+            message: self
+                .message
                 .try_into()
                 .map_err(CronError::invalid_job_spec)?,
         })
@@ -689,8 +693,7 @@ impl From<JobSpec> for JobDetails {
             state: spec.state.into(),
             schedule: spec.schedule.into(),
             delivery: spec.delivery.into(),
-            content: spec.content,
-            headers: spec.headers.into(),
+            message: spec.message.into(),
         }
     }
 }
@@ -701,8 +704,36 @@ impl From<&JobSpec> for JobDetails {
             state: spec.state.into(),
             schedule: (&spec.schedule).into(),
             delivery: (&spec.delivery).into(),
-            content: spec.content.clone(),
-            headers: spec.headers.clone().into(),
+            message: (&spec.message).into(),
+        }
+    }
+}
+
+impl TryFrom<MessageSpec> for JobMessage {
+    type Error = JobSpecError;
+
+    fn try_from(value: MessageSpec) -> Result<Self, Self::Error> {
+        Ok(Self {
+            content: value.content,
+            headers: value.headers.try_into()?,
+        })
+    }
+}
+
+impl From<JobMessage> for MessageSpec {
+    fn from(value: JobMessage) -> Self {
+        Self {
+            content: value.content,
+            headers: value.headers.into(),
+        }
+    }
+}
+
+impl From<&JobMessage> for MessageSpec {
+    fn from(value: &JobMessage) -> Self {
+        Self {
+            content: value.content.clone(),
+            headers: value.headers.clone().into(),
         }
     }
 }
@@ -734,7 +765,9 @@ mod tests {
             "id": "heartbeat",
             "schedule": { "type": "every", "every_sec": 30 },
             "delivery": { "type": "nats_event", "route": "agent.run" },
-            "content": "eyJraW5kIjoiaGVhcnRiZWF0In0="
+            "message": {
+                "content": "eyJraW5kIjoiaGVhcnRiZWF0In0="
+            }
         }"#;
 
         let job: JobSpec = serde_json::from_str(raw).unwrap();
@@ -753,8 +786,10 @@ mod tests {
                 ttl_sec: Some(ttl(30)),
                 source: Some(source("sensors.latest")),
             },
-            content: MessageContent::from_static(br#"{"workflow":"compact"}"#),
-            headers: JobHeaders::new([("owner", "ops")]).unwrap(),
+            message: JobMessage {
+                content: MessageContent::from_static(br#"{"workflow":"compact"}"#),
+                headers: JobHeaders::new([("owner", "ops")]).unwrap(),
+            },
         };
 
         let json = serde_json::to_string(&job).unwrap();
@@ -774,8 +809,10 @@ mod tests {
                 ttl_sec: None,
                 source: None,
             },
-            content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
-            headers: JobHeaders::default(),
+            message: JobMessage {
+                content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
+                headers: JobHeaders::default(),
+            },
         };
 
         let json = serde_json::to_string(&job).unwrap();
@@ -797,8 +834,10 @@ mod tests {
                     ttl_sec: None,
                     source: None,
                 },
-                content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
-                headers: JobHeaders::default(),
+                message: JobMessage {
+                    content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
+                    headers: JobHeaders::default(),
+                },
             },
         );
 
@@ -820,8 +859,10 @@ mod tests {
                     subject: "jobs.latest".to_string(),
                 }),
             },
-            content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
-            headers: MessageHeaders::new([("x-kind", "heartbeat")]).unwrap(),
+            message: MessageSpec {
+                content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
+                headers: MessageHeaders::new([("x-kind", "heartbeat")]).unwrap(),
+            },
         };
 
         let job = details
@@ -839,7 +880,9 @@ mod tests {
             "id": "heartbeat",
             "schedule": { "type": "every", "every_sec": 30 },
             "delivery": { "type": "nats_event", "route": "agent.>" },
-            "content": "eyJraW5kIjoiaGVhcnRiZWF0In0="
+            "message": {
+                "content": "eyJraW5kIjoiaGVhcnRiZWF0In0="
+            }
         }))
         .unwrap_err();
 
@@ -859,7 +902,9 @@ mod tests {
                     "subject": "jobs.>"
                 }
             },
-            "content": "eyJraW5kIjoiaGVhcnRiZWF0In0="
+            "message": {
+                "content": "eyJraW5kIjoiaGVhcnRiZWF0In0="
+            }
         }))
         .unwrap_err();
 
@@ -876,7 +921,9 @@ mod tests {
                 "route": "agent.run",
                 "ttl_sec": 0
             },
-            "content": "eyJraW5kIjoiaGVhcnRiZWF0In0="
+            "message": {
+                "content": "eyJraW5kIjoiaGVhcnRiZWF0In0="
+            }
         }))
         .unwrap_err();
 
@@ -889,7 +936,9 @@ mod tests {
             "id": "heartbeat",
             "schedule": { "type": "every", "every_sec": 0 },
             "delivery": { "type": "nats_event", "route": "agent.run" },
-            "content": "eyJraW5kIjoiaGVhcnRiZWF0In0="
+            "message": {
+                "content": "eyJraW5kIjoiaGVhcnRiZWF0In0="
+            }
         }))
         .unwrap_err();
 
@@ -902,7 +951,9 @@ mod tests {
             "id": "heartbeat",
             "schedule": { "type": "cron", "expr": "not-a-cron" },
             "delivery": { "type": "nats_event", "route": "agent.run" },
-            "content": "eyJraW5kIjoiaGVhcnRiZWF0In0="
+            "message": {
+                "content": "eyJraW5kIjoiaGVhcnRiZWF0In0="
+            }
         }))
         .unwrap_err();
 
@@ -919,7 +970,9 @@ mod tests {
                 "timezone": " America/New_York "
             },
             "delivery": { "type": "nats_event", "route": "agent.run" },
-            "content": "eyJraW5kIjoiaGVhcnRiZWF0In0="
+            "message": {
+                "content": "eyJraW5kIjoiaGVhcnRiZWF0In0="
+            }
         }))
         .unwrap_err();
 
@@ -932,8 +985,10 @@ mod tests {
             "id": "heartbeat",
             "schedule": { "type": "every", "every_sec": 30 },
             "delivery": { "type": "nats_event", "route": "agent.run" },
-            "headers": [["Nats-Schedule-Target", "cron.fire.evil.target"]],
-            "content": "eyJraW5kIjoiaGVhcnRiZWF0In0="
+            "message": {
+                "headers": [["Nats-Schedule-Target", "cron.fire.evil.target"]],
+                "content": "eyJraW5kIjoiaGVhcnRiZWF0In0="
+            }
         }))
         .unwrap_err();
 
@@ -946,8 +1001,10 @@ mod tests {
             "id": "heartbeat",
             "schedule": { "type": "every", "every_sec": 30 },
             "delivery": { "type": "nats_event", "route": "agent.run" },
-            "headers": [["x-kind", "bad\nvalue"]],
-            "content": "eyJraW5kIjoiaGVhcnRiZWF0In0="
+            "message": {
+                "headers": [["x-kind", "bad\nvalue"]],
+                "content": "eyJraW5kIjoiaGVhcnRiZWF0In0="
+            }
         }))
         .unwrap_err();
 
@@ -964,8 +1021,10 @@ mod tests {
                 ttl_sec: Some(0),
                 source: None,
             },
-            content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
-            headers: MessageHeaders::default(),
+            message: MessageSpec {
+                content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
+                headers: MessageHeaders::default(),
+            },
         }
         .try_into_job_spec(job_id("heartbeat"))
         .unwrap_err();

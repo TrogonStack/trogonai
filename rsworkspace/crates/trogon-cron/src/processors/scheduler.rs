@@ -694,8 +694,8 @@ mod tests {
         reconcile_snapshot, scheduler_consumer_config,
     };
     use crate::{
-        CronJob, DeliverySpec, JobDetails, JobEnabledState, JobHeaders, JobId, JobSpec,
-        MessageContent, MessageHeaders, ScheduleSpec,
+        CronJob, DeliverySpec, JobDetails, JobEnabledState, JobHeaders, JobId, JobMessage, JobSpec,
+        MessageContent, MessageHeaders, MessageSpec, ScheduleSpec,
         events::{JobAdded, JobEvent, JobEventState, JobPaused, JobRemoved, JobResumed},
         mocks::{MockCronStore, MockLeaderLock, MockSchedulePublisher},
     };
@@ -710,8 +710,10 @@ mod tests {
             state: JobEnabledState::Enabled,
             schedule: ScheduleSpec::every(30).unwrap(),
             delivery: DeliverySpec::nats_event("agent.run").unwrap(),
-            content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
-            headers: JobHeaders::default(),
+            message: JobMessage {
+                content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
+                headers: JobHeaders::default(),
+            },
         }
     }
 
@@ -732,8 +734,10 @@ mod tests {
                 ttl_sec: None,
                 source: None,
             },
-            content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
-            headers: MessageHeaders::default(),
+            message: MessageSpec {
+                content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
+                headers: MessageHeaders::default(),
+            },
         }
     }
 

@@ -5,7 +5,7 @@ use trogon_eventsourcing::{
     CanonicalEventCodec, EventCodec, EventData, EventType, RecordedEvent, StreamEvent,
 };
 
-pub use message::{MessageContent, MessageHeaders, MessageHeadersError};
+pub use message::{MessageContent, MessageHeaders, MessageHeadersError, MessageSpec};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
@@ -55,9 +55,7 @@ pub struct JobDetails {
     pub state: JobEventState,
     pub schedule: JobEventSchedule,
     pub delivery: JobEventDelivery,
-    pub content: MessageContent,
-    #[serde(default, skip_serializing_if = "MessageHeaders::is_empty")]
-    pub headers: MessageHeaders,
+    pub message: MessageSpec,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -282,8 +280,10 @@ mod tests {
                     subject: "jobs.latest".to_string(),
                 }),
             },
-            content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
-            headers: MessageHeaders::new([("owner", "ops")]).unwrap(),
+            message: MessageSpec {
+                content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
+                headers: MessageHeaders::new([("owner", "ops")]).unwrap(),
+            },
         };
 
         let json = serde_json::to_string(&details).unwrap();
