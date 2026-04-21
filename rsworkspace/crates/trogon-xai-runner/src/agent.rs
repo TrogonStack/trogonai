@@ -514,7 +514,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
         info!(session_id, "xai: new session");
         Ok(NewSessionResponse::new(SessionId::from(session_id))
             .modes(self.session_mode_state())
-            .models(self.session_model_state(None))
+            .models(self.session_model_state(data.model.as_deref()))
             .config_options(Self::all_tool_config_options(&[])))
     }
 
@@ -563,22 +563,21 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
         let new_session_id = Uuid::new_v4().to_string();
         let inherited_model = source.model.clone();
         let inherited_tools = source.enabled_tools.clone();
+        let forked_data = XaiSessionData {
+            cwd,
+            model: inherited_model.clone(),
+            history: source.history,
+            api_key: source.api_key,
+            system_prompt: source.system_prompt,
+            enabled_tools: inherited_tools.clone(),
+            last_response_id: None,
+            created_at_secs: crate::console_session::now_secs(),
+        };
         self.session_store
-            .put(
-                &new_session_id,
-                &XaiSessionData {
-                    cwd,
-                    model: inherited_model.clone(),
-                    history: source.history,
-                    api_key: source.api_key,
-                    system_prompt: source.system_prompt,
-                    enabled_tools: inherited_tools.clone(),
-                    last_response_id: None,
-                    created_at_secs: crate::console_session::now_secs(),
-                },
-            )
+            .put(&new_session_id, &forked_data)
             .await
             .map_err(store_error)?;
+        self.write_console_session(&new_session_id, &forked_data).await;
 
         Ok(ForkSessionResponse::new(new_session_id)
             .modes(self.session_mode_state())
