@@ -240,9 +240,7 @@ mod tests {
         );
 
         let stored_job = store
-            .get_job(GetJobCommand {
-                id: "backup".to_string(),
-            })
+            .get_job(GetJobCommand::new(JobId::parse("backup").unwrap()))
             .await
             .unwrap()
             .unwrap();

@@ -193,7 +193,7 @@ impl MockCronStore {
             .jobs
             .lock()
             .unwrap()
-            .get(&command.id)
+            .get(command.id.as_str())
             .cloned()
             .map(|job| job.payload))
     }
@@ -433,7 +433,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        AddJobCommand, CronJob, DeliverySpec, GetJobCommand, JobDetails, JobEnabledState,
+        AddJobCommand, CronJob, DeliverySpec, GetJobCommand, JobDetails, JobEnabledState, JobId,
         JobEventState, JobHeaders, JobSpec, JobWriteCondition, ListJobsCommand, MessageContent,
         PauseJobCommand, RemoveJobCommand, ResumeJobCommand, ScheduleSpec, add_job, pause_job,
         remove_job, resume_job,
@@ -510,9 +510,7 @@ mod tests {
         store.seed_job(base_job("seeded"));
 
         let seeded = store
-            .get_job(GetJobCommand {
-                id: "seeded".to_string(),
-            })
+            .get_job(GetJobCommand::new(JobId::parse("seeded").unwrap()))
             .await
             .unwrap()
             .unwrap();
@@ -522,9 +520,7 @@ mod tests {
             .await
             .unwrap();
         let alpha = store
-            .get_job(GetJobCommand {
-                id: "alpha".to_string(),
-            })
+            .get_job(GetJobCommand::new(JobId::parse("alpha").unwrap()))
             .await
             .unwrap()
             .unwrap();
@@ -535,9 +531,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             store
-                .get_job(GetJobCommand {
-                    id: "alpha".to_string(),
-                })
+                .get_job(GetJobCommand::new(JobId::parse("alpha").unwrap()))
                 .await
                 .unwrap()
                 .unwrap()
@@ -561,9 +555,7 @@ mod tests {
             .unwrap();
         assert!(
             store
-                .get_job(GetJobCommand {
-                    id: "alpha".to_string(),
-                })
+                .get_job(GetJobCommand::new(JobId::parse("alpha").unwrap()))
                 .await
                 .unwrap()
                 .is_none()

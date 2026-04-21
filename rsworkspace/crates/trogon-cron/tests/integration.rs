@@ -380,9 +380,7 @@ async fn event_store_rebuilds_current_state_for_new_client() {
     let fresh = connect_store(nats).await.unwrap();
     let rebuilt = get_job(
         &fresh.cron_jobs_bucket,
-        GetJobCommand {
-            id: "eventful".to_string(),
-        },
+        GetJobCommand::new(JobId::parse("eventful").unwrap()),
     )
     .await
     .unwrap()
