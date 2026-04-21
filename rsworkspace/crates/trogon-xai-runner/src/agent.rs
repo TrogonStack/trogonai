@@ -25,10 +25,12 @@ use tokio::sync::{Mutex, oneshot};
 use tracing::{info, warn};
 use uuid::Uuid;
 
+use crate::agent_loader::{AgentLoader, AgentLoading};
 use crate::client::{FinishReason, InputItem, Message, XaiClient, XaiEvent};
 use crate::http_client::XaiHttpClient;
 use crate::session_notifier::{NatsSessionNotifier, SessionNotifier};
 use crate::session_store::{KvSessionStore, SessionStore, XaiSessionData};
+use crate::skill_loader::{SkillLoader, SkillLoading};
 
 type CancelChannels = Arc<Mutex<HashMap<String, Arc<Mutex<Option<oneshot::Sender<()>>>>>>>;
 #[cfg(feature = "test-helpers")]
@@ -118,6 +120,14 @@ pub struct XaiAgent<H = XaiClient, N = NatsSessionNotifier> {
     /// The xAI server caps its internal tool-calling loop at this value.
     /// Configured via `XAI_MAX_TURNS` (default: 10; 0 = use server default).
     max_turns: Option<u32>,
+    /// Optional console agent loader. When `CONSOLE_AGENT_ID` is set at startup,
+    /// reads skill IDs from the `CONSOLE_AGENTS` KV bucket on each new session.
+    agent_loader: Option<Arc<AgentLoader>>,
+    /// Optional console skill loader. Resolves skill IDs to formatted content
+    /// from `CONSOLE_SKILLS` / `CONSOLE_SKILL_VERSIONS` KV buckets.
+    skill_loader: Option<Arc<SkillLoader>>,
+    /// Agent ID to look up in `CONSOLE_AGENTS`. Read from `CONSOLE_AGENT_ID` env var.
+    console_agent_id: Option<String>,
 }
 
 impl XaiAgent<XaiClient, NatsSessionNotifier> {
@@ -145,14 +155,26 @@ impl XaiAgent<XaiClient, NatsSessionNotifier> {
             .map(Duration::from_secs)
             .unwrap_or(Duration::from_secs(7 * 24 * 3600));
         let js = async_nats::jetstream::new(nats.clone());
-        let store = KvSessionStore::open(js, bucket, session_ttl).await?;
-        Ok(Self::new_with_store(
-            nats,
-            acp_prefix,
-            default_model,
-            api_key,
-            Box::new(store),
-        ))
+        let store = KvSessionStore::open(js.clone(), bucket, session_ttl).await?;
+        let mut agent = Self::new_with_store(nats, acp_prefix, default_model, api_key, Box::new(store));
+
+        if let Ok(agent_id) = std::env::var("CONSOLE_AGENT_ID") {
+            if !agent_id.is_empty() {
+                match (AgentLoader::open(&js).await, SkillLoader::open(&js).await) {
+                    (Ok(al), Ok(sl)) => {
+                        info!(agent_id = %agent_id, "xai: console skills loader enabled");
+                        agent.agent_loader = Some(Arc::new(al));
+                        agent.skill_loader = Some(Arc::new(sl));
+                        agent.console_agent_id = Some(agent_id);
+                    }
+                    (Err(e), _) | (_, Err(e)) => {
+                        warn!(error = %e, "xai: failed to open console KV buckets — skills disabled");
+                    }
+                }
+            }
+        }
+
+        Ok(agent)
     }
 
     /// Internal constructor: KV-backed store + default `XaiClient` + `NatsSessionNotifier`.
@@ -269,6 +291,9 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
             system_prompt,
             max_history_messages,
             max_turns,
+            agent_loader: None,
+            skill_loader: None,
+            console_agent_id: None,
         }
     }
 
@@ -408,6 +433,20 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
             .take()
             .or_else(|| self.global_api_key.clone());
 
+        let skill_text = match (&self.agent_loader, &self.skill_loader, &self.console_agent_id) {
+            (Some(al), Some(sl), Some(id)) => {
+                let skill_ids = al.get_skill_ids(id).await;
+                sl.load(&skill_ids).await
+            }
+            _ => None,
+        };
+        let session_system_prompt = match (self.system_prompt.as_ref(), skill_text) {
+            (Some(sp), Some(sk)) => Some(format!("{sk}\n\n---\n\n{sp}")),
+            (Some(sp), None) => Some(sp.clone()),
+            (None, Some(sk)) => Some(sk),
+            (None, None) => None,
+        };
+
         self.session_store
             .put(
                 &session_id,
@@ -416,7 +455,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
                     model: None,
                     history: Vec::new(),
                     api_key,
-                    system_prompt: self.system_prompt.clone(),
+                    system_prompt: session_system_prompt,
                     enabled_tools: Vec::new(),
                     last_response_id: None,
                 },

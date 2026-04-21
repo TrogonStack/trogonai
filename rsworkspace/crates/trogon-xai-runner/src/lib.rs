@@ -1,8 +1,10 @@
 mod agent;
+mod agent_loader;
 mod client;
 mod http_client;
 mod session_notifier;
 mod session_store;
+mod skill_loader;
 
 pub use agent::XaiAgent;
 pub use client::{FinishReason, InputItem, Message, XaiClient, XaiEvent};
