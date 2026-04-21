@@ -195,9 +195,13 @@ pub struct ExecutionResult<State, Event> {
     pub state: State,
 }
 
-pub type CommandResult<State, Event, DecideError, EvolveError, InfraError> = Result<
-    ExecutionResult<State, Event>,
-    CommandFailure<DecideError, EvolveError, CommandInfraError<InfraError>>,
+pub type CommandResult<C, InfraError> = Result<
+    ExecutionResult<<C as CommandState>::State, <C as CommandState>::Event>,
+    CommandFailure<
+        <C as Decide<<C as CommandState>::State, <C as CommandState>::Event>>::DecideError,
+        <C as Decide<<C as CommandState>::State, <C as CommandState>::Event>>::EvolveError,
+        CommandInfraError<InfraError>,
+    >,
 >;
 
 #[derive(Debug)]
@@ -378,21 +382,11 @@ where
     <C::Event as CanonicalEventCodec>::Codec: EventCodec<C::Event>,
     <<C::Event as CanonicalEventCodec>::Codec as EventCodec<C::Event>>::Error: Into<SErr>,
 {
-    pub async fn execute(
-        self,
-    ) -> Result<
-        ExecutionResult<C::State, C::Event>,
-        CommandFailure<C::DecideError, C::EvolveError, CommandInfraError<SErr>>,
-    > {
+    pub async fn execute(self) -> CommandResult<C, SErr> {
         self.execute_result().await
     }
 
-    async fn execute_result(
-        self,
-    ) -> Result<
-        ExecutionResult<C::State, C::Event>,
-        CommandFailure<C::DecideError, C::EvolveError, CommandInfraError<SErr>>,
-    > {
+    async fn execute_result(self) -> CommandResult<C, SErr> {
         self.with_codec(C::Event::canonical_codec())
             .execute_result()
             .await
@@ -407,21 +401,11 @@ where
     EC: EventCodec<C::Event>,
     EC::Error: Into<SErr>,
 {
-    pub async fn execute(
-        self,
-    ) -> Result<
-        ExecutionResult<C::State, C::Event>,
-        CommandFailure<C::DecideError, C::EvolveError, CommandInfraError<SErr>>,
-    > {
+    pub async fn execute(self) -> CommandResult<C, SErr> {
         self.execute_result().await
     }
 
-    async fn execute_result(
-        self,
-    ) -> Result<
-        ExecutionResult<C::State, C::Event>,
-        CommandFailure<C::DecideError, C::EvolveError, CommandInfraError<SErr>>,
-    > {
+    async fn execute_result(self) -> CommandResult<C, SErr> {
         let stream_id = self.command.stream_id();
         let stream_read = self
             .event_store
@@ -480,21 +464,11 @@ where
     <C::Event as CanonicalEventCodec>::Codec: EventCodec<C::Event>,
     <<C::Event as CanonicalEventCodec>::Codec as EventCodec<C::Event>>::Error: Into<SErr>,
 {
-    pub async fn execute(
-        self,
-    ) -> Result<
-        ExecutionResult<C::State, C::Event>,
-        CommandFailure<C::DecideError, C::EvolveError, CommandInfraError<SErr>>,
-    > {
+    pub async fn execute(self) -> CommandResult<C, SErr> {
         self.execute_result().await
     }
 
-    async fn execute_result(
-        self,
-    ) -> Result<
-        ExecutionResult<C::State, C::Event>,
-        CommandFailure<C::DecideError, C::EvolveError, CommandInfraError<SErr>>,
-    > {
+    async fn execute_result(self) -> CommandResult<C, SErr> {
         self.with_codec(C::Event::canonical_codec())
             .execute_result()
             .await
@@ -513,21 +487,11 @@ where
     EC: EventCodec<C::Event>,
     EC::Error: Into<SErr>,
 {
-    pub async fn execute(
-        self,
-    ) -> Result<
-        ExecutionResult<C::State, C::Event>,
-        CommandFailure<C::DecideError, C::EvolveError, CommandInfraError<SErr>>,
-    > {
+    pub async fn execute(self) -> CommandResult<C, SErr> {
         self.execute_result().await
     }
 
-    async fn execute_result(
-        self,
-    ) -> Result<
-        ExecutionResult<C::State, C::Event>,
-        CommandFailure<C::DecideError, C::EvolveError, CommandInfraError<SErr>>,
-    > {
+    async fn execute_result(self) -> CommandResult<C, SErr> {
         let stream_id = self.command.stream_id();
         let snapshot = self
             .snapshots

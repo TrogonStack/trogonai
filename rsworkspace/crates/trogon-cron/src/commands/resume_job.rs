@@ -159,7 +159,7 @@ pub async fn resume_job<S, SErr>(
     store: &S,
     command: ResumeJobCommand,
     occ: Option<OccPolicy>,
-) -> CommandResult<ResumeJobState, JobEvent, ResumeJobDecisionError, ResumeJobError, SErr>
+) -> CommandResult<ResumeJobCommand, SErr>
 where
     S: StreamRead<JobId, Error = SErr>
         + StreamAppend<JobId, Error = SErr>

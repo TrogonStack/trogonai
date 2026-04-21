@@ -159,7 +159,7 @@ pub async fn pause_job<S, SErr>(
     store: &S,
     command: PauseJobCommand,
     occ: Option<OccPolicy>,
-) -> CommandResult<PauseJobState, JobEvent, PauseJobDecisionError, PauseJobError, SErr>
+) -> CommandResult<PauseJobCommand, SErr>
 where
     S: StreamRead<JobId, Error = SErr>
         + StreamAppend<JobId, Error = SErr>
