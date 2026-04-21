@@ -1,11 +1,11 @@
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
-use trogon_eventsourcing::nats::kv::SnapshotSchema;
+use trogon_eventsourcing::snapshot::SnapshotSchema;
 use trogon_eventsourcing::{
-    AlwaysSnapshot, CommandExecution, CommandResult, CommandSnapshots, CommandState,
-    CommandStreamState, Decide, Decision, NonEmpty, OccPolicy, SnapshotRead, SnapshotWrite,
-    StreamAppend, StreamCommand, StreamRead, StreamState,
+    CommandExecution, CommandResult, CommandSnapshots, CommandState, CommandStreamState, Decide,
+    Decision, FrequencySnapshot, NonEmpty, OccPolicy, SnapshotRead, SnapshotWrite, StreamAppend,
+    StreamCommand, StreamRead, StreamState,
 };
 
 use crate::{
@@ -124,14 +124,14 @@ impl CommandState for AddJobCommand {
 }
 
 impl CommandSnapshots for AddJobCommand {
-    type SnapshotPolicy = AlwaysSnapshot;
+    type SnapshotPolicy = FrequencySnapshot;
 
     fn snapshot_policy() -> Self::SnapshotPolicy {
-        AlwaysSnapshot
+        super::command_snapshot_policy()
     }
 }
 
-pub async fn run<S, SErr>(
+pub async fn add_job<S, SErr>(
     store: &S,
     command: AddJobCommand,
     occ: Option<OccPolicy>,
@@ -154,7 +154,7 @@ where
 #[cfg(test)]
 mod tests {
     use trogon_eventsourcing::{
-        CommandFailure, Decision, NonEmpty, Snapshot, decide,
+        CommandFailure, Decision, NonEmpty, decide,
         testing::{TestCase, decider, expect_error},
     };
 
@@ -281,9 +281,8 @@ mod tests {
                 AddJobState::snapshot_store_config(),
                 &JobId::parse("backup").unwrap(),
             )
-            .unwrap()
             .unwrap();
-        assert_eq!(command_snapshot, Snapshot::new(1, AddJobState::Present));
+        assert!(command_snapshot.is_none());
     }
 
     #[tokio::test]

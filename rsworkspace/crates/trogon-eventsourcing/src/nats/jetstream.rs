@@ -4,11 +4,9 @@ use std::marker::PhantomData;
 use async_nats::jetstream::{self, kv};
 use serde::{Serialize, de::DeserializeOwned};
 
-use crate::nats::kv::{
-    Snapshot, SnapshotChange, SnapshotStoreConfig, SnapshotStoreError, load_snapshot,
-    persist_snapshot_change,
-};
+use crate::nats::kv::{SnapshotStoreError, load_snapshot, persist_snapshot_change};
 use crate::nats::streams::{StreamStoreError, append_stream, read_stream_from};
+use crate::snapshot::{Snapshot, SnapshotChange, SnapshotStoreConfig};
 use crate::{
     AppendOutcome, EventData, NonEmpty, SnapshotRead, SnapshotWrite, StreamAppend, StreamRead,
     StreamReadResult, StreamState,
