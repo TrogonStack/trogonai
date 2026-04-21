@@ -8,7 +8,7 @@ use trogon_eventsourcing::{
 
 use crate::{
     JobId,
-    events::{JobAdded, JobEvent, JobEventCodec, JobPaused, JobRemoved, JobResumed},
+    events::{JobAdded, JobEvent, JobPaused, JobRemoved, JobResumed},
 };
 
 #[derive(Debug, Clone)]
@@ -52,8 +52,6 @@ impl std::fmt::Display for RemoveJobDecisionError {
         }
     }
 }
-
-impl std::error::Error for RemoveJobDecisionError {}
 
 impl StreamCommand for RemoveJobCommand {
     type StreamId = JobId;
@@ -126,7 +124,6 @@ where
     serde_json::Error: Into<SErr>,
 {
     CommandExecution::new(store, &command)
-        .with_codec(JobEventCodec)
         .with_occ(occ)
         .with_snapshot(store)
         .execute()
@@ -225,7 +222,7 @@ mod tests {
         let store = MockCronStore::new();
         store.seed_job(job("backup"));
 
-        let outcome = run(
+        let outcome = remove_job(
             &store,
             RemoveJobCommand::new(JobId::parse("backup").unwrap()),
             None,
