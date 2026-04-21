@@ -49,6 +49,7 @@ impl AcpStream {
             Self::Commands => vec![
                 format!("{p}.session.*.agent.prompt"),
                 format!("{p}.session.*.agent.cancel"),
+                format!("{p}.session.*.agent.steer"),
                 format!("{p}.session.*.agent.load"),
                 format!("{p}.session.*.agent.set_mode"),
                 format!("{p}.session.*.agent.set_config_option"),
