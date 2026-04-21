@@ -29,6 +29,12 @@ pub struct XaiSessionData {
     /// `duration_ms` when publishing to the console SESSIONS KV bucket.
     #[serde(default)]
     pub created_at_secs: u64,
+    /// Cumulative input tokens consumed across all turns in this session.
+    #[serde(default)]
+    pub total_input_tokens: u64,
+    /// Cumulative output tokens generated across all turns in this session.
+    #[serde(default)]
+    pub total_output_tokens: u64,
 }
 
 /// Persistent store for session data.

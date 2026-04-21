@@ -26,6 +26,8 @@ pub struct RawSession {
     pub created_at: String,
     pub updated_at: String,
     pub duration_ms: u64,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
 }
 
 #[derive(Serialize)]
