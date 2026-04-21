@@ -3,7 +3,9 @@ use std::sync::Arc;
 use acp_nats::acp_prefix::AcpPrefix;
 use acp_nats_agent::AgentSideNatsConnection;
 use tracing::{error, info, warn};
-use trogon_xai_runner::{AgentLoader, NatsSessionNotifier, SkillLoader, XaiAgent};
+use trogon_xai_runner::{
+    AgentLoader, NatsSessionNotifier, NatsSessionStore, SkillLoader, XaiAgent,
+};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -24,15 +26,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // If AGENT_ID is set, attach console skill loaders so skills defined in
     // trogon-console are injected into every new session's system prompt.
-    if let Ok(agent_id) = std::env::var("AGENT_ID") {
+    // Also open the SESSIONS KV bucket for session visibility in trogon-console.
+    {
         let js = async_nats::jetstream::new(nats.clone());
-        match (AgentLoader::open(&js).await, SkillLoader::open(&js).await) {
-            (Ok(al), Ok(sl)) => {
-                info!(agent_id, "xai: console skill injection enabled");
-                agent = agent.with_loaders(agent_id, Arc::new(al), Arc::new(sl));
+
+        if let Ok(agent_id) = std::env::var("AGENT_ID") {
+            match (AgentLoader::open(&js).await, SkillLoader::open(&js).await) {
+                (Ok(al), Ok(sl)) => {
+                    info!(agent_id, "xai: console skill injection enabled");
+                    agent = agent.with_loaders(agent_id, Arc::new(al), Arc::new(sl));
+                }
+                (Err(e), _) | (_, Err(e)) => {
+                    warn!(error = %e, "xai: failed to open console KV buckets — skill injection disabled");
+                }
             }
-            (Err(e), _) | (_, Err(e)) => {
-                warn!(error = %e, "xai: failed to open console KV buckets — skill injection disabled");
+        }
+
+        match NatsSessionStore::open(&js).await {
+            Ok(store) => {
+                info!("xai: session persistence enabled");
+                agent = agent.with_session_store(Arc::new(store));
+            }
+            Err(e) => {
+                warn!(error = %e, "xai: failed to open SESSIONS KV bucket — session persistence disabled");
             }
         }
     }

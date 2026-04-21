@@ -28,6 +28,7 @@ use crate::agent_loader::{AgentConfig, AgentLoading};
 use crate::client::{FinishReason, InputItem, Message, XaiClient, XaiEvent};
 use crate::http_client::XaiHttpClient;
 use crate::session_notifier::{NatsSessionNotifier, SessionNotifier};
+use crate::session_store::{SessionSnapshot, SessionStoring, SnapshotMessage, TextBlock, now_iso};
 use crate::skill_loader::SkillLoading;
 
 fn internal_error(msg: impl Into<String>) -> Error {
@@ -82,6 +83,8 @@ struct XaiSession {
     /// Wall-clock time at which this session was created. Used for LRU eviction
     /// when the session count reaches `MAX_SESSIONS`.
     created_at: Instant,
+    /// ISO 8601 timestamp captured at session creation, written to the SESSIONS KV bucket.
+    created_at_iso: String,
 }
 
 /// ACP Agent implementation backed by xAI's Grok API (Responses API).
@@ -134,6 +137,12 @@ pub struct XaiAgent<H = XaiClient, N = NatsSessionNotifier> {
     agent_loader: Option<Arc<dyn AgentLoading>>,
     /// Reads skill content from CONSOLE_SKILLS / CONSOLE_SKILL_VERSIONS.
     skill_loader: Option<Arc<dyn SkillLoading>>,
+    /// Persists session snapshots to the SESSIONS KV bucket so trogon-console
+    /// can display them. None when JetStream is not available.
+    session_store: Option<Arc<dyn SessionStoring>>,
+    /// Tenant identifier written to each session snapshot (from `TENANT_ID` env
+    /// var; defaults to `"default"`).
+    tenant_id: String,
 }
 
 impl XaiAgent<XaiClient, NatsSessionNotifier> {
@@ -233,6 +242,11 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
             Err(_) => Some(10), // unset: use app default
         };
 
+        let tenant_id = std::env::var("TENANT_ID")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "default".to_string());
+
         Self {
             notifier: Arc::new(notifier),
             client: Arc::new(client),
@@ -249,6 +263,8 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
             agent_id: None,
             agent_loader: None,
             skill_loader: None,
+            session_store: None,
+            tenant_id,
         }
     }
 
@@ -264,6 +280,66 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
         self.agent_loader = Some(agent_loader);
         self.skill_loader = Some(skill_loader);
         self
+    }
+
+    /// Attach a session store so sessions are visible in trogon-console.
+    pub fn with_session_store(mut self, store: Arc<dyn SessionStoring>) -> Self {
+        self.session_store = Some(store);
+        self
+    }
+
+    /// Build a `SessionSnapshot` from the given session for writing to the KV store.
+    fn build_snapshot(&self, session_id: &str, session: &XaiSession) -> SessionSnapshot {
+        let name = session
+            .history
+            .first()
+            .map(|m| {
+                let text = m.content_str();
+                if text.chars().count() > 60 {
+                    format!(
+                        "{}…",
+                        &text[..text
+                            .char_indices()
+                            .nth(60)
+                            .map(|(i, _)| i)
+                            .unwrap_or(text.len())]
+                    )
+                } else {
+                    text.to_string()
+                }
+            })
+            .unwrap_or_else(|| "New Conversation".to_string());
+
+        let messages = session
+            .history
+            .iter()
+            .map(|m| SnapshotMessage {
+                role: m.role.clone(),
+                content: m
+                    .content
+                    .as_deref()
+                    .filter(|s| !s.is_empty())
+                    .map(|s| vec![TextBlock::new(s)])
+                    .unwrap_or_default(),
+            })
+            .collect();
+
+        SessionSnapshot {
+            id: session_id.to_string(),
+            tenant_id: self.tenant_id.clone(),
+            name,
+            model: Some(
+                session
+                    .model
+                    .clone()
+                    .unwrap_or_else(|| self.default_model.clone()),
+            ),
+            tools: vec![],
+            memory_path: None,
+            messages,
+            created_at: session.created_at_iso.clone(),
+            updated_at: now_iso(),
+        }
     }
 
     fn session_mode_state(&self) -> SessionModeState {
@@ -429,6 +505,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
                 (self.system_prompt.clone(), None)
             };
 
+        let created_at_iso = now_iso();
         let mut sessions = self.sessions.lock().await;
         Self::maybe_evict_oldest(&mut sessions);
         sessions.insert(
@@ -442,8 +519,17 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
                 enabled_tools: Vec::new(),
                 system_prompt: session_system_prompt,
                 created_at: Instant::now(),
+                created_at_iso,
             },
         );
+
+        if let Some(store) = &self.session_store {
+            let snapshot = self.build_snapshot(
+                &session_id,
+                sessions.get(&session_id).expect("just inserted"),
+            );
+            store.save(&snapshot).await;
+        }
         drop(sessions);
 
         info!(session_id, agent_id = ?self.agent_id, "xai: new session");
@@ -516,8 +602,14 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
                 enabled_tools: inherited_tools.clone(),
                 system_prompt: inherited_system_prompt,
                 created_at: Instant::now(),
+                created_at_iso: now_iso(),
             },
         );
+
+        if let (Some(store), Some(s)) = (&self.session_store, sessions.get(&new_session_id)) {
+            let snapshot = self.build_snapshot(&new_session_id, s);
+            store.save(&snapshot).await;
+        }
         drop(sessions);
 
         Ok(ForkSessionResponse::new(new_session_id)
@@ -538,7 +630,13 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
             let _ = tx.send(());
         }
 
-        self.sessions.lock().await.remove(&session_id);
+        let mut sessions = self.sessions.lock().await;
+        if let (Some(store), Some(s)) = (&self.session_store, sessions.get(&session_id)) {
+            let snapshot = self.build_snapshot(&session_id, s);
+            store.save(&snapshot).await;
+        }
+        sessions.remove(&session_id);
+        drop(sessions);
         info!(session_id, "xai: session closed");
         Ok(CloseSessionResponse::new())
     }
@@ -986,6 +1084,10 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
                 }
             }
             // If session was closed during streaming, silently discard history update.
+            if let (Some(store), Some(s)) = (&self.session_store, sessions.get(&session_id)) {
+                let snapshot = self.build_snapshot(&session_id, s);
+                store.save(&snapshot).await;
+            }
         }
 
         Ok(PromptResponse::new(stop_reason))
@@ -1085,6 +1187,7 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
                 enabled_tools: Vec::new(),
                 system_prompt: self.system_prompt.clone(),
                 created_at: Instant::now(),
+                created_at_iso: now_iso(),
             },
         );
     }
@@ -1146,6 +1249,7 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
                 enabled_tools: Vec::new(),
                 system_prompt: self.system_prompt.clone(),
                 created_at: Instant::now(),
+                created_at_iso: now_iso(),
             },
         );
     }
@@ -1162,6 +1266,7 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
                 enabled_tools: Vec::new(),
                 system_prompt: self.system_prompt.clone(),
                 created_at: Instant::now(),
+                created_at_iso: now_iso(),
             },
         );
     }
@@ -1178,6 +1283,7 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
                 enabled_tools: Vec::new(),
                 system_prompt: self.system_prompt.clone(),
                 created_at: Instant::now(),
+                created_at_iso: now_iso(),
             },
         );
     }
@@ -3888,5 +3994,430 @@ mod tests {
     fn parse_tool_arguments_empty_string_falls_back_to_string() {
         let val = parse_tool_arguments("");
         assert_eq!(val, serde_json::Value::String(String::new()));
+    }
+
+    // ── with_loaders: skill injection ─────────────────────────────────────────
+
+    fn make_agent_with_loaders(
+        agent_id: &str,
+        skill_ids: Vec<String>,
+        system_prompt: Option<String>,
+        model_id: Option<String>,
+        skill_content: Option<(&str, &str)>, // (skill_id, content)
+    ) -> TestAgent {
+        use crate::agent_loader::mock::MockAgentLoader;
+        use crate::skill_loader::mock::MockSkillLoader;
+
+        let mock_http = Arc::new(MockXaiHttpClient::new());
+        let mock_notifier = Arc::new(MockSessionNotifier::new());
+
+        let mut al = MockAgentLoader::new();
+        al.insert_full(agent_id, skill_ids, system_prompt, model_id);
+
+        let mut sl = MockSkillLoader::new();
+        if let Some((id, content)) = skill_content {
+            sl.insert(id, content);
+        }
+
+        XaiAgent::with_deps(mock_notifier, "grok-3", "test-key", mock_http)
+            .with_loaders(agent_id, Arc::new(al), Arc::new(sl))
+    }
+
+    #[tokio::test]
+    async fn new_session_with_loaders_injects_skills_into_system_prompt() {
+        let agent = make_agent_with_loaders(
+            "agent1",
+            vec!["sk1".into()],
+            None,
+            None,
+            Some(("sk1", "Always be concise.")),
+        );
+        let resp = agent
+            .new_session(NewSessionRequest::new("/tmp"))
+            .await
+            .unwrap();
+        let session_id = resp.session_id.to_string();
+        let sessions = agent.sessions.lock().await;
+        let sp = sessions[&session_id].system_prompt.as_deref().unwrap_or("");
+        assert!(
+            sp.contains("Always be concise."),
+            "skill content missing from system prompt: {sp}"
+        );
+    }
+
+    #[tokio::test]
+    async fn new_session_with_loaders_uses_console_model() {
+        let agent = make_agent_with_loaders(
+            "agent1",
+            vec![],
+            None,
+            Some("grok-4".into()),
+            None,
+        );
+        let resp = agent
+            .new_session(NewSessionRequest::new("/tmp"))
+            .await
+            .unwrap();
+        let session_id = resp.session_id.to_string();
+        let sessions = agent.sessions.lock().await;
+        assert_eq!(
+            sessions[&session_id].model.as_deref(),
+            Some("grok-4"),
+            "console model_id should override default"
+        );
+    }
+
+    #[tokio::test]
+    async fn new_session_with_loaders_uses_console_system_prompt() {
+        let agent = make_agent_with_loaders(
+            "agent1",
+            vec![],
+            Some("You are a helpful assistant.".into()),
+            None,
+            None,
+        );
+        let resp = agent
+            .new_session(NewSessionRequest::new("/tmp"))
+            .await
+            .unwrap();
+        let session_id = resp.session_id.to_string();
+        let sessions = agent.sessions.lock().await;
+        let sp = sessions[&session_id].system_prompt.as_deref().unwrap_or("");
+        assert!(sp.contains("You are a helpful assistant."));
+    }
+
+    #[tokio::test]
+    async fn new_session_with_loaders_combines_system_prompt_and_skills() {
+        let agent = make_agent_with_loaders(
+            "agent1",
+            vec!["sk1".into()],
+            Some("You are expert.".into()),
+            None,
+            Some(("sk1", "Use metric units.")),
+        );
+        let resp = agent
+            .new_session(NewSessionRequest::new("/tmp"))
+            .await
+            .unwrap();
+        let session_id = resp.session_id.to_string();
+        let sessions = agent.sessions.lock().await;
+        let sp = sessions[&session_id].system_prompt.as_deref().unwrap_or("");
+        assert!(sp.contains("You are expert."), "system prompt missing");
+        assert!(sp.contains("Use metric units."), "skill content missing");
+    }
+
+    #[tokio::test]
+    async fn new_session_without_loaders_has_no_system_prompt() {
+        let agent = make_agent();
+        let resp = agent
+            .new_session(NewSessionRequest::new("/tmp"))
+            .await
+            .unwrap();
+        let session_id = resp.session_id.to_string();
+        let sessions = agent.sessions.lock().await;
+        assert!(sessions[&session_id].system_prompt.is_none());
+    }
+
+    // ── with_session_store ────────────────────────────────────────────────────
+
+    fn make_agent_with_store() -> (TestAgent, Arc<crate::session_store::mock::MockSessionStore>) {
+        use crate::session_store::mock::MockSessionStore;
+        use crate::session_store::SessionStoring;
+
+        let mock_http = Arc::new(MockXaiHttpClient::new());
+        let mock_notifier = Arc::new(MockSessionNotifier::new());
+        let store = Arc::new(MockSessionStore::new());
+        let agent = XaiAgent::with_deps(mock_notifier, "grok-3", "test-key", mock_http)
+            .with_session_store(Arc::clone(&store) as Arc<dyn SessionStoring>);
+        (agent, store)
+    }
+
+    #[tokio::test]
+    async fn new_session_with_store_calls_save() {
+        let (agent, store) = make_agent_with_store();
+        agent
+            .new_session(NewSessionRequest::new("/tmp"))
+            .await
+            .unwrap();
+        let saves = store.saves.lock().unwrap();
+        assert_eq!(saves.len(), 1);
+        assert_eq!(saves[0].model.as_deref(), Some("grok-3"));
+        assert_eq!(saves[0].tenant_id, "default");
+        assert!(saves[0].messages.is_empty());
+    }
+
+    #[tokio::test]
+    async fn new_session_without_store_does_not_panic() {
+        // Succeeds even without a session store configured.
+        make_agent()
+            .new_session(NewSessionRequest::new("/tmp"))
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn prompt_with_store_saves_after_turn() {
+        let (agent, store) = make_agent_with_store();
+
+        let resp = agent
+            .new_session(NewSessionRequest::new("/tmp"))
+            .await
+            .unwrap();
+        let session_id = resp.session_id.to_string();
+
+        assert_eq!(store.saves.lock().unwrap().len(), 1);
+
+        agent.client.push_response(vec![
+            XaiEvent::TextDelta {
+                text: "Hello!".into(),
+            },
+            XaiEvent::Done,
+        ]);
+        agent
+            .prompt(PromptRequest::new(
+                session_id.clone(),
+                vec![ContentBlock::from("Hi".to_string())],
+            ))
+            .await
+            .unwrap();
+
+        let saves = store.saves.lock().unwrap();
+        assert_eq!(saves.len(), 2);
+        assert_eq!(saves[1].messages.len(), 2);
+        assert_eq!(saves[1].messages[0].role, "user");
+        assert_eq!(saves[1].messages[1].role, "assistant");
+    }
+
+    #[tokio::test]
+    async fn close_session_with_store_saves_final_snapshot() {
+        let (agent, store) = make_agent_with_store();
+        let resp = agent
+            .new_session(NewSessionRequest::new("/tmp"))
+            .await
+            .unwrap();
+        let session_id = resp.session_id.to_string();
+
+        agent
+            .close_session(CloseSessionRequest::new(session_id.clone()))
+            .await
+            .unwrap();
+
+        // 1 save from new_session + 1 from close_session.
+        assert_eq!(store.saves.lock().unwrap().len(), 2);
+        assert_eq!(agent.test_session_count().await, 0);
+    }
+
+    #[tokio::test]
+    async fn session_snapshot_name_derived_from_first_user_message() {
+        let (agent, store) = make_agent_with_store();
+
+        let resp = agent
+            .new_session(NewSessionRequest::new("/tmp"))
+            .await
+            .unwrap();
+        let session_id = resp.session_id.to_string();
+
+        agent.client.push_response(vec![
+            XaiEvent::TextDelta {
+                text: "Sure!".into(),
+            },
+            XaiEvent::Done,
+        ]);
+        agent
+            .prompt(PromptRequest::new(
+                session_id.clone(),
+                vec![ContentBlock::from("What is Rust?".to_string())],
+            ))
+            .await
+            .unwrap();
+
+        let saves = store.saves.lock().unwrap();
+        assert_eq!(saves[1].name, "What is Rust?");
+    }
+
+    #[tokio::test]
+    async fn session_snapshot_name_truncated_at_60_chars() {
+        let (agent, store) = make_agent_with_store();
+
+        let resp = agent
+            .new_session(NewSessionRequest::new("/tmp"))
+            .await
+            .unwrap();
+        let session_id = resp.session_id.to_string();
+
+        agent.client.push_response(vec![XaiEvent::Done]);
+        agent
+            .prompt(PromptRequest::new(
+                session_id.clone(),
+                vec![ContentBlock::from("A".repeat(80))],
+            ))
+            .await
+            .unwrap();
+
+        let saves = store.saves.lock().unwrap();
+        let name = &saves[1].name;
+        assert!(name.chars().count() <= 62, "name too long: {name}");
+        assert!(name.ends_with('…'));
+    }
+
+    // ── fork_session with store ───────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn fork_session_with_store_saves_forked_snapshot() {
+        let (agent, store) = make_agent_with_store();
+
+        let resp = agent
+            .new_session(NewSessionRequest::new("/tmp"))
+            .await
+            .unwrap();
+        let source_id = resp.session_id.to_string();
+
+        // 1 save from new_session.
+        assert_eq!(store.saves.lock().unwrap().len(), 1);
+
+        agent
+            .fork_session(ForkSessionRequest::new(source_id.clone(), "/fork"))
+            .await
+            .unwrap();
+
+        // 2nd save from fork_session.
+        let saves = store.saves.lock().unwrap();
+        assert_eq!(saves.len(), 2);
+        // The forked session gets a distinct id from the source.
+        assert_ne!(saves[1].id, source_id);
+    }
+
+    #[tokio::test]
+    async fn fork_session_without_store_does_not_panic() {
+        let agent = make_agent();
+        let resp = agent
+            .new_session(NewSessionRequest::new("/tmp"))
+            .await
+            .unwrap();
+        agent
+            .fork_session(ForkSessionRequest::new(
+                resp.session_id.to_string(),
+                "/fork",
+            ))
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn prompt_cancel_does_not_call_store_save() {
+        let (agent, store) = make_agent_with_store();
+        let resp = agent
+            .new_session(NewSessionRequest::new("/tmp"))
+            .await
+            .unwrap();
+        let session_id = resp.session_id.to_string();
+
+        // 1 save from new_session.
+        assert_eq!(store.saves.lock().unwrap().len(), 1);
+
+        // Slow stream: emits one delta then blocks forever so cancel() can fire.
+        agent.client.push_slow_response(XaiEvent::TextDelta {
+            text: "partial".to_string(),
+        });
+
+        let prompt_fut = agent.prompt(PromptRequest::new(
+            session_id.clone(),
+            vec![ContentBlock::from("hi".to_string())],
+        ));
+        let cancel_fut = async {
+            for _ in 0..10 {
+                tokio::task::yield_now().await;
+            }
+            agent.cancel(CancelNotification::new(session_id)).await.unwrap();
+        };
+
+        let (result, _) = tokio::join!(prompt_fut, cancel_fut);
+        assert_eq!(result.unwrap().stop_reason, StopReason::Cancelled);
+
+        // Cancelled turn must not trigger an additional store.save.
+        assert_eq!(
+            store.saves.lock().unwrap().len(),
+            1,
+            "store.save must not be called for a cancelled prompt"
+        );
+    }
+
+    // ── loaders with unknown agent_id ─────────────────────────────────────────
+
+    #[tokio::test]
+    async fn new_session_with_loaders_unknown_agent_uses_runner_defaults() {
+        use crate::agent_loader::mock::MockAgentLoader;
+        use crate::skill_loader::mock::MockSkillLoader;
+
+        let mock_http = Arc::new(MockXaiHttpClient::new());
+        let mock_notifier = Arc::new(MockSessionNotifier::new());
+
+        // Loader has no entry for "agent-x" → returns empty AgentConfig.
+        let al = MockAgentLoader::new();
+        let sl = MockSkillLoader::new();
+
+        let agent =
+            XaiAgent::with_deps(mock_notifier, "grok-3", "test-key", mock_http)
+                .with_loaders("agent-x", Arc::new(al), Arc::new(sl));
+
+        let resp = agent
+            .new_session(NewSessionRequest::new("/tmp"))
+            .await
+            .unwrap();
+        let session_id = resp.session_id.to_string();
+        let sessions = agent.sessions.lock().await;
+        let s = &sessions[&session_id];
+
+        // Empty config: model falls back to None (runner picks default at prompt time).
+        assert!(s.model.is_none(), "expected no model override");
+        assert!(s.system_prompt.is_none(), "expected no system prompt");
+    }
+
+    // ── snapshot message content ──────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn prompt_with_store_snapshot_includes_message_text() {
+        let (agent, store) = make_agent_with_store();
+
+        let resp = agent
+            .new_session(NewSessionRequest::new("/tmp"))
+            .await
+            .unwrap();
+        let session_id = resp.session_id.to_string();
+
+        agent.client.push_response(vec![
+            XaiEvent::TextDelta {
+                text: "42 is the answer.".into(),
+            },
+            XaiEvent::Done,
+        ]);
+        agent
+            .prompt(PromptRequest::new(
+                session_id.clone(),
+                vec![ContentBlock::from("What is the answer?".to_string())],
+            ))
+            .await
+            .unwrap();
+
+        let saves = store.saves.lock().unwrap();
+        let msgs = &saves[1].messages;
+        assert_eq!(msgs[0].content[0].text, "What is the answer?");
+        assert_eq!(msgs[1].content[0].text, "42 is the answer.");
+    }
+
+    // ── MockSessionStore.remove ───────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn mock_session_store_remove_is_recorded() {
+        use crate::session_store::mock::MockSessionStore;
+        use crate::session_store::SessionStoring;
+
+        let store = Arc::new(MockSessionStore::new());
+        let store_dyn = Arc::clone(&store) as Arc<dyn SessionStoring>;
+        store_dyn.remove("tenant1", "sess-abc").await;
+
+        let removes = store.removes.lock().unwrap();
+        assert_eq!(removes.len(), 1);
+        assert_eq!(removes[0], ("tenant1".to_string(), "sess-abc".to_string()));
     }
 }
