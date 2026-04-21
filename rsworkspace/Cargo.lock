@@ -3451,6 +3451,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-e2e"
+version = "0.0.1"
+dependencies = [
+ "async-nats",
+ "bytes",
+ "futures-util",
+ "reqwest",
+ "serde_json",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "trogon-gateway"
 version = "0.1.0"
 dependencies = [
