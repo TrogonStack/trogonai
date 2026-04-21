@@ -8,7 +8,7 @@ use async_nats::jetstream::kv;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use serde::{Serialize, de::DeserializeOwned};
-use trogon_eventsourcing::nats::kv::{Snapshot, SnapshotStoreConfig};
+use trogon_eventsourcing::snapshot::{Snapshot, SnapshotStoreConfig};
 use trogon_eventsourcing::{
     AppendOutcome, EventData, NonEmpty, SnapshotRead, SnapshotWrite, StreamAppend, StreamRead,
     StreamReadResult, StreamState,

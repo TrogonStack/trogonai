@@ -150,20 +150,6 @@ where
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct AlwaysSnapshot;
-
-impl<State, Event> SnapshotPolicy<State, Event> for AlwaysSnapshot {
-    fn snapshot_decision(
-        &self,
-        _next_expected_version: u64,
-        _state: &State,
-        _events: &NonEmpty<Event>,
-    ) -> SnapshotDecision {
-        SnapshotDecision::Take
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct NoSnapshot;
 
 impl<State, Event> SnapshotPolicy<State, Event> for NoSnapshot {
@@ -1320,7 +1306,7 @@ mod tests {
                 .with_snapshot(Snapshots::new(
                     &runtime,
                     test_snapshot_config(),
-                    AlwaysSnapshot,
+                    FrequencySnapshot::new(NonZeroU64::MIN),
                 ))
                 .execute_result(),
         )
@@ -1335,6 +1321,8 @@ mod tests {
 
     #[test]
     fn frequency_snapshot_saves_on_matching_revision() {
+        const EVERY_THREE_REVISIONS: NonZeroU64 =
+            NonZeroU64::new(3).expect("snapshot cadence must be non-zero");
         let runtime = FakeRuntime {
             next_expected_version: 3,
             ..Default::default()
@@ -1346,7 +1334,7 @@ mod tests {
                 .with_snapshot(Snapshots::new(
                     &runtime,
                     test_snapshot_config(),
-                    FrequencySnapshot::new(NonZeroU64::new(3).unwrap()),
+                    FrequencySnapshot::new(EVERY_THREE_REVISIONS),
                 ))
                 .execute_result(),
         )
@@ -1360,6 +1348,8 @@ mod tests {
 
     #[test]
     fn frequency_snapshot_skips_non_matching_revision() {
+        const EVERY_THREE_REVISIONS: NonZeroU64 =
+            NonZeroU64::new(3).expect("snapshot cadence must be non-zero");
         let runtime = FakeRuntime {
             next_expected_version: 2,
             ..Default::default()
@@ -1371,7 +1361,7 @@ mod tests {
                 .with_snapshot(Snapshots::new(
                     &runtime,
                     test_snapshot_config(),
-                    FrequencySnapshot::new(NonZeroU64::new(3).unwrap()),
+                    FrequencySnapshot::new(EVERY_THREE_REVISIONS),
                 ))
                 .execute_result(),
         )
@@ -1412,7 +1402,7 @@ mod tests {
                 .with_snapshot(Snapshots::new(
                     &runtime,
                     test_snapshot_config(),
-                    AlwaysSnapshot,
+                    FrequencySnapshot::new(NonZeroU64::MIN),
                 ))
                 .execute_result(),
         )
