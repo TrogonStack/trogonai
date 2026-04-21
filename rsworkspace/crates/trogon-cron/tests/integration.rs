@@ -7,9 +7,9 @@ use async_nats::jetstream;
 use chrono::{Duration as ChronoDuration, Utc};
 use trogon_cron::{
     AddJobCommand, CronController, DeliveryRoute, DeliverySpec, GetJobCommand, JobEnabledState,
-    JobEventState, JobHeaders, JobId, JobSpec, MessageContent, PauseJobCommand, RemoveJobCommand,
-    SamplingSource, ScheduleSpec, TtlSeconds, add_job, connect_store, get_job, pause_job,
-    remove_job,
+    JobEventState, JobHeaders, JobId, JobMessage, JobSpec, MessageContent, PauseJobCommand,
+    RemoveJobCommand, SamplingSource, ScheduleSpec, TtlSeconds, add_job, connect_store, get_job,
+    pause_job, remove_job,
 };
 use trogon_nats::{NatsConfig, connect as nats_connect};
 
@@ -128,8 +128,10 @@ fn base_job(id: &str) -> JobSpec {
             ttl_sec: Some(TtlSeconds::new(30).unwrap()),
             source: None,
         },
-        content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
-        headers: JobHeaders::default(),
+        message: JobMessage {
+            content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
+            headers: JobHeaders::default(),
+        },
     }
 }
 

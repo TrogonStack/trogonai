@@ -433,10 +433,10 @@ mod tests {
 
     use super::*;
     use crate::{
-        AddJobCommand, CronJob, DeliverySpec, GetJobCommand, JobDetails, JobEnabledState, JobId,
-        JobEventState, JobHeaders, JobSpec, JobWriteCondition, ListJobsCommand, MessageContent,
-        PauseJobCommand, RemoveJobCommand, ResumeJobCommand, ScheduleSpec, add_job, pause_job,
-        remove_job, resume_job,
+        AddJobCommand, CronJob, DeliverySpec, GetJobCommand, JobDetails, JobEnabledState,
+        JobEventState, JobHeaders, JobId, JobMessage, JobSpec, JobWriteCondition, ListJobsCommand,
+        MessageContent, PauseJobCommand, RemoveJobCommand, ResumeJobCommand, ScheduleSpec, add_job,
+        pause_job, remove_job, resume_job,
     };
     use futures::StreamExt;
 
@@ -450,8 +450,10 @@ mod tests {
             state: JobEnabledState::Enabled,
             schedule: ScheduleSpec::every(30).unwrap(),
             delivery: DeliverySpec::nats_event("agent.run").unwrap(),
-            content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
-            headers: JobHeaders::default(),
+            message: JobMessage {
+                content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
+                headers: JobHeaders::default(),
+            },
         }
     }
 
