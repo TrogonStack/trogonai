@@ -345,15 +345,22 @@ pub async fn persist_snapshot_change<T>(
     change: SnapshotChange<T>,
 ) -> Result<(), SnapshotStoreError>
 where
-    T: Serialize,
+    T: Serialize + DeserializeOwned,
 {
     match change {
         SnapshotChange::Upsert {
             stream_id,
             snapshot,
         } => {
+            let snapshot_version = snapshot.version;
             let value = serde_json::to_vec(snapshot.as_ref())?;
-            write_kv_value(bucket, &snapshot_key(config, &stream_id), value).await?;
+            write_snapshot_value::<T>(
+                bucket,
+                &snapshot_key(config, &stream_id),
+                snapshot_version,
+                value,
+            )
+            .await?;
         }
         SnapshotChange::Delete { stream_id } => {
             delete_kv_value(bucket, &snapshot_key(config, &stream_id)).await?;
@@ -416,6 +423,46 @@ async fn write_kv_value(
     }
 
     Ok(())
+}
+
+async fn write_snapshot_value<T>(
+    bucket: &kv::Store,
+    key: &str,
+    snapshot_version: u64,
+    value: Vec<u8>,
+) -> Result<(), SnapshotStoreError>
+where
+    T: DeserializeOwned,
+{
+    if let Some(entry) = bucket.entry(key.to_string()).await.map_err(|source| {
+        SnapshotStoreError::kv_source("failed to read key-value entry for snapshot update", source)
+    })? {
+        let current = serde_json::from_slice::<Snapshot<T>>(&entry.value).map_err(|source| {
+            SnapshotStoreError::kv_source("failed to decode current snapshot entry", source)
+        })?;
+
+        if current.version >= snapshot_version {
+            return Ok(());
+        }
+
+        match bucket.update(key, value.into(), entry.revision).await {
+            Ok(_) => Ok(()),
+            Err(source) if source.kind() == kv::UpdateErrorKind::WrongLastRevision => Ok(()),
+            Err(source) => Err(SnapshotStoreError::kv_source(
+                "failed to update snapshot entry",
+                source,
+            )),
+        }
+    } else {
+        match bucket.create(key, value.into()).await {
+            Ok(_) => Ok(()),
+            Err(source) if source.kind() == kv::CreateErrorKind::AlreadyExists => Ok(()),
+            Err(source) => Err(SnapshotStoreError::kv_source(
+                "failed to create snapshot entry",
+                source,
+            )),
+        }
+    }
 }
 
 async fn delete_kv_value(bucket: &kv::Store, key: &str) -> Result<(), SnapshotStoreError> {
