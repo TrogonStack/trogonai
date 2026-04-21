@@ -354,7 +354,7 @@ async fn session_get_nonexistent_returns_404() {
 // ── Agent sessions list ───────────────────────────────────────────────────────
 
 #[tokio::test]
-async fn agent_sessions_lists_sessions_by_tenant() {
+async fn agent_sessions_lists_sessions_by_agent_id() {
     let env = start().await;
     let base = &env.base_url;
 
@@ -370,7 +370,6 @@ async fn agent_sessions_lists_sessions_by_tenant() {
     let agent: Value = resp.json().await.unwrap();
     let agent_id = agent["id"].as_str().unwrap();
 
-    // Write sessions for this agent (tenant_id = agent_id in this route)
     let sessions_kv = env.js
         .create_or_update_key_value(async_nats::jetstream::kv::Config {
             bucket: "SESSIONS".to_string(),
@@ -383,31 +382,33 @@ async fn agent_sessions_lists_sessions_by_tenant() {
     for i in 0..2u32 {
         let s = json!({
             "id": format!("sess_{i}"),
-            "tenant_id": agent_id,
+            "tenant_id": "some_tenant",
+            "agent_id": agent_id,
             "name": format!("Session {i}"),
             "messages": [],
             "created_at": "1776384000",
             "updated_at": "1776384000"
         });
-        let key = format!("{agent_id}.sess_{i}");
+        let key = format!("some_tenant.sess_{i}");
         sessions_kv.put(&key, Bytes::from(serde_json::to_vec(&s).unwrap())).await.unwrap();
     }
 
-    // Also write a session for a different tenant — should not appear
+    // Session with a different agent_id — should not appear
     let other = json!({
         "id": "sess_other",
-        "tenant_id": "other_tenant",
+        "tenant_id": "some_tenant",
+        "agent_id": "other_agent",
         "name": "Other",
         "messages": [],
         "created_at": "1776384000",
         "updated_at": "1776384000"
     });
-    sessions_kv.put("other_tenant.sess_other", Bytes::from(serde_json::to_vec(&other).unwrap())).await.unwrap();
+    sessions_kv.put("some_tenant.sess_other", Bytes::from(serde_json::to_vec(&other).unwrap())).await.unwrap();
 
     let resp = env.client.get(format!("{base}/agents/{agent_id}/sessions")).send().await.unwrap();
     assert_eq!(resp.status().as_u16(), 200);
     let list: Value = resp.json().await.unwrap();
-    assert_eq!(list.as_array().unwrap().len(), 2, "should return only sessions for this agent/tenant");
+    assert_eq!(list.as_array().unwrap().len(), 2, "should return only sessions for this agent_id");
 }
 
 // ── Environment CRUD ──────────────────────────────────────────────────────────

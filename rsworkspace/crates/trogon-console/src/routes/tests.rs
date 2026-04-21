@@ -601,7 +601,7 @@ async fn get_session_not_found() {
 }
 
 #[tokio::test]
-async fn list_agent_sessions_by_tenant() {
+async fn list_agent_sessions_by_agent_id() {
     let state = Arc::new(AppState {
         agents:       Arc::new(MockAgentStore::new()),
         skills:       Arc::new(MockSkillStore::new()),
@@ -611,7 +611,7 @@ async fn list_agent_sessions_by_tenant() {
             let store = MockSessionStore::new();
             store.insert(ConsoleSession {
                 id: "s1".to_string(),
-                tenant_id: "agent_xyz".to_string(),
+                tenant_id: "tenant_a".to_string(),
                 name: "S1".to_string(),
                 model: None,
                 status: SessionStatus::Idle,
@@ -621,13 +621,13 @@ async fn list_agent_sessions_by_tenant() {
                 cache_read_tokens: 0,
                 cache_write_tokens: 0,
                 duration_ms: 0,
-                agent_id: None,
+                agent_id: Some("agent_xyz".to_string()),
                 created_at: "1".to_string(),
                 updated_at: "1".to_string(),
             });
             store.insert(ConsoleSession {
                 id: "s2".to_string(),
-                tenant_id: "agent_other".to_string(),
+                tenant_id: "tenant_b".to_string(),
                 name: "S2".to_string(),
                 model: None,
                 status: SessionStatus::Idle,
@@ -637,7 +637,7 @@ async fn list_agent_sessions_by_tenant() {
                 cache_read_tokens: 0,
                 cache_write_tokens: 0,
                 duration_ms: 0,
-                agent_id: None,
+                agent_id: Some("agent_other".to_string()),
                 created_at: "1".to_string(),
                 updated_at: "1".to_string(),
             });
