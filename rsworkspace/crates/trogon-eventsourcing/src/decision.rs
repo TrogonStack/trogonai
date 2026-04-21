@@ -87,23 +87,25 @@ pub enum Decision<E> {
     Event(NonEmpty<E>),
 }
 
-pub trait Decide<State, Event> {
+pub trait Decide: StreamCommand + Sized {
+    type State;
+    type Event;
     type EvolveError;
     type DecideError;
 
-    fn initial_state() -> State;
+    fn initial_state() -> Self::State;
 
-    fn evolve(state: State, event: Event) -> Result<State, Self::EvolveError>;
+    fn evolve(state: Self::State, event: Self::Event) -> Result<Self::State, Self::EvolveError>;
 
-    fn decide(state: &State, command: &Self) -> Result<Decision<Event>, Self::DecideError>;
+    fn decide(
+        state: &Self::State,
+        command: &Self,
+    ) -> Result<Decision<Self::Event>, Self::DecideError>;
 }
 
-pub fn decide<State, Event, C>(
-    state: &State,
-    command: &C,
-) -> Result<Decision<Event>, C::DecideError>
+pub fn decide<C>(state: &C::State, command: &C) -> Result<Decision<C::Event>, C::DecideError>
 where
-    C: Decide<State, Event>,
+    C: Decide,
 {
     C::decide(state, command)
 }
@@ -123,22 +125,27 @@ mod tests {
         }
     }
 
-    impl Decide<u8, &'static str> for TestCommand {
+    impl Decide for TestCommand {
+        type State = u8;
+        type Event = &'static str;
         type EvolveError = ();
         type DecideError = ();
 
-        fn initial_state() -> u8 {
+        fn initial_state() -> Self::State {
             0
         }
 
-        fn evolve(state: u8, _event: &'static str) -> Result<u8, Self::EvolveError> {
+        fn evolve(
+            state: Self::State,
+            _event: Self::Event,
+        ) -> Result<Self::State, Self::EvolveError> {
             Ok(state)
         }
 
         fn decide(
-            state: &u8,
+            state: &Self::State,
             _command: &Self,
-        ) -> Result<Decision<&'static str>, Self::DecideError> {
+        ) -> Result<Decision<Self::Event>, Self::DecideError> {
             Ok(Decision::Event(NonEmpty::one(if *state == 1 {
                 "created"
             } else {

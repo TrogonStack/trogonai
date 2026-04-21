@@ -1,9 +1,8 @@
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::snapshot::SnapshotSchema;
 use trogon_eventsourcing::{
-    CommandExecution, CommandResult, CommandSnapshots, CommandState, Decide, Decision,
-    FrequencySnapshot, NonEmpty, OccPolicy, SnapshotRead, SnapshotWrite, StreamAppend,
-    StreamCommand, StreamRead,
+    CommandExecution, CommandResult, CommandSnapshots, Decide, Decision, FrequencySnapshot,
+    NonEmpty, OccPolicy, SnapshotRead, SnapshotWrite, StreamAppend, StreamCommand, StreamRead,
 };
 
 use crate::{
@@ -40,32 +39,10 @@ impl PauseJobCommand {
     }
 }
 
-impl std::fmt::Display for PauseJobDecisionError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::JobNotFound { id } => write!(f, "missing job for pause '{id}'"),
-            Self::JobDeleted { id } => write!(f, "job '{id}' was deleted and cannot be paused"),
-            Self::AlreadyPaused { id } => write!(f, "job '{id}' is already paused"),
-        }
-    }
-}
-
 #[derive(Debug)]
 pub enum PauseJobError {
     InvalidAddEventId { id: String, source: JobIdError },
 }
-
-impl std::fmt::Display for PauseJobError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::InvalidAddEventId { id, .. } => {
-                write!(f, "invalid job id '{id}' in add event while pausing job")
-            }
-        }
-    }
-}
-
-impl std::error::Error for PauseJobError {}
 
 impl StreamCommand for PauseJobCommand {
     type StreamId = JobId;
@@ -75,7 +52,9 @@ impl StreamCommand for PauseJobCommand {
     }
 }
 
-impl Decide<PauseJobState, JobEvent> for PauseJobCommand {
+impl Decide for PauseJobCommand {
+    type State = PauseJobState;
+    type Event = JobEvent;
     type EvolveError = PauseJobError;
     type DecideError = PauseJobDecisionError;
 
@@ -140,11 +119,6 @@ impl Decide<PauseJobState, JobEvent> for PauseJobCommand {
             ))),
         }
     }
-}
-
-impl CommandState for PauseJobCommand {
-    type State = PauseJobState;
-    type Event = JobEvent;
 }
 
 impl CommandSnapshots for PauseJobCommand {
