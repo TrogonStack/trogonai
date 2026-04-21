@@ -662,6 +662,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
             .put(&session_id, &session)
             .await
             .map_err(store_error)?;
+        self.write_console_session(&session_id, &session).await;
 
         info!(session_id, model = %model_id, "xai: set_session_model");
         Ok(SetSessionModelResponse::new())
@@ -1197,6 +1198,8 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
             {
                 current.history.pop();
                 let _ = self.session_store.put(&session_id, &current).await;
+                // Sync console so the phantom user message is removed (status: Idle).
+                self.write_console_session(&session_id, &current).await;
             }
         } else if !assistant_text.is_empty() || current_response_id.is_some() {
             // Re-read to preserve any concurrent model/config changes, then:
