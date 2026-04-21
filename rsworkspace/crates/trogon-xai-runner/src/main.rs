@@ -1,7 +1,9 @@
+use std::sync::Arc;
+
 use acp_nats::acp_prefix::AcpPrefix;
 use acp_nats_agent::AgentSideNatsConnection;
-use tracing::{error, info};
-use trogon_xai_runner::{NatsSessionNotifier, XaiAgent};
+use tracing::{error, info, warn};
+use trogon_xai_runner::{AgentLoader, NatsSessionNotifier, SkillLoader, XaiAgent};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -18,7 +20,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let nats = async_nats::connect(&nats_url).await?;
     let acp_prefix = AcpPrefix::new(&prefix)?;
     let notifier = NatsSessionNotifier::new(nats.clone(), acp_prefix.clone());
-    let agent = XaiAgent::new(notifier, default_model, api_key);
+    let mut agent = XaiAgent::new(notifier, default_model, api_key);
+
+    // If AGENT_ID is set, attach console skill loaders so skills defined in
+    // trogon-console are injected into every new session's system prompt.
+    if let Ok(agent_id) = std::env::var("AGENT_ID") {
+        let js = async_nats::jetstream::new(nats.clone());
+        match (AgentLoader::open(&js).await, SkillLoader::open(&js).await) {
+            (Ok(al), Ok(sl)) => {
+                info!(agent_id, "xai: console skill injection enabled");
+                agent = agent.with_loaders(agent_id, Arc::new(al), Arc::new(sl));
+            }
+            (Err(e), _) | (_, Err(e)) => {
+                warn!(error = %e, "xai: failed to open console KV buckets — skill injection disabled");
+            }
+        }
+    }
 
     let local = tokio::task::LocalSet::new();
     let result = local

@@ -24,9 +24,11 @@ use tokio::sync::{Mutex, oneshot};
 use tracing::{info, warn};
 use uuid::Uuid;
 
+use crate::agent_loader::{AgentConfig, AgentLoading};
 use crate::client::{FinishReason, InputItem, Message, XaiClient, XaiEvent};
 use crate::http_client::XaiHttpClient;
 use crate::session_notifier::{NatsSessionNotifier, SessionNotifier};
+use crate::skill_loader::SkillLoading;
 
 fn internal_error(msg: impl Into<String>) -> Error {
     Error::new(ErrorCode::InternalError.into(), msg.into())
@@ -125,6 +127,13 @@ pub struct XaiAgent<H = XaiClient, N = NatsSessionNotifier> {
     max_history: usize,
     /// Maximum agentic tool-call turns per prompt (passed to the Responses API).
     max_turns: Option<u32>,
+    /// Agent ID from `AGENT_ID` env var. When set, skills are loaded from the
+    /// console KV buckets and injected into each new session's system prompt.
+    agent_id: Option<String>,
+    /// Reads skill_ids for this agent from CONSOLE_AGENTS on session creation.
+    agent_loader: Option<Arc<dyn AgentLoading>>,
+    /// Reads skill content from CONSOLE_SKILLS / CONSOLE_SKILL_VERSIONS.
+    skill_loader: Option<Arc<dyn SkillLoading>>,
 }
 
 impl XaiAgent<XaiClient, NatsSessionNotifier> {
@@ -237,7 +246,24 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
             system_prompt,
             max_history,
             max_turns,
+            agent_id: None,
+            agent_loader: None,
+            skill_loader: None,
         }
+    }
+
+    /// Attach console skill loaders. Call this after `new()` / `with_deps()` when
+    /// `AGENT_ID` is configured so skills are injected into every new session.
+    pub fn with_loaders(
+        mut self,
+        agent_id: impl Into<String>,
+        agent_loader: Arc<dyn AgentLoading>,
+        skill_loader: Arc<dyn SkillLoading>,
+    ) -> Self {
+        self.agent_id = Some(agent_id.into());
+        self.agent_loader = Some(agent_loader);
+        self.skill_loader = Some(skill_loader);
+        self
     }
 
     fn session_mode_state(&self) -> SessionModeState {
@@ -377,24 +403,50 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
             .take()
             .or_else(|| self.global_api_key.clone());
 
+        // Load agent config from console KV when AGENT_ID is configured.
+        // Applies system_prompt, model, and skills from the agent definition.
+        let (session_system_prompt, session_model_override) =
+            if let (Some(id), Some(al), Some(sl)) =
+                (&self.agent_id, &self.agent_loader, &self.skill_loader)
+            {
+                let AgentConfig {
+                    skill_ids,
+                    system_prompt: agent_sp,
+                    model_id,
+                } = al.load_config(id).await;
+                let skills_text = sl.load(&skill_ids).await;
+
+                // Console system_prompt takes precedence over env var; skills appended last.
+                let base = agent_sp.as_deref().or(self.system_prompt.as_deref());
+                let prompt = match (base, skills_text) {
+                    (Some(sp), Some(sk)) => Some(format!("{sp}\n\n{sk}")),
+                    (None, Some(sk)) => Some(sk),
+                    (Some(sp), None) => Some(sp.to_string()),
+                    (None, None) => None,
+                };
+                (prompt, model_id)
+            } else {
+                (self.system_prompt.clone(), None)
+            };
+
         let mut sessions = self.sessions.lock().await;
         Self::maybe_evict_oldest(&mut sessions);
         sessions.insert(
             session_id.clone(),
             XaiSession {
                 cwd,
-                model: None,
+                model: session_model_override,
                 api_key,
                 history: Vec::new(),
                 last_response_id: None,
                 enabled_tools: Vec::new(),
-                system_prompt: self.system_prompt.clone(),
+                system_prompt: session_system_prompt,
                 created_at: Instant::now(),
             },
         );
         drop(sessions);
 
-        info!(session_id, "xai: new session");
+        info!(session_id, agent_id = ?self.agent_id, "xai: new session");
         Ok(NewSessionResponse::new(SessionId::from(session_id))
             .modes(self.session_mode_state())
             .models(self.session_model_state(None))
