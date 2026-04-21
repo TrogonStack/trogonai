@@ -1,12 +1,7 @@
 use crate::{
     CanonicalEventCodec, Decide, Decision, EventCodec, EventData, EventType, NonEmpty,
-    RecordedEvent, Snapshot, SnapshotSchema, SnapshotStoreConfig, StreamCommand, StreamEvent,
+    RecordedEvent, Snapshot, SnapshotSchema, SnapshotStoreConfig, StreamEvent,
 };
-
-pub trait CommandState: StreamCommand + Sized {
-    type State;
-    type Event;
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StreamState {
@@ -127,7 +122,7 @@ pub trait SnapshotPolicy<State, Event> {
     ) -> SnapshotDecision;
 }
 
-pub trait CommandSnapshots: CommandState
+pub trait CommandSnapshots: Decide
 where
     Self::State: SnapshotSchema,
 {
@@ -196,10 +191,10 @@ pub struct ExecutionResult<State, Event> {
 }
 
 pub type CommandResult<C, InfraError> = Result<
-    ExecutionResult<<C as CommandState>::State, <C as CommandState>::Event>,
+    ExecutionResult<<C as Decide>::State, <C as Decide>::Event>,
     CommandFailure<
-        <C as Decide<<C as CommandState>::State, <C as CommandState>::Event>>::DecideError,
-        <C as Decide<<C as CommandState>::State, <C as CommandState>::Event>>::EvolveError,
+        <C as Decide>::DecideError,
+        <C as Decide>::EvolveError,
         CommandInfraError<InfraError>,
     >,
 >;
@@ -246,7 +241,7 @@ impl<'a, S, P> Snapshots<'a, S, P> {
 
 pub trait IntoSnapshots<'a, C>: Sized
 where
-    C: CommandState,
+    C: Decide,
 {
     type Store;
     type Policy;
@@ -256,7 +251,7 @@ where
 
 impl<'a, C, S, P> IntoSnapshots<'a, C> for Snapshots<'a, S, P>
 where
-    C: CommandState,
+    C: Decide,
 {
     type Store = S;
     type Policy = P;
@@ -288,7 +283,7 @@ pub struct CommandExecution<'a, E, C, S = WithoutSnapshots> {
 
 impl<'a, E, C> CommandExecution<'a, E, C, WithoutSnapshots>
 where
-    C: CommandState,
+    C: Decide,
 {
     pub const fn new(event_store: &'a E, command: &'a C) -> Self {
         Self {
@@ -347,7 +342,7 @@ pub struct CommandExecutionWithCodec<'a, E, C, S, EC> {
 
 impl<'a, E, C, S, EC> CommandExecutionWithCodec<'a, E, C, S, EC>
 where
-    C: CommandState,
+    C: Decide,
 {
     pub fn with_occ<O>(mut self, occ: O) -> Self
     where
@@ -376,7 +371,7 @@ where
 
 impl<E, C, SErr> CommandExecution<'_, E, C, WithoutSnapshots>
 where
-    C: CommandState + Decide<C::State, C::Event>,
+    C: Decide,
     C::Event: EventType + StreamEvent + Clone + CanonicalEventCodec,
     E: StreamRead<C::StreamId, Error = SErr> + StreamAppend<C::StreamId, Error = SErr>,
     <C::Event as CanonicalEventCodec>::Codec: EventCodec<C::Event>,
@@ -395,7 +390,7 @@ where
 
 impl<E, C, EC, SErr> CommandExecutionWithCodec<'_, E, C, WithoutSnapshots, EC>
 where
-    C: CommandState + Decide<C::State, C::Event>,
+    C: Decide,
     C::Event: EventType + StreamEvent + Clone,
     E: StreamRead<C::StreamId, Error = SErr> + StreamAppend<C::StreamId, Error = SErr>,
     EC: EventCodec<C::Event>,
@@ -454,7 +449,7 @@ where
 
 impl<E, S, C, P, SErr> CommandExecution<'_, E, C, Snapshots<'_, S, P>>
 where
-    C: CommandState + Decide<C::State, C::Event>,
+    C: Decide,
     C::Event: EventType + StreamEvent + Clone + CanonicalEventCodec,
     C::State: Clone,
     E: StreamRead<C::StreamId, Error = SErr> + StreamAppend<C::StreamId, Error = SErr>,
@@ -477,7 +472,7 @@ where
 
 impl<E, S, C, P, SErr, EC> CommandExecutionWithCodec<'_, E, C, Snapshots<'_, S, P>, EC>
 where
-    C: CommandState + Decide<C::State, C::Event>,
+    C: Decide,
     C::Event: EventType + StreamEvent + Clone,
     C::State: Clone,
     E: StreamRead<C::StreamId, Error = SErr> + StreamAppend<C::StreamId, Error = SErr>,
@@ -607,7 +602,7 @@ mod tests {
     use serde::{Deserialize, Serialize};
 
     use super::*;
-    use crate::{CanonicalEventCodec, EventType, SnapshotSchema, StreamEvent};
+    use crate::{CanonicalEventCodec, EventType, SnapshotSchema, StreamCommand, StreamEvent};
 
     #[derive(Debug, Clone)]
     struct TestCommand {
@@ -738,12 +733,9 @@ mod tests {
         }
     }
 
-    impl CommandState for TestCommand {
+    impl Decide for TestCommand {
         type State = TestState;
         type Event = TestEvent;
-    }
-
-    impl Decide<TestState, TestEvent> for TestCommand {
         type EvolveError = TestCommandError;
         type DecideError = TestDecisionError;
 

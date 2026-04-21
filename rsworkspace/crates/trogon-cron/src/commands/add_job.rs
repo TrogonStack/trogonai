@@ -1,12 +1,10 @@
-use std::fmt;
-
 use std::convert::Infallible;
 
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::snapshot::SnapshotSchema;
 use trogon_eventsourcing::{
-    CommandExecution, CommandResult, CommandSnapshots, CommandState, CommandStreamState, Decide,
-    Decision, FrequencySnapshot, NonEmpty, OccPolicy, SnapshotRead, SnapshotWrite, StreamAppend,
+    CommandExecution, CommandResult, CommandSnapshots, CommandStreamState, Decide, Decision,
+    FrequencySnapshot, NonEmpty, OccPolicy, SnapshotRead, SnapshotWrite, StreamAppend,
     StreamCommand, StreamRead, StreamState,
 };
 
@@ -39,17 +37,6 @@ pub enum AddJobDecisionError {
     JobDeleted { id: JobId },
 }
 
-impl fmt::Display for AddJobDecisionError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::AlreadyExists { id } => write!(f, "job '{id}' already exists"),
-            Self::JobDeleted { id } => {
-                write!(f, "job '{id}' was deleted and cannot be added again")
-            }
-        }
-    }
-}
-
 impl AddJobCommand {
     pub fn new(spec: JobSpec) -> Result<Self, CronError> {
         ResolvedJobSpec::try_from(&CronJob::from((
@@ -80,7 +67,9 @@ impl StreamCommand for AddJobCommand {
     }
 }
 
-impl Decide<AddJobState, JobEvent> for AddJobCommand {
+impl Decide for AddJobCommand {
+    type State = AddJobState;
+    type Event = JobEvent;
     type EvolveError = Infallible;
     type DecideError = AddJobDecisionError;
 
@@ -119,11 +108,6 @@ impl Decide<AddJobState, JobEvent> for AddJobCommand {
             }),
         }
     }
-}
-
-impl CommandState for AddJobCommand {
-    type State = AddJobState;
-    type Event = JobEvent;
 }
 
 impl CommandSnapshots for AddJobCommand {
