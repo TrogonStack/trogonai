@@ -1,4 +1,4 @@
-use crate::execution::CommandStreamState;
+use crate::execution::WritePrecondition;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Act;
@@ -8,7 +8,7 @@ pub trait StreamCommand {
 
     fn stream_id(&self) -> &Self::StreamId;
 
-    fn stream_state(&self) -> Option<CommandStreamState> {
+    fn write_precondition(&self) -> Option<WritePrecondition> {
         None
     }
 }

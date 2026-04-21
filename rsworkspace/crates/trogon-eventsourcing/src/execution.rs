@@ -27,7 +27,7 @@ pub enum OccPolicy {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CommandStreamState {
+pub enum WritePrecondition {
     Prefer(StreamState),
     Require(StreamState),
 }
@@ -35,18 +35,18 @@ pub enum CommandStreamState {
 pub const fn resolve_stream_state(
     occ: Option<OccPolicy>,
     current_version: Option<u64>,
-    command_stream_state: Option<CommandStreamState>,
+    write_precondition: Option<WritePrecondition>,
 ) -> StreamState {
-    if let Some(CommandStreamState::Require(stream_state)) = command_stream_state {
+    if let Some(WritePrecondition::Require(stream_state)) = write_precondition {
         return stream_state;
     }
 
     match occ {
         Some(OccPolicy::ExactCurrentVersion) => StreamState::from_current_version(current_version),
         Some(OccPolicy::Explicit(stream_state)) => stream_state,
-        None => match command_stream_state {
-            Some(CommandStreamState::Prefer(stream_state)) => stream_state,
-            Some(CommandStreamState::Require(stream_state)) => stream_state,
+        None => match write_precondition {
+            Some(WritePrecondition::Prefer(stream_state)) => stream_state,
+            Some(WritePrecondition::Require(stream_state)) => stream_state,
             None => StreamState::from_current_version(current_version),
         },
     }
@@ -426,8 +426,7 @@ where
             .map_err(Into::into)
             .map_err(CommandInfraError::EncodeEvent)
             .map_err(CommandFailure::Infra)?;
-        let stream_state =
-            resolve_stream_state(self.occ, current_version, self.command.stream_state());
+        let stream_state = resolve_stream_state(self.occ, current_version, self.command.write_precondition());
         let append_outcome = self
             .event_store
             .append_events(stream_id, stream_state, encoded_events)
@@ -539,8 +538,7 @@ where
             .map_err(Into::into)
             .map_err(CommandInfraError::EncodeEvent)
             .map_err(CommandFailure::Infra)?;
-        let stream_state =
-            resolve_stream_state(self.occ, current_version, self.command.stream_state());
+        let stream_state = resolve_stream_state(self.occ, current_version, self.command.write_precondition());
         let append_outcome = self
             .event_store
             .append_events(stream_id, stream_state, encoded_events)
@@ -608,7 +606,7 @@ mod tests {
     struct TestCommand {
         id: String,
         action: TestAction,
-        stream_state: Option<CommandStreamState>,
+        write_precondition: Option<WritePrecondition>,
         stream_id_calls: Arc<AtomicUsize>,
     }
 
@@ -700,18 +698,18 @@ mod tests {
             Self {
                 id: id.to_string(),
                 action,
-                stream_state: None,
+                write_precondition: None,
                 stream_id_calls: Arc::new(AtomicUsize::new(0)),
             }
         }
 
-        fn with_default_stream_state(mut self, stream_state: StreamState) -> Self {
-            self.stream_state = Some(CommandStreamState::Prefer(stream_state));
+        fn with_preferred_write_precondition(mut self, stream_state: StreamState) -> Self {
+            self.write_precondition = Some(WritePrecondition::Prefer(stream_state));
             self
         }
 
-        fn with_required_stream_state(mut self, stream_state: StreamState) -> Self {
-            self.stream_state = Some(CommandStreamState::Require(stream_state));
+        fn with_required_write_precondition(mut self, stream_state: StreamState) -> Self {
+            self.write_precondition = Some(WritePrecondition::Require(stream_state));
             self
         }
 
@@ -728,8 +726,8 @@ mod tests {
             &self.id
         }
 
-        fn stream_state(&self) -> Option<CommandStreamState> {
-            self.stream_state
+        fn write_precondition(&self) -> Option<WritePrecondition> {
+            self.write_precondition
         }
     }
 
@@ -1162,8 +1160,8 @@ mod tests {
             next_expected_version: 1,
             ..Default::default()
         };
-        let command = TestCommand::new("alpha", TestAction::Register)
-            .with_default_stream_state(StreamState::StreamExists);
+        let command =
+            TestCommand::new("alpha", TestAction::Register).with_preferred_write_precondition(StreamState::StreamExists);
 
         let _ = block_on(CommandExecution::new(&runtime, &command).execute_result()).unwrap();
 
@@ -1179,8 +1177,8 @@ mod tests {
             next_expected_version: 1,
             ..Default::default()
         };
-        let command = TestCommand::new("alpha", TestAction::Register)
-            .with_default_stream_state(StreamState::StreamExists);
+        let command =
+            TestCommand::new("alpha", TestAction::Register).with_preferred_write_precondition(StreamState::StreamExists);
 
         let _ = block_on(
             CommandExecution::new(&runtime, &command)
@@ -1208,8 +1206,8 @@ mod tests {
             next_expected_version: 8,
             ..Default::default()
         };
-        let command = TestCommand::new("alpha", TestAction::Remove)
-            .with_default_stream_state(StreamState::StreamExists);
+        let command =
+            TestCommand::new("alpha", TestAction::Remove).with_preferred_write_precondition(StreamState::StreamExists);
 
         let _ = block_on(
             CommandExecution::new(&runtime, &command)
@@ -1230,8 +1228,7 @@ mod tests {
             next_expected_version: 1,
             ..Default::default()
         };
-        let command = TestCommand::new("alpha", TestAction::Register)
-            .with_required_stream_state(StreamState::NoStream);
+        let command = TestCommand::new("alpha", TestAction::Register).with_required_write_precondition(StreamState::NoStream);
 
         let _ = block_on(
             CommandExecution::new(&runtime, &command)
