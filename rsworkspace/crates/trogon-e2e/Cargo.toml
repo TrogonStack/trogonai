@@ -1,0 +1,17 @@
+[package]
+name = "trogon-e2e"
+version = "0.0.1"
+edition = "2024"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+async-nats    = { workspace = true, features = ["jetstream", "kv"] }
+bytes         = { workspace = true }
+futures-util  = { workspace = true }
+reqwest       = { workspace = true, features = ["json"] }
+serde_json    = { workspace = true }
+tokio         = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
+uuid          = { workspace = true, features = ["v4"] }
