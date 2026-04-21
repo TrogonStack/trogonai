@@ -37,9 +37,7 @@ async fn client_register_then_get() {
         .unwrap();
 
     let got = store
-        .get_job(GetJobCommand {
-            id: "backup".to_string(),
-        })
+        .get_job(GetJobCommand::new(JobId::parse("backup").unwrap()))
         .await
         .unwrap();
     assert_eq!(got, Some(expected_job("backup")));
@@ -57,9 +55,7 @@ async fn client_pause_job_toggles_job() {
         .unwrap();
 
     let got = store
-        .get_job(GetJobCommand {
-            id: "toggle".to_string(),
-        })
+        .get_job(GetJobCommand::new(JobId::parse("toggle").unwrap()))
         .await
         .unwrap()
         .unwrap();
@@ -86,9 +82,7 @@ async fn client_remove_and_list_jobs_use_store_paths() {
 
     assert!(
         store
-            .get_job(GetJobCommand {
-                id: "beta".to_string(),
-            })
+            .get_job(GetJobCommand::new(JobId::parse("beta").unwrap()))
             .await
             .unwrap()
             .is_none()
