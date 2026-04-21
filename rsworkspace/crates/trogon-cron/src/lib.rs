@@ -24,8 +24,8 @@ pub mod mocks;
 
 pub use commands::domain::{
     CronExpression, DeliveryRoute, DeliverySpec, EverySeconds, JobEnabledState, JobHeaders, JobId,
-    JobIdError, JobSpec, SamplingSource, SamplingSubject, ScheduleSpec, ScheduleTimezone,
-    TtlSeconds,
+    JobIdError, JobMessage, JobSpec, SamplingSource, SamplingSubject, ScheduleSpec,
+    ScheduleTimezone, TtlSeconds,
 };
 pub use commands::{
     AddJobCommand, AddJobDecisionError, AddJobState, PauseJobCommand, PauseJobDecisionError,
@@ -38,7 +38,7 @@ pub use error::{CronError, JobSpecError};
 pub use events::{
     JobAdded, JobDetails, JobEvent, JobEventCodec, JobEventData, JobEventDelivery,
     JobEventSamplingSource, JobEventSchedule, JobEventState, JobPaused, JobRemoved, JobResumed,
-    MessageContent, MessageHeaders, MessageHeadersError, RecordedJobEvent,
+    MessageContent, MessageHeaders, MessageHeadersError, MessageSpec, RecordedJobEvent,
 };
 pub use nats::NatsSchedulePublisher;
 pub use processors::CronController;
