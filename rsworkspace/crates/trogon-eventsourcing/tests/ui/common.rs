@@ -35,24 +35,24 @@ impl StreamCommand for TestCommand {
 impl CommandState for TestCommand {
     type State = TestState;
     type Event = TestEvent;
-    type DomainError = TestDomainError;
+}
 
-    fn initial_state() -> Self::State {
+impl Decide<TestState, TestEvent> for TestCommand {
+    type EvolveError = TestDomainError;
+    type DecideError = TestDecisionError;
+
+    fn initial_state() -> TestState {
         TestState::Missing
     }
 
-    fn evolve(state: Self::State, event: Self::Event) -> Result<Self::State, Self::DomainError> {
+    fn evolve(state: TestState, event: TestEvent) -> Result<TestState, Self::EvolveError> {
         match (state, event) {
             (TestState::Missing, TestEvent::Registered) => Ok(TestState::Present),
             (TestState::Present, TestEvent::Registered) => Err(TestDomainError::InvalidHistory),
         }
     }
-}
 
-impl Decide<TestState, TestEvent> for TestCommand {
-    type Error = TestDecisionError;
-
-    fn decide(state: &TestState, _command: &Self) -> Result<Decision<TestEvent>, Self::Error> {
+    fn decide(state: &TestState, _command: &Self) -> Result<Decision<TestEvent>, Self::DecideError> {
         match state {
             TestState::Missing => Ok(Decision::Event(NonEmpty::one(TestEvent::Registered))),
             TestState::Present => Err(TestDecisionError::AlreadyRegistered),
