@@ -433,26 +433,29 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
             .take()
             .or_else(|| self.global_api_key.clone());
 
-        let skill_text = match (&self.agent_loader, &self.skill_loader, &self.console_agent_id) {
-            (Some(al), Some(sl), Some(id)) => {
-                let skill_ids = al.get_skill_ids(id).await;
-                sl.load(&skill_ids).await
-            }
-            _ => None,
-        };
-        let session_system_prompt = match (self.system_prompt.as_ref(), skill_text) {
-            (Some(sp), Some(sk)) => Some(format!("{sk}\n\n---\n\n{sp}")),
-            (Some(sp), None) => Some(sp.clone()),
-            (None, Some(sk)) => Some(sk),
-            (None, None) => None,
-        };
+        let (session_model, skill_text, agent_system_prompt) =
+            match (&self.agent_loader, &self.skill_loader, &self.console_agent_id) {
+                (Some(al), Some(sl), Some(id)) => {
+                    let cfg = al.get_agent_config(id).await;
+                    let skill_text = sl.load(&cfg.skill_ids).await;
+                    (cfg.model_id, skill_text, cfg.system_prompt)
+                }
+                _ => (None, None, None),
+            };
+
+        // Build the combined system prompt: skills → agent prompt → global env prompt.
+        // Each layer is separated by "---" only when both sides are non-empty.
+        let session_system_prompt = [skill_text, agent_system_prompt, self.system_prompt.clone()]
+            .into_iter()
+            .flatten()
+            .reduce(|acc, next| format!("{acc}\n\n---\n\n{next}"));
 
         self.session_store
             .put(
                 &session_id,
                 &XaiSessionData {
                     cwd,
-                    model: None,
+                    model: session_model,
                     history: Vec::new(),
                     api_key,
                     system_prompt: session_system_prompt,
