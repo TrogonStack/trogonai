@@ -670,8 +670,14 @@ fn process_sse_line(
             } else {
                 &val["usage"]
             };
-            let p = usage["prompt_tokens"].as_u64().unwrap_or(0);
-            let c = usage["completion_tokens"].as_u64().unwrap_or(0);
+            let p = usage["prompt_tokens"]
+                .as_u64()
+                .or_else(|| usage["input_tokens"].as_u64())
+                .unwrap_or(0);
+            let c = usage["completion_tokens"]
+                .as_u64()
+                .or_else(|| usage["output_tokens"].as_u64())
+                .unwrap_or(0);
             if p > 0 || c > 0 {
                 pending.push_back(XaiEvent::Usage {
                     prompt_tokens: p,
@@ -734,8 +740,14 @@ fn process_sse_line(
             } else {
                 &val["usage"]
             };
-            let p = usage["prompt_tokens"].as_u64().unwrap_or(0);
-            let c = usage["completion_tokens"].as_u64().unwrap_or(0);
+            let p = usage["prompt_tokens"]
+                .as_u64()
+                .or_else(|| usage["input_tokens"].as_u64())
+                .unwrap_or(0);
+            let c = usage["completion_tokens"]
+                .as_u64()
+                .or_else(|| usage["output_tokens"].as_u64())
+                .unwrap_or(0);
             if p > 0 || c > 0 {
                 pending.push_back(XaiEvent::Usage {
                     prompt_tokens: p,

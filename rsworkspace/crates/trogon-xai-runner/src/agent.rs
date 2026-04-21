@@ -371,6 +371,8 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
             created_at: crate::console_session::secs_to_iso8601(data.created_at_secs),
             updated_at: crate::console_session::secs_to_iso8601(now),
             duration_ms: now.saturating_sub(data.created_at_secs) * 1000,
+            input_tokens: data.total_input_tokens,
+            output_tokens: data.total_output_tokens,
         };
 
         let key = format!("{tenant_id}.{session_id}");
@@ -504,6 +506,8 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
             enabled_tools: Vec::new(),
             last_response_id: None,
             created_at_secs,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
         };
         self.session_store
             .put(&session_id, &data)
@@ -572,6 +576,8 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
             enabled_tools: inherited_tools.clone(),
             last_response_id: None,
             created_at_secs: crate::console_session::now_secs(),
+            total_input_tokens: 0,
+            total_output_tokens: 0,
         };
         self.session_store
             .put(&new_session_id, &forked_data)
@@ -846,6 +852,8 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
         let client = Arc::clone(&self.client);
         let mut assistant_text = String::new();
         let mut canceled = false;
+        let mut turn_input_tokens: u64 = 0;
+        let mut turn_output_tokens: u64 = 0;
         // Set when xAI returns an error event. We break out of the loop instead
         // of returning immediately so the compensation path below can remove the
         // orphaned user message before we propagate the error.
@@ -1022,6 +1030,8 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
                             session_id,
                             prompt_tokens, completion_tokens, "xai: token usage"
                         );
+                        turn_input_tokens = prompt_tokens;
+                        turn_output_tokens = completion_tokens;
                         // UsageUpdate(used, size): used = tokens currently in context
                         // (prompt_tokens from xAI = full input sent this turn);
                         // size = 0 because the model's context window limit is not
@@ -1225,6 +1235,8 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
                 if let Some(resp_id) = current_response_id {
                     current.last_response_id = Some(resp_id);
                 }
+                current.total_input_tokens += turn_input_tokens;
+                current.total_output_tokens += turn_output_tokens;
                 self.session_store
                     .put(&session_id, &current)
                     .await
