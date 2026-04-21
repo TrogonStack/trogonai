@@ -11,7 +11,7 @@ use trogon_eventsourcing::{
 use crate::{
     CronJob, JobId, JobSpec, ResolvedJobSpec,
     error::CronError,
-    events::{JobAdded, JobDetails, JobEvent, JobEventCodec, JobPaused, JobRemoved, JobResumed},
+    events::{JobAdded, JobDetails, JobEvent, JobPaused, JobRemoved, JobResumed},
 };
 
 #[derive(Debug, Clone)]
@@ -47,8 +47,6 @@ impl fmt::Display for AddJobDecisionError {
         }
     }
 }
-
-impl std::error::Error for AddJobDecisionError {}
 
 impl AddJobCommand {
     pub fn new(spec: JobSpec) -> Result<Self, CronError> {
@@ -144,7 +142,6 @@ where
     serde_json::Error: Into<SErr>,
 {
     CommandExecution::new(store, &command)
-        .with_codec(JobEventCodec)
         .with_occ(occ)
         .with_snapshot(store)
         .execute()
@@ -255,7 +252,7 @@ mod tests {
     async fn run_registers_job_in_store() {
         let store = MockCronStore::new();
 
-        let outcome = run(&store, AddJobCommand::new(job("backup")).unwrap(), None)
+        let outcome = add_job(&store, AddJobCommand::new(job("backup")).unwrap(), None)
             .await
             .unwrap();
         assert_eq!(outcome.next_expected_version, 1);
@@ -289,11 +286,11 @@ mod tests {
     async fn run_rejects_adding_existing_job_with_domain_error() {
         let store = MockCronStore::new();
 
-        run(&store, AddJobCommand::new(job("backup")).unwrap(), None)
+        add_job(&store, AddJobCommand::new(job("backup")).unwrap(), None)
             .await
             .unwrap();
 
-        let error = run(&store, AddJobCommand::new(job("backup")).unwrap(), None)
+        let error = add_job(&store, AddJobCommand::new(job("backup")).unwrap(), None)
             .await
             .unwrap_err();
 
@@ -308,7 +305,7 @@ mod tests {
     async fn run_rejects_adding_deleted_job_id() {
         let store = MockCronStore::new();
 
-        run(&store, AddJobCommand::new(job("backup")).unwrap(), None)
+        add_job(&store, AddJobCommand::new(job("backup")).unwrap(), None)
             .await
             .unwrap();
         crate::remove_job(
@@ -319,7 +316,7 @@ mod tests {
         .await
         .unwrap();
 
-        let error = run(&store, AddJobCommand::new(job("backup")).unwrap(), None)
+        let error = add_job(&store, AddJobCommand::new(job("backup")).unwrap(), None)
             .await
             .unwrap_err();
 

@@ -1,7 +1,9 @@
 mod message;
 
 use serde::{Deserialize, Serialize};
-use trogon_eventsourcing::{EventCodec, EventData, EventType, RecordedEvent, StreamEvent};
+use trogon_eventsourcing::{
+    CanonicalEventCodec, EventCodec, EventData, EventType, RecordedEvent, StreamEvent,
+};
 
 pub use message::{MessageContent, MessageHeaders, MessageHeadersError};
 
@@ -173,6 +175,14 @@ impl EventType for JobEvent {
             Self::JobResumed(event) => event.event_type(),
             Self::JobRemoved(event) => event.event_type(),
         }
+    }
+}
+
+impl CanonicalEventCodec for JobEvent {
+    type Codec = JobEventCodec;
+
+    fn canonical_codec() -> Self::Codec {
+        JobEventCodec
     }
 }
 

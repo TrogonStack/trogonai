@@ -36,6 +36,12 @@ pub trait EventCodec<T> {
     fn decode(&self, value: &str) -> Result<T, Self::Error>;
 }
 
+pub trait CanonicalEventCodec: Sized {
+    type Codec: EventCodec<Self>;
+
+    fn canonical_codec() -> Self::Codec;
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct JsonEventCodec;
 

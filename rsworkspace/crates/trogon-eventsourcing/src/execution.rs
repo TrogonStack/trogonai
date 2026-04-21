@@ -1,6 +1,6 @@
 use crate::{
-    Decide, Decision, EventCodec, EventData, EventType, JsonEventCodec, NonEmpty, RecordedEvent,
-    Snapshot, SnapshotSchema, SnapshotStoreConfig, StreamCommand, StreamEvent,
+    CanonicalEventCodec, Decide, Decision, EventCodec, EventData, EventType, NonEmpty,
+    RecordedEvent, Snapshot, SnapshotSchema, SnapshotStoreConfig, StreamCommand, StreamEvent,
 };
 
 pub trait CommandState: StreamCommand + Sized {
@@ -284,7 +284,6 @@ pub struct CommandExecution<'a, E, C, S = WithoutSnapshots> {
     command: &'a C,
     occ: Option<OccPolicy>,
     snapshots: S,
-    event_codec: JsonEventCodec,
 }
 
 impl<'a, E, C> CommandExecution<'a, E, C, WithoutSnapshots>
@@ -297,7 +296,6 @@ where
             command,
             occ: None,
             snapshots: WithoutSnapshots,
-            event_codec: JsonEventCodec,
         }
     }
 
@@ -313,7 +311,6 @@ where
             command: self.command,
             occ: self.occ,
             snapshots: snapshots.into_snapshots(),
-            event_codec: self.event_codec,
         }
     }
 }
@@ -380,11 +377,11 @@ where
 impl<E, C, SErr> CommandExecution<'_, E, C, WithoutSnapshots>
 where
     C: CommandState + Decide<C::State, C::Event>,
-    C::Event: EventType + StreamEvent + Clone,
+    C::Event: EventType + StreamEvent + Clone + CanonicalEventCodec,
     E: StreamRead<C::StreamId, Error = SErr> + StreamAppend<C::StreamId, Error = SErr>,
     C::DomainError: From<C::Error>,
-    JsonEventCodec: EventCodec<C::Event>,
-    <JsonEventCodec as EventCodec<C::Event>>::Error: Into<SErr>,
+    <C::Event as CanonicalEventCodec>::Codec: EventCodec<C::Event>,
+    <<C::Event as CanonicalEventCodec>::Codec as EventCodec<C::Event>>::Error: Into<SErr>,
 {
     pub async fn execute(
         self,
@@ -401,8 +398,9 @@ where
         ExecutionResult<C::State, C::Event>,
         CommandFailure<C::DomainError, CommandInfraError<SErr>>,
     > {
-        let event_codec = self.event_codec;
-        self.with_codec(event_codec).execute_result().await
+        self.with_codec(C::Event::canonical_codec())
+            .execute_result()
+            .await
     }
 }
 
@@ -480,15 +478,15 @@ where
 impl<E, S, C, P, SErr> CommandExecution<'_, E, C, Snapshots<'_, S, P>>
 where
     C: CommandState + Decide<C::State, C::Event>,
-    C::Event: EventType + StreamEvent + Clone,
+    C::Event: EventType + StreamEvent + Clone + CanonicalEventCodec,
     C::State: Clone,
     E: StreamRead<C::StreamId, Error = SErr> + StreamAppend<C::StreamId, Error = SErr>,
     S: SnapshotRead<C::State, C::StreamId, Error = SErr>
         + SnapshotWrite<C::State, C::StreamId, Error = SErr>,
     P: SnapshotPolicy<C::State, C::Event>,
     C::DomainError: From<C::Error>,
-    JsonEventCodec: EventCodec<C::Event>,
-    <JsonEventCodec as EventCodec<C::Event>>::Error: Into<SErr>,
+    <C::Event as CanonicalEventCodec>::Codec: EventCodec<C::Event>,
+    <<C::Event as CanonicalEventCodec>::Codec as EventCodec<C::Event>>::Error: Into<SErr>,
 {
     pub async fn execute(
         self,
@@ -505,8 +503,9 @@ where
         ExecutionResult<C::State, C::Event>,
         CommandFailure<C::DomainError, CommandInfraError<SErr>>,
     > {
-        let event_codec = self.event_codec;
-        self.with_codec(event_codec).execute_result().await
+        self.with_codec(C::Event::canonical_codec())
+            .execute_result()
+            .await
     }
 }
 
@@ -654,7 +653,7 @@ mod tests {
     use serde::{Deserialize, Serialize};
 
     use super::*;
-    use crate::{EventType, SnapshotSchema, StreamEvent};
+    use crate::{CanonicalEventCodec, EventType, SnapshotSchema, StreamEvent};
 
     #[derive(Debug, Clone)]
     struct TestCommand {
@@ -860,6 +859,14 @@ mod tests {
                 Self::Removed { .. } => "removed",
                 Self::Broken { .. } => "broken",
             }
+        }
+    }
+
+    impl CanonicalEventCodec for TestEvent {
+        type Codec = crate::JsonEventCodec;
+
+        fn canonical_codec() -> Self::Codec {
+            crate::JsonEventCodec
         }
     }
 

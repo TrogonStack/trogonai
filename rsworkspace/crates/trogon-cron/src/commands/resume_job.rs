@@ -8,7 +8,7 @@ use trogon_eventsourcing::{
 
 use crate::{
     JobEnabledState, JobId, JobIdError,
-    events::{JobAdded, JobEvent, JobEventCodec, JobPaused, JobRemoved, JobResumed},
+    events::{JobAdded, JobEvent, JobPaused, JobRemoved, JobResumed},
 };
 
 #[derive(Debug, Clone)]
@@ -182,7 +182,6 @@ where
     serde_json::Error: Into<SErr>,
 {
     CommandExecution::new(store, &command)
-        .with_codec(JobEventCodec)
         .with_occ(occ)
         .with_snapshot(store)
         .execute()
@@ -353,7 +352,7 @@ mod tests {
         let store = MockCronStore::new();
         store.seed_job(paused_job("backup"));
 
-        let outcome = run(
+        let outcome = resume_job(
             &store,
             ResumeJobCommand::new(JobId::parse("backup").unwrap()),
             None,
