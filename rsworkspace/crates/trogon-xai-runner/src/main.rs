@@ -56,16 +56,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     );
 
     let nats = async_nats::connect(&nats_url).await?;
-
+    let js_ctx = async_nats::jetstream::new(nats.clone());
+    let js = trogon_nats::jetstream::NatsJetStreamClient::new(js_ctx);
     let acp_prefix = AcpPrefix::new(&prefix)?;
+
+    acp_nats::jetstream::provision::provision_streams(&js, &acp_prefix)
+        .await
+        .map_err(|e| format!("failed to provision JetStream streams: {e}"))?;
+
     let agent = XaiAgent::new(nats.clone(), acp_prefix.clone(), default_model, api_key).await?;
 
     let local = tokio::task::LocalSet::new();
     let result = local
         .run_until(async {
-            let (_conn, io_task) = AgentSideNatsConnection::new(agent, nats, acp_prefix, |fut| {
-                tokio::task::spawn_local(fut);
-            });
+            let (_conn, io_task) =
+                AgentSideNatsConnection::with_jetstream(agent, nats, js, acp_prefix, |fut| {
+                    tokio::task::spawn_local(fut);
+                });
             info!("xai-runner listening on NATS");
             tokio::select! {
                 result = io_task => result,
