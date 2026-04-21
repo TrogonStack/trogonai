@@ -1,7 +1,7 @@
 #![cfg_attr(coverage, allow(dead_code, unused_imports))]
 
 use async_nats::jetstream::{self, kv};
-use trogon_eventsourcing::jetstream::JetStreamStore;
+use trogon_eventsourcing::nats::jetstream::JetStreamStore;
 
 use crate::{
     error::CronError,
