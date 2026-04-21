@@ -58,6 +58,7 @@ pub trait CredentialRepository: Send + Sync + 'static {
 pub trait SessionRepository: Send + Sync + 'static {
     fn list(&self) -> BoxFuture<'_, Res<Vec<ConsoleSession>>>;
     fn list_by_tenant<'a>(&'a self, tenant_id: &'a str) -> BoxFuture<'a, Res<Vec<ConsoleSession>>>;
+    fn list_by_agent_id<'a>(&'a self, agent_id: &'a str) -> BoxFuture<'a, Res<Vec<ConsoleSession>>>;
     fn get<'a>(
         &'a self,
         tenant_id: &'a str,

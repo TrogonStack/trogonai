@@ -371,6 +371,18 @@ impl SessionRepository for MockSessionStore {
         Box::pin(ready(Ok(sessions)))
     }
 
+    fn list_by_agent_id<'a>(&'a self, agent_id: &'a str) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<ConsoleSession>, String>> + Send + 'a>> {
+        fail_if!(self);
+        let sessions: Vec<_> = self.sessions
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|s| s.agent_id.as_deref() == Some(agent_id))
+            .cloned()
+            .collect();
+        Box::pin(ready(Ok(sessions)))
+    }
+
     fn get<'a>(&'a self, tenant_id: &'a str, session_id: &'a str) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<ConsoleSession>, String>> + Send + 'a>> {
         fail_if!(self);
         let key = format!("{tenant_id}.{session_id}");

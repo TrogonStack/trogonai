@@ -112,6 +112,6 @@ pub async fn list_agent_sessions(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<impl IntoResponse, AppError> {
-    let sessions = state.sessions.list_by_tenant(&id).await.map_err(AppError::Store)?;
+    let sessions = state.sessions.list_by_agent_id(&id).await.map_err(AppError::Store)?;
     Ok(Json(sessions))
 }
