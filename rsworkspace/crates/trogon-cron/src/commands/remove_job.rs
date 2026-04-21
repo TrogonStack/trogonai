@@ -120,7 +120,7 @@ pub async fn remove_job<S, SErr>(
     store: &S,
     command: RemoveJobCommand,
     occ: Option<OccPolicy>,
-) -> CommandResult<RemoveJobState, JobEvent, RemoveJobDecisionError, Infallible, SErr>
+) -> CommandResult<RemoveJobCommand, SErr>
 where
     S: StreamRead<JobId, Error = SErr>
         + StreamAppend<JobId, Error = SErr>
