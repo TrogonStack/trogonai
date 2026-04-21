@@ -1,3 +1,5 @@
+use std::convert::Infallible;
+
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::snapshot::SnapshotSchema;
 use trogon_eventsourcing::{
@@ -6,7 +8,7 @@ use trogon_eventsourcing::{
 };
 
 use crate::{
-    JobEnabledState, JobId, JobIdError,
+    JobEnabledState, JobId,
     events::{JobAdded, JobEvent, JobPaused, JobRemoved, JobResumed},
 };
 
@@ -39,11 +41,6 @@ impl PauseJobCommand {
     }
 }
 
-#[derive(Debug)]
-pub enum PauseJobError {
-    InvalidAddEventId { id: String, source: JobIdError },
-}
-
 impl StreamCommand for PauseJobCommand {
     type StreamId = JobId;
 
@@ -55,7 +52,7 @@ impl StreamCommand for PauseJobCommand {
 impl Decide for PauseJobCommand {
     type State = PauseJobState;
     type Event = JobEvent;
-    type EvolveError = PauseJobError;
+    type EvolveError = Infallible;
     type DecideError = PauseJobDecisionError;
 
     fn initial_state() -> PauseJobState {
@@ -64,14 +61,10 @@ impl Decide for PauseJobCommand {
 
     fn evolve(state: PauseJobState, event: JobEvent) -> Result<PauseJobState, Self::EvolveError> {
         match event {
-            JobEvent::JobAdded(JobAdded { id, job }) => {
+            JobEvent::JobAdded(JobAdded { job, .. }) => {
                 if matches!(state, PauseJobState::Deleted) {
                     return Ok(PauseJobState::Deleted);
                 }
-                JobId::parse(&id).map_err(|source| PauseJobError::InvalidAddEventId {
-                    id: id.clone(),
-                    source,
-                })?;
                 Ok(PauseJobState::Present {
                     current: job.state.into(),
                 })
