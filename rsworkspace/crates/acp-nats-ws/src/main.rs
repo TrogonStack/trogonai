@@ -43,6 +43,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .spawn(move || run_connection_thread(manager_rx, nats_client, js_client, ws_config.acp))?;
 
     let state = AppState {
+        bind_host: ws_config.host,
         manager_tx,
         shutdown_tx: shutdown_tx.clone(),
     };
@@ -208,6 +209,7 @@ mod tests {
     use axum::http::{Request, StatusCode};
     use futures_util::{SinkExt, StreamExt};
     use serde_json::Value;
+    use std::net::{IpAddr, Ipv4Addr};
     use std::time::Duration;
     use tokio::net::TcpListener;
     use tokio_tungstenite::connect_async;
@@ -303,6 +305,7 @@ mod tests {
         let (manager_tx, manager_rx) = mpsc::unbounded_channel::<ManagerRequest>();
         let conn_thread = spawn_connection_thread(nats_mock, manager_rx);
         let app = test_app(AppState {
+            bind_host: IpAddr::V4(Ipv4Addr::LOCALHOST),
             manager_tx,
             shutdown_tx: shutdown_tx.clone(),
         });
@@ -321,6 +324,7 @@ mod tests {
         let (manager_tx, manager_rx) = mpsc::unbounded_channel::<ManagerRequest>();
         let conn_thread = spawn_connection_thread(nats_mock, manager_rx);
         let app = test_app(AppState {
+            bind_host: IpAddr::V4(Ipv4Addr::LOCALHOST),
             manager_tx,
             shutdown_tx: shutdown_tx.clone(),
         });
@@ -347,6 +351,7 @@ mod tests {
     fn sse_events(body: &str) -> Vec<Value> {
         body.lines()
             .filter_map(|line| line.strip_prefix("data: "))
+            .filter(|json| !json.is_empty())
             .map(|json| serde_json::from_str(json).unwrap())
             .collect()
     }

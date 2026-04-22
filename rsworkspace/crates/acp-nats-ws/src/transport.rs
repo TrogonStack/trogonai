@@ -10,20 +10,22 @@ use axum::extract::FromRequestParts;
 use axum::extract::Request;
 use axum::extract::State;
 use axum::extract::ws::{WebSocket, WebSocketUpgrade};
-use axum::http::header::{ACCEPT, CONTENT_TYPE};
-use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use axum::http::header::{ACCEPT, CONTENT_TYPE, HOST, ORIGIN};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri, uri::Authority};
 use axum::response::sse::{Event, Sse};
 use axum::response::{IntoResponse, Response};
-use futures_util::stream;
+use futures_util::{StreamExt, stream};
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::convert::Infallible;
+use std::net::IpAddr;
 use std::rc::Rc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use tokio::sync::{mpsc, oneshot, watch};
 use tracing::{error, info, warn};
 use trogon_std::time::SystemClock;
+use uuid::Uuid;
 
 const HTTP_CHANNEL_CAPACITY: usize = 64;
 
@@ -33,6 +35,7 @@ type SseReceiver = mpsc::Receiver<SseFrame>;
 
 #[derive(Clone)]
 pub struct AppState {
+    pub bind_host: IpAddr,
     pub manager_tx: mpsc::UnboundedSender<ManagerRequest>,
     pub shutdown_tx: watch::Sender<bool>,
 }
@@ -103,6 +106,10 @@ pub enum HttpTransportError {
         message: &'static str,
         source: Option<BoxError>,
     },
+    Forbidden {
+        message: &'static str,
+        source: Option<BoxError>,
+    },
     UnsupportedMediaType {
         message: &'static str,
         source: Option<BoxError>,
@@ -139,6 +146,7 @@ impl HttpTransportError {
             Self::BadRequest { message, .. }
             | Self::NotFound { message, .. }
             | Self::Conflict { message, .. }
+            | Self::Forbidden { message, .. }
             | Self::UnsupportedMediaType { message, .. }
             | Self::NotAcceptable { message, .. }
             | Self::NotImplemented { message, .. }
@@ -151,6 +159,7 @@ impl HttpTransportError {
             Self::BadRequest { source, .. }
             | Self::NotFound { source, .. }
             | Self::Conflict { source, .. }
+            | Self::Forbidden { source, .. }
             | Self::UnsupportedMediaType { source, .. }
             | Self::NotAcceptable { source, .. }
             | Self::NotImplemented { source, .. }
@@ -188,6 +197,23 @@ impl HttpTransportError {
         Self::Conflict {
             message,
             source: None,
+        }
+    }
+
+    fn forbidden(message: &'static str) -> Self {
+        Self::Forbidden {
+            message,
+            source: None,
+        }
+    }
+
+    fn forbidden_with(
+        message: &'static str,
+        source: impl std::error::Error + Send + 'static,
+    ) -> Self {
+        Self::Forbidden {
+            message,
+            source: Some(Box::new(source)),
         }
     }
 
@@ -234,6 +260,7 @@ impl HttpTransportError {
             Self::BadRequest { .. } => StatusCode::BAD_REQUEST,
             Self::NotFound { .. } => StatusCode::NOT_FOUND,
             Self::Conflict { .. } => StatusCode::CONFLICT,
+            Self::Forbidden { .. } => StatusCode::FORBIDDEN,
             Self::UnsupportedMediaType { .. } => StatusCode::UNSUPPORTED_MEDIA_TYPE,
             Self::NotAcceptable { .. } => StatusCode::NOT_ACCEPTABLE,
             Self::NotImplemented { .. } => StatusCode::NOT_IMPLEMENTED,
@@ -273,13 +300,40 @@ pub enum HttpConnectionCommand {
 
 #[derive(Clone, Debug)]
 pub(crate) enum SseFrame {
-    Json(String),
+    Empty {
+        event_id: String,
+    },
+    Json {
+        event_id: Option<String>,
+        json: String,
+    },
 }
 
 impl SseFrame {
+    fn prime() -> Self {
+        Self::Empty {
+            event_id: Uuid::new_v4().to_string(),
+        }
+    }
+
+    fn json(json: String) -> Self {
+        Self::Json {
+            event_id: Some(Uuid::new_v4().to_string()),
+            json,
+        }
+    }
+
     fn into_event(self) -> Event {
         match self {
-            Self::Json(json) => Event::default().data(json),
+            Self::Empty { event_id } => Event::default().id(event_id).data(""),
+            Self::Json { event_id, json } => {
+                let event = Event::default().data(json);
+                if let Some(event_id) = event_id {
+                    event.id(event_id)
+                } else {
+                    event
+                }
+            }
         }
     }
 }
@@ -464,17 +518,26 @@ fn dispatch_to_get_listeners(
             .get_mut(session_id)
             .expect("session listeners must exist after presence check");
         let mut delivered = false;
-        listeners.retain(|listener| match listener.try_send(frame.clone()) {
-            Ok(()) => {
-                delivered = true;
-                true
+        let mut retained = Vec::with_capacity(listeners.len());
+
+        for listener in listeners.drain(..) {
+            if delivered {
+                retained.push(listener);
+                continue;
             }
-            Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
-                warn!(session_id = %session_id, "Dropping stalled HTTP SSE listener");
-                false
+
+            match listener.try_send(frame.clone()) {
+                Ok(()) => {
+                    delivered = true;
+                    retained.push(listener);
+                }
+                Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                    warn!(session_id = %session_id, "Dropping stalled HTTP SSE listener");
+                }
+                Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {}
             }
-            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => false,
-        });
+        }
+        *listeners = retained;
 
         (
             if delivered {
@@ -564,6 +627,10 @@ fn route_buffered_frame(
 }
 
 pub async fn get(State(state): State<AppState>, request: Request) -> Response {
+    if let Err(error) = validate_origin(request.headers(), state.bind_host) {
+        return error.into_response();
+    }
+
     if is_websocket_request(request.headers()) {
         let (mut parts, _body) = request.into_parts();
         match WebSocketUpgrade::from_request_parts(&mut parts, &state).await {
@@ -581,6 +648,10 @@ pub async fn get(State(state): State<AppState>, request: Request) -> Response {
 }
 
 pub async fn post(headers: HeaderMap, State(state): State<AppState>, body: String) -> Response {
+    if let Err(error) = validate_origin(&headers, state.bind_host) {
+        return error.into_response();
+    }
+
     match http_post(headers, state, body).await {
         Ok(response) => response,
         Err(error) => error.into_response(),
@@ -588,6 +659,10 @@ pub async fn post(headers: HeaderMap, State(state): State<AppState>, body: Strin
 }
 
 pub async fn delete(headers: HeaderMap, State(state): State<AppState>) -> Response {
+    if let Err(error) = validate_origin(&headers, state.bind_host) {
+        return error.into_response();
+    }
+
     match http_delete(headers, state).await {
         Ok(response) => response,
         Err(error) => error.into_response(),
@@ -861,6 +936,52 @@ fn media_type_matches(header_value: &str, expected: &str) -> bool {
         .is_some_and(|media_type| media_type.eq_ignore_ascii_case(expected))
 }
 
+fn validate_origin(headers: &HeaderMap, bind_host: IpAddr) -> Result<(), HttpTransportError> {
+    let Some(origin) = headers.get(ORIGIN) else {
+        return Ok(());
+    };
+
+    let origin = origin
+        .to_str()
+        .map_err(|error| HttpTransportError::forbidden_with("invalid Origin header", error))?;
+    let origin = origin
+        .parse::<Uri>()
+        .map_err(|error| HttpTransportError::forbidden_with("invalid Origin header", error))?;
+    let Some(origin_host) = origin.host() else {
+        return Err(HttpTransportError::forbidden("invalid Origin header"));
+    };
+
+    let request_host = headers
+        .get(HOST)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<Authority>().ok())
+        .map(|authority| authority.host().to_owned());
+
+    let allowed = if bind_host.is_loopback() {
+        is_loopback_host(origin_host)
+    } else if bind_host.is_unspecified() {
+        is_loopback_host(origin_host)
+            || request_host
+                .as_deref()
+                .is_some_and(|host| host.eq_ignore_ascii_case(origin_host))
+    } else {
+        origin_host.eq_ignore_ascii_case(&bind_host.to_string())
+            || request_host
+                .as_deref()
+                .is_some_and(|host| host.eq_ignore_ascii_case(origin_host))
+    };
+
+    if allowed {
+        Ok(())
+    } else {
+        Err(HttpTransportError::forbidden("Origin is not allowed"))
+    }
+}
+
+fn is_loopback_host(host: &str) -> bool {
+    matches!(host, "localhost" | "127.0.0.1" | "::1" | "[::1]")
+}
+
 fn parse_connection_id_header(
     headers: &HeaderMap,
 ) -> Result<Option<AcpConnectionId>, HttpTransportError> {
@@ -947,13 +1068,16 @@ fn build_sse_response(
     session_id: Option<acp_nats::AcpSessionId>,
     stream: SseReceiver,
 ) -> Response {
-    let mut response = Sse::new(stream::unfold(stream, |mut stream| async move {
-        stream
-            .recv()
-            .await
-            .map(|item| (Ok::<Event, Infallible>(item.into_event()), stream))
-    }))
-    .into_response();
+    let primed_stream =
+        stream::once(async { Ok::<Event, Infallible>(SseFrame::prime().into_event()) }).chain(
+            stream::unfold(stream, |mut stream| async move {
+                stream
+                    .recv()
+                    .await
+                    .map(|item| (Ok::<Event, Infallible>(item.into_event()), stream))
+            }),
+        );
+    let mut response = Sse::new(primed_stream).into_response();
     set_transport_headers(
         response.headers_mut(),
         &connection_id,
@@ -973,8 +1097,8 @@ fn build_buffered_sse_response(
     events: Vec<SseFrame>,
 ) -> Response {
     let stream = stream::iter(
-        events
-            .into_iter()
+        std::iter::once(SseFrame::prime())
+            .chain(events)
             .map(|item| Ok::<Event, Infallible>(item.into_event())),
     );
     let mut response = Sse::new(stream).into_response();
@@ -1260,7 +1384,7 @@ pub async fn run_http_connection<N, J>(
                     break;
                 };
 
-                let frame = SseFrame::Json(outbound.clone());
+                let frame = SseFrame::json(outbound.clone());
                 let parsed = OutgoingHttpMessage::parse(&outbound);
 
                 if let Some(pending) = pending_request.as_mut() {
@@ -1517,7 +1641,9 @@ mod tests {
     use acp_nats::Config;
     use axum::body::{Body, to_bytes};
     use axum::http::Request as HttpRequest;
+    use axum::http::header::{HOST, ORIGIN};
     use serde_json::{Value, json};
+    use std::net::{IpAddr, Ipv4Addr};
     use tokio::sync::{mpsc, oneshot, watch};
     use trogon_nats::AdvancedMockNatsClient;
 
@@ -1581,6 +1707,7 @@ mod tests {
         let (shutdown_tx, _) = watch::channel(false);
         (
             AppState {
+                bind_host: IpAddr::V4(Ipv4Addr::LOCALHOST),
                 manager_tx,
                 shutdown_tx,
             },
@@ -1593,8 +1720,16 @@ mod tests {
         let body = String::from_utf8(bytes.to_vec()).unwrap();
         body.lines()
             .filter_map(|line| line.strip_prefix("data: "))
+            .filter(|json| !json.is_empty())
             .map(|json| serde_json::from_str(json).unwrap())
             .collect()
+    }
+
+    fn frame_json(frame: &SseFrame) -> &str {
+        match frame {
+            SseFrame::Json { json, .. } => json,
+            SseFrame::Empty { .. } => panic!("expected JSON SSE frame"),
+        }
     }
 
     fn post_headers() -> HeaderMap {
@@ -1631,6 +1766,10 @@ mod tests {
             (
                 HttpTransportError::conflict("conflict"),
                 StatusCode::CONFLICT,
+            ),
+            (
+                HttpTransportError::forbidden("forbidden"),
+                StatusCode::FORBIDDEN,
             ),
             (
                 HttpTransportError::unsupported_media_type("unsupported"),
@@ -1670,6 +1809,15 @@ mod tests {
             "conflict"
         );
         assert!(HttpTransportError::conflict("conflict").source().is_none());
+        assert_eq!(
+            HttpTransportError::forbidden("forbidden").to_string(),
+            "forbidden"
+        );
+        assert!(
+            HttpTransportError::forbidden("forbidden")
+                .source()
+                .is_none()
+        );
         assert!(
             HttpTransportError::unsupported_media_type("unsupported")
                 .source()
@@ -1787,14 +1935,11 @@ mod tests {
 
     #[test]
     fn route_live_frame_keeps_same_session_notifications_on_post_stream() {
-        let frame = SseFrame::Json(
+        let frame = SseFrame::json(
             r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-1"}}"#
                 .to_string(),
         );
-        let parsed = OutgoingHttpMessage::parse(match &frame {
-            SseFrame::Json(json) => json,
-        })
-        .unwrap();
+        let parsed = OutgoingHttpMessage::parse(frame_json(&frame)).unwrap();
         let request_id = RequestId::Number(1);
         let request_session_id = session_id();
         let (live_tx, mut live_rx) = mpsc::channel(HTTP_CHANNEL_CAPACITY);
@@ -1813,7 +1958,8 @@ mod tests {
 
         assert!(matches!(outcome, LiveFrameOutcome::Keep));
         match live_rx.try_recv().unwrap() {
-            SseFrame::Json(json) => assert!(json.contains(r#""sessionId":"session-1""#)),
+            SseFrame::Json { json, .. } => assert!(json.contains(r#""sessionId":"session-1""#)),
+            SseFrame::Empty { .. } => panic!("expected JSON SSE frame"),
         }
         assert!(matches!(
             get_rx.try_recv(),
@@ -1823,14 +1969,11 @@ mod tests {
 
     #[test]
     fn route_live_frame_sends_other_session_notifications_to_get_listeners() {
-        let frame = SseFrame::Json(
+        let frame = SseFrame::json(
             r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-2"}}"#
                 .to_string(),
         );
-        let parsed = OutgoingHttpMessage::parse(match &frame {
-            SseFrame::Json(json) => json,
-        })
-        .unwrap();
+        let parsed = OutgoingHttpMessage::parse(frame_json(&frame)).unwrap();
         let request_id = RequestId::Number(1);
         let request_session_id = session_id();
         let other_session_id = acp_nats::AcpSessionId::new("session-2").unwrap();
@@ -1854,20 +1997,18 @@ mod tests {
             Err(tokio::sync::mpsc::error::TryRecvError::Empty)
         ));
         match get_rx.try_recv().unwrap() {
-            SseFrame::Json(json) => assert!(json.contains(r#""sessionId":"session-2""#)),
+            SseFrame::Json { json, .. } => assert!(json.contains(r#""sessionId":"session-2""#)),
+            SseFrame::Empty { .. } => panic!("expected JSON SSE frame"),
         }
     }
 
     #[test]
     fn route_buffered_frame_sends_other_session_notifications_to_get_listeners() {
-        let frame = SseFrame::Json(
+        let frame = SseFrame::json(
             r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-2"}}"#
                 .to_string(),
         );
-        let parsed = OutgoingHttpMessage::parse(match &frame {
-            SseFrame::Json(json) => json,
-        })
-        .unwrap();
+        let parsed = OutgoingHttpMessage::parse(frame_json(&frame)).unwrap();
         let request_id = RequestId::Number(1);
         let other_session_id = acp_nats::AcpSessionId::new("session-2").unwrap();
         let (get_tx, mut get_rx) = mpsc::channel(HTTP_CHANNEL_CAPACITY);
@@ -1886,7 +2027,8 @@ mod tests {
         assert!(matches!(outcome, BufferedFrameOutcome::Routed));
         assert!(events.is_empty());
         match get_rx.try_recv().unwrap() {
-            SseFrame::Json(json) => assert!(json.contains(r#""sessionId":"session-2""#)),
+            SseFrame::Json { json, .. } => assert!(json.contains(r#""sessionId":"session-2""#)),
+            SseFrame::Empty { .. } => panic!("expected JSON SSE frame"),
         }
     }
 
@@ -1896,21 +2038,43 @@ mod tests {
         let mut get_listeners = HashMap::new();
         let (listener_tx, mut listener_rx) = mpsc::channel(1);
         listener_tx
-            .try_send(SseFrame::Json(
+            .try_send(SseFrame::json(
                 r#"{"jsonrpc":"2.0","method":"session/update"}"#.to_string(),
             ))
             .unwrap();
         get_listeners.insert(session_id.clone(), vec![listener_tx]);
 
-        let frame = SseFrame::Json(r#"{"jsonrpc":"2.0","method":"session/update"}"#.to_string());
+        let frame = SseFrame::json(r#"{"jsonrpc":"2.0","method":"session/update"}"#.to_string());
         let outcome = dispatch_to_get_listeners(&frame, &session_id, &mut get_listeners);
 
         assert!(matches!(outcome, ListenerDispatch::Dropped));
         assert!(!get_listeners.contains_key(&session_id));
-        assert!(matches!(listener_rx.try_recv(), Ok(SseFrame::Json(_))));
+        assert!(matches!(listener_rx.try_recv(), Ok(SseFrame::Json { .. })));
         assert!(matches!(
             listener_rx.try_recv(),
             Err(tokio::sync::mpsc::error::TryRecvError::Disconnected)
+        ));
+    }
+
+    #[test]
+    fn dispatch_to_get_listeners_delivers_each_message_on_only_one_stream() {
+        let session_id = session_id();
+        let mut get_listeners = HashMap::new();
+        let (first_tx, mut first_rx) = mpsc::channel(HTTP_CHANNEL_CAPACITY);
+        let (second_tx, mut second_rx) = mpsc::channel(HTTP_CHANNEL_CAPACITY);
+        get_listeners.insert(session_id.clone(), vec![first_tx, second_tx]);
+
+        let frame = SseFrame::json(
+            r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-1"}}"#
+                .to_string(),
+        );
+        let outcome = dispatch_to_get_listeners(&frame, &session_id, &mut get_listeners);
+
+        assert!(matches!(outcome, ListenerDispatch::Delivered));
+        assert!(matches!(first_rx.try_recv(), Ok(SseFrame::Json { .. })));
+        assert!(matches!(
+            second_rx.try_recv(),
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty)
         ));
     }
 
@@ -1968,6 +2132,41 @@ mod tests {
             validate_get_headers(&invalid_get),
             Err(HttpTransportError::NotAcceptable {
                 message: "Accept must include text/event-stream",
+                source: None,
+            })
+        ));
+    }
+
+    #[test]
+    fn validate_origin_allows_loopback_and_matching_hosts() {
+        let mut loopback = HeaderMap::new();
+        loopback.insert(ORIGIN, HeaderValue::from_static("http://localhost:3000"));
+        assert!(validate_origin(&loopback, IpAddr::V4(Ipv4Addr::LOCALHOST)).is_ok());
+
+        let mut proxied = HeaderMap::new();
+        proxied.insert(ORIGIN, HeaderValue::from_static("https://example.com"));
+        proxied.insert(HOST, HeaderValue::from_static("example.com"));
+        assert!(validate_origin(&proxied, IpAddr::V4(Ipv4Addr::UNSPECIFIED)).is_ok());
+    }
+
+    #[test]
+    fn validate_origin_rejects_invalid_and_remote_origins() {
+        let mut invalid = HeaderMap::new();
+        invalid.insert(ORIGIN, HeaderValue::from_static("not a uri"));
+        assert!(matches!(
+            validate_origin(&invalid, IpAddr::V4(Ipv4Addr::LOCALHOST)),
+            Err(HttpTransportError::Forbidden {
+                message: "invalid Origin header",
+                source: Some(_),
+            })
+        ));
+
+        let mut remote = HeaderMap::new();
+        remote.insert(ORIGIN, HeaderValue::from_static("https://evil.example"));
+        assert!(matches!(
+            validate_origin(&remote, IpAddr::V4(Ipv4Addr::LOCALHOST)),
+            Err(HttpTransportError::Forbidden {
+                message: "Origin is not allowed",
                 source: None,
             })
         ));
@@ -2227,7 +2426,7 @@ mod tests {
                         connection_id: expected_connection_id,
                         protocol_version: Some(ProtocolVersion::V0),
                         session_id: Some(expected_session_id),
-                        events: vec![SseFrame::Json(event.to_string())],
+                        events: vec![SseFrame::json(event.to_string())],
                     }));
                 }
                 _ => panic!("unexpected manager request"),
@@ -2285,7 +2484,7 @@ mod tests {
                     assert_eq!(actual_session_id, expected_session_id);
                     assert_eq!(protocol_version, None);
                     let (stream_tx, stream_rx) = mpsc::channel(HTTP_CHANNEL_CAPACITY);
-                    let _ = stream_tx.try_send(SseFrame::Json(
+                    let _ = stream_tx.try_send(SseFrame::json(
                         json!({
                             "jsonrpc": "2.0",
                             "method": "session/update",
@@ -2378,6 +2577,43 @@ mod tests {
 
         let response = get(State(state), request).await;
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn post_rejects_disallowed_origin_before_processing() {
+        let (state, _manager_rx) = test_state();
+        let mut headers = post_headers();
+        headers.insert(ORIGIN, HeaderValue::from_static("https://evil.example"));
+
+        let response = post(
+            headers,
+            State(state),
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#
+                .to_string(),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(
+            String::from_utf8(bytes.to_vec()).unwrap(),
+            "Origin is not allowed"
+        );
+    }
+
+    #[tokio::test]
+    async fn get_rejects_websocket_upgrade_with_disallowed_origin() {
+        let (state, _manager_rx) = test_state();
+        let request = HttpRequest::builder()
+            .method("GET")
+            .uri("/acp")
+            .header("upgrade", "websocket")
+            .header(ORIGIN, "https://evil.example")
+            .body(Body::empty())
+            .unwrap();
+
+        let response = get(State(state), request).await;
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
     }
 
     #[tokio::test]
