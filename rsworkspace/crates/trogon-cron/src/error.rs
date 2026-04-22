@@ -199,10 +199,10 @@ impl std::fmt::Display for JobSpecError {
 impl std::error::Error for JobSpecError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::InvalidId { .. } => None,
+            Self::InvalidId { source, .. } => Some(source),
             Self::InvalidCronExpression { source, .. } => Some(source.as_ref()),
-            Self::InvalidRoute { .. } => None,
-            Self::InvalidSamplingSource { .. } => None,
+            Self::InvalidRoute { source, .. } => Some(source),
+            Self::InvalidSamplingSource { source, .. } => Some(source),
             Self::EverySecondsMustBePositive
             | Self::InvalidTimezone { .. }
             | Self::TtlMustBePositive
@@ -357,7 +357,7 @@ mod tests {
             source: SubjectTokenViolation::Empty,
         };
         assert!(invalid_id.to_string().contains("job id '' is invalid"));
-        assert!(std::error::Error::source(&invalid_id).is_none());
+        assert!(std::error::Error::source(&invalid_id).is_some());
 
         let every = JobSpecError::EverySecondsMustBePositive;
         assert_eq!(every.to_string(), "every_sec must be >= 1");
@@ -384,18 +384,14 @@ mod tests {
             source: SubjectTokenViolation::InvalidCharacter('>'),
         };
         assert!(route.to_string().contains("route 'agent.>' is invalid"));
-        assert!(std::error::Error::source(&route).is_none());
+        assert!(std::error::Error::source(&route).is_some());
 
         let sampling = JobSpecError::InvalidSamplingSource {
             subject: "sensors.>".to_string(),
             source: SubjectTokenViolation::InvalidCharacter('>'),
         };
-        assert!(
-            sampling
-                .to_string()
-                .contains("sampling source 'sensors.>' is invalid")
-        );
-        assert!(std::error::Error::source(&sampling).is_none());
+        assert!(sampling.to_string().contains("sampling source 'sensors.>' is invalid"));
+        assert!(std::error::Error::source(&sampling).is_some());
 
         let invalid_header_name = JobSpecError::InvalidHeaderName {
             name: "\n".to_string(),

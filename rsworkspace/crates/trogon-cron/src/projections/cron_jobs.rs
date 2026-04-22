@@ -225,7 +225,7 @@ impl std::fmt::Display for JobTransitionError {
 impl std::error::Error for JobTransitionError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::InvalidEventId { .. } => None,
+            Self::InvalidEventId { source, .. } => Some(source),
             _ => None,
         }
     }
