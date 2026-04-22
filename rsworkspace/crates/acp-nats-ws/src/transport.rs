@@ -280,14 +280,16 @@ impl IncomingHttpMessage {
             ));
         }
 
-        let value = serde_json::from_str::<Value>(&raw)
-            .map_err(|error| HttpTransportError::bad_request_with("invalid JSON-RPC payload", error))?;
+        let value = serde_json::from_str::<Value>(&raw).map_err(|error| {
+            HttpTransportError::bad_request_with("invalid JSON-RPC payload", error)
+        })?;
         let (has_result, has_error) = value
             .as_object()
             .map(|object| (object.contains_key("result"), object.contains_key("error")))
             .unwrap_or((false, false));
-        let mut parsed = serde_json::from_value::<Self>(value)
-            .map_err(|error| HttpTransportError::bad_request_with("invalid JSON-RPC payload", error))?;
+        let mut parsed = serde_json::from_value::<Self>(value).map_err(|error| {
+            HttpTransportError::bad_request_with("invalid JSON-RPC payload", error)
+        })?;
         parsed.raw = raw;
         parsed.has_result = has_result;
         parsed.has_error = has_error;
@@ -303,9 +305,7 @@ impl IncomingHttpMessage {
     }
 
     fn is_response(&self) -> bool {
-        self.id.is_some()
-            && self.method.is_none()
-            && (self.has_result || self.has_error)
+        self.id.is_some() && self.method.is_none() && (self.has_result || self.has_error)
     }
 
     fn method_name(&self) -> Option<&str> {
@@ -379,6 +379,14 @@ enum LiveFrameOutcome {
     Keep,
     Clear,
     Drop,
+}
+
+enum BufferedFrameOutcome {
+    Buffered,
+    Routed,
+    Finalize {
+        session_id: Option<acp_nats::AcpSessionId>,
+    },
 }
 
 enum ListenerDispatch {
@@ -481,14 +489,40 @@ fn route_live_frame(
     }
 }
 
+fn route_buffered_frame(
+    frame: &SseFrame,
+    parsed: Option<&OutgoingHttpMessage>,
+    request_id: &RequestId,
+    events: &mut Vec<SseFrame>,
+    get_listeners: &mut HashMap<acp_nats::AcpSessionId, Vec<SseSender>>,
+) -> BufferedFrameOutcome {
+    if parsed.and_then(|message| message.id.as_ref()) == Some(request_id) {
+        events.push(frame.clone());
+        return BufferedFrameOutcome::Finalize {
+            session_id: parsed.and_then(OutgoingHttpMessage::result_session_id),
+        };
+    }
+
+    if let Some(frame_session_id) = parsed.and_then(OutgoingHttpMessage::params_session_id) {
+        match dispatch_to_get_listeners(frame, &frame_session_id, get_listeners) {
+            ListenerDispatch::Delivered | ListenerDispatch::Dropped => {
+                return BufferedFrameOutcome::Routed;
+            }
+            ListenerDispatch::Missing => {}
+        }
+    }
+
+    events.push(frame.clone());
+    BufferedFrameOutcome::Buffered
+}
+
 pub async fn get(State(state): State<AppState>, request: Request) -> Response {
     if is_websocket_request(request.headers()) {
         let (mut parts, _body) = request.into_parts();
         match WebSocketUpgrade::from_request_parts(&mut parts, &state).await {
             Ok(ws) => websocket_response(ws, state),
             Err(_) => {
-                HttpTransportError::bad_request("invalid WebSocket upgrade request")
-                    .into_response()
+                HttpTransportError::bad_request("invalid WebSocket upgrade request").into_response()
             }
         }
     } else {
@@ -550,7 +584,9 @@ async fn http_post(
 
     let message = IncomingHttpMessage::parse(body)?;
     if !(message.is_request() || message.is_notification() || message.is_response()) {
-        return Err(HttpTransportError::bad_request("invalid JSON-RPC message shape"));
+        return Err(HttpTransportError::bad_request(
+            "invalid JSON-RPC message shape",
+        ));
     }
 
     let connection_id = parse_connection_id_header(&headers)?;
@@ -572,12 +608,9 @@ async fn http_post(
             HttpTransportError::internal_with("connection manager is unavailable", error)
         })?;
 
-    match response_rx
-        .await
-        .map_err(|error| {
-            HttpTransportError::internal_with("connection manager dropped the request", error)
-        })??
-    {
+    match response_rx.await.map_err(|error| {
+        HttpTransportError::internal_with("connection manager dropped the request", error)
+    })?? {
         HttpPostOutcome::Accepted => Ok(StatusCode::ACCEPTED.into_response()),
         HttpPostOutcome::Live {
             connection_id,
@@ -599,10 +632,12 @@ async fn http_post(
 async fn http_get(headers: HeaderMap, state: AppState) -> Result<Response, HttpTransportError> {
     validate_get_headers(&headers)?;
 
-    let connection_id = parse_connection_id_header(&headers)?
-        .ok_or(HttpTransportError::bad_request("missing Acp-Connection-Id header"))?;
-    let session_id = parse_session_id_header(&headers)?
-        .ok_or(HttpTransportError::bad_request("missing Acp-Session-Id header"))?;
+    let connection_id = parse_connection_id_header(&headers)?.ok_or(
+        HttpTransportError::bad_request("missing Acp-Connection-Id header"),
+    )?;
+    let session_id = parse_session_id_header(&headers)?.ok_or(HttpTransportError::bad_request(
+        "missing Acp-Session-Id header",
+    ))?;
 
     let (response_tx, response_rx) = oneshot::channel();
     state
@@ -616,11 +651,9 @@ async fn http_get(headers: HeaderMap, state: AppState) -> Result<Response, HttpT
             HttpTransportError::internal_with("connection manager is unavailable", error)
         })?;
 
-    let stream = response_rx
-        .await
-        .map_err(|error| {
-            HttpTransportError::internal_with("connection manager dropped the request", error)
-        })??;
+    let stream = response_rx.await.map_err(|error| {
+        HttpTransportError::internal_with("connection manager dropped the request", error)
+    })??;
 
     let mut response = Sse::new(stream::unfold(stream, |mut stream| async move {
         stream
@@ -637,8 +670,9 @@ async fn http_get(headers: HeaderMap, state: AppState) -> Result<Response, HttpT
 }
 
 async fn http_delete(headers: HeaderMap, state: AppState) -> Result<Response, HttpTransportError> {
-    let connection_id = parse_connection_id_header(&headers)?
-        .ok_or(HttpTransportError::bad_request("missing Acp-Connection-Id header"))?;
+    let connection_id = parse_connection_id_header(&headers)?.ok_or(
+        HttpTransportError::bad_request("missing Acp-Connection-Id header"),
+    )?;
 
     let (response_tx, response_rx) = oneshot::channel();
     state
@@ -651,11 +685,9 @@ async fn http_delete(headers: HeaderMap, state: AppState) -> Result<Response, Ht
             HttpTransportError::internal_with("connection manager is unavailable", error)
         })?;
 
-    response_rx
-        .await
-        .map_err(|error| {
-            HttpTransportError::internal_with("connection manager dropped the request", error)
-        })??;
+    response_rx.await.map_err(|error| {
+        HttpTransportError::internal_with("connection manager dropped the request", error)
+    })??;
 
     Ok(StatusCode::ACCEPTED.into_response())
 }
@@ -665,7 +697,7 @@ fn validate_post_headers(headers: &HeaderMap) -> Result<(), HttpTransportError> 
         .get(CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
     {
-        Some(value) if value.eq_ignore_ascii_case("application/json") => {}
+        Some(value) if media_type_matches(value, "application/json") => {}
         _ => {
             return Err(HttpTransportError::unsupported_media_type(
                 "Content-Type must be application/json",
@@ -753,9 +785,16 @@ fn validate_http_context(
 fn accept_contains(header: &str, expected: &str) -> bool {
     header
         .split(',')
-        .filter_map(|value| value.split(';').next())
         .map(str::trim)
-        .any(|media_type| media_type.eq_ignore_ascii_case(expected))
+        .any(|media_type| media_type_matches(media_type, expected))
+}
+
+fn media_type_matches(header_value: &str, expected: &str) -> bool {
+    header_value
+        .split(';')
+        .next()
+        .map(str::trim)
+        .is_some_and(|media_type| media_type.eq_ignore_ascii_case(expected))
 }
 
 fn parse_connection_id_header(
@@ -794,10 +833,7 @@ fn parse_session_id_header(
                 })
                 .and_then(|value| {
                     acp_nats::AcpSessionId::new(value).map_err(|error| {
-                        HttpTransportError::bad_request_with(
-                            "invalid Acp-Session-Id header",
-                            error,
-                        )
+                        HttpTransportError::bad_request_with("invalid Acp-Session-Id header", error)
                     })
                 })
         })
@@ -1078,19 +1114,28 @@ pub async fn run_http_connection<N, J>(
                             continue;
                         }
                         PendingRequest::Buffered { request_id, events, .. } => {
-                            events.push(frame);
-                            if parsed.as_ref().and_then(|message| message.id.as_ref()) == Some(request_id) {
-                                let session_id = parsed.and_then(|message| message.result_session_id());
-                                if let Some(session_id) = session_id.clone() {
-                                    sessions.insert(session_id);
-                                }
-                                let events = std::mem::take(events);
-                                if let Some(PendingRequest::Buffered { response, .. }) = pending_request.take() {
-                                    let _ = response.send(Ok(HttpPostOutcome::Buffered {
-                                        connection_id: connection_id.clone(),
-                                        session_id,
-                                        events,
-                                    }));
+                            match route_buffered_frame(
+                                &frame,
+                                parsed.as_ref(),
+                                request_id,
+                                events,
+                                &mut get_listeners,
+                            ) {
+                                BufferedFrameOutcome::Buffered | BufferedFrameOutcome::Routed => {}
+                                BufferedFrameOutcome::Finalize { session_id } => {
+                                    if let Some(session_id) = session_id.clone() {
+                                        sessions.insert(session_id);
+                                    }
+                                    let events = std::mem::take(events);
+                                    if let Some(PendingRequest::Buffered { response, .. }) =
+                                        pending_request.take()
+                                    {
+                                        let _ = response.send(Ok(HttpPostOutcome::Buffered {
+                                            connection_id: connection_id.clone(),
+                                            session_id,
+                                            events,
+                                        }));
+                                    }
                                 }
                             }
                             continue;
@@ -1168,6 +1213,7 @@ pub async fn process_manager_request<N, J>(
 {
     websocket_handles.retain(|handle| !handle.is_finished());
     http_connection_handles.retain(|handle| !handle.is_finished());
+    http_connections.retain(|_, handle| !handle.command_tx.is_closed());
 
     match request {
         ManagerRequest::WebSocket(request) => {
@@ -1385,9 +1431,18 @@ mod tests {
     #[test]
     fn http_transport_error_into_response_maps_status_codes() {
         let cases = [
-            (HttpTransportError::bad_request("bad"), StatusCode::BAD_REQUEST),
-            (HttpTransportError::not_found("missing"), StatusCode::NOT_FOUND),
-            (HttpTransportError::conflict("conflict"), StatusCode::CONFLICT),
+            (
+                HttpTransportError::bad_request("bad"),
+                StatusCode::BAD_REQUEST,
+            ),
+            (
+                HttpTransportError::not_found("missing"),
+                StatusCode::NOT_FOUND,
+            ),
+            (
+                HttpTransportError::conflict("conflict"),
+                StatusCode::CONFLICT,
+            ),
             (
                 HttpTransportError::unsupported_media_type("unsupported"),
                 StatusCode::UNSUPPORTED_MEDIA_TYPE,
@@ -1419,8 +1474,14 @@ mod tests {
         use std::error::Error as _;
 
         assert_eq!(HttpTransportError::bad_request("bad").to_string(), "bad");
-        assert_eq!(HttpTransportError::conflict("conflict").to_string(), "conflict");
-        assert_eq!(HttpTransportError::internal("internal").to_string(), "internal");
+        assert_eq!(
+            HttpTransportError::conflict("conflict").to_string(),
+            "conflict"
+        );
+        assert_eq!(
+            HttpTransportError::internal("internal").to_string(),
+            "internal"
+        );
 
         let invalid_json = IncomingHttpMessage::parse("{".to_string()).unwrap_err();
         assert_eq!(invalid_json.to_string(), "invalid JSON-RPC payload");
@@ -1590,6 +1651,38 @@ mod tests {
     }
 
     #[test]
+    fn route_buffered_frame_sends_other_session_notifications_to_get_listeners() {
+        let frame = SseFrame::Json(
+            r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-2"}}"#
+                .to_string(),
+        );
+        let parsed = OutgoingHttpMessage::parse(match &frame {
+            SseFrame::Json(json) => json,
+        })
+        .unwrap();
+        let request_id = RequestId::Number(1);
+        let other_session_id = acp_nats::AcpSessionId::new("session-2").unwrap();
+        let (get_tx, mut get_rx) = mpsc::channel(HTTP_CHANNEL_CAPACITY);
+        let mut events = Vec::new();
+        let mut get_listeners = HashMap::new();
+        get_listeners.insert(other_session_id, vec![get_tx]);
+
+        let outcome = route_buffered_frame(
+            &frame,
+            Some(&parsed),
+            &request_id,
+            &mut events,
+            &mut get_listeners,
+        );
+
+        assert!(matches!(outcome, BufferedFrameOutcome::Routed));
+        assert!(events.is_empty());
+        match get_rx.try_recv().unwrap() {
+            SseFrame::Json(json) => assert!(json.contains(r#""sessionId":"session-2""#)),
+        }
+    }
+
+    #[test]
     fn dispatch_to_get_listeners_drops_full_listener() {
         let session_id = session_id();
         let mut get_listeners = HashMap::new();
@@ -1617,6 +1710,13 @@ mod tests {
     fn header_validators_enforce_content_negotiation() {
         let valid_post = post_headers();
         assert!(validate_post_headers(&valid_post).is_ok());
+
+        let mut valid_post_with_charset = post_headers();
+        valid_post_with_charset.insert(
+            CONTENT_TYPE,
+            HeaderValue::from_static("application/json; charset=utf-8"),
+        );
+        assert!(validate_post_headers(&valid_post_with_charset).is_ok());
 
         let mut bad_content_type = valid_post.clone();
         bad_content_type.insert(CONTENT_TYPE, HeaderValue::from_static("text/plain"));
@@ -2084,6 +2184,47 @@ mod tests {
         .await;
         assert!(matches!(
             delete_response_rx.await.unwrap(),
+            Err(HttpTransportError::NotFound {
+                message: "unknown ACP connection",
+                source: None,
+            })
+        ));
+    }
+
+    #[tokio::test]
+    async fn process_manager_request_prunes_closed_http_connections() {
+        let nats_client = AdvancedMockNatsClient::new();
+        let js_client = MockJs::new();
+        let config = test_config();
+        let mut http_connections = HashMap::new();
+        let mut websocket_handles = Vec::new();
+        let mut http_connection_handles = Vec::new();
+
+        let stale_connection_id = AcpConnectionId::new();
+        let (command_tx, command_rx) = mpsc::unbounded_channel();
+        drop(command_rx);
+        http_connections.insert(stale_connection_id, HttpConnectionHandle { command_tx });
+
+        let unknown_connection_id = AcpConnectionId::new();
+        let (response_tx, response_rx) = oneshot::channel();
+        process_manager_request(
+            ManagerRequest::HttpGet {
+                connection_id: unknown_connection_id,
+                session_id: session_id(),
+                response: response_tx,
+            },
+            &mut http_connections,
+            &mut websocket_handles,
+            &mut http_connection_handles,
+            &nats_client,
+            &js_client,
+            &config,
+        )
+        .await;
+
+        assert!(http_connections.is_empty());
+        assert!(matches!(
+            response_rx.await.unwrap(),
             Err(HttpTransportError::NotFound {
                 message: "unknown ACP connection",
                 source: None,
