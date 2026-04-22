@@ -56,7 +56,7 @@ impl Decide for RemoveJobCommand {
 
 impl CommandSnapshotPolicy for RemoveJobCommand {
     type SnapshotPolicy = FrequencySnapshot;
-    const SNAPSHOT_POLICY: Self::SnapshotPolicy = super::COMMAND_SNAPSHOT_POLICY;
+    const SNAPSHOT_POLICY: Self::SnapshotPolicy = super::snapshot::COMMAND_SNAPSHOT_POLICY;
 }
 
 pub async fn remove_job<S, SErr>(
