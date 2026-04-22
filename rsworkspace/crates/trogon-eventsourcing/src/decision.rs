@@ -145,11 +145,7 @@ mod tests {
         type DecideError = ();
 
         fn decide(state: &Self::State, _command: &Self) -> Result<Decision<Self::Event>, Self::DecideError> {
-            Ok(Decision::event(if *state == 1 {
-                "created"
-            } else {
-                "updated"
-            }))
+            Ok(Decision::event(if *state == 1 { "created" } else { "updated" }))
         }
     }
 

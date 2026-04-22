@@ -1,6 +1,6 @@
 use trogon_eventsourcing::{
-    CommandExecution, CommandResult, CommandSnapshots, Decide, Decision, FrequencySnapshot, OccPolicy, SnapshotRead,
-    SnapshotWrite, StreamAppend, StreamCommand, StreamRead, StreamState, WritePrecondition,
+    CommandExecution, CommandResult, CommandSnapshotPolicy, Decide, Decision, FrequencySnapshot, OccPolicy,
+    SnapshotRead, SnapshotWrite, StreamAppend, StreamCommand, StreamRead, StreamState, WritePrecondition,
 };
 
 use super::JobState;
@@ -59,12 +59,9 @@ impl Decide for AddJobCommand {
     }
 }
 
-impl CommandSnapshots for AddJobCommand {
+impl CommandSnapshotPolicy for AddJobCommand {
     type SnapshotPolicy = FrequencySnapshot;
-
-    fn snapshot_policy() -> Self::SnapshotPolicy {
-        super::command_snapshot_policy()
-    }
+    const SNAPSHOT_POLICY: Self::SnapshotPolicy = super::COMMAND_SNAPSHOT_POLICY;
 }
 
 pub async fn add_job<S, SErr>(
