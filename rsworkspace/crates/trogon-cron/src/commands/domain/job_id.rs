@@ -85,6 +85,20 @@ impl fmt::Display for JobIdError {
 
 impl std::error::Error for JobIdError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        None
+        Some(&self.source)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn invalid_job_id_preserves_subject_token_violation_as_source() {
+        let error = JobId::parse("").unwrap_err();
+
+        let source = std::error::Error::source(&error).unwrap();
+
+        assert_eq!(source.to_string(), SubjectTokenViolation::Empty.to_string());
     }
 }
