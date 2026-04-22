@@ -208,7 +208,7 @@ mod tests {
     use axum::http::header::{ACCEPT, CONTENT_TYPE};
     use axum::http::{Request, StatusCode};
     use futures_util::{SinkExt, StreamExt};
-    use serde_json::Value;
+    use serde_json::{Value, json};
     use std::net::{IpAddr, Ipv4Addr};
     use std::time::Duration;
     use tokio::net::TcpListener;
@@ -573,6 +573,88 @@ mod tests {
         assert_eq!(events[0]["id"], 2);
         assert_eq!(events[0]["result"]["sessionId"], "test-session-1");
         assert_eq!(session_id.as_deref(), Some("test-session-1"));
+
+        let _ = shutdown_tx.send(true);
+        drop(app);
+        conn_thread.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn streamable_http_session_load_uses_request_session_id_header() {
+        let nats_mock = AdvancedMockNatsClient::new();
+        let _injector = nats_mock.inject_messages();
+        nats_mock.set_response(
+            "acp.agent.initialize",
+            r#"{"agentCapabilities":{"loadSession":false,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":0}"#
+                .into(),
+        );
+        nats_mock.set_response("acp.session.test-session-1.agent.load", "{}".into());
+
+        let (app, shutdown_tx, conn_thread) = build_test_app(nats_mock);
+        let initialize = app
+            .clone()
+            .oneshot(http_post_request(
+                r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#,
+            ))
+            .await
+            .unwrap();
+        let connection_id = initialize
+            .headers()
+            .get(ACP_CONNECTION_ID_HEADER)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let _ = body_text(initialize).await;
+
+        let session_load = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(ACP_ENDPOINT)
+                    .header(CONTENT_TYPE, "application/json")
+                    .header(ACCEPT, "application/json, text/event-stream")
+                    .header(ACP_CONNECTION_ID_HEADER, &connection_id)
+                    .header(ACP_PROTOCOL_VERSION_HEADER, "0")
+                    .body(Body::from(
+                        r#"{"jsonrpc":"2.0","id":2,"method":"session/load","params":{"sessionId":"test-session-1","cwd":"."}}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(session_load.status(), StatusCode::OK);
+        assert_eq!(
+            session_load
+                .headers()
+                .get(ACP_CONNECTION_ID_HEADER)
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            connection_id
+        );
+        assert_eq!(
+            session_load
+                .headers()
+                .get(ACP_SESSION_ID_HEADER)
+                .and_then(|value| value.to_str().ok()),
+            Some("test-session-1")
+        );
+        assert_eq!(
+            session_load
+                .headers()
+                .get(ACP_PROTOCOL_VERSION_HEADER)
+                .and_then(|value| value.to_str().ok()),
+            Some("0")
+        );
+
+        let body = body_text(session_load).await;
+        let events = sse_events(&body);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["id"], 2);
+        assert_eq!(events[0]["result"], json!(null));
 
         let _ = shutdown_tx.send(true);
         drop(app);

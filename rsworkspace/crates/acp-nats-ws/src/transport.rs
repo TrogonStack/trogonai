@@ -348,6 +348,7 @@ enum PendingRequest {
     },
     Buffered {
         request_id: RequestId,
+        fallback_session_id: Option<acp_nats::AcpSessionId>,
         events: Vec<SseFrame>,
         response: oneshot::Sender<Result<HttpPostOutcome, HttpTransportError>>,
     },
@@ -411,8 +412,14 @@ impl IncomingHttpMessage {
         self.method_name() == Some("initialize")
     }
 
-    fn is_session_new(&self) -> bool {
-        self.method_name() == Some("session/new")
+    fn activates_session(&self) -> bool {
+        matches!(
+            self.method_name(),
+            Some("session/new")
+                | Some("session/load")
+                | Some("session/resume")
+                | Some("session/fork")
+        )
     }
 
     fn requires_session_id(&self) -> bool {
@@ -421,8 +428,8 @@ impl IncomingHttpMessage {
         }
 
         match self.method_name() {
-            Some("initialize") | Some("authenticate") | Some("session/new")
-            | Some("session/list") => false,
+            Some("initialize") | Some("authenticate") | Some("session/list") => false,
+            _ if self.activates_session() => false,
             Some(method) if method.starts_with("session/") => true,
             _ => false,
         }
@@ -1279,9 +1286,10 @@ pub async fn run_http_connection<N, J>(
                                 continue;
                             }
 
-                            if message.is_session_new() {
+                            if message.activates_session() {
                                 pending_request = Some(PendingRequest::Buffered {
                                     request_id: message.id.clone().expect("request must have id"),
+                                    fallback_session_id: message.params_session_id().ok().flatten(),
                                     events: Vec::new(),
                                     response,
                                 });
@@ -1419,7 +1427,12 @@ pub async fn run_http_connection<N, J>(
                             }
                             continue;
                         }
-                        PendingRequest::Buffered { request_id, events, .. } => {
+                        PendingRequest::Buffered {
+                            request_id,
+                            fallback_session_id,
+                            events,
+                            ..
+                        } => {
                             match route_buffered_frame(
                                 &frame,
                                 parsed.as_ref(),
@@ -1429,6 +1442,8 @@ pub async fn run_http_connection<N, J>(
                             ) {
                                 BufferedFrameOutcome::Buffered | BufferedFrameOutcome::Routed => {}
                                 BufferedFrameOutcome::Finalize { session_id } => {
+                                    let session_id =
+                                        session_id.or_else(|| fallback_session_id.clone());
                                     if let Some(session_id) = session_id.clone() {
                                         sessions.insert(session_id);
                                     }
@@ -1852,7 +1867,17 @@ mod tests {
         )
         .unwrap();
         assert!(request.is_request());
-        assert!(request.is_session_new());
+        assert!(request.activates_session());
+
+        for raw in [
+            r#"{"jsonrpc":"2.0","id":2,"method":"session/load","params":{"sessionId":"session-1","cwd":"."}}"#,
+            r#"{"jsonrpc":"2.0","id":3,"method":"session/resume","params":{"sessionId":"session-1","cwd":"."}}"#,
+            r#"{"jsonrpc":"2.0","id":4,"method":"session/fork","params":{"sessionId":"session-1","cwd":"."}}"#,
+        ] {
+            let activating = IncomingHttpMessage::parse(raw.to_string()).unwrap();
+            assert!(activating.activates_session());
+            assert!(!activating.requires_session_id());
+        }
 
         let notification =
             IncomingHttpMessage::parse(r#"{"jsonrpc":"2.0","method":"initialized"}"#.to_string())
@@ -2227,6 +2252,27 @@ mod tests {
                 source: None,
             })
         ));
+
+        let load = IncomingHttpMessage::parse(
+            r#"{"jsonrpc":"2.0","id":2,"method":"session/load","params":{"sessionId":"session-1","cwd":"."}}"#
+                .to_string(),
+        )
+        .unwrap();
+        assert!(validate_http_context(&load, Some(&connection_id), None).is_ok());
+
+        let resume = IncomingHttpMessage::parse(
+            r#"{"jsonrpc":"2.0","id":2,"method":"session/resume","params":{"sessionId":"session-1","cwd":"."}}"#
+                .to_string(),
+        )
+        .unwrap();
+        assert!(validate_http_context(&resume, Some(&connection_id), None).is_ok());
+
+        let fork = IncomingHttpMessage::parse(
+            r#"{"jsonrpc":"2.0","id":2,"method":"session/fork","params":{"sessionId":"session-1","cwd":"."}}"#
+                .to_string(),
+        )
+        .unwrap();
+        assert!(validate_http_context(&fork, Some(&connection_id), None).is_ok());
     }
 
     #[test]
@@ -2421,7 +2467,7 @@ mod tests {
                     ..
                 } => {
                     assert_eq!(actual_connection_id, expected_connection_id.clone());
-                    assert!(message.is_session_new());
+                    assert!(message.activates_session());
                     let _ = response.send(Ok(HttpPostOutcome::Buffered {
                         connection_id: expected_connection_id,
                         protocol_version: Some(ProtocolVersion::V0),
