@@ -13,9 +13,8 @@ pub mod testing;
 pub use decision::{Act, Decide, Decision, NonEmpty, StateMachine, StreamCommand, decide};
 pub use execution::{
     AppendOutcome, CommandExecution, CommandFailure, CommandInfraError, CommandResult, CommandSnapshotPolicy,
-    ExecutionResult, FrequencySnapshot, NoSnapshot, OccPolicy, SnapshotDecision, SnapshotPolicy, SnapshotRead,
-    SnapshotWrite, Snapshots, StreamAppend, StreamRead, StreamReadResult, StreamState, WithoutSnapshots,
-    WritePrecondition,
+    ExecutionResult, FrequencySnapshot, NoSnapshot, SnapshotDecision, SnapshotPolicy, SnapshotRead, SnapshotWrite,
+    Snapshots, StreamAppend, StreamRead, StreamReadResult, StreamState, WithoutSnapshots, WritePrecondition,
 };
 pub use nats::kv::{
     SnapshotStoreError, checkpoint_key, list_snapshots, load_snapshot, load_snapshot_map,
