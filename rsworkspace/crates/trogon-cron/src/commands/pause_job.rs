@@ -1,6 +1,6 @@
 use trogon_eventsourcing::{
-    CommandExecution, CommandResult, CommandSnapshots, Decide, Decision, FrequencySnapshot, NonEmpty, OccPolicy,
-    SnapshotRead, SnapshotWrite, StreamAppend, StreamCommand, StreamRead,
+    CommandExecution, CommandResult, CommandSnapshots, Decide, Decision, FrequencySnapshot, OccPolicy, SnapshotRead,
+    SnapshotWrite, StreamAppend, StreamCommand, StreamRead,
 };
 
 use super::JobState;
@@ -51,9 +51,9 @@ impl Decide for PauseJobCommand {
             JobState::PresentDisabled => Err(PauseJobDecisionError::AlreadyPaused {
                 id: command.stream_id().clone(),
             }),
-            JobState::PresentEnabled => Ok(Decision::Event(NonEmpty::one(JobEvent::JobPaused(JobPaused {
+            JobState::PresentEnabled => Ok(Decision::event(JobPaused {
                 id: command.stream_id().to_string(),
-            })))),
+            })),
         }
     }
 }
@@ -124,9 +124,9 @@ mod tests {
         let decision = decide(&state, &command).unwrap();
         assert_eq!(
             decision,
-            Decision::Event(NonEmpty::one(JobEvent::JobPaused(JobPaused {
+            Decision::event(JobPaused {
                 id: "backup".to_string(),
-            })))
+            })
         );
     }
 
