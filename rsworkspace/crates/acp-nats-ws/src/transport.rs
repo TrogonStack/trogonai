@@ -153,6 +153,7 @@ impl SseFrame {
 enum PendingRequest {
     Live {
         request_id: RequestId,
+        session_id: Option<acp_nats::AcpSessionId>,
         sender: SseSender,
     },
     Buffered {
@@ -264,6 +265,62 @@ impl OutgoingHttpMessage {
         let result = self.result.as_ref()?;
         let session_id = result.get("sessionId")?.as_str()?;
         acp_nats::AcpSessionId::new(session_id).ok()
+    }
+}
+
+enum LiveFrameOutcome {
+    Keep,
+    Clear,
+    Drop,
+}
+
+fn dispatch_to_get_listeners(
+    frame: &SseFrame,
+    session_id: &acp_nats::AcpSessionId,
+    get_listeners: &mut HashMap<acp_nats::AcpSessionId, Vec<SseSender>>,
+) -> bool {
+    let Some(listeners) = get_listeners.get_mut(session_id) else {
+        return false;
+    };
+
+    listeners.retain(|listener| listener.send(frame.clone()).is_ok());
+    !listeners.is_empty()
+}
+
+fn route_live_frame(
+    frame: &SseFrame,
+    parsed: Option<&OutgoingHttpMessage>,
+    request_id: &RequestId,
+    request_session_id: Option<&acp_nats::AcpSessionId>,
+    sender: &SseSender,
+    get_listeners: &mut HashMap<acp_nats::AcpSessionId, Vec<SseSender>>,
+) -> LiveFrameOutcome {
+    if parsed.and_then(|message| message.id.as_ref()) == Some(request_id) {
+        return if sender.send(frame.clone()).is_ok() {
+            LiveFrameOutcome::Clear
+        } else {
+            LiveFrameOutcome::Drop
+        };
+    }
+
+    if let Some(frame_session_id) = parsed.and_then(OutgoingHttpMessage::params_session_id) {
+        if request_session_id == Some(&frame_session_id) {
+            return if sender.send(frame.clone()).is_ok() {
+                LiveFrameOutcome::Keep
+            } else {
+                LiveFrameOutcome::Drop
+            };
+        }
+
+        if dispatch_to_get_listeners(frame, &frame_session_id, get_listeners) {
+            return LiveFrameOutcome::Keep;
+        }
+    }
+
+    if sender.send(frame.clone()).is_ok() {
+        LiveFrameOutcome::Keep
+    } else {
+        LiveFrameOutcome::Drop
     }
 }
 
@@ -760,6 +817,7 @@ pub async fn run_http_connection<N, J>(
                             let (stream_tx, stream_rx) = mpsc::unbounded_channel();
                             pending_request = Some(PendingRequest::Live {
                                 request_id: message.id.clone().expect("request must have id"),
+                                session_id: session_id.clone(),
                                 sender: stream_tx,
                             });
                             let _ = input_tx.send(message.raw);
@@ -812,14 +870,23 @@ pub async fn run_http_connection<N, J>(
 
                 if let Some(pending) = pending_request.as_mut() {
                     match pending {
-                        PendingRequest::Live { request_id, sender, .. } => {
-                            if sender.send(frame.clone()).is_err() {
-                                pending_request = None;
-                                continue;
-                            }
-
-                            if parsed.as_ref().and_then(|message| message.id.as_ref()) == Some(request_id) {
-                                pending_request = None;
+                        PendingRequest::Live {
+                            request_id,
+                            session_id,
+                            sender,
+                        } => {
+                            match route_live_frame(
+                                &frame,
+                                parsed.as_ref(),
+                                request_id,
+                                session_id.as_ref(),
+                                sender,
+                                &mut get_listeners,
+                            ) {
+                                LiveFrameOutcome::Keep => {}
+                                LiveFrameOutcome::Clear | LiveFrameOutcome::Drop => {
+                                    pending_request = None;
+                                }
                             }
                             continue;
                         }
@@ -848,11 +915,7 @@ pub async fn run_http_connection<N, J>(
                     continue;
                 };
 
-                let Some(listeners) = get_listeners.get_mut(&session_id) else {
-                    continue;
-                };
-
-                listeners.retain(|listener| listener.send(frame.clone()).is_ok());
+                let _ = dispatch_to_get_listeners(&frame, &session_id, &mut get_listeners);
             }
             result = &mut client_task => {
                 match result {
@@ -1252,6 +1315,79 @@ mod tests {
         )
         .unwrap();
         assert_eq!(response.result_session_id(), Some(session_id()));
+    }
+
+    #[test]
+    fn route_live_frame_keeps_same_session_notifications_on_post_stream() {
+        let frame = SseFrame::Json(
+            r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-1"}}"#
+                .to_string(),
+        );
+        let parsed = OutgoingHttpMessage::parse(match &frame {
+            SseFrame::Json(json) => json,
+        })
+        .unwrap();
+        let request_id = RequestId::Number(1);
+        let request_session_id = session_id();
+        let (live_tx, mut live_rx) = mpsc::unbounded_channel();
+        let (get_tx, mut get_rx) = mpsc::unbounded_channel();
+        let mut get_listeners = HashMap::new();
+        get_listeners.insert(request_session_id.clone(), vec![get_tx]);
+
+        let outcome = route_live_frame(
+            &frame,
+            Some(&parsed),
+            &request_id,
+            Some(&request_session_id),
+            &live_tx,
+            &mut get_listeners,
+        );
+
+        assert!(matches!(outcome, LiveFrameOutcome::Keep));
+        match live_rx.try_recv().unwrap() {
+            SseFrame::Json(json) => assert!(json.contains(r#""sessionId":"session-1""#)),
+        }
+        assert!(matches!(
+            get_rx.try_recv(),
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+        ));
+    }
+
+    #[test]
+    fn route_live_frame_sends_other_session_notifications_to_get_listeners() {
+        let frame = SseFrame::Json(
+            r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-2"}}"#
+                .to_string(),
+        );
+        let parsed = OutgoingHttpMessage::parse(match &frame {
+            SseFrame::Json(json) => json,
+        })
+        .unwrap();
+        let request_id = RequestId::Number(1);
+        let request_session_id = session_id();
+        let other_session_id = acp_nats::AcpSessionId::new("session-2").unwrap();
+        let (live_tx, mut live_rx) = mpsc::unbounded_channel();
+        let (get_tx, mut get_rx) = mpsc::unbounded_channel();
+        let mut get_listeners = HashMap::new();
+        get_listeners.insert(other_session_id, vec![get_tx]);
+
+        let outcome = route_live_frame(
+            &frame,
+            Some(&parsed),
+            &request_id,
+            Some(&request_session_id),
+            &live_tx,
+            &mut get_listeners,
+        );
+
+        assert!(matches!(outcome, LiveFrameOutcome::Keep));
+        assert!(matches!(
+            live_rx.try_recv(),
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+        ));
+        match get_rx.try_recv().unwrap() {
+            SseFrame::Json(json) => assert!(json.contains(r#""sessionId":"session-2""#)),
+        }
     }
 
     #[test]
