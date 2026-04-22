@@ -48,4 +48,4 @@ pub use read_model::CronJob;
 pub use schedule::ResolvedJobSpec;
 pub use store::{Store, connect_store, open_snapshot_bucket, snapshot_store_config};
 pub use traits::{LeaderLock, SchedulePublisher};
-pub use trogon_eventsourcing::{CommandFailure, CommandInfraError, CommandResult, ExecutionResult, OccPolicy};
+pub use trogon_eventsourcing::{CommandFailure, CommandInfraError, CommandResult, ExecutionResult, StreamState};

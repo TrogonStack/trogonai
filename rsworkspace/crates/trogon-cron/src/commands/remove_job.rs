@@ -1,6 +1,6 @@
 use trogon_eventsourcing::{
-    CommandExecution, CommandResult, CommandSnapshotPolicy, Decide, Decision, FrequencySnapshot, OccPolicy,
-    SnapshotRead, SnapshotWrite, StreamAppend, StreamCommand, StreamRead,
+    CommandExecution, CommandResult, CommandSnapshotPolicy, Decide, Decision, FrequencySnapshot, SnapshotRead,
+    SnapshotWrite, StreamAppend, StreamCommand, StreamRead, StreamState,
 };
 
 use super::JobState;
@@ -62,7 +62,7 @@ impl CommandSnapshotPolicy for RemoveJobCommand {
 pub async fn remove_job<S, SErr>(
     store: &S,
     command: RemoveJobCommand,
-    occ: Option<OccPolicy>,
+    write_precondition: Option<StreamState>,
 ) -> CommandResult<RemoveJobCommand, SErr>
 where
     S: StreamRead<JobId, Error = SErr>
@@ -72,7 +72,7 @@ where
     serde_json::Error: Into<SErr>,
 {
     CommandExecution::new(store, &command)
-        .with_occ(occ)
+        .with_write_precondition(write_precondition)
         .with_snapshot(store)
         .execute()
         .await
