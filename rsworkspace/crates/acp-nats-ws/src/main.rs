@@ -2,11 +2,11 @@ mod acp_connection_id;
 mod config;
 mod connection;
 mod constants;
-mod upgrade;
+mod transport;
 
 use tokio::sync::{mpsc, watch};
 use tracing::info;
-use upgrade::{ConnectionRequest, UpgradeState};
+use transport::{AppState, ManagerRequest};
 
 #[cfg(not(coverage))]
 use {
@@ -27,7 +27,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     let ws_config = config::apply_timeout_overrides(ws_config, &SystemEnv);
 
-    info!("ACP WebSocket bridge starting");
+    info!("ACP remote transport bridge starting");
 
     let nats_connect_timeout = acp_nats::nats_connect_timeout(&SystemEnv);
     let nats_client = nats::connect(ws_config.acp.nats(), nats_connect_timeout).await?;
@@ -36,28 +36,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let js_client = trogon_nats::jetstream::NatsJetStreamClient::new(js_context);
 
     let (shutdown_tx, _) = watch::channel(false);
-    let (conn_tx, conn_rx) = mpsc::unbounded_channel::<ConnectionRequest>();
+    let (manager_tx, manager_rx) = mpsc::unbounded_channel::<ManagerRequest>();
 
     let conn_thread = std::thread::Builder::new()
         .name(THREAD_NAME.into())
-        .spawn(move || run_connection_thread(conn_rx, nats_client, js_client, ws_config.acp))?;
+        .spawn(move || run_connection_thread(manager_rx, nats_client, js_client, ws_config.acp))?;
 
-    let state = UpgradeState {
-        conn_tx,
+    let state = AppState {
+        manager_tx,
         shutdown_tx: shutdown_tx.clone(),
     };
 
     let app = trogon_std::telemetry::http::instrument_router(
         axum::Router::new()
-            .route(ACP_ENDPOINT, axum::routing::get(upgrade::handle))
-            .route(LEGACY_WS_ENDPOINT, axum::routing::get(upgrade::handle))
+            .route(
+                ACP_ENDPOINT,
+                axum::routing::get(transport::get)
+                    .post(transport::post)
+                    .delete(transport::delete),
+            )
+            .route(
+                LEGACY_WS_ENDPOINT,
+                axum::routing::get(transport::legacy_websocket_get),
+            )
             .with_state(state),
     );
 
     let addr = SocketAddr::from((ws_config.host, ws_config.port));
     let listener = tokio::net::TcpListener::bind(addr).await?;
 
-    info!(address = %addr, "Listening for WebSocket connections");
+    info!(address = %addr, "Listening for ACP transport connections");
 
     let result = axum::serve(listener, app)
         .with_graceful_shutdown(async move {
@@ -68,8 +76,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await;
 
     match &result {
-        Ok(()) => info!("ACP WebSocket bridge stopped"),
-        Err(e) => error!(error = %e, "ACP WebSocket bridge stopped with error"),
+        Ok(()) => info!("ACP remote transport bridge stopped"),
+        Err(e) => error!(error = %e, "ACP remote transport bridge stopped with error"),
     }
 
     // `serve` returning drops the Router (and its AppState.conn_tx), which
@@ -90,13 +98,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(coverage)]
 fn main() {}
 
-use constants::{ACP_CONNECTION_ID_HEADER, ACP_ENDPOINT, LEGACY_WS_ENDPOINT, THREAD_NAME};
+use constants::{ACP_ENDPOINT, LEGACY_WS_ENDPOINT, THREAD_NAME};
 
 /// Runs a single-threaded tokio runtime with a
 /// `LocalSet`. All WebSocket connections are processed here because the ACP
 /// `Agent` trait is `?Send`, requiring `spawn_local` / `Rc`.
 fn run_connection_thread<N, J>(
-    conn_rx: mpsc::UnboundedReceiver<ConnectionRequest>,
+    manager_rx: mpsc::UnboundedReceiver<ManagerRequest>,
     nats_client: N,
     js_client: J,
     config: acp_nats::Config,
@@ -117,7 +125,12 @@ fn run_connection_thread<N, J>(
         .expect("failed to create per-connection runtime");
 
     let local = tokio::task::LocalSet::new();
-    rt.block_on(local.run_until(process_connections(conn_rx, nats_client, js_client, config)));
+    rt.block_on(local.run_until(process_connections(
+        manager_rx,
+        nats_client,
+        js_client,
+        config,
+    )));
 
     // run_until returns once process_connections completes, but
     // sub-tasks spawned by connection handlers (pumps,
@@ -132,7 +145,7 @@ fn run_connection_thread<N, J>(
 }
 
 async fn process_connections<N, J>(
-    mut conn_rx: mpsc::UnboundedReceiver<ConnectionRequest>,
+    mut manager_rx: mpsc::UnboundedReceiver<ManagerRequest>,
     nats_client: N,
     js_client: J,
     config: acp_nats::Config,
@@ -147,30 +160,31 @@ async fn process_connections<N, J>(
     J: acp_nats::JetStreamPublisher + acp_nats::JetStreamGetStream + 'static,
     trogon_nats::jetstream::JsMessageOf<J>: trogon_nats::jetstream::JsRequestMessage,
 {
-    let mut conn_handles: Vec<tokio::task::JoinHandle<()>> = Vec::new();
+    let mut websocket_handles: Vec<tokio::task::JoinHandle<()>> = Vec::new();
+    let mut http_connections = std::collections::HashMap::new();
 
-    while let Some(req) = conn_rx.recv().await {
-        conn_handles.retain(|h| !h.is_finished());
-        let client = nats_client.clone();
-        let js = js_client.clone();
-        let cfg = config.clone();
-        conn_handles.push(tokio::task::spawn_local(connection::handle(
-            req.connection_id,
-            req.socket,
-            client,
-            js,
-            cfg,
-            req.shutdown_rx,
-        )));
+    while let Some(request) = manager_rx.recv().await {
+        transport::process_manager_request(
+            request,
+            &mut http_connections,
+            &mut websocket_handles,
+            &nats_client,
+            &js_client,
+            &config,
+        )
+        .await;
     }
 
-    let active = conn_handles.iter().filter(|h| !h.is_finished()).count();
+    let active = websocket_handles
+        .iter()
+        .filter(|h| !h.is_finished())
+        .count();
     info!(
         active_connections = active,
         "Connection channel closed, draining active connections"
     );
 
-    for handle in conn_handles {
+    for handle in websocket_handles {
         let _ = handle.await;
     }
 
@@ -180,12 +194,18 @@ async fn process_connections<N, J>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::constants::{ACP_CONNECTION_ID_HEADER, ACP_SESSION_ID_HEADER};
     use acp_nats::Config;
+    use axum::body::{Body, to_bytes};
+    use axum::http::header::{ACCEPT, CONTENT_TYPE};
+    use axum::http::{Request, StatusCode};
     use futures_util::{SinkExt, StreamExt};
+    use serde_json::Value;
     use std::time::Duration;
     use tokio::net::TcpListener;
     use tokio_tungstenite::connect_async;
     use tokio_tungstenite::tungstenite::Message;
+    use tower::ServiceExt;
     use trogon_nats::AdvancedMockNatsClient;
 
     #[derive(Clone)]
@@ -233,41 +253,77 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_websocket_connection_lifecycle() {
-        let nats_mock = AdvancedMockNatsClient::new();
-        let config = Config::new(
+    fn test_config() -> Config {
+        Config::new(
             acp_nats::AcpPrefix::new("acp").unwrap(),
             acp_nats::NatsConfig {
                 servers: vec!["localhost:4222".to_string()],
                 auth: trogon_nats::NatsAuth::None,
             },
-        );
+        )
+    }
 
-        // Required by AdvancedMockNatsClient to not error out on subscribe()
-        let _injector = nats_mock.inject_messages();
+    fn test_app(state: AppState) -> axum::Router {
+        axum::Router::new()
+            .route(
+                ACP_ENDPOINT,
+                axum::routing::get(transport::get)
+                    .post(transport::post)
+                    .delete(transport::delete),
+            )
+            .route(
+                LEGACY_WS_ENDPOINT,
+                axum::routing::get(transport::legacy_websocket_get),
+            )
+            .with_state(state)
+    }
 
-        let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
-        let (conn_tx, conn_rx) = mpsc::unbounded_channel::<ConnectionRequest>();
-
-        let nats_mock_clone = nats_mock.clone();
-        let conn_thread = std::thread::Builder::new()
+    fn spawn_connection_thread(
+        nats_mock: AdvancedMockNatsClient,
+        manager_rx: mpsc::UnboundedReceiver<ManagerRequest>,
+    ) -> std::thread::JoinHandle<()> {
+        let config = test_config();
+        std::thread::Builder::new()
             .name(THREAD_NAME.into())
-            .spawn(move || run_connection_thread(conn_rx, nats_mock_clone, MockJs::new(), config))
-            .expect("failed to spawn connection thread");
+            .spawn(move || run_connection_thread(manager_rx, nats_mock, MockJs::new(), config))
+            .expect("failed to spawn connection thread")
+    }
 
-        let state = UpgradeState {
-            conn_tx,
+    fn build_test_app(
+        nats_mock: AdvancedMockNatsClient,
+    ) -> (
+        axum::Router,
+        watch::Sender<bool>,
+        std::thread::JoinHandle<()>,
+    ) {
+        let (shutdown_tx, _) = watch::channel(false);
+        let (manager_tx, manager_rx) = mpsc::unbounded_channel::<ManagerRequest>();
+        let conn_thread = spawn_connection_thread(nats_mock, manager_rx);
+        let app = test_app(AppState {
+            manager_tx,
             shutdown_tx: shutdown_tx.clone(),
-        };
+        });
+        (app, shutdown_tx, conn_thread)
+    }
 
-        let app = axum::Router::new()
-            .route(ACP_ENDPOINT, axum::routing::get(upgrade::handle))
-            .with_state(state);
+    async fn start_test_server(
+        nats_mock: AdvancedMockNatsClient,
+    ) -> (
+        std::net::SocketAddr,
+        watch::Sender<bool>,
+        tokio::task::JoinHandle<()>,
+        std::thread::JoinHandle<()>,
+    ) {
+        let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
+        let (manager_tx, manager_rx) = mpsc::unbounded_channel::<ManagerRequest>();
+        let conn_thread = spawn_connection_thread(nats_mock, manager_rx);
+        let app = test_app(AppState {
+            manager_tx,
+            shutdown_tx: shutdown_tx.clone(),
+        });
 
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-
         let server_task = tokio::spawn(async move {
             axum::serve(listener, app)
                 .with_graceful_shutdown(async move {
@@ -277,9 +333,43 @@ mod tests {
                 .unwrap();
         });
 
+        (addr, shutdown_tx, server_task, conn_thread)
+    }
+
+    async fn body_text(response: axum::response::Response) -> String {
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        String::from_utf8(bytes.to_vec()).unwrap()
+    }
+
+    fn sse_events(body: &str) -> Vec<Value> {
+        body.lines()
+            .filter_map(|line| line.strip_prefix("data: "))
+            .map(|json| serde_json::from_str(json).unwrap())
+            .collect()
+    }
+
+    fn http_post_request(body: &str) -> Request<Body> {
+        Request::builder()
+            .method("POST")
+            .uri(ACP_ENDPOINT)
+            .header(CONTENT_TYPE, "application/json")
+            .header(ACCEPT, "application/json, text/event-stream")
+            .body(Body::from(body.to_owned()))
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn test_websocket_connection_lifecycle() {
+        let nats_mock = AdvancedMockNatsClient::new();
+
+        // Required by AdvancedMockNatsClient to not error out on subscribe()
+        let _injector = nats_mock.inject_messages();
+
         // Setup mock response for NATS
         let nats_response = r#"{"agentCapabilities": {"loadSession": false, "mcpCapabilities": {"http": false, "sse": false}, "promptCapabilities": {"audio": false, "embeddedContext": false, "image": false}, "sessionCapabilities": {}}, "authMethods": [], "protocolVersion": 0}"#;
         nats_mock.set_response("acp.agent.initialize", nats_response.into());
+
+        let (addr, shutdown_tx, server_task, conn_thread) = start_test_server(nats_mock).await;
 
         // Connect client
         let ws_url = format!("ws://{}{}", addr, ACP_ENDPOINT);
@@ -326,47 +416,11 @@ mod tests {
     #[tokio::test]
     async fn test_shutdown_while_connection_active() {
         let nats_mock = AdvancedMockNatsClient::new();
-        let config = Config::new(
-            acp_nats::AcpPrefix::new("acp").unwrap(),
-            acp_nats::NatsConfig {
-                servers: vec!["localhost:4222".to_string()],
-                auth: trogon_nats::NatsAuth::None,
-            },
-        );
 
         let _injector = nats_mock.inject_messages();
 
         nats_mock.hang_next_request();
-
-        let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
-        let (conn_tx, conn_rx) = mpsc::unbounded_channel::<ConnectionRequest>();
-
-        let nats_mock_clone = nats_mock.clone();
-        let conn_thread = std::thread::Builder::new()
-            .name(THREAD_NAME.into())
-            .spawn(move || run_connection_thread(conn_rx, nats_mock_clone, MockJs::new(), config))
-            .expect("failed to spawn connection thread");
-
-        let state = UpgradeState {
-            conn_tx,
-            shutdown_tx: shutdown_tx.clone(),
-        };
-
-        let app = axum::Router::new()
-            .route(ACP_ENDPOINT, axum::routing::get(upgrade::handle))
-            .with_state(state);
-
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-
-        let server_task = tokio::spawn(async move {
-            axum::serve(listener, app)
-                .with_graceful_shutdown(async move {
-                    let _ = shutdown_rx.changed().await;
-                })
-                .await
-                .unwrap();
-        });
+        let (addr, shutdown_tx, server_task, conn_thread) = start_test_server(nats_mock).await;
 
         let ws_url = format!("ws://{}{}", addr, ACP_ENDPOINT);
         let (mut ws_stream, _) = connect_async(&ws_url).await.unwrap();
@@ -385,6 +439,199 @@ mod tests {
 
         drop(ws_stream);
 
+        conn_thread.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn streamable_http_initialize_returns_connection_id_and_sse_response() {
+        let nats_mock = AdvancedMockNatsClient::new();
+        let _injector = nats_mock.inject_messages();
+        nats_mock.set_response(
+            "acp.agent.initialize",
+            r#"{"agentCapabilities":{"loadSession":false,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":0}"#
+                .into(),
+        );
+
+        let (app, shutdown_tx, conn_thread) = build_test_app(nats_mock);
+        let response = app
+            .clone()
+            .oneshot(http_post_request(
+                r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#,
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(CONTENT_TYPE).unwrap(),
+            "text/event-stream"
+        );
+
+        let connection_id = response
+            .headers()
+            .get(ACP_CONNECTION_ID_HEADER)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned();
+        assert!(crate::acp_connection_id::AcpConnectionId::parse(&connection_id).is_ok());
+
+        let body = body_text(response).await;
+        let events = sse_events(&body);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["id"], 1);
+        assert_eq!(events[0]["result"]["protocolVersion"], 0);
+
+        shutdown_tx.send(true).unwrap();
+        drop(app);
+        conn_thread.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn streamable_http_session_new_returns_session_header_and_body() {
+        let nats_mock = AdvancedMockNatsClient::new();
+        let _injector = nats_mock.inject_messages();
+        nats_mock.set_response(
+            "acp.agent.initialize",
+            r#"{"agentCapabilities":{"loadSession":false,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":0}"#
+                .into(),
+        );
+        nats_mock.set_response(
+            "acp.agent.session.new",
+            r#"{"sessionId":"test-session-1"}"#.into(),
+        );
+
+        let (app, shutdown_tx, conn_thread) = build_test_app(nats_mock);
+        let initialize = app
+            .clone()
+            .oneshot(http_post_request(
+                r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#,
+            ))
+            .await
+            .unwrap();
+        let connection_id = initialize
+            .headers()
+            .get(ACP_CONNECTION_ID_HEADER)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let _ = body_text(initialize).await;
+
+        let session_new = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(ACP_ENDPOINT)
+                    .header(CONTENT_TYPE, "application/json")
+                    .header(ACCEPT, "application/json, text/event-stream")
+                    .header(ACP_CONNECTION_ID_HEADER, &connection_id)
+                    .body(Body::from(
+                        r#"{"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":".","mcpServers":[]}}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(session_new.status(), StatusCode::OK);
+        assert_eq!(
+            session_new
+                .headers()
+                .get(ACP_CONNECTION_ID_HEADER)
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            connection_id
+        );
+
+        let session_id = session_new
+            .headers()
+            .get(ACP_SESSION_ID_HEADER)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
+        let body = body_text(session_new).await;
+        let events = sse_events(&body);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["id"], 2);
+        assert_eq!(events[0]["result"]["sessionId"], "test-session-1");
+        assert_eq!(session_id.as_deref(), Some("test-session-1"));
+
+        let _ = shutdown_tx.send(true);
+        drop(app);
+        conn_thread.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn streamable_http_get_requires_connection_and_session_headers() {
+        let nats_mock = AdvancedMockNatsClient::new();
+        let (app, shutdown_tx, conn_thread) = build_test_app(nats_mock);
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(ACP_ENDPOINT)
+                    .header(ACCEPT, "text/event-stream")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        let _ = shutdown_tx.send(true);
+        drop(app);
+        conn_thread.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn streamable_http_delete_terminates_initialized_connection() {
+        let nats_mock = AdvancedMockNatsClient::new();
+        let _injector = nats_mock.inject_messages();
+        nats_mock.set_response(
+            "acp.agent.initialize",
+            r#"{"agentCapabilities":{"loadSession":false,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":0}"#
+                .into(),
+        );
+
+        let (app, shutdown_tx, conn_thread) = build_test_app(nats_mock);
+        let initialize = app
+            .clone()
+            .oneshot(http_post_request(
+                r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#,
+            ))
+            .await
+            .unwrap();
+        let connection_id = initialize
+            .headers()
+            .get(ACP_CONNECTION_ID_HEADER)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let _ = body_text(initialize).await;
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri(ACP_ENDPOINT)
+                    .header(ACP_CONNECTION_ID_HEADER, &connection_id)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+
+        let _ = shutdown_tx.send(true);
+        drop(app);
         conn_thread.join().unwrap();
     }
 }

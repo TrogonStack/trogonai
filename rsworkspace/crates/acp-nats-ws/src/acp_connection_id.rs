@@ -5,6 +5,12 @@ impl AcpConnectionId {
     pub fn new() -> Self {
         Self(uuid::Uuid::now_v7())
     }
+
+    pub fn parse(s: &str) -> Result<Self, AcpConnectionIdError> {
+        uuid::Uuid::parse_str(s)
+            .map(Self)
+            .map_err(AcpConnectionIdError::InvalidUuid)
+    }
 }
 
 impl Default for AcpConnectionId {
@@ -19,6 +25,27 @@ impl std::fmt::Display for AcpConnectionId {
     }
 }
 
+#[derive(Debug)]
+pub enum AcpConnectionIdError {
+    InvalidUuid(uuid::Error),
+}
+
+impl std::fmt::Display for AcpConnectionIdError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidUuid(error) => write!(f, "invalid ACP connection id: {error}"),
+        }
+    }
+}
+
+impl std::error::Error for AcpConnectionIdError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::InvalidUuid(error) => Some(error),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -26,5 +53,17 @@ mod tests {
     #[test]
     fn new_generates_non_empty_id() {
         assert!(!AcpConnectionId::new().to_string().is_empty());
+    }
+
+    #[test]
+    fn parse_round_trips_uuid() {
+        let id = AcpConnectionId::new();
+        let parsed = AcpConnectionId::parse(&id.to_string()).unwrap();
+        assert_eq!(parsed, id);
+    }
+
+    #[test]
+    fn parse_rejects_invalid_uuid() {
+        assert!(AcpConnectionId::parse("not-a-uuid").is_err());
     }
 }
