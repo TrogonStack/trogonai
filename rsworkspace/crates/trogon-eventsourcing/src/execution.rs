@@ -1,6 +1,6 @@
 use crate::{
-    CanonicalEventCodec, Decide, Decision, EventCodec, EventData, EventType, NonEmpty, OverrideWritePrecondition,
-    RecordedEvent, Snapshot, SnapshotSchema, SnapshotStoreConfig, StateMachine, StreamEvent,
+    CanonicalEventCodec, Decide, Decision, EventCodec, EventData, EventType, NonEmpty, RecordedEvent, Snapshot,
+    SnapshotSchema, SnapshotStoreConfig, StateMachine, StreamEvent, WritePreconditionOverride,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -299,7 +299,7 @@ where
 
 impl<'a, E, C, S> CommandExecution<'a, E, C, S>
 where
-    C: OverrideWritePrecondition,
+    C: WritePreconditionOverride,
 {
     pub fn with_write_precondition<W>(mut self, write_precondition: W) -> Self
     where
@@ -353,7 +353,7 @@ where
 
 impl<'a, E, C, S, EC> CommandExecutionWithCodec<'a, E, C, S, EC>
 where
-    C: Decide + OverrideWritePrecondition,
+    C: Decide + WritePreconditionOverride,
 {
     pub fn with_write_precondition<W>(mut self, write_precondition: W) -> Self
     where
@@ -584,7 +584,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        CanonicalEventCodec, EventType, OverrideWritePrecondition, SnapshotSchema, StreamCommand, StreamEvent,
+        CanonicalEventCodec, EventType, SnapshotSchema, StreamCommand, StreamEvent, WritePreconditionOverride,
     };
 
     #[derive(Debug, Clone)]
@@ -715,7 +715,7 @@ mod tests {
         }
     }
 
-    impl OverrideWritePrecondition for TestCommand {}
+    impl WritePreconditionOverride for TestCommand {}
 
     impl StreamCommand for RequiredRegisterCommand {
         type StreamId = str;

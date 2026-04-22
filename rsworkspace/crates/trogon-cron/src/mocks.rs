@@ -407,13 +407,13 @@ where
 
 #[cfg(test)]
 mod tests {
-    use trogon_eventsourcing::CommandFailure;
+    use trogon_eventsourcing::{CommandExecution, CommandFailure};
 
     use super::*;
     use crate::{
         AddJobCommand, CronJob, Delivery, GetJobCommand, Job, JobDetails, JobEventStatus, JobHeaders, JobId,
         JobMessage, JobStatus, JobWriteCondition, ListJobsCommand, MessageContent, PauseJobCommand, RemoveJobCommand,
-        ResumeJobCommand, Schedule, add_job, pause_job, remove_job, resume_job,
+        ResumeJobCommand, Schedule,
     };
     use futures::StreamExt;
 
@@ -489,7 +489,11 @@ mod tests {
             .unwrap();
         assert_eq!(seeded, expected_job("seeded"));
 
-        add_job(&store, AddJobCommand::new(base_job("alpha"))).await.unwrap();
+        CommandExecution::new(&store, &AddJobCommand::new(base_job("alpha")))
+            .with_snapshot(&store)
+            .execute()
+            .await
+            .unwrap();
         let alpha = store
             .get_job(GetJobCommand::new(JobId::parse("alpha").unwrap()))
             .await
@@ -497,7 +501,9 @@ mod tests {
             .unwrap();
         assert_eq!(alpha, expected_job("alpha"));
 
-        pause_job(&store, PauseJobCommand::new(job_id("alpha")), None)
+        CommandExecution::new(&store, &PauseJobCommand::new(job_id("alpha")))
+            .with_snapshot(&store)
+            .execute()
             .await
             .unwrap();
         assert_eq!(
@@ -521,7 +527,9 @@ mod tests {
                 .is_err()
         );
 
-        remove_job(&store, RemoveJobCommand::new(job_id("alpha")), None)
+        CommandExecution::new(&store, &RemoveJobCommand::new(job_id("alpha")))
+            .with_snapshot(&store)
+            .execute()
             .await
             .unwrap();
         assert!(
@@ -532,7 +540,9 @@ mod tests {
                 .is_none()
         );
 
-        let deleted_error = add_job(&store, AddJobCommand::new(base_job("alpha")))
+        let deleted_error = CommandExecution::new(&store, &AddJobCommand::new(base_job("alpha")))
+            .with_snapshot(&store)
+            .execute()
             .await
             .unwrap_err();
         assert!(matches!(
@@ -557,8 +567,14 @@ mod tests {
         .unwrap_err();
         assert!(invalid_error.to_string().contains("sampling source"));
 
-        add_job(&store, AddJobCommand::new(base_job("alpha"))).await.unwrap();
-        let same_state_error = resume_job(&store, ResumeJobCommand::new(job_id("alpha")), None)
+        CommandExecution::new(&store, &AddJobCommand::new(base_job("alpha")))
+            .with_snapshot(&store)
+            .execute()
+            .await
+            .unwrap();
+        let same_state_error = CommandExecution::new(&store, &ResumeJobCommand::new(job_id("alpha")))
+            .with_snapshot(&store)
+            .execute()
             .await
             .unwrap_err();
         assert!(matches!(
@@ -566,7 +582,9 @@ mod tests {
             CommandFailure::Decide(crate::ResumeJobDecisionError::AlreadyActive { .. })
         ));
 
-        let missing_error = pause_job(&store, PauseJobCommand::new(job_id("missing")), None)
+        let missing_error = CommandExecution::new(&store, &PauseJobCommand::new(job_id("missing")))
+            .with_snapshot(&store)
+            .execute()
             .await
             .unwrap_err();
         assert!(matches!(

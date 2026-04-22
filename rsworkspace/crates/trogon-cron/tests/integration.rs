@@ -8,8 +8,9 @@ use chrono::{Duration as ChronoDuration, Utc};
 use trogon_cron::{
     AddJobCommand, CronController, Delivery, DeliveryRoute, GetJobCommand, Job, JobEventStatus, JobHeaders, JobId,
     JobMessage, JobStatus, MessageContent, PauseJobCommand, RemoveJobCommand, SamplingSource, Schedule, TtlSeconds,
-    add_job, connect_store, get_job, pause_job, remove_job,
+    connect_store, get_job,
 };
+use trogon_eventsourcing::CommandExecution;
 use trogon_nats::{NatsConfig, connect as nats_connect};
 
 fn test_url() -> String {
@@ -175,7 +176,11 @@ async fn controller_reconciles_one_time_job() {
         at: Utc::now() + ChronoDuration::seconds(2),
     };
 
-    add_job(&store.event_store, AddJobCommand::new(job)).await.unwrap();
+    CommandExecution::new(&store.event_store, &AddJobCommand::new(job))
+        .with_snapshot(&store.event_store)
+        .execute()
+        .await
+        .unwrap();
 
     let stream = js.get_stream(trogon_cron::kv::SCHEDULES_STREAM).await.unwrap();
     wait_for_subject(&stream, "cron.fire.agent.run.one-time").await;
@@ -201,7 +206,11 @@ async fn controller_reconciles_sampling_job() {
         source: Some(SamplingSource::latest_from_subject("sensors.latest").unwrap()),
     };
 
-    add_job(&store.event_store, AddJobCommand::new(job)).await.unwrap();
+    CommandExecution::new(&store.event_store, &AddJobCommand::new(job))
+        .with_snapshot(&store.event_store)
+        .execute()
+        .await
+        .unwrap();
     wait_for_stream_subject(&js, trogon_cron::kv::SCHEDULES_STREAM, "sensors.latest").await;
     js.publish("sensors.latest", br#"{"value":42}"#.as_slice().into())
         .await
@@ -229,7 +238,11 @@ async fn controller_reconciles_cron_job_with_timezone() {
     let mut job = base_job("cron-timezone");
     job.schedule = Schedule::cron("*/2 * * * * *", Some("UTC".to_string())).unwrap();
 
-    add_job(&store.event_store, AddJobCommand::new(job)).await.unwrap();
+    CommandExecution::new(&store.event_store, &AddJobCommand::new(job))
+        .with_snapshot(&store.event_store)
+        .execute()
+        .await
+        .unwrap();
 
     let stream = js.get_stream(trogon_cron::kv::SCHEDULES_STREAM).await.unwrap();
     wait_for_subject(&stream, "cron.fire.agent.run.cron-timezone").await;
@@ -249,12 +262,18 @@ async fn disabling_job_removes_schedule_subject() {
     });
 
     let job = base_job("disabled");
-    add_job(&store.event_store, AddJobCommand::new(job)).await.unwrap();
+    CommandExecution::new(&store.event_store, &AddJobCommand::new(job))
+        .with_snapshot(&store.event_store)
+        .execute()
+        .await
+        .unwrap();
 
     let stream = js.get_stream(trogon_cron::kv::SCHEDULES_STREAM).await.unwrap();
     wait_for_subject(&stream, "cron.schedules.disabled").await;
 
-    pause_job(&store.event_store, PauseJobCommand::new(job_id("disabled")), None)
+    CommandExecution::new(&store.event_store, &PauseJobCommand::new(job_id("disabled")))
+        .with_snapshot(&store.event_store)
+        .execute()
         .await
         .unwrap();
     wait_for_subject_absence(&stream, "cron.schedules.disabled").await;
@@ -274,12 +293,18 @@ async fn removing_job_removes_schedule_subject() {
     });
 
     let job = base_job("removed");
-    add_job(&store.event_store, AddJobCommand::new(job)).await.unwrap();
+    CommandExecution::new(&store.event_store, &AddJobCommand::new(job))
+        .with_snapshot(&store.event_store)
+        .execute()
+        .await
+        .unwrap();
 
     let stream = js.get_stream(trogon_cron::kv::SCHEDULES_STREAM).await.unwrap();
     wait_for_subject(&stream, "cron.schedules.removed").await;
 
-    remove_job(&store.event_store, RemoveJobCommand::new(job_id("removed")), None)
+    CommandExecution::new(&store.event_store, &RemoveJobCommand::new(job_id("removed")))
+        .with_snapshot(&store.event_store)
+        .execute()
         .await
         .unwrap();
     wait_for_subject_absence(&stream, "cron.schedules.removed").await;
@@ -298,8 +323,14 @@ async fn event_store_rebuilds_current_state_for_new_client() {
     job.schedule = Schedule::cron("*/5 * * * * *", Some("UTC".to_string())).unwrap();
     let expected_schedule = job.schedule.clone();
 
-    add_job(&store.event_store, AddJobCommand::new(job)).await.unwrap();
-    pause_job(&store.event_store, PauseJobCommand::new(job_id("eventful")), None)
+    CommandExecution::new(&store.event_store, &AddJobCommand::new(job))
+        .with_snapshot(&store.event_store)
+        .execute()
+        .await
+        .unwrap();
+    CommandExecution::new(&store.event_store, &PauseJobCommand::new(job_id("eventful")))
+        .with_snapshot(&store.event_store)
+        .execute()
         .await
         .unwrap();
 

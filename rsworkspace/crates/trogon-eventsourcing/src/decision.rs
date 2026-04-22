@@ -11,7 +11,7 @@ pub trait StreamCommand {
     fn stream_id(&self) -> &Self::StreamId;
 }
 
-pub trait OverrideWritePrecondition: StreamCommand {}
+pub trait WritePreconditionOverride: StreamCommand {}
 
 pub trait StateMachine<Event>: Sized {
     type EvolveError;

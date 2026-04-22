@@ -10,7 +10,7 @@ pub mod nats;
 pub mod snapshot;
 pub mod testing;
 
-pub use decision::{Act, Decide, Decision, NonEmpty, OverrideWritePrecondition, StateMachine, StreamCommand, decide};
+pub use decision::{Act, Decide, Decision, NonEmpty, StateMachine, StreamCommand, WritePreconditionOverride, decide};
 pub use execution::{
     AppendOutcome, CommandExecution, CommandFailure, CommandInfraError, CommandResult, CommandSnapshotPolicy,
     ExecutionResult, FrequencySnapshot, NoSnapshot, SnapshotDecision, SnapshotPolicy, SnapshotRead, SnapshotWrite,

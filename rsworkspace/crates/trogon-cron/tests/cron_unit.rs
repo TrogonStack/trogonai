@@ -3,10 +3,10 @@
 use trogon_cron::{
     AddJobCommand, CronController, CronJob, Delivery, GetJobCommand, Job, JobDetails, JobEventStatus, JobHeaders,
     JobId, JobMessage, JobStatus, JobWriteCondition, ListJobsCommand, MessageContent, PauseJobCommand,
-    RemoveJobCommand, Schedule, SchedulePublisher, add_job,
+    RemoveJobCommand, Schedule, SchedulePublisher,
     mocks::{MockCronStore, MockLeaderLock, MockSchedulePublisher},
-    pause_job, remove_job,
 };
+use trogon_eventsourcing::CommandExecution;
 
 fn job_id(id: &str) -> JobId {
     JobId::parse(id).unwrap()
@@ -34,7 +34,11 @@ async fn client_register_then_get() {
     let store = MockCronStore::new();
 
     let job = base_job("backup");
-    add_job(&store, AddJobCommand::new(job)).await.unwrap();
+    CommandExecution::new(&store, &AddJobCommand::new(job))
+        .with_snapshot(&store)
+        .execute()
+        .await
+        .unwrap();
 
     let got = store
         .get_job(GetJobCommand::new(JobId::parse("backup").unwrap()))
@@ -47,8 +51,14 @@ async fn client_register_then_get() {
 async fn client_pause_job_toggles_job() {
     let store = MockCronStore::new();
 
-    add_job(&store, AddJobCommand::new(base_job("toggle"))).await.unwrap();
-    pause_job(&store, PauseJobCommand::new(job_id("toggle")), None)
+    CommandExecution::new(&store, &AddJobCommand::new(base_job("toggle")))
+        .with_snapshot(&store)
+        .execute()
+        .await
+        .unwrap();
+    CommandExecution::new(&store, &PauseJobCommand::new(job_id("toggle")))
+        .with_snapshot(&store)
+        .execute()
         .await
         .unwrap();
 
@@ -64,13 +74,23 @@ async fn client_pause_job_toggles_job() {
 async fn client_remove_and_list_jobs_use_store_paths() {
     let store = MockCronStore::new();
 
-    add_job(&store, AddJobCommand::new(base_job("alpha"))).await.unwrap();
-    add_job(&store, AddJobCommand::new(base_job("beta"))).await.unwrap();
+    CommandExecution::new(&store, &AddJobCommand::new(base_job("alpha")))
+        .with_snapshot(&store)
+        .execute()
+        .await
+        .unwrap();
+    CommandExecution::new(&store, &AddJobCommand::new(base_job("beta")))
+        .with_snapshot(&store)
+        .execute()
+        .await
+        .unwrap();
 
     let listed = store.list_jobs(ListJobsCommand).await.unwrap();
     assert_eq!(listed.len(), 2);
 
-    remove_job(&store, RemoveJobCommand::new(job_id("beta")), None)
+    CommandExecution::new(&store, &RemoveJobCommand::new(job_id("beta")))
+        .with_snapshot(&store)
+        .execute()
         .await
         .unwrap();
 

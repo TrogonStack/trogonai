@@ -1,6 +1,5 @@
 use trogon_eventsourcing::{
-    CommandExecution, CommandResult, CommandSnapshotPolicy, Decide, Decision, FrequencySnapshot,
-    OverrideWritePrecondition, SnapshotRead, SnapshotWrite, StreamAppend, StreamCommand, StreamRead, StreamState,
+    CommandSnapshotPolicy, Decide, Decision, FrequencySnapshot, StreamCommand, WritePreconditionOverride,
 };
 
 use super::JobState;
@@ -35,7 +34,7 @@ impl StreamCommand for PauseJobCommand {
     }
 }
 
-impl OverrideWritePrecondition for PauseJobCommand {}
+impl WritePreconditionOverride for PauseJobCommand {}
 
 impl Decide for PauseJobCommand {
     type State = JobState;
@@ -65,30 +64,11 @@ impl CommandSnapshotPolicy for PauseJobCommand {
     const SNAPSHOT_POLICY: Self::SnapshotPolicy = super::snapshot::COMMAND_SNAPSHOT_POLICY;
 }
 
-pub async fn pause_job<S, SErr>(
-    store: &S,
-    command: PauseJobCommand,
-    write_precondition: Option<StreamState>,
-) -> CommandResult<PauseJobCommand, SErr>
-where
-    S: StreamRead<JobId, Error = SErr>
-        + StreamAppend<JobId, Error = SErr>
-        + SnapshotRead<JobState, JobId, Error = SErr>
-        + SnapshotWrite<JobState, JobId, Error = SErr>,
-    serde_json::Error: Into<SErr>,
-{
-    CommandExecution::new(store, &command)
-        .with_write_precondition(write_precondition)
-        .with_snapshot(store)
-        .execute()
-        .await
-}
-
 #[cfg(test)]
 mod tests {
     use trogon_eventsourcing::snapshot::SnapshotSchema;
     use trogon_eventsourcing::{
-        Decision, NonEmpty, decide,
+        CommandExecution, Decision, NonEmpty, decide,
         testing::{TestCase, Timeline, decider, expect_error},
     };
 
@@ -229,7 +209,9 @@ mod tests {
         let store = MockCronStore::new();
         store.seed_job(job("backup"));
 
-        let outcome = pause_job(&store, PauseJobCommand::new(JobId::parse("backup").unwrap()), None)
+        let outcome = CommandExecution::new(&store, &PauseJobCommand::new(JobId::parse("backup").unwrap()))
+            .with_snapshot(&store)
+            .execute()
             .await
             .unwrap();
         assert_eq!(outcome.next_expected_version, 2);

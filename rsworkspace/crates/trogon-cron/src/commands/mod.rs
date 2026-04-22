@@ -6,8 +6,8 @@ mod remove_job;
 mod resume_job;
 mod snapshot;
 
-pub use add_job::{AddJobCommand, AddJobDecisionError, add_job};
+pub use add_job::{AddJobCommand, AddJobDecisionError};
 pub use job_state::JobState;
-pub use pause_job::{PauseJobCommand, PauseJobDecisionError, pause_job};
-pub use remove_job::{RemoveJobCommand, RemoveJobDecisionError, remove_job};
-pub use resume_job::{ResumeJobCommand, ResumeJobDecisionError, resume_job};
+pub use pause_job::{PauseJobCommand, PauseJobDecisionError};
+pub use remove_job::{RemoveJobCommand, RemoveJobDecisionError};
+pub use resume_job::{ResumeJobCommand, ResumeJobDecisionError};
