@@ -18,7 +18,7 @@ use crate::{
     CronJob, ResolvedJobSpec,
     error::CronError,
     events::{
-        JobAdded, JobEvent, JobEventCodec, JobEventData, JobEventState, JobPaused, JobRemoved, JobResumed,
+        JobAdded, JobEvent, JobEventCodec, JobEventData, JobEventStatus, JobPaused, JobRemoved, JobResumed,
         RecordedJobEvent,
     },
     kv::{EVENTS_SUBJECT_PREFIX, LEADER_BUCKET, LEADER_KEY, LEGACY_EVENTS_SUBJECT_PREFIX},
@@ -333,7 +333,7 @@ fn apply_scheduler_event(desired_jobs: &mut DesiredJobs, event: JobEvent) -> Res
             })?;
             match job {
                 DesiredJobState::Present(job) => {
-                    job.state = JobEventState::Disabled;
+                    job.status = JobEventStatus::Disabled;
                     Ok(SchedulerChange::Delete(id))
                 }
                 DesiredJobState::Deleted => Err(CronError::event_source(
@@ -351,7 +351,7 @@ fn apply_scheduler_event(desired_jobs: &mut DesiredJobs, event: JobEvent) -> Res
             })?;
             match job {
                 DesiredJobState::Present(job) => {
-                    job.state = JobEventState::Enabled;
+                    job.status = JobEventStatus::Enabled;
                     Ok(SchedulerChange::Upsert(job.as_ref().clone()))
                 }
                 DesiredJobState::Deleted => Err(CronError::event_source(
@@ -642,9 +642,9 @@ mod tests {
         default_leader_timing, next_scheduler_start_sequence, reconcile_snapshot, scheduler_consumer_config,
     };
     use crate::{
-        CronJob, DeliverySpec, JobDetails, JobEnabledState, JobHeaders, JobId, JobMessage, JobSpec, MessageContent,
+        CronJob, DeliverySpec, JobDetails, JobHeaders, JobId, JobMessage, JobSpec, JobStatus, MessageContent,
         MessageEnvelope, MessageHeaders, ScheduleSpec,
-        events::{JobAdded, JobEvent, JobEventState, JobPaused, JobRemoved, JobResumed},
+        events::{JobAdded, JobEvent, JobEventStatus, JobPaused, JobRemoved, JobResumed},
         mocks::{MockCronStore, MockLeaderLock, MockSchedulePublisher},
     };
 
@@ -655,7 +655,7 @@ mod tests {
     fn base_job(id: &str) -> JobSpec {
         JobSpec {
             id: job_id(id),
-            state: JobEnabledState::Enabled,
+            status: JobStatus::Enabled,
             schedule: ScheduleSpec::every(30).unwrap(),
             delivery: DeliverySpec::nats_event("agent.run").unwrap(),
             message: JobMessage {
@@ -672,7 +672,7 @@ mod tests {
     fn invalid_enabled_job(id: &str) -> CronJob {
         CronJob {
             id: id.to_string(),
-            state: JobEventState::Enabled,
+            status: JobEventStatus::Enabled,
             schedule: crate::JobEventSchedule::Cron {
                 expr: "not-a-cron".to_string(),
                 timezone: None,
@@ -712,7 +712,7 @@ mod tests {
         publisher.seed_active_job("disabled");
 
         let mut disabled = base_job("disabled");
-        disabled.state = JobEnabledState::Disabled;
+        disabled.status = JobStatus::Disabled;
         let desired_jobs = HashMap::from([(
             "disabled".to_string(),
             DesiredJobState::Present(Box::new(CronJob::from((
@@ -780,10 +780,10 @@ mod tests {
         assert_eq!(disabled, SchedulerChange::Delete("alpha".to_string()));
         assert_eq!(
             match desired_jobs.get("alpha").unwrap() {
-                DesiredJobState::Present(job) => job.state,
+                DesiredJobState::Present(job) => job.status,
                 DesiredJobState::Deleted => panic!("expected present job"),
             },
-            JobEventState::Disabled
+            JobEventStatus::Disabled
         );
 
         let enabled = apply_scheduler_event(
@@ -846,7 +846,7 @@ mod tests {
     async fn apply_scheduler_change_removes_disabled_and_deleted_jobs() {
         let publisher = MockSchedulePublisher::new();
         let mut disabled = base_job("disabled");
-        disabled.state = JobEnabledState::Disabled;
+        disabled.status = JobStatus::Disabled;
 
         apply_scheduler_change(
             &publisher,
