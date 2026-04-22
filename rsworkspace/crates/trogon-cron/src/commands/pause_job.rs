@@ -1,5 +1,3 @@
-use std::convert::Infallible;
-
 use trogon_eventsourcing::{
     CommandExecution, CommandResult, CommandSnapshots, Decide, Decision, FrequencySnapshot, NonEmpty, OccPolicy,
     SnapshotRead, SnapshotWrite, StreamAppend, StreamCommand, StreamRead,
@@ -7,7 +5,7 @@ use trogon_eventsourcing::{
 
 use super::JobCommandState;
 use crate::{
-    JobEnabledState, JobId,
+    JobId,
     events::{JobEvent, JobPaused},
 };
 
@@ -40,16 +38,7 @@ impl StreamCommand for PauseJobCommand {
 impl Decide for PauseJobCommand {
     type State = JobCommandState;
     type Event = JobEvent;
-    type EvolveError = Infallible;
     type DecideError = PauseJobDecisionError;
-
-    fn initial_state() -> JobCommandState {
-        JobCommandState::initial_state()
-    }
-
-    fn evolve(state: JobCommandState, event: JobEvent) -> Result<JobCommandState, Self::EvolveError> {
-        state.evolve(event)
-    }
 
     fn decide(state: &JobCommandState, command: &Self) -> Result<Decision<JobEvent>, Self::DecideError> {
         match state {
@@ -59,12 +48,10 @@ impl Decide for PauseJobCommand {
             JobCommandState::Deleted => Err(PauseJobDecisionError::JobDeleted {
                 id: command.stream_id().clone(),
             }),
-            JobCommandState::Present {
-                current: JobEnabledState::Disabled,
-            } => Err(PauseJobDecisionError::AlreadyPaused {
+            JobCommandState::PresentDisabled => Err(PauseJobDecisionError::AlreadyPaused {
                 id: command.stream_id().clone(),
             }),
-            JobCommandState::Present { .. } => Ok(Decision::Event(NonEmpty::one(JobEvent::JobPaused(JobPaused {
+            JobCommandState::PresentEnabled => Ok(Decision::Event(NonEmpty::one(JobEvent::JobPaused(JobPaused {
                 id: command.stream_id().to_string(),
             })))),
         }
@@ -108,8 +95,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        AddJobCommand, DeliverySpec, GetJobCommand, JobAdded, JobEventState, JobHeaders, JobMessage, JobSpec,
-        MessageContent, ScheduleSpec, mocks::MockCronStore,
+        AddJobCommand, DeliverySpec, GetJobCommand, JobAdded, JobEnabledState, JobEventState, JobHeaders, JobMessage,
+        JobSpec, MessageContent, ScheduleSpec, mocks::MockCronStore,
     };
 
     fn job_id(id: &str) -> JobId {
@@ -131,9 +118,7 @@ mod tests {
 
     #[test]
     fn decides_pause_from_present_enabled_state() {
-        let state = JobCommandState::Present {
-            current: JobEnabledState::Enabled,
-        };
+        let state = JobCommandState::PresentEnabled;
         let command = PauseJobCommand::new(JobId::parse("backup").unwrap());
 
         let decision = decide(&state, &command).unwrap();
@@ -147,9 +132,7 @@ mod tests {
 
     #[test]
     fn rejects_pausing_already_paused_jobs() {
-        let state = JobCommandState::Present {
-            current: JobEnabledState::Disabled,
-        };
+        let state = JobCommandState::PresentDisabled;
         let command = PauseJobCommand::new(JobId::parse("backup").unwrap());
 
         assert!(matches!(

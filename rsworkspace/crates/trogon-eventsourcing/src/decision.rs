@@ -13,6 +13,14 @@ pub trait StreamCommand {
     }
 }
 
+pub trait StateMachine<Event>: Sized {
+    type EvolveError;
+
+    fn initial_state() -> Self;
+
+    fn evolve(self, event: Event) -> Result<Self, Self::EvolveError>;
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NonEmpty<T>(Vec<T>);
 
@@ -22,11 +30,7 @@ impl<T> NonEmpty<T> {
     }
 
     pub fn from_vec(values: Vec<T>) -> Option<Self> {
-        if values.is_empty() {
-            None
-        } else {
-            Some(Self(values))
-        }
+        if values.is_empty() { None } else { Some(Self(values)) }
     }
 
     pub fn into_vec(self) -> Vec<T> {
@@ -90,17 +94,9 @@ pub enum Decision<E> {
 pub trait Decide: StreamCommand + Sized {
     type State;
     type Event;
-    type EvolveError;
     type DecideError;
 
-    fn initial_state() -> Self::State;
-
-    fn evolve(state: Self::State, event: Self::Event) -> Result<Self::State, Self::EvolveError>;
-
-    fn decide(
-        state: &Self::State,
-        command: &Self,
-    ) -> Result<Decision<Self::Event>, Self::DecideError>;
+    fn decide(state: &Self::State, command: &Self) -> Result<Decision<Self::Event>, Self::DecideError>;
 }
 
 pub fn decide<C>(state: &C::State, command: &C) -> Result<Decision<C::Event>, C::DecideError>
@@ -125,27 +121,24 @@ mod tests {
         }
     }
 
-    impl Decide for TestCommand {
-        type State = u8;
-        type Event = &'static str;
+    impl StateMachine<&'static str> for u8 {
         type EvolveError = ();
-        type DecideError = ();
 
-        fn initial_state() -> Self::State {
+        fn initial_state() -> Self {
             0
         }
 
-        fn evolve(
-            state: Self::State,
-            _event: Self::Event,
-        ) -> Result<Self::State, Self::EvolveError> {
-            Ok(state)
+        fn evolve(self, _event: &'static str) -> Result<Self, Self::EvolveError> {
+            Ok(self)
         }
+    }
 
-        fn decide(
-            state: &Self::State,
-            _command: &Self,
-        ) -> Result<Decision<Self::Event>, Self::DecideError> {
+    impl Decide for TestCommand {
+        type State = u8;
+        type Event = &'static str;
+        type DecideError = ();
+
+        fn decide(state: &Self::State, _command: &Self) -> Result<Decision<Self::Event>, Self::DecideError> {
             Ok(Decision::Event(NonEmpty::one(if *state == 1 {
                 "created"
             } else {
@@ -177,10 +170,7 @@ mod tests {
         let events = NonEmpty::from_vec(vec![1, 2, 3]).unwrap();
         assert_eq!(events.len(), 3);
         assert_eq!(events.iter().copied().collect::<Vec<_>>(), vec![1, 2, 3]);
-        assert_eq!(
-            events.map(|value| value.to_string()).into_vec(),
-            vec!["1", "2", "3"]
-        );
+        assert_eq!(events.map(|value| value.to_string()).into_vec(), vec!["1", "2", "3"]);
     }
 
     #[test]
