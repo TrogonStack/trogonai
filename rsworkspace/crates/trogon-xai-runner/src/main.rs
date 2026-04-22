@@ -1,8 +1,10 @@
 use std::sync::Arc;
 
 use acp_nats::acp_prefix::AcpPrefix;
+use acp_nats::jetstream::provision::provision_streams;
 use acp_nats_agent::AgentSideNatsConnection;
 use tracing::{error, info, warn};
+use trogon_nats::jetstream::NatsJetStreamClient;
 use trogon_xai_runner::{
     AgentLoader, NatsSessionNotifier, NatsSessionStore, SkillLoader, XaiAgent,
 };
@@ -61,6 +63,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let nats = async_nats::connect(&nats_url).await?;
     let acp_prefix = AcpPrefix::new(&prefix)?;
+    let js_ctx = async_nats::jetstream::new(nats.clone());
+    let js = NatsJetStreamClient::new(js_ctx.clone());
+
+    provision_streams(&js, &acp_prefix)
+        .await
+        .map_err(|e| format!("failed to provision JetStream streams: {e}"))?;
+
     let notifier = NatsSessionNotifier::new(nats.clone(), acp_prefix.clone());
     let mut agent = XaiAgent::new(notifier, default_model, api_key);
 
@@ -68,7 +77,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // trogon-console are injected into every new session's system prompt.
     // Also open the SESSIONS KV bucket for session visibility in trogon-console.
     {
-        let js = async_nats::jetstream::new(nats.clone());
+        let js = js_ctx;
 
         if let Ok(agent_id) = std::env::var("AGENT_ID") {
             match (AgentLoader::open(&js).await, SkillLoader::open(&js).await) {
@@ -96,9 +105,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let local = tokio::task::LocalSet::new();
     let result = local
         .run_until(async {
-            let (_conn, io_task) = AgentSideNatsConnection::new(agent, nats, acp_prefix, |fut| {
-                tokio::task::spawn_local(fut);
-            });
+            let (_conn, io_task) =
+                AgentSideNatsConnection::with_jetstream(agent, nats, js, acp_prefix, |fut| {
+                    tokio::task::spawn_local(fut);
+                });
             info!("xai-runner listening on NATS");
             tokio::select! {
                 result = io_task => result,
