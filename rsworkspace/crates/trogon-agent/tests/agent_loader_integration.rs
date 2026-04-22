@@ -74,7 +74,10 @@ async fn agent_loader_returns_skill_ids_from_kv() {
 async fn agent_loader_returns_empty_for_missing_agent() {
     let (loader, _c) = make_loader().await;
     let ids = loader.get_skill_ids("does_not_exist").await;
-    assert!(ids.is_empty(), "missing agent must return empty skill_ids; got {ids:?}");
+    assert!(
+        ids.is_empty(),
+        "missing agent must return empty skill_ids; got {ids:?}"
+    );
 }
 
 // ── Malformed JSON returns empty ───────────────────────────────────────────────
@@ -88,15 +91,15 @@ async fn agent_loader_returns_empty_for_malformed_json() {
         .await
         .expect("get KV bucket");
 
-    kv.put(
-        "bad_agent",
-        bytes::Bytes::from(b"not valid json" as &[u8]),
-    )
-    .await
-    .expect("put bad bytes");
+    kv.put("bad_agent", bytes::Bytes::from(b"not valid json" as &[u8]))
+        .await
+        .expect("put bad bytes");
 
     let ids = loader.get_skill_ids("bad_agent").await;
-    assert!(ids.is_empty(), "malformed JSON must return empty skill_ids; got {ids:?}");
+    assert!(
+        ids.is_empty(),
+        "malformed JSON must return empty skill_ids; got {ids:?}"
+    );
 }
 
 // ── Missing skill_ids field returns empty ─────────────────────────────────────
@@ -122,5 +125,8 @@ async fn agent_loader_returns_empty_when_skill_ids_field_missing() {
     .expect("put agent");
 
     let ids = loader.get_skill_ids("agent_no_skills").await;
-    assert!(ids.is_empty(), "agent without skill_ids field must return empty; got {ids:?}");
+    assert!(
+        ids.is_empty(),
+        "agent without skill_ids field must return empty; got {ids:?}"
+    );
 }

@@ -856,9 +856,15 @@ mod tests {
         let app = mock_app(MockAutomationStore::new(), run_store);
         let resp = app.oneshot(get_req("/runs", "acme")).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json.as_array().unwrap().len(), 2, "must return only acme's 2 runs");
+        assert_eq!(
+            json.as_array().unwrap().len(),
+            2,
+            "must return only acme's 2 runs"
+        );
     }
 
     #[tokio::test]
@@ -872,7 +878,9 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         let arr = json.as_array().unwrap();
         assert_eq!(arr.len(), 1);
@@ -905,7 +913,9 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(
             json.as_array().unwrap().len(),
@@ -943,7 +953,9 @@ mod tests {
         let app = mock_app(MockAutomationStore::new(), run_store);
         let resp = app.oneshot(get_req("/stats", "acme")).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["total"], 2);
         assert_eq!(json["successful_7d"], 1);
@@ -1033,10 +1045,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_runs_store_error_returns_500() {
-        let resp = error_app()
-            .oneshot(get_req("/runs", "acme"))
-            .await
-            .unwrap();
+        let resp = error_app().oneshot(get_req("/runs", "acme")).await.unwrap();
         assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 

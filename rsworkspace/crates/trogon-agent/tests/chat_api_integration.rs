@@ -36,7 +36,11 @@ impl AgentLoading for FixedAgentLoader {
         &'a self,
         agent_id: &'a str,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Vec<String>> + Send + 'a>> {
-        let ids = if agent_id == self.target_id { self.skill_ids.clone() } else { vec![] };
+        let ids = if agent_id == self.target_id {
+            self.skill_ids.clone()
+        } else {
+            vec![]
+        };
         Box::pin(std::future::ready(ids))
     }
 }
@@ -65,7 +69,11 @@ impl PromiseRepository for NoOpPromiseStore {
         _tenant_id: &'a str,
         _promise_id: &'a str,
     ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<Option<PromiseEntry>, PromiseStoreError>> + Send + 'a>,
+        Box<
+            dyn std::future::Future<Output = Result<Option<PromiseEntry>, PromiseStoreError>>
+                + Send
+                + 'a,
+        >,
     > {
         Box::pin(async { Ok(None) })
     }
@@ -73,7 +81,9 @@ impl PromiseRepository for NoOpPromiseStore {
     fn put_promise<'a>(
         &'a self,
         _promise: &'a AgentPromise,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<u64, PromiseStoreError>> + Send + 'a>> {
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<u64, PromiseStoreError>> + Send + 'a>,
+    > {
         Box::pin(async { Ok(1) })
     }
 
@@ -83,7 +93,9 @@ impl PromiseRepository for NoOpPromiseStore {
         _promise_id: &'a str,
         _promise: &'a AgentPromise,
         _revision: u64,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<u64, PromiseStoreError>> + Send + 'a>> {
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<u64, PromiseStoreError>> + Send + 'a>,
+    > {
         Box::pin(async { Ok(1) })
     }
 
@@ -92,7 +104,11 @@ impl PromiseRepository for NoOpPromiseStore {
         _tenant_id: &'a str,
         _promise_id: &'a str,
         _cache_key: &'a str,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<String>, PromiseStoreError>> + Send + 'a>> {
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = Result<Option<String>, PromiseStoreError>> + Send + 'a,
+        >,
+    > {
         Box::pin(async { Ok(None) })
     }
 
@@ -102,14 +118,22 @@ impl PromiseRepository for NoOpPromiseStore {
         _promise_id: &'a str,
         _cache_key: &'a str,
         _result: &'a str,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), PromiseStoreError>> + Send + 'a>> {
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<(), PromiseStoreError>> + Send + 'a>,
+    > {
         Box::pin(async { Ok(()) })
     }
 
     fn list_running<'a>(
         &'a self,
         _tenant_id: &'a str,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<AgentPromise>, PromiseStoreError>> + Send + 'a>> {
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = Result<Vec<AgentPromise>, PromiseStoreError>>
+                + Send
+                + 'a,
+        >,
+    > {
         Box::pin(async { Ok(vec![]) })
     }
 }
@@ -1196,7 +1220,10 @@ async fn list_promises_returns_empty_json_array() {
         .unwrap();
     assert_eq!(res.status(), 200);
     let body: Vec<serde_json::Value> = res.json().await.unwrap();
-    assert!(body.is_empty(), "NoOpPromiseStore must return empty list; got {body:?}");
+    assert!(
+        body.is_empty(),
+        "NoOpPromiseStore must return empty list; got {body:?}"
+    );
 }
 
 #[tokio::test]
@@ -1242,7 +1269,10 @@ async fn create_session_sets_started_at_secs() {
         .unwrap();
 
     let started = got["started_at_secs"].as_u64().unwrap_or(0);
-    assert!(started > 0, "started_at_secs must be set to current epoch on creation: {started}");
+    assert!(
+        started > 0,
+        "started_at_secs must be set to current epoch on creation: {started}"
+    );
 }
 
 #[tokio::test]
@@ -1301,12 +1331,7 @@ async fn send_message_computes_duration_ms() {
 
 #[tokio::test]
 async fn create_session_stores_agent_id_from_state() {
-    let env = start_with_options(
-        Some("agent_test_001".to_string()),
-        None,
-        None,
-    )
-    .await;
+    let env = start_with_options(Some("agent_test_001".to_string()), None, None).await;
 
     let created: Value = env
         .client
@@ -1389,8 +1414,14 @@ async fn send_message_persists_usage_on_assistant_message() {
         .expect("assistant message must be present");
 
     let usage = &assistant["usage"];
-    assert_eq!(usage["input_tokens"], 42, "input_tokens from Anthropic response must be persisted");
-    assert_eq!(usage["output_tokens"], 7,  "output_tokens from Anthropic response must be persisted");
+    assert_eq!(
+        usage["input_tokens"], 42,
+        "input_tokens from Anthropic response must be persisted"
+    );
+    assert_eq!(
+        usage["output_tokens"], 7,
+        "output_tokens from Anthropic response must be persisted"
+    );
 }
 
 #[tokio::test]

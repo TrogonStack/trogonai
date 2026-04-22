@@ -6208,7 +6208,7 @@ async fn pipeline_get_pr_comments_tool_detokenized() {
             tenant_id: "default".to_string(),
             split_evaluator_url: None,
             split_auth_token: None,
-        agent_id: None,
+            agent_id: None,
             incidentio_stream_name: None,
         })
         .await
@@ -6381,7 +6381,7 @@ async fn pipeline_update_file_tool_detokenized() {
             tenant_id: "default".to_string(),
             split_evaluator_url: None,
             split_auth_token: None,
-        agent_id: None,
+            agent_id: None,
             incidentio_stream_name: None,
         })
         .await
@@ -6556,7 +6556,7 @@ async fn pipeline_create_pull_request_tool_detokenized() {
             tenant_id: "default".to_string(),
             split_evaluator_url: None,
             split_auth_token: None,
-        agent_id: None,
+            agent_id: None,
             incidentio_stream_name: None,
         })
         .await
@@ -6734,7 +6734,7 @@ async fn pipeline_get_linear_comments_tool_detokenized() {
             tenant_id: "default".to_string(),
             split_evaluator_url: None,
             split_auth_token: None,
-        agent_id: None,
+            agent_id: None,
             incidentio_stream_name: None,
         })
         .await

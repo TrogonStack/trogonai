@@ -427,8 +427,9 @@ async fn send_message<R: SessionRepository>(
             // Legacy sessions with started_at_secs == 0 are skipped to avoid
             // reporting a nonsensical ~55-year duration.
             if session.started_at_secs > 0 {
-                session.duration_ms =
-                    now_secs.saturating_sub(session.started_at_secs).saturating_mul(1000);
+                session.duration_ms = now_secs
+                    .saturating_sub(session.started_at_secs)
+                    .saturating_mul(1000);
             }
 
             if let Err(e) = state.session_store.put(&session).await {
@@ -1020,10 +1021,15 @@ mod tests {
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["model"], "claude-opus-4-6");
-        assert_eq!(store.snapshot()["acme.sess-2"].model.as_deref(), Some("claude-opus-4-6"));
+        assert_eq!(
+            store.snapshot()["acme.sess-2"].model.as_deref(),
+            Some("claude-opus-4-6")
+        );
     }
 
     #[tokio::test]
@@ -1036,7 +1042,9 @@ mod tests {
             .uri("/sessions/sess-3")
             .header("x-tenant-id", "acme")
             .header("content-type", "application/json")
-            .body(Body::from(r#"{"tools":["post_pr_comment","send_slack_message"]}"#))
+            .body(Body::from(
+                r#"{"tools":["post_pr_comment","send_slack_message"]}"#,
+            ))
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
@@ -1214,9 +1222,14 @@ mod tests {
     async fn list_promises_empty_returns_empty_array() {
         let ps = Arc::new(crate::promise_store::mock::MockPromiseStore::new());
         let app = mock_app_with_promise_store(MockSessionStore::new(), ps);
-        let resp = app.oneshot(get_req("/admin/promises", "acme")).await.unwrap();
+        let resp = app
+            .oneshot(get_req("/admin/promises", "acme"))
+            .await
+            .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json, serde_json::json!([]));
     }
@@ -1226,9 +1239,14 @@ mod tests {
         let ps = Arc::new(crate::promise_store::mock::MockPromiseStore::new());
         ps.insert_promise(make_running_promise("p1", "acme"));
         let app = mock_app_with_promise_store(MockSessionStore::new(), Arc::clone(&ps) as _);
-        let resp = app.oneshot(get_req("/admin/promises", "acme")).await.unwrap();
+        let resp = app
+            .oneshot(get_req("/admin/promises", "acme"))
+            .await
+            .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         let arr = json.as_array().unwrap();
         assert_eq!(arr.len(), 1);
@@ -1240,8 +1258,14 @@ mod tests {
         assert_eq!(view["recovery_count"], 1);
         assert_eq!(view["checkpoint_degraded"], false);
         // messages and system_prompt must NOT appear in the response.
-        assert!(view.get("messages").is_none(), "messages must be excluded from view");
-        assert!(view.get("system_prompt").is_none(), "system_prompt must be excluded from view");
+        assert!(
+            view.get("messages").is_none(),
+            "messages must be excluded from view"
+        );
+        assert!(
+            view.get("system_prompt").is_none(),
+            "system_prompt must be excluded from view"
+        );
     }
 
     #[tokio::test]
@@ -1265,7 +1289,10 @@ mod tests {
             MockSessionStore::new(),
             Arc::clone(&ps) as Arc<dyn crate::promise_store::PromiseRepository>,
         );
-        let resp = app.oneshot(get_req("/admin/promises", "acme")).await.unwrap();
+        let resp = app
+            .oneshot(get_req("/admin/promises", "acme"))
+            .await
+            .unwrap();
         assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 

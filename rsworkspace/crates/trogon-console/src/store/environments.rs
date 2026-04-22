@@ -62,16 +62,31 @@ impl EnvironmentStore {
 }
 
 impl EnvironmentRepository for EnvironmentStore {
-    fn list(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<Environment>, String>> + Send + '_>> {
+    fn list(
+        &self,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Vec<Environment>, String>> + Send + '_>,
+    > {
         Box::pin(async move { self.list().await })
     }
-    fn get<'a>(&'a self, id: &'a str) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<Environment>, String>> + Send + 'a>> {
+    fn get<'a>(
+        &'a self,
+        id: &'a str,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Option<Environment>, String>> + Send + 'a>,
+    > {
         Box::pin(async move { self.get(id).await })
     }
-    fn put<'a>(&'a self, env: &'a Environment) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
+    fn put<'a>(
+        &'a self,
+        env: &'a Environment,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
         Box::pin(async move { self.put(env).await })
     }
-    fn delete<'a>(&'a self, id: &'a str) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
+    fn delete<'a>(
+        &'a self,
+        id: &'a str,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
         Box::pin(async move { self.delete(id).await })
     }
 }

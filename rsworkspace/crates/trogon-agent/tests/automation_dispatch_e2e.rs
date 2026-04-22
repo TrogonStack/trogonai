@@ -963,7 +963,9 @@ async fn startup_recovery_resumes_stale_automation_promise_to_resolved() {
     create_streams(&js).await;
 
     // Create the automation so the recovery can find and run it.
-    let astore = AutomationStore::open(&js).await.expect("open AutomationStore");
+    let astore = AutomationStore::open(&js)
+        .await
+        .expect("open AutomationStore");
     astore
         .put(&make_automation(
             "auto-recover",
@@ -1090,10 +1092,10 @@ async fn poll_promise_until_permanent_failed(
     use trogon_agent::promise_store::PromiseStatus;
     let deadline = tokio::time::Instant::now() + timeout;
     loop {
-        if let Ok(Some((p, _))) = ps.get_promise(tenant_id, promise_id).await {
-            if p.status == PromiseStatus::PermanentFailed {
-                return p;
-            }
+        if let Ok(Some((p, _))) = ps.get_promise(tenant_id, promise_id).await
+            && p.status == PromiseStatus::PermanentFailed
+        {
+            return p;
         }
         if tokio::time::Instant::now() >= deadline {
             panic!("Promise {promise_id} did not reach PermanentFailed within {timeout:?}");
@@ -1125,7 +1127,9 @@ async fn startup_recovery_disabled_automation_marks_promise_permanent_failed() {
     create_streams(&js).await;
 
     // Seed the automation as disabled.
-    let astore = AutomationStore::open(&js).await.expect("open AutomationStore");
+    let astore = AutomationStore::open(&js)
+        .await
+        .expect("open AutomationStore");
     let mut disabled_auto = make_automation(
         "auto-disabled",
         "default",
@@ -1133,7 +1137,10 @@ async fn startup_recovery_disabled_automation_marks_promise_permanent_failed() {
         "DISABLED_PROMPT",
     );
     disabled_auto.enabled = false;
-    astore.put(&disabled_auto).await.expect("put disabled automation");
+    astore
+        .put(&disabled_auto)
+        .await
+        .expect("put disabled automation");
 
     // Seed a stale Running promise pointing at the disabled automation.
     let ps = PromiseStore::open(&js).await.expect("open PromiseStore");
@@ -1182,7 +1189,11 @@ async fn startup_recovery_disabled_automation_marks_promise_permanent_failed() {
         Some("automation is disabled"),
         "failure_reason must explain why the promise was not run"
     );
-    assert_eq!(model_mock.hits_async().await, 0, "model must never be called for disabled automation");
+    assert_eq!(
+        model_mock.hits_async().await,
+        0,
+        "model must never be called for disabled automation"
+    );
 }
 
 /// Startup recovery: a stale promise whose automation was deleted (not found in
@@ -1200,7 +1211,9 @@ async fn startup_recovery_deleted_automation_marks_promise_permanent_failed() {
     create_streams(&js).await;
 
     // AutomationStore is open but has NO automation with this ID — simulates deletion.
-    let _astore = AutomationStore::open(&js).await.expect("open AutomationStore");
+    let _astore = AutomationStore::open(&js)
+        .await
+        .expect("open AutomationStore");
 
     let ps = PromiseStore::open(&js).await.expect("open PromiseStore");
     let promise_id = "github_pull_request.88.auto-deleted";
@@ -1246,7 +1259,11 @@ async fn startup_recovery_deleted_automation_marks_promise_permanent_failed() {
         Some("automation no longer exists"),
         "failure_reason must explain that the automation was deleted"
     );
-    assert_eq!(model_mock.hits_async().await, 0, "model must never be called for deleted automation");
+    assert_eq!(
+        model_mock.hits_async().await,
+        0,
+        "model must never be called for deleted automation"
+    );
 }
 
 /// Startup recovery: a stale built-in-handler promise with an unknown NATS subject
@@ -1316,7 +1333,11 @@ async fn startup_recovery_unknown_subject_marks_promise_permanent_failed() {
         PromiseStatus::PermanentFailed,
         "unknown subject must be marked PermanentFailed to stop cycling"
     );
-    assert_eq!(model_mock.hits_async().await, 0, "model must never be called for unknown subject");
+    assert_eq!(
+        model_mock.hits_async().await,
+        0,
+        "model must never be called for unknown subject"
+    );
 }
 
 /// A non-retryable 4xx error from Anthropic (400 Bad Request) marks the promise
@@ -1332,7 +1353,9 @@ async fn dispatch_marks_promise_permanent_failed_on_4xx_error() {
     let (_, js) = js_client(nats_port).await;
     create_streams(&js).await;
 
-    let astore = AutomationStore::open(&js).await.expect("open AutomationStore");
+    let astore = AutomationStore::open(&js)
+        .await
+        .expect("open AutomationStore");
     astore
         .put(&make_automation(
             "auto-pf",
@@ -1397,11 +1420,7 @@ async fn dispatch_marks_promise_permanent_failed_on_4xx_error() {
             .json()
             .await
             .unwrap();
-        if body
-            .as_array()
-            .map(|a| !a.is_empty())
-            .unwrap_or(false)
-        {
+        if body.as_array().map(|a| !a.is_empty()).unwrap_or(false) {
             break;
         }
         if tokio::time::Instant::now() >= deadline {
@@ -1463,10 +1482,10 @@ async fn builtin_handler_marks_promise_resolved_in_kv() {
     let ps = PromiseStore::open(&js).await.expect("open PromiseStore");
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     let promise = loop {
-        if let Ok(Some((p, _))) = ps.get_promise("default", "github_pull_request.1").await {
-            if p.status == PromiseStatus::Resolved {
-                break p;
-            }
+        if let Ok(Some((p, _))) = ps.get_promise("default", "github_pull_request.1").await
+            && p.status == PromiseStatus::Resolved
+        {
+            break p;
         }
         if tokio::time::Instant::now() >= deadline {
             panic!("Built-in handler promise never became Resolved within timeout");
@@ -1496,7 +1515,9 @@ async fn multi_turn_run_checkpoints_iteration_and_messages_in_kv() {
     let (_, js) = js_client(nats_port).await;
     create_streams(&js).await;
 
-    let astore = AutomationStore::open(&js).await.expect("open AutomationStore");
+    let astore = AutomationStore::open(&js)
+        .await
+        .expect("open AutomationStore");
     astore
         .put(&make_automation(
             "auto-multiturn",
@@ -1636,7 +1657,9 @@ async fn dispatch_marks_promise_failed_on_transient_5xx_exhaustion() {
     let (_, js) = js_client(nats_port).await;
     create_streams(&js).await;
 
-    let astore = AutomationStore::open(&js).await.expect("open AutomationStore");
+    let astore = AutomationStore::open(&js)
+        .await
+        .expect("open AutomationStore");
     astore
         .put(&make_automation(
             "auto-5xx",
@@ -1737,7 +1760,9 @@ async fn linear_event_marks_promise_resolved_in_kv() {
     let (_, js) = js_client(nats_port).await;
     create_streams(&js).await;
 
-    let astore = AutomationStore::open(&js).await.expect("open AutomationStore");
+    let astore = AutomationStore::open(&js)
+        .await
+        .expect("open AutomationStore");
     astore
         .put(&make_automation(
             "auto-linear-kv",
@@ -1890,7 +1915,9 @@ async fn tool_cache_dedup_on_recovery_skips_tool_reexecution() {
     let (_, js) = js_client(nats_port).await;
     create_streams(&js).await;
 
-    let astore = AutomationStore::open(&js).await.expect("open AutomationStore");
+    let astore = AutomationStore::open(&js)
+        .await
+        .expect("open AutomationStore");
     astore
         .put(&make_automation(
             "auto-cache",
@@ -2060,7 +2087,9 @@ async fn resolved_promise_skips_redelivered_nats_message() {
     let (_, js) = js_client(nats_port).await;
     create_streams(&js).await;
 
-    let astore = AutomationStore::open(&js).await.expect("open AutomationStore");
+    let astore = AutomationStore::open(&js)
+        .await
+        .expect("open AutomationStore");
     // "auto-skip": pre-seeded as Resolved → must be skipped on dispatch.
     astore
         .put(&make_automation(
@@ -2105,7 +2134,9 @@ async fn resolved_promise_skips_redelivered_nats_message() {
         checkpoint_degraded: false,
         failure_reason: None,
     };
-    ps.put_promise(&resolved).await.expect("seed resolved promise");
+    ps.put_promise(&resolved)
+        .await
+        .expect("seed resolved promise");
 
     // Canary mock — fires when "CANARY_PROMPT" is in the Anthropic request body.
     let canary_mock = mock
@@ -2170,7 +2201,9 @@ async fn two_automations_for_same_event_get_separate_resolved_promises() {
     let (_, js) = js_client(nats_port).await;
     create_streams(&js).await;
 
-    let astore = AutomationStore::open(&js).await.expect("open AutomationStore");
+    let astore = AutomationStore::open(&js)
+        .await
+        .expect("open AutomationStore");
     astore
         .put(&make_automation(
             "auto-dispatch-a",
@@ -2279,9 +2312,17 @@ async fn two_automations_for_same_event_get_separate_resolved_promises() {
         .expect("get promise-b")
         .expect("promise-b must exist");
 
-    assert_eq!(pa.status, PromiseStatus::Resolved, "promise-a must be Resolved");
+    assert_eq!(
+        pa.status,
+        PromiseStatus::Resolved,
+        "promise-a must be Resolved"
+    );
     assert_eq!(pa.automation_id, "auto-dispatch-a");
-    assert_eq!(pb.status, PromiseStatus::Resolved, "promise-b must be Resolved");
+    assert_eq!(
+        pb.status,
+        PromiseStatus::Resolved,
+        "promise-b must be Resolved"
+    );
     assert_eq!(pb.automation_id, "auto-dispatch-b");
 }
 
@@ -2354,9 +2395,15 @@ async fn automations_http_api_crud_lifecycle() {
         .unwrap();
     assert_eq!(create_resp.status(), 201);
     let created: serde_json::Value = create_resp.json().await.unwrap();
-    let auto_id = created["id"].as_str().expect("id must be present").to_string();
+    let auto_id = created["id"]
+        .as_str()
+        .expect("id must be present")
+        .to_string();
     assert_eq!(created["name"], "CRUD Automation");
-    assert!(created["enabled"].as_bool().unwrap_or(false), "enabled by default");
+    assert!(
+        created["enabled"].as_bool().unwrap_or(false),
+        "enabled by default"
+    );
 
     // 3. GET /automations/:id → round-trip.
     let fetched: serde_json::Value = client
@@ -2400,7 +2447,10 @@ async fn automations_http_api_crud_lifecycle() {
         .json()
         .await
         .unwrap();
-    assert!(!disabled["enabled"].as_bool().unwrap_or(true), "must be disabled");
+    assert!(
+        !disabled["enabled"].as_bool().unwrap_or(true),
+        "must be disabled"
+    );
 
     // 6. PATCH /automations/:id/enable → 200, enabled = true.
     let re_enabled: serde_json::Value = client
@@ -2412,7 +2462,10 @@ async fn automations_http_api_crud_lifecycle() {
         .json()
         .await
         .unwrap();
-    assert!(re_enabled["enabled"].as_bool().unwrap_or(false), "must be re-enabled");
+    assert!(
+        re_enabled["enabled"].as_bool().unwrap_or(false),
+        "must be re-enabled"
+    );
 
     // 7. DELETE /automations/:id → 204 No Content.
     let del_status = client
@@ -2444,7 +2497,11 @@ async fn automations_http_api_crud_lifecycle() {
         .json()
         .await
         .unwrap();
-    assert_eq!(final_list.as_array().unwrap().len(), 0, "empty after delete");
+    assert_eq!(
+        final_list.as_array().unwrap().len(),
+        0,
+        "empty after delete"
+    );
 }
 
 /// The `_idempotency_key` injected into built-in tool inputs must be forwarded
@@ -2461,7 +2518,9 @@ async fn write_tool_sends_idempotency_key_header() {
     let (_, js) = js_client(nats_port).await;
     create_streams(&js).await;
 
-    let astore = AutomationStore::open(&js).await.expect("open AutomationStore");
+    let astore = AutomationStore::open(&js)
+        .await
+        .expect("open AutomationStore");
     astore
         .put(&make_automation(
             "auto-idem",
@@ -2668,7 +2727,12 @@ async fn automation_variables_substituted_in_prompt_before_model_call() {
 async fn wait_for_api(client: &reqwest::Client, url: &str) {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     loop {
-        match client.get(url).header("x-tenant-id", "default").send().await {
+        match client
+            .get(url)
+            .header("x-tenant-id", "default")
+            .send()
+            .await
+        {
             Ok(_) => return,
             Err(_) if tokio::time::Instant::now() < deadline => {
                 tokio::time::sleep(Duration::from_millis(100)).await;
@@ -2840,7 +2904,9 @@ async fn resolved_promise_redelivery_produces_single_run_record() {
     let (_, js) = js_client(nats_port).await;
     create_streams(&js).await;
 
-    let astore = AutomationStore::open(&js).await.expect("open AutomationStore");
+    let astore = AutomationStore::open(&js)
+        .await
+        .expect("open AutomationStore");
     // "auto-skip": pre-seeded as Resolved → skipped, must not produce a RunRecord.
     astore
         .put(&make_automation(
@@ -2883,7 +2949,9 @@ async fn resolved_promise_redelivery_produces_single_run_record() {
         checkpoint_degraded: false,
         failure_reason: None,
     };
-    ps.put_promise(&resolved).await.expect("seed resolved promise");
+    ps.put_promise(&resolved)
+        .await
+        .expect("seed resolved promise");
 
     // Canary mock — proves the event was processed.
     let canary_mock = mock
@@ -3086,8 +3154,14 @@ async fn two_concurrent_automations_both_appear_in_runs_and_stats() {
         .iter()
         .map(|r| r["automation_id"].as_str().unwrap())
         .collect();
-    assert!(ids.contains(&"auto-concurrent-A"), "RunRecord for A missing");
-    assert!(ids.contains(&"auto-concurrent-B"), "RunRecord for B missing");
+    assert!(
+        ids.contains(&"auto-concurrent-A"),
+        "RunRecord for A missing"
+    );
+    assert!(
+        ids.contains(&"auto-concurrent-B"),
+        "RunRecord for B missing"
+    );
     assert!(
         arr.iter().all(|r| r["status"] == "success"),
         "both runs must succeed"
@@ -3189,7 +3263,11 @@ async fn automation_filtered_runs_endpoint_returns_only_matching_automation() {
         .await
         .expect("json");
     let arr_a = runs_a.as_array().expect("array");
-    assert_eq!(arr_a.len(), 1, "/automations/auto-filter-A/runs must return exactly 1 record");
+    assert_eq!(
+        arr_a.len(),
+        1,
+        "/automations/auto-filter-A/runs must return exactly 1 record"
+    );
     assert_eq!(arr_a[0]["automation_id"], "auto-filter-A");
     assert_eq!(arr_a[0]["status"], "success");
 
@@ -3204,7 +3282,11 @@ async fn automation_filtered_runs_endpoint_returns_only_matching_automation() {
         .await
         .expect("json");
     let arr_b = runs_b.as_array().expect("array");
-    assert_eq!(arr_b.len(), 1, "/automations/auto-filter-B/runs must return exactly 1 record");
+    assert_eq!(
+        arr_b.len(),
+        1,
+        "/automations/auto-filter-B/runs must return exactly 1 record"
+    );
     assert_eq!(arr_b[0]["automation_id"], "auto-filter-B");
     assert_eq!(arr_b[0]["status"], "success");
 }
@@ -3265,12 +3347,8 @@ async fn cron_tick_produces_run_record_accessible_via_api() {
         .await
         .expect("publish cron tick");
 
-    let runs = poll_runs_until_nonempty(
-        &client,
-        &format!("{base}/runs"),
-        Duration::from_secs(12),
-    )
-    .await;
+    let runs =
+        poll_runs_until_nonempty(&client, &format!("{base}/runs"), Duration::from_secs(12)).await;
 
     let arr = runs.as_array().unwrap();
     assert_eq!(arr.len(), 1, "exactly one RunRecord expected for cron tick");

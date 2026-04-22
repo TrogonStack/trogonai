@@ -82,10 +82,14 @@ impl SkillStore {
             if !key.starts_with(&prefix) {
                 continue;
             }
-            if let Some(bytes) = self.versions_kv.get(&key).await.map_err(|e| e.to_string())? {
-                if let Ok(v) = serde_json::from_slice::<SkillVersion>(&bytes) {
-                    versions.push(v);
-                }
+            if let Some(bytes) = self
+                .versions_kv
+                .get(&key)
+                .await
+                .map_err(|e| e.to_string())?
+                && let Ok(v) = serde_json::from_slice::<SkillVersion>(&bytes)
+            {
+                versions.push(v);
             }
         }
         versions.sort_by(|a, b| b.version.cmp(&a.version));
@@ -104,22 +108,44 @@ impl SkillStore {
 }
 
 impl SkillRepository for SkillStore {
-    fn list(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<Skill>, String>> + Send + '_>> {
+    fn list(
+        &self,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<Skill>, String>> + Send + '_>>
+    {
         Box::pin(async move { self.list().await })
     }
-    fn get<'a>(&'a self, id: &'a str) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<Skill>, String>> + Send + 'a>> {
+    fn get<'a>(
+        &'a self,
+        id: &'a str,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Option<Skill>, String>> + Send + 'a>,
+    > {
         Box::pin(async move { self.get(id).await })
     }
-    fn put<'a>(&'a self, skill: &'a Skill) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
+    fn put<'a>(
+        &'a self,
+        skill: &'a Skill,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
         Box::pin(async move { self.put(skill).await })
     }
-    fn delete<'a>(&'a self, id: &'a str) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
+    fn delete<'a>(
+        &'a self,
+        id: &'a str,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
         Box::pin(async move { self.delete(id).await })
     }
-    fn list_versions<'a>(&'a self, skill_id: &'a str) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<SkillVersion>, String>> + Send + 'a>> {
+    fn list_versions<'a>(
+        &'a self,
+        skill_id: &'a str,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Vec<SkillVersion>, String>> + Send + 'a>,
+    > {
         Box::pin(async move { self.list_versions(skill_id).await })
     }
-    fn put_version<'a>(&'a self, version: &'a SkillVersion) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
+    fn put_version<'a>(
+        &'a self,
+        version: &'a SkillVersion,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
         Box::pin(async move { self.put_version(version).await })
     }
 }

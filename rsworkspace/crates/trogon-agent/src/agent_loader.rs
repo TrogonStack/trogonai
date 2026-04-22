@@ -55,7 +55,10 @@ impl AgentLoader {
                     .unwrap_or_default()
             }
             Ok(None) => {
-                warn!(agent_id, "agent not found in CONSOLE_AGENTS — no skills will be injected");
+                warn!(
+                    agent_id,
+                    "agent not found in CONSOLE_AGENTS — no skills will be injected"
+                );
                 vec![]
             }
             Err(e) => {
@@ -83,9 +86,17 @@ pub mod mock {
         skill_ids: HashMap<String, Vec<String>>,
     }
 
+    impl Default for MockAgentLoader {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
     impl MockAgentLoader {
         pub fn new() -> Self {
-            Self { skill_ids: HashMap::new() }
+            Self {
+                skill_ids: HashMap::new(),
+            }
         }
 
         pub fn insert(&mut self, agent_id: &str, skill_ids: Vec<String>) {

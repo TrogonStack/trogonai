@@ -16,11 +16,8 @@ use trogon_console::{
     run_with,
     server::{AppState, build_router},
     store::{
-        agents::AgentStore,
-        credentials::CredentialStore,
-        environments::EnvironmentStore,
-        sessions::SessionReader,
-        skills::SkillStore,
+        agents::AgentStore, credentials::CredentialStore, environments::EnvironmentStore,
+        sessions::SessionReader, skills::SkillStore,
     },
 };
 
@@ -51,7 +48,13 @@ async fn start() -> TestEnv {
     let credentials = Arc::new(CredentialStore::open(&js).await.expect("CredentialStore"));
     let sessions = Arc::new(SessionReader::open(&js).await.expect("SessionReader"));
 
-    let state = Arc::new(AppState { agents, skills, environments, credentials, sessions });
+    let state = Arc::new(AppState {
+        agents,
+        skills,
+        environments,
+        credentials,
+        sessions,
+    });
     let app = build_router(state);
 
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
@@ -71,8 +74,12 @@ async fn start() -> TestEnv {
 #[tokio::test]
 async fn health_returns_ok() {
     let env = start().await;
-    let resp = env.client.get(format!("{}/-/health", env.base_url))
-        .send().await.unwrap();
+    let resp = env
+        .client
+        .get(format!("{}/-/health", env.base_url))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status().as_u16(), 200);
 }
 
@@ -91,32 +98,59 @@ async fn agent_create_list_get_update_delete() {
         "system_prompt": "You are a test agent.",
         "skill_ids": ["skill_abc"]
     });
-    let resp = env.client.post(format!("{base}/agents"))
-        .json(&body).send().await.unwrap();
+    let resp = env
+        .client
+        .post(format!("{base}/agents"))
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status().as_u16(), 201);
     let created: Value = resp.json().await.unwrap();
     let agent_id = created["id"].as_str().unwrap().to_string();
-    assert!(agent_id.starts_with("agent_"), "id should start with agent_: {agent_id}");
+    assert!(
+        agent_id.starts_with("agent_"),
+        "id should start with agent_: {agent_id}"
+    );
     assert_eq!(created["name"], "TestAgent");
     assert_eq!(created["version"], 1);
     assert_eq!(created["skill_ids"], json!(["skill_abc"]));
 
     // List — agent appears
-    let resp = env.client.get(format!("{base}/agents")).send().await.unwrap();
+    let resp = env
+        .client
+        .get(format!("{base}/agents"))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status().as_u16(), 200);
     let list: Value = resp.json().await.unwrap();
-    let ids: Vec<&str> = list.as_array().unwrap().iter()
-        .map(|a| a["id"].as_str().unwrap()).collect();
+    let ids: Vec<&str> = list
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a["id"].as_str().unwrap())
+        .collect();
     assert!(ids.contains(&agent_id.as_str()), "agent not in list");
 
     // Get
-    let resp = env.client.get(format!("{base}/agents/{agent_id}")).send().await.unwrap();
+    let resp = env
+        .client
+        .get(format!("{base}/agents/{agent_id}"))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status().as_u16(), 200);
     let got: Value = resp.json().await.unwrap();
     assert_eq!(got["id"], agent_id);
 
     // Get non-existent → 404
-    let resp = env.client.get(format!("{base}/agents/agent_nonexistent")).send().await.unwrap();
+    let resp = env
+        .client
+        .get(format!("{base}/agents/agent_nonexistent"))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status().as_u16(), 404);
 
     // Update — change name and add a skill_id, bumps version
@@ -124,8 +158,13 @@ async fn agent_create_list_get_update_delete() {
         "name": "UpdatedAgent",
         "skill_ids": ["skill_abc", "skill_xyz"]
     });
-    let resp = env.client.put(format!("{base}/agents/{agent_id}"))
-        .json(&update).send().await.unwrap();
+    let resp = env
+        .client
+        .put(format!("{base}/agents/{agent_id}"))
+        .json(&update)
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status().as_u16(), 200);
     let updated: Value = resp.json().await.unwrap();
     assert_eq!(updated["name"], "UpdatedAgent");
@@ -133,21 +172,43 @@ async fn agent_create_list_get_update_delete() {
     assert_eq!(updated["skill_ids"], json!(["skill_abc", "skill_xyz"]));
 
     // List versions — two entries (v1 and v2)
-    let resp = env.client.get(format!("{base}/agents/{agent_id}/versions")).send().await.unwrap();
+    let resp = env
+        .client
+        .get(format!("{base}/agents/{agent_id}/versions"))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status().as_u16(), 200);
     let versions: Value = resp.json().await.unwrap();
     assert_eq!(versions.as_array().unwrap().len(), 2, "expected 2 versions");
 
     // Delete
-    let resp = env.client.delete(format!("{base}/agents/{agent_id}")).send().await.unwrap();
+    let resp = env
+        .client
+        .delete(format!("{base}/agents/{agent_id}"))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status().as_u16(), 204);
 
     // List — agent no longer present (NATS KV delete marks as tombstone; keys() skips tombstones)
-    let resp = env.client.get(format!("{base}/agents")).send().await.unwrap();
+    let resp = env
+        .client
+        .get(format!("{base}/agents"))
+        .send()
+        .await
+        .unwrap();
     let list: Value = resp.json().await.unwrap();
-    let ids_after: Vec<&str> = list.as_array().unwrap().iter()
-        .filter_map(|a| a["id"].as_str()).collect();
-    assert!(!ids_after.contains(&agent_id.as_str()), "deleted agent still in list");
+    let ids_after: Vec<&str> = list
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|a| a["id"].as_str())
+        .collect();
+    assert!(
+        !ids_after.contains(&agent_id.as_str()),
+        "deleted agent still in list"
+    );
 }
 
 // ── Skill CRUD ────────────────────────────────────────────────────────────────
@@ -163,12 +224,20 @@ async fn skill_create_list_get_add_version() {
         "description": "Extracts text from PDFs",
         "content": "## PDF Extractor\nUse this skill to extract text."
     });
-    let resp = env.client.post(format!("{base}/skills"))
-        .json(&body).send().await.unwrap();
+    let resp = env
+        .client
+        .post(format!("{base}/skills"))
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status().as_u16(), 201);
     let created: Value = resp.json().await.unwrap();
     let skill_id = created["id"].as_str().unwrap().to_string();
-    assert!(skill_id.starts_with("skill_"), "id should start with skill_: {skill_id}");
+    assert!(
+        skill_id.starts_with("skill_"),
+        "id should start with skill_: {skill_id}"
+    );
     assert_eq!(created["name"], "pdf-extractor");
     assert_eq!(created["provider"], "custom");
 
@@ -176,41 +245,77 @@ async fn skill_create_list_get_add_version() {
     assert_eq!(v1.len(), 8, "version must be YYYYMMDD: {v1}");
 
     // List
-    let resp = env.client.get(format!("{base}/skills")).send().await.unwrap();
+    let resp = env
+        .client
+        .get(format!("{base}/skills"))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status().as_u16(), 200);
     let list: Value = resp.json().await.unwrap();
-    let ids: Vec<&str> = list.as_array().unwrap().iter()
-        .map(|s| s["id"].as_str().unwrap()).collect();
+    let ids: Vec<&str> = list
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["id"].as_str().unwrap())
+        .collect();
     assert!(ids.contains(&skill_id.as_str()));
 
     // Get
-    let resp = env.client.get(format!("{base}/skills/{skill_id}")).send().await.unwrap();
+    let resp = env
+        .client
+        .get(format!("{base}/skills/{skill_id}"))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status().as_u16(), 200);
     let got: Value = resp.json().await.unwrap();
     assert_eq!(got["id"], skill_id);
 
     // Get non-existent → 404
-    let resp = env.client.get(format!("{base}/skills/skill_nonexistent")).send().await.unwrap();
+    let resp = env
+        .client
+        .get(format!("{base}/skills/skill_nonexistent"))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status().as_u16(), 404);
 
     // List versions — one entry
-    let resp = env.client.get(format!("{base}/skills/{skill_id}/versions")).send().await.unwrap();
+    let resp = env
+        .client
+        .get(format!("{base}/skills/{skill_id}/versions"))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status().as_u16(), 200);
     let versions: Value = resp.json().await.unwrap();
     assert_eq!(versions.as_array().unwrap().len(), 1);
-    assert_eq!(versions[0]["content"], "## PDF Extractor\nUse this skill to extract text.");
+    assert_eq!(
+        versions[0]["content"],
+        "## PDF Extractor\nUse this skill to extract text."
+    );
     assert_eq!(versions[0]["is_latest"], true);
 
     // Create new version
-    let resp = env.client.post(format!("{base}/skills/{skill_id}/versions"))
+    let resp = env
+        .client
+        .post(format!("{base}/skills/{skill_id}/versions"))
         .json(&json!({ "content": "## PDF Extractor v2\nImproved extraction." }))
-        .send().await.unwrap();
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status().as_u16(), 201);
     let new_ver: Value = resp.json().await.unwrap();
     assert_eq!(new_ver["is_latest"], true);
 
     // Get skill — latest_version updated
-    let resp = env.client.get(format!("{base}/skills/{skill_id}")).send().await.unwrap();
+    let resp = env
+        .client
+        .get(format!("{base}/skills/{skill_id}"))
+        .send()
+        .await
+        .unwrap();
     let got: Value = resp.json().await.unwrap();
     let latest = got["latest_version"].as_str().unwrap();
     assert_eq!(latest.len(), 8);
@@ -218,10 +323,18 @@ async fn skill_create_list_get_add_version() {
     // Both version creates happen on the same day so they share the same YYYYMMDD key
     // in the versions KV — the second put overwrites the first. Only 1 entry is expected.
     // The content should reflect the latest version.
-    let resp = env.client.get(format!("{base}/skills/{skill_id}/versions")).send().await.unwrap();
+    let resp = env
+        .client
+        .get(format!("{base}/skills/{skill_id}/versions"))
+        .send()
+        .await
+        .unwrap();
     let versions: Value = resp.json().await.unwrap();
     assert_eq!(versions.as_array().unwrap().len(), 1);
-    assert_eq!(versions[0]["content"], "## PDF Extractor v2\nImproved extraction.");
+    assert_eq!(
+        versions[0]["content"],
+        "## PDF Extractor v2\nImproved extraction."
+    );
 }
 
 // ── Session round-trip (write RawSession → read via console API) ──────────────
@@ -275,7 +388,8 @@ async fn session_read_reflects_token_counts_and_agent_id() {
         "agent_id": "agent_deadadd"
     });
 
-    let sessions_kv = env.js
+    let sessions_kv = env
+        .js
         .create_or_update_key_value(async_nats::jetstream::kv::Config {
             bucket: "SESSIONS".to_string(),
             history: 1,
@@ -286,12 +400,18 @@ async fn session_read_reflects_token_counts_and_agent_id() {
 
     let key = format!("{tenant_id}.{session_id}");
     let bytes = serde_json::to_vec(&raw_session).unwrap();
-    sessions_kv.put(&key, Bytes::from(bytes)).await.expect("put session");
+    sessions_kv
+        .put(&key, Bytes::from(bytes))
+        .await
+        .expect("put session");
 
     // GET via console API
-    let resp = env.client
+    let resp = env
+        .client
         .get(format!("{base}/sessions/{tenant_id}/{session_id}"))
-        .send().await.unwrap();
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status().as_u16(), 200);
     let s: Value = resp.json().await.unwrap();
 
@@ -299,10 +419,13 @@ async fn session_read_reflects_token_counts_and_agent_id() {
     assert_eq!(s["tenant_id"], tenant_id);
     assert_eq!(s["message_count"], 4);
     // Token sums from both assistant messages
-    assert_eq!(s["input_tokens"], 25,  "10 + 15");
-    assert_eq!(s["output_tokens"], 8,  "5 + 3");
-    assert_eq!(s["cache_write_tokens"], 3, "cache_creation from first message");
-    assert_eq!(s["cache_read_tokens"], 2,  "cache_read from first message");
+    assert_eq!(s["input_tokens"], 25, "10 + 15");
+    assert_eq!(s["output_tokens"], 8, "5 + 3");
+    assert_eq!(
+        s["cache_write_tokens"], 3,
+        "cache_creation from first message"
+    );
+    assert_eq!(s["cache_read_tokens"], 2, "cache_read from first message");
     assert_eq!(s["duration_ms"], 42000);
     assert_eq!(s["agent_id"], "agent_deadadd");
     // Last message is from assistant → status = idle
@@ -314,7 +437,8 @@ async fn session_list_returns_all_sessions() {
     let env = start().await;
     let base = &env.base_url;
 
-    let sessions_kv = env.js
+    let sessions_kv = env
+        .js
         .create_or_update_key_value(async_nats::jetstream::kv::Config {
             bucket: "SESSIONS".to_string(),
             history: 1,
@@ -333,10 +457,18 @@ async fn session_list_returns_all_sessions() {
             "updated_at": format!("{}", 1776384000 + i)
         });
         let key = format!("tenant_x.sess_{i}");
-        sessions_kv.put(&key, Bytes::from(serde_json::to_vec(&s).unwrap())).await.unwrap();
+        sessions_kv
+            .put(&key, Bytes::from(serde_json::to_vec(&s).unwrap()))
+            .await
+            .unwrap();
     }
 
-    let resp = env.client.get(format!("{base}/sessions")).send().await.unwrap();
+    let resp = env
+        .client
+        .get(format!("{base}/sessions"))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status().as_u16(), 200);
     let list: Value = resp.json().await.unwrap();
     assert_eq!(list.as_array().unwrap().len(), 3);
@@ -345,9 +477,12 @@ async fn session_list_returns_all_sessions() {
 #[tokio::test]
 async fn session_get_nonexistent_returns_404() {
     let env = start().await;
-    let resp = env.client
+    let resp = env
+        .client
         .get(format!("{}/sessions/no_tenant/no_session", env.base_url))
-        .send().await.unwrap();
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status().as_u16(), 404);
 }
 
@@ -365,12 +500,18 @@ async fn agent_sessions_lists_sessions_by_agent_id() {
         "model": { "id": "claude-haiku-4-5-20251001" },
         "system_prompt": "Be a bot.",
     });
-    let resp = env.client.post(format!("{base}/agents"))
-        .json(&agent_body).send().await.unwrap();
+    let resp = env
+        .client
+        .post(format!("{base}/agents"))
+        .json(&agent_body)
+        .send()
+        .await
+        .unwrap();
     let agent: Value = resp.json().await.unwrap();
     let agent_id = agent["id"].as_str().unwrap();
 
-    let sessions_kv = env.js
+    let sessions_kv = env
+        .js
         .create_or_update_key_value(async_nats::jetstream::kv::Config {
             bucket: "SESSIONS".to_string(),
             history: 1,
@@ -390,7 +531,10 @@ async fn agent_sessions_lists_sessions_by_agent_id() {
             "updated_at": "1776384000"
         });
         let key = format!("some_tenant.sess_{i}");
-        sessions_kv.put(&key, Bytes::from(serde_json::to_vec(&s).unwrap())).await.unwrap();
+        sessions_kv
+            .put(&key, Bytes::from(serde_json::to_vec(&s).unwrap()))
+            .await
+            .unwrap();
     }
 
     // Session with a different agent_id — should not appear
@@ -403,12 +547,27 @@ async fn agent_sessions_lists_sessions_by_agent_id() {
         "created_at": "1776384000",
         "updated_at": "1776384000"
     });
-    sessions_kv.put("some_tenant.sess_other", Bytes::from(serde_json::to_vec(&other).unwrap())).await.unwrap();
+    sessions_kv
+        .put(
+            "some_tenant.sess_other",
+            Bytes::from(serde_json::to_vec(&other).unwrap()),
+        )
+        .await
+        .unwrap();
 
-    let resp = env.client.get(format!("{base}/agents/{agent_id}/sessions")).send().await.unwrap();
+    let resp = env
+        .client
+        .get(format!("{base}/agents/{agent_id}/sessions"))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status().as_u16(), 200);
     let list: Value = resp.json().await.unwrap();
-    assert_eq!(list.as_array().unwrap().len(), 2, "should return only sessions for this agent_id");
+    assert_eq!(
+        list.as_array().unwrap().len(),
+        2,
+        "should return only sessions for this agent_id"
+    );
 }
 
 // ── Environment CRUD ──────────────────────────────────────────────────────────
@@ -425,8 +584,13 @@ async fn environment_create_list_get_update_delete() {
         "type": "cloud",
         "networking": "restricted"
     });
-    let resp = env.client.post(format!("{base}/environments"))
-        .json(&body).send().await.unwrap();
+    let resp = env
+        .client
+        .post(format!("{base}/environments"))
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status().as_u16(), 201);
     let created: Value = resp.json().await.unwrap();
     let env_id = created["id"].as_str().unwrap().to_string();
@@ -437,28 +601,51 @@ async fn environment_create_list_get_update_delete() {
     assert_eq!(created["archived"], false);
 
     // List — environment appears
-    let resp = env.client.get(format!("{base}/environments")).send().await.unwrap();
+    let resp = env
+        .client
+        .get(format!("{base}/environments"))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status().as_u16(), 200);
     let list: Value = resp.json().await.unwrap();
-    let ids: Vec<&str> = list.as_array().unwrap().iter()
-        .map(|e| e["id"].as_str().unwrap()).collect();
+    let ids: Vec<&str> = list
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["id"].as_str().unwrap())
+        .collect();
     assert!(ids.contains(&env_id.as_str()));
 
     // Get
-    let resp = env.client.get(format!("{base}/environments/{env_id}")).send().await.unwrap();
+    let resp = env
+        .client
+        .get(format!("{base}/environments/{env_id}"))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status().as_u16(), 200);
     let got: Value = resp.json().await.unwrap();
     assert_eq!(got["id"], env_id);
     assert_eq!(got["description"], "Prod environment");
 
     // Get non-existent → 404
-    let resp = env.client.get(format!("{base}/environments/env_nope")).send().await.unwrap();
+    let resp = env
+        .client
+        .get(format!("{base}/environments/env_nope"))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status().as_u16(), 404);
 
     // Update
-    let resp = env.client.put(format!("{base}/environments/{env_id}"))
+    let resp = env
+        .client
+        .put(format!("{base}/environments/{env_id}"))
         .json(&json!({ "name": "Production-v2", "networking": "unrestricted" }))
-        .send().await.unwrap();
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status().as_u16(), 200);
     let updated: Value = resp.json().await.unwrap();
     assert_eq!(updated["name"], "Production-v2");
@@ -466,11 +653,21 @@ async fn environment_create_list_get_update_delete() {
     assert_eq!(updated["type"], "cloud", "type unchanged");
 
     // Delete
-    let resp = env.client.delete(format!("{base}/environments/{env_id}")).send().await.unwrap();
+    let resp = env
+        .client
+        .delete(format!("{base}/environments/{env_id}"))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status().as_u16(), 204);
 
     // Get after delete → 404
-    let resp = env.client.get(format!("{base}/environments/{env_id}")).send().await.unwrap();
+    let resp = env
+        .client
+        .get(format!("{base}/environments/{env_id}"))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status().as_u16(), 404);
 }
 
@@ -479,22 +676,35 @@ async fn environment_archive_sets_archived_flag() {
     let env = start().await;
     let base = &env.base_url;
 
-    let resp = env.client.post(format!("{base}/environments"))
+    let resp = env
+        .client
+        .post(format!("{base}/environments"))
         .json(&json!({ "name": "ToArchive" }))
-        .send().await.unwrap();
+        .send()
+        .await
+        .unwrap();
     let created: Value = resp.json().await.unwrap();
     let env_id = created["id"].as_str().unwrap();
     assert_eq!(created["archived"], false);
 
     // Archive
-    let resp = env.client.post(format!("{base}/environments/{env_id}/archive"))
-        .send().await.unwrap();
+    let resp = env
+        .client
+        .post(format!("{base}/environments/{env_id}/archive"))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status().as_u16(), 200);
     let archived: Value = resp.json().await.unwrap();
     assert_eq!(archived["archived"], true);
 
     // Verify persisted — GET reflects the flag
-    let resp = env.client.get(format!("{base}/environments/{env_id}")).send().await.unwrap();
+    let resp = env
+        .client
+        .get(format!("{base}/environments/{env_id}"))
+        .send()
+        .await
+        .unwrap();
     let got: Value = resp.json().await.unwrap();
     assert_eq!(got["archived"], true);
 }
@@ -502,10 +712,13 @@ async fn environment_archive_sets_archived_flag() {
 #[tokio::test]
 async fn environment_update_nonexistent_returns_404() {
     let env = start().await;
-    let resp = env.client
+    let resp = env
+        .client
         .put(format!("{}/environments/env_ghost", env.base_url))
         .json(&json!({ "name": "Ghost" }))
-        .send().await.unwrap();
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status().as_u16(), 404);
 }
 
@@ -515,13 +728,20 @@ async fn environment_create_applies_defaults() {
     let base = &env.base_url;
 
     // Only required field: name
-    let resp = env.client.post(format!("{base}/environments"))
+    let resp = env
+        .client
+        .post(format!("{base}/environments"))
         .json(&json!({ "name": "Minimal" }))
-        .send().await.unwrap();
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status().as_u16(), 201);
     let created: Value = resp.json().await.unwrap();
-    assert_eq!(created["type"], "cloud",          "default type is cloud");
-    assert_eq!(created["networking"], "unrestricted", "default networking is unrestricted");
+    assert_eq!(created["type"], "cloud", "default type is cloud");
+    assert_eq!(
+        created["networking"], "unrestricted",
+        "default networking is unrestricted"
+    );
     assert_eq!(created["archived"], false);
     assert_eq!(created["packages"], json!([]));
 }
@@ -534,28 +754,50 @@ async fn credential_vault_not_created_until_first_credential() {
     let base = &env.base_url;
 
     // Create an environment first
-    let resp = env.client.post(format!("{base}/environments"))
+    let resp = env
+        .client
+        .post(format!("{base}/environments"))
         .json(&json!({ "name": "VaultTestEnv" }))
-        .send().await.unwrap();
+        .send()
+        .await
+        .unwrap();
     let created_env: Value = resp.json().await.unwrap();
     let env_id = created_env["id"].as_str().unwrap();
 
     // No vault yet → 404
-    let resp = env.client.get(format!("{base}/environments/{env_id}/vault")).send().await.unwrap();
-    assert_eq!(resp.status().as_u16(), 404, "vault should not exist before first credential");
+    let resp = env
+        .client
+        .get(format!("{base}/environments/{env_id}/vault"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status().as_u16(),
+        404,
+        "vault should not exist before first credential"
+    );
 
     // Create credential — auto-creates vault
-    let resp = env.client.post(format!("{base}/environments/{env_id}/credentials"))
+    let resp = env
+        .client
+        .post(format!("{base}/environments/{env_id}/credentials"))
         .json(&json!({
             "name": "GitHub Token",
             "type": "bearer_token",
             "mcp_server_url": "https://api.github.com"
         }))
-        .send().await.unwrap();
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status().as_u16(), 201);
 
     // Vault now exists
-    let resp = env.client.get(format!("{base}/environments/{env_id}/vault")).send().await.unwrap();
+    let resp = env
+        .client
+        .get(format!("{base}/environments/{env_id}/vault"))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status().as_u16(), 200);
     let vault: Value = resp.json().await.unwrap();
     assert_eq!(vault["env_id"], env_id);
@@ -567,27 +809,48 @@ async fn credential_create_list_delete() {
     let env = start().await;
     let base = &env.base_url;
 
-    let resp = env.client.post(format!("{base}/environments"))
+    let resp = env
+        .client
+        .post(format!("{base}/environments"))
         .json(&json!({ "name": "CredEnv" }))
-        .send().await.unwrap();
+        .send()
+        .await
+        .unwrap();
     let env_obj: Value = resp.json().await.unwrap();
     let env_id = env_obj["id"].as_str().unwrap();
 
     // List credentials — empty initially
-    let resp = env.client.get(format!("{base}/environments/{env_id}/credentials")).send().await.unwrap();
+    let resp = env
+        .client
+        .get(format!("{base}/environments/{env_id}/credentials"))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status().as_u16(), 200);
-    assert_eq!(resp.json::<Value>().await.unwrap().as_array().unwrap().len(), 0);
+    assert_eq!(
+        resp.json::<Value>()
+            .await
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .len(),
+        0
+    );
 
     // Create two credentials
     let mut cred_ids = vec![];
     for name in ["Linear API Key", "Slack Bot Token"] {
-        let resp = env.client.post(format!("{base}/environments/{env_id}/credentials"))
+        let resp = env
+            .client
+            .post(format!("{base}/environments/{env_id}/credentials"))
             .json(&json!({
                 "name": name,
                 "type": "bearer_token",
                 "mcp_server_url": "https://example.com"
             }))
-            .send().await.unwrap();
+            .send()
+            .await
+            .unwrap();
         assert_eq!(resp.status().as_u16(), 201);
         let cred: Value = resp.json().await.unwrap();
         assert!(cred["id"].as_str().unwrap().starts_with("crd_"));
@@ -597,19 +860,35 @@ async fn credential_create_list_delete() {
     }
 
     // List — two credentials
-    let resp = env.client.get(format!("{base}/environments/{env_id}/credentials")).send().await.unwrap();
+    let resp = env
+        .client
+        .get(format!("{base}/environments/{env_id}/credentials"))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status().as_u16(), 200);
     let list: Value = resp.json().await.unwrap();
     assert_eq!(list.as_array().unwrap().len(), 2);
 
     // Delete first credential
-    let resp = env.client
-        .delete(format!("{base}/environments/{env_id}/credentials/{}", cred_ids[0]))
-        .send().await.unwrap();
+    let resp = env
+        .client
+        .delete(format!(
+            "{base}/environments/{env_id}/credentials/{}",
+            cred_ids[0]
+        ))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status().as_u16(), 204);
 
     // List — one credential left
-    let resp = env.client.get(format!("{base}/environments/{env_id}/credentials")).send().await.unwrap();
+    let resp = env
+        .client
+        .get(format!("{base}/environments/{env_id}/credentials"))
+        .send()
+        .await
+        .unwrap();
     let list: Value = resp.json().await.unwrap();
     assert_eq!(list.as_array().unwrap().len(), 1);
     assert_eq!(list[0]["id"], cred_ids[1]);
@@ -622,14 +901,30 @@ async fn credential_isolation_between_environments() {
 
     // Create two environments
     let env_a_id = {
-        let resp = env.client.post(format!("{base}/environments"))
-            .json(&json!({ "name": "EnvA" })).send().await.unwrap();
-        resp.json::<Value>().await.unwrap()["id"].as_str().unwrap().to_string()
+        let resp = env
+            .client
+            .post(format!("{base}/environments"))
+            .json(&json!({ "name": "EnvA" }))
+            .send()
+            .await
+            .unwrap();
+        resp.json::<Value>().await.unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string()
     };
     let env_b_id = {
-        let resp = env.client.post(format!("{base}/environments"))
-            .json(&json!({ "name": "EnvB" })).send().await.unwrap();
-        resp.json::<Value>().await.unwrap()["id"].as_str().unwrap().to_string()
+        let resp = env
+            .client
+            .post(format!("{base}/environments"))
+            .json(&json!({ "name": "EnvB" }))
+            .send()
+            .await
+            .unwrap();
+        resp.json::<Value>().await.unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string()
     };
 
     // Add 2 credentials to env_A, 1 to env_B
@@ -643,15 +938,35 @@ async fn credential_isolation_between_environments() {
         .send().await.unwrap();
 
     // env_A sees 2, env_B sees 1 — no cross-contamination
-    let list_a: Value = env.client
+    let list_a: Value = env
+        .client
         .get(format!("{base}/environments/{env_a_id}/credentials"))
-        .send().await.unwrap().json().await.unwrap();
-    assert_eq!(list_a.as_array().unwrap().len(), 2, "env_A should have 2 credentials");
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        list_a.as_array().unwrap().len(),
+        2,
+        "env_A should have 2 credentials"
+    );
 
-    let list_b: Value = env.client
+    let list_b: Value = env
+        .client
         .get(format!("{base}/environments/{env_b_id}/credentials"))
-        .send().await.unwrap().json().await.unwrap();
-    assert_eq!(list_b.as_array().unwrap().len(), 1, "env_B should have 1 credential");
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        list_b.as_array().unwrap().len(),
+        1,
+        "env_B should have 1 credential"
+    );
 
     // Verify env_A creds all belong to env_A
     for cred in list_a.as_array().unwrap() {
@@ -674,33 +989,60 @@ async fn agent_partial_update_preserves_unchanged_fields() {
         "skill_ids": ["skill_a", "skill_b"],
         "mcp_servers": ["mcp_server_1"]
     });
-    let resp = env.client.post(format!("{base}/agents")).json(&body).send().await.unwrap();
+    let resp = env
+        .client
+        .post(format!("{base}/agents"))
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
     let created: Value = resp.json().await.unwrap();
     let agent_id = created["id"].as_str().unwrap();
 
     // Update only the name
-    let resp = env.client.put(format!("{base}/agents/{agent_id}"))
+    let resp = env
+        .client
+        .put(format!("{base}/agents/{agent_id}"))
         .json(&json!({ "name": "RenamedAgent" }))
-        .send().await.unwrap();
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status().as_u16(), 200);
     let updated: Value = resp.json().await.unwrap();
 
-    assert_eq!(updated["name"], "RenamedAgent",                      "name was updated");
-    assert_eq!(updated["description"], "Original description",        "description unchanged");
-    assert_eq!(updated["model"]["id"], "claude-opus-4-7",            "model unchanged");
-    assert_eq!(updated["system_prompt"], "Be helpful.",              "system_prompt unchanged");
-    assert_eq!(updated["skill_ids"], json!(["skill_a", "skill_b"]),  "skill_ids unchanged");
-    assert_eq!(updated["mcp_servers"], json!(["mcp_server_1"]),      "mcp_servers unchanged");
-    assert_eq!(updated["version"], 2,                                "version bumped");
+    assert_eq!(updated["name"], "RenamedAgent", "name was updated");
+    assert_eq!(
+        updated["description"], "Original description",
+        "description unchanged"
+    );
+    assert_eq!(updated["model"]["id"], "claude-opus-4-7", "model unchanged");
+    assert_eq!(
+        updated["system_prompt"], "Be helpful.",
+        "system_prompt unchanged"
+    );
+    assert_eq!(
+        updated["skill_ids"],
+        json!(["skill_a", "skill_b"]),
+        "skill_ids unchanged"
+    );
+    assert_eq!(
+        updated["mcp_servers"],
+        json!(["mcp_server_1"]),
+        "mcp_servers unchanged"
+    );
+    assert_eq!(updated["version"], 2, "version bumped");
 }
 
 #[tokio::test]
 async fn agent_update_nonexistent_returns_404() {
     let env = start().await;
-    let resp = env.client
+    let resp = env
+        .client
         .put(format!("{}/agents/agent_ghost", env.base_url))
         .json(&json!({ "name": "Ghost" }))
-        .send().await.unwrap();
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status().as_u16(), 404);
 }
 
@@ -710,9 +1052,12 @@ async fn agent_delete_nonexistent_returns_204() {
     // NATS KV delete publishes a tombstone regardless of whether the key exists —
     // it is idempotent by design. The route therefore returns 204 (not 404) for
     // non-existent agents. This is the documented, expected behavior.
-    let resp = env.client
+    let resp = env
+        .client
         .delete(format!("{}/agents/agent_ghost", env.base_url))
-        .send().await.unwrap();
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status().as_u16(), 204);
 }
 
@@ -724,14 +1069,18 @@ async fn agent_list_sorted_by_updated_at_desc() {
     // Create three agents
     let mut agent_ids = vec![];
     for name in ["Agent-A", "Agent-B", "Agent-C"] {
-        let resp = env.client.post(format!("{base}/agents"))
+        let resp = env
+            .client
+            .post(format!("{base}/agents"))
             .json(&json!({
                 "name": name,
                 "description": "",
                 "model": { "id": "claude-haiku-4-5-20251001" },
                 "system_prompt": "."
             }))
-            .send().await.unwrap();
+            .send()
+            .await
+            .unwrap();
         let a: Value = resp.json().await.unwrap();
         agent_ids.push(a["id"].as_str().unwrap().to_string());
     }
@@ -740,14 +1089,25 @@ async fn agent_list_sorted_by_updated_at_desc() {
     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
     // Update the first agent — it should now appear first in the list
-    env.client.put(format!("{base}/agents/{}", agent_ids[0]))
+    env.client
+        .put(format!("{base}/agents/{}", agent_ids[0]))
         .json(&json!({ "name": "Agent-A-Updated" }))
-        .send().await.unwrap();
+        .send()
+        .await
+        .unwrap();
 
-    let resp = env.client.get(format!("{base}/agents")).send().await.unwrap();
+    let resp = env
+        .client
+        .get(format!("{base}/agents"))
+        .send()
+        .await
+        .unwrap();
     let list: Value = resp.json().await.unwrap();
     let arr = list.as_array().unwrap();
-    assert_eq!(arr[0]["id"], agent_ids[0], "most recently updated agent must be first");
+    assert_eq!(
+        arr[0]["id"], agent_ids[0],
+        "most recently updated agent must be first"
+    );
 }
 
 // ── Skill additional behaviors ────────────────────────────────────────────────
@@ -757,22 +1117,36 @@ async fn skill_create_with_custom_provider() {
     let env = start().await;
     let base = &env.base_url;
 
-    let resp = env.client.post(format!("{base}/skills"))
+    let resp = env
+        .client
+        .post(format!("{base}/skills"))
         .json(&json!({
             "name": "anthropic-summarizer",
             "description": "Summarization skill",
             "provider": "anthropic",
             "content": "## Summarizer\nCondense text."
         }))
-        .send().await.unwrap();
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status().as_u16(), 201);
     let created: Value = resp.json().await.unwrap();
-    assert_eq!(created["provider"], "anthropic", "custom provider must be stored as-is");
+    assert_eq!(
+        created["provider"], "anthropic",
+        "custom provider must be stored as-is"
+    );
 
     // Round-trip: GET returns the same provider
     let skill_id = created["id"].as_str().unwrap();
-    let got: Value = env.client.get(format!("{base}/skills/{skill_id}"))
-        .send().await.unwrap().json().await.unwrap();
+    let got: Value = env
+        .client
+        .get(format!("{base}/skills/{skill_id}"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
     assert_eq!(got["provider"], "anthropic");
 }
 
@@ -781,9 +1155,15 @@ async fn skill_versions_for_nonexistent_skill_returns_empty_list() {
     let env = start().await;
     // No 404 — the implementation uses a keys() prefix scan which returns nothing
     // for an unknown skill_id. This is the documented behavior.
-    let resp = env.client
-        .get(format!("{}/skills/skill_nonexistent/versions", env.base_url))
-        .send().await.unwrap();
+    let resp = env
+        .client
+        .get(format!(
+            "{}/skills/skill_nonexistent/versions",
+            env.base_url
+        ))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status().as_u16(), 200);
     let versions: Value = resp.json().await.unwrap();
     assert_eq!(versions.as_array().unwrap().len(), 0);
@@ -792,10 +1172,13 @@ async fn skill_versions_for_nonexistent_skill_returns_empty_list() {
 #[tokio::test]
 async fn skill_create_version_for_nonexistent_returns_404() {
     let env = start().await;
-    let resp = env.client
+    let resp = env
+        .client
         .post(format!("{}/skills/skill_ghost/versions", env.base_url))
         .json(&json!({ "content": "# Ghost skill" }))
-        .send().await.unwrap();
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status().as_u16(), 404);
 }
 
@@ -806,13 +1189,15 @@ async fn session_status_running_when_last_message_is_user() {
     let env = start().await;
     let base = &env.base_url;
 
-    let sessions_kv = env.js
+    let sessions_kv = env
+        .js
         .create_or_update_key_value(async_nats::jetstream::kv::Config {
             bucket: "SESSIONS".to_string(),
             history: 1,
             ..Default::default()
         })
-        .await.unwrap();
+        .await
+        .unwrap();
 
     let raw = json!({
         "id": "sess_running",
@@ -826,12 +1211,26 @@ async fn session_status_running_when_last_message_is_user() {
         "created_at": "1776384000",
         "updated_at": "1776384001"
     });
-    sessions_kv.put("t1.sess_running", Bytes::from(serde_json::to_vec(&raw).unwrap())).await.unwrap();
+    sessions_kv
+        .put(
+            "t1.sess_running",
+            Bytes::from(serde_json::to_vec(&raw).unwrap()),
+        )
+        .await
+        .unwrap();
 
-    let resp = env.client.get(format!("{base}/sessions/t1/sess_running")).send().await.unwrap();
+    let resp = env
+        .client
+        .get(format!("{base}/sessions/t1/sess_running"))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status().as_u16(), 200);
     let s: Value = resp.json().await.unwrap();
-    assert_eq!(s["status"], "running", "last message from user → status must be running");
+    assert_eq!(
+        s["status"], "running",
+        "last message from user → status must be running"
+    );
     assert_eq!(s["message_count"], 3);
 }
 
@@ -840,13 +1239,15 @@ async fn session_with_no_messages_has_zero_counts_and_idle_status() {
     let env = start().await;
     let base = &env.base_url;
 
-    let sessions_kv = env.js
+    let sessions_kv = env
+        .js
         .create_or_update_key_value(async_nats::jetstream::kv::Config {
             bucket: "SESSIONS".to_string(),
             history: 1,
             ..Default::default()
         })
-        .await.unwrap();
+        .await
+        .unwrap();
 
     let raw = json!({
         "id": "sess_empty",
@@ -856,9 +1257,20 @@ async fn session_with_no_messages_has_zero_counts_and_idle_status() {
         "created_at": "1776384000",
         "updated_at": "1776384000"
     });
-    sessions_kv.put("t2.sess_empty", Bytes::from(serde_json::to_vec(&raw).unwrap())).await.unwrap();
+    sessions_kv
+        .put(
+            "t2.sess_empty",
+            Bytes::from(serde_json::to_vec(&raw).unwrap()),
+        )
+        .await
+        .unwrap();
 
-    let resp = env.client.get(format!("{base}/sessions/t2/sess_empty")).send().await.unwrap();
+    let resp = env
+        .client
+        .get(format!("{base}/sessions/t2/sess_empty"))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status().as_u16(), 200);
     let s: Value = resp.json().await.unwrap();
     assert_eq!(s["status"], "idle");
@@ -876,19 +1288,21 @@ async fn session_list_sorted_by_updated_at_desc() {
     let env = start().await;
     let base = &env.base_url;
 
-    let sessions_kv = env.js
+    let sessions_kv = env
+        .js
         .create_or_update_key_value(async_nats::jetstream::kv::Config {
             bucket: "SESSIONS".to_string(),
             history: 1,
             ..Default::default()
         })
-        .await.unwrap();
+        .await
+        .unwrap();
 
     // Write sessions with explicit updated_at epoch values — deliberately out of order
     let data = [
-        ("sess_old",    "1776384001"),
+        ("sess_old", "1776384001"),
         ("sess_newest", "1776384003"),
-        ("sess_mid",    "1776384002"),
+        ("sess_mid", "1776384002"),
     ];
     for (id, updated_at) in data {
         let s = json!({
@@ -900,16 +1314,27 @@ async fn session_list_sorted_by_updated_at_desc() {
             "updated_at": updated_at
         });
         let key = format!("sort_tenant.{id}");
-        sessions_kv.put(&key, Bytes::from(serde_json::to_vec(&s).unwrap())).await.unwrap();
+        sessions_kv
+            .put(&key, Bytes::from(serde_json::to_vec(&s).unwrap()))
+            .await
+            .unwrap();
     }
 
-    let resp = env.client.get(format!("{base}/sessions")).send().await.unwrap();
+    let resp = env
+        .client
+        .get(format!("{base}/sessions"))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status().as_u16(), 200);
     let list: Value = resp.json().await.unwrap();
     let arr = list.as_array().unwrap();
     assert_eq!(arr.len(), 3);
     // Sorted descending by updated_at — newest first
-    assert_eq!(arr[0]["id"], "sess_newest", "highest updated_at must be first");
+    assert_eq!(
+        arr[0]["id"], "sess_newest",
+        "highest updated_at must be first"
+    );
     assert_eq!(arr[1]["id"], "sess_mid");
     assert_eq!(arr[2]["id"], "sess_old");
 }
@@ -921,27 +1346,43 @@ async fn credential_get_by_id() {
     let env = start().await;
     let base = &env.base_url;
 
-    let resp = env.client.post(format!("{base}/environments"))
+    let resp = env
+        .client
+        .post(format!("{base}/environments"))
         .json(&json!({ "name": "GetCredEnv" }))
-        .send().await.unwrap();
-    let env_id = resp.json::<Value>().await.unwrap()["id"].as_str().unwrap().to_string();
+        .send()
+        .await
+        .unwrap();
+    let env_id = resp.json::<Value>().await.unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     // Create a credential
-    let resp = env.client.post(format!("{base}/environments/{env_id}/credentials"))
+    let resp = env
+        .client
+        .post(format!("{base}/environments/{env_id}/credentials"))
         .json(&json!({
             "name": "My Token",
             "type": "bearer_token",
             "mcp_server_url": "https://example.com"
         }))
-        .send().await.unwrap();
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status().as_u16(), 201);
     let created: Value = resp.json().await.unwrap();
     let cred_id = created["id"].as_str().unwrap().to_string();
 
     // GET it by id
-    let resp = env.client
-        .get(format!("{base}/environments/{env_id}/credentials/{cred_id}"))
-        .send().await.unwrap();
+    let resp = env
+        .client
+        .get(format!(
+            "{base}/environments/{env_id}/credentials/{cred_id}"
+        ))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status().as_u16(), 200);
     let fetched: Value = resp.json().await.unwrap();
     assert_eq!(fetched["id"], cred_id.as_str());
@@ -949,9 +1390,14 @@ async fn credential_get_by_id() {
     assert_eq!(fetched["env_id"], env_id.as_str());
 
     // GET non-existent returns 404
-    let resp = env.client
-        .get(format!("{base}/environments/{env_id}/credentials/crd_ghost"))
-        .send().await.unwrap();
+    let resp = env
+        .client
+        .get(format!(
+            "{base}/environments/{env_id}/credentials/crd_ghost"
+        ))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status().as_u16(), 404);
 }
 
@@ -963,23 +1409,42 @@ async fn skill_delete() {
     let base = &env.base_url;
 
     // Create a skill
-    let resp = env.client.post(format!("{base}/skills"))
+    let resp = env
+        .client
+        .post(format!("{base}/skills"))
         .json(&json!({ "name": "Deletable", "description": "", "content": "c" }))
-        .send().await.unwrap();
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status().as_u16(), 201);
     let created: Value = resp.json().await.unwrap();
     let skill_id = created["id"].as_str().unwrap().to_string();
 
     // Confirm it exists
-    let resp = env.client.get(format!("{base}/skills/{skill_id}")).send().await.unwrap();
+    let resp = env
+        .client
+        .get(format!("{base}/skills/{skill_id}"))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status().as_u16(), 200);
 
     // Delete it
-    let resp = env.client.delete(format!("{base}/skills/{skill_id}")).send().await.unwrap();
+    let resp = env
+        .client
+        .delete(format!("{base}/skills/{skill_id}"))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status().as_u16(), 204);
 
     // Confirm it's gone
-    let resp = env.client.get(format!("{base}/skills/{skill_id}")).send().await.unwrap();
+    let resp = env
+        .client
+        .get(format!("{base}/skills/{skill_id}"))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status().as_u16(), 404);
 }
 
@@ -1002,17 +1467,26 @@ async fn mcp_registry_returns_known_servers() {
 
     // Every entry must have name and url fields.
     for entry in arr {
-        assert!(entry["name"].is_string(), "each server must have a name field");
-        assert!(entry["url"].is_string(), "each server must have a url field");
+        assert!(
+            entry["name"].is_string(),
+            "each server must have a name field"
+        );
+        assert!(
+            entry["url"].is_string(),
+            "each server must have a url field"
+        );
     }
 
     // Well-known entries must be present.
-    let names: Vec<&str> = arr
-        .iter()
-        .filter_map(|e| e["name"].as_str())
-        .collect();
-    assert!(names.contains(&"GitHub"), "GitHub must be in the MCP registry");
-    assert!(names.contains(&"Linear"), "Linear must be in the MCP registry");
+    let names: Vec<&str> = arr.iter().filter_map(|e| e["name"].as_str()).collect();
+    assert!(
+        names.contains(&"GitHub"),
+        "GitHub must be in the MCP registry"
+    );
+    assert!(
+        names.contains(&"Linear"),
+        "Linear must be in the MCP registry"
+    );
 }
 
 // ── run_with entry point ──────────────────────────────────────────────────────
@@ -1040,11 +1514,11 @@ async fn run_with_starts_server_and_serves_health() {
     let health = format!("http://127.0.0.1:{port}/-/health");
     let mut ready = false;
     for _ in 0..50 {
-        if let Ok(r) = client.get(&health).send().await {
-            if r.status().is_success() {
-                ready = true;
-                break;
-            }
+        if let Ok(r) = client.get(&health).send().await
+            && r.status().is_success()
+        {
+            ready = true;
+            break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }

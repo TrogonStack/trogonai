@@ -230,7 +230,10 @@ async fn missing_event_header_returns_400_no_nats_message() {
     let timed_out = tokio::time::timeout(Duration::from_millis(300), sub.next())
         .await
         .is_err();
-    assert!(timed_out, "expected no NATS message on missing event header");
+    assert!(
+        timed_out,
+        "expected no NATS message on missing event header"
+    );
 }
 
 /// `X-GitHub-Delivery` is forwarded as `Nats-Msg-Id` for deduplication.
@@ -241,11 +244,7 @@ async fn delivery_id_is_set_as_nats_msg_id() {
     let body = br#"{"action":"opened"}"#;
     let sig = compute_sig(TEST_SECRET, body);
 
-    let mut sub = fixture
-        .nats
-        .subscribe("github.pull_request")
-        .await
-        .unwrap();
+    let mut sub = fixture.nats.subscribe("github.pull_request").await.unwrap();
 
     let resp = fixture
         .app

@@ -152,7 +152,8 @@ async fn missing_token_returns_401_no_nats_message() {
                 .method("POST")
                 .uri("/webhook")
                 .body(Body::from(
-                    serde_json::to_vec(&serde_json::json!({"update_id": 1, "message": {}})).unwrap(),
+                    serde_json::to_vec(&serde_json::json!({"update_id": 1, "message": {}}))
+                        .unwrap(),
                 ))
                 .unwrap(),
         )
@@ -172,8 +173,7 @@ async fn missing_token_returns_401_no_nats_message() {
 async fn wrong_token_returns_401_no_nats_message() {
     let fixture = setup().await;
 
-    let body =
-        serde_json::to_vec(&serde_json::json!({"update_id": 1, "message": {}})).unwrap();
+    let body = serde_json::to_vec(&serde_json::json!({"update_id": 1, "message": {}})).unwrap();
 
     let mut sub = fixture.nats.subscribe("telegram.>").await.unwrap();
 
@@ -210,11 +210,7 @@ async fn unknown_update_type_routes_to_unroutable() {
     }))
     .unwrap();
 
-    let mut sub = fixture
-        .nats
-        .subscribe("telegram.unroutable")
-        .await
-        .unwrap();
+    let mut sub = fixture.nats.subscribe("telegram.unroutable").await.unwrap();
 
     let resp = fixture
         .app

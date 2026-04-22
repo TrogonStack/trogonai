@@ -31,7 +31,9 @@ use async_nats::jetstream::{
 };
 use futures_util::StreamExt;
 use tracing::{error, info, warn};
-use trogon_automations::{AutomationRepository, AutomationStore, RunRecord, RunRepository, RunStatus, RunStore};
+use trogon_automations::{
+    AutomationRepository, AutomationStore, RunRecord, RunRepository, RunStatus, RunStore,
+};
 
 use crate::agent_loop::{AgentLoop, ReqwestAnthropicClient};
 use crate::chat_api::{ChatAppState, router as chat_router};
@@ -252,7 +254,15 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
     let tenant_id = Arc::new(cfg.tenant_id.clone());
 
     // Recover any stale promises from a previous process run.
-    let _ = recover_stale_promises(&agent, &promise_store, &store, &run_store, &tenant_id, skill_loader.clone()).await;
+    let _ = recover_stale_promises(
+        &agent,
+        &promise_store,
+        &store,
+        &run_store,
+        &tenant_id,
+        skill_loader.clone(),
+    )
+    .await;
 
     // Start the combined HTTP API server unless disabled (port == 0).
     // Automations + run history + interactive chat sessions are all on the same port.
@@ -834,10 +844,10 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
             // Reap completed tasks so the JoinSet doesn't grow unboundedly
             // during long-running deployments.
             Some(result) = tasks.join_next() => {
-                if let Err(e) = result {
-                    if e.is_panic() {
-                        error!(error = ?e, "Message handler task panicked");
-                    }
+                if let Err(e) = result
+                    && e.is_panic()
+                {
+                    error!(error = ?e, "Message handler task panicked");
                 }
             }
             // Stop consuming new messages on SIGTERM (Kubernetes pod shutdown)
@@ -856,8 +866,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
     // causing an unnecessary full re-run from the last checkpoint.
     if !tasks.is_empty() {
         info!(count = tasks.len(), "Shutdown: draining in-flight runs");
-        let drain_deadline =
-            tokio::time::Instant::now() + std::time::Duration::from_secs(5 * 60);
+        let drain_deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5 * 60);
         loop {
             match tokio::time::timeout_at(drain_deadline, tasks.join_next()).await {
                 Ok(Some(Err(e))) if e.is_panic() => {
@@ -923,8 +932,7 @@ async fn prepare_agent_with_promise(
     };
     match get_result {
         Ok(Some((existing, rev))) => {
-            if existing.status == PromiseStatus::Running
-                || existing.status == PromiseStatus::Failed
+            if existing.status == PromiseStatus::Running || existing.status == PromiseStatus::Failed
             {
                 // CAS-claim: take ownership so no other worker runs this
                 // promise concurrently. `Running` promises are claimed on both
@@ -967,8 +975,12 @@ async fn prepare_agent_with_promise(
                     .await
                     {
                         Ok(Ok(_)) => {}
-                        Ok(Err(e)) => warn!(promise_id = %promise_id, error = %e, "Could not mark over-limit promise PermanentFailed — will retry on next recovery"),
-                        Err(_) => warn!(promise_id = %promise_id, "KV timeout marking over-limit promise PermanentFailed — will retry on next recovery"),
+                        Ok(Err(e)) => {
+                            warn!(promise_id = %promise_id, error = %e, "Could not mark over-limit promise PermanentFailed — will retry on next recovery")
+                        }
+                        Err(_) => {
+                            warn!(promise_id = %promise_id, "KV timeout marking over-limit promise PermanentFailed — will retry on next recovery")
+                        }
                     }
                     return None;
                 }
@@ -1062,7 +1074,7 @@ async fn prepare_agent_with_promise(
                 system_prompt: None, // populated at first checkpoint in agent_loop::run
                 recovery_count: 0,
                 checkpoint_degraded: false,
-            failure_reason: None,
+                failure_reason: None,
             };
             match tokio::time::timeout(
                 crate::agent_loop::NATS_KV_TIMEOUT,
@@ -1071,8 +1083,12 @@ async fn prepare_agent_with_promise(
             .await
             {
                 Ok(Ok(_)) => {}
-                Ok(Err(e)) => warn!(promise_id = %promise_id, error = %e, "Failed to create promise — run will proceed without durability"),
-                Err(_) => warn!(promise_id = %promise_id, "NATS KV put_promise timed out — run will proceed without durability"),
+                Ok(Err(e)) => {
+                    warn!(promise_id = %promise_id, error = %e, "Failed to create promise — run will proceed without durability")
+                }
+                Err(_) => {
+                    warn!(promise_id = %promise_id, "NATS KV put_promise timed out — run will proceed without durability")
+                }
             }
         }
         Err(e) => {
@@ -1133,16 +1149,28 @@ async fn recover_stale_promises<A: AutomationRepository, R: RunRepository>(
             if attempt > 0 {
                 tokio::time::sleep(LIST_RUNNING_RETRY_DELAY).await;
             }
-            match tokio::time::timeout(LIST_RUNNING_TIMEOUT, promise_store.list_running(tenant_id)).await {
-                Ok(Ok(p)) => { found = Some(p); break; }
-                Ok(Err(e)) => warn!(error = %e, attempt, "Startup recovery: failed to list running promises"),
-                Err(_) => warn!(attempt, "Startup recovery: list_running timed out after 2 min"),
+            match tokio::time::timeout(LIST_RUNNING_TIMEOUT, promise_store.list_running(tenant_id))
+                .await
+            {
+                Ok(Ok(p)) => {
+                    found = Some(p);
+                    break;
+                }
+                Ok(Err(e)) => {
+                    warn!(error = %e, attempt, "Startup recovery: failed to list running promises")
+                }
+                Err(_) => warn!(
+                    attempt,
+                    "Startup recovery: list_running timed out after 2 min"
+                ),
             }
         }
         match found {
             Some(p) => p,
             None => {
-                error!("Startup recovery: list_running failed after 2 attempts — stale promises will not be recovered this startup");
+                error!(
+                    "Startup recovery: list_running failed after 2 attempts — stale promises will not be recovered this startup"
+                );
                 return None;
             }
         }
@@ -1205,8 +1233,7 @@ async fn recover_stale_promises<A: AutomationRepository, R: RunRepository>(
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .subsec_nanos() as u64;
-        let jitter_ms =
-            (nanos ^ (std::process::id() as u64).wrapping_mul(2_654_435_761)) % 30_000;
+        let jitter_ms = (nanos ^ (std::process::id() as u64).wrapping_mul(2_654_435_761)) % 30_000;
         tokio::time::sleep(std::time::Duration::from_millis(jitter_ms)).await;
 
         // Automation promises skipped due to a transient automation-store
@@ -1347,7 +1374,8 @@ async fn recover_stale_promises<A: AutomationRepository, R: RunRepository>(
                 &promise.nats_subject,
                 &promise.trigger,
             )
-            .await else {
+            .await
+            else {
                 info!(
                     promise_id = %promise.id,
                     "Startup recovery: CAS claim lost — another worker took this promise"
@@ -1447,9 +1475,14 @@ async fn recover_stale_promises<A: AutomationRepository, R: RunRepository>(
                         _ => None,
                     };
                     let started_at = trogon_automations::now_unix();
-                    let result =
-                        handlers::run_automation(&agent, &auto, &promise.nats_subject, &payload, skill_content.as_deref())
-                            .await;
+                    let result = handlers::run_automation(
+                        &agent,
+                        &auto,
+                        &promise.nats_subject,
+                        &payload,
+                        skill_content.as_deref(),
+                    )
+                    .await;
                     let finished_at = trogon_automations::now_unix();
                     let (status, output) = match &result {
                         Ok(o) => (RunStatus::Success, o.clone()),
@@ -1533,7 +1566,12 @@ async fn recover_stale_promises<A: AutomationRepository, R: RunRepository>(
                                 current.status = PromiseStatus::PermanentFailed;
                                 match tokio::time::timeout(
                                     crate::agent_loop::NATS_KV_TIMEOUT,
-                                    promise_store.update_promise(&tenant_id, &promise.id, &current, rev),
+                                    promise_store.update_promise(
+                                        &tenant_id,
+                                        &promise.id,
+                                        &current,
+                                        rev,
+                                    ),
                                 )
                                 .await
                                 {
@@ -1603,7 +1641,10 @@ async fn recover_stale_promises<A: AutomationRepository, R: RunRepository>(
                 let payload: bytes::Bytes = serde_json::to_vec(&promise.trigger)
                     .unwrap_or_default()
                     .into();
-                let auto_opt = autos.iter().find(|a| a.id == promise.automation_id).cloned();
+                let auto_opt = autos
+                    .iter()
+                    .find(|a| a.id == promise.automation_id)
+                    .cloned();
                 let perm_fail_reason: Option<&str> = match &auto_opt {
                     Some(a) if !a.enabled => Some("automation is disabled"),
                     None => Some("automation no longer exists"),
@@ -1615,27 +1656,24 @@ async fn recover_stale_promises<A: AutomationRepository, R: RunRepository>(
                         automation_id = %promise.automation_id,
                         "Startup recovery (retry): {reason} — marking promise PermanentFailed"
                     );
-                    match tokio::time::timeout(
+                    if let Ok(Ok(Some((mut current, rev)))) = tokio::time::timeout(
                         crate::agent_loop::NATS_KV_TIMEOUT,
                         promise_store.get_promise(&tenant_id, &promise.id),
                     )
                     .await
                     {
-                        Ok(Ok(Some((mut current, rev)))) => {
-                            current.status = PromiseStatus::PermanentFailed;
-                            current.failure_reason = Some(reason.to_string());
-                            let _ = tokio::time::timeout(
-                                crate::agent_loop::NATS_KV_TIMEOUT,
-                                promise_store.update_promise(
-                                    &tenant_id,
-                                    &promise.id,
-                                    &current,
-                                    rev,
-                                ),
-                            )
-                            .await;
-                        }
-                        _ => {}
+                        current.status = PromiseStatus::PermanentFailed;
+                        current.failure_reason = Some(reason.to_string());
+                        let _ = tokio::time::timeout(
+                            crate::agent_loop::NATS_KV_TIMEOUT,
+                            promise_store.update_promise(
+                                &tenant_id,
+                                &promise.id,
+                                &current,
+                                rev,
+                            ),
+                        )
+                        .await;
                     }
                     continue;
                 }
@@ -1687,7 +1725,8 @@ async fn recover_stale_promises<A: AutomationRepository, R: RunRepository>(
 /// stops sending progress acks after the message has been explicitly acked.
 fn spawn_heartbeat(msg: async_nats::jetstream::Message) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        let mut interval = tokio::time::interval(std::time::Duration::from_secs(HEARTBEAT_INTERVAL_SECS));
+        let mut interval =
+            tokio::time::interval(std::time::Duration::from_secs(HEARTBEAT_INTERVAL_SECS));
         interval.tick().await; // skip immediate first tick
         loop {
             interval.tick().await;
@@ -1700,6 +1739,7 @@ fn spawn_heartbeat(msg: async_nats::jetstream::Message) -> tokio::task::JoinHand
 
 /// Spawn one task per automation and wait for all to finish.
 /// Persists a [`RunRecord`] in `run_store` after each execution.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn dispatch_automations<R: RunRepository>(
     agent: &Arc<AgentLoop>,
     run_store: &Arc<R>,
@@ -1740,7 +1780,8 @@ pub(crate) async fn dispatch_automations<R: RunRepository>(
                     &subject,
                     &trigger,
                 )
-                .await else {
+                .await
+                else {
                     info!(
                         automation = %auto.name,
                         promise_id = %promise_id,
@@ -2100,7 +2141,8 @@ mod tests {
                 &'a self,
                 _tenant_id: &'a str,
                 _flag: &'a dyn trogon_splitio::flags::FeatureFlag,
-            ) -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send + 'a>> {
+            ) -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send + 'a>>
+            {
                 Box::pin(async { false })
             }
         }
@@ -2545,7 +2587,10 @@ mod tests {
         store
     }
 
-    fn sample_promise(id: &str, status: crate::promise_store::PromiseStatus) -> crate::promise_store::AgentPromise {
+    fn sample_promise(
+        id: &str,
+        status: crate::promise_store::PromiseStatus,
+    ) -> crate::promise_store::AgentPromise {
         crate::promise_store::AgentPromise {
             id: id.to_string(),
             tenant_id: "acme".to_string(),
@@ -2601,7 +2646,10 @@ mod tests {
     async fn prepare_agent_claims_running_promise() {
         use crate::promise_store::PromiseRepository;
 
-        let store = make_store_with(sample_promise("p1", crate::promise_store::PromiseStatus::Running));
+        let store = make_store_with(sample_promise(
+            "p1",
+            crate::promise_store::PromiseStatus::Running,
+        ));
         let agent = make_agent("http://127.0.0.1:1");
 
         let result = super::prepare_agent_with_promise(
@@ -2619,7 +2667,10 @@ mod tests {
 
         // worker_id must have been updated (CAS claim happened).
         let (p, _) = store.get_promise("acme", "p1").await.unwrap().unwrap();
-        assert_ne!(p.worker_id, "old-worker", "worker_id must be updated by the CAS claim");
+        assert_ne!(
+            p.worker_id, "old-worker",
+            "worker_id must be updated by the CAS claim"
+        );
     }
 
     /// A `Resolved` promise means the run already completed. The function must
@@ -2627,7 +2678,10 @@ mod tests {
     /// avoiding duplicate LLM calls and tool side-effects.
     #[tokio::test]
     async fn prepare_agent_returns_none_for_resolved_promise() {
-        let store = make_store_with(sample_promise("p1", crate::promise_store::PromiseStatus::Resolved));
+        let store = make_store_with(sample_promise(
+            "p1",
+            crate::promise_store::PromiseStatus::Resolved,
+        ));
         let agent = make_agent("http://127.0.0.1:1");
 
         let result = super::prepare_agent_with_promise(
@@ -2641,7 +2695,10 @@ mod tests {
         )
         .await;
 
-        assert!(result.is_none(), "must return None for Resolved promise — caller acks without re-running");
+        assert!(
+            result.is_none(),
+            "must return None for Resolved promise — caller acks without re-running"
+        );
     }
 
     /// When the CAS claim of a `Running` promise fails (another worker claimed
@@ -2650,7 +2707,10 @@ mod tests {
     #[tokio::test]
     async fn prepare_agent_returns_none_on_cas_claim_conflict() {
         let store = Arc::new(crate::promise_store::mock::CasConflictOnceStore::new());
-        store.inner.insert_promise(sample_promise("p1", crate::promise_store::PromiseStatus::Running));
+        store.inner.insert_promise(sample_promise(
+            "p1",
+            crate::promise_store::PromiseStatus::Running,
+        ));
         let agent = make_agent("http://127.0.0.1:1");
 
         let result = super::prepare_agent_with_promise(
@@ -2723,7 +2783,10 @@ mod tests {
         )
         .await;
 
-        assert!(result.is_some(), "must return agent for a Failed promise — transient error, retry is valid");
+        assert!(
+            result.is_some(),
+            "must return agent for a Failed promise — transient error, retry is valid"
+        );
 
         // Promise must be re-claimed (worker_id updated, status reset to Running).
         let (p, _) = store.get_promise("acme", "p1").await.unwrap().unwrap();
@@ -2732,7 +2795,10 @@ mod tests {
             crate::promise_store::PromiseStatus::Running,
             "Failed promise must be reset to Running on re-claim"
         );
-        assert_ne!(p.worker_id, "old-worker", "worker_id must be updated by the re-claim");
+        assert_ne!(
+            p.worker_id, "old-worker",
+            "worker_id must be updated by the re-claim"
+        );
     }
 
     // ── prepare_agent timeout / error paths ───────────────────────────────────
@@ -2743,8 +2809,8 @@ mod tests {
     /// without durability rather than blocking indefinitely.
     #[tokio::test(start_paused = true)]
     async fn prepare_agent_get_promise_timeout_returns_agent_without_durability() {
-        use crate::promise_store::mock::HangingGetPromiseStore;
         use crate::promise_store::PromiseRepository;
+        use crate::promise_store::mock::HangingGetPromiseStore;
         use std::time::Duration;
 
         let store = Arc::new(HangingGetPromiseStore::new());
@@ -2762,9 +2828,7 @@ mod tests {
                 "github.pull_request",
                 &trigger,
             ),
-            tokio::time::advance(
-                crate::agent_loop::NATS_KV_TIMEOUT + Duration::from_millis(1)
-            ),
+            tokio::time::advance(crate::agent_loop::NATS_KV_TIMEOUT + Duration::from_millis(1)),
         );
 
         let returned = result.expect("must return Some(agent) when get_promise times out");
@@ -2805,9 +2869,7 @@ mod tests {
                 "github.pull_request",
                 &trigger,
             ),
-            tokio::time::advance(
-                crate::agent_loop::NATS_KV_TIMEOUT + Duration::from_millis(1)
-            ),
+            tokio::time::advance(crate::agent_loop::NATS_KV_TIMEOUT + Duration::from_millis(1)),
         );
 
         assert!(
@@ -2857,7 +2919,10 @@ mod tests {
         )
         .await;
 
-        assert!(result.is_none(), "must return None when recovery limit is reached");
+        assert!(
+            result.is_none(),
+            "must return None when recovery limit is reached"
+        );
 
         let (p, _) = store.get_promise("acme", "p-stuck").await.unwrap().unwrap();
         assert_eq!(
@@ -2891,7 +2956,10 @@ mod tests {
         .await;
 
         let (p, _) = store.get_promise("acme", "p-rc").await.unwrap().unwrap();
-        assert_eq!(p.recovery_count, 1, "recovery_count must be incremented on Running re-claim");
+        assert_eq!(
+            p.recovery_count, 1,
+            "recovery_count must be incremented on Running re-claim"
+        );
     }
 
     /// When `get_promise` returns an immediate `Err`, the function must log a
@@ -2903,8 +2971,8 @@ mod tests {
     /// `match get_result` block.
     #[tokio::test]
     async fn prepare_agent_get_promise_error_returns_agent_without_durability() {
-        use crate::promise_store::mock::ErrorGetPromiseStore;
         use crate::promise_store::PromiseRepository;
+        use crate::promise_store::mock::ErrorGetPromiseStore;
 
         let store = Arc::new(ErrorGetPromiseStore::new());
         let store_arc = Arc::clone(&store) as Arc<dyn PromiseRepository>;
@@ -2941,8 +3009,8 @@ mod tests {
     /// inner `put_promise` match falls through to the wiring block.
     #[tokio::test]
     async fn prepare_agent_put_promise_error_returns_agent_with_promise_id_wired() {
-        use crate::promise_store::mock::ErrorPutPromiseStore;
         use crate::promise_store::PromiseRepository;
+        use crate::promise_store::mock::ErrorPutPromiseStore;
 
         let store = Arc::new(ErrorPutPromiseStore::new());
         let store_arc = Arc::clone(&store) as Arc<dyn PromiseRepository>;
@@ -2980,8 +3048,8 @@ mod tests {
     /// checkpoint but is not aborted.
     #[tokio::test(start_paused = true)]
     async fn prepare_agent_put_promise_timeout_returns_agent_with_promise_id_wired() {
-        use crate::promise_store::mock::HangingPutPromiseStore;
         use crate::promise_store::PromiseRepository;
+        use crate::promise_store::mock::HangingPutPromiseStore;
         use std::time::Duration;
 
         let store = Arc::new(HangingPutPromiseStore::new());
@@ -2999,9 +3067,7 @@ mod tests {
                 "github.pull_request",
                 &trigger,
             ),
-            tokio::time::advance(
-                crate::agent_loop::NATS_KV_TIMEOUT + Duration::from_millis(1)
-            ),
+            tokio::time::advance(crate::agent_loop::NATS_KV_TIMEOUT + Duration::from_millis(1)),
         );
 
         let returned = result.expect("must return Some(agent) when put_promise times out");
@@ -3025,8 +3091,8 @@ mod tests {
     /// can start Docker, so we pause the clock manually after store setup.
     #[tokio::test]
     async fn recover_list_running_timeout_returns_none() {
-        use crate::promise_store::mock::HangingListRunningStore;
         use crate::promise_store::PromiseRepository;
+        use crate::promise_store::mock::HangingListRunningStore;
         use std::time::Duration;
 
         // Set up the stores with a real clock so Docker/NATS can start.
@@ -3036,8 +3102,7 @@ mod tests {
         // `pending()`, so `recover_stale_promises` blocks on the timeout future.
         tokio::time::pause();
 
-        let promise_store: Arc<dyn PromiseRepository> =
-            Arc::new(HangingListRunningStore::new());
+        let promise_store: Arc<dyn PromiseRepository> = Arc::new(HangingListRunningStore::new());
         let agent = make_agent("http://127.0.0.1:1");
 
         let (handle, _) = tokio::join!(
@@ -3049,9 +3114,7 @@ mod tests {
                 "acme",
                 None,
             ),
-            tokio::time::advance(
-                crate::agent_loop::NATS_KV_TIMEOUT + Duration::from_millis(1)
-            ),
+            tokio::time::advance(crate::agent_loop::NATS_KV_TIMEOUT + Duration::from_millis(1)),
         );
 
         assert!(
@@ -3064,12 +3127,11 @@ mod tests {
     /// must return `None` without spawning a recovery task.
     #[tokio::test]
     async fn recover_list_running_error_returns_none() {
-        use crate::promise_store::mock::ErrorListRunningStore;
         use crate::promise_store::PromiseRepository;
+        use crate::promise_store::mock::ErrorListRunningStore;
 
         let (auto_store, run_store, _container) = make_all_stores().await;
-        let promise_store: Arc<dyn PromiseRepository> =
-            Arc::new(ErrorListRunningStore::new());
+        let promise_store: Arc<dyn PromiseRepository> = Arc::new(ErrorListRunningStore::new());
         let agent = make_agent("http://127.0.0.1:1");
 
         let handle = super::recover_stale_promises(
@@ -3107,28 +3169,100 @@ mod tests {
             inner: MockPromiseStore,
         }
         impl PromiseRepository for FailOnceThenSucceedListRunningStore {
-            fn get_promise<'a>(&'a self, t: &'a str, id: &'a str)
-            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<crate::promise_store::PromiseEntry>, crate::promise_store::PromiseStoreError>> + Send + 'a>> {
+            fn get_promise<'a>(
+                &'a self,
+                t: &'a str,
+                id: &'a str,
+            ) -> std::pin::Pin<
+                Box<
+                    dyn std::future::Future<
+                            Output = Result<
+                                Option<crate::promise_store::PromiseEntry>,
+                                crate::promise_store::PromiseStoreError,
+                            >,
+                        > + Send
+                        + 'a,
+                >,
+            > {
                 self.inner.get_promise(t, id)
             }
-            fn put_promise<'a>(&'a self, p: &'a crate::promise_store::AgentPromise)
-            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<u64, crate::promise_store::PromiseStoreError>> + Send + 'a>> {
+            fn put_promise<'a>(
+                &'a self,
+                p: &'a crate::promise_store::AgentPromise,
+            ) -> std::pin::Pin<
+                Box<
+                    dyn std::future::Future<
+                            Output = Result<u64, crate::promise_store::PromiseStoreError>,
+                        > + Send
+                        + 'a,
+                >,
+            > {
                 self.inner.put_promise(p)
             }
-            fn update_promise<'a>(&'a self, t: &'a str, id: &'a str, p: &'a crate::promise_store::AgentPromise, rev: u64)
-            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<u64, crate::promise_store::PromiseStoreError>> + Send + 'a>> {
+            fn update_promise<'a>(
+                &'a self,
+                t: &'a str,
+                id: &'a str,
+                p: &'a crate::promise_store::AgentPromise,
+                rev: u64,
+            ) -> std::pin::Pin<
+                Box<
+                    dyn std::future::Future<
+                            Output = Result<u64, crate::promise_store::PromiseStoreError>,
+                        > + Send
+                        + 'a,
+                >,
+            > {
                 self.inner.update_promise(t, id, p, rev)
             }
-            fn get_tool_result<'a>(&'a self, t: &'a str, id: &'a str, ck: &'a str)
-            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<String>, crate::promise_store::PromiseStoreError>> + Send + 'a>> {
+            fn get_tool_result<'a>(
+                &'a self,
+                t: &'a str,
+                id: &'a str,
+                ck: &'a str,
+            ) -> std::pin::Pin<
+                Box<
+                    dyn std::future::Future<
+                            Output = Result<
+                                Option<String>,
+                                crate::promise_store::PromiseStoreError,
+                            >,
+                        > + Send
+                        + 'a,
+                >,
+            > {
                 self.inner.get_tool_result(t, id, ck)
             }
-            fn put_tool_result<'a>(&'a self, t: &'a str, id: &'a str, ck: &'a str, r: &'a str)
-            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), crate::promise_store::PromiseStoreError>> + Send + 'a>> {
+            fn put_tool_result<'a>(
+                &'a self,
+                t: &'a str,
+                id: &'a str,
+                ck: &'a str,
+                r: &'a str,
+            ) -> std::pin::Pin<
+                Box<
+                    dyn std::future::Future<
+                            Output = Result<(), crate::promise_store::PromiseStoreError>,
+                        > + Send
+                        + 'a,
+                >,
+            > {
                 self.inner.put_tool_result(t, id, ck, r)
             }
-            fn list_running<'a>(&'a self, tenant_id: &'a str)
-            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<crate::promise_store::AgentPromise>, crate::promise_store::PromiseStoreError>> + Send + 'a>> {
+            fn list_running<'a>(
+                &'a self,
+                tenant_id: &'a str,
+            ) -> std::pin::Pin<
+                Box<
+                    dyn std::future::Future<
+                            Output = Result<
+                                Vec<crate::promise_store::AgentPromise>,
+                                crate::promise_store::PromiseStoreError,
+                            >,
+                        > + Send
+                        + 'a,
+                >,
+            > {
                 let first_call = !self.called.swap(true, Ordering::SeqCst);
                 let inner_fut = self.inner.list_running(tenant_id);
                 Box::pin(async move {
@@ -3151,10 +3285,11 @@ mod tests {
         inner.insert_promise(p);
         let store_for_assert = inner.clone();
 
-        let promise_store: Arc<dyn PromiseRepository> = Arc::new(FailOnceThenSucceedListRunningStore {
-            called: Arc::new(AtomicBool::new(false)),
-            inner,
-        });
+        let promise_store: Arc<dyn PromiseRepository> =
+            Arc::new(FailOnceThenSucceedListRunningStore {
+                called: Arc::new(AtomicBool::new(false)),
+                inner,
+            });
 
         let auto_store = Arc::new(EmptyAutomationStore);
         let run_store = Arc::new(ErrorRecordRunStore);
@@ -3190,12 +3325,11 @@ mod tests {
     /// `recover_stale_promises` must return `None`.
     #[tokio::test]
     async fn recover_empty_running_list_returns_none() {
-        use crate::promise_store::mock::MockPromiseStore;
         use crate::promise_store::PromiseRepository;
+        use crate::promise_store::mock::MockPromiseStore;
 
         let (auto_store, run_store, _container) = make_all_stores().await;
-        let promise_store: Arc<dyn PromiseRepository> =
-            Arc::new(MockPromiseStore::new());
+        let promise_store: Arc<dyn PromiseRepository> = Arc::new(MockPromiseStore::new());
         let agent = make_agent("http://127.0.0.1:1");
 
         let handle = super::recover_stale_promises(
@@ -3268,8 +3402,8 @@ mod tests {
     /// must skip that promise without claiming or modifying any state.
     #[tokio::test]
     async fn recover_refetch_vanished_skips_promise() {
-        use crate::promise_store::mock::VanishedOnRefetchStore;
         use crate::promise_store::PromiseRepository;
+        use crate::promise_store::mock::VanishedOnRefetchStore;
 
         let (auto_store, run_store, _container) = make_all_stores().await;
         let store = Arc::new(VanishedOnRefetchStore::new());
@@ -3311,8 +3445,8 @@ mod tests {
     /// the loop must skip it without claiming.
     #[tokio::test]
     async fn recover_refetch_resolved_skips_promise() {
-        use crate::promise_store::mock::ResolvedOnRefetchStore;
         use crate::promise_store::PromiseRepository;
+        use crate::promise_store::mock::ResolvedOnRefetchStore;
 
         let (auto_store, run_store, _container) = make_all_stores().await;
         let store = Arc::new(ResolvedOnRefetchStore::new());
@@ -3352,8 +3486,8 @@ mod tests {
     /// recovery loop, the loop must skip that promise and continue.
     #[tokio::test]
     async fn recover_refetch_error_skips_promise() {
-        use crate::promise_store::mock::ErrorGetPromiseStore;
         use crate::promise_store::PromiseRepository;
+        use crate::promise_store::mock::ErrorGetPromiseStore;
 
         let (auto_store, run_store, _container) = make_all_stores().await;
         let store = Arc::new(ErrorGetPromiseStore::new());
@@ -3384,8 +3518,8 @@ mod tests {
     /// (no CAS claim, no worker_id update).
     #[tokio::test]
     async fn recover_flag_disabled_skips_without_claiming() {
-        use crate::promise_store::mock::MockPromiseStore;
         use crate::promise_store::PromiseRepository;
+        use crate::promise_store::mock::MockPromiseStore;
 
         let (auto_store, run_store, _container) = make_all_stores().await;
         let store = Arc::new(MockPromiseStore::new());
@@ -3517,8 +3651,8 @@ mod tests {
     /// while awaiting the spawned handle.
     #[tokio::test]
     async fn recover_refetch_timeout_skips_promise() {
-        use crate::promise_store::mock::HangingGetPromiseStore;
         use crate::promise_store::PromiseRepository;
+        use crate::promise_store::mock::HangingGetPromiseStore;
         use std::time::Duration;
 
         // Start the NATS container with the real clock so Docker can reach the
@@ -3624,7 +3758,10 @@ mod tests {
             permanent_failed, 11,
             "all 11 stale promises must be processed (no cap); got {permanent_failed}"
         );
-        assert_eq!(still_running, 0, "no promises must remain Running; got {still_running}");
+        assert_eq!(
+            still_running, 0,
+            "no promises must remain Running; got {still_running}"
+        );
     }
 
     /// When a stale promise has a non-empty `automation_id` but the automation
@@ -3685,8 +3822,8 @@ mod tests {
     /// `trigger = Null`.
     #[tokio::test]
     async fn dispatch_automations_invalid_json_payload_stores_null_trigger() {
-        use crate::promise_store::mock::MockPromiseStore;
         use crate::promise_store::PromiseRepository;
+        use crate::promise_store::mock::MockPromiseStore;
 
         let server = httpmock::MockServer::start_async().await;
         server.mock(|when, then| {
@@ -3738,8 +3875,8 @@ mod tests {
     /// The promise ID format is `{prefix}.{automation_id}`.
     #[tokio::test]
     async fn dispatch_automations_each_automation_gets_unique_promise_id() {
-        use crate::promise_store::mock::MockPromiseStore;
         use crate::promise_store::PromiseRepository;
+        use crate::promise_store::mock::MockPromiseStore;
 
         let server = httpmock::MockServer::start_async().await;
         server.mock(|when, then| {
@@ -3772,14 +3909,18 @@ mod tests {
         .await;
 
         let snapshot = promise_store.snapshot_promises();
-        assert_eq!(snapshot.len(), 2, "two automations must produce two distinct promises");
+        assert_eq!(
+            snapshot.len(),
+            2,
+            "two automations must produce two distinct promises"
+        );
 
         let ids: std::collections::HashSet<String> =
             snapshot.values().map(|(p, _)| p.id.clone()).collect();
         assert_eq!(ids.len(), 2, "promise IDs must be distinct");
 
         // Each promise ID must encode the automation ID.
-        for (_, (p, _)) in &snapshot {
+        for (p, _) in snapshot.values() {
             assert!(
                 p.id.contains("auto-A") || p.id.contains("auto-B"),
                 "promise ID must embed the automation ID; got: {}",
@@ -3795,8 +3936,8 @@ mod tests {
     async fn dispatch_automations_panicking_task_is_caught() {
         use crate::agent_loop::{AgentLoop, AnthropicClient};
         use crate::flag_client::AlwaysOnFlagClient;
-        use crate::promise_store::mock::MockPromiseStore;
         use crate::promise_store::PromiseRepository;
+        use crate::promise_store::mock::MockPromiseStore;
         use crate::tools::{DefaultToolDispatcher, ToolContext};
 
         struct PanicClient;
@@ -3806,9 +3947,8 @@ mod tests {
                 _body: serde_json::Value,
             ) -> std::pin::Pin<
                 Box<
-                    dyn std::future::Future<
-                            Output = Result<serde_json::Value, reqwest::Error>,
-                        > + Send
+                    dyn std::future::Future<Output = Result<serde_json::Value, reqwest::Error>>
+                        + Send
                         + 'a,
                 >,
             > {
@@ -3835,8 +3975,7 @@ mod tests {
         });
 
         let (rs, _container) = make_run_store().await;
-        let promise_store: Arc<dyn PromiseRepository> =
-            Arc::new(MockPromiseStore::new());
+        let promise_store: Arc<dyn PromiseRepository> = Arc::new(MockPromiseStore::new());
         let payload = bytes::Bytes::from_static(b"{}");
 
         // Must return without panicking even though the task panics.
@@ -3923,8 +4062,13 @@ mod tests {
         fn put<'a>(
             &'a self,
             _automation: &'a trogon_automations::Automation,
-        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), trogon_automations::store::StoreError>> + Send + 'a>>
-        {
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<Output = Result<(), trogon_automations::store::StoreError>>
+                    + Send
+                    + 'a,
+            >,
+        > {
             Box::pin(async { Ok(()) })
         }
 
@@ -3932,8 +4076,17 @@ mod tests {
             &'a self,
             _tenant_id: &'a str,
             _id: &'a str,
-        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<trogon_automations::Automation>, trogon_automations::store::StoreError>> + Send + 'a>>
-        {
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<
+                        Output = Result<
+                            Option<trogon_automations::Automation>,
+                            trogon_automations::store::StoreError,
+                        >,
+                    > + Send
+                    + 'a,
+            >,
+        > {
             Box::pin(async { Ok(None) })
         }
 
@@ -3941,16 +4094,30 @@ mod tests {
             &'a self,
             _tenant_id: &'a str,
             _id: &'a str,
-        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), trogon_automations::store::StoreError>> + Send + 'a>>
-        {
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<Output = Result<(), trogon_automations::store::StoreError>>
+                    + Send
+                    + 'a,
+            >,
+        > {
             Box::pin(async { Ok(()) })
         }
 
         fn list<'a>(
             &'a self,
             _tenant_id: &'a str,
-        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<trogon_automations::Automation>, trogon_automations::store::StoreError>> + Send + 'a>>
-        {
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<
+                        Output = Result<
+                            Vec<trogon_automations::Automation>,
+                            trogon_automations::store::StoreError,
+                        >,
+                    > + Send
+                    + 'a,
+            >,
+        > {
             Box::pin(async {
                 Err(trogon_automations::store::StoreError(
                     "injected list error".to_string(),
@@ -3963,8 +4130,17 @@ mod tests {
             _tenant_id: &'a str,
             _nats_subject: &'a str,
             _payload: &'a serde_json::Value,
-        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<trogon_automations::Automation>, trogon_automations::store::StoreError>> + Send + 'a>>
-        {
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<
+                        Output = Result<
+                            Vec<trogon_automations::Automation>,
+                            trogon_automations::store::StoreError,
+                        >,
+                    > + Send
+                    + 'a,
+            >,
+        > {
             Box::pin(async { Ok(vec![]) })
         }
     }
@@ -3985,16 +4161,31 @@ mod tests {
             &'a self,
             tenant_id: &'a str,
             promise_id: &'a str,
-        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<crate::promise_store::PromiseEntry>, crate::promise_store::PromiseStoreError>> + Send + 'a>>
-        {
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<
+                        Output = Result<
+                            Option<crate::promise_store::PromiseEntry>,
+                            crate::promise_store::PromiseStoreError,
+                        >,
+                    > + Send
+                    + 'a,
+            >,
+        > {
             self.inner.get_promise(tenant_id, promise_id)
         }
 
         fn put_promise<'a>(
             &'a self,
             promise: &'a crate::promise_store::AgentPromise,
-        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<u64, crate::promise_store::PromiseStoreError>> + Send + 'a>>
-        {
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<
+                        Output = Result<u64, crate::promise_store::PromiseStoreError>,
+                    > + Send
+                    + 'a,
+            >,
+        > {
             self.inner.put_promise(promise)
         }
 
@@ -4004,8 +4195,14 @@ mod tests {
             promise_id: &'a str,
             promise: &'a crate::promise_store::AgentPromise,
             revision: u64,
-        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<u64, crate::promise_store::PromiseStoreError>> + Send + 'a>>
-        {
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<
+                        Output = Result<u64, crate::promise_store::PromiseStoreError>,
+                    > + Send
+                    + 'a,
+            >,
+        > {
             if promise.status == crate::promise_store::PromiseStatus::PermanentFailed {
                 return Box::pin(async {
                     Err(crate::promise_store::PromiseStoreError(
@@ -4013,7 +4210,8 @@ mod tests {
                     ))
                 });
             }
-            self.inner.update_promise(tenant_id, promise_id, promise, revision)
+            self.inner
+                .update_promise(tenant_id, promise_id, promise, revision)
         }
 
         fn get_tool_result<'a>(
@@ -4021,8 +4219,14 @@ mod tests {
             tenant_id: &'a str,
             promise_id: &'a str,
             cache_key: &'a str,
-        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<String>, crate::promise_store::PromiseStoreError>> + Send + 'a>>
-        {
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<
+                        Output = Result<Option<String>, crate::promise_store::PromiseStoreError>,
+                    > + Send
+                    + 'a,
+            >,
+        > {
             self.inner.get_tool_result(tenant_id, promise_id, cache_key)
         }
 
@@ -4032,16 +4236,32 @@ mod tests {
             promise_id: &'a str,
             cache_key: &'a str,
             result: &'a str,
-        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), crate::promise_store::PromiseStoreError>> + Send + 'a>>
-        {
-            self.inner.put_tool_result(tenant_id, promise_id, cache_key, result)
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<
+                        Output = Result<(), crate::promise_store::PromiseStoreError>,
+                    > + Send
+                    + 'a,
+            >,
+        > {
+            self.inner
+                .put_tool_result(tenant_id, promise_id, cache_key, result)
         }
 
         fn list_running<'a>(
             &'a self,
             tenant_id: &'a str,
-        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<crate::promise_store::AgentPromise>, crate::promise_store::PromiseStoreError>> + Send + 'a>>
-        {
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<
+                        Output = Result<
+                            Vec<crate::promise_store::AgentPromise>,
+                            crate::promise_store::PromiseStoreError,
+                        >,
+                    > + Send
+                    + 'a,
+            >,
+        > {
             self.inner.list_running(tenant_id)
         }
     }
@@ -4151,8 +4371,8 @@ mod tests {
     ///
     /// Uses a paused clock so the 30 s `AUTO_RETRY_DELAY` is skipped instantly.
     #[tokio::test(start_paused = true)]
-    async fn recover_automation_list_error_backlog_retried_and_marks_permanent_failed_when_disabled(
-    ) {
+    async fn recover_automation_list_error_backlog_retried_and_marks_permanent_failed_when_disabled()
+     {
         use crate::promise_store::mock::MockPromiseStore;
         use crate::promise_store::{PromiseRepository, PromiseStatus};
         use std::sync::atomic::{AtomicBool, Ordering};
@@ -4164,20 +4384,64 @@ mod tests {
             auto_id: String,
         }
         impl trogon_automations::AutomationRepository for FailOnceThenDisabledStore {
-            fn put<'a>(&'a self, _: &'a trogon_automations::Automation)
-            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), trogon_automations::store::StoreError>> + Send + 'a>> {
+            fn put<'a>(
+                &'a self,
+                _: &'a trogon_automations::Automation,
+            ) -> std::pin::Pin<
+                Box<
+                    dyn std::future::Future<
+                            Output = Result<(), trogon_automations::store::StoreError>,
+                        > + Send
+                        + 'a,
+                >,
+            > {
                 Box::pin(async { Ok(()) })
             }
-            fn get<'a>(&'a self, _: &'a str, _: &'a str)
-            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<trogon_automations::Automation>, trogon_automations::store::StoreError>> + Send + 'a>> {
+            fn get<'a>(
+                &'a self,
+                _: &'a str,
+                _: &'a str,
+            ) -> std::pin::Pin<
+                Box<
+                    dyn std::future::Future<
+                            Output = Result<
+                                Option<trogon_automations::Automation>,
+                                trogon_automations::store::StoreError,
+                            >,
+                        > + Send
+                        + 'a,
+                >,
+            > {
                 Box::pin(async { Ok(None) })
             }
-            fn delete<'a>(&'a self, _: &'a str, _: &'a str)
-            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), trogon_automations::store::StoreError>> + Send + 'a>> {
+            fn delete<'a>(
+                &'a self,
+                _: &'a str,
+                _: &'a str,
+            ) -> std::pin::Pin<
+                Box<
+                    dyn std::future::Future<
+                            Output = Result<(), trogon_automations::store::StoreError>,
+                        > + Send
+                        + 'a,
+                >,
+            > {
                 Box::pin(async { Ok(()) })
             }
-            fn list<'a>(&'a self, _: &'a str)
-            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<trogon_automations::Automation>, trogon_automations::store::StoreError>> + Send + 'a>> {
+            fn list<'a>(
+                &'a self,
+                _: &'a str,
+            ) -> std::pin::Pin<
+                Box<
+                    dyn std::future::Future<
+                            Output = Result<
+                                Vec<trogon_automations::Automation>,
+                                trogon_automations::store::StoreError,
+                            >,
+                        > + Send
+                        + 'a,
+                >,
+            > {
                 let first_call = !self.called.swap(true, Ordering::SeqCst);
                 let auto_id = self.auto_id.clone();
                 Box::pin(async move {
@@ -4206,8 +4470,22 @@ mod tests {
                     }
                 })
             }
-            fn matching<'a>(&'a self, _: &'a str, _: &'a str, _: &'a serde_json::Value)
-            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<trogon_automations::Automation>, trogon_automations::store::StoreError>> + Send + 'a>> {
+            fn matching<'a>(
+                &'a self,
+                _: &'a str,
+                _: &'a str,
+                _: &'a serde_json::Value,
+            ) -> std::pin::Pin<
+                Box<
+                    dyn std::future::Future<
+                            Output = Result<
+                                Vec<trogon_automations::Automation>,
+                                trogon_automations::store::StoreError,
+                            >,
+                        > + Send
+                        + 'a,
+                >,
+            > {
                 Box::pin(async { Ok(vec![]) })
             }
         }
@@ -4287,20 +4565,64 @@ mod tests {
             auto_id: String,
         }
         impl trogon_automations::AutomationRepository for FailOnceThenEnabledStore {
-            fn put<'a>(&'a self, _: &'a trogon_automations::Automation)
-            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), trogon_automations::store::StoreError>> + Send + 'a>> {
+            fn put<'a>(
+                &'a self,
+                _: &'a trogon_automations::Automation,
+            ) -> std::pin::Pin<
+                Box<
+                    dyn std::future::Future<
+                            Output = Result<(), trogon_automations::store::StoreError>,
+                        > + Send
+                        + 'a,
+                >,
+            > {
                 Box::pin(async { Ok(()) })
             }
-            fn get<'a>(&'a self, _: &'a str, _: &'a str)
-            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<trogon_automations::Automation>, trogon_automations::store::StoreError>> + Send + 'a>> {
+            fn get<'a>(
+                &'a self,
+                _: &'a str,
+                _: &'a str,
+            ) -> std::pin::Pin<
+                Box<
+                    dyn std::future::Future<
+                            Output = Result<
+                                Option<trogon_automations::Automation>,
+                                trogon_automations::store::StoreError,
+                            >,
+                        > + Send
+                        + 'a,
+                >,
+            > {
                 Box::pin(async { Ok(None) })
             }
-            fn delete<'a>(&'a self, _: &'a str, _: &'a str)
-            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), trogon_automations::store::StoreError>> + Send + 'a>> {
+            fn delete<'a>(
+                &'a self,
+                _: &'a str,
+                _: &'a str,
+            ) -> std::pin::Pin<
+                Box<
+                    dyn std::future::Future<
+                            Output = Result<(), trogon_automations::store::StoreError>,
+                        > + Send
+                        + 'a,
+                >,
+            > {
                 Box::pin(async { Ok(()) })
             }
-            fn list<'a>(&'a self, _: &'a str)
-            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<trogon_automations::Automation>, trogon_automations::store::StoreError>> + Send + 'a>> {
+            fn list<'a>(
+                &'a self,
+                _: &'a str,
+            ) -> std::pin::Pin<
+                Box<
+                    dyn std::future::Future<
+                            Output = Result<
+                                Vec<trogon_automations::Automation>,
+                                trogon_automations::store::StoreError,
+                            >,
+                        > + Send
+                        + 'a,
+                >,
+            > {
                 let first_call = !self.called.swap(true, Ordering::SeqCst);
                 let auto_id = self.auto_id.clone();
                 Box::pin(async move {
@@ -4329,8 +4651,22 @@ mod tests {
                     }
                 })
             }
-            fn matching<'a>(&'a self, _: &'a str, _: &'a str, _: &'a serde_json::Value)
-            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<trogon_automations::Automation>, trogon_automations::store::StoreError>> + Send + 'a>> {
+            fn matching<'a>(
+                &'a self,
+                _: &'a str,
+                _: &'a str,
+                _: &'a serde_json::Value,
+            ) -> std::pin::Pin<
+                Box<
+                    dyn std::future::Future<
+                            Output = Result<
+                                Vec<trogon_automations::Automation>,
+                                trogon_automations::store::StoreError,
+                            >,
+                        > + Send
+                        + 'a,
+                >,
+            > {
                 Box::pin(async { Ok(vec![]) })
             }
         }
@@ -4391,7 +4727,11 @@ mod tests {
 
         // The retry dispatched the automation → RunRecord persisted.
         let records = run_store.snapshot();
-        assert_eq!(records.len(), 1, "exactly one RunRecord must be captured; got {records:?}");
+        assert_eq!(
+            records.len(),
+            1,
+            "exactly one RunRecord must be captured; got {records:?}"
+        );
         assert_eq!(records[0].automation_id, auto_id);
         assert_eq!(
             records[0].status,
@@ -4518,8 +4858,13 @@ mod tests {
         fn record<'a>(
             &'a self,
             _run: &'a trogon_automations::RunRecord,
-        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), trogon_automations::store::StoreError>> + Send + 'a>>
-        {
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<Output = Result<(), trogon_automations::store::StoreError>>
+                    + Send
+                    + 'a,
+            >,
+        > {
             Box::pin(async {
                 Err(trogon_automations::store::StoreError(
                     "injected record error".to_string(),
@@ -4531,16 +4876,34 @@ mod tests {
             &'a self,
             _tenant_id: &'a str,
             _automation_id: Option<&'a str>,
-        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<trogon_automations::RunRecord>, trogon_automations::store::StoreError>> + Send + 'a>>
-        {
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<
+                        Output = Result<
+                            Vec<trogon_automations::RunRecord>,
+                            trogon_automations::store::StoreError,
+                        >,
+                    > + Send
+                    + 'a,
+            >,
+        > {
             Box::pin(async { Ok(vec![]) })
         }
 
         fn stats<'a>(
             &'a self,
             _tenant_id: &'a str,
-        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<trogon_automations::RunStats, trogon_automations::store::StoreError>> + Send + 'a>>
-        {
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<
+                        Output = Result<
+                            trogon_automations::RunStats,
+                            trogon_automations::store::StoreError,
+                        >,
+                    > + Send
+                    + 'a,
+            >,
+        > {
             Box::pin(async {
                 Ok(trogon_automations::RunStats {
                     total: 0,
@@ -4556,8 +4919,8 @@ mod tests {
     /// failure must never abort the automation or propagate to the caller.
     #[tokio::test]
     async fn dispatch_automations_run_record_error_is_logged_not_fatal() {
-        use crate::promise_store::mock::MockPromiseStore;
         use crate::promise_store::PromiseRepository;
+        use crate::promise_store::mock::MockPromiseStore;
 
         let server = httpmock::MockServer::start_async().await;
         let mock = server.mock(|when, then| {
@@ -4595,8 +4958,8 @@ mod tests {
     /// warning must be logged but recovery must complete without panicking.
     #[tokio::test]
     async fn recover_automation_run_record_error_is_logged_not_fatal() {
-        use crate::promise_store::mock::MockPromiseStore;
         use crate::promise_store::PromiseRepository;
+        use crate::promise_store::mock::MockPromiseStore;
 
         let server = httpmock::MockServer::start_async().await;
         server.mock(|when, then| {
@@ -4737,9 +5100,8 @@ mod tests {
             run: &'a trogon_automations::RunRecord,
         ) -> std::pin::Pin<
             Box<
-                dyn std::future::Future<
-                        Output = Result<(), trogon_automations::store::StoreError>,
-                    > + Send
+                dyn std::future::Future<Output = Result<(), trogon_automations::store::StoreError>>
+                    + Send
                     + 'a,
             >,
         > {
@@ -4918,10 +5280,7 @@ mod tests {
     }
 
     impl GetReturnsNoneAfterNthCallStore {
-        fn new(
-            none_from_call: usize,
-            inner: crate::promise_store::mock::MockPromiseStore,
-        ) -> Self {
+        fn new(none_from_call: usize, inner: crate::promise_store::mock::MockPromiseStore) -> Self {
             Self {
                 inner,
                 get_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
@@ -5054,10 +5413,7 @@ mod tests {
     }
 
     impl UpdateHangsAfterNthCallStore {
-        fn new(
-            hang_from_call: usize,
-            inner: crate::promise_store::mock::MockPromiseStore,
-        ) -> Self {
+        fn new(hang_from_call: usize, inner: crate::promise_store::mock::MockPromiseStore) -> Self {
             Self {
                 inner,
                 update_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
@@ -5118,10 +5474,8 @@ mod tests {
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             if n >= self.hang_from_call {
                 return Box::pin(async {
-                    std::future::pending::<
-                        Result<u64, crate::promise_store::PromiseStoreError>,
-                    >()
-                    .await
+                    std::future::pending::<Result<u64, crate::promise_store::PromiseStoreError>>()
+                        .await
                 });
             }
             self.inner
@@ -5194,9 +5548,8 @@ mod tests {
             _: &'a trogon_automations::Automation,
         ) -> std::pin::Pin<
             Box<
-                dyn std::future::Future<
-                        Output = Result<(), trogon_automations::store::StoreError>,
-                    > + Send
+                dyn std::future::Future<Output = Result<(), trogon_automations::store::StoreError>>
+                    + Send
                     + 'a,
             >,
         > {
@@ -5227,9 +5580,8 @@ mod tests {
             _: &'a str,
         ) -> std::pin::Pin<
             Box<
-                dyn std::future::Future<
-                        Output = Result<(), trogon_automations::store::StoreError>,
-                    > + Send
+                dyn std::future::Future<Output = Result<(), trogon_automations::store::StoreError>>
+                    + Send
                     + 'a,
             >,
         > {
@@ -5281,8 +5633,8 @@ mod tests {
     /// normally — the error is logged, not propagated.
     #[tokio::test]
     async fn recover_automation_run_fails_stores_failed_run_record() {
-        use crate::promise_store::mock::MockPromiseStore;
         use crate::promise_store::PromiseRepository;
+        use crate::promise_store::mock::MockPromiseStore;
         use trogon_automations::RunStatus;
 
         let server = httpmock::MockServer::start_async().await;
@@ -5344,8 +5696,8 @@ mod tests {
     /// `dispatch_automations` must return normally.
     #[tokio::test]
     async fn dispatch_automations_run_fails_stores_failed_run_record() {
-        use crate::promise_store::mock::MockPromiseStore;
         use crate::promise_store::PromiseRepository;
+        use crate::promise_store::mock::MockPromiseStore;
         use trogon_automations::RunStatus;
 
         let server = httpmock::MockServer::start_async().await;
@@ -5580,9 +5932,7 @@ mod tests {
         // Advance past NATS_KV_TIMEOUT to trigger the update_promise timeout.
         let (join_result, _) = tokio::join!(
             handle,
-            tokio::time::advance(
-                crate::agent_loop::NATS_KV_TIMEOUT + Duration::from_millis(1),
-            ),
+            tokio::time::advance(crate::agent_loop::NATS_KV_TIMEOUT + Duration::from_millis(1),),
         );
         join_result.expect("recovery task must not panic");
 
@@ -5635,9 +5985,7 @@ mod tests {
 
         let (join_result, _) = tokio::join!(
             handle,
-            tokio::time::advance(
-                crate::agent_loop::NATS_KV_TIMEOUT + Duration::from_millis(1),
-            ),
+            tokio::time::advance(crate::agent_loop::NATS_KV_TIMEOUT + Duration::from_millis(1),),
         );
         join_result.expect("recovery task must not panic");
 
@@ -5774,7 +6122,10 @@ mod tests {
         )
         .await;
 
-        assert!(result.is_some(), "must return agent when claiming a Running promise");
+        assert!(
+            result.is_some(),
+            "must return agent when claiming a Running promise"
+        );
 
         // KV must reflect the CAS claim: worker_id must have changed.
         let (claimed, _) = ps
@@ -6059,7 +6410,10 @@ mod tests {
     /// message — the underlying call that every heartbeat tick makes.
     #[tokio::test]
     async fn spawn_heartbeat_sends_progress_ack_and_aborts_cleanly() {
-        use async_nats::jetstream::{AckKind, consumer::{AckPolicy, pull}};
+        use async_nats::jetstream::{
+            AckKind,
+            consumer::{AckPolicy, pull},
+        };
         use futures_util::StreamExt as _;
         use std::time::Duration;
 
@@ -6520,8 +6874,7 @@ mod tests {
             "automation not found → PermanentFailed"
         );
         assert_eq!(
-            p.recovery_count,
-            1,
+            p.recovery_count, 1,
             "recovery_count must be incremented by prepare_agent_with_promise; got {}",
             p.recovery_count
         );
@@ -6543,7 +6896,7 @@ mod tests {
         use crate::flag_client::AlwaysOnFlagClient;
         use crate::promise_store::mock::MockPromiseStore;
         use crate::promise_store::{PromiseRepository, PromiseStatus};
-        use crate::tools::{mock::MockToolDispatcher, ToolContext};
+        use crate::tools::{ToolContext, mock::MockToolDispatcher};
 
         // Automation store that always returns the automation.
         #[derive(Clone)]
@@ -6551,26 +6904,84 @@ mod tests {
             auto: trogon_automations::Automation,
         }
         impl trogon_automations::AutomationRepository for AlwaysFoundStore {
-            fn put<'a>(&'a self, _: &'a trogon_automations::Automation)
-            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), trogon_automations::store::StoreError>> + Send + 'a>> {
+            fn put<'a>(
+                &'a self,
+                _: &'a trogon_automations::Automation,
+            ) -> std::pin::Pin<
+                Box<
+                    dyn std::future::Future<
+                            Output = Result<(), trogon_automations::store::StoreError>,
+                        > + Send
+                        + 'a,
+                >,
+            > {
                 Box::pin(async { Ok(()) })
             }
-            fn get<'a>(&'a self, _: &'a str, _: &'a str)
-            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<trogon_automations::Automation>, trogon_automations::store::StoreError>> + Send + 'a>> {
+            fn get<'a>(
+                &'a self,
+                _: &'a str,
+                _: &'a str,
+            ) -> std::pin::Pin<
+                Box<
+                    dyn std::future::Future<
+                            Output = Result<
+                                Option<trogon_automations::Automation>,
+                                trogon_automations::store::StoreError,
+                            >,
+                        > + Send
+                        + 'a,
+                >,
+            > {
                 let auto = self.auto.clone();
                 Box::pin(async move { Ok(Some(auto)) })
             }
-            fn delete<'a>(&'a self, _: &'a str, _: &'a str)
-            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), trogon_automations::store::StoreError>> + Send + 'a>> {
+            fn delete<'a>(
+                &'a self,
+                _: &'a str,
+                _: &'a str,
+            ) -> std::pin::Pin<
+                Box<
+                    dyn std::future::Future<
+                            Output = Result<(), trogon_automations::store::StoreError>,
+                        > + Send
+                        + 'a,
+                >,
+            > {
                 Box::pin(async { Ok(()) })
             }
-            fn list<'a>(&'a self, _: &'a str)
-            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<trogon_automations::Automation>, trogon_automations::store::StoreError>> + Send + 'a>> {
+            fn list<'a>(
+                &'a self,
+                _: &'a str,
+            ) -> std::pin::Pin<
+                Box<
+                    dyn std::future::Future<
+                            Output = Result<
+                                Vec<trogon_automations::Automation>,
+                                trogon_automations::store::StoreError,
+                            >,
+                        > + Send
+                        + 'a,
+                >,
+            > {
                 let auto = self.auto.clone();
                 Box::pin(async move { Ok(vec![auto]) })
             }
-            fn matching<'a>(&'a self, _: &'a str, _: &'a str, _: &'a serde_json::Value)
-            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<trogon_automations::Automation>, trogon_automations::store::StoreError>> + Send + 'a>> {
+            fn matching<'a>(
+                &'a self,
+                _: &'a str,
+                _: &'a str,
+                _: &'a serde_json::Value,
+            ) -> std::pin::Pin<
+                Box<
+                    dyn std::future::Future<
+                            Output = Result<
+                                Vec<trogon_automations::Automation>,
+                                trogon_automations::store::StoreError,
+                            >,
+                        > + Send
+                        + 'a,
+                >,
+            > {
                 let auto = self.auto.clone();
                 Box::pin(async move { Ok(vec![auto]) })
             }
@@ -6693,9 +7104,20 @@ mod tests {
             &'a self,
             tenant_id: &'a str,
             promise_id: &'a str,
-        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<crate::promise_store::PromiseEntry>, crate::promise_store::PromiseStoreError>> + Send + 'a>>
-        {
-            let n = self.get_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<
+                        Output = Result<
+                            Option<crate::promise_store::PromiseEntry>,
+                            crate::promise_store::PromiseStoreError,
+                        >,
+                    > + Send
+                    + 'a,
+            >,
+        > {
+            let n = self
+                .get_count
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             if n >= self.error_from_call {
                 return Box::pin(async {
                     Err(crate::promise_store::PromiseStoreError(
@@ -6709,8 +7131,14 @@ mod tests {
         fn put_promise<'a>(
             &'a self,
             promise: &'a crate::promise_store::AgentPromise,
-        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<u64, crate::promise_store::PromiseStoreError>> + Send + 'a>>
-        {
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<
+                        Output = Result<u64, crate::promise_store::PromiseStoreError>,
+                    > + Send
+                    + 'a,
+            >,
+        > {
             self.inner.put_promise(promise)
         }
 
@@ -6720,9 +7148,16 @@ mod tests {
             promise_id: &'a str,
             promise: &'a crate::promise_store::AgentPromise,
             revision: u64,
-        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<u64, crate::promise_store::PromiseStoreError>> + Send + 'a>>
-        {
-            self.inner.update_promise(tenant_id, promise_id, promise, revision)
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<
+                        Output = Result<u64, crate::promise_store::PromiseStoreError>,
+                    > + Send
+                    + 'a,
+            >,
+        > {
+            self.inner
+                .update_promise(tenant_id, promise_id, promise, revision)
         }
 
         fn get_tool_result<'a>(
@@ -6730,8 +7165,14 @@ mod tests {
             tenant_id: &'a str,
             promise_id: &'a str,
             cache_key: &'a str,
-        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<String>, crate::promise_store::PromiseStoreError>> + Send + 'a>>
-        {
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<
+                        Output = Result<Option<String>, crate::promise_store::PromiseStoreError>,
+                    > + Send
+                    + 'a,
+            >,
+        > {
             self.inner.get_tool_result(tenant_id, promise_id, cache_key)
         }
 
@@ -6741,16 +7182,32 @@ mod tests {
             promise_id: &'a str,
             cache_key: &'a str,
             result: &'a str,
-        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), crate::promise_store::PromiseStoreError>> + Send + 'a>>
-        {
-            self.inner.put_tool_result(tenant_id, promise_id, cache_key, result)
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<
+                        Output = Result<(), crate::promise_store::PromiseStoreError>,
+                    > + Send
+                    + 'a,
+            >,
+        > {
+            self.inner
+                .put_tool_result(tenant_id, promise_id, cache_key, result)
         }
 
         fn list_running<'a>(
             &'a self,
             tenant_id: &'a str,
-        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<crate::promise_store::AgentPromise>, crate::promise_store::PromiseStoreError>> + Send + 'a>>
-        {
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<
+                        Output = Result<
+                            Vec<crate::promise_store::AgentPromise>,
+                            crate::promise_store::PromiseStoreError,
+                        >,
+                    > + Send
+                    + 'a,
+            >,
+        > {
             self.inner.list_running(tenant_id)
         }
     }
@@ -6916,7 +7373,7 @@ mod tests {
     /// with a fallback.
     #[tokio::test]
     async fn real_kv_list_running_corrupted_entry_propagates_error() {
-        use crate::promise_store::{PromiseRepository, AGENT_PROMISES_BUCKET};
+        use crate::promise_store::{AGENT_PROMISES_BUCKET, PromiseRepository};
 
         let (ps, _, _, js, _c) = make_all_stores_with_promise().await;
         let promise_repo: Arc<dyn PromiseRepository> = ps.clone();
@@ -6969,10 +7426,17 @@ mod tests {
         let id = worker_id();
         // Must contain exactly one `:` separating hostname from pid.
         let parts: Vec<&str> = id.splitn(2, ':').collect();
-        assert_eq!(parts.len(), 2, "worker_id must contain a ':' separator; got: {id}");
+        assert_eq!(
+            parts.len(),
+            2,
+            "worker_id must contain a ':' separator; got: {id}"
+        );
         let hostname = parts[0];
         let pid_str = parts[1];
-        assert!(!hostname.is_empty(), "hostname part must not be empty; got: {id}");
+        assert!(
+            !hostname.is_empty(),
+            "hostname part must not be empty; got: {id}"
+        );
         let pid: u32 = pid_str
             .parse()
             .unwrap_or_else(|_| panic!("PID part must be a valid u32; got: {pid_str}"));
@@ -7004,9 +7468,8 @@ mod tests {
         let original = std::env::var("HOSTNAME").ok();
         unsafe { std::env::remove_var("HOSTNAME") };
         let id = worker_id();
-        match original {
-            Some(v) => unsafe { std::env::set_var("HOSTNAME", v) },
-            None => {}
+        if let Some(v) = original {
+            unsafe { std::env::set_var("HOSTNAME", v) }
         }
         assert!(
             id.starts_with("unknown:"),

@@ -48,7 +48,11 @@ pub trait CredentialRepository: Send + Sync + 'static {
     fn get_or_create_vault<'a>(&'a self, env_id: &'a str) -> BoxFuture<'a, Res<CredentialVault>>;
     fn get_vault<'a>(&'a self, env_id: &'a str) -> BoxFuture<'a, Res<Option<CredentialVault>>>;
     fn list<'a>(&'a self, env_id: &'a str) -> BoxFuture<'a, Res<Vec<Credential>>>;
-    fn get<'a>(&'a self, env_id: &'a str, cred_id: &'a str) -> BoxFuture<'a, Res<Option<Credential>>>;
+    fn get<'a>(
+        &'a self,
+        env_id: &'a str,
+        cred_id: &'a str,
+    ) -> BoxFuture<'a, Res<Option<Credential>>>;
     fn put<'a>(&'a self, cred: &'a Credential) -> BoxFuture<'a, Res<()>>;
     fn delete<'a>(&'a self, env_id: &'a str, cred_id: &'a str) -> BoxFuture<'a, Res<()>>;
 }
@@ -58,7 +62,8 @@ pub trait CredentialRepository: Send + Sync + 'static {
 pub trait SessionRepository: Send + Sync + 'static {
     fn list(&self) -> BoxFuture<'_, Res<Vec<ConsoleSession>>>;
     fn list_by_tenant<'a>(&'a self, tenant_id: &'a str) -> BoxFuture<'a, Res<Vec<ConsoleSession>>>;
-    fn list_by_agent_id<'a>(&'a self, agent_id: &'a str) -> BoxFuture<'a, Res<Vec<ConsoleSession>>>;
+    fn list_by_agent_id<'a>(&'a self, agent_id: &'a str)
+    -> BoxFuture<'a, Res<Vec<ConsoleSession>>>;
     fn get<'a>(
         &'a self,
         tenant_id: &'a str,

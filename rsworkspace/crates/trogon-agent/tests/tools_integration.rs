@@ -234,7 +234,11 @@ async fn post_pr_comment_degrades_gracefully_when_get_fails() {
     let result = dispatch_tool(&ctx, "post_pr_comment", &input).await;
 
     assert!(result.contains("comment-300"), "got: {result}");
-    assert_eq!(post_mock.hits(), 1, "POST must still be called after GET failure");
+    assert_eq!(
+        post_mock.hits(),
+        1,
+        "POST must still be called after GET failure"
+    );
 }
 
 #[tokio::test]

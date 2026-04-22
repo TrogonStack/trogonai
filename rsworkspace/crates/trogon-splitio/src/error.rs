@@ -44,7 +44,10 @@ mod tests {
     fn all_variants_implement_std_error() {
         fn assert_error<E: std::error::Error>(_: &E) {}
         assert_error(&SplitError::Http("x".into()));
-        assert_error(&SplitError::EvaluatorError { status: 500, body: "err".into() });
+        assert_error(&SplitError::EvaluatorError {
+            status: 500,
+            body: "err".into(),
+        });
         assert_error(&SplitError::UnexpectedResponse("y".into()));
     }
 }

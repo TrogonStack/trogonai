@@ -38,11 +38,17 @@ impl MockAgentStore {
     }
 
     pub fn failing() -> Self {
-        Self { should_fail: true, ..Default::default() }
+        Self {
+            should_fail: true,
+            ..Default::default()
+        }
     }
 
     pub fn failing_put() -> Self {
-        Self { should_fail_put: true, ..Default::default() }
+        Self {
+            should_fail_put: true,
+            ..Default::default()
+        }
     }
 
     pub fn insert(&self, agent: AgentDefinition) {
@@ -51,20 +57,32 @@ impl MockAgentStore {
 }
 
 impl AgentRepository for MockAgentStore {
-    fn list(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<AgentDefinition>, String>> + Send + '_>> {
+    fn list(
+        &self,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Vec<AgentDefinition>, String>> + Send + '_>,
+    > {
         fail_if!(self);
         let mut agents: Vec<_> = self.agents.lock().unwrap().values().cloned().collect();
         agents.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
         Box::pin(ready(Ok(agents)))
     }
 
-    fn get<'a>(&'a self, id: &'a str) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<AgentDefinition>, String>> + Send + 'a>> {
+    fn get<'a>(
+        &'a self,
+        id: &'a str,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Option<AgentDefinition>, String>> + Send + 'a>,
+    > {
         fail_if!(self);
         let result = self.agents.lock().unwrap().get(id).cloned();
         Box::pin(ready(Ok(result)))
     }
 
-    fn put<'a>(&'a self, agent: &'a AgentDefinition) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
+    fn put<'a>(
+        &'a self,
+        agent: &'a AgentDefinition,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
         fail_if!(self);
         if self.should_fail_put {
             return Box::pin(ready(Err("simulated put error".to_string())));
@@ -80,17 +98,28 @@ impl AgentRepository for MockAgentStore {
             .entry(agent.id.clone())
             .or_default()
             .push(ver);
-        self.agents.lock().unwrap().insert(agent.id.clone(), agent.clone());
+        self.agents
+            .lock()
+            .unwrap()
+            .insert(agent.id.clone(), agent.clone());
         Box::pin(ready(Ok(())))
     }
 
-    fn delete<'a>(&'a self, id: &'a str) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
+    fn delete<'a>(
+        &'a self,
+        id: &'a str,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
         fail_if!(self);
         self.agents.lock().unwrap().remove(id);
         Box::pin(ready(Ok(())))
     }
 
-    fn list_versions<'a>(&'a self, agent_id: &'a str) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<AgentVersion>, String>> + Send + 'a>> {
+    fn list_versions<'a>(
+        &'a self,
+        agent_id: &'a str,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Vec<AgentVersion>, String>> + Send + 'a>,
+    > {
         fail_if!(self);
         let mut versions = self
             .versions
@@ -121,15 +150,24 @@ impl MockSkillStore {
     }
 
     pub fn failing() -> Self {
-        Self { should_fail: true, ..Default::default() }
+        Self {
+            should_fail: true,
+            ..Default::default()
+        }
     }
 
     pub fn failing_put() -> Self {
-        Self { should_fail_put: true, ..Default::default() }
+        Self {
+            should_fail_put: true,
+            ..Default::default()
+        }
     }
 
     pub fn failing_put_version() -> Self {
-        Self { should_fail_put_version: true, ..Default::default() }
+        Self {
+            should_fail_put_version: true,
+            ..Default::default()
+        }
     }
 
     pub fn insert_skill(&self, skill: Skill) {
@@ -138,38 +176,61 @@ impl MockSkillStore {
 }
 
 impl SkillRepository for MockSkillStore {
-    fn list(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<Skill>, String>> + Send + '_>> {
+    fn list(
+        &self,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<Skill>, String>> + Send + '_>>
+    {
         fail_if!(self);
         let mut skills: Vec<_> = self.skills.lock().unwrap().values().cloned().collect();
         skills.sort_by(|a, b| a.name.cmp(&b.name));
         Box::pin(ready(Ok(skills)))
     }
 
-    fn get<'a>(&'a self, id: &'a str) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<Skill>, String>> + Send + 'a>> {
+    fn get<'a>(
+        &'a self,
+        id: &'a str,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Option<Skill>, String>> + Send + 'a>,
+    > {
         fail_if!(self);
         let result = self.skills.lock().unwrap().get(id).cloned();
         Box::pin(ready(Ok(result)))
     }
 
-    fn put<'a>(&'a self, skill: &'a Skill) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
+    fn put<'a>(
+        &'a self,
+        skill: &'a Skill,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
         fail_if!(self);
         if self.should_fail_put {
             return Box::pin(ready(Err("simulated put error".to_string())));
         }
-        self.skills.lock().unwrap().insert(skill.id.clone(), skill.clone());
+        self.skills
+            .lock()
+            .unwrap()
+            .insert(skill.id.clone(), skill.clone());
         Box::pin(ready(Ok(())))
     }
 
-    fn delete<'a>(&'a self, id: &'a str) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
+    fn delete<'a>(
+        &'a self,
+        id: &'a str,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
         fail_if!(self);
         self.skills.lock().unwrap().remove(id);
         Box::pin(ready(Ok(())))
     }
 
-    fn list_versions<'a>(&'a self, skill_id: &'a str) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<SkillVersion>, String>> + Send + 'a>> {
+    fn list_versions<'a>(
+        &'a self,
+        skill_id: &'a str,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Vec<SkillVersion>, String>> + Send + 'a>,
+    > {
         fail_if!(self);
         let prefix = format!("{skill_id}.");
-        let versions: Vec<_> = self.versions
+        let versions: Vec<_> = self
+            .versions
             .lock()
             .unwrap()
             .iter()
@@ -179,7 +240,10 @@ impl SkillRepository for MockSkillStore {
         Box::pin(ready(Ok(versions)))
     }
 
-    fn put_version<'a>(&'a self, version: &'a SkillVersion) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
+    fn put_version<'a>(
+        &'a self,
+        version: &'a SkillVersion,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
         fail_if!(self);
         if self.should_fail_put_version {
             return Box::pin(ready(Err("simulated put_version error".to_string())));
@@ -205,11 +269,17 @@ impl MockEnvironmentStore {
     }
 
     pub fn failing() -> Self {
-        Self { should_fail: true, ..Default::default() }
+        Self {
+            should_fail: true,
+            ..Default::default()
+        }
     }
 
     pub fn failing_put() -> Self {
-        Self { should_fail_put: true, ..Default::default() }
+        Self {
+            should_fail_put: true,
+            ..Default::default()
+        }
     }
 
     pub fn insert(&self, env: Environment) {
@@ -218,29 +288,47 @@ impl MockEnvironmentStore {
 }
 
 impl EnvironmentRepository for MockEnvironmentStore {
-    fn list(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<Environment>, String>> + Send + '_>> {
+    fn list(
+        &self,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Vec<Environment>, String>> + Send + '_>,
+    > {
         fail_if!(self);
         let mut envs: Vec<_> = self.envs.lock().unwrap().values().cloned().collect();
         envs.sort_by(|a, b| a.name.cmp(&b.name));
         Box::pin(ready(Ok(envs)))
     }
 
-    fn get<'a>(&'a self, id: &'a str) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<Environment>, String>> + Send + 'a>> {
+    fn get<'a>(
+        &'a self,
+        id: &'a str,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Option<Environment>, String>> + Send + 'a>,
+    > {
         fail_if!(self);
         let result = self.envs.lock().unwrap().get(id).cloned();
         Box::pin(ready(Ok(result)))
     }
 
-    fn put<'a>(&'a self, env: &'a Environment) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
+    fn put<'a>(
+        &'a self,
+        env: &'a Environment,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
         fail_if!(self);
         if self.should_fail_put {
             return Box::pin(ready(Err("simulated put error".to_string())));
         }
-        self.envs.lock().unwrap().insert(env.id.clone(), env.clone());
+        self.envs
+            .lock()
+            .unwrap()
+            .insert(env.id.clone(), env.clone());
         Box::pin(ready(Ok(())))
     }
 
-    fn delete<'a>(&'a self, id: &'a str) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
+    fn delete<'a>(
+        &'a self,
+        id: &'a str,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
         fail_if!(self);
         self.envs.lock().unwrap().remove(id);
         Box::pin(ready(Ok(())))
@@ -263,37 +351,61 @@ impl MockCredentialStore {
     }
 
     pub fn failing() -> Self {
-        Self { should_fail: true, ..Default::default() }
+        Self {
+            should_fail: true,
+            ..Default::default()
+        }
     }
 
     pub fn failing_put() -> Self {
-        Self { should_fail_put: true, ..Default::default() }
+        Self {
+            should_fail_put: true,
+            ..Default::default()
+        }
     }
 }
 
 impl CredentialRepository for MockCredentialStore {
-    fn get_or_create_vault<'a>(&'a self, env_id: &'a str) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<CredentialVault, String>> + Send + 'a>> {
+    fn get_or_create_vault<'a>(
+        &'a self,
+        env_id: &'a str,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<CredentialVault, String>> + Send + 'a>,
+    > {
         fail_if!(self);
         let mut vaults = self.vaults.lock().unwrap();
-        let vault = vaults.entry(env_id.to_string()).or_insert_with(|| CredentialVault {
-            id: format!("vlt_{}", uuid::Uuid::new_v4().simple()),
-            env_id: env_id.to_string(),
-            created_at: "0".to_string(),
-        });
+        let vault = vaults
+            .entry(env_id.to_string())
+            .or_insert_with(|| CredentialVault {
+                id: format!("vlt_{}", uuid::Uuid::new_v4().simple()),
+                env_id: env_id.to_string(),
+                created_at: "0".to_string(),
+            });
         let v = vault.clone();
         Box::pin(ready(Ok(v)))
     }
 
-    fn get_vault<'a>(&'a self, env_id: &'a str) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<CredentialVault>, String>> + Send + 'a>> {
+    fn get_vault<'a>(
+        &'a self,
+        env_id: &'a str,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Option<CredentialVault>, String>> + Send + 'a>,
+    > {
         fail_if!(self);
         let result = self.vaults.lock().unwrap().get(env_id).cloned();
         Box::pin(ready(Ok(result)))
     }
 
-    fn list<'a>(&'a self, env_id: &'a str) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<Credential>, String>> + Send + 'a>> {
+    fn list<'a>(
+        &'a self,
+        env_id: &'a str,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Vec<Credential>, String>> + Send + 'a>,
+    > {
         fail_if!(self);
         let prefix = format!("{env_id}.");
-        let creds: Vec<_> = self.creds
+        let creds: Vec<_> = self
+            .creds
             .lock()
             .unwrap()
             .iter()
@@ -303,14 +415,23 @@ impl CredentialRepository for MockCredentialStore {
         Box::pin(ready(Ok(creds)))
     }
 
-    fn get<'a>(&'a self, env_id: &'a str, cred_id: &'a str) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<Credential>, String>> + Send + 'a>> {
+    fn get<'a>(
+        &'a self,
+        env_id: &'a str,
+        cred_id: &'a str,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Option<Credential>, String>> + Send + 'a>,
+    > {
         fail_if!(self);
         let key = format!("{env_id}.{cred_id}");
         let result = self.creds.lock().unwrap().get(&key).cloned();
         Box::pin(ready(Ok(result)))
     }
 
-    fn put<'a>(&'a self, cred: &'a Credential) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
+    fn put<'a>(
+        &'a self,
+        cred: &'a Credential,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
         fail_if!(self);
         if self.should_fail_put {
             return Box::pin(ready(Err("simulated put error".to_string())));
@@ -320,7 +441,11 @@ impl CredentialRepository for MockCredentialStore {
         Box::pin(ready(Ok(())))
     }
 
-    fn delete<'a>(&'a self, env_id: &'a str, cred_id: &'a str) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
+    fn delete<'a>(
+        &'a self,
+        env_id: &'a str,
+        cred_id: &'a str,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
         fail_if!(self);
         let key = format!("{env_id}.{cred_id}");
         self.creds.lock().unwrap().remove(&key);
@@ -342,7 +467,10 @@ impl MockSessionStore {
     }
 
     pub fn failing() -> Self {
-        Self { should_fail: true, ..Default::default() }
+        Self {
+            should_fail: true,
+            ..Default::default()
+        }
     }
 
     pub fn insert(&self, session: ConsoleSession) {
@@ -352,16 +480,26 @@ impl MockSessionStore {
 }
 
 impl SessionRepository for MockSessionStore {
-    fn list(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<ConsoleSession>, String>> + Send + '_>> {
+    fn list(
+        &self,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Vec<ConsoleSession>, String>> + Send + '_>,
+    > {
         fail_if!(self);
         let mut sessions: Vec<_> = self.sessions.lock().unwrap().values().cloned().collect();
         sessions.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
         Box::pin(ready(Ok(sessions)))
     }
 
-    fn list_by_tenant<'a>(&'a self, tenant_id: &'a str) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<ConsoleSession>, String>> + Send + 'a>> {
+    fn list_by_tenant<'a>(
+        &'a self,
+        tenant_id: &'a str,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Vec<ConsoleSession>, String>> + Send + 'a>,
+    > {
         fail_if!(self);
-        let sessions: Vec<_> = self.sessions
+        let sessions: Vec<_> = self
+            .sessions
             .lock()
             .unwrap()
             .values()
@@ -371,9 +509,15 @@ impl SessionRepository for MockSessionStore {
         Box::pin(ready(Ok(sessions)))
     }
 
-    fn list_by_agent_id<'a>(&'a self, agent_id: &'a str) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<ConsoleSession>, String>> + Send + 'a>> {
+    fn list_by_agent_id<'a>(
+        &'a self,
+        agent_id: &'a str,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Vec<ConsoleSession>, String>> + Send + 'a>,
+    > {
         fail_if!(self);
-        let sessions: Vec<_> = self.sessions
+        let sessions: Vec<_> = self
+            .sessions
             .lock()
             .unwrap()
             .values()
@@ -383,7 +527,13 @@ impl SessionRepository for MockSessionStore {
         Box::pin(ready(Ok(sessions)))
     }
 
-    fn get<'a>(&'a self, tenant_id: &'a str, session_id: &'a str) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<ConsoleSession>, String>> + Send + 'a>> {
+    fn get<'a>(
+        &'a self,
+        tenant_id: &'a str,
+        session_id: &'a str,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Option<ConsoleSession>, String>> + Send + 'a>,
+    > {
         fail_if!(self);
         let key = format!("{tenant_id}.{session_id}");
         let result = self.sessions.lock().unwrap().get(&key).cloned();

@@ -277,8 +277,15 @@ async fn record_overwrites_run_with_same_id() {
 
     let list = store.list("acme", None).await.expect("list");
     assert_eq!(list.len(), 1, "duplicate ID must produce exactly one entry");
-    assert_eq!(list[0].status, RunStatus::Success, "second record must overwrite status");
-    assert_eq!(list[0].output, "completed successfully", "second record must overwrite output");
+    assert_eq!(
+        list[0].status,
+        RunStatus::Success,
+        "second record must overwrite status"
+    );
+    assert_eq!(
+        list[0].output, "completed successfully",
+        "second record must overwrite output"
+    );
 }
 
 // ── Sort order ─────────────────────────────────────────────────────────────────
@@ -356,7 +363,10 @@ async fn stats_run_at_exact_7d_boundary_included_in_window() {
 #[tokio::test]
 async fn stats_skips_invalid_json_entries() {
     use async_nats::jetstream;
-    use testcontainers_modules::{nats::Nats, testcontainers::{ImageExt, runners::AsyncRunner}};
+    use testcontainers_modules::{
+        nats::Nats,
+        testcontainers::{ImageExt, runners::AsyncRunner},
+    };
 
     let container = Nats::default()
         .with_cmd(["--jetstream"])
@@ -371,7 +381,8 @@ async fn stats_skips_invalid_json_entries() {
     let store = RunStore::open(&js).await.expect("open");
 
     // Write a valid run.
-    store.record(&run("r-good", "auto-1", "acme", RunStatus::Success))
+    store
+        .record(&run("r-good", "auto-1", "acme", RunStatus::Success))
         .await
         .unwrap();
 
@@ -380,13 +391,22 @@ async fn stats_skips_invalid_json_entries() {
     // "$KV.RUNS.{key}". We write garbage bytes using the kv API on the
     // underlying NATS connection.
     let kv = js.get_key_value("RUNS").await.expect("kv bucket");
-    kv.put("acme.corrupted-run-id", bytes::Bytes::from(b"not valid json".to_vec()))
-        .await
-        .expect("inject corrupt entry");
+    kv.put(
+        "acme.corrupted-run-id",
+        bytes::Bytes::from(b"not valid json".to_vec()),
+    )
+    .await
+    .expect("inject corrupt entry");
 
     // stats() must not fail — it should count only the valid run.
-    let stats = store.stats("acme").await.expect("stats must not error on corrupt entries");
-    assert_eq!(stats.total, 1, "corrupted entry must be skipped, only valid run counted");
+    let stats = store
+        .stats("acme")
+        .await
+        .expect("stats must not error on corrupt entries");
+    assert_eq!(
+        stats.total, 1,
+        "corrupted entry must be skipped, only valid run counted"
+    );
     assert_eq!(stats.successful_7d, 1);
 }
 
@@ -396,7 +416,10 @@ async fn stats_skips_invalid_json_entries() {
 #[tokio::test]
 async fn list_skips_invalid_json_entries() {
     use async_nats::jetstream;
-    use testcontainers_modules::{nats::Nats, testcontainers::{ImageExt, runners::AsyncRunner}};
+    use testcontainers_modules::{
+        nats::Nats,
+        testcontainers::{ImageExt, runners::AsyncRunner},
+    };
 
     let container = Nats::default()
         .with_cmd(["--jetstream"])
@@ -411,21 +434,32 @@ async fn list_skips_invalid_json_entries() {
     let store = RunStore::open(&js).await.expect("open");
 
     // Write a valid run.
-    store.record(&run("r-good", "auto-1", "acme", RunStatus::Success))
+    store
+        .record(&run("r-good", "auto-1", "acme", RunStatus::Success))
         .await
         .unwrap();
 
     // Inject two corrupted entries directly into the KV bucket.
     let kv = js.get_key_value("RUNS").await.expect("kv bucket");
-    kv.put("acme.corrupt-1", bytes::Bytes::from(b"not valid json".to_vec()))
-        .await
-        .expect("inject corrupt-1");
+    kv.put(
+        "acme.corrupt-1",
+        bytes::Bytes::from(b"not valid json".to_vec()),
+    )
+    .await
+    .expect("inject corrupt-1");
     kv.put("acme.corrupt-2", bytes::Bytes::from(b"{broken".to_vec()))
         .await
         .expect("inject corrupt-2");
 
     // list() must succeed and return only the valid run.
-    let list = store.list("acme", None).await.expect("list must not error on corrupt entries");
-    assert_eq!(list.len(), 1, "corrupted entries must be skipped; only the valid run counts");
+    let list = store
+        .list("acme", None)
+        .await
+        .expect("list must not error on corrupt entries");
+    assert_eq!(
+        list.len(),
+        1,
+        "corrupted entries must be skipped; only the valid run counts"
+    );
     assert_eq!(list[0].id, "r-good");
 }

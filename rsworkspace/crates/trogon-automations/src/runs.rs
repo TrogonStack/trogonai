@@ -465,9 +465,9 @@ mod tests {
         let seven_days_ago = now.saturating_sub(7 * 86_400);
 
         let runs = [
-            sample_run("r1", RunStatus::Success, seven_days_ago),     // exactly at boundary — in
-            sample_run("r2", RunStatus::Failed, seven_days_ago - 1),  // 1 s before — out
-            sample_run("r3", RunStatus::Success, now),                 // now — in
+            sample_run("r1", RunStatus::Success, seven_days_ago), // exactly at boundary — in
+            sample_run("r2", RunStatus::Failed, seven_days_ago - 1), // 1 s before — out
+            sample_run("r3", RunStatus::Success, now),            // now — in
         ];
 
         let successful_7d = runs
@@ -479,9 +479,19 @@ mod tests {
             .filter(|r| r.started_at >= seven_days_ago && r.status == RunStatus::Failed)
             .count() as u64;
 
-        assert_eq!(successful_7d, 2, "r1 (boundary) and r3 (now) must be counted");
-        assert_eq!(failed_7d, 0, "r2 (just before boundary) must not be counted");
-        assert_eq!(runs.len() as u64, 3, "total includes all records regardless of age");
+        assert_eq!(
+            successful_7d, 2,
+            "r1 (boundary) and r3 (now) must be counted"
+        );
+        assert_eq!(
+            failed_7d, 0,
+            "r2 (just before boundary) must not be counted"
+        );
+        assert_eq!(
+            runs.len() as u64,
+            3,
+            "total includes all records regardless of age"
+        );
     }
 
     /// When all runs are older than 7 days the 7d counters must be zero but
@@ -515,8 +525,8 @@ mod tests {
     /// data races — the `Arc<Mutex<Vec<...>>>` must serialise concurrent inserts.
     #[tokio::test]
     async fn mock_run_store_concurrent_records_are_safe() {
-        use super::mock::MockRunStore;
         use super::RunRepository as _;
+        use super::mock::MockRunStore;
 
         let store = std::sync::Arc::new(MockRunStore::new());
         let now = now_unix();
@@ -544,14 +554,19 @@ mod tests {
             .collect();
 
         for h in handles {
-            h.await.expect("task must not panic").expect("record must succeed");
+            h.await
+                .expect("task must not panic")
+                .expect("record must succeed");
         }
 
         let all = store.list("acme", None).await.unwrap();
         assert_eq!(all.len(), 20, "all 20 concurrent records must be present");
 
         // Half successful, half failed
-        let successes = all.iter().filter(|r| r.status == RunStatus::Success).count();
+        let successes = all
+            .iter()
+            .filter(|r| r.status == RunStatus::Success)
+            .count();
         let failures = all.iter().filter(|r| r.status == RunStatus::Failed).count();
         assert_eq!(successes, 10);
         assert_eq!(failures, 10);
