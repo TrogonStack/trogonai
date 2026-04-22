@@ -1,5 +1,3 @@
-use std::convert::Infallible;
-
 use trogon_eventsourcing::{
     CommandExecution, CommandResult, CommandSnapshots, Decide, Decision, FrequencySnapshot, NonEmpty, OccPolicy,
     SnapshotRead, SnapshotWrite, StreamAppend, StreamCommand, StreamRead,
@@ -7,7 +5,7 @@ use trogon_eventsourcing::{
 
 use super::JobCommandState;
 use crate::{
-    JobEnabledState, JobId,
+    JobId,
     events::{JobEvent, JobResumed},
 };
 
@@ -40,16 +38,7 @@ impl StreamCommand for ResumeJobCommand {
 impl Decide for ResumeJobCommand {
     type State = JobCommandState;
     type Event = JobEvent;
-    type EvolveError = Infallible;
     type DecideError = ResumeJobDecisionError;
-
-    fn initial_state() -> JobCommandState {
-        JobCommandState::initial_state()
-    }
-
-    fn evolve(state: JobCommandState, event: JobEvent) -> Result<JobCommandState, Self::EvolveError> {
-        state.evolve(event)
-    }
 
     fn decide(state: &JobCommandState, command: &Self) -> Result<Decision<JobEvent>, Self::DecideError> {
         match state {
@@ -59,12 +48,10 @@ impl Decide for ResumeJobCommand {
             JobCommandState::Deleted => Err(ResumeJobDecisionError::JobDeleted {
                 id: command.stream_id().clone(),
             }),
-            JobCommandState::Present {
-                current: JobEnabledState::Enabled,
-            } => Err(ResumeJobDecisionError::AlreadyActive {
+            JobCommandState::PresentEnabled => Err(ResumeJobDecisionError::AlreadyActive {
                 id: command.stream_id().clone(),
             }),
-            JobCommandState::Present { .. } => Ok(Decision::Event(NonEmpty::one(JobEvent::JobResumed(JobResumed {
+            JobCommandState::PresentDisabled => Ok(Decision::Event(NonEmpty::one(JobEvent::JobResumed(JobResumed {
                 id: command.stream_id().to_string(),
             })))),
         }
@@ -108,8 +95,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        AddJobCommand, DeliverySpec, GetJobCommand, JobAdded, JobEventState, JobHeaders, JobMessage, JobPaused,
-        JobSpec, MessageContent, PauseJobCommand, ScheduleSpec, mocks::MockCronStore,
+        AddJobCommand, DeliverySpec, GetJobCommand, JobAdded, JobEnabledState, JobEventState, JobHeaders, JobMessage,
+        JobPaused, JobSpec, MessageContent, PauseJobCommand, ScheduleSpec, mocks::MockCronStore,
     };
 
     fn job_id(id: &str) -> JobId {
@@ -137,9 +124,7 @@ mod tests {
 
     #[test]
     fn decides_resume_from_present_disabled_state() {
-        let state = JobCommandState::Present {
-            current: JobEnabledState::Disabled,
-        };
+        let state = JobCommandState::PresentDisabled;
         let command = ResumeJobCommand::new(JobId::parse("backup").unwrap());
 
         let decision = decide(&state, &command).unwrap();
@@ -153,9 +138,7 @@ mod tests {
 
     #[test]
     fn rejects_resuming_active_jobs() {
-        let state = JobCommandState::Present {
-            current: JobEnabledState::Enabled,
-        };
+        let state = JobCommandState::PresentEnabled;
         let command = ResumeJobCommand::new(JobId::parse("backup").unwrap());
 
         assert!(matches!(

@@ -1,5 +1,3 @@
-use std::convert::Infallible;
-
 use trogon_eventsourcing::{
     CommandExecution, CommandResult, CommandSnapshots, Decide, Decision, FrequencySnapshot, NonEmpty, OccPolicy,
     SnapshotRead, SnapshotWrite, StreamAppend, StreamCommand, StreamRead,
@@ -39,25 +37,18 @@ impl StreamCommand for RemoveJobCommand {
 impl Decide for RemoveJobCommand {
     type State = JobCommandState;
     type Event = JobEvent;
-    type EvolveError = Infallible;
     type DecideError = RemoveJobDecisionError;
-
-    fn initial_state() -> JobCommandState {
-        JobCommandState::initial_state()
-    }
-
-    fn evolve(state: JobCommandState, event: JobEvent) -> Result<JobCommandState, Self::EvolveError> {
-        state.evolve(event)
-    }
 
     fn decide(state: &JobCommandState, command: &Self) -> Result<Decision<JobEvent>, Self::DecideError> {
         match state {
             JobCommandState::Missing => Err(RemoveJobDecisionError::JobNotFound {
                 id: command.stream_id().clone(),
             }),
-            JobCommandState::Present { .. } => Ok(Decision::Event(NonEmpty::one(JobEvent::JobRemoved(JobRemoved {
-                id: command.stream_id().to_string(),
-            })))),
+            JobCommandState::PresentEnabled | JobCommandState::PresentDisabled => {
+                Ok(Decision::Event(NonEmpty::one(JobEvent::JobRemoved(JobRemoved {
+                    id: command.stream_id().to_string(),
+                }))))
+            }
             JobCommandState::Deleted => Err(RemoveJobDecisionError::JobDeleted {
                 id: command.stream_id().clone(),
             }),
@@ -125,9 +116,7 @@ mod tests {
 
     #[test]
     fn decides_removal_from_present_state() {
-        let state = JobCommandState::Present {
-            current: JobEnabledState::Enabled,
-        };
+        let state = JobCommandState::PresentEnabled;
         let command = RemoveJobCommand::new(JobId::parse("backup").unwrap());
 
         let decision = decide(&state, &command).unwrap();

@@ -1,6 +1,6 @@
 use crate::{
-    CanonicalEventCodec, Decide, Decision, EventCodec, EventData, EventType, NonEmpty,
-    RecordedEvent, Snapshot, SnapshotSchema, SnapshotStoreConfig, StreamEvent,
+    CanonicalEventCodec, Decide, Decision, EventCodec, EventData, EventType, NonEmpty, RecordedEvent, Snapshot,
+    SnapshotSchema, SnapshotStoreConfig, StateMachine, StreamEvent,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -190,13 +190,21 @@ pub struct ExecutionResult<State, Event> {
     pub state: State,
 }
 
+pub trait StateMachineCommand: Decide {
+    type EvolveError;
+}
+
+impl<C> StateMachineCommand for C
+where
+    C: Decide,
+    C::State: StateMachine<C::Event>,
+{
+    type EvolveError = <C::State as StateMachine<C::Event>>::EvolveError;
+}
+
 pub type CommandResult<C, InfraError> = Result<
     ExecutionResult<<C as Decide>::State, <C as Decide>::Event>,
-    CommandFailure<
-        <C as Decide>::DecideError,
-        <C as Decide>::EvolveError,
-        CommandInfraError<InfraError>,
-    >,
+    CommandFailure<<C as Decide>::DecideError, <C as StateMachineCommand>::EvolveError, CommandInfraError<InfraError>>,
 >;
 
 #[derive(Debug)]
@@ -294,10 +302,7 @@ where
         }
     }
 
-    pub fn with_snapshot<I>(
-        self,
-        snapshots: I,
-    ) -> CommandExecution<'a, E, C, Snapshots<'a, I::Store, I::Policy>>
+    pub fn with_snapshot<I>(self, snapshots: I) -> CommandExecution<'a, E, C, Snapshots<'a, I::Store, I::Policy>>
     where
         I: IntoSnapshots<'a, C>,
     {
@@ -372,6 +377,7 @@ where
 impl<E, C, SErr> CommandExecution<'_, E, C, WithoutSnapshots>
 where
     C: Decide,
+    C::State: StateMachine<C::Event>,
     C::Event: EventType + StreamEvent + Clone + CanonicalEventCodec,
     E: StreamRead<C::StreamId, Error = SErr> + StreamAppend<C::StreamId, Error = SErr>,
     <C::Event as CanonicalEventCodec>::Codec: EventCodec<C::Event>,
@@ -382,15 +388,14 @@ where
     }
 
     async fn execute_result(self) -> CommandResult<C, SErr> {
-        self.with_codec(C::Event::canonical_codec())
-            .execute_result()
-            .await
+        self.with_codec(C::Event::canonical_codec()).execute_result().await
     }
 }
 
 impl<E, C, EC, SErr> CommandExecutionWithCodec<'_, E, C, WithoutSnapshots, EC>
 where
     C: Decide,
+    C::State: StateMachine<C::Event>,
     C::Event: EventType + StreamEvent + Clone,
     E: StreamRead<C::StreamId, Error = SErr> + StreamAppend<C::StreamId, Error = SErr>,
     EC: EventCodec<C::Event>,
@@ -409,7 +414,7 @@ where
             .map_err(CommandInfraError::ReadStream)
             .map_err(CommandFailure::Infra)?;
         let current_version = stream_read.current_version;
-        let mut state = C::initial_state();
+        let mut state = C::State::initial_state();
 
         for recorded_event in stream_read.events {
             let event = recorded_event
@@ -417,11 +422,10 @@ where
                 .map_err(Into::into)
                 .map_err(CommandInfraError::DecodeEvent)
                 .map_err(CommandFailure::Infra)?;
-            state = C::evolve(state, event).map_err(CommandFailure::Evolve)?;
+            state = state.evolve(event).map_err(CommandFailure::Evolve)?;
         }
 
-        let Decision::Event(events) =
-            C::decide(&state, self.command).map_err(CommandFailure::Decide)?;
+        let Decision::Event(events) = C::decide(&state, self.command).map_err(CommandFailure::Decide)?;
         let encoded_events = encode_events(&self.event_codec, &events)
             .map_err(Into::into)
             .map_err(CommandInfraError::EncodeEvent)
@@ -435,7 +439,7 @@ where
             .map_err(CommandFailure::Infra)?;
 
         for event in events.iter().cloned() {
-            state = C::evolve(state, event).map_err(CommandFailure::Evolve)?;
+            state = state.evolve(event).map_err(CommandFailure::Evolve)?;
         }
 
         Ok(ExecutionResult {
@@ -449,11 +453,11 @@ where
 impl<E, S, C, P, SErr> CommandExecution<'_, E, C, Snapshots<'_, S, P>>
 where
     C: Decide,
-    C::Event: EventType + StreamEvent + Clone + CanonicalEventCodec,
     C::State: Clone,
+    C::State: StateMachine<C::Event>,
+    C::Event: EventType + StreamEvent + Clone + CanonicalEventCodec,
     E: StreamRead<C::StreamId, Error = SErr> + StreamAppend<C::StreamId, Error = SErr>,
-    S: SnapshotRead<C::State, C::StreamId, Error = SErr>
-        + SnapshotWrite<C::State, C::StreamId, Error = SErr>,
+    S: SnapshotRead<C::State, C::StreamId, Error = SErr> + SnapshotWrite<C::State, C::StreamId, Error = SErr>,
     P: SnapshotPolicy<C::State, C::Event>,
     <C::Event as CanonicalEventCodec>::Codec: EventCodec<C::Event>,
     <<C::Event as CanonicalEventCodec>::Codec as EventCodec<C::Event>>::Error: Into<SErr>,
@@ -463,20 +467,18 @@ where
     }
 
     async fn execute_result(self) -> CommandResult<C, SErr> {
-        self.with_codec(C::Event::canonical_codec())
-            .execute_result()
-            .await
+        self.with_codec(C::Event::canonical_codec()).execute_result().await
     }
 }
 
 impl<E, S, C, P, SErr, EC> CommandExecutionWithCodec<'_, E, C, Snapshots<'_, S, P>, EC>
 where
     C: Decide,
-    C::Event: EventType + StreamEvent + Clone,
     C::State: Clone,
+    C::State: StateMachine<C::Event>,
+    C::Event: EventType + StreamEvent + Clone,
     E: StreamRead<C::StreamId, Error = SErr> + StreamAppend<C::StreamId, Error = SErr>,
-    S: SnapshotRead<C::State, C::StreamId, Error = SErr>
-        + SnapshotWrite<C::State, C::StreamId, Error = SErr>,
+    S: SnapshotRead<C::State, C::StreamId, Error = SErr> + SnapshotWrite<C::State, C::StreamId, Error = SErr>,
     P: SnapshotPolicy<C::State, C::Event>,
     EC: EventCodec<C::Event>,
     EC::Error: Into<SErr>,
@@ -497,10 +499,8 @@ where
         let snapshot_version = snapshot.as_ref().map(|snapshot| snapshot.version);
         let mut state = snapshot
             .map(|snapshot| snapshot.payload)
-            .unwrap_or_else(C::initial_state);
-        let start_sequence = snapshot_version
-            .map(|version| version.saturating_add(1))
-            .unwrap_or(1);
+            .unwrap_or_else(C::State::initial_state);
+        let start_sequence = snapshot_version.map(|version| version.saturating_add(1)).unwrap_or(1);
         let stream_read = self
             .event_store
             .read_stream_from(stream_id, start_sequence)
@@ -513,12 +513,10 @@ where
             match current_version {
                 Some(stream_version) if snapshot_version <= stream_version => {}
                 stream_version => {
-                    return Err(CommandFailure::Infra(
-                        CommandInfraError::SnapshotAheadOfStream {
-                            snapshot_version,
-                            stream_version,
-                        },
-                    ));
+                    return Err(CommandFailure::Infra(CommandInfraError::SnapshotAheadOfStream {
+                        snapshot_version,
+                        stream_version,
+                    }));
                 }
             }
         }
@@ -529,11 +527,10 @@ where
                 .map_err(Into::into)
                 .map_err(CommandInfraError::DecodeEvent)
                 .map_err(CommandFailure::Infra)?;
-            state = C::evolve(state, event).map_err(CommandFailure::Evolve)?;
+            state = state.evolve(event).map_err(CommandFailure::Evolve)?;
         }
 
-        let Decision::Event(events) =
-            C::decide(&state, self.command).map_err(CommandFailure::Decide)?;
+        let Decision::Event(events) = C::decide(&state, self.command).map_err(CommandFailure::Decide)?;
         let encoded_events = encode_events(&self.event_codec, &events)
             .map_err(Into::into)
             .map_err(CommandInfraError::EncodeEvent)
@@ -547,15 +544,13 @@ where
             .map_err(CommandFailure::Infra)?;
 
         for event in events.iter().cloned() {
-            state = C::evolve(state, event).map_err(CommandFailure::Evolve)?;
+            state = state.evolve(event).map_err(CommandFailure::Evolve)?;
         }
 
         if matches!(
-            self.snapshots.policy.snapshot_decision(
-                append_outcome.next_expected_version,
-                &state,
-                &events,
-            ),
+            self.snapshots
+                .policy
+                .snapshot_decision(append_outcome.next_expected_version, &state, &events,),
             SnapshotDecision::Take
         ) {
             self.snapshots
@@ -583,9 +578,7 @@ where
     E: EventType + StreamEvent + Clone,
     C: EventCodec<E>,
 {
-    events
-        .clone()
-        .try_map(|event| EventData::new_with_codec(codec, event))
+    events.clone().try_map(|event| EventData::new_with_codec(codec, event))
 }
 
 #[cfg(test)]
@@ -731,17 +724,14 @@ mod tests {
         }
     }
 
-    impl Decide for TestCommand {
-        type State = TestState;
-        type Event = TestEvent;
+    impl StateMachine<TestEvent> for TestState {
         type EvolveError = TestCommandError;
-        type DecideError = TestDecisionError;
 
-        fn initial_state() -> TestState {
+        fn initial_state() -> Self {
             TestState::Missing
         }
 
-        fn evolve(_state: TestState, event: TestEvent) -> Result<TestState, Self::EvolveError> {
+        fn evolve(self, event: TestEvent) -> Result<Self, Self::EvolveError> {
             match event {
                 TestEvent::Registered { .. } => Ok(TestState::Present { enabled: true }),
                 TestEvent::StateChanged { enabled, .. } => Ok(TestState::Present { enabled }),
@@ -749,32 +739,29 @@ mod tests {
                 TestEvent::Broken { .. } => Err(TestCommandError::BrokenEvent),
             }
         }
+    }
 
-        fn decide(
-            state: &TestState,
-            command: &Self,
-        ) -> Result<Decision<TestEvent>, Self::DecideError> {
+    impl Decide for TestCommand {
+        type State = TestState;
+        type Event = TestEvent;
+        type DecideError = TestDecisionError;
+
+        fn decide(state: &TestState, command: &Self) -> Result<Decision<TestEvent>, Self::DecideError> {
             match (state, command.action) {
                 (TestState::Missing, TestAction::Register) => {
                     Ok(Decision::Event(NonEmpty::one(TestEvent::Registered {
                         id: command.id.clone(),
                     })))
                 }
-                (TestState::Present { .. }, TestAction::Register) => {
-                    Err(TestDecisionError::AlreadyRegistered)
-                }
-                (TestState::Present { enabled: false }, TestAction::Disable) => {
-                    Err(TestDecisionError::AlreadyDisabled)
-                }
+                (TestState::Present { .. }, TestAction::Register) => Err(TestDecisionError::AlreadyRegistered),
+                (TestState::Present { enabled: false }, TestAction::Disable) => Err(TestDecisionError::AlreadyDisabled),
                 (TestState::Present { .. }, TestAction::Disable) => {
                     Ok(Decision::Event(NonEmpty::one(TestEvent::StateChanged {
                         id: command.id.clone(),
                         enabled: false,
                     })))
                 }
-                (TestState::Missing, TestAction::Disable | TestAction::Remove) => {
-                    Err(TestDecisionError::Missing)
-                }
+                (TestState::Missing, TestAction::Disable | TestAction::Remove) => Err(TestDecisionError::Missing),
                 (TestState::Present { .. }, TestAction::Remove) => {
                     Ok(Decision::Event(NonEmpty::one(TestEvent::Removed {
                         id: command.id.clone(),
@@ -873,10 +860,7 @@ mod tests {
                 return Err(TestInfraError::Append);
             }
             self.stream_states.lock().unwrap().push(stream_state);
-            self.appended_events
-                .lock()
-                .unwrap()
-                .extend(events.into_vec());
+            self.appended_events.lock().unwrap().extend(events.into_vec());
             Ok(AppendOutcome {
                 next_expected_version: self.next_expected_version,
             })
@@ -894,10 +878,7 @@ mod tests {
             if self.fail_load_snapshot {
                 return Err(TestInfraError::LoadSnapshot);
             }
-            self.loaded_stream_ids
-                .lock()
-                .unwrap()
-                .push(stream_id.to_string());
+            self.loaded_stream_ids.lock().unwrap().push(stream_id.to_string());
             Ok(self.snapshot.clone())
         }
     }
@@ -1057,13 +1038,9 @@ mod tests {
         };
         let command = TestCommand::new("alpha", TestAction::Register);
 
-        let error =
-            block_on(CommandExecution::new(&runtime, &command).execute_result()).unwrap_err();
+        let error = block_on(CommandExecution::new(&runtime, &command).execute_result()).unwrap_err();
 
-        assert!(matches!(
-            error,
-            CommandFailure::Evolve(TestCommandError::BrokenEvent)
-        ));
+        assert!(matches!(error, CommandFailure::Evolve(TestCommandError::BrokenEvent)));
     }
 
     #[test]
@@ -1160,8 +1137,8 @@ mod tests {
             next_expected_version: 1,
             ..Default::default()
         };
-        let command =
-            TestCommand::new("alpha", TestAction::Register).with_preferred_write_precondition(StreamState::StreamExists);
+        let command = TestCommand::new("alpha", TestAction::Register)
+            .with_preferred_write_precondition(StreamState::StreamExists);
 
         let _ = block_on(CommandExecution::new(&runtime, &command).execute_result()).unwrap();
 
@@ -1177,8 +1154,8 @@ mod tests {
             next_expected_version: 1,
             ..Default::default()
         };
-        let command =
-            TestCommand::new("alpha", TestAction::Register).with_preferred_write_precondition(StreamState::StreamExists);
+        let command = TestCommand::new("alpha", TestAction::Register)
+            .with_preferred_write_precondition(StreamState::StreamExists);
 
         let _ = block_on(
             CommandExecution::new(&runtime, &command)
@@ -1187,10 +1164,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(
-            runtime.stream_states.lock().unwrap().as_slice(),
-            &[StreamState::Any]
-        );
+        assert_eq!(runtime.stream_states.lock().unwrap().as_slice(), &[StreamState::Any]);
     }
 
     #[test]
@@ -1228,7 +1202,8 @@ mod tests {
             next_expected_version: 1,
             ..Default::default()
         };
-        let command = TestCommand::new("alpha", TestAction::Register).with_required_write_precondition(StreamState::NoStream);
+        let command =
+            TestCommand::new("alpha", TestAction::Register).with_required_write_precondition(StreamState::NoStream);
 
         let _ = block_on(
             CommandExecution::new(&runtime, &command)
@@ -1271,8 +1246,7 @@ mod tests {
 
     #[test]
     fn frequency_snapshot_saves_on_matching_revision() {
-        const EVERY_THREE_REVISIONS: NonZeroU64 =
-            NonZeroU64::new(3).expect("snapshot cadence must be non-zero");
+        const EVERY_THREE_REVISIONS: NonZeroU64 = NonZeroU64::new(3).expect("snapshot cadence must be non-zero");
         let runtime = FakeRuntime {
             next_expected_version: 3,
             ..Default::default()
@@ -1298,8 +1272,7 @@ mod tests {
 
     #[test]
     fn frequency_snapshot_skips_non_matching_revision() {
-        const EVERY_THREE_REVISIONS: NonZeroU64 =
-            NonZeroU64::new(3).expect("snapshot cadence must be non-zero");
+        const EVERY_THREE_REVISIONS: NonZeroU64 = NonZeroU64::new(3).expect("snapshot cadence must be non-zero");
         let runtime = FakeRuntime {
             next_expected_version: 2,
             ..Default::default()
@@ -1360,9 +1333,7 @@ mod tests {
 
         assert!(matches!(
             error,
-            CommandFailure::Infra(CommandInfraError::SaveSnapshot(
-                TestInfraError::SaveSnapshot
-            ))
+            CommandFailure::Infra(CommandInfraError::SaveSnapshot(TestInfraError::SaveSnapshot))
         ));
     }
 
