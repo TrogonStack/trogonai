@@ -1,6 +1,6 @@
 use trogon_eventsourcing::{
-    CommandExecution, CommandResult, CommandSnapshots, Decide, Decision, FrequencySnapshot, NonEmpty, OccPolicy,
-    SnapshotRead, SnapshotWrite, StreamAppend, StreamCommand, StreamRead,
+    CommandExecution, CommandResult, CommandSnapshots, Decide, Decision, FrequencySnapshot, OccPolicy, SnapshotRead,
+    SnapshotWrite, StreamAppend, StreamCommand, StreamRead,
 };
 
 use super::JobState;
@@ -51,9 +51,9 @@ impl Decide for ResumeJobCommand {
             JobState::PresentEnabled => Err(ResumeJobDecisionError::AlreadyActive {
                 id: command.stream_id().clone(),
             }),
-            JobState::PresentDisabled => Ok(Decision::Event(NonEmpty::one(JobEvent::JobResumed(JobResumed {
+            JobState::PresentDisabled => Ok(Decision::event(JobResumed {
                 id: command.stream_id().to_string(),
-            })))),
+            })),
         }
     }
 }
@@ -130,9 +130,9 @@ mod tests {
         let decision = decide(&state, &command).unwrap();
         assert_eq!(
             decision,
-            Decision::Event(NonEmpty::one(JobEvent::JobResumed(JobResumed {
+            Decision::event(JobResumed {
                 id: "backup".to_string(),
-            })))
+            })
         );
     }
 
