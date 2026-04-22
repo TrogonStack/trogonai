@@ -488,6 +488,159 @@ async fn prompt_max_tokens_returns_max_tokens_stop_reason() {
         .await;
 }
 
+// ── steer ─────────────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn prompt_steer_subject_contains_session_id() {
+    let store = MemorySessionStore::new();
+    let notifier = MockSessionNotifier::new();
+    let agent = TrogonAgent::new(
+        notifier.clone(),
+        store.clone(),
+        MockAgentRunner::new("claude-test"),
+        "acp",
+        "claude-test",
+        None,
+        Arc::new(RwLock::new(None::<GatewayConfig>)),
+    );
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let new_resp = agent
+                .new_session(NewSessionRequest::new("/cwd"))
+                .await
+                .unwrap();
+            let session_id = new_resp.session_id.to_string();
+
+            let prompt_req = PromptRequest::new(session_id.clone(), vec![]);
+            agent.prompt(prompt_req).await.unwrap();
+
+            let subjects = notifier.steer_subjects();
+            assert_eq!(subjects.len(), 1, "subscribe_steer must be called once per prompt");
+            assert!(
+                subjects[0].contains(&session_id),
+                "steer subject must contain session id; got: {}",
+                subjects[0]
+            );
+            assert!(
+                subjects[0].contains("steer"),
+                "steer subject must contain 'steer'; got: {}",
+                subjects[0]
+            );
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn prompt_steer_message_reaches_runner() {
+    let store = MemorySessionStore::new();
+    let notifier = MockSessionNotifier::new();
+    notifier.inject_steer_message("think carefully about safety");
+    let runner = MockAgentRunner::new("claude-test");
+    let agent = TrogonAgent::new(
+        notifier,
+        store.clone(),
+        runner.clone(),
+        "acp",
+        "claude-test",
+        None,
+        Arc::new(RwLock::new(None::<GatewayConfig>)),
+    );
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let new_resp = agent
+                .new_session(NewSessionRequest::new("/cwd"))
+                .await
+                .unwrap();
+            let session_id = new_resp.session_id.to_string();
+
+            let prompt_req = PromptRequest::new(session_id, vec![]);
+            agent.prompt(prompt_req).await.unwrap();
+
+            let steer = runner.captured_steer();
+            assert_eq!(steer.len(), 1, "runner must receive exactly one steer message");
+            assert_eq!(steer[0], "think carefully about safety");
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn prompt_multiple_steer_messages_all_reach_runner() {
+    let store = MemorySessionStore::new();
+    let notifier = MockSessionNotifier::new();
+    notifier.inject_steer_message("first guidance");
+    notifier.inject_steer_message("second guidance");
+    notifier.inject_steer_message("third guidance");
+    let runner = MockAgentRunner::new("claude-test");
+    let agent = TrogonAgent::new(
+        notifier,
+        store.clone(),
+        runner.clone(),
+        "acp",
+        "claude-test",
+        None,
+        Arc::new(RwLock::new(None::<GatewayConfig>)),
+    );
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let new_resp = agent
+                .new_session(NewSessionRequest::new("/cwd"))
+                .await
+                .unwrap();
+            let session_id = new_resp.session_id.to_string();
+
+            let prompt_req = PromptRequest::new(session_id, vec![]);
+            agent.prompt(prompt_req).await.unwrap();
+
+            let steer = runner.captured_steer();
+            assert_eq!(steer.len(), 3, "all three steer messages must reach the runner");
+            assert_eq!(steer[0], "first guidance");
+            assert_eq!(steer[1], "second guidance");
+            assert_eq!(steer[2], "third guidance");
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn prompt_no_steer_runner_receives_empty() {
+    let store = MemorySessionStore::new();
+    let notifier = MockSessionNotifier::new();
+    let runner = MockAgentRunner::new("claude-test");
+    let agent = TrogonAgent::new(
+        notifier,
+        store.clone(),
+        runner.clone(),
+        "acp",
+        "claude-test",
+        None,
+        Arc::new(RwLock::new(None::<GatewayConfig>)),
+    );
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let new_resp = agent
+                .new_session(NewSessionRequest::new("/cwd"))
+                .await
+                .unwrap();
+            let session_id = new_resp.session_id.to_string();
+
+            let prompt_req = PromptRequest::new(session_id, vec![]);
+            agent.prompt(prompt_req).await.unwrap();
+
+            assert!(
+                runner.captured_steer().is_empty(),
+                "runner must not receive steer messages when none were injected"
+            );
+        })
+        .await;
+}
+
 #[tokio::test]
 async fn prompt_text_delta_events_are_forwarded_without_error() {
     let runner = MockAgentRunner::new("claude-test").with_events(vec![

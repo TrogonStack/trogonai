@@ -112,6 +112,9 @@ pub mod mock {
     /// By default `run_chat_streaming` returns the messages it received
     /// unchanged (no new turns).  Override with `with_response` or
     /// `with_error` to control what the mock returns.
+    ///
+    /// Steer messages received via `steer_rx` are always drained and stored;
+    /// retrieve them with `captured_steer()`.
     #[derive(Clone)]
     pub struct MockAgentRunner {
         pub model: String,
@@ -121,6 +124,8 @@ pub mod mock {
         events: Arc<Mutex<Vec<AgentEvent>>>,
         /// If `Some`, `run_chat_streaming` returns this error string.
         error: Arc<Mutex<Option<AgentError>>>,
+        /// Steer messages received via `steer_rx` during the last run.
+        captured_steer: Arc<Mutex<Vec<String>>>,
     }
 
     impl MockAgentRunner {
@@ -130,6 +135,7 @@ pub mod mock {
                 response: Arc::new(Mutex::new(None)),
                 events: Arc::new(Mutex::new(Vec::new())),
                 error: Arc::new(Mutex::new(None)),
+                captured_steer: Arc::new(Mutex::new(Vec::new())),
             }
         }
 
@@ -149,6 +155,11 @@ pub mod mock {
         pub fn with_error(self, error: AgentError) -> Self {
             *self.error.lock().unwrap() = Some(error);
             self
+        }
+
+        /// Return all steer messages received during the last `run_chat_streaming` call.
+        pub fn captured_steer(&self) -> Vec<String> {
+            self.captured_steer.lock().unwrap().clone()
         }
     }
 
@@ -179,8 +190,14 @@ pub mod mock {
             _tools: &[ToolDef],
             _system_prompt: Option<&str>,
             event_tx: mpsc::Sender<AgentEvent>,
-            _steer_rx: Option<mpsc::Receiver<String>>,
+            mut steer_rx: Option<mpsc::Receiver<String>>,
         ) -> Result<Vec<Message>, AgentError> {
+            // Drain any steer messages that are already buffered in the channel.
+            if let Some(ref mut rx) = steer_rx {
+                while let Ok(msg) = rx.try_recv() {
+                    self.captured_steer.lock().unwrap().push(msg);
+                }
+            }
             let events = self.events.lock().unwrap().clone();
             for event in events {
                 let _ = event_tx.send(event).await;
