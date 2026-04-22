@@ -9,7 +9,7 @@ pub use message::{MessageContent, MessageEnvelope, MessageHeaders, MessageHeader
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
-pub enum JobEventState {
+pub enum JobEventStatus {
     #[default]
     Enabled,
     Disabled,
@@ -51,8 +51,8 @@ pub enum JobEventDelivery {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct JobDetails {
-    #[serde(default)]
-    pub state: JobEventState,
+    #[serde(default, rename = "state")]
+    pub status: JobEventStatus,
     pub schedule: JobEventSchedule,
     pub delivery: JobEventDelivery,
     pub message: MessageEnvelope,
@@ -271,7 +271,7 @@ mod tests {
     #[test]
     fn job_details_round_trip_without_id() {
         let details = JobDetails {
-            state: JobEventState::Enabled,
+            status: JobEventStatus::Enabled,
             schedule: JobEventSchedule::Every { every_sec: 30 },
             delivery: JobEventDelivery::NatsEvent {
                 route: "agent.run".to_string(),

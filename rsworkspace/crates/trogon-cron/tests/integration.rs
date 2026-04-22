@@ -6,9 +6,9 @@ use async_nats::Request;
 use async_nats::jetstream;
 use chrono::{Duration as ChronoDuration, Utc};
 use trogon_cron::{
-    AddJobCommand, CronController, DeliveryRoute, DeliverySpec, GetJobCommand, JobEnabledState, JobEventState,
-    JobHeaders, JobId, JobMessage, JobSpec, MessageContent, PauseJobCommand, RemoveJobCommand, SamplingSource,
-    ScheduleSpec, TtlSeconds, add_job, connect_store, get_job, pause_job, remove_job,
+    AddJobCommand, CronController, DeliveryRoute, DeliverySpec, GetJobCommand, JobEventStatus, JobHeaders, JobId,
+    JobMessage, JobSpec, JobStatus, MessageContent, PauseJobCommand, RemoveJobCommand, SamplingSource, ScheduleSpec,
+    TtlSeconds, add_job, connect_store, get_job, pause_job, remove_job,
 };
 use trogon_nats::{NatsConfig, connect as nats_connect};
 
@@ -112,7 +112,7 @@ async fn wait_for_stream_subject(js: &jetstream::Context, stream_name: &str, sub
 fn base_job(id: &str) -> JobSpec {
     JobSpec {
         id: job_id(id),
-        state: JobEnabledState::Enabled,
+        status: JobStatus::Enabled,
         schedule: ScheduleSpec::every(2).unwrap(),
         delivery: DeliverySpec::NatsEvent {
             route: DeliveryRoute::new("agent.run").unwrap(),
@@ -312,6 +312,6 @@ async fn event_store_rebuilds_current_state_for_new_client() {
     .unwrap()
     .unwrap();
 
-    assert_eq!(rebuilt.state, JobEventState::Disabled);
+    assert_eq!(rebuilt.status, JobEventStatus::Disabled);
     assert_eq!(rebuilt.schedule, expected_schedule.into());
 }

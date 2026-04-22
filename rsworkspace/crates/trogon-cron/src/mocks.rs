@@ -10,8 +10,8 @@ use chrono::{DateTime, Utc};
 use serde::{Serialize, de::DeserializeOwned};
 use trogon_eventsourcing::snapshot::{Snapshot, SnapshotStoreConfig};
 use trogon_eventsourcing::{
-    AppendOutcome, EventData, NonEmpty, SnapshotRead, SnapshotWrite, StreamAppend, StreamRead,
-    StreamReadResult, StreamState,
+    AppendOutcome, EventData, NonEmpty, SnapshotRead, SnapshotWrite, StreamAppend, StreamRead, StreamReadResult,
+    StreamState,
 };
 use trogon_nats::lease::{ReleaseLease, RenewLease, TryAcquireLease};
 
@@ -57,10 +57,7 @@ impl SchedulePublisher for MockSchedulePublisher {
     }
 
     async fn upsert_schedule(&self, job: &ResolvedJobSpec) -> Result<(), Self::Error> {
-        self.upserts
-            .lock()
-            .unwrap()
-            .push(job.schedule_subject().to_string());
+        self.upserts.lock().unwrap().push(job.schedule_subject().to_string());
         self.active.lock().unwrap().insert(job.id().to_string());
         Ok(())
     }
@@ -218,10 +215,7 @@ impl MockCronStore {
             .cloned()
             .map(|job| job.payload)
             .collect();
-        Ok((
-            jobs,
-            Box::pin(futures::stream::pending()) as CronJobWatchStream,
-        ))
+        Ok((jobs, Box::pin(futures::stream::pending()) as CronJobWatchStream))
     }
 }
 
@@ -233,12 +227,7 @@ impl StreamRead<crate::JobId> for MockCronStore {
         stream_id: &crate::JobId,
         from_sequence: u64,
     ) -> Result<StreamReadResult, Self::Error> {
-        let current_version = self
-            .stream_versions
-            .lock()
-            .unwrap()
-            .get(stream_id.as_str())
-            .copied();
+        let current_version = self.stream_versions.lock().unwrap().get(stream_id.as_str()).copied();
         let stream_events = self
             .events
             .lock()
@@ -263,14 +252,12 @@ impl StreamRead<crate::JobId> for MockCronStore {
                 stream_id.to_string(),
                 Some(sequence),
                 Some(sequence),
-                DateTime::<Utc>::from_timestamp(1_700_000_000 + sequence as i64, 0).ok_or_else(
-                    || {
-                        CronError::event_source(
-                            "failed to build mocked recorded event timestamp",
-                            std::io::Error::other(stream_id.to_string()),
-                        )
-                    },
-                )?,
+                DateTime::<Utc>::from_timestamp(1_700_000_000 + sequence as i64, 0).ok_or_else(|| {
+                    CronError::event_source(
+                        "failed to build mocked recorded event timestamp",
+                        std::io::Error::other(stream_id.to_string()),
+                    )
+                })?,
             ));
         }
         Ok(StreamReadResult {
@@ -293,16 +280,10 @@ impl StreamAppend<crate::JobId> for MockCronStore {
         let jobs = self.jobs.clone();
         let stream_versions = self.stream_versions.clone();
         let event_log = self.events.clone();
-        if events
-            .iter()
-            .any(|event| event.stream_id() != stream_id.as_str())
-        {
+        if events.iter().any(|event| event.stream_id() != stream_id.as_str()) {
             return Err(CronError::event_source(
                 "failed to append mocked job event batch",
-                std::io::Error::other(format!(
-                    "batch contains events outside stream '{}'",
-                    stream_id
-                )),
+                std::io::Error::other(format!("batch contains events outside stream '{}'", stream_id)),
             ));
         }
 
@@ -327,8 +308,7 @@ impl StreamAppend<crate::JobId> for MockCronStore {
                 JobWriteCondition::MustNotExist.ensure(stream_id.as_str(), write_state)?;
             }
             StreamState::StreamRevision(version) => {
-                JobWriteCondition::MustBeAtVersion(version)
-                    .ensure(stream_id.as_str(), write_state)?;
+                JobWriteCondition::MustBeAtVersion(version).ensure(stream_id.as_str(), write_state)?;
             }
         }
 
@@ -340,9 +320,7 @@ impl StreamAppend<crate::JobId> for MockCronStore {
         for event_data in events {
             let event = event_data
                 .decode_data_with(&JobEventCodec)
-                .map_err(|source| {
-                    CronError::event_source("failed to decode mocked job event payload", source)
-                })?;
+                .map_err(|source| CronError::event_source("failed to decode mocked job event payload", source))?;
             version += 1;
             stored_events.push(event_data);
             match event {
@@ -357,7 +335,7 @@ impl StreamAppend<crate::JobId> for MockCronStore {
                         )
                     })?;
                     snapshot.version = version;
-                    snapshot.payload.state = crate::JobEventState::Disabled;
+                    snapshot.payload.status = crate::JobEventStatus::Disabled;
                     projected_snapshot = Some(snapshot);
                 }
                 JobEvent::JobResumed(JobResumed { .. }) => {
@@ -368,7 +346,7 @@ impl StreamAppend<crate::JobId> for MockCronStore {
                         )
                     })?;
                     snapshot.version = version;
-                    snapshot.payload.state = crate::JobEventState::Enabled;
+                    snapshot.payload.status = crate::JobEventStatus::Enabled;
                     projected_snapshot = Some(snapshot);
                 }
                 JobEvent::JobRemoved(JobRemoved { .. }) => {
@@ -433,10 +411,9 @@ mod tests {
 
     use super::*;
     use crate::{
-        AddJobCommand, CronJob, DeliverySpec, GetJobCommand, JobDetails, JobEnabledState,
-        JobEventState, JobHeaders, JobId, JobMessage, JobSpec, JobWriteCondition, ListJobsCommand,
-        MessageContent, PauseJobCommand, RemoveJobCommand, ResumeJobCommand, ScheduleSpec, add_job,
-        pause_job, remove_job, resume_job,
+        AddJobCommand, CronJob, DeliverySpec, GetJobCommand, JobDetails, JobEventStatus, JobHeaders, JobId, JobMessage,
+        JobSpec, JobStatus, JobWriteCondition, ListJobsCommand, MessageContent, PauseJobCommand, RemoveJobCommand,
+        ResumeJobCommand, ScheduleSpec, add_job, pause_job, remove_job, resume_job,
     };
     use futures::StreamExt;
 
@@ -447,7 +424,7 @@ mod tests {
     fn base_job(id: &str) -> JobSpec {
         JobSpec {
             id: job_id(id),
-            state: JobEnabledState::Enabled,
+            status: JobStatus::Enabled,
             schedule: ScheduleSpec::every(30).unwrap(),
             delivery: DeliverySpec::nats_event("agent.run").unwrap(),
             message: JobMessage {
@@ -475,13 +452,7 @@ mod tests {
 
         assert_eq!(publisher.upserts(), vec!["cron.schedules.alpha"]);
         assert_eq!(publisher.removals(), vec!["orphan"]);
-        assert!(
-            publisher
-                .active_schedule_ids()
-                .await
-                .unwrap()
-                .contains("alpha")
-        );
+        assert!(publisher.active_schedule_ids().await.unwrap().contains("alpha"));
     }
 
     #[tokio::test]
@@ -535,8 +506,8 @@ mod tests {
                 .await
                 .unwrap()
                 .unwrap()
-                .state,
-            JobEventState::Disabled
+                .status,
+            JobEventStatus::Disabled
         );
 
         let listed = store.list_jobs(ListJobsCommand).await.unwrap();

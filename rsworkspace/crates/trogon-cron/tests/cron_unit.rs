@@ -1,8 +1,8 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
 use trogon_cron::{
-    AddJobCommand, CronController, CronJob, DeliverySpec, GetJobCommand, JobDetails, JobEnabledState, JobEventState,
-    JobHeaders, JobId, JobMessage, JobSpec, JobWriteCondition, ListJobsCommand, MessageContent, PauseJobCommand,
+    AddJobCommand, CronController, CronJob, DeliverySpec, GetJobCommand, JobDetails, JobEventStatus, JobHeaders, JobId,
+    JobMessage, JobSpec, JobStatus, JobWriteCondition, ListJobsCommand, MessageContent, PauseJobCommand,
     RemoveJobCommand, SchedulePublisher, ScheduleSpec, add_job,
     mocks::{MockCronStore, MockLeaderLock, MockSchedulePublisher},
     pause_job, remove_job,
@@ -15,7 +15,7 @@ fn job_id(id: &str) -> JobId {
 fn base_job(id: &str) -> JobSpec {
     JobSpec {
         id: job_id(id),
-        state: JobEnabledState::Enabled,
+        status: JobStatus::Enabled,
         schedule: ScheduleSpec::every(30).unwrap(),
         delivery: DeliverySpec::nats_event("agent.run").unwrap(),
         message: JobMessage {
@@ -57,7 +57,7 @@ async fn client_pause_job_toggles_job() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(got.state, JobEventState::Disabled);
+    assert_eq!(got.status, JobEventStatus::Disabled);
 }
 
 #[tokio::test]

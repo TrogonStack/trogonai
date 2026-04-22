@@ -85,7 +85,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        CronJob, DeliverySpec, GetJobCommand, JobEnabledState, JobHeaders, JobMessage, JobRemoved, MessageContent,
+        CronJob, DeliverySpec, GetJobCommand, JobHeaders, JobMessage, JobRemoved, JobStatus, MessageContent,
         ScheduleSpec, mocks::MockCronStore,
     };
 
@@ -96,7 +96,7 @@ mod tests {
     fn job(id: &str) -> JobSpec {
         JobSpec {
             id: job_id(id),
-            state: JobEnabledState::Enabled,
+            status: JobStatus::Enabled,
             schedule: ScheduleSpec::every(30).unwrap(),
             delivery: DeliverySpec::nats_event("agent.run").unwrap(),
             message: JobMessage {

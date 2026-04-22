@@ -3,7 +3,7 @@ use std::convert::Infallible;
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::{StateMachine, snapshot::SnapshotSchema};
 
-use crate::events::{JobAdded, JobEvent, JobEventState, JobPaused, JobRemoved, JobResumed};
+use crate::events::{JobAdded, JobEvent, JobEventStatus, JobPaused, JobRemoved, JobResumed};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum JobState {
@@ -29,7 +29,7 @@ impl StateMachine<JobEvent> for JobState {
             JobEvent::JobAdded(JobAdded { job, .. }) => {
                 if matches!(self, Self::Deleted) {
                     Self::Deleted
-                } else if matches!(job.state, JobEventState::Enabled) {
+                } else if matches!(job.status, JobEventStatus::Enabled) {
                     Self::PresentEnabled
                 } else {
                     Self::PresentDisabled

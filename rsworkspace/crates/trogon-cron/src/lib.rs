@@ -23,8 +23,8 @@ pub mod traits;
 pub mod mocks;
 
 pub use commands::domain::{
-    CronExpression, DeliveryRoute, DeliverySpec, EverySeconds, JobEnabledState, JobHeaders, JobId, JobIdError,
-    JobMessage, JobSpec, SamplingSource, SamplingSubject, ScheduleSpec, ScheduleTimezone, TtlSeconds,
+    CronExpression, DeliveryRoute, DeliverySpec, EverySeconds, JobHeaders, JobId, JobIdError, JobMessage, JobSpec,
+    JobStatus, SamplingSource, SamplingSubject, ScheduleSpec, ScheduleTimezone, TtlSeconds,
 };
 pub use commands::{
     AddJobCommand, AddJobDecisionError, JobState, PauseJobCommand, PauseJobDecisionError, RemoveJobCommand,
@@ -34,7 +34,7 @@ pub use config::JobWriteCondition;
 pub use error::{CronError, JobSpecError};
 pub use events::{
     JobAdded, JobDetails, JobEvent, JobEventCodec, JobEventData, JobEventDelivery, JobEventSamplingSource,
-    JobEventSchedule, JobEventState, JobPaused, JobRemoved, JobResumed, MessageContent, MessageEnvelope,
+    JobEventSchedule, JobEventStatus, JobPaused, JobRemoved, JobResumed, MessageContent, MessageEnvelope,
     MessageHeaders, MessageHeadersError, RecordedJobEvent,
 };
 pub use nats::NatsSchedulePublisher;
