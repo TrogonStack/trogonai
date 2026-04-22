@@ -102,7 +102,7 @@ where
             "response stream closed unexpectedly",
         )),
         Err(_elapsed) => Err(Error::new(
-            ErrorCode::InternalError.into(),
+            ErrorCode::Other(crate::constants::AGENT_UNAVAILABLE).into(),
             "request timed out waiting for runner",
         )),
     }

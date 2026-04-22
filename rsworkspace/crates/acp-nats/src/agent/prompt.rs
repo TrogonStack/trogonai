@@ -4,7 +4,8 @@ use agent_client_protocol::{
 };
 use async_nats::jetstream::AckKind;
 use bytes::Bytes;
-use futures::StreamExt;
+use futures::{FutureExt as _, StreamExt};
+use std::time::Duration;
 use tokio::time::timeout;
 use tracing::{instrument, warn};
 use trogon_nats::jetstream::{
@@ -355,6 +356,9 @@ where
 
     loop {
         tokio::select! {
+            // biased: drain pending notifications before checking for the response, so
+            // callers always see all events that precede the Done/Error outcome.
+            biased;
             notif = notif_messages.next() => {
                 match notif {
                     None => {
@@ -390,13 +394,52 @@ where
             resp = timeout(op_timeout, resp_messages.next()) => {
                 match resp {
                     Ok(Some(Ok(js_msg))) => {
-                        match serde_json::from_slice::<PromptResponse>(js_msg.message().payload.as_ref()) {
+                        let payload = js_msg.message().payload.as_ref();
+                        if let Ok(env) = serde_json::from_slice::<serde_json::Value>(payload)
+                            && let Some(err_msg) = env.get("error").and_then(|v| v.as_str())
+                        {
+                            let _ = js_msg.ack().await;
+                            bridge.metrics.record_error("prompt", "runner_error");
+                            break Err(Error::new(ErrorCode::InternalError.into(), err_msg.to_string()));
+                        }
+                        match serde_json::from_slice::<PromptResponse>(payload) {
                             Ok(response) => {
                                 let _ = js_msg.ack().await;
+                                // JetStream pull consumers defer their first fetch request
+                                // until the first poll. Under Tokio's LIFO scheduler the
+                                // response consumer's background task fires before the
+                                // notification consumer's, so the response may arrive before
+                                // in-flight notifications have been fetched. A brief sleep
+                                // gives the notification background task real time to send
+                                // its fetch and receive any pending messages.
+                                tokio::time::sleep(Duration::from_millis(2)).await;
+                                while let Some(Some(Ok(notif_js_msg))) =
+                                    notif_messages.next().now_or_never()
+                                {
+                                    let notification: SessionNotification =
+                                        match serde_json::from_slice(
+                                            notif_js_msg.message().payload.as_ref(),
+                                        ) {
+                                            Ok(n) => n,
+                                            Err(e) => {
+                                                warn!(error = %e, "bad notification payload; skipping");
+                                                let _ = notif_js_msg.ack().await;
+                                                continue;
+                                            }
+                                        };
+                                    let _ = notif_js_msg.ack().await;
+                                    let _ = bridge
+                                        .notification_sender
+                                        .send(notification)
+                                        .await
+                                        .inspect_err(|_| {
+                                            warn!("notification receiver dropped; continuing prompt");
+                                        });
+                                }
                                 break Ok(response);
                             }
                             Err(_) => {
-                                if let Ok(agent_err) = serde_json::from_slice::<Error>(js_msg.message().payload.as_ref()) {
+                                if let Ok(agent_err) = serde_json::from_slice::<Error>(payload) {
                                     let _ = js_msg.ack().await;
                                     break Err(agent_err);
                                 }
