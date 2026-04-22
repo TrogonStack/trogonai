@@ -76,6 +76,10 @@ impl AcpStream {
     }
 
     pub fn config(&self, prefix: &AcpPrefix) -> Config {
+        // Global and GlobalExt subjects are used for core NATS request-reply.
+        // no_ack prevents JetStream from sending PubAcks to the request reply-to
+        // inbox, which would race with the runner's actual response.
+        let no_ack = matches!(self, Self::Global | Self::GlobalExt);
         Config {
             name: self.stream_name(prefix),
             subjects: self.subject_patterns(prefix),
@@ -83,6 +87,7 @@ impl AcpStream {
             retention: RetentionPolicy::Limits,
             max_age: DEFAULT_STREAM_MAX_AGE,
             discard: DiscardPolicy::Old,
+            no_ack,
             ..Default::default()
         }
     }

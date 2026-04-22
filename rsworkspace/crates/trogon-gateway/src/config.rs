@@ -18,6 +18,7 @@ use trogon_source_notion::NotionVerificationToken;
 use trogon_source_sentry::SentryClientSecret;
 use trogon_source_slack::config::SlackSigningSecret;
 use trogon_source_telegram::config::TelegramWebhookSecret;
+use trogon_source_twitter::config::TwitterConsumerSecret;
 use trogon_std::{NonZeroDuration, ZeroDuration};
 
 use crate::source_status::SourceStatus;
@@ -198,6 +199,8 @@ struct SourcesConfig {
     #[config(nested)]
     telegram: TelegramConfig,
     #[config(nested)]
+    twitter: TwitterConfig,
+    #[config(nested)]
     gitlab: GitlabConfig,
     #[config(nested)]
     incidentio: IncidentioConfig,
@@ -274,6 +277,22 @@ struct TelegramConfig {
     #[config(env = "TROGON_SOURCE_TELEGRAM_STREAM_MAX_AGE_SECS", default = 604_800)]
     stream_max_age_secs: u64,
     #[config(env = "TROGON_SOURCE_TELEGRAM_NATS_ACK_TIMEOUT_SECS", default = 10)]
+    nats_ack_timeout_secs: u64,
+}
+
+#[derive(Config)]
+struct TwitterConfig {
+    #[config(env = "TROGON_SOURCE_TWITTER_STATUS")]
+    status: Option<String>,
+    #[config(env = "TROGON_SOURCE_TWITTER_CONSUMER_SECRET")]
+    consumer_secret: Option<String>,
+    #[config(env = "TROGON_SOURCE_TWITTER_SUBJECT_PREFIX", default = "twitter")]
+    subject_prefix: String,
+    #[config(env = "TROGON_SOURCE_TWITTER_STREAM_NAME", default = "TWITTER")]
+    stream_name: String,
+    #[config(env = "TROGON_SOURCE_TWITTER_STREAM_MAX_AGE_SECS", default = 604_800)]
+    stream_max_age_secs: u64,
+    #[config(env = "TROGON_SOURCE_TWITTER_NATS_ACK_TIMEOUT_SECS", default = 10)]
     nats_ack_timeout_secs: u64,
 }
 
@@ -382,6 +401,7 @@ pub struct ResolvedConfig {
     pub discord: Option<trogon_source_discord::DiscordConfig>,
     pub slack: Option<trogon_source_slack::SlackConfig>,
     pub telegram: Option<trogon_source_telegram::TelegramSourceConfig>,
+    pub twitter: Option<trogon_source_twitter::TwitterConfig>,
     pub gitlab: Option<trogon_source_gitlab::GitlabConfig>,
     pub incidentio: Option<trogon_source_incidentio::IncidentioConfig>,
     pub linear: Option<trogon_source_linear::LinearConfig>,
@@ -395,6 +415,7 @@ impl ResolvedConfig {
             || self.discord.is_some()
             || self.slack.is_some()
             || self.telegram.is_some()
+            || self.twitter.is_some()
             || self.gitlab.is_some()
             || self.incidentio.is_some()
             || self.linear.is_some()
@@ -424,6 +445,7 @@ fn resolve(cfg: GatewayConfig, nats_overrides: &NatsArgs) -> Result<ResolvedConf
     let discord = resolve_discord(cfg.sources.discord, &mut errors);
     let slack = resolve_slack(cfg.sources.slack, &mut errors);
     let telegram = resolve_telegram(cfg.sources.telegram, &mut errors);
+    let twitter = resolve_twitter(cfg.sources.twitter, &mut errors);
     let gitlab = resolve_gitlab(cfg.sources.gitlab, &mut errors);
     let incidentio = resolve_incidentio(cfg.sources.incidentio, &mut errors);
     let linear = resolve_linear(cfg.sources.linear, &mut errors);
@@ -456,6 +478,7 @@ fn resolve(cfg: GatewayConfig, nats_overrides: &NatsArgs) -> Result<ResolvedConf
         discord,
         slack,
         telegram,
+        twitter,
         gitlab,
         incidentio,
         linear,
@@ -791,6 +814,84 @@ fn resolve_telegram(
 
     Some(trogon_source_telegram::TelegramSourceConfig {
         webhook_secret,
+        subject_prefix,
+        stream_name,
+        stream_max_age,
+        nats_ack_timeout,
+    })
+}
+
+fn resolve_twitter(
+    section: TwitterConfig,
+    errors: &mut Vec<ConfigValidationError>,
+) -> Option<trogon_source_twitter::TwitterConfig> {
+    if !resolve_source_status("twitter", section.status.as_deref(), errors) {
+        return None;
+    }
+
+    let secret_str = section.consumer_secret?;
+    let consumer_secret = match TwitterConsumerSecret::new(secret_str) {
+        Ok(secret) => secret,
+        Err(error) => {
+            errors.push(ConfigValidationError::invalid(
+                "twitter",
+                "consumer_secret",
+                error,
+            ));
+            return None;
+        }
+    };
+
+    let subject_prefix = match NatsToken::new(section.subject_prefix) {
+        Ok(token) => token,
+        Err(error) => {
+            errors.push(ConfigValidationError::invalid_subject_token(
+                "twitter",
+                "subject_prefix",
+                error,
+            ));
+            return None;
+        }
+    };
+
+    let stream_name = match NatsToken::new(section.stream_name) {
+        Ok(token) => token,
+        Err(error) => {
+            errors.push(ConfigValidationError::invalid_subject_token(
+                "twitter",
+                "stream_name",
+                error,
+            ));
+            return None;
+        }
+    };
+
+    let nats_ack_timeout = match NonZeroDuration::from_secs(section.nats_ack_timeout_secs) {
+        Ok(duration) => duration,
+        Err(error) => {
+            errors.push(ConfigValidationError::invalid(
+                "twitter",
+                "nats_ack_timeout_secs",
+                error,
+            ));
+            return None;
+        }
+    };
+
+    let stream_max_age = match StreamMaxAge::from_secs(section.stream_max_age_secs) {
+        Ok(age) => age,
+        Err(error) => {
+            errors.push(ConfigValidationError::invalid(
+                "twitter",
+                "stream_max_age_secs",
+                error,
+            ));
+            return None;
+        }
+    };
+
+    Some(trogon_source_twitter::TwitterConfig {
+        consumer_secret,
         subject_prefix,
         stream_name,
         stream_max_age,
@@ -1305,6 +1406,15 @@ webhook_secret = "{secret}"
         )
     }
 
+    fn twitter_toml(secret: &str) -> String {
+        format!(
+            r#"
+[sources.twitter]
+consumer_secret = "{secret}"
+"#
+        )
+    }
+
     fn gitlab_toml(secret: &str) -> String {
         format!(
             r#"
@@ -1534,6 +1644,38 @@ webhook_secret = "telegram-webhook-secret"
         let f = write_toml(toml);
         let cfg = load(Some(f.path())).expect("load failed");
         assert!(cfg.telegram.is_none());
+    }
+
+    #[test]
+    fn twitter_resolves_with_valid_consumer_secret() {
+        let f = write_toml(&twitter_toml("twitter-consumer-secret"));
+        let cfg = load(Some(f.path())).expect("load failed");
+        assert!(cfg.twitter.is_some());
+    }
+
+    #[test]
+    fn twitter_disabled_returns_none() {
+        let toml = r#"
+[sources.twitter]
+status = "disabled"
+consumer_secret = "twitter-consumer-secret"
+"#;
+        let f = write_toml(toml);
+        let cfg = load(Some(f.path())).expect("load failed");
+        assert!(cfg.twitter.is_none());
+    }
+
+    #[test]
+    fn twitter_empty_consumer_secret_is_invalid() {
+        let toml = r#"
+[sources.twitter]
+consumer_secret = ""
+"#;
+        let f = write_toml(toml);
+        let result = load(Some(f.path()));
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("twitter: invalid consumer_secret")))
+        );
     }
 
     #[test]
@@ -2384,6 +2526,20 @@ subject_prefix = "has.dots"
     }
 
     #[test]
+    fn twitter_invalid_subject_prefix() {
+        let toml = r#"
+[sources.twitter]
+consumer_secret = "twitter-consumer-secret"
+subject_prefix = "has.dots"
+"#;
+        let f = write_toml(toml);
+        let result = load(Some(f.path()));
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("twitter: invalid subject_prefix")))
+        );
+    }
+
+    #[test]
     fn slack_invalid_stream_name() {
         let toml = r#"
 [sources.slack]
@@ -2485,6 +2641,20 @@ stream_name = "has.dots"
     }
 
     #[test]
+    fn twitter_invalid_stream_name() {
+        let toml = r#"
+[sources.twitter]
+consumer_secret = "twitter-consumer-secret"
+stream_name = "has.dots"
+"#;
+        let f = write_toml(toml);
+        let result = load(Some(f.path()));
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("twitter: invalid stream_name")))
+        );
+    }
+
+    #[test]
     fn incidentio_zero_nats_ack_timeout_is_error() {
         let toml = format!(
             r#"
@@ -2561,6 +2731,20 @@ nats_ack_timeout_secs = 0
     }
 
     #[test]
+    fn twitter_zero_nats_ack_timeout_is_error() {
+        let toml = r#"
+[sources.twitter]
+consumer_secret = "twitter-consumer-secret"
+nats_ack_timeout_secs = 0
+"#;
+        let f = write_toml(toml);
+        let result = load(Some(f.path()));
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("twitter: nats_ack_timeout_secs must not be zero")))
+        );
+    }
+
+    #[test]
     fn sentry_zero_stream_max_age_is_error() {
         let toml = r#"
 [sources.sentry]
@@ -2571,6 +2755,20 @@ stream_max_age_secs = 0
         let result = load(Some(f.path()));
         assert!(
             matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("sentry: stream_max_age_secs must not be zero")))
+        );
+    }
+
+    #[test]
+    fn twitter_zero_stream_max_age_is_error() {
+        let toml = r#"
+[sources.twitter]
+consumer_secret = "twitter-consumer-secret"
+stream_max_age_secs = 0
+"#;
+        let f = write_toml(toml);
+        let result = load(Some(f.path()));
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("twitter: stream_max_age_secs must not be zero")))
         );
     }
 
