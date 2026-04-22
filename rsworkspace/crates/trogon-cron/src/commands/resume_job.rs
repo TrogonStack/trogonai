@@ -94,20 +94,20 @@ mod tests {
 
     use super::*;
     use crate::{
-        AddJobCommand, DeliverySpec, GetJobCommand, JobAdded, JobEventStatus, JobHeaders, JobMessage, JobPaused,
-        JobSpec, JobStatus, MessageContent, PauseJobCommand, ScheduleSpec, mocks::MockCronStore,
+        AddJobCommand, Delivery, GetJobCommand, Job, JobAdded, JobEventStatus, JobHeaders, JobMessage, JobPaused,
+        JobStatus, MessageContent, PauseJobCommand, Schedule, mocks::MockCronStore,
     };
 
     fn job_id(id: &str) -> JobId {
         JobId::parse(id).unwrap()
     }
 
-    fn active_job(id: &str) -> JobSpec {
-        JobSpec {
+    fn active_job(id: &str) -> Job {
+        Job {
             id: job_id(id),
             status: JobStatus::Enabled,
-            schedule: ScheduleSpec::every(30).unwrap(),
-            delivery: DeliverySpec::nats_event("agent.run").unwrap(),
+            schedule: Schedule::every(30).unwrap(),
+            delivery: Delivery::nats_event("agent.run").unwrap(),
             message: JobMessage {
                 content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
                 headers: JobHeaders::default(),
@@ -115,7 +115,7 @@ mod tests {
         }
     }
 
-    fn paused_job(id: &str) -> JobSpec {
+    fn paused_job(id: &str) -> Job {
         let mut job = active_job(id);
         job.status = JobStatus::Disabled;
         job

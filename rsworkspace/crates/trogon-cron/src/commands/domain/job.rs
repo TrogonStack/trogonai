@@ -14,12 +14,12 @@ use trogon_nats::DottedNatsToken;
 use super::JobId;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct JobSpec {
+pub struct Job {
     pub id: JobId,
     #[serde(default, rename = "state")]
     pub status: JobStatus,
-    pub schedule: ScheduleSpec,
-    pub delivery: DeliverySpec,
+    pub schedule: Schedule,
+    pub delivery: Delivery,
     pub message: JobMessage,
 }
 
@@ -46,7 +46,7 @@ impl JobStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum ScheduleSpec {
+pub enum Schedule {
     At {
         at: DateTime<Utc>,
     },
@@ -60,7 +60,7 @@ pub enum ScheduleSpec {
     },
 }
 
-impl ScheduleSpec {
+impl Schedule {
     pub fn every(every_sec: u64) -> Result<Self, JobSpecError> {
         Ok(Self::Every {
             every_sec: EverySeconds::new(every_sec)?,
@@ -477,7 +477,7 @@ impl SamplingSource {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum DeliverySpec {
+pub enum Delivery {
     NatsEvent {
         route: DeliveryRoute,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -487,7 +487,7 @@ pub enum DeliverySpec {
     },
 }
 
-impl DeliverySpec {
+impl Delivery {
     pub fn nats_event(route: impl AsRef<str>) -> Result<Self, JobSpecError> {
         Ok(Self::NatsEvent {
             route: DeliveryRoute::new(route)?,
@@ -536,14 +536,14 @@ impl From<JobEventStatus> for JobStatus {
     }
 }
 
-impl From<ScheduleSpec> for JobEventSchedule {
-    fn from(value: ScheduleSpec) -> Self {
+impl From<Schedule> for JobEventSchedule {
+    fn from(value: Schedule) -> Self {
         match value {
-            ScheduleSpec::At { at } => Self::At { at },
-            ScheduleSpec::Every { every_sec } => Self::Every {
+            Schedule::At { at } => Self::At { at },
+            Schedule::Every { every_sec } => Self::Every {
                 every_sec: every_sec.get(),
             },
-            ScheduleSpec::Cron { expr, timezone } => Self::Cron {
+            Schedule::Cron { expr, timezone } => Self::Cron {
                 expr: expr.into_string(),
                 timezone: timezone.map(ScheduleTimezone::into_string),
             },
@@ -551,14 +551,14 @@ impl From<ScheduleSpec> for JobEventSchedule {
     }
 }
 
-impl From<&ScheduleSpec> for JobEventSchedule {
-    fn from(value: &ScheduleSpec) -> Self {
+impl From<&Schedule> for JobEventSchedule {
+    fn from(value: &Schedule) -> Self {
         match value {
-            ScheduleSpec::At { at } => Self::At { at: *at },
-            ScheduleSpec::Every { every_sec } => Self::Every {
+            Schedule::At { at } => Self::At { at: *at },
+            Schedule::Every { every_sec } => Self::Every {
                 every_sec: every_sec.get(),
             },
-            ScheduleSpec::Cron { expr, timezone } => Self::Cron {
+            Schedule::Cron { expr, timezone } => Self::Cron {
                 expr: expr.as_str().to_string(),
                 timezone: timezone.as_ref().map(|timezone| timezone.as_str().to_string()),
             },
@@ -566,7 +566,7 @@ impl From<&ScheduleSpec> for JobEventSchedule {
     }
 }
 
-impl TryFrom<JobEventSchedule> for ScheduleSpec {
+impl TryFrom<JobEventSchedule> for Schedule {
     type Error = JobSpecError;
 
     fn try_from(value: JobEventSchedule) -> Result<Self, Self::Error> {
@@ -608,10 +608,10 @@ impl TryFrom<JobEventSamplingSource> for SamplingSource {
     }
 }
 
-impl From<DeliverySpec> for JobEventDelivery {
-    fn from(value: DeliverySpec) -> Self {
+impl From<Delivery> for JobEventDelivery {
+    fn from(value: Delivery) -> Self {
         match value {
-            DeliverySpec::NatsEvent { route, ttl_sec, source } => Self::NatsEvent {
+            Delivery::NatsEvent { route, ttl_sec, source } => Self::NatsEvent {
                 route: route.as_str().to_string(),
                 ttl_sec: ttl_sec.map(TtlSeconds::get),
                 source: source.map(Into::into),
@@ -620,10 +620,10 @@ impl From<DeliverySpec> for JobEventDelivery {
     }
 }
 
-impl From<&DeliverySpec> for JobEventDelivery {
-    fn from(value: &DeliverySpec) -> Self {
+impl From<&Delivery> for JobEventDelivery {
+    fn from(value: &Delivery) -> Self {
         match value {
-            DeliverySpec::NatsEvent { route, ttl_sec, source } => Self::NatsEvent {
+            Delivery::NatsEvent { route, ttl_sec, source } => Self::NatsEvent {
                 route: route.as_str().to_string(),
                 ttl_sec: ttl_sec.map(TtlSeconds::get),
                 source: source.as_ref().map(Into::into),
@@ -632,7 +632,7 @@ impl From<&DeliverySpec> for JobEventDelivery {
     }
 }
 
-impl TryFrom<JobEventDelivery> for DeliverySpec {
+impl TryFrom<JobEventDelivery> for Delivery {
     type Error = JobSpecError;
 
     fn try_from(value: JobEventDelivery) -> Result<Self, Self::Error> {
@@ -647,8 +647,8 @@ impl TryFrom<JobEventDelivery> for DeliverySpec {
 }
 
 impl JobDetails {
-    pub fn try_into_job_spec(self, id: JobId) -> Result<JobSpec, CronError> {
-        Ok(JobSpec {
+    pub fn try_into_job(self, id: JobId) -> Result<Job, CronError> {
+        Ok(Job {
             id,
             status: self.status.into(),
             schedule: self.schedule.try_into().map_err(CronError::invalid_job_spec)?,
@@ -658,24 +658,24 @@ impl JobDetails {
     }
 }
 
-impl From<JobSpec> for JobDetails {
-    fn from(spec: JobSpec) -> Self {
+impl From<Job> for JobDetails {
+    fn from(job: Job) -> Self {
         Self {
-            status: spec.status.into(),
-            schedule: spec.schedule.into(),
-            delivery: spec.delivery.into(),
-            message: spec.message.into(),
+            status: job.status.into(),
+            schedule: job.schedule.into(),
+            delivery: job.delivery.into(),
+            message: job.message.into(),
         }
     }
 }
 
-impl From<&JobSpec> for JobDetails {
-    fn from(spec: &JobSpec) -> Self {
+impl From<&Job> for JobDetails {
+    fn from(job: &Job) -> Self {
         Self {
-            status: spec.status.into(),
-            schedule: (&spec.schedule).into(),
-            delivery: (&spec.delivery).into(),
-            message: (&spec.message).into(),
+            status: job.status.into(),
+            schedule: (&job.schedule).into(),
+            delivery: (&job.delivery).into(),
+            message: (&job.message).into(),
         }
     }
 }
@@ -731,7 +731,7 @@ mod tests {
     }
 
     #[test]
-    fn job_spec_status_defaults_to_enabled() {
+    fn job_status_defaults_to_enabled() {
         let raw = r#"{
             "id": "heartbeat",
             "schedule": { "type": "every", "every_sec": 30 },
@@ -741,18 +741,18 @@ mod tests {
             }
         }"#;
 
-        let job: JobSpec = serde_json::from_str(raw).unwrap();
+        let job: Job = serde_json::from_str(raw).unwrap();
 
         assert_eq!(job.status, JobStatus::Enabled);
     }
 
     #[test]
-    fn job_spec_round_trips() {
-        let job = JobSpec {
+    fn job_round_trips() {
+        let job = Job {
             id: job_id("compact"),
             status: JobStatus::Enabled,
-            schedule: ScheduleSpec::cron("0 */5 * * * *", Some("UTC".to_string())).unwrap(),
-            delivery: DeliverySpec::NatsEvent {
+            schedule: Schedule::cron("0 */5 * * * *", Some("UTC".to_string())).unwrap(),
+            delivery: Delivery::NatsEvent {
                 route: route("workflow.compact"),
                 ttl_sec: Some(ttl(30)),
                 source: Some(source("sensors.latest")),
@@ -764,18 +764,18 @@ mod tests {
         };
 
         let json = serde_json::to_string(&job).unwrap();
-        let decoded: JobSpec = serde_json::from_str(&json).unwrap();
+        let decoded: Job = serde_json::from_str(&json).unwrap();
 
         assert_eq!(decoded, job);
     }
 
     #[test]
     fn empty_headers_are_omitted() {
-        let job = JobSpec {
+        let job = Job {
             id: job_id("compact"),
             status: JobStatus::Enabled,
-            schedule: ScheduleSpec::every(30).unwrap(),
-            delivery: DeliverySpec::NatsEvent {
+            schedule: Schedule::every(30).unwrap(),
+            delivery: Delivery::NatsEvent {
                 route: route("agent.run"),
                 ttl_sec: None,
                 source: None,
@@ -796,11 +796,11 @@ mod tests {
     fn snapshot_round_trips() {
         let snapshot = Snapshot::new(
             9,
-            JobSpec {
+            Job {
                 id: job_id("compact"),
                 status: JobStatus::Enabled,
-                schedule: ScheduleSpec::every(30).unwrap(),
-                delivery: DeliverySpec::NatsEvent {
+                schedule: Schedule::every(30).unwrap(),
+                delivery: Delivery::NatsEvent {
                     route: route("agent.run"),
                     ttl_sec: None,
                     source: None,
@@ -813,7 +813,7 @@ mod tests {
         );
 
         let json = serde_json::to_string(&snapshot).unwrap();
-        let decoded: Snapshot<JobSpec> = serde_json::from_str(&json).unwrap();
+        let decoded: Snapshot<Job> = serde_json::from_str(&json).unwrap();
 
         assert_eq!(decoded, snapshot);
     }
@@ -836,7 +836,7 @@ mod tests {
             },
         };
 
-        let job = details.clone().try_into_job_spec(job_id("heartbeat")).unwrap();
+        let job = details.clone().try_into_job(job_id("heartbeat")).unwrap();
 
         assert_eq!(job.id.as_str(), "heartbeat");
         assert_eq!(JobDetails::from(&job), details);
@@ -844,7 +844,7 @@ mod tests {
 
     #[test]
     fn invalid_route_is_rejected_during_deserialization() {
-        let error = serde_json::from_value::<JobSpec>(serde_json::json!({
+        let error = serde_json::from_value::<Job>(serde_json::json!({
             "id": "heartbeat",
             "schedule": { "type": "every", "every_sec": 30 },
             "delivery": { "type": "nats_event", "route": "agent.>" },
@@ -859,7 +859,7 @@ mod tests {
 
     #[test]
     fn invalid_sampling_source_is_rejected_during_deserialization() {
-        let error = serde_json::from_value::<JobSpec>(serde_json::json!({
+        let error = serde_json::from_value::<Job>(serde_json::json!({
             "id": "heartbeat",
             "schedule": { "type": "every", "every_sec": 30 },
             "delivery": {
@@ -881,7 +881,7 @@ mod tests {
 
     #[test]
     fn zero_ttl_is_rejected_during_deserialization() {
-        let error = serde_json::from_value::<JobSpec>(serde_json::json!({
+        let error = serde_json::from_value::<Job>(serde_json::json!({
             "id": "heartbeat",
             "schedule": { "type": "every", "every_sec": 30 },
             "delivery": {
@@ -900,7 +900,7 @@ mod tests {
 
     #[test]
     fn zero_every_seconds_is_rejected_during_deserialization() {
-        let error = serde_json::from_value::<JobSpec>(serde_json::json!({
+        let error = serde_json::from_value::<Job>(serde_json::json!({
             "id": "heartbeat",
             "schedule": { "type": "every", "every_sec": 0 },
             "delivery": { "type": "nats_event", "route": "agent.run" },
@@ -915,7 +915,7 @@ mod tests {
 
     #[test]
     fn invalid_cron_expression_is_rejected_during_deserialization() {
-        let error = serde_json::from_value::<JobSpec>(serde_json::json!({
+        let error = serde_json::from_value::<Job>(serde_json::json!({
             "id": "heartbeat",
             "schedule": { "type": "cron", "expr": "not-a-cron" },
             "delivery": { "type": "nats_event", "route": "agent.run" },
@@ -930,7 +930,7 @@ mod tests {
 
     #[test]
     fn invalid_timezone_is_rejected_during_deserialization() {
-        let error = serde_json::from_value::<JobSpec>(serde_json::json!({
+        let error = serde_json::from_value::<Job>(serde_json::json!({
             "id": "heartbeat",
             "schedule": {
                 "type": "cron",
@@ -949,7 +949,7 @@ mod tests {
 
     #[test]
     fn reserved_header_is_rejected_during_deserialization() {
-        let error = serde_json::from_value::<JobSpec>(serde_json::json!({
+        let error = serde_json::from_value::<Job>(serde_json::json!({
             "id": "heartbeat",
             "schedule": { "type": "every", "every_sec": 30 },
             "delivery": { "type": "nats_event", "route": "agent.run" },
@@ -965,7 +965,7 @@ mod tests {
 
     #[test]
     fn invalid_header_value_is_rejected_during_deserialization() {
-        let error = serde_json::from_value::<JobSpec>(serde_json::json!({
+        let error = serde_json::from_value::<Job>(serde_json::json!({
             "id": "heartbeat",
             "schedule": { "type": "every", "every_sec": 30 },
             "delivery": { "type": "nats_event", "route": "agent.run" },
@@ -994,7 +994,7 @@ mod tests {
                 headers: MessageHeaders::default(),
             },
         }
-        .try_into_job_spec(job_id("heartbeat"))
+        .try_into_job(job_id("heartbeat"))
         .unwrap_err();
 
         assert!(error.to_string().contains("ttl_sec"));

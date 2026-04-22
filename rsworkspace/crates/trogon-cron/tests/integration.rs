@@ -6,9 +6,9 @@ use async_nats::Request;
 use async_nats::jetstream;
 use chrono::{Duration as ChronoDuration, Utc};
 use trogon_cron::{
-    AddJobCommand, CronController, DeliveryRoute, DeliverySpec, GetJobCommand, JobEventStatus, JobHeaders, JobId,
-    JobMessage, JobSpec, JobStatus, MessageContent, PauseJobCommand, RemoveJobCommand, SamplingSource, ScheduleSpec,
-    TtlSeconds, add_job, connect_store, get_job, pause_job, remove_job,
+    AddJobCommand, CronController, Delivery, DeliveryRoute, GetJobCommand, Job, JobEventStatus, JobHeaders, JobId,
+    JobMessage, JobStatus, MessageContent, PauseJobCommand, RemoveJobCommand, SamplingSource, Schedule, TtlSeconds,
+    add_job, connect_store, get_job, pause_job, remove_job,
 };
 use trogon_nats::{NatsConfig, connect as nats_connect};
 
@@ -109,12 +109,12 @@ async fn wait_for_stream_subject(js: &jetstream::Context, stream_name: &str, sub
     .expect("timed out waiting for stream subject to be configured");
 }
 
-fn base_job(id: &str) -> JobSpec {
-    JobSpec {
+fn base_job(id: &str) -> Job {
+    Job {
         id: job_id(id),
         status: JobStatus::Enabled,
-        schedule: ScheduleSpec::every(2).unwrap(),
-        delivery: DeliverySpec::NatsEvent {
+        schedule: Schedule::every(2).unwrap(),
+        delivery: Delivery::NatsEvent {
             route: DeliveryRoute::new("agent.run").unwrap(),
             ttl_sec: Some(TtlSeconds::new(30).unwrap()),
             source: None,
@@ -171,7 +171,7 @@ async fn controller_reconciles_one_time_job() {
     });
 
     let mut job = base_job("one-time");
-    job.schedule = ScheduleSpec::At {
+    job.schedule = Schedule::At {
         at: Utc::now() + ChronoDuration::seconds(2),
     };
 
@@ -195,7 +195,7 @@ async fn controller_reconciles_sampling_job() {
     });
 
     let mut job = base_job("sampling");
-    job.delivery = DeliverySpec::NatsEvent {
+    job.delivery = Delivery::NatsEvent {
         route: DeliveryRoute::new("agent.run").unwrap(),
         ttl_sec: None,
         source: Some(SamplingSource::latest_from_subject("sensors.latest").unwrap()),
@@ -227,7 +227,7 @@ async fn controller_reconciles_cron_job_with_timezone() {
     });
 
     let mut job = base_job("cron-timezone");
-    job.schedule = ScheduleSpec::cron("*/2 * * * * *", Some("UTC".to_string())).unwrap();
+    job.schedule = Schedule::cron("*/2 * * * * *", Some("UTC".to_string())).unwrap();
 
     add_job(&store.event_store, AddJobCommand::new(job)).await.unwrap();
 
@@ -295,7 +295,7 @@ async fn event_store_rebuilds_current_state_for_new_client() {
 
     let store = connect_store(nats.clone()).await.unwrap();
     let mut job = base_job("eventful");
-    job.schedule = ScheduleSpec::cron("*/5 * * * * *", Some("UTC".to_string())).unwrap();
+    job.schedule = Schedule::cron("*/5 * * * * *", Some("UTC".to_string())).unwrap();
     let expected_schedule = job.schedule.clone();
 
     add_job(&store.event_store, AddJobCommand::new(job)).await.unwrap();
