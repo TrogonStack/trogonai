@@ -16,7 +16,6 @@
 
 use std::time::Duration;
 
-use trogon_nats::jetstream::NatsJetStreamClient;
 use trogon_nats::{NatsConfig, connect};
 use trogon_secret_proxy::{
     proxy::{ProxyState, router},
@@ -37,7 +36,12 @@ async fn main() {
     let port: u16 = std::env::var("PROXY_PORT")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or(8080);
+        .unwrap_or_else(|| {
+            std::env::var("PROXY_DEFAULT_PORT")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(8080)
+        });
     let timeout_secs: u64 = std::env::var("PROXY_WORKER_TIMEOUT_SECS")
         .ok()
         .and_then(|v| v.parse().ok())
@@ -50,8 +54,9 @@ async fn main() {
         .await
         .expect("Failed to connect to NATS");
 
+    let jetstream = async_nats::jetstream::new(nats.clone());
+
     let outbound_subject = subjects::outbound(&prefix);
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
     stream::ensure_stream(&jetstream, &prefix, &outbound_subject)
         .await
         .expect("Failed to ensure JetStream stream");

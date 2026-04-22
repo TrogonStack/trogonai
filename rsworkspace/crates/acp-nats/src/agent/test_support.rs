@@ -12,14 +12,14 @@ use trogon_nats::AdvancedMockNatsClient;
 pub fn mock_bridge() -> (
     AdvancedMockNatsClient,
     MockJs,
-    Bridge<AdvancedMockNatsClient, trogon_std::time::SystemClock, MockJs>,
+    Bridge<AdvancedMockNatsClient, trogon_std::time::MockClock, MockJs>,
 ) {
     let mock = AdvancedMockNatsClient::new();
     let js = MockJs::new();
     let bridge = Bridge::new(
         mock.clone(),
         js.clone(),
-        trogon_std::time::SystemClock,
+        trogon_std::time::MockClock::new(),
         &opentelemetry::global::meter("acp-nats-test"),
         Config::for_test("acp"),
         tokio::sync::mpsc::channel(1).0,
@@ -74,7 +74,7 @@ impl trogon_nats::jetstream::JetStreamGetStream for MockJs {
 pub fn mock_bridge_with_metrics() -> (
     AdvancedMockNatsClient,
     MockJs,
-    Bridge<AdvancedMockNatsClient, trogon_std::time::SystemClock, MockJs>,
+    Bridge<AdvancedMockNatsClient, trogon_std::time::MockClock, MockJs>,
     InMemoryMetricExporter,
     SdkMeterProvider,
 ) {
@@ -90,7 +90,7 @@ pub fn mock_bridge_with_metrics() -> (
     let bridge = Bridge::new(
         mock.clone(),
         js.clone(),
-        trogon_std::time::SystemClock,
+        trogon_std::time::MockClock::new(),
         &meter,
         Config::for_test("acp"),
         tokio::sync::mpsc::channel(1).0,

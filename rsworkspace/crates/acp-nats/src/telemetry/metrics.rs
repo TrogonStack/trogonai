@@ -326,6 +326,7 @@ mod tests {
         provider.shutdown().unwrap();
     }
 
+
     /// Calling `record_request` multiple times accumulates count in the counter.
     #[test]
     fn record_request_accumulates_multiple_calls() {

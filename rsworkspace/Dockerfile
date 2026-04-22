@@ -25,6 +25,7 @@ RUN cargo chef prepare --recipe-path recipe.json
 
 # ── Stage 3: build dependencies (cached unless Cargo.lock changes) ────────────
 FROM chef AS builder
+# ca-certificates needed for reqwest rustls-tls to verify upstream TLS certs
 RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY --from=planner /workspace/recipe.json recipe.json
 RUN cargo chef cook --release --recipe-path recipe.json

@@ -55,6 +55,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
     # Scale horizontally: docker compose up --scale worker=3
+    # All instances share the same durable JetStream consumer → auto load-balanced.
 
   # ── GitHub webhook receiver ───────────────────────────────────────────────
   trogon-github:

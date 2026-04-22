@@ -162,7 +162,7 @@ impl ApiKeyToken {
     /// Return the env segment (e.g. `"prod"`).
     pub fn env_str(&self) -> &str {
         let without_prefix = &self.0["tok_".len()..];
-        without_prefix.split('_').nth(1).unwrap_or("")
+        without_prefix.splitn(3, '_').nth(1).unwrap_or("")
     }
 
     /// Return the unique ID segment (e.g. `"a1b2c3"`).
