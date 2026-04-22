@@ -517,12 +517,11 @@ fn validate_http_context(
     }
 
     if let (Some(header_session_id), Some(body_session_id)) = (session_id, body_session_id.as_ref())
+        && header_session_id != body_session_id
     {
-        if header_session_id != body_session_id {
-            return Err(HttpTransportError::BadRequest(
-                "Acp-Session-Id header does not match request body sessionId",
-            ));
-        }
+        return Err(HttpTransportError::BadRequest(
+            "Acp-Session-Id header does not match request body sessionId",
+        ));
     }
 
     Ok(())
@@ -1017,5 +1016,631 @@ pub async fn process_manager_request<N, J>(
                 .command_tx
                 .send(HttpConnectionCommand::Close { response });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use acp_nats::Config;
+    use axum::body::{Body, to_bytes};
+    use axum::http::Request as HttpRequest;
+    use serde_json::{Value, json};
+    use tokio::sync::{mpsc, oneshot, watch};
+    use trogon_nats::AdvancedMockNatsClient;
+
+    #[derive(Clone)]
+    struct MockJs {
+        publisher: trogon_nats::jetstream::MockJetStreamPublisher,
+        consumer_factory: trogon_nats::jetstream::MockJetStreamConsumerFactory,
+    }
+
+    impl MockJs {
+        fn new() -> Self {
+            Self {
+                publisher: trogon_nats::jetstream::MockJetStreamPublisher::new(),
+                consumer_factory: trogon_nats::jetstream::MockJetStreamConsumerFactory::new(),
+            }
+        }
+    }
+
+    impl trogon_nats::jetstream::JetStreamPublisher for MockJs {
+        type PublishError = trogon_nats::mocks::MockError;
+        type AckFuture = std::future::Ready<
+            Result<async_nats::jetstream::publish::PublishAck, Self::PublishError>,
+        >;
+
+        async fn publish_with_headers<S: async_nats::subject::ToSubject + Send>(
+            &self,
+            subject: S,
+            headers: async_nats::HeaderMap,
+            payload: bytes::Bytes,
+        ) -> Result<Self::AckFuture, Self::PublishError> {
+            self.publisher
+                .publish_with_headers(subject, headers, payload)
+                .await
+        }
+    }
+
+    impl trogon_nats::jetstream::JetStreamGetStream for MockJs {
+        type Error = trogon_nats::mocks::MockError;
+        type Stream = trogon_nats::jetstream::MockJetStreamStream;
+
+        async fn get_stream<T: AsRef<str> + Send>(
+            &self,
+            stream_name: T,
+        ) -> Result<Self::Stream, Self::Error> {
+            self.consumer_factory.get_stream(stream_name).await
+        }
+    }
+
+    fn test_config() -> Config {
+        Config::new(
+            acp_nats::AcpPrefix::new("acp").unwrap(),
+            acp_nats::NatsConfig {
+                servers: vec!["localhost:4222".to_string()],
+                auth: trogon_nats::NatsAuth::None,
+            },
+        )
+    }
+
+    fn test_state() -> (AppState, mpsc::UnboundedReceiver<ManagerRequest>) {
+        let (manager_tx, manager_rx) = mpsc::unbounded_channel();
+        let (shutdown_tx, _) = watch::channel(false);
+        (
+            AppState {
+                manager_tx,
+                shutdown_tx,
+            },
+            manager_rx,
+        )
+    }
+
+    async fn json_event_body(response: Response) -> Vec<Value> {
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body = String::from_utf8(bytes.to_vec()).unwrap();
+        body.lines()
+            .filter_map(|line| line.strip_prefix("data: "))
+            .map(|json| serde_json::from_str(json).unwrap())
+            .collect()
+    }
+
+    fn post_headers() -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        headers.insert(
+            ACCEPT,
+            HeaderValue::from_static("application/json, text/event-stream"),
+        );
+        headers
+    }
+
+    fn get_headers() -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(ACCEPT, HeaderValue::from_static("text/event-stream"));
+        headers
+    }
+
+    fn session_id() -> acp_nats::AcpSessionId {
+        acp_nats::AcpSessionId::new("session-1").unwrap()
+    }
+
+    #[test]
+    fn http_transport_error_into_response_maps_status_codes() {
+        let cases = [
+            (
+                HttpTransportError::BadRequest("bad"),
+                StatusCode::BAD_REQUEST,
+            ),
+            (
+                HttpTransportError::NotFound("missing"),
+                StatusCode::NOT_FOUND,
+            ),
+            (
+                HttpTransportError::Conflict("conflict"),
+                StatusCode::CONFLICT,
+            ),
+            (
+                HttpTransportError::UnsupportedMediaType("unsupported"),
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            ),
+            (
+                HttpTransportError::NotAcceptable("not-acceptable"),
+                StatusCode::NOT_ACCEPTABLE,
+            ),
+            (
+                HttpTransportError::NotImplemented("not-implemented"),
+                StatusCode::NOT_IMPLEMENTED,
+            ),
+            (
+                HttpTransportError::Internal("internal"),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ),
+        ];
+
+        for (error, status) in cases {
+            assert_eq!(error.into_response().status(), status);
+        }
+    }
+
+    #[test]
+    fn http_transport_error_display_returns_message() {
+        assert_eq!(HttpTransportError::BadRequest("bad").to_string(), "bad");
+        assert_eq!(
+            HttpTransportError::Conflict("conflict").to_string(),
+            "conflict"
+        );
+        assert_eq!(
+            HttpTransportError::Internal("internal").to_string(),
+            "internal"
+        );
+    }
+
+    #[test]
+    fn incoming_http_message_parses_and_classifies_shapes() {
+        let request = IncomingHttpMessage::parse(
+            r#"{"jsonrpc":"2.0","id":1,"method":"session/new","params":{"cwd":".","mcpServers":[]}}"#
+                .to_string(),
+        )
+        .unwrap();
+        assert!(request.is_request());
+        assert!(request.is_session_new());
+
+        let notification =
+            IncomingHttpMessage::parse(r#"{"jsonrpc":"2.0","method":"initialized"}"#.to_string())
+                .unwrap();
+        assert!(notification.is_notification());
+        assert!(!notification.requires_session_id());
+
+        let response = IncomingHttpMessage::parse(
+            r#"{"jsonrpc":"2.0","id":99,"result":{"ok":true}}"#.to_string(),
+        )
+        .unwrap();
+        assert!(response.is_response());
+        assert!(response.requires_session_id());
+    }
+
+    #[test]
+    fn incoming_http_message_parse_rejects_batch_and_invalid_json() {
+        let batch = IncomingHttpMessage::parse(r#"[{"jsonrpc":"2.0"}]"#.to_string()).unwrap_err();
+        assert!(matches!(
+            batch,
+            HttpTransportError::NotImplemented("batch JSON-RPC requests are not supported")
+        ));
+
+        let invalid = IncomingHttpMessage::parse("{".to_string()).unwrap_err();
+        assert!(matches!(
+            invalid,
+            HttpTransportError::BadRequest("invalid JSON-RPC payload")
+        ));
+    }
+
+    #[test]
+    fn incoming_http_message_session_id_helpers_handle_valid_and_invalid_values() {
+        let message = IncomingHttpMessage::parse(
+            r#"{"jsonrpc":"2.0","id":1,"method":"session/prompt","params":{"sessionId":"session-1"}}"#
+                .to_string(),
+        )
+        .unwrap();
+        assert_eq!(message.params_session_id().unwrap(), Some(session_id()));
+
+        let invalid = IncomingHttpMessage::parse(
+            r#"{"jsonrpc":"2.0","id":1,"method":"session/prompt","params":{"sessionId":"bad.session"}}"#
+                .to_string(),
+        )
+        .unwrap();
+        assert!(matches!(
+            invalid.params_session_id(),
+            Err(HttpTransportError::BadRequest(
+                "invalid sessionId in request body"
+            ))
+        ));
+    }
+
+    #[test]
+    fn outgoing_http_message_extracts_session_ids() {
+        let outbound = OutgoingHttpMessage::parse(
+            r#"{"jsonrpc":"2.0","id":1,"params":{"sessionId":"session-1"}}"#,
+        )
+        .unwrap();
+        assert_eq!(outbound.params_session_id(), Some(session_id()));
+
+        let response = OutgoingHttpMessage::parse(
+            r#"{"jsonrpc":"2.0","id":2,"result":{"sessionId":"session-1"}}"#,
+        )
+        .unwrap();
+        assert_eq!(response.result_session_id(), Some(session_id()));
+    }
+
+    #[test]
+    fn header_validators_enforce_content_negotiation() {
+        let valid_post = post_headers();
+        assert!(validate_post_headers(&valid_post).is_ok());
+
+        let mut bad_content_type = valid_post.clone();
+        bad_content_type.insert(CONTENT_TYPE, HeaderValue::from_static("text/plain"));
+        assert!(matches!(
+            validate_post_headers(&bad_content_type),
+            Err(HttpTransportError::UnsupportedMediaType(
+                "Content-Type must be application/json"
+            ))
+        ));
+
+        let mut bad_accept = HeaderMap::new();
+        bad_accept.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        bad_accept.insert(ACCEPT, HeaderValue::from_static("application/json"));
+        assert!(matches!(
+            validate_post_headers(&bad_accept),
+            Err(HttpTransportError::NotAcceptable(
+                "Accept must include application/json and text/event-stream"
+            ))
+        ));
+
+        let valid_get = get_headers();
+        assert!(validate_get_headers(&valid_get).is_ok());
+
+        let mut invalid_get = HeaderMap::new();
+        invalid_get.insert(ACCEPT, HeaderValue::from_static("application/json"));
+        assert!(matches!(
+            validate_get_headers(&invalid_get),
+            Err(HttpTransportError::NotAcceptable(
+                "Accept must include text/event-stream"
+            ))
+        ));
+    }
+
+    #[test]
+    fn validate_http_context_enforces_connection_and_session_rules() {
+        let initialize = IncomingHttpMessage::parse(
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#
+                .to_string(),
+        )
+        .unwrap();
+        let connection_id = AcpConnectionId::new();
+        let session_id = session_id();
+
+        assert!(validate_http_context(&initialize, None, None).is_ok());
+        assert!(matches!(
+            validate_http_context(&initialize, Some(&connection_id), None),
+            Err(HttpTransportError::BadRequest(
+                "initialize must not include Acp-Connection-Id"
+            ))
+        ));
+
+        let initialized =
+            IncomingHttpMessage::parse(r#"{"jsonrpc":"2.0","method":"initialized"}"#.to_string())
+                .unwrap();
+        assert!(matches!(
+            validate_http_context(&initialized, None, None),
+            Err(HttpTransportError::BadRequest(
+                "missing Acp-Connection-Id header"
+            ))
+        ));
+
+        let prompt = IncomingHttpMessage::parse(
+            r#"{"jsonrpc":"2.0","id":2,"method":"session/prompt","params":{"sessionId":"session-1"}}"#
+                .to_string(),
+        )
+        .unwrap();
+        assert!(matches!(
+            validate_http_context(&prompt, Some(&connection_id), None),
+            Err(HttpTransportError::BadRequest(
+                "missing Acp-Session-Id header"
+            ))
+        ));
+
+        let mismatched = IncomingHttpMessage::parse(
+            r#"{"jsonrpc":"2.0","id":2,"method":"session/prompt","params":{"sessionId":"session-2"}}"#
+                .to_string(),
+        )
+        .unwrap();
+        assert!(matches!(
+            validate_http_context(&mismatched, Some(&connection_id), Some(&session_id)),
+            Err(HttpTransportError::BadRequest(
+                "Acp-Session-Id header does not match request body sessionId"
+            ))
+        ));
+    }
+
+    #[test]
+    fn header_parsers_and_websocket_detection_handle_valid_and_invalid_values() {
+        let connection_id = AcpConnectionId::new();
+        let session_id = session_id();
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            ACP_CONNECTION_ID_HEADER,
+            HeaderValue::from_str(&connection_id.to_string()).unwrap(),
+        );
+        headers.insert(
+            ACP_SESSION_ID_HEADER,
+            HeaderValue::from_str(session_id.as_str()).unwrap(),
+        );
+        headers.insert("upgrade", HeaderValue::from_static("websocket"));
+
+        assert_eq!(
+            parse_connection_id_header(&headers).unwrap(),
+            Some(connection_id.clone())
+        );
+        assert_eq!(parse_session_id_header(&headers).unwrap(), Some(session_id));
+        assert!(is_websocket_request(&headers));
+
+        headers.insert(
+            ACP_CONNECTION_ID_HEADER,
+            HeaderValue::from_static("not-a-uuid"),
+        );
+        assert!(matches!(
+            parse_connection_id_header(&headers),
+            Err(HttpTransportError::BadRequest(
+                "invalid Acp-Connection-Id header"
+            ))
+        ));
+    }
+
+    #[tokio::test]
+    async fn http_post_returns_accepted_for_notifications() {
+        let (state, mut manager_rx) = test_state();
+        let connection_id = AcpConnectionId::new();
+        let expected_connection_id = connection_id.clone();
+
+        tokio::spawn(async move {
+            match manager_rx.recv().await.unwrap() {
+                ManagerRequest::HttpPost {
+                    connection_id: Some(actual_connection_id),
+                    session_id: None,
+                    message,
+                    response,
+                    ..
+                } => {
+                    assert_eq!(actual_connection_id, expected_connection_id);
+                    assert!(message.is_notification());
+                    let _ = response.send(Ok(HttpPostOutcome::Accepted));
+                }
+                _ => panic!("unexpected manager request"),
+            }
+        });
+
+        let mut headers = post_headers();
+        headers.insert(
+            ACP_CONNECTION_ID_HEADER,
+            HeaderValue::from_str(&connection_id.to_string()).unwrap(),
+        );
+
+        let response = http_post(
+            headers,
+            state,
+            r#"{"jsonrpc":"2.0","method":"initialized"}"#.to_string(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+    }
+
+    #[tokio::test]
+    async fn http_post_returns_buffered_sse_with_session_headers() {
+        let (state, mut manager_rx) = test_state();
+        let connection_id = AcpConnectionId::new();
+        let session_id = session_id();
+        let event = json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "result": { "sessionId": session_id.as_str() }
+        });
+        let expected_event = event.clone();
+
+        let expected_connection_id = connection_id.clone();
+        let expected_session_id = session_id.clone();
+        tokio::spawn(async move {
+            match manager_rx.recv().await.unwrap() {
+                ManagerRequest::HttpPost {
+                    connection_id: Some(actual_connection_id),
+                    session_id: None,
+                    message,
+                    response,
+                    ..
+                } => {
+                    assert_eq!(actual_connection_id, expected_connection_id.clone());
+                    assert!(message.is_session_new());
+                    let _ = response.send(Ok(HttpPostOutcome::Buffered {
+                        connection_id: expected_connection_id,
+                        session_id: Some(expected_session_id),
+                        events: vec![SseFrame::Json(event.to_string())],
+                    }));
+                }
+                _ => panic!("unexpected manager request"),
+            }
+        });
+
+        let mut headers = post_headers();
+        headers.insert(
+            ACP_CONNECTION_ID_HEADER,
+            HeaderValue::from_str(&connection_id.to_string()).unwrap(),
+        );
+
+        let response = http_post(
+            headers,
+            state,
+            r#"{"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":".","mcpServers":[]}}"#
+                .to_string(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(ACP_CONNECTION_ID_HEADER).unwrap(),
+            HeaderValue::from_str(&connection_id.to_string()).unwrap()
+        );
+        assert_eq!(
+            response.headers().get(ACP_SESSION_ID_HEADER).unwrap(),
+            HeaderValue::from_str(session_id.as_str()).unwrap()
+        );
+        assert_eq!(json_event_body(response).await, vec![expected_event]);
+    }
+
+    #[tokio::test]
+    async fn http_get_and_delete_round_trip_through_manager() {
+        let (state, mut manager_rx) = test_state();
+        let connection_id = AcpConnectionId::new();
+        let session_id = session_id();
+        let expected_connection_id = connection_id.clone();
+        let expected_session_id = session_id.clone();
+
+        tokio::spawn(async move {
+            match manager_rx.recv().await.unwrap() {
+                ManagerRequest::HttpGet {
+                    connection_id: actual_connection_id,
+                    session_id: actual_session_id,
+                    response,
+                } => {
+                    assert_eq!(actual_connection_id, expected_connection_id.clone());
+                    assert_eq!(actual_session_id, expected_session_id);
+                    let (stream_tx, stream_rx) = mpsc::unbounded_channel();
+                    let _ = stream_tx.send(SseFrame::Json(
+                        json!({
+                            "jsonrpc": "2.0",
+                            "method": "session/update",
+                            "params": { "sessionId": "session-1" }
+                        })
+                        .to_string(),
+                    ));
+                    drop(stream_tx);
+                    let _ = response.send(Ok(stream_rx));
+                }
+                _ => panic!("unexpected manager request"),
+            }
+            match manager_rx.recv().await.unwrap() {
+                ManagerRequest::HttpDelete {
+                    connection_id: actual_connection_id,
+                    response,
+                } => {
+                    assert_eq!(actual_connection_id, expected_connection_id);
+                    let _ = response.send(Ok(()));
+                }
+                _ => panic!("unexpected manager request"),
+            }
+        });
+
+        let mut headers = get_headers();
+        headers.insert(
+            ACP_CONNECTION_ID_HEADER,
+            HeaderValue::from_str(&connection_id.to_string()).unwrap(),
+        );
+        headers.insert(
+            ACP_SESSION_ID_HEADER,
+            HeaderValue::from_str(session_id.as_str()).unwrap(),
+        );
+
+        let response = http_get(headers, state.clone()).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(X_ACCEL_BUFFERING_HEADER).unwrap(),
+            HeaderValue::from_static("no")
+        );
+        assert_eq!(
+            json_event_body(response).await,
+            vec![json!({
+                "jsonrpc": "2.0",
+                "method": "session/update",
+                "params": { "sessionId": "session-1" }
+            })]
+        );
+
+        let mut delete_headers = HeaderMap::new();
+        delete_headers.insert(
+            ACP_CONNECTION_ID_HEADER,
+            HeaderValue::from_str(&connection_id.to_string()).unwrap(),
+        );
+
+        let response = http_delete(delete_headers, state).await.unwrap();
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+    }
+
+    #[tokio::test]
+    async fn get_rejects_incomplete_websocket_upgrade() {
+        let (state, _manager_rx) = test_state();
+        let request = HttpRequest::builder()
+            .method("GET")
+            .uri("/acp")
+            .header("upgrade", "websocket")
+            .body(Body::empty())
+            .unwrap();
+
+        let response = get(State(state), request).await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn process_manager_request_rejects_invalid_or_unknown_http_targets() {
+        let nats_client = AdvancedMockNatsClient::new();
+        let js_client = MockJs::new();
+        let config = test_config();
+        let mut http_connections = HashMap::new();
+        let mut websocket_handles = Vec::new();
+        let (_shutdown_tx, shutdown_rx) = watch::channel(false);
+
+        let (post_response_tx, post_response_rx) = oneshot::channel();
+        let post_message =
+            IncomingHttpMessage::parse(r#"{"jsonrpc":"2.0","method":"initialized"}"#.to_string())
+                .unwrap();
+        process_manager_request(
+            ManagerRequest::HttpPost {
+                connection_id: None,
+                session_id: None,
+                message: post_message,
+                response: post_response_tx,
+                shutdown_rx: shutdown_rx.clone(),
+            },
+            &mut http_connections,
+            &mut websocket_handles,
+            &nats_client,
+            &js_client,
+            &config,
+        )
+        .await;
+        assert!(matches!(
+            post_response_rx.await.unwrap(),
+            Err(HttpTransportError::BadRequest(
+                "missing Acp-Connection-Id header"
+            ))
+        ));
+
+        let unknown_connection_id = AcpConnectionId::new();
+        let (get_response_tx, get_response_rx) = oneshot::channel();
+        process_manager_request(
+            ManagerRequest::HttpGet {
+                connection_id: unknown_connection_id.clone(),
+                session_id: session_id(),
+                response: get_response_tx,
+            },
+            &mut http_connections,
+            &mut websocket_handles,
+            &nats_client,
+            &js_client,
+            &config,
+        )
+        .await;
+        assert!(matches!(
+            get_response_rx.await.unwrap(),
+            Err(HttpTransportError::NotFound("unknown ACP connection"))
+        ));
+
+        let (delete_response_tx, delete_response_rx) = oneshot::channel();
+        process_manager_request(
+            ManagerRequest::HttpDelete {
+                connection_id: unknown_connection_id,
+                response: delete_response_tx,
+            },
+            &mut http_connections,
+            &mut websocket_handles,
+            &nats_client,
+            &js_client,
+            &config,
+        )
+        .await;
+        assert!(matches!(
+            delete_response_rx.await.unwrap(),
+            Err(HttpTransportError::NotFound("unknown ACP connection"))
+        ));
     }
 }

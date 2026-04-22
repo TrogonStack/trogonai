@@ -49,6 +49,7 @@ impl std::error::Error for AcpConnectionIdError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::error::Error as _;
 
     #[test]
     fn new_generates_non_empty_id() {
@@ -65,5 +66,22 @@ mod tests {
     #[test]
     fn parse_rejects_invalid_uuid() {
         assert!(AcpConnectionId::parse("not-a-uuid").is_err());
+    }
+
+    #[test]
+    fn default_generates_non_empty_id() {
+        assert!(!AcpConnectionId::default().to_string().is_empty());
+    }
+
+    #[test]
+    fn parse_error_displays_context() {
+        let error = AcpConnectionId::parse("not-a-uuid").unwrap_err();
+        assert!(error.to_string().contains("invalid ACP connection id"));
+    }
+
+    #[test]
+    fn parse_error_exposes_uuid_source() {
+        let error = AcpConnectionId::parse("not-a-uuid").unwrap_err();
+        assert!(error.source().is_some());
     }
 }
