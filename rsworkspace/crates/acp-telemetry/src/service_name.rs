@@ -6,6 +6,8 @@ pub enum ServiceName {
     AcpNatsStdio,
     AcpNatsWs,
     TrogonGateway,
+    TrogonPrActor,
+    TrogonRouter,
     TrogonSourceDiscord,
     TrogonSourceGithub,
     TrogonSourceGitlab,
@@ -20,6 +22,8 @@ impl ServiceName {
             Self::AcpNatsStdio => "acp-nats-stdio",
             Self::AcpNatsWs => "acp-nats-ws",
             Self::TrogonGateway => "trogon-gateway",
+            Self::TrogonPrActor => "trogon-pr-actor",
+            Self::TrogonRouter => "trogon-router",
             Self::TrogonSourceDiscord => "trogon-source-discord",
             Self::TrogonSourceGithub => "trogon-source-github",
             Self::TrogonSourceGitlab => "trogon-source-gitlab",
@@ -45,6 +49,8 @@ mod tests {
         assert_eq!(ServiceName::AcpNatsStdio.as_str(), "acp-nats-stdio");
         assert_eq!(ServiceName::AcpNatsWs.as_str(), "acp-nats-ws");
         assert_eq!(ServiceName::TrogonGateway.as_str(), "trogon-gateway");
+        assert_eq!(ServiceName::TrogonPrActor.as_str(), "trogon-pr-actor");
+        assert_eq!(ServiceName::TrogonRouter.as_str(), "trogon-router");
         assert_eq!(
             ServiceName::TrogonSourceDiscord.as_str(),
             "trogon-source-discord"
@@ -76,6 +82,8 @@ mod tests {
         assert_eq!(format!("{}", ServiceName::AcpNatsStdio), "acp-nats-stdio");
         assert_eq!(format!("{}", ServiceName::AcpNatsWs), "acp-nats-ws");
         assert_eq!(format!("{}", ServiceName::TrogonGateway), "trogon-gateway");
+        assert_eq!(format!("{}", ServiceName::TrogonPrActor), "trogon-pr-actor");
+        assert_eq!(format!("{}", ServiceName::TrogonRouter), "trogon-router");
         assert_eq!(
             format!("{}", ServiceName::TrogonSourceDiscord),
             "trogon-source-discord"
