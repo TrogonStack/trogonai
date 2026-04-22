@@ -22,8 +22,10 @@ use tokio::sync::{mpsc, oneshot, watch};
 use tracing::{error, info, warn};
 use trogon_std::time::SystemClock;
 
-type SseSender = mpsc::UnboundedSender<SseFrame>;
-type SseReceiver = mpsc::UnboundedReceiver<SseFrame>;
+const HTTP_CHANNEL_CAPACITY: usize = 64;
+
+type SseSender = mpsc::Sender<SseFrame>;
+type SseReceiver = mpsc::Receiver<SseFrame>;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -274,17 +276,61 @@ enum LiveFrameOutcome {
     Drop,
 }
 
+enum ListenerDispatch {
+    Missing,
+    Delivered,
+    Dropped,
+}
+
+fn try_send_sse_frame(sender: &SseSender, frame: &SseFrame) -> bool {
+    match sender.try_send(frame.clone()) {
+        Ok(()) => true,
+        Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => false,
+        Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => false,
+    }
+}
+
 fn dispatch_to_get_listeners(
     frame: &SseFrame,
     session_id: &acp_nats::AcpSessionId,
     get_listeners: &mut HashMap<acp_nats::AcpSessionId, Vec<SseSender>>,
-) -> bool {
-    let Some(listeners) = get_listeners.get_mut(session_id) else {
-        return false;
+) -> ListenerDispatch {
+    let Some(_) = get_listeners.get(session_id) else {
+        return ListenerDispatch::Missing;
     };
 
-    listeners.retain(|listener| listener.send(frame.clone()).is_ok());
-    !listeners.is_empty()
+    let (outcome, remove_session) = {
+        let listeners = get_listeners
+            .get_mut(session_id)
+            .expect("session listeners must exist after presence check");
+        let mut delivered = false;
+        listeners.retain(|listener| match listener.try_send(frame.clone()) {
+            Ok(()) => {
+                delivered = true;
+                true
+            }
+            Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                warn!(session_id = %session_id, "Dropping stalled HTTP SSE listener");
+                false
+            }
+            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => false,
+        });
+
+        (
+            if delivered {
+                ListenerDispatch::Delivered
+            } else {
+                ListenerDispatch::Dropped
+            },
+            listeners.is_empty(),
+        )
+    };
+
+    if remove_session {
+        get_listeners.remove(session_id);
+    }
+
+    outcome
 }
 
 fn route_live_frame(
@@ -296,30 +342,36 @@ fn route_live_frame(
     get_listeners: &mut HashMap<acp_nats::AcpSessionId, Vec<SseSender>>,
 ) -> LiveFrameOutcome {
     if parsed.and_then(|message| message.id.as_ref()) == Some(request_id) {
-        return if sender.send(frame.clone()).is_ok() {
+        return if try_send_sse_frame(sender, frame) {
             LiveFrameOutcome::Clear
         } else {
+            warn!(request_id = ?request_id, "Dropping stalled HTTP POST response stream");
             LiveFrameOutcome::Drop
         };
     }
 
     if let Some(frame_session_id) = parsed.and_then(OutgoingHttpMessage::params_session_id) {
         if request_session_id == Some(&frame_session_id) {
-            return if sender.send(frame.clone()).is_ok() {
+            return if try_send_sse_frame(sender, frame) {
                 LiveFrameOutcome::Keep
             } else {
+                warn!(request_id = ?request_id, session_id = %frame_session_id, "Dropping stalled HTTP POST response stream");
                 LiveFrameOutcome::Drop
             };
         }
 
-        if dispatch_to_get_listeners(frame, &frame_session_id, get_listeners) {
-            return LiveFrameOutcome::Keep;
+        match dispatch_to_get_listeners(frame, &frame_session_id, get_listeners) {
+            ListenerDispatch::Delivered | ListenerDispatch::Dropped => {
+                return LiveFrameOutcome::Keep;
+            }
+            ListenerDispatch::Missing => {}
         }
     }
 
-    if sender.send(frame.clone()).is_ok() {
+    if try_send_sse_frame(sender, frame) {
         LiveFrameOutcome::Keep
     } else {
+        warn!(request_id = ?request_id, "Dropping stalled HTTP POST response stream");
         LiveFrameOutcome::Drop
     }
 }
@@ -736,7 +788,7 @@ pub async fn run_http_connection<N, J>(
     let connection = Rc::new(connection);
     spawn_notification_forwarder(connection.clone(), notification_rx);
 
-    let (input_tx, mut input_rx) = mpsc::unbounded_channel::<String>();
+    let (input_tx, mut input_rx) = mpsc::channel::<String>(HTTP_CHANNEL_CAPACITY);
     let input_task = tokio::task::spawn_local(async move {
         while let Some(message) = input_rx.recv().await {
             if input_write.write_all(message.as_bytes()).await.is_err() {
@@ -748,7 +800,7 @@ pub async fn run_http_connection<N, J>(
         }
     });
 
-    let (output_tx, mut output_rx) = mpsc::unbounded_channel::<String>();
+    let (output_tx, mut output_rx) = mpsc::channel::<String>(HTTP_CHANNEL_CAPACITY);
     let output_task = tokio::task::spawn_local(async move {
         let mut reader = tokio::io::BufReader::new(&mut output_read);
         let mut line = String::new();
@@ -761,7 +813,7 @@ pub async fn run_http_connection<N, J>(
                     if trimmed.is_empty() {
                         continue;
                     }
-                    if output_tx.send(trimmed.to_string()).is_err() {
+                    if output_tx.send(trimmed.to_string()).await.is_err() {
                         break;
                     }
                 }
@@ -807,7 +859,14 @@ pub async fn run_http_connection<N, J>(
                                     events: Vec::new(),
                                     response,
                                 });
-                                let _ = input_tx.send(message.raw);
+                                if input_tx.try_send(message.raw).is_err()
+                                    && let Some(PendingRequest::Buffered { response, .. }) =
+                                        pending_request.take()
+                                {
+                                    let _ = response.send(Err(HttpTransportError::Internal(
+                                        "ACP runtime input queue is full",
+                                    )));
+                                }
                                 continue;
                             }
 
@@ -815,13 +874,19 @@ pub async fn run_http_connection<N, J>(
                                 sessions.insert(session_id);
                             }
 
-                            let (stream_tx, stream_rx) = mpsc::unbounded_channel();
+                            let (stream_tx, stream_rx) = mpsc::channel(HTTP_CHANNEL_CAPACITY);
                             pending_request = Some(PendingRequest::Live {
                                 request_id: message.id.clone().expect("request must have id"),
                                 session_id: session_id.clone(),
                                 sender: stream_tx,
                             });
-                            let _ = input_tx.send(message.raw);
+                            if input_tx.try_send(message.raw).is_err() {
+                                pending_request = None;
+                                let _ = response.send(Err(HttpTransportError::Internal(
+                                    "ACP runtime input queue is full",
+                                )));
+                                continue;
+                            }
                             let _ = response.send(Ok(HttpPostOutcome::Live {
                                 connection_id: connection_id.clone(),
                                 session_id,
@@ -834,9 +899,9 @@ pub async fn run_http_connection<N, J>(
                             sessions.insert(session_id);
                         }
 
-                        if input_tx.send(message.raw).is_err() {
+                        if input_tx.try_send(message.raw).is_err() {
                             let _ = response.send(Err(HttpTransportError::Internal(
-                                "failed to forward HTTP payload into ACP runtime",
+                                "ACP runtime input queue is full",
                             )));
                             continue;
                         }
@@ -851,7 +916,7 @@ pub async fn run_http_connection<N, J>(
                             continue;
                         }
 
-                        let (stream_tx, stream_rx) = mpsc::unbounded_channel();
+                        let (stream_tx, stream_rx) = mpsc::channel(HTTP_CHANNEL_CAPACITY);
                         get_listeners.entry(session_id).or_default().push(stream_tx);
                         let _ = response.send(Ok(stream_rx));
                     }
@@ -1330,8 +1395,8 @@ mod tests {
         .unwrap();
         let request_id = RequestId::Number(1);
         let request_session_id = session_id();
-        let (live_tx, mut live_rx) = mpsc::unbounded_channel();
-        let (get_tx, mut get_rx) = mpsc::unbounded_channel();
+        let (live_tx, mut live_rx) = mpsc::channel(HTTP_CHANNEL_CAPACITY);
+        let (get_tx, mut get_rx) = mpsc::channel(HTTP_CHANNEL_CAPACITY);
         let mut get_listeners = HashMap::new();
         get_listeners.insert(request_session_id.clone(), vec![get_tx]);
 
@@ -1367,8 +1432,8 @@ mod tests {
         let request_id = RequestId::Number(1);
         let request_session_id = session_id();
         let other_session_id = acp_nats::AcpSessionId::new("session-2").unwrap();
-        let (live_tx, mut live_rx) = mpsc::unbounded_channel();
-        let (get_tx, mut get_rx) = mpsc::unbounded_channel();
+        let (live_tx, mut live_rx) = mpsc::channel(HTTP_CHANNEL_CAPACITY);
+        let (get_tx, mut get_rx) = mpsc::channel(HTTP_CHANNEL_CAPACITY);
         let mut get_listeners = HashMap::new();
         get_listeners.insert(other_session_id, vec![get_tx]);
 
@@ -1389,6 +1454,30 @@ mod tests {
         match get_rx.try_recv().unwrap() {
             SseFrame::Json(json) => assert!(json.contains(r#""sessionId":"session-2""#)),
         }
+    }
+
+    #[test]
+    fn dispatch_to_get_listeners_drops_full_listener() {
+        let session_id = session_id();
+        let mut get_listeners = HashMap::new();
+        let (listener_tx, mut listener_rx) = mpsc::channel(1);
+        listener_tx
+            .try_send(SseFrame::Json(
+                r#"{"jsonrpc":"2.0","method":"session/update"}"#.to_string(),
+            ))
+            .unwrap();
+        get_listeners.insert(session_id.clone(), vec![listener_tx]);
+
+        let frame = SseFrame::Json(r#"{"jsonrpc":"2.0","method":"session/update"}"#.to_string());
+        let outcome = dispatch_to_get_listeners(&frame, &session_id, &mut get_listeners);
+
+        assert!(matches!(outcome, ListenerDispatch::Dropped));
+        assert!(!get_listeners.contains_key(&session_id));
+        assert!(matches!(listener_rx.try_recv(), Ok(SseFrame::Json(_))));
+        assert!(matches!(
+            listener_rx.try_recv(),
+            Err(tokio::sync::mpsc::error::TryRecvError::Disconnected)
+        ));
     }
 
     #[test]
@@ -1646,8 +1735,8 @@ mod tests {
                 } => {
                     assert_eq!(actual_connection_id, expected_connection_id.clone());
                     assert_eq!(actual_session_id, expected_session_id);
-                    let (stream_tx, stream_rx) = mpsc::unbounded_channel();
-                    let _ = stream_tx.send(SseFrame::Json(
+                    let (stream_tx, stream_rx) = mpsc::channel(HTTP_CHANNEL_CAPACITY);
+                    let _ = stream_tx.try_send(SseFrame::Json(
                         json!({
                             "jsonrpc": "2.0",
                             "method": "session/update",
