@@ -1,6 +1,6 @@
 # ACP NATS WebSocket
 
-Translates [Agent Client Protocol](https://agentclientprotocol.com) (ACP) messages between WebSocket connections and [NATS](https://nats.io), letting browser-based UIs and remote clients talk to distributed agent backends over a standard WebSocket endpoint.
+Translates [Agent Client Protocol](https://agentclientprotocol.com) (ACP) messages between WebSocket connections and [NATS](https://nats.io), letting browser-based UIs and remote clients talk to distributed agent backends over the draft remote transport's WebSocket profile.
 
 For managed NATS infrastructure in production, we recommend <a href="https://synadia.com"><img src="../acp-nats-stdio/assets/synadia-logo.png" alt="Synadia" width="20" style="vertical-align: middle;"> Synadia</a>.
 
@@ -14,7 +14,7 @@ graph LR
 
 ## Features
 
-- Multiple concurrent WebSocket connections, each with its own ACP session
+- Multiple concurrent WebSocket connections
 - Bidirectional ACP bridge with request forwarding
 - OpenTelemetry integration (logs, metrics, traces)
 - Graceful shutdown (SIGINT/SIGTERM) with per-connection drain
@@ -33,8 +33,10 @@ cargo build --release -p acp-nats-ws
 Connect with any WebSocket client:
 
 ```bash
-websocat ws://127.0.0.1:8080/ws
+websocat ws://127.0.0.1:8080/acp
 ```
+
+The WebSocket upgrade response includes `Acp-Connection-Id`. A legacy `/ws` alias remains available for older clients.
 
 ## Configuration
 

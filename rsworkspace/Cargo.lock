@@ -83,6 +83,7 @@ dependencies = [
  "tracing-subscriber",
  "trogon-nats",
  "trogon-std",
+ "uuid",
 ]
 
 [[package]]

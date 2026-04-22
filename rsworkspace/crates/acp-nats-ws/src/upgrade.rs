@@ -1,10 +1,14 @@
+use crate::acp_connection_id::AcpConnectionId;
+use crate::constants::ACP_CONNECTION_ID_HEADER;
 use axum::extract::State;
 use axum::extract::ws::{WebSocket, WebSocketUpgrade};
+use axum::http::HeaderValue;
 use axum::response::Response;
 use tokio::sync::{mpsc, watch};
 use tracing::error;
 
 pub struct ConnectionRequest {
+    pub connection_id: AcpConnectionId,
     pub socket: WebSocket,
     pub shutdown_rx: watch::Receiver<bool>,
 }
@@ -16,11 +20,15 @@ pub struct UpgradeState {
 }
 
 pub async fn handle(ws: WebSocketUpgrade, State(state): State<UpgradeState>) -> Response {
+    let connection_id = AcpConnectionId::new();
+    let response_header = HeaderValue::from_str(&connection_id.to_string())
+        .expect("generated ACP connection id must be a valid header value");
     let shutdown_rx = state.shutdown_tx.subscribe();
-    ws.on_upgrade(move |socket| async move {
+    let mut response = ws.on_upgrade(move |socket| async move {
         if state
             .conn_tx
             .send(ConnectionRequest {
+                connection_id,
                 socket,
                 shutdown_rx,
             })
@@ -28,12 +36,17 @@ pub async fn handle(ws: WebSocketUpgrade, State(state): State<UpgradeState>) -> 
         {
             error!("Connection thread is gone; dropping WebSocket");
         }
-    })
+    });
+    response
+        .headers_mut()
+        .insert(ACP_CONNECTION_ID_HEADER, response_header);
+    response
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::constants::{ACP_CONNECTION_ID_HEADER, ACP_ENDPOINT};
     use std::time::Duration;
     use tokio::net::TcpListener;
     use tokio_tungstenite::connect_async;
@@ -49,7 +62,7 @@ mod tests {
         };
 
         let app = axum::Router::new()
-            .route("/ws", axum::routing::get(handle))
+            .route(ACP_ENDPOINT, axum::routing::get(handle))
             .with_state(state);
 
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -58,8 +71,15 @@ mod tests {
             axum::serve(listener, app).await.unwrap();
         });
 
-        let url = format!("ws://{}/ws", addr);
-        let (_ws, _) = connect_async(&url).await.unwrap();
+        let url = format!("ws://{}{}", addr, ACP_ENDPOINT);
+        let (_ws, response) = connect_async(&url).await.unwrap();
+        let connection_id = response
+            .headers()
+            .get(ACP_CONNECTION_ID_HEADER)
+            .expect("upgrade response should include Acp-Connection-Id")
+            .to_str()
+            .unwrap()
+            .to_string();
 
         let req = tokio::time::timeout(Duration::from_secs(2), conn_rx.recv())
             .await
@@ -67,6 +87,7 @@ mod tests {
             .expect("channel closed");
 
         assert!(!*req.shutdown_rx.borrow());
+        assert_eq!(req.connection_id.to_string(), connection_id);
     }
 
     #[tokio::test]
@@ -80,7 +101,7 @@ mod tests {
         };
 
         let app = axum::Router::new()
-            .route("/ws", axum::routing::get(handle))
+            .route(ACP_ENDPOINT, axum::routing::get(handle))
             .with_state(state);
 
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -91,7 +112,7 @@ mod tests {
 
         drop(conn_rx);
 
-        let url = format!("ws://{}/ws", addr);
+        let url = format!("ws://{}{}", addr, ACP_ENDPOINT);
         let (_ws, _) = connect_async(&url).await.unwrap();
 
         tokio::time::sleep(Duration::from_millis(100)).await;

@@ -9,10 +9,12 @@ use tokio::sync::watch;
 use tracing::{error, info, warn};
 use trogon_std::time::SystemClock;
 
+use crate::acp_connection_id::AcpConnectionId;
 use crate::constants::DUPLEX_BUFFER_SIZE;
 
 /// Handles a single WebSocket connection by bridging it to NATS via ACP.
 pub async fn handle<N, J>(
+    connection_id: AcpConnectionId,
     socket: WebSocket,
     nats_client: N,
     js_client: J,
@@ -68,7 +70,7 @@ pub async fn handle<N, J>(
 
     let mut io_task = tokio::task::spawn_local(io_task);
 
-    info!("WebSocket connection established, ACP bridge running");
+    info!(%connection_id, "WebSocket connection established, ACP bridge running");
 
     let shutdown_result = tokio::select! {
         result = &mut client_task => {
@@ -118,8 +120,8 @@ pub async fn handle<N, J>(
     }
 
     match shutdown_result {
-        Ok(()) => info!("WebSocket connection closed cleanly"),
-        Err(e) => warn!(error = e, "WebSocket connection closed with error"),
+        Ok(()) => info!(%connection_id, "WebSocket connection closed cleanly"),
+        Err(e) => warn!(%connection_id, error = e, "WebSocket connection closed with error"),
     }
 }
 
@@ -130,7 +132,7 @@ async fn run_recv_pump(
     while let Some(Ok(msg)) = ws_receiver.next().await {
         let bytes = match msg {
             Message::Text(t) => bytes::Bytes::from(t),
-            Message::Binary(b) => b,
+            Message::Binary(_) => continue,
             Message::Close(_) => break,
             _ => continue,
         };
@@ -196,6 +198,8 @@ mod tests {
     use tokio_tungstenite::connect_async;
     use tokio_tungstenite::tungstenite::Message as TungsteniteMessage;
 
+    use crate::constants::ACP_ENDPOINT;
+
     #[derive(Clone)]
     struct EchoState;
 
@@ -213,12 +217,12 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let app = axum::Router::new()
-            .route("/ws", axum::routing::get(echo_handler))
+            .route(ACP_ENDPOINT, axum::routing::get(echo_handler))
             .with_state(EchoState);
         tokio::spawn(async move {
             axum::serve(listener, app).await.unwrap();
         });
-        format!("ws://{}/ws", addr)
+        format!("ws://{}{}", addr, ACP_ENDPOINT)
     }
 
     #[tokio::test]
@@ -243,6 +247,32 @@ mod tests {
                 TungsteniteMessage::Text(t) => assert_eq!(t, *expected),
                 other => panic!("expected Text('{expected}'), got {other:?}"),
             }
+        }
+    }
+
+    #[tokio::test]
+    async fn binary_messages_are_ignored() {
+        let url = start_echo_server().await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+
+        ws.send(TungsteniteMessage::Binary(bytes::Bytes::from_static(
+            b"ignored",
+        )))
+        .await
+        .unwrap();
+        ws.send(TungsteniteMessage::Text("kept".into()))
+            .await
+            .unwrap();
+
+        let msg = tokio::time::timeout(Duration::from_secs(2), ws.next())
+            .await
+            .expect("timeout")
+            .expect("stream ended")
+            .unwrap();
+
+        match msg {
+            TungsteniteMessage::Text(text) => assert_eq!(text, "kept"),
+            other => panic!("expected text frame, got {other:?}"),
         }
     }
 }

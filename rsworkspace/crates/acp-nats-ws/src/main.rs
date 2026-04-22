@@ -1,3 +1,4 @@
+mod acp_connection_id;
 mod config;
 mod connection;
 mod constants;
@@ -48,7 +49,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let app = trogon_std::telemetry::http::instrument_router(
         axum::Router::new()
-            .route("/ws", axum::routing::get(upgrade::handle))
+            .route(ACP_ENDPOINT, axum::routing::get(upgrade::handle))
+            .route(LEGACY_WS_ENDPOINT, axum::routing::get(upgrade::handle))
             .with_state(state),
     );
 
@@ -88,7 +90,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(coverage)]
 fn main() {}
 
-use constants::THREAD_NAME;
+use constants::{ACP_CONNECTION_ID_HEADER, ACP_ENDPOINT, LEGACY_WS_ENDPOINT, THREAD_NAME};
 
 /// Runs a single-threaded tokio runtime with a
 /// `LocalSet`. All WebSocket connections are processed here because the ACP
@@ -153,6 +155,7 @@ async fn process_connections<N, J>(
         let js = js_client.clone();
         let cfg = config.clone();
         conn_handles.push(tokio::task::spawn_local(connection::handle(
+            req.connection_id,
             req.socket,
             client,
             js,
@@ -259,7 +262,7 @@ mod tests {
         };
 
         let app = axum::Router::new()
-            .route("/ws", axum::routing::get(upgrade::handle))
+            .route(ACP_ENDPOINT, axum::routing::get(upgrade::handle))
             .with_state(state);
 
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -279,8 +282,9 @@ mod tests {
         nats_mock.set_response("acp.agent.initialize", nats_response.into());
 
         // Connect client
-        let ws_url = format!("ws://{}/ws", addr);
-        let (mut ws_stream, _) = connect_async(ws_url).await.unwrap();
+        let ws_url = format!("ws://{}{}", addr, ACP_ENDPOINT);
+        let (mut ws_stream, response) = connect_async(ws_url).await.unwrap();
+        assert!(response.headers().contains_key(ACP_CONNECTION_ID_HEADER));
 
         // Send initialize request
         let req =
@@ -349,7 +353,7 @@ mod tests {
         };
 
         let app = axum::Router::new()
-            .route("/ws", axum::routing::get(upgrade::handle))
+            .route(ACP_ENDPOINT, axum::routing::get(upgrade::handle))
             .with_state(state);
 
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -364,7 +368,7 @@ mod tests {
                 .unwrap();
         });
 
-        let ws_url = format!("ws://{}/ws", addr);
+        let ws_url = format!("ws://{}{}", addr, ACP_ENDPOINT);
         let (mut ws_stream, _) = connect_async(&ws_url).await.unwrap();
 
         let req =
