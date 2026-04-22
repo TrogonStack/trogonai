@@ -43,7 +43,7 @@ impl Decide for RemoveJobCommand {
     type DecideError = RemoveJobDecisionError;
 
     fn initial_state() -> JobCommandState {
-        JobCommandState::initial()
+        JobCommandState::initial_state()
     }
 
     fn evolve(state: JobCommandState, event: JobEvent) -> Result<JobCommandState, Self::EvolveError> {
