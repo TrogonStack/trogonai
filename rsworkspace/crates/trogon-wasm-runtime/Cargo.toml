@@ -1,0 +1,40 @@
+[package]
+name = "trogon-wasm-runtime"
+version = "0.1.0"
+edition = "2021"
+description = "ACP execution runtime backed by wasmtime — sandboxed terminals and filesystem per session"
+
+[lib]
+name = "trogon_wasm_runtime"
+path = "src/lib.rs"
+
+[[bin]]
+name = "trogon-wasm-runtime"
+path = "src/main.rs"
+test = false
+
+[dependencies]
+acp-nats = { workspace = true }
+acp-telemetry = { workspace = true }
+trogon-nats = { workspace = true }
+trogon-std = { workspace = true }
+agent-client-protocol = { workspace = true }
+async-nats = { workspace = true }
+tokio = { workspace = true, features = ["process", "fs"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+uuid = { workspace = true }
+bytes = { workspace = true }
+futures = { workspace = true }
+anyhow = "=1.0.98"
+wasmtime = { version = "=30.0.2", default-features = false, features = ["cranelift", "runtime", "async"] }
+wasmtime-wasi = { version = "=30.0.2" }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+wat = "=1.224.1"
+
+[lints]
+workspace = true
