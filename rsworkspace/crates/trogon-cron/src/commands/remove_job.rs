@@ -1,6 +1,6 @@
 use trogon_eventsourcing::{
-    CommandExecution, CommandResult, CommandSnapshots, Decide, Decision, FrequencySnapshot, NonEmpty, OccPolicy,
-    SnapshotRead, SnapshotWrite, StreamAppend, StreamCommand, StreamRead,
+    CommandExecution, CommandResult, CommandSnapshots, Decide, Decision, FrequencySnapshot, OccPolicy, SnapshotRead,
+    SnapshotWrite, StreamAppend, StreamCommand, StreamRead,
 };
 
 use super::JobState;
@@ -44,11 +44,9 @@ impl Decide for RemoveJobCommand {
             JobState::Missing => Err(RemoveJobDecisionError::JobNotFound {
                 id: command.stream_id().clone(),
             }),
-            JobState::PresentEnabled | JobState::PresentDisabled => {
-                Ok(Decision::Event(NonEmpty::one(JobEvent::JobRemoved(JobRemoved {
-                    id: command.stream_id().to_string(),
-                }))))
-            }
+            JobState::PresentEnabled | JobState::PresentDisabled => Ok(Decision::event(JobRemoved {
+                id: command.stream_id().to_string(),
+            })),
             JobState::Deleted => Err(RemoveJobDecisionError::JobDeleted {
                 id: command.stream_id().clone(),
             }),
@@ -122,9 +120,9 @@ mod tests {
         let decision = decide(&state, &command).unwrap();
         assert_eq!(
             decision,
-            Decision::Event(NonEmpty::one(JobEvent::JobRemoved(JobRemoved {
+            Decision::event(JobRemoved {
                 id: "backup".to_string(),
-            })))
+            })
         );
     }
 

@@ -749,23 +749,23 @@ mod tests {
         fn decide(state: &TestState, command: &Self) -> Result<Decision<TestEvent>, Self::DecideError> {
             match (state, command.action) {
                 (TestState::Missing, TestAction::Register) => {
-                    Ok(Decision::Event(NonEmpty::one(TestEvent::Registered {
+                    Ok(Decision::event(TestEvent::Registered {
                         id: command.id.clone(),
-                    })))
+                    }))
                 }
                 (TestState::Present { .. }, TestAction::Register) => Err(TestDecisionError::AlreadyRegistered),
                 (TestState::Present { enabled: false }, TestAction::Disable) => Err(TestDecisionError::AlreadyDisabled),
                 (TestState::Present { .. }, TestAction::Disable) => {
-                    Ok(Decision::Event(NonEmpty::one(TestEvent::StateChanged {
+                    Ok(Decision::event(TestEvent::StateChanged {
                         id: command.id.clone(),
                         enabled: false,
-                    })))
+                    }))
                 }
                 (TestState::Missing, TestAction::Disable | TestAction::Remove) => Err(TestDecisionError::Missing),
                 (TestState::Present { .. }, TestAction::Remove) => {
-                    Ok(Decision::Event(NonEmpty::one(TestEvent::Removed {
+                    Ok(Decision::event(TestEvent::Removed {
                         id: command.id.clone(),
-                    })))
+                    }))
                 }
             }
         }

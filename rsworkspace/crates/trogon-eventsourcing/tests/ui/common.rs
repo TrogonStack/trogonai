@@ -54,7 +54,7 @@ impl Decide for TestCommand {
 
     fn decide(state: &TestState, _command: &Self) -> Result<Decision<TestEvent>, Self::DecideError> {
         match state {
-            TestState::Missing => Ok(Decision::Event(NonEmpty::one(TestEvent::Registered))),
+            TestState::Missing => Ok(Decision::event(TestEvent::Registered)),
             TestState::Present => Err(TestDecisionError::AlreadyRegistered),
         }
     }

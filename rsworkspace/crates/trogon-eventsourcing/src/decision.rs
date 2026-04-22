@@ -91,6 +91,12 @@ pub enum Decision<E> {
     Event(NonEmpty<E>),
 }
 
+impl<E> Decision<E> {
+    pub fn event(event: impl Into<E>) -> Self {
+        Self::Event(NonEmpty::one(event.into()))
+    }
+}
+
 pub trait Decide: StreamCommand + Sized {
     type State;
     type Event;
@@ -139,11 +145,11 @@ mod tests {
         type DecideError = ();
 
         fn decide(state: &Self::State, _command: &Self) -> Result<Decision<Self::Event>, Self::DecideError> {
-            Ok(Decision::Event(NonEmpty::one(if *state == 1 {
+            Ok(Decision::event(if *state == 1 {
                 "created"
             } else {
                 "updated"
-            })))
+            }))
         }
     }
 
@@ -176,6 +182,6 @@ mod tests {
     #[test]
     fn decide_dispatches_to_trait_implementation() {
         let decision = decide(&1, &TestCommand).unwrap();
-        assert_eq!(decision, Decision::Event(NonEmpty::one("created")));
+        assert_eq!(decision, Decision::event("created"));
     }
 }
