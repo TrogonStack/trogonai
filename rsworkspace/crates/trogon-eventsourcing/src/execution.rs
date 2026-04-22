@@ -1,6 +1,6 @@
 use crate::{
-    CanonicalEventCodec, Decide, Decision, EventCodec, EventData, EventType, NonEmpty, RecordedEvent, Snapshot,
-    SnapshotSchema, SnapshotStoreConfig, StateMachine, StreamEvent,
+    CanonicalEventCodec, Decide, Decision, EventCodec, EventData, EventType, NonEmpty, OverrideWritePrecondition,
+    RecordedEvent, Snapshot, SnapshotSchema, SnapshotStoreConfig, StateMachine, StreamEvent,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -20,28 +20,17 @@ impl StreamState {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WritePrecondition {
-    Default(StreamState),
-    Require(StreamState),
-}
-
-pub const fn resolve_stream_state(
-    write_precondition: Option<StreamState>,
-    current_version: Option<u64>,
-    command_write_precondition: Option<WritePrecondition>,
-) -> StreamState {
-    if let Some(WritePrecondition::Require(stream_state)) = command_write_precondition {
+pub fn resolve_stream_state<C>(write_precondition: Option<StreamState>, current_version: Option<u64>) -> StreamState
+where
+    C: Decide,
+{
+    if let Some(stream_state) = C::REQUIRED_WRITE_PRECONDITION {
         return stream_state;
     }
 
     match write_precondition {
         Some(stream_state) => stream_state,
-        None => match command_write_precondition {
-            Some(WritePrecondition::Default(stream_state)) => stream_state,
-            Some(WritePrecondition::Require(stream_state)) => stream_state,
-            None => StreamState::from_current_version(current_version),
-        },
+        None => StreamState::from_current_version(current_version),
     }
 }
 
@@ -308,7 +297,10 @@ where
     }
 }
 
-impl<'a, E, C, S> CommandExecution<'a, E, C, S> {
+impl<'a, E, C, S> CommandExecution<'a, E, C, S>
+where
+    C: OverrideWritePrecondition,
+{
     pub fn with_write_precondition<W>(mut self, write_precondition: W) -> Self
     where
         W: Into<Option<StreamState>>,
@@ -342,14 +334,6 @@ impl<'a, E, C, S, EC> CommandExecutionWithCodec<'a, E, C, S, EC>
 where
     C: Decide,
 {
-    pub fn with_write_precondition<W>(mut self, write_precondition: W) -> Self
-    where
-        W: Into<Option<StreamState>>,
-    {
-        self.write_precondition = write_precondition.into();
-        self
-    }
-
     pub fn with_snapshot<I>(
         self,
         snapshots: I,
@@ -364,6 +348,19 @@ where
             snapshots: snapshots.into_snapshots(),
             event_codec: self.event_codec,
         }
+    }
+}
+
+impl<'a, E, C, S, EC> CommandExecutionWithCodec<'a, E, C, S, EC>
+where
+    C: Decide + OverrideWritePrecondition,
+{
+    pub fn with_write_precondition<W>(mut self, write_precondition: W) -> Self
+    where
+        W: Into<Option<StreamState>>,
+    {
+        self.write_precondition = write_precondition.into();
+        self
     }
 }
 
@@ -423,11 +420,7 @@ where
             .map_err(Into::into)
             .map_err(CommandInfraError::EncodeEvent)
             .map_err(CommandFailure::Infra)?;
-        let stream_state = resolve_stream_state(
-            self.write_precondition,
-            current_version,
-            self.command.write_precondition(),
-        );
+        let stream_state = resolve_stream_state::<C>(self.write_precondition, current_version);
         let append_outcome = self
             .event_store
             .append_events(stream_id, stream_state, encoded_events)
@@ -532,11 +525,7 @@ where
             .map_err(Into::into)
             .map_err(CommandInfraError::EncodeEvent)
             .map_err(CommandFailure::Infra)?;
-        let stream_state = resolve_stream_state(
-            self.write_precondition,
-            current_version,
-            self.command.write_precondition(),
-        );
+        let stream_state = resolve_stream_state::<C>(self.write_precondition, current_version);
         let append_outcome = self
             .event_store
             .append_events(stream_id, stream_state, encoded_events)
@@ -594,13 +583,20 @@ mod tests {
     use serde::{Deserialize, Serialize};
 
     use super::*;
-    use crate::{CanonicalEventCodec, EventType, SnapshotSchema, StreamCommand, StreamEvent};
+    use crate::{
+        CanonicalEventCodec, EventType, OverrideWritePrecondition, SnapshotSchema, StreamCommand, StreamEvent,
+    };
 
     #[derive(Debug, Clone)]
     struct TestCommand {
         id: String,
         action: TestAction,
-        write_precondition: Option<WritePrecondition>,
+        stream_id_calls: Arc<AtomicUsize>,
+    }
+
+    #[derive(Debug, Clone)]
+    struct RequiredRegisterCommand {
+        id: String,
         stream_id_calls: Arc<AtomicUsize>,
     }
 
@@ -692,23 +688,21 @@ mod tests {
             Self {
                 id: id.to_string(),
                 action,
-                write_precondition: None,
                 stream_id_calls: Arc::new(AtomicUsize::new(0)),
             }
         }
 
-        fn with_default_write_precondition(mut self, stream_state: StreamState) -> Self {
-            self.write_precondition = Some(WritePrecondition::Default(stream_state));
-            self
-        }
-
-        fn with_required_write_precondition(mut self, stream_state: StreamState) -> Self {
-            self.write_precondition = Some(WritePrecondition::Require(stream_state));
-            self
-        }
-
         fn stream_id_calls(&self) -> usize {
             self.stream_id_calls.load(Ordering::SeqCst)
+        }
+    }
+
+    impl RequiredRegisterCommand {
+        fn new(id: &str) -> Self {
+            Self {
+                id: id.to_string(),
+                stream_id_calls: Arc::new(AtomicUsize::new(0)),
+            }
         }
     }
 
@@ -719,9 +713,18 @@ mod tests {
             self.stream_id_calls.fetch_add(1, Ordering::SeqCst);
             &self.id
         }
+    }
 
-        fn write_precondition(&self) -> Option<WritePrecondition> {
-            self.write_precondition
+    impl OverrideWritePrecondition for TestCommand {}
+
+    impl StreamCommand for RequiredRegisterCommand {
+        type StreamId = str;
+
+        const REQUIRED_WRITE_PRECONDITION: Option<StreamState> = Some(StreamState::NoStream);
+
+        fn stream_id(&self) -> &Self::StreamId {
+            self.stream_id_calls.fetch_add(1, Ordering::SeqCst);
+            &self.id
         }
     }
 
@@ -762,6 +765,19 @@ mod tests {
                 (TestState::Present { .. }, TestAction::Remove) => {
                     Ok(Decision::event(TestEvent::Removed { id: command.id.clone() }))
                 }
+            }
+        }
+    }
+
+    impl Decide for RequiredRegisterCommand {
+        type State = TestState;
+        type Event = TestEvent;
+        type DecideError = TestDecisionError;
+
+        fn decide(state: &TestState, command: &Self) -> Result<Decision<TestEvent>, Self::DecideError> {
+            match state {
+                TestState::Missing => Ok(Decision::event(TestEvent::Registered { id: command.id.clone() })),
+                TestState::Present { .. } => Err(TestDecisionError::AlreadyRegistered),
             }
         }
     }
@@ -1127,30 +1143,35 @@ mod tests {
     }
 
     #[test]
-    fn uses_command_default_expected_state_when_using_command_rule() {
+    fn falls_back_to_exact_current_version_when_command_has_no_required_rule() {
         let runtime = FakeRuntime {
-            next_expected_version: 1,
+            current_version: Some(7),
+            recorded_events: vec![recorded_event(
+                7,
+                TestEvent::Registered {
+                    id: "alpha".to_string(),
+                },
+            )],
+            next_expected_version: 8,
             ..Default::default()
         };
-        let command =
-            TestCommand::new("alpha", TestAction::Register).with_default_write_precondition(StreamState::StreamExists);
+        let command = TestCommand::new("alpha", TestAction::Remove);
 
         let _ = block_on(CommandExecution::new(&runtime, &command).execute_result()).unwrap();
 
         assert_eq!(
             runtime.stream_states.lock().unwrap().as_slice(),
-            &[StreamState::StreamExists]
+            &[StreamState::StreamRevision(7)]
         );
     }
 
     #[test]
-    fn explicit_write_precondition_overrides_default_command_rule() {
+    fn explicit_write_precondition_overrides_exact_current_version_fallback() {
         let runtime = FakeRuntime {
             next_expected_version: 1,
             ..Default::default()
         };
-        let command =
-            TestCommand::new("alpha", TestAction::Register).with_default_write_precondition(StreamState::StreamExists);
+        let command = TestCommand::new("alpha", TestAction::Register);
 
         let _ = block_on(
             CommandExecution::new(&runtime, &command)
@@ -1163,20 +1184,14 @@ mod tests {
     }
 
     #[test]
-    fn required_command_rule_ignores_explicit_write_precondition() {
+    fn required_command_rule_uses_required_stream_state() {
         let runtime = FakeRuntime {
             next_expected_version: 1,
             ..Default::default()
         };
-        let command =
-            TestCommand::new("alpha", TestAction::Register).with_required_write_precondition(StreamState::NoStream);
+        let command = RequiredRegisterCommand::new("alpha");
 
-        let _ = block_on(
-            CommandExecution::new(&runtime, &command)
-                .with_write_precondition(StreamState::Any)
-                .execute_result(),
-        )
-        .unwrap();
+        let _ = block_on(CommandExecution::new(&runtime, &command).execute_result()).unwrap();
 
         assert_eq!(
             runtime.stream_states.lock().unwrap().as_slice(),
