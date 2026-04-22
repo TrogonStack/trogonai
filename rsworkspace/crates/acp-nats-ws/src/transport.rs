@@ -598,8 +598,8 @@ async fn http_get(headers: HeaderMap, state: AppState) -> Result<Response, HttpT
     state
         .manager_tx
         .send(ManagerRequest::HttpGet {
-            connection_id,
-            session_id,
+            connection_id: connection_id.clone(),
+            session_id: session_id.clone(),
             response: response_tx,
         })
         .map_err(|error| {
@@ -619,6 +619,7 @@ async fn http_get(headers: HeaderMap, state: AppState) -> Result<Response, HttpT
             .map(|item| (Ok::<Event, Infallible>(item.into_event()), stream))
     }))
     .into_response();
+    set_transport_headers(response.headers_mut(), &connection_id, Some(&session_id));
     response
         .headers_mut()
         .insert(X_ACCEL_BUFFERING_HEADER, HeaderValue::from_static("no"));
@@ -1892,6 +1893,14 @@ mod tests {
 
         let response = http_get(headers, state.clone()).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(ACP_CONNECTION_ID_HEADER).unwrap(),
+            HeaderValue::from_str(&connection_id.to_string()).unwrap()
+        );
+        assert_eq!(
+            response.headers().get(ACP_SESSION_ID_HEADER).unwrap(),
+            HeaderValue::from_str(session_id.as_str()).unwrap()
+        );
         assert_eq!(
             response.headers().get(X_ACCEL_BUFFERING_HEADER).unwrap(),
             HeaderValue::from_static("no")
