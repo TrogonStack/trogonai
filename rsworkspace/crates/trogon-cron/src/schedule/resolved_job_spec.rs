@@ -64,11 +64,7 @@ impl TryFrom<&CronJob> for ResolvedJobSpec {
         } = resolved_job_spec_parts(job)?;
 
         let schedule_subject = format!("{SCHEDULE_SUBJECT_PREFIX}{}", job_id.as_str());
-        let target_subject = format!(
-            "{FIRE_SUBJECT_PREFIX}{}.{}",
-            route.as_str(),
-            job_id.as_str()
-        );
+        let target_subject = format!("{FIRE_SUBJECT_PREFIX}{}.{}", route.as_str(), job_id.as_str());
         let body = if source_subject.is_some() {
             Bytes::from_static(br#"{}"#)
         } else {
@@ -99,11 +95,7 @@ fn resolved_job_spec_parts(job: &CronJob) -> Result<ResolvedJobSpecParts, CronEr
         JobEventSchedule::At { .. } | JobEventSchedule::Every { .. } => None,
     };
     let (route, ttl_sec, source_subject) = match &job.delivery {
-        JobEventDelivery::NatsEvent {
-            route,
-            ttl_sec,
-            source,
-        } => (
+        JobEventDelivery::NatsEvent { route, ttl_sec, source } => (
             DottedNatsToken::new(route).map_err(|source| {
                 CronError::invalid_job_spec(JobSpecError::InvalidRoute {
                     route: route.clone(),
@@ -174,29 +166,17 @@ impl ResolvedJobSpec {
 
     pub fn schedule_headers(&self) -> HeaderMap {
         let mut headers = HeaderMap::new();
-        headers.insert(
-            NATS_SCHEDULE,
-            HeaderValue::from(self.schedule_expression.as_str()),
-        );
-        headers.insert(
-            NATS_SCHEDULE_TARGET,
-            HeaderValue::from(self.target_subject.as_str()),
-        );
+        headers.insert(NATS_SCHEDULE, HeaderValue::from(self.schedule_expression.as_str()));
+        headers.insert(NATS_SCHEDULE_TARGET, HeaderValue::from(self.target_subject.as_str()));
 
         if let Some(timezone) = &self.timezone {
-            headers.insert(
-                NATS_SCHEDULE_TIME_ZONE,
-                HeaderValue::from(timezone.as_str()),
-            );
+            headers.insert(NATS_SCHEDULE_TIME_ZONE, HeaderValue::from(timezone.as_str()));
         }
         if let Some(ttl_sec) = self.ttl_sec {
             headers.insert(NATS_SCHEDULE_TTL, HeaderValue::from(format!("{ttl_sec}s")));
         }
         if let Some(source_subject) = &self.source_subject {
-            headers.insert(
-                NATS_SCHEDULE_SOURCE,
-                HeaderValue::from(source_subject.as_str()),
-            );
+            headers.insert(NATS_SCHEDULE_SOURCE, HeaderValue::from(source_subject.as_str()));
         }
         for (name, value) in &self.headers {
             headers.append(name.as_str(), value.as_str());
@@ -211,9 +191,7 @@ fn schedule_expression(schedule: &JobEventSchedule) -> Result<String, CronError>
         JobEventSchedule::At { at } => Ok(format!("@at {}", at.to_rfc3339())),
         JobEventSchedule::Every { every_sec } => {
             if *every_sec == 0 {
-                return Err(CronError::invalid_job_spec(
-                    JobSpecError::EverySecondsMustBePositive,
-                ));
+                return Err(CronError::invalid_job_spec(JobSpecError::EverySecondsMustBePositive));
             }
             Ok(format!("@every {every_sec}s"))
         }
@@ -235,15 +213,8 @@ fn validate_timezone(timezone: Option<String>) -> Result<Option<String>, CronErr
     };
 
     let trimmed = timezone.trim();
-    if trimmed.is_empty()
-        || trimmed != timezone
-        || trimmed
-            .chars()
-            .any(|ch| ch.is_control() || ch.is_whitespace())
-    {
-        return Err(CronError::invalid_job_spec(JobSpecError::InvalidTimezone {
-            timezone,
-        }));
+    if trimmed.is_empty() || trimmed != timezone || trimmed.chars().any(|ch| ch.is_control() || ch.is_whitespace()) {
+        return Err(CronError::invalid_job_spec(JobSpecError::InvalidTimezone { timezone }));
     }
     Ok(Some(timezone))
 }
@@ -254,9 +225,9 @@ fn validate_scheduler_headers(headers: &[(String, String)]) -> Result<(), CronEr
             .iter()
             .any(|reserved| reserved.eq_ignore_ascii_case(name))
         {
-            return Err(CronError::invalid_job_spec(
-                JobSpecError::ReservedHeaderName { name: name.clone() },
-            ));
+            return Err(CronError::invalid_job_spec(JobSpecError::ReservedHeaderName {
+                name: name.clone(),
+            }));
         }
     }
 
@@ -268,10 +239,8 @@ mod tests {
     use chrono::{TimeZone, Utc};
 
     use super::*;
-    use crate::events::{
-        JobEventDelivery, JobEventSamplingSource, JobEventSchedule, JobEventState,
-    };
-    use crate::{MessageContent, MessageHeaders, MessageSpec};
+    use crate::events::{JobEventDelivery, JobEventSamplingSource, JobEventSchedule, JobEventState};
+    use crate::{MessageContent, MessageEnvelope, MessageHeaders};
 
     fn base_job() -> CronJob {
         CronJob {
@@ -283,7 +252,7 @@ mod tests {
                 ttl_sec: Some(15),
                 source: None,
             },
-            message: MessageSpec {
+            message: MessageEnvelope {
                 content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
                 headers: MessageHeaders::new([("x-kind", "heartbeat")]).unwrap(),
             },
@@ -301,17 +270,13 @@ mod tests {
             headers.get(NATS_SCHEDULE).map(|value| value.as_str()),
             Some("@every 30s")
         );
-        assert_eq!(
-            headers.get(NATS_SCHEDULE_TTL).map(|value| value.as_str()),
-            Some("15s")
-        );
+        assert_eq!(headers.get(NATS_SCHEDULE_TTL).map(|value| value.as_str()), Some("15s"));
     }
 
     #[test]
     fn resolved_job_preserves_duplicate_headers() {
         let mut job = base_job();
-        job.message.headers =
-            MessageHeaders::new([("x-kind", "heartbeat"), ("x-kind", "retry")]).unwrap();
+        job.message.headers = MessageHeaders::new([("x-kind", "heartbeat"), ("x-kind", "retry")]).unwrap();
 
         let resolved = ResolvedJobSpec::try_from(&job).unwrap();
         let schedule_headers = resolved.schedule_headers();
@@ -380,10 +345,7 @@ mod tests {
         assert_eq!(resolved.id(), "heartbeat");
         assert!(!resolved.enabled());
         assert_eq!(resolved.route(), "agent.run");
-        assert_eq!(
-            resolved.schedule_body(),
-            Bytes::from_static(br#"{"kind":"heartbeat"}"#)
-        );
+        assert_eq!(resolved.schedule_body(), Bytes::from_static(br#"{"kind":"heartbeat"}"#));
         assert_eq!(resolved.source_subject(), None);
     }
 
@@ -423,8 +385,7 @@ mod tests {
     #[test]
     fn reserved_scheduler_header_is_rejected_during_schedule_resolution() {
         let mut job = base_job();
-        job.message.headers =
-            MessageHeaders::new([("Nats-Schedule-Target", "cron.fire.evil.target")]).unwrap();
+        job.message.headers = MessageHeaders::new([("Nats-Schedule-Target", "cron.fire.evil.target")]).unwrap();
 
         let error = ResolvedJobSpec::try_from(&job).unwrap_err();
         assert!(error.to_string().contains("reserved"));
