@@ -90,12 +90,29 @@ async fn start_agent(
         gateway_config,
     );
     let acp_prefix = AcpPrefix::new(prefix).unwrap();
-    let (_, io_task) = AgentSideNatsConnection::new(agent, nats, acp_prefix, |fut| {
+    let (_, io_task) = AgentSideNatsConnection::new(agent, nats.clone(), acp_prefix, |fut| {
         tokio::task::spawn_local(fut);
     });
     tokio::task::spawn_local(io_task);
-    tokio::time::sleep(Duration::from_millis(50)).await;
-    store
+
+    // Poll until the agent's NATS subscriptions are live. Sending an initialize
+    // request and waiting for a reply is the only reliable readiness signal:
+    // the io_task subscribes before entering its message loop, but the subscribe
+    // calls are async and take a non-deterministic amount of time to propagate.
+    let init_subject = format!("{prefix}.agent.initialize");
+    let payload = request_bytes(&InitializeRequest::new(ProtocolVersion::LATEST));
+    for _ in 0..100 {
+        match tokio::time::timeout(
+            Duration::from_millis(50),
+            nats.request(init_subject.clone(), payload.clone()),
+        )
+        .await
+        {
+            Ok(Ok(_)) => return store,
+            _ => tokio::time::sleep(Duration::from_millis(10)).await,
+        }
+    }
+    panic!("TrogonAgent did not become ready within 5 seconds");
 }
 
 fn request_bytes<T: serde::Serialize>(v: &T) -> Bytes {
@@ -225,7 +242,7 @@ async fn new_session_publishes_session_ready() {
             let _ = start_agent(nats.clone(), &js, "acp").await;
 
             let mut ready_sub = nats
-                .subscribe("acp.*.agent.ext.session.ready")
+                .subscribe("acp.session.*.agent.ext.ready")
                 .await
                 .unwrap();
 
@@ -288,13 +305,13 @@ async fn load_session_replies_and_publishes_session_ready() {
                 .unwrap();
 
             let mut ready_sub = nats
-                .subscribe("acp.sess-load-1.agent.ext.session.ready")
+                .subscribe("acp.session.sess-load-1.agent.ext.ready")
                 .await
                 .unwrap();
 
             let req = LoadSessionRequest::new("sess-load-1", "/tmp");
             let reply = nats
-                .request("acp.sess-load-1.agent.session.load", request_bytes(&req))
+                .request("acp.session.sess-load-1.agent.load", request_bytes(&req))
                 .await
                 .expect("load_session must reply");
 
@@ -318,14 +335,14 @@ async fn load_session_bad_payload_does_not_crash_server() {
 
             let _ = nats
                 .publish(
-                    "acp.sess-bad.agent.session.load",
+                    "acp.session.sess-bad.agent.load",
                     Bytes::from_static(b"not json"),
                 )
                 .await;
             tokio::time::sleep(Duration::from_millis(50)).await;
 
             let req = LoadSessionRequest::new("sess-bad", "/tmp");
-            nats.request("acp.sess-bad.agent.session.load", request_bytes(&req))
+            nats.request("acp.session.sess-bad.agent.load", request_bytes(&req))
                 .await
                 .expect("server must be alive after bad payload");
         })
@@ -350,7 +367,7 @@ async fn set_session_mode_updates_mode_in_store() {
             let req = SetSessionModeRequest::new("sess-mode-1", "acceptEdits");
             let reply = nats
                 .request(
-                    "acp.sess-mode-1.agent.session.set_mode",
+                    "acp.session.sess-mode-1.agent.set_mode",
                     request_bytes(&req),
                 )
                 .await
@@ -374,14 +391,14 @@ async fn set_session_mode_bad_payload_does_not_crash_server() {
 
             let _ = nats
                 .publish(
-                    "acp.sess-bad.agent.session.set_mode",
+                    "acp.session.sess-bad.agent.set_mode",
                     Bytes::from_static(b"{{invalid"),
                 )
                 .await;
             tokio::time::sleep(Duration::from_millis(50)).await;
 
             let req = SetSessionModeRequest::new("sess-alive", "default");
-            nats.request("acp.sess-alive.agent.session.set_mode", request_bytes(&req))
+            nats.request("acp.session.sess-alive.agent.set_mode", request_bytes(&req))
                 .await
                 .expect("server must be alive after bad payload");
         })
@@ -406,7 +423,7 @@ async fn set_session_model_updates_model_in_store() {
             let req = SetSessionModelRequest::new("sess-model-1", "claude-opus-4");
             let reply = nats
                 .request(
-                    "acp.sess-model-1.agent.session.set_model",
+                    "acp.session.sess-model-1.agent.set_model",
                     request_bytes(&req),
                 )
                 .await
@@ -430,7 +447,7 @@ async fn set_session_model_works_for_session_that_does_not_exist() {
 
             let req = SetSessionModelRequest::new("new-sess", "claude-sonnet-4");
             let reply = nats
-                .request("acp.new-sess.agent.session.set_model", request_bytes(&req))
+                .request("acp.session.new-sess.agent.set_model", request_bytes(&req))
                 .await
                 .expect("must reply even for unknown sessions");
 
@@ -452,7 +469,7 @@ async fn set_session_model_bad_payload_does_not_crash_server() {
 
             let _ = nats
                 .publish(
-                    "acp.sess-bad.agent.session.set_model",
+                    "acp.session.sess-bad.agent.set_model",
                     Bytes::from_static(b"not json at all"),
                 )
                 .await;
@@ -460,7 +477,7 @@ async fn set_session_model_bad_payload_does_not_crash_server() {
 
             let req = SetSessionModelRequest::new("sess-alive", "claude-haiku-4-5");
             nats.request(
-                "acp.sess-alive.agent.session.set_model",
+                "acp.session.sess-alive.agent.set_model",
                 request_bytes(&req),
             )
             .await
@@ -576,7 +593,7 @@ async fn fork_session_clones_state_under_new_id() {
 
             let req = ForkSessionRequest::new("original", "/home/user/project");
             let reply = nats
-                .request("acp.original.agent.session.fork", request_bytes(&req))
+                .request("acp.session.original.agent.fork", request_bytes(&req))
                 .await
                 .expect("fork_session must reply");
 
@@ -603,14 +620,14 @@ async fn fork_session_bad_payload_does_not_crash_server() {
 
             let _ = nats
                 .publish(
-                    "acp.sess-bad.agent.session.fork",
+                    "acp.session.sess-bad.agent.fork",
                     Bytes::from_static(b"not json"),
                 )
                 .await;
             tokio::time::sleep(Duration::from_millis(50)).await;
 
             let req = ForkSessionRequest::new("nonexistent", "/tmp");
-            nats.request("acp.nonexistent.agent.session.fork", request_bytes(&req))
+            nats.request("acp.session.nonexistent.agent.fork", request_bytes(&req))
                 .await
                 .expect("server must be alive after bad payload");
         })
@@ -630,7 +647,7 @@ async fn set_session_config_option_returns_populated_config_options() {
             let req = SetSessionConfigOptionRequest::new("sess-cfg-1", "mode", "plan");
             let reply = nats
                 .request(
-                    "acp.sess-cfg-1.agent.session.set_config_option",
+                    "acp.session.sess-cfg-1.agent.set_config_option",
                     request_bytes(&req),
                 )
                 .await
@@ -667,7 +684,7 @@ async fn set_session_config_option_mode_updates_store() {
             let session_id = new_resp.session_id.to_string();
 
             let cfg_req = SetSessionConfigOptionRequest::new(session_id.clone(), "mode", "plan");
-            let subject = format!("acp.{}.agent.session.set_config_option", session_id);
+            let subject = format!("acp.session.{}.agent.set_config_option", session_id);
             nats.request(subject, request_bytes(&cfg_req))
                 .await
                 .expect("set_session_config_option must reply");
@@ -699,7 +716,7 @@ async fn set_session_config_option_model_updates_store() {
                 "model",
                 "claude-haiku-4-5-20251001",
             );
-            let subject = format!("acp.{}.agent.session.set_config_option", session_id);
+            let subject = format!("acp.session.{}.agent.set_config_option", session_id);
             nats.request(subject, request_bytes(&cfg_req))
                 .await
                 .expect("set_session_config_option must reply");
@@ -720,7 +737,7 @@ async fn set_session_config_option_bad_payload_does_not_crash_server() {
 
             let _ = nats
                 .publish(
-                    "acp.sess-bad.agent.session.set_config_option",
+                    "acp.session.sess-bad.agent.set_config_option",
                     Bytes::from_static(b"not json"),
                 )
                 .await;
@@ -728,7 +745,7 @@ async fn set_session_config_option_bad_payload_does_not_crash_server() {
 
             let req = SetSessionConfigOptionRequest::new("sess-alive", "key", "val");
             nats.request(
-                "acp.sess-alive.agent.session.set_config_option",
+                "acp.session.sess-alive.agent.set_config_option",
                 request_bytes(&req),
             )
             .await
@@ -750,7 +767,7 @@ async fn resume_session_replies_successfully() {
             let req = ResumeSessionRequest::new("sess-resume-1", "/tmp");
             let reply = nats
                 .request(
-                    "acp.sess-resume-1.agent.session.resume",
+                    "acp.session.sess-resume-1.agent.resume",
                     request_bytes(&req),
                 )
                 .await
@@ -772,14 +789,14 @@ async fn resume_session_bad_payload_does_not_crash_server() {
 
             let _ = nats
                 .publish(
-                    "acp.sess-bad.agent.session.resume",
+                    "acp.session.sess-bad.agent.resume",
                     Bytes::from_static(b"not json"),
                 )
                 .await;
             tokio::time::sleep(Duration::from_millis(50)).await;
 
             let req = ResumeSessionRequest::new("sess-alive", "/tmp");
-            nats.request("acp.sess-alive.agent.session.resume", request_bytes(&req))
+            nats.request("acp.session.sess-alive.agent.resume", request_bytes(&req))
                 .await
                 .expect("server must be alive after bad payload");
         })
@@ -811,7 +828,7 @@ async fn close_session_removes_session_from_store() {
             let close_req = CloseSessionRequest::new(session_id.clone());
             let reply = nats
                 .request(
-                    format!("acp.{session_id}.agent.session.close"),
+                    format!("acp.session.{session_id}.agent.close"),
                     request_bytes(&close_req),
                 )
                 .await
@@ -835,14 +852,14 @@ async fn close_session_bad_payload_does_not_crash_server() {
 
             let _ = nats
                 .publish(
-                    "acp.sess-bad.agent.session.close",
+                    "acp.session.sess-bad.agent.close",
                     Bytes::from_static(b"not json"),
                 )
                 .await;
             tokio::time::sleep(Duration::from_millis(50)).await;
 
             let req = ResumeSessionRequest::new("sess-alive", "/tmp");
-            nats.request("acp.sess-alive.agent.session.resume", request_bytes(&req))
+            nats.request("acp.session.sess-alive.agent.resume", request_bytes(&req))
                 .await
                 .expect("server must be alive after bad payload");
         })
@@ -866,7 +883,7 @@ async fn close_session_publishes_cancel_signal() {
                 serde_json::from_slice(&reply.payload).expect("valid JSON");
             let session_id = new_resp.session_id.to_string();
 
-            let cancel_subject = format!("acp.{session_id}.agent.session.cancel");
+            let cancel_subject = format!("acp.session.{session_id}.agent.cancel");
             let mut cancel_sub = nats
                 .subscribe(cancel_subject)
                 .await
@@ -874,7 +891,7 @@ async fn close_session_publishes_cancel_signal() {
 
             let close_req = CloseSessionRequest::new(session_id.clone());
             nats.request(
-                format!("acp.{session_id}.agent.session.close"),
+                format!("acp.session.{session_id}.agent.close"),
                 request_bytes(&close_req),
             )
             .await
@@ -902,7 +919,7 @@ async fn close_session_nonexistent_session_does_not_crash() {
             let close_req = CloseSessionRequest::new("nonexistent-session-id");
             let reply = nats
                 .request(
-                    "acp.nonexistent-session-id.agent.session.close",
+                    "acp.session.nonexistent-session-id.agent.close",
                     request_bytes(&close_req),
                 )
                 .await
