@@ -7,7 +7,7 @@ use trogon_nats::{DottedNatsToken, NatsToken};
 use crate::{
     CronJob,
     error::{CronError, JobSpecError},
-    events::{JobEventDelivery, JobEventSchedule, JobEventState},
+    events::{JobEventDelivery, JobEventSchedule, JobEventStatus},
     kv::{FIRE_SUBJECT_PREFIX, SCHEDULE_SUBJECT_PREFIX},
 };
 
@@ -141,7 +141,7 @@ impl ResolvedJobSpec {
     }
 
     pub fn enabled(&self) -> bool {
-        matches!(self.job.state, JobEventState::Enabled)
+        matches!(self.job.status, JobEventStatus::Enabled)
     }
 
     pub fn route(&self) -> &str {
@@ -239,13 +239,13 @@ mod tests {
     use chrono::{TimeZone, Utc};
 
     use super::*;
-    use crate::events::{JobEventDelivery, JobEventSamplingSource, JobEventSchedule, JobEventState};
+    use crate::events::{JobEventDelivery, JobEventSamplingSource, JobEventSchedule, JobEventStatus};
     use crate::{MessageContent, MessageEnvelope, MessageHeaders};
 
     fn base_job() -> CronJob {
         CronJob {
             id: "heartbeat".to_string(),
-            state: JobEventState::Enabled,
+            status: JobEventStatus::Enabled,
             schedule: JobEventSchedule::Every { every_sec: 30 },
             delivery: JobEventDelivery::NatsEvent {
                 route: "agent.run".to_string(),
@@ -337,7 +337,7 @@ mod tests {
     #[test]
     fn resolved_job_accessors_expose_validated_values() {
         let mut job = base_job();
-        job.state = JobEventState::Disabled;
+        job.status = JobEventStatus::Disabled;
 
         let resolved = ResolvedJobSpec::try_from(&job).unwrap();
 
