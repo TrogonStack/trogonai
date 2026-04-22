@@ -130,34 +130,24 @@ async fn run_recv_pump(
     mut ws_recv_write: tokio::io::DuplexStream,
 ) {
     while let Some(Ok(msg)) = ws_receiver.next().await {
-        let bytes = match msg {
-            Message::Text(t) => bytes::Bytes::from(t),
+        let text = match msg {
+            Message::Text(text) => text,
             Message::Binary(_) => continue,
             Message::Close(_) => break,
             _ => continue,
         };
 
-        match std::str::from_utf8(&bytes) {
-            Ok(text) => {
-                let line = text.trim_end_matches(['\r', '\n']);
-                if line.is_empty() {
-                    continue;
-                }
+        let line = text.trim_end_matches(['\r', '\n']);
+        if line.is_empty() {
+            continue;
+        }
 
-                if ws_recv_write.write_all(line.as_bytes()).await.is_err() {
-                    break;
-                }
+        if ws_recv_write.write_all(line.as_bytes()).await.is_err() {
+            break;
+        }
 
-                if ws_recv_write.write_all(b"\n").await.is_err() {
-                    break;
-                }
-            }
-            Err(e) => {
-                warn!(
-                    error = %e,
-                    "Received non-UTF-8 WebSocket message, dropping frame"
-                );
-            }
+        if ws_recv_write.write_all(b"\n").await.is_err() {
+            break;
         }
     }
 }
