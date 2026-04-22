@@ -1,9 +1,9 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
 use trogon_cron::{
-    AddJobCommand, CronController, CronJob, DeliverySpec, GetJobCommand, JobDetails, JobEventStatus, JobHeaders, JobId,
-    JobMessage, JobSpec, JobStatus, JobWriteCondition, ListJobsCommand, MessageContent, PauseJobCommand,
-    RemoveJobCommand, SchedulePublisher, ScheduleSpec, add_job,
+    AddJobCommand, CronController, CronJob, Delivery, GetJobCommand, Job, JobDetails, JobEventStatus, JobHeaders,
+    JobId, JobMessage, JobStatus, JobWriteCondition, ListJobsCommand, MessageContent, PauseJobCommand,
+    RemoveJobCommand, Schedule, SchedulePublisher, add_job,
     mocks::{MockCronStore, MockLeaderLock, MockSchedulePublisher},
     pause_job, remove_job,
 };
@@ -12,12 +12,12 @@ fn job_id(id: &str) -> JobId {
     JobId::parse(id).unwrap()
 }
 
-fn base_job(id: &str) -> JobSpec {
-    JobSpec {
+fn base_job(id: &str) -> Job {
+    Job {
         id: job_id(id),
         status: JobStatus::Enabled,
-        schedule: ScheduleSpec::every(30).unwrap(),
-        delivery: DeliverySpec::nats_event("agent.run").unwrap(),
+        schedule: Schedule::every(30).unwrap(),
+        delivery: Delivery::nats_event("agent.run").unwrap(),
         message: JobMessage {
             content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
             headers: JobHeaders::default(),
@@ -86,7 +86,7 @@ async fn client_remove_and_list_jobs_use_store_paths() {
 
 #[tokio::test]
 async fn client_rejects_invalid_route() {
-    let error = serde_json::from_value::<JobSpec>(serde_json::json!({
+    let error = serde_json::from_value::<Job>(serde_json::json!({
         "id": "bad",
         "schedule": { "type": "every", "every_sec": 30 },
         "delivery": { "type": "nats_event", "route": "agent.>" },
@@ -99,7 +99,7 @@ async fn client_rejects_invalid_route() {
 
 #[tokio::test]
 async fn client_rejects_invalid_source_subject() {
-    let error = serde_json::from_value::<JobSpec>(serde_json::json!({
+    let error = serde_json::from_value::<Job>(serde_json::json!({
         "id": "bad-source",
         "schedule": { "type": "every", "every_sec": 30 },
         "delivery": {
@@ -129,7 +129,7 @@ async fn client_rejects_stale_version() {
 #[tokio::test]
 async fn mock_schedule_publisher_records_changes() {
     let publisher = MockSchedulePublisher::new();
-    let resolved = trogon_cron::ResolvedJobSpec::try_from(&expected_job("alpha")).unwrap();
+    let resolved = trogon_cron::ResolvedJob::try_from(&expected_job("alpha")).unwrap();
 
     publisher.upsert_schedule(&resolved).await.unwrap();
     publisher.remove_schedule("alpha").await.unwrap();

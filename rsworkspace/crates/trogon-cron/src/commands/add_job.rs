@@ -5,13 +5,13 @@ use trogon_eventsourcing::{
 
 use super::JobState;
 use crate::{
-    JobId, JobSpec,
+    Job, JobId,
     events::{JobAdded, JobDetails, JobEvent},
 };
 
 #[derive(Debug, Clone)]
 pub struct AddJobCommand {
-    pub spec: JobSpec,
+    pub job: Job,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -21,8 +21,8 @@ pub enum AddJobDecisionError {
 }
 
 impl AddJobCommand {
-    pub const fn new(spec: JobSpec) -> Self {
-        Self { spec }
+    pub const fn new(job: Job) -> Self {
+        Self { job }
     }
 }
 
@@ -31,7 +31,7 @@ impl StreamCommand for AddJobCommand {
     const REQUIRED_WRITE_PRECONDITION: Option<StreamState> = Some(StreamState::NoStream);
 
     fn stream_id(&self) -> &Self::StreamId {
-        &self.spec.id
+        &self.job.id
     }
 }
 
@@ -44,7 +44,7 @@ impl Decide for AddJobCommand {
         match state {
             JobState::Missing => Ok(Decision::event(JobAdded {
                 id: command.stream_id().to_string(),
-                job: JobDetails::from(&command.spec),
+                job: JobDetails::from(&command.job),
             })),
             JobState::PresentEnabled | JobState::PresentDisabled => Err(AddJobDecisionError::AlreadyExists {
                 id: command.stream_id().clone(),
@@ -85,20 +85,20 @@ mod tests {
 
     use super::*;
     use crate::{
-        CronJob, DeliverySpec, GetJobCommand, JobHeaders, JobMessage, JobRemoved, JobStatus, MessageContent,
-        ScheduleSpec, mocks::MockCronStore,
+        CronJob, Delivery, GetJobCommand, JobHeaders, JobMessage, JobRemoved, JobStatus, MessageContent, Schedule,
+        mocks::MockCronStore,
     };
 
     fn job_id(id: &str) -> JobId {
         JobId::parse(id).unwrap()
     }
 
-    fn job(id: &str) -> JobSpec {
-        JobSpec {
+    fn job(id: &str) -> Job {
+        Job {
             id: job_id(id),
             status: JobStatus::Enabled,
-            schedule: ScheduleSpec::every(30).unwrap(),
-            delivery: DeliverySpec::nats_event("agent.run").unwrap(),
+            schedule: Schedule::every(30).unwrap(),
+            delivery: Delivery::nats_event("agent.run").unwrap(),
             message: JobMessage {
                 content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
                 headers: JobHeaders::default(),

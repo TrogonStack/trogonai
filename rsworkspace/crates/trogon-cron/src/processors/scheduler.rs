@@ -15,7 +15,7 @@ use trogon_nats::lease::{LeaderElection, LeaseRenewInterval, LeaseTiming, LeaseT
 use trogon_std::{NowV7, UuidV7Generator};
 
 use crate::{
-    CronJob, ResolvedJobSpec,
+    CronJob, ResolvedJob,
     error::CronError,
     events::{
         JobAdded, JobEvent, JobEventCodec, JobEventData, JobEventStatus, JobPaused, JobRemoved, JobResumed,
@@ -387,7 +387,7 @@ async fn apply_scheduler_change<P: SchedulePublisher<Error = CronError>>(
     match change {
         SchedulerChange::Upsert(job) => {
             if job.is_enabled() {
-                match ResolvedJobSpec::try_from(job) {
+                match ResolvedJob::try_from(job) {
                     Ok(resolved) => {
                         publisher.upsert_schedule(&resolved).await?;
                     }
@@ -427,7 +427,7 @@ async fn reconcile_snapshot<P: SchedulePublisher<Error = CronError>>(
             continue;
         }
 
-        match ResolvedJobSpec::try_from(job.as_ref()) {
+        match ResolvedJob::try_from(job.as_ref()) {
             Ok(resolved) => {
                 desired_active_ids.insert(job.id.to_string());
                 resolved_jobs.push(resolved);
@@ -642,8 +642,8 @@ mod tests {
         default_leader_timing, next_scheduler_start_sequence, reconcile_snapshot, scheduler_consumer_config,
     };
     use crate::{
-        CronJob, DeliverySpec, JobDetails, JobHeaders, JobId, JobMessage, JobSpec, JobStatus, MessageContent,
-        MessageEnvelope, MessageHeaders, ScheduleSpec,
+        CronJob, Delivery, Job, JobDetails, JobHeaders, JobId, JobMessage, JobStatus, MessageContent, MessageEnvelope,
+        MessageHeaders, Schedule,
         events::{JobAdded, JobEvent, JobEventStatus, JobPaused, JobRemoved, JobResumed},
         mocks::{MockCronStore, MockLeaderLock, MockSchedulePublisher},
     };
@@ -652,12 +652,12 @@ mod tests {
         JobId::parse(id).unwrap()
     }
 
-    fn base_job(id: &str) -> JobSpec {
-        JobSpec {
+    fn base_job(id: &str) -> Job {
+        Job {
             id: job_id(id),
             status: JobStatus::Enabled,
-            schedule: ScheduleSpec::every(30).unwrap(),
-            delivery: DeliverySpec::nats_event("agent.run").unwrap(),
+            schedule: Schedule::every(30).unwrap(),
+            delivery: Delivery::nats_event("agent.run").unwrap(),
             message: JobMessage {
                 content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
                 headers: JobHeaders::default(),

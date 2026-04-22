@@ -16,7 +16,7 @@ use trogon_eventsourcing::{
 use trogon_nats::lease::{ReleaseLease, RenewLease, TryAcquireLease};
 
 use crate::{
-    CronJob, GetJobCommand, ListJobsCommand, ResolvedJobSpec,
+    CronJob, GetJobCommand, ListJobsCommand, ResolvedJob,
     config::{JobWriteCondition, JobWriteState},
     error::CronError,
     events::{JobAdded, JobEvent, JobEventCodec, JobEventData, JobPaused, JobRemoved, JobResumed},
@@ -56,7 +56,7 @@ impl SchedulePublisher for MockSchedulePublisher {
         Ok(self.active.lock().unwrap().clone())
     }
 
-    async fn upsert_schedule(&self, job: &ResolvedJobSpec) -> Result<(), Self::Error> {
+    async fn upsert_schedule(&self, job: &ResolvedJob) -> Result<(), Self::Error> {
         self.upserts.lock().unwrap().push(job.schedule_subject().to_string());
         self.active.lock().unwrap().insert(job.id().to_string());
         Ok(())
@@ -145,8 +145,8 @@ impl MockCronStore {
         Self::default()
     }
 
-    pub fn seed_job(&self, spec: crate::JobSpec) {
-        let id = spec.id.to_string();
+    pub fn seed_job(&self, job: crate::Job) {
+        let id = job.id.to_string();
         self.stream_versions.lock().unwrap().insert(id.clone(), 1);
         self.events.lock().unwrap().insert(
             id.clone(),
@@ -155,7 +155,7 @@ impl MockCronStore {
                     &JobEventCodec,
                     JobEvent::JobAdded(JobAdded {
                         id: id.clone(),
-                        job: crate::JobDetails::from(&spec),
+                        job: crate::JobDetails::from(&job),
                     }),
                 )
                 .unwrap(),
@@ -163,7 +163,7 @@ impl MockCronStore {
         );
         self.jobs.lock().unwrap().insert(
             id.clone(),
-            Snapshot::new(1, CronJob::from((id, crate::JobDetails::from(&spec)))),
+            Snapshot::new(1, CronJob::from((id, crate::JobDetails::from(&job)))),
         );
     }
 
@@ -411,9 +411,9 @@ mod tests {
 
     use super::*;
     use crate::{
-        AddJobCommand, CronJob, DeliverySpec, GetJobCommand, JobDetails, JobEventStatus, JobHeaders, JobId, JobMessage,
-        JobSpec, JobStatus, JobWriteCondition, ListJobsCommand, MessageContent, PauseJobCommand, RemoveJobCommand,
-        ResumeJobCommand, ScheduleSpec, add_job, pause_job, remove_job, resume_job,
+        AddJobCommand, CronJob, Delivery, GetJobCommand, Job, JobDetails, JobEventStatus, JobHeaders, JobId,
+        JobMessage, JobStatus, JobWriteCondition, ListJobsCommand, MessageContent, PauseJobCommand, RemoveJobCommand,
+        ResumeJobCommand, Schedule, add_job, pause_job, remove_job, resume_job,
     };
     use futures::StreamExt;
 
@@ -421,12 +421,12 @@ mod tests {
         crate::JobId::parse(id).unwrap()
     }
 
-    fn base_job(id: &str) -> JobSpec {
-        JobSpec {
+    fn base_job(id: &str) -> Job {
+        Job {
             id: job_id(id),
             status: JobStatus::Enabled,
-            schedule: ScheduleSpec::every(30).unwrap(),
-            delivery: DeliverySpec::nats_event("agent.run").unwrap(),
+            schedule: Schedule::every(30).unwrap(),
+            delivery: Delivery::nats_event("agent.run").unwrap(),
             message: JobMessage {
                 content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
                 headers: JobHeaders::default(),
@@ -442,7 +442,7 @@ mod tests {
     async fn mock_schedule_publisher_tracks_active_jobs() {
         let publisher = MockSchedulePublisher::new();
         publisher.seed_active_job("orphan");
-        let resolved = ResolvedJobSpec::try_from(&expected_job("alpha")).unwrap();
+        let resolved = ResolvedJob::try_from(&expected_job("alpha")).unwrap();
 
         let active = publisher.active_schedule_ids().await.unwrap();
         assert!(active.contains("orphan"));
@@ -544,7 +544,7 @@ mod tests {
     #[tokio::test]
     async fn mock_cron_store_rejects_invalid_specs_and_state_errors() {
         let store = MockCronStore::new();
-        let invalid_error = serde_json::from_value::<JobSpec>(serde_json::json!({
+        let invalid_error = serde_json::from_value::<Job>(serde_json::json!({
             "id": "bad",
             "schedule": { "type": "every", "every_sec": 30 },
             "delivery": {

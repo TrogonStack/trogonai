@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use crate::{
-    ResolvedJobSpec,
+    ResolvedJob,
     config::JobWriteState,
     error::CronError,
     kv::{
@@ -163,7 +163,7 @@ impl SchedulePublisher for NatsSchedulePublisher {
         self.active_schedule_ids().await
     }
 
-    async fn upsert_schedule(&self, job: &ResolvedJobSpec) -> Result<(), Self::Error> {
+    async fn upsert_schedule(&self, job: &ResolvedJob) -> Result<(), Self::Error> {
         self.ensure_source_subject(job.source_subject()).await?;
 
         let ack = self
