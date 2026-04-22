@@ -1,0 +1,16 @@
+error[E0599]: the method `with_write_precondition` exists for struct `CommandExecution<'_, (), RequiredCommand>`, but its trait bounds were not satisfied
+  --> tests/ui/fail/required_write_precondition_override.rs:37:50
+   |
+ 9 | struct RequiredCommand;
+   | ---------------------- doesn't satisfy `RequiredCommand: OverrideWritePrecondition`
+...
+37 |     let _ = CommandExecution::new(&(), &command).with_write_precondition(StreamState::Any);
+   |                                                  ^^^^^^^^^^^^^^^^^^^^^^^ method cannot be called on `CommandExecution<'_, (), RequiredCommand>` due to unsatisfied trait bounds
+   |
+   = note: the following trait bounds were not satisfied:
+           `RequiredCommand: OverrideWritePrecondition`
+note: the trait `OverrideWritePrecondition` must be implemented
+  --> src/decision.rs
+   |
+   | pub trait OverrideWritePrecondition: StreamCommand {}
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
