@@ -1,7 +1,4 @@
-use trogon_eventsourcing::{
-    CommandExecution, CommandResult, CommandSnapshotPolicy, Decide, Decision, FrequencySnapshot, SnapshotRead,
-    SnapshotWrite, StreamAppend, StreamCommand, StreamRead, StreamState,
-};
+use trogon_eventsourcing::{CommandSnapshotPolicy, Decide, Decision, FrequencySnapshot, StreamCommand, StreamState};
 
 use super::JobState;
 use crate::{
@@ -61,25 +58,11 @@ impl CommandSnapshotPolicy for AddJobCommand {
     const SNAPSHOT_POLICY: Self::SnapshotPolicy = super::snapshot::COMMAND_SNAPSHOT_POLICY;
 }
 
-pub async fn add_job<S, SErr>(store: &S, command: AddJobCommand) -> CommandResult<AddJobCommand, SErr>
-where
-    S: StreamRead<JobId, Error = SErr>
-        + StreamAppend<JobId, Error = SErr>
-        + SnapshotRead<JobState, JobId, Error = SErr>
-        + SnapshotWrite<JobState, JobId, Error = SErr>,
-    serde_json::Error: Into<SErr>,
-{
-    CommandExecution::new(store, &command)
-        .with_snapshot(store)
-        .execute()
-        .await
-}
-
 #[cfg(test)]
 mod tests {
     use trogon_eventsourcing::snapshot::SnapshotSchema;
     use trogon_eventsourcing::{
-        CommandFailure, Decision, NonEmpty, decide,
+        CommandExecution, CommandFailure, Decision, NonEmpty, decide,
         testing::{TestCase, decider, expect_error},
     };
 
@@ -182,7 +165,11 @@ mod tests {
     async fn run_registers_job_in_store() {
         let store = MockCronStore::new();
 
-        let outcome = add_job(&store, AddJobCommand::new(job("backup"))).await.unwrap();
+        let outcome = CommandExecution::new(&store, &AddJobCommand::new(job("backup")))
+            .with_snapshot(&store)
+            .execute()
+            .await
+            .unwrap();
         assert_eq!(outcome.next_expected_version, 1);
         assert_eq!(
             outcome.events,
@@ -209,9 +196,17 @@ mod tests {
     async fn run_rejects_adding_existing_job_with_domain_error() {
         let store = MockCronStore::new();
 
-        add_job(&store, AddJobCommand::new(job("backup"))).await.unwrap();
+        CommandExecution::new(&store, &AddJobCommand::new(job("backup")))
+            .with_snapshot(&store)
+            .execute()
+            .await
+            .unwrap();
 
-        let error = add_job(&store, AddJobCommand::new(job("backup"))).await.unwrap_err();
+        let error = CommandExecution::new(&store, &AddJobCommand::new(job("backup")))
+            .with_snapshot(&store)
+            .execute()
+            .await
+            .unwrap_err();
 
         assert!(matches!(
             error,
@@ -224,16 +219,22 @@ mod tests {
     async fn run_rejects_adding_deleted_job_id() {
         let store = MockCronStore::new();
 
-        add_job(&store, AddJobCommand::new(job("backup"))).await.unwrap();
-        crate::remove_job(
-            &store,
-            crate::RemoveJobCommand::new(JobId::parse("backup").unwrap()),
-            None,
-        )
-        .await
-        .unwrap();
+        CommandExecution::new(&store, &AddJobCommand::new(job("backup")))
+            .with_snapshot(&store)
+            .execute()
+            .await
+            .unwrap();
+        CommandExecution::new(&store, &crate::RemoveJobCommand::new(JobId::parse("backup").unwrap()))
+            .with_snapshot(&store)
+            .execute()
+            .await
+            .unwrap();
 
-        let error = add_job(&store, AddJobCommand::new(job("backup"))).await.unwrap_err();
+        let error = CommandExecution::new(&store, &AddJobCommand::new(job("backup")))
+            .with_snapshot(&store)
+            .execute()
+            .await
+            .unwrap_err();
 
         assert!(matches!(
             error,
