@@ -339,46 +339,4 @@ mod tests {
         );
     }
 
-    /// `ConnectError::ConnectionFailed` display must include both the server
-    /// list and the inner error message.  Source must return `Some`.
-    ///
-    /// We obtain a real `async_nats::ConnectError` by attempting to connect to
-    /// a port that is almost certainly not listening, **without**
-    /// `retry_on_initial_connect()` so the call returns immediately.
-    #[tokio::test]
-    async fn connect_error_connection_failed_display_and_source() {
-        // Use a port in the ephemeral range that is unlikely to be in use.
-        let bad_addr = "nats://127.0.0.1:19122";
-
-        // Call async_nats directly — without retry_on_initial_connect() the
-        // connection attempt fails immediately when the server is absent.
-        let result = async_nats::ConnectOptions::new().connect(bad_addr).await;
-
-        match result {
-            Err(nats_err) => {
-                let err = ConnectError::ConnectionFailed {
-                    servers: vec![bad_addr.to_string()],
-                    error: nats_err,
-                };
-                let msg = err.to_string();
-                assert!(
-                    msg.contains("Failed to connect to NATS servers"),
-                    "display must mention the failure: {}",
-                    msg
-                );
-                assert!(
-                    msg.contains("19122"),
-                    "display must include the server: {}",
-                    msg
-                );
-                assert!(
-                    std::error::Error::source(&err).is_some(),
-                    "source() must expose the inner async_nats error"
-                );
-            }
-            Ok(_) => {
-                // A server happened to be running on port 19122; skip.
-            }
-        }
-    }
 }

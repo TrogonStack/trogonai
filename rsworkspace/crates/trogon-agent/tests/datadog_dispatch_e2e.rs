@@ -27,7 +27,6 @@ use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
 use trogon_agent::{AgentConfig, run};
 use trogon_datadog::{DatadogConfig, serve as datadog_serve};
-use trogon_nats::jetstream::NatsJetStreamClient;
 use trogon_nats::{NatsAuth, NatsConfig};
 use trogon_secret_proxy::{
     proxy::{ProxyState, router},
@@ -127,7 +126,7 @@ async fn datadog_webhook_http_triggers_full_pipeline_with_real_key() {
     let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
         .await
         .expect("Failed to connect to NATS");
-    let js = NatsJetStreamClient::new(jetstream::new(nats.clone()));
+    let js = Arc::new(jetstream::new(nats.clone()));
 
     // ── 5. Ensure PROXY_REQUESTS stream ────────────────────────────────────
     let outbound_subject = subjects::outbound("trogon");
@@ -310,7 +309,7 @@ async fn datadog_recovered_alert_triggers_full_pipeline() {
     let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
         .await
         .unwrap();
-    let js = NatsJetStreamClient::new(jetstream::new(nats.clone()));
+    let js = Arc::new(jetstream::new(nats.clone()));
 
     let outbound_subject = subjects::outbound("trogon");
     stream::ensure_stream(&js, "trogon", &outbound_subject)
@@ -462,10 +461,10 @@ async fn datadog_automation_dispatch_takes_precedence_over_fallback() {
     let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
         .await
         .unwrap();
-    let js = NatsJetStreamClient::new(jetstream::new(nats.clone()));
+    let js = Arc::new(jetstream::new(nats.clone()));
 
     // ── Register a matching automation in the store ──
-    let store = trogon_automations::AutomationStore::open(js.context())
+    let store = trogon_automations::AutomationStore::open(&js)
         .await
         .unwrap();
     let auto = trogon_automations::Automation {
@@ -489,8 +488,7 @@ async fn datadog_automation_dispatch_takes_precedence_over_fallback() {
 
     // Ensure DATADOG stream exists (the runner will also ensure it, but
     // we need it before the datadog server can publish to it).
-    js.context()
-        .get_or_create_stream(jetstream::stream::Config {
+    js.get_or_create_stream(jetstream::stream::Config {
             name: "DATADOG".to_string(),
             subjects: vec!["datadog.>".to_string()],
             ..Default::default()
@@ -610,7 +608,7 @@ async fn datadog_event_subject_triggers_full_pipeline() {
     let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
         .await
         .unwrap();
-    let js = NatsJetStreamClient::new(jetstream::new(nats.clone()));
+    let js = Arc::new(jetstream::new(nats.clone()));
 
     let outbound_subject = subjects::outbound("trogon");
     stream::ensure_stream(&js, "trogon", &outbound_subject)
@@ -749,10 +747,9 @@ async fn datadog_handler_error_still_acks_and_continues() {
     let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
         .await
         .unwrap();
-    let js = NatsJetStreamClient::new(jetstream::new(nats.clone()));
+    let js = Arc::new(jetstream::new(nats.clone()));
 
-    js.context()
-        .get_or_create_stream(jetstream::stream::Config {
+    js.get_or_create_stream(jetstream::stream::Config {
             name: "DATADOG".to_string(),
             subjects: vec!["datadog.>".to_string()],
             ..Default::default()
@@ -872,10 +869,10 @@ async fn datadog_event_automation_dispatch() {
     let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
         .await
         .unwrap();
-    let js = NatsJetStreamClient::new(jetstream::new(nats.clone()));
+    let js = Arc::new(jetstream::new(nats.clone()));
 
     // Register automation matching datadog.event.
-    let store = trogon_automations::AutomationStore::open(js.context())
+    let store = trogon_automations::AutomationStore::open(&js)
         .await
         .unwrap();
     let auto = trogon_automations::Automation {
@@ -897,8 +894,7 @@ async fn datadog_event_automation_dispatch() {
     };
     store.put(&auto).await.unwrap();
 
-    js.context()
-        .get_or_create_stream(jetstream::stream::Config {
+    js.get_or_create_stream(jetstream::stream::Config {
             name: "DATADOG".to_string(),
             subjects: vec!["datadog.>".to_string()],
             ..Default::default()
