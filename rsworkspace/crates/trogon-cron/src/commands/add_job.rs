@@ -3,7 +3,7 @@ use trogon_eventsourcing::{
     SnapshotRead, SnapshotWrite, StreamAppend, StreamCommand, StreamRead, StreamState, WritePrecondition,
 };
 
-use super::JobCommandState;
+use super::JobState;
 use crate::{
     JobId, JobSpec,
     events::{JobAdded, JobDetails, JobEvent},
@@ -39,22 +39,20 @@ impl StreamCommand for AddJobCommand {
 }
 
 impl Decide for AddJobCommand {
-    type State = JobCommandState;
+    type State = JobState;
     type Event = JobEvent;
     type DecideError = AddJobDecisionError;
 
-    fn decide(state: &JobCommandState, command: &Self) -> Result<Decision<JobEvent>, Self::DecideError> {
+    fn decide(state: &JobState, command: &Self) -> Result<Decision<JobEvent>, Self::DecideError> {
         match state {
-            JobCommandState::Missing => Ok(Decision::Event(NonEmpty::one(JobEvent::JobAdded(JobAdded {
+            JobState::Missing => Ok(Decision::Event(NonEmpty::one(JobEvent::JobAdded(JobAdded {
                 id: command.stream_id().to_string(),
                 job: JobDetails::from(&command.spec),
             })))),
-            JobCommandState::PresentEnabled | JobCommandState::PresentDisabled => {
-                Err(AddJobDecisionError::AlreadyExists {
-                    id: command.stream_id().clone(),
-                })
-            }
-            JobCommandState::Deleted => Err(AddJobDecisionError::JobDeleted {
+            JobState::PresentEnabled | JobState::PresentDisabled => Err(AddJobDecisionError::AlreadyExists {
+                id: command.stream_id().clone(),
+            }),
+            JobState::Deleted => Err(AddJobDecisionError::JobDeleted {
                 id: command.stream_id().clone(),
             }),
         }
@@ -77,8 +75,8 @@ pub async fn add_job<S, SErr>(
 where
     S: StreamRead<JobId, Error = SErr>
         + StreamAppend<JobId, Error = SErr>
-        + SnapshotRead<JobCommandState, JobId, Error = SErr>
-        + SnapshotWrite<JobCommandState, JobId, Error = SErr>,
+        + SnapshotRead<JobState, JobId, Error = SErr>
+        + SnapshotWrite<JobState, JobId, Error = SErr>,
     serde_json::Error: Into<SErr>,
 {
     CommandExecution::new(store, &command)
@@ -125,7 +123,7 @@ mod tests {
 
     #[test]
     fn decides_add_from_missing_state() {
-        let state = JobCommandState::Missing;
+        let state = JobState::Missing;
         let command = AddJobCommand::new(job("backup"));
 
         let decision = decide(&state, &command).unwrap();
@@ -140,7 +138,7 @@ mod tests {
 
     #[test]
     fn rejects_adding_existing_job() {
-        let state = JobCommandState::PresentEnabled;
+        let state = JobState::PresentEnabled;
         let command = AddJobCommand::new(job("backup"));
 
         assert!(matches!(
@@ -213,10 +211,7 @@ mod tests {
         assert_eq!(stored_job, expected_job("backup"));
 
         let command_snapshot = store
-            .read_command_snapshot::<JobCommandState>(
-                JobCommandState::snapshot_store_config(),
-                &JobId::parse("backup").unwrap(),
-            )
+            .read_command_snapshot::<JobState>(JobState::snapshot_store_config(), &JobId::parse("backup").unwrap())
             .unwrap();
         assert!(command_snapshot.is_none());
     }
