@@ -1,0 +1,36 @@
+[package]
+name = "trogon-codex-runner"
+version = "0.0.1"
+edition = "2024"
+
+[lints]
+workspace = true
+
+# Test helper: simulates `codex app-server` JSON-RPC protocol.
+# Used via CODEX_BIN env var in integration tests.
+[[bin]]
+name = "mock_codex_server"
+path = "src/bin/mock_codex_server.rs"
+
+[dependencies]
+acp-nats        = { workspace = true }
+acp-nats-agent  = { path = "../acp-nats-agent" }
+agent-client-protocol = { workspace = true, features = [
+    "unstable_auth_methods",
+    "unstable_boolean_config",
+    "unstable_cancel_request",
+    "unstable_message_id",
+    "unstable_session_close",
+    "unstable_session_fork",
+    "unstable_session_model",
+    "unstable_session_resume",
+    "unstable_session_usage",
+] }
+async-nats      = { workspace = true }
+async-trait     = { workspace = true }
+serde           = { workspace = true }
+serde_json      = { workspace = true }
+tokio           = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "sync", "process", "io-util", "signal"] }
+tracing         = { workspace = true }
+tracing-subscriber = { workspace = true }
+uuid            = { workspace = true }
