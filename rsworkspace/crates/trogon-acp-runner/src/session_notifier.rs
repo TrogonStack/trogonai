@@ -172,12 +172,20 @@ pub mod mock {
 
     /// In-memory `SessionNotifier` for unit tests.
     ///
-    /// Captures all published messages and exposes a `trigger_cancel` helper
-    /// that fires the cancel signal without actual NATS.
+    /// Captures all published messages and exposes helper methods:
+    /// - `trigger_cancel` — fires the cancel signal without actual NATS.
+    /// - `inject_steer_message` — queues steer text to be delivered via `steer_rx`.
+    /// - `steer_subjects` — returns the subjects `subscribe_steer` was called with.
     #[derive(Clone, Default)]
     pub struct MockSessionNotifier {
         published: Arc<Mutex<Vec<(String, Bytes)>>>,
         cancel_tx: Arc<Mutex<Option<oneshot::Sender<()>>>>,
+        /// Queue of steer messages to pre-load into the channel on the next
+        /// `subscribe_steer` call.  All queued messages are sent before the
+        /// receiver is returned, so the runner can drain them with `try_recv`.
+        steer_inject: Arc<Mutex<Vec<String>>>,
+        /// Subjects that `subscribe_steer` was called with (one entry per call).
+        steer_subjects: Arc<Mutex<Vec<String>>>,
     }
 
     impl MockSessionNotifier {
@@ -195,6 +203,17 @@ pub mod mock {
         /// Return all (subject, payload) pairs published via `publish()`.
         pub fn published(&self) -> Vec<(String, Bytes)> {
             self.published.lock().unwrap().clone()
+        }
+
+        /// Queue a steer message to be delivered when `subscribe_steer` is
+        /// next called.  Multiple calls enqueue multiple messages in order.
+        pub fn inject_steer_message(&self, msg: impl Into<String>) {
+            self.steer_inject.lock().unwrap().push(msg.into());
+        }
+
+        /// Return the subjects that `subscribe_steer` was called with.
+        pub fn steer_subjects(&self) -> Vec<String> {
+            self.steer_subjects.lock().unwrap().clone()
         }
     }
 
@@ -216,9 +235,17 @@ pub mod mock {
 
         async fn subscribe_steer(
             &self,
-            _subject: String,
+            subject: String,
         ) -> Option<tokio::sync::mpsc::Receiver<String>> {
-            let (_tx, rx) = tokio::sync::mpsc::channel(1);
+            self.steer_subjects.lock().unwrap().push(subject);
+            let (tx, rx) = tokio::sync::mpsc::channel(16);
+            // Pre-load any queued steer messages into the channel buffer so
+            // `run_chat_streaming` can drain them with `try_recv`.
+            for msg in self.steer_inject.lock().unwrap().drain(..) {
+                let _ = tx.try_send(msg);
+            }
+            // tx is dropped here; the channel stays readable until the buffer
+            // is drained, after which `try_recv` returns `Err(Empty)`.
             Some(rx)
         }
 
