@@ -27,7 +27,6 @@ use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
 use trogon_agent::{AgentConfig, run};
 use trogon_incidentio::{IncidentioConfig, serve as incidentio_serve};
-use trogon_nats::jetstream::NatsJetStreamClient;
 use trogon_nats::{NatsAuth, NatsConfig};
 use trogon_secret_proxy::{
     proxy::{ProxyState, router},
@@ -162,7 +161,7 @@ async fn incidentio_webhook_triggers_full_pipeline_with_real_key() {
     let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
         .await
         .expect("Failed to connect to NATS");
-    let js = NatsJetStreamClient::new(jetstream::new(nats.clone()));
+    let js = Arc::new(jetstream::new(nats.clone()));
 
     // ── 5. Ensure PROXY_REQUESTS stream ────────────────────────────────────
     let outbound_subject = subjects::outbound("trogon");
@@ -313,7 +312,7 @@ async fn incidentio_resolved_triggers_full_pipeline() {
     let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
         .await
         .unwrap();
-    let js = NatsJetStreamClient::new(jetstream::new(nats.clone()));
+    let js = Arc::new(jetstream::new(nats.clone()));
 
     let outbound_subject = subjects::outbound("trogon");
     stream::ensure_stream(&js, "trogon", &outbound_subject)
@@ -445,7 +444,7 @@ async fn incidentio_updated_triggers_full_pipeline() {
     let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
         .await
         .unwrap();
-    let js = NatsJetStreamClient::new(jetstream::new(nats.clone()));
+    let js = Arc::new(jetstream::new(nats.clone()));
 
     let outbound_subject = subjects::outbound("trogon");
     stream::ensure_stream(&js, "trogon", &outbound_subject)
@@ -568,10 +567,10 @@ async fn incidentio_automation_dispatch_takes_precedence_over_fallback() {
     let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
         .await
         .unwrap();
-    let js = NatsJetStreamClient::new(jetstream::new(nats.clone()));
+    let js = Arc::new(jetstream::new(nats.clone()));
 
     // Register a matching automation.
-    let store = trogon_automations::AutomationStore::open(js.context())
+    let store = trogon_automations::AutomationStore::open(&js)
         .await
         .unwrap();
     let auto = trogon_automations::Automation {
@@ -594,8 +593,7 @@ async fn incidentio_automation_dispatch_takes_precedence_over_fallback() {
     store.put(&auto).await.unwrap();
 
     // Pre-create the INCIDENTIO stream so trogon-incidentio can publish.
-    js.context()
-        .get_or_create_stream(jetstream::stream::Config {
+    js.get_or_create_stream(jetstream::stream::Config {
             name: "INCIDENTIO".to_string(),
             subjects: vec!["incidentio.>".to_string()],
             ..Default::default()
@@ -678,11 +676,10 @@ async fn incidentio_stream_name_none_skips_subscription() {
     let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
         .await
         .unwrap();
-    let js = NatsJetStreamClient::new(jetstream::new(nats.clone()));
+    let js = Arc::new(jetstream::new(nats.clone()));
 
     // Manually create the INCIDENTIO stream so we can publish to it.
-    js.context()
-        .get_or_create_stream(jetstream::stream::Config {
+    js.get_or_create_stream(jetstream::stream::Config {
             name: "INCIDENTIO".to_string(),
             subjects: vec!["incidentio.>".to_string()],
             ..Default::default()
@@ -758,7 +755,7 @@ async fn incidentio_no_automation_falls_back_to_handler() {
     let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
         .await
         .unwrap();
-    let js = NatsJetStreamClient::new(jetstream::new(nats.clone()));
+    let js = Arc::new(jetstream::new(nats.clone()));
 
     let outbound_subject = trogon_secret_proxy::subjects::outbound("trogon");
     trogon_secret_proxy::stream::ensure_stream(&js, "trogon", &outbound_subject)

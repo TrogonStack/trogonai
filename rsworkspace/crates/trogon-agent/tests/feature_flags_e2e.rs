@@ -29,7 +29,6 @@ use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
 use trogon_agent::{AgentConfig, run};
 use trogon_automations::{Automation, AutomationStore, Visibility};
-use trogon_nats::jetstream::NatsJetStreamClient;
 use trogon_nats::{NatsAuth, NatsConfig};
 use trogon_secret_proxy::{
     proxy::{ProxyState, router},
@@ -96,7 +95,7 @@ async fn publish_datadog_alert(nats_port: u16) {
 
 async fn start_proxy_and_worker(
     nats: &async_nats::Client,
-    js: NatsJetStreamClient,
+    js: Arc<async_nats::jetstream::Context>,
     mock_base_url: String,
     vault: Arc<MemoryVault>,
     worker_name: &'static str,
@@ -213,7 +212,7 @@ async fn split_auth_token_is_forwarded_to_evaluator() {
     let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
         .await
         .unwrap();
-    let js = NatsJetStreamClient::new(jetstream::new(nats.clone()));
+    let js = Arc::new(jetstream::new(nats.clone()));
     let vault = Arc::new(MemoryVault::new());
     vault
         .store(
@@ -290,7 +289,7 @@ async fn handler_skipped_when_evaluator_returns_500() {
     let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
         .await
         .unwrap();
-    let js = NatsJetStreamClient::new(jetstream::new(nats.clone()));
+    let js = Arc::new(jetstream::new(nats.clone()));
     let vault = Arc::new(MemoryVault::new());
     vault
         .store(
@@ -354,7 +353,7 @@ async fn handler_skipped_for_custom_variant_treatment() {
     let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
         .await
         .unwrap();
-    let js = NatsJetStreamClient::new(jetstream::new(nats.clone()));
+    let js = Arc::new(jetstream::new(nats.clone()));
     let vault = Arc::new(MemoryVault::new());
     vault
         .store(
@@ -417,7 +416,7 @@ async fn alert_handler_skipped_when_flag_is_off() {
     let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
         .await
         .unwrap();
-    let js = NatsJetStreamClient::new(jetstream::new(nats.clone()));
+    let js = Arc::new(jetstream::new(nats.clone()));
 
     let vault = Arc::new(MemoryVault::new());
     vault
@@ -485,7 +484,7 @@ async fn alert_handler_runs_when_flag_is_on() {
     let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
         .await
         .unwrap();
-    let js = NatsJetStreamClient::new(jetstream::new(nats.clone()));
+    let js = Arc::new(jetstream::new(nats.clone()));
 
     let vault = Arc::new(MemoryVault::new());
     vault
@@ -551,7 +550,7 @@ async fn handler_skipped_when_evaluator_is_unreachable() {
     let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
         .await
         .unwrap();
-    let js = NatsJetStreamClient::new(jetstream::new(nats.clone()));
+    let js = Arc::new(jetstream::new(nats.clone()));
 
     let vault = Arc::new(MemoryVault::new());
     vault
@@ -617,7 +616,7 @@ async fn fail_open_when_split_evaluator_not_configured() {
     let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
         .await
         .unwrap();
-    let js = NatsJetStreamClient::new(jetstream::new(nats.clone()));
+    let js = Arc::new(jetstream::new(nats.clone()));
 
     let vault = Arc::new(MemoryVault::new());
     vault
@@ -720,7 +719,7 @@ async fn memory_fetch_skipped_when_flag_is_off() {
     let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
         .await
         .unwrap();
-    let js = NatsJetStreamClient::new(jetstream::new(nats.clone()));
+    let js = Arc::new(jetstream::new(nats.clone()));
 
     let vault = Arc::new(MemoryVault::new());
     vault
@@ -740,7 +739,7 @@ async fn memory_fetch_skipped_when_flag_is_off() {
     )
     .await;
 
-    register_datadog_automation(js.context()).await;
+    register_datadog_automation(&js).await;
 
     let cfg = agent_config_with_memory(
         nats_port,
@@ -811,7 +810,7 @@ async fn memory_content_included_when_flag_is_on() {
     let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}"))
         .await
         .unwrap();
-    let js = NatsJetStreamClient::new(jetstream::new(nats.clone()));
+    let js = Arc::new(jetstream::new(nats.clone()));
 
     let vault = Arc::new(MemoryVault::new());
     vault
@@ -838,7 +837,7 @@ async fn memory_content_included_when_flag_is_on() {
     )
     .await;
 
-    register_datadog_automation(js.context()).await;
+    register_datadog_automation(&js).await;
 
     let cfg = agent_config_with_memory(
         nats_port,
@@ -928,7 +927,7 @@ macro_rules! flag_tests {
                 .await;
 
             let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}")).await.unwrap();
-            let js = NatsJetStreamClient::new(jetstream::new(nats.clone()));
+            let js = Arc::new(jetstream::new(nats.clone()));
             let vault = Arc::new(MemoryVault::new());
             vault
                 .store(&ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(), "sk-ant-realkey")
@@ -973,7 +972,7 @@ macro_rules! flag_tests {
                 .await;
 
             let nats = async_nats::connect(format!("nats://127.0.0.1:{nats_port}")).await.unwrap();
-            let js = NatsJetStreamClient::new(jetstream::new(nats.clone()));
+            let js = Arc::new(jetstream::new(nats.clone()));
             let vault = Arc::new(MemoryVault::new());
             vault
                 .store(&ApiKeyToken::new("tok_anthropic_prod_test01").unwrap(), "sk-ant-realkey")
