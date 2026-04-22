@@ -20,7 +20,7 @@ pub trait XaiHttpClient {
 
 // ── Mock implementation (test-helpers only) ───────────────────────────────────
 
-#[cfg(feature = "test-helpers")]
+#[cfg(any(test, feature = "test-helpers"))]
 pub mod mock {
     use std::collections::VecDeque;
     use std::sync::Mutex;
