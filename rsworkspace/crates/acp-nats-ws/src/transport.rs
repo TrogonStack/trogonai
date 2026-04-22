@@ -17,7 +17,6 @@ use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::convert::Infallible;
 use std::rc::Rc;
-use thiserror::Error;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use tokio::sync::{mpsc, oneshot, watch};
 use tracing::{error, info, warn};
@@ -76,53 +75,77 @@ pub enum HttpPostOutcome {
     },
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug)]
 pub enum HttpTransportError {
-    #[error("{message}")]
     BadRequest {
         message: &'static str,
-        #[source]
         source: Option<BoxError>,
     },
-    #[error("{message}")]
     NotFound {
         message: &'static str,
-        #[source]
         source: Option<BoxError>,
     },
-    #[error("{message}")]
     Conflict {
         message: &'static str,
-        #[source]
         source: Option<BoxError>,
     },
-    #[error("{message}")]
     UnsupportedMediaType {
         message: &'static str,
-        #[source]
         source: Option<BoxError>,
     },
-    #[error("{message}")]
     NotAcceptable {
         message: &'static str,
-        #[source]
         source: Option<BoxError>,
     },
-    #[error("{message}")]
     NotImplemented {
         message: &'static str,
-        #[source]
         source: Option<BoxError>,
     },
-    #[error("{message}")]
     Internal {
         message: &'static str,
-        #[source]
         source: Option<BoxError>,
     },
 }
 
+impl std::fmt::Display for HttpTransportError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.message())
+    }
+}
+
+impl std::error::Error for HttpTransportError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.source_ref()
+    }
+}
+
 impl HttpTransportError {
+    fn message(&self) -> &'static str {
+        match self {
+            Self::BadRequest { message, .. }
+            | Self::NotFound { message, .. }
+            | Self::Conflict { message, .. }
+            | Self::UnsupportedMediaType { message, .. }
+            | Self::NotAcceptable { message, .. }
+            | Self::NotImplemented { message, .. }
+            | Self::Internal { message, .. } => message,
+        }
+    }
+
+    fn source_ref(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::BadRequest { source, .. }
+            | Self::NotFound { source, .. }
+            | Self::Conflict { source, .. }
+            | Self::UnsupportedMediaType { source, .. }
+            | Self::NotAcceptable { source, .. }
+            | Self::NotImplemented { source, .. }
+            | Self::Internal { source, .. } => source
+                .as_deref()
+                .map(|source| source as &(dyn std::error::Error + 'static)),
+        }
+    }
+
     fn bad_request(message: &'static str) -> Self {
         Self::BadRequest {
             message,

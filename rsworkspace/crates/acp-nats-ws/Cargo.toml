@@ -20,7 +20,6 @@ opentelemetry = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "net", "sync", "io-util"] }
-thiserror = { workspace = true }
 tracing = { workspace = true }
 trogon-nats = { workspace = true }
 trogon-std = { workspace = true, features = ["telemetry-http"] }
