@@ -42,7 +42,7 @@ pub struct ConnectionRequest {
 }
 
 pub enum ManagerRequest {
-    WebSocket(ConnectionRequest),
+    WebSocket(Box<ConnectionRequest>),
     HttpPost {
         connection_id: Option<AcpConnectionId>,
         session_id: Option<acp_nats::AcpSessionId>,
@@ -263,10 +263,12 @@ pub struct IncomingHttpMessage {
     pub id: Option<RequestId>,
     pub method: Option<String>,
     pub params: Option<Value>,
-    pub result: Option<Value>,
-    pub error: Option<Value>,
     #[serde(skip)]
     pub raw: String,
+    #[serde(skip)]
+    has_result: bool,
+    #[serde(skip)]
+    has_error: bool,
 }
 
 impl IncomingHttpMessage {
@@ -278,9 +280,17 @@ impl IncomingHttpMessage {
             ));
         }
 
-        let mut parsed = serde_json::from_str::<Self>(&raw)
+        let value = serde_json::from_str::<Value>(&raw)
+            .map_err(|error| HttpTransportError::bad_request_with("invalid JSON-RPC payload", error))?;
+        let (has_result, has_error) = value
+            .as_object()
+            .map(|object| (object.contains_key("result"), object.contains_key("error")))
+            .unwrap_or((false, false));
+        let mut parsed = serde_json::from_value::<Self>(value)
             .map_err(|error| HttpTransportError::bad_request_with("invalid JSON-RPC payload", error))?;
         parsed.raw = raw;
+        parsed.has_result = has_result;
+        parsed.has_error = has_error;
         Ok(parsed)
     }
 
@@ -295,7 +305,7 @@ impl IncomingHttpMessage {
     fn is_response(&self) -> bool {
         self.id.is_some()
             && self.method.is_none()
-            && (self.result.is_some() || self.error.is_some())
+            && (self.has_result || self.has_error)
     }
 
     fn method_name(&self) -> Option<&str> {
@@ -515,11 +525,11 @@ fn websocket_response(ws: WebSocketUpgrade, state: AppState) -> Response {
     let mut response = ws.on_upgrade(move |socket| async move {
         if state
             .manager_tx
-            .send(ManagerRequest::WebSocket(ConnectionRequest {
+            .send(ManagerRequest::WebSocket(Box::new(ConnectionRequest {
                 connection_id,
                 socket,
                 shutdown_rx,
-            }))
+            })))
             .is_err()
         {
             error!("Connection thread is gone; dropping WebSocket");
@@ -1161,13 +1171,18 @@ pub async fn process_manager_request<N, J>(
 
     match request {
         ManagerRequest::WebSocket(request) => {
+            let ConnectionRequest {
+                connection_id,
+                socket,
+                shutdown_rx,
+            } = *request;
             websocket_handles.push(tokio::task::spawn_local(connection::handle(
-                request.connection_id,
-                request.socket,
+                connection_id,
+                socket,
                 nats_client.clone(),
                 js_client.clone(),
                 config.clone(),
-                request.shutdown_rx,
+                shutdown_rx,
             )));
         }
         ManagerRequest::HttpPost {
@@ -1434,6 +1449,12 @@ mod tests {
         .unwrap();
         assert!(response.is_response());
         assert!(response.requires_session_id());
+
+        let null_response =
+            IncomingHttpMessage::parse(r#"{"jsonrpc":"2.0","id":100,"result":null}"#.to_string())
+                .unwrap();
+        assert!(null_response.is_response());
+        assert!(null_response.requires_session_id());
     }
 
     #[test]
@@ -1769,6 +1790,53 @@ mod tests {
             headers,
             state,
             r#"{"jsonrpc":"2.0","method":"initialized"}"#.to_string(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+    }
+
+    #[tokio::test]
+    async fn http_post_accepts_null_result_responses() {
+        let (state, mut manager_rx) = test_state();
+        let connection_id = AcpConnectionId::new();
+        let session_id = session_id();
+        let expected_connection_id = connection_id.clone();
+        let expected_session_id = session_id.clone();
+
+        tokio::spawn(async move {
+            match manager_rx.recv().await.unwrap() {
+                ManagerRequest::HttpPost {
+                    connection_id: Some(actual_connection_id),
+                    session_id: Some(actual_session_id),
+                    message,
+                    response,
+                    ..
+                } => {
+                    assert_eq!(actual_connection_id, expected_connection_id);
+                    assert_eq!(actual_session_id, expected_session_id);
+                    assert!(message.is_response());
+                    let _ = response.send(Ok(HttpPostOutcome::Accepted));
+                }
+                _ => panic!("unexpected manager request"),
+            }
+        });
+
+        let mut headers = post_headers();
+        headers.insert(
+            ACP_CONNECTION_ID_HEADER,
+            HeaderValue::from_str(&connection_id.to_string()).unwrap(),
+        );
+        headers.insert(
+            ACP_SESSION_ID_HEADER,
+            HeaderValue::from_str(session_id.as_str()).unwrap(),
+        );
+
+        let response = http_post(
+            headers,
+            state,
+            r#"{"jsonrpc":"2.0","id":1,"result":null}"#.to_string(),
         )
         .await
         .unwrap();
