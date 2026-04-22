@@ -3,7 +3,7 @@ use trogon_eventsourcing::{
     SnapshotRead, SnapshotWrite, StreamAppend, StreamCommand, StreamRead,
 };
 
-use super::JobCommandState;
+use super::JobState;
 use crate::{
     JobId,
     events::{JobEvent, JobPaused},
@@ -36,22 +36,22 @@ impl StreamCommand for PauseJobCommand {
 }
 
 impl Decide for PauseJobCommand {
-    type State = JobCommandState;
+    type State = JobState;
     type Event = JobEvent;
     type DecideError = PauseJobDecisionError;
 
-    fn decide(state: &JobCommandState, command: &Self) -> Result<Decision<JobEvent>, Self::DecideError> {
+    fn decide(state: &JobState, command: &Self) -> Result<Decision<JobEvent>, Self::DecideError> {
         match state {
-            JobCommandState::Missing => Err(PauseJobDecisionError::JobNotFound {
+            JobState::Missing => Err(PauseJobDecisionError::JobNotFound {
                 id: command.stream_id().clone(),
             }),
-            JobCommandState::Deleted => Err(PauseJobDecisionError::JobDeleted {
+            JobState::Deleted => Err(PauseJobDecisionError::JobDeleted {
                 id: command.stream_id().clone(),
             }),
-            JobCommandState::PresentDisabled => Err(PauseJobDecisionError::AlreadyPaused {
+            JobState::PresentDisabled => Err(PauseJobDecisionError::AlreadyPaused {
                 id: command.stream_id().clone(),
             }),
-            JobCommandState::PresentEnabled => Ok(Decision::Event(NonEmpty::one(JobEvent::JobPaused(JobPaused {
+            JobState::PresentEnabled => Ok(Decision::Event(NonEmpty::one(JobEvent::JobPaused(JobPaused {
                 id: command.stream_id().to_string(),
             })))),
         }
@@ -74,8 +74,8 @@ pub async fn pause_job<S, SErr>(
 where
     S: StreamRead<JobId, Error = SErr>
         + StreamAppend<JobId, Error = SErr>
-        + SnapshotRead<JobCommandState, JobId, Error = SErr>
-        + SnapshotWrite<JobCommandState, JobId, Error = SErr>,
+        + SnapshotRead<JobState, JobId, Error = SErr>
+        + SnapshotWrite<JobState, JobId, Error = SErr>,
     serde_json::Error: Into<SErr>,
 {
     CommandExecution::new(store, &command)
@@ -118,7 +118,7 @@ mod tests {
 
     #[test]
     fn decides_pause_from_present_enabled_state() {
-        let state = JobCommandState::PresentEnabled;
+        let state = JobState::PresentEnabled;
         let command = PauseJobCommand::new(JobId::parse("backup").unwrap());
 
         let decision = decide(&state, &command).unwrap();
@@ -132,7 +132,7 @@ mod tests {
 
     #[test]
     fn rejects_pausing_already_paused_jobs() {
-        let state = JobCommandState::PresentDisabled;
+        let state = JobState::PresentDisabled;
         let command = PauseJobCommand::new(JobId::parse("backup").unwrap());
 
         assert!(matches!(
@@ -143,7 +143,7 @@ mod tests {
 
     #[test]
     fn rejects_pausing_missing_jobs() {
-        let state = JobCommandState::Missing;
+        let state = JobState::Missing;
         let command = PauseJobCommand::new(JobId::parse("backup").unwrap());
 
         assert!(matches!(
@@ -154,7 +154,7 @@ mod tests {
 
     #[test]
     fn rejects_pausing_deleted_jobs() {
-        let state = JobCommandState::Deleted;
+        let state = JobState::Deleted;
         let command = PauseJobCommand::new(JobId::parse("backup").unwrap());
 
         assert!(matches!(
@@ -249,10 +249,7 @@ mod tests {
         assert_eq!(job.state, JobEventState::Disabled);
 
         let command_snapshot = store
-            .read_command_snapshot::<JobCommandState>(
-                JobCommandState::snapshot_store_config(),
-                &JobId::parse("backup").unwrap(),
-            )
+            .read_command_snapshot::<JobState>(JobState::snapshot_store_config(), &JobId::parse("backup").unwrap())
             .unwrap();
         assert!(command_snapshot.is_none());
     }
