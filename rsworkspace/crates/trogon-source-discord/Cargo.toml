@@ -12,7 +12,7 @@ async-nats = { workspace = true, features = ["jetstream"] }
 bytes = { workspace = true }
 futures-core = "0.3"
 serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true }
+serde_json = { workspace = true, features = ["raw_value"] }
 twilight-gateway = { workspace = true }
 twilight-model = { workspace = true }
 tracing = { workspace = true }
@@ -20,9 +20,11 @@ trogon-nats = { workspace = true }
 trogon-std = { workspace = true }
 
 [dev-dependencies]
+async-nats = { workspace = true, features = ["jetstream"] }
+futures-util = { workspace = true }
+serde_json = { workspace = true }
+testcontainers-modules = { version = "0.8", features = ["nats"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 trogon-nats = { workspace = true, features = ["test-support"] }
 trogon-std = { workspace = true, features = ["test-support"] }
-testcontainers-modules = { version = "0.8", features = ["nats"] }
-futures-util = { workspace = true }
-ed25519-dalek = { version = "2.1", features = ["std"] }
+twilight-model = { workspace = true }

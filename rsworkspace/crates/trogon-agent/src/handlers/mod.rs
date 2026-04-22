@@ -161,10 +161,12 @@ pub async fn run_automation(
         .unwrap_or_else(|_| String::from_utf8_lossy(payload).to_string());
 
     // Substitute {{key}} → value for each variable defined on the automation.
-    let resolved_prompt = automation.variables.iter().fold(
-        automation.prompt.clone(),
-        |acc, (k, v)| acc.replace(&format!("{{{{{k}}}}}"), v),
-    );
+    let resolved_prompt = automation
+        .variables
+        .iter()
+        .fold(automation.prompt.clone(), |acc, (k, v)| {
+            acc.replace(&format!("{{{{{k}}}}}"), v)
+        });
 
     let full_prompt = format!(
         "Event subject: {nats_subject}\n\nEvent payload:\n```json\n{event_json}\n```\n\n{resolved_prompt}"
@@ -196,9 +198,9 @@ pub async fn run_automation(
     // Skills provide structural knowledge; memory provides project-specific context.
     let system_prompt = match (skill_content, memory) {
         (Some(s), Some(m)) => Some(format!("{s}\n\n---\n\n{m}")),
-        (Some(s), None)    => Some(s.to_string()),
-        (None, Some(m))    => Some(m),
-        (None, None)       => None,
+        (Some(s), None) => Some(s.to_string()),
+        (None, Some(m)) => Some(m),
+        (None, None) => None,
     };
 
     run_agent(effective, full_prompt, tools, system_prompt)
@@ -655,7 +657,10 @@ mod tests {
         automation.model = Some("claude-haiku-override".to_string());
 
         let result = run_automation(&agent, &automation, "github.push", b"{}", None).await;
-        assert!(result.is_ok(), "expected Ok with model override: {result:?}");
+        assert!(
+            result.is_ok(),
+            "expected Ok with model override: {result:?}"
+        );
         mock.assert_async().await;
     }
 }

@@ -283,22 +283,17 @@ pub async fn create_pull_request(
             "{}/github/repos/{owner}/{repo}/pulls?head={owner}:{head}&base={base}&state=all&per_page=5",
             ctx.proxy_url,
         );
-        match ctx.http_client.get(&list_url, auth_headers).await {
-            Ok(resp) => {
-                if let Ok(prs) = serde_json::from_str::<Value>(&resp.body) {
-                    if let Some(arr) = prs.as_array() {
-                        if let Some(pr) = arr.first() {
-                            let html_url = pr["html_url"].as_str().unwrap_or("(no url)");
-                            let number = pr["number"].as_u64().unwrap_or(0);
-                            return Ok(format!("Pull request #{number} opened: {html_url}"));
-                        }
-                    }
-                }
-            }
-            // Graceful degradation: if the pre-check fails, proceed with the
-            // create. GitHub's 422 guard still blocks obvious duplicates.
-            Err(_) => {}
+        if let Ok(resp) = ctx.http_client.get(&list_url, auth_headers).await
+            && let Ok(prs) = serde_json::from_str::<Value>(&resp.body)
+            && let Some(arr) = prs.as_array()
+            && let Some(pr) = arr.first()
+        {
+            let html_url = pr["html_url"].as_str().unwrap_or("(no url)");
+            let number = pr["number"].as_u64().unwrap_or(0);
+            return Ok(format!("Pull request #{number} opened: {html_url}"));
         }
+        // Graceful degradation: if the pre-check fails, proceed with the
+        // create. GitHub's 422 guard still blocks obvious duplicates.
     }
 
     let url = format!("{}/github/repos/{owner}/{repo}/pulls", ctx.proxy_url);
@@ -509,7 +504,11 @@ pub async fn post_pr_comment(
         let effective_body = format!("{body}\n\n{marker}");
         let resp = ctx
             .http_client
-            .post(&url, auth_headers, serde_json::json!({ "body": effective_body }))
+            .post(
+                &url,
+                auth_headers,
+                serde_json::json!({ "body": effective_body }),
+            )
             .await?;
         let response: Value = serde_json::from_str(&resp.body).map_err(|e| e.to_string())?;
         let url_str = response["html_url"].as_str().unwrap_or("(no url)");
@@ -574,11 +573,7 @@ mod tests {
             json!([{"filename": "src/main.rs", "status": "modified", "patch": "@@ -1 +1 @@\n"}])
                 .to_string(),
         );
-        let result = list_pr_files(
-            &ctx,
-            &json!({"owner": "o", "repo": "r", "pr_number": 5}),
-        )
-        .await;
+        let result = list_pr_files(&ctx, &json!({"owner": "o", "repo": "r", "pr_number": 5})).await;
         assert!(result.is_ok(), "list_pr_files must succeed: {result:?}");
         let body = result.unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
@@ -589,11 +584,7 @@ mod tests {
     async fn list_pr_files_json_parse_error_propagates() {
         let ctx = make_ctx();
         ctx.http_client.enqueue_ok(200, "not-valid-json{{");
-        let result = list_pr_files(
-            &ctx,
-            &json!({"owner": "o", "repo": "r", "pr_number": 5}),
-        )
-        .await;
+        let result = list_pr_files(&ctx, &json!({"owner": "o", "repo": "r", "pr_number": 5})).await;
         assert!(result.is_err(), "invalid JSON must propagate as Err");
     }
 
@@ -644,11 +635,8 @@ mod tests {
             200,
             json!({"sha": "x", "content": "!!!not-base64!!!"}).to_string(),
         );
-        let result = get_file_contents(
-            &ctx,
-            &json!({"owner": "o", "repo": "r", "path": "f.bin"}),
-        )
-        .await;
+        let result =
+            get_file_contents(&ctx, &json!({"owner": "o", "repo": "r", "path": "f.bin"})).await;
         assert!(result.is_err(), "invalid base64 must return Err");
         assert!(
             result.unwrap_err().contains("base64 decode error"),
@@ -661,10 +649,8 @@ mod tests {
         let ctx = make_ctx();
         // GitHub embeds \n in the base64 string every 60 chars — strip before decoding.
         let text = "hello";
-        let encoded_with_newlines = format!(
-            "{}\n",
-            general_purpose::STANDARD.encode(text.as_bytes())
-        );
+        let encoded_with_newlines =
+            format!("{}\n", general_purpose::STANDARD.encode(text.as_bytes()));
         ctx.http_client.enqueue_ok(
             200,
             json!({"sha": "s1", "content": encoded_with_newlines}).to_string(),
@@ -674,7 +660,10 @@ mod tests {
             &json!({"owner": "o", "repo": "r", "path": "hello.txt"}),
         )
         .await;
-        assert!(result.is_ok(), "newlines in base64 must be stripped: {result:?}");
+        assert!(
+            result.is_ok(),
+            "newlines in base64 must be stripped: {result:?}"
+        );
         let v: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
         assert_eq!(v["content"], text);
     }
@@ -695,7 +684,10 @@ mod tests {
             &json!({"owner": "o", "repo": "r", "path": "binary.bin"}),
         )
         .await;
-        assert!(result.is_err(), "non-UTF-8 bytes must return Err: {result:?}");
+        assert!(
+            result.is_err(),
+            "non-UTF-8 bytes must return Err: {result:?}"
+        );
         assert!(
             result.unwrap_err().contains("UTF-8 decode error"),
             "error must mention 'UTF-8 decode error'"
@@ -712,11 +704,8 @@ mod tests {
             json!([{"id": 1, "body": "lgtm", "html_url": "https://github.com/o/r/issues/1#comment-1"}])
                 .to_string(),
         );
-        let result = get_pr_comments(
-            &ctx,
-            &json!({"owner": "o", "repo": "r", "pr_number": 1}),
-        )
-        .await;
+        let result =
+            get_pr_comments(&ctx, &json!({"owner": "o", "repo": "r", "pr_number": 1})).await;
         assert!(result.is_ok(), "get_pr_comments must succeed: {result:?}");
         let parsed: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
         assert_eq!(parsed[0]["body"], "lgtm");
@@ -727,10 +716,8 @@ mod tests {
     #[tokio::test]
     async fn update_file_without_sha_creates_file() {
         let ctx = make_ctx();
-        ctx.http_client.enqueue_ok(
-            201,
-            json!({"commit": {"sha": "commit-abc"}}).to_string(),
-        );
+        ctx.http_client
+            .enqueue_ok(201, json!({"commit": {"sha": "commit-abc"}}).to_string());
         let result = update_file(
             &ctx,
             &json!({
@@ -739,17 +726,18 @@ mod tests {
             }),
         )
         .await;
-        assert!(result.is_ok(), "update_file (create) must succeed: {result:?}");
+        assert!(
+            result.is_ok(),
+            "update_file (create) must succeed: {result:?}"
+        );
         assert!(result.unwrap().contains("commit-abc"));
     }
 
     #[tokio::test]
     async fn update_file_with_sha_updates_existing_file() {
         let ctx = make_ctx();
-        ctx.http_client.enqueue_ok(
-            200,
-            json!({"commit": {"sha": "commit-def"}}).to_string(),
-        );
+        ctx.http_client
+            .enqueue_ok(200, json!({"commit": {"sha": "commit-def"}}).to_string());
         let result = update_file(
             &ctx,
             &json!({
@@ -759,17 +747,18 @@ mod tests {
             }),
         )
         .await;
-        assert!(result.is_ok(), "update_file (update) must succeed: {result:?}");
+        assert!(
+            result.is_ok(),
+            "update_file (update) must succeed: {result:?}"
+        );
         assert!(result.unwrap().contains("commit-def"));
     }
 
     #[tokio::test]
     async fn update_file_with_idempotency_key_succeeds() {
         let ctx = make_ctx();
-        ctx.http_client.enqueue_ok(
-            200,
-            json!({"commit": {"sha": "commit-idem"}}).to_string(),
-        );
+        ctx.http_client
+            .enqueue_ok(200, json!({"commit": {"sha": "commit-idem"}}).to_string());
         let result = update_file(
             &ctx,
             &json!({
@@ -779,7 +768,10 @@ mod tests {
             }),
         )
         .await;
-        assert!(result.is_ok(), "update_file with idempotency key must succeed: {result:?}");
+        assert!(
+            result.is_ok(),
+            "update_file with idempotency key must succeed: {result:?}"
+        );
     }
 
     // ── create_pull_request — pre-check returns empty array ───────────────────
@@ -823,10 +815,8 @@ mod tests {
     async fn request_reviewers_no_idempotency_key_posts_all_reviewers() {
         let ctx = make_ctx();
         // No GET enqueued — the pre-check must be skipped.
-        ctx.http_client.enqueue_ok(
-            201,
-            json!({"number": 3}).to_string(),
-        );
+        ctx.http_client
+            .enqueue_ok(201, json!({"number": 3}).to_string());
         let result = request_reviewers(
             &ctx,
             &json!({
@@ -835,7 +825,10 @@ mod tests {
             }),
         )
         .await;
-        assert!(result.is_ok(), "request_reviewers (first-time) must succeed: {result:?}");
+        assert!(
+            result.is_ok(),
+            "request_reviewers (first-time) must succeed: {result:?}"
+        );
         assert!(result.unwrap().contains("Reviewers requested"));
     }
 
@@ -1003,15 +996,11 @@ mod tests {
         let ctx = make_ctx();
 
         // GET: alice is already pending, bob and carol are not.
-        ctx.http_client.enqueue_ok(
-            200,
-            json!({ "users": [{ "login": "alice" }] }).to_string(),
-        );
+        ctx.http_client
+            .enqueue_ok(200, json!({ "users": [{ "login": "alice" }] }).to_string());
         // POST: bob and carol are requested.
-        ctx.http_client.enqueue_ok(
-            201,
-            json!({ "number": 5 }).to_string(),
-        );
+        ctx.http_client
+            .enqueue_ok(201, json!({ "number": 5 }).to_string());
 
         let result = request_reviewers(
             &ctx,
@@ -1102,12 +1091,18 @@ mod tests {
         )
         .await;
 
-        assert!(result.is_ok(), "update_file must succeed when branch is absent: {result:?}");
+        assert!(
+            result.is_ok(),
+            "update_file must succeed when branch is absent: {result:?}"
+        );
         assert!(
             result.unwrap().contains("README.md"),
             "result must mention the file path"
         );
-        assert!(ctx.http_client.is_empty(), "exactly one PUT must have been made");
+        assert!(
+            ctx.http_client.is_empty(),
+            "exactly one PUT must have been made"
+        );
     }
 
     /// When the HTTP response body is not valid JSON, `get_pr_comments` must
@@ -1117,13 +1112,13 @@ mod tests {
         let ctx = make_ctx();
         ctx.http_client.enqueue_ok(200, "not valid json {{");
 
-        let result = get_pr_comments(
-            &ctx,
-            &json!({"owner": "o", "repo": "r", "pr_number": 1}),
-        )
-        .await;
+        let result =
+            get_pr_comments(&ctx, &json!({"owner": "o", "repo": "r", "pr_number": 1})).await;
 
-        assert!(result.is_err(), "invalid JSON response must return Err: {result:?}");
+        assert!(
+            result.is_err(),
+            "invalid JSON response must return Err: {result:?}"
+        );
     }
 
     /// When the pre-check GET succeeds with HTTP 200 but the body is not valid
@@ -1137,7 +1132,8 @@ mod tests {
         ctx.http_client.enqueue_ok(200, "not valid json {{");
 
         // POST with all reviewers must follow.
-        ctx.http_client.enqueue_ok(201, json!({"number": 9}).to_string());
+        ctx.http_client
+            .enqueue_ok(201, json!({"number": 9}).to_string());
 
         let result = request_reviewers(
             &ctx,

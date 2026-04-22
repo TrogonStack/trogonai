@@ -58,7 +58,11 @@ pub async fn create_environment(
         created_at: now.clone(),
         updated_at: now,
     };
-    state.environments.put(&env).await.map_err(AppError::Store)?;
+    state
+        .environments
+        .put(&env)
+        .await
+        .map_err(AppError::Store)?;
     Ok((StatusCode::CREATED, Json(env)))
 }
 
@@ -74,15 +78,31 @@ pub async fn update_environment(
         .map_err(AppError::Store)?
         .ok_or_else(|| AppError::NotFound(format!("environment {id} not found")))?;
 
-    if let Some(name) = req.name            { env.name = name; }
-    if let Some(desc) = req.description     { env.description = desc; }
-    if let Some(t) = req.env_type           { env.env_type = t; }
-    if let Some(net) = req.networking       { env.networking = net; }
-    if let Some(pkgs) = req.packages        { env.packages = pkgs; }
-    if let Some(meta) = req.metadata        { env.metadata = meta; }
+    if let Some(name) = req.name {
+        env.name = name;
+    }
+    if let Some(desc) = req.description {
+        env.description = desc;
+    }
+    if let Some(t) = req.env_type {
+        env.env_type = t;
+    }
+    if let Some(net) = req.networking {
+        env.networking = net;
+    }
+    if let Some(pkgs) = req.packages {
+        env.packages = pkgs;
+    }
+    if let Some(meta) = req.metadata {
+        env.metadata = meta;
+    }
 
     env.updated_at = now_iso();
-    state.environments.put(&env).await.map_err(AppError::Store)?;
+    state
+        .environments
+        .put(&env)
+        .await
+        .map_err(AppError::Store)?;
     Ok(Json(env))
 }
 
@@ -90,7 +110,11 @@ pub async fn delete_environment(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<impl IntoResponse, AppError> {
-    state.environments.delete(&id).await.map_err(AppError::Store)?;
+    state
+        .environments
+        .delete(&id)
+        .await
+        .map_err(AppError::Store)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -107,6 +131,10 @@ pub async fn archive_environment(
 
     env.archived = true;
     env.updated_at = now_iso();
-    state.environments.put(&env).await.map_err(AppError::Store)?;
+    state
+        .environments
+        .put(&env)
+        .await
+        .map_err(AppError::Store)?;
     Ok(Json(env))
 }

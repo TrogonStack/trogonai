@@ -8,22 +8,22 @@ use serde_json::{Value, json};
 use tower::util::ServiceExt as _;
 
 use crate::{
+    models::session::{ConsoleSession, SessionStatus},
     server::{AppState, build_router},
     store::mock::{
         MockAgentStore, MockCredentialStore, MockEnvironmentStore, MockSessionStore, MockSkillStore,
     },
-    models::session::{ConsoleSession, SessionStatus},
 };
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 fn mock_state() -> Arc<AppState> {
     Arc::new(AppState {
-        agents:       Arc::new(MockAgentStore::new()),
-        skills:       Arc::new(MockSkillStore::new()),
+        agents: Arc::new(MockAgentStore::new()),
+        skills: Arc::new(MockSkillStore::new()),
         environments: Arc::new(MockEnvironmentStore::new()),
-        credentials:  Arc::new(MockCredentialStore::new()),
-        sessions:     Arc::new(MockSessionStore::new()),
+        credentials: Arc::new(MockCredentialStore::new()),
+        sessions: Arc::new(MockSessionStore::new()),
     })
 }
 
@@ -113,7 +113,10 @@ async fn create_and_get_agent() {
 #[tokio::test]
 async fn get_agent_not_found() {
     let app = build_router(mock_state());
-    let resp = app.oneshot(get_request("/agents/nonexistent")).await.unwrap();
+    let resp = app
+        .oneshot(get_request("/agents/nonexistent"))
+        .await
+        .unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
 
@@ -305,7 +308,8 @@ async fn create_skill_version_and_list() {
     // when run within the same day, so we get at least 1 entry with the latest content.
     let versions_arr = versions.as_array().unwrap();
     assert!(!versions_arr.is_empty());
-    let contents: Vec<_> = versions_arr.iter()
+    let contents: Vec<_> = versions_arr
+        .iter()
         .map(|v| v["content"].as_str().unwrap())
         .collect();
     assert!(contents.contains(&"v2 content"));
@@ -393,7 +397,7 @@ async fn archive_environment() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri(&format!("/environments/{id}/archive"))
+                .uri(format!("/environments/{id}/archive"))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -502,7 +506,9 @@ async fn list_and_delete_credentials() {
 
     let cred_id = creds_arr[0]["id"].as_str().unwrap();
     let resp = build_router(Arc::clone(&state))
-        .oneshot(delete_request(&format!("/environments/env_del/credentials/{cred_id}")))
+        .oneshot(delete_request(&format!(
+            "/environments/env_del/credentials/{cred_id}"
+        )))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::NO_CONTENT);
@@ -528,11 +534,11 @@ async fn list_sessions_empty() {
 #[tokio::test]
 async fn list_and_get_sessions() {
     let state = Arc::new(AppState {
-        agents:       Arc::new(MockAgentStore::new()),
-        skills:       Arc::new(MockSkillStore::new()),
+        agents: Arc::new(MockAgentStore::new()),
+        skills: Arc::new(MockSkillStore::new()),
         environments: Arc::new(MockEnvironmentStore::new()),
-        credentials:  Arc::new(MockCredentialStore::new()),
-        sessions:     Arc::new({
+        credentials: Arc::new(MockCredentialStore::new()),
+        sessions: Arc::new({
             let store = MockSessionStore::new();
             store.insert(ConsoleSession {
                 id: "sess_001".to_string(),
@@ -593,21 +599,18 @@ async fn list_and_get_sessions() {
 #[tokio::test]
 async fn get_session_not_found() {
     let app = build_router(mock_state());
-    let resp = app
-        .oneshot(get_request("/sessions/t/nope"))
-        .await
-        .unwrap();
+    let resp = app.oneshot(get_request("/sessions/t/nope")).await.unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
 async fn list_agent_sessions_by_agent_id() {
     let state = Arc::new(AppState {
-        agents:       Arc::new(MockAgentStore::new()),
-        skills:       Arc::new(MockSkillStore::new()),
+        agents: Arc::new(MockAgentStore::new()),
+        skills: Arc::new(MockSkillStore::new()),
         environments: Arc::new(MockEnvironmentStore::new()),
-        credentials:  Arc::new(MockCredentialStore::new()),
-        sessions:     Arc::new({
+        credentials: Arc::new(MockCredentialStore::new()),
+        sessions: Arc::new({
             let store = MockSessionStore::new();
             store.insert(ConsoleSession {
                 id: "s1".to_string(),
@@ -659,51 +662,51 @@ async fn list_agent_sessions_by_agent_id() {
 
 fn fail_agents_state() -> Arc<AppState> {
     Arc::new(AppState {
-        agents:       Arc::new(MockAgentStore::failing()),
-        skills:       Arc::new(MockSkillStore::new()),
+        agents: Arc::new(MockAgentStore::failing()),
+        skills: Arc::new(MockSkillStore::new()),
         environments: Arc::new(MockEnvironmentStore::new()),
-        credentials:  Arc::new(MockCredentialStore::new()),
-        sessions:     Arc::new(MockSessionStore::new()),
+        credentials: Arc::new(MockCredentialStore::new()),
+        sessions: Arc::new(MockSessionStore::new()),
     })
 }
 
 fn fail_skills_state() -> Arc<AppState> {
     Arc::new(AppState {
-        agents:       Arc::new(MockAgentStore::new()),
-        skills:       Arc::new(MockSkillStore::failing()),
+        agents: Arc::new(MockAgentStore::new()),
+        skills: Arc::new(MockSkillStore::failing()),
         environments: Arc::new(MockEnvironmentStore::new()),
-        credentials:  Arc::new(MockCredentialStore::new()),
-        sessions:     Arc::new(MockSessionStore::new()),
+        credentials: Arc::new(MockCredentialStore::new()),
+        sessions: Arc::new(MockSessionStore::new()),
     })
 }
 
 fn fail_environments_state() -> Arc<AppState> {
     Arc::new(AppState {
-        agents:       Arc::new(MockAgentStore::new()),
-        skills:       Arc::new(MockSkillStore::new()),
+        agents: Arc::new(MockAgentStore::new()),
+        skills: Arc::new(MockSkillStore::new()),
         environments: Arc::new(MockEnvironmentStore::failing()),
-        credentials:  Arc::new(MockCredentialStore::new()),
-        sessions:     Arc::new(MockSessionStore::new()),
+        credentials: Arc::new(MockCredentialStore::new()),
+        sessions: Arc::new(MockSessionStore::new()),
     })
 }
 
 fn fail_credentials_state() -> Arc<AppState> {
     Arc::new(AppState {
-        agents:       Arc::new(MockAgentStore::new()),
-        skills:       Arc::new(MockSkillStore::new()),
+        agents: Arc::new(MockAgentStore::new()),
+        skills: Arc::new(MockSkillStore::new()),
         environments: Arc::new(MockEnvironmentStore::new()),
-        credentials:  Arc::new(MockCredentialStore::failing()),
-        sessions:     Arc::new(MockSessionStore::new()),
+        credentials: Arc::new(MockCredentialStore::failing()),
+        sessions: Arc::new(MockSessionStore::new()),
     })
 }
 
 fn fail_sessions_state() -> Arc<AppState> {
     Arc::new(AppState {
-        agents:       Arc::new(MockAgentStore::new()),
-        skills:       Arc::new(MockSkillStore::new()),
+        agents: Arc::new(MockAgentStore::new()),
+        skills: Arc::new(MockSkillStore::new()),
         environments: Arc::new(MockEnvironmentStore::new()),
-        credentials:  Arc::new(MockCredentialStore::new()),
-        sessions:     Arc::new(MockSessionStore::failing()),
+        credentials: Arc::new(MockCredentialStore::new()),
+        sessions: Arc::new(MockSessionStore::failing()),
     })
 }
 
@@ -746,7 +749,11 @@ async fn create_agent_store_error_returns_500() {
 async fn update_agent_store_error_returns_500() {
     let app = build_router(fail_agents_state());
     let resp = app
-        .oneshot(json_request("PUT", "/agents/any_id", json!({ "name": "X" })))
+        .oneshot(json_request(
+            "PUT",
+            "/agents/any_id",
+            json!({ "name": "X" }),
+        ))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
@@ -762,14 +769,20 @@ async fn delete_agent_store_error_returns_500() {
 #[tokio::test]
 async fn list_agent_versions_store_error_returns_500() {
     let app = build_router(fail_agents_state());
-    let resp = app.oneshot(get_request("/agents/any_id/versions")).await.unwrap();
+    let resp = app
+        .oneshot(get_request("/agents/any_id/versions"))
+        .await
+        .unwrap();
     assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
 }
 
 #[tokio::test]
 async fn list_agent_sessions_store_error_returns_500() {
     let app = build_router(fail_sessions_state());
-    let resp = app.oneshot(get_request("/agents/any_id/sessions")).await.unwrap();
+    let resp = app
+        .oneshot(get_request("/agents/any_id/sessions"))
+        .await
+        .unwrap();
     assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
 }
 
@@ -777,7 +790,11 @@ async fn list_agent_sessions_store_error_returns_500() {
 async fn update_agent_not_found_returns_404() {
     let app = build_router(mock_state());
     let resp = app
-        .oneshot(json_request("PUT", "/agents/ghost_id", json!({ "name": "X" })))
+        .oneshot(json_request(
+            "PUT",
+            "/agents/ghost_id",
+            json!({ "name": "X" }),
+        ))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
@@ -878,7 +895,10 @@ async fn create_skill_version_store_error_returns_500() {
 #[tokio::test]
 async fn list_skill_versions_store_error_returns_500() {
     let app = build_router(fail_skills_state());
-    let resp = app.oneshot(get_request("/skills/any_id/versions")).await.unwrap();
+    let resp = app
+        .oneshot(get_request("/skills/any_id/versions"))
+        .await
+        .unwrap();
     assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
 }
 
@@ -908,7 +928,10 @@ async fn list_environments_store_error_returns_500() {
 #[tokio::test]
 async fn get_environment_store_error_returns_500() {
     let app = build_router(fail_environments_state());
-    let resp = app.oneshot(get_request("/environments/any_id")).await.unwrap();
+    let resp = app
+        .oneshot(get_request("/environments/any_id"))
+        .await
+        .unwrap();
     assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
 }
 
@@ -916,7 +939,11 @@ async fn get_environment_store_error_returns_500() {
 async fn create_environment_store_error_returns_500() {
     let app = build_router(fail_environments_state());
     let resp = app
-        .oneshot(json_request("POST", "/environments", json!({ "name": "E" })))
+        .oneshot(json_request(
+            "POST",
+            "/environments",
+            json!({ "name": "E" }),
+        ))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
@@ -926,7 +953,11 @@ async fn create_environment_store_error_returns_500() {
 async fn update_environment_store_error_returns_500() {
     let app = build_router(fail_environments_state());
     let resp = app
-        .oneshot(json_request("PUT", "/environments/any_id", json!({ "name": "E" })))
+        .oneshot(json_request(
+            "PUT",
+            "/environments/any_id",
+            json!({ "name": "E" }),
+        ))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
@@ -951,14 +982,20 @@ async fn archive_environment_store_error_returns_500() {
 #[tokio::test]
 async fn delete_environment_store_error_returns_500() {
     let app = build_router(fail_environments_state());
-    let resp = app.oneshot(delete_request("/environments/any_id")).await.unwrap();
+    let resp = app
+        .oneshot(delete_request("/environments/any_id"))
+        .await
+        .unwrap();
     assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
 }
 
 #[tokio::test]
 async fn get_environment_not_found_returns_404() {
     let app = build_router(mock_state());
-    let resp = app.oneshot(get_request("/environments/ghost_id")).await.unwrap();
+    let resp = app
+        .oneshot(get_request("/environments/ghost_id"))
+        .await
+        .unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
 
@@ -966,7 +1003,11 @@ async fn get_environment_not_found_returns_404() {
 async fn update_environment_not_found_returns_404() {
     let app = build_router(mock_state());
     let resp = app
-        .oneshot(json_request("PUT", "/environments/ghost_id", json!({ "name": "X" })))
+        .oneshot(json_request(
+            "PUT",
+            "/environments/ghost_id",
+            json!({ "name": "X" }),
+        ))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
@@ -993,7 +1034,11 @@ async fn update_environment_all_fields() {
     let state = mock_state();
 
     let resp = build_router(Arc::clone(&state))
-        .oneshot(json_request("POST", "/environments", json!({ "name": "Old" })))
+        .oneshot(json_request(
+            "POST",
+            "/environments",
+            json!({ "name": "Old" }),
+        ))
         .await
         .unwrap();
     let created: Value = body_json(resp.into_body()).await;
@@ -1026,14 +1071,20 @@ async fn update_environment_all_fields() {
 #[tokio::test]
 async fn get_vault_store_error_returns_500() {
     let app = build_router(fail_credentials_state());
-    let resp = app.oneshot(get_request("/environments/env1/vault")).await.unwrap();
+    let resp = app
+        .oneshot(get_request("/environments/env1/vault"))
+        .await
+        .unwrap();
     assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
 }
 
 #[tokio::test]
 async fn list_credentials_store_error_returns_500() {
     let app = build_router(fail_credentials_state());
-    let resp = app.oneshot(get_request("/environments/env1/credentials")).await.unwrap();
+    let resp = app
+        .oneshot(get_request("/environments/env1/credentials"))
+        .await
+        .unwrap();
     assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
 }
 
@@ -1058,7 +1109,10 @@ async fn create_credential_store_error_returns_500() {
 #[tokio::test]
 async fn delete_credential_store_error_returns_500() {
     let app = build_router(fail_credentials_state());
-    let resp = app.oneshot(delete_request("/environments/env1/credentials/crd1")).await.unwrap();
+    let resp = app
+        .oneshot(delete_request("/environments/env1/credentials/crd1"))
+        .await
+        .unwrap();
     assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
 }
 
@@ -1137,7 +1191,9 @@ async fn get_credential_found() {
     let cred_id = created["id"].as_str().unwrap();
 
     let resp = build_router(Arc::clone(&state))
-        .oneshot(get_request(&format!("/environments/env_get/credentials/{cred_id}")))
+        .oneshot(get_request(&format!(
+            "/environments/env_get/credentials/{cred_id}"
+        )))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -1249,7 +1305,10 @@ async fn list_agents_with_two_items_invokes_sort() {
             .await
             .unwrap();
     }
-    let resp = build_router(Arc::clone(&state)).oneshot(get_request("/agents")).await.unwrap();
+    let resp = build_router(Arc::clone(&state))
+        .oneshot(get_request("/agents"))
+        .await
+        .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     let agents: Value = body_json(resp.into_body()).await;
     assert_eq!(agents.as_array().unwrap().len(), 2);
@@ -1268,7 +1327,10 @@ async fn list_skills_with_two_items_invokes_sort() {
             .await
             .unwrap();
     }
-    let resp = build_router(Arc::clone(&state)).oneshot(get_request("/skills")).await.unwrap();
+    let resp = build_router(Arc::clone(&state))
+        .oneshot(get_request("/skills"))
+        .await
+        .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     let skills: Value = body_json(resp.into_body()).await;
     let arr = skills.as_array().unwrap();
@@ -1282,11 +1344,18 @@ async fn list_environments_with_two_items_invokes_sort() {
     let state = mock_state();
     for name in ["Prod", "Dev"] {
         build_router(Arc::clone(&state))
-            .oneshot(json_request("POST", "/environments", json!({ "name": name })))
+            .oneshot(json_request(
+                "POST",
+                "/environments",
+                json!({ "name": name }),
+            ))
             .await
             .unwrap();
     }
-    let resp = build_router(Arc::clone(&state)).oneshot(get_request("/environments")).await.unwrap();
+    let resp = build_router(Arc::clone(&state))
+        .oneshot(get_request("/environments"))
+        .await
+        .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     let envs: Value = body_json(resp.into_body()).await;
     let arr = envs.as_array().unwrap();
@@ -1329,7 +1398,10 @@ async fn update_agent_put_error_returns_500() {
         description: "".to_string(),
         status: AgentStatus::Active,
         version: 1,
-        model: AgentModel { id: "m".to_string(), speed: "standard".to_string() },
+        model: AgentModel {
+            id: "m".to_string(),
+            speed: "standard".to_string(),
+        },
         system_prompt: "".to_string(),
         skill_ids: vec![],
         tools: vec![],
@@ -1339,14 +1411,18 @@ async fn update_agent_put_error_returns_500() {
         updated_at: "0".to_string(),
     });
     let app = build_router(Arc::new(AppState {
-        agents:       Arc::new(store),
-        skills:       Arc::new(MockSkillStore::new()),
+        agents: Arc::new(store),
+        skills: Arc::new(MockSkillStore::new()),
         environments: Arc::new(MockEnvironmentStore::new()),
-        credentials:  Arc::new(MockCredentialStore::new()),
-        sessions:     Arc::new(MockSessionStore::new()),
+        credentials: Arc::new(MockCredentialStore::new()),
+        sessions: Arc::new(MockSessionStore::new()),
     }));
     let resp = app
-        .oneshot(json_request("PUT", "/agents/agent_put_fail", json!({ "name": "Y" })))
+        .oneshot(json_request(
+            "PUT",
+            "/agents/agent_put_fail",
+            json!({ "name": "Y" }),
+        ))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
@@ -1369,14 +1445,18 @@ async fn update_environment_put_error_returns_500() {
         updated_at: "0".to_string(),
     });
     let app = build_router(Arc::new(AppState {
-        agents:       Arc::new(MockAgentStore::new()),
-        skills:       Arc::new(MockSkillStore::new()),
+        agents: Arc::new(MockAgentStore::new()),
+        skills: Arc::new(MockSkillStore::new()),
         environments: Arc::new(store),
-        credentials:  Arc::new(MockCredentialStore::new()),
-        sessions:     Arc::new(MockSessionStore::new()),
+        credentials: Arc::new(MockCredentialStore::new()),
+        sessions: Arc::new(MockSessionStore::new()),
     }));
     let resp = app
-        .oneshot(json_request("PUT", "/environments/env_put_fail", json!({ "name": "E2" })))
+        .oneshot(json_request(
+            "PUT",
+            "/environments/env_put_fail",
+            json!({ "name": "E2" }),
+        ))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
@@ -1399,11 +1479,11 @@ async fn archive_environment_put_error_returns_500() {
         updated_at: "0".to_string(),
     });
     let app = build_router(Arc::new(AppState {
-        agents:       Arc::new(MockAgentStore::new()),
-        skills:       Arc::new(MockSkillStore::new()),
+        agents: Arc::new(MockAgentStore::new()),
+        skills: Arc::new(MockSkillStore::new()),
         environments: Arc::new(store),
-        credentials:  Arc::new(MockCredentialStore::new()),
-        sessions:     Arc::new(MockSessionStore::new()),
+        credentials: Arc::new(MockCredentialStore::new()),
+        sessions: Arc::new(MockSessionStore::new()),
     }));
     let resp = app
         .oneshot(
@@ -1421,11 +1501,11 @@ async fn archive_environment_put_error_returns_500() {
 #[tokio::test]
 async fn create_credential_put_error_returns_500() {
     let app = build_router(Arc::new(AppState {
-        agents:       Arc::new(MockAgentStore::new()),
-        skills:       Arc::new(MockSkillStore::new()),
+        agents: Arc::new(MockAgentStore::new()),
+        skills: Arc::new(MockSkillStore::new()),
         environments: Arc::new(MockEnvironmentStore::new()),
-        credentials:  Arc::new(MockCredentialStore::failing_put()),
-        sessions:     Arc::new(MockSessionStore::new()),
+        credentials: Arc::new(MockCredentialStore::failing_put()),
+        sessions: Arc::new(MockSessionStore::new()),
     }));
     let resp = app
         .oneshot(json_request(
@@ -1441,11 +1521,11 @@ async fn create_credential_put_error_returns_500() {
 #[tokio::test]
 async fn create_skill_put_version_error_returns_500() {
     let app = build_router(Arc::new(AppState {
-        agents:       Arc::new(MockAgentStore::new()),
-        skills:       Arc::new(MockSkillStore::failing_put_version()),
+        agents: Arc::new(MockAgentStore::new()),
+        skills: Arc::new(MockSkillStore::failing_put_version()),
         environments: Arc::new(MockEnvironmentStore::new()),
-        credentials:  Arc::new(MockCredentialStore::new()),
-        sessions:     Arc::new(MockSessionStore::new()),
+        credentials: Arc::new(MockCredentialStore::new()),
+        sessions: Arc::new(MockSessionStore::new()),
     }));
     let resp = app
         .oneshot(json_request(
@@ -1472,11 +1552,11 @@ async fn create_skill_version_put_version_error_returns_500() {
         updated_at: "0".to_string(),
     });
     let app = build_router(Arc::new(AppState {
-        agents:       Arc::new(MockAgentStore::new()),
-        skills:       Arc::new(store),
+        agents: Arc::new(MockAgentStore::new()),
+        skills: Arc::new(store),
         environments: Arc::new(MockEnvironmentStore::new()),
-        credentials:  Arc::new(MockCredentialStore::new()),
-        sessions:     Arc::new(MockSessionStore::new()),
+        credentials: Arc::new(MockCredentialStore::new()),
+        sessions: Arc::new(MockSessionStore::new()),
     }));
     let resp = app
         .oneshot(json_request(
@@ -1503,11 +1583,11 @@ async fn create_skill_version_put_error_returns_500() {
         updated_at: "0".to_string(),
     });
     let app = build_router(Arc::new(AppState {
-        agents:       Arc::new(MockAgentStore::new()),
-        skills:       Arc::new(store),
+        agents: Arc::new(MockAgentStore::new()),
+        skills: Arc::new(store),
         environments: Arc::new(MockEnvironmentStore::new()),
-        credentials:  Arc::new(MockCredentialStore::new()),
-        sessions:     Arc::new(MockSessionStore::new()),
+        credentials: Arc::new(MockCredentialStore::new()),
+        sessions: Arc::new(MockSessionStore::new()),
     }));
     let resp = app
         .oneshot(json_request(
@@ -1538,7 +1618,11 @@ async fn update_agent_without_name_covers_none_branch() {
     let id = created["id"].as_str().unwrap();
 
     let resp = build_router(Arc::clone(&state))
-        .oneshot(json_request("PUT", &format!("/agents/{id}"), json!({ "description": "updated" })))
+        .oneshot(json_request(
+            "PUT",
+            &format!("/agents/{id}"),
+            json!({ "description": "updated" }),
+        ))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -1552,14 +1636,22 @@ async fn update_environment_without_name_covers_none_branch() {
     let state = mock_state();
 
     let resp = build_router(Arc::clone(&state))
-        .oneshot(json_request("POST", "/environments", json!({ "name": "Env", "description": "old" })))
+        .oneshot(json_request(
+            "POST",
+            "/environments",
+            json!({ "name": "Env", "description": "old" }),
+        ))
         .await
         .unwrap();
     let created: Value = body_json(resp.into_body()).await;
     let id = created["id"].as_str().unwrap();
 
     let resp = build_router(Arc::clone(&state))
-        .oneshot(json_request("PUT", &format!("/environments/{id}"), json!({ "description": "new desc" })))
+        .oneshot(json_request(
+            "PUT",
+            &format!("/environments/{id}"),
+            json!({ "description": "new desc" }),
+        ))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);

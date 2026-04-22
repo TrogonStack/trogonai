@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use crate::{
     error::AppError,
-    models::credential::{Credential, CredentialStatus, CreateCredentialRequest},
+    models::credential::{CreateCredentialRequest, Credential, CredentialStatus},
     server::AppState,
 };
 
@@ -38,7 +38,11 @@ pub async fn list_credentials(
     State(state): State<Arc<AppState>>,
     Path(env_id): Path<String>,
 ) -> Result<impl IntoResponse, AppError> {
-    let creds = state.credentials.list(&env_id).await.map_err(AppError::Store)?;
+    let creds = state
+        .credentials
+        .list(&env_id)
+        .await
+        .map_err(AppError::Store)?;
     Ok(Json(creds))
 }
 
@@ -66,7 +70,11 @@ pub async fn create_credential(
         created_at: now.clone(),
         updated_at: now,
     };
-    state.credentials.put(&cred).await.map_err(AppError::Store)?;
+    state
+        .credentials
+        .put(&cred)
+        .await
+        .map_err(AppError::Store)?;
     Ok((StatusCode::CREATED, Json(cred)))
 }
 

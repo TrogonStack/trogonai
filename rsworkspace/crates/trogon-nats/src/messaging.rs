@@ -972,6 +972,7 @@ mod tests {
     /// `request_with_timeout()` must return `NatsError::Timeout` when the
     /// client future never resolves and the timeout elapses.
     #[tokio::test]
+    #[cfg(feature = "test-support")]
     async fn request_with_timeout_returns_timeout_when_client_hangs() {
         #[derive(Debug, Clone)]
         struct LocalErr;
@@ -1017,6 +1018,7 @@ mod tests {
     /// always returns an error to guarantee the failure regardless of
     /// serde_json version.
     #[tokio::test]
+    #[cfg(feature = "test-support")]
     async fn request_with_timeout_returns_serialize_error_for_unserializable_request() {
         struct AlwaysFailsSer;
 

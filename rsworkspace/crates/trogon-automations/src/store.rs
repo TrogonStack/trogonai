@@ -398,7 +398,8 @@ pub mod error_mock {
         fn list<'a>(
             &'a self,
             _tenant_id: &'a str,
-        ) -> Pin<Box<dyn Future<Output = Result<Vec<Automation>, StoreError>> + Send + 'a>> {
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<Automation>, StoreError>> + Send + 'a>>
+        {
             Box::pin(async move { Err(StoreError("injected list error".into())) })
         }
 
@@ -407,7 +408,8 @@ pub mod error_mock {
             _tenant_id: &'a str,
             _nats_subject: &'a str,
             _payload: &'a serde_json::Value,
-        ) -> Pin<Box<dyn Future<Output = Result<Vec<Automation>, StoreError>> + Send + 'a>> {
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<Automation>, StoreError>> + Send + 'a>>
+        {
             Box::pin(async move { Err(StoreError("injected matching error".into())) })
         }
     }

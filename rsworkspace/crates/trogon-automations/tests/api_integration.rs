@@ -727,7 +727,11 @@ async fn get_runs_for_automation_path_returns_filtered_runs() {
         .await
         .unwrap();
     let arr = res.as_array().unwrap();
-    assert_eq!(arr.len(), 2, "/automations/auto-A/runs must return only auto-A runs");
+    assert_eq!(
+        arr.len(),
+        2,
+        "/automations/auto-A/runs must return only auto-A runs"
+    );
     assert!(arr.iter().all(|r| r["automation_id"] == "auto-A"));
 }
 

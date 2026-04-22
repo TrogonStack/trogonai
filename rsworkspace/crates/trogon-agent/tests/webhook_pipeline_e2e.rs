@@ -563,7 +563,9 @@ async fn github_webhook_produces_run_record_accessible_via_api() {
     }
 
     // ── 5. Seed a matching automation ──────────────────────────────────────
-    let astore = AutomationStore::open(&js).await.expect("open AutomationStore");
+    let astore = AutomationStore::open(&js)
+        .await
+        .expect("open AutomationStore");
     astore
         .put(&Automation {
             id: "auto-webhook-e2e".to_string(),
@@ -682,7 +684,11 @@ async fn github_webhook_produces_run_record_accessible_via_api() {
         .await
         .expect("POST to GitHub webhook server failed");
 
-    assert_eq!(resp.status(), 200, "webhook server must accept signed request");
+    assert_eq!(
+        resp.status(),
+        200,
+        "webhook server must accept signed request"
+    );
 
     // ── 9. Poll GET /runs until the RunRecord appears ──────────────────────
     let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
@@ -777,7 +783,9 @@ async fn linear_webhook_produces_run_record_accessible_via_api() {
         .unwrap_or_else(|e| panic!("create stream {name}: {e}"));
     }
 
-    let astore = AutomationStore::open(&js).await.expect("open AutomationStore");
+    let astore = AutomationStore::open(&js)
+        .await
+        .expect("open AutomationStore");
     astore
         .put(&Automation {
             id: "auto-linear-e2e".to_string(),
@@ -989,7 +997,9 @@ async fn github_webhook_failed_run_appears_in_runs_api_as_failed() {
         .unwrap_or_else(|e| panic!("create stream {name}: {e}"));
     }
 
-    let astore = AutomationStore::open(&js).await.expect("open AutomationStore");
+    let astore = AutomationStore::open(&js)
+        .await
+        .expect("open AutomationStore");
     astore
         .put(&Automation {
             id: "auto-fail-e2e".to_string(),

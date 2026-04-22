@@ -8,9 +8,15 @@ use std::sync::Arc;
 use tracing::info;
 
 use store::{
-    agents::AgentStore, credentials::CredentialStore, environments::EnvironmentStore,
-    sessions::SessionReader, skills::SkillStore,
-    traits::{AgentRepository, CredentialRepository, EnvironmentRepository, SessionRepository, SkillRepository},
+    agents::AgentStore,
+    credentials::CredentialStore,
+    environments::EnvironmentStore,
+    sessions::SessionReader,
+    skills::SkillStore,
+    traits::{
+        AgentRepository, CredentialRepository, EnvironmentRepository, SessionRepository,
+        SkillRepository,
+    },
 };
 
 pub async fn run() -> Result<(), String> {
@@ -31,11 +37,12 @@ pub async fn run_with(nats_url: &str, port: u16) -> Result<(), String> {
     let js = async_nats::jetstream::new(nats);
 
     let state = Arc::new(server::AppState {
-        agents:       Arc::new(AgentStore::open(&js).await?)       as Arc<dyn AgentRepository>,
-        skills:       Arc::new(SkillStore::open(&js).await?)       as Arc<dyn SkillRepository>,
-        environments: Arc::new(EnvironmentStore::open(&js).await?) as Arc<dyn EnvironmentRepository>,
-        credentials:  Arc::new(CredentialStore::open(&js).await?)  as Arc<dyn CredentialRepository>,
-        sessions:     Arc::new(SessionReader::open(&js).await?)    as Arc<dyn SessionRepository>,
+        agents: Arc::new(AgentStore::open(&js).await?) as Arc<dyn AgentRepository>,
+        skills: Arc::new(SkillStore::open(&js).await?) as Arc<dyn SkillRepository>,
+        environments: Arc::new(EnvironmentStore::open(&js).await?)
+            as Arc<dyn EnvironmentRepository>,
+        credentials: Arc::new(CredentialStore::open(&js).await?) as Arc<dyn CredentialRepository>,
+        sessions: Arc::new(SessionReader::open(&js).await?) as Arc<dyn SessionRepository>,
     });
 
     let router = server::build_router(state);

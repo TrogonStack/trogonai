@@ -356,7 +356,11 @@ async fn event_id_is_set_as_nats_msg_id() {
     .unwrap();
     let sig = compute_slack_sig(TEST_SECRET, &ts, &body);
 
-    let mut sub = fixture.nats.subscribe("slack.event.app_mention").await.unwrap();
+    let mut sub = fixture
+        .nats
+        .subscribe("slack.event.app_mention")
+        .await
+        .unwrap();
 
     let resp = fixture
         .app

@@ -45,7 +45,10 @@ impl SkillLoader {
             .await
             .map_err(|e| e.to_string())?;
 
-        Ok(Self { skills_kv, versions_kv })
+        Ok(Self {
+            skills_kv,
+            versions_kv,
+        })
     }
 
     async fn load_impl(&self, skill_ids: &[String]) -> Option<String> {
@@ -61,7 +64,8 @@ impl SkillLoader {
                     let Ok(meta) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
                         continue;
                     };
-                    let Some(version) = meta["latest_version"].as_str().map(|s| s.to_string()) else {
+                    let Some(version) = meta["latest_version"].as_str().map(|s| s.to_string())
+                    else {
                         continue;
                     };
                     let name = meta["name"]
@@ -120,13 +124,22 @@ pub mod mock {
         content: HashMap<String, String>,
     }
 
+    impl Default for MockSkillLoader {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
     impl MockSkillLoader {
         pub fn new() -> Self {
-            Self { content: HashMap::new() }
+            Self {
+                content: HashMap::new(),
+            }
         }
 
         pub fn insert(&mut self, skill_id: &str, content: &str) {
-            self.content.insert(skill_id.to_string(), content.to_string());
+            self.content
+                .insert(skill_id.to_string(), content.to_string());
         }
     }
 
@@ -134,7 +147,8 @@ pub mod mock {
         fn load<'a>(
             &'a self,
             skill_ids: &'a [String],
-        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<String>> + Send + 'a>> {
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<String>> + Send + 'a>>
+        {
             let mut sections = Vec::new();
             for id in skill_ids {
                 if let Some(c) = self.content.get(id) {

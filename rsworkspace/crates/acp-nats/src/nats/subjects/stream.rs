@@ -162,7 +162,10 @@ mod tests {
         assert!(patterns.contains(&"acp.session.*.agent.cancel".to_string()));
         assert!(patterns.contains(&"acp.session.*.agent.load".to_string()));
         for pat in &patterns {
-            assert!(pat.starts_with("acp."), "every pattern must start with prefix: {pat}");
+            assert!(
+                pat.starts_with("acp."),
+                "every pattern must start with prefix: {pat}"
+            );
         }
     }
 

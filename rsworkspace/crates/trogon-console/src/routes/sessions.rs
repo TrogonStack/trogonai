@@ -7,7 +7,9 @@ use std::sync::Arc;
 
 use crate::{error::AppError, server::AppState};
 
-pub async fn list_sessions(State(state): State<Arc<AppState>>) -> Result<impl IntoResponse, AppError> {
+pub async fn list_sessions(
+    State(state): State<Arc<AppState>>,
+) -> Result<impl IntoResponse, AppError> {
     let sessions = state.sessions.list().await.map_err(AppError::Store)?;
     Ok(Json(sessions))
 }

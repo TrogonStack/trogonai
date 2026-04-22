@@ -198,11 +198,7 @@ async fn wrong_token_returns_401_no_nats_message() {
 async fn missing_event_header_routes_to_unroutable_returns_200() {
     let fixture = setup().await;
 
-    let mut sub = fixture
-        .nats
-        .subscribe("gitlab.unroutable")
-        .await
-        .unwrap();
+    let mut sub = fixture.nats.subscribe("gitlab.unroutable").await.unwrap();
 
     let resp = fixture
         .app

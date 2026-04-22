@@ -92,7 +92,8 @@ pub async fn post_comment(
                 tokio::time::sleep(std::time::Duration::from_millis(200)).await;
                 match get_comments(ctx, &check_input).await {
                     Ok(json_str) => {
-                        if let Ok(Value::Array(comments)) = serde_json::from_str::<Value>(&json_str) {
+                        if let Ok(Value::Array(comments)) = serde_json::from_str::<Value>(&json_str)
+                        {
                             let already_posted = comments.iter().any(|c| {
                                 c["body"]
                                     .as_str()
@@ -306,10 +307,8 @@ mod tests {
     #[tokio::test]
     async fn get_issue_not_found_returns_err() {
         let ctx = make_ctx();
-        ctx.http_client.enqueue_ok(
-            200,
-            json!({"data": {"issue": null}}).to_string(),
-        );
+        ctx.http_client
+            .enqueue_ok(200, json!({"data": {"issue": null}}).to_string());
         let result = get_issue(&ctx, &json!({"issue_id": "ISS-NONE"})).await;
         assert!(result.is_err(), "null issue must return Err");
         assert!(
@@ -349,10 +348,8 @@ mod tests {
     #[tokio::test]
     async fn get_comments_issue_not_found_returns_err() {
         let ctx = make_ctx();
-        ctx.http_client.enqueue_ok(
-            200,
-            json!({"data": {"issue": null}}).to_string(),
-        );
+        ctx.http_client
+            .enqueue_ok(200, json!({"data": {"issue": null}}).to_string());
         let result = get_comments(&ctx, &json!({"issue_id": "ISS-NONE"})).await;
         assert!(result.is_err(), "null issue must return Err");
         assert!(
@@ -415,7 +412,10 @@ mod tests {
             }),
         )
         .await;
-        assert!(result.is_ok(), "update_issue with all fields must succeed: {result:?}");
+        assert!(
+            result.is_ok(),
+            "update_issue with all fields must succeed: {result:?}"
+        );
         assert!(result.unwrap().contains("ISS-4"));
     }
 

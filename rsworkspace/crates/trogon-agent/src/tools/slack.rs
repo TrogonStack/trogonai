@@ -138,8 +138,7 @@ pub async fn send_message(
                     // misconfiguration early rather than silently duplicating.
                     if messages
                         .map(|msgs| {
-                            !msgs.is_empty()
-                                && msgs.iter().all(|m| m.get("metadata").is_none())
+                            !msgs.is_empty() && msgs.iter().all(|m| m.get("metadata").is_none())
                         })
                         .unwrap_or(false)
                     {
@@ -380,7 +379,10 @@ mod tests {
             }),
         )
         .await;
-        assert!(result.is_ok(), "must succeed after history GET failure: {result:?}");
+        assert!(
+            result.is_ok(),
+            "must succeed after history GET failure: {result:?}"
+        );
         assert!(result.unwrap().contains("Message sent"));
     }
 
@@ -408,7 +410,10 @@ mod tests {
             }),
         )
         .await;
-        assert!(result.is_ok(), "must succeed when history ok:false: {result:?}");
+        assert!(
+            result.is_ok(),
+            "must succeed when history ok:false: {result:?}"
+        );
         assert!(result.unwrap().contains("Message sent"));
     }
 
@@ -450,8 +455,14 @@ mod tests {
         let result = read_channel(&ctx, &json!({"channel": "C-MIXED"})).await;
         assert!(result.is_ok(), "read_channel must succeed: {result:?}");
         let body = result.unwrap();
-        assert!(body.contains("visible message"), "message with text must appear");
-        assert!(!body.contains("U1"), "message without text must be filtered");
+        assert!(
+            body.contains("visible message"),
+            "message with text must appear"
+        );
+        assert!(
+            !body.contains("U1"),
+            "message without text must be filtered"
+        );
     }
 
     /// When the send POST itself returns `ok: false`, `send_message` must
@@ -466,13 +477,13 @@ mod tests {
             json!({"ok": false, "error": "not_in_channel"}).to_string(),
         );
 
-        let result = send_message(
-            &ctx,
-            &json!({"channel": "C-RESTRICTED", "text": "Hello!"}),
-        )
-        .await;
+        let result =
+            send_message(&ctx, &json!({"channel": "C-RESTRICTED", "text": "Hello!"})).await;
 
-        assert!(result.is_err(), "ok:false from POST must return Err: {result:?}");
+        assert!(
+            result.is_err(),
+            "ok:false from POST must return Err: {result:?}"
+        );
         assert!(
             result.unwrap_err().contains("not_in_channel"),
             "error must include Slack's error code"
@@ -524,7 +535,10 @@ mod tests {
         ctx.http_client.enqueue_ok(200, "not valid json {{");
 
         let result = read_channel(&ctx, &json!({"channel": "C-ENG"})).await;
-        assert!(result.is_err(), "invalid JSON response must return Err: {result:?}");
+        assert!(
+            result.is_err(),
+            "invalid JSON response must return Err: {result:?}"
+        );
     }
 
     /// When the channel history is empty, `read_channel` must return the

@@ -193,11 +193,7 @@ mod tests {
             "check_run": {"name": "CI", "conclusion": "failure", "pull_requests": [], "details_url": ""},
             "repository": {}   // no owner or name
         });
-        let result = handle(
-            &make_skip_agent(),
-            &serde_json::to_vec(&payload).unwrap(),
-        )
-        .await;
+        let result = handle(&make_skip_agent(), &serde_json::to_vec(&payload).unwrap()).await;
         assert!(
             result.is_none(),
             "missing repository fields must return None; got: {result:?}"

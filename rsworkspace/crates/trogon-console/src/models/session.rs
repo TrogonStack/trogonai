@@ -71,19 +71,27 @@ pub(crate) struct RawUsage {
 
 impl From<RawSession> for ConsoleSession {
     fn from(r: RawSession) -> Self {
-        let per_msg_input: u32 = r.messages.iter()
+        let per_msg_input: u32 = r
+            .messages
+            .iter()
             .filter_map(|m| m.usage.as_ref())
             .map(|u| u.input_tokens)
             .sum();
-        let per_msg_output: u32 = r.messages.iter()
+        let per_msg_output: u32 = r
+            .messages
+            .iter()
             .filter_map(|m| m.usage.as_ref())
             .map(|u| u.output_tokens)
             .sum();
-        let cache_read_tokens: u32 = r.messages.iter()
+        let cache_read_tokens: u32 = r
+            .messages
+            .iter()
             .filter_map(|m| m.usage.as_ref())
             .map(|u| u.cache_read_input_tokens)
             .sum();
-        let cache_write_tokens: u32 = r.messages.iter()
+        let cache_write_tokens: u32 = r
+            .messages
+            .iter()
             .filter_map(|m| m.usage.as_ref())
             .map(|u| u.cache_creation_input_tokens)
             .sum();
@@ -103,8 +111,16 @@ impl From<RawSession> for ConsoleSession {
 
         // A session is "running" if the last message is from the user
         // (agent hasn't responded yet) or if it was updated very recently.
-        let status = r.messages.last()
-            .map(|m| if m.role == "user" { SessionStatus::Running } else { SessionStatus::Idle })
+        let status = r
+            .messages
+            .last()
+            .map(|m| {
+                if m.role == "user" {
+                    SessionStatus::Running
+                } else {
+                    SessionStatus::Idle
+                }
+            })
             .unwrap_or(SessionStatus::Idle);
 
         ConsoleSession {

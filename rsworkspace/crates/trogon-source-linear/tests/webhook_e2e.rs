@@ -234,11 +234,7 @@ async fn invalid_json_routes_to_unroutable_on_nats() {
     let body = b"not valid json";
     let sig = compute_sig(TEST_SECRET, body);
 
-    let mut sub = fixture
-        .nats
-        .subscribe("linear.unroutable")
-        .await
-        .unwrap();
+    let mut sub = fixture.nats.subscribe("linear.unroutable").await.unwrap();
 
     let resp = fixture
         .app
@@ -282,11 +278,7 @@ async fn stale_timestamp_routes_to_unroutable_on_nats() {
     .unwrap();
     let sig = compute_sig(TEST_SECRET, &body);
 
-    let mut sub = fixture
-        .nats
-        .subscribe("linear.unroutable")
-        .await
-        .unwrap();
+    let mut sub = fixture.nats.subscribe("linear.unroutable").await.unwrap();
 
     let resp = fixture
         .app
@@ -332,7 +324,11 @@ async fn webhook_id_is_set_as_nats_msg_id() {
     .unwrap();
     let sig = compute_sig(TEST_SECRET, &body);
 
-    let mut sub = fixture.nats.subscribe("linear.Comment.update").await.unwrap();
+    let mut sub = fixture
+        .nats
+        .subscribe("linear.Comment.update")
+        .await
+        .unwrap();
 
     let resp = fixture
         .app

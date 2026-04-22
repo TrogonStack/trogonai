@@ -29,6 +29,37 @@ impl FeatureFlagClient for AlwaysOnFlagClient {
     }
 }
 
+/// Split.io-backed feature flag client.
+pub struct SplitFlagClient {
+    inner: trogon_splitio::SplitClient,
+}
+
+impl SplitFlagClient {
+    pub fn new(inner: trogon_splitio::SplitClient) -> Self {
+        Self { inner }
+    }
+}
+
+impl FeatureFlagClient for SplitFlagClient {
+    fn is_enabled<'a>(
+        &'a self,
+        tenant_id: &'a str,
+        flag: &'a dyn FeatureFlag,
+    ) -> Pin<Box<dyn Future<Output = bool> + Send + 'a>> {
+        let tenant = tenant_id.to_string();
+        let flag_name = flag.name().to_string();
+        let inner = self.inner.clone();
+        Box::pin(async move {
+            // Use get_treatment_or_control directly with the flag name string
+            // to avoid object-safety issues with FeatureFlag.
+            inner
+                .get_treatment_or_control(&tenant, &flag_name, None)
+                .await
+                == "on"
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -70,7 +101,9 @@ mod tests {
     async fn split_flag_client_control_treatment_returns_false() {
         // Flag not defined in mock → evaluator returns "control".
         let client = client_for_mock(MockEvaluator::new()).await;
-        let enabled = client.is_enabled("tenant-1", &TestFlag("undefined_flag")).await;
+        let enabled = client
+            .is_enabled("tenant-1", &TestFlag("undefined_flag"))
+            .await;
         assert!(!enabled, "treatment 'control' must return false");
     }
 
@@ -80,7 +113,10 @@ mod tests {
     async fn split_flag_client_on_uppercase_is_not_enabled() {
         let client = client_for_mock(MockEvaluator::new().with_flag("my_flag", "ON")).await;
         let enabled = client.is_enabled("tenant-1", &TestFlag("my_flag")).await;
-        assert!(!enabled, "treatment 'ON' (uppercase) must return false — comparison is case-sensitive");
+        assert!(
+            !enabled,
+            "treatment 'ON' (uppercase) must return false — comparison is case-sensitive"
+        );
     }
 
     /// `AlwaysOnFlagClient` always returns true regardless of flag or tenant.
@@ -88,36 +124,5 @@ mod tests {
     async fn always_on_flag_client_returns_true() {
         let client = AlwaysOnFlagClient;
         assert!(client.is_enabled("any-tenant", &TestFlag("any_flag")).await);
-    }
-}
-
-/// Split.io-backed feature flag client.
-pub struct SplitFlagClient {
-    inner: trogon_splitio::SplitClient,
-}
-
-impl SplitFlagClient {
-    pub fn new(inner: trogon_splitio::SplitClient) -> Self {
-        Self { inner }
-    }
-}
-
-impl FeatureFlagClient for SplitFlagClient {
-    fn is_enabled<'a>(
-        &'a self,
-        tenant_id: &'a str,
-        flag: &'a dyn FeatureFlag,
-    ) -> Pin<Box<dyn Future<Output = bool> + Send + 'a>> {
-        let tenant = tenant_id.to_string();
-        let flag_name = flag.name().to_string();
-        let inner = self.inner.clone();
-        Box::pin(async move {
-            // Use get_treatment_or_control directly with the flag name string
-            // to avoid object-safety issues with FeatureFlag.
-            inner
-                .get_treatment_or_control(&tenant, &flag_name, None)
-                .await
-                == "on"
-        })
     }
 }

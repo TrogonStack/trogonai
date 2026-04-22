@@ -7,11 +7,11 @@ use trogon_console::models::agent::{AgentDefinition, AgentModel, AgentStatus};
 use trogon_console::models::credential::{Credential, CredentialStatus, CredentialType};
 use trogon_console::models::environment::{Environment, EnvironmentType, NetworkingType};
 use trogon_console::models::skill::{Skill, SkillVersion};
-use trogon_console::store::agents::{AgentStore, AGENT_VERSIONS_BUCKET, AGENTS_BUCKET};
-use trogon_console::store::credentials::{CredentialStore, CREDS_BUCKET, VAULTS_BUCKET};
-use trogon_console::store::environments::{EnvironmentStore, ENVS_BUCKET};
-use trogon_console::store::sessions::{SessionReader, SESSIONS_BUCKET};
-use trogon_console::store::skills::{SkillStore, SKILL_VERSIONS_BUCKET, SKILLS_BUCKET};
+use trogon_console::store::agents::{AGENT_VERSIONS_BUCKET, AGENTS_BUCKET, AgentStore};
+use trogon_console::store::credentials::{CREDS_BUCKET, CredentialStore, VAULTS_BUCKET};
+use trogon_console::store::environments::{ENVS_BUCKET, EnvironmentStore};
+use trogon_console::store::sessions::{SESSIONS_BUCKET, SessionReader};
+use trogon_console::store::skills::{SKILL_VERSIONS_BUCKET, SKILLS_BUCKET, SkillStore};
 
 async fn nats_js() -> (jetstream::Context, Box<dyn std::any::Any>) {
     let container = Nats::default()
@@ -33,7 +33,10 @@ fn make_agent(id: &str, updated_at: &str) -> AgentDefinition {
         description: "test".to_string(),
         status: AgentStatus::Active,
         version: 1,
-        model: AgentModel { id: "claude-3".to_string(), speed: "standard".to_string() },
+        model: AgentModel {
+            id: "claude-3".to_string(),
+            speed: "standard".to_string(),
+        },
         system_prompt: "You are helpful".to_string(),
         skill_ids: vec![],
         tools: vec![],
@@ -114,7 +117,10 @@ async fn agent_store_list_versions_prefix_filter() {
     store.put(&a).await.unwrap();
     a.version = 2;
     store.put(&a).await.unwrap();
-    store.put(&make_agent("agent_b", "2026-01-02")).await.unwrap();
+    store
+        .put(&make_agent("agent_b", "2026-01-02"))
+        .await
+        .unwrap();
 
     let versions_a = store.list_versions("agent_a").await.unwrap();
     assert_eq!(versions_a.len(), 2);
@@ -129,7 +135,9 @@ async fn agent_store_get_invalid_json_returns_error() {
     let (js, _c) = nats_js().await;
     let store = AgentStore::open(&js).await.unwrap();
     let kv = js.get_key_value(AGENTS_BUCKET).await.unwrap();
-    kv.put("bad_agent", Bytes::from_static(b"not valid json")).await.unwrap();
+    kv.put("bad_agent", Bytes::from_static(b"not valid json"))
+        .await
+        .unwrap();
     assert!(store.get("bad_agent").await.is_err());
 }
 
@@ -176,7 +184,9 @@ async fn skill_store_get_invalid_json_returns_error() {
     let (js, _c) = nats_js().await;
     let store = SkillStore::open(&js).await.unwrap();
     let kv = js.get_key_value(SKILLS_BUCKET).await.unwrap();
-    kv.put("bad_skill", Bytes::from_static(b"{broken")).await.unwrap();
+    kv.put("bad_skill", Bytes::from_static(b"{broken"))
+        .await
+        .unwrap();
     assert!(store.get("bad_skill").await.is_err());
 }
 
@@ -189,7 +199,10 @@ async fn credential_store_get_nonexistent_and_found() {
 
     assert!(store.get("env1", "nope").await.unwrap().is_none());
 
-    store.put(&make_credential("c1", "env1", "vlt1")).await.unwrap();
+    store
+        .put(&make_credential("c1", "env1", "vlt1"))
+        .await
+        .unwrap();
     let found = store.get("env1", "c1").await.unwrap();
     assert!(found.is_some());
     assert_eq!(found.unwrap().id, "c1");
@@ -207,7 +220,11 @@ async fn credential_store_get_vault_returns_existing_after_create() {
     let (js, _c) = nats_js().await;
     let store = CredentialStore::open(&js).await.unwrap();
     let created = store.get_or_create_vault("env_x").await.unwrap();
-    let found = store.get_vault("env_x").await.unwrap().expect("vault should exist");
+    let found = store
+        .get_vault("env_x")
+        .await
+        .unwrap()
+        .expect("vault should exist");
     assert_eq!(found.id, created.id);
 }
 
@@ -215,9 +232,18 @@ async fn credential_store_get_vault_returns_existing_after_create() {
 async fn credential_store_list_prefix_isolation() {
     let (js, _c) = nats_js().await;
     let store = CredentialStore::open(&js).await.unwrap();
-    store.put(&make_credential("c1", "env_a", "vlt_a")).await.unwrap();
-    store.put(&make_credential("c2", "env_a", "vlt_a")).await.unwrap();
-    store.put(&make_credential("c3", "env_b", "vlt_b")).await.unwrap();
+    store
+        .put(&make_credential("c1", "env_a", "vlt_a"))
+        .await
+        .unwrap();
+    store
+        .put(&make_credential("c2", "env_a", "vlt_a"))
+        .await
+        .unwrap();
+    store
+        .put(&make_credential("c3", "env_b", "vlt_b"))
+        .await
+        .unwrap();
 
     assert_eq!(store.list("env_a").await.unwrap().len(), 2);
     assert_eq!(store.list("env_b").await.unwrap().len(), 1);
@@ -242,7 +268,9 @@ async fn env_store_get_invalid_json_returns_error() {
     let (js, _c) = nats_js().await;
     let store = EnvironmentStore::open(&js).await.unwrap();
     let kv = js.get_key_value(ENVS_BUCKET).await.unwrap();
-    kv.put("bad_env", Bytes::from_static(b"oops")).await.unwrap();
+    kv.put("bad_env", Bytes::from_static(b"oops"))
+        .await
+        .unwrap();
     assert!(store.get("bad_env").await.is_err());
 }
 
@@ -252,7 +280,13 @@ async fn env_store_get_invalid_json_returns_error() {
 async fn session_reader_get_nonexistent() {
     let (js, _c) = nats_js().await;
     let reader = SessionReader::open(&js).await.unwrap();
-    assert!(reader.get("no_tenant", "no_session").await.unwrap().is_none());
+    assert!(
+        reader
+            .get("no_tenant", "no_session")
+            .await
+            .unwrap()
+            .is_none()
+    );
 }
 
 #[tokio::test]
@@ -260,7 +294,9 @@ async fn session_reader_list_ignores_invalid_json() {
     let (js, _c) = nats_js().await;
     let reader = SessionReader::open(&js).await.unwrap();
     let kv = js.get_key_value(SESSIONS_BUCKET).await.unwrap();
-    kv.put("tenant.bad_sess", Bytes::from_static(b"garbage")).await.unwrap();
+    kv.put("tenant.bad_sess", Bytes::from_static(b"garbage"))
+        .await
+        .unwrap();
     // Invalid entries are silently skipped
     assert!(reader.list().await.unwrap().is_empty());
 }
@@ -302,7 +338,9 @@ async fn credential_store_get_invalid_json_returns_error() {
     let (js, _c) = nats_js().await;
     let store = CredentialStore::open(&js).await.unwrap();
     let kv = js.get_key_value(CREDS_BUCKET).await.unwrap();
-    kv.put("env1.crd_bad", Bytes::from_static(b"not json")).await.unwrap();
+    kv.put("env1.crd_bad", Bytes::from_static(b"not json"))
+        .await
+        .unwrap();
     assert!(store.get("env1", "crd_bad").await.is_err());
 }
 
@@ -311,7 +349,9 @@ async fn credential_store_get_vault_invalid_json_returns_error() {
     let (js, _c) = nats_js().await;
     let store = CredentialStore::open(&js).await.unwrap();
     let kv = js.get_key_value(VAULTS_BUCKET).await.unwrap();
-    kv.put("env_bad", Bytes::from_static(b"not json")).await.unwrap();
+    kv.put("env_bad", Bytes::from_static(b"not json"))
+        .await
+        .unwrap();
     assert!(store.get_vault("env_bad").await.is_err());
 }
 
@@ -321,7 +361,9 @@ async fn credential_store_get_or_create_vault_existing_bad_json_returns_error() 
     let store = CredentialStore::open(&js).await.unwrap();
     // pre-populate vault bucket with bad JSON for this env
     let kv = js.get_key_value(VAULTS_BUCKET).await.unwrap();
-    kv.put("env_corrupt", Bytes::from_static(b"not json")).await.unwrap();
+    kv.put("env_corrupt", Bytes::from_static(b"not json"))
+        .await
+        .unwrap();
     // get_or_create sees existing bytes → tries to deserialize → error
     assert!(store.get_or_create_vault("env_corrupt").await.is_err());
 }
@@ -331,7 +373,9 @@ async fn session_reader_get_invalid_json_returns_error() {
     let (js, _c) = nats_js().await;
     let reader = SessionReader::open(&js).await.unwrap();
     let kv = js.get_key_value(SESSIONS_BUCKET).await.unwrap();
-    kv.put("tenant.bad_sess", Bytes::from_static(b"not json")).await.unwrap();
+    kv.put("tenant.bad_sess", Bytes::from_static(b"not json"))
+        .await
+        .unwrap();
     assert!(reader.get("tenant", "bad_sess").await.is_err());
 }
 
@@ -346,7 +390,9 @@ async fn agent_store_list_versions_skips_invalid_json() {
     store.put(&a).await.unwrap();
     // overwrite the version entry with bad JSON
     let kv = js.get_key_value(AGENT_VERSIONS_BUCKET).await.unwrap();
-    kv.put("ag_x.v1", Bytes::from_static(b"notjson")).await.unwrap();
+    kv.put("ag_x.v1", Bytes::from_static(b"notjson"))
+        .await
+        .unwrap();
     // list_versions silently skips unparseable entries
     let versions = store.list_versions("ag_x").await.unwrap();
     assert!(versions.is_empty());
@@ -358,7 +404,9 @@ async fn skill_store_list_versions_skips_invalid_json() {
     let store = SkillStore::open(&js).await.unwrap();
     // put bad JSON at a key that matches the prefix filter
     let kv = js.get_key_value(SKILL_VERSIONS_BUCKET).await.unwrap();
-    kv.put("pdf.20260101", Bytes::from_static(b"notjson")).await.unwrap();
+    kv.put("pdf.20260101", Bytes::from_static(b"notjson"))
+        .await
+        .unwrap();
     let versions = store.list_versions("pdf").await.unwrap();
     assert!(versions.is_empty());
 }
@@ -369,7 +417,9 @@ async fn credential_store_list_skips_invalid_json() {
     let store = CredentialStore::open(&js).await.unwrap();
     // put bad JSON at a key matching the prefix
     let kv = js.get_key_value(CREDS_BUCKET).await.unwrap();
-    kv.put("env1.crd_bad", Bytes::from_static(b"notjson")).await.unwrap();
+    kv.put("env1.crd_bad", Bytes::from_static(b"notjson"))
+        .await
+        .unwrap();
     let creds = store.list("env1").await.unwrap();
     assert!(creds.is_empty());
 }
@@ -380,7 +430,9 @@ async fn credential_store_list_skips_invalid_json() {
 async fn agent_store_nats_error_agents_bucket() {
     let (js, _c) = nats_js().await;
     let store = AgentStore::open(&js).await.unwrap();
-    js.delete_stream(format!("KV_{AGENTS_BUCKET}")).await.unwrap();
+    js.delete_stream(format!("KV_{AGENTS_BUCKET}"))
+        .await
+        .unwrap();
 
     assert!(store.get("x").await.is_err());
     assert!(store.delete("x").await.is_err());
@@ -392,7 +444,9 @@ async fn agent_store_nats_error_agents_bucket() {
 async fn agent_store_nats_error_versions_bucket() {
     let (js, _c) = nats_js().await;
     let store = AgentStore::open(&js).await.unwrap();
-    js.delete_stream(format!("KV_{AGENT_VERSIONS_BUCKET}")).await.unwrap();
+    js.delete_stream(format!("KV_{AGENT_VERSIONS_BUCKET}"))
+        .await
+        .unwrap();
 
     assert!(store.list_versions("agent_a").await.is_err());
     // put writes to agents bucket first, then versions bucket
@@ -403,7 +457,9 @@ async fn agent_store_nats_error_versions_bucket() {
 async fn skill_store_nats_error_skills_bucket() {
     let (js, _c) = nats_js().await;
     let store = SkillStore::open(&js).await.unwrap();
-    js.delete_stream(format!("KV_{SKILLS_BUCKET}")).await.unwrap();
+    js.delete_stream(format!("KV_{SKILLS_BUCKET}"))
+        .await
+        .unwrap();
 
     assert!(store.get("x").await.is_err());
     assert!(store.put(&make_skill("x")).await.is_err());
@@ -414,7 +470,9 @@ async fn skill_store_nats_error_skills_bucket() {
 async fn skill_store_nats_error_versions_bucket() {
     let (js, _c) = nats_js().await;
     let store = SkillStore::open(&js).await.unwrap();
-    js.delete_stream(format!("KV_{SKILL_VERSIONS_BUCKET}")).await.unwrap();
+    js.delete_stream(format!("KV_{SKILL_VERSIONS_BUCKET}"))
+        .await
+        .unwrap();
 
     let sv = SkillVersion {
         skill_id: "sk".to_string(),
@@ -431,10 +489,17 @@ async fn skill_store_nats_error_versions_bucket() {
 async fn credential_store_nats_error_creds_bucket() {
     let (js, _c) = nats_js().await;
     let store = CredentialStore::open(&js).await.unwrap();
-    js.delete_stream(format!("KV_{CREDS_BUCKET}")).await.unwrap();
+    js.delete_stream(format!("KV_{CREDS_BUCKET}"))
+        .await
+        .unwrap();
 
     assert!(store.list("env1").await.is_err());
-    assert!(store.put(&make_credential("c1", "env1", "vlt1")).await.is_err());
+    assert!(
+        store
+            .put(&make_credential("c1", "env1", "vlt1"))
+            .await
+            .is_err()
+    );
     assert!(store.delete("env1", "c1").await.is_err());
 }
 
@@ -442,7 +507,9 @@ async fn credential_store_nats_error_creds_bucket() {
 async fn credential_store_nats_error_vaults_bucket() {
     let (js, _c) = nats_js().await;
     let store = CredentialStore::open(&js).await.unwrap();
-    js.delete_stream(format!("KV_{VAULTS_BUCKET}")).await.unwrap();
+    js.delete_stream(format!("KV_{VAULTS_BUCKET}"))
+        .await
+        .unwrap();
 
     assert!(store.get_vault("env1").await.is_err());
     assert!(store.get_or_create_vault("env1").await.is_err());
@@ -464,7 +531,9 @@ async fn env_store_nats_error() {
 async fn session_store_nats_error() {
     let (js, _c) = nats_js().await;
     let reader = SessionReader::open(&js).await.unwrap();
-    js.delete_stream(format!("KV_{SESSIONS_BUCKET}")).await.unwrap();
+    js.delete_stream(format!("KV_{SESSIONS_BUCKET}"))
+        .await
+        .unwrap();
 
     assert!(reader.get("t", "s").await.is_err());
     assert!(reader.list().await.is_err());

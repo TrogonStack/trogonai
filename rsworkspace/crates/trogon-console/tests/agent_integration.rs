@@ -31,11 +31,8 @@ use tokio::net::TcpListener;
 use trogon_console::{
     server::{AppState, build_router},
     store::{
-        agents::AgentStore,
-        credentials::CredentialStore,
-        environments::EnvironmentStore,
-        sessions::SessionReader,
-        skills::SkillStore,
+        agents::AgentStore, credentials::CredentialStore, environments::EnvironmentStore,
+        sessions::SessionReader, skills::SkillStore,
     },
 };
 
@@ -68,7 +65,13 @@ async fn start() -> TestEnv {
     let credentials = Arc::new(CredentialStore::open(&js).await.expect("CredentialStore"));
     let sessions = Arc::new(SessionReader::open(&js).await.expect("SessionReader"));
 
-    let state = Arc::new(AppState { agents, skills, environments, credentials, sessions });
+    let state = Arc::new(AppState {
+        agents,
+        skills,
+        environments,
+        credentials,
+        sessions,
+    });
     let app = build_router(state);
 
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
@@ -84,9 +87,13 @@ async fn start() -> TestEnv {
 }
 
 async fn kv_get_json(js: &jetstream::Context, bucket: &str, key: &str) -> Value {
-    let kv = js.get_key_value(bucket).await
+    let kv = js
+        .get_key_value(bucket)
+        .await
         .unwrap_or_else(|e| panic!("get_key_value({bucket}): {e}"));
-    let bytes = kv.get(key).await
+    let bytes = kv
+        .get(key)
+        .await
         .unwrap_or_else(|e| panic!("kv.get({key}): {e}"))
         .unwrap_or_else(|| panic!("key {key} not found in {bucket}"));
     serde_json::from_slice(&bytes)
@@ -101,7 +108,8 @@ async fn kv_get_json(js: &jetstream::Context, bucket: &str, key: &str) -> Value 
 async fn skill_written_by_console_has_correct_kv_format_for_skill_loader() {
     let env = start().await;
 
-    let resp = env.client
+    let resp = env
+        .client
         .post(format!("{}/skills", env.base_url))
         .json(&serde_json::json!({
             "name": "Onboarding Guide",
@@ -118,7 +126,8 @@ async fn skill_written_by_console_has_correct_kv_format_for_skill_loader() {
     // CONSOLE_SKILLS entry must have name + latest_version (used by SkillLoader)
     let meta = kv_get_json(&env.js, "CONSOLE_SKILLS", skill_id).await;
     assert_eq!(meta["name"], "Onboarding Guide", "name mismatch: {meta}");
-    let version = meta["latest_version"].as_str()
+    let version = meta["latest_version"]
+        .as_str()
         .unwrap_or_else(|| panic!("latest_version missing: {meta}"));
     assert!(!version.is_empty(), "latest_version must not be empty");
 
@@ -126,8 +135,7 @@ async fn skill_written_by_console_has_correct_kv_format_for_skill_loader() {
     let ver_key = format!("{skill_id}.{version}");
     let ver = kv_get_json(&env.js, "CONSOLE_SKILL_VERSIONS", &ver_key).await;
     assert_eq!(
-        ver["content"],
-        "Always greet new users and ask for their name before proceeding.",
+        ver["content"], "Always greet new users and ask for their name before proceeding.",
         "content mismatch: {ver}"
     );
 }
@@ -138,7 +146,8 @@ async fn skill_written_by_console_has_correct_kv_format_for_skill_loader() {
 async fn adding_skill_version_updates_latest_version_in_kv() {
     let env = start().await;
 
-    let resp = env.client
+    let resp = env
+        .client
         .post(format!("{}/skills", env.base_url))
         .json(&serde_json::json!({
             "name": "Auth Policy",
@@ -153,7 +162,8 @@ async fn adding_skill_version_updates_latest_version_in_kv() {
     let v1 = created["latest_version"].as_str().unwrap().to_string();
 
     // Add a new version
-    let resp = env.client
+    let resp = env
+        .client
         .post(format!("{}/skills/{skill_id}/versions", env.base_url))
         .json(&serde_json::json!({ "content": "v2 content" }))
         .send()
@@ -169,7 +179,12 @@ async fn adding_skill_version_updates_latest_version_in_kv() {
     assert_eq!(stored_latest, v2, "latest_version should be updated to v2");
 
     // v2 version entry must exist with new content
-    let ver = kv_get_json(&env.js, "CONSOLE_SKILL_VERSIONS", &format!("{skill_id}.{v2}")).await;
+    let ver = kv_get_json(
+        &env.js,
+        "CONSOLE_SKILL_VERSIONS",
+        &format!("{skill_id}.{v2}"),
+    )
+    .await;
     assert_eq!(ver["content"], "v2 content");
 
     // v1 version entry may still exist (no cleanup expected) or may be overwritten
@@ -185,7 +200,8 @@ async fn adding_skill_version_updates_latest_version_in_kv() {
 async fn agent_written_by_console_has_skill_ids_in_kv_for_agent_loader() {
     let env = start().await;
 
-    let resp = env.client
+    let resp = env
+        .client
         .post(format!("{}/agents", env.base_url))
         .json(&serde_json::json!({
             "name": "Skilled Agent",
@@ -202,7 +218,8 @@ async fn agent_written_by_console_has_skill_ids_in_kv_for_agent_loader() {
     let agent_id = created["id"].as_str().unwrap();
 
     let entry = kv_get_json(&env.js, "CONSOLE_AGENTS", agent_id).await;
-    let ids: Vec<&str> = entry["skill_ids"].as_array()
+    let ids: Vec<&str> = entry["skill_ids"]
+        .as_array()
         .unwrap_or_else(|| panic!("skill_ids missing or not an array: {entry}"))
         .iter()
         .map(|v| v.as_str().unwrap())
@@ -216,7 +233,8 @@ async fn agent_written_by_console_has_skill_ids_in_kv_for_agent_loader() {
 async fn agent_without_skills_has_empty_skill_ids_in_kv() {
     let env = start().await;
 
-    let resp = env.client
+    let resp = env
+        .client
         .post(format!("{}/agents", env.base_url))
         .json(&serde_json::json!({
             "name": "Bare Agent",
@@ -231,9 +249,13 @@ async fn agent_without_skills_has_empty_skill_ids_in_kv() {
     let agent_id = created["id"].as_str().unwrap();
 
     let entry = kv_get_json(&env.js, "CONSOLE_AGENTS", agent_id).await;
-    let ids = entry["skill_ids"].as_array()
+    let ids = entry["skill_ids"]
+        .as_array()
         .unwrap_or_else(|| panic!("skill_ids missing: {entry}"));
-    assert!(ids.is_empty(), "bare agent should have empty skill_ids: {ids:?}");
+    assert!(
+        ids.is_empty(),
+        "bare agent should have empty skill_ids: {ids:?}"
+    );
 }
 
 /// After PUT /agents/{id} updating skill_ids, CONSOLE_AGENTS reflects the new list.
@@ -241,7 +263,8 @@ async fn agent_without_skills_has_empty_skill_ids_in_kv() {
 async fn updating_agent_skill_ids_is_reflected_in_kv() {
     let env = start().await;
 
-    let resp = env.client
+    let resp = env
+        .client
         .post(format!("{}/agents", env.base_url))
         .json(&serde_json::json!({
             "name": "Evolving Agent",
@@ -264,8 +287,12 @@ async fn updating_agent_skill_ids_is_reflected_in_kv() {
         .unwrap();
 
     let entry = kv_get_json(&env.js, "CONSOLE_AGENTS", agent_id).await;
-    let ids: Vec<&str> = entry["skill_ids"].as_array().unwrap()
-        .iter().map(|v| v.as_str().unwrap()).collect();
+    let ids: Vec<&str> = entry["skill_ids"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
     assert_eq!(ids, vec!["skill_v2", "skill_v3"]);
 }
 
@@ -278,19 +305,25 @@ async fn full_round_trip_kv_structure_is_complete() {
     let env = start().await;
 
     // Create skill
-    let skill_resp: Value = env.client
+    let skill_resp: Value = env
+        .client
         .post(format!("{}/skills", env.base_url))
         .json(&serde_json::json!({
             "name": "Security Policy",
             "description": "",
             "content": "Never expose secrets. Always validate inputs."
         }))
-        .send().await.unwrap()
-        .json().await.unwrap();
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
     let skill_id = skill_resp["id"].as_str().unwrap();
 
     // Create agent referencing that skill
-    let agent_resp: Value = env.client
+    let agent_resp: Value = env
+        .client
         .post(format!("{}/agents", env.base_url))
         .json(&serde_json::json!({
             "name": "Security Agent",
@@ -299,19 +332,32 @@ async fn full_round_trip_kv_structure_is_complete() {
             "system_prompt": "You are a security agent.",
             "skill_ids": [skill_id]
         }))
-        .send().await.unwrap()
-        .json().await.unwrap();
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
     let agent_id = agent_resp["id"].as_str().unwrap();
 
     // Step 1: AgentLoader would read skill_ids from CONSOLE_AGENTS
     let agent_entry = kv_get_json(&env.js, "CONSOLE_AGENTS", agent_id).await;
-    let skill_ids: Vec<&str> = agent_entry["skill_ids"].as_array().unwrap()
-        .iter().map(|v| v.as_str().unwrap()).collect();
-    assert_eq!(skill_ids, vec![skill_id], "agent must reference the created skill");
+    let skill_ids: Vec<&str> = agent_entry["skill_ids"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert_eq!(
+        skill_ids,
+        vec![skill_id],
+        "agent must reference the created skill"
+    );
 
     // Step 2: SkillLoader would read latest_version from CONSOLE_SKILLS
     let skill_meta = kv_get_json(&env.js, "CONSOLE_SKILLS", skill_id).await;
-    let latest_version = skill_meta["latest_version"].as_str()
+    let latest_version = skill_meta["latest_version"]
+        .as_str()
         .unwrap_or_else(|| panic!("latest_version missing"));
     let skill_name = skill_meta["name"].as_str().unwrap();
     assert_eq!(skill_name, "Security Policy");
@@ -362,23 +408,26 @@ async fn session_written_by_agent_is_readable_by_console_api() {
         "updated_at": "2000"
     })).await;
 
-    let resp = env.client
+    let resp = env
+        .client
         .get(format!("{}/sessions/tenant_abc/sess_001", env.base_url))
-        .send().await.unwrap();
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status().as_u16(), 200);
     let s: Value = resp.json().await.unwrap();
 
-    assert_eq!(s["id"],                "sess_001");
-    assert_eq!(s["tenant_id"],         "tenant_abc");
-    assert_eq!(s["model"],             "claude-sonnet-4-6");
-    assert_eq!(s["message_count"],     2);
-    assert_eq!(s["input_tokens"],      100);
-    assert_eq!(s["output_tokens"],     200);
+    assert_eq!(s["id"], "sess_001");
+    assert_eq!(s["tenant_id"], "tenant_abc");
+    assert_eq!(s["model"], "claude-sonnet-4-6");
+    assert_eq!(s["message_count"], 2);
+    assert_eq!(s["input_tokens"], 100);
+    assert_eq!(s["output_tokens"], 200);
     assert_eq!(s["cache_write_tokens"], 50);
-    assert_eq!(s["cache_read_tokens"],  25);
-    assert_eq!(s["duration_ms"],       1500);
-    assert_eq!(s["agent_id"],          "agent_xyz");
-    assert_eq!(s["status"],            "idle"); // last message is "assistant"
+    assert_eq!(s["cache_read_tokens"], 25);
+    assert_eq!(s["duration_ms"], 1500);
+    assert_eq!(s["agent_id"], "agent_xyz");
+    assert_eq!(s["status"], "idle"); // last message is "assistant"
 }
 
 /// A session whose last message is from "user" has status "running".
@@ -386,21 +435,31 @@ async fn session_written_by_agent_is_readable_by_console_api() {
 async fn session_with_last_user_message_has_running_status() {
     let env = start().await;
 
-    write_raw_session(&env.js, "tenant_run", serde_json::json!({
-        "id": "sess_running",
-        "tenant_id": "tenant_run",
-        "name": "Running Session",
-        "messages": [
-            { "role": "assistant", "usage": null },
-            { "role": "user",      "usage": null }
-        ],
-        "created_at": "1", "updated_at": "2"
-    })).await;
+    write_raw_session(
+        &env.js,
+        "tenant_run",
+        serde_json::json!({
+            "id": "sess_running",
+            "tenant_id": "tenant_run",
+            "name": "Running Session",
+            "messages": [
+                { "role": "assistant", "usage": null },
+                { "role": "user",      "usage": null }
+            ],
+            "created_at": "1", "updated_at": "2"
+        }),
+    )
+    .await;
 
-    let s: Value = env.client
+    let s: Value = env
+        .client
         .get(format!("{}/sessions/tenant_run/sess_running", env.base_url))
-        .send().await.unwrap()
-        .json().await.unwrap();
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
 
     assert_eq!(s["status"], "running");
     assert_eq!(s["message_count"], 2);
@@ -412,22 +471,32 @@ async fn session_with_last_user_message_has_running_status() {
 async fn empty_session_has_idle_status_and_zero_counts() {
     let env = start().await;
 
-    write_raw_session(&env.js, "tenant_empty", serde_json::json!({
-        "id": "sess_empty",
-        "tenant_id": "tenant_empty",
-        "name": "Empty",
-        "messages": [],
-        "created_at": "1", "updated_at": "2"
-    })).await;
+    write_raw_session(
+        &env.js,
+        "tenant_empty",
+        serde_json::json!({
+            "id": "sess_empty",
+            "tenant_id": "tenant_empty",
+            "name": "Empty",
+            "messages": [],
+            "created_at": "1", "updated_at": "2"
+        }),
+    )
+    .await;
 
-    let s: Value = env.client
+    let s: Value = env
+        .client
         .get(format!("{}/sessions/tenant_empty/sess_empty", env.base_url))
-        .send().await.unwrap()
-        .json().await.unwrap();
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
 
-    assert_eq!(s["status"],        "idle");
+    assert_eq!(s["status"], "idle");
     assert_eq!(s["message_count"], 0);
-    assert_eq!(s["input_tokens"],  0);
+    assert_eq!(s["input_tokens"], 0);
     assert_eq!(s["output_tokens"], 0);
 }
 
@@ -437,19 +506,29 @@ async fn list_sessions_returns_all_agent_written_sessions() {
     let env = start().await;
 
     for (tenant, id) in [("t1", "s1"), ("t2", "s2")] {
-        write_raw_session(&env.js, tenant, serde_json::json!({
-            "id": id,
-            "tenant_id": tenant,
-            "name": format!("Session {id}"),
-            "messages": [],
-            "created_at": "1", "updated_at": "1"
-        })).await;
+        write_raw_session(
+            &env.js,
+            tenant,
+            serde_json::json!({
+                "id": id,
+                "tenant_id": tenant,
+                "name": format!("Session {id}"),
+                "messages": [],
+                "created_at": "1", "updated_at": "1"
+            }),
+        )
+        .await;
     }
 
-    let sessions: Value = env.client
+    let sessions: Value = env
+        .client
         .get(format!("{}/sessions", env.base_url))
-        .send().await.unwrap()
-        .json().await.unwrap();
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
 
     assert_eq!(sessions.as_array().unwrap().len(), 2);
 }

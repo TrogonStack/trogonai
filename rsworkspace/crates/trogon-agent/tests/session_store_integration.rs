@@ -194,10 +194,24 @@ async fn session_metadata_fields_round_trip() {
     };
     store.put(&s).await.expect("put");
 
-    let got = store.get("acme", "sess-meta").await.expect("get").expect("exists");
-    assert_eq!(got.started_at_secs, 1776384000, "started_at_secs must survive KV round-trip");
-    assert_eq!(got.duration_ms, 42500,          "duration_ms must survive KV round-trip");
-    assert_eq!(got.agent_id, Some("agent_abc123".to_string()), "agent_id must survive KV round-trip");
+    let got = store
+        .get("acme", "sess-meta")
+        .await
+        .expect("get")
+        .expect("exists");
+    assert_eq!(
+        got.started_at_secs, 1776384000,
+        "started_at_secs must survive KV round-trip"
+    );
+    assert_eq!(
+        got.duration_ms, 42500,
+        "duration_ms must survive KV round-trip"
+    );
+    assert_eq!(
+        got.agent_id,
+        Some("agent_abc123".to_string()),
+        "agent_id must survive KV round-trip"
+    );
 }
 
 #[tokio::test]
@@ -208,7 +222,9 @@ async fn message_usage_round_trips_through_kv() {
     let mut s = sample_session("sess-usage", "acme");
     s.messages[1] = Message {
         role: "assistant".to_string(),
-        content: vec![ContentBlock::Text { text: "Hi!".to_string() }],
+        content: vec![ContentBlock::Text {
+            text: "Hi!".to_string(),
+        }],
         usage: Some(Usage {
             input_tokens: 100,
             output_tokens: 50,
@@ -218,8 +234,15 @@ async fn message_usage_round_trips_through_kv() {
     };
     store.put(&s).await.expect("put");
 
-    let got = store.get("acme", "sess-usage").await.expect("get").expect("exists");
-    let usage = got.messages[1].usage.as_ref().expect("usage must be present");
+    let got = store
+        .get("acme", "sess-usage")
+        .await
+        .expect("get")
+        .expect("exists");
+    let usage = got.messages[1]
+        .usage
+        .as_ref()
+        .expect("usage must be present");
     assert_eq!(usage.input_tokens, 100);
     assert_eq!(usage.output_tokens, 50);
     assert_eq!(usage.cache_creation_input_tokens, Some(10));
@@ -232,9 +255,16 @@ async fn session_agent_id_none_round_trips() {
     // Default sample_session has agent_id: None — verify it survives round-trip
     let s = sample_session("sess-no-agent", "acme");
     store.put(&s).await.expect("put");
-    let got = store.get("acme", "sess-no-agent").await.expect("get").expect("exists");
+    let got = store
+        .get("acme", "sess-no-agent")
+        .await
+        .expect("get")
+        .expect("exists");
     assert_eq!(got.agent_id, None, "agent_id None must round-trip as None");
-    assert_eq!(got.started_at_secs, 0, "zero started_at_secs must round-trip");
+    assert_eq!(
+        got.started_at_secs, 0,
+        "zero started_at_secs must round-trip"
+    );
     assert_eq!(got.duration_ms, 0, "zero duration_ms must round-trip");
 }
 
