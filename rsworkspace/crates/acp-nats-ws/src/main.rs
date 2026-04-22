@@ -55,10 +55,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .post(transport::post)
                     .delete(transport::delete),
             )
-            .route(
-                LEGACY_WS_ENDPOINT,
-                axum::routing::get(transport::legacy_websocket_get),
-            )
             .with_state(state),
     );
 
@@ -98,7 +94,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(coverage)]
 fn main() {}
 
-use constants::{ACP_ENDPOINT, LEGACY_WS_ENDPOINT, THREAD_NAME};
+use constants::{ACP_ENDPOINT, THREAD_NAME};
 
 /// Runs a single-threaded tokio runtime with a
 /// `LocalSet`. All WebSocket connections are processed here because the ACP
@@ -279,10 +275,6 @@ mod tests {
                 axum::routing::get(transport::get)
                     .post(transport::post)
                     .delete(transport::delete),
-            )
-            .route(
-                LEGACY_WS_ENDPOINT,
-                axum::routing::get(transport::legacy_websocket_get),
             )
             .with_state(state)
     }

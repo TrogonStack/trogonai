@@ -556,10 +556,6 @@ pub async fn get(State(state): State<AppState>, request: Request) -> Response {
     }
 }
 
-pub async fn legacy_websocket_get(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
-    websocket_response(ws, state)
-}
-
 pub async fn post(headers: HeaderMap, State(state): State<AppState>, body: String) -> Response {
     match http_post(headers, state, body).await {
         Ok(response) => response,

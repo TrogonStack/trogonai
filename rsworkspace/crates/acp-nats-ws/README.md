@@ -15,7 +15,7 @@ graph LR
 ## Features
 
 - Streamable HTTP transport on `/acp` with session-scoped SSE listeners
-- WebSocket upgrade on `/acp` plus a legacy `/ws` compatibility alias
+- WebSocket upgrade on `/acp`
 - Multiple concurrent ACP connections sharing the same NATS bridge
 - OpenTelemetry integration (logs, metrics, traces)
 - Graceful shutdown (SIGINT/SIGTERM) with per-connection drain
