@@ -1,24 +1,35 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use acp_nats::acp_prefix::AcpPrefix;
 use acp_nats::client_proxy::NatsClientProxy;
 use acp_nats::session_id::AcpSessionId;
-use agent_client_protocol::{Client as _, SessionId, SessionNotification};
+use agent_client_protocol::Client as _;
+use agent_client_protocol::SessionNotification;
 use async_trait::async_trait;
 use tracing::warn;
 
-/// Abstraction over the ACP session notification channel so agent tests can
-/// use an in-process mock without a NATS connection.
+/// Abstraction over the ACP session notification channel.
+///
+/// Decouples the agent core from NATS so the same logic can be tested with
+/// an in-memory mock and, eventually, run inside a WASM sandbox with a
+/// different transport.
 #[async_trait(?Send)]
 pub trait SessionNotifier {
-    /// Send a session notification. Implementations are fire-and-forget: errors
-    /// are logged and swallowed rather than propagated to the caller.
-    async fn session_notification(&self, notif: SessionNotification);
+    async fn notify(&self, notification: SessionNotification);
 }
 
-// ── NATS implementation ───────────────────────────────────────────────────────
+/// Blanket impl so `Arc<T>` can be used wherever `T: SessionNotifier`.
+#[async_trait(?Send)]
+impl<T: SessionNotifier> SessionNotifier for Arc<T> {
+    async fn notify(&self, notification: SessionNotification) {
+        (**self).notify(notification).await;
+    }
+}
 
-/// Forwards session notifications to a real NATS server via `NatsClientProxy`.
+// ── Production implementation ─────────────────────────────────────────────────
+
+/// Routes ACP `SessionNotification`s to clients over NATS.
 pub struct NatsSessionNotifier {
     nats: async_nats::Client,
     acp_prefix: AcpPrefix,
@@ -32,35 +43,34 @@ impl NatsSessionNotifier {
 
 #[async_trait(?Send)]
 impl SessionNotifier for NatsSessionNotifier {
-    async fn session_notification(&self, notif: SessionNotification) {
-        let session_id = SessionId::from(notif.session_id.to_string());
-        let acp_session_id = match AcpSessionId::try_from(&session_id) {
+    async fn notify(&self, notification: SessionNotification) {
+        let session_id = match AcpSessionId::try_from(&notification.session_id) {
             Ok(id) => id,
             Err(e) => {
-                warn!(error = %e, "xai: invalid session ID — cannot send notification");
+                warn!(error = %e, "xai: invalid session id in notification — skipping");
                 return;
             }
         };
         let client = NatsClientProxy::new(
             self.nats.clone(),
-            acp_session_id,
+            session_id,
             self.acp_prefix.clone(),
             Duration::from_secs(30),
         );
-        if let Err(e) = client.session_notification(notif).await {
-            warn!(error = %e, "xai: failed to send session notification");
+        if let Err(e) = client.session_notification(notification).await {
+            warn!(error = %e, "xai: failed to send notification");
         }
     }
 }
 
-// ── Mock implementation (test-helpers only) ───────────────────────────────────
+// ── Mock implementation ───────────────────────────────────────────────────────
 
-#[cfg(feature = "test-helpers")]
+#[cfg(any(test, feature = "test-helpers"))]
 pub struct MockSessionNotifier {
     pub notifications: std::sync::Mutex<Vec<SessionNotification>>,
 }
 
-#[cfg(feature = "test-helpers")]
+#[cfg(any(test, feature = "test-helpers"))]
 impl MockSessionNotifier {
     pub fn new() -> Self {
         Self {
@@ -69,17 +79,17 @@ impl MockSessionNotifier {
     }
 }
 
-#[cfg(feature = "test-helpers")]
+#[cfg(any(test, feature = "test-helpers"))]
 impl Default for MockSessionNotifier {
     fn default() -> Self {
         Self::new()
     }
 }
 
-#[cfg(feature = "test-helpers")]
+#[cfg(any(test, feature = "test-helpers"))]
 #[async_trait(?Send)]
 impl SessionNotifier for MockSessionNotifier {
-    async fn session_notification(&self, notif: SessionNotification) {
-        self.notifications.lock().unwrap().push(notif);
+    async fn notify(&self, notification: SessionNotification) {
+        self.notifications.lock().unwrap().push(notification);
     }
 }

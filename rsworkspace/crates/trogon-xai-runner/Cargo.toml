@@ -10,10 +10,6 @@ test-helpers = []
 name = "xai_integration"
 required-features = ["test-helpers"]
 
-[[test]]
-name = "kv_integration"
-required-features = ["test-helpers"]
-
 [lints]
 workspace = true
 
@@ -33,7 +29,6 @@ agent-client-protocol = { workspace = true, features = [
     "unstable_session_usage",
 ] }
 async-nats      = { workspace = true, features = ["jetstream", "kv"] }
-trogon-nats     = { path = "../trogon-nats" }
 async-trait     = { workspace = true }
 bytes           = { workspace = true }
 futures-util    = { workspace = true }
@@ -44,3 +39,9 @@ tokio           = { workspace = true, features = ["rt", "rt-multi-thread", "macr
 tracing         = { workspace = true }
 tracing-subscriber = { workspace = true }
 uuid            = { workspace = true }
+
+[dev-dependencies]
+axum                    = { workspace = true }
+futures                 = { workspace = true }
+testcontainers-modules  = { version = "0.8", features = ["nats"] }
+trogon-nats             = { workspace = true, features = ["test-support"] }

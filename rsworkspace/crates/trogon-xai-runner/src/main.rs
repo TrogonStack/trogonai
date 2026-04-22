@@ -1,7 +1,11 @@
+use std::sync::Arc;
+
 use acp_nats::acp_prefix::AcpPrefix;
 use acp_nats_agent::AgentSideNatsConnection;
-use tracing::{error, info};
-use trogon_xai_runner::XaiAgent;
+use tracing::{error, info, warn};
+use trogon_xai_runner::{
+    AgentLoader, NatsSessionNotifier, NatsSessionStore, SkillLoader, XaiAgent,
+};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -10,7 +14,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let nats_url =
         std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
     let prefix = std::env::var("ACP_PREFIX").unwrap_or_else(|_| "acp".to_string());
-    let default_model = std::env::var("XAI_DEFAULT_MODEL").unwrap_or_else(|_| "grok-3".to_string());
+    let default_model = std::env::var("XAI_DEFAULT_MODEL").unwrap_or_else(|_| "grok-4".to_string());
     let api_key = std::env::var("XAI_API_KEY").unwrap_or_else(|_| {
         info!("XAI_API_KEY not set; users must authenticate with their own key via 'xai-api-key'");
         String::new()
@@ -33,7 +37,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .filter(|&n| n > 0)
         .unwrap_or(300);
     let models = std::env::var("XAI_MODELS")
-        .unwrap_or_else(|_| "grok-3:Grok 3,grok-3-mini:Grok 3 Mini".to_string());
+        .unwrap_or_else(|_| "grok-4:Grok 4,grok-3:Grok 3,grok-3-mini:Grok 3 Mini".to_string());
     let max_turns: Option<u32> = match std::env::var("XAI_MAX_TURNS") {
         Ok(s) => match s.parse::<u32>() {
             Ok(0) => None,
@@ -56,23 +60,45 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     );
 
     let nats = async_nats::connect(&nats_url).await?;
-    let js_ctx = async_nats::jetstream::new(nats.clone());
-    let js = trogon_nats::jetstream::NatsJetStreamClient::new(js_ctx);
     let acp_prefix = AcpPrefix::new(&prefix)?;
+    let notifier = NatsSessionNotifier::new(nats.clone(), acp_prefix.clone());
+    let mut agent = XaiAgent::new(notifier, default_model, api_key);
 
-    acp_nats::jetstream::provision::provision_streams(&js, &acp_prefix)
-        .await
-        .map_err(|e| format!("failed to provision JetStream streams: {e}"))?;
+    // If AGENT_ID is set, attach console skill loaders so skills defined in
+    // trogon-console are injected into every new session's system prompt.
+    // Also open the SESSIONS KV bucket for session visibility in trogon-console.
+    {
+        let js = async_nats::jetstream::new(nats.clone());
 
-    let agent = XaiAgent::new(nats.clone(), acp_prefix.clone(), default_model, api_key).await?;
+        if let Ok(agent_id) = std::env::var("AGENT_ID") {
+            match (AgentLoader::open(&js).await, SkillLoader::open(&js).await) {
+                (Ok(al), Ok(sl)) => {
+                    info!(agent_id, "xai: console skill injection enabled");
+                    agent = agent.with_loaders(agent_id, Arc::new(al), Arc::new(sl));
+                }
+                (Err(e), _) | (_, Err(e)) => {
+                    warn!(error = %e, "xai: failed to open console KV buckets — skill injection disabled");
+                }
+            }
+        }
+
+        match NatsSessionStore::open(&js).await {
+            Ok(store) => {
+                info!("xai: session persistence enabled");
+                agent = agent.with_session_store(Arc::new(store));
+            }
+            Err(e) => {
+                warn!(error = %e, "xai: failed to open SESSIONS KV bucket — session persistence disabled");
+            }
+        }
+    }
 
     let local = tokio::task::LocalSet::new();
     let result = local
         .run_until(async {
-            let (_conn, io_task) =
-                AgentSideNatsConnection::with_jetstream(agent, nats, js, acp_prefix, |fut| {
-                    tokio::task::spawn_local(fut);
-                });
+            let (_conn, io_task) = AgentSideNatsConnection::new(agent, nats, acp_prefix, |fut| {
+                tokio::task::spawn_local(fut);
+            });
             info!("xai-runner listening on NATS");
             tokio::select! {
                 result = io_task => result,
@@ -92,6 +118,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     Ok(result?)
 }
 
+/// Resolves on SIGINT (Ctrl+C) or SIGTERM (container shutdown).
 async fn shutdown_signal() {
     use tokio::signal;
 

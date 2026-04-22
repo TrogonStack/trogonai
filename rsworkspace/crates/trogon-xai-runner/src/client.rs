@@ -66,6 +66,10 @@ pub struct Message {
     pub role: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completion_tokens: Option<u64>,
 }
 
 impl Message {
@@ -73,13 +77,8 @@ impl Message {
         Self {
             role: "user".to_string(),
             content: Some(text.into()),
-        }
-    }
-
-    pub fn system(text: impl Into<String>) -> Self {
-        Self {
-            role: "system".to_string(),
-            content: Some(text.into()),
+            prompt_tokens: None,
+            completion_tokens: None,
         }
     }
 
@@ -87,6 +86,17 @@ impl Message {
         Self {
             role: "assistant".to_string(),
             content: Some(text.into()),
+            prompt_tokens: None,
+            completion_tokens: None,
+        }
+    }
+
+    pub fn assistant_with_usage(text: impl Into<String>, prompt_tokens: u64, completion_tokens: u64) -> Self {
+        Self {
+            role: "assistant".to_string(),
+            content: Some(text.into()),
+            prompt_tokens: Some(prompt_tokens),
+            completion_tokens: Some(completion_tokens),
         }
     }
 
@@ -670,13 +680,13 @@ fn process_sse_line(
             } else {
                 &val["usage"]
             };
-            let p = usage["prompt_tokens"]
+            let p = usage["input_tokens"]
                 .as_u64()
-                .or_else(|| usage["input_tokens"].as_u64())
+                .or_else(|| usage["prompt_tokens"].as_u64())
                 .unwrap_or(0);
-            let c = usage["completion_tokens"]
+            let c = usage["output_tokens"]
                 .as_u64()
-                .or_else(|| usage["output_tokens"].as_u64())
+                .or_else(|| usage["completion_tokens"].as_u64())
                 .unwrap_or(0);
             if p > 0 || c > 0 {
                 pending.push_back(XaiEvent::Usage {
@@ -735,18 +745,21 @@ fn process_sse_line(
             }
             // Usage may be top-level (xAI extension) or nested inside the
             // response object (per OpenAI Responses API spec).
+            // Field names: Responses API uses input_tokens/output_tokens;
+            // Chat Completions API uses prompt_tokens/completion_tokens.
+            // Accept both for forward compatibility.
             let usage = if val["usage"].is_null() {
                 &val["response"]["usage"]
             } else {
                 &val["usage"]
             };
-            let p = usage["prompt_tokens"]
+            let p = usage["input_tokens"]
                 .as_u64()
-                .or_else(|| usage["input_tokens"].as_u64())
+                .or_else(|| usage["prompt_tokens"].as_u64())
                 .unwrap_or(0);
-            let c = usage["completion_tokens"]
+            let c = usage["output_tokens"]
                 .as_u64()
-                .or_else(|| usage["output_tokens"].as_u64())
+                .or_else(|| usage["completion_tokens"].as_u64())
                 .unwrap_or(0);
             if p > 0 || c > 0 {
                 pending.push_back(XaiEvent::Usage {
@@ -904,7 +917,8 @@ mod tests {
     }
 
     #[test]
-    fn usage_event_from_response_completed() {
+    fn usage_event_from_response_completed_legacy_fields() {
+        // Chat Completions API field names (prompt_tokens / completion_tokens)
         let line = r#"data: {"type":"response.completed","usage":{"prompt_tokens":42,"completion_tokens":7}}"#;
         let event = parse_line(line).unwrap();
         assert!(
@@ -913,6 +927,23 @@ mod tests {
                 XaiEvent::Usage {
                     prompt_tokens: 42,
                     completion_tokens: 7
+                }
+            ),
+            "unexpected event: {event:?}"
+        );
+    }
+
+    #[test]
+    fn usage_event_from_response_completed_responses_api_fields() {
+        // Responses API field names (input_tokens / output_tokens) used by grok-4+
+        let line = r#"data: {"type":"response.completed","usage":{"input_tokens":100,"output_tokens":50}}"#;
+        let event = parse_line(line).unwrap();
+        assert!(
+            matches!(
+                event,
+                XaiEvent::Usage {
+                    prompt_tokens: 100,
+                    completion_tokens: 50
                 }
             ),
             "unexpected event: {event:?}"
@@ -1246,6 +1277,846 @@ mod tests {
         assert!(
             parse_line(line).is_none(),
             "x_search_call.searching must produce no event"
+        );
+    }
+
+    // ── reasoning content ─────────────────────────────────────────────────────
+
+    #[test]
+    fn text_delta_with_reasoning_content_emits_text_delta() {
+        // grok-3-mini sends both fields in the same delta object.
+        // The text must be forwarded; reasoning_content must be discarded silently.
+        let line = r#"data: {"type":"message.delta","delta":{"text":"hello","reasoning_content":"Let me think..."}}"#;
+        let event = parse_line(line).unwrap();
+        assert!(
+            matches!(event, XaiEvent::TextDelta { ref text } if text == "hello"),
+            "text field must produce TextDelta even when reasoning_content is also present: {event:?}"
+        );
+    }
+
+    #[test]
+    fn reasoning_content_delta_emits_nothing() {
+        // Reasoning models (e.g. grok-3-mini) emit delta.reasoning_content.
+        // This must NOT produce a TextDelta — reasoning is not forwarded to the ACP client.
+        let line =
+            r#"data: {"type":"message.delta","delta":{"reasoning_content":"Let me think..."}}"#;
+        assert!(
+            parse_line(line).is_none(),
+            "reasoning_content-only delta must not produce any event"
+        );
+    }
+
+    #[test]
+    fn reasoning_summary_text_delta_emits_nothing() {
+        // OpenAI Responses API reasoning summary events are logged and discarded.
+        let line =
+            r#"data: {"type":"response.reasoning_summary_text.delta","delta":"Summary so far."}"#;
+        assert!(
+            parse_line(line).is_none(),
+            "response.reasoning_summary_text.delta must produce no event"
+        );
+    }
+
+    // ── response.done event type ──────────────────────────────────────────────
+
+    #[test]
+    fn response_done_event_same_as_completed() {
+        // "response.done" shares the same match arm as "response.completed".
+        let line = r#"data: {"type":"response.done","response":{"status":"completed"},"usage":{"prompt_tokens":5,"completion_tokens":3}}"#;
+        let events = parse_line_all(line);
+        assert!(
+            events.iter().any(|e| matches!(e, XaiEvent::Finished { reason, .. } if *reason == FinishReason::Completed)),
+            "response.done must emit Finished(Completed) just like response.completed: {events:?}"
+        );
+    }
+
+    // ── usage nested inside response object ───────────────────────────────────
+
+    #[test]
+    fn usage_nested_in_response_object() {
+        // When top-level "usage" is absent (null), the parser must fall back to
+        // response.usage per the OpenAI Responses API spec.
+        let line = r#"data: {"type":"response.completed","response":{"id":"r1","status":"completed","usage":{"prompt_tokens":10,"completion_tokens":20}}}"#;
+        let events = parse_line_all(line);
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                XaiEvent::Usage {
+                    prompt_tokens: 10,
+                    completion_tokens: 20
+                }
+            )),
+            "usage nested in response object must be extracted: {events:?}"
+        );
+    }
+
+    // ── response.completed with non-completed status ──────────────────────────
+
+    #[test]
+    fn response_completed_with_failed_status_emits_finished_failed() {
+        // response.completed can carry any status — "failed" hits FinishReason::Failed
+        // via the same path as response.completed/status=completed, distinct from the
+        // dedicated response.failed event handler.
+        let line = r#"data: {"type":"response.completed","response":{"status":"failed"}}"#;
+        let events = parse_line_all(line);
+        assert!(
+            events.iter().any(|e| matches!(e, XaiEvent::Finished { reason, .. } if *reason == FinishReason::Failed)),
+            "response.completed with status=failed must emit Finished(Failed): {events:?}"
+        );
+    }
+
+    #[test]
+    fn response_completed_with_cancelled_status_emits_finished_cancelled() {
+        let line = r#"data: {"type":"response.completed","response":{"status":"cancelled"}}"#;
+        let events = parse_line_all(line);
+        assert!(
+            events.iter().any(|e| matches!(e, XaiEvent::Finished { reason, .. } if *reason == FinishReason::Cancelled)),
+            "response.completed with status=cancelled must emit Finished(Cancelled): {events:?}"
+        );
+    }
+
+    // ── function_call empty guard ─────────────────────────────────────────────
+
+    #[test]
+    fn function_call_with_empty_call_id_and_name_emits_nothing() {
+        // Both call_id and name empty — the guard `!call_id.is_empty() || !name.is_empty()`
+        // is false, so no FunctionCall event must be emitted.
+        let line = r#"data: {"type":"function_call","function_call":{"call_id":"","name":"","arguments":"{}"}}"#;
+        assert!(
+            parse_line(line).is_none(),
+            "function_call with empty call_id and name must produce no event"
+        );
+    }
+
+    // ── function_call_arguments.delta for unknown call_id ─────────────────────
+
+    #[test]
+    fn function_call_arguments_delta_unknown_call_id_is_ignored() {
+        // A delta that arrives without a preceding output_item.added for its
+        // call_id must not panic or produce any event — the entry is simply absent
+        // from pending_fc so the delta is a no-op.
+        let delta = r#"data: {"type":"response.function_call_arguments.delta","call_id":"ghost_id","delta":"{\"q\":"}"#;
+        assert!(
+            parse_line(delta).is_none(),
+            "delta for unknown call_id must produce no event"
+        );
+    }
+
+    #[test]
+    fn function_call_arguments_delta_empty_call_id_is_ignored() {
+        // `call_id` is empty string — the guard `!call_id.is_empty()` rejects it,
+        // so the delta must be silently discarded without panicking.
+        let delta = r#"data: {"type":"response.function_call_arguments.delta","call_id":"","delta":"{\"q\":"}"#;
+        assert!(
+            parse_line(delta).is_none(),
+            "delta with empty call_id must produce no event"
+        );
+    }
+
+    // ── response.error event → XaiEvent::Error ───────────────────────────────
+
+    #[test]
+    fn response_error_emits_xai_error_with_nested_message() {
+        // Primary path: message lives under error.message (OpenAI Responses API spec).
+        let line =
+            r#"data: {"type":"response.error","error":{"message":"content policy violation"}}"#;
+        let event = parse_line(line).expect("response.error must emit an event");
+        assert!(
+            matches!(&event, XaiEvent::Error { message } if message == "content policy violation"),
+            "must carry the nested error message: {event:?}"
+        );
+    }
+
+    #[test]
+    fn response_error_falls_back_to_top_level_message() {
+        // Fallback: message at top level (xAI deviation from spec).
+        // `val["error"]["message"]` is absent, `.or_else(|| val["message"])` fires.
+        let line = r#"data: {"type":"response.error","message":"rate limit exceeded"}"#;
+        let event = parse_line(line).expect("response.error must emit an event");
+        assert!(
+            matches!(&event, XaiEvent::Error { message } if message == "rate limit exceeded"),
+            "must fall back to top-level message field: {event:?}"
+        );
+    }
+
+    #[test]
+    fn response_error_uses_default_message_when_no_field_present() {
+        // Both fallback paths absent — `.unwrap_or("xAI stream error")` fires.
+        let line = r#"data: {"type":"response.error"}"#;
+        let event =
+            parse_line(line).expect("response.error must emit an event even without a message");
+        assert!(
+            matches!(&event, XaiEvent::Error { message } if message == "xAI stream error"),
+            "must use the default message when no message field present: {event:?}"
+        );
+    }
+
+    // ── FinishReason::Other for unknown status ────────────────────────────────
+
+    #[test]
+    fn response_completed_with_unknown_status_emits_finished_other() {
+        // The `from_status` catch-all arm: any unrecognised status string must
+        // produce `FinishReason::Other(status)` rather than panicking or defaulting
+        // to Completed. The agent treats all `Finished` variants as end-of-turn, so
+        // the loop will break correctly for any future xAI status extensions.
+        let line = r#"data: {"type":"response.completed","response":{"status":"in_progress"}}"#;
+        let events = parse_line_all(line);
+        let finished = events.iter().find_map(|e| {
+            if let XaiEvent::Finished { reason, .. } = e {
+                Some(reason)
+            } else {
+                None
+            }
+        });
+        assert!(
+            matches!(finished, Some(FinishReason::Other(s)) if s == "in_progress"),
+            "unknown status must map to FinishReason::Other(status), got: {finished:?}"
+        );
+    }
+
+    // ── response.output_item.added: non-function-call type ignored ────────────
+
+    #[test]
+    fn output_item_added_with_text_type_produces_no_event() {
+        // When the server announces a text output item (type != "function_call"),
+        // the inner `if item.type == "function_call"` guard must reject it and
+        // produce no event. Without the guard a stale entry would be left in
+        // `pending_fc` and the next delta for an unrelated call_id could be
+        // mis-attributed.
+        let line =
+            r#"data: {"type":"response.output_item.added","item":{"type":"text","id":"item_abc"}}"#;
+        assert!(
+            parse_line(line).is_none(),
+            "output_item.added with type=text must produce no event"
+        );
+    }
+
+    #[test]
+    fn output_item_added_with_message_type_produces_no_event() {
+        // Same guard, different non-function-call item type.
+        let line =
+            r#"data: {"type":"response.output_item.added","item":{"type":"message","id":"msg_1"}}"#;
+        assert!(
+            parse_line(line).is_none(),
+            "output_item.added with type=message must produce no event"
+        );
+    }
+
+    // ── parse_sse: streaming state machine ────────────────────────────────────
+
+    #[tokio::test]
+    async fn parse_sse_trailing_buffer_without_newline() {
+        use futures_util::stream::{self, StreamExt as _};
+
+        // Simulate a stream that ends without a trailing newline.
+        // The `None` branch in parse_sse trims and processes the remaining buffer.
+        let bytes = Bytes::from("data: [DONE]"); // no \n
+        let s = stream::iter(vec![Ok::<_, reqwest::Error>(bytes)]);
+        let events: Vec<_> = parse_sse(s).collect().await;
+        assert!(
+            events.iter().any(|e| matches!(e, XaiEvent::Done)),
+            "parse_sse must process a trailing buffer that has no newline: {events:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn parse_sse_data_split_across_chunks() {
+        use futures_util::stream::{self, StreamExt as _};
+
+        // The SSE parser must accumulate partial byte chunks until it finds a
+        // newline delimiter, then process the complete line.
+        let chunk1 = Bytes::from("data: {\"type\":\"message.delta\",\"delta\":{\"text\":\"hel");
+        let chunk2 = Bytes::from("lo\"}}\n");
+        let s = stream::iter(vec![
+            Ok::<_, reqwest::Error>(chunk1),
+            Ok::<_, reqwest::Error>(chunk2),
+        ]);
+        let events: Vec<_> = parse_sse(s).collect().await;
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, XaiEvent::TextDelta { text } if text == "hello")),
+            "parse_sse must reassemble lines split across multiple byte chunks: {events:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn parse_sse_crlf_line_endings_stripped() {
+        use futures_util::stream::{self, StreamExt as _};
+
+        // SSE spec allows \r\n line endings. The parser strips the trailing \r.
+        let bytes = Bytes::from("data: [DONE]\r\n");
+        let s = stream::iter(vec![Ok::<_, reqwest::Error>(bytes)]);
+        let events: Vec<_> = parse_sse(s).collect().await;
+        assert!(
+            events.iter().any(|e| matches!(e, XaiEvent::Done)),
+            "parse_sse must strip \\r from CRLF lines: {events:?}"
+        );
+    }
+
+    // ── multiple concurrent function calls in a single stream ────────────────
+
+    #[test]
+    fn multiple_concurrent_function_calls_emitted_independently() {
+        // Two function calls are interleaved in a single stream. The parser must
+        // track both in `pending_fc` by call_id and emit each FunctionCall event
+        // independently when its own `done` event arrives.
+        //
+        // Stream sequence:
+        //   added(call_1, search)
+        //   added(call_2, lookup)
+        //   delta(call_1, first fragment)
+        //   delta(call_2, first fragment)
+        //   delta(call_1, second fragment)
+        //   done(call_1)  → FunctionCall { call_1, search, '{"q":"rust"}' }
+        //   delta(call_2, second fragment)
+        //   done(call_2)  → FunctionCall { call_2, lookup, '{"id":"42"}' }
+        let lines = [
+            r#"data: {"type":"response.output_item.added","item":{"type":"function_call","call_id":"call_1","name":"search"}}"#,
+            r#"data: {"type":"response.output_item.added","item":{"type":"function_call","call_id":"call_2","name":"lookup"}}"#,
+            r#"data: {"type":"response.function_call_arguments.delta","call_id":"call_1","delta":"{\"q\":"}"#,
+            r#"data: {"type":"response.function_call_arguments.delta","call_id":"call_2","delta":"{\"id\":"}"#,
+            r#"data: {"type":"response.function_call_arguments.delta","call_id":"call_1","delta":"\"rust\"}"}"#,
+            r#"data: {"type":"response.function_call_arguments.done","call_id":"call_1","name":"search","arguments":"{\"q\":\"rust\"}"}"#,
+            r#"data: {"type":"response.function_call_arguments.delta","call_id":"call_2","delta":"\"42\"}"}"#,
+            r#"data: {"type":"response.function_call_arguments.done","call_id":"call_2","name":"lookup","arguments":"{\"id\":\"42\"}"}"#,
+        ];
+
+        let mut emitted = false;
+        let mut pending = VecDeque::new();
+        let mut pending_fc = HashMap::new();
+        for line in &lines {
+            process_sse_line(line, &mut emitted, &mut pending, &mut pending_fc);
+        }
+
+        let events: Vec<_> = pending.drain(..).collect();
+        assert_eq!(
+            events.len(),
+            2,
+            "must emit exactly 2 FunctionCall events, got: {events:?}"
+        );
+        assert!(
+            matches!(&events[0], XaiEvent::FunctionCall { call_id, name, arguments }
+                if call_id == "call_1" && name == "search" && arguments == r#"{"q":"rust"}"#),
+            "first event must be call_1/search with correct arguments: {:?}",
+            events[0]
+        );
+        assert!(
+            matches!(&events[1], XaiEvent::FunctionCall { call_id, name, arguments }
+                if call_id == "call_2" && name == "lookup" && arguments == r#"{"id":"42"}"#),
+            "second event must be call_2/lookup with correct arguments: {:?}",
+            events[1]
+        );
+        assert!(
+            pending_fc.is_empty(),
+            "pending_fc must be empty after all done events"
+        );
+    }
+
+    // ── response.completed: top-level incomplete_details fallback ─────────────
+
+    #[test]
+    fn response_completed_with_top_level_incomplete_status_and_reason() {
+        // When "status" and "incomplete_details" appear at the top level of the
+        // event (no "response" wrapper), both fallback paths must fire:
+        //   val["response"]["status"] → null → falls back to val["status"]
+        //   val["response"]["incomplete_details"]["reason"] → null → falls back to val["incomplete_details"]["reason"]
+        //
+        // Some xAI deviations from the OpenAI Responses API spec place fields at
+        // the event root rather than nested under a "response" object.
+        let line = r#"data: {"type":"response.completed","status":"incomplete","incomplete_details":{"reason":"max_output_tokens"}}"#;
+        let events = parse_line_all(line);
+
+        let finished = events.iter().find_map(|e| {
+            if let XaiEvent::Finished {
+                reason,
+                incomplete_reason,
+            } = e
+            {
+                Some((reason, incomplete_reason))
+            } else {
+                None
+            }
+        });
+
+        let (reason, incomplete_reason) =
+            finished.expect("response.completed with status=incomplete must emit a Finished event");
+        assert_eq!(
+            *reason,
+            FinishReason::Incomplete,
+            "top-level status=incomplete must map to Incomplete"
+        );
+        assert_eq!(
+            incomplete_reason.as_deref(),
+            Some("max_output_tokens"),
+            "incomplete_reason must be extracted from top-level incomplete_details.reason"
+        );
+    }
+
+    // ── usage: asymmetric tokens still emits ─────────────────────────────────
+
+    #[test]
+    fn usage_with_only_prompt_tokens_nonzero_emits_usage() {
+        // `p > 0 || c > 0` — when completion_tokens is zero but prompt_tokens > 0
+        // the guard must pass and Usage must be emitted.
+        let line = r#"data: {"type":"response.completed","response":{"status":"completed"},"usage":{"prompt_tokens":5,"completion_tokens":0}}"#;
+        let events = parse_line_all(line);
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                XaiEvent::Usage {
+                    prompt_tokens: 5,
+                    completion_tokens: 0
+                }
+            )),
+            "asymmetric usage (p=5, c=0) must still be emitted: {events:?}"
+        );
+    }
+
+    // ── function_call done: empty arguments emits with empty string ───────────
+
+    #[test]
+    fn function_call_done_with_missing_arguments_emits_empty_string() {
+        // `val["arguments"].as_str().unwrap_or("")` returns "" when the field is
+        // absent. The event must still be emitted — not suppressed — so callers
+        // can observe a function call with no argument data.
+        let done = r#"data: {"type":"response.function_call_arguments.done","call_id":"call_1","name":"my_tool"}"#;
+        let event = parse_line(done).expect("done without arguments must still emit FunctionCall");
+        match event {
+            XaiEvent::FunctionCall {
+                call_id,
+                name,
+                arguments,
+            } => {
+                assert_eq!(call_id, "call_1");
+                assert_eq!(name, "my_tool");
+                assert_eq!(
+                    arguments, "",
+                    "absent arguments field must produce empty string"
+                );
+            }
+            other => panic!("expected FunctionCall, got {other:?}"),
+        }
+    }
+
+    // ── output_item.added: re-announced call_id overwrites name ──────────────
+
+    #[test]
+    fn output_item_added_reannounce_same_call_id_overwrites_name() {
+        // When the server sends two `output_item.added` events for the same
+        // call_id (re-announcement with a corrected name), the second insert into
+        // `pending_fc` overwrites the first. The `done` event must use the last name.
+        let added1 = r#"data: {"type":"response.output_item.added","item":{"type":"function_call","call_id":"call_r","name":"wrong_name"}}"#;
+        let added2 = r#"data: {"type":"response.output_item.added","item":{"type":"function_call","call_id":"call_r","name":"correct_name"}}"#;
+        let done = r#"data: {"type":"response.function_call_arguments.done","call_id":"call_r","arguments":"{}"}"#;
+        let events = parse_lines(&[added1, added2, done]);
+        assert_eq!(events.len(), 1, "only the done event must emit: {events:?}");
+        match &events[0] {
+            XaiEvent::FunctionCall { name, .. } => {
+                assert_eq!(
+                    name, "correct_name",
+                    "second output_item.added must overwrite the name"
+                );
+            }
+            other => panic!("expected FunctionCall, got {other:?}"),
+        }
+    }
+
+    // ── parse_sse: event split across chunk boundary ──────────────────────────
+
+    #[tokio::test]
+    async fn parse_sse_event_split_across_chunk_boundary() {
+        use futures_util::stream::{self, StreamExt as _};
+
+        // A single SSE line split into two chunks at an arbitrary byte boundary.
+        // The buffer accumulation logic must reassemble before parsing.
+        let part1 = Bytes::from("data: {\"type\":\"message.delta\",\"delta\":{\"type\":\"output");
+        let part2 = Bytes::from("_text\",\"text\":\"hello\"}}\n");
+        let s = stream::iter(vec![
+            Ok::<_, reqwest::Error>(part1),
+            Ok::<_, reqwest::Error>(part2),
+        ]);
+        let events: Vec<_> = parse_sse(s).collect().await;
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, XaiEvent::TextDelta { text } if text == "hello")),
+            "SSE event split across chunk boundary must be reassembled: {events:?}"
+        );
+    }
+
+    // ── response.completed: zero-token usage guard ───────────────────────────
+
+    #[test]
+    fn response_completed_zero_usage_emits_no_usage_event() {
+        // The emission guard `if p > 0 || c > 0` must skip Usage when both
+        // tokens are zero — a stream that returned no content must not emit a
+        // spurious Usage event with all-zero counts.
+        let line = r#"data: {"type":"response.completed","response":{"id":"r1","status":"completed"},"usage":{"prompt_tokens":0,"completion_tokens":0}}"#;
+        let events = parse_line_all(line);
+        assert!(
+            !events.iter().any(|e| matches!(e, XaiEvent::Usage { .. })),
+            "zero-token usage must not be emitted: {events:?}"
+        );
+    }
+
+    // ── response.output_item.added: empty call_id rejected ───────────────────
+
+    #[test]
+    fn output_item_added_empty_call_id_does_not_register_entry() {
+        // `output_item.added` with an empty call_id must be silently rejected by
+        // `if !call_id.is_empty()` — no entry is inserted into pending_fc.
+        // A subsequent delta for the same empty key finds nothing and is also
+        // a no-op (both guards reject empty call_id).
+        let added = r#"data: {"type":"response.output_item.added","item":{"type":"function_call","call_id":"","name":""}}"#;
+        let delta = r#"data: {"type":"response.function_call_arguments.delta","call_id":"","delta":"partial"}"#;
+        let events = parse_lines(&[added, delta]);
+        assert!(
+            events.is_empty(),
+            "added + delta with empty call_id must produce no events: {events:?}"
+        );
+    }
+
+    // ── response.completed: missing status field — no panic, no events ────────
+
+    #[test]
+    fn response_completed_without_status_field_emits_nothing() {
+        // A response.completed with no status, no usage, and no response.id
+        // (malformed or minimal payload) must not panic and must emit no events.
+        // Every extraction path returns None, so no Finished, Usage, or ResponseId
+        // is pushed onto the pending queue.
+        let line = r#"data: {"type":"response.completed"}"#;
+        let events = parse_line_all(line);
+        assert!(
+            events.is_empty(),
+            "response.completed with no fields must emit nothing: {events:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn parse_sse_response_id_emitted_once_across_multiple_chunks() {
+        use futures_util::stream::{self, StreamExt as _};
+
+        // Two chunks both carry an `id` field. ResponseId must be emitted only once.
+        let line1 = Bytes::from(
+            "data: {\"id\":\"resp_x\",\"type\":\"message.delta\",\"delta\":{\"text\":\"a\"}}\n",
+        );
+        let line2 = Bytes::from(
+            "data: {\"id\":\"resp_x\",\"type\":\"message.delta\",\"delta\":{\"text\":\"b\"}}\n",
+        );
+        let s = stream::iter(vec![
+            Ok::<_, reqwest::Error>(line1),
+            Ok::<_, reqwest::Error>(line2),
+        ]);
+        let events: Vec<_> = parse_sse(s).collect().await;
+        let id_count = events
+            .iter()
+            .filter(|e| matches!(e, XaiEvent::ResponseId { .. }))
+            .count();
+        assert_eq!(
+            id_count, 1,
+            "ResponseId must be emitted exactly once per stream, got {id_count}: {events:?}"
+        );
+    }
+
+    // ── response.done: nested response.id extracted ──────────────────────────
+
+    #[test]
+    fn response_done_event_extracts_nested_response_id() {
+        // `response.done` shares the match arm with `response.completed` and has
+        // the same nested id extraction logic (lines 623-627). When no prior
+        // top-level id has been emitted, the nested `response.id` must be
+        // extracted and emitted as `ResponseId`. The existing
+        // `response_done_event_same_as_completed` test omits the id field, so
+        // this extraction path was untested for `response.done`.
+        let line = r#"data: {"type":"response.done","response":{"id":"resp-done-123","status":"completed"}}"#;
+        let events = parse_lines(&[line]);
+        let id_events: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                XaiEvent::ResponseId { id } => Some(id.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            id_events,
+            vec!["resp-done-123"],
+            "response.done must extract nested response.id when not yet emitted: {events:?}"
+        );
+    }
+
+    // ── response.cancelled: no ResponseId extraction ──────────────────────────
+
+    #[test]
+    fn response_cancelled_does_not_extract_response_id() {
+        // Unlike `response.completed` (which extracts the nested `response.id`
+        // as a fallback), the `response.cancelled` handler only emits
+        // `Finished(Cancelled)`. A ResponseId is NOT extracted even when
+        // `response.id` is present in the payload — documenting the intentional
+        // asymmetry between the two handlers.
+        let line = r#"data: {"type":"response.cancelled","response":{"id":"resp-cancelled","status":"cancelled"}}"#;
+        let events = parse_line_all(line);
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, XaiEvent::ResponseId { .. })),
+            "response.cancelled must not emit ResponseId: {events:?}"
+        );
+        assert!(
+            events.iter().any(|e| matches!(e, XaiEvent::Finished { reason, .. } if *reason == FinishReason::Cancelled)),
+            "response.cancelled must emit Finished(Cancelled): {events:?}"
+        );
+    }
+
+    // ── Message constructors ──────────────────────────────────────────────────
+
+    #[test]
+    fn message_user_constructor_sets_role_and_content() {
+        let msg = Message::user("hello");
+        assert_eq!(msg.role, "user");
+        assert_eq!(msg.content, Some("hello".to_string()));
+    }
+
+    #[test]
+    fn message_assistant_text_constructor_sets_role_and_content() {
+        let msg = Message::assistant_text("reply");
+        assert_eq!(msg.role, "assistant");
+        assert_eq!(msg.content, Some("reply".to_string()));
+    }
+
+    // ── Message::content_str ──────────────────────────────────────────────────
+
+    #[test]
+    fn message_content_str_some_returns_text() {
+        let msg = Message::user("hello");
+        assert_eq!(msg.content_str(), "hello");
+    }
+
+    #[test]
+    fn message_content_str_none_returns_empty_str() {
+        let msg = Message {
+            role: "user".to_string(),
+            content: None,
+            prompt_tokens: None,
+            completion_tokens: None,
+        };
+        assert_eq!(msg.content_str(), "");
+    }
+
+    // ── XaiClient constructors ────────────────────────────────────────────────
+
+    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    fn env_lock() -> &'static std::sync::Mutex<()> {
+        ENV_LOCK.get_or_init(|| std::sync::Mutex::new(()))
+    }
+
+    #[test]
+    fn xai_client_new_uses_default_base_url_when_env_not_set() {
+        let _guard = env_lock().lock().unwrap();
+        unsafe { std::env::remove_var("XAI_BASE_URL") };
+        let client = XaiClient::new();
+        assert_eq!(client.base_url, "https://api.x.ai/v1");
+    }
+
+    #[test]
+    fn xai_client_new_reads_base_url_from_env() {
+        let _guard = env_lock().lock().unwrap();
+        unsafe { std::env::set_var("XAI_BASE_URL", "https://custom.example.com/v2") };
+        let client = XaiClient::new();
+        unsafe { std::env::remove_var("XAI_BASE_URL") };
+        assert_eq!(client.base_url, "https://custom.example.com/v2");
+    }
+
+    #[test]
+    fn xai_client_new_uses_default_timeout_when_env_not_set() {
+        let _guard = env_lock().lock().unwrap();
+        unsafe { std::env::remove_var("XAI_PROMPT_TIMEOUT_SECS") };
+        let client = XaiClient::new();
+        assert_eq!(client.request_timeout, Duration::from_secs(300));
+    }
+
+    #[test]
+    fn xai_client_new_reads_timeout_from_env() {
+        let _guard = env_lock().lock().unwrap();
+        unsafe { std::env::set_var("XAI_PROMPT_TIMEOUT_SECS", "60") };
+        let client = XaiClient::new();
+        unsafe { std::env::remove_var("XAI_PROMPT_TIMEOUT_SECS") };
+        assert_eq!(client.request_timeout, Duration::from_secs(60));
+    }
+
+    #[test]
+    fn xai_client_with_base_url_sets_url_and_default_timeout() {
+        let client = XaiClient::with_base_url("https://proxy.internal/v1");
+        assert_eq!(client.base_url, "https://proxy.internal/v1");
+        assert_eq!(client.request_timeout, Duration::from_secs(300));
+    }
+
+    #[test]
+    fn xai_client_new_timeout_zero_falls_back_to_default() {
+        let _guard = env_lock().lock().unwrap();
+        // `.filter(|&n| n > 0)` rejects 0, so the default 300 s must be used.
+        unsafe { std::env::set_var("XAI_PROMPT_TIMEOUT_SECS", "0") };
+        let client = XaiClient::new();
+        unsafe { std::env::remove_var("XAI_PROMPT_TIMEOUT_SECS") };
+        assert_eq!(client.request_timeout, Duration::from_secs(300));
+    }
+
+    // ── start_request: HTTP error status codes ────────────────────────────────
+    //
+    // These tests spin up a real axum server on a random port so the actual
+    // reqwest/HTTP stack is exercised end-to-end. Each test verifies that a
+    // non-2xx response from the xAI API is converted to a single
+    // `XaiEvent::Error` carrying the status code in its message.
+
+    /// Bind a random local port and return (url, axum server future).
+    /// The caller must spawn / drive the server future.
+    #[cfg(test)]
+    async fn make_test_server(
+        app: axum::Router,
+    ) -> (String, impl std::future::Future<Output = ()>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind test server");
+        let addr = listener.local_addr().expect("local addr");
+        let url = format!("http://{addr}");
+        let server = async move {
+            axum::serve(listener, app).await.ok();
+        };
+        (url, server)
+    }
+
+    #[tokio::test]
+    async fn chat_stream_on_429_emits_error_event_with_status() {
+        use axum::{Router, http::StatusCode, routing::post};
+        use futures_util::StreamExt as _;
+
+        let app = Router::new().route(
+            "/responses",
+            post(|| async { (StatusCode::TOO_MANY_REQUESTS, "rate limit exceeded") }),
+        );
+        let (url, server) = make_test_server(app).await;
+        let server_task = tokio::spawn(server);
+
+        let client = XaiClient::with_base_url(url);
+        let input = [InputItem::user("hi")];
+        let mut stream =
+            XaiHttpClient::chat_stream(&client, "grok-3", &input, "key", &[], None, None).await;
+        let event = stream.next().await.expect("stream must emit one event");
+
+        server_task.abort();
+
+        match event {
+            XaiEvent::Error { message } => {
+                assert!(
+                    message.contains("429"),
+                    "error message must contain HTTP status 429; got: {message}"
+                );
+            }
+            other => panic!("expected XaiEvent::Error, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn chat_stream_on_500_emits_error_event_with_status() {
+        use axum::{Router, http::StatusCode, routing::post};
+        use futures_util::StreamExt as _;
+
+        let app = Router::new().route(
+            "/responses",
+            post(|| async { (StatusCode::INTERNAL_SERVER_ERROR, "internal error") }),
+        );
+        let (url, server) = make_test_server(app).await;
+        let server_task = tokio::spawn(server);
+
+        let client = XaiClient::with_base_url(url);
+        let input = [InputItem::user("hi")];
+        let mut stream =
+            XaiHttpClient::chat_stream(&client, "grok-3", &input, "key", &[], None, None).await;
+        let event = stream.next().await.expect("stream must emit one event");
+
+        server_task.abort();
+
+        match event {
+            XaiEvent::Error { message } => {
+                assert!(
+                    message.contains("500"),
+                    "error message must contain HTTP status 500; got: {message}"
+                );
+            }
+            other => panic!("expected XaiEvent::Error, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn chat_stream_on_connection_refused_emits_error_event() {
+        // Point at a port where nothing is listening — reqwest connection error
+        // must be surfaced as XaiEvent::Error (not a panic or hang).
+        use futures_util::StreamExt as _;
+
+        // Bind then immediately drop to guarantee the port is not in use.
+        let port = {
+            let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            l.local_addr().unwrap().port()
+        };
+        let url = format!("http://127.0.0.1:{port}");
+
+        let client = XaiClient::with_base_url(url);
+        let input = [InputItem::user("hi")];
+        let mut stream =
+            XaiHttpClient::chat_stream(&client, "grok-3", &input, "key", &[], None, None).await;
+        let event = stream
+            .next()
+            .await
+            .expect("stream must emit one event on connection error");
+
+        assert!(
+            matches!(event, XaiEvent::Error { .. }),
+            "connection refused must produce XaiEvent::Error, got {event:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn chat_stream_network_drop_mid_chunk_emits_error_event() {
+        // Exercises the `Some(Err(e))` branch inside `parse_sse` (client.rs:361-363).
+        //
+        // The server sends a valid HTTP 200 with chunked encoding, announces a
+        // 32-byte chunk, writes only 13 bytes, then drops the connection. hyper
+        // detects the incomplete chunk and surfaces it as an Err on the byte
+        // stream, which parse_sse converts to XaiEvent::Error.
+        use futures_util::StreamExt as _;
+        use tokio::io::AsyncWriteExt as _;
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            let (mut tcp, _) = listener.accept().await.unwrap();
+            // Valid 200 response with chunked transfer encoding.
+            tcp.write_all(
+                b"HTTP/1.1 200 OK\r\n\
+                  content-type: text/event-stream\r\n\
+                  transfer-encoding: chunked\r\n\
+                  \r\n",
+            )
+            .await
+            .ok();
+            // Announce a 32-byte (0x20) chunk but only send 13 bytes, then close.
+            tcp.write_all(b"20\r\ndata: partial").await.ok();
+            tcp.flush().await.ok();
+            // Drop closes the TCP connection — hyper will detect the truncated chunk.
+        });
+
+        let client = XaiClient::with_base_url(format!("http://{addr}"));
+        let input = [InputItem::user("hi")];
+        let events: Vec<XaiEvent> =
+            XaiHttpClient::chat_stream(&client, "grok-3", &input, "key", &[], None, None)
+                .await
+                .collect()
+                .await;
+
+        assert!(
+            events.iter().any(|e| matches!(e, XaiEvent::Error { .. })),
+            "mid-stream connection drop must produce XaiEvent::Error; got: {events:?}"
         );
     }
 }
