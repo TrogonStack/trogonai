@@ -1,31 +1,19 @@
 use std::convert::Infallible;
 
-use serde::{Deserialize, Serialize};
-use trogon_eventsourcing::snapshot::SnapshotSchema;
 use trogon_eventsourcing::{
-    CommandExecution, CommandResult, CommandSnapshots, Decide, Decision, FrequencySnapshot,
-    NonEmpty, OccPolicy, SnapshotRead, SnapshotWrite, StreamAppend, StreamCommand, StreamRead,
+    CommandExecution, CommandResult, CommandSnapshots, Decide, Decision, FrequencySnapshot, NonEmpty, OccPolicy,
+    SnapshotRead, SnapshotWrite, StreamAppend, StreamCommand, StreamRead,
 };
 
+use super::JobCommandState;
 use crate::{
     JobEnabledState, JobId,
-    events::{JobAdded, JobEvent, JobPaused, JobRemoved, JobResumed},
+    events::{JobEvent, JobPaused},
 };
 
 #[derive(Debug, Clone)]
 pub struct PauseJobCommand {
     pub id: JobId,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub enum PauseJobState {
-    Missing,
-    Present { current: JobEnabledState },
-    Deleted,
-}
-
-impl SnapshotSchema for PauseJobState {
-    const SNAPSHOT_STREAM_PREFIX: &'static str = "cron.command.pause_job.v1.";
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,63 +38,35 @@ impl StreamCommand for PauseJobCommand {
 }
 
 impl Decide for PauseJobCommand {
-    type State = PauseJobState;
+    type State = JobCommandState;
     type Event = JobEvent;
     type EvolveError = Infallible;
     type DecideError = PauseJobDecisionError;
 
-    fn initial_state() -> PauseJobState {
-        PauseJobState::Missing
+    fn initial_state() -> JobCommandState {
+        JobCommandState::initial()
     }
 
-    fn evolve(state: PauseJobState, event: JobEvent) -> Result<PauseJobState, Self::EvolveError> {
-        match event {
-            JobEvent::JobAdded(JobAdded { job, .. }) => {
-                if matches!(state, PauseJobState::Deleted) {
-                    return Ok(PauseJobState::Deleted);
-                }
-                Ok(PauseJobState::Present {
-                    current: job.state.into(),
-                })
-            }
-            JobEvent::JobPaused(JobPaused { .. }) => match state {
-                PauseJobState::Deleted => Ok(PauseJobState::Deleted),
-                PauseJobState::Missing | PauseJobState::Present { .. } => {
-                    Ok(PauseJobState::Present {
-                        current: JobEnabledState::Disabled,
-                    })
-                }
-            },
-            JobEvent::JobResumed(JobResumed { .. }) => match state {
-                PauseJobState::Deleted => Ok(PauseJobState::Deleted),
-                PauseJobState::Missing | PauseJobState::Present { .. } => {
-                    Ok(PauseJobState::Present {
-                        current: JobEnabledState::Enabled,
-                    })
-                }
-            },
-            JobEvent::JobRemoved(JobRemoved { .. }) => Ok(PauseJobState::Deleted),
-        }
+    fn evolve(state: JobCommandState, event: JobEvent) -> Result<JobCommandState, Self::EvolveError> {
+        state.evolve(event)
     }
 
-    fn decide(state: &PauseJobState, command: &Self) -> Result<Decision<JobEvent>, Self::DecideError> {
+    fn decide(state: &JobCommandState, command: &Self) -> Result<Decision<JobEvent>, Self::DecideError> {
         match state {
-            PauseJobState::Missing => Err(PauseJobDecisionError::JobNotFound {
+            JobCommandState::Missing => Err(PauseJobDecisionError::JobNotFound {
                 id: command.stream_id().clone(),
             }),
-            PauseJobState::Deleted => Err(PauseJobDecisionError::JobDeleted {
+            JobCommandState::Deleted => Err(PauseJobDecisionError::JobDeleted {
                 id: command.stream_id().clone(),
             }),
-            PauseJobState::Present {
+            JobCommandState::Present {
                 current: JobEnabledState::Disabled,
             } => Err(PauseJobDecisionError::AlreadyPaused {
                 id: command.stream_id().clone(),
             }),
-            PauseJobState::Present { .. } => Ok(Decision::Event(NonEmpty::one(
-                JobEvent::JobPaused(JobPaused {
-                    id: command.stream_id().to_string(),
-                }),
-            ))),
+            JobCommandState::Present { .. } => Ok(Decision::Event(NonEmpty::one(JobEvent::JobPaused(JobPaused {
+                id: command.stream_id().to_string(),
+            })))),
         }
     }
 }
@@ -127,8 +87,8 @@ pub async fn pause_job<S, SErr>(
 where
     S: StreamRead<JobId, Error = SErr>
         + StreamAppend<JobId, Error = SErr>
-        + SnapshotRead<PauseJobState, JobId, Error = SErr>
-        + SnapshotWrite<PauseJobState, JobId, Error = SErr>,
+        + SnapshotRead<JobCommandState, JobId, Error = SErr>
+        + SnapshotWrite<JobCommandState, JobId, Error = SErr>,
     serde_json::Error: Into<SErr>,
 {
     CommandExecution::new(store, &command)
@@ -140,6 +100,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use trogon_eventsourcing::snapshot::SnapshotSchema;
     use trogon_eventsourcing::{
         Decision, NonEmpty, decide,
         testing::{TestCase, Timeline, decider, expect_error},
@@ -147,7 +108,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        AddJobCommand, DeliverySpec, GetJobCommand, JobEventState, JobHeaders, JobMessage, JobSpec,
+        AddJobCommand, DeliverySpec, GetJobCommand, JobAdded, JobEventState, JobHeaders, JobMessage, JobSpec,
         MessageContent, ScheduleSpec, mocks::MockCronStore,
     };
 
@@ -170,7 +131,7 @@ mod tests {
 
     #[test]
     fn decides_pause_from_present_enabled_state() {
-        let state = PauseJobState::Present {
+        let state = JobCommandState::Present {
             current: JobEnabledState::Enabled,
         };
         let command = PauseJobCommand::new(JobId::parse("backup").unwrap());
@@ -186,7 +147,7 @@ mod tests {
 
     #[test]
     fn rejects_pausing_already_paused_jobs() {
-        let state = PauseJobState::Present {
+        let state = JobCommandState::Present {
             current: JobEnabledState::Disabled,
         };
         let command = PauseJobCommand::new(JobId::parse("backup").unwrap());
@@ -199,7 +160,7 @@ mod tests {
 
     #[test]
     fn rejects_pausing_missing_jobs() {
-        let state = PauseJobState::Missing;
+        let state = JobCommandState::Missing;
         let command = PauseJobCommand::new(JobId::parse("backup").unwrap());
 
         assert!(matches!(
@@ -210,7 +171,7 @@ mod tests {
 
     #[test]
     fn rejects_pausing_deleted_jobs() {
-        let state = PauseJobState::Deleted;
+        let state = JobCommandState::Deleted;
         let command = PauseJobCommand::new(JobId::parse("backup").unwrap());
 
         assert!(matches!(
@@ -286,13 +247,9 @@ mod tests {
         let store = MockCronStore::new();
         store.seed_job(job("backup"));
 
-        let outcome = pause_job(
-            &store,
-            PauseJobCommand::new(JobId::parse("backup").unwrap()),
-            None,
-        )
-        .await
-        .unwrap();
+        let outcome = pause_job(&store, PauseJobCommand::new(JobId::parse("backup").unwrap()), None)
+            .await
+            .unwrap();
         assert_eq!(outcome.next_expected_version, 2);
         assert_eq!(
             outcome.events,
@@ -309,8 +266,8 @@ mod tests {
         assert_eq!(job.state, JobEventState::Disabled);
 
         let command_snapshot = store
-            .read_command_snapshot::<PauseJobState>(
-                PauseJobState::snapshot_store_config(),
+            .read_command_snapshot::<JobCommandState>(
+                JobCommandState::snapshot_store_config(),
                 &JobId::parse("backup").unwrap(),
             )
             .unwrap();

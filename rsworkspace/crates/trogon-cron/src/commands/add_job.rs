@@ -1,31 +1,19 @@
 use std::convert::Infallible;
 
-use serde::{Deserialize, Serialize};
-use trogon_eventsourcing::snapshot::SnapshotSchema;
 use trogon_eventsourcing::{
-    CommandExecution, CommandResult, CommandSnapshots, WritePrecondition, Decide, Decision, FrequencySnapshot,
-    NonEmpty, OccPolicy, SnapshotRead, SnapshotWrite, StreamAppend, StreamCommand, StreamRead, StreamState,
+    CommandExecution, CommandResult, CommandSnapshots, Decide, Decision, FrequencySnapshot, NonEmpty, OccPolicy,
+    SnapshotRead, SnapshotWrite, StreamAppend, StreamCommand, StreamRead, StreamState, WritePrecondition,
 };
 
+use super::JobCommandState;
 use crate::{
     JobId, JobSpec,
-    events::{JobAdded, JobDetails, JobEvent, JobPaused, JobRemoved, JobResumed},
+    events::{JobAdded, JobDetails, JobEvent},
 };
 
 #[derive(Debug, Clone)]
 pub struct AddJobCommand {
     pub spec: JobSpec,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AddJobState {
-    Missing,
-    Present,
-    Deleted,
-}
-
-impl SnapshotSchema for AddJobState {
-    const SNAPSHOT_STREAM_PREFIX: &'static str = "cron.command.add_job.v1.";
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,39 +41,29 @@ impl StreamCommand for AddJobCommand {
 }
 
 impl Decide for AddJobCommand {
-    type State = AddJobState;
+    type State = JobCommandState;
     type Event = JobEvent;
     type EvolveError = Infallible;
     type DecideError = AddJobDecisionError;
 
-    fn initial_state() -> AddJobState {
-        AddJobState::Missing
+    fn initial_state() -> JobCommandState {
+        JobCommandState::initial()
     }
 
-    fn evolve(state: AddJobState, event: JobEvent) -> Result<AddJobState, Self::EvolveError> {
-        match event {
-            JobEvent::JobAdded(JobAdded { .. })
-            | JobEvent::JobPaused(JobPaused { .. })
-            | JobEvent::JobResumed(JobResumed { .. }) => match state {
-                AddJobState::Deleted => Ok(AddJobState::Deleted),
-                AddJobState::Missing | AddJobState::Present => Ok(AddJobState::Present),
-            },
-            JobEvent::JobRemoved(JobRemoved { .. }) => Ok(AddJobState::Deleted),
-        }
+    fn evolve(state: JobCommandState, event: JobEvent) -> Result<JobCommandState, Self::EvolveError> {
+        state.evolve(event)
     }
 
-    fn decide(state: &AddJobState, command: &Self) -> Result<Decision<JobEvent>, Self::DecideError> {
+    fn decide(state: &JobCommandState, command: &Self) -> Result<Decision<JobEvent>, Self::DecideError> {
         match state {
-            AddJobState::Missing => Ok(Decision::Event(NonEmpty::one(JobEvent::JobAdded(
-                JobAdded {
-                    id: command.stream_id().to_string(),
-                    job: JobDetails::from(&command.spec),
-                },
-            )))),
-            AddJobState::Present => Err(AddJobDecisionError::AlreadyExists {
+            JobCommandState::Missing => Ok(Decision::Event(NonEmpty::one(JobEvent::JobAdded(JobAdded {
+                id: command.stream_id().to_string(),
+                job: JobDetails::from(&command.spec),
+            })))),
+            JobCommandState::Present { .. } => Err(AddJobDecisionError::AlreadyExists {
                 id: command.stream_id().clone(),
             }),
-            AddJobState::Deleted => Err(AddJobDecisionError::JobDeleted {
+            JobCommandState::Deleted => Err(AddJobDecisionError::JobDeleted {
                 id: command.stream_id().clone(),
             }),
         }
@@ -108,8 +86,8 @@ pub async fn add_job<S, SErr>(
 where
     S: StreamRead<JobId, Error = SErr>
         + StreamAppend<JobId, Error = SErr>
-        + SnapshotRead<AddJobState, JobId, Error = SErr>
-        + SnapshotWrite<AddJobState, JobId, Error = SErr>,
+        + SnapshotRead<JobCommandState, JobId, Error = SErr>
+        + SnapshotWrite<JobCommandState, JobId, Error = SErr>,
     serde_json::Error: Into<SErr>,
 {
     CommandExecution::new(store, &command)
@@ -121,6 +99,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use trogon_eventsourcing::snapshot::SnapshotSchema;
     use trogon_eventsourcing::{
         CommandFailure, Decision, NonEmpty, decide,
         testing::{TestCase, decider, expect_error},
@@ -128,8 +107,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        CronJob, DeliverySpec, GetJobCommand, JobEnabledState, JobHeaders, JobMessage,
-        MessageContent, ScheduleSpec, mocks::MockCronStore,
+        CronJob, DeliverySpec, GetJobCommand, JobEnabledState, JobHeaders, JobMessage, JobRemoved, MessageContent,
+        ScheduleSpec, mocks::MockCronStore,
     };
 
     fn job_id(id: &str) -> JobId {
@@ -155,7 +134,7 @@ mod tests {
 
     #[test]
     fn decides_add_from_missing_state() {
-        let state = AddJobState::Missing;
+        let state = JobCommandState::Missing;
         let command = AddJobCommand::new(job("backup"));
 
         let decision = decide(&state, &command).unwrap();
@@ -170,7 +149,9 @@ mod tests {
 
     #[test]
     fn rejects_adding_existing_job() {
-        let state = AddJobState::Present;
+        let state = JobCommandState::Present {
+            current: JobEnabledState::Enabled,
+        };
         let command = AddJobCommand::new(job("backup"));
 
         assert!(matches!(
@@ -225,9 +206,7 @@ mod tests {
     async fn run_registers_job_in_store() {
         let store = MockCronStore::new();
 
-        let outcome = add_job(&store, AddJobCommand::new(job("backup")), None)
-            .await
-            .unwrap();
+        let outcome = add_job(&store, AddJobCommand::new(job("backup")), None).await.unwrap();
         assert_eq!(outcome.next_expected_version, 1);
         assert_eq!(
             outcome.events,
@@ -245,8 +224,8 @@ mod tests {
         assert_eq!(stored_job, expected_job("backup"));
 
         let command_snapshot = store
-            .read_command_snapshot::<AddJobState>(
-                AddJobState::snapshot_store_config(),
+            .read_command_snapshot::<JobCommandState>(
+                JobCommandState::snapshot_store_config(),
                 &JobId::parse("backup").unwrap(),
             )
             .unwrap();
@@ -257,9 +236,7 @@ mod tests {
     async fn run_rejects_adding_existing_job_with_domain_error() {
         let store = MockCronStore::new();
 
-        add_job(&store, AddJobCommand::new(job("backup")), None)
-            .await
-            .unwrap();
+        add_job(&store, AddJobCommand::new(job("backup")), None).await.unwrap();
 
         let error = add_job(&store, AddJobCommand::new(job("backup")), None)
             .await
@@ -276,9 +253,7 @@ mod tests {
     async fn run_rejects_adding_deleted_job_id() {
         let store = MockCronStore::new();
 
-        add_job(&store, AddJobCommand::new(job("backup")), None)
-            .await
-            .unwrap();
+        add_job(&store, AddJobCommand::new(job("backup")), None).await.unwrap();
         crate::remove_job(
             &store,
             crate::RemoveJobCommand::new(JobId::parse("backup").unwrap()),
