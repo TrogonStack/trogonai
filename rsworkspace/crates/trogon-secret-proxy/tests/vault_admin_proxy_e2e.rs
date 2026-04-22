@@ -20,7 +20,6 @@ use std::time::Duration;
 
 use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
-use trogon_nats::jetstream::NatsJetStreamClient;
 use trogon_nats::{NatsAuth, NatsConfig, connect};
 use trogon_secret_proxy::{
     proxy::{ProxyState, router},
@@ -74,7 +73,7 @@ async fn vault_admin_store_then_proxy_request_succeeds() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .expect("Failed to connect to NATS");
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
 
     // ── 5. Ensure PROXY_REQUESTS stream ────────────────────────────────────
     let outbound_subject = subjects::outbound("trogon");
@@ -201,7 +200,7 @@ async fn vault_admin_revoke_then_proxy_request_fails() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
 
     let outbound_subject = subjects::outbound("trogon");
     stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
@@ -348,7 +347,7 @@ async fn vault_admin_rotate_then_proxy_uses_new_key() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .expect("Failed to connect to NATS");
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
 
     let outbound_subject = subjects::outbound("trogon");
     stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
