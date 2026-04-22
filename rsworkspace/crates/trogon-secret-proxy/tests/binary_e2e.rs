@@ -2618,7 +2618,7 @@ async fn binary_prefix_mismatch_causes_timeout() {
         .env("NATS_URL", format!("localhost:{}", nats_port))
         .env("PROXY_PORT", proxy_port.to_string())
         .env("PROXY_WORKER_TIMEOUT_SECS", "2")
-        .env("PROXY_BASE_URL_OVERRIDE", mock_server.base_url())
+        .env("PROXY_BASE_URL_OVERRIDE", &mock_server.base_url())
         .env("PROXY_PREFIX", "alpha")
         .env("RUST_LOG", "warn")
         .kill_on_drop(true)
@@ -6543,7 +6543,7 @@ async fn binary_invalid_worker_timeout_falls_back_to_default() {
         .env("NATS_URL", format!("localhost:{}", nats_port))
         .env("PROXY_PORT", proxy_port.to_string())
         .env("PROXY_WORKER_TIMEOUT_SECS", "99999999999999999999") // overflows u64
-        .env("PROXY_BASE_URL_OVERRIDE", mock_server.base_url())
+        .env("PROXY_BASE_URL_OVERRIDE", &mock_server.base_url())
         .env("RUST_LOG", "warn")
         .kill_on_drop(true)
         .spawn()
@@ -6858,22 +6858,15 @@ async fn binary_base_url_override_with_trailing_slash_is_normalized() {
     );
 }
 
-// ── Gap A: invalid PROXY_PORT falls back to 8080 ─────────────────────────────
+// ── Gap A: invalid PROXY_PORT falls back to default port ──────────────────────
 
 /// When `PROXY_PORT` is set to a non-numeric string (e.g. `"not-a-number"`),
 /// `.parse::<u16>().ok()` returns `None` and the proxy falls back to the
-/// default port `8080`.  The proxy must start and serve requests normally.
-///
-/// NOTE: This test requires port 8080 to be available on the test host.
+/// port set via `PROXY_DEFAULT_PORT` (or 8080 when unset).
+/// The proxy must start and serve requests normally.
 #[tokio::test]
-async fn binary_invalid_proxy_port_falls_back_to_8080() {
-    // Guard: port 8080 must be free for the proxy to bind its fallback address.
-    assert!(
-        tokio::net::TcpStream::connect("127.0.0.1:8080")
-            .await
-            .is_err(),
-        "Port 8080 is already in use — stop any proxy running on that port before running this test"
-    );
+async fn binary_invalid_proxy_port_falls_back_to_default() {
+    let fallback_port = free_port();
 
     let (_nats_container, nats_port) = start_nats().await;
 
@@ -6890,24 +6883,28 @@ async fn binary_invalid_proxy_port_falls_back_to_8080() {
         })
         .await;
 
-    // Spawn proxy with an invalid PROXY_PORT → must fall back to 8080.
+    // Spawn proxy with an invalid PROXY_PORT → must fall back to PROXY_DEFAULT_PORT.
     let _proxy = Command::new(env!("CARGO_BIN_EXE_proxy"))
         .env("NATS_URL", format!("localhost:{}", nats_port))
         .env("PROXY_PORT", "not-a-number")
+        .env("PROXY_DEFAULT_PORT", fallback_port.to_string())
         .env("PROXY_WORKER_TIMEOUT_SECS", "15")
-        .env("PROXY_BASE_URL_OVERRIDE", mock_server.base_url())
+        .env("PROXY_BASE_URL_OVERRIDE", &mock_server.base_url())
         .env("RUST_LOG", "warn")
         .kill_on_drop(true)
         .spawn()
         .expect("Failed to spawn proxy binary");
 
-    wait_for_port(8080, Duration::from_secs(15)).await;
+    wait_for_port(fallback_port, Duration::from_secs(15)).await;
 
     let _worker = spawn_worker(nats_port, "invport-workers-001", token, real_key);
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     let resp = reqwest::Client::new()
-        .post("http://127.0.0.1:8080/anthropic/v1/messages")
+        .post(format!(
+            "http://127.0.0.1:{}/anthropic/v1/messages",
+            fallback_port
+        ))
         .header("Authorization", format!("Bearer {}", token))
         .header("Content-Type", "application/json")
         .body(r#"{"model":"claude-3-5-sonnet","messages":[]}"#)
@@ -6919,7 +6916,7 @@ async fn binary_invalid_proxy_port_falls_back_to_8080() {
     assert_eq!(
         resp.status(),
         200,
-        "Proxy with invalid PROXY_PORT must fall back to 8080 and serve requests"
+        "Proxy with invalid PROXY_PORT must fall back to default port and serve requests"
     );
     assert_eq!(mock.hits(), 1, "Provider must receive exactly one request");
 }

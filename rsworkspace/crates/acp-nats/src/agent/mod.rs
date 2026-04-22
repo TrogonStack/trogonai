@@ -39,7 +39,7 @@ mod tests {
     fn mock_bridge() -> (
         AdvancedMockNatsClient,
         MockJs,
-        Bridge<AdvancedMockNatsClient, trogon_std::time::SystemClock, MockJs>,
+        Bridge<AdvancedMockNatsClient, trogon_std::time::MockClock, MockJs>,
     ) {
         let mock = AdvancedMockNatsClient::new();
         let js = MockJs::new();
@@ -47,7 +47,7 @@ mod tests {
         let bridge = Bridge::new(
             mock.clone(),
             js.clone(),
-            trogon_std::time::SystemClock,
+            trogon_std::time::MockClock::new(),
             &opentelemetry::global::meter("acp-nats-test"),
             Config::for_test("acp"),
             tx,
@@ -119,6 +119,71 @@ mod tests {
                 .ext_notification(ExtNotification::new("ext", empty_raw_value()))
                 .await
                 .is_ok()
+        );
+    }
+
+    /// Methods dispatched via core NATS request_with_timeout return AGENT_UNAVAILABLE
+    /// when the request fails — so clients can distinguish agent unavailability from
+    /// logic errors.
+    #[tokio::test]
+    async fn core_nats_methods_return_agent_unavailable_on_failure() {
+        use agent_client_protocol::{AuthenticateRequest, ErrorCode, NewSessionRequest};
+
+        let (_mock, _js, bridge) = mock_bridge();
+
+        macro_rules! check_unavailable {
+            ($fut:expr) => {{
+                let err = $fut.await.unwrap_err();
+                assert_eq!(
+                    err.code,
+                    ErrorCode::Other(crate::error::AGENT_UNAVAILABLE).into(),
+                    "core NATS failure must return AGENT_UNAVAILABLE, got {:?}",
+                    err.code
+                );
+            }};
+        }
+
+        check_unavailable!(bridge.authenticate(AuthenticateRequest::new("test")));
+        check_unavailable!(bridge.new_session(NewSessionRequest::new(".")));
+    }
+
+    /// Methods dispatched via JetStream js_request return InternalError when the
+    /// JetStream operation fails — JetStream errors are infrastructure-level and
+    /// map to InternalError rather than AGENT_UNAVAILABLE.
+    #[tokio::test]
+    async fn jetstream_methods_return_internal_error_on_failure() {
+        use agent_client_protocol::{ErrorCode, LoadSessionRequest, SetSessionModeRequest};
+
+        let (_mock, _js, bridge) = mock_bridge();
+
+        macro_rules! check_internal {
+            ($fut:expr) => {{
+                let err = $fut.await.unwrap_err();
+                assert_eq!(
+                    err.code,
+                    ErrorCode::InternalError.into(),
+                    "JetStream failure must return InternalError, got {:?}",
+                    err.code
+                );
+            }};
+        }
+
+        check_internal!(bridge.load_session(LoadSessionRequest::new("s1", ".")));
+        check_internal!(bridge.set_session_mode(SetSessionModeRequest::new("s1", "m1")));
+    }
+
+    /// cancel is fire-and-forget: it must return Ok(()) even when the underlying
+    /// NATS publish fails, so callers are never blocked by backend unavailability.
+    #[tokio::test]
+    async fn cancel_returns_ok_even_when_nats_publish_fails() {
+        use agent_client_protocol::CancelNotification;
+
+        let (mock, _js, bridge) = mock_bridge();
+        mock.fail_publish_count(99);
+
+        assert!(
+            bridge.cancel(CancelNotification::new("s1")).await.is_ok(),
+            "cancel must return Ok(()) regardless of NATS publish failure"
         );
     }
 }

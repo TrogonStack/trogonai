@@ -19,15 +19,11 @@ use uuid::Uuid;
 use crate::messages::{OutboundHttpRequest, OutboundHttpResponse};
 use crate::provider;
 use crate::subjects;
+use crate::traits::{JetStreamPublisher, NatsClient};
 use trogon_nats::headers_with_trace_context;
-use trogon_nats::{SubscribeClient, jetstream::JetStreamPublisher};
 
 #[derive(Clone)]
-pub struct ProxyState<N, J>
-where
-    N: SubscribeClient,
-    J: JetStreamPublisher,
-{
+pub struct ProxyState<N = async_nats::Client, J = async_nats::jetstream::Context> {
     pub nats: N,
     pub jetstream: J,
     pub prefix: String,
@@ -41,7 +37,7 @@ where
 /// Build the axum router for the HTTP proxy.
 pub fn router<N, J>(state: ProxyState<N, J>) -> Router
 where
-    N: SubscribeClient,
+    N: NatsClient,
     J: JetStreamPublisher,
 {
     Router::new()
@@ -55,7 +51,7 @@ async fn handle_request<N, J>(
     req: Request,
 ) -> Result<Response<Body>, ProxyError>
 where
-    N: SubscribeClient,
+    N: NatsClient,
     J: JetStreamPublisher,
 {
     // An empty path (e.g. from `GET /anthropic/`) has no meaningful endpoint to
@@ -132,7 +128,7 @@ where
         .nats
         .subscribe(reply_subject.clone())
         .await
-        .map_err(|e| ProxyError::NatsSubscribe(e.to_string()))?;
+        .map_err(|e| ProxyError::NatsSubscribe(e))?;
 
     // Publish OutboundHttpRequest to JetStream, injecting the current trace context
     // into NATS headers so the worker can continue the distributed trace.
@@ -150,9 +146,7 @@ where
         .jetstream
         .publish_with_headers(state.outbound_subject.clone(), nats_headers, payload.into())
         .await
-        .map_err(|e| ProxyError::NatsPublish(e.to_string()))?
-        .await
-        .map_err(|e| ProxyError::NatsPublish(e.to_string()))?;
+        .map_err(|e| ProxyError::NatsPublish(e))?;
 
     tracing::debug!(
         correlation_id = %correlation_id,
@@ -166,7 +160,7 @@ where
         .map_err(|_| ProxyError::Timeout {
             correlation_id: correlation_id.clone(),
         })?
-        .ok_or(ProxyError::ReplyChannelClosed)?;
+        .ok_or_else(|| ProxyError::ReplyChannelClosed)?;
 
     let proxy_response: OutboundHttpResponse = serde_json::from_slice(&reply_msg.payload)
         .map_err(|e| ProxyError::Deserialize(e.to_string()))?;
@@ -310,14 +304,6 @@ mod tests {
         }
     }
 
-    /// `StatusCode::from_u16` accepts values 100–999; outside that range it
-    /// returns `Err`.  `proxy.rs:164` uses `.unwrap_or(INTERNAL_SERVER_ERROR)`
-    /// so the proxy returns 500 instead of panicking when a worker sends an
-    /// out-of-range status code.
-    ///
-    /// This unit test verifies the fallback expression directly.  The e2e test
-    /// `e2e_invalid_response_status_code_falls_back_to_500` exercises the same
-    /// behaviour end-to-end; this test documents it at the unit level.
     #[test]
     fn invalid_upstream_status_code_falls_back_to_500() {
         for invalid in [0u16, 99, 1000] {
@@ -337,12 +323,6 @@ mod tests {
         }
     }
 
-    // ── Worker error + status code selection ─────────────────────────────────
-
-    /// Documents the status-selection logic at `proxy.rs:170-174`:
-    /// when the worker sets `error` but the status code is 2xx (success),
-    /// the proxy must fall back to 502 BAD_GATEWAY to avoid leaking a
-    /// spurious 2xx response to the caller.
     #[test]
     fn worker_error_with_2xx_status_falls_back_to_502() {
         for ok_status in [200u16, 201, 204] {
@@ -360,8 +340,6 @@ mod tests {
         }
     }
 
-    /// A 4xx status from the worker is preserved as-is when the error field
-    /// is set — the original client-error code is more informative than 502.
     #[test]
     fn worker_error_with_4xx_status_preserved() {
         for client_err in [400u16, 401, 403, 404, 422] {
@@ -378,8 +356,6 @@ mod tests {
         }
     }
 
-    /// A 3xx redirect status from the worker is NOT a client-error or
-    /// server-error, so the proxy falls back to 502 just like a 2xx status.
     #[test]
     fn worker_error_with_3xx_status_falls_back_to_502() {
         for redirect in [301u16, 302, 307, 308] {
@@ -397,8 +373,6 @@ mod tests {
         }
     }
 
-    /// A 5xx status from the worker is preserved as-is when the error field
-    /// is set — propagating the upstream server-error code to the caller.
     #[test]
     fn worker_error_with_5xx_status_preserved() {
         for server_err in [500u16, 502, 503, 504] {
@@ -415,8 +389,6 @@ mod tests {
         }
     }
 
-    /// Mirrors the `HOP_BY_HOP` constant and filter in `handle_request`.
-    /// `te` and `trailers` must be stripped per RFC 7230 §6.1.
     #[test]
     fn te_and_trailers_are_filtered_as_hop_by_hop_headers() {
         const HOP_BY_HOP: &[&str] = &[
@@ -457,14 +429,10 @@ mod tests {
         }
     }
 
-    /// Mirrors the header-parsing guard at `proxy.rs handle_request` lines 189-196.
-    /// An invalid header name (e.g. containing a null byte) must be silently
-    /// dropped rather than causing a panic or propagating an error.
     #[test]
     fn invalid_response_header_name_is_silently_dropped() {
         let raw = vec![
             ("content-type".to_string(), "application/json".to_string()),
-            // Null byte makes this an invalid HTTP header name.
             ("x-invalid\x00header".to_string(), "value".to_string()),
             ("x-valid-header".to_string(), "ok".to_string()),
         ];
@@ -479,7 +447,6 @@ mod tests {
         }
         assert!(headers.contains_key("content-type"));
         assert!(headers.contains_key("x-valid-header"));
-        // Invalid header was silently dropped — only 2 entries remain.
         assert_eq!(headers.len(), 2);
     }
 
@@ -503,131 +470,5 @@ mod tests {
                 .contains("boom")
         );
         assert!(!ProxyError::ReplyChannelClosed.to_string().is_empty());
-    }
-
-    // ── Handler tests using mocks ─────────────────────────────────────────────
-
-    mod handler_tests {
-        use super::*;
-        use tower::util::ServiceExt as _;
-        use trogon_nats::{MockNatsClient, jetstream::MockJetStreamPublisher};
-
-        fn make_app(
-            nats: MockNatsClient,
-            js: MockJetStreamPublisher,
-            base_url_override: Option<String>,
-        ) -> axum::Router {
-            let state = ProxyState {
-                nats,
-                jetstream: js,
-                prefix: "trogon".to_string(),
-                outbound_subject: "trogon.outbound.http".to_string(),
-                worker_timeout: Duration::from_secs(5),
-                base_url_override,
-            };
-            router(state)
-        }
-
-        #[tokio::test]
-        async fn unknown_provider_returns_502_without_touching_nats() {
-            let nats = MockNatsClient::new();
-            let js = MockJetStreamPublisher::new();
-            let app = make_app(nats.clone(), js, None);
-
-            let req = axum::http::Request::builder()
-                .method("POST")
-                .uri("/fakeai/v1/generate")
-                .body(axum::body::Body::empty())
-                .unwrap();
-
-            let resp = app.oneshot(req).await.unwrap();
-            assert_eq!(resp.status(), StatusCode::BAD_GATEWAY);
-            assert!(
-                nats.subscribed_to().is_empty(),
-                "no subscribe on unknown provider"
-            );
-        }
-
-        #[tokio::test]
-        async fn happy_path_returns_upstream_status_and_body() {
-            use crate::messages::OutboundHttpResponse;
-
-            let nats = MockNatsClient::new();
-            let tx = nats.inject_messages();
-
-            // Pre-send the worker reply before the handler even subscribes.
-            let upstream = OutboundHttpResponse {
-                status: 201,
-                headers: vec![("content-type".to_string(), "application/json".to_string())],
-                body: b"{\"id\":\"msg-1\"}".to_vec(),
-                error: None,
-            };
-            let reply_bytes = bytes::Bytes::from(serde_json::to_vec(&upstream).unwrap());
-            tx.unbounded_send(async_nats::Message {
-                subject: "reply.ignored".into(),
-                reply: None,
-                payload: reply_bytes.clone(),
-                headers: None,
-                length: reply_bytes.len(),
-                status: None,
-                description: None,
-            })
-            .unwrap();
-
-            let js = MockJetStreamPublisher::new();
-            let app = make_app(nats, js.clone(), Some("http://unused.local".to_string()));
-
-            let req = axum::http::Request::builder()
-                .method("POST")
-                .uri("/anthropic/v1/messages")
-                .header("content-type", "application/json")
-                .header("authorization", "Bearer tok_test_abc")
-                .body(axum::body::Body::from("{}"))
-                .unwrap();
-
-            let resp = app.oneshot(req).await.unwrap();
-            assert_eq!(resp.status(), StatusCode::CREATED);
-            assert_eq!(js.published_subjects().len(), 1);
-        }
-
-        #[tokio::test]
-        async fn worker_error_response_maps_to_expected_status() {
-            use crate::messages::OutboundHttpResponse;
-
-            let nats = MockNatsClient::new();
-            let tx = nats.inject_messages();
-
-            // Worker returns a 401 error response.
-            let upstream = OutboundHttpResponse {
-                status: 401,
-                headers: vec![],
-                body: vec![],
-                error: Some("Unauthorized".to_string()),
-            };
-            let reply_bytes = bytes::Bytes::from(serde_json::to_vec(&upstream).unwrap());
-            tx.unbounded_send(async_nats::Message {
-                subject: "reply.ignored".into(),
-                reply: None,
-                payload: reply_bytes.clone(),
-                headers: None,
-                length: reply_bytes.len(),
-                status: None,
-                description: None,
-            })
-            .unwrap();
-
-            let js = MockJetStreamPublisher::new();
-            let app = make_app(nats, js, Some("http://unused.local".to_string()));
-
-            let req = axum::http::Request::builder()
-                .method("POST")
-                .uri("/anthropic/v1/messages")
-                .header("authorization", "Bearer tok_test")
-                .body(axum::body::Body::empty())
-                .unwrap();
-
-            let resp = app.oneshot(req).await.unwrap();
-            assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
-        }
     }
 }

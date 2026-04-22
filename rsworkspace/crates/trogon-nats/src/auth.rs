@@ -227,6 +227,7 @@ mod tests {
         );
     }
 
+
     // ── servers_from_env edge cases ───────────────────────────────────────────
 
     /// NATS_URL set to whitespace-only entries (e.g. "  ,  ,  ") produces an
@@ -297,6 +298,7 @@ mod tests {
             config.servers
         );
     }
+
 
     /// `NATS_PASSWORD=""` (present but empty) must fall through to `None` —
     /// an empty password is treated the same as an absent one so that

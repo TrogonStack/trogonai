@@ -107,6 +107,18 @@ mod tests {
         cleanup(&dir);
     }
 
+    /// `WriteFile::write` overwrites existing content entirely.
+    #[test]
+    fn write_overwrites_existing_content() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let path = tmp.path();
+        let fs = SystemFs;
+
+        fs.write(path, "first").unwrap();
+        fs.write(path, "second").unwrap();
+        assert_eq!(fs.read_to_string(path).unwrap(), "second");
+    }
+
     #[test]
     fn create_dir_all_creates_nested_directories() {
         let fs = SystemFs;
@@ -119,6 +131,18 @@ mod tests {
         assert!(nested.exists());
 
         cleanup(&dir);
+    }
+
+    /// `CreateDirAll::create_dir_all` is idempotent — calling it on an
+    /// already-existing directory must not return an error.
+    #[test]
+    fn create_dir_all_is_idempotent() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let dir = tmp.path().join("existing");
+        let fs = SystemFs;
+
+        fs.create_dir_all(&dir).unwrap();
+        fs.create_dir_all(&dir).unwrap();
     }
 
     #[test]
@@ -160,6 +184,23 @@ mod tests {
         );
 
         cleanup(&dir);
+    }
+
+    /// `OpenAppendFile::open_append` appends to an existing file rather than
+    /// truncating it.
+    #[test]
+    fn open_append_does_not_truncate_existing_file() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let path = tmp.path();
+        let fs = SystemFs;
+
+        fs.write(path, "existing\n").unwrap();
+
+        let mut w = fs.open_append(path).unwrap();
+        w.write_all(b"appended\n").unwrap();
+        drop(w);
+
+        assert_eq!(fs.read_to_string(path).unwrap(), "existing\nappended\n");
     }
 
     #[test]

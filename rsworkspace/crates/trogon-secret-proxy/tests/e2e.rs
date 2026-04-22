@@ -19,7 +19,6 @@ use std::time::Duration;
 use futures_util::future::join_all;
 use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
-use trogon_nats::jetstream::NatsJetStreamClient;
 use trogon_nats::{NatsAuth, NatsConfig, connect};
 use trogon_secret_proxy::{
     proxy::{ProxyState, router},
@@ -102,7 +101,7 @@ async fn e2e_token_is_exchanged_for_real_key() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .expect("Failed to connect to NATS");
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
 
     // ── 5. Ensure JetStream stream ───────────────────────────────────────────
     let outbound_subject = subjects::outbound("trogon");
@@ -208,7 +207,7 @@ async fn e2e_unknown_token_returns_error() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("trogon");
     stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
@@ -275,7 +274,7 @@ async fn e2e_proxy_timeout_returns_504() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("trogon");
     stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
@@ -345,7 +344,7 @@ async fn e2e_concurrent_requests_all_succeed() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("trogon");
     stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
@@ -439,7 +438,7 @@ async fn e2e_jetstream_message_processed_after_worker_starts_late() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("trogon");
     stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
@@ -534,7 +533,7 @@ async fn e2e_invalid_payload_is_nacked_and_worker_continues() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("trogon");
     stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
@@ -542,7 +541,6 @@ async fn e2e_invalid_payload_is_nacked_and_worker_continues() {
 
     // Inject garbage bytes directly into the stream — bypasses the proxy.
     jetstream
-        .context()
         .publish(
             outbound_subject.clone(),
             b"this is not valid json !!!".to_vec().into(),
@@ -615,7 +613,7 @@ async fn e2e_ensure_stream_is_idempotent() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats));
     let outbound_subject = subjects::outbound("trogon");
 
     // First call — creates the stream.
@@ -651,7 +649,7 @@ async fn e2e_read_body_error_returns_500() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("trogon");
     stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
@@ -706,7 +704,7 @@ async fn e2e_reply_channel_closed_returns_500() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("trogon");
     stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
@@ -780,7 +778,7 @@ async fn e2e_invalid_response_headers_silently_dropped() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("trogon");
     stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
@@ -788,7 +786,6 @@ async fn e2e_invalid_response_headers_silently_dropped() {
 
     // Register an inline worker that will reply with crafted headers.
     let js_stream = jetstream
-        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -886,14 +883,13 @@ async fn e2e_worker_error_field_with_status_200_returns_502() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("trogon");
     stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
         .unwrap();
 
     let js_stream = jetstream
-        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -997,7 +993,7 @@ async fn e2e_nacked_message_redelivered_to_second_worker() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("trogon");
     stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
@@ -1043,7 +1039,6 @@ async fn e2e_nacked_message_redelivered_to_second_worker() {
     let consumer_name = "e2e-redeliver-workers";
     {
         let js_stream = jetstream
-            .context()
             .get_stream(&stream::stream_name("trogon"))
             .await
             .unwrap();
@@ -1059,16 +1054,7 @@ async fn e2e_nacked_message_redelivered_to_second_worker() {
             )
             .await
             .unwrap();
-        // Use fetch(1) instead of messages() so the server-side batch request
-        // is satisfied after pulling 1 message.  Using messages() would leave a
-        // dangling server-side batch request (batch=200, expires=30s) that
-        // consumes the redelivery before the real worker can pull it.
-        let mut bad_messages = bad_consumer
-            .fetch()
-            .max_messages(1)
-            .messages()
-            .await
-            .unwrap();
+        let mut bad_messages = bad_consumer.messages().await.unwrap();
 
         // Pull the message but do NOT ack — simulates crash mid-request.
         let _bad_msg = tokio::time::timeout(Duration::from_secs(5), bad_messages.next())
@@ -1134,7 +1120,7 @@ async fn e2e_worker_invalid_status_code_falls_back_to_500() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("trogon");
     stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
@@ -1142,7 +1128,6 @@ async fn e2e_worker_invalid_status_code_falls_back_to_500() {
 
     // Register an inline worker that will reply with status 1000 (out of range).
     let js_stream = jetstream
-        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -1227,7 +1212,7 @@ async fn e2e_max_deliver_exhausted_proxy_returns_504() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("trogon");
     stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
@@ -1254,7 +1239,6 @@ async fn e2e_max_deliver_exhausted_proxy_returns_504() {
     let saboteur_js = jetstream.clone();
     tokio::spawn(async move {
         let js_stream = saboteur_js
-            .context()
             .get_stream(&stream::stream_name("trogon"))
             .await
             .unwrap();
@@ -1322,7 +1306,7 @@ async fn e2e_hop_by_hop_headers_stripped_from_jetstream_message() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("trogon");
     stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
@@ -1330,7 +1314,6 @@ async fn e2e_hop_by_hop_headers_stripped_from_jetstream_message() {
 
     // Inline consumer — inspects the raw JetStream message headers.
     let js_stream = jetstream
-        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -1448,7 +1431,7 @@ async fn e2e_chunked_request_body_buffered_and_forwarded() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("trogon");
     stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
@@ -1532,14 +1515,13 @@ async fn e2e_duplicate_request_headers_both_values_forwarded() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("trogon");
     stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
         .unwrap();
 
     let js_stream = jetstream
-        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -1632,14 +1614,13 @@ async fn e2e_non_utf8_request_header_silently_dropped() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("trogon");
     stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
         .unwrap();
 
     let js_stream = jetstream
-        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -1740,14 +1721,13 @@ async fn e2e_large_request_header_value_forwarded() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("trogon");
     stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
         .unwrap();
 
     let js_stream = jetstream
-        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -1876,7 +1856,7 @@ async fn e2e_non_utf8_upstream_response_header_silently_dropped() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("trogon");
     stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
@@ -1916,7 +1896,6 @@ async fn e2e_non_utf8_upstream_response_header_silently_dropped() {
     };
 
     jetstream
-        .context()
         .publish(
             outbound_subject,
             serde_json::to_vec(&message).unwrap().into(),
@@ -1979,7 +1958,7 @@ async fn e2e_invalid_http_method_in_outbound_request_returns_worker_error() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("trogon");
     stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
@@ -2020,7 +1999,6 @@ async fn e2e_invalid_http_method_in_outbound_request_returns_worker_error() {
     };
 
     jetstream
-        .context()
         .publish(
             outbound_subject,
             serde_json::to_vec(&message).unwrap().into(),
@@ -2070,7 +2048,7 @@ async fn e2e_corrupted_worker_reply_returns_500() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("trogon");
     stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
@@ -2078,7 +2056,6 @@ async fn e2e_corrupted_worker_reply_returns_500() {
 
     // Set up a consumer to intercept the JetStream message.
     let js_stream = jetstream
-        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -2158,7 +2135,7 @@ async fn e2e_empty_path_after_provider_slash_handled_gracefully() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("trogon");
     stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
@@ -2215,14 +2192,13 @@ async fn e2e_trailing_slash_in_base_url_override_is_normalized() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("trogon");
     stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
         .unwrap();
 
     let js_stream = jetstream
-        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -2312,7 +2288,7 @@ async fn e2e_stream_config_has_work_queue_retention_and_memory_storage() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats));
     let outbound_subject = subjects::outbound("trogon");
 
     stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
@@ -2320,7 +2296,6 @@ async fn e2e_stream_config_has_work_queue_retention_and_memory_storage() {
         .unwrap();
 
     let js_stream = jetstream
-        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -2359,7 +2334,7 @@ async fn e2e_uppercase_provider_name_returns_502() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("trogon");
     stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
@@ -2409,7 +2384,7 @@ async fn e2e_outbound_subject_with_no_stream_returns_500_immediately() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     // Intentionally do NOT call ensure_stream — no stream covers this subject.
 
     let state = ProxyState {
@@ -2453,7 +2428,7 @@ async fn e2e_worker_run_returns_error_when_stream_does_not_exist() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let vault = Arc::new(MemoryVault::new());
     let http_client = reqwest::Client::new();
 
@@ -2522,7 +2497,7 @@ async fn e2e_duplicate_authorization_headers_first_value_used() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("trogon");
     stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
@@ -2568,7 +2543,6 @@ async fn e2e_duplicate_authorization_headers_first_value_used() {
     };
 
     jetstream
-        .context()
         .publish(
             outbound_subject,
             serde_json::to_vec(&message).unwrap().into(),
@@ -2618,7 +2592,7 @@ async fn e2e_transfer_encoding_header_stripped_from_outbound_request() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("trogon");
     stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
@@ -2626,7 +2600,6 @@ async fn e2e_transfer_encoding_header_stripped_from_outbound_request() {
 
     // Intercept consumer — reads the raw JetStream message and checks headers.
     let js_stream = jetstream
-        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -2723,7 +2696,7 @@ async fn e2e_worker_reply_to_wrong_subject_causes_proxy_timeout() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("trogon");
     stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
@@ -2731,7 +2704,6 @@ async fn e2e_worker_reply_to_wrong_subject_causes_proxy_timeout() {
 
     // Intercept consumer plays the role of a misbehaving worker.
     let js_stream = jetstream
-        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -2836,7 +2808,7 @@ async fn e2e_empty_reply_to_field_worker_handles_gracefully() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("trogon");
     stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
@@ -2873,7 +2845,6 @@ async fn e2e_empty_reply_to_field_worker_handles_gracefully() {
         idempotency_key: "emprep-corr-001".to_string(),
     };
     jetstream
-        .context()
         .publish(
             outbound_subject.clone(),
             serde_json::to_vec(&msg1).unwrap().into(),
@@ -2900,7 +2871,6 @@ async fn e2e_empty_reply_to_field_worker_handles_gracefully() {
         idempotency_key: "emprep-corr-002".to_string(),
     };
     jetstream
-        .context()
         .publish(outbound_subject, serde_json::to_vec(&msg2).unwrap().into())
         .await
         .unwrap();
@@ -2951,7 +2921,7 @@ async fn e2e_wrong_retention_policy_messages_survive_ack() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats));
 
     // Use an isolated prefix so this test does not interfere with the shared
     // "trogon" stream used by other tests.
@@ -2961,7 +2931,6 @@ async fn e2e_wrong_retention_policy_messages_survive_ack() {
 
     // Step 1: Pre-create the stream with the WRONG retention policy.
     jetstream
-        .context()
         .get_or_create_stream(async_nats::jetstream::stream::Config {
             name: sname.clone(),
             subjects: vec![outbound_subject.clone()],
@@ -2979,7 +2948,6 @@ async fn e2e_wrong_retention_policy_messages_survive_ack() {
 
     // Verify the bug: stream still has Limits retention, NOT WorkQueue.
     let info = jetstream
-        .context()
         .get_stream(&sname)
         .await
         .unwrap()
@@ -2993,7 +2961,6 @@ async fn e2e_wrong_retention_policy_messages_survive_ack() {
 
     // Step 3: Publish a test message.
     jetstream
-        .context()
         .publish(outbound_subject.clone(), b"test-payload".to_vec().into())
         .await
         .unwrap()
@@ -3001,7 +2968,7 @@ async fn e2e_wrong_retention_policy_messages_survive_ack() {
         .unwrap();
 
     // Consumer A: pull the message and ack it.
-    let stream_handle = jetstream.context().get_stream(&sname).await.unwrap();
+    let stream_handle = jetstream.get_stream(&sname).await.unwrap();
     let consumer_a = stream_handle
         .get_or_create_consumer(
             "wrongret-consumer-a",
@@ -3028,7 +2995,7 @@ async fn e2e_wrong_retention_policy_messages_survive_ack() {
     // Consumer B: brand-new durable with DeliverPolicy::All.
     // With WorkQueue retention the message would be GONE after Consumer A's ack.
     // With Limits retention the message survives — this is the production risk.
-    let stream_handle2 = jetstream.context().get_stream(&sname).await.unwrap();
+    let stream_handle2 = jetstream.get_stream(&sname).await.unwrap();
     let consumer_b = stream_handle2
         .get_or_create_consumer(
             "wrongret-consumer-b",
@@ -3086,7 +3053,7 @@ async fn e2e_invalid_url_in_outbound_request_returns_worker_error() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("trogon");
     stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
@@ -3127,7 +3094,6 @@ async fn e2e_invalid_url_in_outbound_request_returns_worker_error() {
     };
 
     jetstream
-        .context()
         .publish(
             outbound_subject,
             serde_json::to_vec(&message).unwrap().into(),
@@ -3170,7 +3136,7 @@ async fn e2e_nats_reply_to_header_injected_in_jetstream_message() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("trogon");
     stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
@@ -3178,7 +3144,6 @@ async fn e2e_nats_reply_to_header_injected_in_jetstream_message() {
 
     // Intercept consumer — reads the raw JetStream message and checks NATS headers.
     let js_stream = jetstream
-        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -3295,14 +3260,13 @@ async fn e2e_worker_error_with_4xx_status_preserves_status_code() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("trogon");
     stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
         .unwrap();
 
     let js_stream = jetstream
-        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -3401,14 +3365,13 @@ async fn e2e_hop_by_hop_headers_stripped_in_outbound_request() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("trogon");
     stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
         .unwrap();
 
     let js_stream = jetstream
-        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -3515,14 +3478,13 @@ async fn e2e_multiple_transfer_encoding_headers_all_stripped() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("trogon");
     stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
         .unwrap();
 
     let js_stream = jetstream
-        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -3640,14 +3602,13 @@ async fn e2e_empty_query_string_appended_as_bare_question_mark() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("trogon");
     stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
         .unwrap();
 
     let js_stream = jetstream
-        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -3745,14 +3706,13 @@ async fn e2e_request_header_with_invalid_utf8_silently_dropped() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("trogon");
     stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
         .unwrap();
 
     let js_stream = jetstream
-        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -3858,14 +3818,13 @@ async fn e2e_query_string_encoded_chars_preserved() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("trogon");
     stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
         .unwrap();
 
     let js_stream = jetstream
-        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -3964,14 +3923,13 @@ async fn e2e_duplicate_set_cookie_headers_both_forwarded() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("trogon");
     stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
         .unwrap();
 
     let js_stream = jetstream
-        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -4077,14 +4035,13 @@ async fn e2e_invalid_status_code_in_worker_response_falls_back_to_500() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("trogon");
     stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
         .unwrap();
 
     let js_stream = jetstream
-        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -4173,14 +4130,13 @@ async fn e2e_corrupted_reply_json_returns_500() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("trogon");
     stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
         .unwrap();
 
     let js_stream = jetstream
-        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -4261,14 +4217,13 @@ async fn e2e_empty_valued_request_header_is_preserved() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("trogon");
     stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
         .unwrap();
 
     let js_stream = jetstream
-        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -4374,14 +4329,13 @@ async fn e2e_whitespace_only_base_url_override_produces_leading_space_in_url() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("trogon");
     stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
         .unwrap();
 
     let js_stream = jetstream
-        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -4471,7 +4425,7 @@ async fn e2e_zero_worker_timeout_returns_504() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("trogon");
     stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
@@ -4525,14 +4479,13 @@ async fn e2e_real_key_in_response_body_is_not_stripped() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("trogon");
     stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
         .unwrap();
 
     let js_stream = jetstream
-        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -4631,14 +4584,13 @@ async fn e2e_error_field_with_4xx_status_uses_that_status_not_502() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("trogon");
     stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
         .unwrap();
 
     let js_stream = jetstream
-        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -4723,7 +4675,7 @@ async fn e2e_request_to_root_path_returns_404() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("trogon");
     stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
@@ -4778,14 +4730,13 @@ async fn e2e_response_header_with_invalid_name_is_silently_dropped() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("trogon");
     stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
         .unwrap();
 
     let js_stream = jetstream
-        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -4892,14 +4843,13 @@ async fn e2e_response_header_with_invalid_value_is_silently_dropped() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("trogon");
     stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
         .unwrap();
 
     let js_stream = jetstream
-        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -5002,14 +4952,13 @@ async fn e2e_hop_by_hop_headers_are_stripped_before_forwarding() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("trogon");
     stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
         .unwrap();
 
     let js_stream = jetstream
-        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -5132,14 +5081,13 @@ async fn e2e_error_field_with_5xx_status_uses_that_5xx_not_502() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("trogon");
     stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
         .await
         .unwrap();
 
     let js_stream = jetstream
-        .context()
         .get_stream(&stream::stream_name("trogon"))
         .await
         .unwrap();
@@ -5229,7 +5177,7 @@ async fn e2e_worker_run_exits_ok_when_jetstream_stream_is_deleted() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
 
     // Use an isolated prefix so this test does not share a stream with others.
     let prefix = "e2e-graceful";
@@ -5268,7 +5216,6 @@ async fn e2e_worker_run_exits_ok_when_jetstream_stream_is_deleted() {
     // The async_nats internal pull task detects the consumer/stream is gone and
     // closes the channel, causing messages.next() to return None.
     jetstream
-        .context()
         .delete_stream(&stream_name_val)
         .await
         .expect("Failed to delete stream");
@@ -5325,7 +5272,7 @@ async fn e2e_provider_returns_401_proxy_forwards_401_to_caller() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("prov401");
     stream::ensure_stream(&jetstream, "prov401", &outbound_subject)
         .await
@@ -5434,7 +5381,7 @@ async fn e2e_real_key_substring_in_response_header_is_stripped() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("keysubstr");
     stream::ensure_stream(&jetstream, "keysubstr", &outbound_subject)
         .await
@@ -5510,7 +5457,7 @@ async fn e2e_real_key_substring_in_response_header_is_stripped() {
 /// NATS stream names must not contain `/` (only alphanumerics, hyphens,
 /// underscores, and dots are accepted by the server).
 ///
-/// `ensure_stream` calls `jetstream.context().get_or_create_stream(config)` which
+/// `ensure_stream` calls `jetstream.get_or_create_stream(config)` which
 /// returns a `CreateStreamError` from the NATS server.  This test confirms
 /// the error propagates — the function does NOT swallow it — so startup code
 /// can detect and reject an invalid prefix before the proxy begins serving.
@@ -5525,7 +5472,7 @@ async fn e2e_slash_in_prefix_causes_ensure_stream_to_fail() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
 
     // "trogon/api" → stream name "PROXY_REQUESTS_TROGON/API" (invalid: contains '/')
     let outbound_subject = subjects::outbound("trogon/api");
@@ -5580,7 +5527,7 @@ async fn e2e_real_key_in_response_body_is_not_filtered() {
     let nats = connect(&nats_config, Duration::from_secs(10))
         .await
         .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
     let outbound_subject = subjects::outbound("bodyfilter");
     stream::ensure_stream(&jetstream, "bodyfilter", &outbound_subject)
         .await
@@ -5642,288 +5589,4 @@ async fn e2e_real_key_in_response_body_is_not_filtered() {
     );
 
     ai_mock.assert_async().await;
-}
-
-/// The worker retries upstream 5xx responses up to `HTTP_MAX_RETRIES` (3)
-/// times.  This test verifies the happy-path of that retry logic: the upstream
-/// returns 503 on the first two attempts and 200 on the third, so the proxy
-/// ultimately returns 200 to the caller.
-///
-/// Implementation note: httpmock's `matches` API only accepts raw function
-/// pointers (no closures), so we use a minimal custom axum server instead of
-/// httpmock to serve sequential responses controlled by an `Arc<AtomicU32>`.
-#[tokio::test]
-async fn e2e_worker_retries_transient_5xx_and_eventually_succeeds() {
-    use axum::extract::State as AxumState;
-    use axum::http::StatusCode;
-    use std::sync::atomic::{AtomicU32, Ordering};
-
-    #[derive(Clone)]
-    struct SeqState {
-        call_count: Arc<AtomicU32>,
-    }
-
-    async fn seq_handler(AxumState(s): AxumState<SeqState>) -> (StatusCode, String) {
-        let n = s.call_count.fetch_add(1, Ordering::SeqCst);
-        if n < 2 {
-            (
-                StatusCode::SERVICE_UNAVAILABLE,
-                "upstream temporarily unavailable".into(),
-            )
-        } else {
-            (
-                StatusCode::OK,
-                r#"{"id":"msg_retry_ok","type":"message"}"#.into(),
-            )
-        }
-    }
-
-    let call_count = Arc::new(AtomicU32::new(0));
-    let seq_state = SeqState {
-        call_count: Arc::clone(&call_count),
-    };
-
-    let mock_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let mock_port = mock_listener.local_addr().unwrap().port();
-    let mock_url = format!("http://127.0.0.1:{mock_port}");
-
-    let mock_router: axum::Router = axum::Router::new()
-        .route("/v1/messages", axum::routing::post(seq_handler))
-        .with_state(seq_state);
-
-    tokio::spawn(async move { axum::serve(mock_listener, mock_router).await.ok() });
-
-    // ── NATS + proxy + worker ──────────────────────────────────────────────
-    let (_nats_container, nats_port) = start_nats().await;
-
-    let vault = Arc::new(MemoryVault::new());
-    let token = ApiKeyToken::new("tok_anthropic_test_retry01").unwrap();
-    vault.store(&token, "sk-ant-realkey").await.unwrap();
-
-    let nats_config = NatsConfig {
-        servers: vec![format!("localhost:{nats_port}")],
-        auth: NatsAuth::None,
-    };
-    let nats = connect(&nats_config, Duration::from_secs(10))
-        .await
-        .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
-
-    let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&jetstream, "trogon", &outbound_subject)
-        .await
-        .unwrap();
-
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let proxy_port = listener.local_addr().unwrap().port();
-
-    let state = ProxyState {
-        nats: nats.clone(),
-        jetstream: jetstream.clone(),
-        prefix: "trogon".to_string(),
-        outbound_subject: outbound_subject.clone(),
-        worker_timeout: Duration::from_secs(15),
-        base_url_override: Some(mock_url),
-    };
-    tokio::spawn(async move { axum::serve(listener, router(state)).await.ok() });
-
-    let http_client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(15))
-        .build()
-        .unwrap();
-    tokio::spawn(async move {
-        worker::run(
-            jetstream,
-            nats,
-            vault,
-            http_client,
-            "e2e-retry-worker",
-            &stream::stream_name("trogon"),
-        )
-        .await
-        .expect("Worker error");
-    });
-
-    tokio::time::sleep(Duration::from_millis(200)).await;
-
-    let resp = reqwest::Client::new()
-        .post(format!(
-            "http://127.0.0.1:{proxy_port}/anthropic/v1/messages"
-        ))
-        .header("Authorization", "Bearer tok_anthropic_test_retry01")
-        .header("Content-Type", "application/json")
-        .body(r#"{"model":"claude-opus-4-6","max_tokens":10,"messages":[]}"#)
-        .timeout(Duration::from_secs(20))
-        .send()
-        .await
-        .expect("Request to proxy failed");
-
-    assert_eq!(
-        resp.status(),
-        200,
-        "Proxy must return 200 after worker retried the transient 5xx; got {}",
-        resp.status()
-    );
-
-    let body: serde_json::Value = resp.json().await.unwrap();
-    assert_eq!(body["id"], "msg_retry_ok");
-
-    // The mock must have been hit exactly 3 times: 503 × 2 then 200 × 1.
-    assert_eq!(
-        call_count.load(Ordering::SeqCst),
-        3,
-        "Worker must have made exactly 3 upstream attempts (2 × 503 + 1 × 200)"
-    );
-}
-
-/// After rotating a token in the vault, subsequent requests through the proxy
-/// must use the NEW key — the worker resolves the vault on every request.
-#[tokio::test]
-async fn e2e_rotated_token_uses_new_key() {
-    let (_nats_container, nats_port) = start_nats().await;
-    let mock_server = httpmock::MockServer::start_async().await;
-
-    // Mock: accepts requests authenticated with the OLD key.
-    let v1_mock = mock_server
-        .mock_async(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/v1/messages")
-                .header("authorization", "Bearer sk-ant-key-v1");
-            then.status(200)
-                .header("content-type", "application/json")
-                .body(r#"{"id":"resp-v1","version":1}"#);
-        })
-        .await;
-
-    // Mock: accepts requests authenticated with the NEW key.
-    let v2_mock = mock_server
-        .mock_async(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/v1/messages")
-                .header("authorization", "Bearer sk-ant-key-v2");
-            then.status(200)
-                .header("content-type", "application/json")
-                .body(r#"{"id":"resp-v2","version":2}"#);
-        })
-        .await;
-
-    let vault = Arc::new(MemoryVault::new());
-    let token = ApiKeyToken::new("tok_anthropic_test_rot001").unwrap();
-    vault.store(&token, "sk-ant-key-v1").await.unwrap();
-
-    // Keep a reference to the vault so we can rotate it after the first request.
-    let vault_ref = Arc::clone(&vault);
-
-    let nats_config = NatsConfig {
-        servers: vec![format!("localhost:{}", nats_port)],
-        auth: NatsAuth::None,
-    };
-    let nats = connect(&nats_config, Duration::from_secs(10))
-        .await
-        .unwrap();
-    let jetstream = NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
-
-    let outbound_subject = subjects::outbound("rot-test");
-    stream::ensure_stream(&jetstream, "rot-test", &outbound_subject)
-        .await
-        .unwrap();
-
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let proxy_port = listener.local_addr().unwrap().port();
-
-    let state = ProxyState {
-        nats: nats.clone(),
-        jetstream: jetstream.clone(),
-        prefix: "rot-test".to_string(),
-        outbound_subject: outbound_subject.clone(),
-        worker_timeout: Duration::from_secs(15),
-        base_url_override: Some(mock_server.base_url()),
-    };
-    tokio::spawn(async move { axum::serve(listener, router(state)).await.ok() });
-
-    let http_client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(10))
-        .build()
-        .unwrap();
-    tokio::spawn(async move {
-        worker::run(
-            jetstream,
-            nats,
-            vault,
-            http_client,
-            "rot-workers",
-            &stream::stream_name("rot-test"),
-        )
-        .await
-        .ok()
-    });
-
-    tokio::time::sleep(Duration::from_millis(200)).await;
-
-    let client = reqwest::Client::new();
-    let body = r#"{"model":"claude-3-5-sonnet-20241022","max_tokens":10,"messages":[{"role":"user","content":"Hi"}]}"#;
-
-    // ── First request: uses key_v1 ────────────────────────────────────────────
-    let resp1 = client
-        .post(format!(
-            "http://127.0.0.1:{}/anthropic/v1/messages",
-            proxy_port
-        ))
-        .header("Authorization", "Bearer tok_anthropic_test_rot001")
-        .header("Content-Type", "application/json")
-        .body(body)
-        .timeout(Duration::from_secs(20))
-        .send()
-        .await
-        .expect("first request failed");
-
-    assert_eq!(
-        resp1.status(),
-        200,
-        "first request must succeed with key_v1"
-    );
-    let b1: serde_json::Value = resp1.json().await.unwrap();
-    assert_eq!(
-        b1["version"], 1,
-        "first request must be forwarded with key_v1"
-    );
-
-    // ── Rotate: token now maps to key_v2 ─────────────────────────────────────
-    vault_ref.rotate(&token, "sk-ant-key-v2").await.unwrap();
-
-    // ── Second request: must use key_v2 ──────────────────────────────────────
-    let resp2 = client
-        .post(format!(
-            "http://127.0.0.1:{}/anthropic/v1/messages",
-            proxy_port
-        ))
-        .header("Authorization", "Bearer tok_anthropic_test_rot001")
-        .header("Content-Type", "application/json")
-        .body(body)
-        .timeout(Duration::from_secs(20))
-        .send()
-        .await
-        .expect("second request failed");
-
-    assert_eq!(
-        resp2.status(),
-        200,
-        "second request must succeed with key_v2"
-    );
-    let b2: serde_json::Value = resp2.json().await.unwrap();
-    assert_eq!(
-        b2["version"], 2,
-        "second request must be forwarded with key_v2 after rotation"
-    );
-
-    assert_eq!(
-        v1_mock.hits_async().await,
-        1,
-        "key_v1 mock must be hit exactly once"
-    );
-    assert_eq!(
-        v2_mock.hits_async().await,
-        1,
-        "key_v2 mock must be hit exactly once"
-    );
 }

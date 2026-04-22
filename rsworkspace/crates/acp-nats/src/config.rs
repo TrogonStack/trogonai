@@ -358,6 +358,7 @@ mod tests {
 
     /// Consecutive dots (`..`) are rejected via `has_consecutive_or_boundary_dots`
     /// and produce `AcpPrefixError(SubjectTokenViolation::InvalidCharacter('.'))`.
+
     #[test]
     fn acp_prefix_consecutive_dots_returns_invalid_character_dot() {
         use trogon_nats::SubjectTokenViolation;
