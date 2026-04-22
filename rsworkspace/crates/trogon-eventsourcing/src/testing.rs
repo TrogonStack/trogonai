@@ -2,7 +2,7 @@
 
 use std::{collections::HashMap, fmt::Debug, marker::PhantomData};
 
-use crate::{Decide, Decision, NonEmpty};
+use crate::{Decide, Decision, NonEmpty, StateMachine};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Decider<C>(PhantomData<fn() -> C>);
@@ -214,15 +214,16 @@ impl<C> TestCase<C, Given<C::Event>>
 where
     C: Decide,
     C::Event: Clone + Debug,
-    C::EvolveError: Debug,
+    C::State: StateMachine<C::Event>,
+    <C::State as StateMachine<C::Event>>::EvolveError: Debug,
 {
     pub fn when(mut self, command: C) -> TestCase<C, When<C::Event, C::State, C>> {
         self.completed = true;
-        let mut state = C::initial_state();
+        let mut state = C::State::initial_state();
         let history = std::mem::take(&mut self.stage.history);
 
         for (index, event) in history.iter().cloned().enumerate() {
-            state = match C::evolve(state, event.clone()) {
+            state = match state.evolve(event.clone()) {
                 Ok(next) => next,
                 Err(error) => panic!(
                     "Given history could not be replayed at event {}:\nevent = {:?}\nerror = {:?}",
@@ -258,11 +259,7 @@ where
     {
         self.completed = true;
         let actual = C::decide(&self.stage.state, &self.stage.command);
-        expectation.assert_matches(
-            std::mem::take(&mut self.stage.history),
-            &self.stage.command,
-            actual,
-        )
+        expectation.assert_matches(std::mem::take(&mut self.stage.history), &self.stage.command, actual)
     }
 }
 
@@ -519,52 +516,42 @@ mod tests {
         }
     }
 
-    impl Decide for TestCommand {
-        type State = TestState;
-        type Event = TestEvent;
+    impl StateMachine<TestEvent> for TestState {
         type EvolveError = TestDomainError;
-        type DecideError = TestCommandError;
 
-        fn initial_state() -> TestState {
+        fn initial_state() -> Self {
             TestState::Missing
         }
 
-        fn evolve(state: TestState, event: TestEvent) -> Result<TestState, Self::EvolveError> {
-            match (state, event) {
-                (TestState::Missing, TestEvent::Registered { .. }) => {
-                    Ok(TestState::Present { enabled: true })
-                }
-                (TestState::Missing, TestEvent::Disabled { id }) => {
-                    Err(TestDomainError::MissingJobForDisable { id })
-                }
-                (TestState::Missing, TestEvent::Removed { id }) => {
-                    Err(TestDomainError::MissingJobForRemoval { id })
-                }
+        fn evolve(self, event: TestEvent) -> Result<Self, Self::EvolveError> {
+            match (self, event) {
+                (TestState::Missing, TestEvent::Registered { .. }) => Ok(TestState::Present { enabled: true }),
+                (TestState::Missing, TestEvent::Disabled { id }) => Err(TestDomainError::MissingJobForDisable { id }),
+                (TestState::Missing, TestEvent::Removed { id }) => Err(TestDomainError::MissingJobForRemoval { id }),
                 (TestState::Present { .. }, TestEvent::Registered { id }) => {
                     Err(TestDomainError::MissingJobForDisable { id })
                 }
-                (TestState::Present { .. }, TestEvent::Disabled { .. }) => {
-                    Ok(TestState::Present { enabled: false })
-                }
+                (TestState::Present { .. }, TestEvent::Disabled { .. }) => Ok(TestState::Present { enabled: false }),
                 (TestState::Present { .. }, TestEvent::Removed { .. }) => Ok(TestState::Missing),
             }
         }
+    }
 
-        fn decide(
-            state: &TestState,
-            command: &Self,
-        ) -> Result<Decision<TestEvent>, Self::DecideError> {
+    impl Decide for TestCommand {
+        type State = TestState;
+        type Event = TestEvent;
+        type DecideError = TestCommandError;
+
+        fn decide(state: &TestState, command: &Self) -> Result<Decision<TestEvent>, Self::DecideError> {
             match (&command.action, state) {
                 (TestAction::Register, TestState::Missing) => {
                     Ok(Decision::Event(NonEmpty::one(TestEvent::Registered {
                         id: command.id.to_string(),
                     })))
                 }
-                (TestAction::Register, TestState::Present { .. }) => {
-                    Err(TestCommandError::AlreadyRegistered {
-                        id: command.id.to_string(),
-                    })
-                }
+                (TestAction::Register, TestState::Present { .. }) => Err(TestCommandError::AlreadyRegistered {
+                    id: command.id.to_string(),
+                }),
                 (TestAction::Disable, TestState::Missing) => Err(TestCommandError::JobNotFound {
                     id: command.id.to_string(),
                 }),
@@ -733,9 +720,7 @@ mod tests {
         let beta = TestCase::new(decider::<TestCommand>())
             .given([])
             .when(TestCommand::register("beta"))
-            .then([TestEvent::Registered {
-                id: "beta".to_string(),
-            }]);
+            .then([TestEvent::Registered { id: "beta".to_string() }]);
 
         Timeline::new()
             .given([alpha, beta])
@@ -745,12 +730,7 @@ mod tests {
                     id: "alpha".to_string(),
                 }],
             )
-            .then_stream(
-                "beta",
-                [TestEvent::Registered {
-                    id: "beta".to_string(),
-                }],
-            );
+            .then_stream("beta", [TestEvent::Registered { id: "beta".to_string() }]);
     }
 
     #[test]

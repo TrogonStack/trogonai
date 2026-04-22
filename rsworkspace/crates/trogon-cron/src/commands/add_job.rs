@@ -1,5 +1,3 @@
-use std::convert::Infallible;
-
 use trogon_eventsourcing::{
     CommandExecution, CommandResult, CommandSnapshots, Decide, Decision, FrequencySnapshot, NonEmpty, OccPolicy,
     SnapshotRead, SnapshotWrite, StreamAppend, StreamCommand, StreamRead, StreamState, WritePrecondition,
@@ -43,16 +41,7 @@ impl StreamCommand for AddJobCommand {
 impl Decide for AddJobCommand {
     type State = JobCommandState;
     type Event = JobEvent;
-    type EvolveError = Infallible;
     type DecideError = AddJobDecisionError;
-
-    fn initial_state() -> JobCommandState {
-        JobCommandState::initial_state()
-    }
-
-    fn evolve(state: JobCommandState, event: JobEvent) -> Result<JobCommandState, Self::EvolveError> {
-        state.evolve(event)
-    }
 
     fn decide(state: &JobCommandState, command: &Self) -> Result<Decision<JobEvent>, Self::DecideError> {
         match state {
@@ -60,9 +49,11 @@ impl Decide for AddJobCommand {
                 id: command.stream_id().to_string(),
                 job: JobDetails::from(&command.spec),
             })))),
-            JobCommandState::Present { .. } => Err(AddJobDecisionError::AlreadyExists {
-                id: command.stream_id().clone(),
-            }),
+            JobCommandState::PresentEnabled | JobCommandState::PresentDisabled => {
+                Err(AddJobDecisionError::AlreadyExists {
+                    id: command.stream_id().clone(),
+                })
+            }
             JobCommandState::Deleted => Err(AddJobDecisionError::JobDeleted {
                 id: command.stream_id().clone(),
             }),
@@ -149,9 +140,7 @@ mod tests {
 
     #[test]
     fn rejects_adding_existing_job() {
-        let state = JobCommandState::Present {
-            current: JobEnabledState::Enabled,
-        };
+        let state = JobCommandState::PresentEnabled;
         let command = AddJobCommand::new(job("backup"));
 
         assert!(matches!(

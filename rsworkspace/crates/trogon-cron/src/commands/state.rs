@@ -1,51 +1,47 @@
 use std::convert::Infallible;
 
 use serde::{Deserialize, Serialize};
-use trogon_eventsourcing::snapshot::SnapshotSchema;
+use trogon_eventsourcing::{StateMachine, snapshot::SnapshotSchema};
 
-use crate::{
-    JobEnabledState,
-    events::{JobAdded, JobEvent, JobPaused, JobRemoved, JobResumed},
-};
+use crate::events::{JobAdded, JobEvent, JobEventState, JobPaused, JobRemoved, JobResumed};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum JobCommandState {
     Missing,
-    Present { current: JobEnabledState },
+    PresentEnabled,
+    PresentDisabled,
     Deleted,
 }
 
 impl SnapshotSchema for JobCommandState {
-    const SNAPSHOT_STREAM_PREFIX: &'static str = "cron.command.job.v1.";
+    const SNAPSHOT_STREAM_PREFIX: &'static str = "cron.command.job.v2.";
 }
 
-impl JobCommandState {
-    pub const fn initial_state() -> Self {
+impl StateMachine<JobEvent> for JobCommandState {
+    type EvolveError = Infallible;
+
+    fn initial_state() -> Self {
         Self::Missing
     }
 
-    pub fn evolve(self, event: JobEvent) -> Result<Self, Infallible> {
+    fn evolve(self, event: JobEvent) -> Result<Self, Self::EvolveError> {
         Ok(match event {
             JobEvent::JobAdded(JobAdded { job, .. }) => {
                 if matches!(self, Self::Deleted) {
                     Self::Deleted
+                } else if matches!(job.state, JobEventState::Enabled) {
+                    Self::PresentEnabled
                 } else {
-                    Self::Present {
-                        current: job.state.into(),
-                    }
+                    Self::PresentDisabled
                 }
             }
             JobEvent::JobPaused(JobPaused { .. }) => match self {
                 Self::Deleted => Self::Deleted,
-                Self::Missing | Self::Present { .. } => Self::Present {
-                    current: JobEnabledState::Disabled,
-                },
+                Self::Missing | Self::PresentEnabled | Self::PresentDisabled => Self::PresentDisabled,
             },
             JobEvent::JobResumed(JobResumed { .. }) => match self {
                 Self::Deleted => Self::Deleted,
-                Self::Missing | Self::Present { .. } => Self::Present {
-                    current: JobEnabledState::Enabled,
-                },
+                Self::Missing | Self::PresentEnabled | Self::PresentDisabled => Self::PresentEnabled,
             },
             JobEvent::JobRemoved(JobRemoved { .. }) => Self::Deleted,
         })
