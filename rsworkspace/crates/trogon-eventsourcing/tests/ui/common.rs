@@ -1,4 +1,4 @@
-use trogon_eventsourcing::{Decide, Decision, NonEmpty, StateMachine, StreamCommand};
+use trogon_eventsourcing::{Decide, Decision, StateMachine, StreamCommand};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TestState {
