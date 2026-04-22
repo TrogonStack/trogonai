@@ -94,8 +94,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        AddJobCommand, DeliverySpec, GetJobCommand, JobAdded, JobEnabledState, JobEventState, JobHeaders, JobMessage,
-        JobPaused, JobSpec, MessageContent, PauseJobCommand, ScheduleSpec, mocks::MockCronStore,
+        AddJobCommand, DeliverySpec, GetJobCommand, JobAdded, JobEventStatus, JobHeaders, JobMessage, JobPaused,
+        JobSpec, JobStatus, MessageContent, PauseJobCommand, ScheduleSpec, mocks::MockCronStore,
     };
 
     fn job_id(id: &str) -> JobId {
@@ -105,7 +105,7 @@ mod tests {
     fn active_job(id: &str) -> JobSpec {
         JobSpec {
             id: job_id(id),
-            state: JobEnabledState::Enabled,
+            status: JobStatus::Enabled,
             schedule: ScheduleSpec::every(30).unwrap(),
             delivery: DeliverySpec::nats_event("agent.run").unwrap(),
             message: JobMessage {
@@ -117,7 +117,7 @@ mod tests {
 
     fn paused_job(id: &str) -> JobSpec {
         let mut job = active_job(id);
-        job.state = JobEnabledState::Disabled;
+        job.status = JobStatus::Disabled;
         job
     }
 
@@ -261,7 +261,7 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(job.state, JobEventState::Enabled);
+        assert_eq!(job.status, JobEventStatus::Enabled);
 
         let command_snapshot = store
             .read_command_snapshot::<JobState>(JobState::snapshot_store_config(), &JobId::parse("backup").unwrap())

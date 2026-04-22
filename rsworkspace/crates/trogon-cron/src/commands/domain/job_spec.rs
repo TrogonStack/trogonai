@@ -3,7 +3,7 @@ use std::{num::NonZeroU64, str::FromStr};
 use crate::{
     error::{CronError, JobSpecError},
     events::{
-        JobDetails, JobEventDelivery, JobEventSamplingSource, JobEventSchedule, JobEventState, MessageContent,
+        JobDetails, JobEventDelivery, JobEventSamplingSource, JobEventSchedule, JobEventStatus, MessageContent,
         MessageEnvelope, MessageHeaders,
     },
 };
@@ -16,8 +16,8 @@ use super::JobId;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct JobSpec {
     pub id: JobId,
-    #[serde(default)]
-    pub state: JobEnabledState,
+    #[serde(default, rename = "state")]
+    pub status: JobStatus,
     pub schedule: ScheduleSpec,
     pub delivery: DeliverySpec,
     pub message: JobMessage,
@@ -25,13 +25,13 @@ pub struct JobSpec {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
-pub enum JobEnabledState {
+pub enum JobStatus {
     #[default]
     Enabled,
     Disabled,
 }
 
-impl JobEnabledState {
+impl JobStatus {
     pub fn is_enabled(self) -> bool {
         matches!(self, Self::Enabled)
     }
@@ -518,20 +518,20 @@ fn validate_reserved_scheduler_headers(headers: &[(String, String)]) -> Result<(
     Ok(())
 }
 
-impl From<JobEnabledState> for JobEventState {
-    fn from(value: JobEnabledState) -> Self {
+impl From<JobStatus> for JobEventStatus {
+    fn from(value: JobStatus) -> Self {
         match value {
-            JobEnabledState::Enabled => Self::Enabled,
-            JobEnabledState::Disabled => Self::Disabled,
+            JobStatus::Enabled => Self::Enabled,
+            JobStatus::Disabled => Self::Disabled,
         }
     }
 }
 
-impl From<JobEventState> for JobEnabledState {
-    fn from(value: JobEventState) -> Self {
+impl From<JobEventStatus> for JobStatus {
+    fn from(value: JobEventStatus) -> Self {
         match value {
-            JobEventState::Enabled => Self::Enabled,
-            JobEventState::Disabled => Self::Disabled,
+            JobEventStatus::Enabled => Self::Enabled,
+            JobEventStatus::Disabled => Self::Disabled,
         }
     }
 }
@@ -650,7 +650,7 @@ impl JobDetails {
     pub fn try_into_job_spec(self, id: JobId) -> Result<JobSpec, CronError> {
         Ok(JobSpec {
             id,
-            state: self.state.into(),
+            status: self.status.into(),
             schedule: self.schedule.try_into().map_err(CronError::invalid_job_spec)?,
             delivery: self.delivery.try_into().map_err(CronError::invalid_job_spec)?,
             message: self.message.try_into().map_err(CronError::invalid_job_spec)?,
@@ -661,7 +661,7 @@ impl JobDetails {
 impl From<JobSpec> for JobDetails {
     fn from(spec: JobSpec) -> Self {
         Self {
-            state: spec.state.into(),
+            status: spec.status.into(),
             schedule: spec.schedule.into(),
             delivery: spec.delivery.into(),
             message: spec.message.into(),
@@ -672,7 +672,7 @@ impl From<JobSpec> for JobDetails {
 impl From<&JobSpec> for JobDetails {
     fn from(spec: &JobSpec) -> Self {
         Self {
-            state: spec.state.into(),
+            status: spec.status.into(),
             schedule: (&spec.schedule).into(),
             delivery: (&spec.delivery).into(),
             message: (&spec.message).into(),
@@ -731,7 +731,7 @@ mod tests {
     }
 
     #[test]
-    fn job_spec_state_defaults_to_enabled() {
+    fn job_spec_status_defaults_to_enabled() {
         let raw = r#"{
             "id": "heartbeat",
             "schedule": { "type": "every", "every_sec": 30 },
@@ -743,14 +743,14 @@ mod tests {
 
         let job: JobSpec = serde_json::from_str(raw).unwrap();
 
-        assert_eq!(job.state, JobEnabledState::Enabled);
+        assert_eq!(job.status, JobStatus::Enabled);
     }
 
     #[test]
     fn job_spec_round_trips() {
         let job = JobSpec {
             id: job_id("compact"),
-            state: JobEnabledState::Enabled,
+            status: JobStatus::Enabled,
             schedule: ScheduleSpec::cron("0 */5 * * * *", Some("UTC".to_string())).unwrap(),
             delivery: DeliverySpec::NatsEvent {
                 route: route("workflow.compact"),
@@ -773,7 +773,7 @@ mod tests {
     fn empty_headers_are_omitted() {
         let job = JobSpec {
             id: job_id("compact"),
-            state: JobEnabledState::Enabled,
+            status: JobStatus::Enabled,
             schedule: ScheduleSpec::every(30).unwrap(),
             delivery: DeliverySpec::NatsEvent {
                 route: route("agent.run"),
@@ -798,7 +798,7 @@ mod tests {
             9,
             JobSpec {
                 id: job_id("compact"),
-                state: JobEnabledState::Enabled,
+                status: JobStatus::Enabled,
                 schedule: ScheduleSpec::every(30).unwrap(),
                 delivery: DeliverySpec::NatsEvent {
                     route: route("agent.run"),
@@ -821,7 +821,7 @@ mod tests {
     #[test]
     fn job_details_round_trip_through_domain_conversion() {
         let details = JobDetails {
-            state: JobEventState::Enabled,
+            status: JobEventStatus::Enabled,
             schedule: JobEventSchedule::Every { every_sec: 30 },
             delivery: JobEventDelivery::NatsEvent {
                 route: "agent.run".to_string(),
@@ -982,7 +982,7 @@ mod tests {
     #[test]
     fn invalid_event_delivery_is_rejected_when_hydrating_domain_spec() {
         let error = JobDetails {
-            state: JobEventState::Enabled,
+            status: JobEventStatus::Enabled,
             schedule: JobEventSchedule::Every { every_sec: 30 },
             delivery: JobEventDelivery::NatsEvent {
                 route: "agent.run".to_string(),
@@ -1001,10 +1001,10 @@ mod tests {
     }
 
     #[test]
-    fn job_enabled_state_helpers_work() {
-        assert!(JobEnabledState::Enabled.is_enabled());
-        assert_eq!(JobEnabledState::Enabled.as_str(), "enabled");
-        assert!(!JobEnabledState::Disabled.is_enabled());
-        assert_eq!(JobEnabledState::Disabled.as_str(), "disabled");
+    fn job_status_helpers_work() {
+        assert!(JobStatus::Enabled.is_enabled());
+        assert_eq!(JobStatus::Enabled.as_str(), "enabled");
+        assert!(!JobStatus::Disabled.is_enabled());
+        assert_eq!(JobStatus::Disabled.as_str(), "disabled");
     }
 }
