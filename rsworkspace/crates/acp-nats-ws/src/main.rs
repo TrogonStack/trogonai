@@ -590,6 +590,30 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn legacy_websocket_alias_is_not_routed() {
+        let nats_mock = AdvancedMockNatsClient::new();
+        let (app, shutdown_tx, conn_thread) = build_test_app(nats_mock);
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/ws")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+        let _ = shutdown_tx.send(true);
+        drop(app);
+        conn_thread.join().unwrap();
+    }
+
+    #[tokio::test]
     async fn streamable_http_delete_terminates_initialized_connection() {
         let nats_mock = AdvancedMockNatsClient::new();
         let _injector = nats_mock.inject_messages();
