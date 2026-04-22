@@ -161,6 +161,7 @@ async fn process_connections<N, J>(
     trogon_nats::jetstream::JsMessageOf<J>: trogon_nats::jetstream::JsRequestMessage,
 {
     let mut websocket_handles: Vec<tokio::task::JoinHandle<()>> = Vec::new();
+    let mut http_connection_handles: Vec<tokio::task::JoinHandle<()>> = Vec::new();
     let mut http_connections = std::collections::HashMap::new();
 
     while let Some(request) = manager_rx.recv().await {
@@ -168,6 +169,7 @@ async fn process_connections<N, J>(
             request,
             &mut http_connections,
             &mut websocket_handles,
+            &mut http_connection_handles,
             &nats_client,
             &js_client,
             &config,
@@ -178,13 +180,20 @@ async fn process_connections<N, J>(
     let active = websocket_handles
         .iter()
         .filter(|h| !h.is_finished())
-        .count();
+        .count()
+        + http_connection_handles
+            .iter()
+            .filter(|h| !h.is_finished())
+            .count();
     info!(
         active_connections = active,
         "Connection channel closed, draining active connections"
     );
 
     for handle in websocket_handles {
+        let _ = handle.await;
+    }
+    for handle in http_connection_handles {
         let _ = handle.await;
     }
 

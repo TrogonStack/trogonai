@@ -901,6 +901,7 @@ pub async fn process_manager_request<N, J>(
     request: ManagerRequest,
     http_connections: &mut HashMap<AcpConnectionId, HttpConnectionHandle>,
     websocket_handles: &mut Vec<tokio::task::JoinHandle<()>>,
+    http_connection_handles: &mut Vec<tokio::task::JoinHandle<()>>,
     nats_client: &N,
     js_client: &J,
     config: &acp_nats::Config,
@@ -916,6 +917,7 @@ pub async fn process_manager_request<N, J>(
     trogon_nats::jetstream::JsMessageOf<J>: trogon_nats::jetstream::JsRequestMessage,
 {
     websocket_handles.retain(|handle| !handle.is_finished());
+    http_connection_handles.retain(|handle| !handle.is_finished());
 
     match request {
         ManagerRequest::WebSocket(request) => {
@@ -953,14 +955,14 @@ pub async fn process_manager_request<N, J>(
                             command_tx: command_tx.clone(),
                         },
                     );
-                    tokio::task::spawn_local(run_http_connection(
+                    http_connection_handles.push(tokio::task::spawn_local(run_http_connection(
                         connection_id.clone(),
                         nats_client.clone(),
                         js_client.clone(),
                         config.clone(),
                         command_rx,
                         shutdown_rx,
-                    ));
+                    )));
                     connection_id
                 }
             };
@@ -1577,6 +1579,7 @@ mod tests {
         let config = test_config();
         let mut http_connections = HashMap::new();
         let mut websocket_handles = Vec::new();
+        let mut http_connection_handles = Vec::new();
         let (_shutdown_tx, shutdown_rx) = watch::channel(false);
 
         let (post_response_tx, post_response_rx) = oneshot::channel();
@@ -1593,6 +1596,7 @@ mod tests {
             },
             &mut http_connections,
             &mut websocket_handles,
+            &mut http_connection_handles,
             &nats_client,
             &js_client,
             &config,
@@ -1615,6 +1619,7 @@ mod tests {
             },
             &mut http_connections,
             &mut websocket_handles,
+            &mut http_connection_handles,
             &nats_client,
             &js_client,
             &config,
@@ -1633,6 +1638,7 @@ mod tests {
             },
             &mut http_connections,
             &mut websocket_handles,
+            &mut http_connection_handles,
             &nats_client,
             &js_client,
             &config,
@@ -1642,5 +1648,65 @@ mod tests {
             delete_response_rx.await.unwrap(),
             Err(HttpTransportError::NotFound("unknown ACP connection"))
         ));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn process_manager_request_tracks_http_connection_tasks() {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let nats_client = AdvancedMockNatsClient::new();
+                let _injector = nats_client.inject_messages();
+                nats_client.hang_next_request();
+
+                let js_client = MockJs::new();
+                let config = test_config();
+                let mut http_connections = HashMap::new();
+                let mut websocket_handles = Vec::new();
+                let mut http_connection_handles = Vec::new();
+                let (shutdown_tx, shutdown_rx) = watch::channel(false);
+
+                let (response_tx, response_rx) = oneshot::channel();
+                let initialize = IncomingHttpMessage::parse(
+                    r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#
+                        .to_string(),
+                )
+                .unwrap();
+
+                process_manager_request(
+                    ManagerRequest::HttpPost {
+                        connection_id: None,
+                        session_id: None,
+                        message: initialize,
+                        response: response_tx,
+                        shutdown_rx,
+                    },
+                    &mut http_connections,
+                    &mut websocket_handles,
+                    &mut http_connection_handles,
+                    &nats_client,
+                    &js_client,
+                    &config,
+                )
+                .await;
+
+                assert_eq!(http_connections.len(), 1);
+                assert_eq!(http_connection_handles.len(), 1);
+                assert!(!http_connection_handles[0].is_finished());
+                assert!(matches!(
+                    response_rx.await.unwrap(),
+                    Ok(HttpPostOutcome::Live { .. })
+                ));
+
+                let _ = shutdown_tx.send(true);
+                tokio::time::timeout(std::time::Duration::from_secs(2), async {
+                    while !http_connection_handles[0].is_finished() {
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await
+                .expect("HTTP connection task did not finish after shutdown");
+            })
+            .await;
     }
 }
