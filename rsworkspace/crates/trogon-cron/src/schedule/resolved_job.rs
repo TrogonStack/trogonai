@@ -25,7 +25,7 @@ const RESERVED_SCHEDULE_HEADERS: [&str; 5] = [
 ];
 
 #[derive(Debug, Clone)]
-pub struct ResolvedJobSpec {
+pub struct ResolvedJob {
     job: CronJob,
     job_id: NatsToken,
     route: DottedNatsToken,
@@ -39,7 +39,7 @@ pub struct ResolvedJobSpec {
     body: Bytes,
 }
 
-struct ResolvedJobSpecParts {
+struct ResolvedJobParts {
     job_id: NatsToken,
     route: DottedNatsToken,
     schedule_expression: String,
@@ -49,11 +49,11 @@ struct ResolvedJobSpecParts {
     headers: Vec<(String, String)>,
 }
 
-impl TryFrom<&CronJob> for ResolvedJobSpec {
+impl TryFrom<&CronJob> for ResolvedJob {
     type Error = CronError;
 
     fn try_from(job: &CronJob) -> Result<Self, Self::Error> {
-        let ResolvedJobSpecParts {
+        let ResolvedJobParts {
             job_id,
             route,
             schedule_expression,
@@ -61,7 +61,7 @@ impl TryFrom<&CronJob> for ResolvedJobSpec {
             ttl_sec,
             source_subject,
             headers,
-        } = resolved_job_spec_parts(job)?;
+        } = resolved_job_parts(job)?;
 
         let schedule_subject = format!("{SCHEDULE_SUBJECT_PREFIX}{}", job_id.as_str());
         let target_subject = format!("{FIRE_SUBJECT_PREFIX}{}.{}", route.as_str(), job_id.as_str());
@@ -87,7 +87,7 @@ impl TryFrom<&CronJob> for ResolvedJobSpec {
     }
 }
 
-fn resolved_job_spec_parts(job: &CronJob) -> Result<ResolvedJobSpecParts, CronError> {
+fn resolved_job_parts(job: &CronJob) -> Result<ResolvedJobParts, CronError> {
     let job_id = parse_job_id(&job.id)?;
     let schedule_expression = schedule_expression(&job.schedule)?;
     let timezone = match &job.schedule {
@@ -111,7 +111,7 @@ fn resolved_job_spec_parts(job: &CronJob) -> Result<ResolvedJobSpecParts, CronEr
     let headers = job.message.headers.as_slice().to_vec();
     validate_scheduler_headers(&headers)?;
 
-    Ok(ResolvedJobSpecParts {
+    Ok(ResolvedJobParts {
         job_id,
         route,
         schedule_expression,
@@ -131,7 +131,7 @@ fn parse_job_id(id: &str) -> Result<NatsToken, CronError> {
     })
 }
 
-impl ResolvedJobSpec {
+impl ResolvedJob {
     pub fn job(&self) -> &CronJob {
         &self.job
     }
@@ -261,7 +261,7 @@ mod tests {
 
     #[test]
     fn resolved_job_derives_subjects_and_headers() {
-        let resolved = ResolvedJobSpec::try_from(&base_job()).unwrap();
+        let resolved = ResolvedJob::try_from(&base_job()).unwrap();
         let headers = resolved.schedule_headers();
 
         assert_eq!(resolved.schedule_subject(), "cron.schedules.heartbeat");
@@ -278,7 +278,7 @@ mod tests {
         let mut job = base_job();
         job.message.headers = MessageHeaders::new([("x-kind", "heartbeat"), ("x-kind", "retry")]).unwrap();
 
-        let resolved = ResolvedJobSpec::try_from(&job).unwrap();
+        let resolved = ResolvedJob::try_from(&job).unwrap();
         let schedule_headers = resolved.schedule_headers();
         let values = schedule_headers
             .get_all("x-kind")
@@ -295,7 +295,7 @@ mod tests {
             at: Utc.with_ymd_and_hms(2026, 4, 11, 12, 0, 0).unwrap(),
         };
 
-        let resolved = ResolvedJobSpec::try_from(&job).unwrap();
+        let resolved = ResolvedJob::try_from(&job).unwrap();
 
         assert_eq!(
             resolved
@@ -317,7 +317,7 @@ mod tests {
             }),
         };
 
-        let resolved = ResolvedJobSpec::try_from(&job).unwrap();
+        let resolved = ResolvedJob::try_from(&job).unwrap();
 
         assert_eq!(resolved.schedule_body(), Bytes::from_static(br#"{}"#));
         assert_eq!(
@@ -331,7 +331,7 @@ mod tests {
 
     #[test]
     fn resolved_job_accepts_valid_job() {
-        ResolvedJobSpec::try_from(&base_job()).unwrap();
+        ResolvedJob::try_from(&base_job()).unwrap();
     }
 
     #[test]
@@ -339,7 +339,7 @@ mod tests {
         let mut job = base_job();
         job.status = JobEventStatus::Disabled;
 
-        let resolved = ResolvedJobSpec::try_from(&job).unwrap();
+        let resolved = ResolvedJob::try_from(&job).unwrap();
 
         assert_eq!(resolved.job().id, "heartbeat");
         assert_eq!(resolved.id(), "heartbeat");
@@ -354,7 +354,7 @@ mod tests {
         let mut job = base_job();
         job.schedule = JobEventSchedule::Every { every_sec: 0 };
 
-        let error = ResolvedJobSpec::try_from(&job).unwrap_err();
+        let error = ResolvedJob::try_from(&job).unwrap_err();
         assert!(error.to_string().contains("every_sec"));
     }
 
@@ -366,7 +366,7 @@ mod tests {
             timezone: None,
         };
 
-        let error = ResolvedJobSpec::try_from(&job).unwrap_err();
+        let error = ResolvedJob::try_from(&job).unwrap_err();
         assert!(error.to_string().contains("cron expression"));
     }
 
@@ -378,7 +378,7 @@ mod tests {
             timezone: Some(" America/New_York ".to_string()),
         };
 
-        let error = ResolvedJobSpec::try_from(&job).unwrap_err();
+        let error = ResolvedJob::try_from(&job).unwrap_err();
         assert!(error.to_string().contains("timezone"));
     }
 
@@ -387,7 +387,7 @@ mod tests {
         let mut job = base_job();
         job.message.headers = MessageHeaders::new([("Nats-Schedule-Target", "cron.fire.evil.target")]).unwrap();
 
-        let error = ResolvedJobSpec::try_from(&job).unwrap_err();
+        let error = ResolvedJob::try_from(&job).unwrap_err();
         assert!(error.to_string().contains("reserved"));
     }
 }

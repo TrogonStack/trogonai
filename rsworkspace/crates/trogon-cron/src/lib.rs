@@ -23,8 +23,8 @@ pub mod traits;
 pub mod mocks;
 
 pub use commands::domain::{
-    CronExpression, DeliveryRoute, DeliverySpec, EverySeconds, JobHeaders, JobId, JobIdError, JobMessage, JobSpec,
-    JobStatus, SamplingSource, SamplingSubject, ScheduleSpec, ScheduleTimezone, TtlSeconds,
+    CronExpression, Delivery, DeliveryRoute, EverySeconds, Job, JobHeaders, JobId, JobIdError, JobMessage, JobStatus,
+    SamplingSource, SamplingSubject, Schedule, ScheduleTimezone, TtlSeconds,
 };
 pub use commands::{
     AddJobCommand, AddJobDecisionError, JobState, PauseJobCommand, PauseJobDecisionError, RemoveJobCommand,
@@ -45,7 +45,7 @@ pub use projections::{
 };
 pub use queries::{GetJobCommand, ListJobsCommand, get_job, list_jobs};
 pub use read_model::CronJob;
-pub use schedule::ResolvedJobSpec;
+pub use schedule::ResolvedJob;
 pub use store::{Store, connect_store, open_snapshot_bucket, snapshot_store_config};
 pub use traits::{LeaderLock, SchedulePublisher};
 pub use trogon_eventsourcing::{CommandFailure, CommandInfraError, CommandResult, ExecutionResult, StreamState};

@@ -672,20 +672,20 @@ fn validate_event_job_id(id: &str) -> Result<(), SubjectTokenViolation> {
 mod tests {
     use super::*;
     use crate::{
-        CronJob, DeliverySpec, JobAdded, JobDetails, JobEventStatus, JobHeaders, JobId, JobMessage, JobPaused,
-        JobRemoved, JobSpec, JobStatus, MessageContent, ScheduleSpec,
+        CronJob, Delivery, Job, JobAdded, JobDetails, JobEventStatus, JobHeaders, JobId, JobMessage, JobPaused,
+        JobRemoved, JobStatus, MessageContent, Schedule,
     };
 
     fn job_id(id: &str) -> JobId {
         JobId::parse(id).unwrap()
     }
 
-    fn job(id: &str) -> JobSpec {
-        JobSpec {
+    fn job(id: &str) -> Job {
+        Job {
             id: job_id(id),
             status: JobStatus::Enabled,
-            schedule: ScheduleSpec::every(30).unwrap(),
-            delivery: DeliverySpec::nats_event("agent.run").unwrap(),
+            schedule: Schedule::every(30).unwrap(),
+            delivery: Delivery::nats_event("agent.run").unwrap(),
             message: JobMessage {
                 content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
                 headers: JobHeaders::default(),
