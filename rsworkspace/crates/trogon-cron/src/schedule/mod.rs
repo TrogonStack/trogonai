@@ -1,3 +1,3 @@
-mod resolved_job_spec;
+mod resolved_job;
 
-pub use resolved_job_spec::ResolvedJobSpec;
+pub use resolved_job::ResolvedJob;
