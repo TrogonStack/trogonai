@@ -6,18 +6,18 @@ use trogon_eventsourcing::{StateMachine, snapshot::SnapshotSchema};
 use crate::events::{JobAdded, JobEvent, JobEventState, JobPaused, JobRemoved, JobResumed};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub enum JobCommandState {
+pub enum JobState {
     Missing,
     PresentEnabled,
     PresentDisabled,
     Deleted,
 }
 
-impl SnapshotSchema for JobCommandState {
+impl SnapshotSchema for JobState {
     const SNAPSHOT_STREAM_PREFIX: &'static str = "cron.command.job.v2.";
 }
 
-impl StateMachine<JobEvent> for JobCommandState {
+impl StateMachine<JobEvent> for JobState {
     type EvolveError = Infallible;
 
     fn initial_state() -> Self {

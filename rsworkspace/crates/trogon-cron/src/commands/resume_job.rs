@@ -3,7 +3,7 @@ use trogon_eventsourcing::{
     SnapshotRead, SnapshotWrite, StreamAppend, StreamCommand, StreamRead,
 };
 
-use super::JobCommandState;
+use super::JobState;
 use crate::{
     JobId,
     events::{JobEvent, JobResumed},
@@ -36,22 +36,22 @@ impl StreamCommand for ResumeJobCommand {
 }
 
 impl Decide for ResumeJobCommand {
-    type State = JobCommandState;
+    type State = JobState;
     type Event = JobEvent;
     type DecideError = ResumeJobDecisionError;
 
-    fn decide(state: &JobCommandState, command: &Self) -> Result<Decision<JobEvent>, Self::DecideError> {
+    fn decide(state: &JobState, command: &Self) -> Result<Decision<JobEvent>, Self::DecideError> {
         match state {
-            JobCommandState::Missing => Err(ResumeJobDecisionError::JobNotFound {
+            JobState::Missing => Err(ResumeJobDecisionError::JobNotFound {
                 id: command.stream_id().clone(),
             }),
-            JobCommandState::Deleted => Err(ResumeJobDecisionError::JobDeleted {
+            JobState::Deleted => Err(ResumeJobDecisionError::JobDeleted {
                 id: command.stream_id().clone(),
             }),
-            JobCommandState::PresentEnabled => Err(ResumeJobDecisionError::AlreadyActive {
+            JobState::PresentEnabled => Err(ResumeJobDecisionError::AlreadyActive {
                 id: command.stream_id().clone(),
             }),
-            JobCommandState::PresentDisabled => Ok(Decision::Event(NonEmpty::one(JobEvent::JobResumed(JobResumed {
+            JobState::PresentDisabled => Ok(Decision::Event(NonEmpty::one(JobEvent::JobResumed(JobResumed {
                 id: command.stream_id().to_string(),
             })))),
         }
@@ -74,8 +74,8 @@ pub async fn resume_job<S, SErr>(
 where
     S: StreamRead<JobId, Error = SErr>
         + StreamAppend<JobId, Error = SErr>
-        + SnapshotRead<JobCommandState, JobId, Error = SErr>
-        + SnapshotWrite<JobCommandState, JobId, Error = SErr>,
+        + SnapshotRead<JobState, JobId, Error = SErr>
+        + SnapshotWrite<JobState, JobId, Error = SErr>,
     serde_json::Error: Into<SErr>,
 {
     CommandExecution::new(store, &command)
@@ -124,7 +124,7 @@ mod tests {
 
     #[test]
     fn decides_resume_from_present_disabled_state() {
-        let state = JobCommandState::PresentDisabled;
+        let state = JobState::PresentDisabled;
         let command = ResumeJobCommand::new(JobId::parse("backup").unwrap());
 
         let decision = decide(&state, &command).unwrap();
@@ -138,7 +138,7 @@ mod tests {
 
     #[test]
     fn rejects_resuming_active_jobs() {
-        let state = JobCommandState::PresentEnabled;
+        let state = JobState::PresentEnabled;
         let command = ResumeJobCommand::new(JobId::parse("backup").unwrap());
 
         assert!(matches!(
@@ -149,7 +149,7 @@ mod tests {
 
     #[test]
     fn rejects_resuming_missing_jobs() {
-        let state = JobCommandState::Missing;
+        let state = JobState::Missing;
         let command = ResumeJobCommand::new(JobId::parse("backup").unwrap());
 
         assert!(matches!(
@@ -160,7 +160,7 @@ mod tests {
 
     #[test]
     fn rejects_resuming_deleted_jobs() {
-        let state = JobCommandState::Deleted;
+        let state = JobState::Deleted;
         let command = ResumeJobCommand::new(JobId::parse("backup").unwrap());
 
         assert!(matches!(
@@ -265,10 +265,7 @@ mod tests {
         assert_eq!(job.state, JobEventState::Enabled);
 
         let command_snapshot = store
-            .read_command_snapshot::<JobCommandState>(
-                JobCommandState::snapshot_store_config(),
-                &JobId::parse("backup").unwrap(),
-            )
+            .read_command_snapshot::<JobState>(JobState::snapshot_store_config(), &JobId::parse("backup").unwrap())
             .unwrap();
         assert!(command_snapshot.is_none());
     }
