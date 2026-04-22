@@ -545,9 +545,9 @@ mod tests {
         fn decide(state: &TestState, command: &Self) -> Result<Decision<TestEvent>, Self::DecideError> {
             match (&command.action, state) {
                 (TestAction::Register, TestState::Missing) => {
-                    Ok(Decision::Event(NonEmpty::one(TestEvent::Registered {
+                    Ok(Decision::event(TestEvent::Registered {
                         id: command.id.to_string(),
-                    })))
+                    }))
                 }
                 (TestAction::Register, TestState::Present { .. }) => Err(TestCommandError::AlreadyRegistered {
                     id: command.id.to_string(),
@@ -561,17 +561,17 @@ mod tests {
                     })
                 }
                 (TestAction::Disable, TestState::Present { enabled: true }) => {
-                    Ok(Decision::Event(NonEmpty::one(TestEvent::Disabled {
+                    Ok(Decision::event(TestEvent::Disabled {
                         id: command.id.to_string(),
-                    })))
+                    }))
                 }
                 (TestAction::Remove, TestState::Missing) => Err(TestCommandError::JobNotFound {
                     id: command.id.to_string(),
                 }),
                 (TestAction::Remove, TestState::Present { .. }) => {
-                    Ok(Decision::Event(NonEmpty::one(TestEvent::Removed {
+                    Ok(Decision::event(TestEvent::Removed {
                         id: command.id.to_string(),
-                    })))
+                    }))
                 }
             }
         }
