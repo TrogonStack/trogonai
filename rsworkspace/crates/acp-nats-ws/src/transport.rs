@@ -1,8 +1,11 @@
 use crate::acp_connection_id::AcpConnectionId;
 use crate::connection;
-use crate::constants::{ACP_CONNECTION_ID_HEADER, ACP_SESSION_ID_HEADER, X_ACCEL_BUFFERING_HEADER};
+use crate::constants::{
+    ACP_CONNECTION_ID_HEADER, ACP_PROTOCOL_VERSION_HEADER, ACP_SESSION_ID_HEADER,
+    X_ACCEL_BUFFERING_HEADER,
+};
 use acp_nats::{StdJsonSerialize, agent::Bridge, client, spawn_notification_forwarder};
-use agent_client_protocol::{AgentSideConnection, RequestId, SessionNotification};
+use agent_client_protocol::{AgentSideConnection, ProtocolVersion, RequestId, SessionNotification};
 use axum::extract::FromRequestParts;
 use axum::extract::Request;
 use axum::extract::State;
@@ -44,6 +47,7 @@ pub enum ManagerRequest {
     WebSocket(Box<ConnectionRequest>),
     HttpPost {
         connection_id: Option<AcpConnectionId>,
+        protocol_version: Option<ProtocolVersion>,
         session_id: Option<acp_nats::AcpSessionId>,
         message: IncomingHttpMessage,
         response: oneshot::Sender<Result<HttpPostOutcome, HttpTransportError>>,
@@ -52,11 +56,13 @@ pub enum ManagerRequest {
     HttpGet {
         connection_id: AcpConnectionId,
         session_id: acp_nats::AcpSessionId,
-        response: oneshot::Sender<Result<SseReceiver, HttpTransportError>>,
+        protocol_version: Option<ProtocolVersion>,
+        response: oneshot::Sender<Result<HttpGetOutcome, HttpTransportError>>,
     },
     HttpDelete {
         connection_id: AcpConnectionId,
-        response: oneshot::Sender<Result<(), HttpTransportError>>,
+        protocol_version: Option<ProtocolVersion>,
+        response: oneshot::Sender<Result<Option<ProtocolVersion>, HttpTransportError>>,
     },
 }
 
@@ -65,14 +71,22 @@ pub enum HttpPostOutcome {
     Accepted,
     Live {
         connection_id: AcpConnectionId,
+        protocol_version: Option<ProtocolVersion>,
         session_id: Option<acp_nats::AcpSessionId>,
         stream: SseReceiver,
     },
     Buffered {
         connection_id: AcpConnectionId,
+        protocol_version: Option<ProtocolVersion>,
         session_id: Option<acp_nats::AcpSessionId>,
         events: Vec<SseFrame>,
     },
+}
+
+#[derive(Debug)]
+pub struct HttpGetOutcome {
+    pub protocol_version: Option<ProtocolVersion>,
+    pub stream: SseReceiver,
 }
 
 #[derive(Debug)]
@@ -241,16 +255,19 @@ pub struct HttpConnectionHandle {
 #[derive(Debug)]
 pub enum HttpConnectionCommand {
     Post {
+        protocol_version: Option<ProtocolVersion>,
         session_id: Option<acp_nats::AcpSessionId>,
         message: IncomingHttpMessage,
         response: oneshot::Sender<Result<HttpPostOutcome, HttpTransportError>>,
     },
     AttachListener {
         session_id: acp_nats::AcpSessionId,
-        response: oneshot::Sender<Result<SseReceiver, HttpTransportError>>,
+        protocol_version: Option<ProtocolVersion>,
+        response: oneshot::Sender<Result<HttpGetOutcome, HttpTransportError>>,
     },
     Close {
-        response: oneshot::Sender<Result<(), HttpTransportError>>,
+        protocol_version: Option<ProtocolVersion>,
+        response: oneshot::Sender<Result<Option<ProtocolVersion>, HttpTransportError>>,
     },
 }
 
@@ -271,6 +288,7 @@ impl SseFrame {
 enum PendingRequest {
     Live {
         request_id: RequestId,
+        capture_protocol_version: bool,
         session_id: Option<acp_nats::AcpSessionId>,
         sender: SseSender,
     },
@@ -395,6 +413,12 @@ impl OutgoingHttpMessage {
         let result = self.result.as_ref()?;
         let session_id = result.get("sessionId")?.as_str()?;
         acp_nats::AcpSessionId::new(session_id).ok()
+    }
+
+    fn result_protocol_version(&self) -> Option<ProtocolVersion> {
+        let result = self.result.as_ref()?;
+        let protocol_version = result.get("protocolVersion")?;
+        serde_json::from_value(protocol_version.clone()).ok()
     }
 }
 
@@ -609,6 +633,7 @@ async fn http_post(
     }
 
     let connection_id = parse_connection_id_header(&headers)?;
+    let protocol_version = parse_protocol_version_header(&headers)?;
     let session_id = parse_session_id_header(&headers)?;
 
     validate_http_context(&message, connection_id.as_ref(), session_id.as_ref())?;
@@ -618,6 +643,7 @@ async fn http_post(
         .manager_tx
         .send(ManagerRequest::HttpPost {
             connection_id,
+            protocol_version,
             session_id,
             message,
             response: response_tx,
@@ -633,15 +659,23 @@ async fn http_post(
         HttpPostOutcome::Accepted => Ok(StatusCode::ACCEPTED.into_response()),
         HttpPostOutcome::Live {
             connection_id,
+            protocol_version,
             session_id,
             stream,
-        } => Ok(build_sse_response(connection_id, session_id, stream)),
+        } => Ok(build_sse_response(
+            connection_id,
+            protocol_version,
+            session_id,
+            stream,
+        )),
         HttpPostOutcome::Buffered {
             connection_id,
+            protocol_version,
             session_id,
             events,
         } => Ok(build_buffered_sse_response(
             connection_id,
+            protocol_version,
             session_id,
             events,
         )),
@@ -654,6 +688,7 @@ async fn http_get(headers: HeaderMap, state: AppState) -> Result<Response, HttpT
     let connection_id = parse_connection_id_header(&headers)?.ok_or(
         HttpTransportError::bad_request("missing Acp-Connection-Id header"),
     )?;
+    let protocol_version = parse_protocol_version_header(&headers)?;
     let session_id = parse_session_id_header(&headers)?.ok_or(HttpTransportError::bad_request(
         "missing Acp-Session-Id header",
     ))?;
@@ -664,24 +699,30 @@ async fn http_get(headers: HeaderMap, state: AppState) -> Result<Response, HttpT
         .send(ManagerRequest::HttpGet {
             connection_id: connection_id.clone(),
             session_id: session_id.clone(),
+            protocol_version,
             response: response_tx,
         })
         .map_err(|error| {
             HttpTransportError::internal_with("connection manager is unavailable", error)
         })?;
 
-    let stream = response_rx.await.map_err(|error| {
+    let outcome = response_rx.await.map_err(|error| {
         HttpTransportError::internal_with("connection manager dropped the request", error)
     })??;
 
-    let mut response = Sse::new(stream::unfold(stream, |mut stream| async move {
+    let mut response = Sse::new(stream::unfold(outcome.stream, |mut stream| async move {
         stream
             .recv()
             .await
             .map(|item| (Ok::<Event, Infallible>(item.into_event()), stream))
     }))
     .into_response();
-    set_transport_headers(response.headers_mut(), &connection_id, Some(&session_id));
+    set_transport_headers(
+        response.headers_mut(),
+        &connection_id,
+        outcome.protocol_version.as_ref(),
+        Some(&session_id),
+    );
     response
         .headers_mut()
         .insert(X_ACCEL_BUFFERING_HEADER, HeaderValue::from_static("no"));
@@ -692,23 +733,27 @@ async fn http_delete(headers: HeaderMap, state: AppState) -> Result<Response, Ht
     let connection_id = parse_connection_id_header(&headers)?.ok_or(
         HttpTransportError::bad_request("missing Acp-Connection-Id header"),
     )?;
+    let protocol_version = parse_protocol_version_header(&headers)?;
 
     let (response_tx, response_rx) = oneshot::channel();
     state
         .manager_tx
         .send(ManagerRequest::HttpDelete {
             connection_id,
+            protocol_version,
             response: response_tx,
         })
         .map_err(|error| {
             HttpTransportError::internal_with("connection manager is unavailable", error)
         })?;
 
-    response_rx.await.map_err(|error| {
+    let protocol_version = response_rx.await.map_err(|error| {
         HttpTransportError::internal_with("connection manager dropped the request", error)
     })??;
 
-    Ok(StatusCode::ACCEPTED.into_response())
+    let mut response = StatusCode::ACCEPTED.into_response();
+    set_protocol_version_header(response.headers_mut(), protocol_version.as_ref());
+    Ok(response)
 }
 
 fn validate_post_headers(headers: &HeaderMap) -> Result<(), HttpTransportError> {
@@ -839,6 +884,35 @@ fn parse_connection_id_header(
         .transpose()
 }
 
+fn parse_protocol_version_header(
+    headers: &HeaderMap,
+) -> Result<Option<ProtocolVersion>, HttpTransportError> {
+    headers
+        .get(ACP_PROTOCOL_VERSION_HEADER)
+        .map(|value| {
+            value
+                .to_str()
+                .map_err(|error| {
+                    HttpTransportError::bad_request_with(
+                        "invalid Acp-Protocol-Version header",
+                        error,
+                    )
+                })
+                .and_then(|value| {
+                    value
+                        .parse::<u16>()
+                        .map(ProtocolVersion::from)
+                        .map_err(|error| {
+                            HttpTransportError::bad_request_with(
+                                "invalid Acp-Protocol-Version header",
+                                error,
+                            )
+                        })
+                })
+        })
+        .transpose()
+}
+
 fn parse_session_id_header(
     headers: &HeaderMap,
 ) -> Result<Option<acp_nats::AcpSessionId>, HttpTransportError> {
@@ -869,6 +943,7 @@ fn is_websocket_request(headers: &HeaderMap) -> bool {
 
 fn build_sse_response(
     connection_id: AcpConnectionId,
+    protocol_version: Option<ProtocolVersion>,
     session_id: Option<acp_nats::AcpSessionId>,
     stream: SseReceiver,
 ) -> Response {
@@ -879,7 +954,12 @@ fn build_sse_response(
             .map(|item| (Ok::<Event, Infallible>(item.into_event()), stream))
     }))
     .into_response();
-    set_transport_headers(response.headers_mut(), &connection_id, session_id.as_ref());
+    set_transport_headers(
+        response.headers_mut(),
+        &connection_id,
+        protocol_version.as_ref(),
+        session_id.as_ref(),
+    );
     response
         .headers_mut()
         .insert(X_ACCEL_BUFFERING_HEADER, HeaderValue::from_static("no"));
@@ -888,6 +968,7 @@ fn build_sse_response(
 
 fn build_buffered_sse_response(
     connection_id: AcpConnectionId,
+    protocol_version: Option<ProtocolVersion>,
     session_id: Option<acp_nats::AcpSessionId>,
     events: Vec<SseFrame>,
 ) -> Response {
@@ -897,7 +978,12 @@ fn build_buffered_sse_response(
             .map(|item| Ok::<Event, Infallible>(item.into_event())),
     );
     let mut response = Sse::new(stream).into_response();
-    set_transport_headers(response.headers_mut(), &connection_id, session_id.as_ref());
+    set_transport_headers(
+        response.headers_mut(),
+        &connection_id,
+        protocol_version.as_ref(),
+        session_id.as_ref(),
+    );
     response
         .headers_mut()
         .insert(X_ACCEL_BUFFERING_HEADER, HeaderValue::from_static("no"));
@@ -907,6 +993,7 @@ fn build_buffered_sse_response(
 fn set_transport_headers(
     headers: &mut HeaderMap,
     connection_id: &AcpConnectionId,
+    protocol_version: Option<&ProtocolVersion>,
     session_id: Option<&acp_nats::AcpSessionId>,
 ) {
     headers.insert(
@@ -914,6 +1001,7 @@ fn set_transport_headers(
         HeaderValue::from_str(&connection_id.to_string())
             .expect("generated ACP connection id must be a valid header value"),
     );
+    set_protocol_version_header(headers, protocol_version);
     if let Some(session_id) = session_id {
         headers.insert(
             ACP_SESSION_ID_HEADER,
@@ -921,6 +1009,34 @@ fn set_transport_headers(
                 .expect("generated ACP session id must be a valid header value"),
         );
     }
+}
+
+fn set_protocol_version_header(
+    headers: &mut HeaderMap,
+    protocol_version: Option<&ProtocolVersion>,
+) {
+    if let Some(protocol_version) = protocol_version {
+        headers.insert(
+            ACP_PROTOCOL_VERSION_HEADER,
+            HeaderValue::from_str(&protocol_version.to_string())
+                .expect("ACP protocol version must be a valid header value"),
+        );
+    }
+}
+
+fn validate_protocol_version_header(
+    provided: Option<&ProtocolVersion>,
+    negotiated: Option<&ProtocolVersion>,
+) -> Result<(), HttpTransportError> {
+    if let (Some(provided), Some(negotiated)) = (provided, negotiated)
+        && provided != negotiated
+    {
+        return Err(HttpTransportError::bad_request(
+            "Acp-Protocol-Version header does not match initialized protocol version",
+        ));
+    }
+
+    Ok(())
 }
 
 pub async fn run_http_connection<N, J>(
@@ -1008,6 +1124,7 @@ pub async fn run_http_connection<N, J>(
     let mut io_task = tokio::task::spawn_local(io_task);
 
     let mut pending_request: Option<PendingRequest> = None;
+    let mut protocol_version: Option<ProtocolVersion> = None;
     let mut sessions = HashSet::<acp_nats::AcpSessionId>::new();
     let mut get_listeners = HashMap::<acp_nats::AcpSessionId, Vec<SseSender>>::new();
 
@@ -1021,7 +1138,15 @@ pub async fn run_http_connection<N, J>(
                 };
 
                 match command {
-                    HttpConnectionCommand::Post { session_id, message, response } => {
+                    HttpConnectionCommand::Post { protocol_version: header_protocol_version, session_id, message, response } => {
+                        if let Err(error) = validate_protocol_version_header(
+                            header_protocol_version.as_ref(),
+                            protocol_version.as_ref(),
+                        ) {
+                            let _ = response.send(Err(error));
+                            continue;
+                        }
+
                         if message.is_request() {
                             if pending_request.is_some() {
                                 let _ = response.send(Err(HttpTransportError::conflict(
@@ -1054,6 +1179,7 @@ pub async fn run_http_connection<N, J>(
                             let (stream_tx, stream_rx) = mpsc::channel(HTTP_CHANNEL_CAPACITY);
                             pending_request = Some(PendingRequest::Live {
                                 request_id: message.id.clone().expect("request must have id"),
+                                capture_protocol_version: message.is_initialize(),
                                 session_id: session_id.clone(),
                                 sender: stream_tx,
                             });
@@ -1066,6 +1192,7 @@ pub async fn run_http_connection<N, J>(
                             }
                             let _ = response.send(Ok(HttpPostOutcome::Live {
                                 connection_id: connection_id.clone(),
+                                protocol_version: protocol_version.clone(),
                                 session_id,
                                 stream: stream_rx,
                             }));
@@ -1085,7 +1212,19 @@ pub async fn run_http_connection<N, J>(
 
                         let _ = response.send(Ok(HttpPostOutcome::Accepted));
                     }
-                    HttpConnectionCommand::AttachListener { session_id, response } => {
+                    HttpConnectionCommand::AttachListener {
+                        session_id,
+                        protocol_version: header_protocol_version,
+                        response,
+                    } => {
+                        if let Err(error) = validate_protocol_version_header(
+                            header_protocol_version.as_ref(),
+                            protocol_version.as_ref(),
+                        ) {
+                            let _ = response.send(Err(error));
+                            continue;
+                        }
+
                         if !sessions.contains(&session_id) {
                             let _ = response
                                 .send(Err(HttpTransportError::not_found("unknown ACP session")));
@@ -1094,10 +1233,24 @@ pub async fn run_http_connection<N, J>(
 
                         let (stream_tx, stream_rx) = mpsc::channel(HTTP_CHANNEL_CAPACITY);
                         get_listeners.entry(session_id).or_default().push(stream_tx);
-                        let _ = response.send(Ok(stream_rx));
+                        let _ = response.send(Ok(HttpGetOutcome {
+                            protocol_version: protocol_version.clone(),
+                            stream: stream_rx,
+                        }));
                     }
-                    HttpConnectionCommand::Close { response } => {
-                        let _ = response.send(Ok(()));
+                    HttpConnectionCommand::Close {
+                        protocol_version: header_protocol_version,
+                        response,
+                    } => {
+                        if let Err(error) = validate_protocol_version_header(
+                            header_protocol_version.as_ref(),
+                            protocol_version.as_ref(),
+                        ) {
+                            let _ = response.send(Err(error));
+                            continue;
+                        }
+
+                        let _ = response.send(Ok(protocol_version.clone()));
                         break;
                     }
                 }
@@ -1114,9 +1267,19 @@ pub async fn run_http_connection<N, J>(
                     match pending {
                         PendingRequest::Live {
                             request_id,
+                            capture_protocol_version,
                             session_id,
                             sender,
                         } => {
+                            if *capture_protocol_version
+                                && parsed.as_ref().and_then(|message| message.id.as_ref())
+                                    == Some(request_id)
+                            {
+                                protocol_version = parsed
+                                    .as_ref()
+                                    .and_then(OutgoingHttpMessage::result_protocol_version);
+                            }
+
                             match route_live_frame(
                                 &frame,
                                 parsed.as_ref(),
@@ -1151,6 +1314,7 @@ pub async fn run_http_connection<N, J>(
                                     {
                                         let _ = response.send(Ok(HttpPostOutcome::Buffered {
                                             connection_id: connection_id.clone(),
+                                            protocol_version: protocol_version.clone(),
                                             session_id,
                                             events,
                                         }));
@@ -1252,6 +1416,7 @@ pub async fn process_manager_request<N, J>(
         }
         ManagerRequest::HttpPost {
             connection_id,
+            protocol_version,
             session_id,
             message,
             response,
@@ -1295,6 +1460,7 @@ pub async fn process_manager_request<N, J>(
             if handle
                 .command_tx
                 .send(HttpConnectionCommand::Post {
+                    protocol_version,
                     session_id,
                     message,
                     response,
@@ -1307,6 +1473,7 @@ pub async fn process_manager_request<N, J>(
         ManagerRequest::HttpGet {
             connection_id,
             session_id,
+            protocol_version,
             response,
         } => {
             let Some(handle) = http_connections.get(&connection_id) else {
@@ -1318,6 +1485,7 @@ pub async fn process_manager_request<N, J>(
                 .command_tx
                 .send(HttpConnectionCommand::AttachListener {
                     session_id,
+                    protocol_version,
                     response,
                 })
                 .is_err()
@@ -1327,6 +1495,7 @@ pub async fn process_manager_request<N, J>(
         }
         ManagerRequest::HttpDelete {
             connection_id,
+            protocol_version,
             response,
         } => {
             let Some(handle) = http_connections.remove(&connection_id) else {
@@ -1334,9 +1503,10 @@ pub async fn process_manager_request<N, J>(
                 return;
             };
 
-            let _ = handle
-                .command_tx
-                .send(HttpConnectionCommand::Close { response });
+            let _ = handle.command_tx.send(HttpConnectionCommand::Close {
+                protocol_version,
+                response,
+            });
         }
     }
 }
@@ -1861,6 +2031,31 @@ mod tests {
     }
 
     #[test]
+    fn validate_protocol_version_header_allows_missing_and_rejects_mismatches() {
+        assert!(validate_protocol_version_header(None, None).is_ok());
+        assert!(validate_protocol_version_header(Some(&ProtocolVersion::V0), None).is_ok());
+        assert!(validate_protocol_version_header(None, Some(&ProtocolVersion::V0)).is_ok());
+        assert!(
+            validate_protocol_version_header(
+                Some(&ProtocolVersion::V0),
+                Some(&ProtocolVersion::V0)
+            )
+            .is_ok()
+        );
+
+        assert!(matches!(
+            validate_protocol_version_header(
+                Some(&ProtocolVersion::V1),
+                Some(&ProtocolVersion::V0)
+            ),
+            Err(HttpTransportError::BadRequest {
+                message: "Acp-Protocol-Version header does not match initialized protocol version",
+                source: None,
+            })
+        ));
+    }
+
+    #[test]
     fn header_parsers_and_websocket_detection_handle_valid_and_invalid_values() {
         let connection_id = AcpConnectionId::new();
         let session_id = session_id();
@@ -1873,6 +2068,7 @@ mod tests {
             ACP_SESSION_ID_HEADER,
             HeaderValue::from_str(session_id.as_str()).unwrap(),
         );
+        headers.insert(ACP_PROTOCOL_VERSION_HEADER, HeaderValue::from_static("0"));
         headers.insert("upgrade", HeaderValue::from_static("websocket"));
 
         assert_eq!(
@@ -1880,6 +2076,10 @@ mod tests {
             Some(connection_id.clone())
         );
         assert_eq!(parse_session_id_header(&headers).unwrap(), Some(session_id));
+        assert_eq!(
+            parse_protocol_version_header(&headers).unwrap(),
+            Some(ProtocolVersion::V0)
+        );
         assert!(is_websocket_request(&headers));
 
         headers.insert(
@@ -1890,6 +2090,22 @@ mod tests {
             parse_connection_id_header(&headers),
             Err(HttpTransportError::BadRequest {
                 message: "invalid Acp-Connection-Id header",
+                source: Some(_),
+            })
+        ));
+
+        headers.insert(
+            ACP_CONNECTION_ID_HEADER,
+            HeaderValue::from_str(&connection_id.to_string()).unwrap(),
+        );
+        headers.insert(
+            ACP_PROTOCOL_VERSION_HEADER,
+            HeaderValue::from_static("not-a-version"),
+        );
+        assert!(matches!(
+            parse_protocol_version_header(&headers),
+            Err(HttpTransportError::BadRequest {
+                message: "invalid Acp-Protocol-Version header",
                 source: Some(_),
             })
         ));
@@ -2009,6 +2225,7 @@ mod tests {
                     assert!(message.is_session_new());
                     let _ = response.send(Ok(HttpPostOutcome::Buffered {
                         connection_id: expected_connection_id,
+                        protocol_version: Some(ProtocolVersion::V0),
                         session_id: Some(expected_session_id),
                         events: vec![SseFrame::Json(event.to_string())],
                     }));
@@ -2041,6 +2258,10 @@ mod tests {
             response.headers().get(ACP_SESSION_ID_HEADER).unwrap(),
             HeaderValue::from_str(session_id.as_str()).unwrap()
         );
+        assert_eq!(
+            response.headers().get(ACP_PROTOCOL_VERSION_HEADER).unwrap(),
+            HeaderValue::from_static("0")
+        );
         assert_eq!(json_event_body(response).await, vec![expected_event]);
     }
 
@@ -2057,10 +2278,12 @@ mod tests {
                 ManagerRequest::HttpGet {
                     connection_id: actual_connection_id,
                     session_id: actual_session_id,
+                    protocol_version,
                     response,
                 } => {
                     assert_eq!(actual_connection_id, expected_connection_id.clone());
                     assert_eq!(actual_session_id, expected_session_id);
+                    assert_eq!(protocol_version, None);
                     let (stream_tx, stream_rx) = mpsc::channel(HTTP_CHANNEL_CAPACITY);
                     let _ = stream_tx.try_send(SseFrame::Json(
                         json!({
@@ -2071,17 +2294,22 @@ mod tests {
                         .to_string(),
                     ));
                     drop(stream_tx);
-                    let _ = response.send(Ok(stream_rx));
+                    let _ = response.send(Ok(HttpGetOutcome {
+                        protocol_version: Some(ProtocolVersion::V0),
+                        stream: stream_rx,
+                    }));
                 }
                 _ => panic!("unexpected manager request"),
             }
             match manager_rx.recv().await.unwrap() {
                 ManagerRequest::HttpDelete {
                     connection_id: actual_connection_id,
+                    protocol_version,
                     response,
                 } => {
                     assert_eq!(actual_connection_id, expected_connection_id);
-                    let _ = response.send(Ok(()));
+                    assert_eq!(protocol_version, None);
+                    let _ = response.send(Ok(Some(ProtocolVersion::V0)));
                 }
                 _ => panic!("unexpected manager request"),
             }
@@ -2108,6 +2336,10 @@ mod tests {
             HeaderValue::from_str(session_id.as_str()).unwrap()
         );
         assert_eq!(
+            response.headers().get(ACP_PROTOCOL_VERSION_HEADER).unwrap(),
+            HeaderValue::from_static("0")
+        );
+        assert_eq!(
             response.headers().get(X_ACCEL_BUFFERING_HEADER).unwrap(),
             HeaderValue::from_static("no")
         );
@@ -2128,6 +2360,10 @@ mod tests {
 
         let response = http_delete(delete_headers, state).await.unwrap();
         assert_eq!(response.status(), StatusCode::ACCEPTED);
+        assert_eq!(
+            response.headers().get(ACP_PROTOCOL_VERSION_HEADER).unwrap(),
+            HeaderValue::from_static("0")
+        );
     }
 
     #[tokio::test]
@@ -2161,6 +2397,7 @@ mod tests {
         process_manager_request(
             ManagerRequest::HttpPost {
                 connection_id: None,
+                protocol_version: None,
                 session_id: None,
                 message: post_message,
                 response: post_response_tx,
@@ -2188,6 +2425,7 @@ mod tests {
             ManagerRequest::HttpGet {
                 connection_id: unknown_connection_id.clone(),
                 session_id: session_id(),
+                protocol_version: None,
                 response: get_response_tx,
             },
             &mut http_connections,
@@ -2210,6 +2448,7 @@ mod tests {
         process_manager_request(
             ManagerRequest::HttpDelete {
                 connection_id: unknown_connection_id,
+                protocol_version: None,
                 response: delete_response_tx,
             },
             &mut http_connections,
@@ -2249,6 +2488,7 @@ mod tests {
             ManagerRequest::HttpGet {
                 connection_id: unknown_connection_id,
                 session_id: session_id(),
+                protocol_version: None,
                 response: response_tx,
             },
             &mut http_connections,
@@ -2296,6 +2536,7 @@ mod tests {
                 process_manager_request(
                     ManagerRequest::HttpPost {
                         connection_id: None,
+                        protocol_version: None,
                         session_id: None,
                         message: initialize,
                         response: response_tx,

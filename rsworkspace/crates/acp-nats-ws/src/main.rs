@@ -199,7 +199,9 @@ async fn process_connections<N, J>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::constants::{ACP_CONNECTION_ID_HEADER, ACP_SESSION_ID_HEADER};
+    use crate::constants::{
+        ACP_CONNECTION_ID_HEADER, ACP_PROTOCOL_VERSION_HEADER, ACP_SESSION_ID_HEADER,
+    };
     use acp_nats::Config;
     use axum::body::{Body, to_bytes};
     use axum::http::header::{ACCEPT, CONTENT_TYPE};
@@ -528,6 +530,7 @@ mod tests {
                     .header(CONTENT_TYPE, "application/json")
                     .header(ACCEPT, "application/json, text/event-stream")
                     .header(ACP_CONNECTION_ID_HEADER, &connection_id)
+                    .header(ACP_PROTOCOL_VERSION_HEADER, "0")
                     .body(Body::from(
                         r#"{"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":".","mcpServers":[]}}"#,
                     ))
@@ -552,6 +555,13 @@ mod tests {
             .get(ACP_SESSION_ID_HEADER)
             .and_then(|value| value.to_str().ok())
             .map(str::to_owned);
+        assert_eq!(
+            session_new
+                .headers()
+                .get(ACP_PROTOCOL_VERSION_HEADER)
+                .and_then(|value| value.to_str().ok()),
+            Some("0")
+        );
         let body = body_text(session_new).await;
         let events = sse_events(&body);
         assert_eq!(events.len(), 1);
@@ -647,6 +657,7 @@ mod tests {
                     .method("DELETE")
                     .uri(ACP_ENDPOINT)
                     .header(ACP_CONNECTION_ID_HEADER, &connection_id)
+                    .header(ACP_PROTOCOL_VERSION_HEADER, "0")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -654,6 +665,67 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::ACCEPTED);
+        assert_eq!(
+            response
+                .headers()
+                .get(ACP_PROTOCOL_VERSION_HEADER)
+                .and_then(|value| value.to_str().ok()),
+            Some("0")
+        );
+
+        let _ = shutdown_tx.send(true);
+        drop(app);
+        conn_thread.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn streamable_http_rejects_mismatched_protocol_version_after_initialize() {
+        let nats_mock = AdvancedMockNatsClient::new();
+        let _injector = nats_mock.inject_messages();
+        nats_mock.set_response(
+            "acp.agent.initialize",
+            r#"{"agentCapabilities":{"loadSession":false,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":0}"#
+                .into(),
+        );
+
+        let (app, shutdown_tx, conn_thread) = build_test_app(nats_mock);
+        let initialize = app
+            .clone()
+            .oneshot(http_post_request(
+                r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#,
+            ))
+            .await
+            .unwrap();
+        let connection_id = initialize
+            .headers()
+            .get(ACP_CONNECTION_ID_HEADER)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let _ = body_text(initialize).await;
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(ACP_ENDPOINT)
+                    .header(CONTENT_TYPE, "application/json")
+                    .header(ACCEPT, "application/json, text/event-stream")
+                    .header(ACP_CONNECTION_ID_HEADER, &connection_id)
+                    .header(ACP_PROTOCOL_VERSION_HEADER, "1")
+                    .body(Body::from(r#"{"jsonrpc":"2.0","method":"initialized"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            body_text(response).await,
+            "Acp-Protocol-Version header does not match initialized protocol version"
+        );
 
         let _ = shutdown_tx.send(true);
         drop(app);

@@ -2,6 +2,7 @@ use std::net::{IpAddr, Ipv4Addr};
 
 pub const ACP_CONNECTION_ID_HEADER: &str = "acp-connection-id";
 pub const ACP_ENDPOINT: &str = "/acp";
+pub const ACP_PROTOCOL_VERSION_HEADER: &str = "acp-protocol-version";
 pub const ACP_SESSION_ID_HEADER: &str = "acp-session-id";
 pub const DEFAULT_HOST: IpAddr = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
 pub const DEFAULT_PORT: u16 = 8080;
