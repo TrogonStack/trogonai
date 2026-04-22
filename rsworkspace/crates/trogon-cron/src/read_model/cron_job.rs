@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::events::{JobDetails, JobEventDelivery, JobEventSchedule, JobEventState, MessageSpec};
+use crate::events::{JobDetails, JobEventDelivery, JobEventSchedule, JobEventState, MessageEnvelope};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct CronJob {
@@ -9,7 +9,7 @@ pub struct CronJob {
     pub state: JobEventState,
     pub schedule: JobEventSchedule,
     pub delivery: JobEventDelivery,
-    pub message: MessageSpec,
+    pub message: MessageEnvelope,
 }
 
 impl CronJob {

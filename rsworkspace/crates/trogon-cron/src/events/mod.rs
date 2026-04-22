@@ -5,7 +5,7 @@ use trogon_eventsourcing::{
     CanonicalEventCodec, EventCodec, EventData, EventType, RecordedEvent, StreamEvent,
 };
 
-pub use message::{MessageContent, MessageHeaders, MessageHeadersError, MessageSpec};
+pub use message::{MessageContent, MessageEnvelope, MessageHeaders, MessageHeadersError};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
@@ -55,7 +55,7 @@ pub struct JobDetails {
     pub state: JobEventState,
     pub schedule: JobEventSchedule,
     pub delivery: JobEventDelivery,
-    pub message: MessageSpec,
+    pub message: MessageEnvelope,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -280,7 +280,7 @@ mod tests {
                     subject: "jobs.latest".to_string(),
                 }),
             },
-            message: MessageSpec {
+            message: MessageEnvelope {
                 content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
                 headers: MessageHeaders::new([("owner", "ops")]).unwrap(),
             },
