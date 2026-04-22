@@ -587,8 +587,9 @@ fn validate_http_context(
 fn accept_contains(header: &str, expected: &str) -> bool {
     header
         .split(',')
+        .filter_map(|value| value.split(';').next())
         .map(str::trim)
-        .any(|value| value.eq_ignore_ascii_case(expected))
+        .any(|media_type| media_type.eq_ignore_ascii_case(expected))
 }
 
 fn parse_connection_id_header(
@@ -1416,6 +1417,18 @@ mod tests {
 
         let valid_get = get_headers();
         assert!(validate_get_headers(&valid_get).is_ok());
+
+        let mut valid_post_with_q = HeaderMap::new();
+        valid_post_with_q.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        valid_post_with_q.insert(
+            ACCEPT,
+            HeaderValue::from_static("application/json;q=0.9, text/event-stream"),
+        );
+        assert!(validate_post_headers(&valid_post_with_q).is_ok());
+
+        let mut valid_get_with_q = HeaderMap::new();
+        valid_get_with_q.insert(ACCEPT, HeaderValue::from_static("text/event-stream; q=0.5"));
+        assert!(validate_get_headers(&valid_get_with_q).is_ok());
 
         let mut invalid_get = HeaderMap::new();
         invalid_get.insert(ACCEPT, HeaderValue::from_static("application/json"));
