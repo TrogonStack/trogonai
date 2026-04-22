@@ -6,10 +6,9 @@ use async_nats::Request;
 use async_nats::jetstream;
 use chrono::{Duration as ChronoDuration, Utc};
 use trogon_cron::{
-    AddJobCommand, CronController, DeliveryRoute, DeliverySpec, GetJobCommand, JobEnabledState,
-    JobEventState, JobHeaders, JobId, JobMessage, JobSpec, MessageContent, PauseJobCommand,
-    RemoveJobCommand, SamplingSource, ScheduleSpec, TtlSeconds, add_job, connect_store, get_job,
-    pause_job, remove_job,
+    AddJobCommand, CronController, DeliveryRoute, DeliverySpec, GetJobCommand, JobEnabledState, JobEventState,
+    JobHeaders, JobId, JobMessage, JobSpec, MessageContent, PauseJobCommand, RemoveJobCommand, SamplingSource,
+    ScheduleSpec, TtlSeconds, add_job, connect_store, get_job, pause_job, remove_job,
 };
 use trogon_nats::{NatsConfig, connect as nats_connect};
 
@@ -67,11 +66,7 @@ async fn reset_state(js: &jetstream::Context) {
 async fn wait_for_subject(stream: &jetstream::stream::Stream, subject: &str) {
     tokio::time::timeout(Duration::from_secs(12), async {
         loop {
-            if stream
-                .get_last_raw_message_by_subject(subject)
-                .await
-                .is_ok()
-            {
+            if stream.get_last_raw_message_by_subject(subject).await.is_ok() {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(250)).await;
@@ -84,11 +79,7 @@ async fn wait_for_subject(stream: &jetstream::stream::Stream, subject: &str) {
 async fn wait_for_subject_absence(stream: &jetstream::stream::Stream, subject: &str) {
     tokio::time::timeout(Duration::from_secs(12), async {
         loop {
-            if stream
-                .get_last_raw_message_by_subject(subject)
-                .await
-                .is_err()
-            {
+            if stream.get_last_raw_message_by_subject(subject).await.is_err() {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(250)).await;
@@ -141,10 +132,7 @@ async fn schedule_stream_has_required_flags() {
     let (_nats, js) = connect_js().await;
     reset_state(&js).await;
 
-    let stream = js
-        .get_stream(trogon_cron::kv::SCHEDULES_STREAM)
-        .await
-        .unwrap();
+    let stream = js.get_stream(trogon_cron::kv::SCHEDULES_STREAM).await.unwrap();
     let info = stream.cached_info();
 
     assert!(info.config.allow_message_schedules);
@@ -179,12 +167,7 @@ async fn controller_reconciles_one_time_job() {
     let store = connect_store(nats.clone()).await.unwrap();
 
     let handle = tokio::spawn(async move {
-        CronController::from_nats(nats)
-            .await
-            .unwrap()
-            .run()
-            .await
-            .unwrap();
+        CronController::from_nats(nats).await.unwrap().run().await.unwrap();
     });
 
     let mut job = base_job("one-time");
@@ -192,14 +175,9 @@ async fn controller_reconciles_one_time_job() {
         at: Utc::now() + ChronoDuration::seconds(2),
     };
 
-    add_job(&store.event_store, AddJobCommand::new(job), None)
-        .await
-        .unwrap();
+    add_job(&store.event_store, AddJobCommand::new(job)).await.unwrap();
 
-    let stream = js
-        .get_stream(trogon_cron::kv::SCHEDULES_STREAM)
-        .await
-        .unwrap();
+    let stream = js.get_stream(trogon_cron::kv::SCHEDULES_STREAM).await.unwrap();
     wait_for_subject(&stream, "cron.fire.agent.run.one-time").await;
 
     handle.abort();
@@ -213,12 +191,7 @@ async fn controller_reconciles_sampling_job() {
     let store = connect_store(nats.clone()).await.unwrap();
 
     let handle = tokio::spawn(async move {
-        CronController::from_nats(nats)
-            .await
-            .unwrap()
-            .run()
-            .await
-            .unwrap();
+        CronController::from_nats(nats).await.unwrap().run().await.unwrap();
     });
 
     let mut job = base_job("sampling");
@@ -228,9 +201,7 @@ async fn controller_reconciles_sampling_job() {
         source: Some(SamplingSource::latest_from_subject("sensors.latest").unwrap()),
     };
 
-    add_job(&store.event_store, AddJobCommand::new(job), None)
-        .await
-        .unwrap();
+    add_job(&store.event_store, AddJobCommand::new(job)).await.unwrap();
     wait_for_stream_subject(&js, trogon_cron::kv::SCHEDULES_STREAM, "sensors.latest").await;
     js.publish("sensors.latest", br#"{"value":42}"#.as_slice().into())
         .await
@@ -238,10 +209,7 @@ async fn controller_reconciles_sampling_job() {
         .await
         .unwrap();
 
-    let stream = js
-        .get_stream(trogon_cron::kv::SCHEDULES_STREAM)
-        .await
-        .unwrap();
+    let stream = js.get_stream(trogon_cron::kv::SCHEDULES_STREAM).await.unwrap();
     wait_for_subject(&stream, "cron.fire.agent.run.sampling").await;
 
     handle.abort();
@@ -255,25 +223,15 @@ async fn controller_reconciles_cron_job_with_timezone() {
     let store = connect_store(nats.clone()).await.unwrap();
 
     let handle = tokio::spawn(async move {
-        CronController::from_nats(nats)
-            .await
-            .unwrap()
-            .run()
-            .await
-            .unwrap();
+        CronController::from_nats(nats).await.unwrap().run().await.unwrap();
     });
 
     let mut job = base_job("cron-timezone");
     job.schedule = ScheduleSpec::cron("*/2 * * * * *", Some("UTC".to_string())).unwrap();
 
-    add_job(&store.event_store, AddJobCommand::new(job), None)
-        .await
-        .unwrap();
+    add_job(&store.event_store, AddJobCommand::new(job)).await.unwrap();
 
-    let stream = js
-        .get_stream(trogon_cron::kv::SCHEDULES_STREAM)
-        .await
-        .unwrap();
+    let stream = js.get_stream(trogon_cron::kv::SCHEDULES_STREAM).await.unwrap();
     wait_for_subject(&stream, "cron.fire.agent.run.cron-timezone").await;
 
     handle.abort();
@@ -287,32 +245,18 @@ async fn disabling_job_removes_schedule_subject() {
     let store = connect_store(nats.clone()).await.unwrap();
 
     let handle = tokio::spawn(async move {
-        CronController::from_nats(nats)
-            .await
-            .unwrap()
-            .run()
-            .await
-            .unwrap();
+        CronController::from_nats(nats).await.unwrap().run().await.unwrap();
     });
 
     let job = base_job("disabled");
-    add_job(&store.event_store, AddJobCommand::new(job), None)
-        .await
-        .unwrap();
+    add_job(&store.event_store, AddJobCommand::new(job)).await.unwrap();
 
-    let stream = js
-        .get_stream(trogon_cron::kv::SCHEDULES_STREAM)
-        .await
-        .unwrap();
+    let stream = js.get_stream(trogon_cron::kv::SCHEDULES_STREAM).await.unwrap();
     wait_for_subject(&stream, "cron.schedules.disabled").await;
 
-    pause_job(
-        &store.event_store,
-        PauseJobCommand::new(job_id("disabled")),
-        None,
-    )
-    .await
-    .unwrap();
+    pause_job(&store.event_store, PauseJobCommand::new(job_id("disabled")), None)
+        .await
+        .unwrap();
     wait_for_subject_absence(&stream, "cron.schedules.disabled").await;
 
     handle.abort();
@@ -326,32 +270,18 @@ async fn removing_job_removes_schedule_subject() {
     let store = connect_store(nats.clone()).await.unwrap();
 
     let handle = tokio::spawn(async move {
-        CronController::from_nats(nats)
-            .await
-            .unwrap()
-            .run()
-            .await
-            .unwrap();
+        CronController::from_nats(nats).await.unwrap().run().await.unwrap();
     });
 
     let job = base_job("removed");
-    add_job(&store.event_store, AddJobCommand::new(job), None)
-        .await
-        .unwrap();
+    add_job(&store.event_store, AddJobCommand::new(job)).await.unwrap();
 
-    let stream = js
-        .get_stream(trogon_cron::kv::SCHEDULES_STREAM)
-        .await
-        .unwrap();
+    let stream = js.get_stream(trogon_cron::kv::SCHEDULES_STREAM).await.unwrap();
     wait_for_subject(&stream, "cron.schedules.removed").await;
 
-    remove_job(
-        &store.event_store,
-        RemoveJobCommand::new(job_id("removed")),
-        None,
-    )
-    .await
-    .unwrap();
+    remove_job(&store.event_store, RemoveJobCommand::new(job_id("removed")), None)
+        .await
+        .unwrap();
     wait_for_subject_absence(&stream, "cron.schedules.removed").await;
 
     handle.abort();
@@ -368,16 +298,10 @@ async fn event_store_rebuilds_current_state_for_new_client() {
     job.schedule = ScheduleSpec::cron("*/5 * * * * *", Some("UTC".to_string())).unwrap();
     let expected_schedule = job.schedule.clone();
 
-    add_job(&store.event_store, AddJobCommand::new(job), None)
+    add_job(&store.event_store, AddJobCommand::new(job)).await.unwrap();
+    pause_job(&store.event_store, PauseJobCommand::new(job_id("eventful")), None)
         .await
         .unwrap();
-    pause_job(
-        &store.event_store,
-        PauseJobCommand::new(job_id("eventful")),
-        None,
-    )
-    .await
-    .unwrap();
 
     let fresh = connect_store(nats).await.unwrap();
     let rebuilt = get_job(

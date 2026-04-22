@@ -518,9 +518,7 @@ mod tests {
             .unwrap();
         assert_eq!(seeded, expected_job("seeded"));
 
-        add_job(&store, AddJobCommand::new(base_job("alpha")), None)
-            .await
-            .unwrap();
+        add_job(&store, AddJobCommand::new(base_job("alpha"))).await.unwrap();
         let alpha = store
             .get_job(GetJobCommand::new(JobId::parse("alpha").unwrap()))
             .await
@@ -563,7 +561,7 @@ mod tests {
                 .is_none()
         );
 
-        let deleted_error = add_job(&store, AddJobCommand::new(base_job("alpha")), None)
+        let deleted_error = add_job(&store, AddJobCommand::new(base_job("alpha")))
             .await
             .unwrap_err();
         assert!(matches!(
@@ -588,9 +586,7 @@ mod tests {
         .unwrap_err();
         assert!(invalid_error.to_string().contains("sampling source"));
 
-        add_job(&store, AddJobCommand::new(base_job("alpha")), None)
-            .await
-            .unwrap();
+        add_job(&store, AddJobCommand::new(base_job("alpha"))).await.unwrap();
         let same_state_error = resume_job(&store, ResumeJobCommand::new(job_id("alpha")), None)
             .await
             .unwrap_err();

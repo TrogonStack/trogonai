@@ -10,11 +10,11 @@ pub mod nats;
 pub mod snapshot;
 pub mod testing;
 
-pub use decision::{Act, Decide, Decision, NonEmpty, StateMachine, StreamCommand, decide};
+pub use decision::{Act, Decide, Decision, NonEmpty, OverrideWritePrecondition, StateMachine, StreamCommand, decide};
 pub use execution::{
     AppendOutcome, CommandExecution, CommandFailure, CommandInfraError, CommandResult, CommandSnapshotPolicy,
     ExecutionResult, FrequencySnapshot, NoSnapshot, SnapshotDecision, SnapshotPolicy, SnapshotRead, SnapshotWrite,
-    Snapshots, StreamAppend, StreamRead, StreamReadResult, StreamState, WithoutSnapshots, WritePrecondition,
+    Snapshots, StreamAppend, StreamRead, StreamReadResult, StreamState, WithoutSnapshots,
 };
 pub use nats::kv::{
     SnapshotStoreError, checkpoint_key, list_snapshots, load_snapshot, load_snapshot_map,
