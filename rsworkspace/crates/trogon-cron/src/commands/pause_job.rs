@@ -44,7 +44,7 @@ impl Decide for PauseJobCommand {
     type DecideError = PauseJobDecisionError;
 
     fn initial_state() -> JobCommandState {
-        JobCommandState::initial()
+        JobCommandState::initial_state()
     }
 
     fn evolve(state: JobCommandState, event: JobEvent) -> Result<JobCommandState, Self::EvolveError> {

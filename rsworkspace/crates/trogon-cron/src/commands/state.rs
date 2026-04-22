@@ -20,7 +20,7 @@ impl SnapshotSchema for JobCommandState {
 }
 
 impl JobCommandState {
-    pub const fn initial() -> Self {
+    pub const fn initial_state() -> Self {
         Self::Missing
     }
 
