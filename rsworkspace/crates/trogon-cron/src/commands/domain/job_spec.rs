@@ -3,8 +3,8 @@ use std::{num::NonZeroU64, str::FromStr};
 use crate::{
     error::{CronError, JobSpecError},
     events::{
-        JobDetails, JobEventDelivery, JobEventSamplingSource, JobEventSchedule, JobEventState,
-        MessageContent, MessageHeaders, MessageSpec,
+        JobDetails, JobEventDelivery, JobEventSamplingSource, JobEventSchedule, JobEventState, MessageContent,
+        MessageEnvelope, MessageHeaders,
     },
 };
 use chrono::{DateTime, Utc};
@@ -181,11 +181,7 @@ impl ScheduleTimezone {
     pub fn new(timezone: impl Into<String>) -> Result<Self, JobSpecError> {
         let timezone = timezone.into();
         let trimmed = timezone.trim();
-        if trimmed.is_empty()
-            || trimmed != timezone
-            || trimmed
-                .chars()
-                .any(|ch| ch.is_control() || ch.is_whitespace())
+        if trimmed.is_empty() || trimmed != timezone || trimmed.chars().any(|ch| ch.is_control() || ch.is_whitespace())
         {
             return Err(JobSpecError::InvalidTimezone { timezone });
         }
@@ -369,12 +365,12 @@ pub struct SamplingSubject(DottedNatsToken);
 impl SamplingSubject {
     pub fn new(subject: impl AsRef<str>) -> Result<Self, JobSpecError> {
         let subject = subject.as_ref();
-        DottedNatsToken::new(subject).map(Self).map_err(|source| {
-            JobSpecError::InvalidSamplingSource {
+        DottedNatsToken::new(subject)
+            .map(Self)
+            .map_err(|source| JobSpecError::InvalidSamplingSource {
                 subject: subject.to_string(),
                 source,
-            }
-        })
+            })
     }
 
     pub fn as_str(&self) -> &str {
@@ -564,9 +560,7 @@ impl From<&ScheduleSpec> for JobEventSchedule {
             },
             ScheduleSpec::Cron { expr, timezone } => Self::Cron {
                 expr: expr.as_str().to_string(),
-                timezone: timezone
-                    .as_ref()
-                    .map(|timezone| timezone.as_str().to_string()),
+                timezone: timezone.as_ref().map(|timezone| timezone.as_str().to_string()),
             },
         }
     }
@@ -609,9 +603,7 @@ impl TryFrom<JobEventSamplingSource> for SamplingSource {
 
     fn try_from(value: JobEventSamplingSource) -> Result<Self, Self::Error> {
         match value {
-            JobEventSamplingSource::LatestFromSubject { subject } => {
-                Self::latest_from_subject(subject)
-            }
+            JobEventSamplingSource::LatestFromSubject { subject } => Self::latest_from_subject(subject),
         }
     }
 }
@@ -619,11 +611,7 @@ impl TryFrom<JobEventSamplingSource> for SamplingSource {
 impl From<DeliverySpec> for JobEventDelivery {
     fn from(value: DeliverySpec) -> Self {
         match value {
-            DeliverySpec::NatsEvent {
-                route,
-                ttl_sec,
-                source,
-            } => Self::NatsEvent {
+            DeliverySpec::NatsEvent { route, ttl_sec, source } => Self::NatsEvent {
                 route: route.as_str().to_string(),
                 ttl_sec: ttl_sec.map(TtlSeconds::get),
                 source: source.map(Into::into),
@@ -635,11 +623,7 @@ impl From<DeliverySpec> for JobEventDelivery {
 impl From<&DeliverySpec> for JobEventDelivery {
     fn from(value: &DeliverySpec) -> Self {
         match value {
-            DeliverySpec::NatsEvent {
-                route,
-                ttl_sec,
-                source,
-            } => Self::NatsEvent {
+            DeliverySpec::NatsEvent { route, ttl_sec, source } => Self::NatsEvent {
                 route: route.as_str().to_string(),
                 ttl_sec: ttl_sec.map(TtlSeconds::get),
                 source: source.as_ref().map(Into::into),
@@ -653,11 +637,7 @@ impl TryFrom<JobEventDelivery> for DeliverySpec {
 
     fn try_from(value: JobEventDelivery) -> Result<Self, Self::Error> {
         match value {
-            JobEventDelivery::NatsEvent {
-                route,
-                ttl_sec,
-                source,
-            } => Ok(Self::NatsEvent {
+            JobEventDelivery::NatsEvent { route, ttl_sec, source } => Ok(Self::NatsEvent {
                 route: DeliveryRoute::new(route)?,
                 ttl_sec: ttl_sec.map(TtlSeconds::new).transpose()?,
                 source: source.map(TryInto::try_into).transpose()?,
@@ -671,18 +651,9 @@ impl JobDetails {
         Ok(JobSpec {
             id,
             state: self.state.into(),
-            schedule: self
-                .schedule
-                .try_into()
-                .map_err(CronError::invalid_job_spec)?,
-            delivery: self
-                .delivery
-                .try_into()
-                .map_err(CronError::invalid_job_spec)?,
-            message: self
-                .message
-                .try_into()
-                .map_err(CronError::invalid_job_spec)?,
+            schedule: self.schedule.try_into().map_err(CronError::invalid_job_spec)?,
+            delivery: self.delivery.try_into().map_err(CronError::invalid_job_spec)?,
+            message: self.message.try_into().map_err(CronError::invalid_job_spec)?,
         })
     }
 }
@@ -709,10 +680,10 @@ impl From<&JobSpec> for JobDetails {
     }
 }
 
-impl TryFrom<MessageSpec> for JobMessage {
+impl TryFrom<MessageEnvelope> for JobMessage {
     type Error = JobSpecError;
 
-    fn try_from(value: MessageSpec) -> Result<Self, Self::Error> {
+    fn try_from(value: MessageEnvelope) -> Result<Self, Self::Error> {
         Ok(Self {
             content: value.content,
             headers: value.headers.try_into()?,
@@ -720,7 +691,7 @@ impl TryFrom<MessageSpec> for JobMessage {
     }
 }
 
-impl From<JobMessage> for MessageSpec {
+impl From<JobMessage> for MessageEnvelope {
     fn from(value: JobMessage) -> Self {
         Self {
             content: value.content,
@@ -729,7 +700,7 @@ impl From<JobMessage> for MessageSpec {
     }
 }
 
-impl From<&JobMessage> for MessageSpec {
+impl From<&JobMessage> for MessageEnvelope {
     fn from(value: &JobMessage) -> Self {
         Self {
             content: value.content.clone(),
@@ -859,16 +830,13 @@ mod tests {
                     subject: "jobs.latest".to_string(),
                 }),
             },
-            message: MessageSpec {
+            message: MessageEnvelope {
                 content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
                 headers: MessageHeaders::new([("x-kind", "heartbeat")]).unwrap(),
             },
         };
 
-        let job = details
-            .clone()
-            .try_into_job_spec(job_id("heartbeat"))
-            .unwrap();
+        let job = details.clone().try_into_job_spec(job_id("heartbeat")).unwrap();
 
         assert_eq!(job.id.as_str(), "heartbeat");
         assert_eq!(JobDetails::from(&job), details);
@@ -1021,7 +989,7 @@ mod tests {
                 ttl_sec: Some(0),
                 source: None,
             },
-            message: MessageSpec {
+            message: MessageEnvelope {
                 content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
                 headers: MessageHeaders::default(),
             },

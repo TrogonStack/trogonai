@@ -11,17 +11,15 @@ use chrono::{DateTime, Utc};
 use futures::{Stream, StreamExt};
 use trogon_eventsourcing::StreamEvent;
 use trogon_nats::SubjectTokenViolation;
-use trogon_nats::lease::{
-    LeaderElection, LeaseRenewInterval, LeaseTiming, LeaseTtl, NatsKvLease, NatsKvLeaseConfig,
-};
+use trogon_nats::lease::{LeaderElection, LeaseRenewInterval, LeaseTiming, LeaseTtl, NatsKvLease, NatsKvLeaseConfig};
 use trogon_std::{NowV7, UuidV7Generator};
 
 use crate::{
     CronJob, ResolvedJobSpec,
     error::CronError,
     events::{
-        JobAdded, JobEvent, JobEventCodec, JobEventData, JobEventState, JobPaused, JobRemoved,
-        JobResumed, RecordedJobEvent,
+        JobAdded, JobEvent, JobEventCodec, JobEventData, JobEventState, JobPaused, JobRemoved, JobResumed,
+        RecordedJobEvent,
     },
     kv::{EVENTS_SUBJECT_PREFIX, LEADER_BUCKET, LEADER_KEY, LEGACY_EVENTS_SUBJECT_PREFIX},
     nats::NatsSchedulePublisher,
@@ -36,8 +34,7 @@ const SCHEDULER_CONSUMER_NAME: &str = "cron_scheduler";
 const SCHEDULER_CONSUMER_INACTIVE_THRESHOLD: Duration = Duration::from_secs(30);
 
 type DesiredJobs = HashMap<String, DesiredJobState>;
-type SchedulerEventWatcher =
-    Pin<Box<dyn Stream<Item = Result<jetstream::Message, CronError>> + Send + 'static>>;
+type SchedulerEventWatcher = Pin<Box<dyn Stream<Item = Result<jetstream::Message, CronError>> + Send + 'static>>;
 
 enum ReestablishedProcessor {
     Ready((DesiredJobs, SchedulerEventWatcher)),
@@ -75,16 +72,13 @@ impl CronController<Store, NatsSchedulePublisher, NatsKvLease> {
             LEADER_KEY,
             LeaseTtl::from_secs(DEFAULT_LEADER_TTL.as_secs())
                 .map_err(|source| CronError::lease_source("invalid default leader TTL", source))?,
-            LeaseRenewInterval::from_secs(DEFAULT_LEADER_RENEW_INTERVAL.as_secs()).map_err(
-                |source| CronError::lease_source("invalid default leader renew interval", source),
-            )?,
+            LeaseRenewInterval::from_secs(DEFAULT_LEADER_RENEW_INTERVAL.as_secs())
+                .map_err(|source| CronError::lease_source("invalid default leader renew interval", source))?,
         )
         .map_err(|source| CronError::lease_source("invalid leader lease config", source))?;
         let leader_lock = NatsKvLease::provision(&js, &leader_config)
             .await
-            .map_err(|source| {
-                CronError::lease_source("failed to provision leader lease", source)
-            })?;
+            .map_err(|source| CronError::lease_source("failed to provision leader lease", source))?;
 
         Ok(Self {
             store,
@@ -121,8 +115,7 @@ where
     pub async fn run(self) -> Result<(), CronError> {
         let mut desired_jobs = DesiredJobs::new();
         let mut scheduler_watcher = inactive_scheduler_watcher();
-        let mut leader =
-            LeaderElection::new(self.leader_lock, self.node_id.clone(), self.leader_timing);
+        let mut leader = LeaderElection::new(self.leader_lock, self.node_id.clone(), self.leader_timing);
         let mut currently_leader = false;
         let mut heartbeat = tokio::time::interval(self.leader_timing.renew_interval() / 2);
 
@@ -232,9 +225,7 @@ fn default_leader_timing() -> Result<LeaseTiming, CronError> {
     let ttl = LeaseTtl::from_secs(DEFAULT_LEADER_TTL.as_secs())
         .map_err(|source| CronError::lease_source("invalid default leader TTL", source))?;
     let renew_interval = LeaseRenewInterval::from_secs(DEFAULT_LEADER_RENEW_INTERVAL.as_secs())
-        .map_err(|source| {
-            CronError::lease_source("invalid default leader renew interval", source)
-        })?;
+        .map_err(|source| CronError::lease_source("invalid default leader renew interval", source))?;
 
     LeaseTiming::new(ttl, renew_interval)
         .map_err(|source| CronError::lease_source("invalid default leader timing", source))
@@ -252,25 +243,15 @@ where
         .get_info()
         .await
         .map_err(|source| CronError::event_source("failed to query events stream info", source))?;
-    let desired_jobs = rebuild_scheduler_state_from_stream(
-        &stream,
-        info.state.first_sequence,
-        info.state.last_sequence,
-    )
-    .await?;
+    let desired_jobs =
+        rebuild_scheduler_state_from_stream(&stream, info.state.first_sequence, info.state.last_sequence).await?;
     reconcile_snapshot(publisher, &desired_jobs).await?;
-    let watcher = open_scheduler_event_watcher(
-        &stream,
-        next_scheduler_start_sequence(info.state.last_sequence),
-    )
-    .await?;
+    let watcher =
+        open_scheduler_event_watcher(&stream, next_scheduler_start_sequence(info.state.last_sequence)).await?;
     Ok((desired_jobs, watcher))
 }
 
-async fn reestablish_scheduler_processor<P>(
-    store: &Store,
-    publisher: &P,
-) -> Result<ReestablishedProcessor, CronError>
+async fn reestablish_scheduler_processor<P>(store: &Store, publisher: &P) -> Result<ReestablishedProcessor, CronError>
 where
     P: SchedulePublisher<Error = CronError>,
 {
@@ -310,20 +291,16 @@ async fn rebuild_scheduler_state_from_stream(
     }
 
     for sequence in first_sequence..=last_sequence {
-        let Some(message) = read_raw_scheduler_event_message(
-            stream,
-            sequence,
-            "failed to read job event from stream",
-        )
-        .await?
+        let Some(message) =
+            read_raw_scheduler_event_message(stream, sequence, "failed to read job event from stream").await?
         else {
             continue;
         };
         let event = decode_recorded_job_event(message)?;
         let stream_id = job_id_from_event_subject(&event.recorded_stream_id)?;
-        let data = event.decode_data_with(&JobEventCodec).map_err(|source| {
-            CronError::event_source("failed to decode recorded job event payload", source)
-        })?;
+        let data = event
+            .decode_data_with(&JobEventCodec)
+            .map_err(|source| CronError::event_source("failed to decode recorded job event payload", source))?;
         ensure_event_matches_stream(&stream_id, &data)?;
         let _ = apply_scheduler_event(&mut desired_jobs, data)?;
     }
@@ -331,10 +308,7 @@ async fn rebuild_scheduler_state_from_stream(
     Ok(desired_jobs)
 }
 
-fn apply_scheduler_event(
-    desired_jobs: &mut DesiredJobs,
-    event: JobEvent,
-) -> Result<SchedulerChange, CronError> {
+fn apply_scheduler_event(desired_jobs: &mut DesiredJobs, event: JobEvent) -> Result<SchedulerChange, CronError> {
     match event {
         JobEvent::JobAdded(JobAdded { id, job }) => {
             if matches!(desired_jobs.get(&id), Some(DesiredJobState::Deleted)) {
@@ -344,16 +318,10 @@ fn apply_scheduler_event(
                 ));
             }
             validate_event_job_id(&id).map_err(|source| {
-                CronError::invalid_job_spec(crate::JobSpecError::InvalidId {
-                    id: id.clone(),
-                    source,
-                })
+                CronError::invalid_job_spec(crate::JobSpecError::InvalidId { id: id.clone(), source })
             })?;
             let job = CronJob::from((id.clone(), job));
-            desired_jobs.insert(
-                job.id.clone(),
-                DesiredJobState::Present(Box::new(job.clone())),
-            );
+            desired_jobs.insert(job.id.clone(), DesiredJobState::Present(Box::new(job.clone())));
             Ok(SchedulerChange::Upsert(job))
         }
         JobEvent::JobPaused(JobPaused { id }) => {
@@ -405,9 +373,9 @@ async fn handle_scheduler_message(
 ) -> Result<SchedulerChange, CronError> {
     let event = decode_recorded_watch_message(message)?;
     let stream_id = job_id_from_event_subject(&event.recorded_stream_id)?;
-    let data = event.decode_data_with(&JobEventCodec).map_err(|source| {
-        CronError::event_source("failed to decode watched scheduler event payload", source)
-    })?;
+    let data = event
+        .decode_data_with(&JobEventCodec)
+        .map_err(|source| CronError::event_source("failed to decode watched scheduler event payload", source))?;
     ensure_event_matches_stream(&stream_id, &data)?;
     apply_scheduler_event(desired_jobs, data)
 }
@@ -492,9 +460,7 @@ async fn reconcile_snapshot<P: SchedulePublisher<Error = CronError>>(
 }
 
 fn inactive_scheduler_watcher() -> SchedulerEventWatcher {
-    Box::pin(futures::stream::pending::<
-        Result<jetstream::Message, CronError>,
-    >())
+    Box::pin(futures::stream::pending::<Result<jetstream::Message, CronError>>())
 }
 
 async fn open_scheduler_event_watcher(
@@ -511,29 +477,23 @@ async fn open_scheduler_event_watcher(
                 std::io::Error::other(source.to_string()),
             )
         })?;
-    let messages = consumer.messages().await.map_err(|source| {
-        CronError::event_source("failed to open scheduler event watch stream", source)
-    })?;
+    let messages = consumer
+        .messages()
+        .await
+        .map_err(|source| CronError::event_source("failed to open scheduler event watch stream", source))?;
 
     Ok(Box::pin(messages.map(|result| {
-        result.map_err(|source| {
-            CronError::event_source("failed to read scheduler event from consumer", source)
-        })
+        result.map_err(|source| CronError::event_source("failed to read scheduler event from consumer", source))
     })))
 }
 
-async fn recreate_scheduler_consumer(
-    stream: &jetstream::stream::Stream,
-    start_sequence: u64,
-) -> Result<(), CronError> {
+async fn recreate_scheduler_consumer(stream: &jetstream::stream::Stream, start_sequence: u64) -> Result<(), CronError> {
     match stream.consumer_info(SCHEDULER_CONSUMER_NAME).await {
         Ok(_) => {
             stream
                 .delete_consumer(SCHEDULER_CONSUMER_NAME)
                 .await
-                .map_err(|source| {
-                    CronError::event_source("failed to delete existing scheduler consumer", source)
-                })?;
+                .map_err(|source| CronError::event_source("failed to delete existing scheduler consumer", source))?;
         }
         Err(error) if matches!(error.kind(), ConsumerInfoErrorKind::NotFound) => {}
         Err(error) => {
@@ -547,9 +507,7 @@ async fn recreate_scheduler_consumer(
     stream
         .create_consumer(scheduler_consumer_config(start_sequence))
         .await
-        .map_err(|source| {
-            CronError::event_source("failed to create scheduler event consumer", source)
-        })?;
+        .map_err(|source| CronError::event_source("failed to create scheduler event consumer", source))?;
 
     Ok(())
 }
@@ -574,8 +532,7 @@ async fn read_raw_scheduler_event_message(
 }
 
 fn decode_job_event_data(payload: &[u8]) -> Result<JobEventData, CronError> {
-    JobEventData::decode(payload)
-        .map_err(|source| CronError::event_source("failed to decode stored job event", source))
+    JobEventData::decode(payload).map_err(|source| CronError::event_source("failed to decode stored job event", source))
 }
 
 fn decode_recorded_job_event(
@@ -589,18 +546,14 @@ fn decode_recorded_job_event(
     Ok(event.record(stream_id, None, log_position, recorded_at))
 }
 
-fn decode_recorded_watch_message(
-    message: &async_nats::jetstream::Message,
-) -> Result<RecordedJobEvent, CronError> {
-    let stream_message = async_nats::jetstream::message::StreamMessage::try_from(
-        message.message.clone(),
-    )
-    .map_err(|source| {
-        CronError::event_source(
-            "failed to reconstruct stream message from scheduler watch delivery",
-            source,
-        )
-    })?;
+fn decode_recorded_watch_message(message: &async_nats::jetstream::Message) -> Result<RecordedJobEvent, CronError> {
+    let stream_message =
+        async_nats::jetstream::message::StreamMessage::try_from(message.message.clone()).map_err(|source| {
+            CronError::event_source(
+                "failed to reconstruct stream message from scheduler watch delivery",
+                source,
+            )
+        })?;
 
     decode_recorded_job_event(stream_message)
 }
@@ -608,13 +561,12 @@ fn decode_recorded_watch_message(
 fn recorded_at_from_message(
     message: &async_nats::jetstream::message::StreamMessage,
 ) -> Result<DateTime<Utc>, CronError> {
-    DateTime::<Utc>::from_timestamp(message.time.unix_timestamp(), message.time.nanosecond())
-        .ok_or_else(|| {
-            CronError::event_source(
-                "failed to convert message timestamp into recorded event time",
-                std::io::Error::other(message.subject.to_string()),
-            )
-        })
+    DateTime::<Utc>::from_timestamp(message.time.unix_timestamp(), message.time.nanosecond()).ok_or_else(|| {
+        CronError::event_source(
+            "failed to convert message timestamp into recorded event time",
+            std::io::Error::other(message.subject.to_string()),
+        )
+    })
 }
 
 fn next_scheduler_start_sequence(last_sequence: u64) -> u64 {
@@ -660,10 +612,7 @@ fn job_id_from_event_subject(subject: &str) -> Result<String, CronError> {
         })
 }
 
-fn ensure_event_matches_stream(
-    expected_stream_id: &str,
-    event: &JobEvent,
-) -> Result<(), CronError> {
+fn ensure_event_matches_stream(expected_stream_id: &str, event: &JobEvent) -> Result<(), CronError> {
     if event.stream_id() == expected_stream_id {
         Ok(())
     } else {
@@ -689,13 +638,12 @@ mod tests {
     use async_nats::jetstream::consumer::{AckPolicy, DeliverPolicy, ReplayPolicy};
 
     use super::{
-        CronController, DesiredJobState, SchedulerChange, apply_scheduler_change,
-        apply_scheduler_event, default_leader_timing, next_scheduler_start_sequence,
-        reconcile_snapshot, scheduler_consumer_config,
+        CronController, DesiredJobState, SchedulerChange, apply_scheduler_change, apply_scheduler_event,
+        default_leader_timing, next_scheduler_start_sequence, reconcile_snapshot, scheduler_consumer_config,
     };
     use crate::{
-        CronJob, DeliverySpec, JobDetails, JobEnabledState, JobHeaders, JobId, JobMessage, JobSpec,
-        MessageContent, MessageHeaders, MessageSpec, ScheduleSpec,
+        CronJob, DeliverySpec, JobDetails, JobEnabledState, JobHeaders, JobId, JobMessage, JobSpec, MessageContent,
+        MessageEnvelope, MessageHeaders, ScheduleSpec,
         events::{JobAdded, JobEvent, JobEventState, JobPaused, JobRemoved, JobResumed},
         mocks::{MockCronStore, MockLeaderLock, MockSchedulePublisher},
     };
@@ -734,7 +682,7 @@ mod tests {
                 ttl_sec: None,
                 source: None,
             },
-            message: MessageSpec {
+            message: MessageEnvelope {
                 content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
                 headers: MessageHeaders::default(),
             },
@@ -820,10 +768,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(added, SchedulerChange::Upsert(expected_job("alpha")));
-        assert!(matches!(
-            desired_jobs.get("alpha"),
-            Some(DesiredJobState::Present(_))
-        ));
+        assert!(matches!(desired_jobs.get("alpha"), Some(DesiredJobState::Present(_))));
 
         let disabled = apply_scheduler_event(
             &mut desired_jobs,
@@ -858,10 +803,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(removed, SchedulerChange::Delete("alpha".to_string()));
-        assert!(matches!(
-            desired_jobs.get("alpha"),
-            Some(DesiredJobState::Deleted)
-        ));
+        assert!(matches!(desired_jobs.get("alpha"), Some(DesiredJobState::Deleted)));
 
         let error = apply_scheduler_event(
             &mut desired_jobs,
@@ -892,12 +834,9 @@ mod tests {
     async fn apply_scheduler_change_upserts_enabled_jobs() {
         let publisher = MockSchedulePublisher::new();
 
-        apply_scheduler_change(
-            &publisher,
-            &SchedulerChange::Upsert(expected_job("enabled")),
-        )
-        .await
-        .unwrap();
+        apply_scheduler_change(&publisher, &SchedulerChange::Upsert(expected_job("enabled")))
+            .await
+            .unwrap();
 
         assert_eq!(publisher.upserts(), vec!["cron.schedules.enabled"]);
         assert!(publisher.removals().is_empty());
@@ -911,10 +850,7 @@ mod tests {
 
         apply_scheduler_change(
             &publisher,
-            &SchedulerChange::Upsert(CronJob::from((
-                "disabled".to_string(),
-                JobDetails::from(disabled),
-            ))),
+            &SchedulerChange::Upsert(CronJob::from(("disabled".to_string(), JobDetails::from(disabled)))),
         )
         .await
         .unwrap();
@@ -931,12 +867,9 @@ mod tests {
         let publisher = MockSchedulePublisher::new();
         publisher.seed_active_job("invalid");
 
-        apply_scheduler_change(
-            &publisher,
-            &SchedulerChange::Upsert(invalid_enabled_job("invalid")),
-        )
-        .await
-        .unwrap();
+        apply_scheduler_change(&publisher, &SchedulerChange::Upsert(invalid_enabled_job("invalid")))
+            .await
+            .unwrap();
 
         assert!(publisher.upserts().is_empty());
         assert_eq!(publisher.removals(), vec!["invalid"]);
