@@ -23,6 +23,10 @@ pub(crate) async fn provision<C: JetStreamContext>(
         trogon_source_telegram::provision(client, cfg).await?;
         info!(source = "telegram", "stream provisioned");
     }
+    if let Some(ref cfg) = config.twitter {
+        trogon_source_twitter::provision(client, cfg).await?;
+        info!(source = "twitter", "stream provisioned");
+    }
     if let Some(ref cfg) = config.gitlab {
         trogon_source_gitlab::provision(client, cfg).await?;
         info!(source = "gitlab", "stream provisioned");
@@ -78,6 +82,9 @@ signing_secret = "slack-secret"
 [sources.telegram]
 webhook_secret = "tg-secret"
 
+[sources.twitter]
+consumer_secret = "twitter-consumer-secret"
+
 [sources.gitlab]
 webhook_secret = "gl-secret"
 
@@ -118,7 +125,7 @@ client_secret = "sentry-client-secret"
             .await
             .expect("provision should succeed");
 
-        assert_eq!(js.created_streams().len(), 9);
+        assert_eq!(js.created_streams().len(), 10);
     }
 
     #[tokio::test]
@@ -136,6 +143,9 @@ signing_secret = "slack-secret"
 
 [sources.telegram]
 webhook_secret = "tg-secret"
+
+[sources.twitter]
+consumer_secret = "twitter-consumer-secret"
 
 [sources.gitlab]
 webhook_secret = "gl-secret"
@@ -160,6 +170,6 @@ client_secret = "sentry-client-secret"
             .await
             .expect("provision should succeed");
 
-        assert_eq!(js.created_streams().len(), 8);
+        assert_eq!(js.created_streams().len(), 9);
     }
 }
