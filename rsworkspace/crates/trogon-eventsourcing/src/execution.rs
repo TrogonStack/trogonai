@@ -122,19 +122,19 @@ pub trait SnapshotPolicy<State, Event> {
     ) -> SnapshotDecision;
 }
 
-pub trait CommandSnapshots: Decide
+pub trait CommandSnapshotPolicy: Decide
 where
     Self::State: SnapshotSchema,
 {
     type SnapshotPolicy: SnapshotPolicy<Self::State, Self::Event>;
 
-    fn snapshot_policy() -> Self::SnapshotPolicy;
+    const SNAPSHOT_POLICY: Self::SnapshotPolicy;
 
     fn snapshots<'a, S>(snapshot_store: &'a S) -> Snapshots<'a, S, Self::SnapshotPolicy> {
         Snapshots::new(
             snapshot_store,
             Self::State::snapshot_store_config(),
-            Self::snapshot_policy(),
+            Self::SNAPSHOT_POLICY,
         )
     }
 }
@@ -271,7 +271,7 @@ where
 
 impl<'a, C, S> IntoSnapshots<'a, C> for &'a S
 where
-    C: CommandSnapshots,
+    C: CommandSnapshotPolicy,
     C::State: SnapshotSchema,
 {
     type Store = S;
@@ -749,23 +749,17 @@ mod tests {
         fn decide(state: &TestState, command: &Self) -> Result<Decision<TestEvent>, Self::DecideError> {
             match (state, command.action) {
                 (TestState::Missing, TestAction::Register) => {
-                    Ok(Decision::event(TestEvent::Registered {
-                        id: command.id.clone(),
-                    }))
+                    Ok(Decision::event(TestEvent::Registered { id: command.id.clone() }))
                 }
                 (TestState::Present { .. }, TestAction::Register) => Err(TestDecisionError::AlreadyRegistered),
                 (TestState::Present { enabled: false }, TestAction::Disable) => Err(TestDecisionError::AlreadyDisabled),
-                (TestState::Present { .. }, TestAction::Disable) => {
-                    Ok(Decision::event(TestEvent::StateChanged {
-                        id: command.id.clone(),
-                        enabled: false,
-                    }))
-                }
+                (TestState::Present { .. }, TestAction::Disable) => Ok(Decision::event(TestEvent::StateChanged {
+                    id: command.id.clone(),
+                    enabled: false,
+                })),
                 (TestState::Missing, TestAction::Disable | TestAction::Remove) => Err(TestDecisionError::Missing),
                 (TestState::Present { .. }, TestAction::Remove) => {
-                    Ok(Decision::event(TestEvent::Removed {
-                        id: command.id.clone(),
-                    }))
+                    Ok(Decision::event(TestEvent::Removed { id: command.id.clone() }))
                 }
             }
         }
