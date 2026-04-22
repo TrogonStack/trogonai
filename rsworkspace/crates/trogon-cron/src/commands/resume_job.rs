@@ -1,31 +1,19 @@
 use std::convert::Infallible;
 
-use serde::{Deserialize, Serialize};
-use trogon_eventsourcing::snapshot::SnapshotSchema;
 use trogon_eventsourcing::{
-    CommandExecution, CommandResult, CommandSnapshots, Decide, Decision, FrequencySnapshot,
-    NonEmpty, OccPolicy, SnapshotRead, SnapshotWrite, StreamAppend, StreamCommand, StreamRead,
+    CommandExecution, CommandResult, CommandSnapshots, Decide, Decision, FrequencySnapshot, NonEmpty, OccPolicy,
+    SnapshotRead, SnapshotWrite, StreamAppend, StreamCommand, StreamRead,
 };
 
+use super::JobCommandState;
 use crate::{
     JobEnabledState, JobId,
-    events::{JobAdded, JobEvent, JobPaused, JobRemoved, JobResumed},
+    events::{JobEvent, JobResumed},
 };
 
 #[derive(Debug, Clone)]
 pub struct ResumeJobCommand {
     pub id: JobId,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub enum ResumeJobState {
-    Missing,
-    Present { current: JobEnabledState },
-    Deleted,
-}
-
-impl SnapshotSchema for ResumeJobState {
-    const SNAPSHOT_STREAM_PREFIX: &'static str = "cron.command.resume_job.v1.";
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,63 +38,35 @@ impl StreamCommand for ResumeJobCommand {
 }
 
 impl Decide for ResumeJobCommand {
-    type State = ResumeJobState;
+    type State = JobCommandState;
     type Event = JobEvent;
     type EvolveError = Infallible;
     type DecideError = ResumeJobDecisionError;
 
-    fn initial_state() -> ResumeJobState {
-        ResumeJobState::Missing
+    fn initial_state() -> JobCommandState {
+        JobCommandState::initial()
     }
 
-    fn evolve(state: ResumeJobState, event: JobEvent) -> Result<ResumeJobState, Self::EvolveError> {
-        match event {
-            JobEvent::JobAdded(JobAdded { job, .. }) => {
-                if matches!(state, ResumeJobState::Deleted) {
-                    return Ok(ResumeJobState::Deleted);
-                }
-                Ok(ResumeJobState::Present {
-                    current: job.state.into(),
-                })
-            }
-            JobEvent::JobPaused(JobPaused { .. }) => match state {
-                ResumeJobState::Deleted => Ok(ResumeJobState::Deleted),
-                ResumeJobState::Missing | ResumeJobState::Present { .. } => {
-                    Ok(ResumeJobState::Present {
-                        current: JobEnabledState::Disabled,
-                    })
-                }
-            },
-            JobEvent::JobResumed(JobResumed { .. }) => match state {
-                ResumeJobState::Deleted => Ok(ResumeJobState::Deleted),
-                ResumeJobState::Missing | ResumeJobState::Present { .. } => {
-                    Ok(ResumeJobState::Present {
-                        current: JobEnabledState::Enabled,
-                    })
-                }
-            },
-            JobEvent::JobRemoved(JobRemoved { .. }) => Ok(ResumeJobState::Deleted),
-        }
+    fn evolve(state: JobCommandState, event: JobEvent) -> Result<JobCommandState, Self::EvolveError> {
+        state.evolve(event)
     }
 
-    fn decide(state: &ResumeJobState, command: &Self) -> Result<Decision<JobEvent>, Self::DecideError> {
+    fn decide(state: &JobCommandState, command: &Self) -> Result<Decision<JobEvent>, Self::DecideError> {
         match state {
-            ResumeJobState::Missing => Err(ResumeJobDecisionError::JobNotFound {
+            JobCommandState::Missing => Err(ResumeJobDecisionError::JobNotFound {
                 id: command.stream_id().clone(),
             }),
-            ResumeJobState::Deleted => Err(ResumeJobDecisionError::JobDeleted {
+            JobCommandState::Deleted => Err(ResumeJobDecisionError::JobDeleted {
                 id: command.stream_id().clone(),
             }),
-            ResumeJobState::Present {
+            JobCommandState::Present {
                 current: JobEnabledState::Enabled,
             } => Err(ResumeJobDecisionError::AlreadyActive {
                 id: command.stream_id().clone(),
             }),
-            ResumeJobState::Present { .. } => Ok(Decision::Event(NonEmpty::one(
-                JobEvent::JobResumed(JobResumed {
-                    id: command.stream_id().to_string(),
-                }),
-            ))),
+            JobCommandState::Present { .. } => Ok(Decision::Event(NonEmpty::one(JobEvent::JobResumed(JobResumed {
+                id: command.stream_id().to_string(),
+            })))),
         }
     }
 }
@@ -127,8 +87,8 @@ pub async fn resume_job<S, SErr>(
 where
     S: StreamRead<JobId, Error = SErr>
         + StreamAppend<JobId, Error = SErr>
-        + SnapshotRead<ResumeJobState, JobId, Error = SErr>
-        + SnapshotWrite<ResumeJobState, JobId, Error = SErr>,
+        + SnapshotRead<JobCommandState, JobId, Error = SErr>
+        + SnapshotWrite<JobCommandState, JobId, Error = SErr>,
     serde_json::Error: Into<SErr>,
 {
     CommandExecution::new(store, &command)
@@ -140,6 +100,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use trogon_eventsourcing::snapshot::SnapshotSchema;
     use trogon_eventsourcing::{
         Decision, NonEmpty, decide,
         testing::{TestCase, Timeline, decider, expect_error},
@@ -147,8 +108,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        AddJobCommand, DeliverySpec, GetJobCommand, JobEventState, JobHeaders, JobMessage, JobSpec,
-        MessageContent, PauseJobCommand, ScheduleSpec, mocks::MockCronStore,
+        AddJobCommand, DeliverySpec, GetJobCommand, JobAdded, JobEventState, JobHeaders, JobMessage, JobPaused,
+        JobSpec, MessageContent, PauseJobCommand, ScheduleSpec, mocks::MockCronStore,
     };
 
     fn job_id(id: &str) -> JobId {
@@ -176,7 +137,7 @@ mod tests {
 
     #[test]
     fn decides_resume_from_present_disabled_state() {
-        let state = ResumeJobState::Present {
+        let state = JobCommandState::Present {
             current: JobEnabledState::Disabled,
         };
         let command = ResumeJobCommand::new(JobId::parse("backup").unwrap());
@@ -192,7 +153,7 @@ mod tests {
 
     #[test]
     fn rejects_resuming_active_jobs() {
-        let state = ResumeJobState::Present {
+        let state = JobCommandState::Present {
             current: JobEnabledState::Enabled,
         };
         let command = ResumeJobCommand::new(JobId::parse("backup").unwrap());
@@ -205,7 +166,7 @@ mod tests {
 
     #[test]
     fn rejects_resuming_missing_jobs() {
-        let state = ResumeJobState::Missing;
+        let state = JobCommandState::Missing;
         let command = ResumeJobCommand::new(JobId::parse("backup").unwrap());
 
         assert!(matches!(
@@ -216,7 +177,7 @@ mod tests {
 
     #[test]
     fn rejects_resuming_deleted_jobs() {
-        let state = ResumeJobState::Deleted;
+        let state = JobCommandState::Deleted;
         let command = ResumeJobCommand::new(JobId::parse("backup").unwrap());
 
         assert!(matches!(
@@ -280,23 +241,21 @@ mod tests {
                 id: "backup".to_string(),
             })]);
 
-        Timeline::new()
-            .given([register, pause, resume])
-            .then_stream(
-                "backup",
-                [
-                    JobEvent::JobAdded(JobAdded {
-                        id: "backup".to_string(),
-                        job: crate::JobDetails::from(active_job("backup")),
-                    }),
-                    JobEvent::JobPaused(JobPaused {
-                        id: "backup".to_string(),
-                    }),
-                    JobEvent::JobResumed(JobResumed {
-                        id: "backup".to_string(),
-                    }),
-                ],
-            );
+        Timeline::new().given([register, pause, resume]).then_stream(
+            "backup",
+            [
+                JobEvent::JobAdded(JobAdded {
+                    id: "backup".to_string(),
+                    job: crate::JobDetails::from(active_job("backup")),
+                }),
+                JobEvent::JobPaused(JobPaused {
+                    id: "backup".to_string(),
+                }),
+                JobEvent::JobResumed(JobResumed {
+                    id: "backup".to_string(),
+                }),
+            ],
+        );
     }
 
     #[tokio::test]
@@ -304,13 +263,9 @@ mod tests {
         let store = MockCronStore::new();
         store.seed_job(paused_job("backup"));
 
-        let outcome = resume_job(
-            &store,
-            ResumeJobCommand::new(JobId::parse("backup").unwrap()),
-            None,
-        )
-        .await
-        .unwrap();
+        let outcome = resume_job(&store, ResumeJobCommand::new(JobId::parse("backup").unwrap()), None)
+            .await
+            .unwrap();
         assert_eq!(outcome.next_expected_version, 2);
         assert_eq!(
             outcome.events,
@@ -327,8 +282,8 @@ mod tests {
         assert_eq!(job.state, JobEventState::Enabled);
 
         let command_snapshot = store
-            .read_command_snapshot::<ResumeJobState>(
-                ResumeJobState::snapshot_store_config(),
+            .read_command_snapshot::<JobCommandState>(
+                JobCommandState::snapshot_store_config(),
                 &JobId::parse("backup").unwrap(),
             )
             .unwrap();

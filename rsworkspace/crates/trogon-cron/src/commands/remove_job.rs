@@ -1,31 +1,19 @@
 use std::convert::Infallible;
 
-use serde::{Deserialize, Serialize};
-use trogon_eventsourcing::snapshot::SnapshotSchema;
 use trogon_eventsourcing::{
-    CommandExecution, CommandResult, CommandSnapshots, Decide, Decision, FrequencySnapshot,
-    NonEmpty, OccPolicy, SnapshotRead, SnapshotWrite, StreamAppend, StreamCommand, StreamRead,
+    CommandExecution, CommandResult, CommandSnapshots, Decide, Decision, FrequencySnapshot, NonEmpty, OccPolicy,
+    SnapshotRead, SnapshotWrite, StreamAppend, StreamCommand, StreamRead,
 };
 
+use super::JobCommandState;
 use crate::{
     JobId,
-    events::{JobAdded, JobEvent, JobPaused, JobRemoved, JobResumed},
+    events::{JobEvent, JobRemoved},
 };
 
 #[derive(Debug, Clone)]
 pub struct RemoveJobCommand {
     pub id: JobId,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub enum RemoveJobState {
-    Missing,
-    Present,
-    Deleted,
-}
-
-impl SnapshotSchema for RemoveJobState {
-    const SNAPSHOT_STREAM_PREFIX: &'static str = "cron.command.remove_job.v1.";
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,38 +37,28 @@ impl StreamCommand for RemoveJobCommand {
 }
 
 impl Decide for RemoveJobCommand {
-    type State = RemoveJobState;
+    type State = JobCommandState;
     type Event = JobEvent;
     type EvolveError = Infallible;
     type DecideError = RemoveJobDecisionError;
 
-    fn initial_state() -> RemoveJobState {
-        RemoveJobState::Missing
+    fn initial_state() -> JobCommandState {
+        JobCommandState::initial()
     }
 
-    fn evolve(state: RemoveJobState, event: JobEvent) -> Result<RemoveJobState, Self::EvolveError> {
-        match event {
-            JobEvent::JobAdded(JobAdded { .. })
-            | JobEvent::JobPaused(JobPaused { .. })
-            | JobEvent::JobResumed(JobResumed { .. }) => match state {
-                RemoveJobState::Deleted => Ok(RemoveJobState::Deleted),
-                RemoveJobState::Missing | RemoveJobState::Present => Ok(RemoveJobState::Present),
-            },
-            JobEvent::JobRemoved(JobRemoved { .. }) => Ok(RemoveJobState::Deleted),
-        }
+    fn evolve(state: JobCommandState, event: JobEvent) -> Result<JobCommandState, Self::EvolveError> {
+        state.evolve(event)
     }
 
-    fn decide(state: &RemoveJobState, command: &Self) -> Result<Decision<JobEvent>, Self::DecideError> {
+    fn decide(state: &JobCommandState, command: &Self) -> Result<Decision<JobEvent>, Self::DecideError> {
         match state {
-            RemoveJobState::Missing => Err(RemoveJobDecisionError::JobNotFound {
+            JobCommandState::Missing => Err(RemoveJobDecisionError::JobNotFound {
                 id: command.stream_id().clone(),
             }),
-            RemoveJobState::Present => Ok(Decision::Event(NonEmpty::one(JobEvent::JobRemoved(
-                JobRemoved {
-                    id: command.stream_id().to_string(),
-                },
-            )))),
-            RemoveJobState::Deleted => Err(RemoveJobDecisionError::JobDeleted {
+            JobCommandState::Present { .. } => Ok(Decision::Event(NonEmpty::one(JobEvent::JobRemoved(JobRemoved {
+                id: command.stream_id().to_string(),
+            })))),
+            JobCommandState::Deleted => Err(RemoveJobDecisionError::JobDeleted {
                 id: command.stream_id().clone(),
             }),
         }
@@ -103,8 +81,8 @@ pub async fn remove_job<S, SErr>(
 where
     S: StreamRead<JobId, Error = SErr>
         + StreamAppend<JobId, Error = SErr>
-        + SnapshotRead<RemoveJobState, JobId, Error = SErr>
-        + SnapshotWrite<RemoveJobState, JobId, Error = SErr>,
+        + SnapshotRead<JobCommandState, JobId, Error = SErr>
+        + SnapshotWrite<JobCommandState, JobId, Error = SErr>,
     serde_json::Error: Into<SErr>,
 {
     CommandExecution::new(store, &command)
@@ -116,6 +94,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use trogon_eventsourcing::snapshot::SnapshotSchema;
     use trogon_eventsourcing::{
         Decision, NonEmpty, decide,
         testing::{TestCase, decider, expect_error},
@@ -123,8 +102,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        DeliverySpec, GetJobCommand, JobEnabledState, JobHeaders, JobMessage, JobSpec,
-        MessageContent, ScheduleSpec, mocks::MockCronStore,
+        DeliverySpec, GetJobCommand, JobAdded, JobEnabledState, JobHeaders, JobMessage, JobSpec, MessageContent,
+        ScheduleSpec, mocks::MockCronStore,
     };
 
     fn job_id(id: &str) -> JobId {
@@ -146,7 +125,9 @@ mod tests {
 
     #[test]
     fn decides_removal_from_present_state() {
-        let state = RemoveJobState::Present;
+        let state = JobCommandState::Present {
+            current: JobEnabledState::Enabled,
+        };
         let command = RemoveJobCommand::new(JobId::parse("backup").unwrap());
 
         let decision = decide(&state, &command).unwrap();
@@ -160,7 +141,7 @@ mod tests {
 
     #[test]
     fn rejects_removing_missing_job() {
-        let state = RemoveJobState::Missing;
+        let state = JobCommandState::Missing;
         let command = RemoveJobCommand::new(JobId::parse("backup").unwrap());
 
         assert!(matches!(
@@ -171,7 +152,7 @@ mod tests {
 
     #[test]
     fn rejects_removing_deleted_job() {
-        let state = RemoveJobState::Deleted;
+        let state = JobCommandState::Deleted;
         let command = RemoveJobCommand::new(JobId::parse("backup").unwrap());
 
         assert!(matches!(
@@ -208,13 +189,9 @@ mod tests {
         let store = MockCronStore::new();
         store.seed_job(job("backup"));
 
-        let outcome = remove_job(
-            &store,
-            RemoveJobCommand::new(JobId::parse("backup").unwrap()),
-            None,
-        )
-        .await
-        .unwrap();
+        let outcome = remove_job(&store, RemoveJobCommand::new(JobId::parse("backup").unwrap()), None)
+            .await
+            .unwrap();
         assert_eq!(outcome.next_expected_version, 2);
         assert_eq!(
             outcome.events,
@@ -232,8 +209,8 @@ mod tests {
         );
 
         let command_snapshot = store
-            .read_command_snapshot::<RemoveJobState>(
-                RemoveJobState::snapshot_store_config(),
+            .read_command_snapshot::<JobCommandState>(
+                JobCommandState::snapshot_store_config(),
                 &JobId::parse("backup").unwrap(),
             )
             .unwrap();
