@@ -1497,14 +1497,33 @@ mod tests {
         use std::error::Error as _;
 
         assert_eq!(HttpTransportError::bad_request("bad").to_string(), "bad");
+        assert!(HttpTransportError::bad_request("bad").source().is_none());
+        assert!(HttpTransportError::not_found("missing").source().is_none());
         assert_eq!(
             HttpTransportError::conflict("conflict").to_string(),
             "conflict"
+        );
+        assert!(HttpTransportError::conflict("conflict").source().is_none());
+        assert!(
+            HttpTransportError::unsupported_media_type("unsupported")
+                .source()
+                .is_none()
+        );
+        assert!(
+            HttpTransportError::not_acceptable("not-acceptable")
+                .source()
+                .is_none()
+        );
+        assert!(
+            HttpTransportError::not_implemented("not-implemented")
+                .source()
+                .is_none()
         );
         assert_eq!(
             HttpTransportError::internal("internal").to_string(),
             "internal"
         );
+        assert!(HttpTransportError::internal("internal").source().is_none());
 
         let invalid_json = IncomingHttpMessage::parse("{".to_string()).unwrap_err();
         assert_eq!(invalid_json.to_string(), "invalid JSON-RPC payload");
