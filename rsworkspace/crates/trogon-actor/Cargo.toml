@@ -1,0 +1,33 @@
+[package]
+name = "trogon-actor"
+version = "0.1.0"
+edition = "2024"
+
+[lints]
+workspace = true
+
+[dependencies]
+async-nats = { workspace = true, features = ["jetstream", "kv"] }
+bytes = { workspace = true }
+futures-util = { workspace = true }
+opentelemetry = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["sync", "time"] }
+tracing = { workspace = true }
+uuid = { workspace = true }
+trogon-nats = { workspace = true }
+trogon-registry = { workspace = true }
+trogon-transcript = { workspace = true }
+
+[dev-dependencies]
+futures-util = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+trogon-nats = { workspace = true, features = ["test-support"] }
+trogon-registry = { workspace = true, features = ["test-support"] }
+trogon-transcript = { workspace = true, features = ["test-support"] }
+testcontainers-modules = { workspace = true }
+
+[features]
+default = []
+test-support = []

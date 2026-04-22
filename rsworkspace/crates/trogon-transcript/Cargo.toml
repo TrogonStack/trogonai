@@ -1,0 +1,25 @@
+[package]
+name = "trogon-transcript"
+version = "0.1.0"
+edition = "2024"
+
+[lints]
+workspace = true
+
+[dependencies]
+async-nats = { workspace = true, features = ["jetstream"] }
+bytes = { workspace = true }
+futures-util = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+testcontainers-modules = { workspace = true }
+futures-util = { workspace = true }
+
+[features]
+default = []
+test-support = []

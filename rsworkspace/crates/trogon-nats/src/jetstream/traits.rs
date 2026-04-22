@@ -10,6 +10,8 @@ use futures::Stream;
 use std::error::Error;
 use std::future::{Future, IntoFuture};
 
+use super::message::JsDispatchMessage;
+
 pub trait JetStreamContext: Send + Sync + Clone + 'static {
     type Error: Error + Send + Sync;
     type Stream: Send;
@@ -122,7 +124,7 @@ pub trait JetStreamConsumer: Send + Sync + 'static {
     type StreamError: Error + Send + Sync;
     /// Error yielded by individual stream items. Maps to async_nats `MessagesError`.
     type MessagesError: Error + Send + Sync;
-    type Message: Send + 'static;
+    type Message: JsDispatchMessage;
     type Messages: Stream<Item = Result<Self::Message, Self::MessagesError>>
         + Unpin
         + Send

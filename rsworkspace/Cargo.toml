@@ -26,6 +26,10 @@ trogon-source-slack = { path = "crates/trogon-source-slack" }
 trogon-source-telegram = { path = "crates/trogon-source-telegram" }
 trogon-source-twitter = { path = "crates/trogon-source-twitter" }
 trogon-std = { path = "crates/trogon-std" }
+trogon-actor = { path = "crates/trogon-actor" }
+trogon-router = { path = "crates/trogon-router" }
+trogon-registry = { path = "crates/trogon-registry" }
+trogon-transcript = { path = "crates/trogon-transcript" }
 
 # ACP
 agent-client-protocol = { version = "=0.10.4", features = ["unstable_logout"] }
@@ -34,6 +38,7 @@ agent-client-protocol = { version = "=0.10.4", features = ["unstable_logout"] }
 async-compat = "=0.2.5"
 async-nats = { version = "=0.47.0", default-features = false }
 async-trait = "=0.1.89"
+reqwest = { version = "=0.12.15", default-features = false, features = ["json", "rustls-tls"] }
 axum = { version = "=0.8.8", features = ["ws"] }
 bytes = "=1.11.1"
 futures = "=0.3.32"
@@ -68,6 +73,7 @@ twilight-model = "=0.17.1"
 # Misc
 tempfile = "=3.19.1"
 uuid = { version = "=1.23.0", features = ["v4", "v7"] }
+testcontainers-modules = { version = "=0.8", features = ["nats"] }
 
 [profile.release]
 lto = "thin"
