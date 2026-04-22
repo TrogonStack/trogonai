@@ -1,6 +1,6 @@
 use trogon_eventsourcing::{
-    CommandExecution, CommandResult, CommandSnapshotPolicy, Decide, Decision, FrequencySnapshot, SnapshotRead,
-    SnapshotWrite, StreamAppend, StreamCommand, StreamRead, StreamState,
+    CommandExecution, CommandResult, CommandSnapshotPolicy, Decide, Decision, FrequencySnapshot,
+    OverrideWritePrecondition, SnapshotRead, SnapshotWrite, StreamAppend, StreamCommand, StreamRead, StreamState,
 };
 
 use super::JobState;
@@ -34,6 +34,8 @@ impl StreamCommand for PauseJobCommand {
         &self.id
     }
 }
+
+impl OverrideWritePrecondition for PauseJobCommand {}
 
 impl Decide for PauseJobCommand {
     type State = JobState;

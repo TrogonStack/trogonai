@@ -1,10 +1,9 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
 use trogon_cron::{
-    AddJobCommand, CronController, CronJob, DeliverySpec, GetJobCommand, JobDetails,
-    JobEnabledState, JobEventState, JobHeaders, JobId, JobMessage, JobSpec, JobWriteCondition,
-    ListJobsCommand, MessageContent, PauseJobCommand, RemoveJobCommand, SchedulePublisher,
-    ScheduleSpec, add_job,
+    AddJobCommand, CronController, CronJob, DeliverySpec, GetJobCommand, JobDetails, JobEnabledState, JobEventState,
+    JobHeaders, JobId, JobMessage, JobSpec, JobWriteCondition, ListJobsCommand, MessageContent, PauseJobCommand,
+    RemoveJobCommand, SchedulePublisher, ScheduleSpec, add_job,
     mocks::{MockCronStore, MockLeaderLock, MockSchedulePublisher},
     pause_job, remove_job,
 };
@@ -35,9 +34,7 @@ async fn client_register_then_get() {
     let store = MockCronStore::new();
 
     let job = base_job("backup");
-    add_job(&store, AddJobCommand::new(job), None)
-        .await
-        .unwrap();
+    add_job(&store, AddJobCommand::new(job)).await.unwrap();
 
     let got = store
         .get_job(GetJobCommand::new(JobId::parse("backup").unwrap()))
@@ -50,9 +47,7 @@ async fn client_register_then_get() {
 async fn client_pause_job_toggles_job() {
     let store = MockCronStore::new();
 
-    add_job(&store, AddJobCommand::new(base_job("toggle")), None)
-        .await
-        .unwrap();
+    add_job(&store, AddJobCommand::new(base_job("toggle"))).await.unwrap();
     pause_job(&store, PauseJobCommand::new(job_id("toggle")), None)
         .await
         .unwrap();
@@ -69,12 +64,8 @@ async fn client_pause_job_toggles_job() {
 async fn client_remove_and_list_jobs_use_store_paths() {
     let store = MockCronStore::new();
 
-    add_job(&store, AddJobCommand::new(base_job("alpha")), None)
-        .await
-        .unwrap();
-    add_job(&store, AddJobCommand::new(base_job("beta")), None)
-        .await
-        .unwrap();
+    add_job(&store, AddJobCommand::new(base_job("alpha"))).await.unwrap();
+    add_job(&store, AddJobCommand::new(base_job("beta"))).await.unwrap();
 
     let listed = store.list_jobs(ListJobsCommand).await.unwrap();
     assert_eq!(listed.len(), 2);
@@ -126,10 +117,7 @@ async fn client_rejects_invalid_source_subject() {
 #[tokio::test]
 async fn client_rejects_stale_version() {
     let error = JobWriteCondition::MustBeAtVersion(99)
-        .ensure(
-            "stale",
-            trogon_cron::config::JobWriteState::new(Some(1), true),
-        )
+        .ensure("stale", trogon_cron::config::JobWriteState::new(Some(1), true))
         .unwrap_err();
 
     assert!(matches!(

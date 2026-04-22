@@ -1,4 +1,4 @@
-use crate::execution::WritePrecondition;
+use crate::execution::StreamState;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Act;
@@ -6,12 +6,12 @@ pub struct Act;
 pub trait StreamCommand {
     type StreamId: ?Sized;
 
-    fn stream_id(&self) -> &Self::StreamId;
+    const REQUIRED_WRITE_PRECONDITION: Option<StreamState> = None;
 
-    fn write_precondition(&self) -> Option<WritePrecondition> {
-        None
-    }
+    fn stream_id(&self) -> &Self::StreamId;
 }
+
+pub trait OverrideWritePrecondition: StreamCommand {}
 
 pub trait StateMachine<Event>: Sized {
     type EvolveError;

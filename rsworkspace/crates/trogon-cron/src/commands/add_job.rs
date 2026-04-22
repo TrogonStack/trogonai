@@ -1,6 +1,6 @@
 use trogon_eventsourcing::{
     CommandExecution, CommandResult, CommandSnapshotPolicy, Decide, Decision, FrequencySnapshot, SnapshotRead,
-    SnapshotWrite, StreamAppend, StreamCommand, StreamRead, StreamState, WritePrecondition,
+    SnapshotWrite, StreamAppend, StreamCommand, StreamRead, StreamState,
 };
 
 use super::JobState;
@@ -28,13 +28,10 @@ impl AddJobCommand {
 
 impl StreamCommand for AddJobCommand {
     type StreamId = JobId;
+    const REQUIRED_WRITE_PRECONDITION: Option<StreamState> = Some(StreamState::NoStream);
 
     fn stream_id(&self) -> &Self::StreamId {
         &self.spec.id
-    }
-
-    fn write_precondition(&self) -> Option<WritePrecondition> {
-        Some(WritePrecondition::Require(StreamState::NoStream))
     }
 }
 
@@ -64,11 +61,7 @@ impl CommandSnapshotPolicy for AddJobCommand {
     const SNAPSHOT_POLICY: Self::SnapshotPolicy = super::snapshot::COMMAND_SNAPSHOT_POLICY;
 }
 
-pub async fn add_job<S, SErr>(
-    store: &S,
-    command: AddJobCommand,
-    write_precondition: Option<StreamState>,
-) -> CommandResult<AddJobCommand, SErr>
+pub async fn add_job<S, SErr>(store: &S, command: AddJobCommand) -> CommandResult<AddJobCommand, SErr>
 where
     S: StreamRead<JobId, Error = SErr>
         + StreamAppend<JobId, Error = SErr>
@@ -77,7 +70,6 @@ where
     serde_json::Error: Into<SErr>,
 {
     CommandExecution::new(store, &command)
-        .with_write_precondition(write_precondition)
         .with_snapshot(store)
         .execute()
         .await
@@ -190,7 +182,7 @@ mod tests {
     async fn run_registers_job_in_store() {
         let store = MockCronStore::new();
 
-        let outcome = add_job(&store, AddJobCommand::new(job("backup")), None).await.unwrap();
+        let outcome = add_job(&store, AddJobCommand::new(job("backup"))).await.unwrap();
         assert_eq!(outcome.next_expected_version, 1);
         assert_eq!(
             outcome.events,
@@ -217,11 +209,9 @@ mod tests {
     async fn run_rejects_adding_existing_job_with_domain_error() {
         let store = MockCronStore::new();
 
-        add_job(&store, AddJobCommand::new(job("backup")), None).await.unwrap();
+        add_job(&store, AddJobCommand::new(job("backup"))).await.unwrap();
 
-        let error = add_job(&store, AddJobCommand::new(job("backup")), None)
-            .await
-            .unwrap_err();
+        let error = add_job(&store, AddJobCommand::new(job("backup"))).await.unwrap_err();
 
         assert!(matches!(
             error,
@@ -234,7 +224,7 @@ mod tests {
     async fn run_rejects_adding_deleted_job_id() {
         let store = MockCronStore::new();
 
-        add_job(&store, AddJobCommand::new(job("backup")), None).await.unwrap();
+        add_job(&store, AddJobCommand::new(job("backup"))).await.unwrap();
         crate::remove_job(
             &store,
             crate::RemoveJobCommand::new(JobId::parse("backup").unwrap()),
@@ -243,9 +233,7 @@ mod tests {
         .await
         .unwrap();
 
-        let error = add_job(&store, AddJobCommand::new(job("backup")), None)
-            .await
-            .unwrap_err();
+        let error = add_job(&store, AddJobCommand::new(job("backup"))).await.unwrap_err();
 
         assert!(matches!(
             error,
