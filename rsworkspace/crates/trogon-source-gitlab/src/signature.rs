@@ -28,11 +28,7 @@ pub fn verify(secret: &str, provided_token: &str) -> Result<(), SignatureError> 
     let provided = Sha256::digest(provided_token.as_bytes());
 
     let ok = subtle::ConstantTimeEq::ct_eq(expected.as_slice(), provided.as_slice()).unwrap_u8();
-    if ok == 1 {
-        Ok(())
-    } else {
-        Err(SignatureError::Mismatch)
-    }
+    if ok == 1 { Ok(()) } else { Err(SignatureError::Mismatch) }
 }
 
 #[cfg(test)]

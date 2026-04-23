@@ -21,9 +21,8 @@ pub trait JetStreamContext: Send + Sync + Clone + 'static {
 }
 
 pub trait JetStreamKeyValueStatus: Send + Sync + Clone + 'static {
-    fn status(
-        &self,
-    ) -> impl Future<Output = Result<async_nats::jetstream::kv::bucket::Status, kv::StatusError>> + Send;
+    fn status(&self)
+    -> impl Future<Output = Result<async_nats::jetstream::kv::bucket::Status, kv::StatusError>> + Send;
 }
 
 pub trait JetStreamKeyValueCreateWithTtl: Send + Sync + Clone + 'static {
@@ -86,8 +85,7 @@ pub trait JetStreamGetKeyValue: Send + Sync + Clone + 'static {
 
 pub trait JetStreamPublisher: Send + Sync + Clone + 'static {
     type PublishError: Error + Send + Sync;
-    type AckFuture: IntoFuture<Output = Result<PublishAck, Self::PublishError>, IntoFuture: Send>
-        + Send;
+    type AckFuture: IntoFuture<Output = Result<PublishAck, Self::PublishError>, IntoFuture: Send> + Send;
 
     fn publish_with_headers<S: ToSubject + Send>(
         &self,
@@ -111,10 +109,8 @@ pub trait JetStreamCreateConsumer: Send + 'static {
     type Error: Error + Send + Sync;
     type Consumer: JetStreamConsumer;
 
-    fn create_consumer(
-        &self,
-        config: pull::Config,
-    ) -> impl Future<Output = Result<Self::Consumer, Self::Error>> + Send;
+    fn create_consumer(&self, config: pull::Config)
+    -> impl Future<Output = Result<Self::Consumer, Self::Error>> + Send;
 }
 
 pub trait JetStreamConsumer: Send + Sync + 'static {
@@ -123,10 +119,7 @@ pub trait JetStreamConsumer: Send + Sync + 'static {
     /// Error yielded by individual stream items. Maps to async_nats `MessagesError`.
     type MessagesError: Error + Send + Sync;
     type Message: Send + 'static;
-    type Messages: Stream<Item = Result<Self::Message, Self::MessagesError>>
-        + Unpin
-        + Send
-        + 'static;
+    type Messages: Stream<Item = Result<Self::Message, Self::MessagesError>> + Unpin + Send + 'static;
 
     fn messages(&self) -> impl Future<Output = Result<Self::Messages, Self::StreamError>> + Send;
 }
@@ -139,19 +132,13 @@ pub type JsMessageOf<J> =
 impl JetStreamKeyValueStatus for jetstream::kv::Store {
     fn status(
         &self,
-    ) -> impl Future<Output = Result<async_nats::jetstream::kv::bucket::Status, kv::StatusError>> + Send
-    {
+    ) -> impl Future<Output = Result<async_nats::jetstream::kv::bucket::Status, kv::StatusError>> + Send {
         jetstream::kv::Store::status(self)
     }
 }
 
 impl JetStreamKeyValueCreateWithTtl for jetstream::kv::Store {
-    async fn create_with_ttl(
-        &self,
-        key: &str,
-        value: Bytes,
-        ttl: std::time::Duration,
-    ) -> Result<u64, kv::CreateError> {
+    async fn create_with_ttl(&self, key: &str, value: Bytes, ttl: std::time::Duration) -> Result<u64, kv::CreateError> {
         self.create_with_ttl(key, value, ttl).await
     }
 }
@@ -163,11 +150,7 @@ impl JetStreamKeyValueUpdate for jetstream::kv::Store {
 }
 
 impl JetStreamKeyValueDeleteExpectRevision for jetstream::kv::Store {
-    async fn delete_expect_revision(
-        &self,
-        key: &str,
-        revision: Option<u64>,
-    ) -> Result<(), kv::DeleteError> {
+    async fn delete_expect_revision(&self, key: &str, revision: Option<u64>) -> Result<(), kv::DeleteError> {
         self.delete_expect_revision(key, revision).await
     }
 }

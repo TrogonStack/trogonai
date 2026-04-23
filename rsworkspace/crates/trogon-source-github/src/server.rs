@@ -4,13 +4,11 @@ use std::time::Duration;
 use crate::config::GitHubWebhookSecret;
 use crate::config::GithubConfig;
 use crate::constants::{
-    HEADER_DELIVERY, HEADER_EVENT, HEADER_SIGNATURE, HTTP_BODY_SIZE_MAX, NATS_HEADER_DELIVERY,
-    NATS_HEADER_EVENT,
+    HEADER_DELIVERY, HEADER_EVENT, HEADER_SIGNATURE, HTTP_BODY_SIZE_MAX, NATS_HEADER_DELIVERY, NATS_HEADER_EVENT,
 };
 use crate::signature;
 use axum::{
-    Router, body::Bytes, extract::DefaultBodyLimit, extract::State, http::HeaderMap,
-    http::StatusCode, routing::post,
+    Router, body::Bytes, extract::DefaultBodyLimit, extract::State, http::HeaderMap, http::StatusCode, routing::post,
 };
 use std::future::Future;
 use std::pin::Pin;
@@ -159,8 +157,7 @@ mod tests {
     use tracing_subscriber::util::SubscriberInitExt;
     use trogon_nats::jetstream::StreamMaxAge;
     use trogon_nats::jetstream::{
-        ClaimCheckPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher,
-        MockObjectStore,
+        ClaimCheckPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher, MockObjectStore,
     };
     use trogon_std::NonZeroDuration;
 
@@ -203,12 +200,7 @@ mod tests {
         router(wrap_publisher(publisher), &test_config())
     }
 
-    fn webhook_request(
-        body: &[u8],
-        event: &str,
-        delivery: &str,
-        sig: Option<&str>,
-    ) -> Request<Body> {
+    fn webhook_request(body: &[u8], event: &str, delivery: &str, sig: Option<&str>) -> Request<Body> {
         let mut builder = Request::builder()
             .method("POST")
             .uri("/webhook")
@@ -268,17 +260,11 @@ mod tests {
         assert_eq!(messages[0].subject, "github.push");
         assert_eq!(messages[0].payload, Bytes::from(&body[..]));
         assert_eq!(
-            messages[0]
-                .headers
-                .get(NATS_HEADER_EVENT)
-                .map(|v| v.as_str()),
+            messages[0].headers.get(NATS_HEADER_EVENT).map(|v| v.as_str()),
             Some("push"),
         );
         assert_eq!(
-            messages[0]
-                .headers
-                .get(NATS_HEADER_DELIVERY)
-                .map(|v| v.as_str()),
+            messages[0].headers.get(NATS_HEADER_DELIVERY).map(|v| v.as_str()),
             Some("del-1"),
         );
     }
@@ -307,12 +293,7 @@ mod tests {
         let app = mock_app(publisher.clone());
 
         let resp = app
-            .oneshot(webhook_request(
-                b"{}",
-                "push",
-                "del-3",
-                Some("sha256=deadbeef"),
-            ))
+            .oneshot(webhook_request(b"{}", "push", "del-3", Some("sha256=deadbeef")))
             .await
             .unwrap();
 
@@ -443,10 +424,7 @@ mod tests {
 
         let messages = publisher.published_messages();
         assert_eq!(
-            messages[0]
-                .headers
-                .get(NATS_HEADER_DELIVERY)
-                .map(|v| v.as_str()),
+            messages[0].headers.get(NATS_HEADER_DELIVERY).map(|v| v.as_str()),
             Some("unknown"),
         );
     }
@@ -494,9 +472,7 @@ mod tests {
 
             fn into_future(self) -> Self::IntoFuture {
                 match self {
-                    AckFuture::Fail => {
-                        Box::pin(async { Err(MockError("simulated ack failure".to_string())) })
-                    }
+                    AckFuture::Fail => Box::pin(async { Err(MockError("simulated ack failure".to_string())) }),
                     AckFuture::Hang => Box::pin(std::future::pending()),
                 }
             }
@@ -542,10 +518,7 @@ mod tests {
         };
 
         let app = Router::new()
-            .route(
-                "/webhook",
-                post(handle_webhook::<AckFailPublisher, MockObjectStore>),
-            )
+            .route("/webhook", post(handle_webhook::<AckFailPublisher, MockObjectStore>))
             .with_state(state);
 
         let body = b"{}";
@@ -577,10 +550,7 @@ mod tests {
         };
 
         let app = Router::new()
-            .route(
-                "/webhook",
-                post(handle_webhook::<AckFailPublisher, MockObjectStore>),
-            )
+            .route("/webhook", post(handle_webhook::<AckFailPublisher, MockObjectStore>))
             .with_state(state);
 
         let body = b"{}";

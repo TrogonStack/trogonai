@@ -4,14 +4,13 @@ use std::time::Duration;
 use crate::config::GitLabWebhookSecret;
 use crate::config::GitlabConfig;
 use crate::constants::{
-    HEADER_EVENT, HEADER_EVENT_UUID, HEADER_IDEMPOTENCY_KEY, HEADER_INSTANCE, HEADER_TOKEN,
-    HEADER_WEBHOOK_UUID, HTTP_BODY_SIZE_MAX, NATS_HEADER_EVENT, NATS_HEADER_EVENT_UUID,
-    NATS_HEADER_INSTANCE, NATS_HEADER_REJECT_REASON, NATS_HEADER_WEBHOOK_UUID,
+    HEADER_EVENT, HEADER_EVENT_UUID, HEADER_IDEMPOTENCY_KEY, HEADER_INSTANCE, HEADER_TOKEN, HEADER_WEBHOOK_UUID,
+    HTTP_BODY_SIZE_MAX, NATS_HEADER_EVENT, NATS_HEADER_EVENT_UUID, NATS_HEADER_INSTANCE, NATS_HEADER_REJECT_REASON,
+    NATS_HEADER_WEBHOOK_UUID,
 };
 use crate::signature;
 use axum::{
-    Router, body::Bytes, extract::DefaultBodyLimit, extract::State, http::HeaderMap,
-    http::StatusCode, routing::post,
+    Router, body::Bytes, extract::DefaultBodyLimit, extract::State, http::HeaderMap, http::StatusCode, routing::post,
 };
 use std::future::Future;
 use std::pin::Pin;
@@ -178,13 +177,9 @@ async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut>(
         .await;
     };
 
-    let webhook_uuid = headers
-        .get(HEADER_WEBHOOK_UUID)
-        .and_then(|v| v.to_str().ok());
+    let webhook_uuid = headers.get(HEADER_WEBHOOK_UUID).and_then(|v| v.to_str().ok());
     let event_uuid = headers.get(HEADER_EVENT_UUID).and_then(|v| v.to_str().ok());
-    let idempotency_key = headers
-        .get(HEADER_IDEMPOTENCY_KEY)
-        .and_then(|v| v.to_str().ok());
+    let idempotency_key = headers.get(HEADER_IDEMPOTENCY_KEY).and_then(|v| v.to_str().ok());
     let instance = headers.get(HEADER_INSTANCE).and_then(|v| v.to_str().ok());
 
     let subject = format!("{}.{}", state.subject_prefix, event_token);
@@ -228,8 +223,7 @@ mod tests {
     use tracing_subscriber::util::SubscriberInitExt;
     use trogon_nats::jetstream::StreamMaxAge;
     use trogon_nats::jetstream::{
-        ClaimCheckPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher,
-        MockObjectStore,
+        ClaimCheckPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher, MockObjectStore,
     };
 
     const TEST_SECRET: &str = "test-secret";
@@ -282,14 +276,8 @@ mod tests {
 
     #[test]
     fn reject_reason_as_str() {
-        assert_eq!(
-            RejectReason::MissingEventHeader.as_str(),
-            "missing_event_header"
-        );
-        assert_eq!(
-            RejectReason::InvalidEventToken.as_str(),
-            "invalid_event_token"
-        );
+        assert_eq!(RejectReason::MissingEventHeader.as_str(), "missing_event_header");
+        assert_eq!(RejectReason::InvalidEventToken.as_str(), "invalid_event_token");
     }
 
     #[tokio::test]
@@ -336,31 +324,19 @@ mod tests {
         assert_eq!(messages[0].subject, "gitlab.push");
         assert_eq!(messages[0].payload, Bytes::from(&body[..]));
         assert_eq!(
-            messages[0]
-                .headers
-                .get(NATS_HEADER_EVENT)
-                .map(|v| v.as_str()),
+            messages[0].headers.get(NATS_HEADER_EVENT).map(|v| v.as_str()),
             Some("push"),
         );
         assert_eq!(
-            messages[0]
-                .headers
-                .get(NATS_HEADER_WEBHOOK_UUID)
-                .map(|v| v.as_str()),
+            messages[0].headers.get(NATS_HEADER_WEBHOOK_UUID).map(|v| v.as_str()),
             Some("wh-uuid-test"),
         );
         assert_eq!(
-            messages[0]
-                .headers
-                .get(NATS_HEADER_INSTANCE)
-                .map(|v| v.as_str()),
+            messages[0].headers.get(NATS_HEADER_INSTANCE).map(|v| v.as_str()),
             Some("https://gitlab.example.com"),
         );
         assert_eq!(
-            messages[0]
-                .headers
-                .get(NATS_HEADER_EVENT_UUID)
-                .map(|v| v.as_str()),
+            messages[0].headers.get(NATS_HEADER_EVENT_UUID).map(|v| v.as_str()),
             Some("evt-uuid-test"),
         );
         assert_eq!(
@@ -408,10 +384,7 @@ mod tests {
         let publisher = MockJetStreamPublisher::new();
         let app = mock_app(publisher.clone());
 
-        let resp = app
-            .oneshot(webhook_request(b"{}", "push", None))
-            .await
-            .unwrap();
+        let resp = app.oneshot(webhook_request(b"{}", "push", None)).await.unwrap();
 
         assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
         assert!(publisher.published_subjects().is_empty());
@@ -438,10 +411,7 @@ mod tests {
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].subject, "gitlab.unroutable");
         assert_eq!(
-            messages[0]
-                .headers
-                .get(NATS_HEADER_REJECT_REASON)
-                .map(|v| v.as_str()),
+            messages[0].headers.get(NATS_HEADER_REJECT_REASON).map(|v| v.as_str()),
             Some("missing_event_header"),
         );
     }
@@ -538,10 +508,7 @@ mod tests {
 
         let messages = publisher.published_messages();
         assert!(
-            messages[0]
-                .headers
-                .get(async_nats::header::NATS_MESSAGE_ID)
-                .is_none(),
+            messages[0].headers.get(async_nats::header::NATS_MESSAGE_ID).is_none(),
             "should not set Nats-Msg-Id when Idempotency-Key is absent"
         );
     }
@@ -553,19 +520,12 @@ mod tests {
         let app = mock_app(publisher.clone());
         let body = b"{}";
         let resp = app
-            .oneshot(webhook_request(
-                body,
-                "Merge Request Hook",
-                Some(TEST_SECRET),
-            ))
+            .oneshot(webhook_request(body, "Merge Request Hook", Some(TEST_SECRET)))
             .await
             .unwrap();
 
         assert_eq!(resp.status(), StatusCode::OK);
-        assert_eq!(
-            publisher.published_subjects(),
-            vec!["gitlab.merge_request_hook"]
-        );
+        assert_eq!(publisher.published_subjects(), vec!["gitlab.merge_request_hook"]);
     }
 
     #[tokio::test]
@@ -630,9 +590,7 @@ mod tests {
 
             fn into_future(self) -> Self::IntoFuture {
                 match self {
-                    AckFuture::Fail => {
-                        Box::pin(async { Err(MockError("simulated ack failure".to_string())) })
-                    }
+                    AckFuture::Fail => Box::pin(async { Err(MockError("simulated ack failure".to_string())) }),
                     AckFuture::Hang => Box::pin(std::future::pending()),
                 }
             }
@@ -678,10 +636,7 @@ mod tests {
         };
 
         let app = Router::new()
-            .route(
-                "/webhook",
-                post(handle_webhook::<AckFailPublisher, MockObjectStore>),
-            )
+            .route("/webhook", post(handle_webhook::<AckFailPublisher, MockObjectStore>))
             .with_state(state);
 
         let body = b"{}";
@@ -711,10 +666,7 @@ mod tests {
         };
 
         let app = Router::new()
-            .route(
-                "/webhook",
-                post(handle_webhook::<AckFailPublisher, MockObjectStore>),
-            )
+            .route("/webhook", post(handle_webhook::<AckFailPublisher, MockObjectStore>))
             .with_state(state);
 
         let body = b"{}";

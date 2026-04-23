@@ -35,17 +35,12 @@ impl std::error::Error for SignatureError {
 }
 
 pub fn crc_response_token(consumer_secret: &str, crc_token: &str) -> String {
-    let mut mac = HmacSha256::new_from_slice(consumer_secret.as_bytes())
-        .expect("HMAC-SHA256 accepts any key length");
+    let mut mac = HmacSha256::new_from_slice(consumer_secret.as_bytes()).expect("HMAC-SHA256 accepts any key length");
     mac.update(crc_token.as_bytes());
     format!("sha256={}", STANDARD.encode(mac.finalize().into_bytes()))
 }
 
-pub fn verify(
-    consumer_secret: &str,
-    body: &[u8],
-    signature_header: &str,
-) -> Result<(), SignatureError> {
+pub fn verify(consumer_secret: &str, body: &[u8], signature_header: &str) -> Result<(), SignatureError> {
     let encoded_signature = signature_header
         .strip_prefix("sha256=")
         .ok_or(SignatureError::MissingPrefix)?;
@@ -54,11 +49,9 @@ pub fn verify(
         .decode(encoded_signature)
         .map_err(SignatureError::InvalidBase64)?;
 
-    let mut mac = HmacSha256::new_from_slice(consumer_secret.as_bytes())
-        .expect("HMAC-SHA256 accepts any key length");
+    let mut mac = HmacSha256::new_from_slice(consumer_secret.as_bytes()).expect("HMAC-SHA256 accepts any key length");
     mac.update(body);
-    mac.verify_slice(&expected)
-        .map_err(|_| SignatureError::Mismatch)
+    mac.verify_slice(&expected).map_err(|_| SignatureError::Mismatch)
 }
 
 #[cfg(test)]
@@ -76,18 +69,12 @@ mod tests {
     fn crc_response_token_matches_expected_format() {
         let response = crc_response_token("test-secret", "challenge");
         assert!(response.starts_with("sha256="));
-        assert_eq!(
-            response,
-            "sha256=f8xLkQodu/oLP1gQIHLxKfBLAtZZsGw7YnD8CAkvrS0="
-        );
+        assert_eq!(response, "sha256=f8xLkQodu/oLP1gQIHLxKfBLAtZZsGw7YnD8CAkvrS0=");
     }
 
     #[test]
     fn error_display_messages() {
-        assert_eq!(
-            SignatureError::MissingPrefix.to_string(),
-            "missing sha256= prefix"
-        );
+        assert_eq!(SignatureError::MissingPrefix.to_string(), "missing sha256= prefix");
         let base64_error = SignatureError::InvalidBase64(STANDARD.decode("%%%").unwrap_err());
         assert_eq!(base64_error.to_string(), "invalid base64 encoding");
         assert!(base64_error.source().is_some());

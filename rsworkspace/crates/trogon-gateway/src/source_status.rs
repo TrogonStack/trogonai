@@ -33,9 +33,7 @@ pub struct SourceStatusError {
 
 impl SourceStatusError {
     pub fn new(value: impl Into<String>) -> Self {
-        Self {
-            value: value.into(),
-        }
+        Self { value: value.into() }
     }
 }
 
@@ -62,14 +60,8 @@ mod tests {
 
     #[test]
     fn parses_enabled_and_disabled_case_insensitively() {
-        assert_eq!(
-            "enabled".parse::<SourceStatus>().unwrap(),
-            SourceStatus::Enabled
-        );
-        assert_eq!(
-            "DISABLED".parse::<SourceStatus>().unwrap(),
-            SourceStatus::Disabled
-        );
+        assert_eq!("enabled".parse::<SourceStatus>().unwrap(), SourceStatus::Enabled);
+        assert_eq!("DISABLED".parse::<SourceStatus>().unwrap(), SourceStatus::Disabled);
     }
 
     #[test]

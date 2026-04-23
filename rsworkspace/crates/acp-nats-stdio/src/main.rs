@@ -7,21 +7,13 @@ use tracing::{error, info};
 use trogon_std::time::SystemClock;
 
 #[cfg(not(coverage))]
-use {
-    acp_nats::nats, acp_telemetry::ServiceName, trogon_std::env::SystemEnv,
-    trogon_std::fs::SystemFs,
-};
+use {acp_nats::nats, acp_telemetry::ServiceName, trogon_std::env::SystemEnv, trogon_std::fs::SystemFs};
 
 #[cfg(not(coverage))]
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = config::base_config(&trogon_std::CliArgs::<config::Args>::new(), &SystemEnv)?;
-    acp_telemetry::init_logger(
-        ServiceName::AcpNatsStdio,
-        config.acp_prefix(),
-        &SystemEnv,
-        &SystemFs,
-    );
+    acp_telemetry::init_logger(ServiceName::AcpNatsStdio, config.acp_prefix(), &SystemEnv, &SystemFs);
     let config = acp_nats::apply_timeout_overrides(config, &SystemEnv);
 
     info!("ACP bridge starting");
@@ -72,11 +64,7 @@ async fn run_bridge<N, J, W, R>(
     shutdown_signal: impl std::future::Future<Output = ()>,
 ) -> Result<(), Box<dyn std::error::Error>>
 where
-    N: acp_nats::RequestClient
-        + acp_nats::PublishClient
-        + acp_nats::FlushClient
-        + acp_nats::SubscribeClient
-        + 'static,
+    N: acp_nats::RequestClient + acp_nats::PublishClient + acp_nats::FlushClient + acp_nats::SubscribeClient + 'static,
     J: acp_nats::JetStreamPublisher + acp_nats::JetStreamGetStream + 'static,
     trogon_nats::jetstream::JsMessageOf<J>: trogon_nats::jetstream::JsRequestMessage,
     W: futures::AsyncWrite + Unpin + 'static,
@@ -172,9 +160,7 @@ mod tests {
 
     impl trogon_nats::jetstream::JetStreamPublisher for MockJs {
         type PublishError = trogon_nats::mocks::MockError;
-        type AckFuture = std::future::Ready<
-            Result<async_nats::jetstream::publish::PublishAck, Self::PublishError>,
-        >;
+        type AckFuture = std::future::Ready<Result<async_nats::jetstream::publish::PublishAck, Self::PublishError>>;
 
         async fn publish_with_headers<S: async_nats::subject::ToSubject + Send>(
             &self,
@@ -182,9 +168,7 @@ mod tests {
             headers: async_nats::HeaderMap,
             payload: bytes::Bytes,
         ) -> Result<Self::AckFuture, Self::PublishError> {
-            self.publisher
-                .publish_with_headers(subject, headers, payload)
-                .await
+            self.publisher.publish_with_headers(subject, headers, payload).await
         }
     }
 

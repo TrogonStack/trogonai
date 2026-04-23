@@ -6,10 +6,7 @@ pub struct CancelledSubject {
 }
 
 impl CancelledSubject {
-    pub fn new(
-        prefix: &crate::acp_prefix::AcpPrefix,
-        session_id: &crate::session_id::AcpSessionId,
-    ) -> Self {
+    pub fn new(prefix: &crate::acp_prefix::AcpPrefix, session_id: &crate::session_id::AcpSessionId) -> Self {
         Self {
             prefix: prefix.clone(),
             session_id: session_id.clone(),
@@ -38,6 +35,5 @@ impl super::super::markers::Publishable for CancelledSubject {}
 impl super::super::markers::Subscribable for CancelledSubject {}
 
 impl super::super::stream::StreamAssignment for CancelledSubject {
-    const STREAM: Option<super::super::stream::AcpStream> =
-        Some(super::super::stream::AcpStream::Responses);
+    const STREAM: Option<super::super::stream::AcpStream> = Some(super::super::stream::AcpStream::Responses);
 }

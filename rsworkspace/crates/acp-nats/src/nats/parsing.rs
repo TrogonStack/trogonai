@@ -1,6 +1,4 @@
-use crate::constants::{
-    EXT_SUBJECT_PREFIX, SESSION_AGENT_MARKER, SESSION_CLIENT_MARKER, SESSION_PREFIX,
-};
+use crate::constants::{EXT_SUBJECT_PREFIX, SESSION_AGENT_MARKER, SESSION_CLIENT_MARKER, SESSION_PREFIX};
 use crate::ext_method_name::ExtMethodName;
 use crate::session_id::AcpSessionId;
 
@@ -212,9 +210,7 @@ mod tests {
     fn parse_agent_ext() {
         assert_eq!(
             parse_agent_subject("acp.agent.ext.my_tool").unwrap(),
-            ParsedAgentSubject::Global(GlobalAgentMethod::Ext(
-                ExtMethodName::new("my_tool").unwrap()
-            ))
+            ParsedAgentSubject::Global(GlobalAgentMethod::Ext(ExtMethodName::new("my_tool").unwrap()))
         );
     }
 
@@ -222,9 +218,7 @@ mod tests {
     fn parse_agent_ext_dotted() {
         assert_eq!(
             parse_agent_subject("acp.agent.ext.vendor.op").unwrap(),
-            ParsedAgentSubject::Global(GlobalAgentMethod::Ext(
-                ExtMethodName::new("vendor.op").unwrap()
-            ))
+            ParsedAgentSubject::Global(GlobalAgentMethod::Ext(ExtMethodName::new("vendor.op").unwrap()))
         );
     }
 
@@ -364,8 +358,7 @@ mod tests {
 
     #[test]
     fn parse_client_request_permission() {
-        let parsed =
-            parse_client_subject("acp.session.s1.client.session.request_permission").unwrap();
+        let parsed = parse_client_subject("acp.session.s1.client.session.request_permission").unwrap();
         assert_eq!(parsed.session_id.as_str(), "s1");
         assert_eq!(parsed.method, ClientMethod::SessionRequestPermission);
     }
@@ -414,8 +407,7 @@ mod tests {
 
     #[test]
     fn parse_client_ext_prompt_response() {
-        let parsed =
-            parse_client_subject("acp.session.s1.client.ext.session.prompt_response").unwrap();
+        let parsed = parse_client_subject("acp.session.s1.client.ext.session.prompt_response").unwrap();
         assert_eq!(parsed.session_id.as_str(), "s1");
         assert_eq!(parsed.method, ClientMethod::ExtSessionPromptResponse);
     }
@@ -449,8 +441,7 @@ mod tests {
 
     #[test]
     fn parse_client_prefix_containing_session_word() {
-        let parsed =
-            parse_client_subject("my.session.app.session.s1.client.fs.read_text_file").unwrap();
+        let parsed = parse_client_subject("my.session.app.session.s1.client.fs.read_text_file").unwrap();
         assert_eq!(parsed.session_id.as_str(), "s1");
         assert_eq!(parsed.method, ClientMethod::FsReadTextFile);
     }

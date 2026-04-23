@@ -4,9 +4,7 @@ use hmac::{Hmac, Mac};
 use sha2::Sha256;
 use tower::ServiceExt;
 use trogon_nats::NatsToken;
-use trogon_nats::jetstream::{
-    ClaimCheckPublisher, MaxPayload, MockJetStreamPublisher, MockObjectStore, StreamMaxAge,
-};
+use trogon_nats::jetstream::{ClaimCheckPublisher, MaxPayload, MockJetStreamPublisher, MockObjectStore, StreamMaxAge};
 use trogon_source_linear::config::{LinearConfig, LinearWebhookSecret};
 use trogon_std::NonZeroDuration;
 
@@ -86,15 +84,11 @@ async fn comment_create_preserves_full_payload() {
         .expect("request should succeed");
 
     let messages = publisher.published_messages();
-    let published: serde_json::Value =
-        serde_json::from_slice(&messages[0].payload).expect("valid JSON");
+    let published: serde_json::Value = serde_json::from_slice(&messages[0].payload).expect("valid JSON");
 
     assert_eq!(published["type"], "Comment");
     assert_eq!(published["action"], "create");
-    assert_eq!(
-        published["data"]["id"],
-        "00000000-0000-4000-8000-000000000030"
-    );
+    assert_eq!(published["data"]["id"], "00000000-0000-4000-8000-000000000030");
     assert_eq!(published["data"]["issue"]["identifier"], "STM-14");
 }
 
@@ -142,8 +136,7 @@ async fn issue_create_preserves_full_payload() {
         .expect("request should succeed");
 
     let messages = publisher.published_messages();
-    let published: serde_json::Value =
-        serde_json::from_slice(&messages[0].payload).expect("valid JSON");
+    let published: serde_json::Value = serde_json::from_slice(&messages[0].payload).expect("valid JSON");
 
     assert_eq!(published["type"], "Issue");
     assert_eq!(published["action"], "create");
@@ -180,8 +173,7 @@ async fn issue_update_with_label_change_preserves_updated_from() {
         .expect("request should succeed");
 
     let messages = publisher.published_messages();
-    let published: serde_json::Value =
-        serde_json::from_slice(&messages[0].payload).expect("valid JSON");
+    let published: serde_json::Value = serde_json::from_slice(&messages[0].payload).expect("valid JSON");
 
     assert_eq!(published["type"], "Issue");
     assert_eq!(published["action"], "update");
@@ -217,8 +209,7 @@ async fn issue_label_update_preserves_full_payload() {
         .expect("request should succeed");
 
     let messages = publisher.published_messages();
-    let published: serde_json::Value =
-        serde_json::from_slice(&messages[0].payload).expect("valid JSON");
+    let published: serde_json::Value = serde_json::from_slice(&messages[0].payload).expect("valid JSON");
 
     assert_eq!(published["type"], "IssueLabel");
     assert_eq!(published["action"], "update");

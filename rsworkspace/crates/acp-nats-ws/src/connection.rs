@@ -49,10 +49,9 @@ pub async fn handle<N, J>(
         notification_tx,
     ));
 
-    let (connection, io_task) =
-        AgentSideConnection::new(bridge.clone(), outgoing, incoming, |fut| {
-            tokio::task::spawn_local(fut);
-        });
+    let (connection, io_task) = AgentSideConnection::new(bridge.clone(), outgoing, incoming, |fut| {
+        tokio::task::spawn_local(fut);
+    });
 
     let connection = Rc::new(connection);
 
@@ -125,10 +124,7 @@ pub async fn handle<N, J>(
     }
 }
 
-async fn run_recv_pump(
-    mut ws_receiver: SplitStream<WebSocket>,
-    mut ws_recv_write: tokio::io::DuplexStream,
-) {
+async fn run_recv_pump(mut ws_receiver: SplitStream<WebSocket>, mut ws_recv_write: tokio::io::DuplexStream) {
     while let Some(Ok(msg)) = ws_receiver.next().await {
         let text = match msg {
             Message::Text(text) => text,
@@ -152,10 +148,7 @@ async fn run_recv_pump(
     }
 }
 
-async fn run_send_pump(
-    mut ws_sender: SplitSink<WebSocket, Message>,
-    ws_send_read: tokio::io::DuplexStream,
-) {
+async fn run_send_pump(mut ws_sender: SplitSink<WebSocket, Message>, ws_send_read: tokio::io::DuplexStream) {
     let mut reader = tokio::io::BufReader::new(ws_send_read);
     let mut line = String::new();
     loop {
@@ -222,9 +215,7 @@ mod tests {
 
         let messages = vec!["alpha", "beta", "gamma"];
         for msg in &messages {
-            ws.send(TungsteniteMessage::Text((*msg).into()))
-                .await
-                .unwrap();
+            ws.send(TungsteniteMessage::Text((*msg).into())).await.unwrap();
         }
 
         for expected in &messages {
@@ -245,14 +236,10 @@ mod tests {
         let url = start_echo_server().await;
         let (mut ws, _) = connect_async(&url).await.unwrap();
 
-        ws.send(TungsteniteMessage::Binary(bytes::Bytes::from_static(
-            b"ignored",
-        )))
-        .await
-        .unwrap();
-        ws.send(TungsteniteMessage::Text("kept".into()))
+        ws.send(TungsteniteMessage::Binary(bytes::Bytes::from_static(b"ignored")))
             .await
             .unwrap();
+        ws.send(TungsteniteMessage::Text("kept".into())).await.unwrap();
 
         let msg = tokio::time::timeout(Duration::from_secs(2), ws.next())
             .await

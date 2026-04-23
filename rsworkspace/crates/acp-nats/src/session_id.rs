@@ -84,10 +84,7 @@ mod tests {
     #[test]
     fn acp_session_id_rejects_dots() {
         let err = AcpSessionId::new("session.id").err().unwrap();
-        assert_eq!(
-            err,
-            SessionIdError(SubjectTokenViolation::InvalidCharacter('.'))
-        );
+        assert_eq!(err, SessionIdError(SubjectTokenViolation::InvalidCharacter('.')));
     }
 
     #[test]
@@ -100,10 +97,7 @@ mod tests {
     #[test]
     fn acp_session_id_rejects_non_ascii() {
         let err = AcpSessionId::new("séssion").err().unwrap();
-        assert_eq!(
-            err,
-            SessionIdError(SubjectTokenViolation::InvalidCharacter('é'))
-        );
+        assert_eq!(err, SessionIdError(SubjectTokenViolation::InvalidCharacter('é')));
     }
 
     #[test]
@@ -122,10 +116,7 @@ mod tests {
     fn acp_session_id_try_from_session_id() {
         let valid = SessionId::from("valid-session");
         assert!(AcpSessionId::try_from(&valid).is_ok());
-        assert_eq!(
-            AcpSessionId::try_from(&valid).unwrap().as_str(),
-            "valid-session"
-        );
+        assert_eq!(AcpSessionId::try_from(&valid).unwrap().as_str(), "valid-session");
 
         let invalid = SessionId::from("invalid.session");
         assert!(AcpSessionId::try_from(&invalid).is_err());
@@ -146,10 +137,7 @@ mod tests {
             "session_id must not be empty"
         );
         assert_eq!(
-            format!(
-                "{}",
-                SessionIdError(SubjectTokenViolation::InvalidCharacter('.'))
-            ),
+            format!("{}", SessionIdError(SubjectTokenViolation::InvalidCharacter('.'))),
             "session_id contains invalid character: '.'"
         );
         assert_eq!(

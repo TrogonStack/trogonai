@@ -30,9 +30,7 @@ where
                 span
             })
             .on_response(
-                |response: &axum::http::Response<Body>,
-                 _latency: std::time::Duration,
-                 span: &tracing::Span| {
+                |response: &axum::http::Response<Body>, _latency: std::time::Duration, span: &tracing::Span| {
                     set_server_response_span_attributes(span, response.status());
                 },
             ),
@@ -41,29 +39,16 @@ where
 
 pub fn server_request_attributes<B>(request: &Request<B>) -> Vec<KeyValue> {
     let mut attributes = vec![
-        KeyValue::new(
-            semconv::HTTP_REQUEST_METHOD,
-            request.method().as_str().to_owned(),
-        ),
+        KeyValue::new(semconv::HTTP_REQUEST_METHOD, request.method().as_str().to_owned()),
         KeyValue::new(semconv::URL_PATH, request.uri().path().to_owned()),
     ];
 
     if let Some(protocol_version) = protocol_version(request.version()) {
-        attributes.push(KeyValue::new(
-            semconv::NETWORK_PROTOCOL_VERSION,
-            protocol_version,
-        ));
+        attributes.push(KeyValue::new(semconv::NETWORK_PROTOCOL_VERSION, protocol_version));
     }
 
-    if let Some(user_agent) = request
-        .headers()
-        .get(USER_AGENT)
-        .and_then(|value| value.to_str().ok())
-    {
-        attributes.push(KeyValue::new(
-            semconv::USER_AGENT_ORIGINAL,
-            user_agent.to_owned(),
-        ));
+    if let Some(user_agent) = request.headers().get(USER_AGENT).and_then(|value| value.to_str().ok()) {
+        attributes.push(KeyValue::new(semconv::USER_AGENT_ORIGINAL, user_agent.to_owned()));
     }
 
     if let Some(authority) = request
@@ -72,10 +57,7 @@ pub fn server_request_attributes<B>(request: &Request<B>) -> Vec<KeyValue> {
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.parse::<Authority>().ok())
     {
-        attributes.push(KeyValue::new(
-            semconv::SERVER_ADDRESS,
-            authority.host().to_owned(),
-        ));
+        attributes.push(KeyValue::new(semconv::SERVER_ADDRESS, authority.host().to_owned()));
         if let Some(port) = authority.port_u16() {
             attributes.push(KeyValue::new(semconv::SERVER_PORT, i64::from(port)));
         }
@@ -122,10 +104,9 @@ mod tests {
 
     #[tokio::test]
     async fn instrument_router_executes_trace_callbacks() {
-        let app = instrument_router(Router::<()>::new().route(
-            "/-/liveness",
-            axum::routing::get(|| async { StatusCode::OK }),
-        ));
+        let app = instrument_router(
+            Router::<()>::new().route("/-/liveness", axum::routing::get(|| async { StatusCode::OK })),
+        );
 
         let response = app
             .oneshot(
@@ -164,10 +145,7 @@ mod tests {
             "POST"
         );
         assert_eq!(
-            value_for(&attributes, semconv::URL_PATH)
-                .unwrap()
-                .as_str()
-                .as_ref(),
+            value_for(&attributes, semconv::URL_PATH).unwrap().as_str().as_ref(),
             "/github/webhook"
         );
         assert_eq!(
@@ -192,10 +170,7 @@ mod tests {
             "gateway.test"
         );
         assert_eq!(
-            value_for(&attributes, semconv::SERVER_PORT)
-                .unwrap()
-                .as_str()
-                .as_ref(),
+            value_for(&attributes, semconv::SERVER_PORT).unwrap().as_str().as_ref(),
             "8443"
         );
     }
@@ -219,10 +194,7 @@ mod tests {
             "GET"
         );
         assert_eq!(
-            value_for(&attributes, semconv::URL_PATH)
-                .unwrap()
-                .as_str()
-                .as_ref(),
+            value_for(&attributes, semconv::URL_PATH).unwrap().as_str().as_ref(),
             "/-/liveness"
         );
         assert_eq!(

@@ -27,13 +27,8 @@ where
     info!(session_id = %args.session_id, "Close session request");
 
     let session_id = AcpSessionId::try_from(&args.session_id).map_err(|e| {
-        bridge
-            .metrics
-            .record_error("session_validate", "invalid_session_id");
-        Error::new(
-            ErrorCode::InvalidParams.into(),
-            format!("Invalid session ID: {}", e),
-        )
+        bridge.metrics.record_error("session_validate", "invalid_session_id");
+        Error::new(ErrorCode::InvalidParams.into(), format!("Invalid session ID: {}", e))
     })?;
     let prefix = bridge.config.acp_prefix_ref();
     let subject = session::agent::CloseSubject::new(prefix, &session_id);
@@ -53,9 +48,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::agent::test_support::{
-        has_request_metric, mock_bridge, mock_bridge_with_metrics, set_js_response,
-    };
+    use crate::agent::test_support::{has_request_metric, mock_bridge, mock_bridge_with_metrics, set_js_response};
     use agent_client_protocol::{Agent, CloseSessionRequest, CloseSessionResponse, ErrorCode};
 
     #[tokio::test]

@@ -8,8 +8,8 @@ use bytes::Bytes;
 
 use super::message::{JsAck, JsAckWith, JsDoubleAck, JsDoubleAckWith, JsMessageRef};
 use super::traits::{
-    JetStreamConsumer, JetStreamContext, JetStreamCreateConsumer, JetStreamCreateKeyValue,
-    JetStreamGetKeyValue, JetStreamGetStream, JetStreamPublisher,
+    JetStreamConsumer, JetStreamContext, JetStreamCreateConsumer, JetStreamCreateKeyValue, JetStreamGetKeyValue,
+    JetStreamGetStream, JetStreamPublisher,
 };
 
 #[derive(Clone)]
@@ -52,9 +52,7 @@ impl JetStreamPublisher for NatsJetStreamClient {
         headers: HeaderMap,
         payload: Bytes,
     ) -> Result<Self::AckFuture, Self::PublishError> {
-        self.context
-            .publish_with_headers(subject, headers, payload)
-            .await
+        self.context.publish_with_headers(subject, headers, payload).await
     }
 }
 
@@ -140,10 +138,7 @@ impl JetStreamCreateConsumer for jetstream::stream::Stream {
     type Error = ConsumerError;
     type Consumer = NatsJetStreamConsumer;
 
-    async fn create_consumer(
-        &self,
-        config: pull::Config,
-    ) -> Result<NatsJetStreamConsumer, ConsumerError> {
+    async fn create_consumer(&self, config: pull::Config) -> Result<NatsJetStreamConsumer, ConsumerError> {
         self.create_consumer(config).await
     }
 }

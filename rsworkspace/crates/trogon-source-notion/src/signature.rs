@@ -34,22 +34,16 @@ impl std::error::Error for SignatureError {
     }
 }
 
-pub fn verify(
-    secret: &NotionVerificationToken,
-    body: &[u8],
-    signature_header: &str,
-) -> Result<(), SignatureError> {
+pub fn verify(secret: &NotionVerificationToken, body: &[u8], signature_header: &str) -> Result<(), SignatureError> {
     let hex_signature = signature_header
         .strip_prefix("sha256=")
         .ok_or(SignatureError::MissingPrefix)?;
 
     let expected = hex::decode(hex_signature).map_err(SignatureError::InvalidHex)?;
 
-    let mut mac = HmacSha256::new_from_slice(secret.as_str().as_bytes())
-        .expect("HMAC-SHA256 accepts any key length");
+    let mut mac = HmacSha256::new_from_slice(secret.as_str().as_bytes()).expect("HMAC-SHA256 accepts any key length");
     mac.update(body);
-    mac.verify_slice(&expected)
-        .map_err(|_| SignatureError::Mismatch)
+    mac.verify_slice(&expected).map_err(|_| SignatureError::Mismatch)
 }
 
 #[cfg(test)]
@@ -66,10 +60,7 @@ mod tests {
 
     #[test]
     fn error_display_messages() {
-        assert_eq!(
-            SignatureError::MissingPrefix.to_string(),
-            "missing sha256= prefix"
-        );
+        assert_eq!(SignatureError::MissingPrefix.to_string(), "missing sha256= prefix");
         let hex_err = SignatureError::InvalidHex(hex::decode("zz").unwrap_err());
         assert_eq!(hex_err.to_string(), "invalid hex encoding");
         assert!(hex_err.source().is_some());
