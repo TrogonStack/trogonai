@@ -496,11 +496,6 @@ fn dispatch_to_get_listeners(
         let mut retained = Vec::with_capacity(listeners.len());
 
         for listener in listeners.drain(..) {
-            if delivered {
-                retained.push(listener);
-                continue;
-            }
-
             match listener.try_send(frame.clone()) {
                 Ok(()) => {
                     delivered = true;
@@ -2130,7 +2125,7 @@ mod tests {
     }
 
     #[test]
-    fn dispatch_to_get_listeners_delivers_each_message_on_only_one_stream() {
+    fn dispatch_to_get_listeners_broadcasts_each_message_to_all_streams() {
         let session_id = session_id();
         let mut get_listeners = HashMap::new();
         let (first_tx, mut first_rx) = mpsc::channel(HTTP_CHANNEL_CAPACITY);
@@ -2144,10 +2139,7 @@ mod tests {
 
         assert!(matches!(outcome, ListenerDispatch::Delivered));
         assert!(matches!(first_rx.try_recv(), Ok(SseFrame::Json { .. })));
-        assert!(matches!(
-            second_rx.try_recv(),
-            Err(tokio::sync::mpsc::error::TryRecvError::Empty)
-        ));
+        assert!(matches!(second_rx.try_recv(), Ok(SseFrame::Json { .. })));
     }
 
     #[test]

@@ -191,6 +191,7 @@ mod tests {
     use super::*;
     use crate::constants::{ACP_CONNECTION_ID_HEADER, ACP_PROTOCOL_VERSION_HEADER, ACP_SESSION_ID_HEADER};
     use acp_nats::Config;
+    use agent_client_protocol::{ContentBlock, ContentChunk, SessionNotification, SessionUpdate};
     use axum::body::{Body, to_bytes};
     use axum::http::header::{ACCEPT, CONTENT_TYPE};
     use axum::http::{Request, StatusCode};
@@ -333,6 +334,39 @@ mod tests {
             .filter(|json| !json.is_empty())
             .map(|json| serde_json::from_str(json).unwrap())
             .collect()
+    }
+
+    async fn next_json_sse_event<S>(stream: &mut S) -> Value
+    where
+        S: futures_util::Stream<Item = Result<bytes::Bytes, reqwest::Error>> + Unpin,
+    {
+        let mut buffer = String::new();
+
+        loop {
+            let chunk = tokio::time::timeout(Duration::from_secs(2), stream.next())
+                .await
+                .expect("timeout waiting for SSE chunk")
+                .expect("SSE stream ended")
+                .expect("failed to read SSE chunk");
+            buffer.push_str(&String::from_utf8_lossy(&chunk));
+
+            let mut consumed = 0usize;
+            while let Some(relative_end) = buffer[consumed..].find('\n') {
+                let end = consumed + relative_end;
+                let line = buffer[consumed..end].trim_end_matches('\r');
+                consumed = end + 1;
+
+                if let Some(json) = line.strip_prefix("data: ")
+                    && !json.is_empty()
+                {
+                    return serde_json::from_str(json).unwrap();
+                }
+            }
+
+            if consumed > 0 {
+                buffer.drain(..consumed);
+            }
+        }
     }
 
     fn http_post_request(body: &str) -> Request<Body> {
@@ -1099,6 +1133,122 @@ mod tests {
 
         let _ = shutdown_tx.send(true);
         drop(app);
+        conn_thread.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn streamable_http_get_broadcasts_session_updates_to_all_active_listeners() {
+        let nats_mock = AdvancedMockNatsClient::new();
+        let notification_tx = nats_mock.inject_messages();
+        nats_mock.set_response(
+            "acp.agent.initialize",
+            r#"{"agentCapabilities":{"loadSession":false,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":0}"#
+                .into(),
+        );
+        nats_mock.set_response("acp.agent.session.new", r#"{"sessionId":"test-session-1"}"#.into());
+
+        let (addr, shutdown_tx, server_task, conn_thread) = start_test_server(nats_mock).await;
+        let client = reqwest::Client::builder().build().unwrap();
+        let url = format!("http://{}{}", addr, ACP_ENDPOINT);
+
+        let initialize = client
+            .post(&url)
+            .header(CONTENT_TYPE.as_str(), "application/json")
+            .header(ACCEPT.as_str(), "application/json, text/event-stream")
+            .body(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(initialize.status(), StatusCode::OK);
+        let connection_id = initialize
+            .headers()
+            .get(ACP_CONNECTION_ID_HEADER)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let _ = sse_events(&initialize.text().await.unwrap());
+
+        let session_new = client
+            .post(&url)
+            .header(CONTENT_TYPE.as_str(), "application/json")
+            .header(ACCEPT.as_str(), "application/json, text/event-stream")
+            .header(ACP_CONNECTION_ID_HEADER, &connection_id)
+            .header(ACP_PROTOCOL_VERSION_HEADER, "0")
+            .body(r#"{"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":".","mcpServers":[]}}"#)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(session_new.status(), StatusCode::OK);
+        let session_id = session_new
+            .headers()
+            .get(ACP_SESSION_ID_HEADER)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let _ = sse_events(&session_new.text().await.unwrap());
+
+        let first_get = client
+            .get(&url)
+            .header(ACCEPT.as_str(), "text/event-stream")
+            .header(ACP_CONNECTION_ID_HEADER, &connection_id)
+            .header(ACP_PROTOCOL_VERSION_HEADER, "0")
+            .header(ACP_SESSION_ID_HEADER, &session_id)
+            .send()
+            .await
+            .unwrap();
+        let second_get = client
+            .get(&url)
+            .header(ACCEPT.as_str(), "text/event-stream")
+            .header(ACP_CONNECTION_ID_HEADER, &connection_id)
+            .header(ACP_PROTOCOL_VERSION_HEADER, "0")
+            .header(ACP_SESSION_ID_HEADER, &session_id)
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(first_get.status(), StatusCode::OK);
+        assert_eq!(second_get.status(), StatusCode::OK);
+
+        let notification = SessionNotification::new(
+            session_id.clone(),
+            SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::from("fanout"))),
+        );
+        let payload = serde_json::to_vec(&notification).unwrap();
+        notification_tx
+            .unbounded_send(async_nats::Message {
+                subject: format!("acp.session.{}.client.session.update", session_id).into(),
+                reply: None,
+                payload: payload.clone().into(),
+                headers: None,
+                length: payload.len(),
+                status: None,
+                description: None,
+            })
+            .unwrap();
+
+        let mut first_stream = first_get.bytes_stream();
+        let mut second_stream = second_get.bytes_stream();
+        let expected = json!({
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": serde_json::to_value(notification).unwrap(),
+        });
+        let (first_event, second_event) = tokio::join!(
+            next_json_sse_event(&mut first_stream),
+            next_json_sse_event(&mut second_stream)
+        );
+
+        assert_eq!(first_event, expected);
+        assert_eq!(second_event, expected);
+
+        drop(first_stream);
+        drop(second_stream);
+        shutdown_tx.send(true).unwrap();
+        let _ = tokio::time::timeout(Duration::from_secs(2), server_task)
+            .await
+            .expect("server task did not shut down");
         conn_thread.join().unwrap();
     }
 }
