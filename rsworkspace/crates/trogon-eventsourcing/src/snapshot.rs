@@ -101,3 +101,24 @@ impl<T> SnapshotChange<T> {
         }
     }
 }
+
+pub trait SnapshotRead<SnapshotPayload, StreamId: ?Sized>: Send + Sync {
+    type Error;
+
+    fn load_snapshot(
+        &self,
+        config: SnapshotStoreConfig,
+        stream_id: &StreamId,
+    ) -> impl std::future::Future<Output = Result<Option<Snapshot<SnapshotPayload>>, Self::Error>> + Send;
+}
+
+pub trait SnapshotWrite<SnapshotPayload, StreamId: ?Sized>: Send + Sync {
+    type Error;
+
+    fn save_snapshot(
+        &self,
+        config: SnapshotStoreConfig,
+        stream_id: &StreamId,
+        snapshot: Snapshot<SnapshotPayload>,
+    ) -> impl std::future::Future<Output = Result<(), Self::Error>> + Send;
+}
