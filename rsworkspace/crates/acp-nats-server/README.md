@@ -6,7 +6,7 @@ For managed NATS infrastructure in production, we recommend <a href="https://syn
 
 ```mermaid
 graph LR
-    A1[Client1] <-->|http or ws| B[acp-nats-ws]
+    A1[Client1] <-->|http or ws| B[acp-nats-server]
     A2[Client2] <-->|http or ws| B
     AN[ClientN] <-->|ws| B
     B <-->|NATS| C[Backend]
@@ -26,9 +26,9 @@ graph LR
 ```bash
 docker run -p 4222:4222 nats:latest
 
-cargo build --release -p acp-nats-ws
+cargo build --release -p acp-nats-server
 
-./target/release/acp-nats-ws
+./target/release/acp-nats-server
 ```
 
 Connect with any WebSocket client:
@@ -55,12 +55,14 @@ When clients send an `Origin` header, `/acp` validates it against the bound host
 
 ## Configuration
 
-### WebSocket Server
+### Server
 
 | Variable | CLI Flag | Description | Default |
 |----------|----------|-------------|---------|
-| `ACP_WS_HOST` | `--host` | Listen address | `127.0.0.1` |
-| `ACP_WS_PORT` | `--port` | Listen port | `8080` |
+| `ACP_SERVER_HOST` | `--host` | Listen address | `127.0.0.1` |
+| `ACP_SERVER_PORT` | `--port` | Listen port | `8080` |
+
+Legacy `ACP_WS_HOST` and `ACP_WS_PORT` are still accepted for compatibility.
 
 ### ACP
 
@@ -110,4 +112,4 @@ Traces, metrics, and logs are exported over HTTP. The following [OTLP environmen
 | `OTEL_EXPORTER_OTLP_TIMEOUT` | Export timeout in milliseconds (default: `10000`) |
 | `OTEL_RESOURCE_ATTRIBUTES` | Additional resource attributes, comma-separated `key=value` pairs |
 
-`OTEL_SERVICE_NAME` is hardcoded to `acp-nats-ws` and cannot be overridden.
+`OTEL_SERVICE_NAME` is hardcoded to `acp-nats-server` and cannot be overridden.
