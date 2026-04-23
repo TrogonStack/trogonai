@@ -65,7 +65,7 @@ mod tests {
     use trogon_eventsourcing::snapshot::SnapshotSchema;
     use trogon_eventsourcing::{
         CommandExecution, NonEmpty,
-        testing::{TestCase, Timeline, decider, expect_error},
+        testing::{TestCase, Timeline, decider},
     };
 
     use super::*;
@@ -121,9 +121,9 @@ mod tests {
                 job: crate::JobDetails::from(active_job("backup")),
             }])
             .when(ResumeJobCommand::new(JobId::parse("backup").unwrap()))
-            .then(expect_error(ResumeJobDecisionError::AlreadyActive {
+            .then_error(ResumeJobDecisionError::AlreadyActive {
                 id: JobId::parse("backup").unwrap(),
-            }));
+            });
     }
 
     #[test]
@@ -131,9 +131,9 @@ mod tests {
         TestCase::new(decider::<ResumeJobCommand>())
             .given_no_history()
             .when(ResumeJobCommand::new(JobId::parse("backup").unwrap()))
-            .then(expect_error(ResumeJobDecisionError::JobNotFound {
+            .then_error(ResumeJobDecisionError::JobNotFound {
                 id: JobId::parse("backup").unwrap(),
-            }));
+            });
     }
 
     #[test]
@@ -150,9 +150,9 @@ mod tests {
                 id: "backup".to_string(),
             }])
             .when(ResumeJobCommand::new(JobId::parse("backup").unwrap()))
-            .then(expect_error(ResumeJobDecisionError::JobDeleted {
+            .then_error(ResumeJobDecisionError::JobDeleted {
                 id: JobId::parse("backup").unwrap(),
-            }));
+            });
     }
 
     #[test]

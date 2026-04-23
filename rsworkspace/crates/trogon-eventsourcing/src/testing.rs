@@ -22,13 +22,6 @@ pub const fn decider<C>() -> Decider<C> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExpectedError<E>(E);
-
-pub const fn expect_error<E>(error: E) -> ExpectedError<E> {
-    ExpectedError(error)
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ThenEvents<Event> {
     stream_id: String,
     given: Vec<Event>,
@@ -184,10 +177,11 @@ pub struct NoHistory;
 pub struct When<Event, State, Command> {
     history: Vec<Event>,
     state: State,
+    expected_state: Option<State>,
     command: Command,
 }
 
-#[must_use = "test cases must be completed with .then(...)"]
+#[must_use = "test cases must be completed with .then(...) or .then_error(...)"]
 pub struct TestCase<C, Stage = Start> {
     marker: PhantomData<fn() -> C>,
     stage: Stage,
@@ -261,6 +255,7 @@ where
             stage: When {
                 history: Vec::new(),
                 state: C::State::initial_state(),
+                expected_state: None,
                 command,
             },
             completed: false,
@@ -297,6 +292,7 @@ where
             stage: When {
                 history,
                 state,
+                expected_state: None,
                 command,
             },
             completed: false,
@@ -307,17 +303,48 @@ where
 impl<C> TestCase<C, When<C::Event, C::State, C>>
 where
     C: Decide,
+    C::State: PartialEq + Debug,
     C::Event: Clone + PartialEq + Debug,
     C::DecideError: PartialEq + Debug,
     C::StreamId: std::fmt::Display,
 {
+    pub fn state(mut self, state: C::State) -> Self {
+        self.stage.expected_state = Some(state);
+        self
+    }
+
     pub fn then<E>(mut self, expectation: E) -> E::Output
     where
         E: ThenExpectation<C>,
     {
         self.completed = true;
+        assert_expected_state(self.stage.expected_state.as_ref(), &self.stage.state);
         let actual = C::decide(&self.stage.state, &self.stage.command);
         expectation.assert_matches(std::mem::take(&mut self.stage.history), &self.stage.command, actual)
+    }
+
+    pub fn then_error(mut self, expected_error: C::DecideError) -> ThenError<C::Event, C::DecideError> {
+        self.completed = true;
+        assert_expected_state(self.stage.expected_state.as_ref(), &self.stage.state);
+        let actual = C::decide(&self.stage.state, &self.stage.command);
+
+        match actual {
+            Err(error) => assert_eq!(
+                error, expected_error,
+                "then_error(...) expected an exact domain error, but the error did not match"
+            ),
+            Ok(Decision::Event(events)) => panic!(
+                "then_error(...) expected an error, but decide(...) emitted events:\nexpected error = {:?}\nactual events = {:?}",
+                expected_error,
+                events.as_slice(),
+            ),
+        }
+
+        ThenError {
+            stream_id: self.stage.command.stream_id().to_string(),
+            given: std::mem::take(&mut self.stage.history),
+            error: expected_error,
+        }
     }
 }
 
@@ -325,7 +352,7 @@ impl<C, Stage> Drop for TestCase<C, Stage> {
     fn drop(&mut self) {
         assert!(
             self.completed || std::thread::panicking(),
-            "test cases must be completed with .then(...)"
+            "test cases must be completed with .then(...) or .then_error(...)"
         );
     }
 }
@@ -422,41 +449,6 @@ where
     }
 }
 
-impl<C> ThenExpectation<C> for ExpectedError<C::DecideError>
-where
-    C: Decide,
-    C::Event: Clone + PartialEq + Debug,
-    C::DecideError: PartialEq + Debug,
-    C::StreamId: std::fmt::Display,
-{
-    type Output = ThenError<C::Event, C::DecideError>;
-
-    fn assert_matches(
-        self,
-        given: Vec<C::Event>,
-        command: &C,
-        actual: Result<Decision<C::Event>, C::DecideError>,
-    ) -> Self::Output {
-        match actual {
-            Err(error) => assert_eq!(
-                error, self.0,
-                "then(...) expected an exact domain error, but the error did not match"
-            ),
-            Ok(Decision::Event(events)) => panic!(
-                "then(...) expected an error, but decide(...) emitted events:\nexpected error = {:?}\nactual events = {:?}",
-                self.0,
-                events.as_slice(),
-            ),
-        }
-
-        ThenError {
-            stream_id: command.stream_id().to_string(),
-            given,
-            error: self.0,
-        }
-    }
-}
-
 fn assert_events_match<C>(
     expected: Vec<C::Event>,
     given: Vec<C::Event>,
@@ -489,10 +481,17 @@ where
     }
 }
 
+fn assert_expected_state<State>(expected: Option<&State>, actual: &State)
+where
+    State: PartialEq + Debug,
+{
+    if let Some(expected) = expected {
+        assert_eq!(actual, expected, "state(...) replayed state did not match expectation");
+    }
+}
+
 mod private {
     use crate::{Decide, NonEmpty};
-
-    use super::ExpectedError;
 
     pub trait Sealed<C>
     where
@@ -515,8 +514,6 @@ mod private {
         E: Into<C::Event>,
     {
     }
-
-    impl<C> Sealed<C> for ExpectedError<C::DecideError> where C: Decide {}
 }
 
 #[cfg(test)]
@@ -691,9 +688,38 @@ mod tests {
                 id: "alpha".to_string(),
             }])
             .when(TestCommand::register("alpha"))
-            .then(expect_error(TestCommandError::AlreadyRegistered {
+            .then_error(TestCommandError::AlreadyRegistered {
                 id: "alpha".to_string(),
-            }));
+            });
+    }
+
+    #[test]
+    fn state_can_assert_replayed_state_before_events() {
+        TestCase::new(decider::<TestCommand>())
+            .given([TestEvent::Registered {
+                id: "alpha".to_string(),
+            }])
+            .when(TestCommand::disable("alpha"))
+            .state(TestState::Present { enabled: true })
+            .then([TestEvent::Disabled {
+                id: "alpha".to_string(),
+            }]);
+    }
+
+    #[test]
+    fn state_can_assert_replayed_state_before_errors() {
+        TestCase::new(decider::<TestCommand>())
+            .given([TestEvent::Registered {
+                id: "alpha".to_string(),
+            }])
+            .given([TestEvent::Disabled {
+                id: "alpha".to_string(),
+            }])
+            .when(TestCommand::disable("alpha"))
+            .state(TestState::Present { enabled: false })
+            .then_error(TestCommandError::AlreadyDisabled {
+                id: "alpha".to_string(),
+            });
     }
 
     #[test]
@@ -727,13 +753,13 @@ mod tests {
     }
 
     #[test]
-    fn then_expected_error_wrapper_works() {
+    fn then_error_works() {
         let error = TestCase::new(decider::<TestCommand>())
             .given_no_history()
             .when(TestCommand::remove("alpha"))
-            .then(expect_error(TestCommandError::JobNotFound {
+            .then_error(TestCommandError::JobNotFound {
                 id: "alpha".to_string(),
-            }));
+            });
 
         assert_eq!(error.stream_id(), "alpha");
         assert_eq!(error.given_events(), []);
@@ -876,7 +902,7 @@ mod tests {
         .unwrap_err();
 
         let message = panic_message(&panic);
-        assert!(message.contains("test cases must be completed with .then(...)"));
+        assert!(message.contains("test cases must be completed with .then(...) or .then_error(...)"));
     }
 
     #[test]
@@ -903,14 +929,14 @@ mod tests {
             TestCase::new(decider::<TestCommand>())
                 .given_no_history()
                 .when(TestCommand::register("alpha"))
-                .then(expect_error(TestCommandError::JobNotFound {
+                .then_error(TestCommandError::JobNotFound {
                     id: "alpha".to_string(),
-                }));
+                });
         }))
         .unwrap_err();
 
         let message = panic_message(&panic);
-        assert!(message.contains("then(...) expected an error"));
+        assert!(message.contains("then_error(...) expected an error"));
         assert!(message.contains("JobNotFound"));
         assert!(message.contains("Registered"));
     }
