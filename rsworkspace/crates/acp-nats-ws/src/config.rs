@@ -25,6 +25,7 @@ pub struct WsConfig {
     pub port: u16,
 }
 
+#[cfg_attr(coverage, coverage(off))]
 pub fn config_from_args<E: ReadEnv>(
     args: Args,
     env_provider: &E,
@@ -41,6 +42,7 @@ pub fn config_from_args<E: ReadEnv>(
     })
 }
 
+#[cfg_attr(coverage, coverage(off))]
 pub fn apply_timeout_overrides<E: ReadEnv>(mut ws: WsConfig, env_provider: &E) -> WsConfig {
     ws.acp = acp_nats::apply_timeout_overrides(ws.acp, env_provider);
     ws

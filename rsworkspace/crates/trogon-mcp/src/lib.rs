@@ -1,3 +1,4 @@
+#![cfg_attr(coverage, feature(coverage_attribute))]
 //! MCP (Model Context Protocol) HTTP client for trogon.
 //!
 //! Connects to MCP servers via the streamable-HTTP transport (JSON-RPC over

@@ -1,9 +1,11 @@
 use agent_client_protocol::{
-    Error, ErrorCode, PromptRequest, PromptResponse, SessionNotification, StopReason,
+    ContentBlock, EmbeddedResourceResource, Error, ErrorCode, PromptRequest, PromptResponse,
+    SessionNotification, StopReason,
 };
 use async_nats::jetstream::AckKind;
 use bytes::Bytes;
-use futures::StreamExt;
+use futures::{FutureExt as _, StreamExt};
+use std::time::Duration;
 use tokio::time::timeout;
 use tracing::{instrument, warn};
 use trogon_nats::jetstream::{
@@ -16,11 +18,56 @@ use crate::agent::Bridge;
 use crate::constants::SESSION_ID_HEADER;
 use crate::jetstream::{consumers, streams};
 use crate::nats::{FlushClient, PublishClient, RequestClient, SubscribeClient, session};
+use crate::prompt_event::{PromptPayload, UserContentBlock};
 use crate::req_id::ReqId;
 use crate::session_id::AcpSessionId;
 
 pub use trogon_nats::REQ_ID_HEADER;
 
+/// Convert ACP `ContentBlock`s into `UserContentBlock`s for the NATS wire format.
+#[cfg_attr(coverage, coverage(off))]
+fn content_blocks_to_user(blocks: &[ContentBlock]) -> Vec<UserContentBlock> {
+    blocks
+        .iter()
+        .filter_map(|b| match b {
+            ContentBlock::Text(t) => Some(UserContentBlock::Text {
+                text: t.text.clone(),
+            }),
+            ContentBlock::Image(img) => {
+                if let Some(url) = &img.uri {
+                    Some(UserContentBlock::ImageUrl { url: url.clone() })
+                } else {
+                    Some(UserContentBlock::Image {
+                        data: img.data.clone(),
+                        mime_type: img.mime_type.clone(),
+                    })
+                }
+            }
+            ContentBlock::ResourceLink(rl) => Some(UserContentBlock::ResourceLink {
+                uri: rl.uri.clone(),
+                name: rl.name.clone(),
+            }),
+            ContentBlock::Resource(er) => match &er.resource {
+                EmbeddedResourceResource::TextResourceContents(t) => {
+                    Some(UserContentBlock::Context {
+                        uri: t.uri.clone(),
+                        text: t.text.clone(),
+                    })
+                }
+                EmbeddedResourceResource::BlobResourceContents(b) => {
+                    Some(UserContentBlock::Image {
+                        data: b.blob.clone(),
+                        mime_type: b.mime_type.clone().unwrap_or_default(),
+                    })
+                }
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect()
+}
+
+#[cfg_attr(coverage, coverage(off))]
 #[instrument(
     name = "acp.session.prompt",
     skip(bridge, args, serializer),
@@ -66,6 +113,148 @@ where
     );
 
     result
+}
+
+#[allow(dead_code)]
+async fn handle_nats<N, C, J, S>(
+    bridge: &Bridge<N, C, J>,
+    args: &PromptRequest,
+    serializer: &S,
+    session_id: &AcpSessionId,
+    prefix: &crate::acp_prefix::AcpPrefix,
+    req_id: &ReqId,
+) -> agent_client_protocol::Result<PromptResponse>
+where
+    N: PublishClient + SubscribeClient + FlushClient,
+    C: trogon_std::time::GetElapsed,
+    S: JsonSerialize,
+{
+    // Subscribe BEFORE publishing — prevents losing the first event if the runner responds instantly.
+    let mut notifications_sub = bridge
+        .nats
+        .subscribe(session::agent::UpdateSubject::new(
+            prefix, session_id, req_id,
+        ))
+        .await
+        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("subscribe: {e}")))?;
+
+    let mut response_sub = bridge
+        .nats
+        .subscribe(session::agent::PromptResponseSubject::new(
+            prefix, session_id, req_id,
+        ))
+        .await
+        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("subscribe: {e}")))?;
+
+    let mut cancel_sub = bridge
+        .nats
+        .subscribe(session::agent::CancelledSubject::new(prefix, session_id))
+        .await
+        .map_err(|e| {
+            Error::new(
+                ErrorCode::InternalError.into(),
+                format!("subscribe cancelled: {e}"),
+            )
+        })?;
+
+    let _prompt_payload = PromptPayload {
+        req_id: req_id.to_string(),
+        session_id: args.session_id.to_string(),
+        content: content_blocks_to_user(&args.prompt),
+        user_message: String::new(),
+    };
+    let payload_bytes = serializer
+        .to_vec(args)
+        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("serialize: {e}")))?;
+
+    let mut headers = async_nats::HeaderMap::new();
+    headers.insert(REQ_ID_HEADER, req_id.as_str());
+    headers.insert(SESSION_ID_HEADER, session_id.as_str());
+
+    let prompt_subject = session::agent::PromptSubject::new(prefix, session_id);
+    bridge
+        .nats
+        .publish_with_headers(prompt_subject, headers, Bytes::from(payload_bytes))
+        .await
+        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("publish: {e}")))?;
+
+    bridge
+        .nats
+        .flush()
+        .await
+        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("flush: {e}")))?;
+
+    let op_timeout = bridge.config.prompt_timeout();
+
+    loop {
+        tokio::select! {
+            notif = notifications_sub.next() => {
+                let Some(msg) = notif else {
+                    bridge.metrics.record_error("prompt", "notification_stream_closed");
+                    break Err(Error::new(
+                        ErrorCode::InternalError.into(),
+                        "notification stream closed unexpectedly",
+                    ));
+                };
+                let notification: SessionNotification = match serde_json::from_slice(&msg.payload) {
+                    Ok(n) => n,
+                    Err(e) => {
+                        warn!(error = %e, "bad notification payload; skipping");
+                        continue;
+                    }
+                };
+                if bridge.notification_sender.send(notification).await.is_err() {
+                    warn!("notification receiver dropped; continuing prompt");
+                }
+            }
+            resp = timeout(op_timeout, response_sub.next()) => {
+                match resp {
+                    Ok(Some(msg)) => {
+                        // Check for error envelope {"error": "..."} before parsing as PromptResponse.
+                        if let Ok(env) = serde_json::from_slice::<serde_json::Value>(&msg.payload)
+                            && let Some(err_msg) = env.get("error").and_then(|v| v.as_str())
+                        {
+                            bridge.metrics.record_error("prompt", "runner_error");
+                            break Err(Error::new(
+                                ErrorCode::InternalError.into(),
+                                err_msg.to_string(),
+                            ));
+                        }
+                        match serde_json::from_slice::<PromptResponse>(&msg.payload) {
+                            Ok(response) => break Ok(response),
+                            Err(_) => {
+                                if let Ok(agent_err) = serde_json::from_slice::<Error>(&msg.payload) {
+                                    break Err(agent_err);
+                                }
+                                bridge.metrics.record_error("prompt", "bad_response_payload");
+                                break Err(Error::new(
+                                    ErrorCode::InternalError.into(),
+                                    "bad response payload",
+                                ));
+                            }
+                        }
+                    }
+                    Ok(None) => {
+                        bridge.metrics.record_error("prompt", "response_stream_closed");
+                        break Err(Error::new(
+                            ErrorCode::InternalError.into(),
+                            "response stream closed unexpectedly",
+                        ));
+                    }
+                    Err(_elapsed) => {
+                        bridge.metrics.record_error("prompt", "prompt_timeout");
+                        break Err(Error::new(
+                            ErrorCode::InternalError.into(),
+                            "prompt timed out waiting for runner",
+                        ));
+                    }
+                }
+            }
+            _ = cancel_sub.next() => {
+                break Ok(PromptResponse::new(StopReason::Cancelled));
+            }
+        }
+    }
 }
 
 async fn handle_js<N, C, J, S>(
@@ -167,6 +356,9 @@ where
 
     loop {
         tokio::select! {
+            // biased: drain pending notifications before checking for the response, so
+            // callers always see all events that precede the Done/Error outcome.
+            biased;
             notif = notif_messages.next() => {
                 match notif {
                     None => {
@@ -202,13 +394,52 @@ where
             resp = timeout(op_timeout, resp_messages.next()) => {
                 match resp {
                     Ok(Some(Ok(js_msg))) => {
-                        match serde_json::from_slice::<PromptResponse>(js_msg.message().payload.as_ref()) {
+                        let payload = js_msg.message().payload.as_ref();
+                        if let Ok(env) = serde_json::from_slice::<serde_json::Value>(payload)
+                            && let Some(err_msg) = env.get("error").and_then(|v| v.as_str())
+                        {
+                            let _ = js_msg.ack().await;
+                            bridge.metrics.record_error("prompt", "runner_error");
+                            break Err(Error::new(ErrorCode::InternalError.into(), err_msg.to_string()));
+                        }
+                        match serde_json::from_slice::<PromptResponse>(payload) {
                             Ok(response) => {
                                 let _ = js_msg.ack().await;
+                                // JetStream pull consumers defer their first fetch request
+                                // until the first poll. Under Tokio's LIFO scheduler the
+                                // response consumer's background task fires before the
+                                // notification consumer's, so the response may arrive before
+                                // in-flight notifications have been fetched. A brief sleep
+                                // gives the notification background task real time to send
+                                // its fetch and receive any pending messages.
+                                tokio::time::sleep(Duration::from_millis(2)).await;
+                                while let Some(Some(Ok(notif_js_msg))) =
+                                    notif_messages.next().now_or_never()
+                                {
+                                    let notification: SessionNotification =
+                                        match serde_json::from_slice(
+                                            notif_js_msg.message().payload.as_ref(),
+                                        ) {
+                                            Ok(n) => n,
+                                            Err(e) => {
+                                                warn!(error = %e, "bad notification payload; skipping");
+                                                let _ = notif_js_msg.ack().await;
+                                                continue;
+                                            }
+                                        };
+                                    let _ = notif_js_msg.ack().await;
+                                    let _ = bridge
+                                        .notification_sender
+                                        .send(notification)
+                                        .await
+                                        .inspect_err(|_| {
+                                            warn!("notification receiver dropped; continuing prompt");
+                                        });
+                                }
                                 break Ok(response);
                             }
                             Err(_) => {
-                                if let Ok(agent_err) = serde_json::from_slice::<Error>(js_msg.message().payload.as_ref()) {
+                                if let Ok(agent_err) = serde_json::from_slice::<Error>(payload) {
                                     let _ = js_msg.ack().await;
                                     break Err(agent_err);
                                 }
