@@ -90,11 +90,12 @@ pub struct NatsSessionStore {
 }
 
 impl NatsSessionStore {
-    pub async fn open(js: &jetstream::Context) -> Result<Self, String> {
+    pub async fn open(js: &jetstream::Context, session_ttl_secs: u64) -> Result<Self, String> {
         let sessions_kv = js
             .create_or_update_key_value(kv::Config {
                 bucket: SESSIONS_BUCKET.to_string(),
                 history: 1,
+                max_age: std::time::Duration::from_secs(session_ttl_secs),
                 ..Default::default()
             })
             .await

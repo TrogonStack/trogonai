@@ -262,7 +262,7 @@ fn sample_snapshot(id: &str, tenant_id: &str) -> SessionSnapshot {
 #[tokio::test]
 async fn session_store_save_and_read_back() {
     let (js, _c) = make_js().await;
-    let store = Store::open(&js).await.expect("Store::open");
+    let store = Store::open(&js, 0).await.expect("Store::open");
     let snap = sample_snapshot("sess-1", "acme");
 
     store.save(&snap).await;
@@ -282,7 +282,7 @@ async fn session_store_save_and_read_back() {
 #[tokio::test]
 async fn session_store_save_overwrites_existing() {
     let (js, _c) = make_js().await;
-    let store = Store::open(&js).await.expect("open");
+    let store = Store::open(&js, 0).await.expect("open");
 
     let snap = sample_snapshot("sess-1", "acme");
     store.save(&snap).await;
@@ -300,7 +300,7 @@ async fn session_store_save_overwrites_existing() {
 #[tokio::test]
 async fn session_store_remove_deletes_key() {
     let (js, _c) = make_js().await;
-    let store = Store::open(&js).await.expect("open");
+    let store = Store::open(&js, 0).await.expect("open");
     let snap = sample_snapshot("sess-del", "acme");
 
     store.save(&snap).await;
@@ -314,7 +314,7 @@ async fn session_store_remove_deletes_key() {
 #[tokio::test]
 async fn session_store_remove_nonexistent_does_not_panic() {
     let (js, _c) = make_js().await;
-    let store = Store::open(&js).await.expect("open");
+    let store = Store::open(&js, 0).await.expect("open");
     // Should not panic or return an error.
     store.remove("acme", "never-existed").await;
 }
@@ -322,7 +322,7 @@ async fn session_store_remove_nonexistent_does_not_panic() {
 #[tokio::test]
 async fn session_store_key_format_is_tenant_dot_id() {
     let (js, _c) = make_js().await;
-    let store = Store::open(&js).await.expect("open");
+    let store = Store::open(&js, 0).await.expect("open");
     let snap = sample_snapshot("my-session", "my-tenant");
 
     store.save(&snap).await;

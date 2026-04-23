@@ -91,7 +91,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             }
         }
 
-        match NatsSessionStore::open(&js).await {
+        match NatsSessionStore::open(&js, session_ttl_secs).await {
             Ok(store) => {
                 info!("xai: session persistence enabled");
                 agent = agent.with_session_store(Arc::new(store));
