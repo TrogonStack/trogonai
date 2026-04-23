@@ -677,7 +677,7 @@ pub async fn delete(headers: HeaderMap, State(state): State<AppState>) -> Respon
 }
 
 fn websocket_response(ws: WebSocketUpgrade, state: AppState) -> Response {
-    let connection_id = AcpConnectionId::new();
+    let connection_id = AcpConnectionId::now_v7();
     let response_header = HeaderValue::from_str(&connection_id.to_string())
         .expect("generated ACP connection id must be a valid header value");
     let shutdown_rx = state.shutdown_tx.subscribe();
@@ -1571,7 +1571,7 @@ pub async fn process_manager_request<N, J>(
                         return;
                     }
 
-                    let connection_id = AcpConnectionId::new();
+                    let connection_id = AcpConnectionId::now_v7();
                     let (command_tx, command_rx) = mpsc::unbounded_channel();
                     http_connections.insert(
                         connection_id.clone(),
@@ -2204,7 +2204,7 @@ mod tests {
                 .to_string(),
         )
         .unwrap();
-        let connection_id = AcpConnectionId::new();
+        let connection_id = AcpConnectionId::now_v7();
         let session_id = session_id();
 
         assert!(validate_http_context(&initialize, None, None).is_ok());
@@ -2302,7 +2302,7 @@ mod tests {
 
     #[test]
     fn header_parsers_and_websocket_detection_handle_valid_and_invalid_values() {
-        let connection_id = AcpConnectionId::new();
+        let connection_id = AcpConnectionId::now_v7();
         let session_id = session_id();
         let mut headers = HeaderMap::new();
         headers.insert(
@@ -2359,7 +2359,7 @@ mod tests {
     #[tokio::test]
     async fn http_post_returns_accepted_for_notifications() {
         let (state, mut manager_rx) = test_state();
-        let connection_id = AcpConnectionId::new();
+        let connection_id = AcpConnectionId::now_v7();
         let expected_connection_id = connection_id.clone();
 
         tokio::spawn(async move {
@@ -2399,7 +2399,7 @@ mod tests {
     #[tokio::test]
     async fn http_post_accepts_null_result_responses() {
         let (state, mut manager_rx) = test_state();
-        let connection_id = AcpConnectionId::new();
+        let connection_id = AcpConnectionId::now_v7();
         let session_id = session_id();
         let expected_connection_id = connection_id.clone();
         let expected_session_id = session_id.clone();
@@ -2446,7 +2446,7 @@ mod tests {
     #[tokio::test]
     async fn http_post_returns_buffered_sse_with_session_headers() {
         let (state, mut manager_rx) = test_state();
-        let connection_id = AcpConnectionId::new();
+        let connection_id = AcpConnectionId::now_v7();
         let session_id = session_id();
         let event = json!({
             "jsonrpc": "2.0",
@@ -2513,7 +2513,7 @@ mod tests {
     #[tokio::test]
     async fn http_get_and_delete_round_trip_through_manager() {
         let (state, mut manager_rx) = test_state();
-        let connection_id = AcpConnectionId::new();
+        let connection_id = AcpConnectionId::now_v7();
         let session_id = session_id();
         let expected_connection_id = connection_id.clone();
         let expected_session_id = session_id.clone();
@@ -2701,7 +2701,7 @@ mod tests {
             })
         ));
 
-        let unknown_connection_id = AcpConnectionId::new();
+        let unknown_connection_id = AcpConnectionId::now_v7();
         let (get_response_tx, get_response_rx) = oneshot::channel();
         process_manager_request(
             ManagerRequest::HttpGet {
@@ -2759,12 +2759,12 @@ mod tests {
         let mut websocket_handles = Vec::new();
         let mut http_connection_handles = Vec::new();
 
-        let stale_connection_id = AcpConnectionId::new();
+        let stale_connection_id = AcpConnectionId::now_v7();
         let (command_tx, command_rx) = mpsc::unbounded_channel();
         drop(command_rx);
         http_connections.insert(stale_connection_id, HttpConnectionHandle { command_tx });
 
-        let unknown_connection_id = AcpConnectionId::new();
+        let unknown_connection_id = AcpConnectionId::now_v7();
         let (response_tx, response_rx) = oneshot::channel();
         process_manager_request(
             ManagerRequest::HttpGet {
