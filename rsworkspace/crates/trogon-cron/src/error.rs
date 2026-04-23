@@ -235,7 +235,7 @@ impl From<trogon_eventsourcing::SnapshotStoreError> for CronError {
             trogon_eventsourcing::SnapshotStoreError::InvalidSnapshotKey { key } => {
                 Self::event_source("failed to decode stream snapshot key", std::io::Error::other(key))
             }
-            trogon_eventsourcing::SnapshotStoreError::MissingCheckpointKey { key_prefix } => Self::event_source(
+            trogon_eventsourcing::SnapshotStoreError::MissingCheckpointName { key_prefix } => Self::event_source(
                 "failed to resolve stream snapshot checkpoint key",
                 std::io::Error::other(key_prefix),
             ),
