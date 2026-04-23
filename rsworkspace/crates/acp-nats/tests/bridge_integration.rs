@@ -16,8 +16,8 @@ use acp_nats::{AGENT_UNAVAILABLE, AcpPrefix, Bridge, Config, NatsAuth, NatsConfi
 use agent_client_protocol::{
     Agent, AuthenticateRequest, AuthenticateResponse, CancelNotification, ErrorCode,
     Implementation, InitializeRequest, InitializeResponse, LoadSessionRequest, LoadSessionResponse,
-    NewSessionRequest, NewSessionResponse, ProtocolVersion, SessionId, SetSessionModeRequest,
-    SetSessionModeResponse,
+    NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse, ProtocolVersion,
+    SessionId, SetSessionModeRequest, SetSessionModeResponse, StopReason,
 };
 use async_nats::jetstream;
 use futures_util::StreamExt as _;
@@ -614,4 +614,55 @@ async fn concurrent_requests_dont_mix_replies() {
         5,
         "all 5 concurrent sessions should have distinct IDs"
     );
+}
+
+// ── prompt ────────────────────────────────────────────────────────────────────
+
+/// `Bridge::prompt` publishes to the JetStream COMMANDS stream, waits on
+/// consumers for the NOTIFICATIONS and RESPONSES streams, and returns a
+/// `PromptResponse` once a runner publishes the response.
+///
+/// The fake runner subscribes to core NATS (JetStream delivers to core NATS
+/// subscribers too), reads the `X-Req-Id` header, and JetStream-publishes the
+/// response to `{prefix}.session.{id}.agent.prompt.response.{req_id}`.
+#[tokio::test]
+async fn prompt_succeeds_with_real_jetstream() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let js = jetstream::new(nats.clone());
+    setup_streams(&js).await;
+    let bridge = make_bridge(nats.clone(), "acp");
+
+    let session_id = "prompt-integ-sess";
+
+    // Subscribe BEFORE calling bridge.prompt() so the JetStream publish is received.
+    let mut agent_sub = nats
+        .subscribe(format!("acp.session.{}.agent.prompt", session_id))
+        .await
+        .unwrap();
+    let js2 = js.clone();
+    tokio::spawn(async move {
+        if let Some(msg) = agent_sub.next().await {
+            let req_id = msg
+                .headers
+                .as_ref()
+                .and_then(|h| h.get("X-Req-Id"))
+                .map(|v| v.as_str().to_string())
+                .unwrap_or_default();
+            let resp_subject = format!(
+                "acp.session.{}.agent.prompt.response.{}",
+                session_id, req_id
+            );
+            let resp = serde_json::to_vec(&PromptResponse::new(StopReason::EndTurn)).unwrap();
+            // JetStream-publish so the bridge's RESPONSES consumer picks it up.
+            let _ = js2.publish(resp_subject, resp.into()).await;
+        }
+    });
+
+    let result = bridge
+        .prompt(PromptRequest::new(session_id, vec![]))
+        .await;
+
+    assert!(result.is_ok(), "expected Ok, got: {:?}", result.unwrap_err());
+    assert_eq!(result.unwrap().stop_reason, StopReason::EndTurn);
 }

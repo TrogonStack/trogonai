@@ -31,7 +31,9 @@ trogon-nats = { workspace = true }
 trogon-std = { workspace = true }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["test-util"] }
-tracing-subscriber = { workspace = true, features = ["fmt"] }
-trogon-nats = { workspace = true, features = ["test-support"] }
-trogon-std = { workspace = true, features = ["test-support"] }
+serde_json                = { workspace = true }
+testcontainers-modules    = { version = "0.8", features = ["nats"] }
+tokio                     = { workspace = true, features = ["test-util"] }
+tracing-subscriber        = { workspace = true, features = ["fmt"] }
+trogon-nats               = { workspace = true, features = ["test-support"] }
+trogon-std                = { workspace = true, features = ["test-support"] }

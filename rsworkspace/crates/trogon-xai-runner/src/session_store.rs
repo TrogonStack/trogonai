@@ -30,6 +30,10 @@ pub struct SessionSnapshot {
     pub updated_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_session_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branched_at_index: Option<usize>,
 }
 
 /// Per-message token usage written to the SESSIONS bucket.
@@ -241,6 +245,8 @@ mod tests {
             ],
             created_at: "2026-01-01T00:00:00.000Z".into(),
             updated_at: "2026-01-01T00:00:00.000Z".into(),
+            parent_session_id: None,
+            branched_at_index: None,
         };
         let json = serde_json::to_string(&snap).unwrap();
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();

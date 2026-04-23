@@ -19,12 +19,12 @@ use acp_nats::acp_prefix::AcpPrefix;
 use acp_nats_agent::AgentSideNatsConnection;
 use agent_client_protocol::{
     AuthenticateRequest, AuthenticateResponse, CancelNotification, CloseSessionRequest,
-    CloseSessionResponse, ContentBlock, ForkSessionRequest, InitializeRequest, InitializeResponse,
-    ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse,
-    NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse, ProtocolVersion,
-    ResumeSessionRequest, ResumeSessionResponse, SessionNotification, SessionUpdate,
-    SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModeRequest,
-    SetSessionModeResponse, SetSessionModelRequest, SetSessionModelResponse,
+    CloseSessionResponse, ContentBlock, ExtRequest, ForkSessionRequest, InitializeRequest,
+    InitializeResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionRequest,
+    LoadSessionResponse, NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse,
+    ProtocolVersion, ResumeSessionRequest, ResumeSessionResponse, SessionNotification,
+    SessionUpdate, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse,
+    SetSessionModeRequest, SetSessionModeResponse, SetSessionModelRequest, SetSessionModelResponse,
 };
 use async_nats::Message;
 use async_trait::async_trait;
@@ -3193,6 +3193,165 @@ async fn prompt_with_multiple_content_blocks_joins_text_with_newline() {
             assert_eq!(
                 user_item.content, "hello\nworld",
                 "multiple text blocks must be joined with '\\n'"
+            );
+        })
+        .await;
+}
+
+// ── session branching integration ─────────────────────────────────────────────
+
+/// Fork with branchAtIndex:0 → the fork has an empty history, so the first prompt
+/// on the fork sends only the new user message to the xAI HTTP API (no replayed turns).
+#[tokio::test]
+async fn fork_session_branch_at_index_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await; // publishes: 1
+
+            // Prompt source to add one turn to its history.
+            h.http.push(vec![
+                XaiEvent::TextDelta { text: "reply".to_string() },
+                XaiEvent::Done,
+            ]);
+            h.session_req(
+                &format!("acp.session.{sid}.agent.prompt"),
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("hi")]),
+                "r.prompt1",
+            );
+            h.expect_n_publishes(2).await; // publishes: 2
+
+            // Fork with branchAtIndex:0 → empty history.
+            let meta = serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(
+                serde_json::json!({ "branchAtIndex": 0 }),
+            )
+            .unwrap();
+            h.session_req(
+                &format!("acp.session.{sid}.agent.fork"),
+                ForkSessionRequest::new(sid.clone(), "/fork").meta(meta),
+                "r.fork",
+            );
+            let payloads = h.expect_n_publishes(3).await; // publishes: 3
+            let fork_val: serde_json::Value = serde_json::from_slice(&payloads[2]).unwrap();
+            let fork_id = fork_val["sessionId"].as_str().unwrap().to_string();
+            assert!(!fork_id.is_empty(), "fork must return a non-empty session ID");
+
+            // Prompt the fork — history is empty so the xAI API call gets only the new turn.
+            h.http.push(vec![
+                XaiEvent::TextDelta { text: "fork reply".to_string() },
+                XaiEvent::Done,
+            ]);
+            h.session_req(
+                &format!("acp.session.{fork_id}.agent.prompt"),
+                PromptRequest::new(fork_id.clone(), vec![ContentBlock::from("first on fork")]),
+                "r.prompt2",
+            );
+            h.expect_n_publishes(4).await; // publishes: 4
+
+            let call = h.http.last_call().unwrap();
+            assert_eq!(
+                call.inputs.len(),
+                1,
+                "fork with branchAtIndex:0 must replay no history; expected 1 input, got {}",
+                call.inputs.len()
+            );
+        })
+        .await;
+}
+
+/// session/list_children ext method returns the direct children of a session.
+#[tokio::test]
+async fn ext_list_children_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let parent_id = create_session(&h).await; // publishes: 1
+
+            // Fork two direct children.
+            h.session_req(
+                &format!("acp.session.{parent_id}.agent.fork"),
+                ForkSessionRequest::new(parent_id.clone(), "/child1"),
+                "r.fork1",
+            );
+            let payloads = h.expect_n_publishes(2).await; // publishes: 2
+            let child1_id = serde_json::from_slice::<serde_json::Value>(&payloads[1])
+                .unwrap()["sessionId"]
+                .as_str()
+                .unwrap()
+                .to_string();
+
+            h.session_req(
+                &format!("acp.session.{parent_id}.agent.fork"),
+                ForkSessionRequest::new(parent_id.clone(), "/child2"),
+                "r.fork2",
+            );
+            let payloads = h.expect_n_publishes(3).await; // publishes: 3
+            let child2_id = serde_json::from_slice::<serde_json::Value>(&payloads[2])
+                .unwrap()["sessionId"]
+                .as_str()
+                .unwrap()
+                .to_string();
+
+            // Call session/list_children via global ext subject.
+            let params_json = format!(r#"{{"sessionId":"{}"}}"#, parent_id);
+            let params = serde_json::value::RawValue::from_string(params_json).unwrap();
+            h.global(
+                "acp.agent.ext.session/list_children",
+                ExtRequest::new("session/list_children", params.into()),
+                "r.ext",
+            );
+            let payloads = h.expect_n_publishes(4).await; // publishes: 4
+
+            let resp: serde_json::Value = serde_json::from_slice(&payloads[3]).unwrap();
+            let mut children: Vec<String> = resp["children"]
+                .as_array()
+                .expect("response must have children array")
+                .iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect();
+            children.sort();
+            let mut expected = vec![child1_id, child2_id];
+            expected.sort();
+            assert_eq!(children, expected, "list_children must return both direct children");
+        })
+        .await;
+}
+
+/// list_sessions response includes parentSessionId in the forked session's _meta.
+#[tokio::test]
+async fn list_sessions_includes_parent_meta_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let parent_id = create_session(&h).await; // publishes: 1
+
+            h.session_req(
+                &format!("acp.session.{parent_id}.agent.fork"),
+                ForkSessionRequest::new(parent_id.clone(), "/fork"),
+                "r.fork",
+            );
+            let payloads = h.expect_n_publishes(2).await; // publishes: 2
+            let fork_id = serde_json::from_slice::<serde_json::Value>(&payloads[1])
+                .unwrap()["sessionId"]
+                .as_str()
+                .unwrap()
+                .to_string();
+
+            h.global("acp.agent.session.list", ListSessionsRequest::new(), "r.list");
+            let payloads = h.expect_n_publishes(3).await; // publishes: 3
+
+            let resp: ListSessionsResponse = serde_json::from_slice(&payloads[2]).unwrap();
+            let fork_info = resp
+                .sessions
+                .iter()
+                .find(|s| s.session_id.to_string() == fork_id)
+                .expect("fork must appear in list_sessions");
+
+            let meta = fork_info.meta.as_ref().expect("fork must have _meta");
+            assert_eq!(
+                meta.get("parentSessionId").and_then(|v| v.as_str()),
+                Some(parent_id.as_str()),
+                "fork _meta must include parentSessionId pointing to the source session"
             );
         })
         .await;

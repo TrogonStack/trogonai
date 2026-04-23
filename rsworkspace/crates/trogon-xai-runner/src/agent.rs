@@ -368,6 +368,8 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
             created_at: session.created_at_iso.clone(),
             updated_at: now_iso(),
             agent_id: self.agent_id.clone(),
+            parent_session_id: session.parent_session_id.clone(),
+            branched_at_index: session.branched_at_index,
         }
     }
 

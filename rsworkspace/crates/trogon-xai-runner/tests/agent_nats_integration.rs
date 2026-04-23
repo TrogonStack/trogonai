@@ -401,6 +401,91 @@ async fn tenant_id_env_var_sets_kv_key_prefix() {
         .await;
 }
 
+// ── session branching persistence ─────────────────────────────────────────────
+
+/// fork_session persists parent_session_id to the SESSIONS KV bucket.
+#[tokio::test]
+async fn fork_session_persists_parent_session_id_to_nats() {
+    let (js, _c) = make_js().await;
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
+    let agent = make_agent(store);
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let src_resp = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/src")))
+                .await
+                .unwrap();
+            let src_id = src_resp.session_id.clone();
+
+            let fork_resp = agent
+                .fork_session(ForkSessionRequest::new(
+                    src_id.clone(),
+                    PathBuf::from("/fork"),
+                ))
+                .await
+                .unwrap();
+            let fork_id = fork_resp.session_id.to_string();
+
+            let kv = js.get_key_value("SESSIONS").await.expect("get KV");
+            let bytes = kv
+                .get(&format!("default.{fork_id}"))
+                .await
+                .unwrap()
+                .expect("fork KV entry must exist");
+            let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(
+                v["parent_session_id"].as_str(),
+                Some(src_id.to_string().as_str()),
+                "fork KV entry must record parent_session_id"
+            );
+        })
+        .await;
+}
+
+/// fork_session with branchAtIndex persists branched_at_index to the SESSIONS KV bucket.
+#[tokio::test]
+async fn fork_with_branch_at_index_persists_branched_at_index_to_nats() {
+    let (js, _c) = make_js().await;
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
+    let agent = make_agent(store);
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let src_resp = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/src")))
+                .await
+                .unwrap();
+            let src_id = src_resp.session_id.clone();
+
+            let meta = serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(
+                serde_json::json!({ "branchAtIndex": 0 }),
+            )
+            .unwrap();
+            let fork_resp = agent
+                .fork_session(
+                    ForkSessionRequest::new(src_id.clone(), PathBuf::from("/fork")).meta(meta),
+                )
+                .await
+                .unwrap();
+            let fork_id = fork_resp.session_id.to_string();
+
+            let kv = js.get_key_value("SESSIONS").await.expect("get KV");
+            let bytes = kv
+                .get(&format!("default.{fork_id}"))
+                .await
+                .unwrap()
+                .expect("fork KV entry must exist");
+            let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(
+                v["branched_at_index"],
+                serde_json::json!(0),
+                "fork KV entry must record branched_at_index"
+            );
+        })
+        .await;
+}
+
 // ── prompt with assistant response persists both messages ─────────────────────
 
 #[tokio::test]

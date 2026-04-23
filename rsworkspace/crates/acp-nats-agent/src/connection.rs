@@ -302,11 +302,20 @@ async fn dispatch_global<N: PublishClient + FlushClient, A: Agent>(
             })
             .await
         }
-        GlobalAgentMethod::Ext(_) => {
+        GlobalAgentMethod::Ext(method_name) => {
+            let method: std::sync::Arc<str> = method_name.as_str().into();
             if msg.reply.is_some() {
-                handle_request(msg, nats, |req: ExtRequest| agent.ext_method(req)).await
+                handle_request(msg, nats, |mut req: ExtRequest| {
+                    req.method = method;
+                    agent.ext_method(req)
+                })
+                .await
             } else {
-                handle_notification(msg, |req: ExtNotification| agent.ext_notification(req)).await
+                handle_notification(msg, |mut req: ExtNotification| {
+                    req.method = method;
+                    agent.ext_notification(req)
+                })
+                .await
             }
         }
     }
