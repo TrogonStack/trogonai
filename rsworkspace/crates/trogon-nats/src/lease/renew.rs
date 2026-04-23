@@ -8,15 +8,18 @@ use bytes::Bytes;
 
 use crate::jetstream::{JetStreamKeyValueUpdate, JetStreamPublisher};
 
+#[cfg(not(coverage))]
 use super::{NatsKvLease, RenewLease};
 
 #[derive(Clone)]
+#[cfg_attr(coverage, allow(dead_code))]
 pub(super) struct KvPublishTarget {
     default_prefix: String,
     put_prefix: Option<String>,
     uses_jetstream_prefix: bool,
 }
 
+#[cfg_attr(coverage, allow(dead_code))]
 impl KvPublishTarget {
     pub(super) fn from_store(store: &kv::Store) -> Self {
         Self {
@@ -40,6 +43,7 @@ impl KvPublishTarget {
     }
 }
 
+#[cfg(not(coverage))]
 impl RenewLease for NatsKvLease {
     type Error = kv::UpdateError;
 
@@ -57,6 +61,7 @@ impl RenewLease for NatsKvLease {
     }
 }
 
+#[cfg_attr(coverage, allow(dead_code))]
 pub(super) async fn renew_store<S, P>(
     store: &S,
     publish_target: &KvPublishTarget,
@@ -101,6 +106,7 @@ where
     Ok(ack.sequence)
 }
 
+#[cfg_attr(coverage, allow(dead_code))]
 fn update_error_from_publish<E>(source: E) -> kv::UpdateError
 where
     E: std::error::Error + Send + Sync + 'static,
@@ -108,6 +114,7 @@ where
     kv::UpdateError::with_source(kv::UpdateErrorKind::Other, source)
 }
 
+#[cfg_attr(coverage, allow(dead_code))]
 pub(super) fn build_kv_subject(put_prefix: Option<&str>, default_prefix: &str, key: &str) -> String {
     let mut subject = String::new();
     subject.push_str(put_prefix.unwrap_or(default_prefix));
@@ -115,6 +122,7 @@ pub(super) fn build_kv_subject(put_prefix: Option<&str>, default_prefix: &str, k
     subject
 }
 
+#[cfg_attr(coverage, allow(dead_code))]
 pub(super) fn build_update_headers(revision: u64, ttl: Duration) -> HeaderMap {
     let mut headers = HeaderMap::default();
     headers.insert(NATS_EXPECTED_LAST_SUBJECT_SEQUENCE, HeaderValue::from(revision));

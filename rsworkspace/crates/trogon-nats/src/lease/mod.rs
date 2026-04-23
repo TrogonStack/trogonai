@@ -14,6 +14,8 @@ pub mod traits;
 mod ttl;
 
 #[cfg(test)]
+use crate::jetstream::is_create_key_value_already_exists;
+#[cfg(test)]
 use async_nats::header::{NATS_EXPECTED_LAST_SUBJECT_SEQUENCE, NATS_MESSAGE_TTL};
 use async_nats::jetstream::context::{CreateKeyValueError, KeyValueError};
 #[cfg(test)]
@@ -22,8 +24,7 @@ use async_nats::jetstream::kv;
 use bytes::Bytes;
 #[cfg(test)]
 use provision::{
-    KeyValueSettings, create_bucket_error, inspect_bucket_error, is_create_key_value_already_exists,
-    open_existing_bucket_error, validate_bucket_settings,
+    KeyValueSettings, create_bucket_error, inspect_bucket_error, open_existing_bucket_error, validate_bucket_settings,
 };
 use renew::KvPublishTarget;
 #[cfg(test)]
@@ -79,6 +80,7 @@ pub enum LeaseError {
 }
 
 impl LeaseError {
+    #[cfg_attr(coverage, allow(dead_code))]
     fn provision_source(context: &'static str, source: LeaseProvisionError) -> Self {
         Self::Provision { context, source }
     }
@@ -165,6 +167,7 @@ impl std::fmt::Display for IncompatibleLeaseBucketConfig {
 impl std::error::Error for IncompatibleLeaseBucketConfig {}
 
 #[derive(Clone)]
+#[cfg_attr(coverage, allow(dead_code))]
 pub struct NatsKvLease {
     store: kv::Store,
     key: LeaseKey,
