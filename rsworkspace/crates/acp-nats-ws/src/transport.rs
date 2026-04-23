@@ -1,8 +1,8 @@
 use crate::acp_connection_id::AcpConnectionId;
 use crate::connection;
 use crate::constants::{
-    ACP_CONNECTION_ID_HEADER, ACP_PROTOCOL_VERSION_HEADER, ACP_SESSION_ID_HEADER,
-    HTTP_CHANNEL_CAPACITY, X_ACCEL_BUFFERING_HEADER,
+    ACP_CONNECTION_ID_HEADER, ACP_PROTOCOL_VERSION_HEADER, ACP_SESSION_ID_HEADER, HTTP_CHANNEL_CAPACITY,
+    X_ACCEL_BUFFERING_HEADER,
 };
 use acp_nats::{StdJsonSerialize, agent::Bridge, client, spawn_notification_forwarder};
 use agent_client_protocol::{AgentSideConnection, ProtocolVersion, RequestId, SessionNotification};
@@ -168,16 +168,10 @@ impl HttpTransportError {
     }
 
     fn bad_request(message: &'static str) -> Self {
-        Self::BadRequest {
-            message,
-            source: None,
-        }
+        Self::BadRequest { message, source: None }
     }
 
-    fn bad_request_with(
-        message: &'static str,
-        source: impl std::error::Error + Send + 'static,
-    ) -> Self {
+    fn bad_request_with(message: &'static str, source: impl std::error::Error + Send + 'static) -> Self {
         Self::BadRequest {
             message,
             source: Some(Box::new(source)),
@@ -185,30 +179,18 @@ impl HttpTransportError {
     }
 
     fn not_found(message: &'static str) -> Self {
-        Self::NotFound {
-            message,
-            source: None,
-        }
+        Self::NotFound { message, source: None }
     }
 
     fn conflict(message: &'static str) -> Self {
-        Self::Conflict {
-            message,
-            source: None,
-        }
+        Self::Conflict { message, source: None }
     }
 
     fn forbidden(message: &'static str) -> Self {
-        Self::Forbidden {
-            message,
-            source: None,
-        }
+        Self::Forbidden { message, source: None }
     }
 
-    fn forbidden_with(
-        message: &'static str,
-        source: impl std::error::Error + Send + 'static,
-    ) -> Self {
+    fn forbidden_with(message: &'static str, source: impl std::error::Error + Send + 'static) -> Self {
         Self::Forbidden {
             message,
             source: Some(Box::new(source)),
@@ -216,37 +198,22 @@ impl HttpTransportError {
     }
 
     fn unsupported_media_type(message: &'static str) -> Self {
-        Self::UnsupportedMediaType {
-            message,
-            source: None,
-        }
+        Self::UnsupportedMediaType { message, source: None }
     }
 
     fn not_acceptable(message: &'static str) -> Self {
-        Self::NotAcceptable {
-            message,
-            source: None,
-        }
+        Self::NotAcceptable { message, source: None }
     }
 
     fn not_implemented(message: &'static str) -> Self {
-        Self::NotImplemented {
-            message,
-            source: None,
-        }
+        Self::NotImplemented { message, source: None }
     }
 
     fn internal(message: &'static str) -> Self {
-        Self::Internal {
-            message,
-            source: None,
-        }
+        Self::Internal { message, source: None }
     }
 
-    fn internal_with(
-        message: &'static str,
-        source: impl std::error::Error + Send + 'static,
-    ) -> Self {
+    fn internal_with(message: &'static str, source: impl std::error::Error + Send + 'static) -> Self {
         Self::Internal {
             message,
             source: Some(Box::new(source)),
@@ -298,13 +265,8 @@ pub enum HttpConnectionCommand {
 
 #[derive(Clone, Debug)]
 pub(crate) enum SseFrame {
-    Empty {
-        event_id: String,
-    },
-    Json {
-        event_id: Option<String>,
-        json: String,
-    },
+    Empty { event_id: String },
+    Json { event_id: Option<String>, json: String },
 }
 
 impl SseFrame {
@@ -374,16 +336,14 @@ impl IncomingHttpMessage {
             ));
         }
 
-        let value = serde_json::from_str::<Value>(&raw).map_err(|error| {
-            HttpTransportError::bad_request_with("invalid JSON-RPC payload", error)
-        })?;
+        let value = serde_json::from_str::<Value>(&raw)
+            .map_err(|error| HttpTransportError::bad_request_with("invalid JSON-RPC payload", error))?;
         let (has_result, has_error) = value
             .as_object()
             .map(|object| (object.contains_key("result"), object.contains_key("error")))
             .unwrap_or((false, false));
-        let mut parsed = serde_json::from_value::<Self>(value).map_err(|error| {
-            HttpTransportError::bad_request_with("invalid JSON-RPC payload", error)
-        })?;
+        let mut parsed = serde_json::from_value::<Self>(value)
+            .map_err(|error| HttpTransportError::bad_request_with("invalid JSON-RPC payload", error))?;
         parsed.raw = raw;
         parsed.has_result = has_result;
         parsed.has_error = has_error;
@@ -413,10 +373,7 @@ impl IncomingHttpMessage {
     fn activates_session(&self) -> bool {
         matches!(
             self.method_name(),
-            Some("session/new")
-                | Some("session/load")
-                | Some("session/resume")
-                | Some("session/fork")
+            Some("session/new") | Some("session/load") | Some("session/resume") | Some("session/fork")
         )
     }
 
@@ -444,9 +401,7 @@ impl IncomingHttpMessage {
 
         acp_nats::AcpSessionId::new(session_id)
             .map(Some)
-            .map_err(|error| {
-                HttpTransportError::bad_request_with("invalid sessionId in request body", error)
-            })
+            .map_err(|error| HttpTransportError::bad_request_with("invalid sessionId in request body", error))
     }
 }
 
@@ -490,9 +445,7 @@ enum LiveFrameOutcome {
 enum BufferedFrameOutcome {
     Buffered,
     Routed,
-    Finalize {
-        session_id: Option<acp_nats::AcpSessionId>,
-    },
+    Finalize { session_id: Option<acp_nats::AcpSessionId> },
 }
 
 enum ListenerDispatch {
@@ -640,9 +593,7 @@ pub async fn get(State(state): State<AppState>, request: Request) -> Response {
         let (mut parts, _body) = request.into_parts();
         match WebSocketUpgrade::from_request_parts(&mut parts, &state).await {
             Ok(ws) => websocket_response(ws, state),
-            Err(_) => {
-                HttpTransportError::bad_request("invalid WebSocket upgrade request").into_response()
-            }
+            Err(_) => HttpTransportError::bad_request("invalid WebSocket upgrade request").into_response(),
         }
     } else {
         match http_get(request.headers().clone(), state).await {
@@ -692,24 +643,16 @@ fn websocket_response(ws: WebSocketUpgrade, state: AppState) -> Response {
             error!("Connection thread is gone; dropping WebSocket");
         }
     });
-    response
-        .headers_mut()
-        .insert(ACP_CONNECTION_ID_HEADER, response_header);
+    response.headers_mut().insert(ACP_CONNECTION_ID_HEADER, response_header);
     response
 }
 
-async fn http_post(
-    headers: HeaderMap,
-    state: AppState,
-    body: String,
-) -> Result<Response, HttpTransportError> {
+async fn http_post(headers: HeaderMap, state: AppState, body: String) -> Result<Response, HttpTransportError> {
     validate_post_headers(&headers)?;
 
     let message = IncomingHttpMessage::parse(body)?;
     if !(message.is_request() || message.is_notification() || message.is_response()) {
-        return Err(HttpTransportError::bad_request(
-            "invalid JSON-RPC message shape",
-        ));
+        return Err(HttpTransportError::bad_request("invalid JSON-RPC message shape"));
     }
 
     let connection_id = parse_connection_id_header(&headers)?;
@@ -729,25 +672,19 @@ async fn http_post(
             response: response_tx,
             shutdown_rx: state.shutdown_tx.subscribe(),
         })
-        .map_err(|error| {
-            HttpTransportError::internal_with("connection manager is unavailable", error)
-        })?;
+        .map_err(|error| HttpTransportError::internal_with("connection manager is unavailable", error))?;
 
-    match response_rx.await.map_err(|error| {
-        HttpTransportError::internal_with("connection manager dropped the request", error)
-    })?? {
+    match response_rx
+        .await
+        .map_err(|error| HttpTransportError::internal_with("connection manager dropped the request", error))??
+    {
         HttpPostOutcome::Accepted => Ok(StatusCode::ACCEPTED.into_response()),
         HttpPostOutcome::Live {
             connection_id,
             protocol_version,
             session_id,
             stream,
-        } => Ok(build_sse_response(
-            connection_id,
-            protocol_version,
-            session_id,
-            stream,
-        )),
+        } => Ok(build_sse_response(connection_id, protocol_version, session_id, stream)),
         HttpPostOutcome::Buffered {
             connection_id,
             protocol_version,
@@ -765,13 +702,11 @@ async fn http_post(
 async fn http_get(headers: HeaderMap, state: AppState) -> Result<Response, HttpTransportError> {
     validate_get_headers(&headers)?;
 
-    let connection_id = parse_connection_id_header(&headers)?.ok_or(
-        HttpTransportError::bad_request("missing Acp-Connection-Id header"),
-    )?;
+    let connection_id = parse_connection_id_header(&headers)?
+        .ok_or(HttpTransportError::bad_request("missing Acp-Connection-Id header"))?;
     let protocol_version = parse_protocol_version_header(&headers)?;
-    let session_id = parse_session_id_header(&headers)?.ok_or(HttpTransportError::bad_request(
-        "missing Acp-Session-Id header",
-    ))?;
+    let session_id =
+        parse_session_id_header(&headers)?.ok_or(HttpTransportError::bad_request("missing Acp-Session-Id header"))?;
 
     let (response_tx, response_rx) = oneshot::channel();
     state
@@ -782,13 +717,11 @@ async fn http_get(headers: HeaderMap, state: AppState) -> Result<Response, HttpT
             protocol_version,
             response: response_tx,
         })
-        .map_err(|error| {
-            HttpTransportError::internal_with("connection manager is unavailable", error)
-        })?;
+        .map_err(|error| HttpTransportError::internal_with("connection manager is unavailable", error))?;
 
-    let outcome = response_rx.await.map_err(|error| {
-        HttpTransportError::internal_with("connection manager dropped the request", error)
-    })??;
+    let outcome = response_rx
+        .await
+        .map_err(|error| HttpTransportError::internal_with("connection manager dropped the request", error))??;
 
     let mut response = Sse::new(stream::unfold(outcome.stream, |mut stream| async move {
         stream
@@ -810,9 +743,8 @@ async fn http_get(headers: HeaderMap, state: AppState) -> Result<Response, HttpT
 }
 
 async fn http_delete(headers: HeaderMap, state: AppState) -> Result<Response, HttpTransportError> {
-    let connection_id = parse_connection_id_header(&headers)?.ok_or(
-        HttpTransportError::bad_request("missing Acp-Connection-Id header"),
-    )?;
+    let connection_id = parse_connection_id_header(&headers)?
+        .ok_or(HttpTransportError::bad_request("missing Acp-Connection-Id header"))?;
     let protocol_version = parse_protocol_version_header(&headers)?;
 
     let (response_tx, response_rx) = oneshot::channel();
@@ -823,13 +755,11 @@ async fn http_delete(headers: HeaderMap, state: AppState) -> Result<Response, Ht
             protocol_version,
             response: response_tx,
         })
-        .map_err(|error| {
-            HttpTransportError::internal_with("connection manager is unavailable", error)
-        })?;
+        .map_err(|error| HttpTransportError::internal_with("connection manager is unavailable", error))?;
 
-    let protocol_version = response_rx.await.map_err(|error| {
-        HttpTransportError::internal_with("connection manager dropped the request", error)
-    })??;
+    let protocol_version = response_rx
+        .await
+        .map_err(|error| HttpTransportError::internal_with("connection manager dropped the request", error))??;
 
     let mut response = StatusCode::ACCEPTED.into_response();
     set_protocol_version_header(response.headers_mut(), protocol_version.as_ref());
@@ -837,10 +767,7 @@ async fn http_delete(headers: HeaderMap, state: AppState) -> Result<Response, Ht
 }
 
 fn validate_post_headers(headers: &HeaderMap) -> Result<(), HttpTransportError> {
-    match headers
-        .get(CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-    {
+    match headers.get(CONTENT_TYPE).and_then(|value| value.to_str().ok()) {
         Some(value) if media_type_matches(value, "application/json") => {}
         _ => {
             return Err(HttpTransportError::unsupported_media_type(
@@ -849,15 +776,15 @@ fn validate_post_headers(headers: &HeaderMap) -> Result<(), HttpTransportError> 
         }
     }
 
-    let accept = headers
-        .get(ACCEPT)
-        .and_then(|value| value.to_str().ok())
-        .ok_or(HttpTransportError::not_acceptable(
-            "Accept must include application/json and text/event-stream",
-        ))?;
+    let accept =
+        headers
+            .get(ACCEPT)
+            .and_then(|value| value.to_str().ok())
+            .ok_or(HttpTransportError::not_acceptable(
+                "Accept must include application/json and text/event-stream",
+            ))?;
 
-    if !accept_contains(accept, "application/json") || !accept_contains(accept, "text/event-stream")
-    {
+    if !accept_contains(accept, "application/json") || !accept_contains(accept, "text/event-stream") {
         return Err(HttpTransportError::not_acceptable(
             "Accept must include application/json and text/event-stream",
         ));
@@ -867,12 +794,13 @@ fn validate_post_headers(headers: &HeaderMap) -> Result<(), HttpTransportError> 
 }
 
 fn validate_get_headers(headers: &HeaderMap) -> Result<(), HttpTransportError> {
-    let accept = headers
-        .get(ACCEPT)
-        .and_then(|value| value.to_str().ok())
-        .ok_or(HttpTransportError::not_acceptable(
-            "Accept must include text/event-stream",
-        ))?;
+    let accept =
+        headers
+            .get(ACCEPT)
+            .and_then(|value| value.to_str().ok())
+            .ok_or(HttpTransportError::not_acceptable(
+                "Accept must include text/event-stream",
+            ))?;
 
     if !accept_contains(accept, "text/event-stream") {
         return Err(HttpTransportError::not_acceptable(
@@ -903,16 +831,12 @@ fn validate_http_context(
     }
 
     if connection_id.is_none() {
-        return Err(HttpTransportError::bad_request(
-            "missing Acp-Connection-Id header",
-        ));
+        return Err(HttpTransportError::bad_request("missing Acp-Connection-Id header"));
     }
 
     let body_session_id = message.params_session_id()?;
     if message.requires_session_id() && session_id.is_none() {
-        return Err(HttpTransportError::bad_request(
-            "missing Acp-Session-Id header",
-        ));
+        return Err(HttpTransportError::bad_request("missing Acp-Session-Id header"));
     }
 
     if let (Some(header_session_id), Some(body_session_id)) = (session_id, body_session_id.as_ref())
@@ -987,73 +911,48 @@ fn is_loopback_host(host: &str) -> bool {
     matches!(host, "localhost" | "127.0.0.1" | "::1" | "[::1]")
 }
 
-fn parse_connection_id_header(
-    headers: &HeaderMap,
-) -> Result<Option<AcpConnectionId>, HttpTransportError> {
+fn parse_connection_id_header(headers: &HeaderMap) -> Result<Option<AcpConnectionId>, HttpTransportError> {
     headers
         .get(ACP_CONNECTION_ID_HEADER)
         .map(|value| {
             value
                 .to_str()
-                .map_err(|error| {
-                    HttpTransportError::bad_request_with("invalid Acp-Connection-Id header", error)
-                })
+                .map_err(|error| HttpTransportError::bad_request_with("invalid Acp-Connection-Id header", error))
                 .and_then(|value| {
                     AcpConnectionId::parse(value).map_err(|error| {
-                        HttpTransportError::bad_request_with(
-                            "invalid Acp-Connection-Id header",
-                            error,
-                        )
+                        HttpTransportError::bad_request_with("invalid Acp-Connection-Id header", error)
                     })
                 })
         })
         .transpose()
 }
 
-fn parse_protocol_version_header(
-    headers: &HeaderMap,
-) -> Result<Option<ProtocolVersion>, HttpTransportError> {
+fn parse_protocol_version_header(headers: &HeaderMap) -> Result<Option<ProtocolVersion>, HttpTransportError> {
     headers
         .get(ACP_PROTOCOL_VERSION_HEADER)
         .map(|value| {
             value
                 .to_str()
-                .map_err(|error| {
-                    HttpTransportError::bad_request_with(
-                        "invalid Acp-Protocol-Version header",
-                        error,
-                    )
-                })
+                .map_err(|error| HttpTransportError::bad_request_with("invalid Acp-Protocol-Version header", error))
                 .and_then(|value| {
-                    value
-                        .parse::<u16>()
-                        .map(ProtocolVersion::from)
-                        .map_err(|error| {
-                            HttpTransportError::bad_request_with(
-                                "invalid Acp-Protocol-Version header",
-                                error,
-                            )
-                        })
+                    value.parse::<u16>().map(ProtocolVersion::from).map_err(|error| {
+                        HttpTransportError::bad_request_with("invalid Acp-Protocol-Version header", error)
+                    })
                 })
         })
         .transpose()
 }
 
-fn parse_session_id_header(
-    headers: &HeaderMap,
-) -> Result<Option<acp_nats::AcpSessionId>, HttpTransportError> {
+fn parse_session_id_header(headers: &HeaderMap) -> Result<Option<acp_nats::AcpSessionId>, HttpTransportError> {
     headers
         .get(ACP_SESSION_ID_HEADER)
         .map(|value| {
             value
                 .to_str()
-                .map_err(|error| {
-                    HttpTransportError::bad_request_with("invalid Acp-Session-Id header", error)
-                })
+                .map_err(|error| HttpTransportError::bad_request_with("invalid Acp-Session-Id header", error))
                 .and_then(|value| {
-                    acp_nats::AcpSessionId::new(value).map_err(|error| {
-                        HttpTransportError::bad_request_with("invalid Acp-Session-Id header", error)
-                    })
+                    acp_nats::AcpSessionId::new(value)
+                        .map_err(|error| HttpTransportError::bad_request_with("invalid Acp-Session-Id header", error))
                 })
         })
         .transpose()
@@ -1073,15 +972,14 @@ fn build_sse_response(
     session_id: Option<acp_nats::AcpSessionId>,
     stream: SseReceiver,
 ) -> Response {
-    let primed_stream =
-        stream::once(async { Ok::<Event, Infallible>(SseFrame::prime().into_event()) }).chain(
-            stream::unfold(stream, |mut stream| async move {
-                stream
-                    .recv()
-                    .await
-                    .map(|item| (Ok::<Event, Infallible>(item.into_event()), stream))
-            }),
-        );
+    let primed_stream = stream::once(async { Ok::<Event, Infallible>(SseFrame::prime().into_event()) }).chain(
+        stream::unfold(stream, |mut stream| async move {
+            stream
+                .recv()
+                .await
+                .map(|item| (Ok::<Event, Infallible>(item.into_event()), stream))
+        }),
+    );
     let mut response = Sse::new(primed_stream).into_response();
     set_transport_headers(
         response.headers_mut(),
@@ -1134,16 +1032,12 @@ fn set_transport_headers(
     if let Some(session_id) = session_id {
         headers.insert(
             ACP_SESSION_ID_HEADER,
-            HeaderValue::from_str(session_id.as_str())
-                .expect("generated ACP session id must be a valid header value"),
+            HeaderValue::from_str(session_id.as_str()).expect("generated ACP session id must be a valid header value"),
         );
     }
 }
 
-fn set_protocol_version_header(
-    headers: &mut HeaderMap,
-    protocol_version: Option<&ProtocolVersion>,
-) {
+fn set_protocol_version_header(headers: &mut HeaderMap, protocol_version: Option<&ProtocolVersion>) {
     if let Some(protocol_version) = protocol_version {
         headers.insert(
             ACP_PROTOCOL_VERSION_HEADER,
@@ -1202,10 +1096,9 @@ pub async fn run_http_connection<N, J>(
         notification_tx,
     ));
 
-    let (connection, io_task) =
-        AgentSideConnection::new(bridge.clone(), outgoing, incoming, |fut| {
-            tokio::task::spawn_local(fut);
-        });
+    let (connection, io_task) = AgentSideConnection::new(bridge.clone(), outgoing, incoming, |fut| {
+        tokio::task::spawn_local(fut);
+    });
 
     let connection = Rc::new(connection);
     spawn_notification_forwarder(connection.clone(), notification_rx);
@@ -1244,12 +1137,8 @@ pub async fn run_http_connection<N, J>(
         }
     });
 
-    let mut client_task = tokio::task::spawn_local(client::run(
-        nats_client,
-        connection.clone(),
-        bridge,
-        StdJsonSerialize,
-    ));
+    let mut client_task =
+        tokio::task::spawn_local(client::run(nats_client, connection.clone(), bridge, StdJsonSerialize));
     let mut io_task = tokio::task::spawn_local(io_task);
 
     let mut pending_request: Option<PendingRequest> = None;
@@ -1563,9 +1452,7 @@ pub async fn process_manager_request<N, J>(
                 Some(connection_id) => connection_id,
                 None => {
                     if !message.is_initialize() {
-                        let _ = response.send(Err(HttpTransportError::bad_request(
-                            "missing Acp-Connection-Id header",
-                        )));
+                        let _ = response.send(Err(HttpTransportError::bad_request("missing Acp-Connection-Id header")));
                         return;
                     }
 
@@ -1677,9 +1564,7 @@ mod tests {
 
     impl trogon_nats::jetstream::JetStreamPublisher for MockJs {
         type PublishError = trogon_nats::mocks::MockError;
-        type AckFuture = std::future::Ready<
-            Result<async_nats::jetstream::publish::PublishAck, Self::PublishError>,
-        >;
+        type AckFuture = std::future::Ready<Result<async_nats::jetstream::publish::PublishAck, Self::PublishError>>;
 
         async fn publish_with_headers<S: async_nats::subject::ToSubject + Send>(
             &self,
@@ -1687,9 +1572,7 @@ mod tests {
             headers: async_nats::HeaderMap,
             payload: bytes::Bytes,
         ) -> Result<Self::AckFuture, Self::PublishError> {
-            self.publisher
-                .publish_with_headers(subject, headers, payload)
-                .await
+            self.publisher.publish_with_headers(subject, headers, payload).await
         }
     }
 
@@ -1697,10 +1580,7 @@ mod tests {
         type Error = trogon_nats::mocks::MockError;
         type Stream = trogon_nats::jetstream::MockJetStreamStream;
 
-        async fn get_stream<T: AsRef<str> + Send>(
-            &self,
-            stream_name: T,
-        ) -> Result<Self::Stream, Self::Error> {
+        async fn get_stream<T: AsRef<str> + Send>(&self, stream_name: T) -> Result<Self::Stream, Self::Error> {
             self.consumer_factory.get_stream(stream_name).await
         }
     }
@@ -1748,10 +1628,7 @@ mod tests {
     fn post_headers() -> HeaderMap {
         let mut headers = HeaderMap::new();
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-        headers.insert(
-            ACCEPT,
-            HeaderValue::from_static("application/json, text/event-stream"),
-        );
+        headers.insert(ACCEPT, HeaderValue::from_static("application/json, text/event-stream"));
         headers
     }
 
@@ -1768,22 +1645,10 @@ mod tests {
     #[test]
     fn http_transport_error_into_response_maps_status_codes() {
         let cases = [
-            (
-                HttpTransportError::bad_request("bad"),
-                StatusCode::BAD_REQUEST,
-            ),
-            (
-                HttpTransportError::not_found("missing"),
-                StatusCode::NOT_FOUND,
-            ),
-            (
-                HttpTransportError::conflict("conflict"),
-                StatusCode::CONFLICT,
-            ),
-            (
-                HttpTransportError::forbidden("forbidden"),
-                StatusCode::FORBIDDEN,
-            ),
+            (HttpTransportError::bad_request("bad"), StatusCode::BAD_REQUEST),
+            (HttpTransportError::not_found("missing"), StatusCode::NOT_FOUND),
+            (HttpTransportError::conflict("conflict"), StatusCode::CONFLICT),
+            (HttpTransportError::forbidden("forbidden"), StatusCode::FORBIDDEN),
             (
                 HttpTransportError::unsupported_media_type("unsupported"),
                 StatusCode::UNSUPPORTED_MEDIA_TYPE,
@@ -1817,39 +1682,22 @@ mod tests {
         assert_eq!(HttpTransportError::bad_request("bad").to_string(), "bad");
         assert!(HttpTransportError::bad_request("bad").source().is_none());
         assert!(HttpTransportError::not_found("missing").source().is_none());
-        assert_eq!(
-            HttpTransportError::conflict("conflict").to_string(),
-            "conflict"
-        );
+        assert_eq!(HttpTransportError::conflict("conflict").to_string(), "conflict");
         assert!(HttpTransportError::conflict("conflict").source().is_none());
-        assert_eq!(
-            HttpTransportError::forbidden("forbidden").to_string(),
-            "forbidden"
-        );
-        assert!(
-            HttpTransportError::forbidden("forbidden")
-                .source()
-                .is_none()
-        );
+        assert_eq!(HttpTransportError::forbidden("forbidden").to_string(), "forbidden");
+        assert!(HttpTransportError::forbidden("forbidden").source().is_none());
         assert!(
             HttpTransportError::unsupported_media_type("unsupported")
                 .source()
                 .is_none()
         );
-        assert!(
-            HttpTransportError::not_acceptable("not-acceptable")
-                .source()
-                .is_none()
-        );
+        assert!(HttpTransportError::not_acceptable("not-acceptable").source().is_none());
         assert!(
             HttpTransportError::not_implemented("not-implemented")
                 .source()
                 .is_none()
         );
-        assert_eq!(
-            HttpTransportError::internal("internal").to_string(),
-            "internal"
-        );
+        assert_eq!(HttpTransportError::internal("internal").to_string(), "internal");
         assert!(HttpTransportError::internal("internal").source().is_none());
 
         let invalid_json = IncomingHttpMessage::parse("{".to_string()).unwrap_err();
@@ -1860,8 +1708,7 @@ mod tests {
     #[test]
     fn incoming_http_message_parses_and_classifies_shapes() {
         let request = IncomingHttpMessage::parse(
-            r#"{"jsonrpc":"2.0","id":1,"method":"session/new","params":{"cwd":".","mcpServers":[]}}"#
-                .to_string(),
+            r#"{"jsonrpc":"2.0","id":1,"method":"session/new","params":{"cwd":".","mcpServers":[]}}"#.to_string(),
         )
         .unwrap();
         assert!(request.is_request());
@@ -1878,21 +1725,17 @@ mod tests {
         }
 
         let notification =
-            IncomingHttpMessage::parse(r#"{"jsonrpc":"2.0","method":"initialized"}"#.to_string())
-                .unwrap();
+            IncomingHttpMessage::parse(r#"{"jsonrpc":"2.0","method":"initialized"}"#.to_string()).unwrap();
         assert!(notification.is_notification());
         assert!(!notification.requires_session_id());
 
-        let response = IncomingHttpMessage::parse(
-            r#"{"jsonrpc":"2.0","id":99,"result":{"ok":true}}"#.to_string(),
-        )
-        .unwrap();
+        let response =
+            IncomingHttpMessage::parse(r#"{"jsonrpc":"2.0","id":99,"result":{"ok":true}}"#.to_string()).unwrap();
         assert!(response.is_response());
         assert!(response.requires_session_id());
 
         let null_response =
-            IncomingHttpMessage::parse(r#"{"jsonrpc":"2.0","id":100,"result":null}"#.to_string())
-                .unwrap();
+            IncomingHttpMessage::parse(r#"{"jsonrpc":"2.0","id":100,"result":null}"#.to_string()).unwrap();
         assert!(null_response.is_response());
         assert!(null_response.requires_session_id());
     }
@@ -1921,15 +1764,13 @@ mod tests {
     #[test]
     fn incoming_http_message_session_id_helpers_handle_valid_and_invalid_values() {
         let message = IncomingHttpMessage::parse(
-            r#"{"jsonrpc":"2.0","id":1,"method":"session/prompt","params":{"sessionId":"session-1"}}"#
-                .to_string(),
+            r#"{"jsonrpc":"2.0","id":1,"method":"session/prompt","params":{"sessionId":"session-1"}}"#.to_string(),
         )
         .unwrap();
         assert_eq!(message.params_session_id().unwrap(), Some(session_id()));
 
         let invalid = IncomingHttpMessage::parse(
-            r#"{"jsonrpc":"2.0","id":1,"method":"session/prompt","params":{"sessionId":"bad.session"}}"#
-                .to_string(),
+            r#"{"jsonrpc":"2.0","id":1,"method":"session/prompt","params":{"sessionId":"bad.session"}}"#.to_string(),
         )
         .unwrap();
         assert!(matches!(
@@ -1943,24 +1784,19 @@ mod tests {
 
     #[test]
     fn outgoing_http_message_extracts_session_ids() {
-        let outbound = OutgoingHttpMessage::parse(
-            r#"{"jsonrpc":"2.0","id":1,"params":{"sessionId":"session-1"}}"#,
-        )
-        .unwrap();
+        let outbound =
+            OutgoingHttpMessage::parse(r#"{"jsonrpc":"2.0","id":1,"params":{"sessionId":"session-1"}}"#).unwrap();
         assert_eq!(outbound.params_session_id(), Some(session_id()));
 
-        let response = OutgoingHttpMessage::parse(
-            r#"{"jsonrpc":"2.0","id":2,"result":{"sessionId":"session-1"}}"#,
-        )
-        .unwrap();
+        let response =
+            OutgoingHttpMessage::parse(r#"{"jsonrpc":"2.0","id":2,"result":{"sessionId":"session-1"}}"#).unwrap();
         assert_eq!(response.result_session_id(), Some(session_id()));
     }
 
     #[test]
     fn route_live_frame_keeps_same_session_notifications_on_post_stream() {
         let frame = SseFrame::json(
-            r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-1"}}"#
-                .to_string(),
+            r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-1"}}"#.to_string(),
         );
         let parsed = OutgoingHttpMessage::parse(frame_json(&frame)).unwrap();
         let request_id = RequestId::Number(1);
@@ -1993,8 +1829,7 @@ mod tests {
     #[test]
     fn route_live_frame_sends_other_session_notifications_to_get_listeners() {
         let frame = SseFrame::json(
-            r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-2"}}"#
-                .to_string(),
+            r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-2"}}"#.to_string(),
         );
         let parsed = OutgoingHttpMessage::parse(frame_json(&frame)).unwrap();
         let request_id = RequestId::Number(1);
@@ -2028,8 +1863,7 @@ mod tests {
     #[test]
     fn route_buffered_frame_sends_other_session_notifications_to_get_listeners() {
         let frame = SseFrame::json(
-            r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-2"}}"#
-                .to_string(),
+            r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-2"}}"#.to_string(),
         );
         let parsed = OutgoingHttpMessage::parse(frame_json(&frame)).unwrap();
         let request_id = RequestId::Number(1);
@@ -2039,13 +1873,7 @@ mod tests {
         let mut get_listeners = HashMap::new();
         get_listeners.insert(other_session_id, vec![get_tx]);
 
-        let outcome = route_buffered_frame(
-            &frame,
-            Some(&parsed),
-            &request_id,
-            &mut events,
-            &mut get_listeners,
-        );
+        let outcome = route_buffered_frame(&frame, Some(&parsed), &request_id, &mut events, &mut get_listeners);
 
         assert!(matches!(outcome, BufferedFrameOutcome::Routed));
         assert!(events.is_empty());
@@ -2088,8 +1916,7 @@ mod tests {
         get_listeners.insert(session_id.clone(), vec![first_tx, second_tx]);
 
         let frame = SseFrame::json(
-            r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-1"}}"#
-                .to_string(),
+            r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-1"}}"#.to_string(),
         );
         let outcome = dispatch_to_get_listeners(&frame, &session_id, &mut get_listeners);
 
@@ -2198,8 +2025,7 @@ mod tests {
     #[test]
     fn validate_http_context_enforces_connection_and_session_rules() {
         let initialize = IncomingHttpMessage::parse(
-            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#
-                .to_string(),
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#.to_string(),
         )
         .unwrap();
         let connection_id = AcpConnectionId::default();
@@ -2215,8 +2041,7 @@ mod tests {
         ));
 
         let initialized =
-            IncomingHttpMessage::parse(r#"{"jsonrpc":"2.0","method":"initialized"}"#.to_string())
-                .unwrap();
+            IncomingHttpMessage::parse(r#"{"jsonrpc":"2.0","method":"initialized"}"#.to_string()).unwrap();
         assert!(matches!(
             validate_http_context(&initialized, None, None),
             Err(HttpTransportError::BadRequest {
@@ -2226,8 +2051,7 @@ mod tests {
         ));
 
         let prompt = IncomingHttpMessage::parse(
-            r#"{"jsonrpc":"2.0","id":2,"method":"session/prompt","params":{"sessionId":"session-1"}}"#
-                .to_string(),
+            r#"{"jsonrpc":"2.0","id":2,"method":"session/prompt","params":{"sessionId":"session-1"}}"#.to_string(),
         )
         .unwrap();
         assert!(matches!(
@@ -2239,8 +2063,7 @@ mod tests {
         ));
 
         let mismatched = IncomingHttpMessage::parse(
-            r#"{"jsonrpc":"2.0","id":2,"method":"session/prompt","params":{"sessionId":"session-2"}}"#
-                .to_string(),
+            r#"{"jsonrpc":"2.0","id":2,"method":"session/prompt","params":{"sessionId":"session-2"}}"#.to_string(),
         )
         .unwrap();
         assert!(matches!(
@@ -2278,19 +2101,10 @@ mod tests {
         assert!(validate_protocol_version_header(None, None).is_ok());
         assert!(validate_protocol_version_header(Some(&ProtocolVersion::V0), None).is_ok());
         assert!(validate_protocol_version_header(None, Some(&ProtocolVersion::V0)).is_ok());
-        assert!(
-            validate_protocol_version_header(
-                Some(&ProtocolVersion::V0),
-                Some(&ProtocolVersion::V0)
-            )
-            .is_ok()
-        );
+        assert!(validate_protocol_version_header(Some(&ProtocolVersion::V0), Some(&ProtocolVersion::V0)).is_ok());
 
         assert!(matches!(
-            validate_protocol_version_header(
-                Some(&ProtocolVersion::V1),
-                Some(&ProtocolVersion::V0)
-            ),
+            validate_protocol_version_header(Some(&ProtocolVersion::V1), Some(&ProtocolVersion::V0)),
             Err(HttpTransportError::BadRequest {
                 message: "Acp-Protocol-Version header does not match initialized protocol version",
                 source: None,
@@ -2325,10 +2139,7 @@ mod tests {
         );
         assert!(is_websocket_request(&headers));
 
-        headers.insert(
-            ACP_CONNECTION_ID_HEADER,
-            HeaderValue::from_static("not-a-uuid"),
-        );
+        headers.insert(ACP_CONNECTION_ID_HEADER, HeaderValue::from_static("not-a-uuid"));
         assert!(matches!(
             parse_connection_id_header(&headers),
             Err(HttpTransportError::BadRequest {
@@ -2341,10 +2152,7 @@ mod tests {
             ACP_CONNECTION_ID_HEADER,
             HeaderValue::from_str(&connection_id.to_string()).unwrap(),
         );
-        headers.insert(
-            ACP_PROTOCOL_VERSION_HEADER,
-            HeaderValue::from_static("not-a-version"),
-        );
+        headers.insert(ACP_PROTOCOL_VERSION_HEADER, HeaderValue::from_static("not-a-version"));
         assert!(matches!(
             parse_protocol_version_header(&headers),
             Err(HttpTransportError::BadRequest {
@@ -2430,13 +2238,9 @@ mod tests {
             HeaderValue::from_str(session_id.as_str()).unwrap(),
         );
 
-        let response = http_post(
-            headers,
-            state,
-            r#"{"jsonrpc":"2.0","id":1,"result":null}"#.to_string(),
-        )
-        .await
-        .unwrap();
+        let response = http_post(headers, state, r#"{"jsonrpc":"2.0","id":1,"result":null}"#.to_string())
+            .await
+            .unwrap();
 
         assert_eq!(response.status(), StatusCode::ACCEPTED);
     }
@@ -2486,8 +2290,7 @@ mod tests {
         let response = http_post(
             headers,
             state,
-            r#"{"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":".","mcpServers":[]}}"#
-                .to_string(),
+            r#"{"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":".","mcpServers":[]}}"#.to_string(),
         )
         .await
         .unwrap();
@@ -2632,17 +2435,13 @@ mod tests {
         let response = post(
             headers,
             State(state),
-            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#
-                .to_string(),
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#.to_string(),
         )
         .await;
 
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
         let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        assert_eq!(
-            String::from_utf8(bytes.to_vec()).unwrap(),
-            "Origin is not allowed"
-        );
+        assert_eq!(String::from_utf8(bytes.to_vec()).unwrap(), "Origin is not allowed");
     }
 
     #[tokio::test]
@@ -2672,8 +2471,7 @@ mod tests {
 
         let (post_response_tx, post_response_rx) = oneshot::channel();
         let post_message =
-            IncomingHttpMessage::parse(r#"{"jsonrpc":"2.0","method":"initialized"}"#.to_string())
-                .unwrap();
+            IncomingHttpMessage::parse(r#"{"jsonrpc":"2.0","method":"initialized"}"#.to_string()).unwrap();
         process_manager_request(
             ManagerRequest::HttpPost {
                 connection_id: None,
@@ -2808,8 +2606,7 @@ mod tests {
 
                 let (response_tx, response_rx) = oneshot::channel();
                 let initialize = IncomingHttpMessage::parse(
-                    r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#
-                        .to_string(),
+                    r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#.to_string(),
                 )
                 .unwrap();
 
@@ -2834,10 +2631,7 @@ mod tests {
                 assert_eq!(http_connections.len(), 1);
                 assert_eq!(http_connection_handles.len(), 1);
                 assert!(!http_connection_handles[0].is_finished());
-                assert!(matches!(
-                    response_rx.await.unwrap(),
-                    Ok(HttpPostOutcome::Live { .. })
-                ));
+                assert!(matches!(response_rx.await.unwrap(), Ok(HttpPostOutcome::Live { .. })));
 
                 let _ = shutdown_tx.send(true);
                 tokio::time::timeout(std::time::Duration::from_secs(2), async {

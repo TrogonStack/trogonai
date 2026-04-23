@@ -18,9 +18,7 @@ use crate::agent::Bridge;
 use crate::error::AGENT_UNAVAILABLE;
 use crate::in_flight_slot_guard::InFlightSlotGuard;
 use crate::jsonrpc::extract_request_id;
-use crate::nats::{
-    ClientMethod, FlushClient, PublishClient, RequestClient, SubscribeClient, parse_client_subject,
-};
+use crate::nats::{ClientMethod, FlushClient, PublishClient, RequestClient, SubscribeClient, parse_client_subject};
 use agent_client_protocol::{Client, ErrorCode};
 use async_nats::Message;
 use async_nats::header::HeaderMap;
@@ -45,14 +43,7 @@ async fn publish_backpressure_error_reply<N: PublishClient + FlushClient, S: Jso
         ErrorCode::Other(AGENT_UNAVAILABLE),
         "Client proxy overloaded; retry with backoff",
     );
-    rpc_reply::publish_reply(
-        nats,
-        reply_to,
-        bytes,
-        content_type,
-        "backpressure error reply",
-    )
-    .await;
+    rpc_reply::publish_reply(nats, reply_to, bytes, content_type, "backpressure error reply").await;
 }
 
 /// Runs the client proxy, subscribing to client subjects and dispatching to handlers.
@@ -73,8 +64,7 @@ pub async fn run<
     bridge: Rc<Bridge<N, C, J>>,
     serializer: S,
 ) {
-    let wildcard =
-        crate::nats::session::wildcards::AllClientSubject::new(bridge.config.acp_prefix_ref());
+    let wildcard = crate::nats::session::wildcards::AllClientSubject::new(bridge.config.acp_prefix_ref());
     info!("Starting client proxy - subscribing to {}", wildcard);
 
     let mut subscriber = match nats.subscribe(wildcard).await {
@@ -142,9 +132,7 @@ async fn process_message<
             subject = %subject,
             "Client task backpressure — rejecting message"
         );
-        bridge
-            .metrics
-            .record_error("client", "client_backpressure_rejected");
+        bridge.metrics.record_error("client", "client_backpressure_rejected");
 
         if let Some(reply_to) = &reply {
             publish_backpressure_error_reply(nats, &payload, reply_to, serializer).await;
@@ -232,13 +220,8 @@ async fn dispatch_client_method<
             session_update::handle(&payload, ctx.client, reply.is_some()).await;
         }
         ClientMethod::ExtSessionPromptResponse => {
-            ext_session_prompt_response::handle(
-                parsed.session_id.as_str(),
-                &payload,
-                reply.as_deref(),
-                ctx.bridge,
-            )
-            .await;
+            ext_session_prompt_response::handle(parsed.session_id.as_str(), &payload, reply.as_deref(), ctx.bridge)
+                .await;
         }
         ClientMethod::TerminalCreate => {
             terminal_create::handle(
@@ -315,11 +298,10 @@ mod tests {
     use super::*;
     use crate::session_id::AcpSessionId;
     use agent_client_protocol::{
-        ContentBlock, ContentChunk, CreateTerminalRequest, CreateTerminalResponse,
-        KillTerminalRequest, KillTerminalResponse, ReadTextFileRequest, ReadTextFileResponse,
-        ReleaseTerminalRequest, ReleaseTerminalResponse, Request, RequestId,
-        RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
-        SessionNotification, SessionUpdate, TerminalExitStatus, TerminalOutputRequest,
+        ContentBlock, ContentChunk, CreateTerminalRequest, CreateTerminalResponse, KillTerminalRequest,
+        KillTerminalResponse, ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest,
+        ReleaseTerminalResponse, Request, RequestId, RequestPermissionOutcome, RequestPermissionRequest,
+        RequestPermissionResponse, SessionNotification, SessionUpdate, TerminalExitStatus, TerminalOutputRequest,
         TerminalOutputResponse, ToolCallUpdate, ToolCallUpdateFields, WaitForTerminalExitRequest,
         WaitForTerminalExitResponse, WriteTextFileRequest, WriteTextFileResponse,
     };
@@ -385,10 +367,7 @@ mod tests {
             ))
         }
 
-        async fn read_text_file(
-            &self,
-            _: ReadTextFileRequest,
-        ) -> agent_client_protocol::Result<ReadTextFileResponse> {
+        async fn read_text_file(&self, _: ReadTextFileRequest) -> agent_client_protocol::Result<ReadTextFileResponse> {
             Ok(ReadTextFileResponse::new("mock file content".to_string()))
         }
 
@@ -406,10 +385,7 @@ mod tests {
             Ok(CreateTerminalResponse::new("term-001"))
         }
 
-        async fn kill_terminal(
-            &self,
-            _: KillTerminalRequest,
-        ) -> agent_client_protocol::Result<KillTerminalResponse> {
+        async fn kill_terminal(&self, _: KillTerminalRequest) -> agent_client_protocol::Result<KillTerminalResponse> {
             *self.kill_terminal_calls.borrow_mut() += 1;
             Ok(KillTerminalResponse::new())
         }
@@ -419,10 +395,7 @@ mod tests {
             _: TerminalOutputRequest,
         ) -> agent_client_protocol::Result<TerminalOutputResponse> {
             *self.terminal_output_calls.borrow_mut() += 1;
-            Ok(TerminalOutputResponse::new(
-                "mock output".to_string(),
-                false,
-            ))
+            Ok(TerminalOutputResponse::new("mock output".to_string(), false))
         }
 
         async fn release_terminal(
@@ -572,14 +545,7 @@ mod tests {
             bridge: &bridge,
             serializer: &StdJsonSerialize,
         };
-        dispatch_client_method(
-            "acp.session.sess-1.client.session.update",
-            parsed,
-            payload,
-            None,
-            &ctx,
-        )
-        .await;
+        dispatch_client_method("acp.session.sess-1.client.session.update", parsed, payload, None, &ctx).await;
 
         assert_eq!(client.notifications.borrow().len(), 1);
     }
@@ -748,8 +714,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dispatch_client_method_dispatches_terminal_create_session_id_mismatch_publishes_error_reply()
-     {
+    async fn dispatch_client_method_dispatches_terminal_create_session_id_mismatch_publishes_error_reply() {
         let nats = MockNatsClient::new();
         let client = MockClient::new();
         let session_id = AcpSessionId::new("sess-a").unwrap();
@@ -877,11 +842,7 @@ mod tests {
             1,
             "terminal_output handler must run"
         );
-        assert_eq!(
-            client.kill_terminal_call_count(),
-            0,
-            "kill handler must not run"
-        );
+        assert_eq!(client.kill_terminal_call_count(), 0, "kill handler must not run");
     }
 
     #[tokio::test]
@@ -1014,8 +975,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dispatch_client_method_dispatches_terminal_wait_for_exit_client_error_publishes_error_reply()
-     {
+    async fn dispatch_client_method_dispatches_terminal_wait_for_exit_client_error_publishes_error_reply() {
         let nats = MockNatsClient::new();
         let client = TerminalWaitForExitFailingClient;
         let session_id = AcpSessionId::new("sess-1").unwrap();
@@ -1059,9 +1019,7 @@ mod tests {
         );
         assert_eq!(
             response.get("error").and_then(|e| e.get("message")),
-            Some(&serde_json::Value::from(
-                "mock wait_for_terminal_exit failure"
-            ))
+            Some(&serde_json::Value::from("mock wait_for_terminal_exit failure"))
         );
     }
 
@@ -1129,8 +1087,7 @@ mod tests {
             method: ClientMethod::TerminalWaitForExit,
         };
 
-        let bridge =
-            make_bridge_with_operation_timeout(nats.clone(), std::time::Duration::from_millis(10));
+        let bridge = make_bridge_with_operation_timeout(nats.clone(), std::time::Duration::from_millis(10));
         let ctx = DispatchContext {
             nats: &nats,
             client: &client,
@@ -1158,8 +1115,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dispatch_client_method_terminal_wait_for_exit_success_publish_failure_exercises_error_path()
-     {
+    async fn dispatch_client_method_terminal_wait_for_exit_success_publish_failure_exercises_error_path() {
         let nats = AdvancedMockNatsClient::new();
         nats.fail_next_publish();
         let client = MockClient::new();
@@ -1197,8 +1153,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dispatch_client_method_terminal_wait_for_exit_success_flush_failure_exercises_warn_path()
-     {
+    async fn dispatch_client_method_terminal_wait_for_exit_success_flush_failure_exercises_warn_path() {
         let nats = AdvancedMockNatsClient::new();
         nats.fail_next_flush();
         let client = MockClient::new();
@@ -1236,8 +1191,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dispatch_client_method_terminal_wait_for_exit_client_error_publish_failure_exercises_error_path()
-     {
+    async fn dispatch_client_method_terminal_wait_for_exit_client_error_publish_failure_exercises_error_path() {
         let nats = AdvancedMockNatsClient::new();
         nats.fail_next_publish();
         let client = TerminalWaitForExitFailingClient;
@@ -1275,8 +1229,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dispatch_client_method_terminal_wait_for_exit_client_error_flush_failure_exercises_warn_path()
-     {
+    async fn dispatch_client_method_terminal_wait_for_exit_client_error_flush_failure_exercises_warn_path() {
         let nats = AdvancedMockNatsClient::new();
         nats.fail_next_flush();
         let client = TerminalWaitForExitFailingClient;
@@ -1314,8 +1267,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dispatch_client_method_dispatches_terminal_wait_for_exit_with_terminal_release_failing_client()
-     {
+    async fn dispatch_client_method_dispatches_terminal_wait_for_exit_with_terminal_release_failing_client() {
         let nats = MockNatsClient::new();
         let client = TerminalReleaseFailingClient;
         let envelope = Request {
@@ -1347,8 +1299,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dispatch_client_method_terminal_wait_for_exit_failing_client_session_update_covers_stubs()
-     {
+    async fn dispatch_client_method_terminal_wait_for_exit_failing_client_session_update_covers_stubs() {
         let nats = MockNatsClient::new();
         let client = TerminalWaitForExitFailingClient;
         let notification = SessionNotification::new(
@@ -1367,19 +1318,11 @@ mod tests {
             bridge: &bridge,
             serializer: &StdJsonSerialize,
         };
-        dispatch_client_method(
-            "acp.session.sess-1.client.session.update",
-            parsed,
-            payload,
-            None,
-            &ctx,
-        )
-        .await;
+        dispatch_client_method("acp.session.sess-1.client.session.update", parsed, payload, None, &ctx).await;
     }
 
     #[tokio::test]
-    async fn dispatch_client_method_terminal_wait_for_exit_timeout_client_session_update_covers_stubs()
-     {
+    async fn dispatch_client_method_terminal_wait_for_exit_timeout_client_session_update_covers_stubs() {
         let nats = MockNatsClient::new();
         let client = TerminalWaitForExitTimeoutClient;
         let notification = SessionNotification::new(
@@ -1398,19 +1341,11 @@ mod tests {
             bridge: &bridge,
             serializer: &StdJsonSerialize,
         };
-        dispatch_client_method(
-            "acp.session.sess-1.client.session.update",
-            parsed,
-            payload,
-            None,
-            &ctx,
-        )
-        .await;
+        dispatch_client_method("acp.session.sess-1.client.session.update", parsed, payload, None, &ctx).await;
     }
 
     #[tokio::test]
-    async fn dispatch_client_method_terminal_wait_for_exit_failing_client_request_permission_covers_stubs()
-     {
+    async fn dispatch_client_method_terminal_wait_for_exit_failing_client_request_permission_covers_stubs() {
         let nats = MockNatsClient::new();
         let client = TerminalWaitForExitFailingClient;
         let tool_call = ToolCallUpdate::new("call-1", ToolCallUpdateFields::new());
@@ -1444,8 +1379,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dispatch_client_method_terminal_wait_for_exit_timeout_client_request_permission_covers_stubs()
-     {
+    async fn dispatch_client_method_terminal_wait_for_exit_timeout_client_request_permission_covers_stubs() {
         let nats = MockNatsClient::new();
         let client = TerminalWaitForExitTimeoutClient;
         let tool_call = ToolCallUpdate::new("call-1", ToolCallUpdateFields::new());
@@ -1479,8 +1413,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dispatch_client_method_terminal_wait_for_exit_failing_client_read_text_file_covers_stubs()
-     {
+    async fn dispatch_client_method_terminal_wait_for_exit_failing_client_read_text_file_covers_stubs() {
         let nats = MockNatsClient::new();
         let client = TerminalWaitForExitFailingClient;
         let envelope = Request {
@@ -1512,8 +1445,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dispatch_client_method_terminal_wait_for_exit_failing_client_terminal_create_covers_stubs()
-     {
+    async fn dispatch_client_method_terminal_wait_for_exit_failing_client_terminal_create_covers_stubs() {
         let nats = MockNatsClient::new();
         let client = TerminalWaitForExitFailingClient;
         let envelope = Request {
@@ -1545,8 +1477,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dispatch_client_method_terminal_wait_for_exit_failing_client_terminal_kill_covers_stubs()
-     {
+    async fn dispatch_client_method_terminal_wait_for_exit_failing_client_terminal_kill_covers_stubs() {
         let nats = MockNatsClient::new();
         let client = TerminalWaitForExitFailingClient;
         let envelope = Request {
@@ -1581,8 +1512,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dispatch_client_method_terminal_wait_for_exit_failing_client_terminal_output_covers_stubs()
-     {
+    async fn dispatch_client_method_terminal_wait_for_exit_failing_client_terminal_output_covers_stubs() {
         let nats = MockNatsClient::new();
         let client = TerminalWaitForExitFailingClient;
         let envelope = Request {
@@ -1614,8 +1544,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dispatch_client_method_terminal_wait_for_exit_failing_client_terminal_release_covers_stubs()
-     {
+    async fn dispatch_client_method_terminal_wait_for_exit_failing_client_terminal_release_covers_stubs() {
         let nats = MockNatsClient::new();
         let client = TerminalWaitForExitFailingClient;
         let envelope = Request {
@@ -1647,8 +1576,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dispatch_client_method_terminal_wait_for_exit_failing_client_write_text_file_covers_stubs()
-     {
+    async fn dispatch_client_method_terminal_wait_for_exit_failing_client_write_text_file_covers_stubs() {
         let nats = MockNatsClient::new();
         let client = TerminalWaitForExitFailingClient;
         let envelope = Request {
@@ -1684,8 +1612,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dispatch_client_method_terminal_wait_for_exit_timeout_client_read_text_file_covers_stubs()
-     {
+    async fn dispatch_client_method_terminal_wait_for_exit_timeout_client_read_text_file_covers_stubs() {
         let nats = MockNatsClient::new();
         let client = TerminalWaitForExitTimeoutClient;
         let envelope = Request {
@@ -1717,8 +1644,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dispatch_client_method_terminal_wait_for_exit_timeout_client_terminal_create_covers_stubs()
-     {
+    async fn dispatch_client_method_terminal_wait_for_exit_timeout_client_terminal_create_covers_stubs() {
         let nats = MockNatsClient::new();
         let client = TerminalWaitForExitTimeoutClient;
         let envelope = Request {
@@ -1750,8 +1676,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dispatch_client_method_terminal_wait_for_exit_timeout_client_terminal_kill_covers_stubs()
-     {
+    async fn dispatch_client_method_terminal_wait_for_exit_timeout_client_terminal_kill_covers_stubs() {
         let nats = MockNatsClient::new();
         let client = TerminalWaitForExitTimeoutClient;
         let envelope = Request {
@@ -1786,8 +1711,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dispatch_client_method_terminal_wait_for_exit_timeout_client_terminal_output_covers_stubs()
-     {
+    async fn dispatch_client_method_terminal_wait_for_exit_timeout_client_terminal_output_covers_stubs() {
         let nats = MockNatsClient::new();
         let client = TerminalWaitForExitTimeoutClient;
         let envelope = Request {
@@ -1819,8 +1743,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dispatch_client_method_terminal_wait_for_exit_timeout_client_terminal_release_covers_stubs()
-     {
+    async fn dispatch_client_method_terminal_wait_for_exit_timeout_client_terminal_release_covers_stubs() {
         let nats = MockNatsClient::new();
         let client = TerminalWaitForExitTimeoutClient;
         let envelope = Request {
@@ -1852,8 +1775,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dispatch_client_method_terminal_wait_for_exit_timeout_client_write_text_file_covers_stubs()
-     {
+    async fn dispatch_client_method_terminal_wait_for_exit_timeout_client_write_text_file_covers_stubs() {
         let nats = MockNatsClient::new();
         let client = TerminalWaitForExitTimeoutClient;
         let envelope = Request {
@@ -1961,8 +1883,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dispatch_client_method_dispatches_terminal_release_session_id_mismatch_publishes_error_reply()
-     {
+    async fn dispatch_client_method_dispatches_terminal_release_session_id_mismatch_publishes_error_reply() {
         let nats = MockNatsClient::new();
         let client = MockClient::new();
         let session_id = AcpSessionId::new("sess-a").unwrap();
@@ -2003,8 +1924,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dispatch_client_method_dispatches_terminal_release_client_error_publishes_error_reply()
-    {
+    async fn dispatch_client_method_dispatches_terminal_release_client_error_publishes_error_reply() {
         let nats = MockNatsClient::new();
         let client = TerminalReleaseFailingClient;
         let session_id = AcpSessionId::new("sess-1").unwrap();
@@ -2086,8 +2006,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dispatch_client_method_dispatches_session_update_with_terminal_release_failing_client()
-    {
+    async fn dispatch_client_method_dispatches_session_update_with_terminal_release_failing_client() {
         let nats = MockNatsClient::new();
         let client = TerminalReleaseFailingClient;
         let session_id = AcpSessionId::new("sess-1").unwrap();
@@ -2110,19 +2029,11 @@ mod tests {
             bridge: &bridge,
             serializer: &StdJsonSerialize,
         };
-        dispatch_client_method(
-            "acp.session.sess-1.client.session.update",
-            parsed,
-            payload,
-            None,
-            &ctx,
-        )
-        .await;
+        dispatch_client_method("acp.session.sess-1.client.session.update", parsed, payload, None, &ctx).await;
     }
 
     #[tokio::test]
-    async fn dispatch_client_method_dispatches_fs_read_text_file_with_terminal_release_failing_client()
-     {
+    async fn dispatch_client_method_dispatches_fs_read_text_file_with_terminal_release_failing_client() {
         let nats = MockNatsClient::new();
         let client = TerminalReleaseFailingClient;
         let session_id = AcpSessionId::new("sess-1").unwrap();
@@ -2162,8 +2073,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dispatch_client_method_dispatches_terminal_create_with_terminal_release_failing_client()
-     {
+    async fn dispatch_client_method_dispatches_terminal_create_with_terminal_release_failing_client() {
         let nats = MockNatsClient::new();
         let client = TerminalReleaseFailingClient;
         let session_id = AcpSessionId::new("sess-1").unwrap();
@@ -2200,8 +2110,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dispatch_client_method_dispatches_terminal_kill_with_terminal_release_failing_client()
-    {
+    async fn dispatch_client_method_dispatches_terminal_kill_with_terminal_release_failing_client() {
         let nats = MockNatsClient::new();
         let client = TerminalReleaseFailingClient;
         let session_id = AcpSessionId::new("sess-1").unwrap();
@@ -2238,8 +2147,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dispatch_client_method_dispatches_terminal_output_with_terminal_release_failing_client()
-     {
+    async fn dispatch_client_method_dispatches_terminal_output_with_terminal_release_failing_client() {
         let nats = MockNatsClient::new();
         let client = TerminalReleaseFailingClient;
         let session_id = AcpSessionId::new("sess-1").unwrap();
@@ -2276,8 +2184,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dispatch_client_method_dispatches_terminal_release_with_terminal_kill_failing_client()
-    {
+    async fn dispatch_client_method_dispatches_terminal_release_with_terminal_kill_failing_client() {
         let nats = MockNatsClient::new();
         let client = TerminalKillFailingClient;
         let session_id = AcpSessionId::new("sess-1").unwrap();
@@ -2317,8 +2224,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dispatch_client_method_dispatches_request_permission_with_terminal_release_failing_client()
-     {
+    async fn dispatch_client_method_dispatches_request_permission_with_terminal_release_failing_client() {
         let nats = MockNatsClient::new();
         let client = TerminalReleaseFailingClient;
         let session_id = AcpSessionId::new("sess-1").unwrap();
@@ -2357,8 +2263,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dispatch_client_method_dispatches_terminal_output_client_error_publishes_error_reply()
-    {
+    async fn dispatch_client_method_dispatches_terminal_output_client_error_publishes_error_reply() {
         let nats = MockNatsClient::new();
         let client = TerminalKillFailingClient;
         let session_id = AcpSessionId::new("sess-1").unwrap();
@@ -2504,22 +2409,14 @@ mod tests {
             bridge: &bridge,
             serializer: &StdJsonSerialize,
         };
-        dispatch_client_method(
-            "acp.session.sess-1.client.terminal.kill",
-            parsed,
-            payload,
-            None,
-            &ctx,
-        )
-        .await;
+        dispatch_client_method("acp.session.sess-1.client.terminal.kill", parsed, payload, None, &ctx).await;
 
         assert!(nats.published_messages().is_empty());
         assert_eq!(client.kill_terminal_call_count(), 0);
     }
 
     #[tokio::test]
-    async fn dispatch_client_method_dispatches_terminal_kill_session_id_mismatch_publishes_error_reply()
-     {
+    async fn dispatch_client_method_dispatches_terminal_kill_session_id_mismatch_publishes_error_reply() {
         let nats = MockNatsClient::new();
         let client = MockClient::new();
         let session_id = AcpSessionId::new("sess-a").unwrap();
@@ -2635,10 +2532,7 @@ mod tests {
             ))
         }
 
-        async fn read_text_file(
-            &self,
-            _: ReadTextFileRequest,
-        ) -> agent_client_protocol::Result<ReadTextFileResponse> {
+        async fn read_text_file(&self, _: ReadTextFileRequest) -> agent_client_protocol::Result<ReadTextFileResponse> {
             Ok(ReadTextFileResponse::new("mock file content".to_string()))
         }
 
@@ -2656,14 +2550,8 @@ mod tests {
             Ok(CreateTerminalResponse::new("term-001"))
         }
 
-        async fn kill_terminal(
-            &self,
-            _: KillTerminalRequest,
-        ) -> agent_client_protocol::Result<KillTerminalResponse> {
-            Err(agent_client_protocol::Error::new(
-                -32603,
-                "mock kill_terminal failure",
-            ))
+        async fn kill_terminal(&self, _: KillTerminalRequest) -> agent_client_protocol::Result<KillTerminalResponse> {
+            Err(agent_client_protocol::Error::new(-32603, "mock kill_terminal failure"))
         }
 
         async fn terminal_output(
@@ -2709,10 +2597,7 @@ mod tests {
             ))
         }
 
-        async fn read_text_file(
-            &self,
-            _: ReadTextFileRequest,
-        ) -> agent_client_protocol::Result<ReadTextFileResponse> {
+        async fn read_text_file(&self, _: ReadTextFileRequest) -> agent_client_protocol::Result<ReadTextFileResponse> {
             Ok(ReadTextFileResponse::new("mock file content".to_string()))
         }
 
@@ -2730,10 +2615,7 @@ mod tests {
             Ok(CreateTerminalResponse::new("term-001"))
         }
 
-        async fn kill_terminal(
-            &self,
-            _: KillTerminalRequest,
-        ) -> agent_client_protocol::Result<KillTerminalResponse> {
+        async fn kill_terminal(&self, _: KillTerminalRequest) -> agent_client_protocol::Result<KillTerminalResponse> {
             Ok(KillTerminalResponse::new())
         }
 
@@ -2741,10 +2623,7 @@ mod tests {
             &self,
             _: TerminalOutputRequest,
         ) -> agent_client_protocol::Result<TerminalOutputResponse> {
-            Ok(TerminalOutputResponse::new(
-                "mock output".to_string(),
-                false,
-            ))
+            Ok(TerminalOutputResponse::new("mock output".to_string(), false))
         }
 
         async fn release_terminal(
@@ -2789,10 +2668,7 @@ mod tests {
             ))
         }
 
-        async fn read_text_file(
-            &self,
-            _: ReadTextFileRequest,
-        ) -> agent_client_protocol::Result<ReadTextFileResponse> {
+        async fn read_text_file(&self, _: ReadTextFileRequest) -> agent_client_protocol::Result<ReadTextFileResponse> {
             Ok(ReadTextFileResponse::new("mock file content".to_string()))
         }
 
@@ -2810,10 +2686,7 @@ mod tests {
             Ok(CreateTerminalResponse::new("term-001"))
         }
 
-        async fn kill_terminal(
-            &self,
-            _: KillTerminalRequest,
-        ) -> agent_client_protocol::Result<KillTerminalResponse> {
+        async fn kill_terminal(&self, _: KillTerminalRequest) -> agent_client_protocol::Result<KillTerminalResponse> {
             Ok(KillTerminalResponse::new())
         }
 
@@ -2821,10 +2694,7 @@ mod tests {
             &self,
             _: TerminalOutputRequest,
         ) -> agent_client_protocol::Result<TerminalOutputResponse> {
-            Ok(TerminalOutputResponse::new(
-                "mock output".to_string(),
-                false,
-            ))
+            Ok(TerminalOutputResponse::new("mock output".to_string(), false))
         }
 
         async fn release_terminal(
@@ -2867,10 +2737,7 @@ mod tests {
             ))
         }
 
-        async fn read_text_file(
-            &self,
-            _: ReadTextFileRequest,
-        ) -> agent_client_protocol::Result<ReadTextFileResponse> {
+        async fn read_text_file(&self, _: ReadTextFileRequest) -> agent_client_protocol::Result<ReadTextFileResponse> {
             Ok(ReadTextFileResponse::new("mock file content".to_string()))
         }
 
@@ -2888,10 +2755,7 @@ mod tests {
             Ok(CreateTerminalResponse::new("term-001"))
         }
 
-        async fn kill_terminal(
-            &self,
-            _: KillTerminalRequest,
-        ) -> agent_client_protocol::Result<KillTerminalResponse> {
+        async fn kill_terminal(&self, _: KillTerminalRequest) -> agent_client_protocol::Result<KillTerminalResponse> {
             Ok(KillTerminalResponse::new())
         }
 
@@ -2899,10 +2763,7 @@ mod tests {
             &self,
             _: TerminalOutputRequest,
         ) -> agent_client_protocol::Result<TerminalOutputResponse> {
-            Ok(TerminalOutputResponse::new(
-                "mock output".to_string(),
-                false,
-            ))
+            Ok(TerminalOutputResponse::new("mock output".to_string(), false))
         }
 
         async fn release_terminal(
@@ -3107,8 +2968,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dispatch_client_method_terminal_kill_client_error_publish_failure_exercises_error_path()
-     {
+    async fn dispatch_client_method_terminal_kill_client_error_publish_failure_exercises_error_path() {
         let nats = AdvancedMockNatsClient::new();
         nats.fail_next_publish();
         let client = TerminalKillFailingClient;
@@ -3213,19 +3073,11 @@ mod tests {
             bridge: &bridge,
             serializer: &StdJsonSerialize,
         };
-        dispatch_client_method(
-            "acp.session.sess-1.client.session.update",
-            parsed,
-            payload,
-            None,
-            &ctx,
-        )
-        .await;
+        dispatch_client_method("acp.session.sess-1.client.session.update", parsed, payload, None, &ctx).await;
     }
 
     #[tokio::test]
-    async fn dispatch_client_method_dispatches_fs_read_text_file_with_terminal_kill_failing_client()
-    {
+    async fn dispatch_client_method_dispatches_fs_read_text_file_with_terminal_kill_failing_client() {
         let nats = MockNatsClient::new();
         let client = TerminalKillFailingClient;
         let session_id = AcpSessionId::new("sess-1").unwrap();
@@ -3302,8 +3154,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dispatch_client_method_dispatches_request_permission_with_terminal_kill_failing_client()
-     {
+    async fn dispatch_client_method_dispatches_request_permission_with_terminal_kill_failing_client() {
         let nats = MockNatsClient::new();
         let client = TerminalKillFailingClient;
         let session_id = AcpSessionId::new("sess-1").unwrap();
@@ -3427,10 +3278,7 @@ mod tests {
 
     #[async_trait(?Send)]
     impl Client for RpcMockClient {
-        async fn session_notification(
-            &self,
-            _: SessionNotification,
-        ) -> agent_client_protocol::Result<()> {
+        async fn session_notification(&self, _: SessionNotification) -> agent_client_protocol::Result<()> {
             Ok(())
         }
 
@@ -3438,15 +3286,10 @@ mod tests {
             &self,
             _: RequestPermissionRequest,
         ) -> agent_client_protocol::Result<RequestPermissionResponse> {
-            Ok(RequestPermissionResponse::new(
-                RequestPermissionOutcome::Cancelled,
-            ))
+            Ok(RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled))
         }
 
-        async fn read_text_file(
-            &self,
-            _: ReadTextFileRequest,
-        ) -> agent_client_protocol::Result<ReadTextFileResponse> {
+        async fn read_text_file(&self, _: ReadTextFileRequest) -> agent_client_protocol::Result<ReadTextFileResponse> {
             Ok(ReadTextFileResponse::new("file contents".to_string()))
         }
 
@@ -3461,10 +3304,7 @@ mod tests {
             &self,
             _: TerminalOutputRequest,
         ) -> agent_client_protocol::Result<TerminalOutputResponse> {
-            Ok(TerminalOutputResponse::new(
-                "rpc mock output".to_string(),
-                false,
-            ))
+            Ok(TerminalOutputResponse::new("rpc mock output".to_string(), false))
         }
     }
 
@@ -3492,14 +3332,7 @@ mod tests {
             bridge: &bridge,
             serializer: &StdJsonSerialize,
         };
-        dispatch_client_method(
-            "acp.session.sess-1.client.session.update",
-            parsed,
-            payload,
-            None,
-            &ctx,
-        )
-        .await;
+        dispatch_client_method("acp.session.sess-1.client.session.update", parsed, payload, None, &ctx).await;
     }
 
     #[tokio::test]
@@ -3550,10 +3383,7 @@ mod tests {
 
         let request = RequestPermissionRequest::new(
             "sess-1",
-            agent_client_protocol::ToolCallUpdate::new(
-                "call-1",
-                agent_client_protocol::ToolCallUpdateFields::new(),
-            ),
+            agent_client_protocol::ToolCallUpdate::new("call-1", agent_client_protocol::ToolCallUpdateFields::new()),
             vec![],
         );
         let envelope = Request {
@@ -3624,18 +3454,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dispatch_client_method_dispatches_request_permission_client_error_publishes_error_reply()
-     {
+    async fn dispatch_client_method_dispatches_request_permission_client_error_publishes_error_reply() {
         let nats = MockNatsClient::new();
         let client = MockClient::new();
         let session_id = AcpSessionId::new("sess-1").unwrap();
 
         let request = RequestPermissionRequest::new(
             "sess-1",
-            agent_client_protocol::ToolCallUpdate::new(
-                "call-1",
-                agent_client_protocol::ToolCallUpdateFields::new(),
-            ),
+            agent_client_protocol::ToolCallUpdate::new("call-1", agent_client_protocol::ToolCallUpdateFields::new()),
             vec![],
         );
         let envelope = Request {
@@ -3677,10 +3503,7 @@ mod tests {
 
         let request = RequestPermissionRequest::new(
             "sess-1",
-            agent_client_protocol::ToolCallUpdate::new(
-                "call-1",
-                agent_client_protocol::ToolCallUpdateFields::new(),
-            ),
+            agent_client_protocol::ToolCallUpdate::new("call-1", agent_client_protocol::ToolCallUpdateFields::new()),
             vec![],
         );
         let envelope = Request {
@@ -3715,8 +3538,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dispatch_client_method_dispatches_request_permission_client_error_serialization_fallback()
-     {
+    async fn dispatch_client_method_dispatches_request_permission_client_error_serialization_fallback() {
         let nats = MockNatsClient::new();
         let client = MockClient::new();
         let serializer = FailNextSerialize::new(1);
@@ -3724,10 +3546,7 @@ mod tests {
 
         let request = RequestPermissionRequest::new(
             "sess-1",
-            agent_client_protocol::ToolCallUpdate::new(
-                "call-1",
-                agent_client_protocol::ToolCallUpdateFields::new(),
-            ),
+            agent_client_protocol::ToolCallUpdate::new("call-1", agent_client_protocol::ToolCallUpdateFields::new()),
             vec![],
         );
         let envelope = Request {
@@ -3769,16 +3588,7 @@ mod tests {
         let in_flight = Rc::new(Cell::new(0usize));
 
         let msg = make_msg("acp.sess.unknown.method", b"{}", None);
-        process_message(
-            msg,
-            &nats,
-            client,
-            bridge,
-            &in_flight,
-            256,
-            &StdJsonSerialize,
-        )
-        .await;
+        process_message(msg, &nats, client, bridge, &in_flight, 256, &StdJsonSerialize).await;
 
         assert!(nats.published_messages().is_empty());
     }
@@ -3791,16 +3601,7 @@ mod tests {
         let in_flight = Rc::new(Cell::new(0usize));
 
         let msg = make_msg("acp.sess.unknown.method", b"{}", Some("_INBOX.reply"));
-        process_message(
-            msg,
-            &nats,
-            client,
-            bridge,
-            &in_flight,
-            256,
-            &StdJsonSerialize,
-        )
-        .await;
+        process_message(msg, &nats, client, bridge, &in_flight, 256, &StdJsonSerialize).await;
 
         assert!(nats.published_messages().is_empty());
     }
@@ -3969,16 +3770,7 @@ mod tests {
                 let payload = serde_json::to_vec(&notification).unwrap();
 
                 let msg = make_msg("acp.session.sess1.client.session.update", &payload, None);
-                process_message(
-                    msg,
-                    &nats,
-                    client.clone(),
-                    bridge,
-                    &in_flight,
-                    256,
-                    &StdJsonSerialize,
-                )
-                .await;
+                process_message(msg, &nats, client.clone(), bridge, &in_flight, 256, &StdJsonSerialize).await;
 
                 // Yield to allow the spawned local task to run.
                 tokio::task::yield_now().await;

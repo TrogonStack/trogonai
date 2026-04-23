@@ -20,8 +20,7 @@ impl std::error::Error for MockError {}
 pub struct MockNatsClient {
     published: Arc<Mutex<Vec<PublishedMessage>>>,
     subscribed_subjects: Arc<Mutex<Vec<String>>>,
-    subscribe_streams:
-        Arc<Mutex<std::collections::VecDeque<mpsc::UnboundedReceiver<async_nats::Message>>>>,
+    subscribe_streams: Arc<Mutex<std::collections::VecDeque<mpsc::UnboundedReceiver<async_nats::Message>>>>,
 }
 
 #[derive(Clone, Debug)]
@@ -97,10 +96,7 @@ impl std::fmt::Debug for AdvancedMockNatsClient {
             .field("base", &self.base)
             .field(
                 "request_responses",
-                &format!(
-                    "{} configured responses",
-                    self.request_responses.lock().unwrap().len()
-                ),
+                &format!("{} configured responses", self.request_responses.lock().unwrap().len()),
             )
             .field("should_fail_request", &self.should_fail_request)
             .field("should_hang_request", &self.should_hang_request)
@@ -188,10 +184,7 @@ impl SubscribeClient for MockNatsClient {
     type SubscribeError = MockError;
     type Subscription = BoxStream<'static, async_nats::Message>;
 
-    async fn subscribe<S: ToSubject + Send>(
-        &self,
-        subject: S,
-    ) -> Result<Self::Subscription, MockError> {
+    async fn subscribe<S: ToSubject + Send>(&self, subject: S) -> Result<Self::Subscription, MockError> {
         self.subscribed_subjects
             .lock()
             .unwrap()
@@ -246,10 +239,7 @@ impl SubscribeClient for AdvancedMockNatsClient {
     type SubscribeError = MockError;
     type Subscription = BoxStream<'static, async_nats::Message>;
 
-    async fn subscribe<S: ToSubject + Send>(
-        &self,
-        subject: S,
-    ) -> Result<Self::Subscription, MockError> {
+    async fn subscribe<S: ToSubject + Send>(&self, subject: S) -> Result<Self::Subscription, MockError> {
         self.base.subscribe(subject).await
     }
 }
@@ -286,10 +276,7 @@ impl RequestClient for AdvancedMockNatsClient {
                 description: None,
             })
         } else {
-            Err(MockError(format!(
-                "no response configured for subject: {}",
-                subject
-            )))
+            Err(MockError(format!("no response configured for subject: {}", subject)))
         }
     }
 }
@@ -315,9 +302,7 @@ impl PublishClient for AdvancedMockNatsClient {
         if should_fail {
             return Err(MockError("simulated publish failure".to_string()));
         }
-        self.base
-            .publish_with_headers(subject, headers, payload)
-            .await
+        self.base.publish_with_headers(subject, headers, payload).await
     }
 }
 
@@ -356,11 +341,7 @@ mod tests {
     async fn mock_client_tracks_publish() {
         let mock = MockNatsClient::new();
         let _ = mock
-            .publish_with_headers(
-                "foo",
-                async_nats::HeaderMap::new(),
-                bytes::Bytes::from("bar"),
-            )
+            .publish_with_headers("foo", async_nats::HeaderMap::new(), bytes::Bytes::from("bar"))
             .await;
         assert_eq!(mock.published_messages(), vec!["foo"]);
         assert_eq!(mock.published_payloads(), vec![bytes::Bytes::from("bar")]);
@@ -449,11 +430,7 @@ mod tests {
     async fn advanced_mock_request_no_response_configured() {
         let mock = AdvancedMockNatsClient::new();
         let result = mock
-            .request_with_headers(
-                "missing",
-                async_nats::HeaderMap::new(),
-                bytes::Bytes::from("x"),
-            )
+            .request_with_headers("missing", async_nats::HeaderMap::new(), bytes::Bytes::from("x"))
             .await;
         assert!(result.is_err());
         assert!(result.unwrap_err().0.contains("no response configured"));

@@ -9,10 +9,7 @@ pub struct LeaseTiming {
 }
 
 impl LeaseTiming {
-    pub fn new(
-        ttl: LeaseTtl,
-        renew_interval: LeaseRenewInterval,
-    ) -> Result<Self, LeaseConfigError> {
+    pub fn new(ttl: LeaseTtl, renew_interval: LeaseRenewInterval) -> Result<Self, LeaseConfigError> {
         if renew_interval.as_duration() >= ttl.as_duration() {
             return Err(LeaseConfigError::RenewIntervalNotLessThanTtl {
                 renew_interval: renew_interval.as_duration(),
@@ -20,10 +17,7 @@ impl LeaseTiming {
             });
         }
 
-        Ok(Self {
-            ttl,
-            renew_interval,
-        })
+        Ok(Self { ttl, renew_interval })
     }
 
     pub fn ttl(self) -> Duration {

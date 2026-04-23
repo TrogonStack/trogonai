@@ -93,11 +93,7 @@ impl ConfigValidationError {
         Self::MissingField { source, field }
     }
 
-    fn invalid_subject_token(
-        source: &'static str,
-        field: &'static str,
-        violation: SubjectTokenViolation,
-    ) -> Self {
+    fn invalid_subject_token(source: &'static str, field: &'static str, violation: SubjectTokenViolation) -> Self {
         Self::InvalidSubjectToken {
             source,
             field,
@@ -114,11 +110,7 @@ impl ConfigValidationError {
 impl fmt::Display for ConfigValidationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::InvalidField {
-                source,
-                field,
-                error,
-            } => {
+            Self::InvalidField { source, field, error } => {
                 if error.downcast_ref::<ZeroDuration>().is_some() {
                     write!(f, "{source}: {field} must not be zero")
                 } else {
@@ -336,24 +328,15 @@ struct IncidentioConfig {
     status: Option<String>,
     #[config(env = "TROGON_SOURCE_INCIDENTIO_SIGNING_SECRET")]
     signing_secret: Option<String>,
-    #[config(
-        env = "TROGON_SOURCE_INCIDENTIO_SUBJECT_PREFIX",
-        default = "incidentio"
-    )]
+    #[config(env = "TROGON_SOURCE_INCIDENTIO_SUBJECT_PREFIX", default = "incidentio")]
     subject_prefix: String,
     #[config(env = "TROGON_SOURCE_INCIDENTIO_STREAM_NAME", default = "INCIDENTIO")]
     stream_name: String,
-    #[config(
-        env = "TROGON_SOURCE_INCIDENTIO_STREAM_MAX_AGE_SECS",
-        default = 604_800
-    )]
+    #[config(env = "TROGON_SOURCE_INCIDENTIO_STREAM_MAX_AGE_SECS", default = 604_800)]
     stream_max_age_secs: u64,
     #[config(env = "TROGON_SOURCE_INCIDENTIO_NATS_ACK_TIMEOUT_SECS", default = 10)]
     nats_ack_timeout_secs: u64,
-    #[config(
-        env = "TROGON_SOURCE_INCIDENTIO_TIMESTAMP_TOLERANCE_SECS",
-        default = 300
-    )]
+    #[config(env = "TROGON_SOURCE_INCIDENTIO_TIMESTAMP_TOLERANCE_SECS", default = 300)]
     timestamp_tolerance_secs: u64,
 }
 
@@ -499,11 +482,7 @@ fn resolve_github(
     let webhook_secret = match GitHubWebhookSecret::new(secret_str) {
         Ok(s) => s,
         Err(e) => {
-            errors.push(ConfigValidationError::invalid(
-                "github",
-                "webhook_secret",
-                e,
-            ));
+            errors.push(ConfigValidationError::invalid("github", "webhook_secret", e));
             return None;
         }
     };
@@ -523,11 +502,7 @@ fn resolve_github(
     let stream_name = match NatsToken::new(section.stream_name) {
         Ok(t) => t,
         Err(e) => {
-            errors.push(ConfigValidationError::invalid_subject_token(
-                "github",
-                "stream_name",
-                e,
-            ));
+            errors.push(ConfigValidationError::invalid_subject_token("github", "stream_name", e));
             return None;
         }
     };
@@ -535,11 +510,7 @@ fn resolve_github(
     let nats_ack_timeout = match NonZeroDuration::from_secs(section.nats_ack_timeout_secs) {
         Ok(d) => d,
         Err(err) => {
-            errors.push(ConfigValidationError::invalid(
-                "github",
-                "nats_ack_timeout_secs",
-                err,
-            ));
+            errors.push(ConfigValidationError::invalid("github", "nats_ack_timeout_secs", err));
             return None;
         }
     };
@@ -547,11 +518,7 @@ fn resolve_github(
     let stream_max_age = match StreamMaxAge::from_secs(section.stream_max_age_secs) {
         Ok(age) => age,
         Err(err) => {
-            errors.push(ConfigValidationError::invalid(
-                "github",
-                "stream_max_age_secs",
-                err,
-            ));
+            errors.push(ConfigValidationError::invalid("github", "stream_max_age_secs", err));
             return None;
         }
     };
@@ -586,11 +553,7 @@ fn resolve_discord(
         match trogon_source_discord::config::parse_gateway_intents(s) {
             Ok(i) => i,
             Err(e) => {
-                errors.push(ConfigValidationError::invalid(
-                    "discord",
-                    "gateway_intents",
-                    e,
-                ));
+                errors.push(ConfigValidationError::invalid("discord", "gateway_intents", e));
                 return None;
             }
         }
@@ -625,11 +588,7 @@ fn resolve_discord(
     let nats_ack_timeout = match NonZeroDuration::from_secs(section.nats_ack_timeout_secs) {
         Ok(d) => d,
         Err(err) => {
-            errors.push(ConfigValidationError::invalid(
-                "discord",
-                "nats_ack_timeout_secs",
-                err,
-            ));
+            errors.push(ConfigValidationError::invalid("discord", "nats_ack_timeout_secs", err));
             return None;
         }
     };
@@ -637,11 +596,7 @@ fn resolve_discord(
     let stream_max_age = match StreamMaxAge::from_secs(section.stream_max_age_secs) {
         Ok(age) => age,
         Err(err) => {
-            errors.push(ConfigValidationError::invalid(
-                "discord",
-                "stream_max_age_secs",
-                err,
-            ));
+            errors.push(ConfigValidationError::invalid("discord", "stream_max_age_secs", err));
             return None;
         }
     };
@@ -688,11 +643,7 @@ fn resolve_slack(
     let stream_name = match NatsToken::new(section.stream_name) {
         Ok(t) => t,
         Err(e) => {
-            errors.push(ConfigValidationError::invalid_subject_token(
-                "slack",
-                "stream_name",
-                e,
-            ));
+            errors.push(ConfigValidationError::invalid_subject_token("slack", "stream_name", e));
             return None;
         }
     };
@@ -700,11 +651,7 @@ fn resolve_slack(
     let nats_ack_timeout = match NonZeroDuration::from_secs(section.nats_ack_timeout_secs) {
         Ok(d) => d,
         Err(err) => {
-            errors.push(ConfigValidationError::invalid(
-                "slack",
-                "nats_ack_timeout_secs",
-                err,
-            ));
+            errors.push(ConfigValidationError::invalid("slack", "nats_ack_timeout_secs", err));
             return None;
         }
     };
@@ -712,11 +659,7 @@ fn resolve_slack(
     let timestamp_max_drift = match NonZeroDuration::from_secs(section.timestamp_max_drift_secs) {
         Ok(d) => d,
         Err(err) => {
-            errors.push(ConfigValidationError::invalid(
-                "slack",
-                "timestamp_max_drift_secs",
-                err,
-            ));
+            errors.push(ConfigValidationError::invalid("slack", "timestamp_max_drift_secs", err));
             return None;
         }
     };
@@ -724,11 +667,7 @@ fn resolve_slack(
     let stream_max_age = match StreamMaxAge::from_secs(section.stream_max_age_secs) {
         Ok(age) => age,
         Err(err) => {
-            errors.push(ConfigValidationError::invalid(
-                "slack",
-                "stream_max_age_secs",
-                err,
-            ));
+            errors.push(ConfigValidationError::invalid("slack", "stream_max_age_secs", err));
             return None;
         }
     };
@@ -755,11 +694,7 @@ fn resolve_telegram(
     let webhook_secret = match TelegramWebhookSecret::new(secret_str) {
         Ok(s) => s,
         Err(e) => {
-            errors.push(ConfigValidationError::invalid(
-                "telegram",
-                "webhook_secret",
-                e,
-            ));
+            errors.push(ConfigValidationError::invalid("telegram", "webhook_secret", e));
             return None;
         }
     };
@@ -791,11 +726,7 @@ fn resolve_telegram(
     let nats_ack_timeout = match NonZeroDuration::from_secs(section.nats_ack_timeout_secs) {
         Ok(d) => d,
         Err(err) => {
-            errors.push(ConfigValidationError::invalid(
-                "telegram",
-                "nats_ack_timeout_secs",
-                err,
-            ));
+            errors.push(ConfigValidationError::invalid("telegram", "nats_ack_timeout_secs", err));
             return None;
         }
     };
@@ -803,11 +734,7 @@ fn resolve_telegram(
     let stream_max_age = match StreamMaxAge::from_secs(section.stream_max_age_secs) {
         Ok(age) => age,
         Err(err) => {
-            errors.push(ConfigValidationError::invalid(
-                "telegram",
-                "stream_max_age_secs",
-                err,
-            ));
+            errors.push(ConfigValidationError::invalid("telegram", "stream_max_age_secs", err));
             return None;
         }
     };
@@ -833,11 +760,7 @@ fn resolve_twitter(
     let consumer_secret = match TwitterConsumerSecret::new(secret_str) {
         Ok(secret) => secret,
         Err(error) => {
-            errors.push(ConfigValidationError::invalid(
-                "twitter",
-                "consumer_secret",
-                error,
-            ));
+            errors.push(ConfigValidationError::invalid("twitter", "consumer_secret", error));
             return None;
         }
     };
@@ -881,11 +804,7 @@ fn resolve_twitter(
     let stream_max_age = match StreamMaxAge::from_secs(section.stream_max_age_secs) {
         Ok(age) => age,
         Err(error) => {
-            errors.push(ConfigValidationError::invalid(
-                "twitter",
-                "stream_max_age_secs",
-                error,
-            ));
+            errors.push(ConfigValidationError::invalid("twitter", "stream_max_age_secs", error));
             return None;
         }
     };
@@ -911,11 +830,7 @@ fn resolve_gitlab(
     let webhook_secret = match GitLabWebhookSecret::new(webhook_secret_str) {
         Ok(s) => s,
         Err(e) => {
-            errors.push(ConfigValidationError::invalid(
-                "gitlab",
-                "webhook_secret",
-                e,
-            ));
+            errors.push(ConfigValidationError::invalid("gitlab", "webhook_secret", e));
             return None;
         }
     };
@@ -935,11 +850,7 @@ fn resolve_gitlab(
     let stream_name = match NatsToken::new(section.stream_name) {
         Ok(t) => t,
         Err(e) => {
-            errors.push(ConfigValidationError::invalid_subject_token(
-                "gitlab",
-                "stream_name",
-                e,
-            ));
+            errors.push(ConfigValidationError::invalid_subject_token("gitlab", "stream_name", e));
             return None;
         }
     };
@@ -947,11 +858,7 @@ fn resolve_gitlab(
     let nats_ack_timeout = match NonZeroDuration::from_secs(section.nats_ack_timeout_secs) {
         Ok(d) => d,
         Err(err) => {
-            errors.push(ConfigValidationError::invalid(
-                "gitlab",
-                "nats_ack_timeout_secs",
-                err,
-            ));
+            errors.push(ConfigValidationError::invalid("gitlab", "nats_ack_timeout_secs", err));
             return None;
         }
     };
@@ -959,11 +866,7 @@ fn resolve_gitlab(
     let stream_max_age = match StreamMaxAge::from_secs(section.stream_max_age_secs) {
         Ok(age) => age,
         Err(err) => {
-            errors.push(ConfigValidationError::invalid(
-                "gitlab",
-                "stream_max_age_secs",
-                err,
-            ));
+            errors.push(ConfigValidationError::invalid("gitlab", "stream_max_age_secs", err));
             return None;
         }
     };
@@ -989,11 +892,7 @@ fn resolve_linear(
     let webhook_secret = match LinearWebhookSecret::new(secret_str) {
         Ok(s) => s,
         Err(e) => {
-            errors.push(ConfigValidationError::invalid(
-                "linear",
-                "webhook_secret",
-                e,
-            ));
+            errors.push(ConfigValidationError::invalid("linear", "webhook_secret", e));
             return None;
         }
     };
@@ -1013,11 +912,7 @@ fn resolve_linear(
     let stream_name = match NatsToken::new(section.stream_name) {
         Ok(t) => t,
         Err(e) => {
-            errors.push(ConfigValidationError::invalid_subject_token(
-                "linear",
-                "stream_name",
-                e,
-            ));
+            errors.push(ConfigValidationError::invalid_subject_token("linear", "stream_name", e));
             return None;
         }
     };
@@ -1025,11 +920,7 @@ fn resolve_linear(
     let nats_ack_timeout = match NonZeroDuration::from_secs(section.nats_ack_timeout_secs) {
         Ok(d) => d,
         Err(err) => {
-            errors.push(ConfigValidationError::invalid(
-                "linear",
-                "nats_ack_timeout_secs",
-                err,
-            ));
+            errors.push(ConfigValidationError::invalid("linear", "nats_ack_timeout_secs", err));
             return None;
         }
     };
@@ -1037,11 +928,7 @@ fn resolve_linear(
     let stream_max_age = match StreamMaxAge::from_secs(section.stream_max_age_secs) {
         Ok(age) => age,
         Err(err) => {
-            errors.push(ConfigValidationError::invalid(
-                "linear",
-                "stream_max_age_secs",
-                err,
-            ));
+            errors.push(ConfigValidationError::invalid("linear", "stream_max_age_secs", err));
             return None;
         }
     };
@@ -1068,11 +955,7 @@ fn resolve_incidentio(
     let signing_secret = match IncidentioSigningSecret::new(signing_secret_str) {
         Ok(secret) => secret,
         Err(err) => {
-            errors.push(ConfigValidationError::invalid(
-                "incidentio",
-                "signing_secret",
-                err,
-            ));
+            errors.push(ConfigValidationError::invalid("incidentio", "signing_secret", err));
             return None;
         }
     };
@@ -1128,11 +1011,7 @@ fn resolve_incidentio(
     let stream_max_age = match StreamMaxAge::from_secs(section.stream_max_age_secs) {
         Ok(age) => age,
         Err(err) => {
-            errors.push(ConfigValidationError::invalid(
-                "incidentio",
-                "stream_max_age_secs",
-                err,
-            ));
+            errors.push(ConfigValidationError::invalid("incidentio", "stream_max_age_secs", err));
             return None;
         }
     };
@@ -1165,11 +1044,7 @@ fn resolve_notion(
     let verification_token = match NotionVerificationToken::new(verification_token) {
         Ok(token) => token,
         Err(err) => {
-            errors.push(ConfigValidationError::invalid(
-                "notion",
-                "verification_token",
-                err,
-            ));
+            errors.push(ConfigValidationError::invalid("notion", "verification_token", err));
             return None;
         }
     };
@@ -1201,11 +1076,7 @@ fn resolve_notion(
     let nats_ack_timeout = match NonZeroDuration::from_secs(section.nats_ack_timeout_secs) {
         Ok(duration) => duration,
         Err(err) => {
-            errors.push(ConfigValidationError::invalid(
-                "notion",
-                "nats_ack_timeout_secs",
-                err,
-            ));
+            errors.push(ConfigValidationError::invalid("notion", "nats_ack_timeout_secs", err));
             return None;
         }
     };
@@ -1213,11 +1084,7 @@ fn resolve_notion(
     let stream_max_age = match StreamMaxAge::from_secs(section.stream_max_age_secs) {
         Ok(age) => age,
         Err(err) => {
-            errors.push(ConfigValidationError::invalid(
-                "notion",
-                "stream_max_age_secs",
-                err,
-            ));
+            errors.push(ConfigValidationError::invalid("notion", "stream_max_age_secs", err));
             return None;
         }
     };
@@ -1248,11 +1115,7 @@ fn resolve_sentry(
         Some(secret) => match SentryClientSecret::new(secret) {
             Ok(secret) => secret,
             Err(error) => {
-                errors.push(ConfigValidationError::invalid(
-                    "sentry",
-                    "client_secret",
-                    error,
-                ));
+                errors.push(ConfigValidationError::invalid("sentry", "client_secret", error));
                 return None;
             }
         },
@@ -1291,11 +1154,7 @@ fn resolve_sentry(
     let nats_ack_timeout = match NonZeroDuration::from_secs(section.nats_ack_timeout_secs) {
         Ok(duration) => duration,
         Err(error) => {
-            errors.push(ConfigValidationError::invalid(
-                "sentry",
-                "nats_ack_timeout_secs",
-                error,
-            ));
+            errors.push(ConfigValidationError::invalid("sentry", "nats_ack_timeout_secs", error));
             return None;
         }
     };
@@ -1311,11 +1170,7 @@ fn resolve_sentry(
     let stream_max_age = match StreamMaxAge::from_secs(section.stream_max_age_secs) {
         Ok(age) => age,
         Err(error) => {
-            errors.push(ConfigValidationError::invalid(
-                "sentry",
-                "stream_max_age_secs",
-                error,
-            ));
+            errors.push(ConfigValidationError::invalid("sentry", "stream_max_age_secs", error));
             return None;
         }
     };
@@ -1329,11 +1184,7 @@ fn resolve_sentry(
     })
 }
 
-fn resolve_source_status(
-    source: &'static str,
-    status: Option<&str>,
-    errors: &mut Vec<ConfigValidationError>,
-) -> bool {
+fn resolve_source_status(source: &'static str, status: Option<&str>, errors: &mut Vec<ConfigValidationError>) -> bool {
     let status = match status {
         Some(value) => match value.parse::<SourceStatus>() {
             Ok(status) => status,
@@ -1360,8 +1211,7 @@ mod tests {
             .suffix(".toml")
             .tempfile()
             .expect("failed to create temp file");
-        f.write_all(content.as_bytes())
-            .expect("failed to write toml");
+        f.write_all(content.as_bytes()).expect("failed to write toml");
         f.flush().expect("failed to flush");
         f
     }

@@ -37,9 +37,7 @@ pub async fn handle<N: RequestClient, C: GetElapsed, J>(
 
 #[cfg(test)]
 mod tests {
-    use crate::agent::test_support::{
-        has_request_metric, mock_bridge, mock_bridge_with_metrics, set_json_response,
-    };
+    use crate::agent::test_support::{has_request_metric, mock_bridge, mock_bridge_with_metrics, set_json_response};
     use crate::error::AGENT_UNAVAILABLE;
     use agent_client_protocol::{Agent, ErrorCode, ListSessionsRequest, ListSessionsResponse};
 
@@ -80,11 +78,7 @@ mod tests {
     #[tokio::test]
     async fn list_sessions_records_metrics_on_success() {
         let (mock, _js, bridge, exporter, provider) = mock_bridge_with_metrics();
-        set_json_response(
-            &mock,
-            "acp.agent.session.list",
-            &ListSessionsResponse::new(vec![]),
-        );
+        set_json_response(&mock, "acp.agent.session.list", &ListSessionsResponse::new(vec![]));
 
         let _ = bridge.list_sessions(ListSessionsRequest::new()).await;
 

@@ -4,9 +4,7 @@ use jsonrpc_nats::{Message, ResponseId};
 use opentelemetry::Value;
 use opentelemetry::metrics::MeterProvider;
 use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
-use opentelemetry_sdk::metrics::{
-    PeriodicReader, SdkMeterProvider, in_memory_exporter::InMemoryMetricExporter,
-};
+use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider, in_memory_exporter::InMemoryMetricExporter};
 use std::time::Duration;
 use trogon_nats::AdvancedMockNatsClient;
 
@@ -45,8 +43,7 @@ impl MockJs {
 
 impl trogon_nats::jetstream::JetStreamPublisher for MockJs {
     type PublishError = trogon_nats::mocks::MockError;
-    type AckFuture =
-        std::future::Ready<Result<async_nats::jetstream::publish::PublishAck, Self::PublishError>>;
+    type AckFuture = std::future::Ready<Result<async_nats::jetstream::publish::PublishAck, Self::PublishError>>;
 
     async fn publish_with_headers<S: async_nats::subject::ToSubject + Send>(
         &self,
@@ -54,9 +51,7 @@ impl trogon_nats::jetstream::JetStreamPublisher for MockJs {
         headers: async_nats::HeaderMap,
         payload: bytes::Bytes,
     ) -> Result<Self::AckFuture, Self::PublishError> {
-        self.publisher
-            .publish_with_headers(subject, headers, payload)
-            .await
+        self.publisher.publish_with_headers(subject, headers, payload).await
     }
 }
 
@@ -99,11 +94,7 @@ pub fn mock_bridge_with_metrics() -> (
     (mock, js, bridge, exporter, provider)
 }
 
-pub fn set_json_response<T: serde::Serialize>(
-    mock: &AdvancedMockNatsClient,
-    subject: &str,
-    resp: &T,
-) {
+pub fn set_json_response<T: serde::Serialize>(mock: &AdvancedMockNatsClient, subject: &str, resp: &T) {
     let bytes = serde_json::to_vec(resp).unwrap();
     mock.set_response(subject, bytes.into());
 }
@@ -207,14 +198,8 @@ pub fn has_error_metric(
         .is_some()
 }
 
-pub fn has_session_ready_error_metric(
-    finished_metrics: &[opentelemetry_sdk::metrics::data::ResourceMetrics],
-) -> bool {
-    has_error_metric(
-        finished_metrics,
-        "session_ready",
-        "session_ready_publish_failed",
-    )
+pub fn has_session_ready_error_metric(finished_metrics: &[opentelemetry_sdk::metrics::data::ResourceMetrics]) -> bool {
+    has_error_metric(finished_metrics, "session_ready", "session_ready_publish_failed")
 }
 
 fn flush_metrics(
@@ -287,10 +272,7 @@ mod tests {
     fn has_request_metric_returns_false_for_histogram_metric() {
         let (provider, exporter) = test_provider();
         let meter = provider.meter("test");
-        let histogram = meter
-            .f64_histogram("acp.requests")
-            .with_description("test")
-            .build();
+        let histogram = meter.f64_histogram("acp.requests").with_description("test").build();
         histogram.record(1.0, &[]);
 
         let finished = flush_metrics(&provider, &exporter);
@@ -306,11 +288,7 @@ mod tests {
         metrics.record_error("session_validate", "invalid_session_id");
 
         let finished = flush_metrics(&provider, &exporter);
-        assert!(has_error_metric(
-            &finished,
-            "session_validate",
-            "invalid_session_id"
-        ));
+        assert!(has_error_metric(&finished, "session_validate", "invalid_session_id"));
         provider.shutdown().unwrap();
     }
 
@@ -322,11 +300,7 @@ mod tests {
         metrics.record_error("session_validate", "invalid_session_id");
 
         let finished = flush_metrics(&provider, &exporter);
-        assert!(!has_error_metric(
-            &finished,
-            "wrong_operation",
-            "invalid_session_id"
-        ));
+        assert!(!has_error_metric(&finished, "wrong_operation", "invalid_session_id"));
         provider.shutdown().unwrap();
     }
 
@@ -338,11 +312,7 @@ mod tests {
         metrics.record_error("session_validate", "invalid_session_id");
 
         let finished = flush_metrics(&provider, &exporter);
-        assert!(!has_error_metric(
-            &finished,
-            "session_validate",
-            "wrong_reason"
-        ));
+        assert!(!has_error_metric(&finished, "session_validate", "wrong_reason"));
         provider.shutdown().unwrap();
     }
 
@@ -350,18 +320,11 @@ mod tests {
     fn has_error_metric_returns_false_for_histogram_metric() {
         let (provider, exporter) = test_provider();
         let meter = provider.meter("test");
-        let histogram = meter
-            .f64_histogram("acp.errors")
-            .with_description("test")
-            .build();
+        let histogram = meter.f64_histogram("acp.errors").with_description("test").build();
         histogram.record(1.0, &[]);
 
         let finished = flush_metrics(&provider, &exporter);
-        assert!(!has_error_metric(
-            &finished,
-            "session_validate",
-            "invalid_session_id"
-        ));
+        assert!(!has_error_metric(&finished, "session_validate", "invalid_session_id"));
         provider.shutdown().unwrap();
     }
 

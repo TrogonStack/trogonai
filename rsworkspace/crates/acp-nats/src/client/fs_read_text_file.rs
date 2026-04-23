@@ -1,9 +1,7 @@
 use crate::client::rpc_reply;
 use crate::jsonrpc::extract_request_id;
 use crate::nats::{FlushClient, PublishClient};
-use agent_client_protocol::{
-    Client, ErrorCode, ReadTextFileRequest, ReadTextFileResponse, Request, Response,
-};
+use agent_client_protocol::{Client, ErrorCode, ReadTextFileRequest, ReadTextFileResponse, Request, Response};
 use bytes::Bytes;
 use serde::de::Error as SerdeDeError;
 use tracing::{instrument, warn};
@@ -41,10 +39,7 @@ pub fn error_code_and_message(e: &FsReadTextFileError) -> (ErrorCode, String) {
 
 /// Handles read_text_file: parses request, calls client, wraps response in JSON-RPC envelope,
 /// and publishes to reply subject. Reply is required (request-reply pattern).
-#[instrument(
-    name = "acp.client.fs.read_text_file",
-    skip(payload, client, nats, serializer)
-)]
+#[instrument(name = "acp.client.fs.read_text_file", skip(payload, client, nats, serializer))]
 pub async fn handle<N: PublishClient + FlushClient, C: Client, S: JsonSerialize>(
     payload: &[u8],
     client: &C,
@@ -81,14 +76,7 @@ pub async fn handle<N: PublishClient + FlushClient, C: Client, S: JsonSerialize>
                         &format!("Failed to serialize response: {}", e),
                     )
                 });
-            rpc_reply::publish_reply(
-                nats,
-                reply_to,
-                response_bytes,
-                content_type,
-                "fs_read_text_file reply",
-            )
-            .await;
+            rpc_reply::publish_reply(nats, reply_to, response_bytes, content_type, "fs_read_text_file reply").await;
         }
         Err(e) => {
             let (code, message) = error_code_and_message(&e);
@@ -97,29 +85,18 @@ pub async fn handle<N: PublishClient + FlushClient, C: Client, S: JsonSerialize>
                 session_id = %session_id,
                 "Failed to handle fs_read_text_file"
             );
-            let (bytes, content_type) =
-                rpc_reply::error_response_bytes(serializer, request_id, code, &message);
-            rpc_reply::publish_reply(
-                nats,
-                reply_to,
-                bytes,
-                content_type,
-                "fs_read_text_file error reply",
-            )
-            .await;
+            let (bytes, content_type) = rpc_reply::error_response_bytes(serializer, request_id, code, &message);
+            rpc_reply::publish_reply(nats, reply_to, bytes, content_type, "fs_read_text_file error reply").await;
         }
     }
 }
 
-async fn forward_to_client<C: Client>(
-    payload: &[u8],
-    client: &C,
-) -> Result<ReadTextFileResponse, FsReadTextFileError> {
+async fn forward_to_client<C: Client>(payload: &[u8], client: &C) -> Result<ReadTextFileResponse, FsReadTextFileError> {
     let envelope: Request<ReadTextFileRequest> =
         serde_json::from_slice(payload).map_err(FsReadTextFileError::InvalidRequest)?;
-    let request = envelope.params.ok_or_else(|| {
-        FsReadTextFileError::InvalidRequest(serde_json::Error::custom("params is null or missing"))
-    })?;
+    let request = envelope
+        .params
+        .ok_or_else(|| FsReadTextFileError::InvalidRequest(serde_json::Error::custom("params is null or missing")))?;
     client
         .read_text_file(request)
         .await
@@ -152,10 +129,7 @@ mod tests {
 
     #[async_trait(?Send)]
     impl Client for MockClient {
-        async fn session_notification(
-            &self,
-            _: SessionNotification,
-        ) -> agent_client_protocol::Result<()> {
+        async fn session_notification(&self, _: SessionNotification) -> agent_client_protocol::Result<()> {
             Ok(())
         }
 
@@ -169,10 +143,7 @@ mod tests {
             ))
         }
 
-        async fn read_text_file(
-            &self,
-            _: ReadTextFileRequest,
-        ) -> agent_client_protocol::Result<ReadTextFileResponse> {
+        async fn read_text_file(&self, _: ReadTextFileRequest) -> agent_client_protocol::Result<ReadTextFileResponse> {
             Ok(ReadTextFileResponse::new(self.content.clone()))
         }
     }
@@ -181,10 +152,7 @@ mod tests {
 
     #[async_trait(?Send)]
     impl Client for FailingClient {
-        async fn session_notification(
-            &self,
-            _: SessionNotification,
-        ) -> agent_client_protocol::Result<()> {
+        async fn session_notification(&self, _: SessionNotification) -> agent_client_protocol::Result<()> {
             Ok(())
         }
 
@@ -198,10 +166,7 @@ mod tests {
             ))
         }
 
-        async fn read_text_file(
-            &self,
-            _: ReadTextFileRequest,
-        ) -> agent_client_protocol::Result<ReadTextFileResponse> {
+        async fn read_text_file(&self, _: ReadTextFileRequest) -> agent_client_protocol::Result<ReadTextFileResponse> {
             Err(agent_client_protocol::Error::new(
                 i32::from(ErrorCode::InvalidParams),
                 "file not found",
@@ -273,10 +238,7 @@ mod tests {
 
         let result = forward_to_client(&payload, &client).await;
         assert!(result.is_err());
-        assert!(matches!(
-            result.unwrap_err(),
-            FsReadTextFileError::ClientError(_)
-        ));
+        assert!(matches!(result.unwrap_err(), FsReadTextFileError::ClientError(_)));
     }
 
     #[tokio::test]
@@ -294,15 +256,7 @@ mod tests {
         };
         let payload = serde_json::to_vec(&envelope).unwrap();
 
-        handle(
-            &payload,
-            &client,
-            Some("_INBOX.reply"),
-            &nats,
-            "sess-1",
-            &serializer,
-        )
-        .await;
+        handle(&payload, &client, Some("_INBOX.reply"), &nats, "sess-1", &serializer).await;
 
         assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
     }
@@ -386,15 +340,7 @@ mod tests {
         };
         let payload = serde_json::to_vec(&envelope).unwrap();
 
-        handle(
-            &payload,
-            &client,
-            Some("_INBOX.err"),
-            &nats,
-            "sess-1",
-            &serializer,
-        )
-        .await;
+        handle(&payload, &client, Some("_INBOX.err"), &nats, "sess-1", &serializer).await;
 
         assert_eq!(nats.published_messages(), vec!["_INBOX.err"]);
     }
@@ -437,8 +383,7 @@ mod tests {
 
     #[test]
     fn error_code_and_message_client_error_preserves_client_code() {
-        let client_err =
-            agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "file not found");
+        let client_err = agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "file not found");
         let fs_err = FsReadTextFileError::ClientError(client_err);
         let (code, message) = error_code_and_message(&fs_err);
         assert_eq!(code, ErrorCode::InvalidParams);
@@ -541,10 +486,7 @@ mod tests {
 
         let result = forward_to_client(&payload, &client).await;
         assert!(result.is_err());
-        assert!(matches!(
-            result.unwrap_err(),
-            FsReadTextFileError::InvalidRequest(_)
-        ));
+        assert!(matches!(result.unwrap_err(), FsReadTextFileError::InvalidRequest(_)));
     }
 
     #[test]
@@ -553,8 +495,7 @@ mod tests {
         let fs_err = FsReadTextFileError::InvalidRequest(err);
         assert!(fs_err.to_string().contains("invalid request"));
 
-        let client_err =
-            agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "file not found");
+        let client_err = agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "file not found");
         let fs_err = FsReadTextFileError::ClientError(client_err);
         assert!(fs_err.to_string().contains("client error"));
     }
@@ -565,8 +506,7 @@ mod tests {
         let fs_err = FsReadTextFileError::InvalidRequest(err);
         assert!(fs_err.source().is_some());
 
-        let client_err =
-            agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "file not found");
+        let client_err = agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "file not found");
         let fs_err = FsReadTextFileError::ClientError(client_err);
         assert!(fs_err.source().is_some());
     }

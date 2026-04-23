@@ -31,11 +31,7 @@ pub fn verify(secret: &str, token_header: Option<&str>) -> Result<(), SignatureE
     let provided = Sha256::digest(token.as_bytes());
 
     let ok = subtle::ConstantTimeEq::ct_eq(expected.as_slice(), provided.as_slice()).unwrap_u8();
-    if ok == 1 {
-        Ok(())
-    } else {
-        Err(SignatureError::Mismatch)
-    }
+    if ok == 1 { Ok(()) } else { Err(SignatureError::Mismatch) }
 }
 
 #[cfg(test)]
@@ -44,14 +40,8 @@ mod tests {
 
     #[test]
     fn error_display_messages() {
-        assert_eq!(
-            SignatureError::Missing.to_string(),
-            "missing secret token header"
-        );
-        assert_eq!(
-            SignatureError::Mismatch.to_string(),
-            "secret token mismatch"
-        );
+        assert_eq!(SignatureError::Missing.to_string(), "missing secret token header");
+        assert_eq!(SignatureError::Mismatch.to_string(), "secret token mismatch");
     }
 
     #[test]
@@ -69,10 +59,7 @@ mod tests {
 
     #[test]
     fn missing_token_fails() {
-        assert!(matches!(
-            verify("secret", None),
-            Err(SignatureError::Missing)
-        ));
+        assert!(matches!(verify("secret", None), Err(SignatureError::Missing)));
     }
 
     #[test]
@@ -82,9 +69,6 @@ mod tests {
 
     #[test]
     fn empty_secret_does_not_match_nonempty_token() {
-        assert!(matches!(
-            verify("", Some("something")),
-            Err(SignatureError::Mismatch)
-        ));
+        assert!(matches!(verify("", Some("something")), Err(SignatureError::Mismatch)));
     }
 }

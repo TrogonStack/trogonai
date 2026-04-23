@@ -6,9 +6,7 @@ pub struct SessionListSubject {
 
 impl SessionListSubject {
     pub fn new(prefix: &crate::acp_prefix::AcpPrefix) -> Self {
-        Self {
-            prefix: prefix.clone(),
-        }
+        Self { prefix: prefix.clone() }
     }
 }
 

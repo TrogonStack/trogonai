@@ -28,10 +28,7 @@ impl Metrics {
     }
 
     pub fn record_request(&self, method: &'static str, duration: f64, success: bool) {
-        let attrs = &[
-            KeyValue::new("method", method),
-            KeyValue::new("success", success),
-        ];
+        let attrs = &[KeyValue::new("method", method), KeyValue::new("success", success)];
         self.requests.add(1, attrs);
         self.request_duration.record(duration, attrs);
     }
@@ -39,10 +36,7 @@ impl Metrics {
     pub fn record_error(&self, operation: &'static str, reason: &'static str) {
         self.errors.add(
             1,
-            &[
-                KeyValue::new("operation", operation),
-                KeyValue::new("reason", reason),
-            ],
+            &[KeyValue::new("operation", operation), KeyValue::new("reason", reason)],
         );
     }
 }
@@ -78,13 +72,7 @@ mod tests {
     #[test]
     fn record_request_all_methods_do_not_panic() {
         let m = Metrics::new(&test_meter());
-        for method in &[
-            "initialize",
-            "authenticate",
-            "new_session",
-            "load_session",
-            "prompt",
-        ] {
+        for method in &["initialize", "authenticate", "new_session", "load_session", "prompt"] {
             m.record_request(method, 0.001, true);
         }
     }

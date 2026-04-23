@@ -1,8 +1,6 @@
 use crate::client::rpc_reply;
 use crate::nats::{FlushClient, PublishClient};
-use agent_client_protocol::{
-    Client, ErrorCode, ReleaseTerminalRequest, ReleaseTerminalResponse, Request, Response,
-};
+use agent_client_protocol::{Client, ErrorCode, ReleaseTerminalRequest, ReleaseTerminalResponse, Request, Response};
 use bytes::Bytes;
 use tracing::{instrument, warn};
 
@@ -42,10 +40,7 @@ pub fn error_code_and_message(e: &TerminalReleaseError) -> (ErrorCode, String) {
 
 /// Handles terminal/release: parses request, calls client, wraps response in JSON-RPC envelope,
 /// and publishes to reply subject. Reply is required (request-reply pattern).
-#[instrument(
-    name = "acp.client.terminal.release",
-    skip(payload, client, nats, serializer)
-)]
+#[instrument(name = "acp.client.terminal.release", skip(payload, client, nats, serializer))]
 pub async fn handle<N: PublishClient + FlushClient, C: Client, S: JsonSerialize>(
     payload: &[u8],
     client: &C,
@@ -82,14 +77,7 @@ pub async fn handle<N: PublishClient + FlushClient, C: Client, S: JsonSerialize>
                         &format!("Failed to serialize response: {}", e),
                     )
                 });
-            rpc_reply::publish_reply(
-                nats,
-                reply_to,
-                response_bytes,
-                content_type,
-                "terminal_release reply",
-            )
-            .await;
+            rpc_reply::publish_reply(nats, reply_to, response_bytes, content_type, "terminal_release reply").await;
         }
         Err(e) => {
             let (code, message) = error_code_and_message(&e);
@@ -98,16 +86,8 @@ pub async fn handle<N: PublishClient + FlushClient, C: Client, S: JsonSerialize>
                 session_id = %session_id,
                 "Failed to handle terminal/release"
             );
-            let (bytes, content_type) =
-                rpc_reply::error_response_bytes(serializer, request_id, code, &message);
-            rpc_reply::publish_reply(
-                nats,
-                reply_to,
-                bytes,
-                content_type,
-                "terminal_release error reply",
-            )
-            .await;
+            let (bytes, content_type) = rpc_reply::error_response_bytes(serializer, request_id, code, &message);
+            rpc_reply::publish_reply(nats, reply_to, bytes, content_type, "terminal_release error reply").await;
         }
     }
 }
@@ -137,8 +117,8 @@ async fn forward_to_client<C: Client>(
 mod tests {
     use super::*;
     use agent_client_protocol::{
-        ContentBlock, ContentChunk, Request, RequestId, RequestPermissionRequest,
-        RequestPermissionResponse, SessionNotification, SessionUpdate,
+        ContentBlock, ContentChunk, Request, RequestId, RequestPermissionRequest, RequestPermissionResponse,
+        SessionNotification, SessionUpdate,
     };
     use async_trait::async_trait;
     use std::error::Error;
@@ -155,10 +135,7 @@ mod tests {
 
     #[async_trait(?Send)]
     impl Client for MockClient {
-        async fn session_notification(
-            &self,
-            _: SessionNotification,
-        ) -> agent_client_protocol::Result<()> {
+        async fn session_notification(&self, _: SessionNotification) -> agent_client_protocol::Result<()> {
             Ok(())
         }
 
@@ -184,10 +161,7 @@ mod tests {
 
     #[async_trait(?Send)]
     impl Client for FailingClient {
-        async fn session_notification(
-            &self,
-            _: SessionNotification,
-        ) -> agent_client_protocol::Result<()> {
+        async fn session_notification(&self, _: SessionNotification) -> agent_client_protocol::Result<()> {
             Ok(())
         }
 
@@ -368,15 +342,7 @@ mod tests {
         };
         let payload = serde_json::to_vec(&envelope).unwrap();
 
-        handle(
-            &payload,
-            &client,
-            Some("_INBOX.reply"),
-            &nats,
-            "sess-1",
-            &serializer,
-        )
-        .await;
+        handle(&payload, &client, Some("_INBOX.reply"), &nats, "sess-1", &serializer).await;
 
         assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
     }
@@ -444,8 +410,7 @@ mod tests {
 
     #[test]
     fn error_code_and_message_invalid_params_preserves_code_and_message() {
-        let inner =
-            agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "params is null");
+        let inner = agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "params is null");
         let tr_err = TerminalReleaseError::InvalidParams(inner);
         let (code, message) = error_code_and_message(&tr_err);
         assert_eq!(code, ErrorCode::InvalidParams);
@@ -454,8 +419,7 @@ mod tests {
 
     #[test]
     fn error_code_and_message_client_error_preserves_client_code() {
-        let client_err =
-            agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "denied");
+        let client_err = agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "denied");
         let tr_err = TerminalReleaseError::ClientError(client_err);
         let (code, message) = error_code_and_message(&tr_err);
         assert_eq!(code, ErrorCode::InvalidParams);
@@ -464,14 +428,14 @@ mod tests {
 
     #[test]
     fn terminal_release_error_display() {
-        let malformed = TerminalReleaseError::MalformedJson(
-            serde_json::from_slice::<serde_json::Value>(b"not json").unwrap_err(),
-        );
+        let malformed =
+            TerminalReleaseError::MalformedJson(serde_json::from_slice::<serde_json::Value>(b"not json").unwrap_err());
         assert!(malformed.to_string().contains("malformed JSON"));
 
-        let invalid_params = TerminalReleaseError::InvalidParams(
-            agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "bad params"),
-        );
+        let invalid_params = TerminalReleaseError::InvalidParams(agent_client_protocol::Error::new(
+            ErrorCode::InvalidParams.into(),
+            "bad params",
+        ));
         assert!(invalid_params.to_string().contains("invalid params"));
 
         let client_err = TerminalReleaseError::ClientError(agent_client_protocol::Error::new(
@@ -483,14 +447,14 @@ mod tests {
 
     #[test]
     fn terminal_release_error_source() {
-        let malformed = TerminalReleaseError::MalformedJson(
-            serde_json::from_slice::<serde_json::Value>(b"not json").unwrap_err(),
-        );
+        let malformed =
+            TerminalReleaseError::MalformedJson(serde_json::from_slice::<serde_json::Value>(b"not json").unwrap_err());
         assert!(malformed.source().is_some());
 
-        let invalid_params = TerminalReleaseError::InvalidParams(
-            agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "bad params"),
-        );
+        let invalid_params = TerminalReleaseError::InvalidParams(agent_client_protocol::Error::new(
+            ErrorCode::InvalidParams.into(),
+            "bad params",
+        ));
         assert!(invalid_params.source().is_some());
 
         let client_err = TerminalReleaseError::ClientError(agent_client_protocol::Error::new(

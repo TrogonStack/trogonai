@@ -136,19 +136,13 @@ mod tests {
     #[test]
     fn single_too_long() {
         let long = "a".repeat(129);
-        assert_eq!(
-            NatsToken::new(&long),
-            Err(SubjectTokenViolation::TooLong(129))
-        );
+        assert_eq!(NatsToken::new(&long), Err(SubjectTokenViolation::TooLong(129)));
         assert!(NatsToken::new("a".repeat(128)).is_ok());
     }
 
     #[test]
     fn single_rejects_dots() {
-        assert_eq!(
-            NatsToken::new("a.b"),
-            Err(SubjectTokenViolation::InvalidCharacter('.'))
-        );
+        assert_eq!(NatsToken::new("a.b"), Err(SubjectTokenViolation::InvalidCharacter('.')));
     }
 
     #[test]
@@ -181,10 +175,7 @@ mod tests {
 
     #[test]
     fn dotted_valid_dotted() {
-        assert_eq!(
-            DottedNatsToken::new("my.multi.part").unwrap().as_str(),
-            "my.multi.part"
-        );
+        assert_eq!(DottedNatsToken::new("my.multi.part").unwrap().as_str(), "my.multi.part");
         assert!(DottedNatsToken::new("a.b").is_ok());
         assert!(DottedNatsToken::new("vendor.operation").is_ok());
     }
@@ -197,10 +188,7 @@ mod tests {
     #[test]
     fn dotted_too_long() {
         let long = "a".repeat(129);
-        assert_eq!(
-            DottedNatsToken::new(&long),
-            Err(SubjectTokenViolation::TooLong(129))
-        );
+        assert_eq!(DottedNatsToken::new(&long), Err(SubjectTokenViolation::TooLong(129)));
         assert!(DottedNatsToken::new("a".repeat(128)).is_ok());
     }
 
