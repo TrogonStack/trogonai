@@ -119,8 +119,7 @@ impl ExistsFile for MemFs {
 #[cfg(any(test, feature = "test-support"))]
 impl io::Write for MemAppendWriter {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let s =
-            std::str::from_utf8(buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        let s = std::str::from_utf8(buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
         self.files
             .lock()
             .unwrap()
@@ -287,14 +286,8 @@ mod tests {
         fs.insert("/a/b/c/deep.txt", "deep");
         fs.insert("/a/b/shallow.txt", "shallow");
 
-        assert_eq!(
-            fs.read_to_string(Path::new("/a/b/c/deep.txt")).unwrap(),
-            "deep"
-        );
-        assert_eq!(
-            fs.read_to_string(Path::new("/a/b/shallow.txt")).unwrap(),
-            "shallow"
-        );
+        assert_eq!(fs.read_to_string(Path::new("/a/b/c/deep.txt")).unwrap(), "deep");
+        assert_eq!(fs.read_to_string(Path::new("/a/b/shallow.txt")).unwrap(), "shallow");
     }
 
     #[test]
@@ -376,10 +369,7 @@ mod tests {
         let fs = MemFs::new();
         fs.insert("/config.json", r#"{"port": 8080}"#);
 
-        assert_eq!(
-            read_config(&fs, Path::new("/config.json")),
-            r#"{"port": 8080}"#
-        );
+        assert_eq!(read_config(&fs, Path::new("/config.json")), r#"{"port": 8080}"#);
         assert_eq!(read_config(&fs, Path::new("/missing.json")), "{}");
     }
 }

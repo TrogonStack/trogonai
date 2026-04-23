@@ -47,10 +47,7 @@ mod tests {
         assert_eq!(AcpStream::Commands.stream_name(&prefix), "ACP_COMMANDS");
         assert_eq!(AcpStream::Responses.stream_name(&prefix), "ACP_RESPONSES");
         assert_eq!(AcpStream::ClientOps.stream_name(&prefix), "ACP_CLIENT_OPS");
-        assert_eq!(
-            AcpStream::Notifications.stream_name(&prefix),
-            "ACP_NOTIFICATIONS"
-        );
+        assert_eq!(AcpStream::Notifications.stream_name(&prefix), "ACP_NOTIFICATIONS");
         assert_eq!(AcpStream::Global.stream_name(&prefix), "ACP_GLOBAL");
         assert_eq!(AcpStream::GlobalExt.stream_name(&prefix), "ACP_GLOBAL_EXT");
     }
@@ -65,35 +62,17 @@ mod tests {
     #[test]
     fn stream_names_normalize_dots_to_underscores() {
         let prefix = p("my.multi.part");
-        assert_eq!(
-            AcpStream::Commands.stream_name(&prefix),
-            "MY_MULTI_PART_COMMANDS"
-        );
-        assert_eq!(
-            AcpStream::Global.stream_name(&prefix),
-            "MY_MULTI_PART_GLOBAL"
-        );
+        assert_eq!(AcpStream::Commands.stream_name(&prefix), "MY_MULTI_PART_COMMANDS");
+        assert_eq!(AcpStream::Global.stream_name(&prefix), "MY_MULTI_PART_GLOBAL");
     }
 
     #[test]
     fn commands_subjects_are_session_scoped_only() {
         let config = AcpStream::Commands.config(&p("acp"));
         assert!(!config.subjects.contains(&"acp.agent.>".to_string()));
-        assert!(
-            config
-                .subjects
-                .contains(&"acp.session.*.agent.prompt".to_string())
-        );
-        assert!(
-            config
-                .subjects
-                .contains(&"acp.session.*.agent.fork".to_string())
-        );
-        assert!(
-            config
-                .subjects
-                .contains(&"acp.session.*.agent.close".to_string())
-        );
+        assert!(config.subjects.contains(&"acp.session.*.agent.prompt".to_string()));
+        assert!(config.subjects.contains(&"acp.session.*.agent.fork".to_string()));
+        assert!(config.subjects.contains(&"acp.session.*.agent.close".to_string()));
     }
 
     #[test]
@@ -110,16 +89,8 @@ mod tests {
                 .subjects
                 .contains(&"acp.session.*.agent.prompt.response.>".to_string())
         );
-        assert!(
-            config
-                .subjects
-                .contains(&"acp.session.*.agent.ext.ready".to_string())
-        );
-        assert!(
-            config
-                .subjects
-                .contains(&"acp.session.*.agent.cancelled".to_string())
-        );
+        assert!(config.subjects.contains(&"acp.session.*.agent.ext.ready".to_string()));
+        assert!(config.subjects.contains(&"acp.session.*.agent.cancelled".to_string()));
     }
 
     #[test]
@@ -167,10 +138,7 @@ mod tests {
     #[test]
     fn notifications_stream_name_formats_correctly() {
         assert_eq!(notifications_stream_name(&p("acp")), "ACP_NOTIFICATIONS");
-        assert_eq!(
-            notifications_stream_name(&p("myapp")),
-            "MYAPP_NOTIFICATIONS"
-        );
+        assert_eq!(notifications_stream_name(&p("myapp")), "MYAPP_NOTIFICATIONS");
     }
 
     #[test]
@@ -194,32 +162,16 @@ mod tests {
     #[test]
     fn global_subjects_include_expected() {
         let config = AcpStream::Global.config(&p("acp"));
-        assert!(
-            config
-                .subjects
-                .contains(&"acp.agent.initialize".to_string())
-        );
-        assert!(
-            config
-                .subjects
-                .contains(&"acp.agent.authenticate".to_string())
-        );
+        assert!(config.subjects.contains(&"acp.agent.initialize".to_string()));
+        assert!(config.subjects.contains(&"acp.agent.authenticate".to_string()));
         assert!(config.subjects.contains(&"acp.agent.logout".to_string()));
-        assert!(
-            config
-                .subjects
-                .contains(&"acp.agent.session.new".to_string())
-        );
+        assert!(config.subjects.contains(&"acp.agent.session.new".to_string()));
     }
 
     #[test]
     fn global_excludes_session_list_and_ext() {
         let config = AcpStream::Global.config(&p("acp"));
-        assert!(
-            !config
-                .subjects
-                .contains(&"acp.agent.session.list".to_string())
-        );
+        assert!(!config.subjects.contains(&"acp.agent.session.list".to_string()));
         assert!(!config.subjects.contains(&"acp.agent.>".to_string()));
         assert!(!config.subjects.contains(&"acp.agent.ext.>".to_string()));
     }

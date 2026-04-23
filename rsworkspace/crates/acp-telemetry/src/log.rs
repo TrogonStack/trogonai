@@ -14,9 +14,7 @@ use trogon_std::fs::CreateDirAll;
 
 pub(crate) static LOGGER_PROVIDER: OnceLock<SdkLoggerProvider> = OnceLock::new();
 
-pub(crate) fn init_provider(
-    resource: &Resource,
-) -> Result<SdkLoggerProvider, Box<dyn std::error::Error>> {
+pub(crate) fn init_provider(resource: &Resource) -> Result<SdkLoggerProvider, Box<dyn std::error::Error>> {
     let exporter = LogExporter::builder().with_http().build()?;
 
     let provider = SdkLoggerProvider::builder()
@@ -62,20 +60,13 @@ pub(crate) fn ensure_log_dir<E: ReadEnv, F: CreateDirAll>(
 
 #[cfg(target_os = "macos")]
 fn platform_log_dir(service_name: ServiceName) -> Result<PathBuf, Box<dyn std::error::Error>> {
-    let home = SystemDirs
-        .home_dir()
-        .ok_or("could not determine home directory")?;
-    Ok(home
-        .join("Library")
-        .join("Logs")
-        .join(service_name.as_str()))
+    let home = SystemDirs.home_dir().ok_or("could not determine home directory")?;
+    Ok(home.join("Library").join("Logs").join(service_name.as_str()))
 }
 
 #[cfg(not(target_os = "macos"))]
 fn platform_log_dir(service_name: ServiceName) -> Result<PathBuf, Box<dyn std::error::Error>> {
-    let base = SystemDirs
-        .state_dir()
-        .ok_or("could not determine state directory")?;
+    let base = SystemDirs.state_dir().ok_or("could not determine state directory")?;
     Ok(base.join(service_name.as_str()))
 }
 

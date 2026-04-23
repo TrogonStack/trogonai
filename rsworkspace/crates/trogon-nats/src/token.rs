@@ -4,9 +4,7 @@
 
 /// Returns the first character that is a NATS wildcard (`*`, `>`) or whitespace.
 pub fn has_wildcards_or_whitespace(value: &str) -> Option<char> {
-    value
-        .chars()
-        .find(|ch| *ch == '*' || *ch == '>' || ch.is_whitespace())
+    value.chars().find(|ch| *ch == '*' || *ch == '>' || ch.is_whitespace())
 }
 
 /// True if value has consecutive dots, or starts/ends with a dot.

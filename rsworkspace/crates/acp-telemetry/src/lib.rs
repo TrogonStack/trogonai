@@ -55,11 +55,7 @@ fn try_open_log_file<F: CreateDirAll + OpenAppendFile>(
         ),
         Err(e) => (
             None,
-            Some(format!(
-                "Failed to create log file {}: {}",
-                log_file.display(),
-                e
-            )),
+            Some(format!("Failed to create log file {}: {}", log_file.display(), e)),
         ),
     }
 }

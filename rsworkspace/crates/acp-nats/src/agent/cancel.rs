@@ -28,10 +28,7 @@ pub async fn handle<N: PublishClient + FlushClient, C: GetElapsed, J>(
             .metrics
             .record_request("cancel", bridge.clock.elapsed(start).as_secs_f64(), false);
         bridge.metrics.record_error("cancel", "invalid_session_id");
-        Error::new(
-            ErrorCode::InvalidParams.into(),
-            format!("Invalid session ID: {}", e),
-        )
+        Error::new(ErrorCode::InvalidParams.into(), format!("Invalid session ID: {}", e))
     })?;
 
     let prefix = bridge.config.acp_prefix_ref();
@@ -53,19 +50,13 @@ pub async fn handle<N: PublishClient + FlushClient, C: GetElapsed, J>(
             error = %error,
             "Failed to publish cancel notification to backend"
         );
-        bridge
-            .metrics
-            .record_error("cancel", "cancel_publish_failed");
+        bridge.metrics.record_error("cancel", "cancel_publish_failed");
     }
 
     let cancelled_subject = session::agent::CancelledSubject::new(prefix, &session_id);
     if let Err(e) = bridge
         .nats()
-        .publish_with_headers(
-            cancelled_subject,
-            async_nats::HeaderMap::new(),
-            bytes::Bytes::new(),
-        )
+        .publish_with_headers(cancelled_subject, async_nats::HeaderMap::new(), bytes::Bytes::new())
         .await
     {
         warn!(session_id = %args.session_id, error = %e, "Failed to publish session_cancelled broadcast");
@@ -83,9 +74,7 @@ pub async fn handle<N: PublishClient + FlushClient, C: GetElapsed, J>(
 #[cfg(test)]
 mod tests {
     use super::Bridge;
-    use crate::agent::test_support::{
-        has_error_metric, has_request_metric, mock_bridge, mock_bridge_with_metrics,
-    };
+    use crate::agent::test_support::{has_error_metric, has_request_metric, mock_bridge, mock_bridge_with_metrics};
     use crate::config::Config;
     use agent_client_protocol::{Agent, CancelNotification, ErrorCode};
     use trogon_nats::AdvancedMockNatsClient;
@@ -152,9 +141,7 @@ mod tests {
     async fn cancel_records_request_metric_on_invalid_session_id() {
         let (_mock, _js, bridge, exporter, provider) = mock_bridge_with_metrics();
 
-        let _ = bridge
-            .cancel(CancelNotification::new("invalid.session.id"))
-            .await;
+        let _ = bridge.cancel(CancelNotification::new("invalid.session.id")).await;
 
         provider.force_flush().unwrap();
         let finished_metrics = exporter.get_finished_metrics().unwrap();

@@ -30,10 +30,7 @@ pub async fn publish_reply<N: PublishClient + FlushClient>(
 ) {
     let mut headers = headers_with_trace_context();
     headers.insert("Content-Type", content_type);
-    if let Err(e) = nats
-        .publish_with_headers(reply_to.to_string(), headers, bytes)
-        .await
-    {
+    if let Err(e) = nats.publish_with_headers(reply_to.to_string(), headers, bytes).await {
         warn!(error = %e, "Failed to publish {}", context);
     }
     if let Err(e) = nats.flush().await {
@@ -69,12 +66,8 @@ mod tests {
     #[test]
     fn error_response_bytes_first_fallback_uses_null_id() {
         let mock = FailNextSerialize::new(1);
-        let (bytes, content_type) = error_response_bytes(
-            &mock,
-            RequestId::Number(42),
-            ErrorCode::InvalidParams,
-            "test message",
-        );
+        let (bytes, content_type) =
+            error_response_bytes(&mock, RequestId::Number(42), ErrorCode::InvalidParams, "test message");
         assert_eq!(content_type, "application/json");
         let parsed: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(parsed["id"], serde_json::Value::Null);
@@ -84,8 +77,7 @@ mod tests {
     #[test]
     fn error_response_bytes_last_resort_returns_plain_text() {
         let mock = FailNextSerialize::new(2);
-        let (bytes, content_type) =
-            error_response_bytes(&mock, RequestId::Number(1), ErrorCode::InternalError, "msg");
+        let (bytes, content_type) = error_response_bytes(&mock, RequestId::Number(1), ErrorCode::InternalError, "msg");
         assert_eq!(content_type, "text/plain");
         assert_eq!(bytes.as_ref(), b"Internal error");
     }

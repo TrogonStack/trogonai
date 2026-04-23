@@ -122,12 +122,7 @@ fn run_connection_thread<N, J>(
         .expect("failed to create per-connection runtime");
 
     let local = tokio::task::LocalSet::new();
-    rt.block_on(local.run_until(process_connections(
-        manager_rx,
-        nats_client,
-        js_client,
-        config,
-    )));
+    rt.block_on(local.run_until(process_connections(manager_rx, nats_client, js_client, config)));
 
     // run_until returns once process_connections completes, but
     // sub-tasks spawned by connection handlers (pumps,
@@ -174,14 +169,8 @@ async fn process_connections<N, J>(
         .await;
     }
 
-    let active = websocket_handles
-        .iter()
-        .filter(|h| !h.is_finished())
-        .count()
-        + http_connection_handles
-            .iter()
-            .filter(|h| !h.is_finished())
-            .count();
+    let active = websocket_handles.iter().filter(|h| !h.is_finished()).count()
+        + http_connection_handles.iter().filter(|h| !h.is_finished()).count();
     info!(
         active_connections = active,
         "Connection channel closed, draining active connections"
@@ -200,9 +189,7 @@ async fn process_connections<N, J>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::constants::{
-        ACP_CONNECTION_ID_HEADER, ACP_PROTOCOL_VERSION_HEADER, ACP_SESSION_ID_HEADER,
-    };
+    use crate::constants::{ACP_CONNECTION_ID_HEADER, ACP_PROTOCOL_VERSION_HEADER, ACP_SESSION_ID_HEADER};
     use acp_nats::Config;
     use axum::body::{Body, to_bytes};
     use axum::http::header::{ACCEPT, CONTENT_TYPE};
@@ -234,9 +221,7 @@ mod tests {
 
     impl trogon_nats::jetstream::JetStreamPublisher for MockJs {
         type PublishError = trogon_nats::mocks::MockError;
-        type AckFuture = std::future::Ready<
-            Result<async_nats::jetstream::publish::PublishAck, Self::PublishError>,
-        >;
+        type AckFuture = std::future::Ready<Result<async_nats::jetstream::publish::PublishAck, Self::PublishError>>;
 
         async fn publish_with_headers<S: async_nats::subject::ToSubject + Send>(
             &self,
@@ -244,9 +229,7 @@ mod tests {
             headers: async_nats::HeaderMap,
             payload: bytes::Bytes,
         ) -> Result<Self::AckFuture, Self::PublishError> {
-            self.publisher
-                .publish_with_headers(subject, headers, payload)
-                .await
+            self.publisher.publish_with_headers(subject, headers, payload).await
         }
     }
 
@@ -296,11 +279,7 @@ mod tests {
 
     fn build_test_app(
         nats_mock: AdvancedMockNatsClient,
-    ) -> (
-        axum::Router,
-        watch::Sender<bool>,
-        std::thread::JoinHandle<()>,
-    ) {
+    ) -> (axum::Router, watch::Sender<bool>, std::thread::JoinHandle<()>) {
         let (shutdown_tx, _) = watch::channel(false);
         let (manager_tx, manager_rx) = mpsc::unbounded_channel::<ManagerRequest>();
         let conn_thread = spawn_connection_thread(nats_mock, manager_rx);
@@ -385,8 +364,7 @@ mod tests {
         assert!(response.headers().contains_key(ACP_CONNECTION_ID_HEADER));
 
         // Send initialize request
-        let req =
-            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion": 0}}"#;
+        let req = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion": 0}}"#;
         ws_stream.send(Message::Text(req.into())).await.unwrap();
 
         // Await response
@@ -403,8 +381,7 @@ mod tests {
                 let text = t.to_string();
                 // order of fields in JSON might vary, so we parse to compare
                 let actual: serde_json::Value = serde_json::from_str(&text).unwrap();
-                let expected: serde_json::Value =
-                    serde_json::from_str(expected_ws_response).unwrap();
+                let expected: serde_json::Value = serde_json::from_str(expected_ws_response).unwrap();
                 assert_eq!(actual, expected);
             }
             _ => panic!("Expected text message"),
@@ -433,8 +410,7 @@ mod tests {
         let ws_url = format!("ws://{}{}", addr, ACP_ENDPOINT);
         let (mut ws_stream, _) = connect_async(&ws_url).await.unwrap();
 
-        let req =
-            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion": 0}}"#;
+        let req = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion": 0}}"#;
         ws_stream.send(Message::Text(req.into())).await.unwrap();
 
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -470,10 +446,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(
-            response.headers().get(CONTENT_TYPE).unwrap(),
-            "text/event-stream"
-        );
+        assert_eq!(response.headers().get(CONTENT_TYPE).unwrap(), "text/event-stream");
 
         let connection_id = response
             .headers()
@@ -504,10 +477,7 @@ mod tests {
             r#"{"agentCapabilities":{"loadSession":false,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":0}"#
                 .into(),
         );
-        nats_mock.set_response(
-            "acp.agent.session.new",
-            r#"{"sessionId":"test-session-1"}"#.into(),
-        );
+        nats_mock.set_response("acp.agent.session.new", r#"{"sessionId":"test-session-1"}"#.into());
 
         let (app, shutdown_tx, conn_thread) = build_test_app(nats_mock);
         let initialize = app
@@ -693,13 +663,7 @@ mod tests {
 
         let response = app
             .clone()
-            .oneshot(
-                Request::builder()
-                    .method("GET")
-                    .uri("/ws")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
+            .oneshot(Request::builder().method("GET").uri("/ws").body(Body::empty()).unwrap())
             .await
             .unwrap();
 

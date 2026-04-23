@@ -4,9 +4,7 @@ use std::sync::OnceLock;
 
 pub(crate) static TRACER_PROVIDER: OnceLock<sdktrace::SdkTracerProvider> = OnceLock::new();
 
-pub(crate) fn init_provider(
-    resource: &Resource,
-) -> Result<sdktrace::SdkTracerProvider, Box<dyn std::error::Error>> {
+pub(crate) fn init_provider(resource: &Resource) -> Result<sdktrace::SdkTracerProvider, Box<dyn std::error::Error>> {
     let exporter = SpanExporter::builder().with_http().build()?;
 
     let provider = sdktrace::SdkTracerProvider::builder()

@@ -28,10 +28,7 @@ pub trait JsDoubleAck: Send + 'static {
 pub trait JsDoubleAckWith: Send + 'static {
     type Error: fmt::Display + fmt::Debug + Send + Sync;
 
-    fn double_ack_with(
-        &self,
-        kind: AckKind,
-    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
+    fn double_ack_with(&self, kind: AckKind) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }
 
 pub trait JsRequestMessage: JsMessageRef + JsAck + JsAckWith {}

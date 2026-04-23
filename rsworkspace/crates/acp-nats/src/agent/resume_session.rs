@@ -1,9 +1,7 @@
 use super::Bridge;
 use crate::nats::{FlushClient, PublishClient, RequestClient, session};
 use crate::session_id::AcpSessionId;
-use agent_client_protocol::{
-    Error, ErrorCode, Result, ResumeSessionRequest, ResumeSessionResponse,
-};
+use agent_client_protocol::{Error, ErrorCode, Result, ResumeSessionRequest, ResumeSessionResponse};
 use tracing::{info, instrument};
 use trogon_nats::jetstream::{JetStreamGetStream, JetStreamPublisher, JsRequestMessage};
 use trogon_std::time::GetElapsed;
@@ -29,23 +27,14 @@ where
     info!(session_id = %args.session_id, "Resume session request");
 
     let session_id = AcpSessionId::try_from(&args.session_id).map_err(|e| {
-        bridge
-            .metrics
-            .record_error("session_validate", "invalid_session_id");
-        Error::new(
-            ErrorCode::InvalidParams.into(),
-            format!("Invalid session ID: {}", e),
-        )
+        bridge.metrics.record_error("session_validate", "invalid_session_id");
+        Error::new(ErrorCode::InvalidParams.into(), format!("Invalid session ID: {}", e))
     })?;
     let prefix = bridge.config.acp_prefix_ref();
     let subject = session::agent::ResumeSubject::new(prefix, &session_id);
 
     let result = bridge
-        .session_request::<ResumeSessionRequest, ResumeSessionResponse>(
-            &subject,
-            &args,
-            &session_id,
-        )
+        .session_request::<ResumeSessionRequest, ResumeSessionResponse>(&subject, &args, &session_id)
         .await;
 
     if result.is_ok() {
@@ -64,8 +53,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::agent::test_support::{
-        has_request_metric, has_session_ready_error_metric, mock_bridge, mock_bridge_with_metrics,
-        set_js_response,
+        has_request_metric, has_session_ready_error_metric, mock_bridge, mock_bridge_with_metrics, set_js_response,
     };
     use agent_client_protocol::{Agent, ErrorCode, ResumeSessionRequest, ResumeSessionResponse};
     use std::time::Duration;
@@ -117,9 +105,7 @@ mod tests {
         let (mock, js, bridge) = mock_bridge();
         set_js_response(&js, &ResumeSessionResponse::new());
 
-        let _ = bridge
-            .resume_session(ResumeSessionRequest::new("s1", "."))
-            .await;
+        let _ = bridge.resume_session(ResumeSessionRequest::new("s1", ".")).await;
 
         tokio::time::sleep(Duration::from_millis(300)).await;
         let published = mock.published_messages();
@@ -135,9 +121,7 @@ mod tests {
         let (_mock, js, bridge, exporter, provider) = mock_bridge_with_metrics();
         set_js_response(&js, &ResumeSessionResponse::new());
 
-        let _ = bridge
-            .resume_session(ResumeSessionRequest::new("s1", "."))
-            .await;
+        let _ = bridge.resume_session(ResumeSessionRequest::new("s1", ".")).await;
 
         tokio::time::sleep(Duration::from_millis(150)).await;
         provider.force_flush().unwrap();
@@ -153,9 +137,7 @@ mod tests {
     async fn resume_session_records_metrics_on_failure() {
         let (_mock, _js, bridge, exporter, provider) = mock_bridge_with_metrics();
 
-        let _ = bridge
-            .resume_session(ResumeSessionRequest::new("s1", "."))
-            .await;
+        let _ = bridge.resume_session(ResumeSessionRequest::new("s1", ".")).await;
 
         provider.force_flush().unwrap();
         let finished_metrics = exporter.get_finished_metrics().unwrap();
@@ -172,9 +154,7 @@ mod tests {
         set_js_response(&js, &ResumeSessionResponse::new());
         mock.fail_publish_count(4);
 
-        let _ = bridge
-            .resume_session(ResumeSessionRequest::new("s1", "."))
-            .await;
+        let _ = bridge.resume_session(ResumeSessionRequest::new("s1", ".")).await;
 
         tokio::time::sleep(Duration::from_millis(600)).await;
         provider.force_flush().unwrap();
