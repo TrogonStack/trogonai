@@ -176,6 +176,7 @@ pub mod mock {
     /// - `trigger_cancel` — fires the cancel signal without actual NATS.
     /// - `inject_steer_message` — queues steer text to be delivered via `steer_rx`.
     /// - `steer_subjects` — returns the subjects `subscribe_steer` was called with.
+    /// - `fail_steer_subscribe` — makes the next `subscribe_steer` return `None`.
     #[derive(Clone, Default)]
     pub struct MockSessionNotifier {
         published: Arc<Mutex<Vec<(String, Bytes)>>>,
@@ -186,6 +187,9 @@ pub mod mock {
         steer_inject: Arc<Mutex<Vec<String>>>,
         /// Subjects that `subscribe_steer` was called with (one entry per call).
         steer_subjects: Arc<Mutex<Vec<String>>>,
+        /// When `true`, the next `subscribe_steer` call returns `None` (simulates
+        /// a NATS subscription failure).  Reset to `false` after use.
+        steer_fail: Arc<Mutex<bool>>,
     }
 
     impl MockSessionNotifier {
@@ -215,6 +219,12 @@ pub mod mock {
         pub fn steer_subjects(&self) -> Vec<String> {
             self.steer_subjects.lock().unwrap().clone()
         }
+
+        /// Make the next `subscribe_steer` call return `None`, simulating a
+        /// NATS subscription failure.
+        pub fn fail_steer_subscribe(&self) {
+            *self.steer_fail.lock().unwrap() = true;
+        }
     }
 
     #[async_trait::async_trait(?Send)]
@@ -238,6 +248,10 @@ pub mod mock {
             subject: String,
         ) -> Option<tokio::sync::mpsc::Receiver<String>> {
             self.steer_subjects.lock().unwrap().push(subject);
+            // Simulate a subscription failure if requested.
+            if std::mem::replace(&mut *self.steer_fail.lock().unwrap(), false) {
+                return None;
+            }
             let (tx, rx) = tokio::sync::mpsc::channel(16);
             // Pre-load any queued steer messages into the channel buffer so
             // `run_chat_streaming` can drain them with `try_recv`.
