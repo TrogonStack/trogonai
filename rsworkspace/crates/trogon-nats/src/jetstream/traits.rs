@@ -220,7 +220,7 @@ impl JetStreamPublishMessage for jetstream::Context {
         &self,
         message: OutboundMessage,
     ) -> impl Future<Output = Result<Self::AckFuture, Self::PublishError>> + Send {
-        jetstream::Context::publish_message(self, message)
+        context::traits::Publisher::publish_message(self, message)
     }
 }
 
