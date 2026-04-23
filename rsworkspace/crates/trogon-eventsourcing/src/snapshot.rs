@@ -22,48 +22,38 @@ pub trait SnapshotSchema {
     where
         Self: Sized,
     {
-        match Self::CHECKPOINT_NAME {
-            Some(checkpoint_name) => SnapshotStoreConfig::with_checkpoint(
-                Self::SNAPSHOT_STREAM_PREFIX,
-                format!(
-                    "_snapshot.{}.{}",
-                    Self::SNAPSHOT_STREAM_PREFIX.trim_end_matches('.'),
-                    checkpoint_name
-                ),
-            ),
-            None => SnapshotStoreConfig::without_checkpoint(Self::SNAPSHOT_STREAM_PREFIX),
-        }
+        SnapshotStoreConfig::new(Self::SNAPSHOT_STREAM_PREFIX, Self::CHECKPOINT_NAME)
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SnapshotStoreConfig {
     key_prefix: Cow<'static, str>,
-    checkpoint_key: Option<Cow<'static, str>>,
+    checkpoint_name: Option<Cow<'static, str>>,
 }
 
 impl SnapshotStoreConfig {
-    pub fn new(key_prefix: impl Into<Cow<'static, str>>, checkpoint_key: Option<&'static str>) -> Self {
+    pub fn new(key_prefix: impl Into<Cow<'static, str>>, checkpoint_name: Option<&'static str>) -> Self {
         Self {
             key_prefix: key_prefix.into(),
-            checkpoint_key: checkpoint_key.map(Cow::Borrowed),
+            checkpoint_name: checkpoint_name.map(Cow::Borrowed),
         }
     }
 
     pub fn without_checkpoint(key_prefix: impl Into<Cow<'static, str>>) -> Self {
         Self {
             key_prefix: key_prefix.into(),
-            checkpoint_key: None,
+            checkpoint_name: None,
         }
     }
 
-    pub fn with_checkpoint(
+    pub fn with_checkpoint_name(
         key_prefix: impl Into<Cow<'static, str>>,
-        checkpoint_key: impl Into<Cow<'static, str>>,
+        checkpoint_name: impl Into<Cow<'static, str>>,
     ) -> Self {
         Self {
             key_prefix: key_prefix.into(),
-            checkpoint_key: Some(checkpoint_key.into()),
+            checkpoint_name: Some(checkpoint_name.into()),
         }
     }
 
@@ -71,8 +61,8 @@ impl SnapshotStoreConfig {
         self.key_prefix.as_ref()
     }
 
-    pub fn checkpoint_key(&self) -> Option<&str> {
-        self.checkpoint_key.as_deref()
+    pub fn checkpoint_name(&self) -> Option<&str> {
+        self.checkpoint_name.as_deref()
     }
 }
 
