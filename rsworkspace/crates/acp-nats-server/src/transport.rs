@@ -414,7 +414,6 @@ struct OutgoingHttpMessage {
     id: Option<RequestId>,
     params: Option<Value>,
     result: Option<Value>,
-    has_result: bool,
     has_error: bool,
 }
 
@@ -426,7 +425,6 @@ impl OutgoingHttpMessage {
             id: object.get("id").and_then(|id| serde_json::from_value(id.clone()).ok()),
             params: object.get("params").cloned(),
             result: object.get("result").cloned(),
-            has_result: object.contains_key("result"),
             has_error: object.contains_key("error"),
         })
     }
@@ -435,10 +433,6 @@ impl OutgoingHttpMessage {
         let params = self.params.as_ref()?;
         let session_id = params.get("sessionId")?.as_str()?;
         acp_nats::AcpSessionId::new(session_id).ok()
-    }
-
-    fn has_result(&self) -> bool {
-        self.has_result
     }
 
     fn is_success_response(&self) -> bool {
@@ -1874,11 +1868,10 @@ mod tests {
         let response =
             OutgoingHttpMessage::parse(r#"{"jsonrpc":"2.0","id":2,"result":{"sessionId":"session-1"}}"#).unwrap();
         assert_eq!(response.result_session_id(), Some(session_id()));
-        assert!(response.has_result());
         assert!(response.is_success_response());
 
         let null_result = OutgoingHttpMessage::parse(r#"{"jsonrpc":"2.0","id":3,"result":null}"#).unwrap();
-        assert!(null_result.has_result());
+        assert_eq!(null_result.result_session_id(), None);
         assert!(null_result.is_success_response());
 
         let empty_success = OutgoingHttpMessage::parse(r#"{"jsonrpc":"2.0","id":4}"#).unwrap();
