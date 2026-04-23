@@ -350,7 +350,6 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> TrogonAgent<
         req: &PromptRequest,
         prompt_client: &dyn PromptEventClient,
         cancel_rx: Option<tokio::sync::oneshot::Receiver<()>>,
-        steer_rx: Option<tokio::sync::mpsc::Receiver<String>>,
     ) -> agent_client_protocol::Result<PromptResponse> {
         use acp_nats::prompt_event::PromptEvent;
 
@@ -456,7 +455,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> TrogonAgent<
 
         let agent_fut = tokio::task::spawn_local(async move {
             agent
-                .run_chat_streaming(messages, &tools, system_prompt.as_deref(), event_tx, steer_rx)
+                .run_chat_streaming(messages, &tools, system_prompt.as_deref(), event_tx)
                 .await
         });
 
@@ -939,19 +938,11 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> agent_client
         .to_string();
 
         let cancel_rx = self.notifier.subscribe_cancel(cancel_subject).await;
-
-        let steer_subject = session_subjects::agent::SteerSubject::new(
-            &acp_prefix,
-            &AcpSessionId::new(&session_id).expect("valid session_id"),
-        )
-        .to_string();
-        let steer_rx = self.notifier.subscribe_steer(steer_subject).await;
-
         let prompt_client = self
             .notifier
             .make_prompt_client(acp_session_id, acp_prefix);
 
-        self.run_prompt(&req, &*prompt_client, cancel_rx, steer_rx).await
+        self.run_prompt(&req, &*prompt_client, cancel_rx).await
     }
 
     #[cfg_attr(coverage, coverage(off))]

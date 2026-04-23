@@ -27,7 +27,7 @@ use agent_client_protocol::{
 };
 use futures::StreamExt as _;
 use testcontainers_modules::nats::Nats;
-use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt as _, runners::AsyncRunner};
+use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
 use trogon_acp_runner::prompt_converter::{PromptEventConverter, PromptOutcome};
 use trogon_std::time::SystemClock;
 
@@ -55,26 +55,18 @@ fn make_js(nats: &async_nats::Client) -> trogon_nats::jetstream::NatsJetStreamCl
     trogon_nats::jetstream::NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()))
 }
 
-/// Provision only the session-scoped JetStream streams (COMMANDS, RESPONSES,
-/// NOTIFICATIONS, CLIENT_OPS). Skips GLOBAL and GLOBAL_EXT intentionally:
-/// global ops (initialize, authenticate, etc.) use core NATS request/reply,
-/// and provisioning those streams would cause JetStream to ack the requests
-/// before the mock agent responds.
-async fn provision_session_streams(
-    js: &trogon_nats::jetstream::NatsJetStreamClient,
-    prefix: &AcpPrefix,
-) {
+/// Provision only the session-scoped JetStream streams (Commands, Responses,
+/// ClientOps, Notifications). The Global and GlobalExt streams are skipped
+/// because provisioning them causes NATS to deliver a JetStream PubAck to
+/// NATS-Core request reply-subjects (e.g. authenticate, initialize), which
+/// makes timeout tests receive an unexpected Ok response.
+async fn provision_session_streams(js: &trogon_nats::jetstream::NatsJetStreamClient, prefix: &AcpPrefix) {
     use acp_nats::nats::AcpStream;
-    use trogon_nats::jetstream::JetStreamContext as _;
-    for stream in [
-        AcpStream::Commands,
-        AcpStream::Responses,
-        AcpStream::Notifications,
-        AcpStream::ClientOps,
-    ] {
-        js.get_or_create_stream(stream.config(prefix))
+    use trogon_nats::jetstream::JetStreamContext;
+    for stream in [AcpStream::Commands, AcpStream::Responses, AcpStream::ClientOps, AcpStream::Notifications] {
+        JetStreamContext::get_or_create_stream(js, stream.config(prefix))
             .await
-            .unwrap_or_else(|e| panic!("failed to create {stream} stream: {e}"));
+            .expect("failed to provision session JetStream stream");
     }
 }
 
@@ -87,7 +79,7 @@ async fn make_bridge(nats: async_nats::Client, prefix: &str) -> NatsBridge {
             auth: NatsAuth::None,
         },
     )
-    .with_operation_timeout(Duration::from_secs(2))
+    .with_operation_timeout(Duration::from_millis(500))
     .with_prompt_timeout(Duration::from_secs(5));
     let js = make_js(&nats);
     provision_session_streams(&js, &acp_prefix).await;
@@ -119,7 +111,7 @@ async fn make_bridge_with_rx(
             auth: NatsAuth::None,
         },
     )
-    .with_operation_timeout(Duration::from_secs(2))
+    .with_operation_timeout(Duration::from_millis(500))
     .with_prompt_timeout(Duration::from_secs(5));
     let js = make_js(&nats);
     provision_session_streams(&js, &acp_prefix).await;
@@ -149,26 +141,8 @@ async fn initialize_returns_protocol_version_from_agent() {
         if let Some(msg) = agent_sub.next().await {
             let resp =
                 serde_json::to_vec(&InitializeResponse::new(ProtocolVersion::LATEST)).unwrap();
-            {
-                let req_id = msg
-                    .headers
-                    .as_ref()
-                    .and_then(|h| h.get(acp_nats::REQ_ID_HEADER))
-                    .map(|v| v.as_str().to_string())
-                    .unwrap_or_default();
-                let is_session_op = {
-                    let parts: Vec<&str> = msg.subject.as_str().split('.').collect();
-                    parts.get(1) == Some(&"session")
-                };
-                if is_session_op && !req_id.is_empty() {
-                    let subj_parts: Vec<&str> = msg.subject.as_str().split('.').collect();
-                    let sess_id = subj_parts.get(2).copied().unwrap_or("unknown");
-                    let response_subject =
-                        format!("acp.session.{}.agent.response.{}", sess_id, req_id);
-                    nats2.publish(response_subject, resp.into()).await.unwrap();
-                } else if let Some(reply) = msg.reply {
-                    nats2.publish(reply, resp.into()).await.unwrap();
-                }
+            if let Some(reply) = msg.reply {
+                nats2.publish(reply, resp.into()).await.unwrap();
             }
         }
     });
@@ -257,26 +231,8 @@ async fn authenticate_succeeds() {
     tokio::spawn(async move {
         if let Some(msg) = agent_sub.next().await {
             let resp = serde_json::to_vec(&AuthenticateResponse::default()).unwrap();
-            {
-                let req_id = msg
-                    .headers
-                    .as_ref()
-                    .and_then(|h| h.get(acp_nats::REQ_ID_HEADER))
-                    .map(|v| v.as_str().to_string())
-                    .unwrap_or_default();
-                let is_session_op = {
-                    let parts: Vec<&str> = msg.subject.as_str().split('.').collect();
-                    parts.get(1) == Some(&"session")
-                };
-                if is_session_op && !req_id.is_empty() {
-                    let subj_parts: Vec<&str> = msg.subject.as_str().split('.').collect();
-                    let sess_id = subj_parts.get(2).copied().unwrap_or("unknown");
-                    let response_subject =
-                        format!("acp.session.{}.agent.response.{}", sess_id, req_id);
-                    nats2.publish(response_subject, resp.into()).await.unwrap();
-                } else if let Some(reply) = msg.reply {
-                    nats2.publish(reply, resp.into()).await.unwrap();
-                }
+            if let Some(reply) = msg.reply {
+                nats2.publish(reply, resp.into()).await.unwrap();
             }
         }
     });
@@ -320,26 +276,8 @@ async fn new_session_returns_session_id() {
     tokio::spawn(async move {
         if let Some(msg) = agent_sub.next().await {
             let resp = serde_json::to_vec(&NewSessionResponse::new(resp_id)).unwrap();
-            {
-                let req_id = msg
-                    .headers
-                    .as_ref()
-                    .and_then(|h| h.get(acp_nats::REQ_ID_HEADER))
-                    .map(|v| v.as_str().to_string())
-                    .unwrap_or_default();
-                let is_session_op = {
-                    let parts: Vec<&str> = msg.subject.as_str().split('.').collect();
-                    parts.get(1) == Some(&"session")
-                };
-                if is_session_op && !req_id.is_empty() {
-                    let subj_parts: Vec<&str> = msg.subject.as_str().split('.').collect();
-                    let sess_id = subj_parts.get(2).copied().unwrap_or("unknown");
-                    let response_subject =
-                        format!("acp.session.{}.agent.response.{}", sess_id, req_id);
-                    nats2.publish(response_subject, resp.into()).await.unwrap();
-                } else if let Some(reply) = msg.reply {
-                    nats2.publish(reply, resp.into()).await.unwrap();
-                }
+            if let Some(reply) = msg.reply {
+                nats2.publish(reply, resp.into()).await.unwrap();
             }
         }
     });
@@ -368,29 +306,7 @@ async fn load_session_uses_session_scoped_subject() {
         if let Some(msg) = agent_sub.next().await {
             let subject = msg.subject.to_string();
             let _ = tx.send(subject);
-            // Respond so bridge doesn't time out.
-            let resp = serde_json::to_vec(&LoadSessionResponse::new()).unwrap();
-            {
-                let req_id = msg
-                    .headers
-                    .as_ref()
-                    .and_then(|h| h.get(acp_nats::REQ_ID_HEADER))
-                    .map(|v| v.as_str().to_string())
-                    .unwrap_or_default();
-                let is_session_op = {
-                    let parts: Vec<&str> = msg.subject.as_str().split('.').collect();
-                    parts.get(1) == Some(&"session")
-                };
-                if is_session_op && !req_id.is_empty() {
-                    let subj_parts: Vec<&str> = msg.subject.as_str().split('.').collect();
-                    let sess_id = subj_parts.get(2).copied().unwrap_or("unknown");
-                    let response_subject =
-                        format!("acp.session.{}.agent.response.{}", sess_id, req_id);
-                    nats2.publish(response_subject, resp.into()).await.unwrap();
-                } else if let Some(reply) = msg.reply {
-                    nats2.publish(reply, resp.into()).await.unwrap();
-                }
-            }
+            js_respond_session(&nats2, &msg, "acp", "s1", &LoadSessionResponse::new()).await;
         }
     });
 
@@ -448,28 +364,7 @@ async fn set_session_mode_succeeds() {
     let nats2 = nats.clone();
     tokio::spawn(async move {
         if let Some(msg) = agent_sub.next().await {
-            let resp = serde_json::to_vec(&SetSessionModeResponse::new()).unwrap();
-            {
-                let req_id = msg
-                    .headers
-                    .as_ref()
-                    .and_then(|h| h.get(acp_nats::REQ_ID_HEADER))
-                    .map(|v| v.as_str().to_string())
-                    .unwrap_or_default();
-                let is_session_op = {
-                    let parts: Vec<&str> = msg.subject.as_str().split('.').collect();
-                    parts.get(1) == Some(&"session")
-                };
-                if is_session_op && !req_id.is_empty() {
-                    let subj_parts: Vec<&str> = msg.subject.as_str().split('.').collect();
-                    let sess_id = subj_parts.get(2).copied().unwrap_or("unknown");
-                    let response_subject =
-                        format!("acp.session.{}.agent.response.{}", sess_id, req_id);
-                    nats2.publish(response_subject, resp.into()).await.unwrap();
-                } else if let Some(reply) = msg.reply {
-                    nats2.publish(reply, resp.into()).await.unwrap();
-                }
-            }
+            js_respond_session(&nats2, &msg, "acp", "s1", &SetSessionModeResponse::new()).await;
         }
     });
 
@@ -555,26 +450,8 @@ async fn custom_prefix_used_in_all_subjects() {
             let _ = tx.send(subject);
             let resp =
                 serde_json::to_vec(&InitializeResponse::new(ProtocolVersion::LATEST)).unwrap();
-            {
-                let req_id = msg
-                    .headers
-                    .as_ref()
-                    .and_then(|h| h.get(acp_nats::REQ_ID_HEADER))
-                    .map(|v| v.as_str().to_string())
-                    .unwrap_or_default();
-                let is_session_op = {
-                    let parts: Vec<&str> = msg.subject.as_str().split('.').collect();
-                    parts.get(1) == Some(&"session")
-                };
-                if is_session_op && !req_id.is_empty() {
-                    let subj_parts: Vec<&str> = msg.subject.as_str().split('.').collect();
-                    let sess_id = subj_parts.get(2).copied().unwrap_or("unknown");
-                    let response_subject =
-                        format!("acp.session.{}.agent.response.{}", sess_id, req_id);
-                    nats2.publish(response_subject, resp.into()).await.unwrap();
-                } else if let Some(reply) = msg.reply {
-                    nats2.publish(reply, resp.into()).await.unwrap();
-                }
+            if let Some(reply) = msg.reply {
+                nats2.publish(reply, resp.into()).await.unwrap();
             }
         }
     });
@@ -608,26 +485,8 @@ async fn initialize_with_client_info_forwarded_to_agent() {
             let _ = tx.send(payload_str);
             let resp =
                 serde_json::to_vec(&InitializeResponse::new(ProtocolVersion::LATEST)).unwrap();
-            {
-                let req_id = msg
-                    .headers
-                    .as_ref()
-                    .and_then(|h| h.get(acp_nats::REQ_ID_HEADER))
-                    .map(|v| v.as_str().to_string())
-                    .unwrap_or_default();
-                let is_session_op = {
-                    let parts: Vec<&str> = msg.subject.as_str().split('.').collect();
-                    parts.get(1) == Some(&"session")
-                };
-                if is_session_op && !req_id.is_empty() {
-                    let subj_parts: Vec<&str> = msg.subject.as_str().split('.').collect();
-                    let sess_id = subj_parts.get(2).copied().unwrap_or("unknown");
-                    let response_subject =
-                        format!("acp.session.{}.agent.response.{}", sess_id, req_id);
-                    nats2.publish(response_subject, resp.into()).await.unwrap();
-                } else if let Some(reply) = msg.reply {
-                    nats2.publish(reply, resp.into()).await.unwrap();
-                }
+            if let Some(reply) = msg.reply {
+                nats2.publish(reply, resp.into()).await.unwrap();
             }
         }
     });
@@ -668,26 +527,8 @@ async fn concurrent_requests_dont_mix_replies() {
             let idx = counter2.fetch_add(1, Ordering::SeqCst);
             let session_id = SessionId::from(format!("concurrent-sess-{}", idx));
             let resp = serde_json::to_vec(&NewSessionResponse::new(session_id)).unwrap();
-            {
-                let req_id = msg
-                    .headers
-                    .as_ref()
-                    .and_then(|h| h.get(acp_nats::REQ_ID_HEADER))
-                    .map(|v| v.as_str().to_string())
-                    .unwrap_or_default();
-                let is_session_op = {
-                    let parts: Vec<&str> = msg.subject.as_str().split('.').collect();
-                    parts.get(1) == Some(&"session")
-                };
-                if is_session_op && !req_id.is_empty() {
-                    let subj_parts: Vec<&str> = msg.subject.as_str().split('.').collect();
-                    let sess_id = subj_parts.get(2).copied().unwrap_or("unknown");
-                    let response_subject =
-                        format!("acp.session.{}.agent.response.{}", sess_id, req_id);
-                    nats2.publish(response_subject, resp.into()).await.unwrap();
-                } else if let Some(reply) = msg.reply {
-                    nats2.publish(reply, resp.into()).await.unwrap();
-                }
+            if let Some(reply) = msg.reply {
+                nats2.publish(reply, resp.into()).await.unwrap();
             }
         }
     });
@@ -723,6 +564,36 @@ async fn concurrent_requests_dont_mix_replies() {
 
 // ── prompt helpers ────────────────────────────────────────────────────────────
 
+/// Publish a JetStream response to the Responses stream for a session command.
+///
+/// Bridge session operations (fork, resume, close, set_model, etc.) use JetStream
+/// via `js_request`. They publish to the Commands stream with no reply-to subject.
+/// The response must be JetStream-published to
+/// `{prefix}.session.{session_id}.agent.response.{req_id}` so the bridge's
+/// Responses-stream consumer picks it up.
+async fn js_respond_session<R: serde::Serialize>(
+    nats: &async_nats::Client,
+    msg: &async_nats::Message,
+    prefix: &str,
+    session_id: &str,
+    response: &R,
+) {
+    let req_id = msg
+        .headers
+        .as_ref()
+        .and_then(|h| h.get(acp_nats::REQ_ID_HEADER))
+        .map(|v| v.as_str().to_string())
+        .unwrap_or_default();
+    let resp_subject = format!("{prefix}.session.{session_id}.agent.response.{req_id}");
+    let resp_bytes: bytes::Bytes = serde_json::to_vec(response).unwrap().into();
+    async_nats::jetstream::new(nats.clone())
+        .publish(resp_subject, resp_bytes)
+        .await
+        .unwrap()
+        .await
+        .unwrap();
+}
+
 /// Parse a stop-reason string to `StopReason`, falling back to `EndTurn`.
 fn parse_stop_reason(s: &str) -> StopReason {
     match s {
@@ -735,11 +606,12 @@ fn parse_stop_reason(s: &str) -> StopReason {
 }
 
 /// Spawn a mock runner that:
-/// 1. Subscribes to `{prefix}.{session_id}.agent.session.prompt`
+/// 1. Subscribes to `{prefix}.session.{session_id}.agent.prompt`
 /// 2. Reads `req_id` from the `X-Req-Id` header
 /// 3. Converts each `PromptEvent` via `PromptEventConverter` into `SessionNotification`s
-/// 4. Publishes notifications to `agent.session.update.{req_id}`
-/// 5. On terminal outcome (Done/Error) publishes to `agent.ext.session.prompt.response.{req_id}`
+/// 4. JetStream-publishes notifications to `{prefix}.session.{session_id}.agent.update.{req_id}`
+/// 5. On terminal outcome (Done/Error) JetStream-publishes to
+///    `{prefix}.session.{session_id}.agent.prompt.response.{req_id}`
 ///
 /// Returns only after the NATS subscription is confirmed, eliminating the race
 /// where the bridge publishes the prompt before the mock has subscribed.
@@ -770,19 +642,19 @@ async fn mock_runner(
                 prefix, session_id, req_id
             );
 
+            let js = async_nats::jetstream::new(nats.clone());
             let mut converter = PromptEventConverter::new(session_id.clone());
             for event in events {
                 let (notifications, outcome) = converter.convert(event);
                 for notif in &notifications {
-                    nats.publish(
+                    js.publish(
                         update_subject.clone(),
                         serde_json::to_vec(notif).unwrap().into(),
                     )
                     .await
+                    .unwrap()
+                    .await
                     .unwrap();
-                }
-                if !notifications.is_empty() {
-                    nats.flush().await.unwrap();
                 }
                 if let Some(outcome) = outcome {
                     match outcome {
@@ -790,19 +662,23 @@ async fn mock_runner(
                             let resp = agent_client_protocol::PromptResponse::new(
                                 parse_stop_reason(&stop_reason),
                             );
-                            nats.publish(
+                            js.publish(
                                 response_subject,
                                 serde_json::to_vec(&resp).unwrap().into(),
                             )
+                            .await
+                            .unwrap()
                             .await
                             .unwrap();
                         }
                         PromptOutcome::Error { message } => {
                             let env = serde_json::json!({"error": message});
-                            nats.publish(
+                            js.publish(
                                 response_subject,
                                 serde_json::to_vec(&env).unwrap().into(),
                             )
+                            .await
+                            .unwrap()
                             .await
                             .unwrap();
                         }
@@ -1202,13 +1078,13 @@ async fn malformed_event_json_returns_err() {
     });
 
     let result = bridge.prompt(PromptRequest::new(session_id, vec![])).await;
+    // The bridge skips malformed notification JSON and keeps waiting; the prompt
+    // eventually times out since no valid response arrives.
     assert!(result.is_err(), "expected Err from malformed event JSON");
+    let err = result.unwrap_err();
     assert!(
-        result
-            .unwrap_err()
-            .to_string()
-            .contains("timed out"),
-        "expected prompt to time out after bad notification payload",
+        err.to_string().contains("timed out"),
+        "expected timeout error when notification is malformed, got: {err:?}",
     );
 }
 
@@ -2249,28 +2125,7 @@ async fn fork_session_returns_new_session_id() {
     let resp_id = forked_id.clone();
     tokio::spawn(async move {
         if let Some(msg) = agent_sub.next().await {
-            let resp = serde_json::to_vec(&ForkSessionResponse::new(resp_id)).unwrap();
-            {
-                let req_id = msg
-                    .headers
-                    .as_ref()
-                    .and_then(|h| h.get(acp_nats::REQ_ID_HEADER))
-                    .map(|v| v.as_str().to_string())
-                    .unwrap_or_default();
-                let is_session_op = {
-                    let parts: Vec<&str> = msg.subject.as_str().split('.').collect();
-                    parts.get(1) == Some(&"session")
-                };
-                if is_session_op && !req_id.is_empty() {
-                    let subj_parts: Vec<&str> = msg.subject.as_str().split('.').collect();
-                    let sess_id = subj_parts.get(2).copied().unwrap_or("unknown");
-                    let response_subject =
-                        format!("acp.session.{}.agent.response.{}", sess_id, req_id);
-                    nats2.publish(response_subject, resp.into()).await.unwrap();
-                } else if let Some(reply) = msg.reply {
-                    nats2.publish(reply, resp.into()).await.unwrap();
-                }
-            }
+            js_respond_session(&nats2, &msg, "acp", "s1", &ForkSessionResponse::new(resp_id)).await;
         }
     });
 
@@ -2300,29 +2155,10 @@ async fn fork_session_uses_session_scoped_subject() {
     tokio::spawn(async move {
         if let Some(msg) = agent_sub.next().await {
             let _ = tx.send(msg.subject.to_string());
-            let resp =
-                serde_json::to_vec(&ForkSessionResponse::new(SessionId::from("f1"))).unwrap();
-            {
-                let req_id = msg
-                    .headers
-                    .as_ref()
-                    .and_then(|h| h.get(acp_nats::REQ_ID_HEADER))
-                    .map(|v| v.as_str().to_string())
-                    .unwrap_or_default();
-                let is_session_op = {
-                    let parts: Vec<&str> = msg.subject.as_str().split('.').collect();
-                    parts.get(1) == Some(&"session")
-                };
-                if is_session_op && !req_id.is_empty() {
-                    let subj_parts: Vec<&str> = msg.subject.as_str().split('.').collect();
-                    let sess_id = subj_parts.get(2).copied().unwrap_or("unknown");
-                    let response_subject =
-                        format!("acp.session.{}.agent.response.{}", sess_id, req_id);
-                    nats2.publish(response_subject, resp.into()).await.unwrap();
-                } else if let Some(reply) = msg.reply {
-                    nats2.publish(reply, resp.into()).await.unwrap();
-                }
-            }
+            js_respond_session(
+                &nats2, &msg, "acp", "orig-sess",
+                &ForkSessionResponse::new(SessionId::from("f1")),
+            ).await;
         }
     });
 
@@ -2363,28 +2199,7 @@ async fn resume_session_succeeds() {
     let nats2 = nats.clone();
     tokio::spawn(async move {
         if let Some(msg) = agent_sub.next().await {
-            let resp = serde_json::to_vec(&ResumeSessionResponse::new()).unwrap();
-            {
-                let req_id = msg
-                    .headers
-                    .as_ref()
-                    .and_then(|h| h.get(acp_nats::REQ_ID_HEADER))
-                    .map(|v| v.as_str().to_string())
-                    .unwrap_or_default();
-                let is_session_op = {
-                    let parts: Vec<&str> = msg.subject.as_str().split('.').collect();
-                    parts.get(1) == Some(&"session")
-                };
-                if is_session_op && !req_id.is_empty() {
-                    let subj_parts: Vec<&str> = msg.subject.as_str().split('.').collect();
-                    let sess_id = subj_parts.get(2).copied().unwrap_or("unknown");
-                    let response_subject =
-                        format!("acp.session.{}.agent.response.{}", sess_id, req_id);
-                    nats2.publish(response_subject, resp.into()).await.unwrap();
-                } else if let Some(reply) = msg.reply {
-                    nats2.publish(reply, resp.into()).await.unwrap();
-                }
-            }
+            js_respond_session(&nats2, &msg, "acp", "s2", &ResumeSessionResponse::new()).await;
         }
     });
 
@@ -2413,28 +2228,7 @@ async fn resume_session_uses_session_scoped_subject() {
     tokio::spawn(async move {
         if let Some(msg) = agent_sub.next().await {
             let _ = tx.send(msg.subject.to_string());
-            let resp = serde_json::to_vec(&ResumeSessionResponse::new()).unwrap();
-            {
-                let req_id = msg
-                    .headers
-                    .as_ref()
-                    .and_then(|h| h.get(acp_nats::REQ_ID_HEADER))
-                    .map(|v| v.as_str().to_string())
-                    .unwrap_or_default();
-                let is_session_op = {
-                    let parts: Vec<&str> = msg.subject.as_str().split('.').collect();
-                    parts.get(1) == Some(&"session")
-                };
-                if is_session_op && !req_id.is_empty() {
-                    let subj_parts: Vec<&str> = msg.subject.as_str().split('.').collect();
-                    let sess_id = subj_parts.get(2).copied().unwrap_or("unknown");
-                    let response_subject =
-                        format!("acp.session.{}.agent.response.{}", sess_id, req_id);
-                    nats2.publish(response_subject, resp.into()).await.unwrap();
-                } else if let Some(reply) = msg.reply {
-                    nats2.publish(reply, resp.into()).await.unwrap();
-                }
-            }
+            js_respond_session(&nats2, &msg, "acp", "my-sess", &ResumeSessionResponse::new()).await;
         }
     });
 
@@ -2476,26 +2270,8 @@ async fn list_sessions_returns_session_list() {
     tokio::spawn(async move {
         if let Some(msg) = agent_sub.next().await {
             let resp = serde_json::to_vec(&ListSessionsResponse::new(vec![])).unwrap();
-            {
-                let req_id = msg
-                    .headers
-                    .as_ref()
-                    .and_then(|h| h.get(acp_nats::REQ_ID_HEADER))
-                    .map(|v| v.as_str().to_string())
-                    .unwrap_or_default();
-                let is_session_op = {
-                    let parts: Vec<&str> = msg.subject.as_str().split('.').collect();
-                    parts.get(1) == Some(&"session")
-                };
-                if is_session_op && !req_id.is_empty() {
-                    let subj_parts: Vec<&str> = msg.subject.as_str().split('.').collect();
-                    let sess_id = subj_parts.get(2).copied().unwrap_or("unknown");
-                    let response_subject =
-                        format!("acp.session.{}.agent.response.{}", sess_id, req_id);
-                    nats2.publish(response_subject, resp.into()).await.unwrap();
-                } else if let Some(reply) = msg.reply {
-                    nats2.publish(reply, resp.into()).await.unwrap();
-                }
+            if let Some(reply) = msg.reply {
+                nats2.publish(reply, resp.into()).await.unwrap();
             }
         }
     });
@@ -2522,26 +2298,8 @@ async fn list_sessions_uses_global_subject_not_session_scoped() {
         if let Some(msg) = agent_sub.next().await {
             let _ = tx.send(msg.subject.to_string());
             let resp = serde_json::to_vec(&ListSessionsResponse::new(vec![])).unwrap();
-            {
-                let req_id = msg
-                    .headers
-                    .as_ref()
-                    .and_then(|h| h.get(acp_nats::REQ_ID_HEADER))
-                    .map(|v| v.as_str().to_string())
-                    .unwrap_or_default();
-                let is_session_op = {
-                    let parts: Vec<&str> = msg.subject.as_str().split('.').collect();
-                    parts.get(1) == Some(&"session")
-                };
-                if is_session_op && !req_id.is_empty() {
-                    let subj_parts: Vec<&str> = msg.subject.as_str().split('.').collect();
-                    let sess_id = subj_parts.get(2).copied().unwrap_or("unknown");
-                    let response_subject =
-                        format!("acp.session.{}.agent.response.{}", sess_id, req_id);
-                    nats2.publish(response_subject, resp.into()).await.unwrap();
-                } else if let Some(reply) = msg.reply {
-                    nats2.publish(reply, resp.into()).await.unwrap();
-                }
+            if let Some(reply) = msg.reply {
+                nats2.publish(reply, resp.into()).await.unwrap();
             }
         }
     });
@@ -2587,28 +2345,7 @@ async fn set_session_model_succeeds() {
     let nats2 = nats.clone();
     tokio::spawn(async move {
         if let Some(msg) = agent_sub.next().await {
-            let resp = serde_json::to_vec(&SetSessionModelResponse::new()).unwrap();
-            {
-                let req_id = msg
-                    .headers
-                    .as_ref()
-                    .and_then(|h| h.get(acp_nats::REQ_ID_HEADER))
-                    .map(|v| v.as_str().to_string())
-                    .unwrap_or_default();
-                let is_session_op = {
-                    let parts: Vec<&str> = msg.subject.as_str().split('.').collect();
-                    parts.get(1) == Some(&"session")
-                };
-                if is_session_op && !req_id.is_empty() {
-                    let subj_parts: Vec<&str> = msg.subject.as_str().split('.').collect();
-                    let sess_id = subj_parts.get(2).copied().unwrap_or("unknown");
-                    let response_subject =
-                        format!("acp.session.{}.agent.response.{}", sess_id, req_id);
-                    nats2.publish(response_subject, resp.into()).await.unwrap();
-                } else if let Some(reply) = msg.reply {
-                    nats2.publish(reply, resp.into()).await.unwrap();
-                }
-            }
+            js_respond_session(&nats2, &msg, "acp", "s3", &SetSessionModelResponse::new()).await;
         }
     });
 
@@ -2637,28 +2374,7 @@ async fn set_session_model_uses_session_scoped_subject() {
     tokio::spawn(async move {
         if let Some(msg) = agent_sub.next().await {
             let _ = tx.send(msg.subject.to_string());
-            let resp = serde_json::to_vec(&SetSessionModelResponse::new()).unwrap();
-            {
-                let req_id = msg
-                    .headers
-                    .as_ref()
-                    .and_then(|h| h.get(acp_nats::REQ_ID_HEADER))
-                    .map(|v| v.as_str().to_string())
-                    .unwrap_or_default();
-                let is_session_op = {
-                    let parts: Vec<&str> = msg.subject.as_str().split('.').collect();
-                    parts.get(1) == Some(&"session")
-                };
-                if is_session_op && !req_id.is_empty() {
-                    let subj_parts: Vec<&str> = msg.subject.as_str().split('.').collect();
-                    let sess_id = subj_parts.get(2).copied().unwrap_or("unknown");
-                    let response_subject =
-                        format!("acp.session.{}.agent.response.{}", sess_id, req_id);
-                    nats2.publish(response_subject, resp.into()).await.unwrap();
-                } else if let Some(reply) = msg.reply {
-                    nats2.publish(reply, resp.into()).await.unwrap();
-                }
-            }
+            js_respond_session(&nats2, &msg, "acp", "sess-m", &SetSessionModelResponse::new()).await;
         }
     });
 
@@ -2702,28 +2418,10 @@ async fn set_session_config_option_succeeds() {
     let nats2 = nats.clone();
     tokio::spawn(async move {
         if let Some(msg) = agent_sub.next().await {
-            let resp = serde_json::to_vec(&SetSessionConfigOptionResponse::new(vec![])).unwrap();
-            {
-                let req_id = msg
-                    .headers
-                    .as_ref()
-                    .and_then(|h| h.get(acp_nats::REQ_ID_HEADER))
-                    .map(|v| v.as_str().to_string())
-                    .unwrap_or_default();
-                let is_session_op = {
-                    let parts: Vec<&str> = msg.subject.as_str().split('.').collect();
-                    parts.get(1) == Some(&"session")
-                };
-                if is_session_op && !req_id.is_empty() {
-                    let subj_parts: Vec<&str> = msg.subject.as_str().split('.').collect();
-                    let sess_id = subj_parts.get(2).copied().unwrap_or("unknown");
-                    let response_subject =
-                        format!("acp.session.{}.agent.response.{}", sess_id, req_id);
-                    nats2.publish(response_subject, resp.into()).await.unwrap();
-                } else if let Some(reply) = msg.reply {
-                    nats2.publish(reply, resp.into()).await.unwrap();
-                }
-            }
+            js_respond_session(
+                &nats2, &msg, "acp", "s4",
+                &SetSessionConfigOptionResponse::new(vec![]),
+            ).await;
         }
     });
 
@@ -2752,28 +2450,10 @@ async fn set_session_config_option_uses_session_scoped_subject() {
     tokio::spawn(async move {
         if let Some(msg) = agent_sub.next().await {
             let _ = tx.send(msg.subject.to_string());
-            let resp = serde_json::to_vec(&SetSessionConfigOptionResponse::new(vec![])).unwrap();
-            {
-                let req_id = msg
-                    .headers
-                    .as_ref()
-                    .and_then(|h| h.get(acp_nats::REQ_ID_HEADER))
-                    .map(|v| v.as_str().to_string())
-                    .unwrap_or_default();
-                let is_session_op = {
-                    let parts: Vec<&str> = msg.subject.as_str().split('.').collect();
-                    parts.get(1) == Some(&"session")
-                };
-                if is_session_op && !req_id.is_empty() {
-                    let subj_parts: Vec<&str> = msg.subject.as_str().split('.').collect();
-                    let sess_id = subj_parts.get(2).copied().unwrap_or("unknown");
-                    let response_subject =
-                        format!("acp.session.{}.agent.response.{}", sess_id, req_id);
-                    nats2.publish(response_subject, resp.into()).await.unwrap();
-                } else if let Some(reply) = msg.reply {
-                    nats2.publish(reply, resp.into()).await.unwrap();
-                }
-            }
+            js_respond_session(
+                &nats2, &msg, "acp", "sess-cfg",
+                &SetSessionConfigOptionResponse::new(vec![]),
+            ).await;
         }
     });
 
@@ -3117,28 +2797,10 @@ async fn fork_session_integration_returns_new_session_id() {
     let resp_id = forked_id.clone();
     tokio::spawn(async move {
         if let Some(msg) = agent_sub.next().await {
-            let resp = serde_json::to_vec(&ForkSessionResponse::new(resp_id)).unwrap();
-            {
-                let req_id = msg
-                    .headers
-                    .as_ref()
-                    .and_then(|h| h.get(acp_nats::REQ_ID_HEADER))
-                    .map(|v| v.as_str().to_string())
-                    .unwrap_or_default();
-                let is_session_op = {
-                    let parts: Vec<&str> = msg.subject.as_str().split('.').collect();
-                    parts.get(1) == Some(&"session")
-                };
-                if is_session_op && !req_id.is_empty() {
-                    let subj_parts: Vec<&str> = msg.subject.as_str().split('.').collect();
-                    let sess_id = subj_parts.get(2).copied().unwrap_or("unknown");
-                    let response_subject =
-                        format!("acp.session.{}.agent.response.{}", sess_id, req_id);
-                    nats2.publish(response_subject, resp.into()).await.unwrap();
-                } else if let Some(reply) = msg.reply {
-                    nats2.publish(reply, resp.into()).await.unwrap();
-                }
-            }
+            js_respond_session(
+                &nats2, &msg, "acp", "src-sess-1",
+                &ForkSessionResponse::new(resp_id),
+            ).await;
         }
     });
 
@@ -3178,29 +2840,10 @@ async fn fork_session_integration_uses_session_scoped_nats_subject() {
     tokio::spawn(async move {
         if let Some(msg) = agent_sub.next().await {
             let _ = tx.send(msg.subject.to_string());
-            let resp = serde_json::to_vec(&ForkSessionResponse::new(SessionId::from("fork-dst-2")))
-                .unwrap();
-            {
-                let req_id = msg
-                    .headers
-                    .as_ref()
-                    .and_then(|h| h.get(acp_nats::REQ_ID_HEADER))
-                    .map(|v| v.as_str().to_string())
-                    .unwrap_or_default();
-                let is_session_op = {
-                    let parts: Vec<&str> = msg.subject.as_str().split('.').collect();
-                    parts.get(1) == Some(&"session")
-                };
-                if is_session_op && !req_id.is_empty() {
-                    let subj_parts: Vec<&str> = msg.subject.as_str().split('.').collect();
-                    let sess_id = subj_parts.get(2).copied().unwrap_or("unknown");
-                    let response_subject =
-                        format!("acp.session.{}.agent.response.{}", sess_id, req_id);
-                    nats2.publish(response_subject, resp.into()).await.unwrap();
-                } else if let Some(reply) = msg.reply {
-                    nats2.publish(reply, resp.into()).await.unwrap();
-                }
-            }
+            js_respond_session(
+                &nats2, &msg, "acp", "fork-src-2",
+                &ForkSessionResponse::new(SessionId::from("fork-dst-2")),
+            ).await;
         }
     });
 
@@ -3236,28 +2879,10 @@ async fn resume_session_integration_succeeds() {
     let nats2 = nats.clone();
     tokio::spawn(async move {
         if let Some(msg) = agent_sub.next().await {
-            let resp = serde_json::to_vec(&ResumeSessionResponse::new()).unwrap();
-            {
-                let req_id = msg
-                    .headers
-                    .as_ref()
-                    .and_then(|h| h.get(acp_nats::REQ_ID_HEADER))
-                    .map(|v| v.as_str().to_string())
-                    .unwrap_or_default();
-                let is_session_op = {
-                    let parts: Vec<&str> = msg.subject.as_str().split('.').collect();
-                    parts.get(1) == Some(&"session")
-                };
-                if is_session_op && !req_id.is_empty() {
-                    let subj_parts: Vec<&str> = msg.subject.as_str().split('.').collect();
-                    let sess_id = subj_parts.get(2).copied().unwrap_or("unknown");
-                    let response_subject =
-                        format!("acp.session.{}.agent.response.{}", sess_id, req_id);
-                    nats2.publish(response_subject, resp.into()).await.unwrap();
-                } else if let Some(reply) = msg.reply {
-                    nats2.publish(reply, resp.into()).await.unwrap();
-                }
-            }
+            js_respond_session(
+                &nats2, &msg, "acp", "resume-sess-1",
+                &ResumeSessionResponse::new(),
+            ).await;
         }
     });
 
@@ -3287,28 +2912,10 @@ async fn resume_session_integration_uses_session_scoped_subject() {
     tokio::spawn(async move {
         if let Some(msg) = agent_sub.next().await {
             let _ = tx.send(msg.subject.to_string());
-            let resp = serde_json::to_vec(&ResumeSessionResponse::new()).unwrap();
-            {
-                let req_id = msg
-                    .headers
-                    .as_ref()
-                    .and_then(|h| h.get(acp_nats::REQ_ID_HEADER))
-                    .map(|v| v.as_str().to_string())
-                    .unwrap_or_default();
-                let is_session_op = {
-                    let parts: Vec<&str> = msg.subject.as_str().split('.').collect();
-                    parts.get(1) == Some(&"session")
-                };
-                if is_session_op && !req_id.is_empty() {
-                    let subj_parts: Vec<&str> = msg.subject.as_str().split('.').collect();
-                    let sess_id = subj_parts.get(2).copied().unwrap_or("unknown");
-                    let response_subject =
-                        format!("acp.session.{}.agent.response.{}", sess_id, req_id);
-                    nats2.publish(response_subject, resp.into()).await.unwrap();
-                } else if let Some(reply) = msg.reply {
-                    nats2.publish(reply, resp.into()).await.unwrap();
-                }
-            }
+            js_respond_session(
+                &nats2, &msg, "acp", "resume-sess-2",
+                &ResumeSessionResponse::new(),
+            ).await;
         }
     });
 
@@ -3384,26 +2991,8 @@ async fn ext_method_integration_forwards_request_and_returns_response() {
                     .unwrap();
             let resp = ExtResponse::new(raw.into());
             let resp_bytes = serde_json::to_vec(&resp).unwrap();
-            {
-                let req_id = msg
-                    .headers
-                    .as_ref()
-                    .and_then(|h| h.get(acp_nats::REQ_ID_HEADER))
-                    .map(|v| v.as_str().to_string())
-                    .unwrap_or_default();
-                let is_session_op = {
-                    let parts: Vec<&str> = msg.subject.as_str().split('.').collect();
-                    parts.get(1) == Some(&"session")
-                };
-                if is_session_op && !req_id.is_empty() {
-                    let subj_parts: Vec<&str> = msg.subject.as_str().split('.').collect();
-                    let sess_id = subj_parts.get(2).copied().unwrap_or("unknown");
-                    let response_subject =
-                        format!("acp.session.{}.agent.response.{}", sess_id, req_id);
-                    nats2.publish(response_subject, resp_bytes.into()).await.unwrap();
-                } else if let Some(reply) = msg.reply {
-                    nats2.publish(reply, resp_bytes.into()).await.unwrap();
-                }
+            if let Some(reply) = msg.reply {
+                nats2.publish(reply, resp_bytes.into()).await.unwrap();
             }
         }
     });
@@ -3506,29 +3095,7 @@ async fn close_session_integration_forwards_request_and_returns_response() {
     let nats2 = nats.clone();
     tokio::spawn(async move {
         if let Some(msg) = sub.next().await {
-            let resp = CloseSessionResponse::new();
-            let resp_bytes = serde_json::to_vec(&resp).unwrap();
-            {
-                let req_id = msg
-                    .headers
-                    .as_ref()
-                    .and_then(|h| h.get(acp_nats::REQ_ID_HEADER))
-                    .map(|v| v.as_str().to_string())
-                    .unwrap_or_default();
-                let is_session_op = {
-                    let parts: Vec<&str> = msg.subject.as_str().split('.').collect();
-                    parts.get(1) == Some(&"session")
-                };
-                if is_session_op && !req_id.is_empty() {
-                    let subj_parts: Vec<&str> = msg.subject.as_str().split('.').collect();
-                    let sess_id = subj_parts.get(2).copied().unwrap_or("unknown");
-                    let response_subject =
-                        format!("acp.session.{}.agent.response.{}", sess_id, req_id);
-                    nats2.publish(response_subject, resp_bytes.into()).await.unwrap();
-                } else if let Some(reply) = msg.reply {
-                    nats2.publish(reply, resp_bytes.into()).await.unwrap();
-                }
-            }
+            js_respond_session(&nats2, &msg, "acp", "sess-close-1", &CloseSessionResponse::new()).await;
         }
     });
 

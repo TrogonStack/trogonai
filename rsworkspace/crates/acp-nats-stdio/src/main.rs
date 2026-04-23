@@ -279,7 +279,7 @@ mod tests {
         use testcontainers_modules::nats::Nats;
         use testcontainers_modules::testcontainers::{ImageExt, runners::AsyncRunner};
         use acp_nats_agent::AgentSideNatsConnection;
-        use trogon_acp_runner::{SessionStore, TrogonAgent};
+        use trogon_acp_runner::{NatsSessionNotifier, NatsSessionStore, TrogonAgent};
         use trogon_agent_core::agent_loop::AgentLoop;
         use trogon_agent_core::tools::ToolContext;
 
@@ -295,12 +295,10 @@ mod tests {
         // Connect clients.
         let nats_for_server = async_nats::connect(&nats_url).await.unwrap();
         let nats_for_bridge = async_nats::connect(&nats_url).await.unwrap();
-        let js = async_nats::jetstream::new(nats_for_server.clone());
 
-        // Start TrogonAgent.
-        let store = SessionStore::open(&js).await.unwrap();
+        // Start TrogonAgent in its own thread with its own Tokio runtime.
+        // NatsSessionStore must be opened inside that runtime to avoid cross-runtime issues.
         let gateway_config = Arc::new(RwLock::new(None));
-        let store_clone = store.clone();
         std::thread::spawn(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -325,9 +323,13 @@ mod tests {
                 mcp_dispatch: vec![],
                 permission_checker: None,
             };
+            let store = rt.block_on(async {
+                let js = async_nats::jetstream::new(nats_for_server.clone());
+                NatsSessionStore::open(&js).await.unwrap()
+            });
             let ta = TrogonAgent::new(
-                nats_for_server.clone(),
-                store_clone,
+                NatsSessionNotifier::new(nats_for_server.clone()),
+                store,
                 agent_loop,
                 "acp",
                 "claude-opus-4-6",
@@ -357,6 +359,8 @@ mod tests {
         let (stdout_r, stdout_w) = tokio::io::duplex(4096);
 
         // Run bridge in background thread with its own LocalSet.
+        // async_nats::jetstream::new spawns an internal acker task, so it must be
+        // called inside the runtime context (within block_on).
         let handle = std::thread::spawn(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -365,16 +369,19 @@ mod tests {
             let local = tokio::task::LocalSet::new();
             let stdin = async_compat::Compat::new(stdin_r);
             let stdout = async_compat::Compat::new(stdout_w);
-            let js_bridge = async_nats::jetstream::new(nats_for_bridge.clone());
-            let js_client_bridge = trogon_nats::jetstream::NatsJetStreamClient::new(js_bridge);
-            rt.block_on(local.run_until(run_bridge(
-                nats_for_bridge,
-                js_client_bridge,
-                &config,
-                stdout,
-                stdin,
-                std::future::pending::<()>(),
-            )))
+            rt.block_on(local.run_until(async move {
+                let js_bridge = async_nats::jetstream::new(nats_for_bridge.clone());
+                let js_client_bridge = trogon_nats::jetstream::NatsJetStreamClient::new(js_bridge);
+                run_bridge(
+                    nats_for_bridge,
+                    js_client_bridge,
+                    &config,
+                    stdout,
+                    stdin,
+                    std::future::pending::<()>(),
+                )
+                .await
+            }))
             .map_err(|e| {
                 Box::new(std::io::Error::other(e.to_string()))
                     as Box<dyn std::error::Error + Send + Sync>

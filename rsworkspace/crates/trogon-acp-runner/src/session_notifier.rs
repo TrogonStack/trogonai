@@ -31,6 +31,12 @@ pub trait SessionNotifier: Clone {
     /// Publish `payload` to `subject` (fire-and-forget; errors are swallowed).
     async fn publish(&self, subject: String, payload: Bytes);
 
+    /// Schedule a fire-and-forget publish after `delay`.
+    ///
+    /// The real implementation uses `tokio::spawn` (NATS client is `Send`).
+    /// Test mocks record the publish synchronously and ignore the delay.
+    fn schedule_publish(&self, subject: String, payload: Bytes, delay: Duration);
+
     /// Subscribe to `subject` for a cancel signal.
     ///
     /// Returns a `oneshot::Receiver` that resolves the first time a message
@@ -39,17 +45,6 @@ pub trait SessionNotifier: Clone {
         &self,
         subject: String,
     ) -> Option<tokio::sync::oneshot::Receiver<()>>;
-
-    /// Subscribe to `subject` for mid-turn steer messages.
-    ///
-    /// Each message payload is decoded as UTF-8 and forwarded to the returned
-    /// `mpsc::Receiver`.  The channel stays open for the lifetime of the
-    /// prompt; the spawned forwarder task exits when the receiver is dropped.
-    /// Returns `None` if the subscribe call fails.
-    async fn subscribe_steer(
-        &self,
-        subject: String,
-    ) -> Option<tokio::sync::mpsc::Receiver<String>>;
 
     /// Build a notification client bound to the given ACP session.
     fn make_prompt_client(
@@ -79,6 +74,16 @@ impl SessionNotifier for NatsSessionNotifier {
         let _ = self.client.publish(subject, payload).await;
     }
 
+    fn schedule_publish(&self, subject: String, payload: Bytes, delay: Duration) {
+        let client = self.client.clone();
+        tokio::spawn(async move {
+            if !delay.is_zero() {
+                tokio::time::sleep(delay).await;
+            }
+            let _ = client.publish(subject, payload).await;
+        });
+    }
+
     async fn subscribe_cancel(
         &self,
         subject: String,
@@ -91,26 +96,6 @@ impl SessionNotifier for NatsSessionNotifier {
         tokio::task::spawn_local(async move {
             if sub.next().await.is_some() {
                 let _ = tx.send(());
-            }
-        });
-        Some(rx)
-    }
-
-    async fn subscribe_steer(
-        &self,
-        subject: String,
-    ) -> Option<tokio::sync::mpsc::Receiver<String>> {
-        let mut sub = match self.client.subscribe(subject).await {
-            Ok(s) => s,
-            Err(_) => return None,
-        };
-        let (tx, rx) = tokio::sync::mpsc::channel(16);
-        tokio::task::spawn_local(async move {
-            while let Some(msg) = sub.next().await {
-                let text = String::from_utf8_lossy(&msg.payload).to_string();
-                if tx.send(text).await.is_err() {
-                    break;
-                }
             }
         });
         Some(rx)
@@ -188,17 +173,13 @@ pub mod mock {
             self.published.lock().unwrap().push((subject, payload));
         }
 
+        fn schedule_publish(&self, subject: String, payload: Bytes, _delay: Duration) {
+            self.published.lock().unwrap().push((subject, payload));
+        }
+
         async fn subscribe_cancel(&self, _subject: String) -> Option<oneshot::Receiver<()>> {
             let (tx, rx) = oneshot::channel();
             *self.cancel_tx.lock().unwrap() = Some(tx);
-            Some(rx)
-        }
-
-        async fn subscribe_steer(
-            &self,
-            _subject: String,
-        ) -> Option<tokio::sync::mpsc::Receiver<String>> {
-            let (_tx, rx) = tokio::sync::mpsc::channel(1);
             Some(rx)
         }
 

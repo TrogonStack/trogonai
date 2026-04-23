@@ -528,7 +528,6 @@ impl AgentLoop {
         tools: &[ToolDef],
         system_prompt: Option<&str>,
         event_tx: tokio::sync::mpsc::Sender<AgentEvent>,
-        mut steer_rx: Option<tokio::sync::mpsc::Receiver<String>>,
     ) -> Result<Vec<Message>, AgentError> {
         let mut messages = initial_messages;
 
@@ -672,13 +671,7 @@ impl AgentLoop {
                         .execute_tools_streaming(&response.content, &event_tx)
                         .await;
                     messages.push(Message::assistant(response.content));
-                    let mut tool_results_msg = Message::tool_results(results);
-                    if let Some(ref mut rx) = steer_rx {
-                        while let Ok(text) = rx.try_recv() {
-                            tool_results_msg.content.push(ContentBlock::Text { text });
-                        }
-                    }
-                    messages.push(tool_results_msg);
+                    messages.push(Message::tool_results(results));
                 }
                 other => {
                     return Err(AgentError::UnexpectedStopReason(other.to_string()));
@@ -1183,7 +1176,7 @@ mod tests {
             permission_checker: None,
         };
         let result = agent
-            .run_chat_streaming(vec![Message::user_text("hello")], &[], None, tx, None)
+            .run_chat_streaming(vec![Message::user_text("hello")], &[], None, tx)
             .await;
         assert!(result.is_err());
         let mut events = vec![];

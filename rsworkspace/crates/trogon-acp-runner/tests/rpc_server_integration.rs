@@ -90,29 +90,12 @@ async fn start_agent(
         gateway_config,
     );
     let acp_prefix = AcpPrefix::new(prefix).unwrap();
-    let (_, io_task) = AgentSideNatsConnection::new(agent, nats.clone(), acp_prefix, |fut| {
+    let (_, io_task) = AgentSideNatsConnection::new(agent, nats, acp_prefix, |fut| {
         tokio::task::spawn_local(fut);
     });
     tokio::task::spawn_local(io_task);
-
-    // Poll until the agent's NATS subscriptions are live. Sending an initialize
-    // request and waiting for a reply is the only reliable readiness signal:
-    // the io_task subscribes before entering its message loop, but the subscribe
-    // calls are async and take a non-deterministic amount of time to propagate.
-    let init_subject = format!("{prefix}.agent.initialize");
-    let payload = request_bytes(&InitializeRequest::new(ProtocolVersion::LATEST));
-    for _ in 0..100 {
-        match tokio::time::timeout(
-            Duration::from_millis(50),
-            nats.request(init_subject.clone(), payload.clone()),
-        )
-        .await
-        {
-            Ok(Ok(_)) => return store,
-            _ => tokio::time::sleep(Duration::from_millis(10)).await,
-        }
-    }
-    panic!("TrogonAgent did not become ready within 5 seconds");
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    store
 }
 
 fn request_bytes<T: serde::Serialize>(v: &T) -> Bytes {
