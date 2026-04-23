@@ -115,6 +115,10 @@ pub mod mock {
     ///
     /// Steer messages received via `steer_rx` are always drained and stored;
     /// retrieve them with `captured_steer()`.
+    ///
+    /// For NATS integration tests where steer messages arrive asynchronously,
+    /// use `with_steer_wait()`: the runner calls `recv().await` for the first
+    /// steer message, and `with_started_notify()` to signal when it is ready.
     #[derive(Clone)]
     pub struct MockAgentRunner {
         pub model: String,
@@ -126,6 +130,10 @@ pub mod mock {
         error: Arc<Mutex<Option<AgentError>>>,
         /// Steer messages received via `steer_rx` during the last run.
         captured_steer: Arc<Mutex<Vec<String>>>,
+        /// Notified when `run_chat_streaming` begins (before any steer wait).
+        started_notify: Arc<tokio::sync::Notify>,
+        /// If true, await `steer_rx.recv()` for one message before returning.
+        wait_for_steer: bool,
     }
 
     impl MockAgentRunner {
@@ -136,6 +144,8 @@ pub mod mock {
                 events: Arc::new(Mutex::new(Vec::new())),
                 error: Arc::new(Mutex::new(None)),
                 captured_steer: Arc::new(Mutex::new(Vec::new())),
+                started_notify: Arc::new(tokio::sync::Notify::new()),
+                wait_for_steer: false,
             }
         }
 
@@ -154,6 +164,25 @@ pub mod mock {
         /// Make `run_chat_streaming` return an error.
         pub fn with_error(self, error: AgentError) -> Self {
             *self.error.lock().unwrap() = Some(error);
+            self
+        }
+
+        /// Share a `Notify` that is fired when `run_chat_streaming` starts.
+        ///
+        /// Use this in integration tests to know when it is safe to publish
+        /// a steer message — i.e. the steer subscription is active and the
+        /// runner is waiting for input.
+        pub fn with_started_notify(mut self, notify: Arc<tokio::sync::Notify>) -> Self {
+            self.started_notify = notify;
+            self
+        }
+
+        /// Wait for one steer message with `recv().await` before finishing.
+        ///
+        /// Enables NATS integration tests where the steer message arrives
+        /// asynchronously after the runner has started.
+        pub fn with_steer_wait(mut self) -> Self {
+            self.wait_for_steer = true;
             self
         }
 
@@ -192,12 +221,27 @@ pub mod mock {
             event_tx: mpsc::Sender<AgentEvent>,
             mut steer_rx: Option<mpsc::Receiver<String>>,
         ) -> Result<Vec<Message>, AgentError> {
-            // Drain any steer messages that are already buffered in the channel.
+            // Signal that the runner has started and the steer subscription is live.
+            self.started_notify.notify_one();
+
+            // If configured, wait for the first steer message asynchronously.
+            // This is used by NATS integration tests where the message arrives
+            // after the runner starts rather than being pre-injected.
+            if self.wait_for_steer {
+                if let Some(ref mut rx) = steer_rx {
+                    if let Some(msg) = rx.recv().await {
+                        self.captured_steer.lock().unwrap().push(msg);
+                    }
+                }
+            }
+
+            // Drain any remaining buffered steer messages.
             if let Some(ref mut rx) = steer_rx {
                 while let Ok(msg) = rx.try_recv() {
                     self.captured_steer.lock().unwrap().push(msg);
                 }
             }
+
             let events = self.events.lock().unwrap().clone();
             for event in events {
                 let _ = event_tx.send(event).await;
