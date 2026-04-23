@@ -62,8 +62,6 @@ When clients send an `Origin` header, `/acp` validates it against the bound host
 | `ACP_SERVER_HOST` | `--host` | Listen address | `127.0.0.1` |
 | `ACP_SERVER_PORT` | `--port` | Listen port | `8080` |
 
-Legacy `ACP_WS_HOST` and `ACP_WS_PORT` are still accepted for compatibility.
-
 ### ACP
 
 | Variable | Description | Default |

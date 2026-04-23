@@ -25,7 +25,43 @@ pub struct ServerConfig {
     pub port: u16,
 }
 
-pub fn config_from_args<E: ReadEnv>(args: Args, env_provider: &E) -> Result<ServerConfig, AcpPrefixError> {
+#[derive(Debug)]
+pub enum ServerConfigError {
+    InvalidAcpPrefix(AcpPrefixError),
+    InvalidEnvVar {
+        key: &'static str,
+        value: String,
+        message: String,
+    },
+}
+
+impl std::fmt::Display for ServerConfigError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidAcpPrefix(error) => write!(f, "{error}"),
+            Self::InvalidEnvVar { key, value, message } => {
+                write!(f, "invalid value for {key}: {value:?} ({message})")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ServerConfigError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::InvalidAcpPrefix(error) => Some(error),
+            Self::InvalidEnvVar { .. } => None,
+        }
+    }
+}
+
+impl From<AcpPrefixError> for ServerConfigError {
+    fn from(error: AcpPrefixError) -> Self {
+        Self::InvalidAcpPrefix(error)
+    }
+}
+
+pub fn config_from_args<E: ReadEnv>(args: Args, env_provider: &E) -> Result<ServerConfig, ServerConfigError> {
     let raw_prefix = args
         .acp_prefix
         .or_else(|| env_provider.var(acp_nats::ENV_ACP_PREFIX).ok())
@@ -35,19 +71,32 @@ pub fn config_from_args<E: ReadEnv>(args: Args, env_provider: &E) -> Result<Serv
         acp: Config::with_prefix(prefix, NatsConfig::from_env(env_provider)),
         host: args
             .host
-            .or_else(|| env_var(env_provider, "ACP_SERVER_HOST"))
-            .or_else(|| env_var(env_provider, "ACP_WS_HOST"))
+            .or(read_env_var(env_provider, "ACP_SERVER_HOST")?)
             .unwrap_or(DEFAULT_HOST),
         port: args
             .port
-            .or_else(|| env_var(env_provider, "ACP_SERVER_PORT"))
-            .or_else(|| env_var(env_provider, "ACP_WS_PORT"))
+            .or(read_env_var(env_provider, "ACP_SERVER_PORT")?)
             .unwrap_or(DEFAULT_PORT),
     })
 }
 
-fn env_var<T: std::str::FromStr, E: ReadEnv>(env_provider: &E, key: &str) -> Option<T> {
-    env_provider.var(key).ok()?.parse().ok()
+fn read_env_var<T, E>(env_provider: &E, key: &'static str) -> Result<Option<T>, ServerConfigError>
+where
+    T: std::str::FromStr,
+    T::Err: std::fmt::Display,
+    E: ReadEnv,
+{
+    match env_provider.var(key) {
+        Ok(value) => value
+            .parse()
+            .map(Some)
+            .map_err(|error: T::Err| ServerConfigError::InvalidEnvVar {
+                key,
+                value,
+                message: error.to_string(),
+            }),
+        Err(_) => Ok(None),
+    }
 }
 
 pub fn apply_timeout_overrides<E: ReadEnv>(mut server: ServerConfig, env_provider: &E) -> ServerConfig {
@@ -149,12 +198,22 @@ mod tests {
     }
 
     #[test]
-    fn test_legacy_ws_env_vars_still_work() {
+    fn test_invalid_new_server_env_var_fails() {
         let env = InMemoryEnv::new();
-        env.set("ACP_WS_HOST", "0.0.0.0");
-        env.set("ACP_WS_PORT", "9092");
-        let server = config_from_env(&env);
-        assert_eq!(server.host, IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)));
-        assert_eq!(server.port, 9092);
+        env.set("ACP_SERVER_PORT", "abc");
+        let error = config_from_args(
+            Args {
+                acp_prefix: None,
+                host: None,
+                port: None,
+            },
+            &env,
+        )
+        .err()
+        .expect("invalid ACP_SERVER_PORT should fail");
+        assert_eq!(
+            format!("{error}"),
+            "invalid value for ACP_SERVER_PORT: \"abc\" (invalid digit found in string)"
+        );
     }
 }
