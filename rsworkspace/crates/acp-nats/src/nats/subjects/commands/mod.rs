@@ -7,6 +7,7 @@ mod resume;
 mod set_config_option;
 mod set_mode;
 mod set_model;
+mod steer;
 
 pub use cancel::CancelSubject;
 pub use close::CloseSubject;
@@ -17,3 +18,4 @@ pub use resume::ResumeSubject;
 pub use set_config_option::SetConfigOptionSubject;
 pub use set_mode::SetModeSubject;
 pub use set_model::SetModelSubject;
+pub use steer::SteerSubject;

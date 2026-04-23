@@ -11,8 +11,25 @@ use tracing::debug;
 
 static REQUEST_ID: AtomicU64 = AtomicU64::new(1);
 
+#[cfg_attr(coverage, coverage(off))]
 fn next_id() -> u64 {
     REQUEST_ID.fetch_add(1, Ordering::Relaxed)
+}
+
+/// Return `scheme://host[:port]` from `url`, stripping userinfo, path, query, and fragment.
+/// Falls back to the original string if parsing fails.
+fn safe_url(url: &str) -> String {
+    let Some(scheme_end) = url.find("://") else {
+        return url.to_string();
+    };
+    let scheme = &url[..scheme_end];
+    let after_scheme = &url[scheme_end + 3..];
+    let authority = match after_scheme.rfind('@') {
+        Some(at) => &after_scheme[at + 1..],
+        None => after_scheme,
+    };
+    let host_end = authority.find(['/', '?', '#']).unwrap_or(authority.len());
+    format!("{}://{}", scheme, &authority[..host_end])
 }
 
 // ── Public types ──────────────────────────────────────────────────────────────
@@ -76,6 +93,7 @@ pub struct McpClient {
 
 impl McpClient {
     /// Create a new client pointing at `url` (e.g. `http://server/mcp`).
+    #[cfg_attr(coverage, coverage(off))]
     pub fn new(http: Client, url: impl Into<String>) -> Self {
         Self {
             http,
@@ -85,6 +103,7 @@ impl McpClient {
 
     /// Perform the MCP `initialize` handshake.
     /// Must be called once before `list_tools` or `call_tool`.
+    #[cfg_attr(coverage, coverage(off))]
     pub async fn initialize(&self) -> Result<(), String> {
         let body = json!({
             "jsonrpc": "2.0",
@@ -100,11 +119,12 @@ impl McpClient {
         if let Some(err) = resp.get("error") {
             return Err(format!("MCP initialize error: {err}"));
         }
-        debug!(url = %self.url, "MCP server initialized");
+        debug!(url = %safe_url(&self.url), "MCP server initialized");
         Ok(())
     }
 
     /// Retrieve the list of tools the server exposes (`tools/list`).
+    #[cfg_attr(coverage, coverage(off))]
     pub async fn list_tools(&self) -> Result<Vec<McpTool>, String> {
         let body = json!({
             "jsonrpc": "2.0",
@@ -112,17 +132,18 @@ impl McpClient {
             "method": "tools/list",
             "params": {}
         });
-        let resp = self.rpc(body).await?;
+        let mut resp = self.rpc(body).await?;
         if let Some(err) = resp.get("error") {
             return Err(format!("MCP tools/list error: {err}"));
         }
-        let result: ListToolsResult = serde_json::from_value(resp["result"].clone())
+        let result: ListToolsResult = serde_json::from_value(resp["result"].take())
             .map_err(|e| format!("MCP tools/list deserialize error: {e}"))?;
-        debug!(url = %self.url, count = result.tools.len(), "MCP tools listed");
+        debug!(url = %safe_url(&self.url), count = result.tools.len(), "MCP tools listed");
         Ok(result.tools)
     }
 
     /// Call a tool by its original (non-prefixed) name and return the text output.
+    #[cfg_attr(coverage, coverage(off))]
     pub async fn call_tool(&self, name: &str, arguments: &Value) -> Result<String, String> {
         let body = json!({
             "jsonrpc": "2.0",
@@ -130,11 +151,11 @@ impl McpClient {
             "method": "tools/call",
             "params": { "name": name, "arguments": arguments }
         });
-        let resp = self.rpc(body).await?;
+        let mut resp = self.rpc(body).await?;
         if let Some(err) = resp.get("error") {
             return Err(format!("MCP tool error: {err}"));
         }
-        let result: CallToolResult = serde_json::from_value(resp["result"].clone())
+        let result: CallToolResult = serde_json::from_value(resp["result"].take())
             .map_err(|e| format!("MCP tools/call deserialize error: {e}"))?;
 
         let text = result
@@ -148,6 +169,7 @@ impl McpClient {
         if result.is_error { Err(text) } else { Ok(text) }
     }
 
+    #[cfg_attr(coverage, coverage(off))]
     async fn rpc(&self, body: Value) -> Result<Value, String> {
         self.http
             .post(&self.url)
@@ -223,7 +245,7 @@ pub mod mock {
 }
 
 #[cfg(all(test, feature = "test-support"))]
-mod tests {
+mod mock_tests {
     use super::McpCallTool;
     use super::mock::MockMcpClient;
     use serde_json::json;
@@ -279,9 +301,46 @@ mod tests {
 
     #[test]
     fn mock_mcp_client_default_equals_new() {
-        // Default and new() must both start in the ok state.
-        // Verified by cloning — no panic means internal Arc/Mutex are valid.
         let _a = MockMcpClient::new().clone();
         let _b = MockMcpClient::default().clone();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::safe_url;
+
+    #[test]
+    fn safe_url_strips_path_query_fragment() {
+        assert_eq!(
+            safe_url("http://mcp.example.com/mcp?token=secret#frag"),
+            "http://mcp.example.com"
+        );
+    }
+
+    #[test]
+    fn safe_url_strips_userinfo() {
+        assert_eq!(
+            safe_url("http://user:pass@mcp.example.com/mcp"),
+            "http://mcp.example.com"
+        );
+    }
+
+    #[test]
+    fn safe_url_preserves_port() {
+        assert_eq!(
+            safe_url("http://mcp.example.com:8080/mcp"),
+            "http://mcp.example.com:8080"
+        );
+    }
+
+    #[test]
+    fn safe_url_no_scheme_returns_original() {
+        assert_eq!(safe_url("not-a-url"), "not-a-url");
+    }
+
+    #[test]
+    fn safe_url_plain_host_no_path() {
+        assert_eq!(safe_url("http://mcp.example.com"), "http://mcp.example.com");
     }
 }

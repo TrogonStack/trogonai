@@ -24,7 +24,12 @@ trogon-std = { workspace = true, features = ["telemetry-http"] }
 
 [dev-dependencies]
 serde_json = { workspace = true }
+testcontainers-modules = { version = "0.8.0", features = ["nats"] }
 tokio-tungstenite = { workspace = true }
-tracing-subscriber = { workspace = true, features = ["fmt"] }
+acp-nats-agent    = { path = "../acp-nats-agent" }
+reqwest           = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+trogon-acp-runner = { path = "../trogon-acp-runner" }
+trogon-agent-core = { path = "../trogon-agent-core" }
 trogon-nats = { workspace = true, features = ["test-support"] }
+tracing-subscriber = { workspace = true, features = ["fmt"] }
 trogon-std = { workspace = true, features = ["test-support"] }

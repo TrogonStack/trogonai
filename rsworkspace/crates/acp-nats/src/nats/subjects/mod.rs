@@ -23,7 +23,7 @@ pub mod session {
     pub mod agent {
         pub use super::super::commands::{
             CancelSubject, CloseSubject, ForkSubject, LoadSubject, PromptSubject, ResumeSubject,
-            SetConfigOptionSubject, SetModeSubject, SetModelSubject,
+            SetConfigOptionSubject, SetModeSubject, SetModelSubject, SteerSubject,
         };
         pub use super::super::responses::{
             CancelledSubject, ExtReadySubject, PromptResponseSubject, ResponseSubject,
@@ -439,6 +439,10 @@ mod tests {
         );
         assert_eq!(
             session::agent::SetModelSubject::STREAM,
+            Some(AcpStream::Commands)
+        );
+        assert_eq!(
+            session::agent::SteerSubject::STREAM,
             Some(AcpStream::Commands)
         );
 

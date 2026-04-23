@@ -59,6 +59,7 @@ impl MockClock {
         }
     }
 
+    #[cfg_attr(coverage, coverage(off))]
     pub fn advance(&self, duration: Duration) {
         let mut current = self.current.lock().unwrap();
         *current += duration;

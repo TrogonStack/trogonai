@@ -1,3 +1,4 @@
+#![cfg_attr(coverage, feature(coverage_attribute))]
 //! # trogon-nats
 //!
 //! Shared NATS infrastructure for TrogonStack applications.

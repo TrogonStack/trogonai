@@ -49,6 +49,7 @@ name = "acp-nats-stdio"
 version = "0.0.1"
 dependencies = [
  "acp-nats",
+ "acp-nats-agent",
  "acp-telemetry",
  "agent-client-protocol",
  "async-compat",
@@ -57,9 +58,14 @@ dependencies = [
  "clap",
  "futures",
  "opentelemetry",
+ "reqwest",
+ "serde_json",
+ "testcontainers-modules",
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "trogon-acp-runner",
+ "trogon-agent-core",
  "trogon-nats",
  "trogon-std",
 ]
@@ -69,6 +75,7 @@ name = "acp-nats-ws"
 version = "0.1.0"
 dependencies = [
  "acp-nats",
+ "acp-nats-agent",
  "acp-telemetry",
  "agent-client-protocol",
  "async-compat",
@@ -78,11 +85,15 @@ dependencies = [
  "clap",
  "futures-util",
  "opentelemetry",
+ "reqwest",
  "serde_json",
+ "testcontainers-modules",
  "tokio",
  "tokio-tungstenite 0.29.0",
  "tracing",
  "tracing-subscriber",
+ "trogon-acp-runner",
+ "trogon-agent-core",
  "trogon-nats",
  "trogon-std",
 ]
@@ -2090,7 +2101,7 @@ dependencies = [
  "http 1.4.0",
  "hyper 1.9.0",
  "hyper-util",
- "rustls 0.23.38",
+ "rustls 0.23.39",
  "rustls-native-certs 0.8.3",
  "tokio",
  "tokio-rustls 0.26.4",
@@ -3117,7 +3128,7 @@ dependencies = [
  "quinn-proto",
  "quinn-udp",
  "rustc-hash",
- "rustls 0.23.38",
+ "rustls 0.23.39",
  "socket2 0.6.3",
  "thiserror 2.0.18",
  "tokio",
@@ -3137,7 +3148,7 @@ dependencies = [
  "rand 0.9.4",
  "ring",
  "rustc-hash",
- "rustls 0.23.38",
+ "rustls 0.23.39",
  "rustls-pki-types",
  "slab",
  "thiserror 2.0.18",
@@ -3359,7 +3370,7 @@ dependencies = [
  "percent-encoding",
  "pin-project-lite",
  "quinn",
- "rustls 0.23.38",
+ "rustls 0.23.39",
  "rustls-native-certs 0.8.3",
  "rustls-pki-types",
  "serde",
@@ -3467,9 +3478,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.38"
+version = "0.23.39"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "69f9466fb2c14ea04357e91413efb882e2a6d4a406e625449bc0a5d360d53a21"
+checksum = "7c2c118cb077cca2822033836dfb1b975355dfb784b5e8da48f7b6c5db74e60e"
 dependencies = [
  "once_cell",
  "ring",
@@ -4348,7 +4359,7 @@ version = "0.26.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1729aa945f29d91ba541258c8df89027d5792d85a8841fb65e8bf0f4ede4ef61"
 dependencies = [
- "rustls 0.23.38",
+ "rustls 0.23.39",
  "tokio",
 ]
 
@@ -4395,6 +4406,7 @@ checksum = "9ae9cec805b01e8fc3fd2fe289f89149a9b66dd16786abd8b19cfa7b48cb0098"
 dependencies = [
  "bytes",
  "futures-core",
+ "futures-io",
  "futures-sink",
  "pin-project-lite",
  "tokio",
@@ -4664,6 +4676,62 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-acp"
+version = "0.1.0"
+dependencies = [
+ "acp-nats",
+ "acp-nats-agent",
+ "agent-client-protocol",
+ "anyhow",
+ "async-nats",
+ "async-trait",
+ "bytes",
+ "futures-util",
+ "opentelemetry",
+ "reqwest",
+ "serde_json",
+ "testcontainers-modules",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+ "trogon-acp-runner",
+ "trogon-agent-core",
+ "trogon-nats",
+ "trogon-std",
+ "uuid",
+]
+
+[[package]]
+name = "trogon-acp-runner"
+version = "0.1.0"
+dependencies = [
+ "acp-nats",
+ "acp-nats-agent",
+ "agent-client-protocol",
+ "anyhow",
+ "async-nats",
+ "async-trait",
+ "bytes",
+ "futures",
+ "futures-util",
+ "httpmock",
+ "opentelemetry",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "testcontainers-modules",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "trogon-agent-core",
+ "trogon-mcp",
+ "trogon-nats",
+ "trogon-std",
+ "uuid",
+]
+
+[[package]]
 name = "trogon-actor"
 version = "0.1.0"
 dependencies = [
@@ -4715,6 +4783,20 @@ dependencies = [
  "trogon-std",
  "trogon-vault",
  "uuid",
+]
+
+[[package]]
+name = "trogon-agent-core"
+version = "0.1.0"
+dependencies = [
+ "httpmock",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "trogon-mcp",
+ "trogon-std",
 ]
 
 [[package]]
