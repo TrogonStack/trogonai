@@ -383,4 +383,51 @@ mod tests {
         let req = serde_json::from_str::<VaultStoreRequest>(json).unwrap();
         assert_eq!(req.token, "tok_anthropic_prod_abc");
     }
+
+    #[cfg(feature = "test-helpers")]
+    mod handler_tests {
+        use super::*;
+        use std::sync::Arc;
+        use crate::mocks::MockNatsClient;
+        use trogon_vault::MemoryVault;
+
+        fn make_msg(payload: &[u8], reply: Option<&str>) -> async_nats::Message {
+            async_nats::Message {
+                subject: "vault.store".into(),
+                reply: reply.map(|r| r.into()),
+                payload: bytes::Bytes::copy_from_slice(payload),
+                headers: None,
+                length: payload.len(),
+                status: None,
+                description: None,
+            }
+        }
+
+        #[tokio::test]
+        async fn handle_store_invalid_json_publishes_error() {
+            let nats = MockNatsClient::new();
+            let vault = Arc::new(MemoryVault::new());
+            let msg = make_msg(b"not valid json", Some("reply.store.2"));
+            handle_store(&nats, &vault, msg).await;
+            let published = nats.published();
+            assert_eq!(published.len(), 1);
+            let v: serde_json::Value = serde_json::from_slice(&published[0].1).unwrap();
+            assert_eq!(v["ok"], false);
+            assert!(v.get("error").is_some());
+        }
+
+        #[tokio::test]
+        async fn handle_store_no_reply_subject_does_not_publish() {
+            let nats = MockNatsClient::new();
+            let vault = Arc::new(MemoryVault::new());
+            let payload = serde_json::to_vec(&serde_json::json!({
+                "token": "tok_anthropic_prod_abc123",
+                "plaintext": "sk-ant-key"
+            }))
+            .unwrap();
+            let msg = make_msg(&payload, None);
+            handle_store(&nats, &vault, msg).await;
+            assert!(nats.published().is_empty());
+        }
+    }
 }

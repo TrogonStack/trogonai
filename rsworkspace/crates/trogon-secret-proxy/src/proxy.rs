@@ -471,4 +471,98 @@ mod tests {
         );
         assert!(!ProxyError::ReplyChannelClosed.to_string().is_empty());
     }
+
+    #[cfg(feature = "test-helpers")]
+    mod handler_tests {
+        use super::*;
+        use crate::messages::OutboundHttpResponse;
+        use crate::mocks::{MockJetStreamPublisher, MockNatsClient};
+        use tower::util::ServiceExt as _;
+
+        fn make_app(
+            nats: MockNatsClient,
+            js: MockJetStreamPublisher,
+            base_url_override: Option<String>,
+        ) -> axum::Router {
+            router(ProxyState {
+                nats,
+                jetstream: js,
+                prefix: "trogon".to_string(),
+                outbound_subject: "trogon.outbound.http".to_string(),
+                worker_timeout: Duration::from_secs(5),
+                base_url_override,
+            })
+        }
+
+        fn make_reply(status: u16, body: &[u8], error: Option<&str>) -> Bytes {
+            let upstream = OutboundHttpResponse {
+                status,
+                headers: vec![("content-type".to_string(), "application/json".to_string())],
+                body: body.to_vec(),
+                error: error.map(|e| e.to_string()),
+            };
+            Bytes::from(serde_json::to_vec(&upstream).unwrap())
+        }
+
+        fn seed_reply(nats: &MockNatsClient, payload: Bytes) {
+            nats.seed_next_subscription(async_nats::Message {
+                subject: "reply.ignored".into(),
+                reply: None,
+                payload,
+                headers: None,
+                length: 0,
+                status: None,
+                description: None,
+            });
+        }
+
+        #[tokio::test]
+        async fn unknown_provider_returns_502_without_touching_nats() {
+            let nats = MockNatsClient::new();
+            let js = MockJetStreamPublisher::new();
+            let app = make_app(nats.clone(), js, None);
+            let req = axum::http::Request::builder()
+                .method("POST")
+                .uri("/fakeai/v1/generate")
+                .body(axum::body::Body::empty())
+                .unwrap();
+            let resp = app.oneshot(req).await.unwrap();
+            assert_eq!(resp.status(), StatusCode::BAD_GATEWAY);
+            assert!(nats.published().is_empty(), "no publish on unknown provider");
+        }
+
+        #[tokio::test]
+        async fn happy_path_returns_upstream_status_and_body() {
+            let nats = MockNatsClient::new();
+            seed_reply(&nats, make_reply(201, b"{\"id\":\"msg-1\"}", None));
+            let js = MockJetStreamPublisher::new();
+            let app = make_app(nats, js.clone(), Some("http://unused.local".to_string()));
+            let req = axum::http::Request::builder()
+                .method("POST")
+                .uri("/anthropic/v1/messages")
+                .header("content-type", "application/json")
+                .header("authorization", "Bearer tok_test_abc")
+                .body(axum::body::Body::from("{}"))
+                .unwrap();
+            let resp = app.oneshot(req).await.unwrap();
+            assert_eq!(resp.status(), StatusCode::CREATED);
+            assert_eq!(js.count(), 1);
+        }
+
+        #[tokio::test]
+        async fn worker_error_response_maps_to_expected_status() {
+            let nats = MockNatsClient::new();
+            seed_reply(&nats, make_reply(401, b"", Some("Unauthorized")));
+            let js = MockJetStreamPublisher::new();
+            let app = make_app(nats, js, Some("http://unused.local".to_string()));
+            let req = axum::http::Request::builder()
+                .method("POST")
+                .uri("/anthropic/v1/messages")
+                .header("authorization", "Bearer tok_test")
+                .body(axum::body::Body::empty())
+                .unwrap();
+            let resp = app.oneshot(req).await.unwrap();
+            assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        }
+    }
 }
