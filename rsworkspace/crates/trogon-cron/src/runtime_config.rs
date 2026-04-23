@@ -63,11 +63,7 @@ mod tests {
     #[test]
     fn load_with_overrides_prefers_cli_nats_values() {
         let file = tempfile::Builder::new().suffix(".toml").tempfile().unwrap();
-        std::fs::write(
-            file.path(),
-            "[nats]\nurl = 'file:4222'\ntoken = 'file-token'\n",
-        )
-        .unwrap();
+        std::fs::write(file.path(), "[nats]\nurl = 'file:4222'\ntoken = 'file-token'\n").unwrap();
 
         let resolved = load_with_overrides(
             Some(file.path()),
@@ -80,8 +76,6 @@ mod tests {
         .unwrap();
 
         assert_eq!(resolved.nats.servers, vec!["override:4222"]);
-        assert!(
-            matches!(resolved.nats.auth, NatsAuth::Token(ref token) if token == "override-token")
-        );
+        assert!(matches!(resolved.nats.auth, NatsAuth::Token(ref token) if token == "override-token"));
     }
 }

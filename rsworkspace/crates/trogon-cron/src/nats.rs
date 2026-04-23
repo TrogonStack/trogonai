@@ -7,9 +7,8 @@ use crate::{
     config::JobWriteState,
     error::CronError,
     kv::{
-        EVENTS_STREAM, EVENTS_SUBJECT_PATTERN, EVENTS_SUBJECT_PREFIX,
-        LEGACY_EVENTS_SUBJECT_PATTERN, LEGACY_EVENTS_SUBJECT_PREFIX, SCHEDULES_STREAM,
-        get_or_create_schedule_stream,
+        EVENTS_STREAM, EVENTS_SUBJECT_PATTERN, EVENTS_SUBJECT_PREFIX, LEGACY_EVENTS_SUBJECT_PATTERN,
+        LEGACY_EVENTS_SUBJECT_PREFIX, SCHEDULES_STREAM, get_or_create_schedule_stream,
     },
     traits::SchedulePublisher,
 };
@@ -96,17 +95,10 @@ impl NatsSchedulePublisher {
             .get_info()
             .await
             .map_err(|source| {
-                CronError::schedule_source(
-                    "failed to query schedule stream info for sampling source",
-                    source,
-                )
+                CronError::schedule_source("failed to query schedule stream info for sampling source", source)
             })?
             .config;
-        if config
-            .subjects
-            .iter()
-            .any(|subject| subject == source_subject)
-        {
+        if config.subjects.iter().any(|subject| subject == source_subject) {
             return Ok(());
         }
 
@@ -123,10 +115,7 @@ impl NatsSchedulePublisher {
 
         config.subjects.push(source_subject.to_string());
         self.js.update_stream(config).await.map_err(|source| {
-            CronError::schedule_source(
-                "failed to update schedule stream for sampling source",
-                source,
-            )
+            CronError::schedule_source("failed to update schedule stream for sampling source", source)
         })?;
 
         Ok(())
@@ -137,14 +126,14 @@ impl NatsSchedulePublisher {
         let mut info = stream
             .info_with_subjects(crate::kv::SCHEDULE_SUBJECT_PATTERN)
             .await
-            .map_err(|source| {
-                CronError::schedule_source("failed to query active schedule subjects", source)
-            })?;
+            .map_err(|source| CronError::schedule_source("failed to query active schedule subjects", source))?;
         let mut ids = HashSet::new();
 
-        while let Some((subject, _count)) = info.try_next().await.map_err(|source| {
-            CronError::schedule_source("failed to iterate active schedule subjects", source)
-        })? {
+        while let Some((subject, _count)) = info
+            .try_next()
+            .await
+            .map_err(|source| CronError::schedule_source("failed to iterate active schedule subjects", source))?
+        {
             if let Some(job_id) = subject.strip_prefix(crate::kv::SCHEDULE_SUBJECT_PREFIX)
                 && !job_id.is_empty()
             {
@@ -174,13 +163,10 @@ impl SchedulePublisher for NatsSchedulePublisher {
                 job.schedule_body(),
             )
             .await
-            .map_err(|source| {
-                CronError::schedule_source("failed to publish native schedule", source)
-            })?;
+            .map_err(|source| CronError::schedule_source("failed to publish native schedule", source))?;
 
-        ack.await.map_err(|source| {
-            CronError::schedule_source("failed to acknowledge native schedule", source)
-        })?;
+        ack.await
+            .map_err(|source| CronError::schedule_source("failed to acknowledge native schedule", source))?;
 
         Ok(())
     }
@@ -197,17 +183,14 @@ impl SchedulePublisher for NatsSchedulePublisher {
             .purge()
             .filter(format!("cron.schedules.{}", job_id.as_str()))
             .await
-            .map_err(|source| {
-                CronError::schedule_source("failed to purge native schedule", source)
-            })?;
+            .map_err(|source| CronError::schedule_source("failed to purge native schedule", source))?;
         Ok(())
     }
 }
 
 fn validate_server_version(nats: &async_nats::Client) -> Result<(), CronError> {
     let version = nats.server_info().version;
-    let supported =
-        parse_server_version(&version).is_some_and(|(major, minor)| (major, minor) >= (2, 14));
+    let supported = parse_server_version(&version).is_some_and(|(major, minor)| (major, minor) >= (2, 14));
     if supported {
         tracing::info!(server_version = %version, "Using NATS scheduler feature line");
         Ok(())
@@ -235,11 +218,7 @@ pub(crate) fn validate_events_stream(stream: &jetstream::stream::Stream) -> Resu
             std::io::Error::other(EVENTS_STREAM),
         ));
     }
-    if !config
-        .subjects
-        .iter()
-        .any(|subject| subject == EVENTS_SUBJECT_PATTERN)
-    {
+    if !config.subjects.iter().any(|subject| subject == EVENTS_SUBJECT_PATTERN) {
         return Err(CronError::event_source(
             "events stream is missing canonical job event subject coverage",
             std::io::Error::other(EVENTS_STREAM),
@@ -313,9 +292,7 @@ mod tests {
 
     #[test]
     fn legacy_streams_keep_legacy_event_subject() {
-        let state =
-            resolve_event_subject_state("alpha", None, Some(JobWriteState::new(Some(12), true)))
-                .unwrap();
+        let state = resolve_event_subject_state("alpha", None, Some(JobWriteState::new(Some(12), true))).unwrap();
 
         assert_eq!(state.prefix, EventSubjectPrefix::Legacy);
         assert_eq!(state.write_state.current_version(), Some(12));
@@ -324,9 +301,7 @@ mod tests {
 
     #[test]
     fn deleted_streams_keep_their_subject_and_still_count_as_existing() {
-        let state =
-            resolve_event_subject_state("alpha", Some(JobWriteState::new(Some(12), true)), None)
-                .unwrap();
+        let state = resolve_event_subject_state("alpha", Some(JobWriteState::new(Some(12), true)), None).unwrap();
 
         assert_eq!(state.prefix, EventSubjectPrefix::Canonical);
         assert_eq!(state.write_state.current_version(), Some(12));
@@ -342,10 +317,6 @@ mod tests {
         )
         .unwrap_err();
 
-        assert!(
-            error
-                .to_string()
-                .contains("job stream has conflicting event subjects")
-        );
+        assert!(error.to_string().contains("job stream has conflicting event subjects"));
     }
 }

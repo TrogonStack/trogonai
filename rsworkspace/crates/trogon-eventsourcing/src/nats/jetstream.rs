@@ -8,8 +8,8 @@ use crate::nats::kv::{SnapshotStoreError, load_snapshot, persist_snapshot_change
 use crate::nats::streams::{StreamStoreError, append_stream, read_stream_from};
 use crate::snapshot::{Snapshot, SnapshotChange, SnapshotStoreConfig};
 use crate::{
-    AppendOutcome, EventData, NonEmpty, SnapshotRead, SnapshotWrite, StreamAppend, StreamRead,
-    StreamReadResult, StreamState,
+    AppendOutcome, EventData, NonEmpty, SnapshotRead, SnapshotWrite, StreamAppend, StreamRead, StreamReadResult,
+    StreamState,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -230,13 +230,13 @@ impl<Resolver, Projector> JetStreamStore<Resolver, Projector> {
         let current_version = subject_state.current_version;
         let expected_last_subject_sequence = match expected_state {
             StreamState::Any => current_version.unwrap_or(0),
-            StreamState::StreamExists => current_version.ok_or_else(|| {
-                JetStreamStoreError::OptimisticConcurrencyConflict {
+            StreamState::StreamExists => {
+                current_version.ok_or_else(|| JetStreamStoreError::OptimisticConcurrencyConflict {
                     stream_id: stream_id.to_string(),
                     expected: StreamState::StreamExists,
                     current_version,
-                }
-            })?,
+                })?
+            }
             StreamState::NoStream => 0,
             StreamState::StreamRevision(version) => version,
         };
@@ -249,13 +249,11 @@ impl<Resolver, Projector> JetStreamStore<Resolver, Projector> {
         )
         .await
         .map_err(|source| match source {
-            StreamStoreError::WrongExpectedVersion => {
-                JetStreamStoreError::OptimisticConcurrencyConflict {
-                    stream_id: stream_id.to_string(),
-                    expected: expected_state,
-                    current_version,
-                }
-            }
+            StreamStoreError::WrongExpectedVersion => JetStreamStoreError::OptimisticConcurrencyConflict {
+                stream_id: stream_id.to_string(),
+                expected: expected_state,
+                current_version,
+            },
             other => JetStreamStoreError::AppendStream(other),
         })?;
 
@@ -270,9 +268,7 @@ impl<Resolver, Projector> JetStreamStore<Resolver, Projector> {
             .await
             .map_err(JetStreamStoreError::ProjectAppend)?;
 
-        Ok(AppendOutcome {
-            next_expected_version,
-        })
+        Ok(AppendOutcome { next_expected_version })
     }
 
     pub async fn load_snapshot_entry<StreamId, Payload>(
@@ -365,13 +361,11 @@ where
         expected_state: StreamState,
         events: NonEmpty<EventData>,
     ) -> Result<AppendOutcome, Self::Error> {
-        self.append_to_stream(stream_id, expected_state, events)
-            .await
+        self.append_to_stream(stream_id, expected_state, events).await
     }
 }
 
-impl<StreamId, Payload, Resolver, Projector> SnapshotRead<Payload, StreamId>
-    for JetStreamStore<Resolver, Projector>
+impl<StreamId, Payload, Resolver, Projector> SnapshotRead<Payload, StreamId> for JetStreamStore<Resolver, Projector>
 where
     StreamId: AsRef<str> + Send + Sync + ?Sized,
     Payload: Serialize + DeserializeOwned + Send,
@@ -389,8 +383,7 @@ where
     }
 }
 
-impl<StreamId, Payload, Resolver, Projector> SnapshotWrite<Payload, StreamId>
-    for JetStreamStore<Resolver, Projector>
+impl<StreamId, Payload, Resolver, Projector> SnapshotWrite<Payload, StreamId> for JetStreamStore<Resolver, Projector>
 where
     StreamId: AsRef<str> + Send + Sync + ?Sized,
     Payload: Serialize + DeserializeOwned + Send,

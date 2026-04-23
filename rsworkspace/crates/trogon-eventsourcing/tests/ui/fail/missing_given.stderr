@@ -6,3 +6,4 @@ error[E0599]: no method named `when` found for struct `TestCase<TestCommand>` in
   |
   = note: the method was found for
           - `TestCase<C, Given<<C as trogon_eventsourcing::Decide>::Event>>`
+          - `TestCase<C, NoHistory>`
