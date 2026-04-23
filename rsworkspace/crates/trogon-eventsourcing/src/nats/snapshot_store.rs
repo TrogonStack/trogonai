@@ -11,7 +11,7 @@ type BoxError = Box<dyn std::error::Error + Send + Sync>;
 pub enum SnapshotStoreError {
     Kv { context: &'static str, source: BoxError },
     InvalidSnapshotKey { key: String },
-    MissingCheckpointKey { key_prefix: String },
+    MissingCheckpointName { key_prefix: String },
     Serde(serde_json::Error),
 }
 
@@ -34,8 +34,8 @@ impl std::fmt::Display for SnapshotStoreError {
             Self::InvalidSnapshotKey { key } => {
                 write!(f, "Invalid stream snapshot key: {key}")
             }
-            Self::MissingCheckpointKey { key_prefix } => {
-                write!(f, "Missing checkpoint key for snapshot namespace: {key_prefix}")
+            Self::MissingCheckpointName { key_prefix } => {
+                write!(f, "Missing checkpoint name for snapshot namespace: {key_prefix}")
             }
             Self::Serde(source) => write!(f, "Serialization error: {source}"),
         }
@@ -46,7 +46,7 @@ impl std::error::Error for SnapshotStoreError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Kv { source, .. } => Some(source.as_ref()),
-            Self::InvalidSnapshotKey { .. } | Self::MissingCheckpointKey { .. } => None,
+            Self::InvalidSnapshotKey { .. } | Self::MissingCheckpointName { .. } => None,
             Self::Serde(source) => Some(source),
         }
     }
@@ -64,9 +64,15 @@ pub fn snapshot_key(config: &SnapshotStoreConfig, id: &str) -> String {
 
 pub fn checkpoint_key(config: &SnapshotStoreConfig) -> Result<String, SnapshotStoreError> {
     config
-        .checkpoint_key()
-        .map(ToString::to_string)
-        .ok_or_else(|| SnapshotStoreError::MissingCheckpointKey {
+        .checkpoint_name()
+        .map(|checkpoint_name| {
+            format!(
+                "_snapshot.{}.{}",
+                config.key_prefix().trim_end_matches('.'),
+                checkpoint_name
+            )
+        })
+        .ok_or_else(|| SnapshotStoreError::MissingCheckpointName {
             key_prefix: config.key_prefix().to_string(),
         })
 }
@@ -354,10 +360,10 @@ mod tests {
 
     #[test]
     fn snapshot_store_config_exposes_values() {
-        let config = SnapshotStoreConfig::new("snapshots.v2.", Some("_checkpoint.v2"));
+        let config = SnapshotStoreConfig::new("snapshots.v2.", Some("last_event_sequence"));
 
         assert_eq!(config.key_prefix(), "snapshots.v2.");
-        assert_eq!(config.checkpoint_key(), Some("_checkpoint.v2"));
+        assert_eq!(config.checkpoint_name(), Some("last_event_sequence"));
     }
 
     #[test]
@@ -365,33 +371,33 @@ mod tests {
         let config = TestSchema::snapshot_store_config();
 
         assert_eq!(config.key_prefix(), "snapshots.v2.");
-        assert_eq!(
-            config.checkpoint_key(),
-            Some("_snapshot.snapshots.v2.last_event_sequence")
-        );
+        assert_eq!(config.checkpoint_name(), Some("last_event_sequence"));
     }
 
     #[test]
     fn snapshot_key_uses_prefix() {
-        let config = SnapshotStoreConfig::new("snapshots.v2.", Some("_checkpoint.v2"));
+        let config = SnapshotStoreConfig::new("snapshots.v2.", Some("last_event_sequence"));
 
         assert_eq!(snapshot_key(&config, "backup"), "snapshots.v2.backup");
     }
 
     #[test]
-    fn checkpoint_key_uses_config_value() {
-        let config = SnapshotStoreConfig::new("snapshots.v3.", Some("_checkpoint.v3"));
+    fn checkpoint_key_uses_nats_specific_format() {
+        let config = SnapshotStoreConfig::new("snapshots.v3.", Some("last_event_sequence"));
 
-        assert_eq!(checkpoint_key(&config).unwrap(), "_checkpoint.v3");
+        assert_eq!(
+            checkpoint_key(&config).unwrap(),
+            "_snapshot.snapshots.v3.last_event_sequence"
+        );
     }
 
     #[test]
-    fn checkpoint_key_requires_configured_value() {
+    fn checkpoint_key_requires_configured_name() {
         let config = SnapshotStoreConfig::new("snapshots.v3.", None);
 
         assert_eq!(
             checkpoint_key(&config).unwrap_err().to_string(),
-            "Missing checkpoint key for snapshot namespace: snapshots.v3."
+            "Missing checkpoint name for snapshot namespace: snapshots.v3."
         );
     }
 
@@ -460,7 +466,7 @@ mod tests {
 
     #[test]
     fn stream_id_from_snapshot_key_uses_configured_prefix() {
-        let config = SnapshotStoreConfig::new("snapshots.v2.", Some("_checkpoint.v2"));
+        let config = SnapshotStoreConfig::new("snapshots.v2.", Some("last_event_sequence"));
 
         assert_eq!(
             stream_id_from_snapshot_key(&config, "snapshots.v2.backup").unwrap(),
@@ -474,7 +480,7 @@ mod tests {
 
     #[test]
     fn stream_id_from_snapshot_key_rejects_empty_suffix() {
-        let config = SnapshotStoreConfig::new("snapshots.v2.", Some("_checkpoint.v2"));
+        let config = SnapshotStoreConfig::new("snapshots.v2.", Some("last_event_sequence"));
 
         assert_eq!(
             stream_id_from_snapshot_key(&config, "snapshots.v2.")
