@@ -60,7 +60,7 @@ impl CommandSnapshotPolicy for RemoveJobCommand {
 mod tests {
     use trogon_eventsourcing::snapshot::SnapshotSchema;
     use trogon_eventsourcing::{
-        CommandExecution, Decision, NonEmpty, decide,
+        CommandExecution, NonEmpty,
         testing::{TestCase, decider, expect_error},
     };
 
@@ -88,60 +88,40 @@ mod tests {
     }
 
     #[test]
-    fn decides_removal_from_present_state() {
-        let state = JobState::PresentEnabled;
-        let command = RemoveJobCommand::new(JobId::parse("backup").unwrap());
-
-        let decision = decide(&state, &command).unwrap();
-        assert_eq!(
-            decision,
-            Decision::event(JobRemoved {
-                id: "backup".to_string(),
-            })
-        );
-    }
-
-    #[test]
-    fn rejects_removing_missing_job() {
-        let state = JobState::Missing;
-        let command = RemoveJobCommand::new(JobId::parse("backup").unwrap());
-
-        assert!(matches!(
-            decide(&state, &command).unwrap_err(),
-            RemoveJobDecisionError::JobNotFound { .. }
-        ));
-    }
-
-    #[test]
-    fn rejects_removing_deleted_job() {
-        let state = JobState::Deleted;
-        let command = RemoveJobCommand::new(JobId::parse("backup").unwrap());
-
-        assert!(matches!(
-            decide(&state, &command).unwrap_err(),
-            RemoveJobDecisionError::JobDeleted { .. }
-        ));
-    }
-
-    #[test]
     fn given_when_then_supports_remove_job_decider() {
         TestCase::new(decider::<RemoveJobCommand>())
-            .given([JobEvent::JobAdded(JobAdded {
+            .given([JobAdded {
                 id: "backup".to_string(),
                 job: crate::JobDetails::from(job("backup")),
-            })])
+            }])
             .when(RemoveJobCommand::new(JobId::parse("backup").unwrap()))
-            .then([JobEvent::JobRemoved(JobRemoved {
+            .then(trogon_eventsourcing::events![JobRemoved {
                 id: "backup".to_string(),
-            })]);
+            }]);
     }
 
     #[test]
     fn given_when_then_supports_remove_job_failures() {
         TestCase::new(decider::<RemoveJobCommand>())
-            .given([])
+            .given_no_history()
             .when(RemoveJobCommand::new(JobId::parse("backup").unwrap()))
             .then(expect_error(RemoveJobDecisionError::JobNotFound {
+                id: JobId::parse("backup").unwrap(),
+            }));
+    }
+
+    #[test]
+    fn given_when_then_rejects_removing_deleted_job() {
+        TestCase::new(decider::<RemoveJobCommand>())
+            .given([JobAdded {
+                id: "backup".to_string(),
+                job: crate::JobDetails::from(job("backup")),
+            }])
+            .given([JobRemoved {
+                id: "backup".to_string(),
+            }])
+            .when(RemoveJobCommand::new(JobId::parse("backup").unwrap()))
+            .then(expect_error(RemoveJobDecisionError::JobDeleted {
                 id: JobId::parse("backup").unwrap(),
             }));
     }
@@ -159,9 +139,12 @@ mod tests {
         assert_eq!(outcome.next_expected_version, 2);
         assert_eq!(
             outcome.events,
-            NonEmpty::one(JobEvent::JobRemoved(JobRemoved {
-                id: "backup".to_string(),
-            }))
+            NonEmpty::one(
+                JobRemoved {
+                    id: "backup".to_string(),
+                }
+                .into()
+            )
         );
 
         assert!(

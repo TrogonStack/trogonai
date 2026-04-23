@@ -29,12 +29,7 @@ const NATS_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = CliArgs::<cli::Cli>::new().parse_args();
 
-    trogon_telemetry::init_logger(
-        trogon_telemetry::ServiceName::TrogonCron,
-        "cron",
-        &SystemEnv,
-        &SystemFs,
-    );
+    trogon_telemetry::init_logger(trogon_telemetry::ServiceName::TrogonCron, [], &SystemEnv, &SystemFs);
 
     info!("trogon-cron starting");
 
@@ -57,8 +52,7 @@ fn main() {}
 
 #[cfg(not(coverage))]
 async fn run(cli: cli::Cli) -> Result<(), Box<dyn std::error::Error>> {
-    let resolved =
-        runtime_config::load_with_overrides(cli.runtime.config.as_deref(), &cli.runtime.nats)?;
+    let resolved = runtime_config::load_with_overrides(cli.runtime.config.as_deref(), &cli.runtime.nats)?;
     let nats = connect(&resolved.nats, NATS_CONNECT_TIMEOUT).await?;
 
     run_controller(nats).await

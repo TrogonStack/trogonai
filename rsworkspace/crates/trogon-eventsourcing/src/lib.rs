@@ -17,15 +17,13 @@ pub use execution::{
     Snapshots, StreamAppend, StreamRead, StreamReadResult, StreamState, WithoutSnapshots,
 };
 pub use nats::kv::{
-    SnapshotStoreError, checkpoint_key, list_snapshots, load_snapshot, load_snapshot_map,
-    maybe_advance_checkpoint, persist_snapshot_change, read_checkpoint, snapshot_key,
-    write_checkpoint,
+    SnapshotStoreError, checkpoint_key, list_snapshots, load_snapshot, load_snapshot_map, maybe_advance_checkpoint,
+    persist_snapshot_change, read_checkpoint, snapshot_key, write_checkpoint,
 };
 pub use nats::streams::{StreamStoreError, append_stream, read_stream_from, read_stream_range};
 pub use snapshot::{Snapshot, SnapshotChange, SnapshotSchema, SnapshotStoreConfig};
 pub use testing::{
-    Decider, ExpectedError, TestCase, ThenError, ThenEvents, ThenExpectation, Timeline, decider,
-    expect_error,
+    Decider, ExpectedError, TestCase, ThenError, ThenEvents, ThenExpectation, Timeline, decider, expect_error,
 };
 
 pub trait EventCodec<T> {
@@ -109,11 +107,7 @@ impl EventData {
         Self::new_with_codec_and_generator(codec, &UuidV7Generator, event)
     }
 
-    pub fn new_with_codec_and_generator<E, C, N>(
-        codec: &C,
-        now_v7: &N,
-        event: E,
-    ) -> Result<Self, C::Error>
+    pub fn new_with_codec_and_generator<E, C, N>(codec: &C, now_v7: &N, event: E) -> Result<Self, C::Error>
     where
         E: EventType + StreamEvent,
         C: EventCodec<E>,
@@ -133,16 +127,11 @@ impl EventData {
         E: EventType + StreamEvent + Serialize + DeserializeOwned,
         M: Serialize + DeserializeOwned,
     {
-        Self::with_codecs_and_generator(
-            &JsonEventCodec,
-            &JsonEventCodec,
-            &UuidV7Generator,
-            event,
-            metadata,
+        Self::with_codecs_and_generator(&JsonEventCodec, &JsonEventCodec, &UuidV7Generator, event, metadata).map_err(
+            |error| match error {
+                CodecError::Data(source) | CodecError::Metadata(source) => source,
+            },
         )
-        .map_err(|error| match error {
-            CodecError::Data(source) | CodecError::Metadata(source) => source,
-        })
     }
 
     pub fn with_codecs<E, M, EC, MC>(
@@ -156,13 +145,7 @@ impl EventData {
         EC: EventCodec<E>,
         MC: EventCodec<M>,
     {
-        Self::with_codecs_and_generator(
-            event_codec,
-            metadata_codec,
-            &UuidV7Generator,
-            event,
-            metadata,
-        )
+        Self::with_codecs_and_generator(event_codec, metadata_codec, &UuidV7Generator, event, metadata)
     }
 
     pub fn with_codecs_and_generator<E, M, EC, MC, N>(
@@ -243,10 +226,7 @@ impl EventData {
     where
         C: EventCodec<M>,
     {
-        self.metadata
-            .as_deref()
-            .map(|value| codec.decode(value))
-            .transpose()
+        self.metadata.as_deref().map(|value| codec.decode(value)).transpose()
     }
 
     pub fn decode(payload: &[u8]) -> serde_json::Result<Self> {
@@ -288,10 +268,7 @@ impl RecordedEvent {
     where
         C: EventCodec<M>,
     {
-        self.metadata
-            .as_deref()
-            .map(|value| codec.decode(value))
-            .transpose()
+        self.metadata.as_deref().map(|value| codec.decode(value)).transpose()
     }
 
     pub fn decode(payload: &[u8]) -> serde_json::Result<Self> {
@@ -338,10 +315,7 @@ mod tests {
 
         assert_eq!(event.stream_id(), "alpha");
         assert_eq!(event.event_type, "TestEvent");
-        assert_eq!(
-            event.subject_with_prefix("events.test."),
-            "events.test.alpha"
-        );
+        assert_eq!(event.subject_with_prefix("events.test."), "events.test.alpha");
         assert_eq!(event.decode_data::<TestEvent>().unwrap().value, "beta");
     }
 
@@ -364,10 +338,7 @@ mod tests {
         assert_eq!(recorded.recorded_stream_id, "stream-alpha");
         assert_eq!(recorded.stream_position, Some(2));
         assert_eq!(recorded.log_position, Some(10));
-        assert_eq!(
-            recorded.subject_with_prefix("events.test."),
-            "events.test.alpha"
-        );
+        assert_eq!(recorded.subject_with_prefix("events.test."), "events.test.alpha");
     }
 
     #[test]
@@ -380,10 +351,7 @@ mod tests {
         let event_payload = serde_json::to_vec(&event).unwrap();
         let decoded_event = EventData::decode(&event_payload).unwrap();
         assert_eq!(decoded_event, event);
-        assert_eq!(
-            decoded_event.decode_data::<TestEvent>().unwrap().id,
-            "alpha"
-        );
+        assert_eq!(decoded_event.decode_data::<TestEvent>().unwrap().id, "alpha");
 
         let recorded = event.record(
             "stream-alpha",
@@ -394,9 +362,6 @@ mod tests {
         let recorded_payload = serde_json::to_vec(&recorded).unwrap();
         let decoded_recorded = RecordedEvent::decode(&recorded_payload).unwrap();
         assert_eq!(decoded_recorded, recorded);
-        assert_eq!(
-            decoded_recorded.decode_data::<TestEvent>().unwrap().id,
-            "alpha"
-        );
+        assert_eq!(decoded_recorded.decode_data::<TestEvent>().unwrap().id, "alpha");
     }
 }

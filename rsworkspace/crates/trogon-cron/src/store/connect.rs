@@ -5,9 +5,7 @@ use trogon_eventsourcing::nats::jetstream::JetStreamStore;
 
 use crate::{
     error::CronError,
-    kv::{
-        get_or_create_cron_jobs_bucket, get_or_create_events_stream, get_or_create_snapshot_bucket,
-    },
+    kv::{get_or_create_cron_jobs_bucket, get_or_create_events_stream, get_or_create_snapshot_bucket},
     nats::validate_events_stream,
     projections::{CronJobSnapshotProjector, catch_up_snapshots},
 };

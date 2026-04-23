@@ -1,6 +1,4 @@
-use async_nats::jetstream::{
-    self, context, context::PublishErrorKind, message::PublishMessage, publish::PublishAck,
-};
+use async_nats::jetstream::{self, context, context::PublishErrorKind, message::PublishMessage, publish::PublishAck};
 use chrono::{DateTime, Utc};
 use trogon_nats::jetstream::JetStreamPublishMessage;
 use trogon_std::{NowV7, UuidV7Generator};
@@ -15,14 +13,8 @@ const NATS_BATCH_SEQUENCE: &str = "Nats-Batch-Sequence";
 
 #[derive(Debug)]
 pub enum StreamStoreError {
-    Read {
-        context: &'static str,
-        source: BoxError,
-    },
-    Publish {
-        context: &'static str,
-        source: BoxError,
-    },
+    Read { context: &'static str, source: BoxError },
+    Publish { context: &'static str, source: BoxError },
     WrongExpectedVersion,
     Serde(serde_json::Error),
 }
@@ -87,19 +79,9 @@ pub async fn append_stream<J>(
     events: &NonEmpty<EventData>,
 ) -> Result<(), StreamStoreError>
 where
-    J: JetStreamPublishMessage<
-            PublishError = context::PublishError,
-            AckFuture = context::PublishAckFuture,
-        >,
+    J: JetStreamPublishMessage<PublishError = context::PublishError, AckFuture = context::PublishAckFuture>,
 {
-    append_stream_with_uuid_generator(
-        js,
-        subject,
-        expected_last_subject_sequence,
-        events,
-        &UuidV7Generator,
-    )
-    .await
+    append_stream_with_uuid_generator(js, subject, expected_last_subject_sequence, events, &UuidV7Generator).await
 }
 
 async fn append_stream_with_uuid_generator<J, N>(
@@ -110,17 +92,11 @@ async fn append_stream_with_uuid_generator<J, N>(
     now_v7: &N,
 ) -> Result<(), StreamStoreError>
 where
-    J: JetStreamPublishMessage<
-            PublishError = context::PublishError,
-            AckFuture = context::PublishAckFuture,
-        >,
+    J: JetStreamPublishMessage<PublishError = context::PublishError, AckFuture = context::PublishAckFuture>,
     N: NowV7,
 {
     let first_stream_id = events.first().stream_id().to_string();
-    if events
-        .iter()
-        .any(|event| event.stream_id() != first_stream_id)
-    {
+    if events.iter().any(|event| event.stream_id() != first_stream_id) {
         return Err(StreamStoreError::publish_source(
             "failed to publish stream event batch",
             std::io::Error::other("batch contains events across multiple streams"),
@@ -145,9 +121,7 @@ where
         let ack = js
             .publish_message(publish.outbound_message(subject.clone()))
             .await
-            .map_err(|source| {
-                StreamStoreError::publish_source("failed to publish stream event", source)
-            })?;
+            .map_err(|source| StreamStoreError::publish_source("failed to publish stream event", source))?;
         ack_futures.push(ack);
     }
 
@@ -214,19 +188,13 @@ async fn read_raw_message(
         {
             Ok(None)
         }
-        Err(source) => Err(StreamStoreError::read_source(
-            "failed to read stream message",
-            source,
-        )),
+        Err(source) => Err(StreamStoreError::read_source("failed to read stream message", source)),
     }
 }
 
-fn record_message(
-    message: async_nats::jetstream::message::StreamMessage,
-) -> Result<RecordedEvent, StreamStoreError> {
-    let recorded_at =
-        DateTime::<Utc>::from_timestamp(message.time.unix_timestamp(), message.time.nanosecond())
-            .ok_or_else(|| {
+fn record_message(message: async_nats::jetstream::message::StreamMessage) -> Result<RecordedEvent, StreamStoreError> {
+    let recorded_at = DateTime::<Utc>::from_timestamp(message.time.unix_timestamp(), message.time.nanosecond())
+        .ok_or_else(|| {
             StreamStoreError::read_source(
                 "failed to convert stream message timestamp into recorded event time",
                 std::io::Error::other(message.subject.to_string()),
@@ -234,12 +202,7 @@ fn record_message(
         })?;
     let event = EventData::decode(&message.payload)?;
 
-    Ok(event.record(
-        message.subject.to_string(),
-        None,
-        Some(message.sequence),
-        recorded_at,
-    ))
+    Ok(event.record(message.subject.to_string(), None, Some(message.sequence), recorded_at))
 }
 
 #[cfg(test)]

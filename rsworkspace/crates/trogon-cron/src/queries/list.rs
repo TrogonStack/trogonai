@@ -15,12 +15,11 @@ pub async fn run(store: &kv::Store, _command: ListJobsCommand) -> Result<Vec<Cro
     let mut jobs = Vec::new();
 
     while let Some(result) = keys.next().await {
-        let key = result.map_err(|source| {
-            CronError::kv_source("failed to read projected cron job key", source)
-        })?;
-        let Some(entry) = store.entry(key).await.map_err(|source| {
-            CronError::kv_source("failed to read projected cron job value", source)
-        })?
+        let key = result.map_err(|source| CronError::kv_source("failed to read projected cron job key", source))?;
+        let Some(entry) = store
+            .entry(key)
+            .await
+            .map_err(|source| CronError::kv_source("failed to read projected cron job value", source))?
         else {
             continue;
         };

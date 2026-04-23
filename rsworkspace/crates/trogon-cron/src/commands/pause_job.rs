@@ -64,7 +64,7 @@ impl CommandSnapshotPolicy for PauseJobCommand {
 mod tests {
     use trogon_eventsourcing::snapshot::SnapshotSchema;
     use trogon_eventsourcing::{
-        CommandExecution, Decision, NonEmpty, decide,
+        CommandExecution, NonEmpty,
         testing::{TestCase, Timeline, decider, expect_error},
     };
 
@@ -92,77 +92,28 @@ mod tests {
     }
 
     #[test]
-    fn decides_pause_from_present_enabled_state() {
-        let state = JobState::PresentEnabled;
-        let command = PauseJobCommand::new(JobId::parse("backup").unwrap());
-
-        let decision = decide(&state, &command).unwrap();
-        assert_eq!(
-            decision,
-            Decision::event(JobPaused {
-                id: "backup".to_string(),
-            })
-        );
-    }
-
-    #[test]
-    fn rejects_pausing_already_paused_jobs() {
-        let state = JobState::PresentDisabled;
-        let command = PauseJobCommand::new(JobId::parse("backup").unwrap());
-
-        assert!(matches!(
-            decide(&state, &command).unwrap_err(),
-            PauseJobDecisionError::AlreadyPaused { .. }
-        ));
-    }
-
-    #[test]
-    fn rejects_pausing_missing_jobs() {
-        let state = JobState::Missing;
-        let command = PauseJobCommand::new(JobId::parse("backup").unwrap());
-
-        assert!(matches!(
-            decide(&state, &command).unwrap_err(),
-            PauseJobDecisionError::JobNotFound { .. }
-        ));
-    }
-
-    #[test]
-    fn rejects_pausing_deleted_jobs() {
-        let state = JobState::Deleted;
-        let command = PauseJobCommand::new(JobId::parse("backup").unwrap());
-
-        assert!(matches!(
-            decide(&state, &command).unwrap_err(),
-            PauseJobDecisionError::JobDeleted { .. }
-        ));
-    }
-
-    #[test]
     fn given_when_then_supports_pause_job_decider() {
         TestCase::new(decider::<PauseJobCommand>())
-            .given([JobEvent::JobAdded(JobAdded {
+            .given([JobAdded {
                 id: "backup".to_string(),
                 job: crate::JobDetails::from(job("backup")),
-            })])
+            }])
             .when(PauseJobCommand::new(JobId::parse("backup").unwrap()))
-            .then([JobEvent::JobPaused(JobPaused {
+            .then(trogon_eventsourcing::events![JobPaused {
                 id: "backup".to_string(),
-            })]);
+            }]);
     }
 
     #[test]
     fn given_when_then_supports_pause_job_failures() {
         TestCase::new(decider::<PauseJobCommand>())
-            .given([
-                JobEvent::JobAdded(JobAdded {
-                    id: "backup".to_string(),
-                    job: crate::JobDetails::from(job("backup")),
-                }),
-                JobEvent::JobPaused(JobPaused {
-                    id: "backup".to_string(),
-                }),
-            ])
+            .given([JobAdded {
+                id: "backup".to_string(),
+                job: crate::JobDetails::from(job("backup")),
+            }])
+            .given([JobPaused {
+                id: "backup".to_string(),
+            }])
             .when(PauseJobCommand::new(JobId::parse("backup").unwrap()))
             .then(expect_error(PauseJobDecisionError::AlreadyPaused {
                 id: JobId::parse("backup").unwrap(),
@@ -170,32 +121,61 @@ mod tests {
     }
 
     #[test]
-    fn timeline_matches_cases_by_command_stream() {
-        let register = TestCase::new(decider::<AddJobCommand>())
-            .given([])
-            .when(AddJobCommand::new(job("backup")))
-            .then([JobEvent::JobAdded(JobAdded {
+    fn given_when_then_rejects_pausing_missing_jobs() {
+        TestCase::new(decider::<PauseJobCommand>())
+            .given_no_history()
+            .when(PauseJobCommand::new(JobId::parse("backup").unwrap()))
+            .then(expect_error(PauseJobDecisionError::JobNotFound {
+                id: JobId::parse("backup").unwrap(),
+            }));
+    }
+
+    #[test]
+    fn given_when_then_rejects_pausing_deleted_jobs() {
+        TestCase::new(decider::<PauseJobCommand>())
+            .given([JobAdded {
                 id: "backup".to_string(),
                 job: crate::JobDetails::from(job("backup")),
-            })]);
+            }])
+            .given([JobPaused {
+                id: "backup".to_string(),
+            }])
+            .given([crate::JobRemoved {
+                id: "backup".to_string(),
+            }])
+            .when(PauseJobCommand::new(JobId::parse("backup").unwrap()))
+            .then(expect_error(PauseJobDecisionError::JobDeleted {
+                id: JobId::parse("backup").unwrap(),
+            }));
+    }
+
+    #[test]
+    fn timeline_matches_cases_by_command_stream() {
+        let register = TestCase::new(decider::<AddJobCommand>())
+            .given_no_history()
+            .when(AddJobCommand::new(job("backup")))
+            .then(trogon_eventsourcing::events![JobAdded {
+                id: "backup".to_string(),
+                job: crate::JobDetails::from(job("backup")),
+            }]);
 
         let pause = TestCase::new(decider::<PauseJobCommand>())
             .given(register.history())
             .when(PauseJobCommand::new(JobId::parse("backup").unwrap()))
-            .then([JobEvent::JobPaused(JobPaused {
+            .then(trogon_eventsourcing::events![JobPaused {
                 id: "backup".to_string(),
-            })]);
+            }]);
 
         Timeline::new().given([register, pause]).then_stream(
             "backup",
-            [
-                JobEvent::JobAdded(JobAdded {
+            trogon_eventsourcing::events![
+                JobAdded {
                     id: "backup".to_string(),
                     job: crate::JobDetails::from(job("backup")),
-                }),
-                JobEvent::JobPaused(JobPaused {
+                },
+                JobPaused {
                     id: "backup".to_string(),
-                }),
+                },
             ],
         );
     }
@@ -213,9 +193,12 @@ mod tests {
         assert_eq!(outcome.next_expected_version, 2);
         assert_eq!(
             outcome.events,
-            NonEmpty::one(JobEvent::JobPaused(JobPaused {
-                id: "backup".to_string(),
-            }))
+            NonEmpty::one(
+                JobPaused {
+                    id: "backup".to_string(),
+                }
+                .into()
+            )
         );
 
         let job = store
