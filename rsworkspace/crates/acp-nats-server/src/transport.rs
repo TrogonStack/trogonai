@@ -487,6 +487,22 @@ fn activate_attached_session_on_success(
     }
 }
 
+fn pending_response_context(
+    message: &IncomingHttpMessage,
+    session_id: acp_nats::AcpSessionId,
+) -> Option<PendingResponseContext> {
+    if message.creates_session() {
+        return None;
+    }
+
+    let attaches_session = message.attaches_session();
+    Some(PendingResponseContext {
+        session_id,
+        activate_session_on_success: attaches_session,
+        inject_session_id: attaches_session,
+    })
+}
+
 fn targets_unknown_session(
     message: &IncomingHttpMessage,
     session_id: Option<&acp_nats::AcpSessionId>,
@@ -1106,16 +1122,9 @@ pub async fn run_http_connection<N, J>(
                             }
 
                             if let Some(session_id) = session_id.clone()
-                                && !message.creates_session()
+                                && let Some(context) = pending_response_context(&message, session_id)
                             {
-                                pending_response_sessions.insert(
-                                    request_id.clone(),
-                                    PendingResponseContext {
-                                        session_id,
-                                        activate_session_on_success: message.attaches_session(),
-                                        inject_session_id: true,
-                                    },
-                                );
+                                pending_response_sessions.insert(request_id.clone(), context);
                             }
 
                             if input_tx.try_send(message.raw).is_err() {
@@ -1718,6 +1727,32 @@ mod tests {
         activate_attached_session_on_success(&mut sessions, &request_id, Some(&session_id), Some(&error_response));
 
         assert!(!sessions.contains(&session_id));
+    }
+
+    #[test]
+    fn pending_response_context_only_injects_session_id_for_attach_requests() {
+        let session_id = session_id();
+        let attach = IncomingHttpMessage::parse(
+            r#"{"jsonrpc":"2.0","id":2,"method":"session/load","params":{"sessionId":"session-1","cwd":"."}}"#
+                .to_string(),
+        )
+        .unwrap();
+        let attach_context = pending_response_context(&attach, session_id.clone()).unwrap();
+        assert!(attach_context.activate_session_on_success);
+        assert!(attach_context.inject_session_id);
+
+        let authenticate =
+            IncomingHttpMessage::parse(r#"{"jsonrpc":"2.0","id":3,"method":"authenticate"}"#.to_string()).unwrap();
+        let authenticate_context = pending_response_context(&authenticate, session_id.clone()).unwrap();
+        assert!(!authenticate_context.activate_session_on_success);
+        assert!(!authenticate_context.inject_session_id);
+
+        let create = IncomingHttpMessage::parse(
+            r#"{"jsonrpc":"2.0","id":4,"method":"session/fork","params":{"sessionId":"session-1","cwd":"."}}"#
+                .to_string(),
+        )
+        .unwrap();
+        assert!(pending_response_context(&create, session_id).is_none());
     }
 
     #[test]
