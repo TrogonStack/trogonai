@@ -14,7 +14,7 @@ use axum::http::header::{ACCEPT, CONTENT_TYPE, HOST, ORIGIN};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri, uri::Authority};
 use axum::response::sse::{Event, Sse};
 use axum::response::{IntoResponse, Response};
-use futures_util::{StreamExt, stream};
+use futures_util::stream;
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -56,7 +56,6 @@ pub enum ManagerRequest {
     },
     HttpGet {
         connection_id: AcpConnectionId,
-        session_id: acp_nats::AcpSessionId,
         protocol_version: Option<ProtocolVersion>,
         response: oneshot::Sender<Result<HttpGetOutcome, HttpTransportError>>,
     },
@@ -70,17 +69,10 @@ pub enum ManagerRequest {
 #[derive(Debug)]
 pub enum HttpPostOutcome {
     Accepted,
-    Live {
+    Json {
         connection_id: AcpConnectionId,
         protocol_version: Option<ProtocolVersion>,
-        session_id: Option<acp_nats::AcpSessionId>,
-        stream: SseReceiver,
-    },
-    Buffered {
-        connection_id: AcpConnectionId,
-        protocol_version: Option<ProtocolVersion>,
-        session_id: Option<acp_nats::AcpSessionId>,
-        events: Vec<SseFrame>,
+        body: String,
     },
 }
 
@@ -253,7 +245,6 @@ pub enum HttpConnectionCommand {
         response: oneshot::Sender<Result<HttpPostOutcome, HttpTransportError>>,
     },
     AttachListener {
-        session_id: acp_nats::AcpSessionId,
         protocol_version: Option<ProtocolVersion>,
         response: oneshot::Sender<Result<HttpGetOutcome, HttpTransportError>>,
     },
@@ -265,17 +256,10 @@ pub enum HttpConnectionCommand {
 
 #[derive(Clone, Debug)]
 pub(crate) enum SseFrame {
-    Empty { event_id: String },
     Json { event_id: Option<String>, json: String },
 }
 
 impl SseFrame {
-    fn prime() -> Self {
-        Self::Empty {
-            event_id: Uuid::new_v4().to_string(),
-        }
-    }
-
     fn json(json: String) -> Self {
         Self::Json {
             event_id: Some(Uuid::new_v4().to_string()),
@@ -285,7 +269,6 @@ impl SseFrame {
 
     fn into_event(self) -> Event {
         match self {
-            Self::Empty { event_id } => Event::default().id(event_id).data(""),
             Self::Json { event_id, json } => {
                 let event = Event::default().data(json);
                 if let Some(event_id) = event_id {
@@ -300,19 +283,17 @@ impl SseFrame {
 
 #[derive(Debug)]
 enum PendingRequest {
-    Live {
+    Initialize {
         request_id: RequestId,
-        initialize_request: bool,
-        activate_session_on_success: Option<acp_nats::AcpSessionId>,
-        session_id: Option<acp_nats::AcpSessionId>,
-        sender: SseSender,
-    },
-    Buffered {
-        request_id: RequestId,
-        request_session_id: Option<acp_nats::AcpSessionId>,
-        events: Vec<SseFrame>,
         response: oneshot::Sender<Result<HttpPostOutcome, HttpTransportError>>,
     },
+}
+
+#[derive(Clone, Debug)]
+struct PendingResponseContext {
+    session_id: acp_nats::AcpSessionId,
+    activate_session_on_success: bool,
+    inject_session_id: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -430,14 +411,12 @@ impl OutgoingHttpMessage {
         })
     }
 
-    fn params_session_id(&self) -> Option<acp_nats::AcpSessionId> {
-        let params = self.params.as_ref()?;
-        let session_id = params.get("sessionId")?.as_str()?;
-        acp_nats::AcpSessionId::new(session_id).ok()
+    fn is_response(&self) -> bool {
+        self.id.is_some() && self.params.is_none()
     }
 
     fn is_success_response(&self) -> bool {
-        self.id.is_some() && self.params.is_none() && !self.has_error
+        self.is_response() && !self.has_error
     }
 
     fn result_session_id(&self) -> Option<acp_nats::AcpSessionId> {
@@ -453,157 +432,41 @@ impl OutgoingHttpMessage {
     }
 }
 
-enum LiveFrameOutcome {
-    Keep,
-    Clear,
-    Drop,
-}
-
-enum BufferedFrameOutcome {
-    Buffered,
-    Routed,
-    Finalize { session_id: Option<acp_nats::AcpSessionId> },
-}
-
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ListenerDispatch {
     Missing,
     Delivered,
     Dropped,
 }
 
-fn try_send_sse_frame(sender: &SseSender, frame: &SseFrame) -> bool {
-    match sender.try_send(frame.clone()) {
-        Ok(()) => true,
-        Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => false,
-        Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => false,
-    }
-}
-
-fn dispatch_to_get_listeners(
-    frame: &SseFrame,
-    session_id: &acp_nats::AcpSessionId,
-    get_listeners: &mut HashMap<acp_nats::AcpSessionId, Vec<SseSender>>,
-) -> ListenerDispatch {
-    let Some(_) = get_listeners.get(session_id) else {
+fn dispatch_to_get_listeners(frame: &SseFrame, get_listeners: &mut Vec<SseSender>) -> ListenerDispatch {
+    if get_listeners.is_empty() {
         return ListenerDispatch::Missing;
-    };
-
-    let (outcome, remove_session) = {
-        let listeners = get_listeners
-            .get_mut(session_id)
-            .expect("session listeners must exist after presence check");
-        let mut delivered = false;
-        let mut retained = Vec::with_capacity(listeners.len());
-
-        for listener in listeners.drain(..) {
-            match listener.try_send(frame.clone()) {
-                Ok(()) => {
-                    delivered = true;
-                    retained.push(listener);
-                }
-                Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
-                    warn!(session_id = %session_id, "Dropping stalled HTTP SSE listener");
-                }
-                Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {}
-            }
-        }
-        *listeners = retained;
-
-        (
-            if delivered {
-                ListenerDispatch::Delivered
-            } else {
-                ListenerDispatch::Dropped
-            },
-            listeners.is_empty(),
-        )
-    };
-
-    if remove_session {
-        get_listeners.remove(session_id);
     }
 
-    outcome
-}
+    let mut delivered = false;
+    let mut retained = Vec::with_capacity(get_listeners.len());
 
-fn route_live_frame(
-    frame: &SseFrame,
-    parsed: Option<&OutgoingHttpMessage>,
-    request_id: &RequestId,
-    request_session_id: Option<&acp_nats::AcpSessionId>,
-    sender: &SseSender,
-    get_listeners: &mut HashMap<acp_nats::AcpSessionId, Vec<SseSender>>,
-) -> LiveFrameOutcome {
-    if parsed.and_then(|message| message.id.as_ref()) == Some(request_id) {
-        return if try_send_sse_frame(sender, frame) {
-            LiveFrameOutcome::Clear
-        } else {
-            warn!(request_id = ?request_id, "Dropping stalled HTTP POST response stream");
-            LiveFrameOutcome::Drop
-        };
-    }
-
-    if let Some(frame_session_id) = parsed.and_then(OutgoingHttpMessage::params_session_id) {
-        if request_session_id == Some(&frame_session_id) {
-            return if try_send_sse_frame(sender, frame) {
-                LiveFrameOutcome::Keep
-            } else {
-                warn!(request_id = ?request_id, session_id = %frame_session_id, "Dropping stalled HTTP POST response stream");
-                LiveFrameOutcome::Drop
-            };
-        }
-
-        match dispatch_to_get_listeners(frame, &frame_session_id, get_listeners) {
-            ListenerDispatch::Delivered | ListenerDispatch::Dropped => {
-                return LiveFrameOutcome::Keep;
+    for listener in std::mem::take(get_listeners) {
+        match listener.try_send(frame.clone()) {
+            Ok(()) => {
+                delivered = true;
+                retained.push(listener);
             }
-            ListenerDispatch::Missing => {
-                return LiveFrameOutcome::Keep;
+            Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                warn!("Dropping stalled HTTP SSE listener");
             }
+            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {}
         }
     }
 
-    if try_send_sse_frame(sender, frame) {
-        LiveFrameOutcome::Keep
+    *get_listeners = retained;
+
+    if delivered {
+        ListenerDispatch::Delivered
     } else {
-        warn!(request_id = ?request_id, "Dropping stalled HTTP POST response stream");
-        LiveFrameOutcome::Drop
+        ListenerDispatch::Dropped
     }
-}
-
-fn route_buffered_frame(
-    frame: &SseFrame,
-    parsed: Option<&OutgoingHttpMessage>,
-    request_id: &RequestId,
-    request_session_id: Option<&acp_nats::AcpSessionId>,
-    events: &mut Vec<SseFrame>,
-    get_listeners: &mut HashMap<acp_nats::AcpSessionId, Vec<SseSender>>,
-) -> BufferedFrameOutcome {
-    if parsed.and_then(|message| message.id.as_ref()) == Some(request_id) {
-        events.push(frame.clone());
-        return BufferedFrameOutcome::Finalize {
-            session_id: parsed.and_then(OutgoingHttpMessage::result_session_id),
-        };
-    }
-
-    if let Some(frame_session_id) = parsed.and_then(OutgoingHttpMessage::params_session_id) {
-        if request_session_id == Some(&frame_session_id) {
-            events.push(frame.clone());
-            return BufferedFrameOutcome::Buffered;
-        }
-
-        match dispatch_to_get_listeners(frame, &frame_session_id, get_listeners) {
-            ListenerDispatch::Delivered | ListenerDispatch::Dropped => {
-                return BufferedFrameOutcome::Routed;
-            }
-            ListenerDispatch::Missing => {
-                return BufferedFrameOutcome::Routed;
-            }
-        }
-    }
-
-    events.push(frame.clone());
-    BufferedFrameOutcome::Buffered
 }
 
 fn activate_attached_session_on_success(
@@ -623,6 +486,22 @@ fn activate_attached_session_on_success(
     }
 }
 
+fn pending_response_context(
+    message: &IncomingHttpMessage,
+    session_id: acp_nats::AcpSessionId,
+) -> Option<PendingResponseContext> {
+    if message.creates_session() {
+        return None;
+    }
+
+    let attaches_session = message.attaches_session();
+    Some(PendingResponseContext {
+        session_id,
+        activate_session_on_success: attaches_session,
+        inject_session_id: attaches_session,
+    })
+}
+
 fn targets_unknown_session(
     message: &IncomingHttpMessage,
     session_id: Option<&acp_nats::AcpSessionId>,
@@ -638,6 +517,78 @@ fn require_initialized(initialized: bool) -> Result<(), HttpTransportError> {
         Err(HttpTransportError::bad_request(
             "ACP connection has not been initialized",
         ))
+    }
+}
+
+fn inject_result_value(raw: &str, field: &str, value: Value) -> Result<String, HttpTransportError> {
+    let mut json: Value = serde_json::from_str(raw)
+        .map_err(|error| HttpTransportError::internal_with("invalid outbound JSON-RPC payload", error))?;
+
+    let Some(object) = json.as_object_mut() else {
+        return Ok(raw.to_string());
+    };
+
+    if object.contains_key("error") {
+        return Ok(raw.to_string());
+    }
+
+    let result = object
+        .entry("result")
+        .or_insert_with(|| Value::Object(serde_json::Map::new()));
+
+    match result {
+        Value::Object(map) => {
+            map.entry(field.to_string()).or_insert(value);
+        }
+        Value::Null => {
+            *result = Value::Object(serde_json::Map::from_iter([(field.to_string(), value)]));
+        }
+        _ => return Ok(raw.to_string()),
+    }
+
+    serde_json::to_string(&json)
+        .map_err(|error| HttpTransportError::internal_with("invalid outbound JSON-RPC payload", error))
+}
+
+fn inject_connection_id_into_initialize_result(
+    raw: &str,
+    connection_id: &AcpConnectionId,
+) -> Result<String, HttpTransportError> {
+    inject_result_value(raw, "connectionId", Value::String(connection_id.to_string()))
+}
+
+fn inject_session_id_into_response_result(
+    raw: &str,
+    session_id: &acp_nats::AcpSessionId,
+) -> Result<String, HttpTransportError> {
+    inject_result_value(raw, "sessionId", Value::String(session_id.as_str().to_string()))
+}
+
+fn inject_session_id_into_response_result_or_preserve(
+    outbound: String,
+    session_id: &acp_nats::AcpSessionId,
+    connection_id: &AcpConnectionId,
+) -> String {
+    match inject_session_id_into_response_result(&outbound, session_id) {
+        Ok(updated_outbound) => updated_outbound,
+        Err(error) => {
+            error!(%connection_id, error = %error, "Failed to augment outbound session response");
+            outbound
+        }
+    }
+}
+
+fn undelivered_response_outcome(
+    parsed: Option<&OutgoingHttpMessage>,
+    dispatch_outcome: ListenerDispatch,
+) -> Option<ListenerDispatch> {
+    if !parsed.is_some_and(OutgoingHttpMessage::is_response) {
+        return None;
+    }
+
+    match dispatch_outcome {
+        ListenerDispatch::Missing | ListenerDispatch::Dropped => Some(dispatch_outcome),
+        ListenerDispatch::Delivered => None,
     }
 }
 
@@ -736,23 +687,11 @@ async fn http_post(headers: HeaderMap, state: AppState, body: String) -> Result<
         .map_err(|error| HttpTransportError::internal_with("connection manager dropped the request", error))??
     {
         HttpPostOutcome::Accepted => Ok(StatusCode::ACCEPTED.into_response()),
-        HttpPostOutcome::Live {
+        HttpPostOutcome::Json {
             connection_id,
             protocol_version,
-            session_id,
-            stream,
-        } => Ok(build_sse_response(connection_id, protocol_version, session_id, stream)),
-        HttpPostOutcome::Buffered {
-            connection_id,
-            protocol_version,
-            session_id,
-            events,
-        } => Ok(build_buffered_sse_response(
-            connection_id,
-            protocol_version,
-            session_id,
-            events,
-        )),
+            body,
+        } => Ok(build_json_response(connection_id, protocol_version, body)),
     }
 }
 
@@ -762,15 +701,12 @@ async fn http_get(headers: HeaderMap, state: AppState) -> Result<Response, HttpT
     let connection_id = parse_connection_id_header(&headers)?
         .ok_or(HttpTransportError::bad_request("missing Acp-Connection-Id header"))?;
     let protocol_version = parse_protocol_version_header(&headers)?;
-    let session_id =
-        parse_session_id_header(&headers)?.ok_or(HttpTransportError::bad_request("missing Acp-Session-Id header"))?;
 
     let (response_tx, response_rx) = oneshot::channel();
     state
         .manager_tx
         .send(ManagerRequest::HttpGet {
             connection_id: connection_id.clone(),
-            session_id: session_id.clone(),
             protocol_version,
             response: response_tx,
         })
@@ -791,7 +727,7 @@ async fn http_get(headers: HeaderMap, state: AppState) -> Result<Response, HttpT
         response.headers_mut(),
         &connection_id,
         outcome.protocol_version.as_ref(),
-        Some(&session_id),
+        None,
     );
     response
         .headers_mut()
@@ -831,20 +767,6 @@ fn validate_post_headers(headers: &HeaderMap) -> Result<(), HttpTransportError> 
                 "Content-Type must be application/json",
             ));
         }
-    }
-
-    let accept =
-        headers
-            .get(ACCEPT)
-            .and_then(|value| value.to_str().ok())
-            .ok_or(HttpTransportError::not_acceptable(
-                "Accept must include application/json and text/event-stream",
-            ))?;
-
-    if !accept_contains(accept, "application/json") || !accept_contains(accept, "text/event-stream") {
-        return Err(HttpTransportError::not_acceptable(
-            "Accept must include application/json and text/event-stream",
-        ));
     }
 
     Ok(())
@@ -1023,54 +945,16 @@ fn is_websocket_request(headers: &HeaderMap) -> bool {
         .unwrap_or(false)
 }
 
-fn build_sse_response(
+fn build_json_response(
     connection_id: AcpConnectionId,
     protocol_version: Option<ProtocolVersion>,
-    session_id: Option<acp_nats::AcpSessionId>,
-    stream: SseReceiver,
+    body: String,
 ) -> Response {
-    let primed_stream = stream::once(async { Ok::<Event, Infallible>(SseFrame::prime().into_event()) }).chain(
-        stream::unfold(stream, |mut stream| async move {
-            stream
-                .recv()
-                .await
-                .map(|item| (Ok::<Event, Infallible>(item.into_event()), stream))
-        }),
-    );
-    let mut response = Sse::new(primed_stream).into_response();
-    set_transport_headers(
-        response.headers_mut(),
-        &connection_id,
-        protocol_version.as_ref(),
-        session_id.as_ref(),
-    );
+    let mut response = (StatusCode::OK, body).into_response();
     response
         .headers_mut()
-        .insert(X_ACCEL_BUFFERING_HEADER, HeaderValue::from_static("no"));
-    response
-}
-
-fn build_buffered_sse_response(
-    connection_id: AcpConnectionId,
-    protocol_version: Option<ProtocolVersion>,
-    session_id: Option<acp_nats::AcpSessionId>,
-    events: Vec<SseFrame>,
-) -> Response {
-    let stream = stream::iter(
-        std::iter::once(SseFrame::prime())
-            .chain(events)
-            .map(|item| Ok::<Event, Infallible>(item.into_event())),
-    );
-    let mut response = Sse::new(stream).into_response();
-    set_transport_headers(
-        response.headers_mut(),
-        &connection_id,
-        protocol_version.as_ref(),
-        session_id.as_ref(),
-    );
-    response
-        .headers_mut()
-        .insert(X_ACCEL_BUFFERING_HEADER, HeaderValue::from_static("no"));
+        .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+    set_transport_headers(response.headers_mut(), &connection_id, protocol_version.as_ref(), None);
     response
 }
 
@@ -1199,10 +1083,11 @@ pub async fn run_http_connection<N, J>(
     let mut io_task = tokio::task::spawn_local(io_task);
 
     let mut pending_request: Option<PendingRequest> = None;
+    let mut pending_response_sessions = HashMap::<RequestId, PendingResponseContext>::new();
     let mut initialized = false;
     let mut protocol_version: Option<ProtocolVersion> = None;
     let mut sessions = HashSet::<acp_nats::AcpSessionId>::new();
-    let mut get_listeners = HashMap::<acp_nats::AcpSessionId, Vec<SseSender>>::new();
+    let mut get_listeners = Vec::<SseSender>::new();
 
     info!(%connection_id, "HTTP connection established");
 
@@ -1238,22 +1123,22 @@ pub async fn run_http_connection<N, J>(
                         }
 
                         if message.is_request() {
-                            if pending_request.is_some() {
-                                let _ = response.send(Err(HttpTransportError::conflict(
-                                    "only one in-flight HTTP request is supported per ACP connection",
-                                )));
-                                continue;
-                            }
+                            let request_id = message.id.clone().expect("request must have id");
 
-                            if message.creates_session() {
-                                pending_request = Some(PendingRequest::Buffered {
-                                    request_id: message.id.clone().expect("request must have id"),
-                                    request_session_id: session_id.clone(),
-                                    events: Vec::new(),
+                            if message.is_initialize() {
+                                if initialized || pending_request.is_some() {
+                                    let _ = response.send(Err(HttpTransportError::conflict(
+                                        "initialize request is already in flight",
+                                    )));
+                                    continue;
+                                }
+
+                                pending_request = Some(PendingRequest::Initialize {
+                                    request_id: request_id.clone(),
                                     response,
                                 });
                                 if input_tx.try_send(message.raw).is_err()
-                                    && let Some(PendingRequest::Buffered { response, .. }) =
+                                    && let Some(PendingRequest::Initialize { response, .. }) =
                                         pending_request.take()
                                 {
                                     let _ = response.send(Err(HttpTransportError::internal(
@@ -1263,31 +1148,20 @@ pub async fn run_http_connection<N, J>(
                                 continue;
                             }
 
-                            let (stream_tx, stream_rx) = mpsc::channel(HTTP_CHANNEL_CAPACITY);
-                            pending_request = Some(PendingRequest::Live {
-                                request_id: message.id.clone().expect("request must have id"),
-                                initialize_request: message.is_initialize(),
-                                activate_session_on_success: if message.attaches_session() {
-                                    session_id.clone()
-                                } else {
-                                    None
-                                },
-                                session_id: session_id.clone(),
-                                sender: stream_tx,
-                            });
+                            if let Some(session_id) = session_id.clone()
+                                && let Some(context) = pending_response_context(&message, session_id)
+                            {
+                                pending_response_sessions.insert(request_id.clone(), context);
+                            }
+
                             if input_tx.try_send(message.raw).is_err() {
-                                pending_request = None;
+                                pending_response_sessions.remove(&request_id);
                                 let _ = response.send(Err(HttpTransportError::internal(
                                     "ACP runtime input queue is full",
                                 )));
                                 continue;
                             }
-                            let _ = response.send(Ok(HttpPostOutcome::Live {
-                                connection_id: connection_id.clone(),
-                                protocol_version: protocol_version.clone(),
-                                session_id,
-                                stream: stream_rx,
-                            }));
+                            let _ = response.send(Ok(HttpPostOutcome::Accepted));
                             continue;
                         }
 
@@ -1301,7 +1175,6 @@ pub async fn run_http_connection<N, J>(
                         let _ = response.send(Ok(HttpPostOutcome::Accepted));
                     }
                     HttpConnectionCommand::AttachListener {
-                        session_id,
                         protocol_version: header_protocol_version,
                         response,
                     } => {
@@ -1315,14 +1188,8 @@ pub async fn run_http_connection<N, J>(
                             continue;
                         }
 
-                        if !sessions.contains(&session_id) {
-                            let _ = response
-                                .send(Err(HttpTransportError::not_found("unknown ACP session")));
-                            continue;
-                        }
-
                         let (stream_tx, stream_rx) = mpsc::channel(HTTP_CHANNEL_CAPACITY);
-                        get_listeners.entry(session_id).or_default().push(stream_tx);
+                        get_listeners.push(stream_tx);
                         let _ = response.send(Ok(HttpGetOutcome {
                             protocol_version: protocol_version.clone(),
                             stream: stream_rx,
@@ -1350,91 +1217,81 @@ pub async fn run_http_connection<N, J>(
                     break;
                 };
 
-                let frame = SseFrame::json(outbound.clone());
                 let parsed = OutgoingHttpMessage::parse(&outbound);
 
-                if let Some(pending) = pending_request.as_mut() {
-                    match pending {
-                        PendingRequest::Live {
-                            request_id,
-                            initialize_request,
-                            activate_session_on_success,
-                            session_id,
-                            sender,
-                        } => {
-                            if parsed.as_ref().and_then(|message| message.id.as_ref()) == Some(request_id) {
-                                if *initialize_request {
-                                    protocol_version = parsed
-                                        .as_ref()
-                                        .and_then(OutgoingHttpMessage::result_protocol_version);
-                                    initialized = protocol_version.is_some();
-                                }
+                if let Some(PendingRequest::Initialize { request_id, .. }) = pending_request.as_ref()
+                    && parsed.as_ref().and_then(|message| message.id.as_ref()) == Some(request_id)
+                {
+                    protocol_version = parsed
+                        .as_ref()
+                        .and_then(OutgoingHttpMessage::result_protocol_version);
+                    initialized = parsed.as_ref().is_some_and(OutgoingHttpMessage::is_success_response)
+                        && protocol_version.is_some();
 
-                                activate_attached_session_on_success(
-                                    &mut sessions,
-                                    request_id,
-                                    activate_session_on_success.as_ref(),
-                                    parsed.as_ref(),
-                                );
-                            }
-
-                            match route_live_frame(
-                                &frame,
-                                parsed.as_ref(),
-                                request_id,
-                                session_id.as_ref(),
-                                sender,
-                                &mut get_listeners,
-                            ) {
-                                LiveFrameOutcome::Keep => {}
-                                LiveFrameOutcome::Clear | LiveFrameOutcome::Drop => {
-                                    pending_request = None;
-                                }
+                    let response_body = match inject_connection_id_into_initialize_result(&outbound, &connection_id) {
+                        Ok(response_body) => response_body,
+                        Err(error) => {
+                            if let Some(PendingRequest::Initialize { response, .. }) = pending_request.take() {
+                                let _ = response.send(Err(error));
                             }
                             continue;
                         }
-                        PendingRequest::Buffered {
-                            request_id,
-                            request_session_id,
-                            events,
-                            ..
-                        } => {
-                            match route_buffered_frame(
-                                &frame,
-                                parsed.as_ref(),
-                                request_id,
-                                request_session_id.as_ref(),
-                                events,
-                                &mut get_listeners,
-                            ) {
-                                BufferedFrameOutcome::Buffered | BufferedFrameOutcome::Routed => {}
-                                BufferedFrameOutcome::Finalize { session_id } => {
-                                    if let Some(session_id) = session_id.clone() {
-                                        sessions.insert(session_id);
-                                    }
-                                    let events = std::mem::take(events);
-                                    if let Some(PendingRequest::Buffered { response, .. }) =
-                                        pending_request.take()
-                                    {
-                                        let _ = response.send(Ok(HttpPostOutcome::Buffered {
-                                            connection_id: connection_id.clone(),
-                                            protocol_version: protocol_version.clone(),
-                                            session_id,
-                                            events,
-                                        }));
-                                    }
-                                }
-                            }
-                            continue;
-                        }
+                    };
+
+                    if let Some(PendingRequest::Initialize { response, .. }) = pending_request.take() {
+                        let _ = response.send(Ok(HttpPostOutcome::Json {
+                            connection_id: connection_id.clone(),
+                            protocol_version: protocol_version.clone(),
+                            body: response_body,
+                        }));
+                    }
+                    continue;
+                }
+
+                let mut outbound = outbound;
+
+                if let Some(request_id) = parsed.as_ref().and_then(|message| message.id.as_ref())
+                    && let Some(context) = pending_response_sessions.remove(request_id)
+                {
+                    activate_attached_session_on_success(
+                        &mut sessions,
+                        request_id,
+                        context.activate_session_on_success.then_some(&context.session_id),
+                        parsed.as_ref(),
+                    );
+
+                    if context.inject_session_id
+                        && parsed.as_ref().is_some_and(OutgoingHttpMessage::is_success_response)
+                        && parsed.as_ref().and_then(OutgoingHttpMessage::result_session_id).is_none()
+                    {
+                        outbound = inject_session_id_into_response_result_or_preserve(
+                            outbound,
+                            &context.session_id,
+                            &connection_id,
+                        );
                     }
                 }
 
-                let Some(session_id) = parsed.and_then(|message| message.params_session_id()) else {
-                    continue;
-                };
+                let frame = SseFrame::json(outbound.clone());
+                let parsed = OutgoingHttpMessage::parse(&outbound);
 
-                let _ = dispatch_to_get_listeners(&frame, &session_id, &mut get_listeners);
+                if let Some(session_id) = parsed.as_ref().and_then(OutgoingHttpMessage::result_session_id) {
+                    sessions.insert(session_id);
+                }
+
+                if let Some(dispatch_outcome) =
+                    undelivered_response_outcome(parsed.as_ref(), dispatch_to_get_listeners(&frame, &mut get_listeners))
+                {
+                    match dispatch_outcome {
+                        ListenerDispatch::Missing => {
+                            warn!(%connection_id, "Dropping JSON-RPC response: no active GET listener");
+                        }
+                        ListenerDispatch::Dropped => {
+                            warn!(%connection_id, "Dropping JSON-RPC response: GET listeners closed or stalled");
+                        }
+                        ListenerDispatch::Delivered => {}
+                    }
+                }
             }
             result = &mut client_task => {
                 match result {
@@ -1458,7 +1315,7 @@ pub async fn run_http_connection<N, J>(
         }
     }
 
-    if let Some(PendingRequest::Buffered { response, .. }) = pending_request.take() {
+    if let Some(PendingRequest::Initialize { response, .. }) = pending_request.take() {
         let _ = response.send(Err(HttpTransportError::internal(
             "HTTP connection closed before the request completed",
         )));
@@ -1574,7 +1431,6 @@ pub async fn process_manager_request<N, J>(
         }
         ManagerRequest::HttpGet {
             connection_id,
-            session_id,
             protocol_version,
             response,
         } => {
@@ -1586,7 +1442,6 @@ pub async fn process_manager_request<N, J>(
             if handle
                 .command_tx
                 .send(HttpConnectionCommand::AttachListener {
-                    session_id,
                     protocol_version,
                     response,
                 })
@@ -1694,13 +1549,6 @@ mod tests {
             .filter(|json| !json.is_empty())
             .map(|json| serde_json::from_str(json).unwrap())
             .collect()
-    }
-
-    fn frame_json(frame: &SseFrame) -> &str {
-        match frame {
-            SseFrame::Json { json, .. } => json,
-            SseFrame::Empty { .. } => panic!("expected JSON SSE frame"),
-        }
     }
 
     fn post_headers() -> HeaderMap {
@@ -1870,24 +1718,28 @@ mod tests {
 
     #[test]
     fn outgoing_http_message_extracts_session_ids() {
-        let outbound =
-            OutgoingHttpMessage::parse(r#"{"jsonrpc":"2.0","id":1,"params":{"sessionId":"session-1"}}"#).unwrap();
-        assert_eq!(outbound.params_session_id(), Some(session_id()));
+        let request =
+            OutgoingHttpMessage::parse(r#"{"jsonrpc":"2.0","id":1,"method":"prompt","params":{"text":"hi"}}"#).unwrap();
+        assert!(!request.is_response());
 
         let response =
             OutgoingHttpMessage::parse(r#"{"jsonrpc":"2.0","id":2,"result":{"sessionId":"session-1"}}"#).unwrap();
+        assert!(response.is_response());
         assert_eq!(response.result_session_id(), Some(session_id()));
         assert!(response.is_success_response());
 
         let null_result = OutgoingHttpMessage::parse(r#"{"jsonrpc":"2.0","id":3,"result":null}"#).unwrap();
+        assert!(null_result.is_response());
         assert_eq!(null_result.result_session_id(), None);
         assert!(null_result.is_success_response());
 
         let empty_success = OutgoingHttpMessage::parse(r#"{"jsonrpc":"2.0","id":4}"#).unwrap();
+        assert!(empty_success.is_response());
         assert!(empty_success.is_success_response());
 
         let error_response =
             OutgoingHttpMessage::parse(r#"{"jsonrpc":"2.0","id":5,"error":{"code":-32000,"message":"boom"}}"#).unwrap();
+        assert!(error_response.is_response());
         assert!(!error_response.is_success_response());
     }
 
@@ -1916,6 +1768,32 @@ mod tests {
         activate_attached_session_on_success(&mut sessions, &request_id, Some(&session_id), Some(&error_response));
 
         assert!(!sessions.contains(&session_id));
+    }
+
+    #[test]
+    fn pending_response_context_only_injects_session_id_for_attach_requests() {
+        let session_id = session_id();
+        let attach = IncomingHttpMessage::parse(
+            r#"{"jsonrpc":"2.0","id":2,"method":"session/load","params":{"sessionId":"session-1","cwd":"."}}"#
+                .to_string(),
+        )
+        .unwrap();
+        let attach_context = pending_response_context(&attach, session_id.clone()).unwrap();
+        assert!(attach_context.activate_session_on_success);
+        assert!(attach_context.inject_session_id);
+
+        let authenticate =
+            IncomingHttpMessage::parse(r#"{"jsonrpc":"2.0","id":3,"method":"authenticate"}"#.to_string()).unwrap();
+        let authenticate_context = pending_response_context(&authenticate, session_id.clone()).unwrap();
+        assert!(!authenticate_context.activate_session_on_success);
+        assert!(!authenticate_context.inject_session_id);
+
+        let create = IncomingHttpMessage::parse(
+            r#"{"jsonrpc":"2.0","id":4,"method":"session/fork","params":{"sessionId":"session-1","cwd":"."}}"#
+                .to_string(),
+        )
+        .unwrap();
+        assert!(pending_response_context(&create, session_id).is_none());
     }
 
     #[test]
@@ -1952,171 +1830,21 @@ mod tests {
     }
 
     #[test]
-    fn route_live_frame_keeps_same_session_notifications_on_post_stream() {
-        let frame = SseFrame::json(
-            r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-1"}}"#.to_string(),
-        );
-        let parsed = OutgoingHttpMessage::parse(frame_json(&frame)).unwrap();
-        let request_id = RequestId::Number(1);
-        let request_session_id = session_id();
-        let (live_tx, mut live_rx) = mpsc::channel(HTTP_CHANNEL_CAPACITY);
-        let (get_tx, mut get_rx) = mpsc::channel(HTTP_CHANNEL_CAPACITY);
-        let mut get_listeners = HashMap::new();
-        get_listeners.insert(request_session_id.clone(), vec![get_tx]);
-
-        let outcome = route_live_frame(
-            &frame,
-            Some(&parsed),
-            &request_id,
-            Some(&request_session_id),
-            &live_tx,
-            &mut get_listeners,
-        );
-
-        assert!(matches!(outcome, LiveFrameOutcome::Keep));
-        match live_rx.try_recv().unwrap() {
-            SseFrame::Json { json, .. } => assert!(json.contains(r#""sessionId":"session-1""#)),
-            SseFrame::Empty { .. } => panic!("expected JSON SSE frame"),
-        }
-        assert!(matches!(
-            get_rx.try_recv(),
-            Err(tokio::sync::mpsc::error::TryRecvError::Empty)
-        ));
-    }
-
-    #[test]
-    fn route_live_frame_sends_other_session_notifications_to_get_listeners() {
-        let frame = SseFrame::json(
-            r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-2"}}"#.to_string(),
-        );
-        let parsed = OutgoingHttpMessage::parse(frame_json(&frame)).unwrap();
-        let request_id = RequestId::Number(1);
-        let request_session_id = session_id();
-        let other_session_id = acp_nats::AcpSessionId::new("session-2").unwrap();
-        let (live_tx, mut live_rx) = mpsc::channel(HTTP_CHANNEL_CAPACITY);
-        let (get_tx, mut get_rx) = mpsc::channel(HTTP_CHANNEL_CAPACITY);
-        let mut get_listeners = HashMap::new();
-        get_listeners.insert(other_session_id, vec![get_tx]);
-
-        let outcome = route_live_frame(
-            &frame,
-            Some(&parsed),
-            &request_id,
-            Some(&request_session_id),
-            &live_tx,
-            &mut get_listeners,
-        );
-
-        assert!(matches!(outcome, LiveFrameOutcome::Keep));
-        assert!(matches!(
-            live_rx.try_recv(),
-            Err(tokio::sync::mpsc::error::TryRecvError::Empty)
-        ));
-        match get_rx.try_recv().unwrap() {
-            SseFrame::Json { json, .. } => assert!(json.contains(r#""sessionId":"session-2""#)),
-            SseFrame::Empty { .. } => panic!("expected JSON SSE frame"),
-        }
-    }
-
-    #[test]
-    fn route_buffered_frame_sends_other_session_notifications_to_get_listeners() {
-        let frame = SseFrame::json(
-            r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-2"}}"#.to_string(),
-        );
-        let parsed = OutgoingHttpMessage::parse(frame_json(&frame)).unwrap();
-        let request_id = RequestId::Number(1);
-        let request_session_id = session_id();
-        let other_session_id = acp_nats::AcpSessionId::new("session-2").unwrap();
-        let (get_tx, mut get_rx) = mpsc::channel(HTTP_CHANNEL_CAPACITY);
-        let mut events = Vec::new();
-        let mut get_listeners = HashMap::new();
-        get_listeners.insert(other_session_id, vec![get_tx]);
-
-        let outcome = route_buffered_frame(
-            &frame,
-            Some(&parsed),
-            &request_id,
-            Some(&request_session_id),
-            &mut events,
-            &mut get_listeners,
-        );
-
-        assert!(matches!(outcome, BufferedFrameOutcome::Routed));
-        assert!(events.is_empty());
-        match get_rx.try_recv().unwrap() {
-            SseFrame::Json { json, .. } => assert!(json.contains(r#""sessionId":"session-2""#)),
-            SseFrame::Empty { .. } => panic!("expected JSON SSE frame"),
-        }
-    }
-
-    #[test]
-    fn route_live_frame_drops_other_session_notifications_without_listener() {
-        let frame = SseFrame::json(
-            r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-2"}}"#.to_string(),
-        );
-        let parsed = OutgoingHttpMessage::parse(frame_json(&frame)).unwrap();
-        let request_id = RequestId::Number(1);
-        let request_session_id = session_id();
-        let (live_tx, mut live_rx) = mpsc::channel(HTTP_CHANNEL_CAPACITY);
-        let mut get_listeners = HashMap::new();
-
-        let outcome = route_live_frame(
-            &frame,
-            Some(&parsed),
-            &request_id,
-            Some(&request_session_id),
-            &live_tx,
-            &mut get_listeners,
-        );
-
-        assert!(matches!(outcome, LiveFrameOutcome::Keep));
-        assert!(matches!(
-            live_rx.try_recv(),
-            Err(tokio::sync::mpsc::error::TryRecvError::Empty)
-        ));
-    }
-
-    #[test]
-    fn route_buffered_frame_drops_other_session_notifications_without_listener() {
-        let frame = SseFrame::json(
-            r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-2"}}"#.to_string(),
-        );
-        let parsed = OutgoingHttpMessage::parse(frame_json(&frame)).unwrap();
-        let request_id = RequestId::Number(1);
-        let request_session_id = session_id();
-        let mut events = Vec::new();
-        let mut get_listeners = HashMap::new();
-
-        let outcome = route_buffered_frame(
-            &frame,
-            Some(&parsed),
-            &request_id,
-            Some(&request_session_id),
-            &mut events,
-            &mut get_listeners,
-        );
-
-        assert!(matches!(outcome, BufferedFrameOutcome::Routed));
-        assert!(events.is_empty());
-    }
-
-    #[test]
     fn dispatch_to_get_listeners_drops_full_listener() {
-        let session_id = session_id();
-        let mut get_listeners = HashMap::new();
+        let mut get_listeners = Vec::new();
         let (listener_tx, mut listener_rx) = mpsc::channel(1);
         listener_tx
             .try_send(SseFrame::json(
                 r#"{"jsonrpc":"2.0","method":"session/update"}"#.to_string(),
             ))
             .unwrap();
-        get_listeners.insert(session_id.clone(), vec![listener_tx]);
+        get_listeners.push(listener_tx);
 
         let frame = SseFrame::json(r#"{"jsonrpc":"2.0","method":"session/update"}"#.to_string());
-        let outcome = dispatch_to_get_listeners(&frame, &session_id, &mut get_listeners);
+        let outcome = dispatch_to_get_listeners(&frame, &mut get_listeners);
 
         assert!(matches!(outcome, ListenerDispatch::Dropped));
-        assert!(!get_listeners.contains_key(&session_id));
+        assert!(get_listeners.is_empty());
         assert!(matches!(listener_rx.try_recv(), Ok(SseFrame::Json { .. })));
         assert!(matches!(
             listener_rx.try_recv(),
@@ -2126,16 +1854,16 @@ mod tests {
 
     #[test]
     fn dispatch_to_get_listeners_broadcasts_each_message_to_all_streams() {
-        let session_id = session_id();
-        let mut get_listeners = HashMap::new();
+        let mut get_listeners = Vec::new();
         let (first_tx, mut first_rx) = mpsc::channel(HTTP_CHANNEL_CAPACITY);
         let (second_tx, mut second_rx) = mpsc::channel(HTTP_CHANNEL_CAPACITY);
-        get_listeners.insert(session_id.clone(), vec![first_tx, second_tx]);
+        get_listeners.push(first_tx);
+        get_listeners.push(second_tx);
 
         let frame = SseFrame::json(
             r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-1"}}"#.to_string(),
         );
-        let outcome = dispatch_to_get_listeners(&frame, &session_id, &mut get_listeners);
+        let outcome = dispatch_to_get_listeners(&frame, &mut get_listeners);
 
         assert!(matches!(outcome, ListenerDispatch::Delivered));
         assert!(matches!(first_rx.try_recv(), Ok(SseFrame::Json { .. })));
@@ -2144,19 +1872,80 @@ mod tests {
 
     #[test]
     fn dispatch_to_get_listeners_removes_closed_listener() {
-        let session_id = session_id();
-        let mut get_listeners = HashMap::new();
+        let mut get_listeners = Vec::new();
         let (listener_tx, listener_rx) = mpsc::channel(HTTP_CHANNEL_CAPACITY);
         drop(listener_rx);
-        get_listeners.insert(session_id.clone(), vec![listener_tx]);
+        get_listeners.push(listener_tx);
 
         let frame = SseFrame::json(
             r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-1"}}"#.to_string(),
         );
-        let outcome = dispatch_to_get_listeners(&frame, &session_id, &mut get_listeners);
+        let outcome = dispatch_to_get_listeners(&frame, &mut get_listeners);
 
         assert!(matches!(outcome, ListenerDispatch::Dropped));
-        assert!(!get_listeners.contains_key(&session_id));
+        assert!(get_listeners.is_empty());
+    }
+
+    #[test]
+    fn inject_connection_id_into_initialize_result_preserves_existing_payload() {
+        let connection_id = AcpConnectionId::default();
+        let updated = inject_connection_id_into_initialize_result(
+            r#"{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":0}}"#,
+            &connection_id,
+        )
+        .unwrap();
+
+        let json: Value = serde_json::from_str(&updated).unwrap();
+        assert_eq!(json["result"]["protocolVersion"], 0);
+        assert_eq!(json["result"]["connectionId"], connection_id.to_string());
+    }
+
+    #[test]
+    fn inject_session_id_into_response_result_adds_session_id_to_null_result() {
+        let session_id = session_id();
+        let updated =
+            inject_session_id_into_response_result(r#"{"jsonrpc":"2.0","id":2,"result":null}"#, &session_id).unwrap();
+
+        let json: Value = serde_json::from_str(&updated).unwrap();
+        assert_eq!(json["result"]["sessionId"], session_id.as_str());
+    }
+
+    #[test]
+    fn inject_session_id_into_response_result_or_preserve_keeps_original_on_error() {
+        let connection_id = AcpConnectionId::default();
+        let session_id = session_id();
+        let outbound = "{".to_string();
+
+        let updated = inject_session_id_into_response_result_or_preserve(outbound.clone(), &session_id, &connection_id);
+
+        assert_eq!(updated, outbound);
+    }
+
+    #[test]
+    fn undelivered_response_outcome_only_flags_missing_or_dropped_responses() {
+        let response = OutgoingHttpMessage::parse(r#"{"jsonrpc":"2.0","id":2,"result":null}"#).unwrap();
+        let notification = OutgoingHttpMessage::parse(
+            r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-1"}}"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            undelivered_response_outcome(Some(&response), ListenerDispatch::Missing),
+            Some(ListenerDispatch::Missing)
+        );
+        assert_eq!(
+            undelivered_response_outcome(Some(&response), ListenerDispatch::Dropped),
+            Some(ListenerDispatch::Dropped)
+        );
+        assert_eq!(
+            undelivered_response_outcome(Some(&response), ListenerDispatch::Delivered),
+            None
+        );
+        assert_eq!(
+            undelivered_response_outcome(Some(&notification), ListenerDispatch::Missing),
+            None
+        );
+        assert_eq!(undelivered_response_outcome(None, ListenerDispatch::Missing), None);
     }
 
     #[test]
@@ -2181,27 +1970,16 @@ mod tests {
             })
         ));
 
-        let mut bad_accept = HeaderMap::new();
-        bad_accept.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-        bad_accept.insert(ACCEPT, HeaderValue::from_static("application/json"));
-        assert!(matches!(
-            validate_post_headers(&bad_accept),
-            Err(HttpTransportError::NotAcceptable {
-                message: "Accept must include application/json and text/event-stream",
-                source: None,
-            })
-        ));
-
         let valid_get = get_headers();
         assert!(validate_get_headers(&valid_get).is_ok());
 
-        let mut valid_post_with_q = HeaderMap::new();
-        valid_post_with_q.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-        valid_post_with_q.insert(
+        let mut valid_post_with_accept = HeaderMap::new();
+        valid_post_with_accept.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        valid_post_with_accept.insert(
             ACCEPT,
             HeaderValue::from_static("application/json;q=0.9, text/event-stream"),
         );
-        assert!(validate_post_headers(&valid_post_with_q).is_ok());
+        assert!(validate_post_headers(&valid_post_with_accept).is_ok());
 
         let mut valid_get_with_q = HeaderMap::new();
         valid_get_with_q.insert(ACCEPT, HeaderValue::from_static("text/event-stream; q=0.5"));
@@ -2498,51 +2276,44 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn http_post_returns_buffered_sse_with_session_headers() {
+    async fn http_post_returns_json_initialize_response_with_connection_header() {
         let (state, mut manager_rx) = test_state();
         let connection_id = AcpConnectionId::default();
-        let session_id = session_id();
-        let event = json!({
+        let body = json!({
             "jsonrpc": "2.0",
-            "id": 2,
-            "result": { "sessionId": session_id.as_str() }
+            "id": 1,
+            "result": {
+                "connectionId": connection_id.to_string(),
+                "protocolVersion": 0
+            }
         });
-        let expected_event = event.clone();
+        let expected_body = body.clone();
 
         let expected_connection_id = connection_id.clone();
-        let expected_session_id = session_id.clone();
         tokio::spawn(async move {
             match manager_rx.recv().await.unwrap() {
                 ManagerRequest::HttpPost {
-                    connection_id: Some(actual_connection_id),
+                    connection_id: None,
                     session_id: None,
                     message,
                     response,
                     ..
                 } => {
-                    assert_eq!(actual_connection_id, expected_connection_id.clone());
-                    assert!(message.creates_session());
-                    let _ = response.send(Ok(HttpPostOutcome::Buffered {
+                    assert!(message.is_initialize());
+                    let _ = response.send(Ok(HttpPostOutcome::Json {
                         connection_id: expected_connection_id,
                         protocol_version: Some(ProtocolVersion::V0),
-                        session_id: Some(expected_session_id),
-                        events: vec![SseFrame::json(event.to_string())],
+                        body: body.to_string(),
                     }));
                 }
                 _ => panic!("unexpected manager request"),
             }
         });
 
-        let mut headers = post_headers();
-        headers.insert(
-            ACP_CONNECTION_ID_HEADER,
-            HeaderValue::from_str(&connection_id.to_string()).unwrap(),
-        );
-
         let response = http_post(
-            headers,
+            post_headers(),
             state,
-            r#"{"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":".","mcpServers":[]}}"#.to_string(),
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#.to_string(),
         )
         .await
         .unwrap();
@@ -2553,34 +2324,27 @@ mod tests {
             HeaderValue::from_str(&connection_id.to_string()).unwrap()
         );
         assert_eq!(
-            response.headers().get(ACP_SESSION_ID_HEADER).unwrap(),
-            HeaderValue::from_str(session_id.as_str()).unwrap()
-        );
-        assert_eq!(
             response.headers().get(ACP_PROTOCOL_VERSION_HEADER).unwrap(),
             HeaderValue::from_static("0")
         );
-        assert_eq!(json_event_body(response).await, vec![expected_event]);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(serde_json::from_slice::<Value>(&bytes).unwrap(), expected_body);
     }
 
     #[tokio::test]
     async fn http_get_and_delete_round_trip_through_manager() {
         let (state, mut manager_rx) = test_state();
         let connection_id = AcpConnectionId::default();
-        let session_id = session_id();
         let expected_connection_id = connection_id.clone();
-        let expected_session_id = session_id.clone();
 
         tokio::spawn(async move {
             match manager_rx.recv().await.unwrap() {
                 ManagerRequest::HttpGet {
                     connection_id: actual_connection_id,
-                    session_id: actual_session_id,
                     protocol_version,
                     response,
                 } => {
                     assert_eq!(actual_connection_id, expected_connection_id.clone());
-                    assert_eq!(actual_session_id, expected_session_id);
                     assert_eq!(protocol_version, None);
                     let (stream_tx, stream_rx) = mpsc::channel(HTTP_CHANNEL_CAPACITY);
                     let _ = stream_tx.try_send(SseFrame::json(
@@ -2618,20 +2382,12 @@ mod tests {
             ACP_CONNECTION_ID_HEADER,
             HeaderValue::from_str(&connection_id.to_string()).unwrap(),
         );
-        headers.insert(
-            ACP_SESSION_ID_HEADER,
-            HeaderValue::from_str(session_id.as_str()).unwrap(),
-        );
 
         let response = http_get(headers, state.clone()).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(
             response.headers().get(ACP_CONNECTION_ID_HEADER).unwrap(),
             HeaderValue::from_str(&connection_id.to_string()).unwrap()
-        );
-        assert_eq!(
-            response.headers().get(ACP_SESSION_ID_HEADER).unwrap(),
-            HeaderValue::from_str(session_id.as_str()).unwrap()
         );
         assert_eq!(
             response.headers().get(ACP_PROTOCOL_VERSION_HEADER).unwrap(),
@@ -2754,7 +2510,6 @@ mod tests {
         process_manager_request(
             ManagerRequest::HttpGet {
                 connection_id: unknown_connection_id.clone(),
-                session_id: session_id(),
                 protocol_version: None,
                 response: get_response_tx,
             },
@@ -2817,7 +2572,6 @@ mod tests {
         process_manager_request(
             ManagerRequest::HttpGet {
                 connection_id: unknown_connection_id,
-                session_id: session_id(),
                 protocol_version: None,
                 response: response_tx,
             },
@@ -2856,7 +2610,7 @@ mod tests {
                 let mut http_connection_handles = Vec::new();
                 let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
-                let (response_tx, response_rx) = oneshot::channel();
+                let (response_tx, mut response_rx) = oneshot::channel();
                 let initialize = IncomingHttpMessage::parse(
                     r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#.to_string(),
                 )
@@ -2883,7 +2637,10 @@ mod tests {
                 assert_eq!(http_connections.len(), 1);
                 assert_eq!(http_connection_handles.len(), 1);
                 assert!(!http_connection_handles[0].is_finished());
-                assert!(matches!(response_rx.await.unwrap(), Ok(HttpPostOutcome::Live { .. })));
+                assert!(matches!(
+                    response_rx.try_recv(),
+                    Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+                ));
 
                 let _ = shutdown_tx.send(true);
                 tokio::time::timeout(std::time::Duration::from_secs(2), async {
