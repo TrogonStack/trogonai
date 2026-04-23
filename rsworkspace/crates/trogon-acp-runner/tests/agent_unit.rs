@@ -642,6 +642,47 @@ async fn prompt_no_steer_runner_receives_empty() {
 }
 
 #[tokio::test]
+async fn prompt_steer_subscribe_failure_prompt_still_succeeds() {
+    // When subscribe_steer returns None (e.g. NATS subscribe failed),
+    // TrogonAgent must continue the prompt with no steer (steer_rx = None)
+    // rather than returning an error.
+    let store = MemorySessionStore::new();
+    let notifier = MockSessionNotifier::new();
+    notifier.fail_steer_subscribe(); // next subscribe_steer → None
+    let runner = MockAgentRunner::new("claude-test");
+    let agent = TrogonAgent::new(
+        notifier,
+        store.clone(),
+        runner.clone(),
+        "acp",
+        "claude-test",
+        None,
+        Arc::new(RwLock::new(None::<GatewayConfig>)),
+    );
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let new_resp = agent
+                .new_session(NewSessionRequest::new("/cwd"))
+                .await
+                .unwrap();
+            let session_id = new_resp.session_id.to_string();
+
+            let result = agent.prompt(PromptRequest::new(session_id, vec![])).await;
+            assert!(
+                result.is_ok(),
+                "prompt must succeed even when subscribe_steer fails: {result:?}"
+            );
+            assert!(
+                runner.captured_steer().is_empty(),
+                "no steer messages must reach runner when subscription failed"
+            );
+        })
+        .await;
+}
+
+#[tokio::test]
 async fn prompt_text_delta_events_are_forwarded_without_error() {
     let runner = MockAgentRunner::new("claude-test").with_events(vec![
         AgentEvent::TextDelta {

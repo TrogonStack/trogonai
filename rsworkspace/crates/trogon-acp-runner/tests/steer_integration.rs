@@ -253,3 +253,76 @@ async fn nats_steer_is_session_scoped() {
         })
         .await;
 }
+
+/// A NATS publish with invalid UTF-8 bytes must not crash the agent.
+/// `from_utf8_lossy` replaces invalid bytes with U+FFFD — the runner receives
+/// the lossy-decoded string and the prompt completes successfully.
+#[tokio::test]
+async fn nats_steer_invalid_utf8_is_delivered_lossily() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+
+    let started = Arc::new(tokio::sync::Notify::new());
+    let runner = MockAgentRunner::new("claude-test")
+        .with_started_notify(started.clone())
+        .with_steer_wait();
+
+    let notifier = NatsSessionNotifier::new(nats.clone());
+    let store = MemorySessionStore::new();
+    let agent = TrogonAgent::new(
+        notifier,
+        store,
+        runner.clone(),
+        "acp",
+        "claude-test",
+        None,
+        Arc::new(RwLock::new(None::<GatewayConfig>)),
+    );
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async move {
+            let new_resp = agent
+                .new_session(NewSessionRequest::new("/cwd"))
+                .await
+                .unwrap();
+            let session_id = new_resp.session_id.to_string();
+            let steer_subject = format!("acp.session.{session_id}.agent.steer");
+
+            let prompt_handle = tokio::task::spawn_local({
+                let req = PromptRequest::new(session_id, vec![]);
+                async move { agent.prompt(req).await }
+            });
+
+            tokio::time::timeout(Duration::from_secs(5), started.notified())
+                .await
+                .expect("runner did not start within 5 s");
+
+            // Publish bytes that are not valid UTF-8: valid prefix + 0xFF byte.
+            let mut payload = b"valid prefix ".to_vec();
+            payload.push(0xFF);
+            nats.publish(steer_subject, payload.into()).await.unwrap();
+            nats.flush().await.unwrap();
+
+            let result = tokio::time::timeout(Duration::from_secs(5), prompt_handle)
+                .await
+                .expect("prompt did not complete within 5 s")
+                .expect("spawn_local did not panic");
+            assert!(result.is_ok(), "prompt must succeed with invalid UTF-8 steer: {result:?}");
+
+            let captured = runner.captured_steer();
+            assert_eq!(captured.len(), 1, "runner must receive exactly one steer message");
+            // from_utf8_lossy replaces 0xFF with U+FFFD (the replacement character).
+            assert!(
+                captured[0].contains("valid prefix"),
+                "valid UTF-8 prefix must be preserved; got: {:?}",
+                captured[0]
+            );
+            assert!(
+                captured[0].contains('\u{FFFD}'),
+                "invalid byte must become U+FFFD replacement character; got: {:?}",
+                captured[0]
+            );
+        })
+        .await;
+}
