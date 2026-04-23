@@ -48,7 +48,7 @@ use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use tracing::info;
 
 use acp_nats_agent::AgentSideNatsConnection;
-use trogon_acp_runner::{GatewayConfig, PermissionReq, SessionStore, TrogonAgent};
+use trogon_acp_runner::{GatewayConfig, NatsSessionNotifier, NatsSessionStore, PermissionReq, SessionStore, TrogonAgent};
 use trogon_agent_core::agent_loop::AgentLoop;
 use trogon_agent_core::tools::ToolContext;
 use trogon_nats::NatsConfig;
@@ -130,12 +130,12 @@ async fn main() -> anyhow::Result<()> {
 
     // ── Session store ─────────────────────────────────────────────────────────
 
-    let store = trogon_acp_runner::SessionStore::open(&js).await?;
+    let store = NatsSessionStore::open(&js).await?;
 
     // ── TrogonAgent (NATS subscriber + agent) ────────────────────────────────
 
     let ta = TrogonAgent::new(
-        nats.clone(),
+        NatsSessionNotifier::new(nats.clone()),
         store.clone(),
         agent_loop,
         acp_prefix.clone(),
@@ -175,7 +175,7 @@ async fn main() -> anyhow::Result<()> {
     let acp_agent = agent::TrogonAcpAgent::new(
         bridge,
         store.clone(),
-        nats.clone(),
+        NatsSessionNotifier::new(nats.clone()),
         acp_prefix,
         notification_tx.clone(),
         model.clone(),
@@ -264,10 +264,10 @@ fn allow_bypass() -> bool {
 /// - `ExitPlanMode`: presents mode-selection options instead of allow/deny.
 /// - `allow_always`: saves the tool name to `allowed_tools` in the session store.
 #[cfg_attr(coverage, coverage(off))]
-async fn handle_permission_request(
+async fn handle_permission_request<S: SessionStore>(
     conn: &AgentSideConnection,
     req: PermissionReq,
-    store: &SessionStore,
+    store: &S,
     notification_tx: &mpsc::Sender<SessionNotification>,
     default_model: &str,
 ) {
@@ -332,6 +332,8 @@ async fn handle_permission_request(
                     async_nats::Client,
                     trogon_std::time::SystemClock,
                     trogon_nats::jetstream::NatsJetStreamClient,
+                    NatsSessionStore,
+                    NatsSessionNotifier,
                 >::build_config_options(
                     &mode, current_model, allow_bypass()
                 );

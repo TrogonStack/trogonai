@@ -41,6 +41,10 @@ trogon-std        = { path = "../trogon-std" }
 [features]
 test-helpers = []
 
+[[test]]
+name = "agent_unit"
+required-features = ["test-helpers"]
+
 [dev-dependencies]
 futures                = "0.3"
 httpmock               = "0.7"

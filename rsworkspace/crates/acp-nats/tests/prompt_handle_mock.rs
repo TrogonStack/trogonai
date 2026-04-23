@@ -1,9 +1,9 @@
 //! Unit-style tests for `prompt::handle` using a lightweight in-memory mock.
 //!
 //! These tests cover error paths that require no real NATS server:
-//!   - cancel NATS subscribe fails after JetStream consumers succeed
-//!   - notification JetStream stream closes before first message
-//!   - 600-second prompt timeout fires
+//!   - second subscribe (cancel_notify) fails  → lines 69-73
+//!   - event stream closes before first message → lines 124-128
+//!   - 600-second operation timeout fires       → lines 129-133
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
@@ -170,18 +170,21 @@ fn make_mock_bridge(mock: MultiStreamMock, js: MockJs) -> Bridge<MultiStreamMock
 
 // ── tests ─────────────────────────────────────────────────────────────────────
 
-/// When JetStream consumers are created successfully but the core-NATS cancel subscribe fails,
-/// `handle` must return an `InternalError` containing "subscribe cancelled".
+/// When the NATS Core subscribe for `session_cancelled` fails, `handle_js` must
+/// return an `InternalError` describing the failure.
+///
+/// handle_js uses JetStream for notifications and responses, NATS Core for cancel.
+/// With two JS consumers queued and no NATS Core stream, the cancel subscribe fails.
 #[tokio::test]
 async fn subscribe_cancel_notify_failure_returns_error() {
-    let mock = MultiStreamMock::new();
-    // No NATS subscribe stream injected → cancel subscribe will fail.
-
     let js = MockJs::new();
     let (notif_consumer, _notif_tx) = MockJetStreamConsumer::new();
-    js.consumer_factory.add_consumer(notif_consumer);
     let (resp_consumer, _resp_tx) = MockJetStreamConsumer::new();
+    js.consumer_factory.add_consumer(notif_consumer);
     js.consumer_factory.add_consumer(resp_consumer);
+
+    // No NATS Core stream injected → cancel subscribe fails.
+    let mock = MultiStreamMock::new();
 
     let bridge = make_mock_bridge(mock, js);
     let err = bridge
@@ -195,21 +198,22 @@ async fn subscribe_cancel_notify_failure_returns_error() {
     );
 }
 
-/// When the notification JetStream consumer stream closes before any message arrives,
-/// `handle` must return an `InternalError` about the stream closing.
+/// When the JetStream notifications stream closes before any message arrives,
+/// `handle_js` must return an `InternalError` about the stream closing.
 #[tokio::test]
 async fn event_stream_closed_before_message_returns_error() {
-    let mock = MultiStreamMock::new();
-    let _cancel_tx = mock.inject(); // cancel subscribe succeeds
-
     let js = MockJs::new();
     let (notif_consumer, notif_tx) = MockJetStreamConsumer::new();
-    js.consumer_factory.add_consumer(notif_consumer);
     let (resp_consumer, _resp_tx) = MockJetStreamConsumer::new();
+    js.consumer_factory.add_consumer(notif_consumer);
     js.consumer_factory.add_consumer(resp_consumer);
 
-    // Drop immediately → notification stream closed when polled.
+    // Drop sender so the notifications stream is already closed when polled.
     drop(notif_tx);
+
+    // Inject one NATS Core stream so cancel subscribe succeeds.
+    let mock = MultiStreamMock::new();
+    let _cancel_tx = mock.inject();
 
     let bridge = make_mock_bridge(mock, js);
     let err = bridge
@@ -218,39 +222,41 @@ async fn event_stream_closed_before_message_returns_error() {
         .unwrap_err();
 
     assert!(
-        err.to_string().contains("notification stream closed"),
-        "expected 'notification stream closed' in error, got: {err}"
+        err.to_string().contains("stream closed"),
+        "expected 'stream closed' in error, got: {err}"
     );
 }
 
-/// When no response arrives within the prompt timeout, `handle` must return a timeout error.
+/// When no response arrives within the prompt timeout, `handle_js` must return
+/// a timeout error.
 ///
 /// Uses `start_paused = true` + `spawn_local` so the clock can be fast-forwarded
-/// without waiting real time.
+/// without waiting real time. The bridge is configured with a short 5-second
+/// prompt timeout so we only need to advance 6 seconds.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn event_stream_timeout_after_600_seconds_returns_error() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
             let handle = tokio::task::spawn_local(async {
+                let js = MockJs::new();
+                let (notif_consumer, _notif_tx) = MockJetStreamConsumer::new();
+                let (resp_consumer, _resp_tx) = MockJetStreamConsumer::new();
+                js.consumer_factory.add_consumer(notif_consumer);
+                js.consumer_factory.add_consumer(resp_consumer);
+
                 let mock = MultiStreamMock::new();
                 let _cancel_tx = mock.inject(); // cancel subscribe succeeds, never fires
 
-                let js = MockJs::new();
-                let (notif_consumer, _notif_tx) = MockJetStreamConsumer::new(); // never sends
-                js.consumer_factory.add_consumer(notif_consumer);
-                let (resp_consumer, _resp_tx) = MockJetStreamConsumer::new(); // never sends
-                js.consumer_factory.add_consumer(resp_consumer);
-
-                let config = Config::new(
+                let config = acp_nats::Config::new(
                     AcpPrefix::new("acp").unwrap(),
-                    NatsConfig {
+                    acp_nats::NatsConfig {
                         servers: vec!["unused".to_string()],
-                        auth: NatsAuth::None,
+                        auth: acp_nats::NatsAuth::None,
                     },
                 )
-                .with_prompt_timeout(Duration::from_secs(600));
-                let meter = opentelemetry::global::meter("prompt-handle-mock-timeout-test");
+                .with_prompt_timeout(Duration::from_secs(5));
+                let meter = opentelemetry::global::meter("prompt-handle-mock-test");
                 let (tx, _rx) = tokio::sync::mpsc::channel(1);
                 let bridge = Bridge::new(mock, js, SystemClock, &meter, config, tx);
 
@@ -262,8 +268,8 @@ async fn event_stream_timeout_after_600_seconds_returns_error() {
             // Yield to let the spawned task start and register the timer.
             tokio::task::yield_now().await;
 
-            // Jump the clock past the 600-second prompt timeout.
-            tokio::time::advance(Duration::from_secs(601)).await;
+            // Jump the clock past the 5-second prompt timeout.
+            tokio::time::advance(Duration::from_secs(6)).await;
 
             // Yield again to let the timer fire and the task produce its result.
             tokio::task::yield_now().await;

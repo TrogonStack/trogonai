@@ -34,18 +34,12 @@ pub trait AgentRunner: Clone {
     fn apply_gateway(&mut self, config: &GatewayConfig);
 
     /// Stream agent events while running the LLM tool-use loop.
-    ///
-    /// `steer_rx` receives mid-turn steering messages published to
-    /// `{prefix}.session.{id}.agent.steer`.  Each message is appended as a
-    /// `Text` block to the next tool-results user turn so the model sees the
-    /// guidance before deciding its next action.
     async fn run_chat_streaming(
         &self,
         messages: Vec<Message>,
         tools: &[ToolDef],
         system_prompt: Option<&str>,
         event_tx: mpsc::Sender<AgentEvent>,
-        steer_rx: Option<mpsc::Receiver<String>>,
     ) -> Result<Vec<Message>, AgentError>;
 }
 
@@ -86,7 +80,6 @@ impl AgentRunner for trogon_agent_core::agent_loop::AgentLoop {
         tools: &[ToolDef],
         system_prompt: Option<&str>,
         event_tx: mpsc::Sender<AgentEvent>,
-        steer_rx: Option<mpsc::Receiver<String>>,
     ) -> Result<Vec<Message>, AgentError> {
         trogon_agent_core::agent_loop::AgentLoop::run_chat_streaming(
             self,
@@ -94,7 +87,6 @@ impl AgentRunner for trogon_agent_core::agent_loop::AgentLoop {
             tools,
             system_prompt,
             event_tx,
-            steer_rx,
         )
         .await
     }
@@ -179,7 +171,6 @@ pub mod mock {
             _tools: &[ToolDef],
             _system_prompt: Option<&str>,
             event_tx: mpsc::Sender<AgentEvent>,
-            _steer_rx: Option<mpsc::Receiver<String>>,
         ) -> Result<Vec<Message>, AgentError> {
             let events = self.events.lock().unwrap().clone();
             for event in events {

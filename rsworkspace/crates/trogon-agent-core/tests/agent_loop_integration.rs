@@ -241,7 +241,7 @@ async fn run_chat_streaming_emits_text_delta_and_usage_summary() {
     let agent = make_agent(&server.base_url());
     let (tx, mut rx) = tokio::sync::mpsc::channel(32);
     let result = agent
-        .run_chat_streaming(vec![Message::user_text("stream me")], &[], None, tx, None)
+        .run_chat_streaming(vec![Message::user_text("stream me")], &[], None, tx)
         .await;
 
     assert!(result.is_ok(), "run_chat_streaming must succeed");
@@ -280,7 +280,7 @@ async fn run_chat_streaming_returns_updated_history() {
     let initial = vec![Message::user_text("tell me something")];
     let (tx, _rx) = tokio::sync::mpsc::channel(32);
     let updated = agent
-        .run_chat_streaming(initial, &[], None, tx, None)
+        .run_chat_streaming(initial, &[], None, tx)
         .await
         .unwrap();
 
@@ -294,7 +294,7 @@ async fn run_chat_streaming_http_error_returns_error() {
     let agent = make_agent("http://127.0.0.1:1");
     let (tx, _rx) = tokio::sync::mpsc::channel(32);
     let result = agent
-        .run_chat_streaming(vec![Message::user_text("hi")], &[], None, tx, None)
+        .run_chat_streaming(vec![Message::user_text("hi")], &[], None, tx)
         .await;
 
     assert!(matches!(result, Err(AgentError::Http(_))));
@@ -315,7 +315,7 @@ async fn run_chat_streaming_max_tokens_emits_usage_and_returns_error() {
     let agent = make_agent(&server.base_url());
     let (tx, mut rx) = tokio::sync::mpsc::channel(32);
     let result = agent
-        .run_chat_streaming(vec![Message::user_text("hi")], &[], None, tx, None)
+        .run_chat_streaming(vec![Message::user_text("hi")], &[], None, tx)
         .await;
 
     assert!(matches!(result, Err(AgentError::MaxTokens)));
@@ -425,7 +425,7 @@ async fn run_chat_streaming_emits_tool_call_events() {
     let agent = make_agent(&server.base_url());
     let (tx, mut rx) = tokio::sync::mpsc::channel(32);
     let result = agent
-        .run_chat_streaming(vec![Message::user_text("use a tool")], &[], None, tx, None)
+        .run_chat_streaming(vec![Message::user_text("use a tool")], &[], None, tx)
         .await;
 
     assert!(result.is_ok(), "run_chat_streaming must succeed");
@@ -561,7 +561,7 @@ async fn run_chat_streaming_unexpected_stop_reason() {
     let agent = make_agent(&server.base_url());
     let (tx, _rx) = tokio::sync::mpsc::channel(32);
     let result = agent
-        .run_chat_streaming(vec![Message::user_text("hi")], &[], None, tx, None)
+        .run_chat_streaming(vec![Message::user_text("hi")], &[], None, tx)
         .await;
 
     assert!(matches!(result, Err(AgentError::UnexpectedStopReason(_))));
@@ -606,7 +606,7 @@ async fn run_chat_streaming_max_iterations_reached() {
 
     let (tx, _rx) = tokio::sync::mpsc::channel(32);
     let result = agent
-        .run_chat_streaming(vec![Message::user_text("hi")], &[], None, tx, None)
+        .run_chat_streaming(vec![Message::user_text("hi")], &[], None, tx)
         .await;
 
     assert!(matches!(result, Err(AgentError::MaxIterationsReached)));
@@ -792,7 +792,6 @@ async fn run_chat_streaming_comprehensive() {
             &tools,
             Some("You reason carefully."),
             tx,
-            None,
         )
         .await;
 
@@ -832,7 +831,7 @@ async fn run_chat_streaming_max_tokens_with_thinking_block() {
     let agent = make_agent(&server.base_url());
     let (tx, mut rx) = tokio::sync::mpsc::channel(32);
     let result = agent
-        .run_chat_streaming(vec![Message::user_text("hi")], &[], None, tx, None)
+        .run_chat_streaming(vec![Message::user_text("hi")], &[], None, tx)
         .await;
 
     assert!(matches!(result, Err(AgentError::MaxTokens)));
@@ -904,7 +903,7 @@ async fn run_chat_streaming_permission_denied() {
 
     let (tx, mut rx) = tokio::sync::mpsc::channel(32);
     let result = agent
-        .run_chat_streaming(vec![Message::user_text("use a tool")], &[], None, tx, None)
+        .run_chat_streaming(vec![Message::user_text("use a tool")], &[], None, tx)
         .await;
 
     assert!(result.is_ok(), "should succeed after permission denial");

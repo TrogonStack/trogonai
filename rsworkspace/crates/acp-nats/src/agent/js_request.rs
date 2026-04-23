@@ -103,7 +103,7 @@ where
         )),
         Err(_elapsed) => Err(Error::new(
             ErrorCode::Other(crate::constants::AGENT_UNAVAILABLE).into(),
-            "request timed out waiting for runner",
+            "Request timed out; agent may be overloaded or unavailable",
         )),
     }
 }
