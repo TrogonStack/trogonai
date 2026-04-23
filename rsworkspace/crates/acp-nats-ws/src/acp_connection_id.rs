@@ -6,10 +6,6 @@ impl AcpConnectionId {
         Self(uuid)
     }
 
-    pub fn now_v7() -> Self {
-        Self(uuid::Uuid::now_v7())
-    }
-
     pub fn parse(s: &str) -> Result<Self, AcpConnectionIdError> {
         uuid::Uuid::parse_str(s)
             .map(Self::new)
@@ -19,7 +15,7 @@ impl AcpConnectionId {
 
 impl Default for AcpConnectionId {
     fn default() -> Self {
-        Self::now_v7()
+        Self::new(uuid::Uuid::now_v7())
     }
 }
 
@@ -62,13 +58,8 @@ mod tests {
     }
 
     #[test]
-    fn now_v7_generates_non_empty_id() {
-        assert!(!AcpConnectionId::now_v7().to_string().is_empty());
-    }
-
-    #[test]
     fn parse_round_trips_uuid() {
-        let id = AcpConnectionId::now_v7();
+        let id = AcpConnectionId::default();
         let parsed = AcpConnectionId::parse(&id.to_string()).unwrap();
         assert_eq!(parsed, id);
     }
