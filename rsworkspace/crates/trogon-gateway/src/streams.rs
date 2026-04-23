@@ -3,10 +3,7 @@ use trogon_nats::jetstream::JetStreamContext;
 
 use crate::config::ResolvedConfig;
 
-pub(crate) async fn provision<C: JetStreamContext>(
-    client: &C,
-    config: &ResolvedConfig,
-) -> Result<(), C::Error> {
+pub(crate) async fn provision<C: JetStreamContext>(client: &C, config: &ResolvedConfig) -> Result<(), C::Error> {
     if let Some(ref cfg) = config.github {
         trogon_source_github::provision(client, cfg).await?;
         info!(source = "github", "stream provisioned");
@@ -62,8 +59,7 @@ mod tests {
             .suffix(".toml")
             .tempfile()
             .expect("failed to create temp file");
-        f.write_all(content.as_bytes())
-            .expect("failed to write toml");
+        f.write_all(content.as_bytes()).expect("failed to write toml");
         f.flush().expect("failed to flush");
         f
     }
@@ -108,9 +104,7 @@ client_secret = "sentry-client-secret"
         let cfg = load(None).expect("load failed");
         let js = MockJetStreamContext::new();
 
-        provision(&js, &cfg)
-            .await
-            .expect("provision should succeed");
+        provision(&js, &cfg).await.expect("provision should succeed");
 
         assert!(js.created_streams().is_empty());
     }
@@ -121,9 +115,7 @@ client_secret = "sentry-client-secret"
         let cfg = load(Some(f.path())).expect("load failed");
         let js = MockJetStreamContext::new();
 
-        provision(&js, &cfg)
-            .await
-            .expect("provision should succeed");
+        provision(&js, &cfg).await.expect("provision should succeed");
 
         assert_eq!(js.created_streams().len(), 10);
     }
@@ -166,9 +158,7 @@ client_secret = "sentry-client-secret"
         let cfg = load(Some(f.path())).expect("load failed");
         let js = MockJetStreamContext::new();
 
-        provision(&js, &cfg)
-            .await
-            .expect("provision should succeed");
+        provision(&js, &cfg).await.expect("provision should succeed");
 
         assert_eq!(js.created_streams().len(), 9);
     }

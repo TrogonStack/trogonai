@@ -6,10 +6,7 @@ pub struct TerminalWaitForExitSubject {
 }
 
 impl TerminalWaitForExitSubject {
-    pub fn new(
-        prefix: &crate::acp_prefix::AcpPrefix,
-        session_id: &crate::session_id::AcpSessionId,
-    ) -> Self {
+    pub fn new(prefix: &crate::acp_prefix::AcpPrefix, session_id: &crate::session_id::AcpSessionId) -> Self {
         Self {
             prefix: prefix.clone(),
             session_id: session_id.clone(),
@@ -31,6 +28,5 @@ impl std::fmt::Display for TerminalWaitForExitSubject {
 impl super::super::markers::ClientRequestable for TerminalWaitForExitSubject {}
 
 impl super::super::stream::StreamAssignment for TerminalWaitForExitSubject {
-    const STREAM: Option<super::super::stream::AcpStream> =
-        Some(super::super::stream::AcpStream::ClientOps);
+    const STREAM: Option<super::super::stream::AcpStream> = Some(super::super::stream::AcpStream::ClientOps);
 }

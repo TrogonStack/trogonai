@@ -232,11 +232,7 @@ mod tests {
     fn test_generic_function_with_mock_clock() {
         use super::super::{GetElapsed, GetNow};
 
-        fn is_expired<C: GetNow + GetElapsed>(
-            clock: &C,
-            started_at: C::Instant,
-            ttl: Duration,
-        ) -> bool {
+        fn is_expired<C: GetNow + GetElapsed>(clock: &C, started_at: C::Instant, ttl: Duration) -> bool {
             clock.elapsed(started_at) >= ttl
         }
 

@@ -41,6 +41,5 @@ impl async_nats::subject::ToSubject for ResponseSubject {
 impl super::super::markers::Subscribable for ResponseSubject {}
 
 impl super::super::stream::StreamAssignment for ResponseSubject {
-    const STREAM: Option<super::super::stream::AcpStream> =
-        Some(super::super::stream::AcpStream::Responses);
+    const STREAM: Option<super::super::stream::AcpStream> = Some(super::super::stream::AcpStream::Responses);
 }

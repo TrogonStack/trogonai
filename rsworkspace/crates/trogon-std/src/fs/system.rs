@@ -38,10 +38,7 @@ impl OpenAppendFile for SystemFs {
 
     #[inline]
     fn open_append(&self, path: &Path) -> std::io::Result<Self::Writer> {
-        std::fs::File::options()
-            .create(true)
-            .append(true)
-            .open(path)
+        std::fs::File::options().create(true).append(true).open(path)
     }
 }
 
@@ -58,11 +55,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .expect("clock should be after unix epoch")
             .as_nanos();
-        std::env::temp_dir().join(format!(
-            "trogon_std_system_fs_{name}_{}_{}",
-            std::process::id(),
-            nanos
-        ))
+        std::env::temp_dir().join(format!("trogon_std_system_fs_{name}_{}_{}", std::process::id(), nanos))
     }
 
     fn cleanup(path: &Path) {
@@ -96,8 +89,7 @@ mod tests {
         std::fs::create_dir_all(&dir).expect("test dir should be created");
         assert!(!fs.exists(&path));
 
-        fs.write(&path, r#"{"port":8080}"#)
-            .expect("write should succeed");
+        fs.write(&path, r#"{"port":8080}"#).expect("write should succeed");
         assert!(fs.exists(&path));
         assert_eq!(
             fs.read_to_string(&path).expect("read should succeed"),
@@ -114,8 +106,7 @@ mod tests {
         let nested = dir.join("a/b/c");
         cleanup(&dir);
 
-        fs.create_dir_all(&nested)
-            .expect("create_dir_all should succeed");
+        fs.create_dir_all(&nested).expect("create_dir_all should succeed");
         assert!(nested.exists());
 
         cleanup(&dir);
@@ -150,8 +141,7 @@ mod tests {
         drop(w1);
 
         let mut w2 = fs.open_append(&file).expect("second open should succeed");
-        w2.write_all(b" world")
-            .expect("second write should succeed");
+        w2.write_all(b" world").expect("second write should succeed");
         drop(w2);
 
         assert_eq!(

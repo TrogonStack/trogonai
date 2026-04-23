@@ -7,9 +7,7 @@ use crate::constants::METRIC_EXPORT_INTERVAL;
 
 pub(crate) static METER_PROVIDER: OnceLock<SdkMeterProvider> = OnceLock::new();
 
-pub(crate) fn init_provider(
-    resource: &Resource,
-) -> Result<SdkMeterProvider, Box<dyn std::error::Error>> {
+pub(crate) fn init_provider(resource: &Resource) -> Result<SdkMeterProvider, Box<dyn std::error::Error>> {
     let exporter = MetricExporter::builder().with_http().build()?;
 
     let reader = PeriodicReader::builder(exporter)

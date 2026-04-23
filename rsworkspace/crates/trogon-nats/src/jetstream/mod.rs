@@ -11,33 +11,29 @@ pub mod traits;
 pub mod mocks;
 
 pub use claim_check::{
-    ClaimCheckPublisher, ClaimResolveError, HEADER_CLAIM_BUCKET, HEADER_CLAIM_CHECK,
-    HEADER_CLAIM_KEY, MaxPayload, is_claim, resolve_claim,
+    ClaimCheckPublisher, ClaimResolveError, HEADER_CLAIM_BUCKET, HEADER_CLAIM_CHECK, HEADER_CLAIM_KEY, MaxPayload,
+    is_claim, resolve_claim,
 };
 #[cfg(not(coverage))]
 pub use client::{
-    ConsumerError, GetStreamError, MessagesError, NatsJetStreamClient, NatsJetStreamConsumer,
-    PublishAckFuture, PublishError, StreamError,
+    ConsumerError, GetStreamError, MessagesError, NatsJetStreamClient, NatsJetStreamConsumer, PublishAckFuture,
+    PublishError, StreamError,
 };
-pub use message::{
-    JsAck, JsAckWith, JsDispatchMessage, JsDoubleAck, JsDoubleAckWith, JsMessageRef,
-    JsRequestMessage,
-};
+pub use message::{JsAck, JsAckWith, JsDispatchMessage, JsDoubleAck, JsDoubleAckWith, JsMessageRef, JsRequestMessage};
 #[cfg(not(coverage))]
 pub use object_store::NatsObjectStore;
 pub use object_store::{ObjectStoreGet, ObjectStorePut};
 pub use publish::{PublishOutcome, publish_event};
 pub use stream_max_age::StreamMaxAge;
 pub use traits::{
-    JetStreamConsumer, JetStreamContext, JetStreamCreateConsumer, JetStreamCreateKeyValue,
-    JetStreamGetKeyValue, JetStreamGetStream, JetStreamKeyValueCreateWithTtl,
-    JetStreamKeyValueDeleteExpectRevision, JetStreamKeyValueStatus, JetStreamKeyValueUpdate,
-    JetStreamPublisher, JsMessageOf,
+    JetStreamConsumer, JetStreamContext, JetStreamCreateConsumer, JetStreamCreateKeyValue, JetStreamGetKeyValue,
+    JetStreamGetStream, JetStreamKeyValueCreateWithTtl, JetStreamKeyValueDeleteExpectRevision, JetStreamKeyValueStatus,
+    JetStreamKeyValueUpdate, JetStreamPublisher, JsMessageOf,
 };
 
 #[cfg(any(test, feature = "test-support"))]
 pub use mocks::{
-    AckKindSnapshot, AckKindValue, MockJetStreamConsumer, MockJetStreamConsumerFactory,
-    MockJetStreamContext, MockJetStreamKvClient, MockJetStreamKvStore, MockJetStreamPublisher,
-    MockJetStreamStream, MockJsMessage, MockObjectStore,
+    AckKindSnapshot, AckKindValue, MockJetStreamConsumer, MockJetStreamConsumerFactory, MockJetStreamContext,
+    MockJetStreamKvClient, MockJetStreamKvStore, MockJetStreamPublisher, MockJetStreamStream, MockJsMessage,
+    MockObjectStore,
 };

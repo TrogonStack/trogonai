@@ -80,13 +80,8 @@ where
     if publish_target.uses_jetstream_prefix {
         // TODO(yordis): support per-message TTL renew when KV store uses a custom
         // JetStream API prefix by routing through an SDK path that handles prefixing.
-        let source = std::io::Error::other(
-            "per-message lease renew does not support custom JS API prefixes",
-        );
-        return Err(kv::UpdateError::with_source(
-            kv::UpdateErrorKind::Other,
-            source,
-        ));
+        let source = std::io::Error::other("per-message lease renew does not support custom JS API prefixes");
+        return Err(kv::UpdateError::with_source(kv::UpdateErrorKind::Other, source));
     }
 
     let subject = build_kv_subject(
@@ -113,11 +108,7 @@ where
     kv::UpdateError::with_source(kv::UpdateErrorKind::Other, source)
 }
 
-pub(super) fn build_kv_subject(
-    put_prefix: Option<&str>,
-    default_prefix: &str,
-    key: &str,
-) -> String {
+pub(super) fn build_kv_subject(put_prefix: Option<&str>, default_prefix: &str, key: &str) -> String {
     let mut subject = String::new();
     subject.push_str(put_prefix.unwrap_or(default_prefix));
     subject.push_str(key);
@@ -126,10 +117,7 @@ pub(super) fn build_kv_subject(
 
 pub(super) fn build_update_headers(revision: u64, ttl: Duration) -> HeaderMap {
     let mut headers = HeaderMap::default();
-    headers.insert(
-        NATS_EXPECTED_LAST_SUBJECT_SEQUENCE,
-        HeaderValue::from(revision),
-    );
+    headers.insert(NATS_EXPECTED_LAST_SUBJECT_SEQUENCE, HeaderValue::from(revision));
     headers.insert(NATS_MESSAGE_TTL, HeaderValue::from(ttl.as_secs()));
     headers
 }
@@ -281,10 +269,7 @@ mod tests {
             Some("7")
         );
         assert_eq!(
-            message
-                .headers
-                .get(NATS_MESSAGE_TTL)
-                .map(|value| value.as_str()),
+            message.headers.get(NATS_MESSAGE_TTL).map(|value| value.as_str()),
             Some("9")
         );
     }
@@ -317,17 +302,12 @@ mod tests {
         let publish_target = publish_target();
         let publisher = MockJetStreamPublisher::new();
 
-        let ack1 = JetStreamPublisher::publish_with_headers(
-            &publisher,
-            "preseed",
-            HeaderMap::default(),
-            Bytes::new(),
-        )
-        .await
-        .unwrap()
-        .into_future()
-        .await
-        .unwrap();
+        let ack1 = JetStreamPublisher::publish_with_headers(&publisher, "preseed", HeaderMap::default(), Bytes::new())
+            .await
+            .unwrap()
+            .into_future()
+            .await
+            .unwrap();
         assert_eq!(ack1.sequence, 1);
 
         let revision = renew_store(

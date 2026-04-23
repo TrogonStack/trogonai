@@ -48,16 +48,14 @@ pub fn verify(
 
     let expected = hex::decode(hex_sig).map_err(SignatureError::InvalidHex)?;
 
-    let mut mac = HmacSha256::new_from_slice(signing_secret.as_bytes())
-        .expect("HMAC-SHA256 accepts any key length");
+    let mut mac = HmacSha256::new_from_slice(signing_secret.as_bytes()).expect("HMAC-SHA256 accepts any key length");
 
     mac.update(b"v0:");
     mac.update(timestamp.as_bytes());
     mac.update(b":");
     mac.update(body);
 
-    mac.verify_slice(&expected)
-        .map_err(|_| SignatureError::Mismatch)
+    mac.verify_slice(&expected).map_err(|_| SignatureError::Mismatch)
 }
 
 #[cfg(test)]
@@ -76,10 +74,7 @@ mod tests {
 
     #[test]
     fn error_display_messages() {
-        assert_eq!(
-            SignatureError::MissingPrefix.to_string(),
-            "missing v0= prefix"
-        );
+        assert_eq!(SignatureError::MissingPrefix.to_string(), "missing v0= prefix");
         let hex_err = SignatureError::InvalidHex(hex::decode("zz").unwrap_err());
         assert_eq!(hex_err.to_string(), "invalid hex encoding");
         assert!(hex_err.source().is_some());

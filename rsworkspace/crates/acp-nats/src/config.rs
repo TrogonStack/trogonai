@@ -6,8 +6,8 @@ use trogon_std::env::ReadEnv;
 use crate::acp_prefix::AcpPrefix;
 use crate::constants::{
     DEFAULT_CONNECT_TIMEOUT_SECS, DEFAULT_MAX_CONCURRENT_CLIENT_TASKS, DEFAULT_OPERATION_TIMEOUT,
-    DEFAULT_PROMPT_TIMEOUT, ENV_CONNECT_TIMEOUT_SECS, ENV_OPERATION_TIMEOUT_SECS,
-    ENV_PROMPT_TIMEOUT_SECS, MIN_TIMEOUT_SECS,
+    DEFAULT_PROMPT_TIMEOUT, ENV_CONNECT_TIMEOUT_SECS, ENV_OPERATION_TIMEOUT_SECS, ENV_PROMPT_TIMEOUT_SECS,
+    MIN_TIMEOUT_SECS,
 };
 
 pub use crate::constants::{DEFAULT_ACP_PREFIX, ENV_ACP_PREFIX};
@@ -99,9 +99,7 @@ pub fn apply_timeout_overrides<E: ReadEnv>(config: Config, env_provider: &E) -> 
                 config = config.with_operation_timeout(Duration::from_secs(secs));
             }
             Ok(secs) => {
-                warn!(
-                    "{ENV_OPERATION_TIMEOUT_SECS}={secs} is below minimum ({MIN_TIMEOUT_SECS}), using default"
-                );
+                warn!("{ENV_OPERATION_TIMEOUT_SECS}={secs} is below minimum ({MIN_TIMEOUT_SECS}), using default");
             }
             Err(_) => {
                 warn!("{ENV_OPERATION_TIMEOUT_SECS}={raw:?} is not a valid integer, using default");
@@ -115,9 +113,7 @@ pub fn apply_timeout_overrides<E: ReadEnv>(config: Config, env_provider: &E) -> 
                 config = config.with_prompt_timeout(Duration::from_secs(secs));
             }
             Ok(secs) => {
-                warn!(
-                    "{ENV_PROMPT_TIMEOUT_SECS}={secs} is below minimum ({MIN_TIMEOUT_SECS}), using default"
-                );
+                warn!("{ENV_PROMPT_TIMEOUT_SECS}={secs} is below minimum ({MIN_TIMEOUT_SECS}), using default");
             }
             Err(_) => {
                 warn!("{ENV_PROMPT_TIMEOUT_SECS}={raw:?} is not a valid integer, using default");
@@ -135,9 +131,7 @@ pub fn nats_connect_timeout<E: ReadEnv>(env_provider: &E) -> Duration {
         Ok(raw) => match raw.parse::<u64>() {
             Ok(secs) if secs >= MIN_TIMEOUT_SECS => Duration::from_secs(secs),
             Ok(secs) => {
-                warn!(
-                    "{ENV_CONNECT_TIMEOUT_SECS}={secs} is below minimum ({MIN_TIMEOUT_SECS}), using default"
-                );
+                warn!("{ENV_CONNECT_TIMEOUT_SECS}={secs} is below minimum ({MIN_TIMEOUT_SECS}), using default");
                 default
             }
             Err(_) => {
@@ -170,22 +164,21 @@ mod tests {
 
     #[test]
     fn config_with_operation_timeout() {
-        let config = Config::new(AcpPrefix::new("acp").unwrap(), default_nats())
-            .with_operation_timeout(Duration::from_secs(60));
+        let config =
+            Config::new(AcpPrefix::new("acp").unwrap(), default_nats()).with_operation_timeout(Duration::from_secs(60));
         assert_eq!(config.operation_timeout(), Duration::from_secs(60));
     }
 
     #[test]
     fn config_with_prompt_timeout() {
-        let config = Config::new(AcpPrefix::new("acp").unwrap(), default_nats())
-            .with_prompt_timeout(Duration::from_secs(3600));
+        let config =
+            Config::new(AcpPrefix::new("acp").unwrap(), default_nats()).with_prompt_timeout(Duration::from_secs(3600));
         assert_eq!(config.prompt_timeout(), Duration::from_secs(3600));
     }
 
     #[test]
     fn config_with_max_concurrent_client_tasks() {
-        let config = Config::new(AcpPrefix::new("acp").unwrap(), default_nats())
-            .with_max_concurrent_client_tasks(32);
+        let config = Config::new(AcpPrefix::new("acp").unwrap(), default_nats()).with_max_concurrent_client_tasks(32);
         assert_eq!(config.max_concurrent_client_tasks(), 32);
     }
 

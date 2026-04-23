@@ -2,8 +2,7 @@ use std::fmt;
 use std::time::Duration;
 
 use axum::{
-    Router, body::Bytes, extract::DefaultBodyLimit, extract::State, http::HeaderMap,
-    http::StatusCode, routing::post,
+    Router, body::Bytes, extract::DefaultBodyLimit, extract::State, http::HeaderMap, http::StatusCode, routing::post,
 };
 use tracing::{info, instrument, warn};
 use trogon_nats::NatsToken;
@@ -58,15 +57,9 @@ async fn publish_unroutable<P: JetStreamPublisher, S: ObjectStorePut>(
 ) -> StatusCode {
     let subject = format!("{subject_prefix}.unroutable");
     let mut headers = async_nats::HeaderMap::new();
-    headers.insert(
-        async_nats::header::NATS_MESSAGE_ID,
-        verified.webhook_id.as_str(),
-    );
+    headers.insert(async_nats::header::NATS_MESSAGE_ID, verified.webhook_id.as_str());
     headers.insert(NATS_HEADER_WEBHOOK_ID, verified.webhook_id.as_str());
-    headers.insert(
-        NATS_HEADER_WEBHOOK_TIMESTAMP,
-        verified.webhook_timestamp.as_str(),
-    );
+    headers.insert(NATS_HEADER_WEBHOOK_TIMESTAMP, verified.webhook_timestamp.as_str());
     headers.insert(NATS_HEADER_REJECT_REASON, reason.as_str());
 
     let outcome = publisher
@@ -89,10 +82,7 @@ struct AppState<P: JetStreamPublisher, S: ObjectStorePut> {
     nats_ack_timeout: NonZeroDuration,
 }
 
-pub async fn provision<C: JetStreamContext>(
-    js: &C,
-    config: &IncidentioConfig,
-) -> Result<(), C::Error> {
+pub async fn provision<C: JetStreamContext>(js: &C, config: &IncidentioConfig) -> Result<(), C::Error> {
     js.get_or_create_stream(async_nats::jetstream::stream::Config {
         name: config.stream_name.to_string(),
         subjects: vec![format!("{}.>", config.subject_prefix)],
@@ -140,12 +130,7 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
     headers: HeaderMap,
     body: Bytes,
 ) -> StatusCode {
-    let verified = match signature::verify(
-        &headers,
-        &body,
-        &state.signing_secret,
-        state.timestamp_tolerance,
-    ) {
+    let verified = match signature::verify(&headers, &body, &state.signing_secret, state.timestamp_tolerance) {
         Ok(verified) => verified,
         Err(err) => {
             warn!(error = %err, "incident.io webhook signature validation failed");
@@ -201,23 +186,14 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
     let subject = format!("{}.{}", state.subject_prefix, event_type);
     let span = tracing::Span::current();
     span.record("event_type", event_type.as_str());
-    span.record(
-        "webhook_id",
-        tracing::field::display(verified.webhook_id.as_str()),
-    );
+    span.record("webhook_id", tracing::field::display(verified.webhook_id.as_str()));
     span.record("subject", &subject);
 
     let mut nats_headers = async_nats::HeaderMap::new();
-    nats_headers.insert(
-        async_nats::header::NATS_MESSAGE_ID,
-        verified.webhook_id.as_str(),
-    );
+    nats_headers.insert(async_nats::header::NATS_MESSAGE_ID, verified.webhook_id.as_str());
     nats_headers.insert(NATS_HEADER_EVENT_TYPE, event_type.as_str());
     nats_headers.insert(NATS_HEADER_WEBHOOK_ID, verified.webhook_id.as_str());
-    nats_headers.insert(
-        NATS_HEADER_WEBHOOK_TIMESTAMP,
-        verified.webhook_timestamp.as_str(),
-    );
+    nats_headers.insert(NATS_HEADER_WEBHOOK_TIMESTAMP, verified.webhook_timestamp.as_str());
 
     let outcome = state
         .publisher
@@ -240,8 +216,7 @@ mod tests {
     use tracing_subscriber::util::SubscriberInitExt;
     use trogon_nats::jetstream::StreamMaxAge;
     use trogon_nats::jetstream::{
-        ClaimCheckPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher,
-        MockObjectStore,
+        ClaimCheckPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher, MockObjectStore,
     };
 
     type HmacSha256 = Hmac<Sha256>;
@@ -297,12 +272,7 @@ mod tests {
             .to_string()
     }
 
-    fn webhook_request(
-        body: &[u8],
-        webhook_id: &str,
-        timestamp: &str,
-        signature: &str,
-    ) -> Request<Body> {
+    fn webhook_request(body: &[u8], webhook_id: &str, timestamp: &str, signature: &str) -> Request<Body> {
         Request::builder()
             .method("POST")
             .uri("/webhook")
@@ -323,10 +293,7 @@ mod tests {
         assert_eq!(messages.len(), 1, "expected exactly one unroutable publish");
         assert_eq!(messages[0].subject, "incidentio.unroutable");
         assert_eq!(
-            messages[0]
-                .headers
-                .get(NATS_HEADER_REJECT_REASON)
-                .map(|v| v.as_str()),
+            messages[0].headers.get(NATS_HEADER_REJECT_REASON).map(|v| v.as_str()),
             Some(expected_reason),
         );
         assert_eq!(
@@ -337,10 +304,7 @@ mod tests {
             Some(expected_webhook_id),
         );
         assert_eq!(
-            messages[0]
-                .headers
-                .get(NATS_HEADER_WEBHOOK_ID)
-                .map(|v| v.as_str()),
+            messages[0].headers.get(NATS_HEADER_WEBHOOK_ID).map(|v| v.as_str()),
             Some(expected_webhook_id),
         );
         assert_eq!(
@@ -388,10 +352,7 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
         let messages = publisher.published_messages();
         assert_eq!(messages.len(), 1);
-        assert_eq!(
-            messages[0].subject,
-            "incidentio.public_incident.incident_created_v2"
-        );
+        assert_eq!(messages[0].subject, "incidentio.public_incident.incident_created_v2");
         assert_eq!(messages[0].payload.as_ref(), body);
         assert_eq!(
             messages[0]
@@ -407,8 +368,7 @@ mod tests {
         let _guard = tracing_guard();
         let publisher = MockJetStreamPublisher::new();
         let app = mock_app(publisher.clone());
-        let body =
-            br#"{"event_type":"private_incident.incident_updated_v2","data":{"id":"01ABC"}}"#;
+        let body = br#"{"event_type":"private_incident.incident_updated_v2","data":{"id":"01ABC"}}"#;
         let timestamp = valid_timestamp();
         let resp = app
             .oneshot(webhook_request(
@@ -572,14 +532,9 @@ mod tests {
             headers.get(NATS_HEADER_EVENT_TYPE).map(|v| v.as_str()),
             Some("public_incident.incident_created_v2"),
         );
+        assert_eq!(headers.get(NATS_HEADER_WEBHOOK_ID).map(|v| v.as_str()), Some("msg-9"),);
         assert_eq!(
-            headers.get(NATS_HEADER_WEBHOOK_ID).map(|v| v.as_str()),
-            Some("msg-9"),
-        );
-        assert_eq!(
-            headers
-                .get(NATS_HEADER_WEBHOOK_TIMESTAMP)
-                .map(|v| v.as_str()),
+            headers.get(NATS_HEADER_WEBHOOK_TIMESTAMP).map(|v| v.as_str()),
             Some(timestamp.as_str()),
         );
     }

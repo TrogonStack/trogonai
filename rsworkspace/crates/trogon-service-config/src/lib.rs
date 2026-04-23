@@ -54,12 +54,9 @@ pub fn load_config<T: Config>(config_path: Option<&Path>) -> Result<T, confique:
 }
 
 pub fn resolve_nats(section: &NatsConfigSection, overrides: &NatsArgs) -> NatsConfig {
-    let auth = if let Some(creds) =
-        first_non_empty(overrides.nats_creds.as_ref(), section.creds.as_ref())
-    {
+    let auth = if let Some(creds) = first_non_empty(overrides.nats_creds.as_ref(), section.creds.as_ref()) {
         NatsAuth::Credentials(creds.clone().into())
-    } else if let Some(nkey) = first_non_empty(overrides.nats_nkey.as_ref(), section.nkey.as_ref())
-    {
+    } else if let Some(nkey) = first_non_empty(overrides.nats_nkey.as_ref(), section.nkey.as_ref()) {
         NatsAuth::NKey(nkey.clone())
     } else if let (Some(user), Some(password)) = (
         first_non_empty(overrides.nats_user.as_ref(), section.user.as_ref()),
@@ -69,9 +66,7 @@ pub fn resolve_nats(section: &NatsConfigSection, overrides: &NatsArgs) -> NatsCo
             user: user.clone(),
             password: password.clone(),
         }
-    } else if let Some(token) =
-        first_non_empty(overrides.nats_token.as_ref(), section.token.as_ref())
-    {
+    } else if let Some(token) = first_non_empty(overrides.nats_token.as_ref(), section.token.as_ref()) {
         NatsAuth::Token(token.clone())
     } else {
         NatsAuth::None
@@ -91,10 +86,7 @@ pub fn resolve_nats(section: &NatsConfigSection, overrides: &NatsArgs) -> NatsCo
     NatsConfig::new(servers, auth)
 }
 
-fn first_non_empty<'a>(
-    primary: Option<&'a String>,
-    fallback: Option<&'a String>,
-) -> Option<&'a String> {
+fn first_non_empty<'a>(primary: Option<&'a String>, fallback: Option<&'a String>) -> Option<&'a String> {
     primary
         .filter(|value| !value.is_empty())
         .or_else(|| fallback.filter(|value| !value.is_empty()))
@@ -167,9 +159,7 @@ mod tests {
 
         let resolved = resolve_nats(&section, &overrides);
 
-        assert!(
-            matches!(resolved.auth, NatsAuth::Credentials(ref path) if path == Path::new("/tmp/nats.creds"))
-        );
+        assert!(matches!(resolved.auth, NatsAuth::Credentials(ref path) if path == Path::new("/tmp/nats.creds")));
     }
 
     #[test]
