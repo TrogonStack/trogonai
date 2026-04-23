@@ -22,9 +22,7 @@ pub use nats::kv::{
 };
 pub use nats::streams::{StreamStoreError, append_stream, read_stream_from, read_stream_range};
 pub use snapshot::{Snapshot, SnapshotChange, SnapshotSchema, SnapshotStoreConfig};
-pub use testing::{
-    Decider, ExpectedError, TestCase, ThenError, ThenEvents, ThenExpectation, Timeline, decider, expect_error,
-};
+pub use testing::{Decider, TestCase, ThenError, ThenEvents, ThenExpectation, Timeline, decider};
 
 pub trait EventCodec<T> {
     type Error;

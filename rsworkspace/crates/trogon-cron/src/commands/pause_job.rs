@@ -65,7 +65,7 @@ mod tests {
     use trogon_eventsourcing::snapshot::SnapshotSchema;
     use trogon_eventsourcing::{
         CommandExecution, NonEmpty,
-        testing::{TestCase, Timeline, decider, expect_error},
+        testing::{TestCase, Timeline, decider},
     };
 
     use super::*;
@@ -115,9 +115,9 @@ mod tests {
                 id: "backup".to_string(),
             }])
             .when(PauseJobCommand::new(JobId::parse("backup").unwrap()))
-            .then(expect_error(PauseJobDecisionError::AlreadyPaused {
+            .then_error(PauseJobDecisionError::AlreadyPaused {
                 id: JobId::parse("backup").unwrap(),
-            }));
+            });
     }
 
     #[test]
@@ -125,9 +125,9 @@ mod tests {
         TestCase::new(decider::<PauseJobCommand>())
             .given_no_history()
             .when(PauseJobCommand::new(JobId::parse("backup").unwrap()))
-            .then(expect_error(PauseJobDecisionError::JobNotFound {
+            .then_error(PauseJobDecisionError::JobNotFound {
                 id: JobId::parse("backup").unwrap(),
-            }));
+            });
     }
 
     #[test]
@@ -144,9 +144,9 @@ mod tests {
                 id: "backup".to_string(),
             }])
             .when(PauseJobCommand::new(JobId::parse("backup").unwrap()))
-            .then(expect_error(PauseJobDecisionError::JobDeleted {
+            .then_error(PauseJobDecisionError::JobDeleted {
                 id: JobId::parse("backup").unwrap(),
-            }));
+            });
     }
 
     #[test]
