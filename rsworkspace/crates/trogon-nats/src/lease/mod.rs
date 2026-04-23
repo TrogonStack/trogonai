@@ -80,6 +80,7 @@ pub enum LeaseError {
 }
 
 impl LeaseError {
+    #[cfg_attr(coverage, allow(dead_code))]
     fn provision_source(context: &'static str, source: LeaseProvisionError) -> Self {
         Self::Provision { context, source }
     }
@@ -166,6 +167,7 @@ impl std::fmt::Display for IncompatibleLeaseBucketConfig {
 impl std::error::Error for IncompatibleLeaseBucketConfig {}
 
 #[derive(Clone)]
+#[cfg_attr(coverage, allow(dead_code))]
 pub struct NatsKvLease {
     store: kv::Store,
     key: LeaseKey,
