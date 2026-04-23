@@ -309,6 +309,7 @@ enum PendingRequest {
     },
     Buffered {
         request_id: RequestId,
+        request_session_id: Option<acp_nats::AcpSessionId>,
         events: Vec<SseFrame>,
         response: oneshot::Sender<Result<HttpPostOutcome, HttpTransportError>>,
     },
@@ -561,7 +562,9 @@ fn route_live_frame(
             ListenerDispatch::Delivered | ListenerDispatch::Dropped => {
                 return LiveFrameOutcome::Keep;
             }
-            ListenerDispatch::Missing => {}
+            ListenerDispatch::Missing => {
+                return LiveFrameOutcome::Keep;
+            }
         }
     }
 
@@ -577,6 +580,7 @@ fn route_buffered_frame(
     frame: &SseFrame,
     parsed: Option<&OutgoingHttpMessage>,
     request_id: &RequestId,
+    request_session_id: Option<&acp_nats::AcpSessionId>,
     events: &mut Vec<SseFrame>,
     get_listeners: &mut HashMap<acp_nats::AcpSessionId, Vec<SseSender>>,
 ) -> BufferedFrameOutcome {
@@ -588,11 +592,18 @@ fn route_buffered_frame(
     }
 
     if let Some(frame_session_id) = parsed.and_then(OutgoingHttpMessage::params_session_id) {
+        if request_session_id == Some(&frame_session_id) {
+            events.push(frame.clone());
+            return BufferedFrameOutcome::Buffered;
+        }
+
         match dispatch_to_get_listeners(frame, &frame_session_id, get_listeners) {
             ListenerDispatch::Delivered | ListenerDispatch::Dropped => {
                 return BufferedFrameOutcome::Routed;
             }
-            ListenerDispatch::Missing => {}
+            ListenerDispatch::Missing => {
+                return BufferedFrameOutcome::Routed;
+            }
         }
     }
 
@@ -1242,6 +1253,7 @@ pub async fn run_http_connection<N, J>(
                             if message.creates_session() {
                                 pending_request = Some(PendingRequest::Buffered {
                                     request_id: message.id.clone().expect("request must have id"),
+                                    request_session_id: session_id.clone(),
                                     events: Vec::new(),
                                     response,
                                 });
@@ -1388,6 +1400,7 @@ pub async fn run_http_connection<N, J>(
                         }
                         PendingRequest::Buffered {
                             request_id,
+                            request_session_id,
                             events,
                             ..
                         } => {
@@ -1395,6 +1408,7 @@ pub async fn run_http_connection<N, J>(
                                 &frame,
                                 parsed.as_ref(),
                                 request_id,
+                                request_session_id.as_ref(),
                                 events,
                                 &mut get_listeners,
                             ) {
@@ -2016,13 +2030,21 @@ mod tests {
         );
         let parsed = OutgoingHttpMessage::parse(frame_json(&frame)).unwrap();
         let request_id = RequestId::Number(1);
+        let request_session_id = session_id();
         let other_session_id = acp_nats::AcpSessionId::new("session-2").unwrap();
         let (get_tx, mut get_rx) = mpsc::channel(HTTP_CHANNEL_CAPACITY);
         let mut events = Vec::new();
         let mut get_listeners = HashMap::new();
         get_listeners.insert(other_session_id, vec![get_tx]);
 
-        let outcome = route_buffered_frame(&frame, Some(&parsed), &request_id, &mut events, &mut get_listeners);
+        let outcome = route_buffered_frame(
+            &frame,
+            Some(&parsed),
+            &request_id,
+            Some(&request_session_id),
+            &mut events,
+            &mut get_listeners,
+        );
 
         assert!(matches!(outcome, BufferedFrameOutcome::Routed));
         assert!(events.is_empty());
@@ -2030,6 +2052,57 @@ mod tests {
             SseFrame::Json { json, .. } => assert!(json.contains(r#""sessionId":"session-2""#)),
             SseFrame::Empty { .. } => panic!("expected JSON SSE frame"),
         }
+    }
+
+    #[test]
+    fn route_live_frame_drops_other_session_notifications_without_listener() {
+        let frame = SseFrame::json(
+            r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-2"}}"#.to_string(),
+        );
+        let parsed = OutgoingHttpMessage::parse(frame_json(&frame)).unwrap();
+        let request_id = RequestId::Number(1);
+        let request_session_id = session_id();
+        let (live_tx, mut live_rx) = mpsc::channel(HTTP_CHANNEL_CAPACITY);
+        let mut get_listeners = HashMap::new();
+
+        let outcome = route_live_frame(
+            &frame,
+            Some(&parsed),
+            &request_id,
+            Some(&request_session_id),
+            &live_tx,
+            &mut get_listeners,
+        );
+
+        assert!(matches!(outcome, LiveFrameOutcome::Keep));
+        assert!(matches!(
+            live_rx.try_recv(),
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+        ));
+    }
+
+    #[test]
+    fn route_buffered_frame_drops_other_session_notifications_without_listener() {
+        let frame = SseFrame::json(
+            r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-2"}}"#.to_string(),
+        );
+        let parsed = OutgoingHttpMessage::parse(frame_json(&frame)).unwrap();
+        let request_id = RequestId::Number(1);
+        let request_session_id = session_id();
+        let mut events = Vec::new();
+        let mut get_listeners = HashMap::new();
+
+        let outcome = route_buffered_frame(
+            &frame,
+            Some(&parsed),
+            &request_id,
+            Some(&request_session_id),
+            &mut events,
+            &mut get_listeners,
+        );
+
+        assert!(matches!(outcome, BufferedFrameOutcome::Routed));
+        assert!(events.is_empty());
     }
 
     #[test]
