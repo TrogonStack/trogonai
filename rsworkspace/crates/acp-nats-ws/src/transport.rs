@@ -2,7 +2,7 @@ use crate::acp_connection_id::AcpConnectionId;
 use crate::connection;
 use crate::constants::{
     ACP_CONNECTION_ID_HEADER, ACP_PROTOCOL_VERSION_HEADER, ACP_SESSION_ID_HEADER,
-    X_ACCEL_BUFFERING_HEADER,
+    HTTP_CHANNEL_CAPACITY, X_ACCEL_BUFFERING_HEADER,
 };
 use acp_nats::{StdJsonSerialize, agent::Bridge, client, spawn_notification_forwarder};
 use agent_client_protocol::{AgentSideConnection, ProtocolVersion, RequestId, SessionNotification};
@@ -26,8 +26,6 @@ use tokio::sync::{mpsc, oneshot, watch};
 use tracing::{error, info, warn};
 use trogon_std::time::SystemClock;
 use uuid::Uuid;
-
-const HTTP_CHANNEL_CAPACITY: usize = 64;
 
 type BoxError = Box<dyn std::error::Error + Send>;
 type SseSender = mpsc::Sender<SseFrame>;
