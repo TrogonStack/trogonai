@@ -489,7 +489,7 @@ async fn authenticate_via_nats_succeeds() {
             meta.insert("XAI_API_KEY".to_string(), serde_json::json!("user-key-123"));
             h.global(
                 "acp.agent.authenticate",
-                AuthenticateRequest::new("api-key").meta(meta),
+                AuthenticateRequest::new("xai-api-key").meta(meta),
                 "r.auth",
             );
             let payloads = h.expect_n_publishes(1).await;
@@ -513,7 +513,7 @@ async fn authenticate_then_new_session_uses_pending_key() {
             meta.insert("XAI_API_KEY".to_string(), serde_json::json!("user-key-123"));
             h.global(
                 "acp.agent.authenticate",
-                AuthenticateRequest::new("api-key").meta(meta),
+                AuthenticateRequest::new("xai-api-key").meta(meta),
                 "r.auth",
             );
             h.expect_n_publishes(1).await;
@@ -1043,7 +1043,7 @@ async fn prompt_finished_incomplete_breaks_loop() {
         .await;
 }
 
-/// A stream that ends with `Finished { Failed }` must publish a `PromptResponse`.
+/// A stream that ends with `Finished { Failed }` must publish an ACP error response.
 #[tokio::test]
 async fn prompt_finished_failed_breaks_loop() {
     tokio::task::LocalSet::new()
@@ -1062,12 +1062,14 @@ async fn prompt_finished_failed_breaks_loop() {
                 "r.prompt",
             );
             let payloads = h.expect_n_publishes(2).await;
-            let _: PromptResponse = serde_json::from_slice(&payloads[1]).unwrap();
+            // Agent surfaces the failure as an ACP error (not a PromptResponse).
+            let val: serde_json::Value = serde_json::from_slice(&payloads[1]).unwrap();
+            assert!(val.get("code").is_some(), "expected ACP error with 'code', got: {val}");
         })
         .await;
 }
 
-/// A stream that ends with `Finished { Cancelled }` must publish a `PromptResponse`.
+/// A stream that ends with `Finished { Cancelled }` must publish an ACP error response.
 #[tokio::test]
 async fn prompt_finished_cancelled_breaks_loop() {
     tokio::task::LocalSet::new()
@@ -1086,7 +1088,9 @@ async fn prompt_finished_cancelled_breaks_loop() {
                 "r.prompt",
             );
             let payloads = h.expect_n_publishes(2).await;
-            let _: PromptResponse = serde_json::from_slice(&payloads[1]).unwrap();
+            // Agent surfaces the cancellation as an ACP error (not a PromptResponse).
+            let val: serde_json::Value = serde_json::from_slice(&payloads[1]).unwrap();
+            assert!(val.get("code").is_some(), "expected ACP error with 'code', got: {val}");
         })
         .await;
 }
@@ -1372,8 +1376,7 @@ async fn prompt_without_api_key_returns_acp_error() {
 
 // ── prompt with Error event ───────────────────────────────────────────────────
 
-/// An `XaiEvent::Error` in the stream causes the agent to log a warning and
-/// break the loop — it must still publish a `PromptResponse`.
+/// An `XaiEvent::Error` in the stream causes the agent to surface an ACP error.
 #[tokio::test]
 async fn prompt_error_event_breaks_loop() {
     tokio::task::LocalSet::new()
@@ -1391,7 +1394,8 @@ async fn prompt_error_event_breaks_loop() {
                 "r.prompt",
             );
             let payloads = h.expect_n_publishes(2).await;
-            let _: PromptResponse = serde_json::from_slice(&payloads[1]).unwrap();
+            let val: serde_json::Value = serde_json::from_slice(&payloads[1]).unwrap();
+            assert!(val.get("code").is_some(), "expected ACP error with 'code', got: {val}");
         })
         .await;
 }
@@ -1953,8 +1957,7 @@ async fn set_session_mode_unknown_session_succeeds() {
         .await;
 }
 
-/// `set_session_config_option` also ignores the session ID — same "always
-/// accept" contract as `set_session_mode`.
+/// `set_session_config_option` on an unknown session returns an ACP error.
 #[tokio::test]
 async fn set_session_config_option_unknown_session_succeeds() {
     tokio::task::LocalSet::new()
@@ -1966,7 +1969,8 @@ async fn set_session_config_option_unknown_session_succeeds() {
                 "r.cfg",
             );
             let payloads = h.expect_n_publishes(1).await;
-            let _: SetSessionConfigOptionResponse = serde_json::from_slice(&payloads[0]).unwrap();
+            let val: serde_json::Value = serde_json::from_slice(&payloads[0]).unwrap();
+            assert!(val.get("code").is_some(), "expected ACP error with 'code', got: {val}");
         })
         .await;
 }
@@ -1988,7 +1992,7 @@ async fn authenticate_empty_key_does_not_override_global_key() {
             meta.insert("XAI_API_KEY".to_string(), serde_json::json!(""));
             h.global(
                 "acp.agent.authenticate",
-                AuthenticateRequest::new("api-key").meta(meta),
+                AuthenticateRequest::new("xai-api-key").meta(meta),
                 "r.auth",
             );
             h.expect_n_publishes(1).await;
@@ -2073,7 +2077,7 @@ async fn second_authenticate_overwrites_first() {
             meta1.insert("XAI_API_KEY".to_string(), serde_json::json!("first-key"));
             h.global(
                 "acp.agent.authenticate",
-                AuthenticateRequest::new("api-key").meta(meta1),
+                AuthenticateRequest::new("xai-api-key").meta(meta1),
                 "r.auth1",
             );
             h.expect_n_publishes(1).await;
@@ -2083,7 +2087,7 @@ async fn second_authenticate_overwrites_first() {
             meta2.insert("XAI_API_KEY".to_string(), serde_json::json!("second-key"));
             h.global(
                 "acp.agent.authenticate",
-                AuthenticateRequest::new("api-key").meta(meta2),
+                AuthenticateRequest::new("xai-api-key").meta(meta2),
                 "r.auth2",
             );
             h.expect_n_publishes(2).await;
@@ -2419,7 +2423,7 @@ async fn authenticate_with_meta_without_xai_api_key_does_not_set_pending_key() {
             );
             h.global(
                 "acp.agent.authenticate",
-                AuthenticateRequest::new("api-key").meta(meta),
+                AuthenticateRequest::new("xai-api-key").meta(meta),
                 "r.auth",
             );
             h.expect_n_publishes(1).await;
@@ -2592,12 +2596,11 @@ async fn fork_with_no_model_override_uses_agent_default_on_prompt() {
         .await;
 }
 
-// ── prompt: partial text before Error is saved in history ────────────────────
+// ── prompt: Error clears history (no partial text saved) ─────────────────────
 
-/// When `XaiEvent::Error` arrives mid-stream after text has already been
-/// accumulated, the partial assistant text must be recorded in history.
-/// The agent's `if !assistant_text.is_empty()` guard fires even on the
-/// error path because the history update runs after the streaming loop exits.
+/// When `XaiEvent::Error` arrives mid-stream, the agent returns Err immediately
+/// and skips the history update — session history is empty after the error.
+/// The follow-up prompt starts from a clean slate.
 #[tokio::test]
 async fn prompt_error_mid_stream_partial_text_saved_in_history() {
     tokio::task::LocalSet::new()
@@ -2629,9 +2632,12 @@ async fn prompt_error_mid_stream_partial_text_saved_in_history() {
             h.expect_n_publishes(3).await;
 
             let call = h.http.last_call().unwrap();
+            // Errors skip history update — session history is empty after error.
+            // Follow-up prompt sends only the new user message.
             assert_eq!(
-                call.input_len, 3,
-                "history must contain user₁ + partial_assistant₁ + user₂ = 3 items after mid-stream error"
+                call.input_len, 1,
+                "history must be empty after stream error; follow-up must send only user₂, got input_len = {}",
+                call.input_len
             );
         })
         .await;
@@ -2692,7 +2698,7 @@ async fn authenticate_new_session_twice_each_session_uses_its_own_key() {
             );
             h.global(
                 "acp.agent.authenticate",
-                AuthenticateRequest::new("api-key").meta(meta1),
+                AuthenticateRequest::new("xai-api-key").meta(meta1),
                 "r.auth1",
             );
             h.expect_n_publishes(1).await;
@@ -2706,7 +2712,7 @@ async fn authenticate_new_session_twice_each_session_uses_its_own_key() {
             );
             h.global(
                 "acp.agent.authenticate",
-                AuthenticateRequest::new("api-key").meta(meta2),
+                AuthenticateRequest::new("xai-api-key").meta(meta2),
                 "r.auth2",
             );
             h.expect_n_publishes(3).await; // auth1 + session1 + auth2
