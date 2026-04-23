@@ -211,7 +211,7 @@ mod tests {
         let env = InMemoryEnv::new();
         let fs = MemFs::new();
 
-        let (writer, info) = try_open_log_file(ServiceName::AcpNatsWs, &env, &fs);
+        let (writer, info) = try_open_log_file(ServiceName::AcpNatsServer, &env, &fs);
         assert!(writer.is_some());
         let msg = info.unwrap();
         assert!(msg.contains("File logging enabled"));
@@ -233,7 +233,7 @@ mod tests {
     #[test]
     fn service_name_reexported() {
         assert_eq!(ServiceName::AcpNatsStdio.as_str(), "acp-nats-stdio");
-        assert_eq!(ServiceName::AcpNatsWs.as_str(), "acp-nats-ws");
+        assert_eq!(ServiceName::AcpNatsServer.as_str(), "acp-nats-server");
     }
 
     #[test]

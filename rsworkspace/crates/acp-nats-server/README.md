@@ -14,7 +14,7 @@ graph LR
 
 ## Features
 
-- Streamable HTTP transport on `/acp` with a connection-scoped SSE stream
+- Streamable HTTP transport on `/acp` with session-scoped SSE listeners
 - WebSocket upgrade on `/acp`
 - Multiple concurrent ACP connections sharing the same NATS bridge
 - OpenTelemetry integration (logs, metrics, traces)
@@ -47,21 +47,11 @@ curl -i \
   http://127.0.0.1:8080/acp
 ```
 
-Then open the long-lived SSE stream for the connection:
+`POST /acp` returns an SSE response for JSON-RPC requests, `GET /acp` opens a session-scoped SSE listener with `Acp-Connection-Id` and `Acp-Session-Id`, and `DELETE /acp` terminates a connection. The WebSocket upgrade response and HTTP initialize response both include `Acp-Connection-Id`.
 
-```bash
-curl -N \
-  -H 'Accept: text/event-stream' \
-  -H 'Acp-Connection-Id: <connection-id>' \
-  -H 'Acp-Protocol-Version: 0' \
-  http://127.0.0.1:8080/acp
-```
+After `initialize`, HTTP clients may send `Acp-Protocol-Version` on `POST`/`GET`/`DELETE`. When present, it must match the negotiated ACP protocol version for that connection.
 
-`POST /acp` returns `200 OK` with JSON only for `initialize`; follow-up POST requests return `202 Accepted` immediately and their JSON-RPC responses arrive on the connection-scoped `GET /acp` stream. Session-scoped POST requests must include both `Acp-Connection-Id` and `Acp-Session-Id`. `DELETE /acp` terminates a connection. The WebSocket upgrade response and HTTP initialize response both include `Acp-Connection-Id`.
-
-After `initialize`, the ACP transport spec says HTTP clients SHOULD send `Acp-Protocol-Version` on `POST`/`GET`/`DELETE`. The server validates it when present and rejects mismatches against the negotiated ACP protocol version for that connection.
-
-When clients send an `Origin` header, `/acp` validates it against the bound host and rejects disallowed origins with `403 Forbidden`.
+When clients send an `Origin` header, `/acp` validates it against the bound host and rejects disallowed origins with `403 Forbidden`. Streamable HTTP `POST` SSE responses also emit a priming SSE event ID before JSON-RPC payloads and attach event IDs to streamed JSON events.
 
 ## Configuration
 
@@ -107,7 +97,7 @@ If none are set, the connection is unauthenticated.
 | Variable | Description |
 |----------|-------------|
 | `RUST_LOG` | Tracing filter directive (default: `info`) |
-| `TROGON_LOG_DIR` | Directory for file-based logging |
+| `ACP_LOG_DIR` | Directory for file-based logging |
 
 ### OpenTelemetry
 

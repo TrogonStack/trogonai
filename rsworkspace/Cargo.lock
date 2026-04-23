@@ -43,27 +43,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "acp-nats-stdio"
-version = "0.0.1"
-dependencies = [
- "acp-nats",
- "acp-telemetry",
- "agent-client-protocol",
- "async-compat",
- "async-nats",
- "bytes",
- "clap",
- "futures",
- "opentelemetry",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "trogon-nats",
- "trogon-std",
-]
-
-[[package]]
-name = "acp-nats-ws"
+name = "acp-nats-server"
 version = "0.1.0"
 dependencies = [
  "acp-nats",
@@ -86,6 +66,26 @@ dependencies = [
  "trogon-nats",
  "trogon-std",
  "uuid",
+]
+
+[[package]]
+name = "acp-nats-stdio"
+version = "0.0.1"
+dependencies = [
+ "acp-nats",
+ "acp-telemetry",
+ "agent-client-protocol",
+ "async-compat",
+ "async-nats",
+ "bytes",
+ "clap",
+ "futures",
+ "opentelemetry",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "trogon-nats",
+ "trogon-std",
 ]
 
 [[package]]
