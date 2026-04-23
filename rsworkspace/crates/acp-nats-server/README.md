@@ -49,7 +49,7 @@ curl -i \
 
 `POST /acp` returns an SSE response for JSON-RPC requests, `GET /acp` opens a session-scoped SSE listener with `Acp-Connection-Id` and `Acp-Session-Id`, and `DELETE /acp` terminates a connection. The WebSocket upgrade response and HTTP initialize response both include `Acp-Connection-Id`.
 
-After `initialize`, HTTP clients may send `Acp-Protocol-Version` on `POST`/`GET`/`DELETE`. When present, it must match the negotiated ACP protocol version for that connection.
+After `initialize`, the ACP transport spec says HTTP clients SHOULD send `Acp-Protocol-Version` on `POST`/`GET`/`DELETE`. The server validates it when present and rejects mismatches against the negotiated ACP protocol version for that connection.
 
 When clients send an `Origin` header, `/acp` validates it against the bound host and rejects disallowed origins with `403 Forbidden`. Streamable HTTP `POST` SSE responses also emit a priming SSE event ID before JSON-RPC payloads and attach event IDs to streamed JSON events.
 
