@@ -1,15 +1,22 @@
-//! AI provider → base URL mapping.
+//! Provider → base URL mapping.
+//!
+//! Covers both AI providers and external API providers used by trogon-agent.
 
 /// Return the HTTPS base URL for a provider name extracted from the request path.
 ///
 /// Returns `None` if the provider is not recognised.
 pub fn base_url(provider: &str) -> Option<&'static str> {
     match provider {
+        // AI providers
         "anthropic" => Some("https://api.anthropic.com"),
         "openai" => Some("https://api.openai.com"),
         "gemini" => Some("https://generativelanguage.googleapis.com"),
         "cohere" => Some("https://api.cohere.ai"),
         "mistral" => Some("https://api.mistral.ai"),
+        // External API providers (used by trogon-agent tools)
+        "github" => Some("https://api.github.com"),
+        "linear" => Some("https://api.linear.app"),
+        "slack" => Some("https://slack.com/api"),
         _ => None,
     }
 }
@@ -28,6 +35,9 @@ mod tests {
         );
         assert_eq!(base_url("cohere"), Some("https://api.cohere.ai"));
         assert_eq!(base_url("mistral"), Some("https://api.mistral.ai"));
+        assert_eq!(base_url("github"), Some("https://api.github.com"));
+        assert_eq!(base_url("linear"), Some("https://api.linear.app"));
+        assert_eq!(base_url("slack"), Some("https://slack.com/api"));
     }
 
     #[test]
