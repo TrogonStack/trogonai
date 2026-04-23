@@ -411,8 +411,12 @@ impl OutgoingHttpMessage {
         })
     }
 
+    fn is_response(&self) -> bool {
+        self.id.is_some() && self.params.is_none()
+    }
+
     fn is_success_response(&self) -> bool {
-        self.id.is_some() && self.params.is_none() && !self.has_error
+        self.is_response() && !self.has_error
     }
 
     fn result_session_id(&self) -> Option<acp_nats::AcpSessionId> {
@@ -428,6 +432,7 @@ impl OutgoingHttpMessage {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ListenerDispatch {
     Missing,
     Delivered,
@@ -557,6 +562,34 @@ fn inject_session_id_into_response_result(
     session_id: &acp_nats::AcpSessionId,
 ) -> Result<String, HttpTransportError> {
     inject_result_value(raw, "sessionId", Value::String(session_id.as_str().to_string()))
+}
+
+fn inject_session_id_into_response_result_or_preserve(
+    outbound: String,
+    session_id: &acp_nats::AcpSessionId,
+    connection_id: &AcpConnectionId,
+) -> String {
+    match inject_session_id_into_response_result(&outbound, session_id) {
+        Ok(updated_outbound) => updated_outbound,
+        Err(error) => {
+            error!(%connection_id, error = %error, "Failed to augment outbound session response");
+            outbound
+        }
+    }
+}
+
+fn undelivered_response_outcome(
+    parsed: Option<&OutgoingHttpMessage>,
+    dispatch_outcome: ListenerDispatch,
+) -> Option<ListenerDispatch> {
+    if !parsed.is_some_and(OutgoingHttpMessage::is_response) {
+        return None;
+    }
+
+    match dispatch_outcome {
+        ListenerDispatch::Missing | ListenerDispatch::Dropped => Some(dispatch_outcome),
+        ListenerDispatch::Delivered => None,
+    }
 }
 
 pub async fn get(State(state): State<AppState>, request: Request) -> Response {
@@ -1231,13 +1264,11 @@ pub async fn run_http_connection<N, J>(
                         && parsed.as_ref().is_some_and(OutgoingHttpMessage::is_success_response)
                         && parsed.as_ref().and_then(OutgoingHttpMessage::result_session_id).is_none()
                     {
-                        match inject_session_id_into_response_result(&outbound, &context.session_id) {
-                            Ok(updated_outbound) => outbound = updated_outbound,
-                            Err(error) => {
-                                error!(%connection_id, error = %error, "Failed to augment outbound session response");
-                                continue;
-                            }
-                        }
+                        outbound = inject_session_id_into_response_result_or_preserve(
+                            outbound,
+                            &context.session_id,
+                            &connection_id,
+                        );
                     }
                 }
 
@@ -1248,7 +1279,19 @@ pub async fn run_http_connection<N, J>(
                     sessions.insert(session_id);
                 }
 
-                let _ = dispatch_to_get_listeners(&frame, &mut get_listeners);
+                if let Some(dispatch_outcome) =
+                    undelivered_response_outcome(parsed.as_ref(), dispatch_to_get_listeners(&frame, &mut get_listeners))
+                {
+                    match dispatch_outcome {
+                        ListenerDispatch::Missing => {
+                            warn!(%connection_id, "Dropping JSON-RPC response: no active GET listener");
+                        }
+                        ListenerDispatch::Dropped => {
+                            warn!(%connection_id, "Dropping JSON-RPC response: GET listeners closed or stalled");
+                        }
+                        ListenerDispatch::Delivered => {}
+                    }
+                }
             }
             result = &mut client_task => {
                 match result {
@@ -1675,20 +1718,28 @@ mod tests {
 
     #[test]
     fn outgoing_http_message_extracts_session_ids() {
+        let request =
+            OutgoingHttpMessage::parse(r#"{"jsonrpc":"2.0","id":1,"method":"prompt","params":{"text":"hi"}}"#).unwrap();
+        assert!(!request.is_response());
+
         let response =
             OutgoingHttpMessage::parse(r#"{"jsonrpc":"2.0","id":2,"result":{"sessionId":"session-1"}}"#).unwrap();
+        assert!(response.is_response());
         assert_eq!(response.result_session_id(), Some(session_id()));
         assert!(response.is_success_response());
 
         let null_result = OutgoingHttpMessage::parse(r#"{"jsonrpc":"2.0","id":3,"result":null}"#).unwrap();
+        assert!(null_result.is_response());
         assert_eq!(null_result.result_session_id(), None);
         assert!(null_result.is_success_response());
 
         let empty_success = OutgoingHttpMessage::parse(r#"{"jsonrpc":"2.0","id":4}"#).unwrap();
+        assert!(empty_success.is_response());
         assert!(empty_success.is_success_response());
 
         let error_response =
             OutgoingHttpMessage::parse(r#"{"jsonrpc":"2.0","id":5,"error":{"code":-32000,"message":"boom"}}"#).unwrap();
+        assert!(error_response.is_response());
         assert!(!error_response.is_success_response());
     }
 
@@ -1857,6 +1908,44 @@ mod tests {
 
         let json: Value = serde_json::from_str(&updated).unwrap();
         assert_eq!(json["result"]["sessionId"], session_id.as_str());
+    }
+
+    #[test]
+    fn inject_session_id_into_response_result_or_preserve_keeps_original_on_error() {
+        let connection_id = AcpConnectionId::default();
+        let session_id = session_id();
+        let outbound = "{".to_string();
+
+        let updated = inject_session_id_into_response_result_or_preserve(outbound.clone(), &session_id, &connection_id);
+
+        assert_eq!(updated, outbound);
+    }
+
+    #[test]
+    fn undelivered_response_outcome_only_flags_missing_or_dropped_responses() {
+        let response = OutgoingHttpMessage::parse(r#"{"jsonrpc":"2.0","id":2,"result":null}"#).unwrap();
+        let notification = OutgoingHttpMessage::parse(
+            r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-1"}}"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            undelivered_response_outcome(Some(&response), ListenerDispatch::Missing),
+            Some(ListenerDispatch::Missing)
+        );
+        assert_eq!(
+            undelivered_response_outcome(Some(&response), ListenerDispatch::Dropped),
+            Some(ListenerDispatch::Dropped)
+        );
+        assert_eq!(
+            undelivered_response_outcome(Some(&response), ListenerDispatch::Delivered),
+            None
+        );
+        assert_eq!(
+            undelivered_response_outcome(Some(&notification), ListenerDispatch::Missing),
+            None
+        );
+        assert_eq!(undelivered_response_outcome(None, ListenerDispatch::Missing), None);
     }
 
     #[test]
