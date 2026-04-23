@@ -369,6 +369,26 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn next_json_sse_event_skips_empty_event_frames() {
+        let mut stream = futures_util::stream::iter(vec![
+            Ok::<_, reqwest::Error>(bytes::Bytes::from("data: \n\n")),
+            Ok::<_, reqwest::Error>(bytes::Bytes::from(
+                "data: {\"jsonrpc\":\"2.0\",\"method\":\"session/update\"}\n\n",
+            )),
+        ]);
+
+        let event = next_json_sse_event(&mut stream).await;
+
+        assert_eq!(
+            event,
+            json!({
+                "jsonrpc": "2.0",
+                "method": "session/update",
+            })
+        );
+    }
+
     fn http_post_request(body: &str) -> Request<Body> {
         Request::builder()
             .method("POST")

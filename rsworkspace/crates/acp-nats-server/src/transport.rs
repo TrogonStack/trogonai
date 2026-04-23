@@ -2143,6 +2143,23 @@ mod tests {
     }
 
     #[test]
+    fn dispatch_to_get_listeners_removes_closed_listener() {
+        let session_id = session_id();
+        let mut get_listeners = HashMap::new();
+        let (listener_tx, listener_rx) = mpsc::channel(HTTP_CHANNEL_CAPACITY);
+        drop(listener_rx);
+        get_listeners.insert(session_id.clone(), vec![listener_tx]);
+
+        let frame = SseFrame::json(
+            r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-1"}}"#.to_string(),
+        );
+        let outcome = dispatch_to_get_listeners(&frame, &session_id, &mut get_listeners);
+
+        assert!(matches!(outcome, ListenerDispatch::Dropped));
+        assert!(!get_listeners.contains_key(&session_id));
+    }
+
+    #[test]
     fn header_validators_enforce_content_negotiation() {
         let valid_post = post_headers();
         assert!(validate_post_headers(&valid_post).is_ok());
