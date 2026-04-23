@@ -98,7 +98,7 @@ fn make_agent(store: NatsSessionStore) -> XaiAgent<NoOpHttpClient, NoOpNotifier>
 #[tokio::test]
 async fn agent_new_session_persists_to_nats() {
     let (js, _c) = make_js().await;
-    let store = NatsSessionStore::open(&js).await.expect("store");
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
     let agent = make_agent(store);
 
     tokio::task::LocalSet::new()
@@ -126,7 +126,7 @@ async fn agent_new_session_persists_to_nats() {
 #[tokio::test]
 async fn agent_new_session_name_defaults_to_new_conversation() {
     let (js, _c) = make_js().await;
-    let store = NatsSessionStore::open(&js).await.expect("store");
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
     let agent = make_agent(store);
 
     tokio::task::LocalSet::new()
@@ -153,7 +153,7 @@ async fn agent_new_session_name_defaults_to_new_conversation() {
 #[tokio::test]
 async fn agent_new_session_model_defaults_to_agent_default() {
     let (js, _c) = make_js().await;
-    let store = NatsSessionStore::open(&js).await.expect("store");
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
     let agent = make_agent(store);
 
     tokio::task::LocalSet::new()
@@ -180,7 +180,7 @@ async fn agent_new_session_model_defaults_to_agent_default() {
 #[tokio::test]
 async fn agent_fork_session_creates_separate_nats_entry() {
     let (js, _c) = make_js().await;
-    let store = NatsSessionStore::open(&js).await.expect("store");
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
     let agent = make_agent(store);
 
     tokio::task::LocalSet::new()
@@ -224,7 +224,7 @@ async fn agent_fork_session_creates_separate_nats_entry() {
 #[tokio::test]
 async fn agent_close_session_saves_final_snapshot_to_nats() {
     let (js, _c) = make_js().await;
-    let store = NatsSessionStore::open(&js).await.expect("store");
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
     let agent = make_agent(store);
 
     tokio::task::LocalSet::new()
@@ -256,7 +256,7 @@ async fn agent_close_session_saves_final_snapshot_to_nats() {
 #[tokio::test]
 async fn prompt_persists_user_message_to_nats() {
     let (js, _c) = make_js().await;
-    let store = NatsSessionStore::open(&js).await.expect("store");
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
     // Requires a non-empty API key so prompt does not reject before calling the client.
     let agent = XaiAgent::with_deps(NoOpNotifier, "grok-4", "dummy-key", NoOpHttpClient)
         .with_session_store(Arc::new(store));
@@ -325,7 +325,7 @@ async fn new_session_with_loaders_writes_console_model_to_sessions() {
 
     let agent_loader = AgentLoader::open(&js).await.expect("AgentLoader");
     let skill_loader = SkillLoader::open(&js).await.expect("SkillLoader");
-    let store = NatsSessionStore::open(&js).await.expect("store");
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
 
     let agent = XaiAgent::with_deps(NoOpNotifier, "grok-4", "", NoOpHttpClient)
         .with_loaders("agent-x", Arc::new(agent_loader), Arc::new(skill_loader))
@@ -358,7 +358,7 @@ async fn new_session_with_loaders_writes_console_model_to_sessions() {
 #[tokio::test]
 async fn tenant_id_env_var_sets_kv_key_prefix() {
     let (js, _c) = make_js().await;
-    let store = NatsSessionStore::open(&js).await.expect("store");
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
 
     // Set TENANT_ID before constructing the agent (read in with_deps).
     // SAFETY: single-threaded test body; no other thread reads this var concurrently.
@@ -406,7 +406,7 @@ async fn tenant_id_env_var_sets_kv_key_prefix() {
 #[tokio::test]
 async fn prompt_with_assistant_response_persists_both_messages_to_nats() {
     let (js, _c) = make_js().await;
-    let store = NatsSessionStore::open(&js).await.expect("store");
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
     let agent = XaiAgent::with_deps(NoOpNotifier, "grok-4", "dummy-key", ReplyHttpClient)
         .with_session_store(Arc::new(store));
 
