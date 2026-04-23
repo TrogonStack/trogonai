@@ -302,13 +302,13 @@ impl SseFrame {
 enum PendingRequest {
     Live {
         request_id: RequestId,
-        capture_protocol_version: bool,
+        initialize_request: bool,
+        activate_session_on_success: Option<acp_nats::AcpSessionId>,
         session_id: Option<acp_nats::AcpSessionId>,
         sender: SseSender,
     },
     Buffered {
         request_id: RequestId,
-        fallback_session_id: Option<acp_nats::AcpSessionId>,
         events: Vec<SseFrame>,
         response: oneshot::Sender<Result<HttpPostOutcome, HttpTransportError>>,
     },
@@ -370,11 +370,16 @@ impl IncomingHttpMessage {
         self.method_name() == Some("initialize")
     }
 
-    fn activates_session(&self) -> bool {
-        matches!(
-            self.method_name(),
-            Some("session/new") | Some("session/load") | Some("session/resume") | Some("session/fork")
-        )
+    fn creates_session(&self) -> bool {
+        matches!(self.method_name(), Some("session/new") | Some("session/fork"))
+    }
+
+    fn attaches_session(&self) -> bool {
+        matches!(self.method_name(), Some("session/load") | Some("session/resume"))
+    }
+
+    fn allows_unknown_session(&self) -> bool {
+        self.creates_session() || self.attaches_session()
     }
 
     fn requires_session_id(&self) -> bool {
@@ -383,8 +388,7 @@ impl IncomingHttpMessage {
         }
 
         match self.method_name() {
-            Some("initialize") | Some("authenticate") | Some("session/list") => false,
-            _ if self.activates_session() => false,
+            Some("initialize") | Some("authenticate") | Some("session/list") | Some("session/new") => false,
             Some(method) if method.starts_with("session/") => true,
             _ => false,
         }
@@ -405,22 +409,34 @@ impl IncomingHttpMessage {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug)]
 struct OutgoingHttpMessage {
     id: Option<RequestId>,
     params: Option<Value>,
     result: Option<Value>,
+    has_error: bool,
 }
 
 impl OutgoingHttpMessage {
     fn parse(raw: &str) -> Option<Self> {
-        serde_json::from_str(raw).ok()
+        let value: Value = serde_json::from_str(raw).ok()?;
+        let object = value.as_object()?;
+        Some(Self {
+            id: object.get("id").and_then(|id| serde_json::from_value(id.clone()).ok()),
+            params: object.get("params").cloned(),
+            result: object.get("result").cloned(),
+            has_error: object.contains_key("error"),
+        })
     }
 
     fn params_session_id(&self) -> Option<acp_nats::AcpSessionId> {
         let params = self.params.as_ref()?;
         let session_id = params.get("sessionId")?.as_str()?;
         acp_nats::AcpSessionId::new(session_id).ok()
+    }
+
+    fn is_success_response(&self) -> bool {
+        self.id.is_some() && self.params.is_none() && !self.has_error
     }
 
     fn result_session_id(&self) -> Option<acp_nats::AcpSessionId> {
@@ -582,6 +598,41 @@ fn route_buffered_frame(
 
     events.push(frame.clone());
     BufferedFrameOutcome::Buffered
+}
+
+fn activate_attached_session_on_success(
+    sessions: &mut HashSet<acp_nats::AcpSessionId>,
+    request_id: &RequestId,
+    activate_session_on_success: Option<&acp_nats::AcpSessionId>,
+    parsed: Option<&OutgoingHttpMessage>,
+) {
+    if parsed.and_then(|message| message.id.as_ref()) != Some(request_id) {
+        return;
+    }
+
+    if parsed.is_some_and(OutgoingHttpMessage::is_success_response)
+        && let Some(session_id) = activate_session_on_success
+    {
+        sessions.insert(session_id.clone());
+    }
+}
+
+fn targets_unknown_session(
+    message: &IncomingHttpMessage,
+    session_id: Option<&acp_nats::AcpSessionId>,
+    sessions: &HashSet<acp_nats::AcpSessionId>,
+) -> bool {
+    message.requires_session_id() && session_id.is_some_and(|session_id| !sessions.contains(session_id))
+}
+
+fn require_initialized(initialized: bool) -> Result<(), HttpTransportError> {
+    if initialized {
+        Ok(())
+    } else {
+        Err(HttpTransportError::bad_request(
+            "ACP connection has not been initialized",
+        ))
+    }
 }
 
 pub async fn get(State(state): State<AppState>, request: Request) -> Response {
@@ -1142,6 +1193,7 @@ pub async fn run_http_connection<N, J>(
     let mut io_task = tokio::task::spawn_local(io_task);
 
     let mut pending_request: Option<PendingRequest> = None;
+    let mut initialized = false;
     let mut protocol_version: Option<ProtocolVersion> = None;
     let mut sessions = HashSet::<acp_nats::AcpSessionId>::new();
     let mut get_listeners = HashMap::<acp_nats::AcpSessionId, Vec<SseSender>>::new();
@@ -1165,6 +1217,20 @@ pub async fn run_http_connection<N, J>(
                             continue;
                         }
 
+                        if !message.is_initialize()
+                            && let Err(error) = require_initialized(initialized)
+                        {
+                            let _ = response.send(Err(error));
+                            continue;
+                        }
+
+                        if !message.allows_unknown_session()
+                            && targets_unknown_session(&message, session_id.as_ref(), &sessions)
+                        {
+                            let _ = response.send(Err(HttpTransportError::not_found("unknown ACP session")));
+                            continue;
+                        }
+
                         if message.is_request() {
                             if pending_request.is_some() {
                                 let _ = response.send(Err(HttpTransportError::conflict(
@@ -1173,10 +1239,9 @@ pub async fn run_http_connection<N, J>(
                                 continue;
                             }
 
-                            if message.activates_session() {
+                            if message.creates_session() {
                                 pending_request = Some(PendingRequest::Buffered {
                                     request_id: message.id.clone().expect("request must have id"),
-                                    fallback_session_id: message.params_session_id().ok().flatten(),
                                     events: Vec::new(),
                                     response,
                                 });
@@ -1191,14 +1256,15 @@ pub async fn run_http_connection<N, J>(
                                 continue;
                             }
 
-                            if let Some(session_id) = session_id.clone() {
-                                sessions.insert(session_id);
-                            }
-
                             let (stream_tx, stream_rx) = mpsc::channel(HTTP_CHANNEL_CAPACITY);
                             pending_request = Some(PendingRequest::Live {
                                 request_id: message.id.clone().expect("request must have id"),
-                                capture_protocol_version: message.is_initialize(),
+                                initialize_request: message.is_initialize(),
+                                activate_session_on_success: if message.attaches_session() {
+                                    session_id.clone()
+                                } else {
+                                    None
+                                },
                                 session_id: session_id.clone(),
                                 sender: stream_tx,
                             });
@@ -1218,10 +1284,6 @@ pub async fn run_http_connection<N, J>(
                             continue;
                         }
 
-                        if let Some(session_id) = session_id.clone() {
-                            sessions.insert(session_id);
-                        }
-
                         if input_tx.try_send(message.raw).is_err() {
                             let _ = response.send(Err(HttpTransportError::internal(
                                 "ACP runtime input queue is full",
@@ -1236,6 +1298,8 @@ pub async fn run_http_connection<N, J>(
                         protocol_version: header_protocol_version,
                         response,
                     } => {
+                        if let Err(error) = require_initialized(initialized) { let _ = response.send(Err(error)); continue; }
+
                         if let Err(error) = validate_protocol_version_header(
                             header_protocol_version.as_ref(),
                             protocol_version.as_ref(),
@@ -1286,17 +1350,25 @@ pub async fn run_http_connection<N, J>(
                     match pending {
                         PendingRequest::Live {
                             request_id,
-                            capture_protocol_version,
+                            initialize_request,
+                            activate_session_on_success,
                             session_id,
                             sender,
                         } => {
-                            if *capture_protocol_version
-                                && parsed.as_ref().and_then(|message| message.id.as_ref())
-                                    == Some(request_id)
-                            {
-                                protocol_version = parsed
-                                    .as_ref()
-                                    .and_then(OutgoingHttpMessage::result_protocol_version);
+                            if parsed.as_ref().and_then(|message| message.id.as_ref()) == Some(request_id) {
+                                if *initialize_request {
+                                    protocol_version = parsed
+                                        .as_ref()
+                                        .and_then(OutgoingHttpMessage::result_protocol_version);
+                                    initialized = protocol_version.is_some();
+                                }
+
+                                activate_attached_session_on_success(
+                                    &mut sessions,
+                                    request_id,
+                                    activate_session_on_success.as_ref(),
+                                    parsed.as_ref(),
+                                );
                             }
 
                             match route_live_frame(
@@ -1316,7 +1388,6 @@ pub async fn run_http_connection<N, J>(
                         }
                         PendingRequest::Buffered {
                             request_id,
-                            fallback_session_id,
                             events,
                             ..
                         } => {
@@ -1329,8 +1400,6 @@ pub async fn run_http_connection<N, J>(
                             ) {
                                 BufferedFrameOutcome::Buffered | BufferedFrameOutcome::Routed => {}
                                 BufferedFrameOutcome::Finalize { session_id } => {
-                                    let session_id =
-                                        session_id.or_else(|| fallback_session_id.clone());
                                     if let Some(session_id) = session_id.clone() {
                                         sessions.insert(session_id);
                                     }
@@ -1712,17 +1781,25 @@ mod tests {
         )
         .unwrap();
         assert!(request.is_request());
-        assert!(request.activates_session());
+        assert!(request.creates_session());
+        assert!(!request.requires_session_id());
 
         for raw in [
             r#"{"jsonrpc":"2.0","id":2,"method":"session/load","params":{"sessionId":"session-1","cwd":"."}}"#,
             r#"{"jsonrpc":"2.0","id":3,"method":"session/resume","params":{"sessionId":"session-1","cwd":"."}}"#,
-            r#"{"jsonrpc":"2.0","id":4,"method":"session/fork","params":{"sessionId":"session-1","cwd":"."}}"#,
         ] {
-            let activating = IncomingHttpMessage::parse(raw.to_string()).unwrap();
-            assert!(activating.activates_session());
-            assert!(!activating.requires_session_id());
+            let attach = IncomingHttpMessage::parse(raw.to_string()).unwrap();
+            assert!(attach.attaches_session());
+            assert!(attach.requires_session_id());
         }
+
+        let fork = IncomingHttpMessage::parse(
+            r#"{"jsonrpc":"2.0","id":4,"method":"session/fork","params":{"sessionId":"session-1","cwd":"."}}"#
+                .to_string(),
+        )
+        .unwrap();
+        assert!(fork.creates_session());
+        assert!(fork.requires_session_id());
 
         let notification =
             IncomingHttpMessage::parse(r#"{"jsonrpc":"2.0","method":"initialized"}"#.to_string()).unwrap();
@@ -1791,6 +1868,78 @@ mod tests {
         let response =
             OutgoingHttpMessage::parse(r#"{"jsonrpc":"2.0","id":2,"result":{"sessionId":"session-1"}}"#).unwrap();
         assert_eq!(response.result_session_id(), Some(session_id()));
+        assert!(response.is_success_response());
+
+        let null_result = OutgoingHttpMessage::parse(r#"{"jsonrpc":"2.0","id":3,"result":null}"#).unwrap();
+        assert_eq!(null_result.result_session_id(), None);
+        assert!(null_result.is_success_response());
+
+        let empty_success = OutgoingHttpMessage::parse(r#"{"jsonrpc":"2.0","id":4}"#).unwrap();
+        assert!(empty_success.is_success_response());
+
+        let error_response =
+            OutgoingHttpMessage::parse(r#"{"jsonrpc":"2.0","id":5,"error":{"code":-32000,"message":"boom"}}"#).unwrap();
+        assert!(!error_response.is_success_response());
+    }
+
+    #[test]
+    fn activate_attached_session_on_success_tracks_matching_success_responses() {
+        let request_id = RequestId::Number(2);
+        let session_id = session_id();
+        let mut sessions = std::collections::HashSet::new();
+        let response = OutgoingHttpMessage::parse(r#"{"jsonrpc":"2.0","id":2,"result":null}"#).unwrap();
+
+        activate_attached_session_on_success(&mut sessions, &request_id, Some(&session_id), Some(&response));
+
+        assert!(sessions.contains(&session_id));
+    }
+
+    #[test]
+    fn activate_attached_session_on_success_ignores_errors_and_other_request_ids() {
+        let request_id = RequestId::Number(2);
+        let session_id = session_id();
+        let mut sessions = std::collections::HashSet::new();
+        let other_response = OutgoingHttpMessage::parse(r#"{"jsonrpc":"2.0","id":3}"#).unwrap();
+        let error_response =
+            OutgoingHttpMessage::parse(r#"{"jsonrpc":"2.0","id":2,"error":{"code":-32000,"message":"boom"}}"#).unwrap();
+
+        activate_attached_session_on_success(&mut sessions, &request_id, Some(&session_id), Some(&other_response));
+        activate_attached_session_on_success(&mut sessions, &request_id, Some(&session_id), Some(&error_response));
+
+        assert!(!sessions.contains(&session_id));
+    }
+
+    #[test]
+    fn targets_unknown_session_requires_a_known_session_header() {
+        let session_id = session_id();
+        let prompt = IncomingHttpMessage::parse(
+            r#"{"jsonrpc":"2.0","method":"session/cancel","params":{"sessionId":"session-1"}}"#.to_string(),
+        )
+        .unwrap();
+        let initialize = IncomingHttpMessage::parse(
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#.to_string(),
+        )
+        .unwrap();
+        let mut sessions = std::collections::HashSet::new();
+
+        assert!(targets_unknown_session(&prompt, Some(&session_id), &sessions));
+        assert!(!targets_unknown_session(&prompt, None, &sessions));
+        assert!(!targets_unknown_session(&initialize, Some(&session_id), &sessions));
+
+        sessions.insert(session_id.clone());
+        assert!(!targets_unknown_session(&prompt, Some(&session_id), &sessions));
+    }
+
+    #[test]
+    fn require_initialized_rejects_uninitialized_connections() {
+        assert!(require_initialized(true).is_ok());
+        assert!(matches!(
+            require_initialized(false),
+            Err(HttpTransportError::BadRequest {
+                message: "ACP connection has not been initialized",
+                source: None,
+            })
+        ));
     }
 
     #[test]
@@ -2079,21 +2228,42 @@ mod tests {
                 .to_string(),
         )
         .unwrap();
-        assert!(validate_http_context(&load, Some(&connection_id), None).is_ok());
+        assert!(matches!(
+            validate_http_context(&load, Some(&connection_id), None),
+            Err(HttpTransportError::BadRequest {
+                message: "missing Acp-Session-Id header",
+                source: None,
+            })
+        ));
+        assert!(validate_http_context(&load, Some(&connection_id), Some(&session_id)).is_ok());
 
         let resume = IncomingHttpMessage::parse(
             r#"{"jsonrpc":"2.0","id":2,"method":"session/resume","params":{"sessionId":"session-1","cwd":"."}}"#
                 .to_string(),
         )
         .unwrap();
-        assert!(validate_http_context(&resume, Some(&connection_id), None).is_ok());
+        assert!(matches!(
+            validate_http_context(&resume, Some(&connection_id), None),
+            Err(HttpTransportError::BadRequest {
+                message: "missing Acp-Session-Id header",
+                source: None,
+            })
+        ));
+        assert!(validate_http_context(&resume, Some(&connection_id), Some(&session_id)).is_ok());
 
         let fork = IncomingHttpMessage::parse(
             r#"{"jsonrpc":"2.0","id":2,"method":"session/fork","params":{"sessionId":"session-1","cwd":"."}}"#
                 .to_string(),
         )
         .unwrap();
-        assert!(validate_http_context(&fork, Some(&connection_id), None).is_ok());
+        assert!(matches!(
+            validate_http_context(&fork, Some(&connection_id), None),
+            Err(HttpTransportError::BadRequest {
+                message: "missing Acp-Session-Id header",
+                source: None,
+            })
+        ));
+        assert!(validate_http_context(&fork, Some(&connection_id), Some(&session_id)).is_ok());
     }
 
     #[test]
@@ -2269,7 +2439,7 @@ mod tests {
                     ..
                 } => {
                     assert_eq!(actual_connection_id, expected_connection_id.clone());
-                    assert!(message.activates_session());
+                    assert!(message.creates_session());
                     let _ = response.send(Ok(HttpPostOutcome::Buffered {
                         connection_id: expected_connection_id,
                         protocol_version: Some(ProtocolVersion::V0),

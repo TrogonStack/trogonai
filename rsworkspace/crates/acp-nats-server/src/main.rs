@@ -587,8 +587,9 @@ mod tests {
                     .header(ACCEPT, "application/json, text/event-stream")
                     .header(ACP_CONNECTION_ID_HEADER, &connection_id)
                     .header(ACP_PROTOCOL_VERSION_HEADER, "0")
+                    .header(ACP_SESSION_ID_HEADER, "test-session-1")
                     .body(Body::from(
-                        r#"{"jsonrpc":"2.0","id":2,"method":"session/load","params":{"sessionId":"test-session-1","cwd":"."}}"#,
+                        r#"{"jsonrpc":"2.0","id":2,"method":"session/load","params":{"sessionId":"test-session-1","cwd":".","mcpServers":[]}}"#,
                     ))
                     .unwrap(),
             )
@@ -632,6 +633,124 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn streamable_http_session_load_requires_session_header() {
+        let nats_mock = AdvancedMockNatsClient::new();
+        let _injector = nats_mock.inject_messages();
+        nats_mock.set_response(
+            "acp.agent.initialize",
+            r#"{"agentCapabilities":{"loadSession":false,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":0}"#
+                .into(),
+        );
+
+        let (app, shutdown_tx, conn_thread) = build_test_app(nats_mock);
+        let initialize = app
+            .clone()
+            .oneshot(http_post_request(
+                r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#,
+            ))
+            .await
+            .unwrap();
+        let connection_id = initialize
+            .headers()
+            .get(ACP_CONNECTION_ID_HEADER)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let _ = body_text(initialize).await;
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(ACP_ENDPOINT)
+                    .header(CONTENT_TYPE, "application/json")
+                    .header(ACCEPT, "application/json, text/event-stream")
+                    .header(ACP_CONNECTION_ID_HEADER, &connection_id)
+                    .header(ACP_PROTOCOL_VERSION_HEADER, "0")
+                    .body(Body::from(
+                        r#"{"jsonrpc":"2.0","id":2,"method":"session/load","params":{"sessionId":"test-session-1","cwd":".","mcpServers":[]}}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(body_text(response).await, "missing Acp-Session-Id header");
+
+        let _ = shutdown_tx.send(true);
+        drop(app);
+        conn_thread.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn streamable_http_session_load_returns_live_sse_before_backend_completes() {
+        let nats_mock = AdvancedMockNatsClient::new();
+        let control = nats_mock.clone();
+        let _injector = nats_mock.inject_messages();
+        nats_mock.set_response(
+            "acp.agent.initialize",
+            r#"{"agentCapabilities":{"loadSession":false,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":0}"#
+                .into(),
+        );
+
+        let (app, shutdown_tx, conn_thread) = build_test_app(nats_mock);
+        let initialize = app
+            .clone()
+            .oneshot(http_post_request(
+                r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#,
+            ))
+            .await
+            .unwrap();
+        let connection_id = initialize
+            .headers()
+            .get(ACP_CONNECTION_ID_HEADER)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let _ = body_text(initialize).await;
+
+        control.hang_next_request();
+
+        let session_load = tokio::time::timeout(
+            Duration::from_millis(200),
+            app.clone().oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(ACP_ENDPOINT)
+                    .header(CONTENT_TYPE, "application/json")
+                    .header(ACCEPT, "application/json, text/event-stream")
+                    .header(ACP_CONNECTION_ID_HEADER, &connection_id)
+                    .header(ACP_PROTOCOL_VERSION_HEADER, "0")
+                    .header(ACP_SESSION_ID_HEADER, "test-session-1")
+                    .body(Body::from(
+                        r#"{"jsonrpc":"2.0","id":2,"method":"session/load","params":{"sessionId":"test-session-1","cwd":".","mcpServers":[]}}"#,
+                    ))
+                    .unwrap(),
+            ),
+        )
+        .await
+        .expect("session/load should return a live SSE response before the backend completes")
+        .unwrap();
+
+        assert_eq!(session_load.status(), StatusCode::OK);
+        assert_eq!(
+            session_load
+                .headers()
+                .get(ACP_SESSION_ID_HEADER)
+                .and_then(|value| value.to_str().ok()),
+            Some("test-session-1")
+        );
+
+        let _ = shutdown_tx.send(true);
+        drop(app);
+        conn_thread.join().unwrap();
+    }
+
+    #[tokio::test]
     async fn streamable_http_get_requires_connection_and_session_headers() {
         let nats_mock = AdvancedMockNatsClient::new();
         let (app, shutdown_tx, conn_thread) = build_test_app(nats_mock);
@@ -668,6 +787,98 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+        let _ = shutdown_tx.send(true);
+        drop(app);
+        conn_thread.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn streamable_http_rejects_follow_up_requests_before_successful_initialize() {
+        let nats_mock = AdvancedMockNatsClient::new();
+        let _injector = nats_mock.inject_messages();
+        nats_mock.fail_next_request();
+
+        let (app, shutdown_tx, conn_thread) = build_test_app(nats_mock);
+        let initialize = app
+            .clone()
+            .oneshot(http_post_request(
+                r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#,
+            ))
+            .await
+            .unwrap();
+        let connection_id = initialize
+            .headers()
+            .get(ACP_CONNECTION_ID_HEADER)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let _ = body_text(initialize).await;
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(ACP_ENDPOINT)
+                    .header(CONTENT_TYPE, "application/json")
+                    .header(ACCEPT, "application/json, text/event-stream")
+                    .header(ACP_CONNECTION_ID_HEADER, &connection_id)
+                    .body(Body::from(r#"{"jsonrpc":"2.0","method":"initialized"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(body_text(response).await, "ACP connection has not been initialized");
+
+        let _ = shutdown_tx.send(true);
+        drop(app);
+        conn_thread.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn streamable_http_get_rejects_before_successful_initialize() {
+        let nats_mock = AdvancedMockNatsClient::new();
+        let _injector = nats_mock.inject_messages();
+        nats_mock.fail_next_request();
+
+        let (app, shutdown_tx, conn_thread) = build_test_app(nats_mock);
+        let initialize = app
+            .clone()
+            .oneshot(http_post_request(
+                r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#,
+            ))
+            .await
+            .unwrap();
+        let connection_id = initialize
+            .headers()
+            .get(ACP_CONNECTION_ID_HEADER)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let _ = body_text(initialize).await;
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(ACP_ENDPOINT)
+                    .header(ACCEPT, "text/event-stream")
+                    .header(ACP_CONNECTION_ID_HEADER, &connection_id)
+                    .header(ACP_SESSION_ID_HEADER, "test-session-1")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(body_text(response).await, "ACP connection has not been initialized");
 
         let _ = shutdown_tx.send(true);
         drop(app);
@@ -723,6 +934,114 @@ mod tests {
                 .and_then(|value| value.to_str().ok()),
             Some("0")
         );
+
+        let _ = shutdown_tx.send(true);
+        drop(app);
+        conn_thread.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn streamable_http_rejects_unknown_session_scoped_notification() {
+        let nats_mock = AdvancedMockNatsClient::new();
+        let _injector = nats_mock.inject_messages();
+        nats_mock.set_response(
+            "acp.agent.initialize",
+            r#"{"agentCapabilities":{"loadSession":false,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":0}"#
+                .into(),
+        );
+
+        let (app, shutdown_tx, conn_thread) = build_test_app(nats_mock);
+        let initialize = app
+            .clone()
+            .oneshot(http_post_request(
+                r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#,
+            ))
+            .await
+            .unwrap();
+        let connection_id = initialize
+            .headers()
+            .get(ACP_CONNECTION_ID_HEADER)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let _ = body_text(initialize).await;
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(ACP_ENDPOINT)
+                    .header(CONTENT_TYPE, "application/json")
+                    .header(ACCEPT, "application/json, text/event-stream")
+                    .header(ACP_CONNECTION_ID_HEADER, &connection_id)
+                    .header(ACP_PROTOCOL_VERSION_HEADER, "0")
+                    .header(ACP_SESSION_ID_HEADER, "ghost-session")
+                    .body(Body::from(
+                        r#"{"jsonrpc":"2.0","method":"session/cancel","params":{"sessionId":"ghost-session"}}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(body_text(response).await, "unknown ACP session");
+
+        let _ = shutdown_tx.send(true);
+        drop(app);
+        conn_thread.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn streamable_http_rejects_unknown_session_scoped_post() {
+        let nats_mock = AdvancedMockNatsClient::new();
+        let _injector = nats_mock.inject_messages();
+        nats_mock.set_response(
+            "acp.agent.initialize",
+            r#"{"agentCapabilities":{"loadSession":false,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":0}"#
+                .into(),
+        );
+
+        let (app, shutdown_tx, conn_thread) = build_test_app(nats_mock);
+        let initialize = app
+            .clone()
+            .oneshot(http_post_request(
+                r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#,
+            ))
+            .await
+            .unwrap();
+        let connection_id = initialize
+            .headers()
+            .get(ACP_CONNECTION_ID_HEADER)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let _ = body_text(initialize).await;
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(ACP_ENDPOINT)
+                    .header(CONTENT_TYPE, "application/json")
+                    .header(ACCEPT, "application/json, text/event-stream")
+                    .header(ACP_CONNECTION_ID_HEADER, &connection_id)
+                    .header(ACP_PROTOCOL_VERSION_HEADER, "0")
+                    .header(ACP_SESSION_ID_HEADER, "ghost-session")
+                    .body(Body::from(
+                        r#"{"jsonrpc":"2.0","id":2,"method":"session/prompt","params":{"sessionId":"ghost-session","prompt":{"role":"user","content":[{"type":"text","text":"hi"}]}}}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(body_text(response).await, "unknown ACP session");
 
         let _ = shutdown_tx.send(true);
         drop(app);
