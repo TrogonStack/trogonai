@@ -1730,6 +1730,44 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn fork_session_branch_at_index_zero_produces_empty_history() {
+        let agent = make_agent();
+        let history = vec![
+            Message::user("msg-0"),
+            Message::user("msg-1"),
+            Message::user("msg-2"),
+        ];
+        agent
+            .test_insert_session_with_history("src", "/tmp", history)
+            .await;
+
+        let meta = serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(
+            serde_json::json!({ "branchAtIndex": 0 }),
+        )
+        .unwrap();
+        let resp = agent
+            .fork_session(ForkSessionRequest::new("src", "/branch").meta(meta))
+            .await
+            .unwrap();
+        let new_id = resp.session_id.to_string();
+
+        assert_eq!(
+            agent.test_history_len(&new_id).await,
+            0,
+            "branchAtIndex: 0 must produce an empty history"
+        );
+        assert_eq!(
+            agent.test_session_branched_at_index(&new_id).await,
+            Some(0)
+        );
+        assert_eq!(
+            agent.test_history_len("src").await,
+            3,
+            "source must remain unchanged"
+        );
+    }
+
     // ── set_session_model ─────────────────────────────────────────────────────
 
     #[tokio::test]
@@ -4896,6 +4934,53 @@ mod tests {
         let ext_req = ExtRequest::new("session/unknown", raw_params.into());
         let err = agent.ext_method(ext_req).await.unwrap_err();
         assert_eq!(err.code, ErrorCode::MethodNotFound);
+    }
+
+    #[tokio::test]
+    async fn ext_list_children_only_returns_direct_children_not_grandchildren() {
+        use agent_client_protocol::Agent;
+        let agent = make_agent();
+
+        // A → B → C
+        agent.test_insert_session("a", "/tmp", None).await;
+        let b = agent
+            .fork_session(ForkSessionRequest::new("a", "/b"))
+            .await
+            .unwrap()
+            .session_id
+            .to_string();
+        let c = agent
+            .fork_session(ForkSessionRequest::new(b.clone(), "/c"))
+            .await
+            .unwrap()
+            .session_id
+            .to_string();
+
+        let list_children = |sid: String| {
+            let raw = serde_json::value::RawValue::from_string(
+                serde_json::json!({ "sessionId": sid }).to_string(),
+            )
+            .unwrap();
+            ExtRequest::new("session/list_children", raw.into())
+        };
+        let parse = |resp: ExtResponse| -> Vec<String> {
+            let v: serde_json::Value = serde_json::from_str(resp.0.get()).unwrap();
+            v["children"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|x| x.as_str().unwrap().to_string())
+                .collect()
+        };
+
+        let children_a = parse(agent.ext_method(list_children("a".to_string())).await.unwrap());
+        assert_eq!(children_a, vec![b.clone()], "A must have only B as child");
+
+        let children_b = parse(agent.ext_method(list_children(b.clone())).await.unwrap());
+        assert_eq!(children_b, vec![c.clone()], "B must have only C as child");
+
+        let children_c = parse(agent.ext_method(list_children(c.clone())).await.unwrap());
+        assert!(children_c.is_empty(), "C must have no children");
     }
 
     // ── MockSessionStore.remove ───────────────────────────────────────────────

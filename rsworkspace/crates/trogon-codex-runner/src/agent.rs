@@ -1267,6 +1267,52 @@ mod tests {
         assert_eq!(err.code, ErrorCode::MethodNotFound);
     }
 
+    #[tokio::test]
+    async fn ext_list_children_only_returns_direct_children_not_grandchildren() {
+        let agent = make_agent().await;
+
+        // A → B → C
+        agent.test_insert_session("a", "/tmp", None).await;
+        let b = agent
+            .fork_session(ForkSessionRequest::new("a", "/b"))
+            .await
+            .unwrap()
+            .session_id
+            .to_string();
+        let c = agent
+            .fork_session(ForkSessionRequest::new(b.clone(), "/c"))
+            .await
+            .unwrap()
+            .session_id
+            .to_string();
+
+        let list_children = |sid: String| {
+            let raw = serde_json::value::RawValue::from_string(
+                serde_json::json!({ "sessionId": sid }).to_string(),
+            )
+            .unwrap();
+            ExtRequest::new("session/list_children", raw.into())
+        };
+        let parse = |resp: ExtResponse| -> Vec<String> {
+            let v: serde_json::Value = serde_json::from_str(resp.0.get()).unwrap();
+            v["children"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|x| x.as_str().unwrap().to_string())
+                .collect()
+        };
+
+        let children_a = parse(agent.ext_method(list_children("a".to_string())).await.unwrap());
+        assert_eq!(children_a, vec![b.clone()], "A must have only B as child");
+
+        let children_b = parse(agent.ext_method(list_children(b.clone())).await.unwrap());
+        assert_eq!(children_b, vec![c.clone()], "B must have only C as child");
+
+        let children_c = parse(agent.ext_method(list_children(c.clone())).await.unwrap());
+        assert!(children_c.is_empty(), "C must have no children");
+    }
+
     // ── cancel ────────────────────────────────────────────────────────────────
 
     #[tokio::test]

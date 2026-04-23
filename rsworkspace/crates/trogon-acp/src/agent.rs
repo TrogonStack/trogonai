@@ -3097,6 +3097,53 @@ mod tests {
             assert_eq!(forked_state.branched_at_index, Some(99));
         }
 
+        #[tokio::test(flavor = "current_thread")]
+        async fn fork_session_branch_at_index_zero_produces_empty_history() {
+            use trogon_agent_core::agent_loop::{ContentBlock as AgentCb, Message as AgentMsg};
+
+            let (_c, nats, js) = start_nats().await;
+            let (agent, _rx) = make_agent(nats, &js).await;
+
+            let new_resp = agent
+                .new_session(NewSessionRequest::new("/src"))
+                .await
+                .unwrap();
+            let src_id = new_resp.session_id.clone();
+
+            let store = NatsSessionStore::open(&js).await.unwrap();
+            let mut state = store.load(&src_id.to_string()).await.unwrap();
+            state.messages = (0..3)
+                .map(|i| AgentMsg {
+                    role: "user".to_string(),
+                    content: vec![AgentCb::Text {
+                        text: format!("msg-{i}"),
+                    }],
+                })
+                .collect();
+            store.save(&src_id.to_string(), &state).await.unwrap();
+
+            let meta = serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(
+                serde_json::json!({ "branchAtIndex": 0 }),
+            )
+            .unwrap();
+            let fork_resp = agent
+                .fork_session(ForkSessionRequest::new(src_id.clone(), "/branch").meta(meta))
+                .await
+                .unwrap();
+            let forked_id = fork_resp.session_id.to_string();
+
+            let forked_state = store.load(&forked_id).await.unwrap();
+            assert_eq!(
+                forked_state.messages.len(),
+                0,
+                "branchAtIndex: 0 must produce an empty history"
+            );
+            assert_eq!(forked_state.branched_at_index, Some(0));
+
+            let src_state = store.load(&src_id.to_string()).await.unwrap();
+            assert_eq!(src_state.messages.len(), 3, "source must remain unchanged");
+        }
+
         // ── ext_method ─────────────────────────────────────────────────────────
 
         #[tokio::test(flavor = "current_thread")]
@@ -3252,6 +3299,65 @@ mod tests {
             let body: serde_json::Value = serde_json::from_str(resp.0.get()).unwrap();
             let children = body["children"].as_array().unwrap();
             assert!(children.is_empty(), "root session must have no children");
+        }
+
+        #[tokio::test(flavor = "current_thread")]
+        async fn ext_list_children_only_returns_direct_children_not_grandchildren() {
+            let (_c, nats, js) = start_nats().await;
+            let (agent, _rx) = make_agent(nats, &js).await;
+
+            // A → B → C
+            let a = agent
+                .new_session(NewSessionRequest::new("/a"))
+                .await
+                .unwrap()
+                .session_id
+                .to_string();
+            let b = agent
+                .fork_session(ForkSessionRequest::new(a.clone(), "/b"))
+                .await
+                .unwrap()
+                .session_id
+                .to_string();
+            let c = agent
+                .fork_session(ForkSessionRequest::new(b.clone(), "/c"))
+                .await
+                .unwrap()
+                .session_id
+                .to_string();
+
+            let call_list_children = |sid: String| {
+                let params_json = format!(r#"{{"sessionId":"{}"}}"#, sid);
+                let params: Arc<serde_json::value::RawValue> =
+                    serde_json::value::RawValue::from_string(params_json)
+                        .unwrap()
+                        .into();
+                ExtRequest::new("session/list_children", params)
+            };
+            let parse = |resp: agent_client_protocol::ExtResponse| -> Vec<String> {
+                let v: serde_json::Value = serde_json::from_str(resp.0.get()).unwrap();
+                v["children"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|x| x.as_str().unwrap().to_string())
+                    .collect()
+            };
+
+            let children_a = parse(
+                agent.ext_method(call_list_children(a.clone())).await.unwrap(),
+            );
+            assert_eq!(children_a, vec![b.clone()], "A must have only B as child");
+
+            let children_b = parse(
+                agent.ext_method(call_list_children(b.clone())).await.unwrap(),
+            );
+            assert_eq!(children_b, vec![c.clone()], "B must have only C as child");
+
+            let children_c = parse(
+                agent.ext_method(call_list_children(c.clone())).await.unwrap(),
+            );
+            assert!(children_c.is_empty(), "C must have no children");
         }
 
         // ── replay_history ─────────────────────────────────────────────────────
