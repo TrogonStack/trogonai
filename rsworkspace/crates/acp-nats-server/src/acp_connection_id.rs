@@ -25,10 +25,25 @@ impl std::fmt::Display for AcpConnectionId {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum AcpConnectionIdError {
-    #[error("invalid ACP connection id: {0}")]
-    InvalidUuid(#[source] uuid::Error),
+    InvalidUuid(uuid::Error),
+}
+
+impl std::fmt::Display for AcpConnectionIdError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidUuid(error) => write!(f, "invalid ACP connection id: {error}"),
+        }
+    }
+}
+
+impl std::error::Error for AcpConnectionIdError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::InvalidUuid(error) => Some(error),
+        }
+    }
 }
 
 #[cfg(test)]

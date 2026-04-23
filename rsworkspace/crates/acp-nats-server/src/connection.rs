@@ -12,25 +12,6 @@ use trogon_std::time::SystemClock;
 use crate::acp_connection_id::AcpConnectionId;
 use crate::constants::DUPLEX_BUFFER_SIZE;
 
-#[derive(Debug, thiserror::Error)]
-enum ConnectionShutdownError {
-    #[error("client task error: {source}")]
-    ClientTask {
-        #[source]
-        source: tokio::task::JoinError,
-    },
-    #[error("io task spawn error: {source}")]
-    IoTaskSpawn {
-        #[source]
-        source: tokio::task::JoinError,
-    },
-    #[error("io task error: {source}")]
-    IoTask {
-        #[source]
-        source: Box<dyn std::error::Error + Send + Sync>,
-    },
-}
-
 /// Handles a single WebSocket connection by bridging it to NATS via ACP.
 pub async fn handle<N, J>(
     connection_id: AcpConnectionId,
@@ -57,7 +38,7 @@ pub async fn handle<N, J>(
     let incoming = async_compat::Compat::new(agent_read);
     let outgoing = async_compat::Compat::new(agent_write);
 
-    let meter = trogon_telemetry::meter("acp-nats-server");
+    let meter = acp_telemetry::meter("acp-nats-server");
     let (notification_tx, notification_rx) = tokio::sync::mpsc::channel::<SessionNotification>(64);
     let bridge = Rc::new(Bridge::new(
         nats_client.clone(),
@@ -99,18 +80,14 @@ pub async fn handle<N, J>(
                 }
                 Err(e) => {
                     error!(error = %e, "Client task ended with error");
-                    Err(ConnectionShutdownError::ClientTask { source: e })
+                    Err(format!("client task error: {e}"))
                 }
             }
         }
         result = &mut io_task => {
             let res = result
-                .map_err(|source| ConnectionShutdownError::IoTaskSpawn { source })
-                .and_then(|r| {
-                    r.map_err(|source| ConnectionShutdownError::IoTask {
-                        source: Box::new(source),
-                    })
-                });
+                .map_err(|e| format!("io task spawn error: {e}"))
+                .and_then(|r| r.map_err(|e| format!("io task error: {e}")));
 
             match res {
                 Ok(_) => {
@@ -118,7 +95,7 @@ pub async fn handle<N, J>(
                     Ok(())
                 }
                 Err(e) => {
-                    error!(error = %e, "IO task ended with error");
+                    error!(error = e, "IO task ended with error");
                     Err(e)
                 }
             }
@@ -143,7 +120,7 @@ pub async fn handle<N, J>(
 
     match shutdown_result {
         Ok(()) => info!(%connection_id, "WebSocket connection closed cleanly"),
-        Err(e) => warn!(%connection_id, error = %e, "WebSocket connection closed with error"),
+        Err(e) => warn!(%connection_id, error = e, "WebSocket connection closed with error"),
     }
 }
 
@@ -199,8 +176,6 @@ mod tests {
     use axum::extract::State;
     use axum::extract::ws::WebSocketUpgrade;
     use axum::response::Response;
-    use std::error::Error;
-    use std::io;
     use std::time::Duration;
     use tokio::net::TcpListener;
     use tokio_tungstenite::connect_async;
@@ -231,16 +206,6 @@ mod tests {
             axum::serve(listener, app).await.unwrap();
         });
         format!("ws://{}{}", addr, ACP_ENDPOINT)
-    }
-
-    #[test]
-    fn shutdown_error_display_includes_source_details() {
-        let error = ConnectionShutdownError::IoTask {
-            source: Box::new(io::Error::other("duplex closed")),
-        };
-
-        assert_eq!(error.to_string(), "io task error: duplex closed");
-        assert_eq!(error.source().unwrap().to_string(), "duplex closed");
     }
 
     #[tokio::test]
