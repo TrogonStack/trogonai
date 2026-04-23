@@ -39,6 +39,10 @@ fn invalid_params(msg: impl Into<String>) -> Error {
     Error::new(ErrorCode::InvalidParams.into(), msg.into())
 }
 
+fn not_found(msg: impl Into<String>) -> Error {
+    Error::new(ErrorCode::ResourceNotFound.into(), msg.into())
+}
+
 /// xAI server-side tools that can be toggled per session.
 ///
 /// Each entry is `(tool_id, display_label)`. The `tool_id` is sent verbatim in
@@ -467,19 +471,35 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
         &self,
         req: AuthenticateRequest,
     ) -> agent_client_protocol::Result<AuthenticateResponse> {
-        // Extract XAI_API_KEY from the request meta if provided by the client.
-        // This allows per-user API keys in multi-tenant deployments.
-        // Any method_id is accepted (lenient — clients may use legacy ids like "api-key").
-        if let Some(key) = req
-            .meta
-            .as_ref()
-            .and_then(|m| m.get("XAI_API_KEY"))
-            .and_then(|v| v.as_str())
-            .filter(|s| !s.is_empty())
-            .map(str::to_string)
-        {
-            info!("xai: client authenticated with user-provided API key");
-            *self.pending_api_key.lock().await = Some(key);
+        match req.method_id.0.as_ref() {
+            "xai-api-key" => {
+                let val = req
+                    .meta
+                    .as_ref()
+                    .and_then(|m| m.get("XAI_API_KEY"))
+                    .ok_or_else(|| internal_error("XAI_API_KEY missing from meta"))?;
+                let key = val
+                    .as_str()
+                    .ok_or_else(|| invalid_params("XAI_API_KEY must be a non-empty string"))?;
+                if key.is_empty() {
+                    return Err(invalid_params("XAI_API_KEY must not be empty"));
+                }
+                info!("xai: client authenticated with user-provided API key");
+                *self.pending_api_key.lock().await = Some(key.to_string());
+            }
+            "agent" => {
+                if self.global_api_key.is_none() {
+                    return Err(internal_error(
+                        "authenticate: no server API key configured",
+                    ));
+                }
+                info!("xai: client authenticated using server key");
+            }
+            other => {
+                return Err(internal_error(format!(
+                    "authenticate: unknown method '{other}'"
+                )));
+            }
         }
         Ok(AuthenticateResponse::new())
     }
@@ -571,7 +591,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
                 .modes(self.session_mode_state())
                 .models(self.session_model_state(s.model.as_deref()))
                 .config_options(Self::all_tool_config_options(&s.enabled_tools))),
-            None => Err(internal_error(format!("session {session_id} not found"))),
+            None => Err(not_found(format!("session {session_id} not found"))),
         }
     }
 
@@ -581,7 +601,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
     ) -> agent_client_protocol::Result<ResumeSessionResponse> {
         let session_id = req.session_id.to_string();
         if !self.sessions.lock().await.contains_key(&session_id) {
-            return Err(internal_error(format!("session {session_id} not found")));
+            return Err(not_found(format!("session {session_id} not found")));
         }
         Ok(ResumeSessionResponse::new())
     }
@@ -597,7 +617,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
             let sessions = self.sessions.lock().await;
             let s = sessions
                 .get(&source_id)
-                .ok_or_else(|| internal_error(format!("session {source_id} not found")))?;
+                .ok_or_else(|| not_found(format!("session {source_id} not found")))?;
             (
                 s.model.clone(),
                 s.api_key.clone(),
@@ -680,8 +700,12 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
         req: SetSessionModeRequest,
     ) -> agent_client_protocol::Result<SetSessionModeResponse> {
         let mode_id = req.mode_id.to_string();
+        let session_id = req.session_id.to_string();
         if mode_id != "default" {
             return Err(invalid_params(format!("unknown mode: {mode_id}")));
+        }
+        if !self.sessions.lock().await.contains_key(&session_id) {
+            return Err(not_found(format!("session {session_id} not found")));
         }
         // xAI has no ACP permission modes — silently accept "default".
         Ok(SetSessionModeResponse::new())
@@ -712,7 +736,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
                 info!(session_id, model = %model_id, "xai: set_session_model");
                 Ok(SetSessionModelResponse::new())
             }
-            None => Err(internal_error(format!("session {session_id} not found"))),
+            None => Err(not_found(format!("session {session_id} not found"))),
         }
     }
 
@@ -731,29 +755,35 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
         // under a single lock so the returned config_options reflect the new state.
         let config_options = {
             let mut sessions = self.sessions.lock().await;
+            let s = sessions
+                .get_mut(&session_id)
+                .ok_or_else(|| not_found(format!("session {session_id} not found")))?;
             if is_known_tool {
                 if let SessionConfigOptionValue::ValueId { value } = &req.value {
                     let val = value.to_string();
-                    if let Some(s) = sessions.get_mut(&session_id) {
-                        if val == "on" {
+                    match val.as_str() {
+                        "on" => {
                             if !s.enabled_tools.iter().any(|t| t == &config_id) {
                                 s.enabled_tools.push(config_id.clone());
                             }
-                        } else {
-                            s.enabled_tools.retain(|t| t != &config_id);
+                            info!(session_id, tool = %config_id, "xai: tool enabled");
                         }
-                        info!(session_id, tool = %config_id, enabled = (val == "on"), "xai: tool toggled");
+                        "off" => {
+                            s.enabled_tools.retain(|t| t != &config_id);
+                            info!(session_id, tool = %config_id, "xai: tool disabled");
+                        }
+                        other => {
+                            return Err(invalid_params(format!(
+                                "unknown value '{other}' for tool '{config_id}' — expected 'on' or 'off'"
+                            )));
+                        }
                     }
                 }
             } else {
                 warn!(config_id = %config_id, "xai: set_session_config_option called for unknown option — ignored");
             }
-            // ACP spec: response must include the full set of config options and
-            // their current values. Return empty only when the session is unknown.
-            sessions
-                .get(&session_id)
-                .map(|s| Self::all_tool_config_options(&s.enabled_tools))
-                .unwrap_or_default()
+            // ACP spec: response must include the full set of config options and their current values.
+            Self::all_tool_config_options(&s.enabled_tools)
         };
 
         Ok(SetSessionConfigOptionResponse::new(config_options))
@@ -799,7 +829,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
             let sessions = self.sessions.lock().await;
             let s = sessions
                 .get(&session_id)
-                .ok_or_else(|| internal_error(format!("session {session_id} not found")))?;
+                .ok_or_else(|| not_found(format!("session {session_id} not found")))?;
             (
                 s.model.clone(),
                 s.api_key.clone(),
@@ -816,6 +846,15 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
             .ok_or_else(|| {
                 internal_error("no API key for session — set XAI_API_KEY or authenticate first")
             })?;
+
+        // Resuming detection: if history already ends with the exact user message,
+        // this is a retry after a crash — the user message was persisted but the
+        // assistant response was never written. Skip adding the user message again
+        // to avoid sending duplicate consecutive user turns to xAI.
+        let resuming = history
+            .last()
+            .map(|m| m.role == "user" && m.content.as_deref() == Some(user_input.as_str()))
+            == Some(true);
 
         // Build initial input and previous_response_id.
         //
@@ -834,6 +873,17 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
             (
                 vec![InputItem::user(user_input.clone())],
                 Some(prev_id.clone()),
+            )
+        } else if resuming {
+            // History already ends with the user message. Build input from
+            // history[..len-1] so build_full_history_input re-appends it once.
+            (
+                build_full_history_input(
+                    session_system_prompt.as_deref(),
+                    &history[..history.len() - 1],
+                    &user_input,
+                ),
+                None,
             )
         } else {
             (
@@ -978,11 +1028,13 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
                             }
                             FinishReason::Failed => {
                                 warn!(session_id, "xai: response failed");
-                                break StopReason::EndTurn;
+                                return Err(internal_error("xAI response failed"));
                             }
                             FinishReason::Cancelled => {
                                 info!(session_id, "xai: response cancelled by server");
-                                break StopReason::Cancelled;
+                                return Err(internal_error(
+                                    "xAI request cancelled by server",
+                                ));
                             }
                             FinishReason::Completed => {}
                             FinishReason::Other(ref s) => {
@@ -1045,7 +1097,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
                             continue 'outer;
                         }
                         tracing::error!(session_id, error = %message, "xai: stream error");
-                        break StopReason::EndTurn;
+                        return Err(internal_error(message));
                     }
                 }
             };
@@ -1093,11 +1145,14 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
         // Update session history.
         //
         // On explicit cancel: discard this turn entirely (no user message pushed).
-        // On timeout, stream error, or success: push user + optional assistant, then trim.
+        // On resuming: user message is already in history — skip the push to avoid duplicates.
+        // On timeout or success: push user + optional assistant, then trim.
         if !canceled {
             let mut sessions = self.sessions.lock().await;
             if let Some(s) = sessions.get_mut(&session_id) {
-                s.history.push(Message::user(user_input));
+                if !resuming {
+                    s.history.push(Message::user(user_input));
+                }
                 if !assistant_text.is_empty() {
                     let assistant_msg = match current_turn_usage {
                         Some((pt, ct)) => Message::assistant_with_usage(assistant_text, pt, ct),
@@ -1350,6 +1405,14 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
         self.max_history
     }
 
+    pub fn test_max_history_messages(&self) -> usize {
+        self.max_history
+    }
+
+    pub fn test_max_turns(&self) -> Option<u32> {
+        self.max_turns
+    }
+
     pub async fn test_session_enabled_tools(&self, id: &str) -> Vec<String> {
         self.sessions
             .lock()
@@ -1383,7 +1446,7 @@ mod tests {
     use std::sync::Arc;
 
     use agent_client_protocol::{
-        Agent, AuthMethodId, AuthenticateRequest, CancelNotification, CloseSessionRequest,
+        Agent, AuthenticateRequest, CancelNotification, CloseSessionRequest,
         ContentBlock, ForkSessionRequest, InitializeRequest, ListSessionsRequest,
         LoadSessionRequest, NewSessionRequest, PromptRequest, ProtocolVersion,
         ResumeSessionRequest, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse,
@@ -1617,10 +1680,10 @@ mod tests {
     // ── authenticate ──────────────────────────────────────────────────────────
 
     #[tokio::test]
-    async fn authenticate_always_succeeds() {
-        let agent = make_agent();
+    async fn authenticate_agent_method_succeeds_with_server_key() {
+        let agent = make_agent(); // make_agent provides "test-key" as global key
         agent
-            .authenticate(AuthenticateRequest::new(AuthMethodId::from("any-method")))
+            .authenticate(AuthenticateRequest::new("agent"))
             .await
             .unwrap();
     }
@@ -1676,18 +1739,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn set_session_config_option_unknown_session_returns_ok() {
-        // Unknown session is tolerated — returns empty config_options without error.
+    async fn set_session_config_option_unknown_session_returns_error() {
         let agent = make_agent();
-        let resp = agent
+        let err = agent
             .set_session_config_option(SetSessionConfigOptionRequest::new(
                 "no-such-session",
                 "some-option",
                 "some-value",
             ))
             .await
-            .unwrap();
-        assert!(resp.config_options.is_empty());
+            .unwrap_err();
+        assert!(
+            err.message.contains("not found"),
+            "unknown session must return not-found error, got: {err}"
+        );
     }
 
     #[tokio::test]
@@ -1988,7 +2053,7 @@ mod tests {
         let mut meta = serde_json::Map::new();
         meta.insert("XAI_API_KEY".to_string(), serde_json::json!("user-key"));
         agent
-            .authenticate(AuthenticateRequest::new("api-key").meta(meta))
+            .authenticate(AuthenticateRequest::new("xai-api-key").meta(meta))
             .await
             .unwrap();
 
@@ -2027,7 +2092,7 @@ mod tests {
         let mut meta = serde_json::Map::new();
         meta.insert("XAI_API_KEY".to_string(), serde_json::json!("session-key"));
         agent
-            .authenticate(AuthenticateRequest::new("api-key").meta(meta))
+            .authenticate(AuthenticateRequest::new("xai-api-key").meta(meta))
             .await
             .unwrap();
         let resp = agent
@@ -2081,28 +2146,21 @@ mod tests {
         );
     }
 
-    // ── authenticate: no meta does not set pending key ────────────────────────
+    // ── authenticate: agent method does not set pending key ──────────────────
 
     #[tokio::test]
-    async fn authenticate_with_no_meta_does_not_set_pending_key() {
-        let mock_http = Arc::new(MockXaiHttpClient::new());
-        let mock_notifier = Arc::new(MockSessionNotifier::new());
-        let agent: TestAgent = XaiAgent::with_deps(
-            Arc::clone(&mock_notifier),
-            "grok-3",
-            "",
-            Arc::clone(&mock_http),
-        );
+    async fn authenticate_agent_method_does_not_set_pending_key() {
+        let agent = make_agent(); // make_agent provides "test-key" as global key
 
         agent
-            .authenticate(AuthenticateRequest::new("api-key"))
+            .authenticate(AuthenticateRequest::new("agent"))
             .await
             .unwrap();
 
         assert_eq!(
             agent.test_pending_api_key().await,
             None,
-            "authenticate without meta must not set pending_api_key"
+            "authenticate with 'agent' method must not set pending_api_key"
         );
     }
 
@@ -2121,15 +2179,19 @@ mod tests {
 
         let mut meta = serde_json::Map::new();
         meta.insert("XAI_API_KEY".to_string(), serde_json::json!(42));
-        agent
-            .authenticate(AuthenticateRequest::new("api-key").meta(meta))
+        let err = agent
+            .authenticate(AuthenticateRequest::new("xai-api-key").meta(meta))
             .await
-            .unwrap();
+            .unwrap_err();
 
+        assert!(
+            err.message.contains("XAI_API_KEY"),
+            "non-string XAI_API_KEY must return an error mentioning the field, got: {err}"
+        );
         assert_eq!(
             agent.test_pending_api_key().await,
             None,
-            "non-string XAI_API_KEY must be rejected by .as_str() filter"
+            "pending key must remain unset after error"
         );
     }
 
@@ -2148,7 +2210,7 @@ mod tests {
         let mut meta = serde_json::Map::new();
         meta.insert("XAI_API_KEY".to_string(), serde_json::json!("pending-key"));
         agent
-            .authenticate(AuthenticateRequest::new("api-key").meta(meta))
+            .authenticate(AuthenticateRequest::new("xai-api-key").meta(meta))
             .await
             .unwrap();
 
@@ -2197,7 +2259,7 @@ mod tests {
         let mut meta = serde_json::Map::new();
         meta.insert("XAI_API_KEY".to_string(), serde_json::json!("my-key"));
         agent
-            .authenticate(AuthenticateRequest::new("api-key").meta(meta))
+            .authenticate(AuthenticateRequest::new("xai-api-key").meta(meta))
             .await
             .unwrap();
 
@@ -2437,10 +2499,10 @@ mod tests {
         );
     }
 
-    // ── authenticate: ignores empty key ──────────────────────────────────────
+    // ── authenticate: empty key is rejected ──────────────────────────────────
 
     #[tokio::test]
-    async fn authenticate_ignores_empty_api_key() {
+    async fn authenticate_empty_key_is_rejected() {
         let mock_http = Arc::new(MockXaiHttpClient::new());
         let mock_notifier = Arc::new(MockSessionNotifier::new());
         let agent: TestAgent = XaiAgent::with_deps(
@@ -2452,15 +2514,19 @@ mod tests {
 
         let mut meta = serde_json::Map::new();
         meta.insert("XAI_API_KEY".to_string(), serde_json::json!(""));
-        agent
-            .authenticate(AuthenticateRequest::new("api-key").meta(meta))
+        let err = agent
+            .authenticate(AuthenticateRequest::new("xai-api-key").meta(meta))
             .await
-            .unwrap();
+            .unwrap_err();
 
+        assert!(
+            err.message.contains("must not be empty"),
+            "empty key must be rejected with message mentioning 'must not be empty', got: {err}"
+        );
         assert_eq!(
             agent.test_pending_api_key().await,
             None,
-            "empty API key in meta must not be stored"
+            "empty API key must not be stored"
         );
     }
 
@@ -2519,18 +2585,21 @@ mod tests {
     // ── prompt: stream error returns Ok ──────────────────────────────────────────
 
     #[tokio::test]
-    async fn prompt_stream_error_returns_ok() {
+    async fn prompt_stream_error_returns_err() {
         let agent = make_agent();
         agent.test_insert_session("err1", "/tmp", None).await;
         agent.client.push_response(vec![XaiEvent::Error {
             message: "server exploded".to_string(),
         }]);
 
-        // Stream errors return Ok(PromptResponse) — not Err — to keep the session alive.
-        agent
+        let err = agent
             .prompt(PromptRequest::new("err1", vec![ContentBlock::from("hi")]))
             .await
-            .unwrap();
+            .unwrap_err();
+        assert!(
+            err.message.contains("server exploded"),
+            "error must surface the stream error message, got: {err}"
+        );
     }
 
     #[tokio::test]
@@ -2554,7 +2623,7 @@ mod tests {
         agent
             .prompt(PromptRequest::new("err2", vec![ContentBlock::from("hi")]))
             .await
-            .unwrap();
+            .unwrap_err();
 
         assert_eq!(
             agent.test_last_response_id("err2").await.as_deref(),
@@ -4019,7 +4088,7 @@ mod tests {
                 vec![ContentBlock::from("hi")],
             ))
             .await
-            .unwrap();
+            .unwrap_err();
 
         let calls = agent.client.calls.lock().unwrap();
         assert_eq!(calls.len(), 1, "4xx error must not trigger stale-ID retry");
