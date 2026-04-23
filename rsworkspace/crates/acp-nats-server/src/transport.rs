@@ -496,11 +496,6 @@ fn dispatch_to_get_listeners(
         let mut retained = Vec::with_capacity(listeners.len());
 
         for listener in listeners.drain(..) {
-            if delivered {
-                retained.push(listener);
-                continue;
-            }
-
             match listener.try_send(frame.clone()) {
                 Ok(()) => {
                     delivered = true;
@@ -2130,7 +2125,7 @@ mod tests {
     }
 
     #[test]
-    fn dispatch_to_get_listeners_delivers_each_message_on_only_one_stream() {
+    fn dispatch_to_get_listeners_broadcasts_each_message_to_all_streams() {
         let session_id = session_id();
         let mut get_listeners = HashMap::new();
         let (first_tx, mut first_rx) = mpsc::channel(HTTP_CHANNEL_CAPACITY);
@@ -2144,10 +2139,24 @@ mod tests {
 
         assert!(matches!(outcome, ListenerDispatch::Delivered));
         assert!(matches!(first_rx.try_recv(), Ok(SseFrame::Json { .. })));
-        assert!(matches!(
-            second_rx.try_recv(),
-            Err(tokio::sync::mpsc::error::TryRecvError::Empty)
-        ));
+        assert!(matches!(second_rx.try_recv(), Ok(SseFrame::Json { .. })));
+    }
+
+    #[test]
+    fn dispatch_to_get_listeners_removes_closed_listener() {
+        let session_id = session_id();
+        let mut get_listeners = HashMap::new();
+        let (listener_tx, listener_rx) = mpsc::channel(HTTP_CHANNEL_CAPACITY);
+        drop(listener_rx);
+        get_listeners.insert(session_id.clone(), vec![listener_tx]);
+
+        let frame = SseFrame::json(
+            r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-1"}}"#.to_string(),
+        );
+        let outcome = dispatch_to_get_listeners(&frame, &session_id, &mut get_listeners);
+
+        assert!(matches!(outcome, ListenerDispatch::Dropped));
+        assert!(!get_listeners.contains_key(&session_id));
     }
 
     #[test]
