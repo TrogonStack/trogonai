@@ -1,6 +1,6 @@
 use crate::{
     CanonicalEventCodec, Decide, Decision, EventCodec, EventData, EventType, NonEmpty, RecordedEvent, Snapshot,
-    SnapshotSchema, SnapshotStoreConfig, StateMachine, StreamEvent, WritePreconditionOverride,
+    SnapshotSchema, SnapshotStoreConfig, StateMachine, StreamEvent,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -297,10 +297,7 @@ where
     }
 }
 
-impl<'a, E, C, S> CommandExecution<'a, E, C, S>
-where
-    C: WritePreconditionOverride,
-{
+impl<'a, E, C, S> CommandExecution<'a, E, C, S> {
     pub fn with_write_precondition<W>(mut self, write_precondition: W) -> Self
     where
         W: Into<Option<StreamState>>,
@@ -351,10 +348,7 @@ where
     }
 }
 
-impl<'a, E, C, S, EC> CommandExecutionWithCodec<'a, E, C, S, EC>
-where
-    C: Decide + WritePreconditionOverride,
-{
+impl<'a, E, C, S, EC> CommandExecutionWithCodec<'a, E, C, S, EC> {
     pub fn with_write_precondition<W>(mut self, write_precondition: W) -> Self
     where
         W: Into<Option<StreamState>>,
@@ -583,9 +577,7 @@ mod tests {
     use serde::{Deserialize, Serialize};
 
     use super::*;
-    use crate::{
-        CanonicalEventCodec, EventType, SnapshotSchema, StreamCommand, StreamEvent, WritePreconditionOverride,
-    };
+    use crate::{CanonicalEventCodec, EventType, SnapshotSchema, StreamCommand, StreamEvent};
 
     #[derive(Debug, Clone)]
     struct TestCommand {
@@ -714,8 +706,6 @@ mod tests {
             &self.id
         }
     }
-
-    impl WritePreconditionOverride for TestCommand {}
 
     impl StreamCommand for RequiredRegisterCommand {
         type StreamId = str;
@@ -1191,7 +1181,12 @@ mod tests {
         };
         let command = RequiredRegisterCommand::new("alpha");
 
-        let _ = block_on(CommandExecution::new(&runtime, &command).execute_result()).unwrap();
+        let _ = block_on(
+            CommandExecution::new(&runtime, &command)
+                .with_write_precondition(StreamState::Any)
+                .execute_result(),
+        )
+        .unwrap();
 
         assert_eq!(
             runtime.stream_states.lock().unwrap().as_slice(),
