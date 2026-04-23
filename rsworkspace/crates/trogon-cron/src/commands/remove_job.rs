@@ -61,7 +61,7 @@ mod tests {
     use trogon_eventsourcing::snapshot::SnapshotSchema;
     use trogon_eventsourcing::{
         CommandExecution, NonEmpty,
-        testing::{TestCase, decider, expect_error},
+        testing::{TestCase, decider},
     };
 
     use super::*;
@@ -105,9 +105,9 @@ mod tests {
         TestCase::new(decider::<RemoveJobCommand>())
             .given_no_history()
             .when(RemoveJobCommand::new(JobId::parse("backup").unwrap()))
-            .then(expect_error(RemoveJobDecisionError::JobNotFound {
+            .then_error(RemoveJobDecisionError::JobNotFound {
                 id: JobId::parse("backup").unwrap(),
-            }));
+            });
     }
 
     #[test]
@@ -121,9 +121,9 @@ mod tests {
                 id: "backup".to_string(),
             }])
             .when(RemoveJobCommand::new(JobId::parse("backup").unwrap()))
-            .then(expect_error(RemoveJobDecisionError::JobDeleted {
+            .then_error(RemoveJobDecisionError::JobDeleted {
                 id: JobId::parse("backup").unwrap(),
-            }));
+            });
     }
 
     #[tokio::test]
