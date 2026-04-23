@@ -1,4 +1,4 @@
-use crate::execution::StreamState;
+use crate::stream::StreamState;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Act;
