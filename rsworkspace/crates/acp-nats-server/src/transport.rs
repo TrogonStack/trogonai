@@ -411,12 +411,6 @@ impl OutgoingHttpMessage {
         })
     }
 
-    fn params_session_id(&self) -> Option<acp_nats::AcpSessionId> {
-        let params = self.params.as_ref()?;
-        let session_id = params.get("sessionId")?.as_str()?;
-        acp_nats::AcpSessionId::new(session_id).ok()
-    }
-
     fn is_success_response(&self) -> bool {
         self.id.is_some() && self.params.is_none() && !self.has_error
     }
@@ -1681,10 +1675,6 @@ mod tests {
 
     #[test]
     fn outgoing_http_message_extracts_session_ids() {
-        let outbound =
-            OutgoingHttpMessage::parse(r#"{"jsonrpc":"2.0","id":1,"params":{"sessionId":"session-1"}}"#).unwrap();
-        assert_eq!(outbound.params_session_id(), Some(session_id()));
-
         let response =
             OutgoingHttpMessage::parse(r#"{"jsonrpc":"2.0","id":2,"result":{"sessionId":"session-1"}}"#).unwrap();
         assert_eq!(response.result_session_id(), Some(session_id()));
