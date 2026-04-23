@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use httpmock::prelude::*;
 use trogon_agent_core::agent_loop::{
-    AgentError, AgentEvent, AgentLoop, Message, PermissionChecker,
+    AgentError, AgentEvent, AgentLoop, ContentBlock, Message, PermissionChecker,
 };
 use trogon_agent_core::tools::{ToolContext, tool_def};
 
@@ -1057,4 +1057,231 @@ async fn run_uses_proxy_url_when_no_anthropic_base_url() {
 
     let result = agent.run(vec![Message::user_text("hi")], &[], None).await;
     assert_eq!(result.unwrap(), "via proxy");
+}
+
+// ── steer ─────────────────────────────────────────────────────────────────────
+
+/// A steer message pre-loaded into `steer_rx` is appended to the tool-results
+/// turn and sent to the LLM in the second API request.
+///
+/// Verification trick: the second mock requires `body_contains("tool_result")`
+/// AND `body_contains` of the steer text.  If the steer text is absent the
+/// mock won't fire, the agent keeps looping on tool_use, and hits
+/// MaxIterationsReached — making the test fail clearly.
+#[tokio::test]
+async fn run_chat_streaming_steer_appended_to_tool_results_turn() {
+    let server = MockServer::start();
+    // Second call: must contain both "tool_result" and the steer text.
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result")
+            .body_contains("think step by step");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(end_turn_body("Done with steer"));
+    });
+    // First call: returns tool_use.
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(tool_use_body());
+    });
+
+    let agent = make_agent(&server.base_url());
+    let (steer_tx, steer_rx) = tokio::sync::mpsc::channel(4);
+    steer_tx.try_send("think step by step".to_string()).unwrap();
+
+    let (event_tx, _rx) = tokio::sync::mpsc::channel(32);
+    let result = agent
+        .run_chat_streaming(
+            vec![Message::user_text("use a tool")],
+            &[],
+            None,
+            event_tx,
+            Some(steer_rx),
+        )
+        .await;
+
+    assert!(
+        result.is_ok(),
+        "run_chat_streaming with steer must succeed: {result:?}"
+    );
+    assert_eq!(
+        result.unwrap().last().unwrap().role,
+        "assistant",
+        "final message must be from assistant"
+    );
+}
+
+/// The steer text appears in the returned message history as a `ContentBlock::Text`
+/// block inside the tool-results user turn.
+#[tokio::test]
+async fn run_chat_streaming_steer_present_in_returned_messages() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(end_turn_body("Done"));
+    });
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(tool_use_body());
+    });
+
+    let agent = make_agent(&server.base_url());
+    let (steer_tx, steer_rx) = tokio::sync::mpsc::channel(4);
+    steer_tx.try_send("steer guidance".to_string()).unwrap();
+
+    let (event_tx, _rx) = tokio::sync::mpsc::channel(32);
+    let messages = agent
+        .run_chat_streaming(vec![Message::user_text("hi")], &[], None, event_tx, Some(steer_rx))
+        .await
+        .unwrap();
+
+    // Find the tool-results user turn (role == "user" containing a ToolResult block).
+    let tool_results_turn = messages.iter().find(|m| {
+        m.role == "user"
+            && m.content
+                .iter()
+                .any(|c| matches!(c, ContentBlock::ToolResult { .. }))
+    });
+    assert!(
+        tool_results_turn.is_some(),
+        "expected a tool-results user turn in message history"
+    );
+    let has_steer = tool_results_turn.unwrap().content.iter().any(|c| {
+        matches!(c, ContentBlock::Text { text } if text == "steer guidance")
+    });
+    assert!(
+        has_steer,
+        "steer text must appear as a Text block in the tool-results turn"
+    );
+}
+
+/// Multiple steer messages are ALL appended to the tool-results turn.
+#[tokio::test]
+async fn run_chat_streaming_multiple_steer_messages_all_appended() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result")
+            .body_contains("hint one")
+            .body_contains("hint two")
+            .body_contains("hint three");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(end_turn_body("Done with all hints"));
+    });
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(tool_use_body());
+    });
+
+    let agent = make_agent(&server.base_url());
+    let (steer_tx, steer_rx) = tokio::sync::mpsc::channel(8);
+    steer_tx.try_send("hint one".to_string()).unwrap();
+    steer_tx.try_send("hint two".to_string()).unwrap();
+    steer_tx.try_send("hint three".to_string()).unwrap();
+
+    let (event_tx, _rx) = tokio::sync::mpsc::channel(32);
+    let result = agent
+        .run_chat_streaming(
+            vec![Message::user_text("use a tool")],
+            &[],
+            None,
+            event_tx,
+            Some(steer_rx),
+        )
+        .await;
+
+    assert!(
+        result.is_ok(),
+        "all three steer messages must reach the LLM: {result:?}"
+    );
+}
+
+/// When the model returns `end_turn` directly (no tool call), steer messages
+/// in `steer_rx` are silently dropped — the prompt still succeeds.
+#[tokio::test]
+async fn run_chat_streaming_steer_ignored_without_tool_use() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(end_turn_body("Direct reply"));
+    });
+
+    let agent = make_agent(&server.base_url());
+    let (steer_tx, steer_rx) = tokio::sync::mpsc::channel(4);
+    steer_tx.try_send("ignored steer".to_string()).unwrap();
+
+    let (event_tx, _rx) = tokio::sync::mpsc::channel(32);
+    let messages = agent
+        .run_chat_streaming(vec![Message::user_text("hi")], &[], None, event_tx, Some(steer_rx))
+        .await
+        .unwrap();
+
+    // The steer text must not appear anywhere in the returned message history.
+    let steer_found = messages.iter().any(|m| {
+        m.content.iter().any(|c| {
+            matches!(c, ContentBlock::Text { text } if text.contains("ignored steer"))
+        })
+    });
+    assert!(
+        !steer_found,
+        "steer text must not appear in messages when there was no tool call"
+    );
+    assert_eq!(
+        messages.last().unwrap().role,
+        "assistant",
+        "last message must still be from assistant"
+    );
+}
+
+/// Passing `steer_rx = None` leaves existing behaviour unchanged.
+#[tokio::test]
+async fn run_chat_streaming_steer_none_is_noop() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(end_turn_body("Done no steer"));
+    });
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(tool_use_body());
+    });
+
+    let agent = make_agent(&server.base_url());
+    let (event_tx, _rx) = tokio::sync::mpsc::channel(32);
+    let result = agent
+        .run_chat_streaming(
+            vec![Message::user_text("use a tool")],
+            &[],
+            None,
+            event_tx,
+            None, // no steer
+        )
+        .await;
+
+    assert!(
+        result.is_ok(),
+        "tool use without steer must still succeed: {result:?}"
+    );
 }
