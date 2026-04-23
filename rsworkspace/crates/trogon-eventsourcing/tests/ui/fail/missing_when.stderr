@@ -1,4 +1,4 @@
-error[E0599]: no method named `then` found for struct `TestCase<TestCommand, Given<TestEvent>>` in the current scope
+error[E0599]: no method named `then` found for struct `TestCase<TestCommand, NoHistory>` in the current scope
   --> tests/ui/fail/missing_when.rs:11:10
    |
  9 |       TestCase::new(decider::<TestCommand>())
@@ -6,7 +6,7 @@ error[E0599]: no method named `then` found for struct `TestCase<TestCommand, Giv
    |       |
    |  _____method `then` is available on `TestCase<TestCommand>`
    | |
-10 | |         .given([])
+10 | |         .given_no_history()
 11 | |         .then(expect_error(TestDecisionError::AlreadyRegistered));
    | |_________-^^^^
    |

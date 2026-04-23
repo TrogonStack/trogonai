@@ -1,12 +1,13 @@
-error[E0599]: no method named `given` found for struct `TestCase<TestCommand, Given<TestEvent>>` in the current scope
+error[E0599]: no method named `given` found for struct `TestCase<TestCommand, NoHistory>` in the current scope
   --> tests/ui/fail/double_given.rs:11:10
    |
  9 | /     TestCase::new(decider::<TestCommand>())
-10 | |         .given([])
+10 | |         .given_no_history()
 11 | |         .given([]);
-   | |         -^^^^^ method not found in `TestCase<TestCommand, Given<TestEvent>>`
+   | |         -^^^^^ method not found in `TestCase<TestCommand, NoHistory>`
    | |_________|
    |
    |
    = note: the method was found for
+           - `TestCase<C, Given<<C as trogon_eventsourcing::Decide>::Event>>`
            - `TestCase<C>`

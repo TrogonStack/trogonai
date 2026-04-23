@@ -1,9 +1,7 @@
 mod message;
 
 use serde::{Deserialize, Serialize};
-use trogon_eventsourcing::{
-    CanonicalEventCodec, EventCodec, EventData, EventType, RecordedEvent, StreamEvent,
-};
+use trogon_eventsourcing::{CanonicalEventCodec, EventCodec, EventData, EventType, RecordedEvent, StreamEvent};
 
 pub use message::{MessageContent, MessageEnvelope, MessageHeaders, MessageHeadersError};
 

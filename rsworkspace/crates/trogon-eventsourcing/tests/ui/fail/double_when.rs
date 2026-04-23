@@ -7,7 +7,7 @@ use common::TestCommand;
 
 fn main() {
     TestCase::new(decider::<TestCommand>())
-        .given([])
+        .given_no_history()
         .when(TestCommand)
         .when(TestCommand);
 }

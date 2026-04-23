@@ -43,10 +43,7 @@ pub struct SnapshotStoreConfig {
 }
 
 impl SnapshotStoreConfig {
-    pub fn new(
-        key_prefix: impl Into<Cow<'static, str>>,
-        checkpoint_key: Option<&'static str>,
-    ) -> Self {
+    pub fn new(key_prefix: impl Into<Cow<'static, str>>, checkpoint_key: Option<&'static str>) -> Self {
         Self {
             key_prefix: key_prefix.into(),
             checkpoint_key: checkpoint_key.map(Cow::Borrowed),

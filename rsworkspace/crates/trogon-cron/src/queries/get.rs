@@ -22,7 +22,5 @@ pub async fn run(store: &kv::Store, command: GetJobCommand) -> Result<Option<Cro
         return Ok(None);
     };
 
-    serde_json::from_slice(&entry.value)
-        .map(Some)
-        .map_err(CronError::from)
+    serde_json::from_slice(&entry.value).map(Some).map_err(CronError::from)
 }

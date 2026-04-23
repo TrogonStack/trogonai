@@ -9,16 +9,9 @@ type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 #[derive(Debug)]
 pub enum SnapshotStoreError {
-    Kv {
-        context: &'static str,
-        source: BoxError,
-    },
-    InvalidSnapshotKey {
-        key: String,
-    },
-    MissingCheckpointKey {
-        key_prefix: String,
-    },
+    Kv { context: &'static str, source: BoxError },
+    InvalidSnapshotKey { key: String },
+    MissingCheckpointKey { key_prefix: String },
     Serde(serde_json::Error),
 }
 
@@ -42,10 +35,7 @@ impl std::fmt::Display for SnapshotStoreError {
                 write!(f, "Invalid stream snapshot key: {key}")
             }
             Self::MissingCheckpointKey { key_prefix } => {
-                write!(
-                    f,
-                    "Missing checkpoint key for snapshot namespace: {key_prefix}"
-                )
+                write!(f, "Missing checkpoint key for snapshot namespace: {key_prefix}")
             }
             Self::Serde(source) => write!(f, "Serialization error: {source}"),
         }
@@ -85,19 +75,14 @@ fn snapshot_key_prefix(config: &SnapshotStoreConfig) -> String {
     config.key_prefix().to_string()
 }
 
-fn stream_id_from_snapshot_key(
-    config: &SnapshotStoreConfig,
-    key: &str,
-) -> Result<Option<String>, SnapshotStoreError> {
+fn stream_id_from_snapshot_key(config: &SnapshotStoreConfig, key: &str) -> Result<Option<String>, SnapshotStoreError> {
     let prefix = snapshot_key_prefix(config);
     let Some(stream_id) = key.strip_prefix(&prefix) else {
         return Ok(None);
     };
 
     if stream_id.is_empty() {
-        return Err(SnapshotStoreError::InvalidSnapshotKey {
-            key: key.to_string(),
-        });
+        return Err(SnapshotStoreError::InvalidSnapshotKey { key: key.to_string() });
     }
 
     Ok(Some(stream_id.to_string()))
@@ -110,27 +95,27 @@ async fn load_snapshot_entries<T>(
 where
     T: DeserializeOwned,
 {
-    let mut keys = bucket.keys().await.map_err(|source| {
-        SnapshotStoreError::kv_source("failed to list stream snapshot keys", source)
-    })?;
+    let mut keys = bucket
+        .keys()
+        .await
+        .map_err(|source| SnapshotStoreError::kv_source("failed to list stream snapshot keys", source))?;
     let mut snapshots = Vec::new();
 
     while let Some(result) = keys.next().await {
-        let key = result.map_err(|source| {
-            SnapshotStoreError::kv_source("failed to read stream snapshot key", source)
-        })?;
+        let key =
+            result.map_err(|source| SnapshotStoreError::kv_source("failed to read stream snapshot key", source))?;
         let Some(stream_id) = stream_id_from_snapshot_key(config, &key)? else {
             continue;
         };
-        let Some(entry) = bucket.entry(key).await.map_err(|source| {
-            SnapshotStoreError::kv_source("failed to read stream snapshot value", source)
-        })?
+        let Some(entry) = bucket
+            .entry(key)
+            .await
+            .map_err(|source| SnapshotStoreError::kv_source("failed to read stream snapshot value", source))?
         else {
             continue;
         };
-        let snapshot = serde_json::from_slice::<Snapshot<T>>(&entry.value).map_err(|source| {
-            SnapshotStoreError::kv_source("failed to decode stream snapshot value", source)
-        })?;
+        let snapshot = serde_json::from_slice::<Snapshot<T>>(&entry.value)
+            .map_err(|source| SnapshotStoreError::kv_source("failed to decode stream snapshot value", source))?;
         snapshots.push((stream_id, snapshot));
     }
 
@@ -148,18 +133,14 @@ where
     let Some(entry) = bucket
         .entry(snapshot_key(config, id))
         .await
-        .map_err(|source| {
-            SnapshotStoreError::kv_source("failed to read stream snapshot entry", source)
-        })?
+        .map_err(|source| SnapshotStoreError::kv_source("failed to read stream snapshot entry", source))?
     else {
         return Ok(None);
     };
 
     serde_json::from_slice::<Snapshot<T>>(&entry.value)
         .map(Some)
-        .map_err(|source| {
-            SnapshotStoreError::kv_source("failed to decode stream snapshot entry", source)
-        })
+        .map_err(|source| SnapshotStoreError::kv_source("failed to decode stream snapshot entry", source))
 }
 
 pub async fn list_snapshots<T>(
@@ -186,10 +167,7 @@ where
         .map(|entries| entries.into_iter().collect())
 }
 
-pub async fn read_checkpoint(
-    bucket: &kv::Store,
-    config: &SnapshotStoreConfig,
-) -> Result<u64, SnapshotStoreError> {
+pub async fn read_checkpoint(bucket: &kv::Store, config: &SnapshotStoreConfig) -> Result<u64, SnapshotStoreError> {
     let (_revision, sequence) = read_checkpoint_entry(bucket, config).await?;
     Ok(sequence)
 }
@@ -215,10 +193,7 @@ pub async fn maybe_advance_checkpoint(
 
     let value = checkpoint_value(sequence);
     match revision {
-        Some(revision) => match bucket
-            .update(&checkpoint_key(config)?, value.into(), revision)
-            .await
-        {
+        Some(revision) => match bucket.update(&checkpoint_key(config)?, value.into(), revision).await {
             Ok(_) => Ok(()),
             Err(source) if source.kind() == kv::UpdateErrorKind::WrongLastRevision => Ok(()),
             Err(source) => Err(SnapshotStoreError::kv_source(
@@ -246,19 +221,10 @@ where
     T: Serialize + DeserializeOwned,
 {
     match change {
-        SnapshotChange::Upsert {
-            stream_id,
-            snapshot,
-        } => {
+        SnapshotChange::Upsert { stream_id, snapshot } => {
             let snapshot_version = snapshot.version;
             let value = serde_json::to_vec(snapshot.as_ref())?;
-            write_snapshot_value::<T>(
-                bucket,
-                &snapshot_key(config, &stream_id),
-                snapshot_version,
-                value,
-            )
-            .await?;
+            write_snapshot_value::<T>(bucket, &snapshot_key(config, &stream_id), snapshot_version, value).await?;
         }
         SnapshotChange::Delete { stream_id } => {
             delete_kv_value(bucket, &snapshot_key(config, &stream_id)).await?;
@@ -280,9 +246,7 @@ async fn read_checkpoint_entry(
     let Some(entry) = bucket
         .entry(checkpoint_key.clone())
         .await
-        .map_err(|source| {
-            SnapshotStoreError::kv_source("failed to read stream snapshot checkpoint entry", source)
-        })?
+        .map_err(|source| SnapshotStoreError::kv_source("failed to read stream snapshot checkpoint entry", source))?
     else {
         return Ok((None, 0));
     };
@@ -300,24 +264,21 @@ async fn read_checkpoint_entry(
     Ok((Some(entry.revision), sequence))
 }
 
-async fn write_kv_value(
-    bucket: &kv::Store,
-    key: &str,
-    value: Vec<u8>,
-) -> Result<(), SnapshotStoreError> {
-    if let Some(entry) = bucket.entry(key.to_string()).await.map_err(|source| {
-        SnapshotStoreError::kv_source("failed to read key-value entry for update", source)
-    })? {
+async fn write_kv_value(bucket: &kv::Store, key: &str, value: Vec<u8>) -> Result<(), SnapshotStoreError> {
+    if let Some(entry) = bucket
+        .entry(key.to_string())
+        .await
+        .map_err(|source| SnapshotStoreError::kv_source("failed to read key-value entry for update", source))?
+    {
         let _ = bucket
             .update(key, value.into(), entry.revision)
             .await
-            .map_err(|source| {
-                SnapshotStoreError::kv_source("failed to update key-value entry", source)
-            })?;
+            .map_err(|source| SnapshotStoreError::kv_source("failed to update key-value entry", source))?;
     } else {
-        let _ = bucket.create(key, value.into()).await.map_err(|source| {
-            SnapshotStoreError::kv_source("failed to create key-value entry", source)
-        })?;
+        let _ = bucket
+            .create(key, value.into())
+            .await
+            .map_err(|source| SnapshotStoreError::kv_source("failed to create key-value entry", source))?;
     }
 
     Ok(())
@@ -332,12 +293,13 @@ async fn write_snapshot_value<T>(
 where
     T: DeserializeOwned,
 {
-    if let Some(entry) = bucket.entry(key.to_string()).await.map_err(|source| {
-        SnapshotStoreError::kv_source("failed to read key-value entry for snapshot update", source)
-    })? {
-        let current = serde_json::from_slice::<Snapshot<T>>(&entry.value).map_err(|source| {
-            SnapshotStoreError::kv_source("failed to decode current snapshot entry", source)
-        })?;
+    if let Some(entry) = bucket
+        .entry(key.to_string())
+        .await
+        .map_err(|source| SnapshotStoreError::kv_source("failed to read key-value entry for snapshot update", source))?
+    {
+        let current = serde_json::from_slice::<Snapshot<T>>(&entry.value)
+            .map_err(|source| SnapshotStoreError::kv_source("failed to decode current snapshot entry", source))?;
 
         if current.version >= snapshot_version {
             return Ok(());
@@ -346,33 +308,27 @@ where
         match bucket.update(key, value.into(), entry.revision).await {
             Ok(_) => Ok(()),
             Err(source) if source.kind() == kv::UpdateErrorKind::WrongLastRevision => Ok(()),
-            Err(source) => Err(SnapshotStoreError::kv_source(
-                "failed to update snapshot entry",
-                source,
-            )),
+            Err(source) => Err(SnapshotStoreError::kv_source("failed to update snapshot entry", source)),
         }
     } else {
         match bucket.create(key, value.into()).await {
             Ok(_) => Ok(()),
             Err(source) if source.kind() == kv::CreateErrorKind::AlreadyExists => Ok(()),
-            Err(source) => Err(SnapshotStoreError::kv_source(
-                "failed to create snapshot entry",
-                source,
-            )),
+            Err(source) => Err(SnapshotStoreError::kv_source("failed to create snapshot entry", source)),
         }
     }
 }
 
 async fn delete_kv_value(bucket: &kv::Store, key: &str) -> Result<(), SnapshotStoreError> {
-    if let Some(entry) = bucket.entry(key.to_string()).await.map_err(|source| {
-        SnapshotStoreError::kv_source("failed to read key-value entry for delete", source)
-    })? {
+    if let Some(entry) = bucket
+        .entry(key.to_string())
+        .await
+        .map_err(|source| SnapshotStoreError::kv_source("failed to read key-value entry for delete", source))?
+    {
         bucket
             .delete_expect_revision(key, Some(entry.revision))
             .await
-            .map_err(|source| {
-                SnapshotStoreError::kv_source("failed to delete key-value entry", source)
-            })?;
+            .map_err(|source| SnapshotStoreError::kv_source("failed to delete key-value entry", source))?;
     }
 
     Ok(())

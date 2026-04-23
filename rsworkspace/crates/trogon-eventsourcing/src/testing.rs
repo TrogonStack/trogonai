@@ -4,6 +4,16 @@ use std::{collections::HashMap, fmt::Debug, marker::PhantomData};
 
 use crate::{Decide, Decision, NonEmpty, StateMachine};
 
+#[macro_export]
+macro_rules! events {
+    () => {
+        ::std::vec::Vec::new()
+    };
+    ($($event:expr),+ $(,)?) => {
+        ::std::vec![$(::core::convert::Into::into($event)),+]
+    };
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Decider<C>(PhantomData<fn() -> C>);
 
@@ -168,6 +178,9 @@ pub struct Given<Event> {
 }
 
 #[doc(hidden)]
+pub struct NoHistory;
+
+#[doc(hidden)]
 pub struct When<Event, State, Command> {
     history: Vec<Event>,
     state: State,
@@ -195,15 +208,60 @@ impl<C> TestCase<C, Start>
 where
     C: Decide,
 {
-    pub fn given<I>(mut self, events: I) -> TestCase<C, Given<C::Event>>
+    pub fn given_no_history(mut self) -> TestCase<C, NoHistory> {
+        self.completed = true;
+        TestCase {
+            marker: PhantomData,
+            stage: NoHistory,
+            completed: false,
+        }
+    }
+
+    pub fn given<I, E>(mut self, events: I) -> TestCase<C, Given<C::Event>>
     where
-        I: IntoIterator<Item = C::Event>,
+        I: IntoIterator<Item = E>,
+        E: Into<C::Event>,
     {
         self.completed = true;
         TestCase {
             marker: PhantomData,
             stage: Given {
-                history: events.into_iter().collect(),
+                history: events.into_iter().map(Into::into).collect(),
+            },
+            completed: false,
+        }
+    }
+}
+
+impl<C> TestCase<C, Given<C::Event>>
+where
+    C: Decide,
+{
+    pub fn given<I, E>(mut self, events: I) -> Self
+    where
+        I: IntoIterator<Item = E>,
+        E: Into<C::Event>,
+    {
+        self.stage.history.extend(events.into_iter().map(Into::into));
+        self
+    }
+}
+
+impl<C> TestCase<C, NoHistory>
+where
+    C: Decide,
+    C::Event: Clone + Debug,
+    C::State: StateMachine<C::Event>,
+    <C::State as StateMachine<C::Event>>::EvolveError: Debug,
+{
+    pub fn when(mut self, command: C) -> TestCase<C, When<C::Event, C::State, C>> {
+        self.completed = true;
+        TestCase {
+            marker: PhantomData,
+            stage: When {
+                history: Vec::new(),
+                state: C::State::initial_state(),
+                command,
             },
             completed: false,
         }
@@ -287,12 +345,13 @@ where
     ) -> Self::Output;
 }
 
-impl<C> ThenExpectation<C> for NonEmpty<C::Event>
+impl<C, E> ThenExpectation<C> for NonEmpty<E>
 where
     C: Decide,
     C::Event: Clone + PartialEq + Debug,
     C::DecideError: PartialEq + Debug,
     C::StreamId: std::fmt::Display,
+    E: Into<C::Event>,
 {
     type Output = ThenEvents<C::Event>;
 
@@ -302,7 +361,12 @@ where
         command: &C,
         actual: Result<Decision<C::Event>, C::DecideError>,
     ) -> Self::Output {
-        assert_events_match::<C>(self.into_vec(), given, command, actual)
+        assert_events_match::<C>(
+            self.into_vec().into_iter().map(Into::into).collect(),
+            given,
+            command,
+            actual,
+        )
     }
 }
 
@@ -329,12 +393,13 @@ where
     }
 }
 
-impl<C, const N: usize> ThenExpectation<C> for [C::Event; N]
+impl<C, E, const N: usize> ThenExpectation<C> for [E; N]
 where
     C: Decide,
     C::Event: Clone + PartialEq + Debug,
     C::DecideError: PartialEq + Debug,
     C::StreamId: std::fmt::Display,
+    E: Into<C::Event>,
 {
     type Output = ThenEvents<C::Event>;
 
@@ -348,7 +413,12 @@ where
             N > 0,
             "expected events in then(...), but event expectations must be non-empty"
         );
-        assert_events_match::<C>(Vec::from(self), given, command, actual)
+        assert_events_match::<C>(
+            Vec::from(self).into_iter().map(Into::into).collect(),
+            given,
+            command,
+            actual,
+        )
     }
 }
 
@@ -430,11 +500,21 @@ mod private {
     {
     }
 
-    impl<C> Sealed<C> for NonEmpty<C::Event> where C: Decide {}
+    impl<C, E> Sealed<C> for NonEmpty<E>
+    where
+        C: Decide,
+        E: Into<C::Event>,
+    {
+    }
 
     impl<C> Sealed<C> for Vec<C::Event> where C: Decide {}
 
-    impl<C, const N: usize> Sealed<C> for [C::Event; N] where C: Decide {}
+    impl<C, E, const N: usize> Sealed<C> for [E; N]
+    where
+        C: Decide,
+        E: Into<C::Event>,
+    {
+    }
 
     impl<C> Sealed<C> for ExpectedError<C::DecideError> where C: Decide {}
 }
@@ -576,7 +656,7 @@ mod tests {
     #[test]
     fn given_empty_history_when_command_then_array_events_succeeds() {
         let register = TestCase::new(decider::<TestCommand>())
-            .given([])
+            .given_no_history()
             .when(TestCommand::register("alpha"))
             .then([TestEvent::Registered {
                 id: "alpha".to_string(),
@@ -629,7 +709,7 @@ mod tests {
     #[test]
     fn then_vec_events_works() {
         TestCase::new(decider::<TestCommand>())
-            .given([])
+            .given_no_history()
             .when(TestCommand::register("alpha"))
             .then(vec![TestEvent::Registered {
                 id: "alpha".to_string(),
@@ -639,7 +719,7 @@ mod tests {
     #[test]
     fn then_non_empty_events_works() {
         TestCase::new(decider::<TestCommand>())
-            .given([])
+            .given_no_history()
             .when(TestCommand::register("alpha"))
             .then(NonEmpty::one(TestEvent::Registered {
                 id: "alpha".to_string(),
@@ -649,7 +729,7 @@ mod tests {
     #[test]
     fn then_expected_error_wrapper_works() {
         let error = TestCase::new(decider::<TestCommand>())
-            .given([])
+            .given_no_history()
             .when(TestCommand::remove("alpha"))
             .then(expect_error(TestCommandError::JobNotFound {
                 id: "alpha".to_string(),
@@ -668,7 +748,7 @@ mod tests {
     #[test]
     fn timeline_matches_then_outputs_against_next_given_for_same_stream() {
         let register = TestCase::new(decider::<TestCommand>())
-            .given([])
+            .given_no_history()
             .when(TestCommand::register("alpha"))
             .then([TestEvent::Registered {
                 id: "alpha".to_string(),
@@ -707,14 +787,14 @@ mod tests {
     #[test]
     fn timeline_keeps_command_streams_separate() {
         let alpha = TestCase::new(decider::<TestCommand>())
-            .given([])
+            .given_no_history()
             .when(TestCommand::register("alpha"))
             .then([TestEvent::Registered {
                 id: "alpha".to_string(),
             }]);
 
         let beta = TestCase::new(decider::<TestCommand>())
-            .given([])
+            .given_no_history()
             .when(TestCommand::register("beta"))
             .then([TestEvent::Registered { id: "beta".to_string() }]);
 
@@ -732,7 +812,7 @@ mod tests {
     #[test]
     fn timeline_rejects_mismatched_given_history_for_command_stream() {
         let register = TestCase::new(decider::<TestCommand>())
-            .given([])
+            .given_no_history()
             .when(TestCommand::register("alpha"))
             .then([TestEvent::Registered {
                 id: "alpha".to_string(),
@@ -768,15 +848,30 @@ mod tests {
     #[should_panic(expected = "event expectations must be non-empty")]
     fn then_empty_event_vec_panics() {
         TestCase::new(decider::<TestCommand>())
-            .given([])
+            .given_no_history()
             .when(TestCommand::register("alpha"))
             .then(Vec::<TestEvent>::new());
     }
 
     #[test]
+    fn multiple_given_calls_append_to_history() {
+        TestCase::new(decider::<TestCommand>())
+            .given([TestEvent::Registered {
+                id: "alpha".to_string(),
+            }])
+            .given([TestEvent::Disabled {
+                id: "alpha".to_string(),
+            }])
+            .when(TestCommand::remove("alpha"))
+            .then([TestEvent::Removed {
+                id: "alpha".to_string(),
+            }]);
+    }
+
+    #[test]
     fn unfinished_test_case_panics_on_drop() {
         let panic = catch_unwind(AssertUnwindSafe(|| {
-            let _case = TestCase::new(decider::<TestCommand>()).given([]);
+            let _case = TestCase::new(decider::<TestCommand>()).given_no_history();
         }))
         .unwrap_err();
 
@@ -788,7 +883,7 @@ mod tests {
     fn event_mismatch_shows_expected_vs_actual() {
         let panic = catch_unwind(AssertUnwindSafe(|| {
             TestCase::new(decider::<TestCommand>())
-                .given([])
+                .given_no_history()
                 .when(TestCommand::register("alpha"))
                 .then([TestEvent::Removed {
                     id: "alpha".to_string(),
@@ -806,7 +901,7 @@ mod tests {
     fn error_mismatch_shows_expected_vs_actual() {
         let panic = catch_unwind(AssertUnwindSafe(|| {
             TestCase::new(decider::<TestCommand>())
-                .given([])
+                .given_no_history()
                 .when(TestCommand::register("alpha"))
                 .then(expect_error(TestCommandError::JobNotFound {
                     id: "alpha".to_string(),

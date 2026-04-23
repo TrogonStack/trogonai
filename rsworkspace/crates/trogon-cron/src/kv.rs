@@ -21,9 +21,7 @@ pub const SCHEDULE_SUBJECT_PATTERN: &str = "cron.schedules.>";
 pub const FIRE_SUBJECT_PATTERN: &str = "cron.fire.>";
 
 #[cfg(not(coverage))]
-pub async fn get_or_create_cron_jobs_bucket(
-    js: &jetstream::Context,
-) -> Result<kv::Store, CronError> {
+pub async fn get_or_create_cron_jobs_bucket(js: &jetstream::Context) -> Result<kv::Store, CronError> {
     get_or_create(
         js,
         kv::Config {
@@ -36,9 +34,7 @@ pub async fn get_or_create_cron_jobs_bucket(
 }
 
 #[cfg(coverage)]
-pub async fn get_or_create_cron_jobs_bucket(
-    _js: &jetstream::Context,
-) -> Result<kv::Store, CronError> {
+pub async fn get_or_create_cron_jobs_bucket(_js: &jetstream::Context) -> Result<kv::Store, CronError> {
     Err(CronError::kv_source(
         "coverage stub does not provision cron jobs buckets",
         std::io::Error::other(CRON_JOBS_BUCKET),
@@ -46,9 +42,7 @@ pub async fn get_or_create_cron_jobs_bucket(
 }
 
 #[cfg(not(coverage))]
-pub async fn get_or_create_snapshot_bucket(
-    js: &jetstream::Context,
-) -> Result<kv::Store, CronError> {
+pub async fn get_or_create_snapshot_bucket(js: &jetstream::Context) -> Result<kv::Store, CronError> {
     get_or_create(
         js,
         kv::Config {
@@ -61,9 +55,7 @@ pub async fn get_or_create_snapshot_bucket(
 }
 
 #[cfg(coverage)]
-pub async fn get_or_create_snapshot_bucket(
-    _js: &jetstream::Context,
-) -> Result<kv::Store, CronError> {
+pub async fn get_or_create_snapshot_bucket(_js: &jetstream::Context) -> Result<kv::Store, CronError> {
     Err(CronError::kv_source(
         "coverage stub does not provision snapshot buckets",
         std::io::Error::other(SNAPSHOT_BUCKET),
@@ -71,33 +63,22 @@ pub async fn get_or_create_snapshot_bucket(
 }
 
 #[cfg(not(coverage))]
-pub async fn get_or_create(
-    js: &jetstream::Context,
-    config: kv::Config,
-) -> Result<kv::Store, CronError> {
+pub async fn get_or_create(js: &jetstream::Context, config: kv::Config) -> Result<kv::Store, CronError> {
     let name = config.bucket.clone();
     match js.create_key_value(config).await {
         Ok(store) => Ok(store),
-        Err(source) if is_create_key_value_already_exists(&source) => {
-            js.get_key_value(&name).await.map_err(|source| {
-                CronError::kv_source(
-                    "failed to get existing key-value bucket after create reported already exists",
-                    source,
-                )
-            })
-        }
-        Err(source) => Err(CronError::kv_source(
-            "failed to create key-value bucket",
-            source,
-        )),
+        Err(source) if is_create_key_value_already_exists(&source) => js.get_key_value(&name).await.map_err(|source| {
+            CronError::kv_source(
+                "failed to get existing key-value bucket after create reported already exists",
+                source,
+            )
+        }),
+        Err(source) => Err(CronError::kv_source("failed to create key-value bucket", source)),
     }
 }
 
 #[cfg(coverage)]
-pub async fn get_or_create(
-    _js: &jetstream::Context,
-    _config: kv::Config,
-) -> Result<kv::Store, CronError> {
+pub async fn get_or_create(_js: &jetstream::Context, _config: kv::Config) -> Result<kv::Store, CronError> {
     Err(CronError::kv_source(
         "coverage stub does not provision key-value buckets",
         std::io::Error::other("coverage"),
@@ -105,15 +86,10 @@ pub async fn get_or_create(
 }
 
 #[cfg(not(coverage))]
-pub async fn get_or_create_schedule_stream(
-    js: &jetstream::Context,
-) -> Result<stream::Stream, CronError> {
+pub async fn get_or_create_schedule_stream(js: &jetstream::Context) -> Result<stream::Stream, CronError> {
     let config = stream::Config {
         name: SCHEDULES_STREAM.to_string(),
-        subjects: vec![
-            SCHEDULE_SUBJECT_PATTERN.to_string(),
-            FIRE_SUBJECT_PATTERN.to_string(),
-        ],
+        subjects: vec![SCHEDULE_SUBJECT_PATTERN.to_string(), FIRE_SUBJECT_PATTERN.to_string()],
         allow_message_ttl: true,
         allow_message_schedules: true,
         ..Default::default()
@@ -137,9 +113,7 @@ pub async fn get_or_create_schedule_stream(
 }
 
 #[cfg(coverage)]
-pub async fn get_or_create_schedule_stream(
-    _js: &jetstream::Context,
-) -> Result<stream::Stream, CronError> {
+pub async fn get_or_create_schedule_stream(_js: &jetstream::Context) -> Result<stream::Stream, CronError> {
     Err(CronError::schedule_source(
         "coverage stub does not provision schedule streams",
         std::io::Error::other(SCHEDULES_STREAM),
@@ -147,9 +121,7 @@ pub async fn get_or_create_schedule_stream(
 }
 
 #[cfg(not(coverage))]
-pub async fn get_or_create_events_stream(
-    js: &jetstream::Context,
-) -> Result<stream::Stream, CronError> {
+pub async fn get_or_create_events_stream(js: &jetstream::Context) -> Result<stream::Stream, CronError> {
     let config = stream::Config {
         name: EVENTS_STREAM.to_string(),
         subjects: vec![
@@ -171,10 +143,7 @@ pub async fn get_or_create_events_stream(
             })?
         }
         Err(source) => {
-            return Err(CronError::event_source(
-                "failed to get or create events stream",
-                source,
-            ));
+            return Err(CronError::event_source("failed to get or create events stream", source));
         }
     };
 
@@ -182,9 +151,7 @@ pub async fn get_or_create_events_stream(
 }
 
 #[cfg(coverage)]
-pub async fn get_or_create_events_stream(
-    _js: &jetstream::Context,
-) -> Result<stream::Stream, CronError> {
+pub async fn get_or_create_events_stream(_js: &jetstream::Context) -> Result<stream::Stream, CronError> {
     Err(CronError::event_source(
         "coverage stub does not provision events streams",
         std::io::Error::other(EVENTS_STREAM),
@@ -198,17 +165,15 @@ async fn ensure_events_stream_config(
     desired: stream::Config,
 ) -> Result<stream::Stream, CronError> {
     let mut current = stream.cached_info().config.clone();
-    if current.allow_atomic_publish == desired.allow_atomic_publish
-        && current.subjects == desired.subjects
-    {
+    if current.allow_atomic_publish == desired.allow_atomic_publish && current.subjects == desired.subjects {
         return Ok(stream);
     }
 
     current.allow_atomic_publish = desired.allow_atomic_publish;
     current.subjects = desired.subjects;
-    js.update_stream(current).await.map_err(|source| {
-        CronError::event_source("failed to update events stream configuration", source)
-    })?;
+    js.update_stream(current)
+        .await
+        .map_err(|source| CronError::event_source("failed to update events stream configuration", source))?;
     js.get_stream(EVENTS_STREAM)
         .await
         .map_err(|source| CronError::event_source("failed to reopen updated events stream", source))
@@ -232,10 +197,7 @@ mod tests {
 
     #[test]
     fn create_key_value_already_exists_matches_wrapped_stream_exists_error() {
-        let error = CreateKeyValueError::with_source(
-            CreateKeyValueErrorKind::BucketCreate,
-            stream_exists_error(),
-        );
+        let error = CreateKeyValueError::with_source(CreateKeyValueErrorKind::BucketCreate, stream_exists_error());
 
         assert!(is_create_key_value_already_exists(&error));
     }

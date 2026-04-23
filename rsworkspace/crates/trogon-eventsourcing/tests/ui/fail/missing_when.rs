@@ -7,6 +7,6 @@ use common::{TestCommand, TestDecisionError};
 
 fn main() {
     TestCase::new(decider::<TestCommand>())
-        .given([])
+        .given_no_history()
         .then(expect_error(TestDecisionError::AlreadyRegistered));
 }

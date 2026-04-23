@@ -62,7 +62,7 @@ impl CommandSnapshotPolicy for AddJobCommand {
 mod tests {
     use trogon_eventsourcing::snapshot::SnapshotSchema;
     use trogon_eventsourcing::{
-        CommandExecution, CommandFailure, Decision, NonEmpty, decide,
+        CommandExecution, CommandFailure, NonEmpty,
         testing::{TestCase, decider, expect_error},
     };
 
@@ -94,49 +94,23 @@ mod tests {
     }
 
     #[test]
-    fn decides_add_from_missing_state() {
-        let state = JobState::Missing;
-        let command = AddJobCommand::new(job("backup"));
-
-        let decision = decide(&state, &command).unwrap();
-        assert_eq!(
-            decision,
-            Decision::event(JobAdded {
-                id: "backup".to_string(),
-                job: JobDetails::from(job("backup")),
-            })
-        );
-    }
-
-    #[test]
-    fn rejects_adding_existing_job() {
-        let state = JobState::PresentEnabled;
-        let command = AddJobCommand::new(job("backup"));
-
-        assert!(matches!(
-            decide(&state, &command).unwrap_err(),
-            AddJobDecisionError::AlreadyExists { .. }
-        ));
-    }
-
-    #[test]
     fn given_when_then_supports_register_job_decider() {
         TestCase::new(decider::<AddJobCommand>())
-            .given([])
+            .given_no_history()
             .when(AddJobCommand::new(job("backup")))
-            .then([JobEvent::JobAdded(JobAdded {
+            .then(trogon_eventsourcing::events![JobAdded {
                 id: "backup".to_string(),
                 job: JobDetails::from(job("backup")),
-            })]);
+            }]);
     }
 
     #[test]
     fn given_when_then_supports_register_job_failures() {
         TestCase::new(decider::<AddJobCommand>())
-            .given([JobEvent::JobAdded(JobAdded {
+            .given([JobAdded {
                 id: "backup".to_string(),
                 job: JobDetails::from(job("backup")),
-            })])
+            }])
             .when(AddJobCommand::new(job("backup")))
             .then(expect_error(AddJobDecisionError::AlreadyExists {
                 id: JobId::parse("backup").unwrap(),
@@ -146,15 +120,13 @@ mod tests {
     #[test]
     fn rejects_adding_deleted_job_ids() {
         TestCase::new(decider::<AddJobCommand>())
-            .given([
-                JobEvent::JobAdded(JobAdded {
-                    id: "backup".to_string(),
-                    job: JobDetails::from(job("backup")),
-                }),
-                JobEvent::JobRemoved(JobRemoved {
-                    id: "backup".to_string(),
-                }),
-            ])
+            .given([JobAdded {
+                id: "backup".to_string(),
+                job: JobDetails::from(job("backup")),
+            }])
+            .given([JobRemoved {
+                id: "backup".to_string(),
+            }])
             .when(AddJobCommand::new(job("backup")))
             .then(expect_error(AddJobDecisionError::JobDeleted {
                 id: JobId::parse("backup").unwrap(),
@@ -173,10 +145,13 @@ mod tests {
         assert_eq!(outcome.next_expected_version, 1);
         assert_eq!(
             outcome.events,
-            NonEmpty::one(JobEvent::JobAdded(JobAdded {
-                id: "backup".to_string(),
-                job: JobDetails::from(job("backup")),
-            }))
+            NonEmpty::one(
+                JobAdded {
+                    id: "backup".to_string(),
+                    job: JobDetails::from(job("backup")),
+                }
+                .into()
+            )
         );
 
         let stored_job = store

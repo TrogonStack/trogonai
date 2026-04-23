@@ -7,7 +7,7 @@ use common::{TestCommand, TestEvent};
 
 fn main() {
     TestCase::new(decider::<TestCommand>())
-        .given([])
+        .given_no_history()
         .when(TestCommand)
         .then([TestEvent::Registered])
         .when(TestCommand);

@@ -1,8 +1,6 @@
 use async_nats::jetstream::{
     ErrorCode,
-    context::{
-        CreateKeyValueError, CreateKeyValueErrorKind, CreateStreamError, CreateStreamErrorKind,
-    },
+    context::{CreateKeyValueError, CreateKeyValueErrorKind, CreateStreamError, CreateStreamErrorKind},
 };
 
 pub fn is_create_stream_already_exists(error: &CreateStreamError) -> bool {
@@ -38,10 +36,7 @@ mod tests {
 
     #[test]
     fn key_value_already_exists_matches_wrapped_stream_exists_error() {
-        let error = CreateKeyValueError::with_source(
-            CreateKeyValueErrorKind::BucketCreate,
-            stream_exists_error(),
-        );
+        let error = CreateKeyValueError::with_source(CreateKeyValueErrorKind::BucketCreate, stream_exists_error());
 
         assert!(is_create_key_value_already_exists(&error));
     }
