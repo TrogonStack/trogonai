@@ -12,25 +12,6 @@ use trogon_std::time::SystemClock;
 use crate::acp_connection_id::AcpConnectionId;
 use crate::constants::DUPLEX_BUFFER_SIZE;
 
-#[derive(Debug, thiserror::Error)]
-enum ConnectionShutdownError {
-    #[error("client task error: {source}")]
-    ClientTask {
-        #[source]
-        source: tokio::task::JoinError,
-    },
-    #[error("io task spawn error: {source}")]
-    IoTaskSpawn {
-        #[source]
-        source: tokio::task::JoinError,
-    },
-    #[error("io task error: {source}")]
-    IoTask {
-        #[source]
-        source: Box<dyn std::error::Error + Send + Sync>,
-    },
-}
-
 /// Handles a single WebSocket connection by bridging it to NATS via ACP.
 pub async fn handle<N, J>(
     connection_id: AcpConnectionId,
@@ -57,7 +38,7 @@ pub async fn handle<N, J>(
     let incoming = async_compat::Compat::new(agent_read);
     let outgoing = async_compat::Compat::new(agent_write);
 
-    let meter = trogon_telemetry::meter("acp-nats-server");
+    let meter = acp_telemetry::meter("acp-nats-server");
     let (notification_tx, notification_rx) = tokio::sync::mpsc::channel::<SessionNotification>(64);
     let bridge = Rc::new(Bridge::new(
         nats_client.clone(),
@@ -94,18 +75,14 @@ pub async fn handle<N, J>(
                 }
                 Err(e) => {
                     error!(error = %e, "Client task ended with error");
-                    Err(ConnectionShutdownError::ClientTask { source: e })
+                    Err(format!("client task error: {e}"))
                 }
             }
         }
         result = &mut io_task => {
             let res = result
-                .map_err(|source| ConnectionShutdownError::IoTaskSpawn { source })
-                .and_then(|r| {
-                    r.map_err(|source| ConnectionShutdownError::IoTask {
-                        source: Box::new(source),
-                    })
-                });
+                .map_err(|e| format!("io task spawn error: {e}"))
+                .and_then(|r| r.map_err(|e| format!("io task error: {e}")));
 
             match res {
                 Ok(_) => {
@@ -113,7 +90,7 @@ pub async fn handle<N, J>(
                     Ok(())
                 }
                 Err(e) => {
-                    error!(error = %e, "IO task ended with error");
+                    error!(error = e, "IO task ended with error");
                     Err(e)
                 }
             }
@@ -138,7 +115,7 @@ pub async fn handle<N, J>(
 
     match shutdown_result {
         Ok(()) => info!(%connection_id, "WebSocket connection closed cleanly"),
-        Err(e) => warn!(%connection_id, error = %e, "WebSocket connection closed with error"),
+        Err(e) => warn!(%connection_id, error = e, "WebSocket connection closed with error"),
     }
 }
 
@@ -189,4 +166,85 @@ async fn run_send_pump(mut ws_sender: SplitSink<WebSocket, Message>, ws_send_rea
 }
 
 #[cfg(test)]
-mod tests;
+mod tests {
+    use super::*;
+    use axum::extract::State;
+    use axum::extract::ws::WebSocketUpgrade;
+    use axum::response::Response;
+    use std::time::Duration;
+    use tokio::net::TcpListener;
+    use tokio_tungstenite::connect_async;
+    use tokio_tungstenite::tungstenite::Message as TungsteniteMessage;
+
+    use crate::constants::ACP_ENDPOINT;
+
+    #[derive(Clone)]
+    struct EchoState;
+
+    async fn echo_handler(ws: WebSocketUpgrade, State(_): State<EchoState>) -> Response {
+        ws.on_upgrade(|socket| async move {
+            let (ws_sender, ws_receiver) = socket.split();
+            let (duplex_write, duplex_read) = tokio::io::duplex(DUPLEX_BUFFER_SIZE);
+            let recv = run_recv_pump(ws_receiver, duplex_write);
+            let send = run_send_pump(ws_sender, duplex_read);
+            tokio::join!(recv, send);
+        })
+    }
+
+    async fn start_echo_server() -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = axum::Router::new()
+            .route(ACP_ENDPOINT, axum::routing::get(echo_handler))
+            .with_state(EchoState);
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        format!("ws://{}{}", addr, ACP_ENDPOINT)
+    }
+
+    #[tokio::test]
+    async fn multiple_messages_round_trip() {
+        let url = start_echo_server().await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+
+        let messages = vec!["alpha", "beta", "gamma"];
+        for msg in &messages {
+            ws.send(TungsteniteMessage::Text((*msg).into())).await.unwrap();
+        }
+
+        for expected in &messages {
+            let msg = tokio::time::timeout(Duration::from_secs(2), ws.next())
+                .await
+                .expect("timeout")
+                .expect("stream ended")
+                .unwrap();
+            match msg {
+                TungsteniteMessage::Text(t) => assert_eq!(t, *expected),
+                other => panic!("expected Text('{expected}'), got {other:?}"),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn binary_messages_are_ignored() {
+        let url = start_echo_server().await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+
+        ws.send(TungsteniteMessage::Binary(bytes::Bytes::from_static(b"ignored")))
+            .await
+            .unwrap();
+        ws.send(TungsteniteMessage::Text("kept".into())).await.unwrap();
+
+        let msg = tokio::time::timeout(Duration::from_secs(2), ws.next())
+            .await
+            .expect("timeout")
+            .expect("stream ended")
+            .unwrap();
+
+        match msg {
+            TungsteniteMessage::Text(text) => assert_eq!(text, "kept"),
+            other => panic!("expected text frame, got {other:?}"),
+        }
+    }
+}

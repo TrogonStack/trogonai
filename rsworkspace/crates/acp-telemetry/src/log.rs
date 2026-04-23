@@ -99,8 +99,8 @@ mod tests {
 
     #[test]
     fn platform_log_dir_returns_path_ending_with_service_name() {
-        let dir = platform_log_dir(ServiceName::AcpNatsWs).unwrap();
-        assert!(dir.ends_with(ServiceName::AcpNatsWs.as_str()));
+        let dir = platform_log_dir(ServiceName::AcpNatsServer).unwrap();
+        assert!(dir.ends_with(ServiceName::AcpNatsServer.as_str()));
     }
 
     #[test]
