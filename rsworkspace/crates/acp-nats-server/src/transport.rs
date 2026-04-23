@@ -302,13 +302,13 @@ impl SseFrame {
 enum PendingRequest {
     Live {
         request_id: RequestId,
-        capture_protocol_version: bool,
+        initialize_request: bool,
+        activate_session_on_success: Option<acp_nats::AcpSessionId>,
         session_id: Option<acp_nats::AcpSessionId>,
         sender: SseSender,
     },
     Buffered {
         request_id: RequestId,
-        fallback_session_id: Option<acp_nats::AcpSessionId>,
         events: Vec<SseFrame>,
         response: oneshot::Sender<Result<HttpPostOutcome, HttpTransportError>>,
     },
@@ -370,11 +370,16 @@ impl IncomingHttpMessage {
         self.method_name() == Some("initialize")
     }
 
-    fn activates_session(&self) -> bool {
-        matches!(
-            self.method_name(),
-            Some("session/new") | Some("session/load") | Some("session/resume") | Some("session/fork")
-        )
+    fn creates_session(&self) -> bool {
+        matches!(self.method_name(), Some("session/new") | Some("session/fork"))
+    }
+
+    fn attaches_session(&self) -> bool {
+        matches!(self.method_name(), Some("session/load") | Some("session/resume"))
+    }
+
+    fn allows_unknown_session(&self) -> bool {
+        self.creates_session() || self.attaches_session()
     }
 
     fn requires_session_id(&self) -> bool {
@@ -383,8 +388,7 @@ impl IncomingHttpMessage {
         }
 
         match self.method_name() {
-            Some("initialize") | Some("authenticate") | Some("session/list") => false,
-            _ if self.activates_session() => false,
+            Some("initialize") | Some("authenticate") | Some("session/list") | Some("session/new") => false,
             Some(method) if method.starts_with("session/") => true,
             _ => false,
         }
@@ -1142,6 +1146,7 @@ pub async fn run_http_connection<N, J>(
     let mut io_task = tokio::task::spawn_local(io_task);
 
     let mut pending_request: Option<PendingRequest> = None;
+    let mut initialized = false;
     let mut protocol_version: Option<ProtocolVersion> = None;
     let mut sessions = HashSet::<acp_nats::AcpSessionId>::new();
     let mut get_listeners = HashMap::<acp_nats::AcpSessionId, Vec<SseSender>>::new();
@@ -1165,6 +1170,23 @@ pub async fn run_http_connection<N, J>(
                             continue;
                         }
 
+                        if !message.is_initialize() && !initialized {
+                            let _ = response.send(Err(HttpTransportError::bad_request(
+                                "ACP connection has not been initialized",
+                            )));
+                            continue;
+                        }
+
+                        if message.requires_session_id()
+                            && !message.allows_unknown_session()
+                            && session_id
+                                .as_ref()
+                                .is_some_and(|session_id| !sessions.contains(session_id))
+                        {
+                            let _ = response.send(Err(HttpTransportError::not_found("unknown ACP session")));
+                            continue;
+                        }
+
                         if message.is_request() {
                             if pending_request.is_some() {
                                 let _ = response.send(Err(HttpTransportError::conflict(
@@ -1173,10 +1195,9 @@ pub async fn run_http_connection<N, J>(
                                 continue;
                             }
 
-                            if message.activates_session() {
+                            if message.creates_session() {
                                 pending_request = Some(PendingRequest::Buffered {
                                     request_id: message.id.clone().expect("request must have id"),
-                                    fallback_session_id: message.params_session_id().ok().flatten(),
                                     events: Vec::new(),
                                     response,
                                 });
@@ -1191,14 +1212,15 @@ pub async fn run_http_connection<N, J>(
                                 continue;
                             }
 
-                            if let Some(session_id) = session_id.clone() {
-                                sessions.insert(session_id);
-                            }
-
                             let (stream_tx, stream_rx) = mpsc::channel(HTTP_CHANNEL_CAPACITY);
                             pending_request = Some(PendingRequest::Live {
                                 request_id: message.id.clone().expect("request must have id"),
-                                capture_protocol_version: message.is_initialize(),
+                                initialize_request: message.is_initialize(),
+                                activate_session_on_success: if message.attaches_session() {
+                                    session_id.clone()
+                                } else {
+                                    None
+                                },
                                 session_id: session_id.clone(),
                                 sender: stream_tx,
                             });
@@ -1218,8 +1240,13 @@ pub async fn run_http_connection<N, J>(
                             continue;
                         }
 
-                        if let Some(session_id) = session_id.clone() {
-                            sessions.insert(session_id);
+                        if message.requires_session_id()
+                            && session_id
+                                .as_ref()
+                                .is_some_and(|session_id| !sessions.contains(session_id))
+                        {
+                            let _ = response.send(Err(HttpTransportError::not_found("unknown ACP session")));
+                            continue;
                         }
 
                         if input_tx.try_send(message.raw).is_err() {
@@ -1236,6 +1263,13 @@ pub async fn run_http_connection<N, J>(
                         protocol_version: header_protocol_version,
                         response,
                     } => {
+                        if !initialized {
+                            let _ = response.send(Err(HttpTransportError::bad_request(
+                                "ACP connection has not been initialized",
+                            )));
+                            continue;
+                        }
+
                         if let Err(error) = validate_protocol_version_header(
                             header_protocol_version.as_ref(),
                             protocol_version.as_ref(),
@@ -1286,17 +1320,24 @@ pub async fn run_http_connection<N, J>(
                     match pending {
                         PendingRequest::Live {
                             request_id,
-                            capture_protocol_version,
+                            initialize_request,
+                            activate_session_on_success,
                             session_id,
                             sender,
                         } => {
-                            if *capture_protocol_version
-                                && parsed.as_ref().and_then(|message| message.id.as_ref())
-                                    == Some(request_id)
-                            {
-                                protocol_version = parsed
-                                    .as_ref()
-                                    .and_then(OutgoingHttpMessage::result_protocol_version);
+                            if parsed.as_ref().and_then(|message| message.id.as_ref()) == Some(request_id) {
+                                if *initialize_request {
+                                    protocol_version = parsed
+                                        .as_ref()
+                                        .and_then(OutgoingHttpMessage::result_protocol_version);
+                                    initialized = protocol_version.is_some();
+                                }
+
+                                if let Some(session_id) = activate_session_on_success.clone()
+                                    && parsed.as_ref().and_then(|message| message.result.as_ref()).is_some()
+                                {
+                                    sessions.insert(session_id);
+                                }
                             }
 
                             match route_live_frame(
@@ -1316,7 +1357,6 @@ pub async fn run_http_connection<N, J>(
                         }
                         PendingRequest::Buffered {
                             request_id,
-                            fallback_session_id,
                             events,
                             ..
                         } => {
@@ -1329,8 +1369,6 @@ pub async fn run_http_connection<N, J>(
                             ) {
                                 BufferedFrameOutcome::Buffered | BufferedFrameOutcome::Routed => {}
                                 BufferedFrameOutcome::Finalize { session_id } => {
-                                    let session_id =
-                                        session_id.or_else(|| fallback_session_id.clone());
                                     if let Some(session_id) = session_id.clone() {
                                         sessions.insert(session_id);
                                     }
@@ -1712,17 +1750,25 @@ mod tests {
         )
         .unwrap();
         assert!(request.is_request());
-        assert!(request.activates_session());
+        assert!(request.creates_session());
+        assert!(!request.requires_session_id());
 
         for raw in [
             r#"{"jsonrpc":"2.0","id":2,"method":"session/load","params":{"sessionId":"session-1","cwd":"."}}"#,
             r#"{"jsonrpc":"2.0","id":3,"method":"session/resume","params":{"sessionId":"session-1","cwd":"."}}"#,
-            r#"{"jsonrpc":"2.0","id":4,"method":"session/fork","params":{"sessionId":"session-1","cwd":"."}}"#,
         ] {
-            let activating = IncomingHttpMessage::parse(raw.to_string()).unwrap();
-            assert!(activating.activates_session());
-            assert!(!activating.requires_session_id());
+            let attach = IncomingHttpMessage::parse(raw.to_string()).unwrap();
+            assert!(attach.attaches_session());
+            assert!(attach.requires_session_id());
         }
+
+        let fork = IncomingHttpMessage::parse(
+            r#"{"jsonrpc":"2.0","id":4,"method":"session/fork","params":{"sessionId":"session-1","cwd":"."}}"#
+                .to_string(),
+        )
+        .unwrap();
+        assert!(fork.creates_session());
+        assert!(fork.requires_session_id());
 
         let notification =
             IncomingHttpMessage::parse(r#"{"jsonrpc":"2.0","method":"initialized"}"#.to_string()).unwrap();
@@ -2079,21 +2125,42 @@ mod tests {
                 .to_string(),
         )
         .unwrap();
-        assert!(validate_http_context(&load, Some(&connection_id), None).is_ok());
+        assert!(matches!(
+            validate_http_context(&load, Some(&connection_id), None),
+            Err(HttpTransportError::BadRequest {
+                message: "missing Acp-Session-Id header",
+                source: None,
+            })
+        ));
+        assert!(validate_http_context(&load, Some(&connection_id), Some(&session_id)).is_ok());
 
         let resume = IncomingHttpMessage::parse(
             r#"{"jsonrpc":"2.0","id":2,"method":"session/resume","params":{"sessionId":"session-1","cwd":"."}}"#
                 .to_string(),
         )
         .unwrap();
-        assert!(validate_http_context(&resume, Some(&connection_id), None).is_ok());
+        assert!(matches!(
+            validate_http_context(&resume, Some(&connection_id), None),
+            Err(HttpTransportError::BadRequest {
+                message: "missing Acp-Session-Id header",
+                source: None,
+            })
+        ));
+        assert!(validate_http_context(&resume, Some(&connection_id), Some(&session_id)).is_ok());
 
         let fork = IncomingHttpMessage::parse(
             r#"{"jsonrpc":"2.0","id":2,"method":"session/fork","params":{"sessionId":"session-1","cwd":"."}}"#
                 .to_string(),
         )
         .unwrap();
-        assert!(validate_http_context(&fork, Some(&connection_id), None).is_ok());
+        assert!(matches!(
+            validate_http_context(&fork, Some(&connection_id), None),
+            Err(HttpTransportError::BadRequest {
+                message: "missing Acp-Session-Id header",
+                source: None,
+            })
+        ));
+        assert!(validate_http_context(&fork, Some(&connection_id), Some(&session_id)).is_ok());
     }
 
     #[test]
@@ -2269,7 +2336,7 @@ mod tests {
                     ..
                 } => {
                     assert_eq!(actual_connection_id, expected_connection_id.clone());
-                    assert!(message.activates_session());
+                    assert!(message.creates_session());
                     let _ = response.send(Ok(HttpPostOutcome::Buffered {
                         connection_id: expected_connection_id,
                         protocol_version: Some(ProtocolVersion::V0),
