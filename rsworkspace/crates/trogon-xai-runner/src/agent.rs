@@ -16,7 +16,7 @@ use agent_client_protocol::{
     SessionResumeCapabilities, SessionUpdate, SetSessionConfigOptionRequest,
     SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse,
     SetSessionModelRequest, SetSessionModelResponse, StopReason, ToolCall, ToolCallStatus,
-    ToolKind, UsageUpdate,
+    ExtRequest, ExtResponse, ToolKind, UsageUpdate,
 };
 use async_trait::async_trait;
 use futures_util::StreamExt as _;
@@ -89,6 +89,10 @@ struct XaiSession {
     created_at: Instant,
     /// ISO 8601 timestamp captured at session creation, written to the SESSIONS KV bucket.
     created_at_iso: String,
+    /// Session this was branched from. None for root sessions.
+    parent_session_id: Option<String>,
+    /// Message index at which the branch was made. None for full forks.
+    branched_at_index: Option<usize>,
 }
 
 /// ACP Agent implementation backed by xAI's Grok API (Responses API).
@@ -453,13 +457,17 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
                 AgentCapabilities::new()
                     .load_session(true)
                     .prompt_capabilities(PromptCapabilities::new().embedded_context(true))
-                    .session_capabilities(
+                    .session_capabilities({
+                        let mut caps_meta = serde_json::Map::new();
+                        caps_meta.insert("branchAtIndex".to_string(), serde_json::json!({}));
+                        caps_meta.insert("listChildren".to_string(), serde_json::json!({}));
                         SessionCapabilities::new()
                             .fork(SessionForkCapabilities::new())
                             .list(SessionListCapabilities::new())
                             .resume(SessionResumeCapabilities::new())
-                            .close(SessionCloseCapabilities::new()),
-                    ),
+                            .close(SessionCloseCapabilities::new())
+                            .meta(caps_meta)
+                    }),
             )
             .agent_info(Implementation::new(
                 "trogon-xai-runner",
@@ -561,6 +569,8 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
                 system_prompt: session_system_prompt,
                 created_at: Instant::now(),
                 created_at_iso,
+                parent_session_id: None,
+                branched_at_index: None,
             },
         );
 
@@ -613,7 +623,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
         let source_id = req.session_id.to_string();
         let cwd = req.cwd.to_string_lossy().into_owned();
 
-        let (inherited_model, inherited_key, history, inherited_tools, inherited_system_prompt) = {
+        let (inherited_model, inherited_key, mut history, inherited_tools, inherited_system_prompt) = {
             let sessions = self.sessions.lock().await;
             let s = sessions
                 .get(&source_id)
@@ -626,6 +636,16 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
                 s.system_prompt.clone(),
             )
         };
+
+        let branch_at: Option<usize> = req
+            .meta
+            .as_ref()
+            .and_then(|m| m.get("branchAtIndex"))
+            .and_then(|v| v.as_u64())
+            .map(|n| n as usize);
+        if let Some(idx) = branch_at {
+            history.truncate(idx);
+        }
 
         let new_session_id = Uuid::new_v4().to_string();
         let mut sessions = self.sessions.lock().await;
@@ -644,6 +664,8 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
                 system_prompt: inherited_system_prompt,
                 created_at: Instant::now(),
                 created_at_iso: now_iso(),
+                parent_session_id: Some(source_id.clone()),
+                branched_at_index: branch_at,
             },
         );
 
@@ -689,7 +711,20 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
         let sessions = self.sessions.lock().await;
         let mut list: Vec<_> = sessions
             .iter()
-            .map(|(id, s)| SessionInfo::new(id.clone(), s.cwd.clone()))
+            .map(|(id, s)| {
+                let mut info = SessionInfo::new(id.clone(), s.cwd.clone());
+                if s.parent_session_id.is_some() || s.branched_at_index.is_some() {
+                    let mut meta = serde_json::Map::new();
+                    if let Some(ref parent_id) = s.parent_session_id {
+                        meta.insert("parentSessionId".to_string(), serde_json::json!(parent_id));
+                    }
+                    if let Some(idx) = s.branched_at_index {
+                        meta.insert("branchedAtIndex".to_string(), serde_json::json!(idx));
+                    }
+                    info = info.meta(meta);
+                }
+                info
+            })
             .collect();
         list.sort_by(|a, b| a.session_id.0.cmp(&b.session_id.0));
         Ok(ListSessionsResponse::new(list))
@@ -1185,6 +1220,33 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
         }
         Ok(())
     }
+
+    async fn ext_method(&self, args: ExtRequest) -> agent_client_protocol::Result<ExtResponse> {
+        if args.method.as_ref() == "session/list_children" {
+            let params: serde_json::Value =
+                serde_json::from_str(args.params.get()).unwrap_or_default();
+            let parent_id = params
+                .get("sessionId")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+            let children: Vec<String> = self
+                .sessions
+                .lock()
+                .await
+                .iter()
+                .filter(|(_, s)| s.parent_session_id.as_deref() == Some(parent_id))
+                .map(|(id, _)| id.clone())
+                .collect();
+            let result = serde_json::json!({ "children": children });
+            let raw = serde_json::value::RawValue::from_string(result.to_string())
+                .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
+            return Ok(ExtResponse::new(raw.into()));
+        }
+        Err(Error::new(
+            ErrorCode::MethodNotFound.into(),
+            format!("unknown ext method: {}", args.method),
+        ))
+    }
 }
 
 /// Build the full `input` array for a Responses API request from session history.
@@ -1272,6 +1334,8 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
                 system_prompt: self.system_prompt.clone(),
                 created_at: Instant::now(),
                 created_at_iso: now_iso(),
+                parent_session_id: None,
+                branched_at_index: None,
             },
         );
     }
@@ -1334,6 +1398,8 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
                 system_prompt: self.system_prompt.clone(),
                 created_at: Instant::now(),
                 created_at_iso: now_iso(),
+                parent_session_id: None,
+                branched_at_index: None,
             },
         );
     }
@@ -1351,6 +1417,8 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
                 system_prompt: self.system_prompt.clone(),
                 created_at: Instant::now(),
                 created_at_iso: now_iso(),
+                parent_session_id: None,
+                branched_at_index: None,
             },
         );
     }
@@ -1368,8 +1436,26 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
                 system_prompt: self.system_prompt.clone(),
                 created_at: Instant::now(),
                 created_at_iso: now_iso(),
+                parent_session_id: None,
+                branched_at_index: None,
             },
         );
+    }
+
+    pub async fn test_session_parent_id(&self, id: &str) -> Option<String> {
+        self.sessions
+            .lock()
+            .await
+            .get(id)
+            .and_then(|s| s.parent_session_id.clone())
+    }
+
+    pub async fn test_session_branched_at_index(&self, id: &str) -> Option<usize> {
+        self.sessions
+            .lock()
+            .await
+            .get(id)
+            .and_then(|s| s.branched_at_index)
     }
 
     pub async fn test_last_response_id(&self, id: &str) -> Option<String> {
@@ -1561,6 +1647,89 @@ mod tests {
         assert!(err.message.contains("not found"), "error: {}", err.message);
     }
 
+    #[tokio::test]
+    async fn fork_session_records_parent_id() {
+        let agent = make_agent();
+        agent.test_insert_session("src", "/tmp", None).await;
+        let resp = agent
+            .fork_session(ForkSessionRequest::new("src", "/fork"))
+            .await
+            .unwrap();
+        let new_id = resp.session_id.to_string();
+        assert_eq!(
+            agent.test_session_parent_id(&new_id).await.as_deref(),
+            Some("src"),
+            "fork must record parent session ID"
+        );
+    }
+
+    #[tokio::test]
+    async fn fork_session_branches_at_index() {
+        let agent = make_agent();
+        let history = vec![
+            Message::user("msg-0"),
+            Message::user("msg-1"),
+            Message::user("msg-2"),
+            Message::user("msg-3"),
+        ];
+        agent
+            .test_insert_session_with_history("src", "/tmp", history)
+            .await;
+
+        let meta = serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(
+            serde_json::json!({ "branchAtIndex": 2 }),
+        )
+        .unwrap();
+        let resp = agent
+            .fork_session(ForkSessionRequest::new("src", "/branch").meta(meta))
+            .await
+            .unwrap();
+        let new_id = resp.session_id.to_string();
+
+        let history_len = agent.test_history_len(&new_id).await;
+        assert_eq!(history_len, 2, "branch must contain only messages 0..2");
+        let src_len = agent.test_history_len("src").await;
+        assert_eq!(src_len, 4, "source session must remain unchanged");
+        assert_eq!(
+            agent.test_session_branched_at_index(&new_id).await,
+            Some(2),
+            "branched_at_index must be stored"
+        );
+    }
+
+    #[tokio::test]
+    async fn fork_session_branch_at_index_out_of_bounds_copies_full_history() {
+        let agent = make_agent();
+        let history = vec![
+            Message::user("msg-0"),
+            Message::user("msg-1"),
+            Message::user("msg-2"),
+        ];
+        agent
+            .test_insert_session_with_history("src", "/tmp", history)
+            .await;
+
+        let meta = serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(
+            serde_json::json!({ "branchAtIndex": 99 }),
+        )
+        .unwrap();
+        let resp = agent
+            .fork_session(ForkSessionRequest::new("src", "/branch").meta(meta))
+            .await
+            .unwrap();
+        let new_id = resp.session_id.to_string();
+
+        assert_eq!(
+            agent.test_history_len(&new_id).await,
+            3,
+            "out-of-bounds branchAtIndex must copy the full history"
+        );
+        assert_eq!(
+            agent.test_session_branched_at_index(&new_id).await,
+            Some(99)
+        );
+    }
+
     // ── set_session_model ─────────────────────────────────────────────────────
 
     #[tokio::test]
@@ -1640,6 +1809,80 @@ mod tests {
         assert!(resp.sessions.is_empty());
     }
 
+    #[tokio::test]
+    async fn list_sessions_branch_has_parent_meta() {
+        let agent = make_agent();
+        agent.test_insert_session("src", "/root", None).await;
+        let resp = agent
+            .fork_session(ForkSessionRequest::new("src", "/branch"))
+            .await
+            .unwrap();
+        let fork_id = resp.session_id.to_string();
+
+        let list_resp = agent
+            .list_sessions(ListSessionsRequest::new())
+            .await
+            .unwrap();
+
+        let branch_info = list_resp
+            .sessions
+            .iter()
+            .find(|s| s.session_id.to_string() == fork_id)
+            .expect("forked session must appear in list");
+        let meta = branch_info.meta.as_ref().expect("branch must have _meta");
+        assert_eq!(
+            meta.get("parentSessionId").and_then(|v| v.as_str()),
+            Some("src"),
+            "parentSessionId must be in _meta"
+        );
+
+        let root_info = list_resp
+            .sessions
+            .iter()
+            .find(|s| s.session_id.to_string() == "src")
+            .expect("root must appear in list");
+        assert!(root_info.meta.is_none(), "root must not have branch _meta");
+    }
+
+    #[tokio::test]
+    async fn list_sessions_branch_at_index_has_branched_at_index_meta() {
+        let agent = make_agent();
+        let history = vec![
+            Message::user("a"),
+            Message::user("b"),
+            Message::user("c"),
+        ];
+        agent
+            .test_insert_session_with_history("src2", "/tmp", history)
+            .await;
+
+        let meta = serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(
+            serde_json::json!({ "branchAtIndex": 2 }),
+        )
+        .unwrap();
+        let resp = agent
+            .fork_session(ForkSessionRequest::new("src2", "/b").meta(meta))
+            .await
+            .unwrap();
+        let fork_id = resp.session_id.to_string();
+
+        let list_resp = agent
+            .list_sessions(ListSessionsRequest::new())
+            .await
+            .unwrap();
+        let info = list_resp
+            .sessions
+            .iter()
+            .find(|s| s.session_id.to_string() == fork_id)
+            .expect("branch must appear in list");
+        let meta = info.meta.as_ref().expect("branch must have _meta");
+        assert_eq!(
+            meta.get("branchedAtIndex").and_then(|v| v.as_u64()),
+            Some(2),
+            "branchedAtIndex must be in _meta"
+        );
+    }
+
     // ── initialize ────────────────────────────────────────────────────────────
 
     #[tokio::test]
@@ -1664,6 +1907,15 @@ mod tests {
         assert!(sc.list.is_some());
         assert!(sc.resume.is_some());
         assert!(sc.close.is_some());
+        let meta = sc.meta.expect("session_capabilities must have _meta");
+        assert!(
+            meta.contains_key("branchAtIndex"),
+            "caps _meta must advertise branchAtIndex"
+        );
+        assert!(
+            meta.contains_key("listChildren"),
+            "caps _meta must advertise listChildren"
+        );
     }
 
     #[tokio::test]
@@ -4577,6 +4829,73 @@ mod tests {
         let usage = assistant_msg.usage.as_ref().expect("usage must be set on assistant message");
         assert_eq!(usage.input_tokens, 42);
         assert_eq!(usage.output_tokens, 7);
+    }
+
+    // ── ext_method / session/list_children ───────────────────────────────────
+
+    #[tokio::test]
+    async fn ext_list_children_returns_direct_children() {
+        use agent_client_protocol::Agent;
+        let agent = make_agent();
+        agent.test_insert_session("parent", "/tmp", None).await;
+        agent.test_insert_session("other", "/tmp", None).await;
+
+        // Fork twice from "parent"
+        let resp1 = agent
+            .fork_session(ForkSessionRequest::new("parent", "/b1"))
+            .await
+            .unwrap();
+        let child1 = resp1.session_id.to_string();
+        let resp2 = agent
+            .fork_session(ForkSessionRequest::new("parent", "/b2"))
+            .await
+            .unwrap();
+        let child2 = resp2.session_id.to_string();
+
+        let raw_params = serde_json::value::RawValue::from_string(
+            serde_json::json!({ "sessionId": "parent" }).to_string(),
+        )
+        .unwrap();
+        let ext_req = ExtRequest::new("session/list_children", raw_params.into());
+        let resp = agent.ext_method(ext_req).await.unwrap();
+        let result: serde_json::Value = serde_json::from_str(resp.0.get()).unwrap();
+        let mut children: Vec<String> = result["children"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().to_string())
+            .collect();
+        children.sort();
+        let mut expected = vec![child1, child2];
+        expected.sort();
+        assert_eq!(children, expected);
+    }
+
+    #[tokio::test]
+    async fn ext_list_children_returns_empty_for_root_session() {
+        use agent_client_protocol::Agent;
+        let agent = make_agent();
+        agent.test_insert_session("root", "/tmp", None).await;
+
+        let raw_params = serde_json::value::RawValue::from_string(
+            serde_json::json!({ "sessionId": "root" }).to_string(),
+        )
+        .unwrap();
+        let ext_req = ExtRequest::new("session/list_children", raw_params.into());
+        let resp = agent.ext_method(ext_req).await.unwrap();
+        let result: serde_json::Value = serde_json::from_str(resp.0.get()).unwrap();
+        assert_eq!(result["children"].as_array().unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn ext_unknown_method_returns_method_not_found() {
+        use agent_client_protocol::Agent;
+        let agent = make_agent();
+        let raw_params =
+            serde_json::value::RawValue::from_string("{}".to_string()).unwrap();
+        let ext_req = ExtRequest::new("session/unknown", raw_params.into());
+        let err = agent.ext_method(ext_req).await.unwrap_err();
+        assert_eq!(err.code, ErrorCode::MethodNotFound);
     }
 
     // ── MockSessionStore.remove ───────────────────────────────────────────────

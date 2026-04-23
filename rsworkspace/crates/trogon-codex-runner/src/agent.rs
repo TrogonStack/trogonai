@@ -8,15 +8,16 @@ use acp_nats::session_id::AcpSessionId;
 use agent_client_protocol::{
     AgentCapabilities, AuthenticateRequest, AuthenticateResponse, CancelNotification,
     CloseSessionRequest, CloseSessionResponse, ContentBlock, ContentChunk, Error, ErrorCode,
-    ForkSessionRequest, ForkSessionResponse, Implementation, InitializeRequest, InitializeResponse,
-    ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse, ModelInfo,
-    NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse, ProtocolVersion,
-    ResumeSessionRequest, ResumeSessionResponse, SessionCapabilities, SessionCloseCapabilities,
-    SessionForkCapabilities, SessionId, SessionInfo, SessionListCapabilities, SessionMode,
-    SessionModeState, SessionModelState, SessionNotification, SessionResumeCapabilities,
-    SessionUpdate, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse,
-    SetSessionModeRequest, SetSessionModeResponse, SetSessionModelRequest, SetSessionModelResponse,
-    StopReason, ToolCall, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
+    ExtRequest, ExtResponse, ForkSessionRequest, ForkSessionResponse, Implementation,
+    InitializeRequest, InitializeResponse, ListSessionsRequest, ListSessionsResponse,
+    LoadSessionRequest, LoadSessionResponse, ModelInfo, NewSessionRequest, NewSessionResponse,
+    PromptRequest, PromptResponse, ProtocolVersion, ResumeSessionRequest, ResumeSessionResponse,
+    SessionCapabilities, SessionCloseCapabilities, SessionForkCapabilities, SessionId, SessionInfo,
+    SessionListCapabilities, SessionMode, SessionModeState, SessionModelState, SessionNotification,
+    SessionResumeCapabilities, SessionUpdate, SetSessionConfigOptionRequest,
+    SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse,
+    SetSessionModelRequest, SetSessionModelResponse, StopReason, ToolCall, ToolCallStatus,
+    ToolCallUpdate, ToolCallUpdateFields, ToolKind,
 };
 use async_trait::async_trait;
 use tokio::sync::Mutex;
@@ -55,6 +56,8 @@ struct CodexSession {
     cwd: String,
     /// Per-session model override. None means use the agent default.
     model: Option<String>,
+    /// Session this was branched from. None for root sessions.
+    parent_session_id: Option<String>,
 }
 
 // ── NatsNotifierFactory ───────────────────────────────────────────────────────
@@ -256,6 +259,12 @@ impl DefaultCodexAgent {
 
 // ── ACP Agent impl ────────────────────────────────────────────────────────────
 
+// Note: `branchAtIndex` is intentionally not supported. Codex manages its own
+// conversation history inside the subprocess via `thread_fork` — the ACP layer
+// has no access to individual messages, so truncation at an arbitrary index is
+// not possible. `session/list_children` IS supported via in-memory HashMap scan
+// (same approach as xai-runner). Results are ephemeral: a process restart clears
+// all sessions.
 #[async_trait(?Send)]
 impl<N, P> agent_client_protocol::Agent for CodexAgent<N, P>
 where
@@ -267,6 +276,8 @@ where
         &self,
         _req: InitializeRequest,
     ) -> agent_client_protocol::Result<InitializeResponse> {
+        let mut caps_meta = serde_json::Map::new();
+        caps_meta.insert("listChildren".to_string(), serde_json::json!({}));
         Ok(InitializeResponse::new(ProtocolVersion::LATEST)
             .agent_capabilities(
                 AgentCapabilities::new()
@@ -276,7 +287,8 @@ where
                             .fork(SessionForkCapabilities::new())
                             .list(SessionListCapabilities::new())
                             .resume(SessionResumeCapabilities::new())
-                            .close(SessionCloseCapabilities::new()),
+                            .close(SessionCloseCapabilities::new())
+                            .meta(caps_meta),
                     ),
             )
             .agent_info(Implementation::new(
@@ -313,6 +325,7 @@ where
                 thread_id,
                 cwd,
                 model: None,
+                parent_session_id: None,
             },
         );
 
@@ -392,6 +405,7 @@ where
                 thread_id: new_thread_id,
                 cwd,
                 model: inherited_model.clone(),
+                parent_session_id: Some(source_id.clone()),
             },
         );
 
@@ -419,7 +433,15 @@ where
         let sessions = self.sessions.lock().await;
         let mut list: Vec<_> = sessions
             .iter()
-            .map(|(id, s)| SessionInfo::new(id.clone(), s.cwd.clone()))
+            .map(|(id, s)| {
+                let mut info = SessionInfo::new(id.clone(), s.cwd.clone());
+                if let Some(ref parent_id) = s.parent_session_id {
+                    let mut meta = serde_json::Map::new();
+                    meta.insert("parentSessionId".to_string(), serde_json::json!(parent_id));
+                    info = info.meta(meta);
+                }
+                info
+            })
             .collect();
         list.sort_by(|a, b| a.session_id.0.cmp(&b.session_id.0));
         Ok(ListSessionsResponse::new(list))
@@ -600,6 +622,33 @@ where
 
         Ok(())
     }
+
+    async fn ext_method(&self, args: ExtRequest) -> agent_client_protocol::Result<ExtResponse> {
+        if args.method.as_ref() == "session/list_children" {
+            let params: serde_json::Value =
+                serde_json::from_str(args.params.get()).unwrap_or_default();
+            let parent_id = params
+                .get("sessionId")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+            let children: Vec<String> = self
+                .sessions
+                .lock()
+                .await
+                .iter()
+                .filter(|(_, s)| s.parent_session_id.as_deref() == Some(parent_id))
+                .map(|(id, _)| id.clone())
+                .collect();
+            let result = serde_json::json!({ "children": children });
+            let raw = serde_json::value::RawValue::from_string(result.to_string())
+                .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
+            return Ok(ExtResponse::new(raw.into()));
+        }
+        Err(Error::new(
+            ErrorCode::MethodNotFound.into(),
+            format!("unknown ext method: {}", args.method),
+        ))
+    }
 }
 
 // ── Test helpers (same module scope → access to private fields) ───────────────
@@ -614,6 +663,7 @@ impl<N: SessionNotifierFactory, P: ProcessSpawner> CodexAgent<N, P> {
                 thread_id: format!("thread-{id}"),
                 cwd: cwd.to_string(),
                 model,
+                parent_session_id: None,
             },
         );
     }
@@ -624,6 +674,14 @@ impl<N: SessionNotifierFactory, P: ProcessSpawner> CodexAgent<N, P> {
             .await
             .get(id)
             .and_then(|s| s.model.clone())
+    }
+
+    async fn test_session_parent_id(&self, id: &str) -> Option<String> {
+        self.sessions
+            .lock()
+            .await
+            .get(id)
+            .and_then(|s| s.parent_session_id.clone())
     }
 
     async fn test_session_count(&self) -> usize {
@@ -642,7 +700,7 @@ mod tests {
     use super::*;
     use agent_client_protocol::{
         Agent, AuthMethodId, AuthenticateRequest, CancelNotification, CloseSessionRequest,
-        ForkSessionRequest, InitializeRequest, ListSessionsRequest, LoadSessionRequest,
+        ExtRequest, ForkSessionRequest, InitializeRequest, ListSessionsRequest, LoadSessionRequest,
         PromptRequest, ProtocolVersion, ResumeSessionRequest, SetSessionConfigOptionRequest,
         SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModelRequest, StopReason,
     };
@@ -958,6 +1016,15 @@ mod tests {
             "resume capability should be advertised"
         );
         assert!(sc.close.is_some(), "close capability should be advertised");
+        let meta = sc.meta.expect("session_capabilities must have _meta");
+        assert!(
+            meta.contains_key("listChildren"),
+            "caps _meta must advertise listChildren"
+        );
+        assert!(
+            !meta.contains_key("branchAtIndex"),
+            "branchAtIndex must not be advertised (not supported)"
+        );
     }
 
     // ── authenticate ──────────────────────────────────────────────────────────
@@ -1084,6 +1151,120 @@ mod tests {
                 .await
                 .is_err()
         );
+    }
+
+    #[tokio::test]
+    async fn fork_session_records_parent_id() {
+        let agent = make_agent().await;
+        agent.test_insert_session("f2", "/src", None).await;
+        let resp = agent
+            .fork_session(ForkSessionRequest::new("f2", "/fork"))
+            .await
+            .unwrap();
+        let new_id = resp.session_id.to_string();
+        assert_eq!(
+            agent.test_session_parent_id(&new_id).await.as_deref(),
+            Some("f2"),
+            "fork must record parent session ID"
+        );
+    }
+
+    #[tokio::test]
+    async fn list_sessions_branch_has_parent_meta() {
+        let agent = make_agent().await;
+        agent.test_insert_session("src", "/root", None).await;
+        let resp = agent
+            .fork_session(ForkSessionRequest::new("src", "/branch"))
+            .await
+            .unwrap();
+        let fork_id = resp.session_id.to_string();
+
+        let list_resp = agent
+            .list_sessions(ListSessionsRequest::new())
+            .await
+            .unwrap();
+
+        let branch_info = list_resp
+            .sessions
+            .iter()
+            .find(|s| s.session_id.to_string() == fork_id)
+            .expect("forked session must appear in list");
+        let meta = branch_info.meta.as_ref().expect("branch must have _meta");
+        assert_eq!(
+            meta.get("parentSessionId").and_then(|v| v.as_str()),
+            Some("src"),
+            "parentSessionId must be in _meta"
+        );
+
+        let root_info = list_resp
+            .sessions
+            .iter()
+            .find(|s| s.session_id.to_string() == "src")
+            .expect("root must appear in list");
+        assert!(root_info.meta.is_none(), "root must not have branch _meta");
+    }
+
+    // ── ext_method / session/list_children ───────────────────────────────────
+
+    #[tokio::test]
+    async fn ext_list_children_returns_direct_children() {
+        let agent = make_agent().await;
+        agent.test_insert_session("parent", "/tmp", None).await;
+        agent.test_insert_session("other", "/tmp", None).await;
+
+        let resp1 = agent
+            .fork_session(ForkSessionRequest::new("parent", "/b1"))
+            .await
+            .unwrap();
+        let child1 = resp1.session_id.to_string();
+        let resp2 = agent
+            .fork_session(ForkSessionRequest::new("parent", "/b2"))
+            .await
+            .unwrap();
+        let child2 = resp2.session_id.to_string();
+
+        let raw_params = serde_json::value::RawValue::from_string(
+            serde_json::json!({ "sessionId": "parent" }).to_string(),
+        )
+        .unwrap();
+        let ext_req = ExtRequest::new("session/list_children", raw_params.into());
+        let resp = agent.ext_method(ext_req).await.unwrap();
+        let result: serde_json::Value = serde_json::from_str(resp.0.get()).unwrap();
+        let mut children: Vec<String> = result["children"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().to_string())
+            .collect();
+        children.sort();
+        let mut expected = vec![child1, child2];
+        expected.sort();
+        assert_eq!(children, expected);
+    }
+
+    #[tokio::test]
+    async fn ext_list_children_returns_empty_for_root_session() {
+        let agent = make_agent().await;
+        agent.test_insert_session("root", "/tmp", None).await;
+
+        let raw_params = serde_json::value::RawValue::from_string(
+            serde_json::json!({ "sessionId": "root" }).to_string(),
+        )
+        .unwrap();
+        let ext_req = ExtRequest::new("session/list_children", raw_params.into());
+        let resp = agent.ext_method(ext_req).await.unwrap();
+        let result: serde_json::Value = serde_json::from_str(resp.0.get()).unwrap();
+        assert_eq!(result["children"].as_array().unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn ext_unknown_method_returns_method_not_found() {
+        let agent = make_agent().await;
+        let raw_params =
+            serde_json::value::RawValue::from_string("{}".to_string()).unwrap();
+        let ext_req = ExtRequest::new("session/unknown", raw_params.into());
+        let err = agent.ext_method(ext_req).await.unwrap_err();
+        assert_eq!(err.code, ErrorCode::MethodNotFound);
     }
 
     // ── cancel ────────────────────────────────────────────────────────────────

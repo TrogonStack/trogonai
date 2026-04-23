@@ -597,6 +597,8 @@ where
         let mut caps_meta = serde_json::Map::new();
         // Advertise `close` capability — not yet a first-class field in the Rust SDK
         caps_meta.insert("close".to_string(), serde_json::json!({}));
+        caps_meta.insert("listChildren".to_string(), serde_json::json!({}));
+        caps_meta.insert("branchAtIndex".to_string(), serde_json::json!({}));
 
         let session_caps = SessionCapabilities::new()
             .list(SessionListCapabilities::new())
@@ -1013,6 +1015,18 @@ where
                     info = info.title(sanitized);
                 }
             }
+            let mut session_meta = serde_json::Map::new();
+            if let Some(ref parent_id) = state.parent_session_id {
+                session_meta
+                    .insert("parentSessionId".to_string(), serde_json::json!(parent_id));
+            }
+            if let Some(idx) = state.branched_at_index {
+                session_meta
+                    .insert("branchedAtIndex".to_string(), serde_json::json!(idx));
+            }
+            if !session_meta.is_empty() {
+                info = info.meta(session_meta);
+            }
             sessions.push(info);
         }
         Ok(ListSessionsResponse::new(sessions))
@@ -1035,6 +1049,12 @@ where
 
         let new_id = uuid::Uuid::new_v4().to_string();
         let cwd = args.cwd.to_string_lossy().to_string();
+        let branch_at: Option<usize> = args
+            .meta
+            .as_ref()
+            .and_then(|m| m.get("branchAtIndex"))
+            .and_then(|v| v.as_u64())
+            .map(|n| n as usize);
         let system_prompt = args
             .meta
             .as_ref()
@@ -1062,8 +1082,12 @@ where
             .and_then(|m| m.get("disableBuiltInTools"))
             .and_then(|v| v.as_bool())
             .unwrap_or(src_state.disable_builtin_tools);
+        let mut messages = src_state.messages.clone();
+        if let Some(idx) = branch_at {
+            messages.truncate(idx);
+        }
         let new_state = SessionState {
-            messages: src_state.messages.clone(),
+            messages,
             model: src_state.model.clone(),
             mode: src_state.mode.clone(),
             cwd,
@@ -1075,6 +1099,8 @@ where
             additional_roots,
             disable_builtin_tools,
             allowed_tools: src_state.allowed_tools.clone(),
+            parent_session_id: Some(src_id.clone()),
+            branched_at_index: branch_at,
         };
         if let Err(e) = self.store.save(&new_id, &new_state).await {
             Self::warn_save_forked_session_failed(&new_id, &e);
@@ -1161,6 +1187,29 @@ where
             return Ok(ExtResponse::new(
                 serde_json::value::RawValue::NULL.to_owned().into(),
             ));
+        }
+        if args.method.as_ref() == "session/list_children" {
+            let params: serde_json::Value =
+                serde_json::from_str(args.params.get()).unwrap_or_default();
+            let session_id = params
+                .get("sessionId")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+            let children = self
+                .store
+                .list_children(session_id)
+                .await
+                .map_err(|e| {
+                    Error::new(
+                        ErrorCode::InternalError.into(),
+                        format!("list_children failed: {e}"),
+                    )
+                })?;
+            let result = serde_json::json!({ "children": children });
+            let raw = serde_json::value::RawValue::from_string(result.to_string()).map_err(|e| {
+                Error::new(ErrorCode::InternalError.into(), e.to_string())
+            })?;
+            return Ok(ExtResponse::new(raw.into()));
         }
         Err(Error::new(
             ErrorCode::MethodNotFound.into(),
@@ -2005,6 +2054,48 @@ mod tests {
                     .await
                     .unwrap();
                 assert_eq!(resp.sessions.len(), 2);
+            }).await;
+        }
+
+        #[tokio::test(flavor = "current_thread")]
+        async fn list_sessions_branch_has_parent_meta() {
+            run_in_local(|| async {
+                let (agent, _rx) = make_mock_agent();
+                let parent_resp = agent
+                    .new_session(NewSessionRequest::new("/root").mcp_servers(vec![]))
+                    .await
+                    .unwrap();
+                let parent_id = parent_resp.session_id.to_string();
+
+                let fork_resp = agent
+                    .fork_session(ForkSessionRequest::new(parent_id.clone(), "/branch"))
+                    .await
+                    .unwrap();
+                let fork_id = fork_resp.session_id.to_string();
+
+                let list_resp = agent
+                    .list_sessions(agent_client_protocol::ListSessionsRequest::new())
+                    .await
+                    .unwrap();
+
+                let branch_info = list_resp
+                    .sessions
+                    .iter()
+                    .find(|s| s.session_id.to_string() == fork_id)
+                    .expect("forked session must appear in list");
+                let meta = branch_info.meta.as_ref().expect("branch must have _meta");
+                assert_eq!(
+                    meta.get("parentSessionId").and_then(|v| v.as_str()),
+                    Some(parent_id.as_str()),
+                    "parentSessionId must be in _meta"
+                );
+
+                let root_info = list_resp
+                    .sessions
+                    .iter()
+                    .find(|s| s.session_id.to_string() == parent_id)
+                    .expect("root session must appear in list");
+                assert!(root_info.meta.is_none(), "root must not have branch _meta");
             }).await;
         }
     }
@@ -2879,6 +2970,133 @@ mod tests {
             );
         }
 
+        // ── fork_session — branching ───────────────────────────────────────────
+
+        #[tokio::test(flavor = "current_thread")]
+        async fn fork_session_records_parent_id() {
+            let (_c, nats, js) = start_nats().await;
+            let (agent, _rx) = make_agent(nats, &js).await;
+
+            let new_resp = agent
+                .new_session(NewSessionRequest::new("/src"))
+                .await
+                .unwrap();
+            let src_id = new_resp.session_id.clone();
+
+            let fork_resp = agent
+                .fork_session(ForkSessionRequest::new(src_id.clone(), "/fork"))
+                .await
+                .unwrap();
+            let forked_id = fork_resp.session_id.to_string();
+
+            let store = NatsSessionStore::open(&js).await.unwrap();
+            let forked_state = store.load(&forked_id).await.unwrap();
+            assert_eq!(
+                forked_state.parent_session_id.as_deref(),
+                Some(src_id.to_string().as_str()),
+                "fork must record parent session ID"
+            );
+            assert_eq!(
+                forked_state.branched_at_index, None,
+                "full fork must have no branch index"
+            );
+        }
+
+        #[tokio::test(flavor = "current_thread")]
+        async fn fork_session_branches_at_index() {
+            use trogon_agent_core::agent_loop::{ContentBlock as AgentCb, Message as AgentMsg};
+
+            let (_c, nats, js) = start_nats().await;
+            let (agent, _rx) = make_agent(nats, &js).await;
+
+            let new_resp = agent
+                .new_session(NewSessionRequest::new("/src"))
+                .await
+                .unwrap();
+            let src_id = new_resp.session_id.clone();
+
+            let store = NatsSessionStore::open(&js).await.unwrap();
+            let mut state = store.load(&src_id.to_string()).await.unwrap();
+            state.messages = (0..4)
+                .map(|i| AgentMsg {
+                    role: "user".to_string(),
+                    content: vec![AgentCb::Text {
+                        text: format!("msg-{i}"),
+                    }],
+                })
+                .collect();
+            store.save(&src_id.to_string(), &state).await.unwrap();
+
+            let meta = serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(
+                serde_json::json!({ "branchAtIndex": 2 }),
+            )
+            .unwrap();
+            let fork_resp = agent
+                .fork_session(ForkSessionRequest::new(src_id.clone(), "/branch").meta(meta))
+                .await
+                .unwrap();
+            let forked_id = fork_resp.session_id.to_string();
+
+            let forked_state = store.load(&forked_id).await.unwrap();
+            assert_eq!(
+                forked_state.messages.len(),
+                2,
+                "branch must contain only messages 0..2"
+            );
+            assert_eq!(forked_state.branched_at_index, Some(2));
+            assert_eq!(
+                forked_state.parent_session_id.as_deref(),
+                Some(src_id.to_string().as_str())
+            );
+
+            let src_state = store.load(&src_id.to_string()).await.unwrap();
+            assert_eq!(src_state.messages.len(), 4, "source must remain unchanged");
+        }
+
+        #[tokio::test(flavor = "current_thread")]
+        async fn fork_session_branch_at_index_out_of_bounds_copies_full_history() {
+            use trogon_agent_core::agent_loop::{ContentBlock as AgentCb, Message as AgentMsg};
+
+            let (_c, nats, js) = start_nats().await;
+            let (agent, _rx) = make_agent(nats, &js).await;
+
+            let new_resp = agent
+                .new_session(NewSessionRequest::new("/src"))
+                .await
+                .unwrap();
+            let src_id = new_resp.session_id.clone();
+
+            let store = NatsSessionStore::open(&js).await.unwrap();
+            let mut state = store.load(&src_id.to_string()).await.unwrap();
+            state.messages = (0..3)
+                .map(|i| AgentMsg {
+                    role: "user".to_string(),
+                    content: vec![AgentCb::Text {
+                        text: format!("msg-{i}"),
+                    }],
+                })
+                .collect();
+            store.save(&src_id.to_string(), &state).await.unwrap();
+
+            let meta = serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(
+                serde_json::json!({ "branchAtIndex": 99 }),
+            )
+            .unwrap();
+            let fork_resp = agent
+                .fork_session(ForkSessionRequest::new(src_id.clone(), "/branch").meta(meta))
+                .await
+                .unwrap();
+            let forked_id = fork_resp.session_id.to_string();
+
+            let forked_state = store.load(&forked_id).await.unwrap();
+            assert_eq!(
+                forked_state.messages.len(),
+                3,
+                "out-of-bounds branchAtIndex must copy the full history"
+            );
+            assert_eq!(forked_state.branched_at_index, Some(99));
+        }
+
         // ── ext_method ─────────────────────────────────────────────────────────
 
         #[tokio::test(flavor = "current_thread")]
@@ -2963,6 +3181,77 @@ mod tests {
                 .await
                 .unwrap_err();
             assert!(err.to_string().contains("unknown ext method"));
+        }
+
+        #[tokio::test(flavor = "current_thread")]
+        async fn ext_list_children_returns_direct_children() {
+            let (_c, nats, js) = start_nats().await;
+            let (agent, _rx) = make_agent(nats, &js).await;
+
+            let parent_resp = agent
+                .new_session(NewSessionRequest::new("/parent"))
+                .await
+                .unwrap();
+            let parent_id = parent_resp.session_id.to_string();
+
+            let fork1 = agent
+                .fork_session(ForkSessionRequest::new(parent_id.clone(), "/b1"))
+                .await
+                .unwrap();
+            let fork2 = agent
+                .fork_session(ForkSessionRequest::new(parent_id.clone(), "/b2"))
+                .await
+                .unwrap();
+
+            let params_json = format!(r#"{{"sessionId":"{}"}}"#, parent_id);
+            let params: Arc<serde_json::value::RawValue> =
+                serde_json::value::RawValue::from_string(params_json)
+                    .unwrap()
+                    .into();
+            let resp = agent
+                .ext_method(ExtRequest::new("session/list_children", params))
+                .await
+                .unwrap();
+
+            let body: serde_json::Value = serde_json::from_str(resp.0.get()).unwrap();
+            let mut children: Vec<String> = body["children"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect();
+            children.sort();
+
+            let mut expected =
+                vec![fork1.session_id.to_string(), fork2.session_id.to_string()];
+            expected.sort();
+            assert_eq!(children, expected);
+        }
+
+        #[tokio::test(flavor = "current_thread")]
+        async fn ext_list_children_returns_empty_for_root_session() {
+            let (_c, nats, js) = start_nats().await;
+            let (agent, _rx) = make_agent(nats, &js).await;
+
+            let resp = agent
+                .new_session(NewSessionRequest::new("/root"))
+                .await
+                .unwrap();
+            let sid = resp.session_id.to_string();
+
+            let params_json = format!(r#"{{"sessionId":"{}"}}"#, sid);
+            let params: Arc<serde_json::value::RawValue> =
+                serde_json::value::RawValue::from_string(params_json)
+                    .unwrap()
+                    .into();
+            let resp = agent
+                .ext_method(ExtRequest::new("session/list_children", params))
+                .await
+                .unwrap();
+
+            let body: serde_json::Value = serde_json::from_str(resp.0.get()).unwrap();
+            let children = body["children"].as_array().unwrap();
+            assert!(children.is_empty(), "root session must have no children");
         }
 
         // ── replay_history ─────────────────────────────────────────────────────
