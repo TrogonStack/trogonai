@@ -4396,4 +4396,48 @@ mod tests {
         assert!(resp.modes.is_some(), "must return modes");
         assert!(resp.models.is_some(), "must return models");
     }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn list_sessions_shows_parent_session_id_in_meta_with_real_store() {
+        let (_container, nats, js) = start_nats_js().await;
+        let (agent, _rx) = make_agent_with_nats(nats, js).await;
+
+        let parent_id = agent
+            .new_session(NewSessionRequest::new("/root").mcp_servers(vec![]))
+            .await
+            .unwrap()
+            .session_id
+            .to_string();
+
+        let fork_id = agent
+            .fork_session(ForkSessionRequest::new(parent_id.clone(), "/fork"))
+            .await
+            .unwrap()
+            .session_id
+            .to_string();
+
+        let list_resp = agent
+            .list_sessions(ListSessionsRequest::new())
+            .await
+            .unwrap();
+
+        let fork_info = list_resp
+            .sessions
+            .iter()
+            .find(|s| s.session_id.to_string() == fork_id)
+            .expect("forked session must appear in list_sessions");
+        let meta = fork_info.meta.as_ref().expect("fork must have _meta");
+        assert_eq!(
+            meta.get("parentSessionId").and_then(|v| v.as_str()),
+            Some(parent_id.as_str()),
+            "parentSessionId must be present in fork _meta after KV round-trip"
+        );
+
+        let root_info = list_resp
+            .sessions
+            .iter()
+            .find(|s| s.session_id.to_string() == parent_id)
+            .expect("root session must appear in list_sessions");
+        assert!(root_info.meta.is_none(), "root session must not have branch _meta");
+    }
 }

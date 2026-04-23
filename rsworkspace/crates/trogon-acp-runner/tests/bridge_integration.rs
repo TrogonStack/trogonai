@@ -3127,3 +3127,97 @@ async fn close_session_integration_timeout_returns_agent_unavailable() {
         err
     );
 }
+
+// ── session branching integration ─────────────────────────────────────────────
+
+/// fork_session with branchAtIndex in _meta forwards the field in the NATS payload.
+#[tokio::test]
+async fn fork_session_with_branch_at_index_forwards_meta() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let (bridge, _rx) = make_bridge_with_rx(nats.clone(), "acp").await;
+
+    let (tx, rx) = tokio::sync::oneshot::channel::<bytes::Bytes>();
+    let mut agent_sub = nats
+        .subscribe("acp.session.branch-src-1.agent.fork")
+        .await
+        .unwrap();
+    let nats2 = nats.clone();
+    tokio::spawn(async move {
+        if let Some(msg) = agent_sub.next().await {
+            let _ = tx.send(msg.payload.clone());
+            js_respond_session(
+                &nats2, &msg, "acp", "branch-src-1",
+                &ForkSessionResponse::new(SessionId::from("branch-dst-1")),
+            )
+            .await;
+        }
+    });
+
+    let meta = serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(
+        serde_json::json!({ "branchAtIndex": 2 }),
+    )
+    .unwrap();
+    bridge
+        .fork_session(ForkSessionRequest::new("branch-src-1", ".").meta(meta))
+        .await
+        .unwrap();
+
+    let payload = tokio::time::timeout(Duration::from_secs(1), rx)
+        .await
+        .expect("timed out waiting for NATS payload")
+        .unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&payload).unwrap();
+    assert_eq!(
+        body["_meta"]["branchAtIndex"],
+        serde_json::json!(2),
+        "branchAtIndex must be forwarded in the NATS payload _meta"
+    );
+}
+
+/// ext_method("session/list_children") routes to the global ext NATS subject.
+#[tokio::test]
+async fn ext_list_children_integration_routes_to_ext_subject() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let (bridge, _rx) = make_bridge_with_rx(nats.clone(), "acp").await;
+
+    let (tx, rx) = tokio::sync::oneshot::channel::<String>();
+    let mut ext_sub = nats
+        .subscribe("acp.agent.ext.session/list_children")
+        .await
+        .unwrap();
+    let nats2 = nats.clone();
+    tokio::spawn(async move {
+        if let Some(msg) = ext_sub.next().await {
+            let _ = tx.send(msg.subject.to_string());
+            let raw =
+                serde_json::value::RawValue::from_string(r#"{"children":[]}"#.to_string())
+                    .unwrap();
+            let resp = ExtResponse::new(raw.into());
+            if let Some(reply) = &msg.reply {
+                let _ = nats2
+                    .publish(reply.clone(), serde_json::to_vec(&resp).unwrap().into())
+                    .await;
+            }
+        }
+    });
+
+    let params = serde_json::value::RawValue::from_string(
+        r#"{"sessionId":"some-session"}"#.to_string(),
+    )
+    .unwrap();
+    bridge
+        .ext_method(ExtRequest::new("session/list_children", params.into()))
+        .await
+        .unwrap();
+
+    let subject = tokio::time::timeout(Duration::from_secs(1), rx)
+        .await
+        .expect("timed out waiting for NATS subject")
+        .unwrap();
+    assert_eq!(
+        subject, "acp.agent.ext.session/list_children",
+        "session/list_children must route to global ext NATS subject"
+    );
+}

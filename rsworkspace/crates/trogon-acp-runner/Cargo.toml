@@ -45,6 +45,14 @@ test-helpers = []
 name = "agent_unit"
 required-features = ["test-helpers"]
 
+[[test]]
+name = "steer_integration"
+required-features = ["test-helpers"]
+
+[[test]]
+name = "session_branching_nats"
+required-features = ["test-helpers"]
+
 [dev-dependencies]
 futures                = "0.3"
 httpmock               = "0.7"

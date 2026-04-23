@@ -16,7 +16,7 @@ use tokio::sync::Mutex;
 
 use acp_nats::acp_prefix::AcpPrefix;
 use agent_client_protocol::{
-    Agent, CancelNotification, CloseSessionRequest, ContentBlock, ForkSessionRequest,
+    Agent, CancelNotification, CloseSessionRequest, ContentBlock, ExtRequest, ForkSessionRequest,
     ListSessionsRequest, LoadSessionRequest, NewSessionRequest, PromptRequest,
     ResumeSessionRequest, SetSessionConfigOptionRequest, SetSessionModeRequest,
     SetSessionModelRequest, StopReason, TextContent,
@@ -1747,6 +1747,118 @@ async fn set_session_config_option_returns_empty_and_session_survives() {
                 .load_session(LoadSessionRequest::new(sess.session_id.to_string(), "/tmp"))
                 .await
                 .unwrap();
+        })
+        .await;
+}
+
+// ── session branching integration ─────────────────────────────────────────────
+
+/// fork_session records parent_session_id: list_sessions shows parentSessionId in _meta.
+#[tokio::test(flavor = "current_thread")]
+async fn fork_session_records_parent_session_id_in_list() {
+    let _guard = bin_env_lock().lock().await;
+    let local = LocalSet::new();
+    local
+        .run_until(async {
+            let agent = make_agent().await;
+
+            let src = agent
+                .new_session(NewSessionRequest::new("/src"))
+                .await
+                .unwrap();
+            let src_id = src.session_id.to_string();
+
+            let fork = agent
+                .fork_session(ForkSessionRequest::new(src_id.clone(), "/fork"))
+                .await
+                .unwrap();
+            let fork_id = fork.session_id.to_string();
+
+            let list = agent
+                .list_sessions(ListSessionsRequest::new())
+                .await
+                .unwrap();
+
+            let fork_info = list
+                .sessions
+                .iter()
+                .find(|s| s.session_id.to_string() == fork_id)
+                .expect("fork must appear in list_sessions");
+
+            let meta = fork_info.meta.as_ref().expect("fork must have _meta");
+            assert_eq!(
+                meta.get("parentSessionId").and_then(|v| v.as_str()),
+                Some(src_id.as_str()),
+                "fork _meta must contain parentSessionId"
+            );
+
+            // Root session must not have parent meta.
+            let src_info = list
+                .sessions
+                .iter()
+                .find(|s| s.session_id.to_string() == src_id)
+                .expect("source must appear in list_sessions");
+            assert!(
+                src_info.meta.is_none()
+                    || src_info
+                        .meta
+                        .as_ref()
+                        .and_then(|m| m.get("parentSessionId"))
+                        .is_none(),
+                "root session must not have parentSessionId in _meta"
+            );
+        })
+        .await;
+}
+
+/// ext_method("session/list_children") returns the direct children of a session.
+#[tokio::test(flavor = "current_thread")]
+async fn ext_list_children_returns_direct_children_integration() {
+    let _guard = bin_env_lock().lock().await;
+    let local = LocalSet::new();
+    local
+        .run_until(async {
+            let agent = make_agent().await;
+
+            let src = agent
+                .new_session(NewSessionRequest::new("/src"))
+                .await
+                .unwrap();
+            let src_id = src.session_id.to_string();
+
+            let c1 = agent
+                .fork_session(ForkSessionRequest::new(src_id.clone(), "/c1"))
+                .await
+                .unwrap()
+                .session_id
+                .to_string();
+            let c2 = agent
+                .fork_session(ForkSessionRequest::new(src_id.clone(), "/c2"))
+                .await
+                .unwrap()
+                .session_id
+                .to_string();
+
+            let raw_params = serde_json::value::RawValue::from_string(
+                format!(r#"{{"sessionId":"{}"}}"#, src_id),
+            )
+            .unwrap();
+            let resp = agent
+                .ext_method(ExtRequest::new("session/list_children", raw_params.into()))
+                .await
+                .unwrap();
+
+            let body: serde_json::Value = serde_json::from_str(resp.0.get()).unwrap();
+            let mut children: Vec<String> = body["children"]
+                .as_array()
+                .expect("response must have children array")
+                .iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect();
+            children.sort();
+            let mut expected = vec![c1, c2];
+            expected.sort();
+            assert_eq!(children, expected, "must return exactly the two direct children");
         })
         .await;
 }
