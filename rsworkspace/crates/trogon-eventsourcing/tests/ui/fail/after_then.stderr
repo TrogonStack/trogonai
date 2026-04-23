@@ -6,8 +6,8 @@ error[E0599]: no method named `when` found for struct `ThenEvents<Event>` in the
    |       |
    |  _____method `when` is available on `TestCase<TestCommand>`
    | |
-10 | |         .given([])
-   | |          --------- method `when` is available on `TestCase<TestCommand, Given<TestEvent>>`
+10 | |         .given_no_history()
+   | |          ------------------ method `when` is available on `TestCase<TestCommand, NoHistory>`
 11 | |         .when(TestCommand)
    | |          ----------------- method `when` is available on `TestCase<TestCommand, When<TestEvent, TestState, TestCommand>>`
 12 | |         .then([TestEvent::Registered])

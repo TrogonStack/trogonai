@@ -1,7 +1,5 @@
 use async_nats::jetstream;
-use trogon_eventsourcing::nats::jetstream::{
-    StreamSubjectResolver, SubjectState, subject_current_version,
-};
+use trogon_eventsourcing::nats::jetstream::{StreamSubjectResolver, SubjectState, subject_current_version};
 
 use crate::{
     JobId,
@@ -24,10 +22,8 @@ pub(crate) async fn stream_subject_state(
     stream: &jetstream::stream::Stream,
     job_id: &str,
 ) -> Result<StreamSubjectState, CronError> {
-    let canonical_state =
-        current_subject_state(stream, &EventSubjectPrefix::Canonical.subject(job_id)).await?;
-    let legacy_state =
-        current_subject_state(stream, &EventSubjectPrefix::Legacy.subject(job_id)).await?;
+    let canonical_state = current_subject_state(stream, &EventSubjectPrefix::Canonical.subject(job_id)).await?;
+    let legacy_state = current_subject_state(stream, &EventSubjectPrefix::Legacy.subject(job_id)).await?;
 
     resolve_event_subject_state(job_id, canonical_state, legacy_state)
 }

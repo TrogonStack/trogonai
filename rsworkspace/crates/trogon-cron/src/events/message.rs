@@ -40,10 +40,7 @@ impl MessageHeaders {
             {
                 return Err(MessageHeadersError::InvalidName { name: name.clone() });
             }
-            if value
-                .chars()
-                .any(|ch| ch == '\r' || ch == '\n' || ch == '\0')
-            {
+            if value.chars().any(|ch| ch == '\r' || ch == '\n' || ch == '\0') {
                 return Err(MessageHeadersError::InvalidValue { name: name.clone() });
             }
         }
@@ -162,20 +159,12 @@ mod tests {
 
     #[test]
     fn headers_round_trip_as_ordered_pairs() {
-        let headers = MessageHeaders::new([
-            ("x-kind", "heartbeat"),
-            ("x-kind", "retry"),
-            ("x-owner", "ops"),
-        ])
-        .unwrap();
+        let headers = MessageHeaders::new([("x-kind", "heartbeat"), ("x-kind", "retry"), ("x-owner", "ops")]).unwrap();
 
         let json = serde_json::to_string(&headers).unwrap();
         let decoded: MessageHeaders = serde_json::from_str(&json).unwrap();
 
-        assert_eq!(
-            json,
-            r#"[["x-kind","heartbeat"],["x-kind","retry"],["x-owner","ops"]]"#
-        );
+        assert_eq!(json, r#"[["x-kind","heartbeat"],["x-kind","retry"],["x-owner","ops"]]"#);
         assert_eq!(decoded, headers);
     }
 

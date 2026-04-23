@@ -114,9 +114,9 @@ impl std::error::Error for CronError {
             Self::Schedule { source, .. } => Some(source.as_ref()),
             Self::Serde(error) => Some(error),
             Self::InvalidJobSpec { source } => Some(source),
-            Self::JobAlreadyExists { .. }
-            | Self::JobNotFound { .. }
-            | Self::OptimisticConcurrencyConflict { .. } => None,
+            Self::JobAlreadyExists { .. } | Self::JobNotFound { .. } | Self::OptimisticConcurrencyConflict { .. } => {
+                None
+            }
         }
     }
 }
@@ -231,21 +231,14 @@ impl From<MessageHeadersError> for JobSpecError {
 impl From<trogon_eventsourcing::SnapshotStoreError> for CronError {
     fn from(value: trogon_eventsourcing::SnapshotStoreError) -> Self {
         match value {
-            trogon_eventsourcing::SnapshotStoreError::Kv { context, source } => {
-                Self::Kv { context, source }
-            }
+            trogon_eventsourcing::SnapshotStoreError::Kv { context, source } => Self::Kv { context, source },
             trogon_eventsourcing::SnapshotStoreError::InvalidSnapshotKey { key } => {
-                Self::event_source(
-                    "failed to decode stream snapshot key",
-                    std::io::Error::other(key),
-                )
+                Self::event_source("failed to decode stream snapshot key", std::io::Error::other(key))
             }
-            trogon_eventsourcing::SnapshotStoreError::MissingCheckpointKey { key_prefix } => {
-                Self::event_source(
-                    "failed to resolve stream snapshot checkpoint key",
-                    std::io::Error::other(key_prefix),
-                )
-            }
+            trogon_eventsourcing::SnapshotStoreError::MissingCheckpointKey { key_prefix } => Self::event_source(
+                "failed to resolve stream snapshot checkpoint key",
+                std::io::Error::other(key_prefix),
+            ),
             trogon_eventsourcing::SnapshotStoreError::Serde(source) => Self::Serde(source),
         }
     }
@@ -254,15 +247,11 @@ impl From<trogon_eventsourcing::SnapshotStoreError> for CronError {
 impl From<JetStreamStoreError<CronError>> for CronError {
     fn from(value: JetStreamStoreError<CronError>) -> Self {
         match value {
-            JetStreamStoreError::ResolveSubject(source)
-            | JetStreamStoreError::ProjectAppend(source) => source,
-            JetStreamStoreError::ReadStream(source) => Self::event_source(
-                "failed to read job stream while catching up command state",
-                source,
-            ),
-            JetStreamStoreError::AppendStream(source) => {
-                Self::event_source("failed to append job event batch", source)
+            JetStreamStoreError::ResolveSubject(source) | JetStreamStoreError::ProjectAppend(source) => source,
+            JetStreamStoreError::ReadStream(source) => {
+                Self::event_source("failed to read job stream while catching up command state", source)
             }
+            JetStreamStoreError::AppendStream(source) => Self::event_source("failed to append job event batch", source),
             JetStreamStoreError::Snapshot(source) => Self::from(source),
             JetStreamStoreError::Codec(source) => Self::Serde(source),
             JetStreamStoreError::OptimisticConcurrencyConflict {
@@ -328,11 +317,7 @@ mod tests {
             expected: StreamState::NoStream,
             current_version: None,
         };
-        assert!(
-            occ_missing
-                .to_string()
-                .contains("job has no current version")
-        );
+        assert!(occ_missing.to_string().contains("job has no current version"));
         assert!(std::error::Error::source(&occ_missing).is_none());
 
         let occ_current = CronError::OptimisticConcurrencyConflict {
@@ -343,9 +328,7 @@ mod tests {
         assert!(occ_current.to_string().contains("current version is 4"));
         assert!(std::error::Error::source(&occ_current).is_none());
 
-        let serde_error: CronError = serde_json::from_str::<serde_json::Value>("{")
-            .unwrap_err()
-            .into();
+        let serde_error: CronError = serde_json::from_str::<serde_json::Value>("{").unwrap_err().into();
         assert!(serde_error.to_string().starts_with("Serialization error:"));
         assert!(std::error::Error::source(&serde_error).is_some());
     }
@@ -393,13 +376,8 @@ mod tests {
         assert!(sampling.to_string().contains("sampling source 'sensors.>' is invalid"));
         assert!(std::error::Error::source(&sampling).is_some());
 
-        let invalid_header_name = JobSpecError::InvalidHeaderName {
-            name: "\n".to_string(),
-        };
-        assert_eq!(
-            invalid_header_name.to_string(),
-            "header name '\n' is invalid"
-        );
+        let invalid_header_name = JobSpecError::InvalidHeaderName { name: "\n".to_string() };
+        assert_eq!(invalid_header_name.to_string(), "header name '\n' is invalid");
 
         let reserved = JobSpecError::ReservedHeaderName {
             name: "Nats-Schedule".to_string(),
