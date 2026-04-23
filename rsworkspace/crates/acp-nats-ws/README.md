@@ -1,21 +1,22 @@
-# ACP NATS WebSocket
+# ACP NATS Streamable HTTP & WebSocket
 
-Translates [Agent Client Protocol](https://agentclientprotocol.com) (ACP) messages between WebSocket connections and [NATS](https://nats.io), letting browser-based UIs and remote clients talk to distributed agent backends over a standard WebSocket endpoint.
+Translates [Agent Client Protocol](https://agentclientprotocol.com) (ACP) messages between [NATS](https://nats.io) and the draft remote transport served on `/acp`, including both Streamable HTTP (`POST`/`GET`/`DELETE`) and WebSocket upgrade.
 
 For managed NATS infrastructure in production, we recommend <a href="https://synadia.com"><img src="../acp-nats-stdio/assets/synadia-logo.png" alt="Synadia" width="20" style="vertical-align: middle;"> Synadia</a>.
 
 ```mermaid
 graph LR
-    A1[Client1] <-->|ws| B[acp-nats-ws]
-    A2[Client2] <-->|ws| B
+    A1[Client1] <-->|http or ws| B[acp-nats-ws]
+    A2[Client2] <-->|http or ws| B
     AN[ClientN] <-->|ws| B
     B <-->|NATS| C[Backend]
 ```
 
 ## Features
 
-- Multiple concurrent WebSocket connections, each with its own ACP session
-- Bidirectional ACP bridge with request forwarding
+- Streamable HTTP transport on `/acp` with session-scoped SSE listeners
+- WebSocket upgrade on `/acp`
+- Multiple concurrent ACP connections sharing the same NATS bridge
 - OpenTelemetry integration (logs, metrics, traces)
 - Graceful shutdown (SIGINT/SIGTERM) with per-connection drain
 - Custom prefix support for multi-tenancy
@@ -33,8 +34,24 @@ cargo build --release -p acp-nats-ws
 Connect with any WebSocket client:
 
 ```bash
-websocat ws://127.0.0.1:8080/ws
+websocat ws://127.0.0.1:8080/acp
 ```
+
+Or use Streamable HTTP:
+
+```bash
+curl -i \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}' \
+  http://127.0.0.1:8080/acp
+```
+
+`POST /acp` returns an SSE response for JSON-RPC requests, `GET /acp` opens a session-scoped SSE listener with `Acp-Connection-Id` and `Acp-Session-Id`, and `DELETE /acp` terminates a connection. The WebSocket upgrade response and HTTP initialize response both include `Acp-Connection-Id`.
+
+After `initialize`, HTTP clients may send `Acp-Protocol-Version` on `POST`/`GET`/`DELETE`. When present, it must match the negotiated ACP protocol version for that connection.
+
+When clients send an `Origin` header, `/acp` validates it against the bound host and rejects disallowed origins with `403 Forbidden`. Streamable HTTP `POST` SSE responses also emit a priming SSE event ID before JSON-RPC payloads and attach event IDs to streamed JSON events.
 
 ## Configuration
 
