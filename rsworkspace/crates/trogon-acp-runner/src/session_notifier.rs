@@ -46,6 +46,17 @@ pub trait SessionNotifier: Clone {
         subject: String,
     ) -> Option<tokio::sync::oneshot::Receiver<()>>;
 
+    /// Subscribe to `subject` for mid-turn steer messages.
+    ///
+    /// Each message payload is decoded as UTF-8 and forwarded to the returned
+    /// `mpsc::Receiver`.  The channel stays open for the lifetime of the
+    /// prompt; the spawned forwarder task exits when the receiver is dropped.
+    /// Returns `None` if the subscribe call fails.
+    async fn subscribe_steer(
+        &self,
+        subject: String,
+    ) -> Option<tokio::sync::mpsc::Receiver<String>>;
+
     /// Build a notification client bound to the given ACP session.
     fn make_prompt_client(
         &self,
@@ -96,6 +107,26 @@ impl SessionNotifier for NatsSessionNotifier {
         tokio::task::spawn_local(async move {
             if sub.next().await.is_some() {
                 let _ = tx.send(());
+            }
+        });
+        Some(rx)
+    }
+
+    async fn subscribe_steer(
+        &self,
+        subject: String,
+    ) -> Option<tokio::sync::mpsc::Receiver<String>> {
+        let mut sub = match self.client.subscribe(subject).await {
+            Ok(s) => s,
+            Err(_) => return None,
+        };
+        let (tx, rx) = tokio::sync::mpsc::channel(16);
+        tokio::task::spawn_local(async move {
+            while let Some(msg) = sub.next().await {
+                let text = String::from_utf8_lossy(&msg.payload).to_string();
+                if tx.send(text).await.is_err() {
+                    break;
+                }
             }
         });
         Some(rx)
@@ -180,6 +211,14 @@ pub mod mock {
         async fn subscribe_cancel(&self, _subject: String) -> Option<oneshot::Receiver<()>> {
             let (tx, rx) = oneshot::channel();
             *self.cancel_tx.lock().unwrap() = Some(tx);
+            Some(rx)
+        }
+
+        async fn subscribe_steer(
+            &self,
+            _subject: String,
+        ) -> Option<tokio::sync::mpsc::Receiver<String>> {
+            let (_tx, rx) = tokio::sync::mpsc::channel(1);
             Some(rx)
         }
 
