@@ -1,17 +1,12 @@
-error[E0599]: no method named `then` found for struct `TestCase<TestCommand, NoHistory>` in the current scope
+error[E0599]: no method named `then_error` found for struct `TestCase<TestCommand, NoHistory>` in the current scope
   --> tests/ui/fail/missing_when.rs:11:10
    |
- 9 |       TestCase::new(decider::<TestCommand>())
-   |       ---------------------------------------
-   |       |
-   |  _____method `then` is available on `TestCase<TestCommand>`
-   | |
+ 9 | /     TestCase::new(decider::<TestCommand>())
 10 | |         .given_no_history()
-11 | |         .then(expect_error(TestDecisionError::AlreadyRegistered));
-   | |_________-^^^^
+11 | |         .then_error(TestDecisionError::AlreadyRegistered);
+   | |         -^^^^^^^^^^ method not found in `TestCase<TestCommand, NoHistory>`
+   | |_________|
    |
-help: there is a method `when` with a similar name
    |
-11 -         .then(expect_error(TestDecisionError::AlreadyRegistered));
-11 +         .when(expect_error(TestDecisionError::AlreadyRegistered));
-   |
+   = note: the method was found for
+           - `TestCase<C, When<<C as trogon_eventsourcing::Decide>::Event, <C as trogon_eventsourcing::Decide>::State, C>>`

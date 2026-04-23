@@ -63,7 +63,7 @@ mod tests {
     use trogon_eventsourcing::snapshot::SnapshotSchema;
     use trogon_eventsourcing::{
         CommandExecution, CommandFailure, NonEmpty,
-        testing::{TestCase, decider, expect_error},
+        testing::{TestCase, decider},
     };
 
     use super::*;
@@ -112,9 +112,9 @@ mod tests {
                 job: JobDetails::from(job("backup")),
             }])
             .when(AddJobCommand::new(job("backup")))
-            .then(expect_error(AddJobDecisionError::AlreadyExists {
+            .then_error(AddJobDecisionError::AlreadyExists {
                 id: JobId::parse("backup").unwrap(),
-            }));
+            });
     }
 
     #[test]
@@ -128,9 +128,9 @@ mod tests {
                 id: "backup".to_string(),
             }])
             .when(AddJobCommand::new(job("backup")))
-            .then(expect_error(AddJobDecisionError::JobDeleted {
+            .then_error(AddJobDecisionError::JobDeleted {
                 id: JobId::parse("backup").unwrap(),
-            }));
+            });
     }
 
     #[tokio::test]
