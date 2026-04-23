@@ -16,7 +16,7 @@ pub use execution::{
     ExecutionResult, FrequencySnapshot, NoSnapshot, SnapshotDecision, SnapshotPolicy, SnapshotRead, SnapshotWrite,
     Snapshots, StreamAppend, StreamRead, StreamReadResult, StreamState, WithoutSnapshots,
 };
-pub use nats::kv::{
+pub use nats::snapshot_store::{
     SnapshotStoreError, checkpoint_key, list_snapshots, load_snapshot, load_snapshot_map, maybe_advance_checkpoint,
     persist_snapshot_change, read_checkpoint, snapshot_key, write_checkpoint,
 };
