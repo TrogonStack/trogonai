@@ -56,6 +56,13 @@ pub struct SessionState {
     /// Tools for which the user chose "Always Allow" — auto-approved on future calls.
     #[serde(default)]
     pub allowed_tools: Vec<String>,
+    /// Session this was branched from. None for root sessions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_session_id: Option<String>,
+    /// Message index at which the branch was made (exclusive upper bound).
+    /// None means the entire source history was copied.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branched_at_index: Option<usize>,
 }
 
 // ── SessionStore trait ────────────────────────────────────────────────────────
@@ -71,6 +78,8 @@ pub trait SessionStore: Clone {
     async fn save(&self, session_id: &str, state: &SessionState) -> anyhow::Result<()>;
     async fn delete(&self, session_id: &str) -> anyhow::Result<()>;
     async fn list_ids(&self) -> anyhow::Result<Vec<String>>;
+    /// Return the IDs of all sessions whose `parent_session_id` matches `parent_id`.
+    async fn list_children(&self, parent_id: &str) -> anyhow::Result<Vec<String>>;
 }
 
 // ── NATS KV implementation ────────────────────────────────────────────────────
@@ -135,6 +144,20 @@ impl SessionStore for NatsSessionStore {
         }
         Ok(ids)
     }
+
+    #[cfg_attr(coverage, coverage(off))]
+    async fn list_children(&self, parent_id: &str) -> anyhow::Result<Vec<String>> {
+        let ids = self.list_ids().await?;
+        let mut children = Vec::new();
+        for id in ids {
+            if let Ok(state) = self.load(&id).await {
+                if state.parent_session_id.as_deref() == Some(parent_id) {
+                    children.push(id);
+                }
+            }
+        }
+        Ok(children)
+    }
 }
 
 // ── In-memory mock (test-helpers feature) ─────────────────────────────────────
@@ -184,6 +207,17 @@ pub mod mock {
 
         async fn list_ids(&self) -> anyhow::Result<Vec<String>> {
             Ok(self.sessions.lock().unwrap().keys().cloned().collect())
+        }
+
+        async fn list_children(&self, parent_id: &str) -> anyhow::Result<Vec<String>> {
+            Ok(self
+                .sessions
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|(_, s)| s.parent_session_id.as_deref() == Some(parent_id))
+                .map(|(id, _)| id.clone())
+                .collect())
         }
     }
 }
@@ -412,5 +446,97 @@ mod tests {
             json.contains("claude-opus-4-6"),
             "model must be serialized: {json}"
         );
+    }
+
+    // ── branching fields ──────────────────────────────────────────────────────
+
+    #[test]
+    fn session_state_branching_fields_omitted_when_none() {
+        let state = SessionState::default();
+        let json = serde_json::to_string(&state).unwrap();
+        assert!(
+            !json.contains("parent_session_id"),
+            "parent_session_id must be omitted when None: {json}"
+        );
+        assert!(
+            !json.contains("branched_at_index"),
+            "branched_at_index must be omitted when None: {json}"
+        );
+    }
+
+    #[test]
+    fn session_state_branching_fields_roundtrip() {
+        let state = SessionState {
+            parent_session_id: Some("root-session".to_string()),
+            branched_at_index: Some(5),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&state).unwrap();
+        let back: SessionState = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.parent_session_id.as_deref(), Some("root-session"));
+        assert_eq!(back.branched_at_index, Some(5));
+    }
+
+    // ── MemorySessionStore::list_children ─────────────────────────────────────
+
+    #[cfg(feature = "test-helpers")]
+    mod list_children_tests {
+        use super::*;
+        use mock::MemorySessionStore;
+
+        #[tokio::test]
+        async fn list_children_returns_direct_children() {
+            let store = MemorySessionStore::new();
+            store
+                .save(
+                    "child-1",
+                    &SessionState {
+                        parent_session_id: Some("root".to_string()),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .unwrap();
+            store
+                .save(
+                    "child-2",
+                    &SessionState {
+                        parent_session_id: Some("root".to_string()),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .unwrap();
+            store.save("unrelated", &SessionState::default()).await.unwrap();
+
+            let mut children = store.list_children("root").await.unwrap();
+            children.sort();
+            assert_eq!(children, vec!["child-1", "child-2"]);
+        }
+
+        #[tokio::test]
+        async fn list_children_returns_empty_for_unknown_parent() {
+            let store = MemorySessionStore::new();
+            store.save("s1", &SessionState::default()).await.unwrap();
+            let children = store.list_children("no-such-parent").await.unwrap();
+            assert!(children.is_empty());
+        }
+
+        #[tokio::test]
+        async fn list_children_ignores_root_sessions() {
+            let store = MemorySessionStore::new();
+            store
+                .save(
+                    "root-session",
+                    &SessionState {
+                        parent_session_id: None,
+                        ..Default::default()
+                    },
+                )
+                .await
+                .unwrap();
+            let children = store.list_children("root-session").await.unwrap();
+            assert!(children.is_empty());
+        }
     }
 }

@@ -7,11 +7,11 @@ use acp_nats::session_id::AcpSessionId;
 use agent_client_protocol::{
     AgentCapabilities, AuthMethod, AuthMethodAgent, AuthenticateRequest, AuthenticateResponse,
     CancelNotification, CloseSessionRequest, CloseSessionResponse, ContentBlock,
-    EmbeddedResourceResource, Error, ErrorCode, ForkSessionRequest, ForkSessionResponse,
-    Implementation, InitializeRequest, InitializeResponse, ListSessionsRequest,
-    ListSessionsResponse, LoadSessionRequest, LoadSessionResponse, ModelInfo, NewSessionRequest,
-    NewSessionResponse, PromptRequest, PromptResponse, ProtocolVersion, ResumeSessionRequest,
-    ResumeSessionResponse, SessionCapabilities, SessionConfigOption,
+    EmbeddedResourceResource, Error, ErrorCode, ExtRequest, ExtResponse, ForkSessionRequest,
+    ForkSessionResponse, Implementation, InitializeRequest, InitializeResponse,
+    ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse, ModelInfo,
+    NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse, ProtocolVersion,
+    ResumeSessionRequest, ResumeSessionResponse, SessionCapabilities, SessionConfigOption,
     SessionConfigOptionCategory, SessionConfigSelectOption, SessionForkCapabilities, SessionId,
     SessionInfo, SessionListCapabilities, SessionMode, SessionModeState, SessionModelState,
     SessionResumeCapabilities, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse,
@@ -633,6 +633,8 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> agent_client
     ) -> agent_client_protocol::Result<InitializeResponse> {
         let mut session_caps_meta = serde_json::Map::new();
         session_caps_meta.insert("close".to_string(), serde_json::json!({}));
+        session_caps_meta.insert("listChildren".to_string(), serde_json::json!({}));
+        session_caps_meta.insert("branchAtIndex".to_string(), serde_json::json!({}));
         let capabilities = AgentCapabilities::new()
             .load_session(true)
             .session_capabilities(
@@ -851,6 +853,18 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> agent_client
             if !state.updated_at.is_empty() {
                 info = info.updated_at(state.updated_at);
             }
+            let mut session_meta = serde_json::Map::new();
+            if let Some(ref parent_id) = state.parent_session_id {
+                session_meta
+                    .insert("parentSessionId".to_string(), serde_json::json!(parent_id));
+            }
+            if let Some(idx) = state.branched_at_index {
+                session_meta
+                    .insert("branchedAtIndex".to_string(), serde_json::json!(idx));
+            }
+            if !session_meta.is_empty() {
+                info = info.meta(session_meta);
+            }
             sessions.push(info);
         }
 
@@ -871,10 +885,24 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> agent_client
             }
         };
 
+        let branch_at: Option<usize> = req
+            .meta
+            .as_ref()
+            .and_then(|m| m.get("branchAtIndex"))
+            .and_then(|v| v.as_u64())
+            .map(|n| n as usize);
+
+        if let Some(idx) = branch_at {
+            state.messages.truncate(idx);
+        }
+
         let new_id = uuid::Uuid::new_v4().to_string();
         let now = now_iso8601();
         state.created_at = now.clone();
         state.updated_at = now;
+        state.cwd = req.cwd.to_string_lossy().into_owned();
+        state.parent_session_id = Some(source_id.clone());
+        state.branched_at_index = branch_at;
         if let Err(e) = self.store.save(&new_id, &state).await {
             warn!(new_id, error = %e, "agent: failed to save forked session");
         }
@@ -968,6 +996,30 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> agent_client
         .to_string();
         self.notifier.publish(subject, Bytes::new()).await;
         Ok(())
+    }
+
+    async fn ext_method(&self, args: ExtRequest) -> agent_client_protocol::Result<ExtResponse> {
+        if args.method.as_ref() == "session/list_children" {
+            let params: serde_json::Value =
+                serde_json::from_str(args.params.get()).unwrap_or_default();
+            let session_id = params
+                .get("sessionId")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+            let children = self
+                .store
+                .list_children(session_id)
+                .await
+                .map_err(|e| internal_error(format!("list_children failed: {e}")))?;
+            let result = serde_json::json!({ "children": children });
+            let raw = serde_json::value::RawValue::from_string(result.to_string())
+                .map_err(|e| internal_error(e.to_string()))?;
+            return Ok(ExtResponse::new(raw.into()));
+        }
+        Err(Error::new(
+            ErrorCode::MethodNotFound.into(),
+            format!("unknown ext method: {}", args.method),
+        ))
     }
 }
 

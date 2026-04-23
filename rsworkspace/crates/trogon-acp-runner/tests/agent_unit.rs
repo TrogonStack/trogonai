@@ -8,9 +8,10 @@
 use std::sync::Arc;
 
 use agent_client_protocol::{
-    Agent, CancelNotification, CloseSessionRequest, ForkSessionRequest, InitializeRequest,
-    ListSessionsRequest, LoadSessionRequest, NewSessionRequest, PromptRequest, ProtocolVersion,
-    ResumeSessionRequest, SetSessionModeRequest, SetSessionModelRequest, TextContent,
+    Agent, CancelNotification, CloseSessionRequest, ExtRequest, ForkSessionRequest,
+    InitializeRequest, ListSessionsRequest, LoadSessionRequest, NewSessionRequest, PromptRequest,
+    ProtocolVersion, ResumeSessionRequest, SetSessionModeRequest, SetSessionModelRequest,
+    TextContent,
 };
 use tokio::sync::RwLock;
 use trogon_acp_runner::{
@@ -233,6 +234,56 @@ async fn list_sessions_returns_all_sessions() {
         .await;
 }
 
+#[tokio::test]
+async fn list_sessions_branch_has_parent_meta() {
+    let (_, _, agent) = make_agent_parts();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let parent_resp = agent
+                .new_session(NewSessionRequest::new("/root"))
+                .await
+                .unwrap();
+            let parent_id = parent_resp.session_id.to_string();
+
+            let fork_resp = agent
+                .fork_session(ForkSessionRequest::new(parent_id.clone(), "/branch"))
+                .await
+                .unwrap();
+            let fork_id = fork_resp.session_id.to_string();
+
+            let list_resp = agent
+                .list_sessions(ListSessionsRequest::new())
+                .await
+                .unwrap();
+
+            let branch_info = list_resp
+                .sessions
+                .iter()
+                .find(|s| s.session_id.to_string() == fork_id)
+                .expect("forked session must appear in list");
+
+            let meta = branch_info.meta.as_ref().expect("branch must have _meta");
+            assert_eq!(
+                meta.get("parentSessionId").and_then(|v| v.as_str()),
+                Some(parent_id.as_str()),
+                "parentSessionId must be present in _meta"
+            );
+
+            let root_info = list_resp
+                .sessions
+                .iter()
+                .find(|s| s.session_id.to_string() == parent_id)
+                .expect("parent session must appear in list");
+            assert!(
+                root_info.meta.is_none(),
+                "root session must not have branch _meta"
+            );
+        })
+        .await;
+}
+
 // ── fork_session ──────────────────────────────────────────────────────────────
 
 #[tokio::test]
@@ -258,6 +309,119 @@ async fn fork_session_creates_copy_with_new_id() {
 
             let fork_state = store.load(&fork_id).await.unwrap();
             assert_eq!(fork_state.cwd, "/src");
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn fork_session_records_parent_id() {
+    let (store, _, agent) = make_agent_parts();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let new_resp = agent
+                .new_session(NewSessionRequest::new("/src"))
+                .await
+                .unwrap();
+            let source_id = new_resp.session_id.to_string();
+
+            let fork_resp = agent
+                .fork_session(ForkSessionRequest::new(source_id.clone(), "/fork"))
+                .await
+                .unwrap();
+            let fork_id = fork_resp.session_id.to_string();
+
+            let fork_state = store.load(&fork_id).await.unwrap();
+            assert_eq!(
+                fork_state.parent_session_id.as_deref(),
+                Some(source_id.as_str()),
+                "fork must record parent session ID"
+            );
+            assert_eq!(fork_state.branched_at_index, None);
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn fork_session_branches_at_index() {
+    let (store, _, agent) = make_agent_parts();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let new_resp = agent
+                .new_session(NewSessionRequest::new("/src"))
+                .await
+                .unwrap();
+            let source_id = new_resp.session_id.to_string();
+
+            let mut state = store.load(&source_id).await.unwrap();
+            state.messages = (0..4)
+                .map(|i| Message::user_text(format!("msg-{i}")))
+                .collect();
+            store.save(&source_id, &state).await.unwrap();
+
+            let meta = serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(
+                serde_json::json!({ "branchAtIndex": 2 }),
+            )
+            .unwrap();
+            let fork_resp = agent
+                .fork_session(ForkSessionRequest::new(source_id.clone(), "/branch").meta(meta))
+                .await
+                .unwrap();
+            let fork_id = fork_resp.session_id.to_string();
+
+            let fork_state = store.load(&fork_id).await.unwrap();
+            assert_eq!(fork_state.messages.len(), 2, "branch must truncate to index 2");
+            assert_eq!(fork_state.branched_at_index, Some(2));
+            assert_eq!(
+                fork_state.parent_session_id.as_deref(),
+                Some(source_id.as_str())
+            );
+
+            let src_state = store.load(&source_id).await.unwrap();
+            assert_eq!(src_state.messages.len(), 4, "source must remain unchanged");
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn fork_session_branch_at_index_out_of_bounds_copies_full_history() {
+    let (store, _, agent) = make_agent_parts();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let new_resp = agent
+                .new_session(NewSessionRequest::new("/src"))
+                .await
+                .unwrap();
+            let source_id = new_resp.session_id.to_string();
+
+            let mut state = store.load(&source_id).await.unwrap();
+            state.messages = (0..3)
+                .map(|i| Message::user_text(format!("msg-{i}")))
+                .collect();
+            store.save(&source_id, &state).await.unwrap();
+
+            let meta = serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(
+                serde_json::json!({ "branchAtIndex": 99 }),
+            )
+            .unwrap();
+            let fork_resp = agent
+                .fork_session(ForkSessionRequest::new(source_id.clone(), "/branch").meta(meta))
+                .await
+                .unwrap();
+            let fork_id = fork_resp.session_id.to_string();
+
+            let fork_state = store.load(&fork_id).await.unwrap();
+            assert_eq!(
+                fork_state.messages.len(),
+                3,
+                "out-of-bounds branchAtIndex must copy the full history"
+            );
+            assert_eq!(fork_state.branched_at_index, Some(99));
         })
         .await;
 }
@@ -306,6 +470,111 @@ async fn resume_session_returns_ok() {
                 .resume_session(ResumeSessionRequest::new("any-session", "/cwd"))
                 .await;
             assert!(result.is_ok());
+        })
+        .await;
+}
+
+// ── ext_method: session/list_children ────────────────────────────────────────
+
+#[tokio::test]
+async fn ext_list_children_returns_direct_children() {
+    let (store, _, agent) = make_agent_parts();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let parent_resp = agent
+                .new_session(NewSessionRequest::new("/parent"))
+                .await
+                .unwrap();
+            let parent_id = parent_resp.session_id.to_string();
+
+            let fork1 = agent
+                .fork_session(ForkSessionRequest::new(parent_id.clone(), "/branch1"))
+                .await
+                .unwrap();
+            let fork2 = agent
+                .fork_session(ForkSessionRequest::new(parent_id.clone(), "/branch2"))
+                .await
+                .unwrap();
+
+            let params_json = format!(r#"{{"sessionId":"{}"}}"#, parent_id);
+            let params: std::sync::Arc<serde_json::value::RawValue> =
+                serde_json::value::RawValue::from_string(params_json)
+                    .unwrap()
+                    .into();
+            let resp = agent
+                .ext_method(ExtRequest::new("session/list_children", params))
+                .await
+                .unwrap();
+
+            let body: serde_json::Value =
+                serde_json::from_str(resp.0.get()).unwrap();
+            let mut children: Vec<String> = body["children"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect();
+            children.sort();
+
+            let mut expected =
+                vec![fork1.session_id.to_string(), fork2.session_id.to_string()];
+            expected.sort();
+            assert_eq!(children, expected);
+
+            let _ = store.list_children(&parent_id).await.unwrap();
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn ext_list_children_returns_empty_for_root_session() {
+    let (_, _, agent) = make_agent_parts();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let resp = agent
+                .new_session(NewSessionRequest::new("/root"))
+                .await
+                .unwrap();
+            let sid = resp.session_id.to_string();
+
+            let params_json = format!(r#"{{"sessionId":"{}"}}"#, sid);
+            let params: std::sync::Arc<serde_json::value::RawValue> =
+                serde_json::value::RawValue::from_string(params_json)
+                    .unwrap()
+                    .into();
+            let resp = agent
+                .ext_method(ExtRequest::new("session/list_children", params))
+                .await
+                .unwrap();
+
+            let body: serde_json::Value =
+                serde_json::from_str(resp.0.get()).unwrap();
+            let children = body["children"].as_array().unwrap();
+            assert!(children.is_empty(), "root session must have no children");
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn ext_unknown_method_returns_method_not_found() {
+    let (_, _, agent) = make_agent_parts();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let params: std::sync::Arc<serde_json::value::RawValue> =
+                serde_json::value::RawValue::from_string("{}".to_string())
+                    .unwrap()
+                    .into();
+            let err = agent
+                .ext_method(ExtRequest::new("session/nope", params))
+                .await
+                .unwrap_err();
+            assert!(err.to_string().contains("unknown ext method"));
         })
         .await;
 }
