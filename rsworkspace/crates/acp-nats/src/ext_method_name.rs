@@ -36,9 +36,7 @@ pub struct ExtMethodName(DottedNatsToken);
 
 impl ExtMethodName {
     pub fn new(method: impl AsRef<str>) -> Result<Self, ExtMethodNameError> {
-        DottedNatsToken::new(method)
-            .map(Self)
-            .map_err(ExtMethodNameError)
+        DottedNatsToken::new(method).map(Self).map_err(ExtMethodNameError)
     }
 
     pub fn as_str(&self) -> &str {
@@ -127,17 +125,11 @@ mod tests {
             "method must not be empty"
         );
         assert_eq!(
-            format!(
-                "{}",
-                ExtMethodNameError(SubjectTokenViolation::InvalidCharacter(' '))
-            ),
+            format!("{}", ExtMethodNameError(SubjectTokenViolation::InvalidCharacter(' '))),
             "method contains invalid character: ' '"
         );
         assert_eq!(
-            format!(
-                "{}",
-                ExtMethodNameError(SubjectTokenViolation::TooLong(200))
-            ),
+            format!("{}", ExtMethodNameError(SubjectTokenViolation::TooLong(200))),
             "method is too long: 200 bytes (max 128)"
         );
     }

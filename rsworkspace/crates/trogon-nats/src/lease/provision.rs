@@ -2,18 +2,13 @@ use std::time::Duration;
 
 use async_nats::jetstream::{
     ErrorCode,
-    context::{
-        CreateKeyValueError, CreateKeyValueErrorKind, CreateStreamError, CreateStreamErrorKind,
-        KeyValueError,
-    },
+    context::{CreateKeyValueError, CreateKeyValueErrorKind, CreateStreamError, CreateStreamErrorKind, KeyValueError},
     kv,
 };
 
 use crate::jetstream::{JetStreamCreateKeyValue, JetStreamGetKeyValue, JetStreamKeyValueStatus};
 
-use super::{
-    IncompatibleLeaseBucketConfig, LeaseError, LeaseProvisionError, NatsKvLease, NatsKvLeaseConfig,
-};
+use super::{IncompatibleLeaseBucketConfig, LeaseError, LeaseProvisionError, NatsKvLease, NatsKvLeaseConfig};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct KeyValueSettings {
@@ -54,10 +49,7 @@ pub(super) fn key_value_config(config: &NatsKvLeaseConfig) -> kv::Config {
     }
 }
 
-pub(super) async fn provision_store<J, S>(
-    js: &J,
-    config: &NatsKvLeaseConfig,
-) -> Result<S, LeaseError>
+pub(super) async fn provision_store<J, S>(js: &J, config: &NatsKvLeaseConfig) -> Result<S, LeaseError>
 where
     J: JetStreamCreateKeyValue<Store = S> + JetStreamGetKeyValue<Store = S>,
     S: JetStreamKeyValueStatus,
@@ -123,9 +115,7 @@ pub(super) fn validate_bucket_settings(
     Ok(())
 }
 
-pub(super) fn settings_from_status(
-    status: &async_nats::jetstream::kv::bucket::Status,
-) -> KeyValueSettings {
+pub(super) fn settings_from_status(status: &async_nats::jetstream::kv::bucket::Status) -> KeyValueSettings {
     KeyValueSettings {
         history: status.history(),
         max_age: status.max_age(),
@@ -239,11 +229,7 @@ mod tests {
         let error = provision_store::<_, MockJetStreamKvStore>(&client, &config)
             .await
             .unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .contains("failed to open existing lease bucket")
-        );
+        assert!(error.to_string().contains("failed to open existing lease bucket"));
     }
 
     #[tokio::test]

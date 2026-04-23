@@ -37,11 +37,9 @@ pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapse
         bridge.schedule_session_ready(response.session_id.clone());
     }
 
-    bridge.metrics.record_request(
-        "new_session",
-        bridge.clock.elapsed(start).as_secs_f64(),
-        result.is_ok(),
-    );
+    bridge
+        .metrics
+        .record_request("new_session", bridge.clock.elapsed(start).as_secs_f64(), result.is_ok());
 
     result
 }
@@ -49,13 +47,10 @@ pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapse
 #[cfg(test)]
 mod tests {
     use crate::agent::test_support::{
-        has_request_metric, has_session_ready_error_metric, mock_bridge, mock_bridge_with_metrics,
-        set_json_response,
+        has_request_metric, has_session_ready_error_metric, mock_bridge, mock_bridge_with_metrics, set_json_response,
     };
     use crate::error::AGENT_UNAVAILABLE;
-    use agent_client_protocol::{
-        Agent, ErrorCode, NewSessionRequest, NewSessionResponse, SessionId,
-    };
+    use agent_client_protocol::{Agent, ErrorCode, NewSessionRequest, NewSessionResponse, SessionId};
     use std::time::Duration;
 
     #[tokio::test]
@@ -101,11 +96,7 @@ mod tests {
     async fn new_session_records_metrics_on_success() {
         let (mock, _js, bridge, exporter, provider) = mock_bridge_with_metrics();
         let session_id = SessionId::from("test-session-1");
-        set_json_response(
-            &mock,
-            "acp.agent.session.new",
-            &NewSessionResponse::new(session_id),
-        );
+        set_json_response(&mock, "acp.agent.session.new", &NewSessionResponse::new(session_id));
 
         let _ = bridge.new_session(NewSessionRequest::new(".")).await;
 
@@ -139,11 +130,7 @@ mod tests {
     async fn new_session_records_error_when_session_ready_publish_fails() {
         let (mock, _js, bridge, exporter, provider) = mock_bridge_with_metrics();
         let session_id = SessionId::from("test-session-1");
-        set_json_response(
-            &mock,
-            "acp.agent.session.new",
-            &NewSessionResponse::new(session_id),
-        );
+        set_json_response(&mock, "acp.agent.session.new", &NewSessionResponse::new(session_id));
         mock.fail_publish_count(4);
 
         let _ = bridge.new_session(NewSessionRequest::new(".")).await;
@@ -166,11 +153,7 @@ mod tests {
     async fn new_session_publishes_session_ready_to_correct_subject() {
         let (mock, _js, bridge) = mock_bridge();
         let session_id = SessionId::from("test-session-1");
-        set_json_response(
-            &mock,
-            "acp.agent.session.new",
-            &NewSessionResponse::new(session_id),
-        );
+        set_json_response(&mock, "acp.agent.session.new", &NewSessionResponse::new(session_id));
 
         let _ = bridge.new_session(NewSessionRequest::new(".")).await;
 

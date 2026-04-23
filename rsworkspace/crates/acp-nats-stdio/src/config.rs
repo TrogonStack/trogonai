@@ -19,19 +19,13 @@ pub fn base_config<P: ParseArgs<Args = Args>, E: ReadEnv>(
     base_config_from_args(args, env_provider)
 }
 
-fn base_config_from_args<E: ReadEnv>(
-    args: Args,
-    env_provider: &E,
-) -> Result<Config, AcpPrefixError> {
+fn base_config_from_args<E: ReadEnv>(args: Args, env_provider: &E) -> Result<Config, AcpPrefixError> {
     let raw_prefix = args
         .acp_prefix
         .or_else(|| env_provider.var(acp_nats::ENV_ACP_PREFIX).ok())
         .unwrap_or_else(|| acp_nats::DEFAULT_ACP_PREFIX.to_string());
     let prefix = AcpPrefix::new(raw_prefix)?;
-    Ok(Config::with_prefix(
-        prefix,
-        NatsConfig::from_env(env_provider),
-    ))
+    Ok(Config::with_prefix(prefix, NatsConfig::from_env(env_provider)))
 }
 
 #[cfg(test)]

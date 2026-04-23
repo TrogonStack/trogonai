@@ -6,10 +6,7 @@ pub struct OneAgentSubject {
 }
 
 impl OneAgentSubject {
-    pub fn new(
-        prefix: &crate::acp_prefix::AcpPrefix,
-        session_id: &crate::session_id::AcpSessionId,
-    ) -> Self {
+    pub fn new(prefix: &crate::acp_prefix::AcpPrefix, session_id: &crate::session_id::AcpSessionId) -> Self {
         Self {
             prefix: prefix.clone(),
             session_id: session_id.clone(),

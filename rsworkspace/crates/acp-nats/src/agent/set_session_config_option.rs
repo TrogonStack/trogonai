@@ -1,9 +1,7 @@
 use super::Bridge;
 use crate::nats::{FlushClient, PublishClient, RequestClient, session};
 use crate::session_id::AcpSessionId;
-use agent_client_protocol::{
-    Error, ErrorCode, Result, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse,
-};
+use agent_client_protocol::{Error, ErrorCode, Result, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse};
 use tracing::{info, instrument};
 use trogon_nats::jetstream::{JetStreamGetStream, JetStreamPublisher, JsRequestMessage};
 use trogon_std::time::GetElapsed;
@@ -29,23 +27,14 @@ where
     info!(session_id = %args.session_id, config_id = %args.config_id, "Set session config option request");
 
     let session_id = AcpSessionId::try_from(&args.session_id).map_err(|e| {
-        bridge
-            .metrics
-            .record_error("session_validate", "invalid_session_id");
-        Error::new(
-            ErrorCode::InvalidParams.into(),
-            format!("Invalid session ID: {}", e),
-        )
+        bridge.metrics.record_error("session_validate", "invalid_session_id");
+        Error::new(ErrorCode::InvalidParams.into(), format!("Invalid session ID: {}", e))
     })?;
     let prefix = bridge.config.acp_prefix_ref();
     let subject = session::agent::SetConfigOptionSubject::new(prefix, &session_id);
 
     let result = bridge
-        .session_request::<SetSessionConfigOptionRequest, SetSessionConfigOptionResponse>(
-            &subject,
-            &args,
-            &session_id,
-        )
+        .session_request::<SetSessionConfigOptionRequest, SetSessionConfigOptionResponse>(&subject, &args, &session_id)
         .await;
 
     bridge.metrics.record_request(
@@ -59,12 +48,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::agent::test_support::{
-        has_request_metric, mock_bridge, mock_bridge_with_metrics, set_js_response,
-    };
-    use agent_client_protocol::{
-        Agent, ErrorCode, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse,
-    };
+    use crate::agent::test_support::{has_request_metric, mock_bridge, mock_bridge_with_metrics, set_js_response};
+    use agent_client_protocol::{Agent, ErrorCode, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse};
 
     #[tokio::test]
     async fn set_session_config_option_forwards_request_and_returns_response() {

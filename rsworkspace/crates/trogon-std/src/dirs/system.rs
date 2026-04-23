@@ -47,9 +47,7 @@ impl StateDir for SystemDirs {
 }
 
 fn non_empty_var(name: &str) -> Option<PathBuf> {
-    std::env::var_os(name)
-        .filter(|v| !v.is_empty())
-        .map(PathBuf::from)
+    std::env::var_os(name).filter(|v| !v.is_empty()).map(PathBuf::from)
 }
 
 fn home_dir_impl() -> Option<PathBuf> {
@@ -104,8 +102,7 @@ fn data_dir_impl() -> Option<PathBuf> {
     }
     #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
     {
-        non_empty_var("XDG_DATA_HOME")
-            .or_else(|| home_dir_impl().map(|h| h.join(".local").join("share")))
+        non_empty_var("XDG_DATA_HOME").or_else(|| home_dir_impl().map(|h| h.join(".local").join("share")))
     }
 }
 
@@ -120,8 +117,7 @@ fn data_local_dir_impl() -> Option<PathBuf> {
     }
     #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
     {
-        non_empty_var("XDG_DATA_HOME")
-            .or_else(|| home_dir_impl().map(|h| h.join(".local").join("share")))
+        non_empty_var("XDG_DATA_HOME").or_else(|| home_dir_impl().map(|h| h.join(".local").join("share")))
     }
 }
 
@@ -134,8 +130,7 @@ fn state_dir_impl() -> Option<PathBuf> {
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
-        non_empty_var("XDG_STATE_HOME")
-            .or_else(|| home_dir_impl().map(|h| h.join(".local").join("state")))
+        non_empty_var("XDG_STATE_HOME").or_else(|| home_dir_impl().map(|h| h.join(".local").join("state")))
     }
 }
 

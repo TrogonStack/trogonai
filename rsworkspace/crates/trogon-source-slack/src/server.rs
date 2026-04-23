@@ -4,9 +4,8 @@ use std::time::Duration;
 use crate::config::SlackConfig;
 use crate::config::SlackSigningSecret;
 use crate::constants::{
-    CONTENT_TYPE_FORM, HEADER_SIGNATURE, HEADER_TIMESTAMP, HTTP_BODY_SIZE_MAX,
-    NATS_HEADER_EVENT_ID, NATS_HEADER_EVENT_TYPE, NATS_HEADER_PAYLOAD_KIND,
-    NATS_HEADER_REJECT_REASON, NATS_HEADER_TEAM_ID,
+    CONTENT_TYPE_FORM, HEADER_SIGNATURE, HEADER_TIMESTAMP, HTTP_BODY_SIZE_MAX, NATS_HEADER_EVENT_ID,
+    NATS_HEADER_EVENT_TYPE, NATS_HEADER_PAYLOAD_KIND, NATS_HEADER_REJECT_REASON, NATS_HEADER_TEAM_ID,
 };
 use crate::signature;
 use trogon_std::NonZeroDuration;
@@ -14,8 +13,7 @@ use trogon_std::SystemClock;
 use trogon_std::time::EpochClock;
 
 use axum::{
-    Router, body::Bytes, extract::DefaultBodyLimit, extract::State, http::HeaderMap,
-    http::StatusCode, routing::post,
+    Router, body::Bytes, extract::DefaultBodyLimit, extract::State, http::HeaderMap, http::StatusCode, routing::post,
 };
 use form_urlencoded;
 use std::future::Future;
@@ -189,10 +187,7 @@ async fn handle_json_payload<P: JetStreamPublisher, S: ObjectStorePut>(
         return (StatusCode::BAD_REQUEST, String::new());
     };
 
-    let payload_type = payload
-        .get("type")
-        .and_then(|v| v.as_str())
-        .unwrap_or_default();
+    let payload_type = payload.get("type").and_then(|v| v.as_str()).unwrap_or_default();
 
     if payload_type == "url_verification" {
         let challenge = payload
@@ -274,12 +269,7 @@ async fn handle_json_payload<P: JetStreamPublisher, S: ObjectStorePut>(
 
     let outcome = state
         .publisher
-        .publish_event(
-            subject,
-            nats_headers,
-            body.clone(),
-            state.nats_ack_timeout.into(),
-        )
+        .publish_event(subject, nats_headers, body.clone(), state.nats_ack_timeout.into())
         .await;
 
     (outcome_to_status(outcome), String::new())
@@ -309,12 +299,7 @@ async fn handle_form_payload<P: JetStreamPublisher, S: ObjectStorePut>(
         .map(|(k, v)| (k.into_owned(), v.into_owned()))
         .collect();
 
-    let find_field = |name: &str| {
-        fields
-            .iter()
-            .find(|(k, _)| k == name)
-            .map(|(_, v)| v.as_str())
-    };
+    let find_field = |name: &str| fields.iter().find(|(k, _)| k == name).map(|(_, v)| v.as_str());
 
     if let Some(payload_json) = find_field("payload") {
         return handle_interaction(state, payload_json, body).await;
@@ -431,11 +416,7 @@ async fn handle_slash_command<P: JetStreamPublisher, S: ObjectStorePut>(
         .map(|(_, v)| v.as_str())
         .unwrap_or("unknown");
 
-    let Some(trigger_id) = fields
-        .iter()
-        .find(|(k, _)| k == "trigger_id")
-        .map(|(_, v)| v.as_str())
-    else {
+    let Some(trigger_id) = fields.iter().find(|(k, _)| k == "trigger_id").map(|(_, v)| v.as_str()) else {
         warn!(command, "Missing trigger_id in slash command payload");
         publish_unroutable(
             &state.publisher,
@@ -465,12 +446,7 @@ async fn handle_slash_command<P: JetStreamPublisher, S: ObjectStorePut>(
 
     let outcome = state
         .publisher
-        .publish_event(
-            subject,
-            nats_headers,
-            raw_body.clone(),
-            state.nats_ack_timeout.into(),
-        )
+        .publish_event(subject, nats_headers, raw_body.clone(), state.nats_ack_timeout.into())
         .await;
 
     (outcome_to_status(outcome), String::new())
@@ -487,8 +463,7 @@ mod tests {
     use tracing_subscriber::util::SubscriberInitExt;
     use trogon_nats::jetstream::StreamMaxAge;
     use trogon_nats::jetstream::{
-        ClaimCheckPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher,
-        MockObjectStore,
+        ClaimCheckPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher, MockObjectStore,
     };
     use trogon_std::NonZeroDuration;
 
@@ -552,17 +527,11 @@ mod tests {
         assert_eq!(messages.len(), 1, "expected exactly one unroutable publish");
         assert_eq!(messages[0].subject, "slack.unroutable");
         assert_eq!(
-            messages[0]
-                .headers
-                .get(NATS_HEADER_REJECT_REASON)
-                .map(|v| v.as_str()),
+            messages[0].headers.get(NATS_HEADER_REJECT_REASON).map(|v| v.as_str()),
             Some(expected_reason),
         );
         assert_eq!(
-            messages[0]
-                .headers
-                .get(NATS_HEADER_PAYLOAD_KIND)
-                .map(|v| v.as_str()),
+            messages[0].headers.get(NATS_HEADER_PAYLOAD_KIND).map(|v| v.as_str()),
             Some("unroutable"),
         );
     }
@@ -648,10 +617,7 @@ mod tests {
         let ts = current_timestamp();
         let sig = compute_sig(TEST_SECRET, &ts, &body);
 
-        let resp = app
-            .oneshot(webhook_request(&body, &ts, Some(&sig)))
-            .await
-            .unwrap();
+        let resp = app.oneshot(webhook_request(&body, &ts, Some(&sig))).await.unwrap();
 
         assert_eq!(resp.status(), StatusCode::OK);
 
@@ -659,24 +625,15 @@ mod tests {
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].subject, "slack.event.message");
         assert_eq!(
-            messages[0]
-                .headers
-                .get(NATS_HEADER_EVENT_TYPE)
-                .map(|v| v.as_str()),
+            messages[0].headers.get(NATS_HEADER_EVENT_TYPE).map(|v| v.as_str()),
             Some("message"),
         );
         assert_eq!(
-            messages[0]
-                .headers
-                .get(NATS_HEADER_EVENT_ID)
-                .map(|v| v.as_str()),
+            messages[0].headers.get(NATS_HEADER_EVENT_ID).map(|v| v.as_str()),
             Some("Ev01ABC123"),
         );
         assert_eq!(
-            messages[0]
-                .headers
-                .get(NATS_HEADER_TEAM_ID)
-                .map(|v| v.as_str()),
+            messages[0].headers.get(NATS_HEADER_TEAM_ID).map(|v| v.as_str()),
             Some("T01ABC"),
         );
     }
@@ -694,10 +651,7 @@ mod tests {
         let ts = current_timestamp();
         let sig = compute_sig(TEST_SECRET, &ts, &body);
 
-        let resp = app
-            .oneshot(webhook_request(&body, &ts, Some(&sig)))
-            .await
-            .unwrap();
+        let resp = app.oneshot(webhook_request(&body, &ts, Some(&sig))).await.unwrap();
 
         assert_eq!(resp.status(), StatusCode::OK);
 
@@ -735,10 +689,7 @@ mod tests {
         let body = event_callback_body("message");
         let ts = current_timestamp();
 
-        let resp = app
-            .oneshot(webhook_request(&body, &ts, None))
-            .await
-            .unwrap();
+        let resp = app.oneshot(webhook_request(&body, &ts, None)).await.unwrap();
 
         assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
         assert!(publisher.published_messages().is_empty());
@@ -789,10 +740,7 @@ mod tests {
         let stale_ts = "1000000000";
         let sig = compute_sig(TEST_SECRET, stale_ts, &body);
 
-        let resp = app
-            .oneshot(webhook_request(&body, stale_ts, Some(&sig)))
-            .await
-            .unwrap();
+        let resp = app.oneshot(webhook_request(&body, stale_ts, Some(&sig))).await.unwrap();
 
         assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
         assert!(publisher.published_messages().is_empty());
@@ -807,10 +755,7 @@ mod tests {
         let ts = current_timestamp();
         let sig = compute_sig(TEST_SECRET, &ts, body);
 
-        let resp = app
-            .oneshot(webhook_request(body, &ts, Some(&sig)))
-            .await
-            .unwrap();
+        let resp = app.oneshot(webhook_request(body, &ts, Some(&sig))).await.unwrap();
 
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
         assert_unroutable(&publisher, "invalid_json");
@@ -828,10 +773,7 @@ mod tests {
         let ts = current_timestamp();
         let sig = compute_sig(TEST_SECRET, &ts, &body);
 
-        let resp = app
-            .oneshot(webhook_request(&body, &ts, Some(&sig)))
-            .await
-            .unwrap();
+        let resp = app.oneshot(webhook_request(&body, &ts, Some(&sig))).await.unwrap();
 
         assert_eq!(resp.status(), StatusCode::OK);
         assert_unroutable(&publisher, "unhandled_payload_type");
@@ -847,10 +789,7 @@ mod tests {
         let ts = current_timestamp();
         let sig = compute_sig(TEST_SECRET, &ts, &body);
 
-        let resp = app
-            .oneshot(webhook_request(&body, &ts, Some(&sig)))
-            .await
-            .unwrap();
+        let resp = app.oneshot(webhook_request(&body, &ts, Some(&sig))).await.unwrap();
 
         assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
@@ -880,16 +819,10 @@ mod tests {
         let ts = current_timestamp();
         let sig = compute_sig(TEST_SECRET, &ts, &body);
 
-        let resp = app
-            .oneshot(webhook_request(&body, &ts, Some(&sig)))
-            .await
-            .unwrap();
+        let resp = app.oneshot(webhook_request(&body, &ts, Some(&sig))).await.unwrap();
 
         assert_eq!(resp.status(), StatusCode::OK);
-        assert_eq!(
-            publisher.published_subjects(),
-            vec!["custom.event.app_mention"]
-        );
+        assert_eq!(publisher.published_subjects(), vec!["custom.event.app_mention"]);
     }
 
     #[tokio::test]
@@ -907,10 +840,7 @@ mod tests {
         let ts = current_timestamp();
         let sig = compute_sig(TEST_SECRET, &ts, &body);
 
-        let resp = app
-            .oneshot(webhook_request(&body, &ts, Some(&sig)))
-            .await
-            .unwrap();
+        let resp = app.oneshot(webhook_request(&body, &ts, Some(&sig))).await.unwrap();
 
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
         assert_unroutable(&publisher, "missing_event_type");
@@ -930,10 +860,7 @@ mod tests {
         let ts = current_timestamp();
         let sig = compute_sig(TEST_SECRET, &ts, &body);
 
-        let resp = app
-            .oneshot(webhook_request(&body, &ts, Some(&sig)))
-            .await
-            .unwrap();
+        let resp = app.oneshot(webhook_request(&body, &ts, Some(&sig))).await.unwrap();
 
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
         assert_unroutable(&publisher, "missing_event_id");
@@ -982,9 +909,7 @@ mod tests {
 
             fn into_future(self) -> Self::IntoFuture {
                 match self {
-                    AckFuture::Fail => {
-                        Box::pin(async { Err(MockError("simulated ack failure".to_string())) })
-                    }
+                    AckFuture::Fail => Box::pin(async { Err(MockError("simulated ack failure".to_string())) }),
                     AckFuture::Hang => Box::pin(std::future::pending()),
                 }
             }
@@ -1042,10 +967,7 @@ mod tests {
         let ts = current_timestamp();
         let sig = compute_sig(TEST_SECRET, &ts, &body);
 
-        let resp = app
-            .oneshot(webhook_request(&body, &ts, Some(&sig)))
-            .await
-            .unwrap();
+        let resp = app.oneshot(webhook_request(&body, &ts, Some(&sig))).await.unwrap();
 
         assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
@@ -1080,10 +1002,7 @@ mod tests {
         let ts = current_timestamp();
         let sig = compute_sig(TEST_SECRET, &ts, &body);
 
-        let resp = app
-            .oneshot(webhook_request(&body, &ts, Some(&sig)))
-            .await
-            .unwrap();
+        let resp = app.oneshot(webhook_request(&body, &ts, Some(&sig))).await.unwrap();
 
         assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
@@ -1114,8 +1033,7 @@ mod tests {
         });
         let form_body = format!(
             "payload={}",
-            form_urlencoded::byte_serialize(interaction_payload.to_string().as_bytes())
-                .collect::<String>()
+            form_urlencoded::byte_serialize(interaction_payload.to_string().as_bytes()).collect::<String>()
         );
         let ts = current_timestamp();
         let sig = compute_sig(TEST_SECRET, &ts, form_body.as_bytes());
@@ -1131,17 +1049,11 @@ mod tests {
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].subject, "slack.interaction.block_actions");
         assert_eq!(
-            messages[0]
-                .headers
-                .get(NATS_HEADER_PAYLOAD_KIND)
-                .map(|v| v.as_str()),
+            messages[0].headers.get(NATS_HEADER_PAYLOAD_KIND).map(|v| v.as_str()),
             Some("interaction"),
         );
         assert_eq!(
-            messages[0]
-                .headers
-                .get(NATS_HEADER_TEAM_ID)
-                .map(|v| v.as_str()),
+            messages[0].headers.get(NATS_HEADER_TEAM_ID).map(|v| v.as_str()),
             Some("T01ABC"),
         );
     }
@@ -1161,8 +1073,7 @@ mod tests {
         });
         let form_body = format!(
             "payload={}",
-            form_urlencoded::byte_serialize(interaction_payload.to_string().as_bytes())
-                .collect::<String>()
+            form_urlencoded::byte_serialize(interaction_payload.to_string().as_bytes()).collect::<String>()
         );
         let ts = current_timestamp();
         let sig = compute_sig(TEST_SECRET, &ts, form_body.as_bytes());
@@ -1192,8 +1103,7 @@ mod tests {
         });
         let form_body = format!(
             "payload={}",
-            form_urlencoded::byte_serialize(interaction_payload.to_string().as_bytes())
-                .collect::<String>()
+            form_urlencoded::byte_serialize(interaction_payload.to_string().as_bytes()).collect::<String>()
         );
         let ts = current_timestamp();
         let sig = compute_sig(TEST_SECRET, &ts, form_body.as_bytes());
@@ -1213,7 +1123,8 @@ mod tests {
         let publisher = MockJetStreamPublisher::new();
         let app = mock_app(publisher.clone());
 
-        let form_body = "command=%2Ftrogon&text=hello+world&team_id=T01ABC&trigger_id=cmd789&user_id=U01ABC&channel_id=C01ABC";
+        let form_body =
+            "command=%2Ftrogon&text=hello+world&team_id=T01ABC&trigger_id=cmd789&user_id=U01ABC&channel_id=C01ABC";
         let ts = current_timestamp();
         let sig = compute_sig(TEST_SECRET, &ts, form_body.as_bytes());
 
@@ -1228,17 +1139,11 @@ mod tests {
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].subject, "slack.command.trogon");
         assert_eq!(
-            messages[0]
-                .headers
-                .get(NATS_HEADER_PAYLOAD_KIND)
-                .map(|v| v.as_str()),
+            messages[0].headers.get(NATS_HEADER_PAYLOAD_KIND).map(|v| v.as_str()),
             Some("command"),
         );
         assert_eq!(
-            messages[0]
-                .headers
-                .get(NATS_HEADER_EVENT_TYPE)
-                .map(|v| v.as_str()),
+            messages[0].headers.get(NATS_HEADER_EVENT_TYPE).map(|v| v.as_str()),
             Some("/trogon"),
         );
     }
@@ -1249,8 +1154,7 @@ mod tests {
         let publisher = MockJetStreamPublisher::new();
         let app = mock_app(publisher.clone());
 
-        let form_body =
-            "command=%2Ftrogon&text=hello&team_id=T01ABC&user_id=U01ABC&channel_id=C01ABC";
+        let form_body = "command=%2Ftrogon&text=hello&team_id=T01ABC&user_id=U01ABC&channel_id=C01ABC";
         let ts = current_timestamp();
         let sig = compute_sig(TEST_SECRET, &ts, form_body.as_bytes());
 
@@ -1329,8 +1233,7 @@ mod tests {
         });
         let form_body = format!(
             "payload={}",
-            form_urlencoded::byte_serialize(interaction_payload.to_string().as_bytes())
-                .collect::<String>()
+            form_urlencoded::byte_serialize(interaction_payload.to_string().as_bytes()).collect::<String>()
         );
         let ts = current_timestamp();
         let sig = compute_sig(TEST_SECRET, &ts, form_body.as_bytes());

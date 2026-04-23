@@ -2,8 +2,7 @@ use std::fmt;
 use std::time::Duration;
 
 use axum::{
-    Router, body::Bytes, extract::DefaultBodyLimit, extract::State, http::HeaderMap,
-    http::StatusCode, routing::post,
+    Router, body::Bytes, extract::DefaultBodyLimit, extract::State, http::HeaderMap, http::StatusCode, routing::post,
 };
 use tracing::{info, instrument, warn};
 use trogon_nats::NatsToken;
@@ -16,8 +15,8 @@ use crate::NotionEventType;
 use crate::NotionVerificationToken;
 use crate::config::NotionConfig;
 use crate::constants::{
-    HEADER_SIGNATURE, HTTP_BODY_SIZE_MAX, NATS_HEADER_ATTEMPT_NUMBER, NATS_HEADER_EVENT_ID,
-    NATS_HEADER_EVENT_TYPE, NATS_HEADER_REJECT_REASON, NATS_HEADER_SUBSCRIPTION_ID,
+    HEADER_SIGNATURE, HTTP_BODY_SIZE_MAX, NATS_HEADER_ATTEMPT_NUMBER, NATS_HEADER_EVENT_ID, NATS_HEADER_EVENT_TYPE,
+    NATS_HEADER_REJECT_REASON, NATS_HEADER_SUBSCRIPTION_ID,
 };
 use crate::signature;
 
@@ -48,17 +47,12 @@ struct EventMetadata {
 impl EventMetadata {
     fn from_value(value: &serde_json::Value) -> Self {
         Self {
-            event_id: value
-                .get("id")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_owned),
+            event_id: value.get("id").and_then(serde_json::Value::as_str).map(str::to_owned),
             subscription_id: value
                 .get("subscription_id")
                 .and_then(serde_json::Value::as_str)
                 .map(str::to_owned),
-            attempt_number: value
-                .get("attempt_number")
-                .and_then(serde_json::Value::as_u64),
+            attempt_number: value.get("attempt_number").and_then(serde_json::Value::as_u64),
         }
     }
 
@@ -89,9 +83,7 @@ enum VerificationRequestParseError {
 impl fmt::Display for VerificationRequestParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::InvalidVerificationToken(_) => {
-                f.write_str("verification_token must not be empty")
-            }
+            Self::InvalidVerificationToken(_) => f.write_str("verification_token must not be empty"),
         }
     }
 }
@@ -147,12 +139,7 @@ async fn publish_verification<P: JetStreamPublisher, S: ObjectStorePut>(
 ) -> StatusCode {
     let subject = format!("{subject_prefix}.subscription.verification");
     let outcome = publisher
-        .publish_event(
-            subject,
-            async_nats::HeaderMap::new(),
-            body,
-            ack_timeout.into(),
-        )
+        .publish_event(subject, async_nats::HeaderMap::new(), body, ack_timeout.into())
         .await;
 
     if outcome.is_ok() {
@@ -204,9 +191,7 @@ pub fn router<P: JetStreamPublisher, S: ObjectStorePut>(
         .with_state(state)
 }
 
-fn parse_verification_request(
-    body: &[u8],
-) -> Result<Option<VerificationRequest>, VerificationRequestParseError> {
+fn parse_verification_request(body: &[u8]) -> Result<Option<VerificationRequest>, VerificationRequestParseError> {
     let value: serde_json::Value = match serde_json::from_slice(body) {
         Ok(value) => value,
         Err(_) => return Ok(None),
@@ -240,16 +225,13 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
     headers: HeaderMap,
     body: Bytes,
 ) -> StatusCode {
-    let signature = headers
-        .get(HEADER_SIGNATURE)
-        .and_then(|value| value.to_str().ok());
+    let signature = headers.get(HEADER_SIGNATURE).and_then(|value| value.to_str().ok());
     let span = tracing::Span::current();
 
     match parse_verification_request(&body) {
         Ok(Some(verification_request)) => {
             if let Some(signature) = signature
-                && let Err(err) =
-                    signature::verify(&verification_request.verification_token, &body, signature)
+                && let Err(err) = signature::verify(&verification_request.verification_token, &body, signature)
             {
                 warn!(error = %err, "Notion verification request signature validation failed");
                 return StatusCode::UNAUTHORIZED;
@@ -259,13 +241,7 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
             span.record("event_type", "subscription.verification");
             span.record("subject", &subject);
 
-            return publish_verification(
-                &state.publisher,
-                &state.subject_prefix,
-                body,
-                state.nats_ack_timeout,
-            )
-            .await;
+            return publish_verification(&state.publisher, &state.subject_prefix, body, state.nats_ack_timeout).await;
         }
         Ok(None) => {}
         Err(err) => {
@@ -335,10 +311,7 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
 
     let subject = format!("{}.{}", state.subject_prefix, event_type);
     span.record("event_type", event_type.as_str());
-    span.record(
-        "event_id",
-        metadata.event_id.as_deref().unwrap_or("unknown"),
-    );
+    span.record("event_id", metadata.event_id.as_deref().unwrap_or("unknown"));
     span.record(
         "subscription_id",
         metadata.subscription_id.as_deref().unwrap_or("unknown"),
@@ -368,8 +341,7 @@ mod tests {
     use tracing_subscriber::util::SubscriberInitExt;
     use trogon_nats::jetstream::StreamMaxAge;
     use trogon_nats::jetstream::{
-        ClaimCheckPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher,
-        MockObjectStore,
+        ClaimCheckPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher, MockObjectStore,
     };
 
     type HmacSha256 = Hmac<Sha256>;
@@ -482,10 +454,7 @@ mod tests {
         let body = valid_event_body();
         let signature = compute_sig(&test_config().verification_token, &body);
 
-        let response = app
-            .oneshot(webhook_request(&body, Some(&signature)))
-            .await
-            .unwrap();
+        let response = app.oneshot(webhook_request(&body, Some(&signature))).await.unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
         let messages = publisher.published_messages();
@@ -517,10 +486,7 @@ mod tests {
         let response = app.oneshot(webhook_request(&body, None)).await.unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(
-            publisher.published_subjects(),
-            vec!["notion.subscription.verification"]
-        );
+        assert_eq!(publisher.published_subjects(), vec!["notion.subscription.verification"]);
     }
 
     #[tokio::test]
@@ -530,10 +496,7 @@ mod tests {
         let app = mock_app(publisher.clone());
         let body = verification_body();
 
-        let response = app
-            .oneshot(webhook_request(&body, Some("sha256=bad")))
-            .await
-            .unwrap();
+        let response = app.oneshot(webhook_request(&body, Some("sha256=bad"))).await.unwrap();
 
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
         assert_no_publishes(&publisher);
@@ -576,10 +539,7 @@ mod tests {
         let body = b"not-json";
         let signature = compute_sig(&test_config().verification_token, body);
 
-        let response = app
-            .oneshot(webhook_request(body, Some(&signature)))
-            .await
-            .unwrap();
+        let response = app.oneshot(webhook_request(body, Some(&signature))).await.unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
         assert_unroutable(&publisher, "invalid_json");
@@ -596,10 +556,7 @@ mod tests {
         .unwrap();
         let signature = compute_sig(&test_config().verification_token, &body);
 
-        let response = app
-            .oneshot(webhook_request(&body, Some(&signature)))
-            .await
-            .unwrap();
+        let response = app.oneshot(webhook_request(&body, Some(&signature))).await.unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
         assert_unroutable(&publisher, "missing_event_type");
@@ -617,10 +574,7 @@ mod tests {
         .unwrap();
         let signature = compute_sig(&test_config().verification_token, &body);
 
-        let response = app
-            .oneshot(webhook_request(&body, Some(&signature)))
-            .await
-            .unwrap();
+        let response = app.oneshot(webhook_request(&body, Some(&signature))).await.unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
         assert_unroutable(&publisher, "invalid_event_type");
@@ -635,10 +589,7 @@ mod tests {
         let body = valid_event_body();
         let signature = compute_sig(&test_config().verification_token, &body);
 
-        let response = app
-            .oneshot(webhook_request(&body, Some(&signature)))
-            .await
-            .unwrap();
+        let response = app.oneshot(webhook_request(&body, Some(&signature))).await.unwrap();
 
         assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }

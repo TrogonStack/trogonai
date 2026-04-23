@@ -53,10 +53,7 @@ mod tests {
     fn acp_prefix_new_valid() {
         let p = AcpPrefix::new("acp").unwrap();
         assert_eq!(p.as_str(), "acp");
-        assert_eq!(
-            AcpPrefix::new("my.multi.part").unwrap().as_str(),
-            "my.multi.part"
-        );
+        assert_eq!(AcpPrefix::new("my.multi.part").unwrap().as_str(), "my.multi.part");
     }
 
     #[test]
@@ -96,10 +93,7 @@ mod tests {
             "acp_prefix must not be empty"
         );
         assert_eq!(
-            format!(
-                "{}",
-                AcpPrefixError(SubjectTokenViolation::InvalidCharacter('*'))
-            ),
+            format!("{}", AcpPrefixError(SubjectTokenViolation::InvalidCharacter('*'))),
             "acp_prefix contains invalid character: '*'"
         );
         assert_eq!(

@@ -20,18 +20,11 @@ pub async fn handle<N: RequestClient, C: GetElapsed, J>(
     info!(method = %args.method, "Extension method request");
 
     let method_name = ExtMethodName::new(&args.method).map_err(|e| {
-        bridge.metrics.record_request(
-            "ext_method",
-            bridge.clock.elapsed(start).as_secs_f64(),
-            false,
-        );
         bridge
             .metrics
-            .record_error("ext_method", "invalid_method_name");
-        Error::new(
-            ErrorCode::InvalidParams.into(),
-            format!("Invalid method name: {}", e),
-        )
+            .record_request("ext_method", bridge.clock.elapsed(start).as_secs_f64(), false);
+        bridge.metrics.record_error("ext_method", "invalid_method_name");
+        Error::new(ErrorCode::InvalidParams.into(), format!("Invalid method name: {}", e))
     })?;
 
     let nats = bridge.nats();
@@ -46,11 +39,9 @@ pub async fn handle<N: RequestClient, C: GetElapsed, J>(
     .await
     .map_err(map_nats_error);
 
-    bridge.metrics.record_request(
-        "ext_method",
-        bridge.clock.elapsed(start).as_secs_f64(),
-        result.is_ok(),
-    );
+    bridge
+        .metrics
+        .record_request("ext_method", bridge.clock.elapsed(start).as_secs_f64(), result.is_ok());
 
     result
 }
@@ -58,8 +49,7 @@ pub async fn handle<N: RequestClient, C: GetElapsed, J>(
 #[cfg(test)]
 mod tests {
     use crate::agent::test_support::{
-        has_error_metric, has_request_metric, mock_bridge, mock_bridge_with_metrics,
-        set_json_response,
+        has_error_metric, has_request_metric, mock_bridge, mock_bridge_with_metrics, set_json_response,
     };
     use agent_client_protocol::{Agent, ErrorCode, ExtRequest, ExtResponse};
     use serde_json::value::RawValue;
@@ -138,16 +128,10 @@ mod tests {
     async fn ext_method_records_metrics_on_success() {
         let (mock, _js, bridge, exporter, provider) = mock_bridge_with_metrics();
         let raw = RawValue::from_string("{}".to_string()).unwrap();
-        set_json_response(
-            &mock,
-            "acp.agent.ext.my_method",
-            &ExtResponse::new(raw.into()),
-        );
+        set_json_response(&mock, "acp.agent.ext.my_method", &ExtResponse::new(raw.into()));
 
         let params = RawValue::from_string("{}".to_string()).unwrap();
-        let _ = bridge
-            .ext_method(ExtRequest::new("my_method", params.into()))
-            .await;
+        let _ = bridge.ext_method(ExtRequest::new("my_method", params.into())).await;
 
         provider.force_flush().unwrap();
         let finished_metrics = exporter.get_finished_metrics().unwrap();
@@ -164,9 +148,7 @@ mod tests {
         mock.fail_next_request();
 
         let params = RawValue::from_string("{}".to_string()).unwrap();
-        let _ = bridge
-            .ext_method(ExtRequest::new("my_method", params.into()))
-            .await;
+        let _ = bridge.ext_method(ExtRequest::new("my_method", params.into())).await;
 
         provider.force_flush().unwrap();
         let finished_metrics = exporter.get_finished_metrics().unwrap();

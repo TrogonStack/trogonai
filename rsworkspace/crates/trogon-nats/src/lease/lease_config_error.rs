@@ -6,10 +6,7 @@ pub enum LeaseConfigError {
     InvalidBucketName(String),
     EmptyKey,
     InvalidKeyName(String),
-    RenewIntervalNotLessThanTtl {
-        renew_interval: Duration,
-        ttl: Duration,
-    },
+    RenewIntervalNotLessThanTtl { renew_interval: Duration, ttl: Duration },
 }
 
 impl std::fmt::Display for LeaseConfigError {
@@ -25,10 +22,7 @@ impl std::fmt::Display for LeaseConfigError {
                 f,
                 "lease key '{key}' must contain only ASCII letters, digits, '-', '_', '/', '=' or '.'"
             ),
-            Self::RenewIntervalNotLessThanTtl {
-                renew_interval,
-                ttl,
-            } => write!(
+            Self::RenewIntervalNotLessThanTtl { renew_interval, ttl } => write!(
                 f,
                 "lease renew interval {:?} must be less than ttl {:?}",
                 renew_interval, ttl
