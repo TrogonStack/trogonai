@@ -1,5 +1,5 @@
 [package]
-name = "acp-nats-ws"
+name = "acp-nats-server"
 version = "0.1.0"
 edition = "2024"
 

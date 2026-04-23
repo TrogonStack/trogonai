@@ -18,19 +18,19 @@ use {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = config::Args::parse();
-    let ws_config = config::config_from_args(args, &SystemEnv)?;
+    let server_config = config::config_from_args(args, &SystemEnv)?;
     acp_telemetry::init_logger(
-        ServiceName::AcpNatsWs,
-        ws_config.acp.acp_prefix(),
+        ServiceName::AcpNatsServer,
+        server_config.acp.acp_prefix(),
         &SystemEnv,
         &SystemFs,
     );
-    let ws_config = config::apply_timeout_overrides(ws_config, &SystemEnv);
+    let server_config = config::apply_timeout_overrides(server_config, &SystemEnv);
 
     info!("ACP remote transport bridge starting");
 
     let nats_connect_timeout = acp_nats::nats_connect_timeout(&SystemEnv);
-    let nats_client = nats::connect(ws_config.acp.nats(), nats_connect_timeout).await?;
+    let nats_client = nats::connect(server_config.acp.nats(), nats_connect_timeout).await?;
 
     let js_context = async_nats::jetstream::new(nats_client.clone());
     let js_client = trogon_nats::jetstream::NatsJetStreamClient::new(js_context);
@@ -40,10 +40,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let conn_thread = std::thread::Builder::new()
         .name(THREAD_NAME.into())
-        .spawn(move || run_connection_thread(manager_rx, nats_client, js_client, ws_config.acp))?;
+        .spawn(move || run_connection_thread(manager_rx, nats_client, js_client, server_config.acp))?;
 
     let state = AppState {
-        bind_host: ws_config.host,
+        bind_host: server_config.host,
         manager_tx,
         shutdown_tx: shutdown_tx.clone(),
     };
@@ -59,7 +59,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .with_state(state),
     );
 
-    let addr = SocketAddr::from((ws_config.host, ws_config.port));
+    let addr = SocketAddr::from((server_config.host, server_config.port));
     let listener = tokio::net::TcpListener::bind(addr).await?;
 
     info!(address = %addr, "Listening for ACP transport connections");
