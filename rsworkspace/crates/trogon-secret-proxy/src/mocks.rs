@@ -29,6 +29,8 @@ use crate::traits::{
 pub struct MockNatsClient {
     /// Messages to deliver when a subject is subscribed.
     subscriptions: Arc<Mutex<HashMap<String, VecDeque<async_nats::Message>>>>,
+    /// Messages delivered to the next `subscribe()` call regardless of subject.
+    next_subscription: Arc<Mutex<VecDeque<async_nats::Message>>>,
     /// All (subject, payload) pairs published via this client.
     published: Arc<Mutex<Vec<(String, Bytes)>>>,
 }
@@ -38,12 +40,18 @@ impl MockNatsClient {
         Self::default()
     }
 
-    /// Pre-populate messages that will be delivered to a subscriber.
+    /// Pre-populate messages that will be delivered to a subscriber on `subject`.
     pub fn seed_messages(&self, subject: &str, messages: Vec<async_nats::Message>) {
         self.subscriptions
             .lock()
             .unwrap()
             .insert(subject.to_string(), messages.into());
+    }
+
+    /// Pre-populate a message delivered to the next `subscribe()` call,
+    /// regardless of subject.  Useful when the reply subject is a dynamic UUID.
+    pub fn seed_next_subscription(&self, msg: async_nats::Message) {
+        self.next_subscription.lock().unwrap().push_back(msg);
     }
 
     /// Return all (subject, payload) pairs published so far.
@@ -56,12 +64,19 @@ impl NatsClient for MockNatsClient {
     type Sub = MockSubscription;
 
     async fn subscribe(&self, subject: String) -> Result<MockSubscription, String> {
-        let msgs = self
-            .subscriptions
+        let mut msgs: VecDeque<_> = self
+            .next_subscription
             .lock()
             .unwrap()
-            .remove(&subject)
-            .unwrap_or_default();
+            .drain(..)
+            .collect();
+        msgs.extend(
+            self.subscriptions
+                .lock()
+                .unwrap()
+                .remove(&subject)
+                .unwrap_or_default(),
+        );
         Ok(MockSubscription::new(msgs))
     }
 
