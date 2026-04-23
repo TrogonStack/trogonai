@@ -1,11 +1,11 @@
 use std::time::Duration;
 
 use async_nats::jetstream::{
-    ErrorCode,
-    context::{CreateKeyValueError, CreateKeyValueErrorKind, CreateStreamError, CreateStreamErrorKind, KeyValueError},
+    context::{CreateKeyValueError, KeyValueError},
     kv,
 };
 
+use crate::jetstream::is_create_key_value_already_exists;
 use crate::jetstream::{JetStreamCreateKeyValue, JetStreamGetKeyValue, JetStreamKeyValueStatus};
 
 use super::{IncompatibleLeaseBucketConfig, LeaseError, LeaseProvisionError, NatsKvLease, NatsKvLeaseConfig};
@@ -124,29 +124,12 @@ pub(super) fn settings_from_status(status: &async_nats::jetstream::kv::bucket::S
     }
 }
 
-pub(super) fn is_create_key_value_already_exists(error: &CreateKeyValueError) -> bool {
-    if error.kind() != CreateKeyValueErrorKind::BucketCreate {
-        return false;
-    }
-
-    std::error::Error::source(error)
-        .and_then(|source| source.downcast_ref::<CreateStreamError>())
-        .is_some_and(is_create_stream_already_exists)
-}
-
-fn is_create_stream_already_exists(error: &CreateStreamError) -> bool {
-    matches!(
-        error.kind(),
-        CreateStreamErrorKind::JetStream(ref source)
-            if source.error_code() == ErrorCode::STREAM_NAME_EXIST
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::jetstream::{MockJetStreamKvClient, MockJetStreamKvStore};
     use crate::lease::{LeaseRenewInterval, LeaseTtl};
+    use async_nats::jetstream::context::CreateKeyValueErrorKind;
 
     fn ttl(secs: u64) -> LeaseTtl {
         LeaseTtl::from_secs(secs).unwrap()
