@@ -18,7 +18,7 @@ use acp_nats_agent::AgentSideNatsConnection;
 use agent_client_protocol::{
     Agent, AuthenticateRequest, AuthenticateResponse, CancelNotification, InitializeRequest,
     InitializeResponse, NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse,
-    StopReason,
+    ProtocolVersion, StopReason,
 };
 use async_nats::jetstream;
 use futures::StreamExt as _;
@@ -171,4 +171,61 @@ async fn serve_js_dispatches_prompt_command_to_agent() {
         *prompt_called.lock().unwrap(),
         "agent.prompt() must have been called by serve_js"
     );
+}
+
+/// `serve_global` (run by `with_jetstream`) subscribes to the global NATS wildcard
+/// `{prefix}.agent.>`. When a core-NATS request arrives on `{prefix}.agent.initialize`,
+/// it dispatches to the agent's `initialize()` handler and replies on the reply inbox.
+#[tokio::test]
+async fn serve_global_dispatches_initialize_to_agent() {
+    let (_c, port) = start_nats().await;
+    let nats = async_nats::connect(format!("127.0.0.1:{port}"))
+        .await
+        .expect("connect to NATS");
+    let js_ctx = jetstream::new(nats.clone());
+    setup_streams(&js_ctx).await;
+
+    let agent = MockAgent {
+        prompt_called: Arc::new(Mutex::new(false)),
+    };
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let js_client = NatsJetStreamClient::new(js_ctx.clone());
+            let prefix = AcpPrefix::new("acp").unwrap();
+            let (_conn, io_task) = AgentSideNatsConnection::with_jetstream(
+                agent,
+                nats.clone(),
+                js_client,
+                prefix,
+                |fut| {
+                    tokio::task::spawn_local(fut);
+                },
+            );
+            tokio::task::spawn_local(io_task);
+
+            // Let serve_global subscribe to the global wildcard before sending.
+            tokio::time::sleep(Duration::from_millis(100)).await;
+
+            // Send a core-NATS request — serve_global handles it via the acp.agent.> sub.
+            let req = InitializeRequest::new(ProtocolVersion::V0);
+            let payload = serde_json::to_vec(&req).unwrap();
+            let msg = tokio::time::timeout(
+                Duration::from_secs(5),
+                nats.request("acp.agent.initialize", payload.into()),
+            )
+            .await
+            .expect("timed out waiting for initialize response")
+            .expect("request failed");
+
+            let resp: InitializeResponse =
+                serde_json::from_slice(&msg.payload).expect("invalid InitializeResponse JSON");
+            assert_eq!(
+                resp.protocol_version,
+                ProtocolVersion::V0,
+                "serve_global must relay the agent's initialize response"
+            );
+        })
+        .await;
 }

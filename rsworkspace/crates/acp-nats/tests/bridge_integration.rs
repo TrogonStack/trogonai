@@ -15,9 +15,10 @@ use std::time::Duration;
 use acp_nats::{AGENT_UNAVAILABLE, AcpPrefix, Bridge, Config, NatsAuth, NatsConfig};
 use agent_client_protocol::{
     Agent, AuthenticateRequest, AuthenticateResponse, CancelNotification, ErrorCode,
-    Implementation, InitializeRequest, InitializeResponse, LoadSessionRequest, LoadSessionResponse,
-    NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse, ProtocolVersion,
-    SessionId, SetSessionModeRequest, SetSessionModeResponse, StopReason,
+    ExtRequest, ExtResponse, Implementation, InitializeRequest, InitializeResponse,
+    LoadSessionRequest, LoadSessionResponse, NewSessionRequest, NewSessionResponse, PromptRequest,
+    PromptResponse, ProtocolVersion, SessionId, SetSessionModeRequest, SetSessionModeResponse,
+    StopReason,
 };
 use async_nats::jetstream;
 use futures_util::StreamExt as _;
@@ -665,4 +666,42 @@ async fn prompt_succeeds_with_real_jetstream() {
 
     assert!(result.is_ok(), "expected Ok, got: {:?}", result.unwrap_err());
     assert_eq!(result.unwrap().stop_reason, StopReason::EndTurn);
+}
+
+// ── ext_method ────────────────────────────────────────────────────────────────
+
+/// `Bridge::ext_method` sends a core-NATS request to `{prefix}.agent.ext.{method}`
+/// and returns the `ExtResponse` published by the agent.  This exercises the full
+/// client→NATS→agent round-trip for extension methods.
+#[tokio::test]
+async fn ext_method_routes_to_agent_and_returns_response() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    // No JetStream stream setup required — ext_method uses core NATS request-reply.
+    let bridge = make_bridge(nats.clone(), "acp");
+
+    let mut agent_sub = nats.subscribe("acp.agent.ext.ping").await.unwrap();
+    let nats2 = nats.clone();
+    let resp_payload =
+        serde_json::to_vec(&ExtResponse::new(
+            serde_json::value::RawValue::from_string(r#"{"pong":true}"#.to_string())
+                .unwrap()
+                .into(),
+        ))
+        .unwrap();
+    tokio::spawn(async move {
+        if let Some(msg) = agent_sub.next().await {
+            if let Some(reply) = msg.reply {
+                nats2.publish(reply, resp_payload.into()).await.unwrap();
+            }
+        }
+    });
+
+    let params =
+        serde_json::value::RawValue::from_string("{}".to_string()).unwrap();
+    let result = bridge
+        .ext_method(ExtRequest::new("ping", params.into()))
+        .await;
+
+    assert!(result.is_ok(), "expected Ok, got: {:?}", result.unwrap_err());
 }
