@@ -703,6 +703,309 @@ async fn ext_unknown_method_returns_method_not_found() {
         .await;
 }
 
+// ── fork_session: notifications and state inheritance ────────────────────────
+
+#[tokio::test]
+async fn fork_session_publishes_session_ready() {
+    let (_, notifier, agent) = make_agent_parts();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let parent_resp = agent
+                .new_session(NewSessionRequest::new("/src"))
+                .await
+                .unwrap();
+            let parent_id = parent_resp.session_id.to_string();
+
+            // One notification for new_session; fork must add a second one.
+            agent
+                .fork_session(ForkSessionRequest::new(parent_id, "/fork"))
+                .await
+                .unwrap();
+
+            let published = notifier.published();
+            assert_eq!(published.len(), 2, "fork_session must publish a session.ready notification");
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn fork_session_inherits_parent_mode_and_model() {
+    let (store, _, agent) = make_agent_parts();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let parent_resp = agent
+                .new_session(NewSessionRequest::new("/src"))
+                .await
+                .unwrap();
+            let parent_id = parent_resp.session_id.to_string();
+
+            // Mutate mode and model directly in the store before forking.
+            let mut state = store.load(&parent_id).await.unwrap();
+            state.mode = "plan".to_string();
+            state.model = Some("claude-opus-4-7".to_string());
+            store.save(&parent_id, &state).await.unwrap();
+
+            let fork_id = agent
+                .fork_session(ForkSessionRequest::new(parent_id, "/fork"))
+                .await
+                .unwrap()
+                .session_id
+                .to_string();
+
+            let fork_state = store.load(&fork_id).await.unwrap();
+            assert_eq!(fork_state.mode, "plan", "fork must inherit parent mode");
+            assert_eq!(
+                fork_state.model.as_deref(),
+                Some("claude-opus-4-7"),
+                "fork must inherit parent model"
+            );
+        })
+        .await;
+}
+
+// ── fork_session: edge cases ──────────────────────────────────────────────────
+
+#[tokio::test]
+async fn fork_session_nonexistent_source_succeeds_with_default_state() {
+    // MemorySessionStore::load returns Ok(Default) for unknown IDs, so forking
+    // a session that was never created silently succeeds.  This documents the
+    // current semantics: no "session not found" error is raised.
+    let (store, _, agent) = make_agent_parts();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let fork_resp = agent
+                .fork_session(ForkSessionRequest::new("ghost-session-id", "/fork"))
+                .await;
+
+            assert!(fork_resp.is_ok(), "fork of non-existent session must succeed");
+            let fork_id = fork_resp.unwrap().session_id.to_string();
+            assert!(!fork_id.is_empty());
+
+            let fork_state = store.load(&fork_id).await.unwrap();
+            assert_eq!(
+                fork_state.parent_session_id.as_deref(),
+                Some("ghost-session-id"),
+                "fork must record the (non-existent) parent session ID"
+            );
+            assert!(fork_state.messages.is_empty(), "forked state must be empty (default)");
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn fork_session_branch_at_index_wrong_type_falls_back_to_full_copy() {
+    // branchAtIndex must be a JSON integer.  A JSON string (e.g. "2") is not
+    // parsed by as_u64(), so branch_at stays None → full copy, branched_at_index = None.
+    let (store, _, agent) = make_agent_parts();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let new_resp = agent
+                .new_session(NewSessionRequest::new("/src"))
+                .await
+                .unwrap();
+            let source_id = new_resp.session_id.to_string();
+
+            let mut state = store.load(&source_id).await.unwrap();
+            state.messages = (0..4)
+                .map(|i| Message::user_text(format!("msg-{i}")))
+                .collect();
+            store.save(&source_id, &state).await.unwrap();
+
+            // Pass branchAtIndex as a JSON *string* — must be silently ignored.
+            let meta = serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(
+                serde_json::json!({ "branchAtIndex": "2" }),
+            )
+            .unwrap();
+            let fork_resp = agent
+                .fork_session(ForkSessionRequest::new(source_id.clone(), "/branch").meta(meta))
+                .await
+                .unwrap();
+            let fork_id = fork_resp.session_id.to_string();
+
+            let fork_state = store.load(&fork_id).await.unwrap();
+            assert_eq!(
+                fork_state.messages.len(),
+                4,
+                "wrong-type branchAtIndex must be ignored → full history copied"
+            );
+            assert_eq!(
+                fork_state.branched_at_index,
+                None,
+                "branched_at_index must be None when branchAtIndex had a wrong type"
+            );
+        })
+        .await;
+}
+
+// ── ext_method: session/list_children edge cases ──────────────────────────────
+
+#[tokio::test]
+async fn ext_list_children_missing_session_id_param_returns_empty() {
+    // When params contains no sessionId field, unwrap_or_default() → "" → no
+    // session has "" as parent → empty children list.
+    let (_, _, agent) = make_agent_parts();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let params: std::sync::Arc<serde_json::value::RawValue> =
+                serde_json::value::RawValue::from_string("{}".to_string())
+                    .unwrap()
+                    .into();
+            let resp = agent
+                .ext_method(ExtRequest::new("session/list_children", params))
+                .await
+                .unwrap();
+            let body: serde_json::Value = serde_json::from_str(resp.0.get()).unwrap();
+            let children = body["children"].as_array().unwrap();
+            assert!(
+                children.is_empty(),
+                "missing sessionId must yield an empty children list"
+            );
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn ext_list_children_null_session_id_returns_empty() {
+    // sessionId: null is treated the same as missing — as_str() returns None,
+    // unwrap_or_default() → "" → no match → empty.
+    let (_, _, agent) = make_agent_parts();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let params: std::sync::Arc<serde_json::value::RawValue> =
+                serde_json::value::RawValue::from_string(r#"{"sessionId":null}"#.to_string())
+                    .unwrap()
+                    .into();
+            let resp = agent
+                .ext_method(ExtRequest::new("session/list_children", params))
+                .await
+                .unwrap();
+            let body: serde_json::Value = serde_json::from_str(resp.0.get()).unwrap();
+            let children = body["children"].as_array().unwrap();
+            assert!(
+                children.is_empty(),
+                "null sessionId must yield an empty children list"
+            );
+        })
+        .await;
+}
+
+// ── list_sessions: _meta fields ───────────────────────────────────────────────
+
+#[tokio::test]
+async fn list_sessions_includes_branched_at_index_in_meta() {
+    let (_, _, agent) = make_agent_parts();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let parent_resp = agent
+                .new_session(NewSessionRequest::new("/root"))
+                .await
+                .unwrap();
+            let parent_id = parent_resp.session_id.to_string();
+
+            let meta = serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(
+                serde_json::json!({ "branchAtIndex": 3 }),
+            )
+            .unwrap();
+            let fork_resp = agent
+                .fork_session(ForkSessionRequest::new(parent_id.clone(), "/fork").meta(meta))
+                .await
+                .unwrap();
+            let fork_id = fork_resp.session_id.to_string();
+
+            let list_resp = agent
+                .list_sessions(ListSessionsRequest::new())
+                .await
+                .unwrap();
+
+            let fork_info = list_resp
+                .sessions
+                .iter()
+                .find(|s| s.session_id.to_string() == fork_id)
+                .expect("forked session must appear in list_sessions");
+
+            let m = fork_info.meta.as_ref().expect("fork must have _meta");
+            assert_eq!(
+                m.get("branchedAtIndex").and_then(|v| v.as_u64()),
+                Some(3),
+                "list_sessions _meta must include branchedAtIndex"
+            );
+            assert_eq!(
+                m.get("parentSessionId").and_then(|v| v.as_str()),
+                Some(parent_id.as_str()),
+                "list_sessions _meta must include parentSessionId"
+            );
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn list_sessions_preserves_parent_session_id_after_parent_deleted() {
+    // When the parent session is deleted, the fork's _meta.parentSessionId must
+    // still appear — the dangling reference is not cleaned up.
+    let (store, _, agent) = make_agent_parts();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let parent_resp = agent
+                .new_session(NewSessionRequest::new("/root"))
+                .await
+                .unwrap();
+            let parent_id = parent_resp.session_id.to_string();
+
+            let fork_resp = agent
+                .fork_session(ForkSessionRequest::new(parent_id.clone(), "/fork"))
+                .await
+                .unwrap();
+            let fork_id = fork_resp.session_id.to_string();
+
+            // Delete the parent directly via the store.
+            store.delete(&parent_id).await.unwrap();
+
+            let list_resp = agent
+                .list_sessions(ListSessionsRequest::new())
+                .await
+                .unwrap();
+
+            // Parent must no longer appear.
+            assert!(
+                list_resp
+                    .sessions
+                    .iter()
+                    .all(|s| s.session_id.to_string() != parent_id),
+                "deleted parent must not appear in list_sessions"
+            );
+
+            // Fork must still expose the dangling parentSessionId in _meta.
+            let fork_info = list_resp
+                .sessions
+                .iter()
+                .find(|s| s.session_id.to_string() == fork_id)
+                .expect("fork session must still appear");
+            let m = fork_info.meta.as_ref().expect("fork must have _meta");
+            assert_eq!(
+                m.get("parentSessionId").and_then(|v| v.as_str()),
+                Some(parent_id.as_str()),
+                "parentSessionId must survive even after the parent is deleted"
+            );
+        })
+        .await;
+}
+
 // ── cancel ────────────────────────────────────────────────────────────────────
 
 #[tokio::test]
