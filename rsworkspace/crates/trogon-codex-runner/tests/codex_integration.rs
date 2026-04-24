@@ -1862,3 +1862,147 @@ async fn ext_list_children_returns_direct_children_integration() {
         })
         .await;
 }
+
+/// fork_session with branchAtIndex must succeed and must NOT surface branchedAtIndex
+/// in list_sessions._meta — Codex does not support message-level branching.
+#[tokio::test(flavor = "current_thread")]
+async fn fork_session_ignores_branch_at_index_in_list_sessions() {
+    let _guard = bin_env_lock().lock().await;
+    let local = LocalSet::new();
+    local
+        .run_until(async {
+            let agent = make_agent().await;
+
+            let src_id = agent
+                .new_session(NewSessionRequest::new("/src"))
+                .await
+                .unwrap()
+                .session_id
+                .to_string();
+
+            let meta = serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(
+                serde_json::json!({ "branchAtIndex": 2 }),
+            )
+            .unwrap();
+            let fork_id = agent
+                .fork_session(ForkSessionRequest::new(src_id.clone(), "/fork").meta(meta))
+                .await
+                .unwrap()
+                .session_id
+                .to_string();
+
+            let list_resp = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
+            let fork_info = list_resp
+                .sessions
+                .iter()
+                .find(|s| s.session_id.to_string() == fork_id)
+                .expect("fork must appear in list_sessions");
+
+            assert!(
+                fork_info
+                    .meta
+                    .as_ref()
+                    .map_or(true, |m| !m.contains_key("branchedAtIndex")),
+                "branchedAtIndex must not appear in _meta — branchAtIndex is not supported by codex-runner"
+            );
+        })
+        .await;
+}
+
+/// A root session (one that was never forked) must have no children.
+#[tokio::test(flavor = "current_thread")]
+async fn ext_list_children_returns_empty_for_root_session_integration() {
+    let _guard = bin_env_lock().lock().await;
+    let local = LocalSet::new();
+    local
+        .run_until(async {
+            let agent = make_agent().await;
+
+            let root_id = agent
+                .new_session(NewSessionRequest::new("/root"))
+                .await
+                .unwrap()
+                .session_id
+                .to_string();
+
+            let raw_params = serde_json::value::RawValue::from_string(
+                format!(r#"{{"sessionId":"{}"}}"#, root_id),
+            )
+            .unwrap();
+            let resp = agent
+                .ext_method(ExtRequest::new("session/list_children", raw_params.into()))
+                .await
+                .unwrap();
+
+            let body: serde_json::Value = serde_json::from_str(resp.0.get()).unwrap();
+            assert_eq!(
+                body["children"].as_array().map(Vec::len),
+                Some(0),
+                "root session must have no children"
+            );
+        })
+        .await;
+}
+
+/// `ext_method("session/list_children")` must return only direct children,
+/// not grandchildren.  For a chain A→B→C, querying A returns [B] and B returns [C].
+#[tokio::test(flavor = "current_thread")]
+async fn ext_list_children_only_returns_direct_children_not_grandchildren_integration() {
+    let _guard = bin_env_lock().lock().await;
+    let local = LocalSet::new();
+    local
+        .run_until(async {
+            let agent = make_agent().await;
+
+            let a_id = agent
+                .new_session(NewSessionRequest::new("/a"))
+                .await
+                .unwrap()
+                .session_id
+                .to_string();
+
+            let b_id = agent
+                .fork_session(ForkSessionRequest::new(a_id.clone(), "/b"))
+                .await
+                .unwrap()
+                .session_id
+                .to_string();
+
+            let c_id = agent
+                .fork_session(ForkSessionRequest::new(b_id.clone(), "/c"))
+                .await
+                .unwrap()
+                .session_id
+                .to_string();
+
+            let list_children = |sid: String| -> ExtRequest {
+                let raw = serde_json::value::RawValue::from_string(
+                    format!(r#"{{"sessionId":"{}"}}"#, sid),
+                )
+                .unwrap();
+                ExtRequest::new("session/list_children", raw.into())
+            };
+            let parse_children = |resp: agent_client_protocol::ExtResponse| -> Vec<String> {
+                let v: serde_json::Value = serde_json::from_str(resp.0.get()).unwrap();
+                v["children"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .filter_map(|x| x.as_str().map(String::from))
+                    .collect()
+            };
+
+            let children_a =
+                parse_children(agent.ext_method(list_children(a_id.clone())).await.unwrap());
+            assert_eq!(children_a, vec![b_id.clone()], "A must have only B as child");
+
+            let children_b =
+                parse_children(agent.ext_method(list_children(b_id.clone())).await.unwrap());
+            assert_eq!(children_b, vec![c_id.clone()], "B must have only C as child");
+
+            let children_c =
+                parse_children(agent.ext_method(list_children(c_id.clone())).await.unwrap());
+            assert!(children_c.is_empty(), "C must have no children");
+        })
+        .await;
+}

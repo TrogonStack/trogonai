@@ -4697,6 +4697,50 @@ mod tests {
         assert_eq!(saves.len(), 2);
         // The forked session gets a distinct id from the source.
         assert_ne!(saves[1].id, source_id);
+        // Branching fields must be present in the snapshot.
+        assert_eq!(
+            saves[1].parent_session_id.as_deref(),
+            Some(source_id.as_str()),
+            "snapshot must record parent_session_id"
+        );
+        assert_eq!(
+            saves[1].branched_at_index,
+            None,
+            "snapshot must record branched_at_index (None when no branchAtIndex meta)"
+        );
+    }
+
+    #[tokio::test]
+    async fn fork_session_with_store_saves_branch_at_index_in_snapshot() {
+        let (agent, store) = make_agent_with_store();
+
+        let resp = agent
+            .new_session(NewSessionRequest::new("/tmp"))
+            .await
+            .unwrap();
+        let source_id = resp.session_id.to_string();
+
+        let meta = serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(
+            serde_json::json!({ "branchAtIndex": 3 }),
+        )
+        .unwrap();
+        agent
+            .fork_session(ForkSessionRequest::new(source_id.clone(), "/fork").meta(meta))
+            .await
+            .unwrap();
+
+        let saves = store.saves.lock().unwrap();
+        let fork_snap = &saves[1];
+        assert_eq!(
+            fork_snap.parent_session_id.as_deref(),
+            Some(source_id.as_str()),
+            "snapshot must record parent_session_id"
+        );
+        assert_eq!(
+            fork_snap.branched_at_index,
+            Some(3),
+            "snapshot must record branched_at_index"
+        );
     }
 
     #[tokio::test]
