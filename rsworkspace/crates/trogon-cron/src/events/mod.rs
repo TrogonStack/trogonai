@@ -2,7 +2,7 @@ mod contract;
 mod message;
 
 use serde::{Deserialize, Serialize};
-use trogon_eventsourcing::{CanonicalEventCodec, EventCodec, EventData, EventType, RecordedEvent, StreamEvent};
+use trogon_eventsourcing::{CanonicalEventCodec, EventCodec, EventData, EventType, RecordedEvent};
 
 pub use contract::{ContractEventError, contract_v1};
 pub use message::{MessageContent, MessageEnvelope, MessageHeaders, MessageHeadersError};
@@ -79,30 +79,6 @@ pub struct JobRemoved {
     pub id: String,
 }
 
-impl StreamEvent for JobAdded {
-    fn stream_id(&self) -> &str {
-        &self.id
-    }
-}
-
-impl StreamEvent for JobPaused {
-    fn stream_id(&self) -> &str {
-        &self.id
-    }
-}
-
-impl StreamEvent for JobResumed {
-    fn stream_id(&self) -> &str {
-        &self.id
-    }
-}
-
-impl StreamEvent for JobRemoved {
-    fn stream_id(&self) -> &str {
-        &self.id
-    }
-}
-
 impl EventType for JobAdded {
     fn event_type(&self) -> &'static str {
         "job_added"
@@ -154,8 +130,8 @@ impl EventCodec<JobEvent> for JobEventCodec {
     }
 }
 
-impl StreamEvent for JobEvent {
-    fn stream_id(&self) -> &str {
+impl JobEvent {
+    pub fn stream_id(&self) -> &str {
         match self {
             Self::JobAdded(event) => &event.id,
             Self::JobPaused(event) => &event.id,
@@ -215,6 +191,7 @@ mod tests {
     #[test]
     fn event_data_and_recorded_event_helpers_work() {
         let event = JobEventData::new_with_codec(
+            "cleanup",
             &JobEventCodec,
             JobEvent::JobRemoved(JobRemoved {
                 id: "cleanup".to_string(),

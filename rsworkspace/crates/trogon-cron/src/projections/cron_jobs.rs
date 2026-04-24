@@ -13,8 +13,8 @@ use futures::{Stream, StreamExt, future};
 use trogon_eventsourcing::nats::jetstream::AppendProjector;
 use trogon_eventsourcing::snapshot::{Snapshot, SnapshotChange};
 use trogon_eventsourcing::{
-    EventData, StreamEvent, load_snapshot, load_snapshot_map, maybe_advance_checkpoint, persist_snapshot_change,
-    read_checkpoint, write_checkpoint,
+    EventData, load_snapshot, load_snapshot_map, maybe_advance_checkpoint, persist_snapshot_change, read_checkpoint,
+    write_checkpoint,
 };
 use trogon_nats::SubjectTokenViolation;
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream};

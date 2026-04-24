@@ -9,7 +9,6 @@ use async_nats::jetstream::{
 };
 use chrono::{DateTime, Utc};
 use futures::{Stream, StreamExt};
-use trogon_eventsourcing::StreamEvent;
 use trogon_nats::SubjectTokenViolation;
 use trogon_nats::lease::{LeaderElection, LeaseRenewInterval, LeaseTiming, LeaseTtl, NatsKvLease, NatsKvLeaseConfig};
 use trogon_std::{NowV7, UuidV7Generator};
