@@ -15,12 +15,13 @@ use std::time::Duration;
 use acp_nats::{AGENT_UNAVAILABLE, AcpPrefix, Bridge, Config, NatsAuth, NatsConfig};
 use agent_client_protocol::{
     Agent, AuthenticateRequest, AuthenticateResponse, CancelNotification,
-    CloseSessionRequest, CloseSessionResponse, ErrorCode, ExtRequest, ExtResponse,
+    CloseSessionRequest, CloseSessionResponse, ErrorCode, ExtNotification, ExtRequest, ExtResponse,
     ForkSessionRequest, ForkSessionResponse, Implementation, InitializeRequest, InitializeResponse,
     ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse,
     LogoutRequest, LogoutResponse, NewSessionRequest, NewSessionResponse, PromptRequest,
     PromptResponse, ProtocolVersion, ResumeSessionRequest, ResumeSessionResponse, SessionId,
-    SetSessionModeRequest, SetSessionModeResponse, StopReason,
+    SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModelRequest,
+    SetSessionModelResponse, SetSessionModeRequest, SetSessionModeResponse, StopReason,
 };
 use async_nats::jetstream;
 use futures_util::StreamExt as _;
@@ -876,5 +877,117 @@ async fn ext_method_routes_to_agent_and_returns_response() {
         .ext_method(ExtRequest::new("ping", params.into()))
         .await;
 
+    assert!(result.is_ok(), "expected Ok, got: {:?}", result.unwrap_err());
+}
+
+// ── ext_notification ──────────────────────────────────────────────────────────
+
+/// `Bridge::ext_notification` publishes fire-and-forget to
+/// `{prefix}.agent.ext.{method}` and always returns `Ok(())` regardless of
+/// whether any subscriber is listening.
+#[tokio::test]
+async fn ext_notification_publishes_to_correct_subject() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let bridge = make_bridge(nats.clone(), "acp");
+
+    let mut sub = nats.subscribe("acp.agent.ext.my_notify").await.unwrap();
+
+    let params = serde_json::value::RawValue::from_string(r#"{"key":"val"}"#.to_string()).unwrap();
+    let result = bridge
+        .ext_notification(ExtNotification::new("my_notify", params.into()))
+        .await;
+
+    assert!(result.is_ok(), "ext_notification must always return Ok(())");
+
+    let msg = tokio::time::timeout(Duration::from_secs(2), sub.next())
+        .await
+        .expect("timed out waiting for ext_notification publish")
+        .expect("subscriber closed");
+
+    assert_eq!(msg.subject.as_str(), "acp.agent.ext.my_notify");
+    assert!(
+        msg.reply.is_none(),
+        "ext_notification must not include a reply subject"
+    );
+}
+
+// ── set_session_config_option ─────────────────────────────────────────────────
+
+/// `Bridge::set_session_config_option` JetStream-publishes to the COMMANDS stream
+/// and returns `SetSessionConfigOptionResponse` once the runner responds.
+#[tokio::test]
+async fn set_session_config_option_succeeds_with_real_jetstream() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let js = jetstream::new(nats.clone());
+    setup_streams(&js).await;
+    let bridge = make_bridge(nats.clone(), "acp");
+
+    let session_id = "cfg-opt-sess";
+
+    let mut agent_sub = nats
+        .subscribe(format!("acp.session.{}.agent.set_config_option", session_id))
+        .await
+        .unwrap();
+    let js2 = js.clone();
+    tokio::spawn(async move {
+        if let Some(msg) = agent_sub.next().await {
+            let req_id = msg
+                .headers
+                .as_ref()
+                .and_then(|h| h.get(trogon_nats::REQ_ID_HEADER))
+                .map(|v| v.as_str().to_string())
+                .unwrap_or_default();
+            let resp_subject = format!("acp.session.{}.agent.response.{}", session_id, req_id);
+            let resp = serde_json::to_vec(&SetSessionConfigOptionResponse::new(vec![])).unwrap();
+            let _ = js2.publish(resp_subject, resp.into()).await;
+        }
+    });
+
+    let result = bridge
+        .set_session_config_option(SetSessionConfigOptionRequest::new(
+            session_id, "theme", "dark",
+        ))
+        .await;
+    assert!(result.is_ok(), "expected Ok, got: {:?}", result.unwrap_err());
+}
+
+// ── set_session_model ─────────────────────────────────────────────────────────
+
+/// `Bridge::set_session_model` JetStream-publishes to the COMMANDS stream and
+/// returns `SetSessionModelResponse` once the runner responds.
+#[tokio::test]
+async fn set_session_model_succeeds_with_real_jetstream() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let js = jetstream::new(nats.clone());
+    setup_streams(&js).await;
+    let bridge = make_bridge(nats.clone(), "acp");
+
+    let session_id = "set-model-sess";
+
+    let mut agent_sub = nats
+        .subscribe(format!("acp.session.{}.agent.set_model", session_id))
+        .await
+        .unwrap();
+    let js2 = js.clone();
+    tokio::spawn(async move {
+        if let Some(msg) = agent_sub.next().await {
+            let req_id = msg
+                .headers
+                .as_ref()
+                .and_then(|h| h.get(trogon_nats::REQ_ID_HEADER))
+                .map(|v| v.as_str().to_string())
+                .unwrap_or_default();
+            let resp_subject = format!("acp.session.{}.agent.response.{}", session_id, req_id);
+            let resp = serde_json::to_vec(&SetSessionModelResponse::new()).unwrap();
+            let _ = js2.publish(resp_subject, resp.into()).await;
+        }
+    });
+
+    let result = bridge
+        .set_session_model(SetSessionModelRequest::new(session_id, "claude-sonnet-4-6"))
+        .await;
     assert!(result.is_ok(), "expected Ok, got: {:?}", result.unwrap_err());
 }

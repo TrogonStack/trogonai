@@ -16,9 +16,14 @@ use std::time::Duration;
 use acp_nats::AcpPrefix;
 use acp_nats_agent::AgentSideNatsConnection;
 use agent_client_protocol::{
-    Agent, AuthenticateRequest, AuthenticateResponse, CancelNotification, ExtNotification,
-    ExtRequest, ExtResponse, InitializeRequest, InitializeResponse, NewSessionRequest,
-    NewSessionResponse, PromptRequest, PromptResponse, ProtocolVersion, StopReason,
+    Agent, AuthenticateRequest, AuthenticateResponse, CancelNotification,
+    CloseSessionRequest, CloseSessionResponse, ExtNotification, ExtRequest, ExtResponse,
+    ForkSessionRequest, ForkSessionResponse, InitializeRequest, InitializeResponse,
+    ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse,
+    LogoutRequest, LogoutResponse, NewSessionRequest, NewSessionResponse, PromptRequest,
+    PromptResponse, ProtocolVersion, ResumeSessionRequest, ResumeSessionResponse,
+    SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModelRequest,
+    SetSessionModelResponse, SetSessionModeRequest, SetSessionModeResponse, SessionId, StopReason,
 };
 use async_nats::jetstream;
 use futures::StreamExt as _;
@@ -111,6 +116,66 @@ impl Agent for MockAgent {
     ) -> agent_client_protocol::Result<()> {
         *self.ext_notification_called.lock().unwrap() = true;
         Ok(())
+    }
+
+    async fn logout(&self, _: LogoutRequest) -> agent_client_protocol::Result<LogoutResponse> {
+        Ok(LogoutResponse::new())
+    }
+
+    async fn list_sessions(
+        &self,
+        _: ListSessionsRequest,
+    ) -> agent_client_protocol::Result<ListSessionsResponse> {
+        Ok(ListSessionsResponse::new(vec![]))
+    }
+
+    async fn load_session(
+        &self,
+        _: LoadSessionRequest,
+    ) -> agent_client_protocol::Result<LoadSessionResponse> {
+        Ok(LoadSessionResponse::new())
+    }
+
+    async fn set_session_mode(
+        &self,
+        _: SetSessionModeRequest,
+    ) -> agent_client_protocol::Result<SetSessionModeResponse> {
+        Ok(SetSessionModeResponse::new())
+    }
+
+    async fn set_session_config_option(
+        &self,
+        _: SetSessionConfigOptionRequest,
+    ) -> agent_client_protocol::Result<SetSessionConfigOptionResponse> {
+        Ok(SetSessionConfigOptionResponse::new(vec![]))
+    }
+
+    async fn set_session_model(
+        &self,
+        _: SetSessionModelRequest,
+    ) -> agent_client_protocol::Result<SetSessionModelResponse> {
+        Ok(SetSessionModelResponse::new())
+    }
+
+    async fn fork_session(
+        &self,
+        _: ForkSessionRequest,
+    ) -> agent_client_protocol::Result<ForkSessionResponse> {
+        Ok(ForkSessionResponse::new(SessionId::from("forked-in-serve-js")))
+    }
+
+    async fn resume_session(
+        &self,
+        _: ResumeSessionRequest,
+    ) -> agent_client_protocol::Result<ResumeSessionResponse> {
+        Ok(ResumeSessionResponse::new())
+    }
+
+    async fn close_session(
+        &self,
+        _: CloseSessionRequest,
+    ) -> agent_client_protocol::Result<CloseSessionResponse> {
+        Ok(CloseSessionResponse::new())
     }
 }
 
@@ -437,4 +502,442 @@ async fn serve_js_dispatches_cancel_notification_to_agent() {
         *cancel_called.lock().unwrap(),
         "agent.cancel() must have been called via JetStream cancel notification"
     );
+}
+
+// ── helper ────────────────────────────────────────────────────────────────────
+
+/// Start `AgentSideNatsConnection::with_jetstream` for the given agent, wait
+/// 100 ms for subscriptions to be established, then return the LocalSet future
+/// handle and a function to run the inner test logic.
+///
+/// All serve_global + serve_js tests share the same boilerplate; this macro-like
+/// helper keeps them short.
+async fn run_with_jetstream<A: agent_client_protocol::Agent + 'static>(
+    nats: async_nats::Client,
+    js_ctx: async_nats::jetstream::Context,
+    agent: A,
+    inner: impl std::future::Future<Output = ()>,
+) {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let js_client = NatsJetStreamClient::new(js_ctx);
+            let prefix = AcpPrefix::new("acp").unwrap();
+            let (_conn, io_task) = AgentSideNatsConnection::with_jetstream(
+                agent,
+                nats,
+                js_client,
+                prefix,
+                |fut| {
+                    tokio::task::spawn_local(fut);
+                },
+            );
+            tokio::task::spawn_local(io_task);
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            inner.await;
+        })
+        .await;
+}
+
+// ── serve_global: authenticate ────────────────────────────────────────────────
+
+#[tokio::test]
+async fn serve_global_dispatches_authenticate_to_agent() {
+    let (_c, port) = start_nats().await;
+    let nats = async_nats::connect(format!("127.0.0.1:{port}"))
+        .await
+        .expect("connect to NATS");
+    let js_ctx = jetstream::new(nats.clone());
+    setup_streams(&js_ctx).await;
+
+    let nats2 = nats.clone();
+    run_with_jetstream(nats, js_ctx, MockAgent::default(), async move {
+        let payload =
+            serde_json::to_vec(&AuthenticateRequest::new("secret")).unwrap();
+        let msg = tokio::time::timeout(
+            Duration::from_secs(5),
+            nats2.request("acp.agent.authenticate", payload.into()),
+        )
+        .await
+        .expect("timed out")
+        .expect("request failed");
+
+        // MockAgent.authenticate() returns method_not_found; verify a JSON
+        // response arrived (error or success).
+        assert!(
+            !msg.payload.is_empty(),
+            "serve_global must publish a reply to authenticate"
+        );
+    })
+    .await;
+}
+
+// ── serve_global: logout ──────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn serve_global_dispatches_logout_to_agent() {
+    let (_c, port) = start_nats().await;
+    let nats = async_nats::connect(format!("127.0.0.1:{port}"))
+        .await
+        .expect("connect to NATS");
+    let js_ctx = jetstream::new(nats.clone());
+    setup_streams(&js_ctx).await;
+
+    let nats2 = nats.clone();
+    run_with_jetstream(nats, js_ctx, MockAgent::default(), async move {
+        let payload = serde_json::to_vec(&LogoutRequest::new()).unwrap();
+        let msg = tokio::time::timeout(
+            Duration::from_secs(5),
+            nats2.request("acp.agent.logout", payload.into()),
+        )
+        .await
+        .expect("timed out")
+        .expect("request failed");
+
+        let _resp: LogoutResponse =
+            serde_json::from_slice(&msg.payload).expect("invalid LogoutResponse JSON");
+    })
+    .await;
+}
+
+// ── serve_global: new_session ─────────────────────────────────────────────────
+
+#[tokio::test]
+async fn serve_global_dispatches_new_session_to_agent() {
+    let (_c, port) = start_nats().await;
+    let nats = async_nats::connect(format!("127.0.0.1:{port}"))
+        .await
+        .expect("connect to NATS");
+    let js_ctx = jetstream::new(nats.clone());
+    setup_streams(&js_ctx).await;
+
+    let nats2 = nats.clone();
+    run_with_jetstream(nats, js_ctx, MockAgent::default(), async move {
+        let payload = serde_json::to_vec(&NewSessionRequest::new(".")).unwrap();
+        let msg = tokio::time::timeout(
+            Duration::from_secs(5),
+            nats2.request("acp.agent.session.new", payload.into()),
+        )
+        .await
+        .expect("timed out")
+        .expect("request failed");
+
+        let resp: NewSessionResponse =
+            serde_json::from_slice(&msg.payload).expect("invalid NewSessionResponse JSON");
+        assert_eq!(
+            resp.session_id.to_string().as_str(),
+            "test-session",
+            "serve_global must relay the agent's new_session response"
+        );
+    })
+    .await;
+}
+
+// ── serve_global: list_sessions ───────────────────────────────────────────────
+
+#[tokio::test]
+async fn serve_global_dispatches_list_sessions_to_agent() {
+    let (_c, port) = start_nats().await;
+    let nats = async_nats::connect(format!("127.0.0.1:{port}"))
+        .await
+        .expect("connect to NATS");
+    let js_ctx = jetstream::new(nats.clone());
+    setup_streams(&js_ctx).await;
+
+    let nats2 = nats.clone();
+    run_with_jetstream(nats, js_ctx, MockAgent::default(), async move {
+        let payload = serde_json::to_vec(&ListSessionsRequest::new()).unwrap();
+        let msg = tokio::time::timeout(
+            Duration::from_secs(5),
+            nats2.request("acp.agent.session.list", payload.into()),
+        )
+        .await
+        .expect("timed out")
+        .expect("request failed");
+
+        let _resp: ListSessionsResponse =
+            serde_json::from_slice(&msg.payload).expect("invalid ListSessionsResponse JSON");
+    })
+    .await;
+}
+
+// ── serve_js: helpers ─────────────────────────────────────────────────────────
+
+/// Publish a JetStream command with an `X-Req-Id` header and wait for the
+/// response that `serve_js` publishes to core NATS.
+async fn serve_js_round_trip(
+    nats: &async_nats::Client,
+    js_ctx: &async_nats::jetstream::Context,
+    subject: &str,
+    req_id: &str,
+    payload: Vec<u8>,
+    response_subject: &str,
+) -> async_nats::Message {
+    let mut sub = nats.subscribe(response_subject.to_string()).await.unwrap();
+
+    let mut headers = async_nats::HeaderMap::new();
+    headers.insert("X-Req-Id", req_id);
+    js_ctx
+        .publish_with_headers(subject.to_string(), headers, payload.into())
+        .await
+        .unwrap()
+        .await
+        .unwrap();
+
+    tokio::time::timeout(Duration::from_secs(5), sub.next())
+        .await
+        .expect("timed out waiting for serve_js response")
+        .expect("response subscription closed")
+}
+
+// ── serve_js: load_session ────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn serve_js_dispatches_load_session_to_agent() {
+    let (_c, port) = start_nats().await;
+    let nats = async_nats::connect(format!("127.0.0.1:{port}"))
+        .await
+        .expect("connect to NATS");
+    let js_ctx = jetstream::new(nats.clone());
+    setup_streams(&js_ctx).await;
+
+    let session_id = "load-js-sess";
+    let req_id = "req-load-1";
+    let response_subject = format!("acp.session.{}.agent.response.{}", session_id, req_id);
+
+    let nats2 = nats.clone();
+    let js2 = js_ctx.clone();
+    run_with_jetstream(nats, js_ctx, MockAgent::default(), async move {
+        let payload =
+            serde_json::to_vec(&LoadSessionRequest::new(session_id, ".")).unwrap();
+        let msg = serve_js_round_trip(
+            &nats2,
+            &js2,
+            &format!("acp.session.{}.agent.load", session_id),
+            req_id,
+            payload,
+            &response_subject,
+        )
+        .await;
+        let _resp: LoadSessionResponse =
+            serde_json::from_slice(&msg.payload).expect("invalid LoadSessionResponse");
+    })
+    .await;
+}
+
+// ── serve_js: set_session_mode ────────────────────────────────────────────────
+
+#[tokio::test]
+async fn serve_js_dispatches_set_session_mode_to_agent() {
+    let (_c, port) = start_nats().await;
+    let nats = async_nats::connect(format!("127.0.0.1:{port}"))
+        .await
+        .expect("connect to NATS");
+    let js_ctx = jetstream::new(nats.clone());
+    setup_streams(&js_ctx).await;
+
+    let session_id = "set-mode-js-sess";
+    let req_id = "req-mode-1";
+    let response_subject = format!("acp.session.{}.agent.response.{}", session_id, req_id);
+
+    let nats2 = nats.clone();
+    let js2 = js_ctx.clone();
+    run_with_jetstream(nats, js_ctx, MockAgent::default(), async move {
+        let payload =
+            serde_json::to_vec(&SetSessionModeRequest::new(session_id, "edit")).unwrap();
+        let msg = serve_js_round_trip(
+            &nats2,
+            &js2,
+            &format!("acp.session.{}.agent.set_mode", session_id),
+            req_id,
+            payload,
+            &response_subject,
+        )
+        .await;
+        let _resp: SetSessionModeResponse =
+            serde_json::from_slice(&msg.payload).expect("invalid SetSessionModeResponse");
+    })
+    .await;
+}
+
+// ── serve_js: set_session_config_option ───────────────────────────────────────
+
+#[tokio::test]
+async fn serve_js_dispatches_set_session_config_option_to_agent() {
+    let (_c, port) = start_nats().await;
+    let nats = async_nats::connect(format!("127.0.0.1:{port}"))
+        .await
+        .expect("connect to NATS");
+    let js_ctx = jetstream::new(nats.clone());
+    setup_streams(&js_ctx).await;
+
+    let session_id = "cfg-opt-js-sess";
+    let req_id = "req-cfg-1";
+    let response_subject = format!("acp.session.{}.agent.response.{}", session_id, req_id);
+
+    let nats2 = nats.clone();
+    let js2 = js_ctx.clone();
+    run_with_jetstream(nats, js_ctx, MockAgent::default(), async move {
+        let payload = serde_json::to_vec(&SetSessionConfigOptionRequest::new(
+            session_id, "theme", "dark",
+        ))
+        .unwrap();
+        let msg = serve_js_round_trip(
+            &nats2,
+            &js2,
+            &format!("acp.session.{}.agent.set_config_option", session_id),
+            req_id,
+            payload,
+            &response_subject,
+        )
+        .await;
+        let _resp: SetSessionConfigOptionResponse =
+            serde_json::from_slice(&msg.payload).expect("invalid SetSessionConfigOptionResponse");
+    })
+    .await;
+}
+
+// ── serve_js: set_session_model ───────────────────────────────────────────────
+
+#[tokio::test]
+async fn serve_js_dispatches_set_session_model_to_agent() {
+    let (_c, port) = start_nats().await;
+    let nats = async_nats::connect(format!("127.0.0.1:{port}"))
+        .await
+        .expect("connect to NATS");
+    let js_ctx = jetstream::new(nats.clone());
+    setup_streams(&js_ctx).await;
+
+    let session_id = "set-model-js-sess";
+    let req_id = "req-model-1";
+    let response_subject = format!("acp.session.{}.agent.response.{}", session_id, req_id);
+
+    let nats2 = nats.clone();
+    let js2 = js_ctx.clone();
+    run_with_jetstream(nats, js_ctx, MockAgent::default(), async move {
+        let payload =
+            serde_json::to_vec(&SetSessionModelRequest::new(session_id, "claude-sonnet-4-6"))
+                .unwrap();
+        let msg = serve_js_round_trip(
+            &nats2,
+            &js2,
+            &format!("acp.session.{}.agent.set_model", session_id),
+            req_id,
+            payload,
+            &response_subject,
+        )
+        .await;
+        let _resp: SetSessionModelResponse =
+            serde_json::from_slice(&msg.payload).expect("invalid SetSessionModelResponse");
+    })
+    .await;
+}
+
+// ── serve_js: fork_session ────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn serve_js_dispatches_fork_session_to_agent() {
+    let (_c, port) = start_nats().await;
+    let nats = async_nats::connect(format!("127.0.0.1:{port}"))
+        .await
+        .expect("connect to NATS");
+    let js_ctx = jetstream::new(nats.clone());
+    setup_streams(&js_ctx).await;
+
+    let session_id = "fork-js-sess";
+    let req_id = "req-fork-1";
+    let response_subject = format!("acp.session.{}.agent.response.{}", session_id, req_id);
+
+    let nats2 = nats.clone();
+    let js2 = js_ctx.clone();
+    run_with_jetstream(nats, js_ctx, MockAgent::default(), async move {
+        let payload =
+            serde_json::to_vec(&ForkSessionRequest::new(session_id, ".")).unwrap();
+        let msg = serve_js_round_trip(
+            &nats2,
+            &js2,
+            &format!("acp.session.{}.agent.fork", session_id),
+            req_id,
+            payload,
+            &response_subject,
+        )
+        .await;
+        let resp: ForkSessionResponse =
+            serde_json::from_slice(&msg.payload).expect("invalid ForkSessionResponse");
+        assert_eq!(
+            resp.session_id.to_string().as_str(),
+            "forked-in-serve-js",
+            "serve_js must relay the agent's fork_session response"
+        );
+    })
+    .await;
+}
+
+// ── serve_js: resume_session ──────────────────────────────────────────────────
+
+#[tokio::test]
+async fn serve_js_dispatches_resume_session_to_agent() {
+    let (_c, port) = start_nats().await;
+    let nats = async_nats::connect(format!("127.0.0.1:{port}"))
+        .await
+        .expect("connect to NATS");
+    let js_ctx = jetstream::new(nats.clone());
+    setup_streams(&js_ctx).await;
+
+    let session_id = "resume-js-sess";
+    let req_id = "req-resume-1";
+    let response_subject = format!("acp.session.{}.agent.response.{}", session_id, req_id);
+
+    let nats2 = nats.clone();
+    let js2 = js_ctx.clone();
+    run_with_jetstream(nats, js_ctx, MockAgent::default(), async move {
+        let payload =
+            serde_json::to_vec(&ResumeSessionRequest::new(session_id, ".")).unwrap();
+        let msg = serve_js_round_trip(
+            &nats2,
+            &js2,
+            &format!("acp.session.{}.agent.resume", session_id),
+            req_id,
+            payload,
+            &response_subject,
+        )
+        .await;
+        let _resp: ResumeSessionResponse =
+            serde_json::from_slice(&msg.payload).expect("invalid ResumeSessionResponse");
+    })
+    .await;
+}
+
+// ── serve_js: close_session ───────────────────────────────────────────────────
+
+#[tokio::test]
+async fn serve_js_dispatches_close_session_to_agent() {
+    let (_c, port) = start_nats().await;
+    let nats = async_nats::connect(format!("127.0.0.1:{port}"))
+        .await
+        .expect("connect to NATS");
+    let js_ctx = jetstream::new(nats.clone());
+    setup_streams(&js_ctx).await;
+
+    let session_id = "close-js-sess";
+    let req_id = "req-close-1";
+    let response_subject = format!("acp.session.{}.agent.response.{}", session_id, req_id);
+
+    let nats2 = nats.clone();
+    let js2 = js_ctx.clone();
+    run_with_jetstream(nats, js_ctx, MockAgent::default(), async move {
+        let payload = serde_json::to_vec(&CloseSessionRequest::new(session_id)).unwrap();
+        let msg = serve_js_round_trip(
+            &nats2,
+            &js2,
+            &format!("acp.session.{}.agent.close", session_id),
+            req_id,
+            payload,
+            &response_subject,
+        )
+        .await;
+        let _resp: CloseSessionResponse =
+            serde_json::from_slice(&msg.payload).expect("invalid CloseSessionResponse");
+    })
+    .await;
 }
