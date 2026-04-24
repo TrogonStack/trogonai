@@ -1,0 +1,14 @@
+[package]
+name = "trogon-cron-jobs-proto"
+version = "0.1.0"
+edition = "2024"
+
+[lints.rust]
+warnings = "deny"
+unexpected_cfgs = { level = "deny", check-cfg = ['cfg(coverage)'] }
+
+[lints.clippy]
+all = "deny"
+
+[dependencies]
+protobuf = { workspace = true }
