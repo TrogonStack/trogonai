@@ -1,0 +1,15 @@
+edition = "2024";
+
+package trogon.cron.jobs.state.v1;
+
+message State {
+  StateValue state = 1;
+}
+
+enum StateValue {
+  STATE_VALUE_UNSPECIFIED = 0;
+  STATE_VALUE_MISSING = 1;
+  STATE_VALUE_PRESENT_ENABLED = 2;
+  STATE_VALUE_PRESENT_DISABLED = 3;
+  STATE_VALUE_DELETED = 4;
+}
