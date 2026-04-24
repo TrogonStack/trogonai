@@ -27,8 +27,8 @@ pub use commands::domain::{
     SamplingSource, SamplingSubject, Schedule, ScheduleTimezone, TtlSeconds,
 };
 pub use commands::{
-    AddJobCommand, AddJobDecisionError, JobState, PauseJobCommand, PauseJobDecisionError, RemoveJobCommand,
-    RemoveJobDecisionError, ResumeJobCommand, ResumeJobDecisionError,
+    AddJobCommand, AddJobDecisionError, ContractSnapshotStateError, JobState, PauseJobCommand, PauseJobDecisionError,
+    RemoveJobCommand, RemoveJobDecisionError, ResumeJobCommand, ResumeJobDecisionError,
 };
 pub use config::JobWriteCondition;
 pub use error::{CronError, JobSpecError};
