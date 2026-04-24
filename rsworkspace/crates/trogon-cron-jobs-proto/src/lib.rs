@@ -9,8 +9,18 @@ pub mod trogon {
                     "/src/gen/trogon/cron/jobs/v1/generated.rs"
                 ));
             }
+
+            pub mod snapshot {
+                pub mod v1 {
+                    include!(concat!(
+                        env!("CARGO_MANIFEST_DIR"),
+                        "/src/gen/trogon/cron/jobs/snapshot/v1/generated.rs"
+                    ));
+                }
+            }
         }
     }
 }
 
+pub use trogon::cron::jobs::snapshot::v1 as snapshot_v1;
 pub use trogon::cron::jobs::v1;
