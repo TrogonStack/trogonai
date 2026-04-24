@@ -1978,6 +1978,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "paste-complete"
+version = "1.0.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3a4cf96a295ab7f0ec2334fa557745c0e9526595f6ebabbb129563a98dfc1b2a"
+
+[[package]]
 name = "pem-rfc7468"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2111,6 +2117,27 @@ dependencies = [
  "anyhow",
  "itertools",
  "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "protobuf"
+version = "4.34.1-release"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5af3157e12bb2193b1ee85fd61fe9ebe737b63a22ab3774d7cbb7fb5f32b6425"
+dependencies = [
+ "cc",
+ "paste-complete",
+ "protobuf-macros",
+]
+
+[[package]]
+name = "protobuf-macros"
+version = "4.34.1-release"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b19d8dd07383acc9acc88034d66dec66da7ef87f54df25c8c924e5245606409"
+dependencies = [
  "quote",
  "syn",
 ]
@@ -3549,10 +3576,18 @@ dependencies = [
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
+ "trogon-cron-jobs-proto",
  "trogon-eventsourcing",
  "trogon-nats",
  "trogon-service-config",
  "trogon-std",
+]
+
+[[package]]
+name = "trogon-cron-jobs-proto"
+version = "0.1.0"
+dependencies = [
+ "protobuf",
 ]
 
 [[package]]
