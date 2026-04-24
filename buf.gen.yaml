@@ -1,0 +1,8 @@
+version: v2
+clean: true
+plugins:
+  - protoc_builtin: rust
+    out: rsworkspace/crates/trogon-cron-jobs-proto/src/gen
+    opt:
+      - experimental-codegen=enabled
+      - kernel=upb

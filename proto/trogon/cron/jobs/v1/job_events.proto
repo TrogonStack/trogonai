@@ -1,0 +1,95 @@
+edition = "2024";
+
+package trogon.cron.jobs.v1;
+
+message JobEvent {
+  oneof event {
+    JobAdded job_added = 1;
+    JobPaused job_paused = 2;
+    JobResumed job_resumed = 3;
+    JobRemoved job_removed = 4;
+  }
+}
+
+message JobAdded {
+  string id = 1;
+  JobDetails job = 2;
+}
+
+message JobPaused {
+  string id = 1;
+}
+
+message JobResumed {
+  string id = 1;
+}
+
+message JobRemoved {
+  string id = 1;
+}
+
+message JobDetails {
+  JobStatus status = 1;
+  JobSchedule schedule = 2;
+  JobDelivery delivery = 3;
+  JobMessage message = 4;
+}
+
+enum JobStatus {
+  JOB_STATUS_UNSPECIFIED = 0;
+  JOB_STATUS_ENABLED = 1;
+  JOB_STATUS_DISABLED = 2;
+}
+
+message JobSchedule {
+  oneof kind {
+    AtSchedule at = 1;
+    EverySchedule every = 2;
+    CronSchedule cron = 3;
+  }
+}
+
+message AtSchedule {
+  string at = 1;
+}
+
+message EverySchedule {
+  uint64 every_sec = 1;
+}
+
+message CronSchedule {
+  string expr = 1;
+  string timezone = 2;
+}
+
+message JobDelivery {
+  oneof kind {
+    NatsEventDelivery nats_event = 1;
+  }
+}
+
+message NatsEventDelivery {
+  string route = 1;
+  uint64 ttl_sec = 2;
+  JobSamplingSource source = 3;
+}
+
+message JobSamplingSource {
+  oneof kind {
+    LatestFromSubjectSampling latest_from_subject = 1;
+  }
+}
+
+message LatestFromSubjectSampling {
+  string subject = 1;
+}
+
+message JobMessage {
+  bytes content = 1;
+  repeated Header headers = 2;
+}
+
+message Header {
+  string name = 1;
+  string value = 2;
+}

@@ -33,9 +33,9 @@ pub use commands::{
 pub use config::JobWriteCondition;
 pub use error::{CronError, JobSpecError};
 pub use events::{
-    JobAdded, JobDetails, JobEvent, JobEventCodec, JobEventData, JobEventDelivery, JobEventSamplingSource,
-    JobEventSchedule, JobEventStatus, JobPaused, JobRemoved, JobResumed, MessageContent, MessageEnvelope,
-    MessageHeaders, MessageHeadersError, RecordedJobEvent,
+    ContractEventError, JobAdded, JobDetails, JobEvent, JobEventCodec, JobEventData, JobEventDelivery,
+    JobEventSamplingSource, JobEventSchedule, JobEventStatus, JobPaused, JobRemoved, JobResumed, MessageContent,
+    MessageEnvelope, MessageHeaders, MessageHeadersError, RecordedJobEvent, contract_v1,
 };
 pub use nats::NatsSchedulePublisher;
 pub use processors::CronController;
