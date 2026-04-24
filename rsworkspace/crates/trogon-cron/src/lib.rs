@@ -27,13 +27,13 @@ pub use commands::domain::{
     SamplingSource, SamplingSubject, Schedule, ScheduleTimezone, TtlSeconds,
 };
 pub use commands::{
-    AddJobCommand, AddJobDecisionError, ContractSnapshotStateError, JobState, PauseJobCommand, PauseJobDecisionError,
-    RemoveJobCommand, RemoveJobDecisionError, ResumeJobCommand, ResumeJobDecisionError,
+    AddJobCommand, AddJobDecisionError, JobState, PauseJobCommand, PauseJobDecisionError, RemoveJobCommand,
+    RemoveJobDecisionError, ResumeJobCommand, ResumeJobDecisionError, SnapshotStateProtoError,
 };
 pub use config::JobWriteCondition;
 pub use error::{CronError, JobSpecError};
 pub use events::{
-    ContractEventError, JobAdded, JobDetails, JobEvent, JobEventCodec, JobEventData, JobEventDelivery,
+    JobAdded, JobDetails, JobEvent, JobEventCodec, JobEventData, JobEventDelivery, JobEventProtoError,
     JobEventSamplingSource, JobEventSchedule, JobEventStatus, JobPaused, JobRemoved, JobResumed, MessageContent,
     MessageEnvelope, MessageHeaders, MessageHeadersError, RecordedJobEvent, contract_v1,
 };

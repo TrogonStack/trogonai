@@ -9,7 +9,7 @@ use super::{
 pub use trogon_cron_jobs_proto::v1 as contract_v1;
 
 #[derive(Debug)]
-pub enum ContractEventError {
+pub enum JobEventProtoError {
     MissingEvent,
     MissingJobDetails,
     MissingSchedule,
@@ -23,7 +23,7 @@ pub enum ContractEventError {
     InvalidHeaders(MessageHeadersError),
 }
 
-impl std::fmt::Display for ContractEventError {
+impl std::fmt::Display for JobEventProtoError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::MissingEvent => f.write_str("protobuf job event is missing its oneof case"),
@@ -43,7 +43,7 @@ impl std::fmt::Display for ContractEventError {
     }
 }
 
-impl std::error::Error for ContractEventError {
+impl std::error::Error for JobEventProtoError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::InvalidTimestamp { source, .. } => Some(source),
@@ -81,7 +81,7 @@ impl From<&JobEvent> for v1::JobEvent {
 }
 
 impl TryFrom<v1::JobEvent> for JobEvent {
-    type Error = ContractEventError;
+    type Error = JobEventProtoError;
 
     fn try_from(value: v1::JobEvent) -> Result<Self, Self::Error> {
         match value.event() {
@@ -89,7 +89,7 @@ impl TryFrom<v1::JobEvent> for JobEvent {
             v1::job_event::EventOneof::JobPaused(inner) => Ok(Self::JobPaused(inner.to_owned().try_into()?)),
             v1::job_event::EventOneof::JobResumed(inner) => Ok(Self::JobResumed(inner.to_owned().try_into()?)),
             v1::job_event::EventOneof::JobRemoved(inner) => Ok(Self::JobRemoved(inner.to_owned().try_into()?)),
-            v1::job_event::EventOneof::not_set(_) | _ => Err(ContractEventError::MissingEvent),
+            v1::job_event::EventOneof::not_set(_) | _ => Err(JobEventProtoError::MissingEvent),
         }
     }
 }
@@ -104,11 +104,11 @@ impl From<&JobAdded> for v1::JobAdded {
 }
 
 impl TryFrom<v1::JobAdded> for JobAdded {
-    type Error = ContractEventError;
+    type Error = JobEventProtoError;
 
     fn try_from(value: v1::JobAdded) -> Result<Self, Self::Error> {
         if !value.has_job() {
-            return Err(ContractEventError::MissingJobDetails);
+            return Err(JobEventProtoError::MissingJobDetails);
         }
         Ok(Self {
             id: value.id().to_string(),
@@ -126,7 +126,7 @@ impl From<&JobPaused> for v1::JobPaused {
 }
 
 impl TryFrom<v1::JobPaused> for JobPaused {
-    type Error = ContractEventError;
+    type Error = JobEventProtoError;
 
     fn try_from(value: v1::JobPaused) -> Result<Self, Self::Error> {
         Ok(Self {
@@ -144,7 +144,7 @@ impl From<&JobResumed> for v1::JobResumed {
 }
 
 impl TryFrom<v1::JobResumed> for JobResumed {
-    type Error = ContractEventError;
+    type Error = JobEventProtoError;
 
     fn try_from(value: v1::JobResumed) -> Result<Self, Self::Error> {
         Ok(Self {
@@ -162,7 +162,7 @@ impl From<&JobRemoved> for v1::JobRemoved {
 }
 
 impl TryFrom<v1::JobRemoved> for JobRemoved {
-    type Error = ContractEventError;
+    type Error = JobEventProtoError;
 
     fn try_from(value: v1::JobRemoved) -> Result<Self, Self::Error> {
         Ok(Self {
@@ -183,17 +183,17 @@ impl From<&JobDetails> for v1::JobDetails {
 }
 
 impl TryFrom<v1::JobDetails> for JobDetails {
-    type Error = ContractEventError;
+    type Error = JobEventProtoError;
 
     fn try_from(value: v1::JobDetails) -> Result<Self, Self::Error> {
         if !value.has_schedule() {
-            return Err(ContractEventError::MissingSchedule);
+            return Err(JobEventProtoError::MissingSchedule);
         }
         if !value.has_delivery() {
-            return Err(ContractEventError::MissingDelivery);
+            return Err(JobEventProtoError::MissingDelivery);
         }
         if !value.has_message() {
-            return Err(ContractEventError::MissingMessage);
+            return Err(JobEventProtoError::MissingMessage);
         }
         Ok(Self {
             status: value.status().try_into()?,
@@ -214,13 +214,13 @@ impl From<JobEventStatus> for v1::JobStatus {
 }
 
 impl TryFrom<v1::JobStatus> for JobEventStatus {
-    type Error = ContractEventError;
+    type Error = JobEventProtoError;
 
     fn try_from(value: v1::JobStatus) -> Result<Self, Self::Error> {
         match i32::from(value) {
             1 => Ok(Self::Enabled),
             2 => Ok(Self::Disabled),
-            other => Err(ContractEventError::UnknownJobStatus { value: other }),
+            other => Err(JobEventProtoError::UnknownJobStatus { value: other }),
         }
     }
 }
@@ -253,14 +253,14 @@ impl From<&JobEventSchedule> for v1::JobSchedule {
 }
 
 impl TryFrom<v1::JobSchedule> for JobEventSchedule {
-    type Error = ContractEventError;
+    type Error = JobEventProtoError;
 
     fn try_from(value: v1::JobSchedule) -> Result<Self, Self::Error> {
         match value.kind() {
             v1::job_schedule::KindOneof::At(inner) => {
                 let at = inner.at().to_string();
                 let parsed = DateTime::parse_from_rfc3339(&at)
-                    .map_err(|source| ContractEventError::InvalidTimestamp { value: at, source })?
+                    .map_err(|source| JobEventProtoError::InvalidTimestamp { value: at, source })?
                     .with_timezone(&Utc);
                 Ok(Self::At { at: parsed })
             }
@@ -271,7 +271,7 @@ impl TryFrom<v1::JobSchedule> for JobEventSchedule {
                 expr: inner.expr().to_string(),
                 timezone: inner.has_timezone().then(|| inner.timezone().to_string()),
             }),
-            v1::job_schedule::KindOneof::not_set(_) | _ => Err(ContractEventError::MissingScheduleKind),
+            v1::job_schedule::KindOneof::not_set(_) | _ => Err(JobEventProtoError::MissingScheduleKind),
         }
     }
 }
@@ -297,7 +297,7 @@ impl From<&JobEventDelivery> for v1::JobDelivery {
 }
 
 impl TryFrom<v1::JobDelivery> for JobEventDelivery {
-    type Error = ContractEventError;
+    type Error = JobEventProtoError;
 
     fn try_from(value: v1::JobDelivery) -> Result<Self, Self::Error> {
         match value.kind() {
@@ -309,7 +309,7 @@ impl TryFrom<v1::JobDelivery> for JobEventDelivery {
                     .then(|| inner.source().to_owned().try_into())
                     .transpose()?,
             }),
-            v1::job_delivery::KindOneof::not_set(_) | _ => Err(ContractEventError::MissingDeliveryKind),
+            v1::job_delivery::KindOneof::not_set(_) | _ => Err(JobEventProtoError::MissingDeliveryKind),
         }
     }
 }
@@ -329,14 +329,14 @@ impl From<&JobEventSamplingSource> for v1::JobSamplingSource {
 }
 
 impl TryFrom<v1::JobSamplingSource> for JobEventSamplingSource {
-    type Error = ContractEventError;
+    type Error = JobEventProtoError;
 
     fn try_from(value: v1::JobSamplingSource) -> Result<Self, Self::Error> {
         match value.kind() {
             v1::job_sampling_source::KindOneof::LatestFromSubject(inner) => Ok(Self::LatestFromSubject {
                 subject: inner.subject().to_string(),
             }),
-            v1::job_sampling_source::KindOneof::not_set(_) | _ => Err(ContractEventError::MissingSamplingSourceKind),
+            v1::job_sampling_source::KindOneof::not_set(_) | _ => Err(JobEventProtoError::MissingSamplingSourceKind),
         }
     }
 }
@@ -356,7 +356,7 @@ impl From<&MessageEnvelope> for v1::JobMessage {
 }
 
 impl TryFrom<v1::JobMessage> for MessageEnvelope {
-    type Error = ContractEventError;
+    type Error = JobEventProtoError;
 
     fn try_from(value: v1::JobMessage) -> Result<Self, Self::Error> {
         let headers = value
@@ -367,7 +367,7 @@ impl TryFrom<v1::JobMessage> for MessageEnvelope {
 
         Ok(Self {
             content: MessageContent::new(value.content().as_ref().to_vec()),
-            headers: MessageHeaders::new(headers).map_err(ContractEventError::InvalidHeaders)?,
+            headers: MessageHeaders::new(headers).map_err(JobEventProtoError::InvalidHeaders)?,
         })
     }
 }
@@ -422,6 +422,6 @@ mod tests {
         }));
 
         let error = JobDetails::try_from(details).unwrap_err();
-        assert!(matches!(error, ContractEventError::UnknownJobStatus { value: 99 }));
+        assert!(matches!(error, JobEventProtoError::UnknownJobStatus { value: 99 }));
     }
 }
