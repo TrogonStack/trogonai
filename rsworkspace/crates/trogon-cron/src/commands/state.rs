@@ -1,7 +1,7 @@
 use std::convert::Infallible;
 
 use serde::{Deserialize, Serialize};
-use trogon_cron_jobs_proto::snapshot_v1;
+use trogon_cron_jobs_proto::state_v1;
 use trogon_eventsourcing::{StateMachine, snapshot::SnapshotSchema};
 
 use crate::events::{JobAdded, JobEvent, JobEventStatus, JobPaused, JobRemoved, JobResumed};
@@ -19,45 +19,45 @@ impl SnapshotSchema for JobState {
 }
 
 #[derive(Debug)]
-pub enum SnapshotStateProtoError {
-    UnknownSnapshotStateValue { value: i32 },
+pub enum JobStateProtoError {
+    UnknownStateValue { value: i32 },
 }
 
-impl std::fmt::Display for SnapshotStateProtoError {
+impl std::fmt::Display for JobStateProtoError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::UnknownSnapshotStateValue { value } => {
-                write!(f, "protobuf snapshot state '{value}' is unknown")
+            Self::UnknownStateValue { value } => {
+                write!(f, "protobuf state '{value}' is unknown")
             }
         }
     }
 }
 
-impl std::error::Error for SnapshotStateProtoError {}
+impl std::error::Error for JobStateProtoError {}
 
-impl From<JobState> for snapshot_v1::SnapshotState {
+impl From<JobState> for state_v1::State {
     fn from(value: JobState) -> Self {
         Self::from(&value)
     }
 }
 
-impl From<&JobState> for snapshot_v1::SnapshotState {
+impl From<&JobState> for state_v1::State {
     fn from(value: &JobState) -> Self {
-        let mut state = snapshot_v1::SnapshotState::new();
-        state.set_state(snapshot_v1::SnapshotStateValue::from(*value));
+        let mut state = state_v1::State::new();
+        state.set_state(state_v1::StateValue::from(*value));
         state
     }
 }
 
-impl TryFrom<snapshot_v1::SnapshotState> for JobState {
-    type Error = SnapshotStateProtoError;
+impl TryFrom<state_v1::State> for JobState {
+    type Error = JobStateProtoError;
 
-    fn try_from(value: snapshot_v1::SnapshotState) -> Result<Self, Self::Error> {
+    fn try_from(value: state_v1::State) -> Result<Self, Self::Error> {
         value.state().try_into()
     }
 }
 
-impl From<JobState> for snapshot_v1::SnapshotStateValue {
+impl From<JobState> for state_v1::StateValue {
     fn from(value: JobState) -> Self {
         match value {
             JobState::Missing => Self::Missing,
@@ -68,16 +68,16 @@ impl From<JobState> for snapshot_v1::SnapshotStateValue {
     }
 }
 
-impl TryFrom<snapshot_v1::SnapshotStateValue> for JobState {
-    type Error = SnapshotStateProtoError;
+impl TryFrom<state_v1::StateValue> for JobState {
+    type Error = JobStateProtoError;
 
-    fn try_from(value: snapshot_v1::SnapshotStateValue) -> Result<Self, Self::Error> {
+    fn try_from(value: state_v1::StateValue) -> Result<Self, Self::Error> {
         match i32::from(value) {
             1 => Ok(Self::Missing),
             2 => Ok(Self::PresentEnabled),
             3 => Ok(Self::PresentDisabled),
             4 => Ok(Self::Deleted),
-            other => Err(SnapshotStateProtoError::UnknownSnapshotStateValue { value: other }),
+            other => Err(JobStateProtoError::UnknownStateValue { value: other }),
         }
     }
 }
@@ -118,22 +118,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn snapshot_state_round_trips_through_contract() {
+    fn state_round_trips_through_proto() {
         let state = JobState::PresentEnabled;
 
-        let proto = snapshot_v1::SnapshotState::from(state);
+        let proto = state_v1::State::from(state);
         let decoded = JobState::try_from(proto).unwrap();
 
         assert_eq!(decoded, state);
     }
 
     #[test]
-    fn unspecified_snapshot_state_is_rejected() {
-        let error = JobState::try_from(snapshot_v1::SnapshotState::new()).unwrap_err();
+    fn unspecified_state_is_rejected() {
+        let error = JobState::try_from(state_v1::State::new()).unwrap_err();
 
-        assert!(matches!(
-            error,
-            SnapshotStateProtoError::UnknownSnapshotStateValue { value: 0 }
-        ));
+        assert!(matches!(error, JobStateProtoError::UnknownStateValue { value: 0 }));
     }
 }
