@@ -1204,6 +1204,40 @@ mod tests {
         assert!(root_info.meta.is_none(), "root must not have branch _meta");
     }
 
+    /// `branchAtIndex` is not supported by codex-runner (Codex manages its own
+    /// history inside the subprocess). Passing it must not cause an error and
+    /// must not surface as `branchedAtIndex` in `list_sessions._meta`.
+    #[tokio::test]
+    async fn fork_session_silently_ignores_branch_at_index() {
+        let agent = make_agent().await;
+        agent.test_insert_session("src", "/root", None).await;
+
+        let meta = serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(
+            serde_json::json!({ "branchAtIndex": 2 }),
+        )
+        .unwrap();
+        let fork_id = agent
+            .fork_session(ForkSessionRequest::new("src", "/branch").meta(meta))
+            .await
+            .unwrap()
+            .session_id
+            .to_string();
+
+        let list_resp = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
+        let fork_info = list_resp
+            .sessions
+            .iter()
+            .find(|s| s.session_id.to_string() == fork_id)
+            .expect("forked session must appear in list");
+        assert!(
+            fork_info
+                .meta
+                .as_ref()
+                .map_or(true, |m| !m.contains_key("branchedAtIndex")),
+            "branchedAtIndex must not appear in _meta — branchAtIndex is not supported"
+        );
+    }
+
     // ── ext_method / session/list_children ───────────────────────────────────
 
     #[tokio::test]

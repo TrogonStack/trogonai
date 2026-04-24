@@ -3356,3 +3356,213 @@ async fn list_sessions_includes_parent_meta_via_nats() {
         })
         .await;
 }
+
+/// list_sessions response includes branchedAtIndex in the forked session's _meta
+/// when the fork was created with branchAtIndex set.
+#[tokio::test]
+async fn list_sessions_includes_branched_at_index_in_meta_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let parent_id = create_session(&h).await; // publishes: 1
+
+            let meta = serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(
+                serde_json::json!({ "branchAtIndex": 2 }),
+            )
+            .unwrap();
+            h.session_req(
+                &format!("acp.session.{parent_id}.agent.fork"),
+                ForkSessionRequest::new(parent_id.clone(), "/fork").meta(meta),
+                "r.fork",
+            );
+            let payloads = h.expect_n_publishes(2).await; // publishes: 2
+            let fork_id = serde_json::from_slice::<serde_json::Value>(&payloads[1])
+                .unwrap()["sessionId"]
+                .as_str()
+                .unwrap()
+                .to_string();
+
+            h.global("acp.agent.session.list", ListSessionsRequest::new(), "r.list");
+            let payloads = h.expect_n_publishes(3).await; // publishes: 3
+
+            let resp: ListSessionsResponse = serde_json::from_slice(&payloads[2]).unwrap();
+            let fork_info = resp
+                .sessions
+                .iter()
+                .find(|s| s.session_id.to_string() == fork_id)
+                .expect("fork must appear in list_sessions");
+
+            let meta = fork_info.meta.as_ref().expect("fork must have _meta");
+            assert_eq!(
+                meta.get("branchedAtIndex").and_then(|v| v.as_u64()),
+                Some(2),
+                "fork _meta must include branchedAtIndex: 2"
+            );
+        })
+        .await;
+}
+
+/// Fork with an out-of-bounds branchAtIndex copies the full history — the first
+/// prompt on the fork replays all inherited messages.
+#[tokio::test]
+async fn fork_session_branch_at_index_out_of_bounds_replays_full_history_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await; // publishes: 1
+
+            // Prompt source — adds 1 user + 1 assistant message to history.
+            h.http.push(vec![
+                XaiEvent::TextDelta { text: "assistant reply".to_string() },
+                XaiEvent::Done,
+            ]);
+            h.session_req(
+                &format!("acp.session.{sid}.agent.prompt"),
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("user question")]),
+                "r.prompt1",
+            );
+            h.expect_n_publishes(2).await; // publishes: 2
+
+            // Fork with out-of-bounds branchAtIndex → full history copied.
+            let meta = serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(
+                serde_json::json!({ "branchAtIndex": 99 }),
+            )
+            .unwrap();
+            h.session_req(
+                &format!("acp.session.{sid}.agent.fork"),
+                ForkSessionRequest::new(sid.clone(), "/fork").meta(meta),
+                "r.fork",
+            );
+            let payloads = h.expect_n_publishes(3).await; // publishes: 3
+            let fork_id = serde_json::from_slice::<serde_json::Value>(&payloads[2])
+                .unwrap()["sessionId"]
+                .as_str()
+                .unwrap()
+                .to_string();
+
+            // Prompt the fork — must replay full inherited history.
+            h.http.push(vec![XaiEvent::Done]);
+            h.session_req(
+                &format!("acp.session.{fork_id}.agent.prompt"),
+                PromptRequest::new(fork_id.clone(), vec![ContentBlock::from("follow-up")]),
+                "r.prompt2",
+            );
+            h.expect_n_publishes(4).await; // publishes: 4
+
+            let call = h.http.last_call().unwrap();
+            assert_eq!(
+                call.input_len, 3,
+                "out-of-bounds branchAtIndex must replay full history: user + assistant + follow-up = 3"
+            );
+        })
+        .await;
+}
+
+/// `ext_method("session/list_children")` must return only direct children,
+/// not grandchildren.  For the chain A → B → C, querying A returns [B] and
+/// querying B returns [C].
+#[tokio::test]
+async fn ext_list_children_only_returns_direct_children_not_grandchildren_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let a_id = create_session(&h).await; // publishes: 1
+
+            // Fork A → B.
+            h.session_req(
+                &format!("acp.session.{a_id}.agent.fork"),
+                ForkSessionRequest::new(a_id.clone(), "/b"),
+                "r.fork_b",
+            );
+            let payloads = h.expect_n_publishes(2).await; // publishes: 2
+            let b_id = serde_json::from_slice::<serde_json::Value>(&payloads[1])
+                .unwrap()["sessionId"]
+                .as_str()
+                .unwrap()
+                .to_string();
+
+            // Fork B → C.
+            h.session_req(
+                &format!("acp.session.{b_id}.agent.fork"),
+                ForkSessionRequest::new(b_id.clone(), "/c"),
+                "r.fork_c",
+            );
+            let payloads = h.expect_n_publishes(3).await; // publishes: 3
+            let c_id = serde_json::from_slice::<serde_json::Value>(&payloads[2])
+                .unwrap()["sessionId"]
+                .as_str()
+                .unwrap()
+                .to_string();
+
+            // list_children(A) must return only B.
+            let params_a = serde_json::value::RawValue::from_string(
+                format!(r#"{{"sessionId":"{}"}}"#, a_id),
+            )
+            .unwrap();
+            h.global(
+                "acp.agent.ext.session/list_children",
+                ExtRequest::new("session/list_children", params_a.into()),
+                "r.ext_a",
+            );
+            let payloads = h.expect_n_publishes(4).await; // publishes: 4
+            let resp_a: serde_json::Value = serde_json::from_slice(&payloads[3]).unwrap();
+            let children_a: Vec<String> = resp_a["children"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect();
+            assert_eq!(children_a, vec![b_id.clone()], "A must have only B as child");
+
+            // list_children(B) must return only C.
+            let params_b = serde_json::value::RawValue::from_string(
+                format!(r#"{{"sessionId":"{}"}}"#, b_id),
+            )
+            .unwrap();
+            h.global(
+                "acp.agent.ext.session/list_children",
+                ExtRequest::new("session/list_children", params_b.into()),
+                "r.ext_b",
+            );
+            let payloads = h.expect_n_publishes(5).await; // publishes: 5
+            let resp_b: serde_json::Value = serde_json::from_slice(&payloads[4]).unwrap();
+            let children_b: Vec<String> = resp_b["children"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect();
+            assert_eq!(children_b, vec![c_id.clone()], "B must have only C as child");
+        })
+        .await;
+}
+
+/// `ext_method("session/list_children")` on a root session (never forked)
+/// returns an empty children array.
+#[tokio::test]
+async fn ext_list_children_returns_empty_for_root_session_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let root_id = create_session(&h).await; // publishes: 1
+
+            let params = serde_json::value::RawValue::from_string(
+                format!(r#"{{"sessionId":"{}"}}"#, root_id),
+            )
+            .unwrap();
+            h.global(
+                "acp.agent.ext.session/list_children",
+                ExtRequest::new("session/list_children", params.into()),
+                "r.ext",
+            );
+            let payloads = h.expect_n_publishes(2).await; // publishes: 2
+
+            let resp: serde_json::Value = serde_json::from_slice(&payloads[1]).unwrap();
+            assert_eq!(
+                resp["children"].as_array().map(Vec::len),
+                Some(0),
+                "root session must have no children"
+            );
+        })
+        .await;
+}

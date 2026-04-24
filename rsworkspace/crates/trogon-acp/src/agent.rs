@@ -4082,7 +4082,7 @@ mod tests {
 
     use acp_nats::{AcpPrefix, Config, NatsAuth, NatsConfig};
     use agent_client_protocol::{
-        Agent as _, AuthenticateRequest, ForkSessionRequest, InitializeRequest,
+        Agent as _, AuthenticateRequest, ExtRequest, ForkSessionRequest, InitializeRequest,
         ListSessionsRequest, LoadSessionRequest, NewSessionRequest, ProtocolVersion,
         ResumeSessionRequest, SetSessionModeRequest, SetSessionModelRequest,
     };
@@ -4439,5 +4439,175 @@ mod tests {
             .find(|s| s.session_id.to_string() == parent_id)
             .expect("root session must appear in list_sessions");
         assert!(root_info.meta.is_none(), "root session must not have branch _meta");
+    }
+
+    /// `initialize` advertises both `listChildren` and `branchAtIndex` in the
+    /// `session_capabilities._meta` map when backed by a real NATS store.
+    #[tokio::test(flavor = "current_thread")]
+    async fn initialize_advertises_listchildren_and_branchatindex_capabilities() {
+        let (_container, nats, js) = start_nats_js().await;
+        let (agent, _rx) = make_agent_with_nats(nats, js).await;
+
+        let resp = agent
+            .initialize(InitializeRequest::new(ProtocolVersion::LATEST))
+            .await
+            .unwrap();
+
+        let meta = resp
+            .agent_capabilities
+            .session_capabilities
+            .meta
+            .expect("session_capabilities must have _meta");
+        assert!(meta.contains_key("listChildren"), "must advertise listChildren");
+        assert!(meta.contains_key("branchAtIndex"), "must advertise branchAtIndex");
+    }
+
+    /// `fork_session` writes both `parent_session_id` and `branched_at_index`
+    /// into the NATS KV bucket so the fields survive a round-trip.
+    #[tokio::test(flavor = "current_thread")]
+    async fn fork_session_persists_parent_session_id_and_branched_at_index_to_nats_kv() {
+        let (_container, nats, js) = start_nats_js().await;
+        let (agent, _rx) = make_agent_with_nats(nats, js).await;
+
+        let parent_id = agent
+            .new_session(NewSessionRequest::new("/root").mcp_servers(vec![]))
+            .await
+            .unwrap()
+            .session_id
+            .to_string();
+
+        let meta = serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(
+            serde_json::json!({ "branchAtIndex": 3 }),
+        )
+        .unwrap();
+        let fork_id = agent
+            .fork_session(ForkSessionRequest::new(parent_id.clone(), "/fork").meta(meta))
+            .await
+            .unwrap()
+            .session_id
+            .to_string();
+
+        let fork_state = agent.store.load(&fork_id).await.unwrap();
+        assert_eq!(
+            fork_state.parent_session_id.as_deref(),
+            Some(parent_id.as_str()),
+            "fork KV entry must record parent_session_id"
+        );
+        assert_eq!(
+            fork_state.branched_at_index,
+            Some(3),
+            "fork KV entry must record branched_at_index"
+        );
+    }
+
+    /// `list_sessions` reads `branched_at_index` back from the real NATS KV
+    /// bucket and exposes it as `branchedAtIndex` in the session `_meta`.
+    #[tokio::test(flavor = "current_thread")]
+    async fn list_sessions_includes_branched_at_index_in_meta_with_real_store() {
+        let (_container, nats, js) = start_nats_js().await;
+        let (agent, _rx) = make_agent_with_nats(nats, js).await;
+
+        let parent_id = agent
+            .new_session(NewSessionRequest::new("/root").mcp_servers(vec![]))
+            .await
+            .unwrap()
+            .session_id
+            .to_string();
+
+        let meta = serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(
+            serde_json::json!({ "branchAtIndex": 2 }),
+        )
+        .unwrap();
+        let fork_id = agent
+            .fork_session(ForkSessionRequest::new(parent_id.clone(), "/fork").meta(meta))
+            .await
+            .unwrap()
+            .session_id
+            .to_string();
+
+        let list_resp = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
+
+        let fork_info = list_resp
+            .sessions
+            .iter()
+            .find(|s| s.session_id.to_string() == fork_id)
+            .expect("forked session must appear in list_sessions");
+        let session_meta = fork_info.meta.as_ref().expect("fork must have _meta");
+        assert_eq!(
+            session_meta.get("branchedAtIndex").and_then(|v| v.as_u64()),
+            Some(2),
+            "branchedAtIndex must be 2 in fork _meta after KV round-trip"
+        );
+
+        let root_info = list_resp
+            .sessions
+            .iter()
+            .find(|s| s.session_id.to_string() == parent_id)
+            .expect("root session must appear in list_sessions");
+        assert!(
+            root_info
+                .meta
+                .as_ref()
+                .map_or(true, |m| !m.contains_key("branchedAtIndex")),
+            "root session must not have branchedAtIndex in _meta"
+        );
+    }
+
+    /// `ext_method("session/list_children")` drives `list_children` against
+    /// real NATS KV. It must return only direct children, not grandchildren.
+    #[tokio::test(flavor = "current_thread")]
+    async fn ext_list_children_returns_direct_children_with_real_nats() {
+        let (_container, nats, js) = start_nats_js().await;
+        let (agent, _rx) = make_agent_with_nats(nats, js).await;
+
+        let parent_id = agent
+            .new_session(NewSessionRequest::new("/root").mcp_servers(vec![]))
+            .await
+            .unwrap()
+            .session_id
+            .to_string();
+
+        let child1 = agent
+            .fork_session(ForkSessionRequest::new(parent_id.clone(), "/c1"))
+            .await
+            .unwrap()
+            .session_id
+            .to_string();
+
+        let child2 = agent
+            .fork_session(ForkSessionRequest::new(parent_id.clone(), "/c2"))
+            .await
+            .unwrap()
+            .session_id
+            .to_string();
+
+        // Grandchild must NOT appear in parent's list.
+        let _grandchild = agent
+            .fork_session(ForkSessionRequest::new(child1.clone(), "/gc"))
+            .await
+            .unwrap()
+            .session_id
+            .to_string();
+
+        let params_json = format!(r#"{{"sessionId":"{}"}}"#, parent_id);
+        let params: std::sync::Arc<serde_json::value::RawValue> =
+            serde_json::value::RawValue::from_string(params_json).unwrap().into();
+        let resp = agent
+            .ext_method(ExtRequest::new("session/list_children", params))
+            .await
+            .unwrap();
+
+        let v: serde_json::Value = serde_json::from_str(resp.0.get()).unwrap();
+        let mut children: Vec<String> = v["children"]
+            .as_array()
+            .expect("response must contain a children array")
+            .iter()
+            .filter_map(|x| x.as_str().map(String::from))
+            .collect();
+        children.sort();
+
+        let mut expected = vec![child1, child2];
+        expected.sort();
+        assert_eq!(children, expected, "must return only direct children");
     }
 }
