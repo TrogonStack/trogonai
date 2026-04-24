@@ -56,10 +56,6 @@ where
     }
 }
 
-pub trait StreamEvent {
-    fn stream_id(&self) -> &str;
-}
-
 pub trait EventType {
     fn event_type(&self) -> &'static str;
 }
@@ -91,63 +87,83 @@ pub struct RecordedEvent {
 }
 
 impl EventData {
-    pub fn new<E>(event: E) -> serde_json::Result<Self>
+    pub fn new<E>(stream_id: impl AsRef<str>, event: E) -> serde_json::Result<Self>
     where
-        E: EventType + StreamEvent + Serialize + DeserializeOwned,
+        E: EventType + Serialize + DeserializeOwned,
     {
-        Self::new_with_codec_and_generator(&JsonEventCodec, &UuidV7Generator, event)
+        Self::new_with_codec_and_generator(stream_id, &JsonEventCodec, &UuidV7Generator, event)
     }
 
-    pub fn new_with_codec<E, C>(codec: &C, event: E) -> Result<Self, C::Error>
+    pub fn new_with_codec<E, C>(stream_id: impl AsRef<str>, codec: &C, event: E) -> Result<Self, C::Error>
     where
-        E: EventType + StreamEvent,
+        E: EventType,
         C: EventCodec<E>,
     {
-        Self::new_with_codec_and_generator(codec, &UuidV7Generator, event)
+        Self::new_with_codec_and_generator(stream_id, codec, &UuidV7Generator, event)
     }
 
-    pub fn new_with_codec_and_generator<E, C, N>(codec: &C, now_v7: &N, event: E) -> Result<Self, C::Error>
+    pub fn new_with_codec_and_generator<E, C, N>(
+        stream_id: impl AsRef<str>,
+        codec: &C,
+        now_v7: &N,
+        event: E,
+    ) -> Result<Self, C::Error>
     where
-        E: EventType + StreamEvent,
+        E: EventType,
         C: EventCodec<E>,
         N: NowV7,
     {
         Ok(Self {
             event_id: now_v7.now_v7().to_string(),
             event_type: event.event_type().to_string(),
-            stream_id: event.stream_id().to_string(),
+            stream_id: stream_id.as_ref().to_string(),
             data: codec.encode(&event)?,
             metadata: None,
         })
     }
 
-    pub fn with_metadata<E, M>(event: E, metadata: Option<M>) -> serde_json::Result<Self>
+    pub fn with_metadata<E, M>(stream_id: impl AsRef<str>, event: E, metadata: Option<M>) -> serde_json::Result<Self>
     where
-        E: EventType + StreamEvent + Serialize + DeserializeOwned,
+        E: EventType + Serialize + DeserializeOwned,
         M: Serialize + DeserializeOwned,
     {
-        Self::with_codecs_and_generator(&JsonEventCodec, &JsonEventCodec, &UuidV7Generator, event, metadata).map_err(
-            |error| match error {
-                CodecError::Data(source) | CodecError::Metadata(source) => source,
-            },
+        Self::with_codecs_and_generator(
+            stream_id,
+            &JsonEventCodec,
+            &JsonEventCodec,
+            &UuidV7Generator,
+            event,
+            metadata,
         )
+        .map_err(|error| match error {
+            CodecError::Data(source) | CodecError::Metadata(source) => source,
+        })
     }
 
     pub fn with_codecs<E, M, EC, MC>(
+        stream_id: impl AsRef<str>,
         event_codec: &EC,
         metadata_codec: &MC,
         event: E,
         metadata: Option<M>,
     ) -> Result<Self, CodecError<EC::Error, MC::Error>>
     where
-        E: EventType + StreamEvent,
+        E: EventType,
         EC: EventCodec<E>,
         MC: EventCodec<M>,
     {
-        Self::with_codecs_and_generator(event_codec, metadata_codec, &UuidV7Generator, event, metadata)
+        Self::with_codecs_and_generator(
+            stream_id,
+            event_codec,
+            metadata_codec,
+            &UuidV7Generator,
+            event,
+            metadata,
+        )
     }
 
     pub fn with_codecs_and_generator<E, M, EC, MC, N>(
+        stream_id: impl AsRef<str>,
         event_codec: &EC,
         metadata_codec: &MC,
         now_v7: &N,
@@ -155,7 +171,7 @@ impl EventData {
         metadata: Option<M>,
     ) -> Result<Self, CodecError<EC::Error, MC::Error>>
     where
-        E: EventType + StreamEvent,
+        E: EventType,
         EC: EventCodec<E>,
         MC: EventCodec<M>,
         N: NowV7,
@@ -163,7 +179,7 @@ impl EventData {
         Ok(Self {
             event_id: now_v7.now_v7().to_string(),
             event_type: event.event_type().to_string(),
-            stream_id: event.stream_id().to_string(),
+            stream_id: stream_id.as_ref().to_string(),
             data: event_codec.encode(&event).map_err(CodecError::Data)?,
             metadata: metadata
                 .map(|value| metadata_codec.encode(&value))
@@ -292,12 +308,6 @@ mod tests {
         value: String,
     }
 
-    impl StreamEvent for TestEvent {
-        fn stream_id(&self) -> &str {
-            &self.id
-        }
-    }
-
     impl EventType for TestEvent {
         fn event_type(&self) -> &'static str {
             "TestEvent"
@@ -306,10 +316,13 @@ mod tests {
 
     #[test]
     fn event_data_uses_event_traits() {
-        let event = EventData::new(TestEvent {
-            id: "alpha".to_string(),
-            value: "beta".to_string(),
-        })
+        let event = EventData::new(
+            "alpha",
+            TestEvent {
+                id: "alpha".to_string(),
+                value: "beta".to_string(),
+            },
+        )
         .unwrap();
 
         assert_eq!(event.stream_id(), "alpha");
@@ -320,10 +333,13 @@ mod tests {
 
     #[test]
     fn recorded_event_preserves_store_context() {
-        let event = EventData::new(TestEvent {
-            id: "alpha".to_string(),
-            value: "beta".to_string(),
-        })
+        let event = EventData::new(
+            "alpha",
+            TestEvent {
+                id: "alpha".to_string(),
+                value: "beta".to_string(),
+            },
+        )
         .unwrap();
 
         let recorded = event.record(
@@ -342,10 +358,13 @@ mod tests {
 
     #[test]
     fn event_data_and_recorded_event_decode_payloads() {
-        let event = EventData::new(TestEvent {
-            id: "alpha".to_string(),
-            value: "beta".to_string(),
-        })
+        let event = EventData::new(
+            "alpha",
+            TestEvent {
+                id: "alpha".to_string(),
+                value: "beta".to_string(),
+            },
+        )
         .unwrap();
         let event_payload = serde_json::to_vec(&event).unwrap();
         let decoded_event = EventData::decode(&event_payload).unwrap();

@@ -152,6 +152,7 @@ impl MockCronStore {
             id.clone(),
             vec![
                 JobEventData::new_with_codec(
+                    &id,
                     &JobEventCodec,
                     JobEvent::JobAdded(JobAdded {
                         id: id.clone(),
