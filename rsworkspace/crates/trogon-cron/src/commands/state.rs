@@ -19,11 +19,11 @@ impl SnapshotSchema for JobState {
 }
 
 #[derive(Debug)]
-pub enum ContractSnapshotStateError {
+pub enum SnapshotStateProtoError {
     UnknownSnapshotStateValue { value: i32 },
 }
 
-impl std::fmt::Display for ContractSnapshotStateError {
+impl std::fmt::Display for SnapshotStateProtoError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::UnknownSnapshotStateValue { value } => {
@@ -33,7 +33,7 @@ impl std::fmt::Display for ContractSnapshotStateError {
     }
 }
 
-impl std::error::Error for ContractSnapshotStateError {}
+impl std::error::Error for SnapshotStateProtoError {}
 
 impl From<JobState> for snapshot_v1::SnapshotState {
     fn from(value: JobState) -> Self {
@@ -50,7 +50,7 @@ impl From<&JobState> for snapshot_v1::SnapshotState {
 }
 
 impl TryFrom<snapshot_v1::SnapshotState> for JobState {
-    type Error = ContractSnapshotStateError;
+    type Error = SnapshotStateProtoError;
 
     fn try_from(value: snapshot_v1::SnapshotState) -> Result<Self, Self::Error> {
         value.state().try_into()
@@ -69,7 +69,7 @@ impl From<JobState> for snapshot_v1::SnapshotStateValue {
 }
 
 impl TryFrom<snapshot_v1::SnapshotStateValue> for JobState {
-    type Error = ContractSnapshotStateError;
+    type Error = SnapshotStateProtoError;
 
     fn try_from(value: snapshot_v1::SnapshotStateValue) -> Result<Self, Self::Error> {
         match i32::from(value) {
@@ -77,7 +77,7 @@ impl TryFrom<snapshot_v1::SnapshotStateValue> for JobState {
             2 => Ok(Self::PresentEnabled),
             3 => Ok(Self::PresentDisabled),
             4 => Ok(Self::Deleted),
-            other => Err(ContractSnapshotStateError::UnknownSnapshotStateValue { value: other }),
+            other => Err(SnapshotStateProtoError::UnknownSnapshotStateValue { value: other }),
         }
     }
 }
@@ -133,7 +133,7 @@ mod tests {
 
         assert!(matches!(
             error,
-            ContractSnapshotStateError::UnknownSnapshotStateValue { value: 0 }
+            SnapshotStateProtoError::UnknownSnapshotStateValue { value: 0 }
         ));
     }
 }
