@@ -16,9 +16,9 @@ use std::time::Duration;
 use acp_nats::AcpPrefix;
 use acp_nats_agent::AgentSideNatsConnection;
 use agent_client_protocol::{
-    Agent, AuthenticateRequest, AuthenticateResponse, CancelNotification, InitializeRequest,
-    InitializeResponse, NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse,
-    ProtocolVersion, StopReason,
+    Agent, AuthenticateRequest, AuthenticateResponse, CancelNotification, ExtNotification,
+    ExtRequest, ExtResponse, InitializeRequest, InitializeResponse, NewSessionRequest,
+    NewSessionResponse, PromptRequest, PromptResponse, ProtocolVersion, StopReason,
 };
 use async_nats::jetstream;
 use futures::StreamExt as _;
@@ -47,8 +47,12 @@ async fn setup_streams(js: &jetstream::Context) {
 
 // ── MockAgent ─────────────────────────────────────────────────────────────────
 
+#[derive(Default)]
 struct MockAgent {
     prompt_called: Arc<Mutex<bool>>,
+    cancel_called: Arc<Mutex<bool>>,
+    ext_method_called: Arc<Mutex<bool>>,
+    ext_notification_called: Arc<Mutex<bool>>,
 }
 
 #[async_trait::async_trait(?Send)]
@@ -85,6 +89,27 @@ impl Agent for MockAgent {
     }
 
     async fn cancel(&self, _: CancelNotification) -> agent_client_protocol::Result<()> {
+        *self.cancel_called.lock().unwrap() = true;
+        Ok(())
+    }
+
+    async fn ext_method(
+        &self,
+        _: ExtRequest,
+    ) -> agent_client_protocol::Result<ExtResponse> {
+        *self.ext_method_called.lock().unwrap() = true;
+        Ok(ExtResponse::new(
+            serde_json::value::RawValue::from_string(r#"{"ok":true}"#.to_string())
+                .unwrap()
+                .into(),
+        ))
+    }
+
+    async fn ext_notification(
+        &self,
+        _: ExtNotification,
+    ) -> agent_client_protocol::Result<()> {
+        *self.ext_notification_called.lock().unwrap() = true;
         Ok(())
     }
 }
@@ -110,6 +135,7 @@ async fn serve_js_dispatches_prompt_command_to_agent() {
     let prompt_called = Arc::new(Mutex::new(false));
     let agent = MockAgent {
         prompt_called: prompt_called.clone(),
+        ..Default::default()
     };
 
     // Subscribe to the response subject BEFORE starting io_task so no message is missed.
@@ -185,9 +211,7 @@ async fn serve_global_dispatches_initialize_to_agent() {
     let js_ctx = jetstream::new(nats.clone());
     setup_streams(&js_ctx).await;
 
-    let agent = MockAgent {
-        prompt_called: Arc::new(Mutex::new(false)),
-    };
+    let agent = MockAgent::default();
 
     let local = tokio::task::LocalSet::new();
     local
@@ -228,4 +252,189 @@ async fn serve_global_dispatches_initialize_to_agent() {
             );
         })
         .await;
+}
+
+/// `serve_global` (run by `with_jetstream`) also subscribes to
+/// `{prefix}.session.*.agent.ext.>` (AllAgentExtSubject).  When a request
+/// arrives there it is parsed as a global Ext method and dispatched to the
+/// agent's `ext_method()` handler; the response is published to the reply inbox.
+#[tokio::test]
+async fn serve_global_dispatches_session_ext_method_to_agent() {
+    let (_c, port) = start_nats().await;
+    let nats = async_nats::connect(format!("127.0.0.1:{port}"))
+        .await
+        .expect("connect to NATS");
+    let js_ctx = jetstream::new(nats.clone());
+    setup_streams(&js_ctx).await;
+
+    let ext_method_called = Arc::new(Mutex::new(false));
+    let agent = MockAgent {
+        ext_method_called: ext_method_called.clone(),
+        ..Default::default()
+    };
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let js_client = NatsJetStreamClient::new(js_ctx.clone());
+            let prefix = AcpPrefix::new("acp").unwrap();
+            let (_conn, io_task) = AgentSideNatsConnection::with_jetstream(
+                agent,
+                nats.clone(),
+                js_client,
+                prefix,
+                |fut| {
+                    tokio::task::spawn_local(fut);
+                },
+            );
+            tokio::task::spawn_local(io_task);
+
+            tokio::time::sleep(Duration::from_millis(100)).await;
+
+            // Session-scoped ext subject is caught by AllAgentExtSubject subscription
+            // and parsed as GlobalAgentMethod::Ext — serve_global calls ext_method().
+            let payload = serde_json::to_vec(&ExtRequest::new(
+                "my_op",
+                serde_json::value::RawValue::from_string("{}".to_string())
+                    .unwrap()
+                    .into(),
+            ))
+            .unwrap();
+            let msg = tokio::time::timeout(
+                Duration::from_secs(5),
+                nats.request("acp.session.sess-ext.agent.ext.my_op", payload.into()),
+            )
+            .await
+            .expect("timed out waiting for ext_method response")
+            .expect("request failed");
+
+            let _resp: ExtResponse =
+                serde_json::from_slice(&msg.payload).expect("invalid ExtResponse JSON");
+        })
+        .await;
+
+    assert!(
+        *ext_method_called.lock().unwrap(),
+        "agent.ext_method() must have been called via session ext subscription"
+    );
+}
+
+/// `serve_global` dispatches ext publishes that carry no reply subject to the
+/// agent's `ext_notification()` handler (fire-and-forget).
+#[tokio::test]
+async fn serve_global_dispatches_ext_notification_to_agent() {
+    let (_c, port) = start_nats().await;
+    let nats = async_nats::connect(format!("127.0.0.1:{port}"))
+        .await
+        .expect("connect to NATS");
+    let js_ctx = jetstream::new(nats.clone());
+    setup_streams(&js_ctx).await;
+
+    let ext_notification_called = Arc::new(Mutex::new(false));
+    let agent = MockAgent {
+        ext_notification_called: ext_notification_called.clone(),
+        ..Default::default()
+    };
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let js_client = NatsJetStreamClient::new(js_ctx.clone());
+            let prefix = AcpPrefix::new("acp").unwrap();
+            let (_conn, io_task) = AgentSideNatsConnection::with_jetstream(
+                agent,
+                nats.clone(),
+                js_client,
+                prefix,
+                |fut| {
+                    tokio::task::spawn_local(fut);
+                },
+            );
+            tokio::task::spawn_local(io_task);
+
+            tokio::time::sleep(Duration::from_millis(100)).await;
+
+            // No reply subject → serve_global calls ext_notification() instead of ext_method().
+            let payload = serde_json::to_vec(&ExtNotification::new(
+                "my_notify",
+                serde_json::value::RawValue::from_string("{}".to_string())
+                    .unwrap()
+                    .into(),
+            ))
+            .unwrap();
+            nats.publish("acp.agent.ext.my_notify", payload.into())
+                .await
+                .unwrap();
+
+            // Give the dispatch loop time to call the handler.
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        })
+        .await;
+
+    assert!(
+        *ext_notification_called.lock().unwrap(),
+        "agent.ext_notification() must have been called for fire-and-forget ext publish"
+    );
+}
+
+/// `serve_js` receives a cancel message from the JetStream COMMANDS stream.
+/// Cancel is a notification — no `X-Req-Id`, no response published — but the
+/// agent's `cancel()` handler must still be called and the message acked.
+#[tokio::test]
+async fn serve_js_dispatches_cancel_notification_to_agent() {
+    let (_c, port) = start_nats().await;
+    let nats = async_nats::connect(format!("127.0.0.1:{port}"))
+        .await
+        .expect("connect to NATS");
+    let js_ctx = jetstream::new(nats.clone());
+    setup_streams(&js_ctx).await;
+
+    let session_id = "cancel-sess";
+    let cancel_called = Arc::new(Mutex::new(false));
+    let agent = MockAgent {
+        cancel_called: cancel_called.clone(),
+        ..Default::default()
+    };
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let js_client = NatsJetStreamClient::new(js_ctx.clone());
+            let prefix = AcpPrefix::new("acp").unwrap();
+            let (_conn, io_task) = AgentSideNatsConnection::with_jetstream(
+                agent,
+                nats.clone(),
+                js_client,
+                prefix,
+                |fut| {
+                    tokio::task::spawn_local(fut);
+                },
+            );
+            tokio::task::spawn_local(io_task);
+
+            tokio::time::sleep(Duration::from_millis(100)).await;
+
+            // Cancel arrives via JetStream with no X-Req-Id — it is a notification.
+            let payload =
+                serde_json::to_vec(&agent_client_protocol::CancelNotification::new(session_id))
+                    .unwrap();
+            js_ctx
+                .publish(
+                    format!("acp.session.{}.agent.cancel", session_id),
+                    payload.into(),
+                )
+                .await
+                .unwrap()
+                .await
+                .unwrap();
+
+            // Give serve_js time to dispatch the notification.
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        })
+        .await;
+
+    assert!(
+        *cancel_called.lock().unwrap(),
+        "agent.cancel() must have been called via JetStream cancel notification"
+    );
 }

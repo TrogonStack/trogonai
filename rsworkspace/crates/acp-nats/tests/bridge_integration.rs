@@ -14,11 +14,13 @@ use std::time::Duration;
 
 use acp_nats::{AGENT_UNAVAILABLE, AcpPrefix, Bridge, Config, NatsAuth, NatsConfig};
 use agent_client_protocol::{
-    Agent, AuthenticateRequest, AuthenticateResponse, CancelNotification, ErrorCode,
-    ExtRequest, ExtResponse, Implementation, InitializeRequest, InitializeResponse,
-    LoadSessionRequest, LoadSessionResponse, NewSessionRequest, NewSessionResponse, PromptRequest,
-    PromptResponse, ProtocolVersion, SessionId, SetSessionModeRequest, SetSessionModeResponse,
-    StopReason,
+    Agent, AuthenticateRequest, AuthenticateResponse, CancelNotification,
+    CloseSessionRequest, CloseSessionResponse, ErrorCode, ExtRequest, ExtResponse,
+    ForkSessionRequest, ForkSessionResponse, Implementation, InitializeRequest, InitializeResponse,
+    ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse,
+    LogoutRequest, LogoutResponse, NewSessionRequest, NewSessionResponse, PromptRequest,
+    PromptResponse, ProtocolVersion, ResumeSessionRequest, ResumeSessionResponse, SessionId,
+    SetSessionModeRequest, SetSessionModeResponse, StopReason,
 };
 use async_nats::jetstream;
 use futures_util::StreamExt as _;
@@ -666,6 +668,177 @@ async fn prompt_succeeds_with_real_jetstream() {
 
     assert!(result.is_ok(), "expected Ok, got: {:?}", result.unwrap_err());
     assert_eq!(result.unwrap().stop_reason, StopReason::EndTurn);
+}
+
+// ── list_sessions ─────────────────────────────────────────────────────────────
+
+/// `Bridge::list_sessions` sends a core-NATS request to `{prefix}.agent.session.list`
+/// and returns the `ListSessionsResponse` published by the agent.
+#[tokio::test]
+async fn list_sessions_routes_to_agent_and_returns_response() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let bridge = make_bridge(nats.clone(), "acp");
+
+    let mut agent_sub = nats.subscribe("acp.agent.session.list").await.unwrap();
+    let nats2 = nats.clone();
+    tokio::spawn(async move {
+        if let Some(msg) = agent_sub.next().await {
+            let resp = serde_json::to_vec(&ListSessionsResponse::new(vec![])).unwrap();
+            if let Some(reply) = msg.reply {
+                nats2.publish(reply, resp.into()).await.unwrap();
+            }
+        }
+    });
+
+    let result = bridge.list_sessions(ListSessionsRequest::new()).await;
+    assert!(result.is_ok(), "expected Ok, got: {:?}", result.unwrap_err());
+}
+
+// ── logout ────────────────────────────────────────────────────────────────────
+
+/// `Bridge::logout` sends a core-NATS request to `{prefix}.agent.logout` and
+/// returns the `LogoutResponse` published by the agent.
+#[tokio::test]
+async fn logout_routes_to_agent_and_returns_response() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let bridge = make_bridge(nats.clone(), "acp");
+
+    let mut agent_sub = nats.subscribe("acp.agent.logout").await.unwrap();
+    let nats2 = nats.clone();
+    tokio::spawn(async move {
+        if let Some(msg) = agent_sub.next().await {
+            let resp = serde_json::to_vec(&LogoutResponse::new()).unwrap();
+            if let Some(reply) = msg.reply {
+                nats2.publish(reply, resp.into()).await.unwrap();
+            }
+        }
+    });
+
+    let result = bridge.logout(LogoutRequest::new()).await;
+    assert!(result.is_ok(), "expected Ok, got: {:?}", result.unwrap_err());
+}
+
+// ── fork_session ──────────────────────────────────────────────────────────────
+
+/// `Bridge::fork_session` JetStream-publishes to the COMMANDS stream, waits on
+/// a RESPONSES consumer, and returns `ForkSessionResponse` once the runner
+/// JetStream-publishes the response.
+#[tokio::test]
+async fn fork_session_succeeds_with_real_jetstream() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let js = jetstream::new(nats.clone());
+    setup_streams(&js).await;
+    let bridge = make_bridge(nats.clone(), "acp");
+
+    let session_id = "fork-integ-sess";
+    let new_session_id = SessionId::from("forked-session-1");
+
+    let mut agent_sub = nats
+        .subscribe(format!("acp.session.{}.agent.fork", session_id))
+        .await
+        .unwrap();
+    let js2 = js.clone();
+    let new_id = new_session_id.clone();
+    tokio::spawn(async move {
+        if let Some(msg) = agent_sub.next().await {
+            let req_id = msg
+                .headers
+                .as_ref()
+                .and_then(|h| h.get(trogon_nats::REQ_ID_HEADER))
+                .map(|v| v.as_str().to_string())
+                .unwrap_or_default();
+            let resp_subject = format!("acp.session.{}.agent.response.{}", session_id, req_id);
+            let resp = serde_json::to_vec(&ForkSessionResponse::new(new_id)).unwrap();
+            let _ = js2.publish(resp_subject, resp.into()).await;
+        }
+    });
+
+    let result = bridge
+        .fork_session(ForkSessionRequest::new(session_id, "."))
+        .await;
+    assert!(result.is_ok(), "expected Ok, got: {:?}", result.unwrap_err());
+    assert_eq!(result.unwrap().session_id, new_session_id);
+}
+
+// ── close_session ─────────────────────────────────────────────────────────────
+
+/// `Bridge::close_session` JetStream-publishes to the COMMANDS stream and returns
+/// `CloseSessionResponse` once the runner JetStream-publishes the response.
+#[tokio::test]
+async fn close_session_succeeds_with_real_jetstream() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let js = jetstream::new(nats.clone());
+    setup_streams(&js).await;
+    let bridge = make_bridge(nats.clone(), "acp");
+
+    let session_id = "close-integ-sess";
+
+    let mut agent_sub = nats
+        .subscribe(format!("acp.session.{}.agent.close", session_id))
+        .await
+        .unwrap();
+    let js2 = js.clone();
+    tokio::spawn(async move {
+        if let Some(msg) = agent_sub.next().await {
+            let req_id = msg
+                .headers
+                .as_ref()
+                .and_then(|h| h.get(trogon_nats::REQ_ID_HEADER))
+                .map(|v| v.as_str().to_string())
+                .unwrap_or_default();
+            let resp_subject = format!("acp.session.{}.agent.response.{}", session_id, req_id);
+            let resp = serde_json::to_vec(&CloseSessionResponse::new()).unwrap();
+            let _ = js2.publish(resp_subject, resp.into()).await;
+        }
+    });
+
+    let result = bridge
+        .close_session(CloseSessionRequest::new(session_id))
+        .await;
+    assert!(result.is_ok(), "expected Ok, got: {:?}", result.unwrap_err());
+}
+
+// ── resume_session ────────────────────────────────────────────────────────────
+
+/// `Bridge::resume_session` JetStream-publishes to the COMMANDS stream and returns
+/// `ResumeSessionResponse` once the runner JetStream-publishes the response.
+#[tokio::test]
+async fn resume_session_succeeds_with_real_jetstream() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let js = jetstream::new(nats.clone());
+    setup_streams(&js).await;
+    let bridge = make_bridge(nats.clone(), "acp");
+
+    let session_id = "resume-integ-sess";
+
+    let mut agent_sub = nats
+        .subscribe(format!("acp.session.{}.agent.resume", session_id))
+        .await
+        .unwrap();
+    let js2 = js.clone();
+    tokio::spawn(async move {
+        if let Some(msg) = agent_sub.next().await {
+            let req_id = msg
+                .headers
+                .as_ref()
+                .and_then(|h| h.get(trogon_nats::REQ_ID_HEADER))
+                .map(|v| v.as_str().to_string())
+                .unwrap_or_default();
+            let resp_subject = format!("acp.session.{}.agent.response.{}", session_id, req_id);
+            let resp = serde_json::to_vec(&ResumeSessionResponse::new()).unwrap();
+            let _ = js2.publish(resp_subject, resp.into()).await;
+        }
+    });
+
+    let result = bridge
+        .resume_session(ResumeSessionRequest::new(session_id, "."))
+        .await;
+    assert!(result.is_ok(), "expected Ok, got: {:?}", result.unwrap_err());
 }
 
 // ── ext_method ────────────────────────────────────────────────────────────────
