@@ -10,4 +10,4 @@ pub use add_job::{AddJobCommand, AddJobDecisionError};
 pub use pause_job::{PauseJobCommand, PauseJobDecisionError};
 pub use remove_job::{RemoveJobCommand, RemoveJobDecisionError};
 pub use resume_job::{ResumeJobCommand, ResumeJobDecisionError};
-pub use state::JobState;
+pub use state::{ContractSnapshotStateError, JobState};

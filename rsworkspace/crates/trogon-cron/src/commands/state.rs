@@ -1,6 +1,7 @@
 use std::convert::Infallible;
 
 use serde::{Deserialize, Serialize};
+use trogon_cron_jobs_proto::snapshot_v1;
 use trogon_eventsourcing::{StateMachine, snapshot::SnapshotSchema};
 
 use crate::events::{JobAdded, JobEvent, JobEventStatus, JobPaused, JobRemoved, JobResumed};
@@ -15,6 +16,70 @@ pub enum JobState {
 
 impl SnapshotSchema for JobState {
     const SNAPSHOT_STREAM_PREFIX: &'static str = "cron.command.job.v2.";
+}
+
+#[derive(Debug)]
+pub enum ContractSnapshotStateError {
+    UnknownSnapshotStateValue { value: i32 },
+}
+
+impl std::fmt::Display for ContractSnapshotStateError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnknownSnapshotStateValue { value } => {
+                write!(f, "protobuf snapshot state '{value}' is unknown")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ContractSnapshotStateError {}
+
+impl From<JobState> for snapshot_v1::SnapshotState {
+    fn from(value: JobState) -> Self {
+        Self::from(&value)
+    }
+}
+
+impl From<&JobState> for snapshot_v1::SnapshotState {
+    fn from(value: &JobState) -> Self {
+        let mut state = snapshot_v1::SnapshotState::new();
+        state.set_state(snapshot_v1::SnapshotStateValue::from(*value));
+        state
+    }
+}
+
+impl TryFrom<snapshot_v1::SnapshotState> for JobState {
+    type Error = ContractSnapshotStateError;
+
+    fn try_from(value: snapshot_v1::SnapshotState) -> Result<Self, Self::Error> {
+        value.state().try_into()
+    }
+}
+
+impl From<JobState> for snapshot_v1::SnapshotStateValue {
+    fn from(value: JobState) -> Self {
+        match value {
+            JobState::Missing => Self::Missing,
+            JobState::PresentEnabled => Self::PresentEnabled,
+            JobState::PresentDisabled => Self::PresentDisabled,
+            JobState::Deleted => Self::Deleted,
+        }
+    }
+}
+
+impl TryFrom<snapshot_v1::SnapshotStateValue> for JobState {
+    type Error = ContractSnapshotStateError;
+
+    fn try_from(value: snapshot_v1::SnapshotStateValue) -> Result<Self, Self::Error> {
+        match i32::from(value) {
+            1 => Ok(Self::Missing),
+            2 => Ok(Self::PresentEnabled),
+            3 => Ok(Self::PresentDisabled),
+            4 => Ok(Self::Deleted),
+            other => Err(ContractSnapshotStateError::UnknownSnapshotStateValue { value: other }),
+        }
+    }
 }
 
 impl StateMachine<JobEvent> for JobState {
@@ -45,5 +110,30 @@ impl StateMachine<JobEvent> for JobState {
             },
             JobEvent::JobRemoved(JobRemoved { .. }) => Self::Deleted,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn snapshot_state_round_trips_through_contract() {
+        let state = JobState::PresentEnabled;
+
+        let proto = snapshot_v1::SnapshotState::from(state);
+        let decoded = JobState::try_from(proto).unwrap();
+
+        assert_eq!(decoded, state);
+    }
+
+    #[test]
+    fn unspecified_snapshot_state_is_rejected() {
+        let error = JobState::try_from(snapshot_v1::SnapshotState::new()).unwrap_err();
+
+        assert!(matches!(
+            error,
+            ContractSnapshotStateError::UnknownSnapshotStateValue { value: 0 }
+        ));
     }
 }
