@@ -1,8 +1,10 @@
+mod contract;
 mod message;
 
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::{CanonicalEventCodec, EventCodec, EventData, EventType, RecordedEvent, StreamEvent};
 
+pub use contract::{ContractEventError, contract_v1};
 pub use message::{MessageContent, MessageEnvelope, MessageHeaders, MessageHeadersError};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
