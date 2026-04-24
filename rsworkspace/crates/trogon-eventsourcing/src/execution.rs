@@ -1,8 +1,6 @@
 use crate::snapshot::{Snapshot, SnapshotRead, SnapshotSchema, SnapshotStoreConfig, SnapshotWrite};
 use crate::stream::{StreamAppend, StreamRead, StreamState, resolve_stream_state};
-use crate::{
-    CanonicalEventCodec, Decide, Decision, EventCodec, EventData, EventType, NonEmpty, StateMachine, StreamEvent,
-};
+use crate::{CanonicalEventCodec, Decide, Decision, EventCodec, EventData, EventType, NonEmpty, StateMachine};
 
 use std::num::NonZeroU64;
 
@@ -279,7 +277,8 @@ impl<E, C, SErr> CommandExecution<'_, E, C, WithoutSnapshots>
 where
     C: Decide,
     C::State: StateMachine<C::Event>,
-    C::Event: EventType + StreamEvent + Clone + CanonicalEventCodec,
+    C::Event: EventType + Clone + CanonicalEventCodec,
+    C::StreamId: AsRef<str>,
     E: StreamRead<C::StreamId, Error = SErr> + StreamAppend<C::StreamId, Error = SErr>,
     <C::Event as CanonicalEventCodec>::Codec: EventCodec<C::Event>,
     <<C::Event as CanonicalEventCodec>::Codec as EventCodec<C::Event>>::Error: Into<SErr>,
@@ -297,7 +296,8 @@ impl<E, C, EC, SErr> CommandExecutionWithCodec<'_, E, C, WithoutSnapshots, EC>
 where
     C: Decide,
     C::State: StateMachine<C::Event>,
-    C::Event: EventType + StreamEvent + Clone,
+    C::Event: EventType + Clone,
+    C::StreamId: AsRef<str>,
     E: StreamRead<C::StreamId, Error = SErr> + StreamAppend<C::StreamId, Error = SErr>,
     EC: EventCodec<C::Event>,
     EC::Error: Into<SErr>,
@@ -327,7 +327,7 @@ where
         }
 
         let Decision::Event(events) = C::decide(&state, self.command).map_err(CommandFailure::Decide)?;
-        let encoded_events = encode_events(&self.event_codec, &events)
+        let encoded_events = encode_events(stream_id.as_ref(), &self.event_codec, &events)
             .map_err(Into::into)
             .map_err(CommandInfraError::EncodeEvent)
             .map_err(CommandFailure::Infra)?;
@@ -356,7 +356,8 @@ where
     C: Decide,
     C::State: Clone,
     C::State: StateMachine<C::Event>,
-    C::Event: EventType + StreamEvent + Clone + CanonicalEventCodec,
+    C::Event: EventType + Clone + CanonicalEventCodec,
+    C::StreamId: AsRef<str>,
     E: StreamRead<C::StreamId, Error = SErr> + StreamAppend<C::StreamId, Error = SErr>,
     S: SnapshotRead<C::State, C::StreamId, Error = SErr> + SnapshotWrite<C::State, C::StreamId, Error = SErr>,
     P: SnapshotPolicy<C::State, C::Event>,
@@ -377,7 +378,8 @@ where
     C: Decide,
     C::State: Clone,
     C::State: StateMachine<C::Event>,
-    C::Event: EventType + StreamEvent + Clone,
+    C::Event: EventType + Clone,
+    C::StreamId: AsRef<str>,
     E: StreamRead<C::StreamId, Error = SErr> + StreamAppend<C::StreamId, Error = SErr>,
     S: SnapshotRead<C::State, C::StreamId, Error = SErr> + SnapshotWrite<C::State, C::StreamId, Error = SErr>,
     P: SnapshotPolicy<C::State, C::Event>,
@@ -432,7 +434,7 @@ where
         }
 
         let Decision::Event(events) = C::decide(&state, self.command).map_err(CommandFailure::Decide)?;
-        let encoded_events = encode_events(&self.event_codec, &events)
+        let encoded_events = encode_events(stream_id.as_ref(), &self.event_codec, &events)
             .map_err(Into::into)
             .map_err(CommandInfraError::EncodeEvent)
             .map_err(CommandFailure::Infra)?;
@@ -474,12 +476,14 @@ where
     }
 }
 
-fn encode_events<E, C>(codec: &C, events: &NonEmpty<E>) -> Result<NonEmpty<EventData>, C::Error>
+fn encode_events<E, C>(stream_id: &str, codec: &C, events: &NonEmpty<E>) -> Result<NonEmpty<EventData>, C::Error>
 where
-    E: EventType + StreamEvent + Clone,
+    E: EventType + Clone,
     C: EventCodec<E>,
 {
-    events.clone().try_map(|event| EventData::new_with_codec(codec, event))
+    events
+        .clone()
+        .try_map(|event| EventData::new_with_codec(stream_id, codec, event))
 }
 
 #[cfg(test)]
@@ -495,7 +499,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        CanonicalEventCodec, EventType, RecordedEvent, SnapshotSchema, StreamCommand, StreamEvent, StreamReadResult,
+        CanonicalEventCodec, EventType, RecordedEvent, SnapshotSchema, StreamCommand, StreamReadResult,
         stream::AppendOutcome,
     };
 
@@ -692,17 +696,6 @@ mod tests {
         }
     }
 
-    impl StreamEvent for TestEvent {
-        fn stream_id(&self) -> &str {
-            match self {
-                Self::Registered { id }
-                | Self::StateChanged { id, .. }
-                | Self::Removed { id }
-                | Self::Broken { id } => id,
-            }
-        }
-    }
-
     impl EventType for TestEvent {
         fn event_type(&self) -> &'static str {
             match self {
@@ -822,7 +815,13 @@ mod tests {
     }
 
     fn recorded_event(sequence: u64, event: TestEvent) -> RecordedEvent {
-        EventData::new(event).unwrap().record(
+        let stream_id = match &event {
+            TestEvent::Registered { id }
+            | TestEvent::StateChanged { id, .. }
+            | TestEvent::Removed { id }
+            | TestEvent::Broken { id } => id.clone(),
+        };
+        EventData::new(stream_id, event).unwrap().record(
             "stream-alpha",
             Some(sequence),
             Some(sequence),
@@ -1021,6 +1020,7 @@ mod tests {
             current_version: Some(1),
             recorded_events: vec![
                 EventData::new_with_codec(
+                    "alpha",
                     &WrappedJsonCodec,
                     TestEvent::Registered {
                         id: "alpha".to_string(),
