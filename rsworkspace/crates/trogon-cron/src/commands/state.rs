@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use trogon_cron_jobs_proto::state_v1;
 use trogon_eventsourcing::{StateMachine, snapshot::SnapshotSchema};
 
-use crate::events::{JobAdded, JobEvent, JobEventStatus, JobPaused, JobRemoved, JobResumed};
+use super::event::{JobAdded, JobEvent, JobEventStatus, JobPaused, JobRemoved, JobResumed};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum JobState {

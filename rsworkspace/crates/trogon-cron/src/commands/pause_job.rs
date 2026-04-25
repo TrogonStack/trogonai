@@ -1,10 +1,7 @@
 use trogon_eventsourcing::{CommandSnapshotPolicy, Decide, Decision, FrequencySnapshot, StreamCommand};
 
 use super::JobState;
-use crate::{
-    JobId,
-    events::{JobEvent, JobPaused},
-};
+use crate::{JobEvent, JobId, JobPaused};
 
 #[derive(Debug, Clone)]
 pub struct PauseJobCommand {

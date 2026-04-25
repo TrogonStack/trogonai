@@ -5,9 +5,8 @@ use bytes::Bytes;
 use trogon_nats::{DottedNatsToken, NatsToken};
 
 use crate::{
-    CronJob,
+    CronJob, JobEventDelivery, JobEventSchedule, JobEventStatus,
     error::{CronError, JobSpecError},
-    events::{JobEventDelivery, JobEventSchedule, JobEventStatus},
     kv::{FIRE_SUBJECT_PREFIX, SCHEDULE_SUBJECT_PREFIX},
 };
 
@@ -239,8 +238,10 @@ mod tests {
     use chrono::{TimeZone, Utc};
 
     use super::*;
-    use crate::events::{JobEventDelivery, JobEventSamplingSource, JobEventSchedule, JobEventStatus};
-    use crate::{MessageContent, MessageEnvelope, MessageHeaders};
+    use crate::{
+        JobEventDelivery, JobEventSamplingSource, JobEventSchedule, JobEventStatus, MessageContent, MessageEnvelope,
+        MessageHeaders,
+    };
 
     fn base_job() -> CronJob {
         CronJob {

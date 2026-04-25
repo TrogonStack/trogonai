@@ -20,12 +20,9 @@ use trogon_nats::SubjectTokenViolation;
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream};
 
 use crate::{
-    CronJob, JobId,
+    CronJob, JobAdded, JobEvent, JobEventCodec, JobEventData, JobEventStatus, JobId, JobPaused, JobRemoved, JobResumed,
+    RecordedJobEvent,
     error::CronError,
-    events::{
-        JobAdded, JobEvent, JobEventCodec, JobEventData, JobEventStatus, JobPaused, JobRemoved, JobResumed,
-        RecordedJobEvent,
-    },
     kv::{EVENTS_SUBJECT_PREFIX, LEGACY_EVENTS_SUBJECT_PREFIX},
     store::{open_cron_jobs_bucket, open_events_stream, open_snapshot_bucket, snapshot_store_config},
 };

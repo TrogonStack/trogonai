@@ -1,17 +1,16 @@
 use std::{num::NonZeroU64, str::FromStr};
 
-use crate::{
-    error::{CronError, JobSpecError},
-    events::{
-        JobDetails, JobEventDelivery, JobEventSamplingSource, JobEventSchedule, JobEventStatus, MessageContent,
-        MessageEnvelope, MessageHeaders,
-    },
-};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 use trogon_nats::DottedNatsToken;
 
+use crate::error::{CronError, JobSpecError};
+
 use super::JobId;
+use crate::commands::event::{
+    JobDetails, JobEventDelivery, JobEventSamplingSource, JobEventSchedule, JobEventStatus, MessageContent,
+    MessageEnvelope, MessageHeaders,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Job {

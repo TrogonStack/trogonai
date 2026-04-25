@@ -1,10 +1,7 @@
 use trogon_eventsourcing::{CommandSnapshotPolicy, Decide, Decision, FrequencySnapshot, StreamCommand};
 
 use super::JobState;
-use crate::{
-    JobId,
-    events::{JobEvent, JobRemoved},
-};
+use crate::{JobEvent, JobId, JobRemoved};
 
 #[derive(Debug, Clone)]
 pub struct RemoveJobCommand {
