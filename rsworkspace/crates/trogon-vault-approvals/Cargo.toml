@@ -3,12 +3,17 @@ name    = "trogon-vault-approvals"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = []
+slack   = ["dep:reqwest"]
+
 [dependencies]
 async-nats   = { workspace = true, features = ["jetstream"] }
 async-trait  = { workspace = true }
 bytes        = { workspace = true }
 dashmap      = "6"
 futures-util = { workspace = true }
+reqwest      = { workspace = true, optional = true }
 serde        = { workspace = true }
 serde_json   = { workspace = true }
 tokio        = { workspace = true, features = ["sync"] }

@@ -171,4 +171,56 @@ mod tests {
         let b = CryptoCtx::derive(b"pw", b"salt5678").unwrap();
         assert_ne!(a.key, b.key);
     }
+
+    // ── from_env() ────────────────────────────────────────────────────────────
+
+    mod from_env {
+        use super::*;
+        use std::sync::Mutex;
+
+        static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+        const PW:   &str = "VAULT_MASTER_PASSWORD";
+        const SALT: &str = "VAULT_KEY_SALT";
+
+        fn clear() {
+            unsafe {
+                std::env::remove_var(PW);
+                std::env::remove_var(SALT);
+            }
+        }
+
+        #[test]
+        fn returns_ctx_when_both_vars_set() {
+            let _g = ENV_LOCK.lock().unwrap();
+            clear();
+            unsafe {
+                std::env::set_var(PW,   "my-secret-password");
+                std::env::set_var(SALT, "salt1234567890ab");
+            }
+            let result = CryptoCtx::from_env();
+            clear();
+            assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
+        }
+
+        #[test]
+        fn errors_when_password_missing() {
+            let _g = ENV_LOCK.lock().unwrap();
+            clear();
+            unsafe { std::env::set_var(SALT, "salt1234567890ab"); }
+            let err = CryptoCtx::from_env().err().expect("expected Err");
+            clear();
+            assert!(err.contains(PW), "expected {PW} in error: {err}");
+        }
+
+        #[test]
+        fn errors_when_salt_missing() {
+            let _g = ENV_LOCK.lock().unwrap();
+            clear();
+            unsafe { std::env::set_var(PW, "my-secret-password"); }
+            let err = CryptoCtx::from_env().err().expect("expected Err");
+            clear();
+            assert!(err.contains(SALT), "expected {SALT} in error: {err}");
+        }
+    }
 }

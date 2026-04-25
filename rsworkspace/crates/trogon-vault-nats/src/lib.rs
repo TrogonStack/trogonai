@@ -29,3 +29,37 @@ pub fn grace_period_from_env() -> std::time::Duration {
         .map(std::time::Duration::from_secs)
         .unwrap_or(std::time::Duration::from_secs(30))
 }
+
+#[cfg(test)]
+mod grace_period_tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+    const VAR: &str = "VAULT_GRACE_PERIOD_SECS";
+
+    #[test]
+    fn defaults_to_30_secs_when_unset() {
+        let _g = ENV_LOCK.lock().unwrap();
+        unsafe { std::env::remove_var(VAR); }
+        assert_eq!(grace_period_from_env(), std::time::Duration::from_secs(30));
+    }
+
+    #[test]
+    fn returns_configured_value() {
+        let _g = ENV_LOCK.lock().unwrap();
+        unsafe { std::env::set_var(VAR, "60"); }
+        let d = grace_period_from_env();
+        unsafe { std::env::remove_var(VAR); }
+        assert_eq!(d, std::time::Duration::from_secs(60));
+    }
+
+    #[test]
+    fn falls_back_on_non_numeric_value() {
+        let _g = ENV_LOCK.lock().unwrap();
+        unsafe { std::env::set_var(VAR, "not-a-number"); }
+        let d = grace_period_from_env();
+        unsafe { std::env::remove_var(VAR); }
+        assert_eq!(d, std::time::Duration::from_secs(30));
+    }
+}

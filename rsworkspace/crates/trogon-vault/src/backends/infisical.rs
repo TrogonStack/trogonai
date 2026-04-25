@@ -596,6 +596,67 @@ mod tests {
         m.assert();
     }
 
+    // ── from_env() ────────────────────────────────────────────────────────────
+
+    mod from_env {
+        use super::*;
+        use std::sync::Mutex;
+
+        static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+        const URL:   &str = "INFISICAL_URL";
+        const PID:   &str = "INFISICAL_PROJECT_ID";
+        const TOKEN: &str = "INFISICAL_SERVICE_TOKEN";
+
+        fn clear() {
+            unsafe {
+                std::env::remove_var(URL);
+                std::env::remove_var(PID);
+                std::env::remove_var(TOKEN);
+            }
+        }
+
+        #[test]
+        fn returns_config_when_all_vars_set() {
+            let _g = ENV_LOCK.lock().unwrap();
+            clear();
+            unsafe {
+                std::env::set_var(URL,   "https://app.infisical.com");
+                std::env::set_var(PID,   "proj-abc");
+                std::env::set_var(TOKEN, "st.tok");
+            }
+            let result = InfisicalConfig::from_env();
+            clear();
+            let cfg = result.expect("expected Ok");
+            assert_eq!(cfg.base_url,   "https://app.infisical.com");
+            assert_eq!(cfg.project_id, "proj-abc");
+        }
+
+        #[test]
+        fn errors_naming_single_missing_var() {
+            let _g = ENV_LOCK.lock().unwrap();
+            clear();
+            unsafe {
+                std::env::set_var(PID,   "proj-abc");
+                std::env::set_var(TOKEN, "st.tok");
+            }
+            let err = InfisicalConfig::from_env().err().expect("expected Err");
+            clear();
+            assert!(err.contains(URL), "expected {URL} in error: {err}");
+            assert!(!err.contains(PID));
+        }
+
+        #[test]
+        fn errors_listing_all_missing_vars() {
+            let _g = ENV_LOCK.lock().unwrap();
+            clear();
+            let err = InfisicalConfig::from_env().err().expect("expected Err");
+            assert!(err.contains(URL),   "expected {URL} in error: {err}");
+            assert!(err.contains(PID),   "expected {PID} in error: {err}");
+            assert!(err.contains(TOKEN), "expected {TOKEN} in error: {err}");
+        }
+    }
+
     // ── parse_error: non-JSON body ────────────────────────────────────────────
 
     #[tokio::test]

@@ -5303,6 +5303,7 @@ dependencies = [
  "trogon-nats",
  "trogon-std",
  "trogon-vault",
+ "trogon-vault-nats",
  "uuid",
 ]
 
@@ -5606,6 +5607,7 @@ dependencies = [
  "bytes",
  "dashmap",
  "futures-util",
+ "reqwest",
  "serde",
  "serde_json",
  "testcontainers-modules",

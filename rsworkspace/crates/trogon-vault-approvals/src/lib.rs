@@ -23,6 +23,8 @@ pub mod subjects;
 
 pub use error::ApprovalError;
 pub use notifier::{LoggingNotifier, NoopNotifier, Notifier};
+#[cfg(feature = "slack")]
+pub use notifier::SlackWebhookNotifier;
 pub use proposal::{
     ApproveRequest, CreateRequest, Proposal, ProposalStatus, RejectRequest, StatusResponse,
 };
