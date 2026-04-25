@@ -6,10 +6,7 @@ pub struct CloseSubject {
 }
 
 impl CloseSubject {
-    pub fn new(
-        prefix: &crate::acp_prefix::AcpPrefix,
-        session_id: &crate::session_id::AcpSessionId,
-    ) -> Self {
+    pub fn new(prefix: &crate::acp_prefix::AcpPrefix, session_id: &crate::session_id::AcpSessionId) -> Self {
         Self {
             prefix: prefix.clone(),
             session_id: session_id.clone(),
@@ -37,8 +34,7 @@ impl async_nats::subject::ToSubject for CloseSubject {
 impl super::super::markers::SessionCommand for CloseSubject {}
 
 impl super::super::stream::StreamAssignment for CloseSubject {
-    const STREAM: Option<super::super::stream::AcpStream> =
-        Some(super::super::stream::AcpStream::Commands);
+    const STREAM: Option<super::super::stream::AcpStream> = Some(super::super::stream::AcpStream::Commands);
 }
 
 #[cfg(test)]

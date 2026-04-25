@@ -53,10 +53,7 @@ impl SubscribeClient for NatsAsyncClient {
     type SubscribeError = async_nats::client::SubscribeError;
     type Subscription = async_nats::Subscriber;
 
-    async fn subscribe<S: ToSubject + Send>(
-        &self,
-        subject: S,
-    ) -> Result<Self::Subscription, Self::SubscribeError> {
+    async fn subscribe<S: ToSubject + Send>(&self, subject: S) -> Result<Self::Subscription, Self::SubscribeError> {
         self.subscribe(subject).await
     }
 }

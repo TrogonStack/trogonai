@@ -47,14 +47,9 @@ pub async fn resolve_claim<S: ObjectStoreGet>(
         return Ok(payload);
     }
 
-    let key = headers
-        .get(HEADER_CLAIM_KEY)
-        .ok_or(ClaimResolveError::MissingKey)?;
+    let key = headers.get(HEADER_CLAIM_KEY).ok_or(ClaimResolveError::MissingKey)?;
 
-    let mut reader = store
-        .get(key.as_str())
-        .await
-        .map_err(ClaimResolveError::StoreFailed)?;
+    let mut reader = store.get(key.as_str()).await.map_err(ClaimResolveError::StoreFailed)?;
 
     let mut buf = Vec::new();
     reader
@@ -189,14 +184,7 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> ClaimCheckPublisher<P, S> {
         claim_headers.insert(HEADER_CLAIM_BUCKET, self.bucket_name.as_str());
         claim_headers.insert(HEADER_CLAIM_KEY, key.as_str());
 
-        super::publish::publish_event(
-            &self.publisher,
-            subject,
-            claim_headers,
-            Bytes::new(),
-            ack_timeout,
-        )
-        .await
+        super::publish::publish_event(&self.publisher, subject, claim_headers, Bytes::new(), ack_timeout).await
     }
 }
 
@@ -275,8 +263,7 @@ mod tests {
 
     #[test]
     fn claim_resolve_error_display_store_failed() {
-        let err: ClaimResolveError<String> =
-            ClaimResolveError::StoreFailed("connection refused".to_string());
+        let err: ClaimResolveError<String> = ClaimResolveError::StoreFailed("connection refused".to_string());
         let msg = err.to_string();
         assert!(msg.contains("connection refused"));
     }
@@ -374,27 +361,14 @@ mod integration_tests {
         assert_eq!(messages.len(), 1);
         assert!(messages[0].payload.is_empty());
         assert_eq!(
-            messages[0]
-                .headers
-                .get(HEADER_CLAIM_CHECK)
-                .unwrap()
-                .as_str(),
+            messages[0].headers.get(HEADER_CLAIM_CHECK).unwrap().as_str(),
             CLAIM_CHECK_VERSION
         );
         assert_eq!(
-            messages[0]
-                .headers
-                .get(HEADER_CLAIM_BUCKET)
-                .unwrap()
-                .as_str(),
+            messages[0].headers.get(HEADER_CLAIM_BUCKET).unwrap().as_str(),
             "test-bucket"
         );
-        let key = messages[0]
-            .headers
-            .get(HEADER_CLAIM_KEY)
-            .unwrap()
-            .as_str()
-            .to_string();
+        let key = messages[0].headers.get(HEADER_CLAIM_KEY).unwrap().as_str().to_string();
         assert!(key.starts_with("test.subject/"));
 
         let stored = store.stored_objects();

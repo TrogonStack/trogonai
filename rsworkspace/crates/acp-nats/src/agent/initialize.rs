@@ -16,11 +16,7 @@ pub async fn handle<N: RequestClient, C: GetElapsed, J>(
 ) -> Result<InitializeResponse> {
     let start = bridge.clock.now();
 
-    let client_name = args
-        .client_info
-        .as_ref()
-        .map(|c| c.name.as_str())
-        .unwrap_or("unknown");
+    let client_name = args.client_info.as_ref().map(|c| c.name.as_str()).unwrap_or("unknown");
 
     info!(client = %client_name, "Initialize request");
 
@@ -36,11 +32,9 @@ pub async fn handle<N: RequestClient, C: GetElapsed, J>(
     .await
     .map_err(map_nats_error);
 
-    bridge.metrics.record_request(
-        "initialize",
-        bridge.clock.elapsed(start).as_secs_f64(),
-        result.is_ok(),
-    );
+    bridge
+        .metrics
+        .record_request("initialize", bridge.clock.elapsed(start).as_secs_f64(), result.is_ok());
 
     result
 }
@@ -48,9 +42,7 @@ pub async fn handle<N: RequestClient, C: GetElapsed, J>(
 #[cfg(test)]
 mod tests {
     use super::Bridge;
-    use crate::agent::test_support::{
-        has_request_metric, mock_bridge, mock_bridge_with_metrics, set_json_response,
-    };
+    use crate::agent::test_support::{has_request_metric, mock_bridge, mock_bridge_with_metrics, set_json_response};
     use crate::config::Config;
     use crate::error::AGENT_UNAVAILABLE;
     use agent_client_protocol::{
@@ -78,8 +70,8 @@ mod tests {
         let expected = InitializeResponse::new(ProtocolVersion::LATEST);
         set_json_response(&mock, "acp.agent.initialize", &expected);
 
-        let request = InitializeRequest::new(ProtocolVersion::LATEST)
-            .client_info(Implementation::new("my-client", "1.0.0"));
+        let request =
+            InitializeRequest::new(ProtocolVersion::LATEST).client_info(Implementation::new("my-client", "1.0.0"));
         let result = bridge.initialize(request).await;
 
         assert!(result.is_ok());
@@ -118,9 +110,7 @@ mod tests {
             &InitializeResponse::new(ProtocolVersion::LATEST),
         );
 
-        let _ = bridge
-            .initialize(InitializeRequest::new(ProtocolVersion::LATEST))
-            .await;
+        let _ = bridge.initialize(InitializeRequest::new(ProtocolVersion::LATEST)).await;
 
         provider.force_flush().unwrap();
         let finished_metrics = exporter.get_finished_metrics().unwrap();
@@ -136,9 +126,7 @@ mod tests {
         let (mock, _js, bridge, exporter, provider) = mock_bridge_with_metrics();
         mock.fail_next_request();
 
-        let _ = bridge
-            .initialize(InitializeRequest::new(ProtocolVersion::LATEST))
-            .await;
+        let _ = bridge.initialize(InitializeRequest::new(ProtocolVersion::LATEST)).await;
 
         provider.force_flush().unwrap();
         let finished_metrics = exporter.get_finished_metrics().unwrap();

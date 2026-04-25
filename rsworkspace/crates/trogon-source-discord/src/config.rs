@@ -35,9 +35,7 @@ pub struct DiscordConfig {
 }
 
 const PRIVILEGED_INTENTS: Intents = Intents::from_bits_truncate(
-    Intents::GUILD_MEMBERS.bits()
-        | Intents::GUILD_PRESENCES.bits()
-        | Intents::MESSAGE_CONTENT.bits(),
+    Intents::GUILD_MEMBERS.bits() | Intents::GUILD_PRESENCES.bits() | Intents::MESSAGE_CONTENT.bits(),
 );
 
 pub fn default_intents() -> Intents {
@@ -148,8 +146,7 @@ mod tests {
 
     #[test]
     fn parse_intents_is_case_insensitive_and_trimmed() {
-        let intents =
-            parse_gateway_intents("  GUILDS , Guild_Members , direct_message_reactions ").unwrap();
+        let intents = parse_gateway_intents("  GUILDS , Guild_Members , direct_message_reactions ").unwrap();
         assert!(intents.contains(Intents::GUILDS));
         assert!(intents.contains(Intents::GUILD_MEMBERS));
         assert!(intents.contains(Intents::DIRECT_MESSAGE_REACTIONS));

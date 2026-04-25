@@ -6,9 +6,7 @@ pub struct AuthenticateSubject {
 
 impl AuthenticateSubject {
     pub fn new(prefix: &crate::acp_prefix::AcpPrefix) -> Self {
-        Self {
-            prefix: prefix.clone(),
-        }
+        Self { prefix: prefix.clone() }
     }
 }
 
@@ -21,8 +19,7 @@ impl std::fmt::Display for AuthenticateSubject {
 impl super::super::markers::Requestable for AuthenticateSubject {}
 
 impl super::super::stream::StreamAssignment for AuthenticateSubject {
-    const STREAM: Option<super::super::stream::AcpStream> =
-        Some(super::super::stream::AcpStream::Global);
+    const STREAM: Option<super::super::stream::AcpStream> = Some(super::super::stream::AcpStream::Global);
 }
 
 #[cfg(test)]

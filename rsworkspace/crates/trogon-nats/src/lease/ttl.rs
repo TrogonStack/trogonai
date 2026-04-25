@@ -33,14 +33,12 @@ impl LeaseTtl {
     }
 
     pub fn from_secs(secs: u64) -> Result<Self, LeaseTtlError> {
-        let ttl = NonZeroDuration::from_secs(secs)
-            .map_err(|_: ZeroDuration| LeaseTtlError::ZeroDuration)?;
+        let ttl = NonZeroDuration::from_secs(secs).map_err(|_: ZeroDuration| LeaseTtlError::ZeroDuration)?;
         Self::new(ttl)
     }
 
     pub fn from_millis(millis: u64) -> Result<Self, LeaseTtlError> {
-        let ttl = NonZeroDuration::from_millis(millis)
-            .map_err(|_: ZeroDuration| LeaseTtlError::ZeroDuration)?;
+        let ttl = NonZeroDuration::from_millis(millis).map_err(|_: ZeroDuration| LeaseTtlError::ZeroDuration)?;
         Self::new(ttl)
     }
 
@@ -128,10 +126,7 @@ mod tests {
 
     #[test]
     fn display_messages_are_actionable() {
-        assert_eq!(
-            LeaseTtlError::ZeroDuration.to_string(),
-            "lease ttl must not be zero"
-        );
+        assert_eq!(LeaseTtlError::ZeroDuration.to_string(), "lease ttl must not be zero");
         assert_eq!(
             LeaseTtlError::SubsecondPrecisionUnsupported.to_string(),
             "lease ttl must be whole seconds"

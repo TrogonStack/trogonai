@@ -29,10 +29,7 @@ pub fn map_nats_error(e: NatsError) -> Error {
         }
         NatsError::Deserialize(inner) => {
             warn!(error = %inner, "failed to deserialize response");
-            Error::new(
-                ErrorCode::InternalError.into(),
-                "Invalid response from agent",
-            )
+            Error::new(ErrorCode::InternalError.into(), "Invalid response from agent")
         }
         NatsError::PublishOperation(inner) => {
             warn!(error = %inner, "publish operation failed");
@@ -44,10 +41,7 @@ pub fn map_nats_error(e: NatsError) -> Error {
             attempts,
         } => {
             warn!(subject = %subject, error = %inner, attempts, "publish operation exhausted");
-            Error::new(
-                ErrorCode::InternalError.into(),
-                "Publish operation exhausted",
-            )
+            Error::new(ErrorCode::InternalError.into(), "Publish operation exhausted")
         }
         NatsError::Other(msg) => {
             warn!(error = %msg, "NATS request failed");

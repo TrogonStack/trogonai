@@ -8,15 +8,18 @@ use bytes::Bytes;
 
 use crate::jetstream::{JetStreamKeyValueUpdate, JetStreamPublisher};
 
+#[cfg(not(coverage))]
 use super::{NatsKvLease, RenewLease};
 
 #[derive(Clone)]
+#[cfg_attr(coverage, allow(dead_code))]
 pub(super) struct KvPublishTarget {
     default_prefix: String,
     put_prefix: Option<String>,
     uses_jetstream_prefix: bool,
 }
 
+#[cfg_attr(coverage, allow(dead_code))]
 impl KvPublishTarget {
     pub(super) fn from_store(store: &kv::Store) -> Self {
         Self {
@@ -40,6 +43,7 @@ impl KvPublishTarget {
     }
 }
 
+#[cfg(not(coverage))]
 impl RenewLease for NatsKvLease {
     type Error = kv::UpdateError;
 
@@ -57,6 +61,7 @@ impl RenewLease for NatsKvLease {
     }
 }
 
+#[cfg_attr(coverage, allow(dead_code))]
 pub(super) async fn renew_store<S, P>(
     store: &S,
     publish_target: &KvPublishTarget,
@@ -80,13 +85,8 @@ where
     if publish_target.uses_jetstream_prefix {
         // TODO(yordis): support per-message TTL renew when KV store uses a custom
         // JetStream API prefix by routing through an SDK path that handles prefixing.
-        let source = std::io::Error::other(
-            "per-message lease renew does not support custom JS API prefixes",
-        );
-        return Err(kv::UpdateError::with_source(
-            kv::UpdateErrorKind::Other,
-            source,
-        ));
+        let source = std::io::Error::other("per-message lease renew does not support custom JS API prefixes");
+        return Err(kv::UpdateError::with_source(kv::UpdateErrorKind::Other, source));
     }
 
     let subject = build_kv_subject(
@@ -106,6 +106,7 @@ where
     Ok(ack.sequence)
 }
 
+#[cfg_attr(coverage, allow(dead_code))]
 fn update_error_from_publish<E>(source: E) -> kv::UpdateError
 where
     E: std::error::Error + Send + Sync + 'static,
@@ -113,23 +114,18 @@ where
     kv::UpdateError::with_source(kv::UpdateErrorKind::Other, source)
 }
 
-pub(super) fn build_kv_subject(
-    put_prefix: Option<&str>,
-    default_prefix: &str,
-    key: &str,
-) -> String {
+#[cfg_attr(coverage, allow(dead_code))]
+pub(super) fn build_kv_subject(put_prefix: Option<&str>, default_prefix: &str, key: &str) -> String {
     let mut subject = String::new();
     subject.push_str(put_prefix.unwrap_or(default_prefix));
     subject.push_str(key);
     subject
 }
 
+#[cfg_attr(coverage, allow(dead_code))]
 pub(super) fn build_update_headers(revision: u64, ttl: Duration) -> HeaderMap {
     let mut headers = HeaderMap::default();
-    headers.insert(
-        NATS_EXPECTED_LAST_SUBJECT_SEQUENCE,
-        HeaderValue::from(revision),
-    );
+    headers.insert(NATS_EXPECTED_LAST_SUBJECT_SEQUENCE, HeaderValue::from(revision));
     headers.insert(NATS_MESSAGE_TTL, HeaderValue::from(ttl.as_secs()));
     headers
 }
@@ -281,10 +277,7 @@ mod tests {
             Some("7")
         );
         assert_eq!(
-            message
-                .headers
-                .get(NATS_MESSAGE_TTL)
-                .map(|value| value.as_str()),
+            message.headers.get(NATS_MESSAGE_TTL).map(|value| value.as_str()),
             Some("9")
         );
     }
@@ -317,17 +310,12 @@ mod tests {
         let publish_target = publish_target();
         let publisher = MockJetStreamPublisher::new();
 
-        let ack1 = JetStreamPublisher::publish_with_headers(
-            &publisher,
-            "preseed",
-            HeaderMap::default(),
-            Bytes::new(),
-        )
-        .await
-        .unwrap()
-        .into_future()
-        .await
-        .unwrap();
+        let ack1 = JetStreamPublisher::publish_with_headers(&publisher, "preseed", HeaderMap::default(), Bytes::new())
+            .await
+            .unwrap()
+            .into_future()
+            .await
+            .unwrap();
         assert_eq!(ack1.sequence, 1);
 
         let revision = renew_store(

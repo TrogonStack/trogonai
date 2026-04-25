@@ -24,18 +24,11 @@ pub async fn handle<N: PublishClient + FlushClient, C: GetElapsed, J>(
     info!(method = %args.method, "Extension notification");
 
     let method_name = ExtMethodName::new(&args.method).map_err(|e| {
-        bridge.metrics.record_request(
-            "ext_notification",
-            bridge.clock.elapsed(start).as_secs_f64(),
-            false,
-        );
         bridge
             .metrics
-            .record_error("ext_notification", "invalid_method_name");
-        Error::new(
-            ErrorCode::InvalidParams.into(),
-            format!("Invalid method name: {}", e),
-        )
+            .record_request("ext_notification", bridge.clock.elapsed(start).as_secs_f64(), false);
+        bridge.metrics.record_error("ext_notification", "invalid_method_name");
+        Error::new(ErrorCode::InvalidParams.into(), format!("Invalid method name: {}", e))
     })?;
 
     let subject = agent::ExtNotifySubject::new(bridge.config.acp_prefix_ref(), &method_name);
@@ -61,20 +54,16 @@ pub async fn handle<N: PublishClient + FlushClient, C: GetElapsed, J>(
             .record_error("ext_notification", "ext_notification_publish_failed");
     }
 
-    bridge.metrics.record_request(
-        "ext_notification",
-        bridge.clock.elapsed(start).as_secs_f64(),
-        true,
-    );
+    bridge
+        .metrics
+        .record_request("ext_notification", bridge.clock.elapsed(start).as_secs_f64(), true);
 
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::agent::test_support::{
-        has_error_metric, has_request_metric, mock_bridge, mock_bridge_with_metrics,
-    };
+    use crate::agent::test_support::{has_error_metric, has_request_metric, mock_bridge, mock_bridge_with_metrics};
     use agent_client_protocol::{Agent, ErrorCode, ExtNotification};
     use serde_json::value::RawValue;
 
@@ -178,11 +167,7 @@ mod tests {
         provider.force_flush().unwrap();
         let finished_metrics = exporter.get_finished_metrics().unwrap();
         assert!(
-            has_error_metric(
-                &finished_metrics,
-                "ext_notification",
-                "ext_notification_publish_failed"
-            ),
+            has_error_metric(&finished_metrics, "ext_notification", "ext_notification_publish_failed"),
             "expected acp.errors with operation=ext_notification, reason=ext_notification_publish_failed"
         );
         assert!(

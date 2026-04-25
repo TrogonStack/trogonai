@@ -20,11 +20,7 @@ impl NatsKvLeaseConfig {
         let key = LeaseKey::new(key)?;
         let timing = LeaseTiming::new(ttl, renew_interval)?;
 
-        Ok(Self {
-            bucket,
-            key,
-            timing,
-        })
+        Ok(Self { bucket, key, timing })
     }
 
     pub fn bucket(&self) -> &LeaseBucket {

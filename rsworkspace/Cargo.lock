@@ -46,6 +46,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "acp-nats-server"
+version = "0.1.0"
+dependencies = [
+ "acp-nats",
+ "acp-nats-agent",
+ "acp-telemetry",
+ "agent-client-protocol",
+ "async-compat",
+ "async-nats",
+ "axum 0.8.8",
+ "bytes",
+ "clap",
+ "futures-util",
+ "opentelemetry",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "testcontainers-modules",
+ "tokio",
+ "tokio-tungstenite 0.29.0",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+ "trogon-acp-runner",
+ "trogon-agent-core",
+ "trogon-nats",
+ "trogon-std",
+ "uuid",
+]
+
+[[package]]
 name = "acp-nats-stdio"
 version = "0.0.1"
 dependencies = [
@@ -5389,6 +5420,7 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-opentelemetry",
+ "uuid",
 ]
 
 [[package]]

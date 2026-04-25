@@ -6,9 +6,7 @@ use serde::Deserialize;
 use serde_json::value::RawValue;
 use tracing::{debug, info, warn};
 use trogon_nats::NatsToken;
-use trogon_nats::jetstream::{
-    ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut,
-};
+use trogon_nats::jetstream::{ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut};
 
 use crate::config::DiscordConfig;
 use crate::constants::{NATS_HEADER_EVENT_NAME, NATS_HEADER_GUILD_ID};
@@ -56,10 +54,7 @@ impl DiscordGateway for twilight_gateway::Shard {
 
 const GATEWAY_OP_DISPATCH: u8 = 0;
 
-pub async fn provision<C: JetStreamContext>(
-    js: &C,
-    config: &DiscordConfig,
-) -> Result<(), C::Error> {
+pub async fn provision<C: JetStreamContext>(js: &C, config: &DiscordConfig) -> Result<(), C::Error> {
     js.get_or_create_stream(async_nats::jetstream::stream::Config {
         name: config.stream_name.to_string(),
         subjects: vec![format!("{}.>", config.subject_prefix)],
@@ -93,11 +88,7 @@ pub struct GatewayBridge<P: JetStreamPublisher, S: ObjectStorePut> {
 }
 
 impl<P: JetStreamPublisher, S: ObjectStorePut> GatewayBridge<P, S> {
-    pub fn new(
-        publisher: ClaimCheckPublisher<P, S>,
-        subject_prefix: NatsToken,
-        nats_ack_timeout: Duration,
-    ) -> Self {
+    pub fn new(publisher: ClaimCheckPublisher<P, S>, subject_prefix: NatsToken, nats_ack_timeout: Duration) -> Self {
         Self {
             publisher,
             subject_prefix,
@@ -132,22 +123,11 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> GatewayBridge<P, S> {
         let guild_id = extract_guild_id(data_bytes);
         let dedup_id = extract_dedup_id(&event_name, data_bytes);
 
-        self.publish_bytes(
-            &event_name,
-            guild_id,
-            dedup_id,
-            Bytes::copy_from_slice(data_bytes),
-        )
-        .await;
+        self.publish_bytes(&event_name, guild_id, dedup_id, Bytes::copy_from_slice(data_bytes))
+            .await;
     }
 
-    async fn publish_bytes(
-        &self,
-        event_name: &str,
-        guild_id: Option<u64>,
-        msg_id: Option<String>,
-        payload: Bytes,
-    ) {
+    async fn publish_bytes(&self, event_name: &str, guild_id: Option<u64>, msg_id: Option<String>, payload: Bytes) {
         let subject = format!("{}.{}", self.subject_prefix, event_name);
 
         let mut headers = HeaderMap::new();
@@ -249,12 +229,7 @@ fn extract_dedup_id(event_name: &str, data: &[u8]) -> Option<String> {
         }
         "message_delete_bulk" => {
             let channel_id = v.get("channel_id")?.as_str()?;
-            let ids: Vec<&str> = v
-                .get("ids")?
-                .as_array()?
-                .iter()
-                .filter_map(|v| v.as_str())
-                .collect();
+            let ids: Vec<&str> = v.get("ids")?.as_array()?.iter().filter_map(|v| v.as_str()).collect();
             Some(format!("{event_name}:{channel_id}:{}", ids.join(",")))
         }
         "guild_role_create" => {
@@ -277,8 +252,7 @@ fn extract_dedup_id(event_name: &str, data: &[u8]) -> Option<String> {
 mod tests {
     use super::*;
     use trogon_nats::jetstream::{
-        ClaimCheckPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher,
-        MockObjectStore, StreamMaxAge,
+        ClaimCheckPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher, MockObjectStore, StreamMaxAge,
     };
     use trogon_std::NonZeroDuration;
 
@@ -367,13 +341,8 @@ mod tests {
     #[tokio::test]
     async fn publish_sends_to_correct_subject() {
         let (b, mock) = bridge_with_mock();
-        b.publish(
-            "message_create",
-            None,
-            None,
-            &serde_json::json!({"test": true}),
-        )
-        .await;
+        b.publish("message_create", None, None, &serde_json::json!({"test": true}))
+            .await;
 
         let subjects = mock.published_subjects();
         assert_eq!(subjects, vec!["discord.message_create"]);
@@ -391,8 +360,7 @@ mod tests {
     #[tokio::test]
     async fn publish_includes_event_name_header() {
         let (b, mock) = bridge_with_mock();
-        b.publish("guild_create", Some(123), None, &serde_json::json!({}))
-            .await;
+        b.publish("guild_create", Some(123), None, &serde_json::json!({})).await;
 
         let msgs = mock.published_messages();
         assert_eq!(msgs.len(), 1);
@@ -411,17 +379,13 @@ mod tests {
 
         let msgs = mock.published_messages();
         let headers = &msgs[0].headers;
-        assert_eq!(
-            headers.get(NATS_HEADER_GUILD_ID).map(|v| v.as_str()),
-            Some("999")
-        );
+        assert_eq!(headers.get(NATS_HEADER_GUILD_ID).map(|v| v.as_str()), Some("999"));
     }
 
     #[tokio::test]
     async fn publish_omits_guild_id_header_when_absent() {
         let (b, mock) = bridge_with_mock();
-        b.publish("user_update", None, None, &serde_json::json!({}))
-            .await;
+        b.publish("user_update", None, None, &serde_json::json!({})).await;
 
         let msgs = mock.published_messages();
         let headers = &msgs[0].headers;
@@ -459,8 +423,7 @@ mod tests {
     async fn publish_failure_does_not_panic() {
         let (b, mock) = bridge_with_mock();
         mock.fail_next_js_publish();
-        b.publish("message_create", None, None, &serde_json::json!({}))
-            .await;
+        b.publish("message_create", None, None, &serde_json::json!({})).await;
 
         assert!(mock.published_subjects().is_empty());
     }
@@ -468,21 +431,14 @@ mod tests {
     #[tokio::test]
     async fn multiple_publishes_accumulate() {
         let (b, mock) = bridge_with_mock();
-        b.publish("message_create", Some(1), None, &serde_json::json!({}))
-            .await;
-        b.publish("reaction_add", Some(2), None, &serde_json::json!({}))
-            .await;
-        b.publish("guild_delete", Some(3), None, &serde_json::json!({}))
-            .await;
+        b.publish("message_create", Some(1), None, &serde_json::json!({})).await;
+        b.publish("reaction_add", Some(2), None, &serde_json::json!({})).await;
+        b.publish("guild_delete", Some(3), None, &serde_json::json!({})).await;
 
         let subjects = mock.published_subjects();
         assert_eq!(
             subjects,
-            vec![
-                "discord.message_create",
-                "discord.reaction_add",
-                "discord.guild_delete",
-            ]
+            vec!["discord.message_create", "discord.reaction_add", "discord.guild_delete",]
         );
     }
 
@@ -490,15 +446,12 @@ mod tests {
     async fn publish_sets_nats_msg_id_when_provided() {
         let (b, mock) = bridge_with_mock();
         let mid = Some("message_create:123456".to_string());
-        b.publish("message_create", Some(1), mid, &serde_json::json!({}))
-            .await;
+        b.publish("message_create", Some(1), mid, &serde_json::json!({})).await;
 
         let msgs = mock.published_messages();
         let headers = &msgs[0].headers;
         assert_eq!(
-            headers
-                .get(async_nats::header::NATS_MESSAGE_ID)
-                .map(|v| v.as_str()),
+            headers.get(async_nats::header::NATS_MESSAGE_ID).map(|v| v.as_str()),
             Some("message_create:123456")
         );
     }
@@ -524,20 +477,16 @@ mod tests {
     #[tokio::test]
     async fn dispatch_forwards_dispatch_event() {
         let (b, mock) = bridge_with_mock();
-        b.dispatch(
-            r#"{"op":0,"t":"MESSAGE_CREATE","s":1,"d":{"id":"123","channel_id":"456","content":"hi"}}"#,
-        )
-        .await;
+        b.dispatch(r#"{"op":0,"t":"MESSAGE_CREATE","s":1,"d":{"id":"123","channel_id":"456","content":"hi"}}"#)
+            .await;
         assert_eq!(mock.published_subjects(), vec!["discord.message_create"]);
     }
 
     #[tokio::test]
     async fn dispatch_forwards_raw_data_payload() {
         let (b, mock) = bridge_with_mock();
-        b.dispatch(
-            r#"{"op":0,"t":"MESSAGE_CREATE","s":1,"d":{"id":"123","content":"hello world"}}"#,
-        )
-        .await;
+        b.dispatch(r#"{"op":0,"t":"MESSAGE_CREATE","s":1,"d":{"id":"123","content":"hello world"}}"#)
+            .await;
 
         let payloads = mock.published_payloads();
         let parsed: serde_json::Value = serde_json::from_slice(&payloads[0]).expect("valid json");
@@ -549,8 +498,7 @@ mod tests {
     async fn dispatch_skips_non_dispatch_ops() {
         let (b, mock) = bridge_with_mock();
         b.dispatch(r#"{"op":11}"#).await;
-        b.dispatch(r#"{"op":10,"d":{"heartbeat_interval":41250}}"#)
-            .await;
+        b.dispatch(r#"{"op":10,"d":{"heartbeat_interval":41250}}"#).await;
         b.dispatch(r#"{"op":7}"#).await;
         b.dispatch(r#"{"op":9,"d":false}"#).await;
         b.dispatch(r#"{"op":1,"d":42}"#).await;
@@ -581,10 +529,8 @@ mod tests {
     #[tokio::test]
     async fn dispatch_lowercases_event_type() {
         let (b, mock) = bridge_with_mock();
-        b.dispatch(
-            r#"{"op":0,"t":"GUILD_MEMBER_ADD","s":1,"d":{"guild_id":"123","user":{"id":"1"}}}"#,
-        )
-        .await;
+        b.dispatch(r#"{"op":0,"t":"GUILD_MEMBER_ADD","s":1,"d":{"guild_id":"123","user":{"id":"1"}}}"#)
+            .await;
         assert_eq!(mock.published_subjects(), vec!["discord.guild_member_add"]);
     }
 
@@ -596,10 +542,7 @@ mod tests {
 
         let msgs = mock.published_messages();
         assert_eq!(
-            msgs[0]
-                .headers
-                .get(NATS_HEADER_GUILD_ID)
-                .map(|v| v.as_str()),
+            msgs[0].headers.get(NATS_HEADER_GUILD_ID).map(|v| v.as_str()),
             Some("999")
         );
     }
@@ -633,18 +576,11 @@ mod tests {
     #[tokio::test]
     async fn dispatch_no_dedup_for_member_events() {
         let (b, mock) = bridge_with_mock();
-        b.dispatch(
-            r#"{"op":0,"t":"GUILD_MEMBER_ADD","s":1,"d":{"guild_id":"1","user":{"id":"2"}}}"#,
-        )
-        .await;
+        b.dispatch(r#"{"op":0,"t":"GUILD_MEMBER_ADD","s":1,"d":{"guild_id":"1","user":{"id":"2"}}}"#)
+            .await;
 
         let msgs = mock.published_messages();
-        assert!(
-            msgs[0]
-                .headers
-                .get(async_nats::header::NATS_MESSAGE_ID)
-                .is_none()
-        );
+        assert!(msgs[0].headers.get(async_nats::header::NATS_MESSAGE_ID).is_none());
     }
 
     #[tokio::test]
@@ -703,10 +639,7 @@ mod tests {
     #[test]
     fn dedup_id_for_message_delete_bulk() {
         assert_eq!(
-            extract_dedup_id(
-                "message_delete_bulk",
-                br#"{"channel_id":"ch1","ids":["1","2","3"]}"#
-            ),
+            extract_dedup_id("message_delete_bulk", br#"{"channel_id":"ch1","ids":["1","2","3"]}"#),
             Some("message_delete_bulk:ch1:1,2,3".to_string())
         );
     }
@@ -745,18 +678,12 @@ mod tests {
 
     #[test]
     fn dedup_id_unknown_event_returns_none() {
-        assert_eq!(
-            extract_dedup_id("presence_update", br#"{"user":{"id":"1"}}"#),
-            None
-        );
+        assert_eq!(extract_dedup_id("presence_update", br#"{"user":{"id":"1"}}"#), None);
     }
 
     #[test]
     fn dedup_id_missing_id_field_returns_none() {
-        assert_eq!(
-            extract_dedup_id("message_create", br#"{"content":"hi"}"#),
-            None
-        );
+        assert_eq!(extract_dedup_id("message_create", br#"{"content":"hi"}"#), None);
     }
 
     // ── MockDiscordGateway ────────────────────────────────────────────────────

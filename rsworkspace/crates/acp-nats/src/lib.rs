@@ -22,9 +22,7 @@ pub use acp_prefix::{AcpPrefix, AcpPrefixError};
 pub use agent::Bridge;
 pub use agent::REQ_ID_HEADER;
 pub use client_proxy::NatsClientProxy;
-pub use config::{
-    Config, DEFAULT_ACP_PREFIX, ENV_ACP_PREFIX, apply_timeout_overrides, nats_connect_timeout,
-};
+pub use config::{Config, DEFAULT_ACP_PREFIX, ENV_ACP_PREFIX, apply_timeout_overrides, nats_connect_timeout};
 pub use error::AGENT_UNAVAILABLE;
 pub use ext_method_name::ExtMethodName;
 pub use nats::session::agent::{PromptResponseSubject, ResponseSubject, UpdateSubject};
@@ -77,15 +75,11 @@ mod tests {
         async fn request_permission(
             &self,
             _args: agent_client_protocol::RequestPermissionRequest,
-        ) -> agent_client_protocol::Result<agent_client_protocol::RequestPermissionResponse>
-        {
+        ) -> agent_client_protocol::Result<agent_client_protocol::RequestPermissionResponse> {
             Err(agent_client_protocol::Error::internal_error())
         }
 
-        async fn session_notification(
-            &self,
-            args: SessionNotification,
-        ) -> agent_client_protocol::Result<()> {
+        async fn session_notification(&self, args: SessionNotification) -> agent_client_protocol::Result<()> {
             let count = self.received.borrow().len();
             if let Some(limit) = self.fail_after
                 && count >= limit
@@ -111,9 +105,7 @@ mod tests {
                 let notif = SessionNotification::new(
                     "s1",
                     SessionUpdate::AgentMessageChunk(agent_client_protocol::ContentChunk::new(
-                        agent_client_protocol::ContentBlock::Text(
-                            agent_client_protocol::TextContent::new("hello"),
-                        ),
+                        agent_client_protocol::ContentBlock::Text(agent_client_protocol::TextContent::new("hello")),
                     )),
                 );
                 tx.send(notif).await.unwrap();
@@ -129,9 +121,7 @@ mod tests {
 
     #[tokio::test]
     async fn mock_client_request_permission_returns_error() {
-        use agent_client_protocol::{
-            Client, RequestPermissionRequest, ToolCallUpdate, ToolCallUpdateFields,
-        };
+        use agent_client_protocol::{Client, RequestPermissionRequest, ToolCallUpdate, ToolCallUpdateFields};
         let client = MockClient::new(None);
         let tool_call = ToolCallUpdate::new("id", ToolCallUpdateFields::new());
         let result = client
@@ -154,9 +144,7 @@ mod tests {
                 let notif = SessionNotification::new(
                     "s1",
                     SessionUpdate::AgentMessageChunk(agent_client_protocol::ContentChunk::new(
-                        agent_client_protocol::ContentBlock::Text(
-                            agent_client_protocol::TextContent::new("hello"),
-                        ),
+                        agent_client_protocol::ContentBlock::Text(agent_client_protocol::TextContent::new("hello")),
                     )),
                 );
                 let _ = tx.send(notif).await;

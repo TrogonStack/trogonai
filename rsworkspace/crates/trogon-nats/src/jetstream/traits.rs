@@ -1,9 +1,12 @@
 use async_nats::HeaderMap;
 use async_nats::jetstream::consumer::pull;
+use async_nats::jetstream::context;
 use async_nats::jetstream::kv;
+use async_nats::jetstream::message::OutboundMessage;
 use async_nats::jetstream::publish::PublishAck;
 use async_nats::jetstream::stream;
-use async_nats::jetstream::{self, context};
+#[cfg(not(coverage))]
+use async_nats::jetstream::{self};
 use async_nats::subject::ToSubject;
 use bytes::Bytes;
 use futures::Stream;
@@ -23,9 +26,8 @@ pub trait JetStreamContext: Send + Sync + Clone + 'static {
 }
 
 pub trait JetStreamKeyValueStatus: Send + Sync + Clone + 'static {
-    fn status(
-        &self,
-    ) -> impl Future<Output = Result<async_nats::jetstream::kv::bucket::Status, kv::StatusError>> + Send;
+    fn status(&self)
+    -> impl Future<Output = Result<async_nats::jetstream::kv::bucket::Status, kv::StatusError>> + Send;
 }
 
 pub trait JetStreamKeyValueCreateWithTtl: Send + Sync + Clone + 'static {
@@ -88,14 +90,23 @@ pub trait JetStreamGetKeyValue: Send + Sync + Clone + 'static {
 
 pub trait JetStreamPublisher: Send + Sync + Clone + 'static {
     type PublishError: Error + Send + Sync;
-    type AckFuture: IntoFuture<Output = Result<PublishAck, Self::PublishError>, IntoFuture: Send>
-        + Send;
+    type AckFuture: IntoFuture<Output = Result<PublishAck, Self::PublishError>, IntoFuture: Send> + Send;
 
     fn publish_with_headers<S: ToSubject + Send>(
         &self,
         subject: S,
         headers: HeaderMap,
         payload: Bytes,
+    ) -> impl Future<Output = Result<Self::AckFuture, Self::PublishError>> + Send;
+}
+
+pub trait JetStreamPublishMessage: Send + Sync + Clone + 'static {
+    type PublishError: Error + Send + Sync;
+    type AckFuture: IntoFuture<Output = Result<PublishAck, Self::PublishError>, IntoFuture: Send> + Send;
+
+    fn publish_message(
+        &self,
+        message: OutboundMessage,
     ) -> impl Future<Output = Result<Self::AckFuture, Self::PublishError>> + Send;
 }
 
@@ -113,10 +124,8 @@ pub trait JetStreamCreateConsumer: Send + 'static {
     type Error: Error + Send + Sync;
     type Consumer: JetStreamConsumer;
 
-    fn create_consumer(
-        &self,
-        config: pull::Config,
-    ) -> impl Future<Output = Result<Self::Consumer, Self::Error>> + Send;
+    fn create_consumer(&self, config: pull::Config)
+    -> impl Future<Output = Result<Self::Consumer, Self::Error>> + Send;
 }
 
 pub trait JetStreamConsumer: Send + Sync + 'static {
@@ -138,42 +147,37 @@ pub trait JetStreamConsumer: Send + Sync + 'static {
 pub type JsMessageOf<J> =
     <<<J as JetStreamGetStream>::Stream as JetStreamCreateConsumer>::Consumer as JetStreamConsumer>::Message;
 
+#[cfg(not(coverage))]
 impl JetStreamKeyValueStatus for jetstream::kv::Store {
     fn status(
         &self,
-    ) -> impl Future<Output = Result<async_nats::jetstream::kv::bucket::Status, kv::StatusError>> + Send
-    {
+    ) -> impl Future<Output = Result<async_nats::jetstream::kv::bucket::Status, kv::StatusError>> + Send {
         jetstream::kv::Store::status(self)
     }
 }
 
+#[cfg(not(coverage))]
 impl JetStreamKeyValueCreateWithTtl for jetstream::kv::Store {
-    async fn create_with_ttl(
-        &self,
-        key: &str,
-        value: Bytes,
-        ttl: std::time::Duration,
-    ) -> Result<u64, kv::CreateError> {
+    async fn create_with_ttl(&self, key: &str, value: Bytes, ttl: std::time::Duration) -> Result<u64, kv::CreateError> {
         self.create_with_ttl(key, value, ttl).await
     }
 }
 
+#[cfg(not(coverage))]
 impl JetStreamKeyValueUpdate for jetstream::kv::Store {
     async fn update(&self, key: &str, value: Bytes, revision: u64) -> Result<u64, kv::UpdateError> {
         self.update(key, value, revision).await
     }
 }
 
+#[cfg(not(coverage))]
 impl JetStreamKeyValueDeleteExpectRevision for jetstream::kv::Store {
-    async fn delete_expect_revision(
-        &self,
-        key: &str,
-        revision: Option<u64>,
-    ) -> Result<(), kv::DeleteError> {
+    async fn delete_expect_revision(&self, key: &str, revision: Option<u64>) -> Result<(), kv::DeleteError> {
         self.delete_expect_revision(key, revision).await
     }
 }
 
+#[cfg(not(coverage))]
 impl JetStreamCreateKeyValue for jetstream::Context {
     type Store = kv::Store;
 
@@ -185,6 +189,7 @@ impl JetStreamCreateKeyValue for jetstream::Context {
     }
 }
 
+#[cfg(not(coverage))]
 impl JetStreamGetKeyValue for jetstream::Context {
     type Store = kv::Store;
 
@@ -196,6 +201,7 @@ impl JetStreamGetKeyValue for jetstream::Context {
     }
 }
 
+#[cfg(not(coverage))]
 impl JetStreamPublisher for jetstream::Context {
     type PublishError = context::PublishError;
     type AckFuture = context::PublishAckFuture;
@@ -207,5 +213,53 @@ impl JetStreamPublisher for jetstream::Context {
         payload: Bytes,
     ) -> impl Future<Output = Result<Self::AckFuture, Self::PublishError>> + Send {
         jetstream::Context::publish_with_headers(self, subject, headers, payload)
+    }
+}
+
+#[cfg(not(coverage))]
+impl JetStreamPublishMessage for jetstream::Context {
+    type PublishError = context::PublishError;
+    type AckFuture = context::PublishAckFuture;
+
+    fn publish_message(
+        &self,
+        message: OutboundMessage,
+    ) -> impl Future<Output = Result<Self::AckFuture, Self::PublishError>> + Send {
+        context::traits::Publisher::publish_message(self, message)
+    }
+}
+
+#[cfg(not(coverage))]
+impl JetStreamGetStream for jetstream::Context {
+    type Error = context::GetStreamError;
+    type Stream = stream::Stream;
+
+    fn get_stream<T: AsRef<str> + Send>(
+        &self,
+        stream_name: T,
+    ) -> impl Future<Output = Result<Self::Stream, Self::Error>> + Send {
+        jetstream::Context::get_stream(self, stream_name)
+    }
+}
+
+#[cfg(not(coverage))]
+impl JetStreamCreateConsumer for jetstream::stream::Stream {
+    type Error = async_nats::jetstream::stream::ConsumerError;
+    type Consumer = jetstream::consumer::Consumer<pull::Config>;
+
+    async fn create_consumer(&self, config: pull::Config) -> Result<Self::Consumer, Self::Error> {
+        self.create_consumer(config).await
+    }
+}
+
+#[cfg(not(coverage))]
+impl JetStreamConsumer for jetstream::consumer::Consumer<pull::Config> {
+    type StreamError = async_nats::jetstream::consumer::StreamError;
+    type MessagesError = async_nats::jetstream::consumer::pull::MessagesError;
+    type Message = jetstream::Message;
+    type Messages = async_nats::jetstream::consumer::pull::Stream;
+
+    async fn messages(&self) -> Result<Self::Messages, Self::StreamError> {
+        self.messages().await
     }
 }

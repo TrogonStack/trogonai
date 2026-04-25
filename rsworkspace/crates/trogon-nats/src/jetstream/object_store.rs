@@ -82,11 +82,7 @@ impl ObjectStorePut for NatsObjectStore {
     type Error = async_nats::jetstream::object_store::PutError;
     type Info = async_nats::jetstream::object_store::ObjectInfo;
 
-    async fn put<R: AsyncRead + Unpin + Send>(
-        &self,
-        name: &str,
-        data: &mut R,
-    ) -> Result<Self::Info, Self::Error> {
+    async fn put<R: AsyncRead + Unpin + Send>(&self, name: &str, data: &mut R) -> Result<Self::Info, Self::Error> {
         self.store.put(name, data).await
     }
 }

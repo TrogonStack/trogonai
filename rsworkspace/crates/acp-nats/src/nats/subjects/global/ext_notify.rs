@@ -6,10 +6,7 @@ pub struct ExtNotifySubject {
 }
 
 impl ExtNotifySubject {
-    pub fn new(
-        prefix: &crate::acp_prefix::AcpPrefix,
-        method: &crate::ext_method_name::ExtMethodName,
-    ) -> Self {
+    pub fn new(prefix: &crate::acp_prefix::AcpPrefix, method: &crate::ext_method_name::ExtMethodName) -> Self {
         Self {
             prefix: prefix.clone(),
             method: method.clone(),
@@ -26,8 +23,7 @@ impl std::fmt::Display for ExtNotifySubject {
 impl super::super::markers::Publishable for ExtNotifySubject {}
 
 impl super::super::stream::StreamAssignment for ExtNotifySubject {
-    const STREAM: Option<super::super::stream::AcpStream> =
-        Some(super::super::stream::AcpStream::GlobalExt);
+    const STREAM: Option<super::super::stream::AcpStream> = Some(super::super::stream::AcpStream::GlobalExt);
 }
 
 #[cfg(test)]

@@ -6,10 +6,7 @@ pub struct PromptSubject {
 }
 
 impl PromptSubject {
-    pub fn new(
-        prefix: &crate::acp_prefix::AcpPrefix,
-        session_id: &crate::session_id::AcpSessionId,
-    ) -> Self {
+    pub fn new(prefix: &crate::acp_prefix::AcpPrefix, session_id: &crate::session_id::AcpSessionId) -> Self {
         Self {
             prefix: prefix.clone(),
             session_id: session_id.clone(),
@@ -37,8 +34,7 @@ impl async_nats::subject::ToSubject for PromptSubject {
 impl super::super::markers::SessionCommand for PromptSubject {}
 
 impl super::super::stream::StreamAssignment for PromptSubject {
-    const STREAM: Option<super::super::stream::AcpStream> =
-        Some(super::super::stream::AcpStream::Commands);
+    const STREAM: Option<super::super::stream::AcpStream> = Some(super::super::stream::AcpStream::Commands);
 }
 
 #[cfg(test)]

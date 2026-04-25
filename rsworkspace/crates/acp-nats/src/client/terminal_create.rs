@@ -1,9 +1,7 @@
 use crate::client::rpc_reply;
 use crate::jsonrpc::extract_request_id;
 use crate::nats::{FlushClient, PublishClient};
-use agent_client_protocol::{
-    Client, CreateTerminalRequest, CreateTerminalResponse, ErrorCode, Request, Response,
-};
+use agent_client_protocol::{Client, CreateTerminalRequest, CreateTerminalResponse, ErrorCode, Request, Response};
 use bytes::Bytes;
 use serde::de::Error as SerdeDeError;
 use tracing::{instrument, warn};
@@ -45,10 +43,7 @@ pub fn error_code_and_message(e: &TerminalCreateError) -> (ErrorCode, String) {
 
 /// Handles terminal/create: parses request, calls client, wraps response in JSON-RPC envelope,
 /// and publishes to reply subject. Reply is required (request-reply pattern).
-#[instrument(
-    name = "acp.client.terminal.create",
-    skip(payload, client, nats, serializer)
-)]
+#[instrument(name = "acp.client.terminal.create", skip(payload, client, nats, serializer))]
 pub async fn handle<N: PublishClient + FlushClient, C: Client, S: JsonSerialize>(
     payload: &[u8],
     client: &C,
@@ -86,14 +81,7 @@ pub async fn handle<N: PublishClient + FlushClient, C: Client, S: JsonSerialize>
                         &format!("Failed to serialize response: {}", e),
                     )
                 });
-            rpc_reply::publish_reply(
-                nats,
-                reply_to,
-                response_bytes,
-                content_type,
-                "terminal_create reply",
-            )
-            .await;
+            rpc_reply::publish_reply(nats, reply_to, response_bytes, content_type, "terminal_create reply").await;
         }
         Err(e) => {
             let (code, message) = error_code_and_message(&e);
@@ -102,16 +90,8 @@ pub async fn handle<N: PublishClient + FlushClient, C: Client, S: JsonSerialize>
                 session_id = %session_id,
                 "Failed to handle terminal/create"
             );
-            let (bytes, content_type) =
-                rpc_reply::error_response_bytes(serializer, request_id, code, &message);
-            rpc_reply::publish_reply(
-                nats,
-                reply_to,
-                bytes,
-                content_type,
-                "terminal_create error reply",
-            )
-            .await;
+            let (bytes, content_type) = rpc_reply::error_response_bytes(serializer, request_id, code, &message);
+            rpc_reply::publish_reply(nats, reply_to, bytes, content_type, "terminal_create error reply").await;
         }
     }
 }
@@ -123,17 +103,15 @@ async fn forward_to_client<C: Client>(
 ) -> Result<CreateTerminalResponse, TerminalCreateError> {
     let envelope: Request<CreateTerminalRequest> =
         serde_json::from_slice(payload).map_err(TerminalCreateError::InvalidRequest)?;
-    let request = envelope.params.ok_or_else(|| {
-        TerminalCreateError::InvalidRequest(serde_json::Error::custom("params is null or missing"))
-    })?;
+    let request = envelope
+        .params
+        .ok_or_else(|| TerminalCreateError::InvalidRequest(serde_json::Error::custom("params is null or missing")))?;
     let params_session_id = request.session_id.to_string();
     if params_session_id != expected_session_id {
-        return Err(TerminalCreateError::InvalidRequest(
-            serde_json::Error::custom(format!(
-                "params.sessionId ({}) does not match subject session id ({})",
-                params_session_id, expected_session_id
-            )),
-        ));
+        return Err(TerminalCreateError::InvalidRequest(serde_json::Error::custom(format!(
+            "params.sessionId ({}) does not match subject session id ({})",
+            params_session_id, expected_session_id
+        ))));
     }
     client
         .create_terminal(request)
@@ -145,9 +123,8 @@ async fn forward_to_client<C: Client>(
 mod tests {
     use super::*;
     use agent_client_protocol::{
-        ContentBlock, ContentChunk, CreateTerminalRequest, CreateTerminalResponse, Request,
-        RequestId, RequestPermissionRequest, RequestPermissionResponse, SessionNotification,
-        SessionUpdate,
+        ContentBlock, ContentChunk, CreateTerminalRequest, CreateTerminalResponse, Request, RequestId,
+        RequestPermissionRequest, RequestPermissionResponse, SessionNotification, SessionUpdate,
     };
     use async_trait::async_trait;
     use std::error::Error;
@@ -168,10 +145,7 @@ mod tests {
 
     #[async_trait(?Send)]
     impl Client for MockClient {
-        async fn session_notification(
-            &self,
-            _: SessionNotification,
-        ) -> agent_client_protocol::Result<()> {
+        async fn session_notification(&self, _: SessionNotification) -> agent_client_protocol::Result<()> {
             Ok(())
         }
 
@@ -197,10 +171,7 @@ mod tests {
 
     #[async_trait(?Send)]
     impl Client for FailingClient {
-        async fn session_notification(
-            &self,
-            _: SessionNotification,
-        ) -> agent_client_protocol::Result<()> {
+        async fn session_notification(&self, _: SessionNotification) -> agent_client_protocol::Result<()> {
             Ok(())
         }
 
@@ -321,8 +292,7 @@ mod tests {
 
     #[test]
     fn error_code_and_message_client_error_preserves_client_code() {
-        let client_err =
-            agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "file not found");
+        let client_err = agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "file not found");
         let tc_err = TerminalCreateError::ClientError(client_err);
         let (code, message) = error_code_and_message(&tc_err);
         assert_eq!(code, ErrorCode::InvalidParams);
@@ -331,8 +301,7 @@ mod tests {
 
     #[test]
     fn error_code_and_message_client_error_preserves_other_code() {
-        let client_err =
-            agent_client_protocol::Error::new(ErrorCode::InternalError.into(), "internal");
+        let client_err = agent_client_protocol::Error::new(ErrorCode::InternalError.into(), "internal");
         let tc_err = TerminalCreateError::ClientError(client_err);
         let (code, _) = error_code_and_message(&tc_err);
         assert_eq!(code, ErrorCode::InternalError);
@@ -350,10 +319,7 @@ mod tests {
 
         let result = forward_to_client(&payload, &client, "sess-1").await;
         assert!(result.is_err());
-        assert!(matches!(
-            result.unwrap_err(),
-            TerminalCreateError::InvalidRequest(_)
-        ));
+        assert!(matches!(result.unwrap_err(), TerminalCreateError::InvalidRequest(_)));
     }
 
     #[tokio::test]
@@ -369,10 +335,7 @@ mod tests {
 
         let result = forward_to_client(&payload, &client, "sess-a").await;
         assert!(result.is_err());
-        assert!(matches!(
-            result.unwrap_err(),
-            TerminalCreateError::InvalidRequest(_)
-        ));
+        assert!(matches!(result.unwrap_err(), TerminalCreateError::InvalidRequest(_)));
     }
 
     #[tokio::test]
@@ -412,15 +375,7 @@ mod tests {
         };
         let payload = serde_json::to_vec(&envelope).unwrap();
 
-        handle(
-            &payload,
-            &client,
-            Some("_INBOX.reply"),
-            &nats,
-            "sess-1",
-            &serializer,
-        )
-        .await;
+        handle(&payload, &client, Some("_INBOX.reply"), &nats, "sess-1", &serializer).await;
 
         assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
     }
@@ -431,8 +386,7 @@ mod tests {
         let tc_err = TerminalCreateError::InvalidRequest(err);
         assert!(tc_err.to_string().contains("invalid request"));
 
-        let client_err =
-            agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "create failed");
+        let client_err = agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "create failed");
         let tc_err = TerminalCreateError::ClientError(client_err);
         assert!(tc_err.to_string().contains("client error"));
     }
@@ -443,8 +397,7 @@ mod tests {
         let tc_err = TerminalCreateError::InvalidRequest(err);
         assert!(tc_err.source().is_some());
 
-        let client_err =
-            agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "create failed");
+        let client_err = agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "create failed");
         let tc_err = TerminalCreateError::ClientError(client_err);
         assert!(tc_err.source().is_some());
     }

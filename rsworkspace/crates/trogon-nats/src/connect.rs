@@ -27,11 +27,7 @@ impl std::fmt::Display for ConnectError {
                 write!(f, "NATS authorization violation: invalid credentials")
             }
             Self::ConnectionFailed { servers, error } => {
-                write!(
-                    f,
-                    "Failed to connect to NATS servers {:?}: {}",
-                    servers, error
-                )
+                write!(f, "Failed to connect to NATS servers {:?}: {}", servers, error)
             }
         }
     }
@@ -65,11 +61,7 @@ fn reconnect_delay(attempts: usize) -> Duration {
         MAX_RECONNECT_DELAY.as_secs(),
         2u64.saturating_pow((attempts - 1) as u32),
     ));
-    info!(
-        attempts,
-        delay_secs = delay.as_secs(),
-        "NATS reconnect delay"
-    );
+    info!(attempts, delay_secs = delay.as_secs(), "NATS reconnect delay");
     delay
 }
 
@@ -124,10 +116,7 @@ fn apply_reconnect_options(
 
 #[cfg_attr(coverage, coverage(off))]
 #[instrument(name = "nats.connect", skip(config), fields(servers = ?config.servers, auth = %config.auth.description(), timeout_secs = ?connection_timeout.as_secs()))]
-pub async fn connect(
-    config: &NatsConfig,
-    connection_timeout: Duration,
-) -> Result<Client, ConnectError> {
+pub async fn connect(config: &NatsConfig, connection_timeout: Duration) -> Result<Client, ConnectError> {
     info!(
         servers = ?config.servers,
         auth = %config.auth.description(),
@@ -315,10 +304,7 @@ mod tests {
 
     #[test]
     fn connect_error_display_invalid_credentials() {
-        let err = ConnectError::InvalidCredentials(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            "file not found",
-        ));
+        let err = ConnectError::InvalidCredentials(std::io::Error::new(std::io::ErrorKind::NotFound, "file not found"));
         let msg = err.to_string();
         assert!(msg.contains("Failed to load credentials file"));
         assert!(msg.contains("file not found"));
@@ -326,10 +312,7 @@ mod tests {
 
     #[test]
     fn connect_error_source_invalid_credentials() {
-        let err = ConnectError::InvalidCredentials(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            "file not found",
-        ));
+        let err = ConnectError::InvalidCredentials(std::io::Error::new(std::io::ErrorKind::NotFound, "file not found"));
         assert!(std::error::Error::source(&err).is_some());
     }
 

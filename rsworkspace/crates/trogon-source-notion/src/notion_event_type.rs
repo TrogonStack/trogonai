@@ -27,9 +27,7 @@ pub struct NotionEventType(DottedNatsToken);
 
 impl NotionEventType {
     pub fn new(value: impl AsRef<str>) -> Result<Self, NotionEventTypeError> {
-        DottedNatsToken::new(value)
-            .map(Self)
-            .map_err(NotionEventTypeError)
+        DottedNatsToken::new(value).map(Self).map_err(NotionEventTypeError)
     }
 
     pub fn as_str(&self) -> &str {

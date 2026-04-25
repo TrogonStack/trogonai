@@ -91,11 +91,7 @@ where
     })
 }
 
-pub async fn request<N: RequestClient, Req, Res>(
-    client: &N,
-    subject: &str,
-    request: &Req,
-) -> Result<Res, NatsError>
+pub async fn request<N: RequestClient, Req, Res>(client: &N, subject: &str, request: &Req) -> Result<Res, NatsError>
 where
     Req: Serialize,
     Res: DeserializeOwned,
@@ -126,12 +122,7 @@ impl RetryPolicy {
         }
     }
 
-    pub async fn execute<F, Fut>(
-        &self,
-        mut operation: F,
-        operation_name: &str,
-        subject: &str,
-    ) -> Result<(), NatsError>
+    pub async fn execute<F, Fut>(&self, mut operation: F, operation_name: &str, subject: &str) -> Result<(), NatsError>
     where
         F: FnMut() -> Fut,
         Fut: std::future::Future<Output = Result<(), PublishOperationError>>,
@@ -291,11 +282,7 @@ where
         .execute(
             || async {
                 client
-                    .publish_with_headers(
-                        subject.to_string(),
-                        headers.clone(),
-                        payload.clone().into(),
-                    )
+                    .publish_with_headers(subject.to_string(), headers.clone(), payload.clone().into())
                     .await
                     .map_err(|e| PublishOperationError(e.to_string()))
             },
@@ -316,12 +303,7 @@ where
         .execute(
             || {
                 let client = client.clone();
-                async move {
-                    client
-                        .flush()
-                        .await
-                        .map_err(|e| PublishOperationError(e.to_string()))
-                }
+                async move { client.flush().await.map_err(|e| PublishOperationError(e.to_string())) }
             },
             "flush",
             subject,
@@ -569,10 +551,7 @@ mod tests {
         let mut headers = async_nats::HeaderMap::new();
         let mut carrier = HeaderMapCarrier(&mut headers);
         carrier.set("x-test-key", "test-value".to_string());
-        assert_eq!(
-            headers.get("x-test-key").map(|v| v.as_str()),
-            Some("test-value")
-        );
+        assert_eq!(headers.get("x-test-key").map(|v| v.as_str()), Some("test-value"));
     }
 
     /// `inject_trace_context()` must not remove or overwrite headers that were
@@ -690,8 +669,7 @@ mod tests {
     async fn test_request_serialize_error() {
         let mock = AdvancedMockNatsClient::new();
 
-        let result: Result<TestResponse, NatsError> =
-            request(&mock, "test.subject", &FailingSerialize).await;
+        let result: Result<TestResponse, NatsError> = request(&mock, "test.subject", &FailingSerialize).await;
 
         assert!(matches!(result, Err(NatsError::Serialize(_))));
     }
@@ -715,13 +693,7 @@ mod tests {
     async fn test_publish_serialize_error() {
         let mock = AdvancedMockNatsClient::new();
 
-        let result = publish(
-            &mock,
-            "test.subject",
-            &FailingSerialize,
-            PublishOptions::simple(),
-        )
-        .await;
+        let result = publish(&mock, "test.subject", &FailingSerialize, PublishOptions::simple()).await;
 
         assert!(matches!(result, Err(NatsError::Serialize(_))));
         assert!(mock.published_messages().is_empty());
@@ -789,10 +761,7 @@ mod tests {
         let err = NatsError::Timeout {
             subject: "test.subject".to_string(),
         };
-        assert!(
-            err.to_string()
-                .contains("Request to 'test.subject' timed out")
-        );
+        assert!(err.to_string().contains("Request to 'test.subject' timed out"));
     }
 
     #[test]
@@ -802,12 +771,10 @@ mod tests {
 
     #[test]
     fn nats_error_display_all_variants() {
-        let serialize_err =
-            NatsError::Serialize(serde_json::from_str::<String>("bad").unwrap_err());
+        let serialize_err = NatsError::Serialize(serde_json::from_str::<String>("bad").unwrap_err());
         assert!(serialize_err.to_string().contains("serialize request"));
 
-        let deserialize_err =
-            NatsError::Deserialize(serde_json::from_str::<String>("bad").unwrap_err());
+        let deserialize_err = NatsError::Deserialize(serde_json::from_str::<String>("bad").unwrap_err());
         assert!(deserialize_err.to_string().contains("deserialize response"));
 
         let request_err = NatsError::Request {
@@ -832,12 +799,10 @@ mod tests {
 
     #[test]
     fn nats_error_source() {
-        let serialize_err =
-            NatsError::Serialize(serde_json::from_str::<String>("bad").unwrap_err());
+        let serialize_err = NatsError::Serialize(serde_json::from_str::<String>("bad").unwrap_err());
         assert!(std::error::Error::source(&serialize_err).is_some());
 
-        let deserialize_err =
-            NatsError::Deserialize(serde_json::from_str::<String>("bad").unwrap_err());
+        let deserialize_err = NatsError::Deserialize(serde_json::from_str::<String>("bad").unwrap_err());
         assert!(std::error::Error::source(&deserialize_err).is_some());
 
         let pub_err = NatsError::PublishOperation(PublishOperationError("f".into()));
@@ -856,9 +821,7 @@ mod tests {
         };
         assert!(std::error::Error::source(&request_err).is_none());
 
-        let timeout = NatsError::Timeout {
-            subject: "s".into(),
-        };
+        let timeout = NatsError::Timeout { subject: "s".into() };
         assert!(std::error::Error::source(&timeout).is_none());
 
         let other = NatsError::Other("x".into());
@@ -959,9 +922,7 @@ mod tests {
         assert_eq!(*call_count.lock().unwrap(), 4); // initial + 3 retries
 
         match result.unwrap_err() {
-            NatsError::PublishOperationExhausted {
-                attempts, subject, ..
-            } => {
+            NatsError::PublishOperationExhausted { attempts, subject, .. } => {
                 assert_eq!(attempts, 4);
                 assert_eq!(subject, "test.subject");
             }

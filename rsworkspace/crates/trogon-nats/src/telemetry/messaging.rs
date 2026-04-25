@@ -45,21 +45,12 @@ impl MessagingOperation {
     }
 }
 
-pub(crate) fn client_operation_attributes(
-    operation: MessagingOperation,
-    destination_name: &str,
-) -> [KeyValue; 4] {
+pub(crate) fn client_operation_attributes(operation: MessagingOperation, destination_name: &str) -> [KeyValue; 4] {
     [
         KeyValue::new(attr_semconv::MESSAGING_SYSTEM, "nats"),
-        KeyValue::new(
-            attr_semconv::MESSAGING_DESTINATION_NAME,
-            destination_name.to_owned(),
-        ),
+        KeyValue::new(attr_semconv::MESSAGING_DESTINATION_NAME, destination_name.to_owned()),
         KeyValue::new(attr_semconv::MESSAGING_OPERATION_NAME, operation.name()),
-        KeyValue::new(
-            attr_semconv::MESSAGING_OPERATION_TYPE,
-            operation.operation_type(),
-        ),
+        KeyValue::new(attr_semconv::MESSAGING_OPERATION_TYPE, operation.operation_type()),
     ]
 }
 
@@ -67,11 +58,7 @@ pub(crate) fn error_attribute(error: MessagingError) -> KeyValue {
     KeyValue::new(trace_semconv::ERROR_TYPE, error.as_str())
 }
 
-pub(crate) fn set_client_operation_span_attributes(
-    span: &Span,
-    operation: MessagingOperation,
-    destination_name: &str,
-) {
+pub(crate) fn set_client_operation_span_attributes(span: &Span, operation: MessagingOperation, destination_name: &str) {
     for attribute in client_operation_attributes(operation, destination_name) {
         span.set_attribute(attribute.key, attribute.value);
     }
@@ -95,8 +82,7 @@ mod tests {
 
     #[test]
     fn client_operation_attributes_follow_messaging_semantic_conventions() {
-        let attributes =
-            client_operation_attributes(MessagingOperation::Request, "acp.session.new");
+        let attributes = client_operation_attributes(MessagingOperation::Request, "acp.session.new");
 
         assert_eq!(
             value_for(&attributes, attr_semconv::MESSAGING_SYSTEM)
@@ -139,10 +125,7 @@ mod tests {
     #[test]
     fn error_attribute_covers_all_semantic_error_variants() {
         assert_eq!(
-            error_attribute(MessagingError::FlushOperation)
-                .value
-                .as_str()
-                .as_ref(),
+            error_attribute(MessagingError::FlushOperation).value.as_str().as_ref(),
             "flush_operation"
         );
         assert_eq!(
@@ -153,10 +136,7 @@ mod tests {
             "publish_operation"
         );
         assert_eq!(
-            error_attribute(MessagingError::Serialize)
-                .value
-                .as_str()
-                .as_ref(),
+            error_attribute(MessagingError::Serialize).value.as_str().as_ref(),
             "serialize"
         );
     }

@@ -6,9 +6,7 @@ pub struct SessionNewSubject {
 
 impl SessionNewSubject {
     pub fn new(prefix: &crate::acp_prefix::AcpPrefix) -> Self {
-        Self {
-            prefix: prefix.clone(),
-        }
+        Self { prefix: prefix.clone() }
     }
 }
 
@@ -21,8 +19,7 @@ impl std::fmt::Display for SessionNewSubject {
 impl super::super::markers::Requestable for SessionNewSubject {}
 
 impl super::super::stream::StreamAssignment for SessionNewSubject {
-    const STREAM: Option<super::super::stream::AcpStream> =
-        Some(super::super::stream::AcpStream::Global);
+    const STREAM: Option<super::super::stream::AcpStream> = Some(super::super::stream::AcpStream::Global);
 }
 
 #[cfg(test)]

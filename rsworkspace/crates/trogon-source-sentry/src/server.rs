@@ -4,13 +4,12 @@ use std::time::Duration;
 
 use crate::config::SentryConfig;
 use crate::constants::{
-    HEADER_REQUEST_ID, HEADER_RESOURCE, HEADER_SIGNATURE, HEADER_TIMESTAMP, HTTP_BODY_SIZE_MAX,
-    NATS_HEADER_ACTION, NATS_HEADER_REQUEST_ID, NATS_HEADER_RESOURCE, NATS_HEADER_TIMESTAMP,
+    HEADER_REQUEST_ID, HEADER_RESOURCE, HEADER_SIGNATURE, HEADER_TIMESTAMP, HTTP_BODY_SIZE_MAX, NATS_HEADER_ACTION,
+    NATS_HEADER_REQUEST_ID, NATS_HEADER_RESOURCE, NATS_HEADER_TIMESTAMP,
 };
 use crate::signature;
 use axum::{
-    Router, body::Bytes, extract::DefaultBodyLimit, extract::State, http::HeaderMap,
-    http::StatusCode, routing::post,
+    Router, body::Bytes, extract::DefaultBodyLimit, extract::State, http::HeaderMap, http::StatusCode, routing::post,
 };
 use serde::Deserialize;
 use tracing::{info, instrument, warn};
@@ -198,12 +197,7 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
         }
     };
 
-    let subject = format!(
-        "{}.{}.{}",
-        state.subject_prefix,
-        resource.as_str(),
-        action_token
-    );
+    let subject = format!("{}.{}.{}", state.subject_prefix, resource.as_str(), action_token);
     let span = tracing::Span::current();
     span.record("resource", resource.as_str());
     span.record("action", &payload.action);
@@ -242,8 +236,7 @@ mod tests {
     use tracing_subscriber::util::SubscriberInitExt;
     use trogon_nats::jetstream::StreamMaxAge;
     use trogon_nats::jetstream::{
-        ClaimCheckPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher,
-        MockObjectStore,
+        ClaimCheckPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher, MockObjectStore,
     };
 
     type HmacSha256 = Hmac<Sha256>;
@@ -341,13 +334,7 @@ mod tests {
         let signature = compute_sig(TEST_SECRET, body);
 
         let response = app
-            .oneshot(webhook_request(
-                body,
-                "issue",
-                "1711315768",
-                "req-1",
-                Some(&signature),
-            ))
+            .oneshot(webhook_request(body, "issue", "1711315768", "req-1", Some(&signature)))
             .await
             .unwrap();
 
@@ -365,36 +352,14 @@ mod tests {
                 .as_str(),
             "req-1"
         );
+        assert_eq!(messages[0].headers.get(NATS_HEADER_RESOURCE).unwrap().as_str(), "issue");
+        assert_eq!(messages[0].headers.get(NATS_HEADER_ACTION).unwrap().as_str(), "created");
         assert_eq!(
-            messages[0]
-                .headers
-                .get(NATS_HEADER_RESOURCE)
-                .unwrap()
-                .as_str(),
-            "issue"
-        );
-        assert_eq!(
-            messages[0]
-                .headers
-                .get(NATS_HEADER_ACTION)
-                .unwrap()
-                .as_str(),
-            "created"
-        );
-        assert_eq!(
-            messages[0]
-                .headers
-                .get(NATS_HEADER_REQUEST_ID)
-                .unwrap()
-                .as_str(),
+            messages[0].headers.get(NATS_HEADER_REQUEST_ID).unwrap().as_str(),
             "req-1"
         );
         assert_eq!(
-            messages[0]
-                .headers
-                .get(NATS_HEADER_TIMESTAMP)
-                .unwrap()
-                .as_str(),
+            messages[0].headers.get(NATS_HEADER_TIMESTAMP).unwrap().as_str(),
             "1711315768"
         );
     }
@@ -423,13 +388,7 @@ mod tests {
         let body = br#"{"action":"created"}"#;
 
         let response = app
-            .oneshot(webhook_request(
-                body,
-                "issue",
-                "1711315768",
-                "req-1",
-                Some("not-valid"),
-            ))
+            .oneshot(webhook_request(body, "issue", "1711315768", "req-1", Some("not-valid")))
             .await
             .unwrap();
 
@@ -513,13 +472,7 @@ mod tests {
         let signature = compute_sig(TEST_SECRET, body);
 
         let response = app
-            .oneshot(webhook_request(
-                body,
-                "issue",
-                "1711315768",
-                "req-1",
-                Some(&signature),
-            ))
+            .oneshot(webhook_request(body, "issue", "1711315768", "req-1", Some(&signature)))
             .await
             .unwrap();
 
@@ -570,13 +523,7 @@ mod tests {
         let signature = compute_sig(TEST_SECRET, body);
 
         let response = app
-            .oneshot(webhook_request(
-                body,
-                "issue",
-                "1711315768",
-                "req-1",
-                Some(&signature),
-            ))
+            .oneshot(webhook_request(body, "issue", "1711315768", "req-1", Some(&signature)))
             .await
             .unwrap();
 
@@ -594,13 +541,7 @@ mod tests {
         let signature = compute_sig(TEST_SECRET, body);
 
         let response = app
-            .oneshot(webhook_request(
-                body,
-                "issue",
-                "1711315768",
-                "req-1",
-                Some(&signature),
-            ))
+            .oneshot(webhook_request(body, "issue", "1711315768", "req-1", Some(&signature)))
             .await
             .unwrap();
 
