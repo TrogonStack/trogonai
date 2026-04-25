@@ -20,8 +20,8 @@ use trogon_nats::SubjectTokenViolation;
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream};
 
 use crate::{
-    CronJob, JobAdded, JobEvent, JobEventCodec, JobEventData, JobEventStatus, JobId, JobPaused, JobRemoved, JobResumed,
-    RecordedJobEvent,
+    CronJob, JobEventData, JobEventProtoError, JobEventStatus, JobId, RecordedJobEvent,
+    commands::proto::{JobContractEventCodec, contract_event_stream_id, contract_v1},
     error::CronError,
     kv::{EVENTS_SUBJECT_PREFIX, LEGACY_EVENTS_SUBJECT_PREFIX},
     store::{open_cron_jobs_bucket, open_events_stream, open_snapshot_bucket, snapshot_store_config},
@@ -70,6 +70,7 @@ pub enum JobStreamState {
 #[derive(Debug)]
 pub enum JobTransitionError {
     InvalidEventId { id: String, source: SubjectTokenViolation },
+    InvalidEvent { source: JobEventProtoError },
     CannotAddExistingJob { id: String },
     CannotAddDeletedJob { id: String },
     MissingJobForStateChange { id: String },
@@ -81,50 +82,64 @@ pub const fn initial_state() -> JobStreamState {
     JobStreamState::Initial
 }
 
-pub fn apply(state: JobStreamState, event: JobEvent) -> Result<JobStreamState, JobTransitionError> {
-    match (state, event) {
-        (JobStreamState::Initial, JobEvent::JobAdded(JobAdded { id, job })) => {
+pub fn apply(state: JobStreamState, event: &contract_v1::JobEvent) -> Result<JobStreamState, JobTransitionError> {
+    match (state, event.event()) {
+        (JobStreamState::Initial, contract_v1::job_event::EventOneof::JobAdded(inner)) => {
+            let id = inner.id().to_string();
             validate_event_job_id(&id)
                 .map_err(|source| JobTransitionError::InvalidEventId { id: id.clone(), source })?;
-            Ok(JobStreamState::Present(CronJob::from((id, job))))
+            if !inner.has_job() {
+                return Err(JobTransitionError::InvalidEvent {
+                    source: JobEventProtoError::MissingJobDetails,
+                });
+            }
+            Ok(JobStreamState::Present(
+                CronJob::try_from((id, inner.job().to_owned()))
+                    .map_err(|source| JobTransitionError::InvalidEvent { source })?,
+            ))
         }
-        (JobStreamState::Initial, event @ JobEvent::JobPaused(JobPaused { .. })) => {
+        (JobStreamState::Initial, contract_v1::job_event::EventOneof::JobPaused(_)) => {
             Err(JobTransitionError::MissingJobForStateChange {
-                id: parse_event_job_id(&event)?,
+                id: parse_event_job_id(event)?,
             })
         }
-        (JobStreamState::Initial, event @ JobEvent::JobResumed(JobResumed { .. })) => {
+        (JobStreamState::Initial, contract_v1::job_event::EventOneof::JobResumed(_)) => {
             Err(JobTransitionError::MissingJobForStateChange {
-                id: parse_event_job_id(&event)?,
+                id: parse_event_job_id(event)?,
             })
         }
-        (JobStreamState::Initial, event @ JobEvent::JobRemoved(JobRemoved { .. })) => {
-            Ok(JobStreamState::Deleted(parse_event_job_id(&event)?))
+        (JobStreamState::Initial, contract_v1::job_event::EventOneof::JobRemoved(_)) => {
+            Ok(JobStreamState::Deleted(parse_event_job_id(event)?))
         }
-        (JobStreamState::Present(job), JobEvent::JobAdded(JobAdded { .. })) => {
+        (JobStreamState::Present(job), contract_v1::job_event::EventOneof::JobAdded(_)) => {
             Err(JobTransitionError::CannotAddExistingJob { id: job.id })
         }
-        (JobStreamState::Present(mut job), JobEvent::JobPaused(JobPaused { .. })) => {
+        (JobStreamState::Present(mut job), contract_v1::job_event::EventOneof::JobPaused(_)) => {
             job.status = JobEventStatus::Disabled;
             Ok(JobStreamState::Present(job))
         }
-        (JobStreamState::Present(mut job), JobEvent::JobResumed(JobResumed { .. })) => {
+        (JobStreamState::Present(mut job), contract_v1::job_event::EventOneof::JobResumed(_)) => {
             job.status = JobEventStatus::Enabled;
             Ok(JobStreamState::Present(job))
         }
-        (JobStreamState::Present(job), JobEvent::JobRemoved(JobRemoved { .. })) => Ok(JobStreamState::Deleted(job.id)),
-        (JobStreamState::Deleted(id), JobEvent::JobAdded(JobAdded { .. })) => {
+        (JobStreamState::Present(job), contract_v1::job_event::EventOneof::JobRemoved(_)) => {
+            Ok(JobStreamState::Deleted(job.id))
+        }
+        (JobStreamState::Deleted(id), contract_v1::job_event::EventOneof::JobAdded(_)) => {
             Err(JobTransitionError::CannotAddDeletedJob { id })
         }
-        (JobStreamState::Deleted(id), JobEvent::JobPaused(JobPaused { .. })) => {
+        (JobStreamState::Deleted(id), contract_v1::job_event::EventOneof::JobPaused(_)) => {
             Err(JobTransitionError::DeletedJobForStateChange { id })
         }
-        (JobStreamState::Deleted(id), JobEvent::JobResumed(JobResumed { .. })) => {
+        (JobStreamState::Deleted(id), contract_v1::job_event::EventOneof::JobResumed(_)) => {
             Err(JobTransitionError::DeletedJobForStateChange { id })
         }
-        (JobStreamState::Deleted(id), JobEvent::JobRemoved(JobRemoved { .. })) => {
+        (JobStreamState::Deleted(id), contract_v1::job_event::EventOneof::JobRemoved(_)) => {
             Err(JobTransitionError::DeletedJobForRemoval { id })
         }
+        (_, contract_v1::job_event::EventOneof::not_set(_)) | (_, _) => Err(JobTransitionError::InvalidEvent {
+            source: JobEventProtoError::MissingEvent,
+        }),
     }
 }
 
@@ -171,6 +186,7 @@ impl std::fmt::Display for JobTransitionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InvalidEventId { id, .. } => write!(f, "job event id '{id}' is invalid"),
+            Self::InvalidEvent { source } => write!(f, "job event is invalid: {source}"),
             Self::CannotAddExistingJob { id } => write!(f, "job '{id}' already exists"),
             Self::CannotAddDeletedJob { id } => {
                 write!(f, "job '{id}' was deleted and cannot be added again")
@@ -191,6 +207,7 @@ impl std::fmt::Display for JobTransitionError {
 impl std::error::Error for JobTransitionError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            Self::InvalidEvent { source } => Some(source),
             Self::InvalidEventId { source, .. } => Some(source),
             _ => None,
         }
@@ -256,7 +273,7 @@ where
                             return None;
                         }
                     };
-                    let data = match event.decode_data() {
+                    let data = match event.decode_data_with(&JobContractEventCodec) {
                         Ok(data) => data,
                         Err(error) => {
                             tracing::error!(error = %error, "Failed to decode watched cron job event payload");
@@ -282,7 +299,7 @@ where
                         };
                         (|| -> Result<Option<ProjectionChange>, CronError> {
                             let current = state.get(stream_id.as_str()).cloned().unwrap_or_else(initial_state);
-                            let next = apply(current.clone(), data.clone()).map_err(|error| {
+                            let next = apply(current.clone(), &data).map_err(|error| {
                                 CronError::event_source("failed to apply watched job event to stream state", error)
                             })?;
                             let change = projection_change(&current, &next);
@@ -362,7 +379,7 @@ where
         let event = decode_recorded_job_event(message)?;
         let stream_id = job_id_from_event_subject(&event.recorded_stream_id)?;
         let data = event
-            .decode_data()
+            .decode_data_with(&JobContractEventCodec)
             .map_err(|source| CronError::event_source("failed to decode job event during snapshot catch-up", source))?;
         let change = apply_event_to_snapshot_map(&mut states, &mut snapshots, &stream_id, &data, sequence)?;
         persist_snapshot_change(&bucket, &snapshot_store_config(), change)
@@ -411,7 +428,7 @@ pub(crate) async fn project_appended_events(
 
     for (index, event) in events.iter().enumerate() {
         let decoded = event
-            .decode_data()
+            .decode_data_with(&JobContractEventCodec)
             .map_err(|source| CronError::event_source("failed to decode job event for snapshot projection", source))?;
         let change = apply_event_to_snapshot_map(
             &mut states,
@@ -429,8 +446,10 @@ pub(crate) async fn project_appended_events(
         .map_err(CronError::from)
 }
 
-fn parse_event_job_id(event: &JobEvent) -> Result<String, JobTransitionError> {
-    let id = event.stream_id().to_string();
+fn parse_event_job_id(event: &contract_v1::JobEvent) -> Result<String, JobTransitionError> {
+    let id = contract_event_stream_id(event)
+        .map_err(|source| JobTransitionError::InvalidEvent { source })?
+        .to_string();
     validate_event_job_id(&id)
         .map(|()| id.clone())
         .map_err(|source| JobTransitionError::InvalidEventId { id, source })
@@ -481,7 +500,7 @@ async fn rebuild_jobs_from_stream(
         let event = decode_recorded_job_event(message)?;
         let stream_id = job_id_from_event_subject(&event.recorded_stream_id)?;
         let data = event
-            .decode_data_with(&JobEventCodec)
+            .decode_data_with(&JobContractEventCodec)
             .map_err(|source| CronError::event_source("failed to decode recorded job event payload", source))?;
         apply_event_to_snapshot_map(&mut states, &mut snapshots, &stream_id, &data, version)?;
     }
@@ -592,12 +611,12 @@ fn apply_event_to_snapshot_map(
     states: &mut BTreeMap<String, JobStreamState>,
     snapshots: &mut BTreeMap<String, Snapshot<CronJob>>,
     stream_id: &str,
-    event: &JobEvent,
+    event: &contract_v1::JobEvent,
     version: u64,
 ) -> Result<SnapshotChange<CronJob>, CronError> {
     ensure_event_matches_stream(stream_id, event)?;
     let current_state = states.get(stream_id).cloned().unwrap_or_else(initial_state);
-    let next_state = apply(current_state, event.clone())
+    let next_state = apply(current_state, event)
         .map_err(|source| CronError::event_source("failed to apply job event to stream snapshot state", source))?;
 
     states.insert(stream_id.to_string(), next_state.clone());
@@ -643,16 +662,17 @@ fn job_id_from_event_subject(subject: &str) -> Result<String, CronError> {
         })
 }
 
-fn ensure_event_matches_stream(expected_stream_id: &str, event: &JobEvent) -> Result<(), CronError> {
-    if event.stream_id() == expected_stream_id {
+fn ensure_event_matches_stream(expected_stream_id: &str, event: &contract_v1::JobEvent) -> Result<(), CronError> {
+    let event_stream_id = contract_event_stream_id(event)
+        .map_err(|source| CronError::event_source("job event is missing its id", source))?;
+    if event_stream_id == expected_stream_id {
         Ok(())
     } else {
         Err(CronError::event_source(
             "event payload stream id does not match the expected stream",
             std::io::Error::other(format!(
                 "expected '{}' but event carried '{}'",
-                expected_stream_id,
-                event.stream_id()
+                expected_stream_id, event_stream_id
             )),
         ))
     }
@@ -665,9 +685,10 @@ fn validate_event_job_id(id: &str) -> Result<(), SubjectTokenViolation> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::proto::contract_v1;
     use crate::{
-        CronJob, Delivery, Job, JobAdded, JobDetails, JobEventStatus, JobHeaders, JobId, JobMessage, JobPaused,
-        JobRemoved, JobStatus, MessageContent, Schedule,
+        CronJob, Delivery, Job, JobDetails, JobEventStatus, JobHeaders, JobId, JobMessage, JobStatus, MessageContent,
+        Schedule,
     };
 
     fn job_id(id: &str) -> JobId {
@@ -691,23 +712,37 @@ mod tests {
         CronJob::from((id.to_string(), JobDetails::from(job(id))))
     }
 
+    fn added_event(id: &str) -> contract_v1::JobEvent {
+        let mut event = contract_v1::JobEvent::new();
+        let mut inner = contract_v1::JobAdded::new();
+        inner.set_id(id);
+        inner.set_job(contract_v1::JobDetails::from(&JobDetails::from(job(id))));
+        event.set_job_added(inner);
+        event
+    }
+
+    fn paused_event(id: &str) -> contract_v1::JobEvent {
+        let mut event = contract_v1::JobEvent::new();
+        let mut inner = contract_v1::JobPaused::new();
+        inner.set_id(id);
+        event.set_job_paused(inner);
+        event
+    }
+
+    fn removed_event(id: &str) -> contract_v1::JobEvent {
+        let mut event = contract_v1::JobEvent::new();
+        let mut inner = contract_v1::JobRemoved::new();
+        inner.set_id(id);
+        event.set_job_removed(inner);
+        event
+    }
+
     #[test]
     fn event_projection_replays_latest_state() {
-        let events = [
-            JobEvent::JobAdded(JobAdded {
-                id: "backup".to_string(),
-                job: job("backup").into(),
-            }),
-            JobEvent::JobPaused(JobPaused {
-                id: "backup".to_string(),
-            }),
-            JobEvent::JobRemoved(JobRemoved {
-                id: "backup".to_string(),
-            }),
-        ];
+        let events = [added_event("backup"), paused_event("backup"), removed_event("backup")];
         let mut state = initial_state();
 
-        for event in events {
+        for event in &events {
             state = apply(state, event).unwrap();
         }
 
@@ -716,27 +751,14 @@ mod tests {
 
     #[test]
     fn event_projection_rejects_recreating_deleted_job() {
-        let error = apply(
-            JobStreamState::Deleted("backup".to_string()),
-            JobEvent::JobAdded(JobAdded {
-                id: "backup".to_string(),
-                job: job("backup").into(),
-            }),
-        )
-        .unwrap_err();
+        let error = apply(JobStreamState::Deleted("backup".to_string()), &added_event("backup")).unwrap_err();
 
         assert!(matches!(error, JobTransitionError::CannotAddDeletedJob { .. }));
     }
 
     #[test]
     fn state_change_requires_existing_job() {
-        let error = apply(
-            initial_state(),
-            JobEvent::JobPaused(JobPaused {
-                id: "missing".to_string(),
-            }),
-        )
-        .unwrap_err();
+        let error = apply(initial_state(), &paused_event("missing")).unwrap_err();
 
         assert!(matches!(error, JobTransitionError::MissingJobForStateChange { .. }));
     }
@@ -744,26 +766,13 @@ mod tests {
     #[test]
     fn projection_change_tracks_latest_state() {
         let before = initial_state();
-        let after = apply(
-            before.clone(),
-            JobEvent::JobAdded(JobAdded {
-                id: "backup".to_string(),
-                job: job("backup").into(),
-            }),
-        )
-        .unwrap();
+        let after = apply(before.clone(), &added_event("backup")).unwrap();
         assert_eq!(
             projection_change(&before, &after),
             Some(ProjectionChange::Upsert(expected_job("backup")))
         );
 
-        let updated = apply(
-            after.clone(),
-            JobEvent::JobPaused(JobPaused {
-                id: "backup".to_string(),
-            }),
-        )
-        .unwrap();
+        let updated = apply(after.clone(), &paused_event("backup")).unwrap();
         match projection_change(&after, &updated).unwrap() {
             ProjectionChange::Upsert(job) => assert_eq!(job.status, JobEventStatus::Disabled),
             ProjectionChange::Delete(_) => panic!("expected upsert change"),
@@ -772,35 +781,20 @@ mod tests {
 
     #[test]
     fn initial_state_rejects_adding_existing_job() {
-        let error = apply(
-            JobStreamState::Present(expected_job("backup")),
-            JobEvent::JobAdded(JobAdded {
-                id: "backup".to_string(),
-                job: job("backup").into(),
-            }),
-        )
-        .unwrap_err();
+        let error = apply(JobStreamState::Present(expected_job("backup")), &added_event("backup")).unwrap_err();
         assert!(matches!(error, JobTransitionError::CannotAddExistingJob { .. }));
     }
 
     #[test]
     fn initial_removal_creates_deleted_tombstone() {
-        let state = apply(
-            initial_state(),
-            JobEvent::JobRemoved(JobRemoved {
-                id: "backup".to_string(),
-            }),
-        )
-        .unwrap();
+        let state = apply(initial_state(), &removed_event("backup")).unwrap();
         assert_eq!(state, JobStreamState::Deleted("backup".to_string()));
     }
 
     #[test]
     fn reducer_rejects_stream_id_mismatch() {
         let stream_id = "alpha".to_string();
-        let error =
-            ensure_event_matches_stream(&stream_id, &JobEvent::JobRemoved(JobRemoved { id: "beta".to_string() }))
-                .unwrap_err();
+        let error = ensure_event_matches_stream(&stream_id, &removed_event("beta")).unwrap_err();
         assert!(error.to_string().contains("event payload stream id does not match"));
     }
 
@@ -828,48 +822,11 @@ mod tests {
         let mut snapshots = BTreeMap::new();
         let stream_id = "alpha".to_string();
 
-        apply_event_to_snapshot_map(
-            &mut states,
-            &mut snapshots,
-            &stream_id,
-            &JobEvent::JobAdded(JobAdded {
-                id: "alpha".to_string(),
-                job: JobDetails::from(job("alpha")),
-            }),
-            1,
-        )
-        .unwrap();
-        apply_event_to_snapshot_map(
-            &mut states,
-            &mut snapshots,
-            &stream_id,
-            &JobEvent::JobPaused(JobPaused {
-                id: "alpha".to_string(),
-            }),
-            2,
-        )
-        .unwrap();
-        apply_event_to_snapshot_map(
-            &mut states,
-            &mut snapshots,
-            &stream_id,
-            &JobEvent::JobRemoved(JobRemoved {
-                id: "alpha".to_string(),
-            }),
-            3,
-        )
-        .unwrap();
-        let error = apply_event_to_snapshot_map(
-            &mut states,
-            &mut snapshots,
-            &stream_id,
-            &JobEvent::JobAdded(JobAdded {
-                id: "alpha".to_string(),
-                job: JobDetails::from(job("alpha")),
-            }),
-            4,
-        )
-        .unwrap_err();
+        apply_event_to_snapshot_map(&mut states, &mut snapshots, &stream_id, &added_event("alpha"), 1).unwrap();
+        apply_event_to_snapshot_map(&mut states, &mut snapshots, &stream_id, &paused_event("alpha"), 2).unwrap();
+        apply_event_to_snapshot_map(&mut states, &mut snapshots, &stream_id, &removed_event("alpha"), 3).unwrap();
+        let error =
+            apply_event_to_snapshot_map(&mut states, &mut snapshots, &stream_id, &added_event("alpha"), 4).unwrap_err();
 
         assert!(error.to_string().contains("deleted"));
         assert!(!snapshots.contains_key("alpha"));
@@ -883,9 +840,7 @@ mod tests {
             &mut BTreeMap::new(),
             &mut BTreeMap::new(),
             &stream_id,
-            &JobEvent::JobPaused(JobPaused {
-                id: "alpha".to_string(),
-            }),
+            &paused_event("alpha"),
             1,
         )
         .unwrap_err();
