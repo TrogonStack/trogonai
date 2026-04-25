@@ -5607,6 +5607,8 @@ dependencies = [
  "dashmap",
  "futures-util",
  "rand 0.8.6",
+ "serde",
+ "serde_json",
  "testcontainers-modules",
  "tokio",
  "tracing",

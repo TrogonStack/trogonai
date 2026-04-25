@@ -10,12 +10,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_nats::jetstream;
+use futures_util::StreamExt as _;
 use testcontainers_modules::{
     nats::Nats,
     testcontainers::{ImageExt, runners::AsyncRunner},
 };
 use trogon_vault::{ApiKeyToken, VaultStore};
-use trogon_vault_nats::{CryptoCtx, NatsKvVault, ensure_vault_bucket};
+use trogon_vault_nats::{
+    AuditPublisher, CryptoCtx, NatsKvVault, ensure_audit_stream, ensure_vault_bucket,
+};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -28,7 +31,7 @@ fn crypto() -> Arc<CryptoCtx> {
 }
 
 async fn make_vault(js: &jetstream::Context, name: &str) -> NatsKvVault {
-    let kv = ensure_vault_bucket(js, name).await.expect("bucket");
+    let kv = ensure_vault_bucket(js, name, 1).await.expect("bucket");
     NatsKvVault::new(kv, crypto(), Duration::from_secs(30))
         .await
         .expect("vault")
@@ -218,4 +221,62 @@ async fn store_overwrites_existing_value() {
         vault.resolve(&token).await.unwrap(),
         Some("sk-ant-v2".to_string())
     );
+}
+
+#[tokio::test]
+async fn audit_events_published_for_store_resolve_revoke() {
+    let (js, _c) = start_nats().await;
+
+    // Subscribe on core NATS before creating the stream so we don't miss any messages.
+    // JetStream publish also delivers to matching core NATS subscribers.
+    let mut sub = js
+        .client()
+        .subscribe("vault.audit.>")
+        .await
+        .expect("subscribe");
+
+    ensure_audit_stream(&js).await.expect("audit stream");
+
+    let kv = ensure_vault_bucket(&js, "prod", 1).await.expect("bucket");
+    let publisher = Arc::new(AuditPublisher::new(js.clone(), "prod"));
+    let vault = NatsKvVault::new(kv, crypto(), Duration::from_secs(30))
+        .await
+        .expect("vault")
+        .with_audit(publisher);
+
+    let token = tok("tok_anthropic_prod_abc123");
+
+    // store → audit.store.prod
+    vault.store(&token, "sk-ant-key").await.unwrap();
+    let msg = tokio::time::timeout(Duration::from_secs(2), sub.next())
+        .await
+        .expect("timeout waiting for store audit event")
+        .expect("stream ended");
+    assert_eq!(msg.subject.as_str(), "vault.audit.store.prod");
+    let body: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
+    assert_eq!(body["type"], "store");
+    assert_eq!(body["token"], "tok_anthropic_prod_abc123");
+    assert_eq!(body["vault"], "prod");
+
+    // resolve → audit.resolve.prod
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    vault.resolve(&token).await.unwrap();
+    let msg = tokio::time::timeout(Duration::from_secs(2), sub.next())
+        .await
+        .expect("timeout waiting for resolve audit event")
+        .expect("stream ended");
+    assert_eq!(msg.subject.as_str(), "vault.audit.resolve.prod");
+    let body: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
+    assert_eq!(body["type"], "resolve");
+    assert_eq!(body["success"], true);
+
+    // revoke → audit.revoke.prod
+    vault.revoke(&token).await.unwrap();
+    let msg = tokio::time::timeout(Duration::from_secs(2), sub.next())
+        .await
+        .expect("timeout waiting for revoke audit event")
+        .expect("stream ended");
+    assert_eq!(msg.subject.as_str(), "vault.audit.revoke.prod");
+    let body: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
+    assert_eq!(body["type"], "revoke");
 }

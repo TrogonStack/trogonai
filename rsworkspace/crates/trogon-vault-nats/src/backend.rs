@@ -8,6 +8,7 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use trogon_vault::{ApiKeyToken, VaultStore};
 
+use crate::audit::AuditPublisher;
 use crate::crypto::CryptoCtx;
 use crate::error::{NatsKvVaultError, NatsResult as _};
 use crate::slot::RotationSlot;
@@ -22,11 +23,15 @@ use crate::slot::RotationSlot;
 ///
 /// NATS never stores plaintext — every value is encrypted with AES-256-GCM
 /// before being written to the KV bucket.
+///
+/// Attach an [`AuditPublisher`] via [`with_audit`](NatsKvVault::with_audit) to
+/// emit fire-and-forget audit events for every vault operation.
 pub struct NatsKvVault {
     cache:    Arc<DashMap<String, RotationSlot>>,
     kv:       kv::Store,
     ready:    watch::Receiver<bool>,
     crypto:   Arc<CryptoCtx>,
+    audit:    Option<Arc<AuditPublisher>>,
     _watcher: JoinHandle<()>,
 }
 
@@ -89,8 +94,18 @@ impl NatsKvVault {
             kv,
             ready: ready_rx,
             crypto,
+            audit: None,
             _watcher: watcher,
         })
+    }
+
+    /// Attach an [`AuditPublisher`] so every vault operation emits an audit event.
+    ///
+    /// Call [`ensure_audit_stream`](crate::ensure_audit_stream) before using this
+    /// so the `VAULT_AUDIT` stream exists to receive the events.
+    pub fn with_audit(mut self, publisher: Arc<AuditPublisher>) -> Self {
+        self.audit = Some(publisher);
+        self
     }
 
     /// Return `(current, previous)` for a token.
@@ -116,18 +131,31 @@ impl VaultStore for NatsKvVault {
     async fn store(&self, token: &ApiKeyToken, plaintext: &str) -> Result<(), Self::Error> {
         let ciphertext = self.crypto.encrypt(plaintext.as_bytes())?;
         self.kv.put(token.as_str(), ciphertext.into()).await.nats_err()?;
+        if let Some(ref audit) = self.audit {
+            audit.publish_store(token.as_str());
+        }
         Ok(())
     }
 
     async fn resolve(&self, token: &ApiKeyToken) -> Result<Option<String>, Self::Error> {
         wait_ready(&self.ready).await?;
-        Ok(self.cache.get(token.as_str()).map(|s| s.current.clone()))
+        let t0 = std::time::Instant::now();
+        let result = self.cache.get(token.as_str()).map(|s| s.current.clone());
+        if let Some(ref audit) = self.audit {
+            audit.publish_resolve(token.as_str(), result.is_some(), t0.elapsed().as_micros() as u64);
+        }
+        Ok(result)
     }
 
     async fn revoke(&self, token: &ApiKeyToken) -> Result<(), Self::Error> {
         // kv.delete() publishes a tombstone regardless — safe for non-existent keys
         match self.kv.delete(token.as_str()).await {
-            Ok(_)  => Ok(()),
+            Ok(_)  => {
+                if let Some(ref audit) = self.audit {
+                    audit.publish_revoke(token.as_str());
+                }
+                Ok(())
+            }
             Err(e) => {
                 let msg = e.to_string();
                 if msg.contains("not found") || msg.contains("NotFound") {
@@ -137,6 +165,15 @@ impl VaultStore for NatsKvVault {
                 }
             }
         }
+    }
+
+    async fn rotate(&self, token: &ApiKeyToken, new_plaintext: &str) -> Result<(), Self::Error> {
+        let ciphertext = self.crypto.encrypt(new_plaintext.as_bytes())?;
+        self.kv.put(token.as_str(), ciphertext.into()).await.nats_err()?;
+        if let Some(ref audit) = self.audit {
+            audit.publish_rotate(token.as_str());
+        }
+        Ok(())
     }
 
     async fn resolve_with_previous(
@@ -149,10 +186,6 @@ impl VaultStore for NatsKvVault {
             None => (None, None),
         })
     }
-
-    // rotate() uses the default impl (delegates to store()), which re-encrypts
-    // and overwrites. The watcher picks up the Put and updates the RotationSlot,
-    // saving the old value as `previous` for the grace period.
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

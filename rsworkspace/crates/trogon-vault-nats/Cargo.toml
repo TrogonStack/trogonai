@@ -11,6 +11,8 @@ bytes        = { workspace = true }
 dashmap      = "6"
 futures-util = { workspace = true }
 rand         = "0.8"
+serde        = { workspace = true }
+serde_json   = { workspace = true }
 tokio        = { workspace = true, features = ["sync"] }
 tracing      = { workspace = true }
 trogon-vault = { path = "../trogon-vault" }

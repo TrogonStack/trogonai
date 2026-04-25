@@ -5,12 +5,14 @@
 //! Supports named vaults (one bucket per name) and zero-downtime rotation via
 //! [`RotationSlot`].
 
+pub mod audit;
 pub mod backend;
 pub mod bucket;
 pub mod crypto;
 pub mod error;
 pub mod slot;
 
+pub use audit::{AuditEvent, AuditPublisher, ensure_audit_stream, ensure_audit_stream_with_max_age};
 pub use backend::NatsKvVault;
 pub use bucket::ensure_vault_bucket;
 pub use crypto::CryptoCtx;
