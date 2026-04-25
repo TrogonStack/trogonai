@@ -24,20 +24,16 @@ pub async fn handle<N: RequestClient, C: GetElapsed, J>(
     .await
     .map_err(map_nats_error);
 
-    bridge.metrics.record_request(
-        "logout",
-        bridge.clock.elapsed(start).as_secs_f64(),
-        result.is_ok(),
-    );
+    bridge
+        .metrics
+        .record_request("logout", bridge.clock.elapsed(start).as_secs_f64(), result.is_ok());
 
     result
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::agent::test_support::{
-        has_request_metric, mock_bridge, mock_bridge_with_metrics, set_json_response,
-    };
+    use crate::agent::test_support::{has_request_metric, mock_bridge, mock_bridge_with_metrics, set_json_response};
     use crate::error::AGENT_UNAVAILABLE;
     use agent_client_protocol::{Agent, ErrorCode, LogoutRequest, LogoutResponse};
 

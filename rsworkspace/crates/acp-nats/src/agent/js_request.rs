@@ -7,8 +7,8 @@ use std::time::Duration;
 use tokio::time::timeout;
 use trogon_nats::REQ_ID_HEADER;
 use trogon_nats::jetstream::{
-    JetStreamConsumer as _, JetStreamCreateConsumer as _, JetStreamGetStream, JetStreamPublisher,
-    JsAck as _, JsAckWith as _, JsMessageRef as _, JsRequestMessage,
+    JetStreamConsumer as _, JetStreamCreateConsumer as _, JetStreamGetStream, JetStreamPublisher, JsAck as _,
+    JsAckWith as _, JsMessageRef as _, JsRequestMessage,
 };
 use trogon_std::JsonSerialize;
 
@@ -49,12 +49,10 @@ where
             format!("create response consumer: {e}"),
         )
     })?;
-    let mut resp_messages = resp_consumer.messages().await.map_err(|e| {
-        Error::new(
-            ErrorCode::InternalError.into(),
-            format!("response messages: {e}"),
-        )
-    })?;
+    let mut resp_messages = resp_consumer
+        .messages()
+        .await
+        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("response messages: {e}")))?;
 
     let payload_bytes = serializer
         .to_vec(request)
@@ -71,28 +69,21 @@ where
         .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("js ack: {e}")))?;
 
     match timeout(operation_timeout, resp_messages.next()).await {
-        Ok(Some(Ok(js_msg))) => {
-            match serde_json::from_slice::<Res>(js_msg.message().payload.as_ref()) {
-                Ok(response) => {
+        Ok(Some(Ok(js_msg))) => match serde_json::from_slice::<Res>(js_msg.message().payload.as_ref()) {
+            Ok(response) => {
+                let _ = js_msg.ack().await;
+                Ok(response)
+            }
+            Err(_) => {
+                if let Ok(agent_err) = serde_json::from_slice::<Error>(js_msg.message().payload.as_ref()) {
                     let _ = js_msg.ack().await;
-                    Ok(response)
-                }
-                Err(_) => {
-                    if let Ok(agent_err) =
-                        serde_json::from_slice::<Error>(js_msg.message().payload.as_ref())
-                    {
-                        let _ = js_msg.ack().await;
-                        Err(agent_err)
-                    } else {
-                        let _ = js_msg.ack_with(AckKind::Term).await;
-                        Err(Error::new(
-                            ErrorCode::InternalError.into(),
-                            "bad response payload",
-                        ))
-                    }
+                    Err(agent_err)
+                } else {
+                    let _ = js_msg.ack_with(AckKind::Term).await;
+                    Err(Error::new(ErrorCode::InternalError.into(), "bad response payload"))
                 }
             }
-        }
+        },
         Ok(Some(Err(e))) => Err(Error::new(
             ErrorCode::InternalError.into(),
             format!("response consumer: {e}"),
@@ -161,10 +152,7 @@ mod tests {
         .await;
 
         assert!(result.is_ok());
-        assert_eq!(
-            result.unwrap().stop_reason,
-            agent_client_protocol::StopReason::EndTurn
-        );
+        assert_eq!(result.unwrap().stop_reason, agent_client_protocol::StopReason::EndTurn);
     }
 
     #[tokio::test]
@@ -207,12 +195,7 @@ mod tests {
         .await;
 
         assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .message
-                .contains("create response consumer")
-        );
+        assert!(result.unwrap_err().message.contains("create response consumer"));
     }
 
     #[tokio::test]
@@ -290,10 +273,8 @@ mod tests {
         let (consumer, tx) = MockJetStreamConsumer::new();
         js.consumer_factory.add_consumer(consumer);
 
-        let agent_err = agent_client_protocol::Error::new(
-            agent_client_protocol::ErrorCode::InternalError.into(),
-            "agent failed",
-        );
+        let agent_err =
+            agent_client_protocol::Error::new(agent_client_protocol::ErrorCode::InternalError.into(), "agent failed");
         let msg = MockJsMessage::new(async_nats::Message {
             subject: "test".into(),
             reply: None,
@@ -343,12 +324,7 @@ mod tests {
         .await;
 
         assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .message
-                .contains("response stream closed")
-        );
+        assert!(result.unwrap_err().message.contains("response stream closed"));
     }
 
     #[tokio::test]
@@ -357,10 +333,8 @@ mod tests {
         let (consumer, tx) = MockJetStreamConsumer::new();
         js.consumer_factory.add_consumer(consumer);
 
-        tx.unbounded_send(Err(trogon_nats::mocks::MockError(
-            "stream error".to_string(),
-        )))
-        .unwrap();
+        tx.unbounded_send(Err(trogon_nats::mocks::MockError("stream error".to_string())))
+            .unwrap();
 
         let result: agent_client_protocol::Result<PromptResponse> = js_request(
             &js,

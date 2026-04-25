@@ -27,9 +27,7 @@ pub struct IncidentioEventType(DottedNatsToken);
 
 impl IncidentioEventType {
     pub fn new(value: impl AsRef<str>) -> Result<Self, IncidentioEventTypeError> {
-        DottedNatsToken::new(value)
-            .map(Self)
-            .map_err(IncidentioEventTypeError)
+        DottedNatsToken::new(value).map(Self).map_err(IncidentioEventTypeError)
     }
 
     pub fn as_str(&self) -> &str {
@@ -64,20 +62,14 @@ mod tests {
     #[test]
     fn invalid_character_error_display_is_specific() {
         let err = IncidentioEventType::new("public incident").unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            "event_type contains invalid character: ' '"
-        );
+        assert_eq!(err.to_string(), "event_type contains invalid character: ' '");
     }
 
     #[test]
     fn too_long_error_display_is_specific() {
         let long_event_type = "a".repeat(129);
         let err = IncidentioEventType::new(&long_event_type).unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            "event_type is too long: 129 bytes (max 128)"
-        );
+        assert_eq!(err.to_string(), "event_type is too long: 129 bytes (max 128)");
     }
 
     #[test]
@@ -115,10 +107,7 @@ mod tests {
     #[test]
     fn display_roundtrips() {
         let event_type = IncidentioEventType::new("private_incident.incident_updated_v2").unwrap();
-        assert_eq!(
-            event_type.to_string(),
-            "private_incident.incident_updated_v2"
-        );
+        assert_eq!(event_type.to_string(), "private_incident.incident_updated_v2");
     }
 
     #[test]

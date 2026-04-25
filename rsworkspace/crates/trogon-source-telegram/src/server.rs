@@ -1,13 +1,11 @@
 use crate::config::TelegramSourceConfig;
 use crate::config::TelegramWebhookSecret;
 use crate::constants::{
-    HEADER_SECRET_TOKEN, HTTP_BODY_SIZE_MAX, NATS_HEADER_UPDATE_ID, NATS_HEADER_UPDATE_TYPE,
-    UPDATE_TYPES,
+    HEADER_SECRET_TOKEN, HTTP_BODY_SIZE_MAX, NATS_HEADER_UPDATE_ID, NATS_HEADER_UPDATE_TYPE, UPDATE_TYPES,
 };
 use crate::signature;
 use axum::{
-    Router, body::Bytes, extract::DefaultBodyLimit, extract::State, http::HeaderMap,
-    http::StatusCode, routing::post,
+    Router, body::Bytes, extract::DefaultBodyLimit, extract::State, http::HeaderMap, http::StatusCode, routing::post,
 };
 use std::fmt;
 use std::future::Future;
@@ -38,10 +36,7 @@ struct AppState<P: JetStreamPublisher, S: ObjectStorePut> {
     nats_ack_timeout: NonZeroDuration,
 }
 
-pub async fn provision<C: JetStreamContext>(
-    js: &C,
-    config: &TelegramSourceConfig,
-) -> Result<(), C::Error> {
+pub async fn provision<C: JetStreamContext>(js: &C, config: &TelegramSourceConfig) -> Result<(), C::Error> {
     js.get_or_create_stream(async_nats::jetstream::stream::Config {
         name: config.stream_name.as_str().to_owned(),
         subjects: vec![format!("{}.>", config.subject_prefix)],
@@ -104,9 +99,7 @@ async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut>(
     headers: HeaderMap,
     body: Bytes,
 ) -> StatusCode {
-    let token = headers
-        .get(HEADER_SECRET_TOKEN)
-        .and_then(|v| v.to_str().ok());
+    let token = headers.get(HEADER_SECRET_TOKEN).and_then(|v| v.to_str().ok());
 
     if let Err(e) = signature::verify(state.webhook_secret.as_str(), token) {
         warn!(reason = %e, "Telegram webhook secret validation failed");
@@ -161,8 +154,7 @@ mod tests {
     use tracing_subscriber::util::SubscriberInitExt;
     use trogon_nats::jetstream::StreamMaxAge;
     use trogon_nats::jetstream::{
-        ClaimCheckPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher,
-        MockObjectStore,
+        ClaimCheckPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher, MockObjectStore,
     };
     use trogon_std::NonZeroDuration;
 
@@ -248,10 +240,7 @@ mod tests {
         let app = mock_app(publisher.clone());
         let body = update_json("message");
 
-        let resp = app
-            .oneshot(webhook_request(&body, Some(TEST_SECRET)))
-            .await
-            .unwrap();
+        let resp = app.oneshot(webhook_request(&body, Some(TEST_SECRET))).await.unwrap();
 
         assert_eq!(resp.status(), StatusCode::OK);
 
@@ -259,17 +248,11 @@ mod tests {
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].subject, "telegram.message");
         assert_eq!(
-            messages[0]
-                .headers
-                .get(NATS_HEADER_UPDATE_TYPE)
-                .map(|v| v.as_str()),
+            messages[0].headers.get(NATS_HEADER_UPDATE_TYPE).map(|v| v.as_str()),
             Some("message"),
         );
         assert_eq!(
-            messages[0]
-                .headers
-                .get(NATS_HEADER_UPDATE_ID)
-                .map(|v| v.as_str()),
+            messages[0].headers.get(NATS_HEADER_UPDATE_ID).map(|v| v.as_str()),
             Some("12345"),
         );
     }
@@ -281,16 +264,10 @@ mod tests {
         let app = mock_app(publisher.clone());
         let body = update_json("callback_query");
 
-        let resp = app
-            .oneshot(webhook_request(&body, Some(TEST_SECRET)))
-            .await
-            .unwrap();
+        let resp = app.oneshot(webhook_request(&body, Some(TEST_SECRET))).await.unwrap();
 
         assert_eq!(resp.status(), StatusCode::OK);
-        assert_eq!(
-            publisher.published_subjects(),
-            vec!["telegram.callback_query"]
-        );
+        assert_eq!(publisher.published_subjects(), vec!["telegram.callback_query"]);
     }
 
     #[tokio::test]
@@ -300,10 +277,7 @@ mod tests {
         let app = mock_app(publisher.clone());
         let body = br#"{"update_id": 99}"#;
 
-        let resp = app
-            .oneshot(webhook_request(body, Some(TEST_SECRET)))
-            .await
-            .unwrap();
+        let resp = app.oneshot(webhook_request(body, Some(TEST_SECRET))).await.unwrap();
 
         assert_eq!(resp.status(), StatusCode::OK);
         assert_eq!(publisher.published_subjects(), vec!["telegram.unroutable"]);
@@ -316,10 +290,7 @@ mod tests {
         let app = mock_app(publisher.clone());
         let body = br#"{"message": {"chat": {"id": 1}}}"#;
 
-        let resp = app
-            .oneshot(webhook_request(body, Some(TEST_SECRET)))
-            .await
-            .unwrap();
+        let resp = app.oneshot(webhook_request(body, Some(TEST_SECRET))).await.unwrap();
 
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
         assert!(publisher.published_messages().is_empty());
@@ -332,10 +303,7 @@ mod tests {
         let app = mock_app(publisher.clone());
         let body = br#"{"update_id": "not_a_number", "message": {"chat": {"id": 1}}}"#;
 
-        let resp = app
-            .oneshot(webhook_request(body, Some(TEST_SECRET)))
-            .await
-            .unwrap();
+        let resp = app.oneshot(webhook_request(body, Some(TEST_SECRET))).await.unwrap();
 
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
         assert!(publisher.published_messages().is_empty());
@@ -359,10 +327,7 @@ mod tests {
         let publisher = MockJetStreamPublisher::new();
         let app = mock_app(publisher.clone());
 
-        let resp = app
-            .oneshot(webhook_request(b"{}", Some("wrong-secret")))
-            .await
-            .unwrap();
+        let resp = app.oneshot(webhook_request(b"{}", Some("wrong-secret"))).await.unwrap();
 
         assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
         assert!(publisher.published_subjects().is_empty());
@@ -391,10 +356,7 @@ mod tests {
         let app = mock_app(publisher.clone());
         let body = update_json("message");
 
-        let resp = app
-            .oneshot(webhook_request(&body, Some(TEST_SECRET)))
-            .await
-            .unwrap();
+        let resp = app.oneshot(webhook_request(&body, Some(TEST_SECRET))).await.unwrap();
 
         assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
@@ -420,10 +382,7 @@ mod tests {
 
         let body = update_json("message");
 
-        let resp = app
-            .oneshot(webhook_request(&body, Some(TEST_SECRET)))
-            .await
-            .unwrap();
+        let resp = app.oneshot(webhook_request(&body, Some(TEST_SECRET))).await.unwrap();
 
         assert_eq!(resp.status(), StatusCode::OK);
         assert_eq!(publisher.published_subjects(), vec!["custom.message"]);
@@ -436,10 +395,7 @@ mod tests {
         let app = mock_app(publisher.clone());
         let body = update_json("message");
 
-        let resp = app
-            .oneshot(webhook_request(&body, Some(TEST_SECRET)))
-            .await
-            .unwrap();
+        let resp = app.oneshot(webhook_request(&body, Some(TEST_SECRET))).await.unwrap();
 
         assert_eq!(resp.status(), StatusCode::OK);
 
@@ -546,9 +502,7 @@ mod tests {
 
             fn into_future(self) -> Self::IntoFuture {
                 match self {
-                    AckFuture::Fail => {
-                        Box::pin(async { Err(MockError("simulated ack failure".to_string())) })
-                    }
+                    AckFuture::Fail => Box::pin(async { Err(MockError("simulated ack failure".to_string())) }),
                     AckFuture::Hang => Box::pin(std::future::pending()),
                 }
             }
@@ -593,18 +547,12 @@ mod tests {
         };
 
         let app = Router::new()
-            .route(
-                "/webhook",
-                post(handle_webhook::<AckFailPublisher, MockObjectStore>),
-            )
+            .route("/webhook", post(handle_webhook::<AckFailPublisher, MockObjectStore>))
             .with_state(state);
 
         let body = update_json("message");
 
-        let resp = app
-            .oneshot(webhook_request(&body, Some(TEST_SECRET)))
-            .await
-            .unwrap();
+        let resp = app.oneshot(webhook_request(&body, Some(TEST_SECRET))).await.unwrap();
 
         assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
@@ -627,18 +575,12 @@ mod tests {
         };
 
         let app = Router::new()
-            .route(
-                "/webhook",
-                post(handle_webhook::<AckFailPublisher, MockObjectStore>),
-            )
+            .route("/webhook", post(handle_webhook::<AckFailPublisher, MockObjectStore>))
             .with_state(state);
 
         let body = update_json("message");
 
-        let resp = app
-            .oneshot(webhook_request(&body, Some(TEST_SECRET)))
-            .await
-            .unwrap();
+        let resp = app.oneshot(webhook_request(&body, Some(TEST_SECRET))).await.unwrap();
 
         assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }

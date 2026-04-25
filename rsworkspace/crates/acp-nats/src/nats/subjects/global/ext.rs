@@ -6,10 +6,7 @@ pub struct ExtSubject {
 }
 
 impl ExtSubject {
-    pub fn new(
-        prefix: &crate::acp_prefix::AcpPrefix,
-        method: &crate::ext_method_name::ExtMethodName,
-    ) -> Self {
+    pub fn new(prefix: &crate::acp_prefix::AcpPrefix, method: &crate::ext_method_name::ExtMethodName) -> Self {
         Self {
             prefix: prefix.clone(),
             method: method.clone(),
@@ -26,8 +23,7 @@ impl std::fmt::Display for ExtSubject {
 impl super::super::markers::Requestable for ExtSubject {}
 
 impl super::super::stream::StreamAssignment for ExtSubject {
-    const STREAM: Option<super::super::stream::AcpStream> =
-        Some(super::super::stream::AcpStream::GlobalExt);
+    const STREAM: Option<super::super::stream::AcpStream> = Some(super::super::stream::AcpStream::GlobalExt);
 }
 
 #[cfg(test)]

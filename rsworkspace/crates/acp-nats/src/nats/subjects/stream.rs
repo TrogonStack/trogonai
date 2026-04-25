@@ -36,11 +36,7 @@ impl AcpStream {
     }
 
     pub fn stream_name(&self, prefix: &AcpPrefix) -> String {
-        format!(
-            "{}_{}",
-            prefix.as_str().to_uppercase().replace('.', "_"),
-            self.suffix()
-        )
+        format!("{}_{}", prefix.as_str().to_uppercase().replace('.', "_"), self.suffix())
     }
 
     pub fn subject_patterns(&self, prefix: &AcpPrefix) -> Vec<String> {

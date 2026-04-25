@@ -53,11 +53,7 @@ impl Default for InMemoryEnv {
 #[cfg(any(test, feature = "test-support"))]
 impl ReadEnv for InMemoryEnv {
     fn var(&self, key: &str) -> Result<String, env::VarError> {
-        self.vars
-            .borrow()
-            .get(key)
-            .cloned()
-            .ok_or(env::VarError::NotPresent)
+        self.vars.borrow().get(key).cloned().ok_or(env::VarError::NotPresent)
     }
 }
 
@@ -77,10 +73,7 @@ mod tests {
     fn test_in_memory_env_not_present() {
         let env = InMemoryEnv::new();
 
-        assert!(matches!(
-            env.var("NONEXISTENT"),
-            Err(std::env::VarError::NotPresent)
-        ));
+        assert!(matches!(env.var("NONEXISTENT"), Err(std::env::VarError::NotPresent)));
     }
 
     #[test]
@@ -89,10 +82,7 @@ mod tests {
         env.set("TEST_VAR", "test_value");
         env.remove("TEST_VAR");
 
-        assert!(matches!(
-            env.var("TEST_VAR"),
-            Err(std::env::VarError::NotPresent)
-        ));
+        assert!(matches!(env.var("TEST_VAR"), Err(std::env::VarError::NotPresent)));
     }
 
     #[test]
@@ -142,13 +132,7 @@ mod tests {
 
         let mem_env = InMemoryEnv::new();
         mem_env.set("MY_VAR", "custom_value");
-        assert_eq!(
-            get_value_or_default(&mem_env, "MY_VAR", "default"),
-            "custom_value"
-        );
-        assert_eq!(
-            get_value_or_default(&mem_env, "MISSING", "default"),
-            "default"
-        );
+        assert_eq!(get_value_or_default(&mem_env, "MY_VAR", "default"), "custom_value");
+        assert_eq!(get_value_or_default(&mem_env, "MISSING", "default"), "default");
     }
 }

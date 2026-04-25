@@ -2,20 +2,19 @@ use std::cell::RefCell;
 
 use crate::config::Config;
 use crate::nats::{
-    self, ExtSessionReady, FlushClient, FlushPolicy, PublishClient, PublishOptions, RequestClient,
-    RetryPolicy, SubscribeClient, session,
+    self, ExtSessionReady, FlushClient, FlushPolicy, PublishClient, PublishOptions, RequestClient, RetryPolicy,
+    SubscribeClient, session,
 };
 use crate::pending_prompt_waiters::PendingSessionPromptResponseWaiters;
 use crate::telemetry::metrics::Metrics;
 use agent_client_protocol::{
-    Agent, AuthenticateRequest, AuthenticateResponse, CancelNotification, CloseSessionRequest,
-    CloseSessionResponse, ExtNotification, ExtRequest, ExtResponse, ForkSessionRequest,
-    ForkSessionResponse, InitializeRequest, InitializeResponse, ListSessionsRequest,
-    ListSessionsResponse, LoadSessionRequest, LoadSessionResponse, LogoutRequest, LogoutResponse,
-    NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse, Result,
-    ResumeSessionRequest, ResumeSessionResponse, SessionId, SessionNotification,
-    SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModeRequest,
-    SetSessionModeResponse, SetSessionModelRequest, SetSessionModelResponse,
+    Agent, AuthenticateRequest, AuthenticateResponse, CancelNotification, CloseSessionRequest, CloseSessionResponse,
+    ExtNotification, ExtRequest, ExtResponse, ForkSessionRequest, ForkSessionResponse, InitializeRequest,
+    InitializeResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse,
+    LogoutRequest, LogoutResponse, NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse, Result,
+    ResumeSessionRequest, ResumeSessionResponse, SessionId, SessionNotification, SetSessionConfigOptionRequest,
+    SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse, SetSessionModelRequest,
+    SetSessionModelResponse,
 };
 use opentelemetry::metrics::Meter;
 use tokio::sync::mpsc;
@@ -25,9 +24,9 @@ use trogon_nats::jetstream::{JetStreamGetStream, JetStreamPublisher, JsRequestMe
 use trogon_std::time::GetElapsed;
 
 use super::{
-    authenticate, cancel, close_session, ext_method, ext_notification, fork_session, initialize,
-    js_request, list_sessions, load_session, logout, new_session, prompt, resume_session,
-    set_session_config_option, set_session_mode, set_session_model,
+    authenticate, cancel, close_session, ext_method, ext_notification, fork_session, initialize, js_request,
+    list_sessions, load_session, logout, new_session, prompt, resume_session, set_session_config_option,
+    set_session_mode, set_session_model,
 };
 
 use crate::constants::SESSION_READY_DELAY;
@@ -139,11 +138,8 @@ async fn publish_session_ready<N: PublishClient + FlushClient>(
     }
 }
 
-impl<
-    N: RequestClient + PublishClient + FlushClient,
-    C: GetElapsed,
-    J: JetStreamPublisher + JetStreamGetStream,
-> Bridge<N, C, J>
+impl<N: RequestClient + PublishClient + FlushClient, C: GetElapsed, J: JetStreamPublisher + JetStreamGetStream>
+    Bridge<N, C, J>
 where
     trogon_nats::jetstream::JsMessageOf<J>: JsRequestMessage,
 {

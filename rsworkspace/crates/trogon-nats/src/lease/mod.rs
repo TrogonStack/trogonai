@@ -14,18 +14,17 @@ pub mod traits;
 mod ttl;
 
 #[cfg(test)]
+use crate::jetstream::is_create_key_value_already_exists;
+#[cfg(test)]
 use async_nats::header::{NATS_EXPECTED_LAST_SUBJECT_SEQUENCE, NATS_MESSAGE_TTL};
 use async_nats::jetstream::context::{CreateKeyValueError, KeyValueError};
 #[cfg(test)]
-use async_nats::jetstream::context::{
-    CreateKeyValueErrorKind, CreateStreamError, CreateStreamErrorKind,
-};
+use async_nats::jetstream::context::{CreateKeyValueErrorKind, CreateStreamError, CreateStreamErrorKind};
 use async_nats::jetstream::kv;
 use bytes::Bytes;
 #[cfg(test)]
 use provision::{
-    KeyValueSettings, create_bucket_error, inspect_bucket_error,
-    is_create_key_value_already_exists, open_existing_bucket_error, validate_bucket_settings,
+    KeyValueSettings, create_bucket_error, inspect_bucket_error, open_existing_bucket_error, validate_bucket_settings,
 };
 use renew::KvPublishTarget;
 #[cfg(test)]
@@ -81,6 +80,7 @@ pub enum LeaseError {
 }
 
 impl LeaseError {
+    #[cfg_attr(coverage, allow(dead_code))]
     fn provision_source(context: &'static str, source: LeaseProvisionError) -> Self {
         Self::Provision { context, source }
     }
@@ -120,10 +120,7 @@ impl std::fmt::Display for LeaseError {
                 write!(f, "lease provision error: {context}: {source}")
             }
             Self::IncompatibleBucketConfig { source } => {
-                write!(
-                    f,
-                    "lease provision error: incompatible bucket config: {source}"
-                )
+                write!(f, "lease provision error: incompatible bucket config: {source}")
             }
         }
     }
@@ -170,6 +167,7 @@ impl std::fmt::Display for IncompatibleLeaseBucketConfig {
 impl std::error::Error for IncompatibleLeaseBucketConfig {}
 
 #[derive(Clone)]
+#[cfg_attr(coverage, allow(dead_code))]
 pub struct NatsKvLease {
     store: kv::Store,
     key: LeaseKey,
@@ -333,9 +331,7 @@ where
     fn should_renew(&self) -> bool {
         match self.last_renewed {
             None => true,
-            Some(renewed_at) => {
-                Self::renew_interval_elapsed(&self.clock, renewed_at, self.timing.renew_interval())
-            }
+            Some(renewed_at) => Self::renew_interval_elapsed(&self.clock, renewed_at, self.timing.renew_interval()),
         }
     }
 
@@ -427,9 +423,7 @@ mod tests {
         async fn try_acquire(&self, _value: Bytes) -> Result<u64, Self::Error> {
             match &*self.acquire_behavior.lock().unwrap() {
                 AcquireBehavior::Acquired => Ok(self.next_revision.fetch_add(1, Ordering::SeqCst)),
-                AcquireBehavior::HeldByOther => {
-                    Err(kv::CreateError::new(kv::CreateErrorKind::AlreadyExists))
-                }
+                AcquireBehavior::HeldByOther => Err(kv::CreateError::new(kv::CreateErrorKind::AlreadyExists)),
                 AcquireBehavior::Error => Err(kv::CreateError::new(kv::CreateErrorKind::Other)),
             }
         }
@@ -454,9 +448,7 @@ mod tests {
             self.released_revisions.lock().unwrap().push(revision);
             match &*self.release_behavior.lock().unwrap() {
                 ReleaseBehavior::Ok => Ok(()),
-                ReleaseBehavior::WrongLastRevision => {
-                    Err(kv::DeleteError::new(kv::DeleteErrorKind::WrongLastRevision))
-                }
+                ReleaseBehavior::WrongLastRevision => Err(kv::DeleteError::new(kv::DeleteErrorKind::WrongLastRevision)),
                 ReleaseBehavior::Error => Err(kv::DeleteError::new(kv::DeleteErrorKind::Other)),
             }
         }
@@ -485,8 +477,7 @@ mod tests {
 
     #[test]
     fn lease_config_rejects_invalid_bucket_name() {
-        let error = NatsKvLeaseConfig::new("invalid.bucket", "key", ttl(10), renew_interval(5))
-            .unwrap_err();
+        let error = NatsKvLeaseConfig::new("invalid.bucket", "key", ttl(10), renew_interval(5)).unwrap_err();
 
         assert!(matches!(error, LeaseConfigError::InvalidBucketName(_)));
     }
@@ -510,8 +501,7 @@ mod tests {
 
     #[test]
     fn lease_config_rejects_invalid_key_name() {
-        let error = NatsKvLeaseConfig::new("bucket", "invalid key", ttl(10), renew_interval(5))
-            .unwrap_err();
+        let error = NatsKvLeaseConfig::new("bucket", "invalid key", ttl(10), renew_interval(5)).unwrap_err();
 
         assert!(matches!(error, LeaseConfigError::InvalidKeyName(_)));
     }
@@ -530,10 +520,7 @@ mod tests {
     fn lease_config_rejects_renew_interval_not_less_than_ttl() {
         let error = NatsKvLeaseConfig::new("bucket", "key", ttl(5), renew_interval(5)).unwrap_err();
 
-        assert!(matches!(
-            error,
-            LeaseConfigError::RenewIntervalNotLessThanTtl { .. }
-        ));
+        assert!(matches!(error, LeaseConfigError::RenewIntervalNotLessThanTtl { .. }));
     }
 
     #[tokio::test]
@@ -560,12 +547,8 @@ mod tests {
     async fn does_not_renew_before_interval() {
         let lease = MockLease::new();
         let clock = MockClock::new();
-        let mut election = LeaderElection::with_clock(
-            lease.clone(),
-            "node-3".to_string(),
-            lease_timing(),
-            clock.clone(),
-        );
+        let mut election =
+            LeaderElection::with_clock(lease.clone(), "node-3".to_string(), lease_timing(), clock.clone());
 
         assert!(election.ensure_leader().await.unwrap());
         lease.fail_renew();
@@ -579,12 +562,8 @@ mod tests {
     async fn renews_when_interval_elapsed() {
         let lease = MockLease::new();
         let clock = MockClock::new();
-        let mut election = LeaderElection::with_clock(
-            lease.clone(),
-            "node-renew".to_string(),
-            lease_timing(),
-            clock.clone(),
-        );
+        let mut election =
+            LeaderElection::with_clock(lease.clone(), "node-renew".to_string(), lease_timing(), clock.clone());
 
         assert!(election.ensure_leader().await.unwrap());
         let previous = election.current_revision;
@@ -599,12 +578,8 @@ mod tests {
     async fn loses_leadership_when_renew_fails() {
         let lease = MockLease::new();
         let clock = MockClock::new();
-        let mut election = LeaderElection::with_clock(
-            lease.clone(),
-            "node-4".to_string(),
-            lease_timing(),
-            clock.clone(),
-        );
+        let mut election =
+            LeaderElection::with_clock(lease.clone(), "node-4".to_string(), lease_timing(), clock.clone());
 
         assert!(election.ensure_leader().await.unwrap());
         lease.fail_renew();
@@ -677,8 +652,7 @@ mod tests {
     #[tokio::test]
     async fn release_treats_wrong_last_revision_as_success() {
         let lease = MockLease::new();
-        let mut election =
-            LeaderElection::new(lease.clone(), "node-10".to_string(), lease_timing());
+        let mut election = LeaderElection::new(lease.clone(), "node-10".to_string(), lease_timing());
 
         assert!(election.ensure_leader().await.unwrap());
         lease.wrong_revision_on_release();
@@ -690,12 +664,8 @@ mod tests {
     async fn release_without_revision_clears_local_state_without_calling_lock() {
         let lease = MockLease::new();
         let clock = MockClock::new();
-        let mut election = LeaderElection::with_clock(
-            lease.clone(),
-            "node-9".to_string(),
-            lease_timing(),
-            clock.clone(),
-        );
+        let mut election =
+            LeaderElection::with_clock(lease.clone(), "node-9".to_string(), lease_timing(), clock.clone());
         election.is_leader = true;
         election.current_revision = None;
         election.last_renewed = Some(clock.now());
@@ -710,8 +680,7 @@ mod tests {
     #[tokio::test]
     async fn release_noops_when_not_leader() {
         let lease = MockLease::new();
-        let mut election =
-            LeaderElection::new(lease.clone(), "node-noop".to_string(), lease_timing());
+        let mut election = LeaderElection::new(lease.clone(), "node-noop".to_string(), lease_timing());
 
         election.release().await.unwrap();
 
@@ -722,11 +691,7 @@ mod tests {
     #[tokio::test]
     async fn maybe_renew_without_revision_clears_state() {
         let lease = MockLease::new();
-        let mut election = LeaderElection::new(
-            lease.clone(),
-            "node-missing-rev".to_string(),
-            lease_timing(),
-        );
+        let mut election = LeaderElection::new(lease.clone(), "node-missing-rev".to_string(), lease_timing());
 
         assert!(election.ensure_leader().await.unwrap());
         election.current_revision = None;
@@ -739,10 +704,7 @@ mod tests {
 
     #[test]
     fn create_key_value_already_exists_matches_only_wrapped_stream_exists() {
-        let error = CreateKeyValueError::with_source(
-            CreateKeyValueErrorKind::BucketCreate,
-            stream_exists_error(),
-        );
+        let error = CreateKeyValueError::with_source(CreateKeyValueErrorKind::BucketCreate, stream_exists_error());
 
         assert!(is_create_key_value_already_exists(&error));
 
@@ -859,10 +821,7 @@ mod tests {
                 .map(|value| value.as_str()),
             Some("7")
         );
-        assert_eq!(
-            headers.get(NATS_MESSAGE_TTL).map(|value| value.as_str()),
-            Some("9")
-        );
+        assert_eq!(headers.get(NATS_MESSAGE_TTL).map(|value| value.as_str()), Some("9"));
     }
 
     #[test]
@@ -873,18 +832,10 @@ mod tests {
         assert!(empty_key.to_string().contains("must not be empty"));
 
         let invalid_bucket = LeaseConfigError::InvalidBucketName("bad.bucket".to_string());
-        assert!(
-            invalid_bucket
-                .to_string()
-                .contains("must contain only ASCII letters")
-        );
+        assert!(invalid_bucket.to_string().contains("must contain only ASCII letters"));
 
         let invalid_key = LeaseConfigError::InvalidKeyName("bad key".to_string());
-        assert!(
-            invalid_key
-                .to_string()
-                .contains("must contain only ASCII letters")
-        );
+        assert!(invalid_key.to_string().contains("must contain only ASCII letters"));
 
         let invalid_timing = LeaseConfigError::RenewIntervalNotLessThanTtl {
             renew_interval: Duration::from_secs(5),
@@ -927,9 +878,7 @@ mod tests {
     fn lease_error_source_chain_wraps_create_bucket_error() {
         let error = LeaseError::provision_source(
             "failed to create lease bucket",
-            LeaseProvisionError::CreateBucket(CreateKeyValueError::new(
-                CreateKeyValueErrorKind::TimedOut,
-            )),
+            LeaseProvisionError::CreateBucket(CreateKeyValueError::new(CreateKeyValueErrorKind::TimedOut)),
         );
 
         let provision = std::error::Error::source(&error)
@@ -955,10 +904,7 @@ mod tests {
         let provision = std::error::Error::source(&error)
             .and_then(|source| source.downcast_ref::<LeaseProvisionError>())
             .expect("expected LeaseProvisionError source");
-        assert!(matches!(
-            provision,
-            LeaseProvisionError::OpenExistingBucket(_)
-        ));
+        assert!(matches!(provision, LeaseProvisionError::OpenExistingBucket(_)));
         assert!(
             std::error::Error::source(provision)
                 .and_then(|source| source.downcast_ref::<KeyValueError>())
@@ -988,26 +934,20 @@ mod tests {
     fn lease_error_display_mentions_context_for_provision_failures() {
         let error = LeaseError::provision_source(
             "failed to create lease bucket",
-            LeaseProvisionError::CreateBucket(CreateKeyValueError::new(
-                CreateKeyValueErrorKind::TimedOut,
-            )),
+            LeaseProvisionError::CreateBucket(CreateKeyValueError::new(CreateKeyValueErrorKind::TimedOut)),
         );
         assert!(error.to_string().contains("failed to create lease bucket"));
     }
 
     #[test]
     fn nats_kv_lease_provision_error_helpers_set_expected_context() {
-        let create =
-            create_bucket_error(CreateKeyValueError::new(CreateKeyValueErrorKind::TimedOut));
+        let create = create_bucket_error(CreateKeyValueError::new(CreateKeyValueErrorKind::TimedOut));
         assert!(create.to_string().contains("failed to create lease bucket"));
 
         let open = open_existing_bucket_error(KeyValueError::new(
             async_nats::jetstream::context::KeyValueErrorKind::GetBucket,
         ));
-        assert!(
-            open.to_string()
-                .contains("failed to open existing lease bucket")
-        );
+        assert!(open.to_string().contains("failed to open existing lease bucket"));
 
         let inspect = inspect_bucket_error(kv::StatusError::new(kv::StatusErrorKind::TimedOut));
         assert!(
@@ -1019,9 +959,7 @@ mod tests {
 
     #[test]
     fn lease_provision_error_display_covers_all_variants() {
-        let create = LeaseProvisionError::CreateBucket(CreateKeyValueError::new(
-            CreateKeyValueErrorKind::TimedOut,
-        ));
+        let create = LeaseProvisionError::CreateBucket(CreateKeyValueError::new(CreateKeyValueErrorKind::TimedOut));
         assert!(!create.to_string().is_empty());
 
         let open = LeaseProvisionError::OpenExistingBucket(KeyValueError::new(
@@ -1029,8 +967,7 @@ mod tests {
         ));
         assert!(!open.to_string().is_empty());
 
-        let inspect =
-            LeaseProvisionError::InspectBucket(kv::StatusError::new(kv::StatusErrorKind::TimedOut));
+        let inspect = LeaseProvisionError::InspectBucket(kv::StatusError::new(kv::StatusErrorKind::TimedOut));
         assert!(!inspect.to_string().is_empty());
     }
 }

@@ -8,8 +8,7 @@ use crate::config::LinearWebhookSecret;
 use crate::constants::{HTTP_BODY_SIZE_MAX, NATS_HEADER_REJECT_REASON};
 use crate::signature;
 use axum::{
-    Router, body::Bytes, extract::DefaultBodyLimit, extract::State, http::HeaderMap,
-    http::StatusCode, routing::post,
+    Router, body::Bytes, extract::DefaultBodyLimit, extract::State, http::HeaderMap, http::StatusCode, routing::post,
 };
 use tracing::{info, instrument, warn};
 use trogon_nats::NatsToken;
@@ -141,9 +140,7 @@ async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut>(
     headers: HeaderMap,
     body: Bytes,
 ) -> StatusCode {
-    let sig = headers
-        .get("linear-signature")
-        .and_then(|v| v.to_str().ok());
+    let sig = headers.get("linear-signature").and_then(|v| v.to_str().ok());
 
     match sig {
         Some(sig) if signature::verify(state.webhook_secret.as_str(), &body, sig) => {}
@@ -289,8 +286,7 @@ mod tests {
     use tracing_subscriber::util::SubscriberInitExt;
     use trogon_nats::jetstream::StreamMaxAge;
     use trogon_nats::jetstream::{
-        ClaimCheckPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher,
-        MockObjectStore,
+        ClaimCheckPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher, MockObjectStore,
     };
 
     type HmacSha256 = Hmac<Sha256>;
@@ -340,9 +336,7 @@ mod tests {
             builder = builder.header("linear-signature", s);
         }
 
-        builder
-            .body(Body::from(body.to_vec()))
-            .expect("valid request")
+        builder.body(Body::from(body.to_vec())).expect("valid request")
     }
 
     fn valid_body() -> Vec<u8> {
@@ -366,19 +360,13 @@ mod tests {
         assert_eq!(messages.len(), 1, "expected exactly one unroutable publish");
         assert_eq!(messages[0].subject, "linear.unroutable");
         assert_eq!(
-            messages[0]
-                .headers
-                .get(NATS_HEADER_REJECT_REASON)
-                .map(|v| v.as_str()),
+            messages[0].headers.get(NATS_HEADER_REJECT_REASON).map(|v| v.as_str()),
             Some(expected_reason),
         );
     }
 
     fn assert_no_publishes(publisher: &MockJetStreamPublisher) {
-        assert!(
-            publisher.published_messages().is_empty(),
-            "expected no publishes"
-        );
+        assert!(publisher.published_messages().is_empty(), "expected no publishes");
     }
 
     #[tokio::test]

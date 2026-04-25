@@ -42,6 +42,8 @@ pub mod secret_string;
 #[cfg(feature = "telemetry-http")]
 pub mod telemetry;
 pub mod time;
+#[cfg(feature = "uuid")]
+pub mod uuid;
 
 #[cfg(all(feature = "clap", not(coverage)))]
 pub use args::CliArgs;
@@ -58,3 +60,5 @@ pub use json::FailNextSerialize;
 pub use json::{JsonSerialize, StdJsonSerialize};
 pub use secret_string::{EmptySecret, SecretString};
 pub use time::{EpochClock, GetElapsed, GetNow, SystemClock};
+#[cfg(feature = "uuid")]
+pub use uuid::{NowV7, UuidV7Generator};

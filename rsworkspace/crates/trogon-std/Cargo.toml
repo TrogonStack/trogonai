@@ -9,6 +9,7 @@ workspace = true
 [features]
 test-support = []
 clap = ["dep:clap"]
+uuid = ["dep:uuid"]
 telemetry-http = [
     "dep:axum",
     "dep:opentelemetry",
@@ -29,6 +30,7 @@ serde_json = { workspace = true }
 tower-http = { workspace = true, optional = true }
 tracing = { workspace = true, optional = true }
 tracing-opentelemetry = { workspace = true, optional = true }
+uuid = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile = "3"

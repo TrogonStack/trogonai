@@ -2,8 +2,7 @@ use std::path::PathBuf;
 use trogon_std::env::ReadEnv;
 
 use crate::constants::{
-    DEFAULT_NATS_URL, ENV_NATS_CREDS, ENV_NATS_NKEY, ENV_NATS_PASSWORD, ENV_NATS_TOKEN,
-    ENV_NATS_URL, ENV_NATS_USER,
+    DEFAULT_NATS_URL, ENV_NATS_CREDS, ENV_NATS_NKEY, ENV_NATS_PASSWORD, ENV_NATS_TOKEN, ENV_NATS_URL, ENV_NATS_USER,
 };
 
 /// NATS authentication method.
@@ -66,9 +65,7 @@ impl NatsConfig {
 }
 
 fn servers_from_env<E: ReadEnv>(env: &E) -> Vec<String> {
-    let raw = env
-        .var(ENV_NATS_URL)
-        .unwrap_or_else(|_| DEFAULT_NATS_URL.to_string());
+    let raw = env.var(ENV_NATS_URL).unwrap_or_else(|_| DEFAULT_NATS_URL.to_string());
     raw.split(',')
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
@@ -115,10 +112,7 @@ mod tests {
 
         let config = NatsConfig::from_env(&env);
 
-        assert_eq!(
-            config.servers,
-            vec!["host1:4222", "host2:4222", "host3:4222"]
-        );
+        assert_eq!(config.servers, vec!["host1:4222", "host2:4222", "host3:4222"]);
     }
 
     #[test]
@@ -130,9 +124,7 @@ mod tests {
 
         let config = NatsConfig::from_env(&env);
 
-        assert!(
-            matches!(config.auth, NatsAuth::Credentials(p) if p == std::path::Path::new("/path/to/creds"))
-        );
+        assert!(matches!(config.auth, NatsAuth::Credentials(p) if p == std::path::Path::new("/path/to/creds")));
     }
 
     #[test]
@@ -334,10 +326,7 @@ mod tests {
 
     #[test]
     fn description_matches_variant() {
-        assert_eq!(
-            NatsAuth::Credentials("/a".into()).description(),
-            "credentials file"
-        );
+        assert_eq!(NatsAuth::Credentials("/a".into()).description(), "credentials file");
         assert_eq!(NatsAuth::NKey("k".into()).description(), "NKey");
         assert_eq!(
             NatsAuth::UserPassword {

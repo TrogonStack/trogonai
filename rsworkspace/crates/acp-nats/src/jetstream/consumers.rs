@@ -5,11 +5,7 @@ use crate::acp_prefix::AcpPrefix;
 use crate::req_id::ReqId;
 use crate::session_id::AcpSessionId;
 
-pub fn prompt_notifications_consumer(
-    prefix: &AcpPrefix,
-    session_id: &AcpSessionId,
-    req_id: &ReqId,
-) -> Config {
+pub fn prompt_notifications_consumer(prefix: &AcpPrefix, session_id: &AcpSessionId, req_id: &ReqId) -> Config {
     let pfx = prefix.as_str();
     let sid = session_id.as_str();
     Config {
@@ -21,11 +17,7 @@ pub fn prompt_notifications_consumer(
     }
 }
 
-pub fn prompt_response_consumer(
-    prefix: &AcpPrefix,
-    session_id: &AcpSessionId,
-    req_id: &ReqId,
-) -> Config {
+pub fn prompt_response_consumer(prefix: &AcpPrefix, session_id: &AcpSessionId, req_id: &ReqId) -> Config {
     let pfx = prefix.as_str();
     let sid = session_id.as_str();
     Config {
@@ -81,10 +73,7 @@ mod tests {
     #[test]
     fn prompt_notifications_consumer_filter() {
         let config = prompt_notifications_consumer(&p("acp"), &sid("sess-1"), &rid("req-abc"));
-        assert_eq!(
-            config.filter_subject,
-            "acp.session.sess-1.agent.update.req-abc"
-        );
+        assert_eq!(config.filter_subject, "acp.session.sess-1.agent.update.req-abc");
     }
 
     #[test]
@@ -120,10 +109,7 @@ mod tests {
     #[test]
     fn response_consumer_filter() {
         let config = response_consumer(&p("acp"), &sid("sess-1"), &rid("req-abc"));
-        assert_eq!(
-            config.filter_subject,
-            "acp.session.sess-1.agent.response.req-abc"
-        );
+        assert_eq!(config.filter_subject, "acp.session.sess-1.agent.response.req-abc");
     }
 
     #[test]
@@ -143,9 +129,6 @@ mod tests {
     #[test]
     fn custom_prefix_in_consumers() {
         let config = prompt_response_consumer(&p("myapp"), &sid("s1"), &rid("r1"));
-        assert_eq!(
-            config.filter_subject,
-            "myapp.session.s1.agent.prompt.response.r1"
-        );
+        assert_eq!(config.filter_subject, "myapp.session.s1.agent.prompt.response.r1");
     }
 }

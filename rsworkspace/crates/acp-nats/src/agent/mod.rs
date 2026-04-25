@@ -30,8 +30,7 @@ mod tests {
     use crate::agent::test_support::MockJs;
     use crate::config::Config;
     use agent_client_protocol::{
-        Agent, ExtNotification, ExtRequest, PromptRequest, PromptResponse, SessionNotification,
-        StopReason,
+        Agent, ExtNotification, ExtRequest, PromptRequest, PromptResponse, SessionNotification, StopReason,
     };
     use tokio::sync::mpsc;
     use trogon_nats::AdvancedMockNatsClient;

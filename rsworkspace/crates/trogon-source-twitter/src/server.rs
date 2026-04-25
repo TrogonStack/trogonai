@@ -18,8 +18,7 @@ use trogon_std::NonZeroDuration;
 
 use crate::config::{TwitterConfig, TwitterConsumerSecret};
 use crate::constants::{
-    HEADER_SIGNATURE, HTTP_BODY_SIZE_MAX, NATS_HEADER_EVENT_TYPE, NATS_HEADER_PAYLOAD_KIND,
-    NATS_HEADER_REJECT_REASON,
+    HEADER_SIGNATURE, HTTP_BODY_SIZE_MAX, NATS_HEADER_EVENT_TYPE, NATS_HEADER_PAYLOAD_KIND, NATS_HEADER_REJECT_REASON,
 };
 use crate::signature;
 
@@ -125,10 +124,7 @@ async fn publish_unroutable<P: JetStreamPublisher, S: ObjectStorePut>(
     }
 }
 
-pub async fn provision<C: JetStreamContext>(
-    js: &C,
-    config: &TwitterConfig,
-) -> Result<(), C::Error> {
+pub async fn provision<C: JetStreamContext>(js: &C, config: &TwitterConfig) -> Result<(), C::Error> {
     js.get_or_create_stream(async_nats::jetstream::stream::Config {
         name: config.stream_name.as_str().to_owned(),
         subjects: vec![format!("{}.>", config.subject_prefix)],
@@ -155,10 +151,7 @@ pub fn router<P: JetStreamPublisher, S: ObjectStorePut>(
     };
 
     Router::new()
-        .route(
-            "/webhook",
-            get(handle_crc::<P, S>).post(handle_webhook::<P, S>),
-        )
+        .route("/webhook", get(handle_crc::<P, S>).post(handle_webhook::<P, S>))
         .layer(DefaultBodyLimit::max(HTTP_BODY_SIZE_MAX.as_usize()))
         .with_state(state)
 }
@@ -174,10 +167,7 @@ async fn handle_crc<P: JetStreamPublisher, S: ObjectStorePut>(
     }
 
     Ok(Json(CrcResponse {
-        response_token: signature::crc_response_token(
-            state.consumer_secret.as_str(),
-            &query.crc_token,
-        ),
+        response_token: signature::crc_response_token(state.consumer_secret.as_str(), &query.crc_token),
     }))
 }
 
@@ -195,10 +185,7 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
     headers: HeaderMap,
     body: Bytes,
 ) -> StatusCode {
-    let Some(signature_header) = headers
-        .get(HEADER_SIGNATURE)
-        .and_then(|value| value.to_str().ok())
-    else {
+    let Some(signature_header) = headers.get(HEADER_SIGNATURE).and_then(|value| value.to_str().ok()) else {
         warn!("Missing x-twitter-webhooks-signature header");
         return StatusCode::UNAUTHORIZED;
     };
@@ -226,10 +213,7 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
     let (event_type, payload_kind) = match resolve_event_type(&payload) {
         Ok(event_type) => event_type,
         Err(reason) => {
-            warn!(
-                reason = reason.as_str(),
-                "Unable to classify Twitter/X webhook payload"
-            );
+            warn!(reason = reason.as_str(), "Unable to classify Twitter/X webhook payload");
             return publish_unroutable(
                 &state.publisher,
                 &state.subject_prefix,
@@ -263,9 +247,7 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
     outcome_to_status(outcome)
 }
 
-fn resolve_event_type(
-    payload: &serde_json::Value,
-) -> Result<(DottedNatsToken, PayloadKind), RejectReason> {
+fn resolve_event_type(payload: &serde_json::Value) -> Result<(DottedNatsToken, PayloadKind), RejectReason> {
     if let Some(event_type) = payload
         .get("data")
         .and_then(|value| value.get("event_type"))
@@ -323,13 +305,11 @@ fn extract_message_id(payload: &serde_json::Value, event_type: &str) -> Option<S
                 return None;
             }
 
-            payload
-                .get(event_type)
-                .and_then(|event_value| match event_value {
-                    serde_json::Value::Array(items) if items.len() == 1 => value_id(&items[0]),
-                    serde_json::Value::Object(_) => value_id(event_value),
-                    _ => None,
-                })
+            payload.get(event_type).and_then(|event_value| match event_value {
+                serde_json::Value::Array(items) if items.len() == 1 => value_id(&items[0]),
+                serde_json::Value::Object(_) => value_id(event_value),
+                _ => None,
+            })
         })
         .map(|message_id| format!("{event_type}:{message_id}"))
 }
@@ -364,8 +344,8 @@ mod tests {
     use tracing_subscriber::util::SubscriberInitExt;
     use trogon_nats::jetstream::StreamMaxAge;
     use trogon_nats::jetstream::{
-        ClaimCheckPublisher, JetStreamPublisher, MaxPayload, MockJetStreamContext,
-        MockJetStreamPublisher, MockObjectStore,
+        ClaimCheckPublisher, JetStreamPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher,
+        MockObjectStore,
     };
     use trogon_nats::mocks::MockError;
 
@@ -467,9 +447,7 @@ mod tests {
 
             fn into_future(self) -> Self::IntoFuture {
                 match self {
-                    AckFuture::Fail => {
-                        Box::pin(async { Err(MockError("simulated ack failure".to_string())) })
-                    }
+                    AckFuture::Fail => Box::pin(async { Err(MockError("simulated ack failure".to_string())) }),
                 }
             }
         }
@@ -526,9 +504,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
         let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(
             payload["response_token"],
@@ -571,10 +547,7 @@ mod tests {
         }"#;
         let signature = compute_sig(TEST_SECRET, body);
 
-        let response = app
-            .oneshot(webhook_request(body, Some(&signature)))
-            .await
-            .unwrap();
+        let response = app.oneshot(webhook_request(body, Some(&signature))).await.unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
         let messages = publisher.published_messages();
@@ -610,10 +583,7 @@ mod tests {
         }"#;
         let signature = compute_sig(TEST_SECRET, body);
 
-        let response = app
-            .oneshot(webhook_request(body, Some(&signature)))
-            .await
-            .unwrap();
+        let response = app.oneshot(webhook_request(body, Some(&signature))).await.unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
         let messages = publisher.published_messages();
@@ -651,19 +621,13 @@ mod tests {
         }"#;
         let signature = compute_sig(TEST_SECRET, body);
 
-        let response = app
-            .oneshot(webhook_request(body, Some(&signature)))
-            .await
-            .unwrap();
+        let response = app.oneshot(webhook_request(body, Some(&signature))).await.unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
         let messages = publisher.published_messages();
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].subject, "twitter.account_activity");
-        assert_eq!(
-            messages[0].headers.get(async_nats::header::NATS_MESSAGE_ID),
-            None
-        );
+        assert_eq!(messages[0].headers.get(async_nats::header::NATS_MESSAGE_ID), None);
     }
 
     #[tokio::test]
@@ -682,10 +646,7 @@ mod tests {
         }"#;
         let signature = compute_sig(TEST_SECRET, body);
 
-        let response = app
-            .oneshot(webhook_request(body, Some(&signature)))
-            .await
-            .unwrap();
+        let response = app.oneshot(webhook_request(body, Some(&signature))).await.unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
         let messages = publisher.published_messages();
@@ -733,10 +694,7 @@ mod tests {
         let body = b"{not-json";
         let signature = compute_sig(TEST_SECRET, body);
 
-        let response = app
-            .oneshot(webhook_request(body, Some(&signature)))
-            .await
-            .unwrap();
+        let response = app.oneshot(webhook_request(body, Some(&signature))).await.unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
         assert_unroutable(&publisher, "invalid_json");
@@ -750,10 +708,7 @@ mod tests {
         let body = br#"{"hello":"world"}"#;
         let signature = compute_sig(TEST_SECRET, body);
 
-        let response = app
-            .oneshot(webhook_request(body, Some(&signature)))
-            .await
-            .unwrap();
+        let response = app.oneshot(webhook_request(body, Some(&signature))).await.unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
         assert_unroutable(&publisher, "missing_event_type");
@@ -771,10 +726,7 @@ mod tests {
         }"#;
         let signature = compute_sig(TEST_SECRET, body);
 
-        let response = app
-            .oneshot(webhook_request(body, Some(&signature)))
-            .await
-            .unwrap();
+        let response = app.oneshot(webhook_request(body, Some(&signature))).await.unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
         assert_unroutable(&publisher, "invalid_event_type");
@@ -808,10 +760,7 @@ mod tests {
         let body = br#"{"data":{"event_type":"profile.update.bio"}}"#;
         let signature = compute_sig(TEST_SECRET, body);
 
-        let response = app
-            .oneshot(webhook_request(body, Some(&signature)))
-            .await
-            .unwrap();
+        let response = app.oneshot(webhook_request(body, Some(&signature))).await.unwrap();
 
         assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
@@ -844,10 +793,7 @@ mod tests {
         let body = b"{not-json";
         let signature = compute_sig(TEST_SECRET, body);
 
-        let response = app
-            .oneshot(webhook_request(body, Some(&signature)))
-            .await
-            .unwrap();
+        let response = app.oneshot(webhook_request(body, Some(&signature))).await.unwrap();
 
         assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
@@ -856,10 +802,7 @@ mod tests {
     fn resolve_event_type_rejects_non_object_payloads() {
         let payload = serde_json::json!(42);
 
-        assert_eq!(
-            resolve_event_type(&payload),
-            Err(RejectReason::MissingEventType)
-        );
+        assert_eq!(resolve_event_type(&payload), Err(RejectReason::MissingEventType));
     }
 
     #[test]

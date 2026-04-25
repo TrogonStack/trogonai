@@ -25,9 +25,7 @@ pub struct FixedDirs {
 #[cfg(any(test, feature = "test-support"))]
 impl FixedDirs {
     pub fn new() -> Self {
-        Self {
-            dirs: HashMap::new(),
-        }
+        Self { dirs: HashMap::new() }
     }
 
     pub fn set(&mut self, kind: DirKind, path: impl Into<PathBuf>) -> &mut Self {
@@ -147,10 +145,7 @@ mod tests {
         let mut dirs = FixedDirs::new();
         dirs.set(DirKind::State, "/var/state");
 
-        assert_eq!(
-            get_state(&dirs, "myapp"),
-            Some(PathBuf::from("/var/state/myapp"))
-        );
+        assert_eq!(get_state(&dirs, "myapp"), Some(PathBuf::from("/var/state/myapp")));
     }
 
     #[test]

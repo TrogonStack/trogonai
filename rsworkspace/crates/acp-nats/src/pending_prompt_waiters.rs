@@ -49,9 +49,9 @@ impl<I: Copy> PendingSessionPromptResponseWaiters<I> {
         &self,
         clock: &C,
     ) -> Result<(), LockPoisonedError> {
-        self.timed_out.lock()?.retain(|_, seen_at| {
-            clock.elapsed(*seen_at) < PROMPT_TIMEOUT_WARNING_SUPPRESSION_WINDOW
-        });
+        self.timed_out
+            .lock()?
+            .retain(|_, seen_at| clock.elapsed(*seen_at) < PROMPT_TIMEOUT_WARNING_SUPPRESSION_WINDOW);
         Ok(())
     }
 
@@ -61,10 +61,7 @@ impl<I: Copy> PendingSessionPromptResponseWaiters<I> {
         prompt_token: PromptToken,
         _clock: &C,
     ) -> Result<bool, LockPoisonedError> {
-        Ok(self
-            .timed_out
-            .lock()?
-            .contains_key(&(session_id.clone(), prompt_token)))
+        Ok(self.timed_out.lock()?.contains_key(&(session_id.clone(), prompt_token)))
     }
 
     pub fn resolve_waiter(
@@ -74,9 +71,7 @@ impl<I: Copy> PendingSessionPromptResponseWaiters<I> {
         response: std::result::Result<PromptResponse, String>,
     ) -> Result<bool, LockPoisonedError> {
         let mut waiters = self.waiters.lock()?;
-        let should_remove = waiters
-            .get(session_id)
-            .is_some_and(|e| e.token == prompt_token);
+        let should_remove = waiters.get(session_id).is_some_and(|e| e.token == prompt_token);
         let waiter = if should_remove {
             waiters.remove(session_id)
         } else {
@@ -84,9 +79,7 @@ impl<I: Copy> PendingSessionPromptResponseWaiters<I> {
         };
         drop(waiters);
         if let Some(waiter) = waiter {
-            self.timed_out
-                .lock()?
-                .remove(&(session_id.clone(), prompt_token));
+            self.timed_out.lock()?.remove(&(session_id.clone(), prompt_token));
             Ok(waiter.sender.send(response).is_ok())
         } else {
             Ok(false)

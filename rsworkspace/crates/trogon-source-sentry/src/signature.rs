@@ -35,11 +35,9 @@ impl std::error::Error for SignatureError {
 
 pub fn verify(secret: &str, body: &[u8], signature_header: &str) -> Result<(), SignatureError> {
     let expected = hex::decode(signature_header).map_err(SignatureError::InvalidHex)?;
-    let mut mac =
-        HmacSha256::new_from_slice(secret.as_bytes()).map_err(|_| SignatureError::InvalidKey)?;
+    let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).map_err(|_| SignatureError::InvalidKey)?;
     mac.update(body);
-    mac.verify_slice(&expected)
-        .map_err(|_| SignatureError::Mismatch)
+    mac.verify_slice(&expected).map_err(|_| SignatureError::Mismatch)
 }
 
 #[cfg(test)]

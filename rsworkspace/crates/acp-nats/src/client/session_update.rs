@@ -22,8 +22,8 @@ pub async fn handle<C: Client>(payload: &[u8], client: &C, has_reply: bool) {
 mod tests {
     use super::*;
     use agent_client_protocol::{
-        ContentBlock, ContentChunk, RequestPermissionOutcome, RequestPermissionRequest,
-        RequestPermissionResponse, SessionUpdate,
+        ContentBlock, ContentChunk, RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
+        SessionUpdate,
     };
     use async_trait::async_trait;
     use std::cell::RefCell;
@@ -55,10 +55,7 @@ mod tests {
 
     #[async_trait(?Send)]
     impl Client for MockClient {
-        async fn session_notification(
-            &self,
-            notification: SessionNotification,
-        ) -> agent_client_protocol::Result<()> {
+        async fn session_notification(&self, notification: SessionNotification) -> agent_client_protocol::Result<()> {
             if self.should_fail {
                 return Err(agent_client_protocol::Error::new(-1, "mock failure"));
             }
@@ -72,9 +69,7 @@ mod tests {
             &self,
             _: RequestPermissionRequest,
         ) -> agent_client_protocol::Result<RequestPermissionResponse> {
-            Ok(RequestPermissionResponse::new(
-                RequestPermissionOutcome::Cancelled,
-            ))
+            Ok(RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled))
         }
     }
 

@@ -41,8 +41,7 @@ impl async_nats::subject::ToSubject for UpdateSubject {
 impl super::super::markers::Subscribable for UpdateSubject {}
 
 impl super::super::stream::StreamAssignment for UpdateSubject {
-    const STREAM: Option<super::super::stream::AcpStream> =
-        Some(super::super::stream::AcpStream::Notifications);
+    const STREAM: Option<super::super::stream::AcpStream> = Some(super::super::stream::AcpStream::Notifications);
 }
 
 #[cfg(test)]

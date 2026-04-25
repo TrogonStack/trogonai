@@ -6,10 +6,7 @@ use bytes::Bytes;
 use tracing::{instrument, warn};
 use trogon_std::JsonSerialize;
 
-#[instrument(
-    name = "acp.client.terminal.output",
-    skip(payload, client, nats, serializer)
-)]
+#[instrument(name = "acp.client.terminal.output", skip(payload, client, nats, serializer))]
 pub async fn handle<N: PublishClient + FlushClient, C: Client, S: JsonSerialize>(
     payload: &[u8],
     client: &C,
@@ -39,16 +36,8 @@ pub async fn handle<N: PublishClient + FlushClient, C: Client, S: JsonSerialize>
                 session_id = %session_id,
                 "Failed to handle terminal/output"
             );
-            let (bytes, content_type) =
-                rpc_reply::error_response_bytes(serializer, request_id, code, &message);
-            rpc_reply::publish_reply(
-                nats,
-                reply_to,
-                bytes,
-                content_type,
-                "terminal/output error reply",
-            )
-            .await;
+            let (bytes, content_type) = rpc_reply::error_response_bytes(serializer, request_id, code, &message);
+            rpc_reply::publish_reply(nats, reply_to, bytes, content_type, "terminal/output error reply").await;
             return;
         }
     };
@@ -70,14 +59,7 @@ pub async fn handle<N: PublishClient + FlushClient, C: Client, S: JsonSerialize>
                         &format!("Failed to serialize response: {}", e),
                     )
                 });
-            rpc_reply::publish_reply(
-                nats,
-                reply_to,
-                response_bytes,
-                content_type,
-                "terminal/output reply",
-            )
-            .await;
+            rpc_reply::publish_reply(nats, reply_to, response_bytes, content_type, "terminal/output reply").await;
         }
         Err(e) => {
             warn!(
@@ -85,36 +67,22 @@ pub async fn handle<N: PublishClient + FlushClient, C: Client, S: JsonSerialize>
                 session_id = %session_id,
                 "Failed to handle terminal/output"
             );
-            let (bytes, content_type) =
-                rpc_reply::error_response_bytes(serializer, request_id, e.code, &e.message);
-            rpc_reply::publish_reply(
-                nats,
-                reply_to,
-                bytes,
-                content_type,
-                "terminal/output error reply",
-            )
-            .await;
+            let (bytes, content_type) = rpc_reply::error_response_bytes(serializer, request_id, e.code, &e.message);
+            rpc_reply::publish_reply(nats, reply_to, bytes, content_type, "terminal/output error reply").await;
         }
     }
 }
 
-fn parse_request(
-    payload: &[u8],
-    expected_session_id: &str,
-) -> Result<TerminalOutputRequest, (ErrorCode, String)> {
-    let value: serde_json::Value = serde_json::from_slice(payload)
-        .map_err(|e| (ErrorCode::ParseError, format!("Malformed JSON: {}", e)))?;
+fn parse_request(payload: &[u8], expected_session_id: &str) -> Result<TerminalOutputRequest, (ErrorCode, String)> {
+    let value: serde_json::Value =
+        serde_json::from_slice(payload).map_err(|e| (ErrorCode::ParseError, format!("Malformed JSON: {}", e)))?;
 
-    let envelope: Request<TerminalOutputRequest> = serde_json::from_value(value)
-        .map_err(|e| (ErrorCode::InvalidParams, format!("Invalid request: {}", e)))?;
+    let envelope: Request<TerminalOutputRequest> =
+        serde_json::from_value(value).map_err(|e| (ErrorCode::InvalidParams, format!("Invalid request: {}", e)))?;
 
-    let request = envelope.params.ok_or_else(|| {
-        (
-            ErrorCode::InvalidParams,
-            "params is null or missing".to_string(),
-        )
-    })?;
+    let request = envelope
+        .params
+        .ok_or_else(|| (ErrorCode::InvalidParams, "params is null or missing".to_string()))?;
 
     let params_session_id = request.session_id.to_string();
     if params_session_id != expected_session_id {
@@ -134,8 +102,8 @@ fn parse_request(
 mod tests {
     use super::*;
     use agent_client_protocol::{
-        RequestId, RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
-        SessionNotification, TerminalOutputResponse,
+        RequestId, RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse, SessionNotification,
+        TerminalOutputResponse,
     };
     use async_trait::async_trait;
     use std::sync::Arc;
@@ -155,20 +123,14 @@ mod tests {
 
         fn failing() -> Self {
             Self {
-                terminal_output_result: Err(agent_client_protocol::Error::new(
-                    -32603,
-                    "mock failure",
-                )),
+                terminal_output_result: Err(agent_client_protocol::Error::new(-32603, "mock failure")),
             }
         }
     }
 
     #[async_trait(?Send)]
     impl Client for MockClient {
-        async fn session_notification(
-            &self,
-            _: SessionNotification,
-        ) -> agent_client_protocol::Result<()> {
+        async fn session_notification(&self, _: SessionNotification) -> agent_client_protocol::Result<()> {
             Ok(())
         }
 
@@ -176,9 +138,7 @@ mod tests {
             &self,
             _: RequestPermissionRequest,
         ) -> agent_client_protocol::Result<RequestPermissionResponse> {
-            Ok(RequestPermissionResponse::new(
-                RequestPermissionOutcome::Cancelled,
-            ))
+            Ok(RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled))
         }
 
         async fn terminal_output(
@@ -361,24 +321,14 @@ mod tests {
         let serializer = FailNextSerialize::new(1);
         let payload = envelope_payload();
 
-        handle(
-            &payload,
-            &client,
-            Some("_INBOX.reply"),
-            &nats,
-            "sess-1",
-            &serializer,
-        )
-        .await;
+        handle(&payload, &client, Some("_INBOX.reply"), &nats, "sess-1", &serializer).await;
 
         assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
     }
 
     #[tokio::test]
     async fn mock_client_trait_methods_exercise_coverage() {
-        use agent_client_protocol::{
-            ContentBlock, ContentChunk, SessionUpdate, ToolCallUpdate, ToolCallUpdateFields,
-        };
+        use agent_client_protocol::{ContentBlock, ContentChunk, SessionUpdate, ToolCallUpdate, ToolCallUpdateFields};
 
         let client = MockClient::success();
         let notification = SessionNotification::new(

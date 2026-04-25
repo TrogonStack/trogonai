@@ -12,11 +12,7 @@ pub trait TryAcquireLease: Send + Sync + Clone + 'static {
 pub trait RenewLease: Send + Sync + Clone + 'static {
     type Error: Error + Send + Sync;
 
-    fn renew(
-        &self,
-        value: Bytes,
-        revision: u64,
-    ) -> impl Future<Output = Result<u64, Self::Error>> + Send;
+    fn renew(&self, value: Bytes, revision: u64) -> impl Future<Output = Result<u64, Self::Error>> + Send;
 }
 
 pub trait ReleaseLease: Send + Sync + Clone + 'static {

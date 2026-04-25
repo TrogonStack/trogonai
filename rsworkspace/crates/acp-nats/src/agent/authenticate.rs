@@ -39,9 +39,7 @@ pub async fn handle<N: RequestClient, C: GetElapsed, J>(
 
 #[cfg(test)]
 mod tests {
-    use crate::agent::test_support::{
-        has_request_metric, mock_bridge, mock_bridge_with_metrics, set_json_response,
-    };
+    use crate::agent::test_support::{has_request_metric, mock_bridge, mock_bridge_with_metrics, set_json_response};
     use crate::error::AGENT_UNAVAILABLE;
     use agent_client_protocol::{Agent, AuthenticateRequest, AuthenticateResponse, ErrorCode};
 
@@ -83,11 +81,7 @@ mod tests {
     #[tokio::test]
     async fn authenticate_records_metrics_on_success() {
         let (mock, _js, bridge, exporter, provider) = mock_bridge_with_metrics();
-        set_json_response(
-            &mock,
-            "acp.agent.authenticate",
-            &AuthenticateResponse::default(),
-        );
+        set_json_response(&mock, "acp.agent.authenticate", &AuthenticateResponse::default());
 
         let _ = bridge.authenticate(AuthenticateRequest::new("test")).await;
 

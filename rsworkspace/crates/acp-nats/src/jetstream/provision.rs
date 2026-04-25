@@ -49,11 +49,7 @@ mod tests {
     async fn provision_creates_correct_stream_names() {
         let ctx = MockJetStreamContext::new();
         provision_streams(&ctx, &p("acp")).await.unwrap();
-        let names: Vec<String> = ctx
-            .created_streams()
-            .iter()
-            .map(|c| c.name.clone())
-            .collect();
+        let names: Vec<String> = ctx.created_streams().iter().map(|c| c.name.clone()).collect();
         assert!(names.contains(&"ACP_COMMANDS".to_string()));
         assert!(names.contains(&"ACP_RESPONSES".to_string()));
         assert!(names.contains(&"ACP_CLIENT_OPS".to_string()));
@@ -66,11 +62,7 @@ mod tests {
     async fn provision_with_custom_prefix() {
         let ctx = MockJetStreamContext::new();
         provision_streams(&ctx, &p("myapp")).await.unwrap();
-        let names: Vec<String> = ctx
-            .created_streams()
-            .iter()
-            .map(|c| c.name.clone())
-            .collect();
+        let names: Vec<String> = ctx.created_streams().iter().map(|c| c.name.clone()).collect();
         assert!(names.contains(&"MYAPP_COMMANDS".to_string()));
     }
 

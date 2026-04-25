@@ -8,11 +8,7 @@ impl TryAcquireLease for NatsKvLease {
 
     async fn try_acquire(&self, value: Bytes) -> Result<u64, Self::Error> {
         match self.ttl {
-            Some(ttl) => {
-                self.store
-                    .create_with_ttl(self.key.as_str(), value, ttl)
-                    .await
-            }
+            Some(ttl) => self.store.create_with_ttl(self.key.as_str(), value, ttl).await,
             None => self.store.create(self.key.as_str(), value).await,
         }
     }

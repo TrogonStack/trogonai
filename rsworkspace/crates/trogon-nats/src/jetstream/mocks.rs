@@ -17,10 +17,9 @@ use futures::stream::BoxStream;
 use super::message::{JsAck, JsAckWith, JsDoubleAck, JsDoubleAckWith, JsMessageRef};
 use super::object_store::{ObjectStoreGet, ObjectStorePut};
 use super::traits::{
-    JetStreamConsumer, JetStreamContext, JetStreamCreateConsumer, JetStreamCreateKeyValue,
-    JetStreamGetKeyValue, JetStreamGetStream, JetStreamKeyValueCreateWithTtl,
-    JetStreamKeyValueDeleteExpectRevision, JetStreamKeyValueStatus, JetStreamKeyValueUpdate,
-    JetStreamPublisher,
+    JetStreamConsumer, JetStreamContext, JetStreamCreateConsumer, JetStreamCreateKeyValue, JetStreamGetKeyValue,
+    JetStreamGetStream, JetStreamKeyValueCreateWithTtl, JetStreamKeyValueDeleteExpectRevision, JetStreamKeyValueStatus,
+    JetStreamKeyValueUpdate, JetStreamPublisher,
 };
 use crate::mocks::MockError;
 
@@ -176,10 +175,7 @@ impl JetStreamContext for MockJetStreamContext {
     type Error = MockError;
     type Stream = ();
 
-    async fn get_or_create_stream<S: Into<stream::Config> + Send>(
-        &self,
-        config: S,
-    ) -> Result<(), MockError> {
+    async fn get_or_create_stream<S: Into<stream::Config> + Send>(&self, config: S) -> Result<(), MockError> {
         let config = config.into();
         let should_fail = {
             let mut flag = self.should_fail.lock().unwrap();
@@ -408,12 +404,7 @@ impl JetStreamKeyValueStatus for MockJetStreamKvStore {
 }
 
 impl JetStreamKeyValueCreateWithTtl for MockJetStreamKvStore {
-    async fn create_with_ttl(
-        &self,
-        key: &str,
-        value: Bytes,
-        ttl: Duration,
-    ) -> Result<u64, kv::CreateError> {
+    async fn create_with_ttl(&self, key: &str, value: Bytes, ttl: Duration) -> Result<u64, kv::CreateError> {
         self.create_with_ttl_calls
             .lock()
             .unwrap()
@@ -433,15 +424,8 @@ impl JetStreamKeyValueUpdate for MockJetStreamKvStore {
 }
 
 impl JetStreamKeyValueDeleteExpectRevision for MockJetStreamKvStore {
-    async fn delete_expect_revision(
-        &self,
-        key: &str,
-        revision: Option<u64>,
-    ) -> Result<(), kv::DeleteError> {
-        self.delete_calls
-            .lock()
-            .unwrap()
-            .push((key.to_string(), revision));
+    async fn delete_expect_revision(&self, key: &str, revision: Option<u64>) -> Result<(), kv::DeleteError> {
+        self.delete_calls.lock().unwrap().push((key.to_string(), revision));
         (*self.delete_result.lock().unwrap()).map_err(kv::DeleteError::new)
     }
 }
@@ -470,12 +454,8 @@ enum MockGetKeyValueResult {
 impl MockJetStreamKvClient {
     pub fn new() -> Self {
         Self {
-            create_result: Arc::new(Mutex::new(MockCreateKeyValueResult::Ok(
-                MockJetStreamKvStore::new(),
-            ))),
-            get_result: Arc::new(Mutex::new(MockGetKeyValueResult::Ok(
-                MockJetStreamKvStore::new(),
-            ))),
+            create_result: Arc::new(Mutex::new(MockCreateKeyValueResult::Ok(MockJetStreamKvStore::new()))),
+            get_result: Arc::new(Mutex::new(MockGetKeyValueResult::Ok(MockJetStreamKvStore::new()))),
             create_configs: Arc::new(Mutex::new(Vec::new())),
             requested_buckets: Arc::new(Mutex::new(Vec::new())),
         }
@@ -519,10 +499,7 @@ impl Default for MockJetStreamKvClient {
 impl JetStreamCreateKeyValue for MockJetStreamKvClient {
     type Store = MockJetStreamKvStore;
 
-    async fn create_key_value(
-        &self,
-        config: kv::Config,
-    ) -> Result<Self::Store, CreateKeyValueError> {
+    async fn create_key_value(&self, config: kv::Config) -> Result<Self::Store, CreateKeyValueError> {
         self.create_configs.lock().unwrap().push(config);
         match self.create_result.lock().unwrap().clone() {
             MockCreateKeyValueResult::Ok(store) => Ok(store),
@@ -538,10 +515,7 @@ impl JetStreamCreateKeyValue for MockJetStreamKvClient {
 impl JetStreamGetKeyValue for MockJetStreamKvClient {
     type Store = MockJetStreamKvStore;
 
-    async fn get_key_value<T: Into<String> + Send>(
-        &self,
-        bucket: T,
-    ) -> Result<Self::Store, context::KeyValueError> {
+    async fn get_key_value<T: Into<String> + Send>(&self, bucket: T) -> Result<Self::Store, context::KeyValueError> {
         self.requested_buckets.lock().unwrap().push(bucket.into());
         match self.get_result.lock().unwrap().clone() {
             MockGetKeyValueResult::Ok(store) => Ok(store),
@@ -559,10 +533,7 @@ fn mock_stream_exists_error() -> context::CreateStreamError {
     context::CreateStreamError::new(context::CreateStreamErrorKind::JetStream(source))
 }
 
-fn status_from_settings(
-    bucket: &str,
-    settings: MockKeyValueSettings,
-) -> async_nats::jetstream::kv::bucket::Status {
+fn status_from_settings(bucket: &str, settings: MockKeyValueSettings) -> async_nats::jetstream::kv::bucket::Status {
     let config = stream::Config {
         name: format!("KV_{bucket}"),
         max_messages_per_subject: settings.history,
@@ -645,10 +616,7 @@ impl JetStreamGetStream for MockJetStreamConsumerFactory {
     type Error = MockError;
     type Stream = MockJetStreamStream;
 
-    async fn get_stream<T: AsRef<str> + Send>(
-        &self,
-        _stream_name: T,
-    ) -> Result<MockJetStreamStream, MockError> {
+    async fn get_stream<T: AsRef<str> + Send>(&self, _stream_name: T) -> Result<MockJetStreamStream, MockError> {
         let mut count = self.get_stream_call_count.lock().unwrap();
         *count += 1;
         let current = *count;
@@ -669,10 +637,7 @@ impl JetStreamCreateConsumer for MockJetStreamStream {
     type Error = MockError;
     type Consumer = MockJetStreamConsumer;
 
-    async fn create_consumer(
-        &self,
-        _config: pull::Config,
-    ) -> Result<MockJetStreamConsumer, MockError> {
+    async fn create_consumer(&self, _config: pull::Config) -> Result<MockJetStreamConsumer, MockError> {
         self.consumers
             .lock()
             .unwrap()
@@ -686,10 +651,7 @@ pub struct MockJetStreamConsumer {
 }
 
 impl MockJetStreamConsumer {
-    pub fn new() -> (
-        Self,
-        mpsc::UnboundedSender<Result<MockJsMessage, MockError>>,
-    ) {
+    pub fn new() -> (Self, mpsc::UnboundedSender<Result<MockJsMessage, MockError>>) {
         let (tx, rx) = mpsc::unbounded();
         (
             Self {
@@ -700,9 +662,7 @@ impl MockJetStreamConsumer {
     }
 
     pub fn failing() -> Self {
-        Self {
-            rx: Mutex::new(None),
-        }
+        Self { rx: Mutex::new(None) }
     }
 }
 
@@ -767,11 +727,7 @@ impl ObjectStorePut for MockObjectStore {
     type Error = MockError;
     type Info = ();
 
-    async fn put<R: tokio::io::AsyncRead + Unpin + Send>(
-        &self,
-        name: &str,
-        data: &mut R,
-    ) -> Result<(), MockError> {
+    async fn put<R: tokio::io::AsyncRead + Unpin + Send>(&self, name: &str, data: &mut R) -> Result<(), MockError> {
         use tokio::io::AsyncReadExt;
 
         let should_fail = {
@@ -787,13 +743,8 @@ impl ObjectStorePut for MockObjectStore {
             return Err(MockError("simulated object store put failure".to_string()));
         }
         let mut buf = Vec::new();
-        data.read_to_end(&mut buf)
-            .await
-            .map_err(|e| MockError(e.to_string()))?;
-        self.objects
-            .lock()
-            .unwrap()
-            .push((name.to_string(), Bytes::from(buf)));
+        data.read_to_end(&mut buf).await.map_err(|e| MockError(e.to_string()))?;
+        self.objects.lock().unwrap().push((name.to_string(), Bytes::from(buf)));
         Ok(())
     }
 }
@@ -883,10 +834,7 @@ mod tests {
     async fn mock_js_message_records_double_ack_with() {
         let msg = MockJsMessage::new(make_nats_msg("test", b""));
         msg.double_ack_with(AckKind::Ack).await.unwrap();
-        assert_eq!(
-            msg.signals(),
-            vec![AckKindSnapshot::DoubleAckWith(AckKindValue::Ack)]
-        );
+        assert_eq!(msg.signals(), vec![AckKindSnapshot::DoubleAckWith(AckKindValue::Ack)]);
     }
 
     #[tokio::test]
@@ -914,11 +862,7 @@ mod tests {
     async fn mock_publisher_records_publishes() {
         let pub_mock = MockJetStreamPublisher::new();
         let ack = pub_mock
-            .publish_with_headers(
-                "test.subject".to_string(),
-                HeaderMap::new(),
-                Bytes::from("hello"),
-            )
+            .publish_with_headers("test.subject".to_string(), HeaderMap::new(), Bytes::from("hello"))
             .await
             .unwrap()
             .await
@@ -970,17 +914,9 @@ mod tests {
         factory.add_consumer(consumer1);
         factory.add_consumer(consumer2);
 
-        let stream = JetStreamGetStream::get_stream(&factory, "stream")
-            .await
-            .unwrap();
-        let _c1 = stream
-            .create_consumer(pull::Config::default())
-            .await
-            .unwrap();
-        let _c2 = stream
-            .create_consumer(pull::Config::default())
-            .await
-            .unwrap();
+        let stream = JetStreamGetStream::get_stream(&factory, "stream").await.unwrap();
+        let _c1 = stream.create_consumer(pull::Config::default()).await.unwrap();
+        let _c2 = stream.create_consumer(pull::Config::default()).await.unwrap();
 
         let result = stream.create_consumer(pull::Config::default()).await;
         assert!(result.is_err());
@@ -1020,10 +956,7 @@ mod tests {
     async fn mock_js_message_records_nak() {
         let msg = MockJsMessage::new(make_nats_msg("test", b""));
         msg.ack_with(AckKind::Nak(None)).await.unwrap();
-        assert_eq!(
-            msg.signals(),
-            vec![AckKindSnapshot::AckWith(AckKindValue::Nak(None))]
-        );
+        assert_eq!(msg.signals(), vec![AckKindSnapshot::AckWith(AckKindValue::Nak(None))]);
     }
 
     #[tokio::test]
@@ -1071,10 +1004,7 @@ mod tests {
         assert_eq!(inner.payload.as_ref(), b"hello");
         assert_eq!(inner.subject.as_str(), "test.subject");
         assert!(inner.headers.is_some());
-        assert_eq!(
-            inner.reply.as_ref().map(|s| s.as_str()),
-            Some("_INBOX.reply")
-        );
+        assert_eq!(inner.reply.as_ref().map(|s| s.as_str()), Some("_INBOX.reply"));
     }
 
     #[test]
@@ -1124,10 +1054,7 @@ mod tests {
     async fn mock_js_message_ack_with_next() {
         let msg = MockJsMessage::new(make_nats_msg("test", b""));
         msg.ack_with(AckKind::Next).await.unwrap();
-        assert_eq!(
-            msg.signals(),
-            vec![AckKindSnapshot::AckWith(AckKindValue::Next)]
-        );
+        assert_eq!(msg.signals(), vec![AckKindSnapshot::AckWith(AckKindValue::Next)]);
     }
 
     #[test]
