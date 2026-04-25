@@ -19,3 +19,4 @@ tempfile = "3"
 default = []
 test-support = []
 hashicorp-vault = ["dep:reqwest", "dep:serde_json"]
+infisical       = ["dep:reqwest", "dep:serde_json"]

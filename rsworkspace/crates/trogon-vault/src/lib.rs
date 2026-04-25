@@ -32,3 +32,8 @@ pub use vault::VaultStore;
 pub use backends::hashicorp_vault::{
     HashicorpVaultConfig, HashicorpVaultError, HashicorpVaultStore, VaultAuth,
 };
+
+#[cfg(feature = "infisical")]
+pub use backends::infisical::{
+    InfisicalAuth, InfisicalConfig, InfisicalError, InfisicalVaultStore,
+};
