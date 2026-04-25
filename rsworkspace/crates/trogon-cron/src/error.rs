@@ -1,7 +1,7 @@
 use trogon_eventsourcing::StreamState;
 use trogon_eventsourcing::nats::jetstream::JetStreamStoreError;
 
-use crate::events::MessageHeadersError;
+use crate::MessageHeadersError;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 

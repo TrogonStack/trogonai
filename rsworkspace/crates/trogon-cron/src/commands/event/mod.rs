@@ -1,4 +1,3 @@
-mod contract;
 mod job_added;
 mod job_details;
 mod job_event;
@@ -11,10 +10,9 @@ mod job_removed;
 mod job_resumed;
 mod message;
 
-pub use contract::{JobEventProtoError, contract_v1};
 pub use job_added::JobAdded;
 pub use job_details::JobDetails;
-pub use job_event::{JobEvent, JobEventCodec, JobEventData, RecordedJobEvent};
+pub use job_event::JobEvent;
 pub use job_event_delivery::JobEventDelivery;
 pub use job_event_sampling_source::JobEventSamplingSource;
 pub use job_event_schedule::JobEventSchedule;

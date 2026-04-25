@@ -1,12 +1,74 @@
 use chrono::{DateTime, Utc};
 use trogon_cron_jobs_proto::v1;
+use trogon_eventsourcing::{CanonicalEventCodec, EventCodec, EventData, EventType, RecordedEvent};
 
-use super::{
+use crate::commands::event::{
     JobAdded, JobDetails, JobEvent, JobEventDelivery, JobEventSamplingSource, JobEventSchedule, JobEventStatus,
     JobPaused, JobRemoved, JobResumed, MessageContent, MessageEnvelope, MessageHeaders, MessageHeadersError,
 };
 
 pub use trogon_cron_jobs_proto::v1 as contract_v1;
+
+pub type JobEventData = EventData;
+pub type RecordedJobEvent = RecordedEvent;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct JobEventCodec;
+
+impl EventType for JobAdded {
+    fn event_type(&self) -> &'static str {
+        "job_added"
+    }
+}
+
+impl EventType for JobPaused {
+    fn event_type(&self) -> &'static str {
+        "job_paused"
+    }
+}
+
+impl EventType for JobResumed {
+    fn event_type(&self) -> &'static str {
+        "job_resumed"
+    }
+}
+
+impl EventType for JobRemoved {
+    fn event_type(&self) -> &'static str {
+        "job_removed"
+    }
+}
+
+impl EventCodec<JobEvent> for JobEventCodec {
+    type Error = serde_json::Error;
+
+    fn encode(&self, value: &JobEvent) -> Result<String, Self::Error> {
+        serde_json::to_string(value)
+    }
+
+    fn decode(&self, value: &str) -> Result<JobEvent, Self::Error> {
+        serde_json::from_str(value)
+    }
+}
+
+impl EventType for JobEvent {
+    fn event_type(&self) -> &'static str {
+        match self {
+            Self::JobAdded(event) => event.event_type(),
+            Self::JobPaused(event) => event.event_type(),
+            Self::JobResumed(event) => event.event_type(),
+            Self::JobRemoved(event) => event.event_type(),
+        }
+    }
+}
+
+impl CanonicalEventCodec for JobEvent {
+    type Codec = JobEventCodec;
+
+    fn canonical_codec() -> Self::Codec {
+        JobEventCodec
+    }
+}
 
 #[derive(Debug)]
 pub enum JobEventProtoError {
@@ -375,6 +437,63 @@ impl TryFrom<v1::JobMessage> for MessageEnvelope {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn event_data_and_recorded_event_helpers_work() {
+        let event = JobEventData::new_with_codec(
+            "cleanup",
+            &JobEventCodec,
+            JobEvent::JobRemoved(JobRemoved {
+                id: "cleanup".to_string(),
+            }),
+        )
+        .unwrap();
+        assert_eq!(event.stream_id(), "cleanup");
+        assert_eq!(event.event_type, "job_removed");
+        assert_eq!(
+            event.subject_with_prefix("cron.events.jobs."),
+            "cron.events.jobs.cleanup"
+        );
+
+        let payload = serde_json::to_vec(&event).unwrap();
+        let decoded = JobEventData::decode(&payload).unwrap();
+        assert_eq!(decoded, event);
+        assert_eq!(
+            decoded.decode_data_with(&JobEventCodec).unwrap(),
+            JobEvent::JobRemoved(JobRemoved {
+                id: "cleanup".to_string()
+            })
+        );
+
+        let recorded = event.record(
+            "cron.jobs.events.cleanup",
+            None,
+            Some(9),
+            chrono::DateTime::<chrono::Utc>::from_timestamp(1_700_000_000, 0).unwrap(),
+        );
+        assert_eq!(recorded.stream_id(), "cleanup");
+        assert_eq!(recorded.recorded_stream_id, "cron.jobs.events.cleanup");
+        assert_eq!(recorded.log_position, Some(9));
+        assert_eq!(
+            recorded.subject_with_prefix("cron.events.jobs."),
+            "cron.events.jobs.cleanup"
+        );
+        let recorded_payload = serde_json::to_vec(&recorded).unwrap();
+        let decoded = RecordedJobEvent::decode(&recorded_payload).unwrap();
+        assert_eq!(decoded, recorded);
+        assert_eq!(
+            decoded.decode_data_with(&JobEventCodec).unwrap(),
+            JobEvent::JobRemoved(JobRemoved {
+                id: "cleanup".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn invalid_payload_fails_decode() {
+        assert!(JobEventData::decode(br#"not-json"#).is_err());
+        assert!(RecordedJobEvent::decode(br#"not-json"#).is_err());
+    }
 
     #[test]
     fn job_added_round_trips_through_contract() {
