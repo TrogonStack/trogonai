@@ -15,27 +15,44 @@ pub type RecordedJobEvent = RecordedEvent;
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct JobEventCodec;
 
-impl EventType for JobAdded {
-    fn event_type(&self) -> &'static str {
-        "job_added"
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct JobContractEventCodec;
+
+#[derive(Debug)]
+pub enum JobContractEventCodecError {
+    Json(serde_json::Error),
+    Proto(JobEventProtoError),
+}
+
+impl std::fmt::Display for JobContractEventCodecError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Json(source) => write!(f, "{source}"),
+            Self::Proto(source) => write!(f, "{source}"),
+        }
     }
 }
 
-impl EventType for JobPaused {
-    fn event_type(&self) -> &'static str {
-        "job_paused"
+impl std::error::Error for JobContractEventCodecError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Json(source) => Some(source),
+            Self::Proto(source) => Some(source),
+        }
     }
 }
 
-impl EventType for JobResumed {
-    fn event_type(&self) -> &'static str {
-        "job_resumed"
-    }
-}
+impl EventCodec<v1::JobEvent> for JobContractEventCodec {
+    type Error = JobContractEventCodecError;
 
-impl EventType for JobRemoved {
-    fn event_type(&self) -> &'static str {
-        "job_removed"
+    fn encode(&self, value: &v1::JobEvent) -> Result<String, Self::Error> {
+        let event = JobEvent::try_from(value.clone()).map_err(JobContractEventCodecError::Proto)?;
+        serde_json::to_string(&event).map_err(JobContractEventCodecError::Json)
+    }
+
+    fn decode(&self, value: &str) -> Result<v1::JobEvent, Self::Error> {
+        let event = serde_json::from_str(value).map_err(JobContractEventCodecError::Json)?;
+        Ok(v1::JobEvent::from(&event))
     }
 }
 
@@ -54,10 +71,10 @@ impl EventCodec<JobEvent> for JobEventCodec {
 impl EventType for JobEvent {
     fn event_type(&self) -> &'static str {
         match self {
-            Self::JobAdded(event) => event.event_type(),
-            Self::JobPaused(event) => event.event_type(),
-            Self::JobResumed(event) => event.event_type(),
-            Self::JobRemoved(event) => event.event_type(),
+            Self::JobAdded(..) => "job_added",
+            Self::JobPaused(..) => "job_paused",
+            Self::JobResumed(..) => "job_resumed",
+            Self::JobRemoved(..) => "job_removed",
         }
     }
 }
@@ -153,6 +170,16 @@ impl TryFrom<v1::JobEvent> for JobEvent {
             v1::job_event::EventOneof::JobRemoved(inner) => Ok(Self::JobRemoved(inner.to_owned().try_into()?)),
             v1::job_event::EventOneof::not_set(_) | _ => Err(JobEventProtoError::MissingEvent),
         }
+    }
+}
+
+pub fn contract_event_stream_id(event: &v1::JobEvent) -> Result<String, JobEventProtoError> {
+    match event.event() {
+        v1::job_event::EventOneof::JobAdded(inner) => Ok(inner.id().to_string()),
+        v1::job_event::EventOneof::JobPaused(inner) => Ok(inner.id().to_string()),
+        v1::job_event::EventOneof::JobResumed(inner) => Ok(inner.id().to_string()),
+        v1::job_event::EventOneof::JobRemoved(inner) => Ok(inner.id().to_string()),
+        v1::job_event::EventOneof::not_set(_) | _ => Err(JobEventProtoError::MissingEvent),
     }
 }
 
@@ -428,7 +455,7 @@ impl TryFrom<v1::JobMessage> for MessageEnvelope {
             .collect::<Vec<_>>();
 
         Ok(Self {
-            content: MessageContent::new(value.content().as_ref().to_vec()),
+            content: MessageContent::new(value.content().to_vec()),
             headers: MessageHeaders::new(headers).map_err(JobEventProtoError::InvalidHeaders)?,
         })
     }
