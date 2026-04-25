@@ -257,6 +257,7 @@ async fn audit_events_published_for_store_resolve_revoke() {
     assert_eq!(body["type"], "store");
     assert_eq!(body["token"], "tok_anthropic_prod_abc123");
     assert_eq!(body["vault"], "prod");
+    assert_eq!(body["actor"], "system");
 
     // resolve → audit.resolve.prod
     tokio::time::sleep(Duration::from_millis(100)).await;

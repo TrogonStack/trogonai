@@ -20,10 +20,10 @@ const DEFAULT_MAX_AGE: Duration = Duration::from_secs(90 * 24 * 3600);
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AuditEvent {
-    Store   { token: String, vault: String },
+    Store   { token: String, vault: String, actor: String },
     Resolve { token: String, vault: String, success: bool, latency_us: u64 },
-    Revoke  { token: String, vault: String },
-    Rotate  { token: String, vault: String },
+    Revoke  { token: String, vault: String, actor: String },
+    Rotate  { token: String, vault: String, actor: String },
     /// Published by `trogon-vault-approvals` (Phase 5).
     Approve { proposal_id: String, vault: String, approver: String },
     /// Published by `trogon-vault-approvals` (Phase 5).
@@ -61,10 +61,11 @@ impl AuditPublisher {
         Self { js, vault_name: vault_name.into() }
     }
 
-    pub fn publish_store(&self, token: &str) {
+    pub fn publish_store(&self, token: &str, actor: &str) {
         self.fire(AuditEvent::Store {
             token: token.to_string(),
             vault: self.vault_name.clone(),
+            actor: actor.to_string(),
         });
     }
 
@@ -77,17 +78,19 @@ impl AuditPublisher {
         });
     }
 
-    pub fn publish_revoke(&self, token: &str) {
+    pub fn publish_revoke(&self, token: &str, actor: &str) {
         self.fire(AuditEvent::Revoke {
             token: token.to_string(),
             vault: self.vault_name.clone(),
+            actor: actor.to_string(),
         });
     }
 
-    pub fn publish_rotate(&self, token: &str) {
+    pub fn publish_rotate(&self, token: &str, actor: &str) {
         self.fire(AuditEvent::Rotate {
             token: token.to_string(),
             vault: self.vault_name.clone(),
+            actor: actor.to_string(),
         });
     }
 

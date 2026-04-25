@@ -51,6 +51,38 @@ impl InfisicalConfig {
         self.secret_path = path.into();
         self
     }
+
+    /// Build an [`InfisicalConfig`] from environment variables.
+    ///
+    /// | Variable                  | Description                        |
+    /// |---------------------------|------------------------------------|
+    /// | `INFISICAL_URL`           | Base URL (e.g. `https://app.infisical.com`) |
+    /// | `INFISICAL_PROJECT_ID`    | Workspace / project ID             |
+    /// | `INFISICAL_SERVICE_TOKEN` | Service token for authentication   |
+    ///
+    /// Returns an error message listing any missing variables.
+    pub fn from_env() -> Result<Self, String> {
+        let mut missing = Vec::new();
+
+        let base_url = std::env::var("INFISICAL_URL").unwrap_or_else(|_| {
+            missing.push("INFISICAL_URL");
+            String::new()
+        });
+        let project_id = std::env::var("INFISICAL_PROJECT_ID").unwrap_or_else(|_| {
+            missing.push("INFISICAL_PROJECT_ID");
+            String::new()
+        });
+        let token = std::env::var("INFISICAL_SERVICE_TOKEN").unwrap_or_else(|_| {
+            missing.push("INFISICAL_SERVICE_TOKEN");
+            String::new()
+        });
+
+        if !missing.is_empty() {
+            return Err(format!("missing env vars: {}", missing.join(", ")));
+        }
+
+        Ok(Self::new(base_url, project_id, InfisicalAuth::ServiceToken(token)))
+    }
 }
 
 /// Errors produced by [`InfisicalVaultStore`].

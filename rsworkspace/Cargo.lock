@@ -5592,6 +5592,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "tracing",
  "trogon-std",
  "uuid",
 ]

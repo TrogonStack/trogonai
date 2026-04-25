@@ -132,7 +132,7 @@ impl VaultStore for NatsKvVault {
         let ciphertext = self.crypto.encrypt(plaintext.as_bytes())?;
         self.kv.put(token.as_str(), ciphertext.into()).await.nats_err()?;
         if let Some(ref audit) = self.audit {
-            audit.publish_store(token.as_str());
+            audit.publish_store(token.as_str(), "system");
         }
         Ok(())
     }
@@ -152,7 +152,7 @@ impl VaultStore for NatsKvVault {
         match self.kv.delete(token.as_str()).await {
             Ok(_)  => {
                 if let Some(ref audit) = self.audit {
-                    audit.publish_revoke(token.as_str());
+                    audit.publish_revoke(token.as_str(), "system");
                 }
                 Ok(())
             }
@@ -171,7 +171,7 @@ impl VaultStore for NatsKvVault {
         let ciphertext = self.crypto.encrypt(new_plaintext.as_bytes())?;
         self.kv.put(token.as_str(), ciphertext.into()).await.nats_err()?;
         if let Some(ref audit) = self.audit {
-            audit.publish_rotate(token.as_str());
+            audit.publish_rotate(token.as_str(), "system");
         }
         Ok(())
     }

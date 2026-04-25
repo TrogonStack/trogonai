@@ -18,3 +18,14 @@ pub use bucket::ensure_vault_bucket;
 pub use crypto::CryptoCtx;
 pub use error::NatsKvVaultError;
 pub use slot::RotationSlot;
+
+/// Read the rotation grace period from `VAULT_GRACE_PERIOD_SECS`.
+///
+/// Defaults to 30 seconds if the variable is absent or unparseable.
+pub fn grace_period_from_env() -> std::time::Duration {
+    std::env::var("VAULT_GRACE_PERIOD_SECS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .map(std::time::Duration::from_secs)
+        .unwrap_or(std::time::Duration::from_secs(30))
+}

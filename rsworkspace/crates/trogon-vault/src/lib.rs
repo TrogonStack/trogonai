@@ -24,6 +24,7 @@ pub mod backends;
 pub mod token;
 pub mod vault;
 
+pub use backends::dual_write::DualWriteVault;
 pub use backends::memory::{MemoryVault, MemoryVaultError};
 pub use token::{AiProvider, ApiKeyToken, Env, TokenError};
 pub use vault::VaultStore;

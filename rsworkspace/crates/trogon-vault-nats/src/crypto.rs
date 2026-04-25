@@ -41,6 +41,24 @@ pub struct CryptoCtx {
 }
 
 impl CryptoCtx {
+    /// Build a [`CryptoCtx`] from environment variables.
+    ///
+    /// | Variable              | Description                                         |
+    /// |-----------------------|-----------------------------------------------------|
+    /// | `VAULT_MASTER_PASSWORD` | Password passed to Argon2id KDF                   |
+    /// | `VAULT_KEY_SALT`        | Salt (UTF-8); must be ≥ 8 bytes, 16+ recommended  |
+    ///
+    /// Returns an error message listing any missing variables or derivation failure.
+    pub fn from_env() -> Result<Self, String> {
+        let password = std::env::var("VAULT_MASTER_PASSWORD")
+            .map_err(|_| "missing env var: VAULT_MASTER_PASSWORD".to_string())?;
+        let salt = std::env::var("VAULT_KEY_SALT")
+            .map_err(|_| "missing env var: VAULT_KEY_SALT".to_string())?;
+
+        Self::derive(password.as_bytes(), salt.as_bytes())
+            .map_err(|e| format!("key derivation failed: {e}"))
+    }
+
     /// Derive the master key from `password` and `salt` using Argon2id.
     ///
     /// Parameters: m=64 MiB, t=3 iterations, p=4 lanes.
