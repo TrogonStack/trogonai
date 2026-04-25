@@ -14,12 +14,9 @@ use trogon_nats::lease::{LeaderElection, LeaseRenewInterval, LeaseTiming, LeaseT
 use trogon_std::{NowV7, UuidV7Generator};
 
 use crate::{
-    CronJob, ResolvedJob,
+    CronJob, JobAdded, JobEvent, JobEventCodec, JobEventData, JobEventStatus, JobPaused, JobRemoved, JobResumed,
+    RecordedJobEvent, ResolvedJob,
     error::CronError,
-    events::{
-        JobAdded, JobEvent, JobEventCodec, JobEventData, JobEventStatus, JobPaused, JobRemoved, JobResumed,
-        RecordedJobEvent,
-    },
     kv::{EVENTS_SUBJECT_PREFIX, LEADER_BUCKET, LEADER_KEY, LEGACY_EVENTS_SUBJECT_PREFIX},
     nats::NatsSchedulePublisher,
     store::{Store, connect_store},
@@ -641,9 +638,8 @@ mod tests {
         default_leader_timing, next_scheduler_start_sequence, reconcile_snapshot, scheduler_consumer_config,
     };
     use crate::{
-        CronJob, Delivery, Job, JobDetails, JobHeaders, JobId, JobMessage, JobStatus, MessageContent, MessageEnvelope,
-        MessageHeaders, Schedule,
-        events::{JobAdded, JobEvent, JobEventStatus, JobPaused, JobRemoved, JobResumed},
+        CronJob, Delivery, Job, JobAdded, JobDetails, JobEvent, JobEventStatus, JobHeaders, JobId, JobMessage,
+        JobPaused, JobRemoved, JobResumed, JobStatus, MessageContent, MessageEnvelope, MessageHeaders, Schedule,
         mocks::{MockCronStore, MockLeaderLock, MockSchedulePublisher},
     };
 

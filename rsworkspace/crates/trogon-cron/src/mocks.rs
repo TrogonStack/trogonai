@@ -16,10 +16,10 @@ use trogon_eventsourcing::{
 use trogon_nats::lease::{ReleaseLease, RenewLease, TryAcquireLease};
 
 use crate::{
-    CronJob, GetJobCommand, ListJobsCommand, ResolvedJob,
+    CronJob, GetJobCommand, JobAdded, JobEvent, JobEventCodec, JobEventData, JobPaused, JobRemoved, JobResumed,
+    ListJobsCommand, ResolvedJob,
     config::{JobWriteCondition, JobWriteState},
     error::CronError,
-    events::{JobAdded, JobEvent, JobEventCodec, JobEventData, JobPaused, JobRemoved, JobResumed},
     projections::{CronJobWatchStream, LoadAndWatchCronJobsResult},
     traits::SchedulePublisher,
 };
