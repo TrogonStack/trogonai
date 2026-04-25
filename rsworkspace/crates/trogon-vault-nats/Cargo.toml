@@ -1,0 +1,20 @@
+[package]
+name = "trogon-vault-nats"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+aes-gcm      = "0.10"
+argon2       = "0.5"
+async-nats   = { workspace = true, features = ["jetstream", "kv"] }
+bytes        = { workspace = true }
+dashmap      = "6"
+futures-util = { workspace = true }
+rand         = "0.8"
+tokio        = { workspace = true, features = ["sync"] }
+tracing      = { workspace = true }
+trogon-vault = { path = "../trogon-vault" }
+
+[dev-dependencies]
+testcontainers-modules = { version = "0.8", features = ["nats"] }
+tokio                  = { version = "1.49.0", features = ["macros", "rt-multi-thread"] }
