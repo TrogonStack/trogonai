@@ -5597,6 +5597,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-vault-approvals"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "async-trait",
+ "bytes",
+ "dashmap",
+ "futures-util",
+ "serde",
+ "serde_json",
+ "testcontainers-modules",
+ "tokio",
+ "tracing",
+ "trogon-vault",
+ "trogon-vault-nats",
+]
+
+[[package]]
 name = "trogon-vault-nats"
 version = "0.1.0"
 dependencies = [

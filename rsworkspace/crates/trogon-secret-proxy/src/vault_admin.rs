@@ -83,7 +83,15 @@ impl std::error::Error for VaultAdminError {}
 
 /// Subscribe to vault admin subjects and serve requests until the NATS client
 /// is closed or an unrecoverable error occurs.
-pub async fn run<V, N>(nats: N, vault: Arc<V>, prefix: &str) -> Result<(), VaultAdminError>
+///
+/// - `vault_name = None` → flat subjects `{prefix}.vault.store/rotate/revoke`
+/// - `vault_name = Some("prod")` → named subjects `{prefix}.vault.prod.store/rotate/revoke`
+pub async fn run<V, N>(
+    nats: N,
+    vault: Arc<V>,
+    prefix: &str,
+    vault_name: Option<&str>,
+) -> Result<(), VaultAdminError>
 where
     V: VaultStore + 'static,
     V::Error: std::fmt::Display,
@@ -91,9 +99,18 @@ where
 {
     use futures_util::StreamExt as _;
 
-    let store_subject = subjects::vault_store(prefix);
-    let rotate_subject = subjects::vault_rotate(prefix);
-    let revoke_subject = subjects::vault_revoke(prefix);
+    let (store_subject, rotate_subject, revoke_subject) = match vault_name {
+        None => (
+            subjects::vault_store(prefix),
+            subjects::vault_rotate(prefix),
+            subjects::vault_revoke(prefix),
+        ),
+        Some(name) => (
+            subjects::vault_store_for(prefix, name),
+            subjects::vault_rotate_for(prefix, name),
+            subjects::vault_revoke_for(prefix, name),
+        ),
+    };
 
     let mut store_sub =
         nats.subscribe(store_subject.clone())

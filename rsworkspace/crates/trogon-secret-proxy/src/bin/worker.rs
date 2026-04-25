@@ -63,7 +63,7 @@ async fn run_all<V: VaultStore + 'static>(
         let vault = Arc::clone(&vault);
         let prefix = prefix.to_string();
         async move {
-            vault_admin::run(nats, vault, &prefix)
+            vault_admin::run(nats, vault, &prefix, None)
                 .await
                 .expect("Vault admin listener exited with error");
         }
