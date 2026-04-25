@@ -8,7 +8,6 @@
 pub mod commands;
 pub mod config;
 pub mod error;
-pub mod events;
 pub mod kv;
 pub mod nats;
 mod processors;
@@ -26,17 +25,17 @@ pub use commands::domain::{
     CronExpression, Delivery, DeliveryRoute, EverySeconds, Job, JobHeaders, JobId, JobIdError, JobMessage, JobStatus,
     SamplingSource, SamplingSubject, Schedule, ScheduleTimezone, TtlSeconds,
 };
+pub use commands::event::{
+    JobAdded, JobDetails, JobEvent, JobEventDelivery, JobEventSamplingSource, JobEventSchedule, JobEventStatus,
+    JobPaused, JobRemoved, JobResumed, MessageContent, MessageEnvelope, MessageHeaders, MessageHeadersError,
+};
 pub use commands::{
-    AddJobCommand, AddJobDecisionError, JobState, JobStateProtoError, PauseJobCommand, PauseJobDecisionError,
-    RemoveJobCommand, RemoveJobDecisionError, ResumeJobCommand, ResumeJobDecisionError,
+    AddJobCommand, AddJobDecisionError, JobEventCodec, JobEventData, JobEventProtoError, JobState, JobStateProtoError,
+    PauseJobCommand, PauseJobDecisionError, RecordedJobEvent, RemoveJobCommand, RemoveJobDecisionError,
+    ResumeJobCommand, ResumeJobDecisionError, contract_v1,
 };
 pub use config::JobWriteCondition;
 pub use error::{CronError, JobSpecError};
-pub use events::{
-    JobAdded, JobDetails, JobEvent, JobEventCodec, JobEventData, JobEventDelivery, JobEventProtoError,
-    JobEventSamplingSource, JobEventSchedule, JobEventStatus, JobPaused, JobRemoved, JobResumed, MessageContent,
-    MessageEnvelope, MessageHeaders, MessageHeadersError, RecordedJobEvent, contract_v1,
-};
 pub use nats::NatsSchedulePublisher;
 pub use processors::CronController;
 pub use projections::{

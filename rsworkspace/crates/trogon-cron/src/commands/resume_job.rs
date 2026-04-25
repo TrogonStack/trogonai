@@ -1,10 +1,7 @@
 use trogon_eventsourcing::{CommandSnapshotPolicy, Decide, Decision, FrequencySnapshot, StreamCommand};
 
 use super::JobState;
-use crate::{
-    JobId,
-    events::{JobEvent, JobResumed},
-};
+use crate::{JobEvent, JobId, JobResumed};
 
 #[derive(Debug, Clone)]
 pub struct ResumeJobCommand {
