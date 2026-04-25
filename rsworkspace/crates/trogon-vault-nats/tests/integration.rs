@@ -186,6 +186,23 @@ async fn data_survives_vault_restart() {
 }
 
 #[tokio::test]
+async fn resolve_with_previous_returns_previous_during_grace_period() {
+    let (js, _c) = start_nats().await;
+    let vault = make_vault(&js, "default").await;
+    let token = tok("tok_anthropic_prod_abc123");
+
+    vault.store(&token, "sk-ant-v1").await.unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    vault.rotate(&token, "sk-ant-v2").await.unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let (current, previous) = vault.resolve_with_previous(&token).await.unwrap();
+    assert_eq!(current, Some("sk-ant-v2".to_string()));
+    assert_eq!(previous, Some("sk-ant-v1".to_string()));
+}
+
+#[tokio::test]
 async fn store_overwrites_existing_value() {
     let (js, _c) = start_nats().await;
     let vault = make_vault(&js, "default").await;

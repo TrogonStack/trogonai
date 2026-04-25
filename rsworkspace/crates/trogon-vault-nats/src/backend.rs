@@ -139,6 +139,17 @@ impl VaultStore for NatsKvVault {
         }
     }
 
+    async fn resolve_with_previous(
+        &self,
+        token: &ApiKeyToken,
+    ) -> Result<(Option<String>, Option<String>), NatsKvVaultError> {
+        wait_ready(&self.ready).await?;
+        Ok(match self.cache.get(token.as_str()) {
+            Some(slot) => (Some(slot.current.clone()), slot.valid_previous().map(String::from)),
+            None => (None, None),
+        })
+    }
+
     // rotate() uses the default impl (delegates to store()), which re-encrypts
     // and overwrites. The watcher picks up the Put and updates the RotationSlot,
     // saving the old value as `previous` for the grace period.
