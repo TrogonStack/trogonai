@@ -1,0 +1,17 @@
+edition = "2024";
+
+package trogon.cron.jobs.v1;
+
+import "trogon/cron/jobs/v1/job_added.proto";
+import "trogon/cron/jobs/v1/job_paused.proto";
+import "trogon/cron/jobs/v1/job_removed.proto";
+import "trogon/cron/jobs/v1/job_resumed.proto";
+
+message JobEvent {
+  oneof event {
+    JobAdded job_added = 1;
+    JobPaused job_paused = 2;
+    JobResumed job_resumed = 3;
+    JobRemoved job_removed = 4;
+  }
+}
