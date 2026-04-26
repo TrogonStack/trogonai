@@ -1,0 +1,13 @@
+edition = "2024";
+
+package trogon.cron.jobs.v1;
+
+message JobMessage {
+  string content = 1;
+  repeated Header headers = 2;
+}
+
+message Header {
+  string name = 1;
+  string value = 2;
+}
