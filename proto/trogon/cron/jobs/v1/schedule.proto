@@ -1,0 +1,24 @@
+edition = "2024";
+
+package trogon.cron.jobs.v1;
+
+message JobSchedule {
+  oneof kind {
+    AtSchedule at = 1;
+    EverySchedule every = 2;
+    CronSchedule cron = 3;
+  }
+}
+
+message AtSchedule {
+  string at = 1;
+}
+
+message EverySchedule {
+  uint64 every_sec = 1;
+}
+
+message CronSchedule {
+  string expr = 1;
+  string timezone = 2;
+}

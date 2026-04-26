@@ -1,0 +1,7 @@
+edition = "2024";
+
+package trogon.cron.jobs.v1;
+
+message JobRemoved {
+  string id = 1;
+}
