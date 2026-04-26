@@ -10,6 +10,7 @@ type BoxError = Box<dyn std::error::Error + Send + Sync>;
 const NATS_BATCH_COMMIT: &str = "Nats-Batch-Commit";
 const NATS_BATCH_ID: &str = "Nats-Batch-Id";
 const NATS_BATCH_SEQUENCE: &str = "Nats-Batch-Sequence";
+pub const TROGON_EVENT_TYPE: &str = "Trogon-Event-Type";
 
 #[derive(Debug)]
 pub enum StreamStoreError {
@@ -108,15 +109,14 @@ where
 
     for (index, event) in events.iter().enumerate() {
         let payload = serde_json::to_vec(event)?;
-        let mut publish = PublishMessage::build()
-            .payload(payload.into())
-            .message_id(&event.event_id)
-            .expected_last_subject_sequence(expected_last_subject_sequence + index as u64)
-            .header(NATS_BATCH_ID, batch_id.as_str())
-            .header(NATS_BATCH_SEQUENCE, (index + 1).to_string());
-        if index + 1 == events.len() {
-            publish = publish.header(NATS_BATCH_COMMIT, "1");
-        }
+        let publish = build_publish_message(
+            event,
+            payload,
+            expected_last_subject_sequence,
+            batch_id.as_str(),
+            index,
+            events.len(),
+        );
 
         let ack = js
             .publish_message(publish.outbound_message(subject.clone()))
@@ -141,6 +141,27 @@ where
     }
 
     Ok(())
+}
+
+fn build_publish_message(
+    event: &EventData,
+    payload: Vec<u8>,
+    expected_last_subject_sequence: u64,
+    batch_id: &str,
+    index: usize,
+    event_count: usize,
+) -> PublishMessage {
+    let mut publish = PublishMessage::build()
+        .payload(payload.into())
+        .message_id(&event.event_id)
+        .expected_last_subject_sequence(expected_last_subject_sequence + index as u64)
+        .header(TROGON_EVENT_TYPE, event.event_type.as_str())
+        .header(NATS_BATCH_ID, batch_id)
+        .header(NATS_BATCH_SEQUENCE, (index + 1).to_string());
+    if index + 1 == event_count {
+        publish = publish.header(NATS_BATCH_COMMIT, "1");
+    }
+    publish
 }
 
 pub async fn read_stream_from(
@@ -207,6 +228,30 @@ fn record_message(message: async_nats::jetstream::message::StreamMessage) -> Res
 
 #[cfg(test)]
 mod tests {
+    use crate::EventData;
+
+    use super::{TROGON_EVENT_TYPE, build_publish_message};
+
+    #[test]
+    fn build_publish_message_sets_trogon_event_type_header() {
+        let event = EventData {
+            event_id: "event-1".to_string(),
+            event_type: "trogon.cron.jobs.v1.JobAdded".to_string(),
+            stream_id: "backup".to_string(),
+            data: "{}".to_string(),
+            metadata: None,
+        };
+
+        let message =
+            build_publish_message(&event, Vec::new(), 0, "batch-1", 0, 1).outbound_message("cron.jobs.events.backup");
+        let headers = message.headers.unwrap_or_default();
+
+        assert_eq!(
+            headers.get(TROGON_EVENT_TYPE).map(|value| value.as_str()),
+            Some("trogon.cron.jobs.v1.JobAdded")
+        );
+    }
+
     #[test]
     fn read_stream_range_rejects_empty_ranges() {
         assert!(read_stream_range_bounds(0, 1));

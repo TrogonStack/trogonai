@@ -12,6 +12,11 @@ pub use trogon_cron_jobs_proto::v1 as contract_v1;
 pub type JobEventData = EventData;
 pub type RecordedJobEvent = RecordedEvent;
 
+pub const JOB_ADDED_EVENT_TYPE: &str = "trogon.cron.jobs.v1.JobAdded";
+pub const JOB_PAUSED_EVENT_TYPE: &str = "trogon.cron.jobs.v1.JobPaused";
+pub const JOB_RESUMED_EVENT_TYPE: &str = "trogon.cron.jobs.v1.JobResumed";
+pub const JOB_REMOVED_EVENT_TYPE: &str = "trogon.cron.jobs.v1.JobRemoved";
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct JobEventCodec;
 
@@ -71,10 +76,10 @@ impl EventCodec<JobEvent> for JobEventCodec {
 impl EventType for JobEvent {
     fn event_type(&self) -> &'static str {
         match self {
-            Self::JobAdded(..) => "job_added",
-            Self::JobPaused(..) => "job_paused",
-            Self::JobResumed(..) => "job_resumed",
-            Self::JobRemoved(..) => "job_removed",
+            Self::JobAdded(..) => JOB_ADDED_EVENT_TYPE,
+            Self::JobPaused(..) => JOB_PAUSED_EVENT_TYPE,
+            Self::JobResumed(..) => JOB_RESUMED_EVENT_TYPE,
+            Self::JobRemoved(..) => JOB_REMOVED_EVENT_TYPE,
         }
     }
 }
@@ -476,7 +481,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(event.stream_id(), "cleanup");
-        assert_eq!(event.event_type, "job_removed");
+        assert_eq!(event.event_type, JOB_REMOVED_EVENT_TYPE);
         assert_eq!(
             event.subject_with_prefix("cron.events.jobs."),
             "cron.events.jobs.cleanup"
