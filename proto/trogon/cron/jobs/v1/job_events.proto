@@ -85,7 +85,7 @@ message LatestFromSubjectSampling {
 }
 
 message JobMessage {
-  bytes content = 1;
+  string content = 1;
   repeated Header headers = 2;
 }
 

@@ -429,7 +429,7 @@ mod tests {
             schedule: Schedule::every(30).unwrap(),
             delivery: Delivery::nats_event("agent.run").unwrap(),
             message: JobMessage {
-                content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
+                content: MessageContent::from_static(r#"{"kind":"heartbeat"}"#),
                 headers: JobHeaders::default(),
             },
         }
@@ -563,7 +563,7 @@ mod tests {
                 "route": "agent.run",
                 "source": { "type": "latest_from_subject", "subject": "sensors.>" }
             },
-            "content": "eyJraW5kIjoiaGVhcnRiZWF0In0="
+            "content": "{\"kind\":\"heartbeat\"}"
         }))
         .unwrap_err();
         assert!(invalid_error.to_string().contains("sampling source"));

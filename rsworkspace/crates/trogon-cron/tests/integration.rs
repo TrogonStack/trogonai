@@ -121,7 +121,7 @@ fn base_job(id: &str) -> Job {
             source: None,
         },
         message: JobMessage {
-            content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
+            content: MessageContent::from_static(r#"{"kind":"heartbeat"}"#),
             headers: JobHeaders::default(),
         },
     }
