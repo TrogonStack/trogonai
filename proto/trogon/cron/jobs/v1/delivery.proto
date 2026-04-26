@@ -1,0 +1,25 @@
+edition = "2024";
+
+package trogon.cron.jobs.v1;
+
+message JobDelivery {
+  oneof kind {
+    NatsEventDelivery nats_event = 1;
+  }
+}
+
+message NatsEventDelivery {
+  string route = 1;
+  uint64 ttl_sec = 2;
+  JobSamplingSource source = 3;
+}
+
+message JobSamplingSource {
+  oneof kind {
+    LatestFromSubjectSampling latest_from_subject = 1;
+  }
+}
+
+message LatestFromSubjectSampling {
+  string subject = 1;
+}
