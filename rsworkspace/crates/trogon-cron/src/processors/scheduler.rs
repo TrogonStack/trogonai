@@ -674,7 +674,7 @@ mod tests {
             schedule: Schedule::every(30).unwrap(),
             delivery: Delivery::nats_event("agent.run").unwrap(),
             message: JobMessage {
-                content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
+                content: MessageContent::from_static(r#"{"kind":"heartbeat"}"#),
                 headers: JobHeaders::default(),
             },
         }
@@ -731,7 +731,7 @@ mod tests {
                 source: None,
             },
             message: MessageEnvelope {
-                content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
+                content: MessageContent::from_static(r#"{"kind":"heartbeat"}"#),
                 headers: MessageHeaders::default(),
             },
         }

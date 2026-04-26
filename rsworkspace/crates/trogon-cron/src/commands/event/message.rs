@@ -1,4 +1,3 @@
-use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -95,36 +94,40 @@ pub struct MessageEnvelope {
     pub headers: MessageHeaders,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct MessageContent(Vec<u8>);
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct MessageContent(String);
 
 impl MessageContent {
-    pub fn new(content: impl Into<Vec<u8>>) -> Self {
+    pub fn new(content: impl Into<String>) -> Self {
         Self(content.into())
     }
 
-    pub fn from_static(content: &'static [u8]) -> Self {
-        Self(content.to_vec())
+    pub fn from_static(content: &'static str) -> Self {
+        Self(content.to_string())
     }
 
-    pub fn as_slice(&self) -> &[u8] {
+    pub fn as_str(&self) -> &str {
         &self.0
     }
 
-    pub fn into_vec(self) -> Vec<u8> {
+    pub fn as_slice(&self) -> &[u8] {
+        self.0.as_bytes()
+    }
+
+    pub fn into_string(self) -> String {
         self.0
     }
 }
 
-impl From<Vec<u8>> for MessageContent {
-    fn from(value: Vec<u8>) -> Self {
+impl From<String> for MessageContent {
+    fn from(value: String) -> Self {
         Self(value)
     }
 }
 
-impl From<&[u8]> for MessageContent {
-    fn from(value: &[u8]) -> Self {
-        Self(value.to_vec())
+impl From<&str> for MessageContent {
+    fn from(value: &str) -> Self {
+        Self(value.to_string())
     }
 }
 
@@ -134,38 +137,22 @@ impl AsRef<[u8]> for MessageContent {
     }
 }
 
-impl Serialize for MessageContent {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_str(&STANDARD.encode(&self.0))
-    }
-}
-
-impl<'de> Deserialize<'de> for MessageContent {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let encoded = String::deserialize(deserializer)?;
-        STANDARD.decode(encoded).map(Self).map_err(D::Error::custom)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn headers_round_trip_as_ordered_pairs() {
+    fn headers_preserve_ordered_pairs() {
         let headers = MessageHeaders::new([("x-kind", "heartbeat"), ("x-kind", "retry"), ("x-owner", "ops")]).unwrap();
 
-        let json = serde_json::to_string(&headers).unwrap();
-        let decoded: MessageHeaders = serde_json::from_str(&json).unwrap();
-
-        assert_eq!(json, r#"[["x-kind","heartbeat"],["x-kind","retry"],["x-owner","ops"]]"#);
-        assert_eq!(decoded, headers);
+        assert_eq!(
+            headers.as_slice(),
+            &[
+                ("x-kind".to_string(), "heartbeat".to_string()),
+                ("x-kind".to_string(), "retry".to_string()),
+                ("x-owner".to_string(), "ops".to_string()),
+            ]
+        );
     }
 
     #[test]

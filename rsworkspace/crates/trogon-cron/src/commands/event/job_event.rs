@@ -1,9 +1,6 @@
-use serde::{Deserialize, Serialize};
-
 use super::{JobAdded, JobPaused, JobRemoved, JobResumed};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq)]
 pub enum JobEvent {
     JobAdded(JobAdded),
     JobPaused(JobPaused),

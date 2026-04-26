@@ -219,6 +219,18 @@ impl From<serde_json::Error> for CronError {
     }
 }
 
+impl From<crate::commands::proto::JobEventCodecError> for CronError {
+    fn from(value: crate::commands::proto::JobEventCodecError) -> Self {
+        Self::event_source("failed to encode or decode job event payload", value)
+    }
+}
+
+impl From<crate::commands::proto::JobEventCodecError> for JetStreamStoreError<CronError> {
+    fn from(value: crate::commands::proto::JobEventCodecError) -> Self {
+        Self::Codec(value.into())
+    }
+}
+
 impl From<MessageHeadersError> for JobSpecError {
     fn from(value: MessageHeadersError) -> Self {
         match value {
@@ -253,7 +265,7 @@ impl From<JetStreamStoreError<CronError>> for CronError {
             }
             JetStreamStoreError::AppendStream(source) => Self::event_source("failed to append job event batch", source),
             JetStreamStoreError::Snapshot(source) => Self::from(source),
-            JetStreamStoreError::Codec(source) => Self::Serde(source),
+            JetStreamStoreError::Codec(source) => source,
             JetStreamStoreError::OptimisticConcurrencyConflict {
                 stream_id,
                 expected,

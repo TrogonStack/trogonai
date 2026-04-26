@@ -254,7 +254,7 @@ mod tests {
                 source: None,
             },
             message: MessageEnvelope {
-                content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
+                content: MessageContent::from_static(r#"{"kind":"heartbeat"}"#),
                 headers: MessageHeaders::new([("x-kind", "heartbeat")]).unwrap(),
             },
         }

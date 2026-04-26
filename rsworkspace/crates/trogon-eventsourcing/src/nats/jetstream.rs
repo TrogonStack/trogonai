@@ -81,7 +81,7 @@ pub enum JetStreamStoreError<Error> {
     AppendStream(StreamStoreError),
     ProjectAppend(Error),
     Snapshot(SnapshotStoreError),
-    Codec(serde_json::Error),
+    Codec(Error),
     OptimisticConcurrencyConflict {
         stream_id: String,
         expected: StreamState,
@@ -138,9 +138,12 @@ where
     }
 }
 
-impl<Error> From<serde_json::Error> for JetStreamStoreError<Error> {
+impl<Error> From<serde_json::Error> for JetStreamStoreError<Error>
+where
+    Error: From<serde_json::Error>,
+{
     fn from(value: serde_json::Error) -> Self {
-        Self::Codec(value)
+        Self::Codec(value.into())
     }
 }
 

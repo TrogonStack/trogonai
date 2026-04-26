@@ -19,7 +19,7 @@ fn base_job(id: &str) -> Job {
         schedule: Schedule::every(30).unwrap(),
         delivery: Delivery::nats_event("agent.run").unwrap(),
         message: JobMessage {
-            content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
+            content: MessageContent::from_static(r#"{"kind":"heartbeat"}"#),
             headers: JobHeaders::default(),
         },
     }
@@ -110,7 +110,7 @@ async fn client_rejects_invalid_route() {
         "id": "bad",
         "schedule": { "type": "every", "every_sec": 30 },
         "delivery": { "type": "nats_event", "route": "agent.>" },
-        "content": "eyJraW5kIjoiaGVhcnRiZWF0In0="
+        "content": "{\"kind\":\"heartbeat\"}"
     }))
     .unwrap_err();
 
@@ -127,7 +127,7 @@ async fn client_rejects_invalid_source_subject() {
             "route": "agent.run",
             "source": { "type": "latest_from_subject", "subject": "sensors.>" }
         },
-        "content": "eyJraW5kIjoiaGVhcnRiZWF0In0="
+        "content": "{\"kind\":\"heartbeat\"}"
     }))
     .unwrap_err();
 

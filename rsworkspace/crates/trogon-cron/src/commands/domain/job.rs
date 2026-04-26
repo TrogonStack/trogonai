@@ -736,7 +736,7 @@ mod tests {
             "schedule": { "type": "every", "every_sec": 30 },
             "delivery": { "type": "nats_event", "route": "agent.run" },
             "message": {
-                "content": "eyJraW5kIjoiaGVhcnRiZWF0In0="
+                "content": "{\"kind\":\"heartbeat\"}"
             }
         }"#;
 
@@ -757,7 +757,7 @@ mod tests {
                 source: Some(source("sensors.latest")),
             },
             message: JobMessage {
-                content: MessageContent::from_static(br#"{"workflow":"compact"}"#),
+                content: MessageContent::from_static(r#"{"workflow":"compact"}"#),
                 headers: JobHeaders::new([("owner", "ops")]).unwrap(),
             },
         };
@@ -780,7 +780,7 @@ mod tests {
                 source: None,
             },
             message: JobMessage {
-                content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
+                content: MessageContent::from_static(r#"{"kind":"heartbeat"}"#),
                 headers: JobHeaders::default(),
             },
         };
@@ -805,7 +805,7 @@ mod tests {
                     source: None,
                 },
                 message: JobMessage {
-                    content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
+                    content: MessageContent::from_static(r#"{"kind":"heartbeat"}"#),
                     headers: JobHeaders::default(),
                 },
             },
@@ -830,7 +830,7 @@ mod tests {
                 }),
             },
             message: MessageEnvelope {
-                content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
+                content: MessageContent::from_static(r#"{"kind":"heartbeat"}"#),
                 headers: MessageHeaders::new([("x-kind", "heartbeat")]).unwrap(),
             },
         };
@@ -848,7 +848,7 @@ mod tests {
             "schedule": { "type": "every", "every_sec": 30 },
             "delivery": { "type": "nats_event", "route": "agent.>" },
             "message": {
-                "content": "eyJraW5kIjoiaGVhcnRiZWF0In0="
+                "content": "{\"kind\":\"heartbeat\"}"
             }
         }))
         .unwrap_err();
@@ -870,7 +870,7 @@ mod tests {
                 }
             },
             "message": {
-                "content": "eyJraW5kIjoiaGVhcnRiZWF0In0="
+                "content": "{\"kind\":\"heartbeat\"}"
             }
         }))
         .unwrap_err();
@@ -889,7 +889,7 @@ mod tests {
                 "ttl_sec": 0
             },
             "message": {
-                "content": "eyJraW5kIjoiaGVhcnRiZWF0In0="
+                "content": "{\"kind\":\"heartbeat\"}"
             }
         }))
         .unwrap_err();
@@ -904,7 +904,7 @@ mod tests {
             "schedule": { "type": "every", "every_sec": 0 },
             "delivery": { "type": "nats_event", "route": "agent.run" },
             "message": {
-                "content": "eyJraW5kIjoiaGVhcnRiZWF0In0="
+                "content": "{\"kind\":\"heartbeat\"}"
             }
         }))
         .unwrap_err();
@@ -919,7 +919,7 @@ mod tests {
             "schedule": { "type": "cron", "expr": "not-a-cron" },
             "delivery": { "type": "nats_event", "route": "agent.run" },
             "message": {
-                "content": "eyJraW5kIjoiaGVhcnRiZWF0In0="
+                "content": "{\"kind\":\"heartbeat\"}"
             }
         }))
         .unwrap_err();
@@ -938,7 +938,7 @@ mod tests {
             },
             "delivery": { "type": "nats_event", "route": "agent.run" },
             "message": {
-                "content": "eyJraW5kIjoiaGVhcnRiZWF0In0="
+                "content": "{\"kind\":\"heartbeat\"}"
             }
         }))
         .unwrap_err();
@@ -954,7 +954,7 @@ mod tests {
             "delivery": { "type": "nats_event", "route": "agent.run" },
             "message": {
                 "headers": [["Nats-Schedule-Target", "cron.fire.evil.target"]],
-                "content": "eyJraW5kIjoiaGVhcnRiZWF0In0="
+                "content": "{\"kind\":\"heartbeat\"}"
             }
         }))
         .unwrap_err();
@@ -970,7 +970,7 @@ mod tests {
             "delivery": { "type": "nats_event", "route": "agent.run" },
             "message": {
                 "headers": [["x-kind", "bad\nvalue"]],
-                "content": "eyJraW5kIjoiaGVhcnRiZWF0In0="
+                "content": "{\"kind\":\"heartbeat\"}"
             }
         }))
         .unwrap_err();
@@ -989,7 +989,7 @@ mod tests {
                 source: None,
             },
             message: MessageEnvelope {
-                content: MessageContent::from_static(br#"{"kind":"heartbeat"}"#),
+                content: MessageContent::from_static(r#"{"kind":"heartbeat"}"#),
                 headers: MessageHeaders::default(),
             },
         }
