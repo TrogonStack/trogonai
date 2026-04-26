@@ -153,7 +153,7 @@ fn build_publish_message(
 ) -> PublishMessage {
     let mut publish = PublishMessage::build()
         .payload(payload.into())
-        .message_id(&event.event_id)
+        .message_id(event.event_id.to_string())
         .expected_last_subject_sequence(expected_last_subject_sequence + index as u64)
         .header(TROGON_EVENT_TYPE, event.event_type.as_str())
         .header(NATS_BATCH_ID, batch_id)
@@ -228,14 +228,17 @@ fn record_message(message: async_nats::jetstream::message::StreamMessage) -> Res
 
 #[cfg(test)]
 mod tests {
-    use crate::EventData;
+    use async_nats::header::NATS_MESSAGE_ID;
+    use uuid::Uuid;
+
+    use crate::{EventData, EventId};
 
     use super::{TROGON_EVENT_TYPE, build_publish_message};
 
     #[test]
     fn build_publish_message_sets_trogon_event_type_header() {
         let event = EventData {
-            event_id: "event-1".to_string(),
+            event_id: EventId::from(Uuid::from_u128(1)),
             event_type: "trogon.cron.jobs.v1.JobAdded".to_string(),
             stream_id: "backup".to_string(),
             data: "{}".to_string(),
@@ -249,6 +252,10 @@ mod tests {
         assert_eq!(
             headers.get(TROGON_EVENT_TYPE).map(|value| value.as_str()),
             Some("trogon.cron.jobs.v1.JobAdded")
+        );
+        assert_eq!(
+            headers.get(NATS_MESSAGE_ID).map(|value| value.as_str()),
+            Some("00000000-0000-0000-0000-000000000001")
         );
     }
 

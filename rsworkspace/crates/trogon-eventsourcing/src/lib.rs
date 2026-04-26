@@ -1,8 +1,11 @@
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
+use std::{fmt, str::FromStr};
+
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de::DeserializeOwned};
 use trogon_std::{NowV7, UuidV7Generator};
+use uuid::Uuid;
 
 mod decision;
 mod execution;
@@ -60,9 +63,80 @@ pub trait EventType {
     fn event_type(&self) -> &'static str;
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct EventId(Uuid);
+
+impl EventId {
+    pub fn new(value: Uuid) -> Self {
+        Self(value)
+    }
+
+    pub fn now_v7<N>(now_v7: &N) -> Self
+    where
+        N: NowV7 + ?Sized,
+    {
+        Self(now_v7.now_v7())
+    }
+
+    pub fn as_uuid(self) -> Uuid {
+        self.0
+    }
+}
+
+impl fmt::Debug for EventId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("EventId").field(&self.0).finish()
+    }
+}
+
+impl fmt::Display for EventId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl From<Uuid> for EventId {
+    fn from(value: Uuid) -> Self {
+        Self::new(value)
+    }
+}
+
+impl From<EventId> for Uuid {
+    fn from(value: EventId) -> Self {
+        value.0
+    }
+}
+
+impl FromStr for EventId {
+    type Err = uuid::Error;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Uuid::parse_str(value).map(Self::new)
+    }
+}
+
+impl Serialize for EventId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> Deserialize<'de> for EventId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Self::from_str(value.as_str()).map_err(serde::de::Error::custom)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct EventData {
-    pub event_id: String,
+    pub event_id: EventId,
     pub event_type: String,
     pub stream_id: String,
     pub data: String,
@@ -72,7 +146,7 @@ pub struct EventData {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RecordedEvent {
-    pub event_id: String,
+    pub event_id: EventId,
     pub event_type: String,
     pub event_stream_id: String,
     pub data: String,
@@ -102,6 +176,36 @@ impl EventData {
         Self::new_with_codec_and_generator(stream_id, codec, &UuidV7Generator, event)
     }
 
+    pub fn new_with_event_id<E>(
+        stream_id: impl AsRef<str>,
+        event_id: impl Into<EventId>,
+        event: E,
+    ) -> serde_json::Result<Self>
+    where
+        E: EventType + Serialize + DeserializeOwned,
+    {
+        Self::new_with_codec_and_event_id(stream_id, &JsonEventCodec, event_id, event)
+    }
+
+    pub fn new_with_codec_and_event_id<E, C>(
+        stream_id: impl AsRef<str>,
+        codec: &C,
+        event_id: impl Into<EventId>,
+        event: E,
+    ) -> Result<Self, C::Error>
+    where
+        E: EventType,
+        C: EventCodec<E>,
+    {
+        Ok(Self {
+            event_id: event_id.into(),
+            event_type: event.event_type().to_string(),
+            stream_id: stream_id.as_ref().to_string(),
+            data: codec.encode(&event)?,
+            metadata: None,
+        })
+    }
+
     pub fn new_with_codec_and_generator<E, C, N>(
         stream_id: impl AsRef<str>,
         codec: &C,
@@ -113,13 +217,7 @@ impl EventData {
         C: EventCodec<E>,
         N: NowV7,
     {
-        Ok(Self {
-            event_id: now_v7.now_v7().to_string(),
-            event_type: event.event_type().to_string(),
-            stream_id: stream_id.as_ref().to_string(),
-            data: codec.encode(&event)?,
-            metadata: None,
-        })
+        Self::new_with_codec_and_event_id(stream_id, codec, EventId::now_v7(now_v7), event)
     }
 
     pub fn with_metadata<E, M>(stream_id: impl AsRef<str>, event: E, metadata: Option<M>) -> serde_json::Result<Self>
@@ -162,6 +260,48 @@ impl EventData {
         )
     }
 
+    pub fn with_metadata_and_event_id<E, M>(
+        stream_id: impl AsRef<str>,
+        event_id: impl Into<EventId>,
+        event: E,
+        metadata: Option<M>,
+    ) -> serde_json::Result<Self>
+    where
+        E: EventType + Serialize + DeserializeOwned,
+        M: Serialize + DeserializeOwned,
+    {
+        Self::with_codecs_and_event_id(stream_id, &JsonEventCodec, &JsonEventCodec, event_id, event, metadata).map_err(
+            |error| match error {
+                CodecError::Data(source) | CodecError::Metadata(source) => source,
+            },
+        )
+    }
+
+    pub fn with_codecs_and_event_id<E, M, EC, MC>(
+        stream_id: impl AsRef<str>,
+        event_codec: &EC,
+        metadata_codec: &MC,
+        event_id: impl Into<EventId>,
+        event: E,
+        metadata: Option<M>,
+    ) -> Result<Self, CodecError<EC::Error, MC::Error>>
+    where
+        E: EventType,
+        EC: EventCodec<E>,
+        MC: EventCodec<M>,
+    {
+        Ok(Self {
+            event_id: event_id.into(),
+            event_type: event.event_type().to_string(),
+            stream_id: stream_id.as_ref().to_string(),
+            data: event_codec.encode(&event).map_err(CodecError::Data)?,
+            metadata: metadata
+                .map(|value| metadata_codec.encode(&value))
+                .transpose()
+                .map_err(CodecError::Metadata)?,
+        })
+    }
+
     pub fn with_codecs_and_generator<E, M, EC, MC, N>(
         stream_id: impl AsRef<str>,
         event_codec: &EC,
@@ -176,16 +316,14 @@ impl EventData {
         MC: EventCodec<M>,
         N: NowV7,
     {
-        Ok(Self {
-            event_id: now_v7.now_v7().to_string(),
-            event_type: event.event_type().to_string(),
-            stream_id: stream_id.as_ref().to_string(),
-            data: event_codec.encode(&event).map_err(CodecError::Data)?,
-            metadata: metadata
-                .map(|value| metadata_codec.encode(&value))
-                .transpose()
-                .map_err(CodecError::Metadata)?,
-        })
+        Self::with_codecs_and_event_id(
+            stream_id,
+            event_codec,
+            metadata_codec,
+            EventId::now_v7(now_v7),
+            event,
+            metadata,
+        )
     }
 
     pub fn record(
@@ -326,9 +464,41 @@ mod tests {
         .unwrap();
 
         assert_eq!(event.stream_id(), "alpha");
+        assert_eq!(event.event_id.as_uuid().get_version_num(), 7);
         assert_eq!(event.event_type, "TestEvent");
         assert_eq!(event.subject_with_prefix("events.test."), "events.test.alpha");
         assert_eq!(event.decode_data::<TestEvent>().unwrap().value, "beta");
+    }
+
+    #[test]
+    fn event_data_accepts_caller_supplied_uuid_event_id() {
+        let event_id = EventId::from(Uuid::from_u128(0x018f_8f4d_94a8_7000_8000_0000_0000_0001));
+        let event = EventData::new_with_event_id(
+            "alpha",
+            event_id,
+            TestEvent {
+                id: "alpha".to_string(),
+                value: "beta".to_string(),
+            },
+        )
+        .unwrap();
+
+        let payload = serde_json::to_value(&event).unwrap();
+
+        assert_eq!(event.event_id, event_id);
+        assert_eq!(payload["event_id"], event_id.to_string());
+    }
+
+    #[test]
+    fn event_data_rejects_non_uuid_event_ids() {
+        let payload = br#"{
+            "event_id": "not-a-uuid",
+            "event_type": "TestEvent",
+            "stream_id": "alpha",
+            "data": "{\"id\":\"alpha\",\"value\":\"beta\"}"
+        }"#;
+
+        assert!(EventData::decode(payload).is_err());
     }
 
     #[test]
