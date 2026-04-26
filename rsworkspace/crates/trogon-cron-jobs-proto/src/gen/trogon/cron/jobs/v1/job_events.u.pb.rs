@@ -7646,22 +7646,23 @@ impl<'msg> JobMessageView<'msg> {
     ::protobuf::IntoProxied::into_proxied(*self, ::protobuf::__internal::Private)
   }
 
-  // content: optional bytes
+  // content: optional string
   pub fn has_content(self) -> bool {
     unsafe {
       self.inner.ptr().has_field_at_index(0)
     }
   }
-  pub fn content_opt(self) -> ::protobuf::Optional<&'msg [u8]> {
+  pub fn content_opt(self) -> ::protobuf::Optional<&'msg ::protobuf::ProtoStr> {
         ::protobuf::Optional::new(self.content(), self.has_content())
   }
-  pub fn content(self) -> ::protobuf::View<'msg, ::protobuf::ProtoBytes> {
+  pub fn content(self) -> ::protobuf::View<'msg, ::protobuf::ProtoString> {
     let str_view = unsafe {
       self.inner.ptr().get_string_at_index(
         0, (b"").into()
       )
     };
-    unsafe { str_view.as_ref() }
+    // SAFETY: The runtime doesn't require ProtoStr to be UTF-8.
+    unsafe { ::protobuf::ProtoStr::from_utf8_unchecked(str_view.as_ref()) }
   }
 
   // headers: repeated message trogon.cron.jobs.v1.Header
@@ -7769,7 +7770,7 @@ impl<'msg> JobMessageMut<'msg> {
     ::protobuf::AsView::as_view(self).to_owned()
   }
 
-  // content: optional bytes
+  // content: optional string
   pub fn has_content(&self) -> bool {
     unsafe {
       self.inner.ptr().has_field_at_index(0)
@@ -7782,20 +7783,21 @@ impl<'msg> JobMessageMut<'msg> {
       );
     }
   }
-  pub fn content_opt(&self) -> ::protobuf::Optional<&'_ [u8]> {
+  pub fn content_opt(&self) -> ::protobuf::Optional<&'_ ::protobuf::ProtoStr> {
         ::protobuf::Optional::new(self.content(), self.has_content())
   }
-  pub fn content(&self) -> ::protobuf::View<'_, ::protobuf::ProtoBytes> {
+  pub fn content(&self) -> ::protobuf::View<'_, ::protobuf::ProtoString> {
     let str_view = unsafe {
       self.inner.ptr().get_string_at_index(
         0, (b"").into()
       )
     };
-    unsafe { str_view.as_ref() }
+    // SAFETY: The runtime doesn't require ProtoStr to be UTF-8.
+    unsafe { ::protobuf::ProtoStr::from_utf8_unchecked(str_view.as_ref()) }
   }
-  pub fn set_content(&mut self, val: impl ::protobuf::IntoProxied<::protobuf::ProtoBytes>) {
+  pub fn set_content(&mut self, val: impl ::protobuf::IntoProxied<::protobuf::ProtoString>) {
     unsafe {
-      ::protobuf::__internal::runtime::message_set_bytes_field(
+      ::protobuf::__internal::runtime::message_set_string_field(
         ::protobuf::AsMut::as_mut(self).inner,
         0,
         val);
@@ -7902,7 +7904,7 @@ impl JobMessage {
     ::protobuf::__internal::runtime::MessageMutInner::mut_of_owned(&mut self.inner).into()
   }
 
-  // content: optional bytes
+  // content: optional string
   pub fn has_content(&self) -> bool {
     unsafe {
       self.inner.ptr().has_field_at_index(0)
@@ -7915,20 +7917,21 @@ impl JobMessage {
       );
     }
   }
-  pub fn content_opt(&self) -> ::protobuf::Optional<&'_ [u8]> {
+  pub fn content_opt(&self) -> ::protobuf::Optional<&'_ ::protobuf::ProtoStr> {
         ::protobuf::Optional::new(self.content(), self.has_content())
   }
-  pub fn content(&self) -> ::protobuf::View<'_, ::protobuf::ProtoBytes> {
+  pub fn content(&self) -> ::protobuf::View<'_, ::protobuf::ProtoString> {
     let str_view = unsafe {
       self.inner.ptr().get_string_at_index(
         0, (b"").into()
       )
     };
-    unsafe { str_view.as_ref() }
+    // SAFETY: The runtime doesn't require ProtoStr to be UTF-8.
+    unsafe { ::protobuf::ProtoStr::from_utf8_unchecked(str_view.as_ref()) }
   }
-  pub fn set_content(&mut self, val: impl ::protobuf::IntoProxied<::protobuf::ProtoBytes>) {
+  pub fn set_content(&mut self, val: impl ::protobuf::IntoProxied<::protobuf::ProtoString>) {
     unsafe {
-      ::protobuf::__internal::runtime::message_set_bytes_field(
+      ::protobuf::__internal::runtime::message_set_string_field(
         ::protobuf::AsMut::as_mut(self).inner,
         0,
         val);
@@ -8006,7 +8009,7 @@ unsafe impl ::protobuf::__internal::runtime::AssociatedMiniTable for JobMessage 
     unsafe {
       ONCE_LOCK.get_or_init(|| {
         super::trogon__cron__jobs__v1__JobMessage_msg_init.0 =
-            ::protobuf::__internal::runtime::build_mini_table("$0G");
+            ::protobuf::__internal::runtime::build_mini_table("$1TG");
         ::protobuf::__internal::runtime::link_mini_table(
             super::trogon__cron__jobs__v1__JobMessage_msg_init.0, &[<super::Header as ::protobuf::__internal::runtime::AssociatedMiniTable>::mini_table(),
             ], &[]);
