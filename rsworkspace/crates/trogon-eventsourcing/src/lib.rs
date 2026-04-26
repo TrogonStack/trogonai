@@ -20,7 +20,7 @@ pub use nats::snapshot_store::{
     SnapshotStoreError, checkpoint_key, list_snapshots, load_snapshot, load_snapshot_map, maybe_advance_checkpoint,
     persist_snapshot_change, read_checkpoint, snapshot_key, write_checkpoint,
 };
-pub use nats::streams::{StreamStoreError, append_stream, read_stream_from, read_stream_range};
+pub use nats::streams::{StreamStoreError, TROGON_EVENT_TYPE, append_stream, read_stream_from, read_stream_range};
 pub use snapshot::{Snapshot, SnapshotChange, SnapshotRead, SnapshotSchema, SnapshotStoreConfig, SnapshotWrite};
 pub use stream::{AppendOutcome, StreamAppend, StreamRead, StreamReadResult, StreamState};
 pub use testing::{Decider, TestCase, ThenError, ThenEvents, ThenExpectation, Timeline, decider};
