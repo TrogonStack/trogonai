@@ -3204,6 +3204,7 @@ dependencies = [
  "trogon-nats",
  "trogon-std",
  "trybuild",
+ "uuid",
 ]
 
 [[package]]
