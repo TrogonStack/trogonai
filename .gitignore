@@ -22,6 +22,7 @@ dist
 .env
 .env.*
 !.env.example
+mise.local.toml
 
 # Docker
 docker-compose.override.yml
