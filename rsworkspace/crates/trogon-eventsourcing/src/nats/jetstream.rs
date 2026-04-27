@@ -195,17 +195,21 @@ impl<Resolver, Projector> JetStreamStore<Resolver, Projector> {
         Resolver: StreamSubjectResolver<StreamId>,
         Projector: AppendProjector<StreamId, Error = Resolver::Error>,
     {
-        let current_version = self
+        let subject_state = self
             .subject_resolver
             .resolve_subject_state(self.events_stream(), stream_id)
             .await
-            .map_err(JetStreamStoreError::ResolveSubject)?
-            .current_version;
+            .map_err(JetStreamStoreError::ResolveSubject)?;
+        let current_version = subject_state.current_version;
         let events = read_stream_from(self.events_stream(), from_sequence)
             .await
             .map_err(JetStreamStoreError::ReadStream)?
             .into_iter()
-            .filter(|event| event.stream_id() == stream_id.as_ref())
+            .filter(|event| event.recorded_stream_id == subject_state.subject)
+            .map(|mut event| {
+                event.event_stream_id = stream_id.as_ref().to_string();
+                event
+            })
             .collect();
 
         Ok(StreamReadResult {
