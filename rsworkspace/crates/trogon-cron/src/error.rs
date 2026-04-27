@@ -1,7 +1,7 @@
 use trogon_eventsourcing::StreamState;
 use trogon_eventsourcing::nats::jetstream::JetStreamStoreError;
 
-use crate::MessageHeadersError;
+use crate::read_model::MessageHeadersError;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -219,8 +219,8 @@ impl From<serde_json::Error> for CronError {
     }
 }
 
-impl From<crate::commands::proto::JobEventCodecError> for CronError {
-    fn from(value: crate::commands::proto::JobEventCodecError) -> Self {
+impl From<crate::proto::JobEventCodecError> for CronError {
+    fn from(value: crate::proto::JobEventCodecError) -> Self {
         Self::event_source("failed to encode or decode job event payload", value)
     }
 }

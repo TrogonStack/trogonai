@@ -16,10 +16,11 @@ use trogon_eventsourcing::{
 use trogon_nats::lease::{ReleaseLease, RenewLease, TryAcquireLease};
 
 use crate::{
-    CronJob, GetJobCommand, JobEventCodec, ListJobsCommand, ResolvedJob,
+    GetJobCommand, JobEventCodec, ListJobsCommand, ResolvedJob,
     config::{JobWriteCondition, JobWriteState},
     error::CronError,
     projections::{CronJobWatchStream, LoadAndWatchCronJobsResult},
+    read_model::CronJob,
     traits::SchedulePublisher,
     v1,
 };
@@ -145,10 +146,16 @@ impl MockCronStore {
         Self::default()
     }
 
-    pub fn seed_job(&self, job: crate::Job) {
-        let id = job.id.to_string();
+    pub fn seed_job(&self, job: CronJob) {
+        let id = job.id.clone();
+        let details = crate::read_model::JobDetails {
+            status: job.status,
+            schedule: job.schedule.clone(),
+            delivery: job.delivery.clone(),
+            message: job.message.clone(),
+        };
         let mut inner = v1::JobAdded::new();
-        inner.set_job(v1::JobDetails::from(&job));
+        inner.set_job(v1::JobDetails::from(&details));
         let mut event = v1::JobEvent::new();
         event.set_job_added(inner);
 
@@ -157,16 +164,13 @@ impl MockCronStore {
             id.clone(),
             vec![EventData::new_with_codec(&id, &JobEventCodec, event).unwrap()],
         );
-        self.jobs.lock().unwrap().insert(
-            id.clone(),
-            Snapshot::new(1, CronJob::from((id, crate::JobDetails::from(&job)))),
-        );
+        self.jobs.lock().unwrap().insert(id.clone(), Snapshot::new(1, job));
     }
 
     pub(crate) fn read_command_snapshot<Payload>(
         &self,
         config: trogon_eventsourcing::SnapshotStoreConfig,
-        stream_id: &crate::JobId,
+        stream_id: &(impl AsRef<str> + ?Sized),
     ) -> Result<Option<Snapshot<Payload>>, CronError>
     where
         Payload: DeserializeOwned,
@@ -175,7 +179,7 @@ impl MockCronStore {
             .lock()
             .unwrap()
             .get(config.key_prefix())
-            .and_then(|snapshots| snapshots.get(stream_id.as_str()).cloned())
+            .and_then(|snapshots| snapshots.get(stream_id.as_ref()).cloned())
             .map(|snapshot| serde_json::from_str(&snapshot))
             .transpose()
             .map_err(CronError::from)
@@ -215,22 +219,12 @@ impl MockCronStore {
     }
 }
 
-impl StreamRead<crate::JobId> for MockCronStore {
+impl StreamRead<str> for MockCronStore {
     type Error = CronError;
 
-    async fn read_stream_from(
-        &self,
-        stream_id: &crate::JobId,
-        from_sequence: u64,
-    ) -> Result<StreamReadResult, Self::Error> {
-        let current_version = self.stream_versions.lock().unwrap().get(stream_id.as_str()).copied();
-        let stream_events = self
-            .events
-            .lock()
-            .unwrap()
-            .get(stream_id.as_str())
-            .cloned()
-            .unwrap_or_default();
+    async fn read_stream_from(&self, stream_id: &str, from_sequence: u64) -> Result<StreamReadResult, Self::Error> {
+        let current_version = self.stream_versions.lock().unwrap().get(stream_id).copied();
+        let stream_events = self.events.lock().unwrap().get(stream_id).cloned().unwrap_or_default();
         if from_sequence == 0 {
             return Ok(StreamReadResult {
                 current_version,
@@ -263,16 +257,16 @@ impl StreamRead<crate::JobId> for MockCronStore {
     }
 }
 
-impl StreamAppend<crate::JobId> for MockCronStore {
+impl StreamAppend<str> for MockCronStore {
     type Error = CronError;
 
     async fn append_events(
         &self,
-        stream_id: &crate::JobId,
+        stream_id: &str,
         expected_state: StreamState,
         events: NonEmpty<EventData>,
     ) -> Result<AppendOutcome, Self::Error> {
-        let stream_id = stream_id.clone();
+        let stream_id = stream_id.to_string();
         let jobs = self.jobs.clone();
         let stream_versions = self.stream_versions.clone();
         let event_log = self.events.clone();
@@ -380,7 +374,7 @@ impl StreamAppend<crate::JobId> for MockCronStore {
     }
 }
 
-impl<Payload> SnapshotRead<Payload, crate::JobId> for MockCronStore
+impl<Payload> SnapshotRead<Payload, str> for MockCronStore
 where
     Payload: Serialize + DeserializeOwned + Send,
 {
@@ -389,13 +383,13 @@ where
     async fn load_snapshot(
         &self,
         config: SnapshotStoreConfig,
-        stream_id: &crate::JobId,
+        stream_id: &str,
     ) -> Result<Option<Snapshot<Payload>>, Self::Error> {
         self.read_command_snapshot(config, stream_id)
     }
 }
 
-impl<Payload> SnapshotWrite<Payload, crate::JobId> for MockCronStore
+impl<Payload> SnapshotWrite<Payload, str> for MockCronStore
 where
     Payload: Serialize + DeserializeOwned + Send,
 {
@@ -404,7 +398,7 @@ where
     async fn save_snapshot(
         &self,
         config: SnapshotStoreConfig,
-        stream_id: &crate::JobId,
+        stream_id: &str,
         snapshot: Snapshot<Payload>,
     ) -> Result<(), Self::Error> {
         let snapshot = serde_json::to_string(&snapshot)?;
@@ -423,32 +417,50 @@ mod tests {
     use trogon_eventsourcing::{CommandExecution, CommandFailure};
 
     use super::*;
+    use crate::commands::domain as command_domain;
     use crate::{
-        AddJobCommand, CronJob, Delivery, GetJobCommand, Job, JobDetails, JobEventStatus, JobHeaders, JobId,
-        JobMessage, JobStatus, JobWriteCondition, ListJobsCommand, MessageContent, PauseJobCommand, RemoveJobCommand,
-        ResumeJobCommand, Schedule,
+        AddJobCommand, CronJob, GetJobCommand, JobEventDelivery, JobEventSchedule, JobEventStatus, JobId,
+        JobWriteCondition, ListJobsCommand, MessageContent, MessageEnvelope, MessageHeaders, PauseJobCommand,
+        RemoveJobCommand, ResumeJobCommand,
     };
     use futures::StreamExt;
 
-    fn job_id(id: &str) -> crate::JobId {
-        crate::JobId::parse(id).unwrap()
+    fn command_job_id(id: &str) -> command_domain::JobId {
+        command_domain::JobId::parse(id).unwrap()
     }
 
-    fn base_job(id: &str) -> Job {
-        Job {
-            id: job_id(id),
-            status: JobStatus::Enabled,
-            schedule: Schedule::every(30).unwrap(),
-            delivery: Delivery::nats_event("agent.run").unwrap(),
-            message: JobMessage {
+    fn base_job(id: &str) -> CronJob {
+        CronJob {
+            id: id.to_string(),
+            status: JobEventStatus::Enabled,
+            schedule: JobEventSchedule::Every { every_sec: 30 },
+            delivery: JobEventDelivery::NatsEvent {
+                route: "agent.run".to_string(),
+                ttl_sec: None,
+                source: None,
+            },
+            message: MessageEnvelope {
                 content: MessageContent::from_static(r#"{"kind":"heartbeat"}"#),
-                headers: JobHeaders::default(),
+                headers: MessageHeaders::default(),
+            },
+        }
+    }
+
+    fn command_base_job(id: &str) -> command_domain::Job {
+        command_domain::Job {
+            id: command_job_id(id),
+            status: command_domain::JobStatus::Enabled,
+            schedule: command_domain::Schedule::every(30).unwrap(),
+            delivery: command_domain::Delivery::nats_event("agent.run").unwrap(),
+            message: command_domain::JobMessage {
+                content: command_domain::MessageContent::from_static(r#"{"kind":"heartbeat"}"#),
+                headers: command_domain::JobHeaders::default(),
             },
         }
     }
 
     fn expected_job(id: &str) -> CronJob {
-        CronJob::from((id.to_string(), JobDetails::from(base_job(id))))
+        base_job(id)
     }
 
     #[tokio::test]
@@ -502,7 +514,7 @@ mod tests {
             .unwrap();
         assert_eq!(seeded, expected_job("seeded"));
 
-        CommandExecution::new(&store, &AddJobCommand::new(base_job("alpha")))
+        CommandExecution::new(&store, &AddJobCommand::new(command_base_job("alpha")))
             .with_snapshot(&store)
             .execute()
             .await
@@ -514,7 +526,7 @@ mod tests {
             .unwrap();
         assert_eq!(alpha, expected_job("alpha"));
 
-        CommandExecution::new(&store, &PauseJobCommand::new(job_id("alpha")))
+        CommandExecution::new(&store, &PauseJobCommand::new(command_job_id("alpha")))
             .with_snapshot(&store)
             .execute()
             .await
@@ -540,7 +552,7 @@ mod tests {
                 .is_err()
         );
 
-        CommandExecution::new(&store, &RemoveJobCommand::new(job_id("alpha")))
+        CommandExecution::new(&store, &RemoveJobCommand::new(command_job_id("alpha")))
             .with_snapshot(&store)
             .execute()
             .await
@@ -553,7 +565,7 @@ mod tests {
                 .is_none()
         );
 
-        let deleted_error = CommandExecution::new(&store, &AddJobCommand::new(base_job("alpha")))
+        let deleted_error = CommandExecution::new(&store, &AddJobCommand::new(command_base_job("alpha")))
             .with_snapshot(&store)
             .execute()
             .await
@@ -567,7 +579,7 @@ mod tests {
     #[tokio::test]
     async fn mock_cron_store_rejects_invalid_specs_and_state_errors() {
         let store = MockCronStore::new();
-        let invalid_error = serde_json::from_value::<Job>(serde_json::json!({
+        let invalid_error = serde_json::from_value::<command_domain::Job>(serde_json::json!({
             "id": "bad",
             "schedule": { "type": "every", "every_sec": 30 },
             "delivery": {
@@ -580,12 +592,12 @@ mod tests {
         .unwrap_err();
         assert!(invalid_error.to_string().contains("sampling source"));
 
-        CommandExecution::new(&store, &AddJobCommand::new(base_job("alpha")))
+        CommandExecution::new(&store, &AddJobCommand::new(command_base_job("alpha")))
             .with_snapshot(&store)
             .execute()
             .await
             .unwrap();
-        let same_state_error = CommandExecution::new(&store, &ResumeJobCommand::new(job_id("alpha")))
+        let same_state_error = CommandExecution::new(&store, &ResumeJobCommand::new(command_job_id("alpha")))
             .with_snapshot(&store)
             .execute()
             .await
@@ -595,7 +607,7 @@ mod tests {
             CommandFailure::Decide(crate::ResumeJobDecisionError::AlreadyActive { .. })
         ));
 
-        let missing_error = CommandExecution::new(&store, &PauseJobCommand::new(job_id("missing")))
+        let missing_error = CommandExecution::new(&store, &PauseJobCommand::new(command_job_id("missing")))
             .with_snapshot(&store)
             .execute()
             .await
