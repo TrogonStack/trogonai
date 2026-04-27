@@ -2,20 +2,14 @@ use trogon_cron_jobs_proto::{state_v1, v1};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum JobStateProtoError {
-    MissingEvent,
-    MissingJobDetails,
     UnsupportedEvent,
-    UnknownJobStatus { value: i32 },
     UnknownStateValue { value: i32 },
 }
 
 impl std::fmt::Display for JobStateProtoError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::MissingEvent => f.write_str("protobuf job event is missing its oneof case"),
-            Self::MissingJobDetails => f.write_str("protobuf job_added is missing job details"),
             Self::UnsupportedEvent => f.write_str("protobuf job event is not supported by command state"),
-            Self::UnknownJobStatus { value } => write!(f, "protobuf job status '{value}' is unknown"),
             Self::UnknownStateValue { value } => write!(f, "protobuf state '{value}' is unknown"),
         }
     }
@@ -45,17 +39,12 @@ pub(crate) fn evolve(state: state_v1::State, event: &v1::JobEvent) -> Result<sta
 
     let next_state = match event.event() {
         v1::job_event::EventOneof::JobAdded(inner) => {
-            if !inner.has_job() {
-                return Err(JobStateProtoError::MissingJobDetails);
-            }
             if current_state == state_v1::StateValue::Deleted {
                 state_v1::StateValue::Deleted
+            } else if inner.job().status() == v1::JobStatus::Disabled {
+                state_v1::StateValue::PresentDisabled
             } else {
-                match i32::from(inner.job().status()) {
-                    1 => state_v1::StateValue::PresentEnabled,
-                    2 => state_v1::StateValue::PresentDisabled,
-                    value => return Err(JobStateProtoError::UnknownJobStatus { value }),
-                }
+                state_v1::StateValue::PresentEnabled
             }
         }
         v1::job_event::EventOneof::JobPaused(_) => {
@@ -73,7 +62,7 @@ pub(crate) fn evolve(state: state_v1::State, event: &v1::JobEvent) -> Result<sta
             }
         }
         v1::job_event::EventOneof::JobRemoved(_) => state_v1::StateValue::Deleted,
-        v1::job_event::EventOneof::not_set(_) => return Err(JobStateProtoError::MissingEvent),
+        v1::job_event::EventOneof::not_set(_) => return Err(JobStateProtoError::UnsupportedEvent),
         _ => return Err(JobStateProtoError::UnsupportedEvent),
     };
 
