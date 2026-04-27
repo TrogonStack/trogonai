@@ -10,7 +10,11 @@ use crate::proposal::Proposal;
 #[async_trait::async_trait]
 pub trait Notifier: Send + Sync + 'static {
     /// Called when a new proposal is created (status: Pending).
-    async fn notify_pending(&self, proposal: &Proposal);
+    ///
+    /// `vault_name` is the approval vault name (e.g. `"prod"`). Implementations
+    /// should include it in the notification so the operator knows which NATS
+    /// subjects to use when approving or rejecting.
+    async fn notify_pending(&self, proposal: &Proposal, vault_name: &str);
 
     /// Called after a proposal is approved and the credential is stored.
     async fn notify_approved(&self, proposal: &Proposal, approved_by: &str);
@@ -26,7 +30,7 @@ pub struct NoopNotifier;
 
 #[async_trait::async_trait]
 impl Notifier for NoopNotifier {
-    async fn notify_pending(&self, _proposal: &Proposal) {}
+    async fn notify_pending(&self, _proposal: &Proposal, _vault_name: &str) {}
     async fn notify_approved(&self, _proposal: &Proposal, _approved_by: &str) {}
     async fn notify_rejected(&self, _proposal: &Proposal, _rejected_by: &str, _reason: &str) {}
 }
@@ -73,10 +77,20 @@ impl SlackWebhookNotifier {
 #[cfg(feature = "slack")]
 #[async_trait::async_trait]
 impl Notifier for SlackWebhookNotifier {
-    async fn notify_pending(&self, proposal: &Proposal) {
+    async fn notify_pending(&self, proposal: &Proposal, vault_name: &str) {
         self.post(&format!(
-            ":hourglass: *Approval pending*\nProposal `{}` for `{}` (service: `{}`)\n> {}",
-            proposal.id, proposal.credential_key, proposal.service, proposal.message,
+            ":hourglass: *Approval pending*\n\
+             Proposal `{id}` requests `{key}` for `{svc}`\n\
+             > {msg}\n\n\
+             *To approve*, publish to `vault.proposals.{vault}.approve`:\n\
+             ```{{\"proposal_id\":\"{id}\",\"approved_by\":\"<name>\",\"plaintext\":\"<api-key>\"}}```\n\
+             *To reject*, publish to `vault.proposals.{vault}.reject`:\n\
+             ```{{\"proposal_id\":\"{id}\",\"rejected_by\":\"<name>\",\"reason\":\"<optional>\"}}```",
+            id    = proposal.id,
+            key   = proposal.credential_key,
+            svc   = proposal.service,
+            msg   = proposal.message,
+            vault = vault_name,
         )).await;
     }
 
@@ -102,12 +116,13 @@ pub struct LoggingNotifier;
 
 #[async_trait::async_trait]
 impl Notifier for LoggingNotifier {
-    async fn notify_pending(&self, proposal: &Proposal) {
+    async fn notify_pending(&self, proposal: &Proposal, vault_name: &str) {
         tracing::info!(
             id             = %proposal.id,
             credential_key = %proposal.credential_key,
             service        = %proposal.service,
             message        = %proposal.message,
+            vault          = %vault_name,
             "approval pending"
         );
     }

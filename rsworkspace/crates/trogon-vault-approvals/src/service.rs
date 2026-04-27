@@ -203,7 +203,7 @@ where
             status:         ProposalStatus::Pending,
         };
 
-        this.notifier.notify_pending(&proposal).await;
+        this.notifier.notify_pending(&proposal, &this.vault_name).await;
         this.proposals.insert(req.id, proposal);
         Ok(())
     }

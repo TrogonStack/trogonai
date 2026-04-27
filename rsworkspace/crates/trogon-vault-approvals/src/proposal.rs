@@ -2,6 +2,11 @@
 
 use serde::{Deserialize, Serialize};
 
+// ── ProposalId ────────────────────────────────────────────────────────────────
+
+/// Identifier for an approval proposal (`prop_{random}` by convention).
+pub type ProposalId = String;
+
 // ── Domain types ──────────────────────────────────────────────────────────────
 
 /// A pending or resolved approval proposal.

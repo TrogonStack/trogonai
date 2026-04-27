@@ -26,7 +26,7 @@ pub use notifier::{LoggingNotifier, NoopNotifier, Notifier};
 #[cfg(feature = "slack")]
 pub use notifier::SlackWebhookNotifier;
 pub use proposal::{
-    ApproveRequest, CreateRequest, Proposal, ProposalStatus, RejectRequest, StatusResponse,
+    ApproveRequest, CreateRequest, Proposal, ProposalId, ProposalStatus, RejectRequest, StatusResponse,
 };
 pub use service::ApprovalService;
 pub use stream::{ensure_proposals_stream, ensure_proposals_stream_with_max_age};
