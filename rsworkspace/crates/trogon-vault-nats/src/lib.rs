@@ -10,9 +10,11 @@ pub mod backend;
 pub mod bucket;
 pub mod crypto;
 pub mod error;
+pub mod kv_ops;
 pub mod slot;
 
 pub use audit::{Audit, AuditEvent, AuditPublisher, NoopAudit, ensure_audit_stream, ensure_audit_stream_with_max_age};
+pub use kv_ops::KvOps;
 pub use backend::NatsKvVault;
 pub use bucket::ensure_vault_bucket;
 pub use crypto::CryptoCtx;
