@@ -1,9 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    JobDetails, JobEventDelivery, JobEventProtoError, JobEventSchedule, JobEventStatus, MessageEnvelope,
-    commands::proto::v1,
-};
+use crate::{JobEventProtoError, proto::v1};
+
+use super::{JobDetails, JobEventDelivery, JobEventSchedule, JobEventStatus, MessageEnvelope};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct CronJob {

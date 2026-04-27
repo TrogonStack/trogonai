@@ -1,39 +1,53 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
 use trogon_cron::{
-    AddJobCommand, CronController, CronJob, Delivery, GetJobCommand, Job, JobDetails, JobEventStatus, JobHeaders,
-    JobId, JobMessage, JobStatus, JobWriteCondition, ListJobsCommand, MessageContent, PauseJobCommand,
-    RemoveJobCommand, Schedule, SchedulePublisher,
+    AddJobCommand, CronController, CronJob, GetJobCommand, JobEventDelivery, JobEventSchedule, JobEventStatus, JobId,
+    JobWriteCondition, ListJobsCommand, MessageContent, MessageEnvelope, MessageHeaders, PauseJobCommand,
+    RemoveJobCommand, SchedulePublisher,
+    commands::domain as command_domain,
     mocks::{MockCronStore, MockLeaderLock, MockSchedulePublisher},
 };
 use trogon_eventsourcing::CommandExecution;
 
-fn job_id(id: &str) -> JobId {
-    JobId::parse(id).unwrap()
+fn command_job_id(id: &str) -> command_domain::JobId {
+    command_domain::JobId::parse(id).unwrap()
 }
 
-fn base_job(id: &str) -> Job {
-    Job {
-        id: job_id(id),
-        status: JobStatus::Enabled,
-        schedule: Schedule::every(30).unwrap(),
-        delivery: Delivery::nats_event("agent.run").unwrap(),
-        message: JobMessage {
+fn expected_job(id: &str) -> CronJob {
+    CronJob {
+        id: id.to_string(),
+        status: JobEventStatus::Enabled,
+        schedule: JobEventSchedule::Every { every_sec: 30 },
+        delivery: JobEventDelivery::NatsEvent {
+            route: "agent.run".to_string(),
+            ttl_sec: None,
+            source: None,
+        },
+        message: MessageEnvelope {
             content: MessageContent::from_static(r#"{"kind":"heartbeat"}"#),
-            headers: JobHeaders::default(),
+            headers: MessageHeaders::default(),
         },
     }
 }
 
-fn expected_job(id: &str) -> CronJob {
-    CronJob::from((id.to_string(), JobDetails::from(base_job(id))))
+fn command_base_job(id: &str) -> command_domain::Job {
+    command_domain::Job {
+        id: command_job_id(id),
+        status: command_domain::JobStatus::Enabled,
+        schedule: command_domain::Schedule::every(30).unwrap(),
+        delivery: command_domain::Delivery::nats_event("agent.run").unwrap(),
+        message: command_domain::JobMessage {
+            content: command_domain::MessageContent::from_static(r#"{"kind":"heartbeat"}"#),
+            headers: command_domain::JobHeaders::default(),
+        },
+    }
 }
 
 #[tokio::test]
 async fn client_register_then_get() {
     let store = MockCronStore::new();
 
-    let job = base_job("backup");
+    let job = command_base_job("backup");
     CommandExecution::new(&store, &AddJobCommand::new(job))
         .with_snapshot(&store)
         .execute()
@@ -51,12 +65,12 @@ async fn client_register_then_get() {
 async fn client_pause_job_toggles_job() {
     let store = MockCronStore::new();
 
-    CommandExecution::new(&store, &AddJobCommand::new(base_job("toggle")))
+    CommandExecution::new(&store, &AddJobCommand::new(command_base_job("toggle")))
         .with_snapshot(&store)
         .execute()
         .await
         .unwrap();
-    CommandExecution::new(&store, &PauseJobCommand::new(job_id("toggle")))
+    CommandExecution::new(&store, &PauseJobCommand::new(command_job_id("toggle")))
         .with_snapshot(&store)
         .execute()
         .await
@@ -74,12 +88,12 @@ async fn client_pause_job_toggles_job() {
 async fn client_remove_and_list_jobs_use_store_paths() {
     let store = MockCronStore::new();
 
-    CommandExecution::new(&store, &AddJobCommand::new(base_job("alpha")))
+    CommandExecution::new(&store, &AddJobCommand::new(command_base_job("alpha")))
         .with_snapshot(&store)
         .execute()
         .await
         .unwrap();
-    CommandExecution::new(&store, &AddJobCommand::new(base_job("beta")))
+    CommandExecution::new(&store, &AddJobCommand::new(command_base_job("beta")))
         .with_snapshot(&store)
         .execute()
         .await
@@ -88,7 +102,7 @@ async fn client_remove_and_list_jobs_use_store_paths() {
     let listed = store.list_jobs(ListJobsCommand).await.unwrap();
     assert_eq!(listed.len(), 2);
 
-    CommandExecution::new(&store, &RemoveJobCommand::new(job_id("beta")))
+    CommandExecution::new(&store, &RemoveJobCommand::new(command_job_id("beta")))
         .with_snapshot(&store)
         .execute()
         .await
@@ -106,7 +120,7 @@ async fn client_remove_and_list_jobs_use_store_paths() {
 
 #[tokio::test]
 async fn client_rejects_invalid_route() {
-    let error = serde_json::from_value::<Job>(serde_json::json!({
+    let error = serde_json::from_value::<command_domain::Job>(serde_json::json!({
         "id": "bad",
         "schedule": { "type": "every", "every_sec": 30 },
         "delivery": { "type": "nats_event", "route": "agent.>" },
@@ -119,7 +133,7 @@ async fn client_rejects_invalid_route() {
 
 #[tokio::test]
 async fn client_rejects_invalid_source_subject() {
-    let error = serde_json::from_value::<Job>(serde_json::json!({
+    let error = serde_json::from_value::<command_domain::Job>(serde_json::json!({
         "id": "bad-source",
         "schedule": { "type": "every", "every_sec": 30 },
         "delivery": {
