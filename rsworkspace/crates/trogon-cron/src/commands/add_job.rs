@@ -39,7 +39,7 @@ impl Decide for AddJobCommand {
         super::state::initial_state()
     }
 
-    fn evolve(state: Self::State, event: Self::Event) -> Result<Self::State, Self::EvolveError> {
+    fn evolve(state: Self::State, event: &Self::Event) -> Result<Self::State, Self::EvolveError> {
         super::state::evolve(state, event)
     }
 
