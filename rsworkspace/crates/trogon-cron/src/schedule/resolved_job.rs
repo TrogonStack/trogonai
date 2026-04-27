@@ -5,9 +5,9 @@ use bytes::Bytes;
 use trogon_nats::{DottedNatsToken, NatsToken};
 
 use crate::{
-    CronJob, JobEventDelivery, JobEventSchedule, JobEventStatus,
     error::{CronError, JobSpecError},
     kv::{FIRE_SUBJECT_PREFIX, SCHEDULE_SUBJECT_PREFIX},
+    read_model::{CronJob, JobEventDelivery, JobEventSamplingSource, JobEventSchedule, JobEventStatus},
 };
 
 const NATS_SCHEDULE: &str = "Nats-Schedule";
@@ -103,7 +103,7 @@ fn resolved_job_parts(job: &CronJob) -> Result<ResolvedJobParts, CronError> {
             })?,
             *ttl_sec,
             source.as_ref().map(|source| match source {
-                crate::JobEventSamplingSource::LatestFromSubject { subject } => subject.clone(),
+                JobEventSamplingSource::LatestFromSubject { subject } => subject.clone(),
             }),
         ),
     };
@@ -238,7 +238,7 @@ mod tests {
     use chrono::{TimeZone, Utc};
 
     use super::*;
-    use crate::{
+    use crate::read_model::{
         JobEventDelivery, JobEventSamplingSource, JobEventSchedule, JobEventStatus, MessageContent, MessageEnvelope,
         MessageHeaders,
     };

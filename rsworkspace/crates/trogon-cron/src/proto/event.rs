@@ -1,5 +1,3 @@
-use crate::commands::domain::MessageHeadersError;
-
 pub use trogon_cron_jobs_proto::{
     JOB_ADDED_EVENT_TYPE, JOB_PAUSED_EVENT_TYPE, JOB_REMOVED_EVENT_TYPE, JOB_RESUMED_EVENT_TYPE, JobEventCodec,
     JobEventCodecError,
@@ -15,9 +13,24 @@ pub enum JobEventProtoError {
     MissingScheduleKind,
     MissingDeliveryKind,
     MissingSamplingSourceKind,
-    UnknownJobStatus { value: i32 },
-    InvalidTimestamp { value: String, source: chrono::ParseError },
-    InvalidHeaders(MessageHeadersError),
+    UnknownJobStatus {
+        value: i32,
+    },
+    InvalidTimestamp {
+        value: String,
+        source: chrono::ParseError,
+    },
+    InvalidHeaders {
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+}
+
+impl JobEventProtoError {
+    pub fn invalid_headers(source: impl std::error::Error + Send + Sync + 'static) -> Self {
+        Self::InvalidHeaders {
+            source: Box::new(source),
+        }
+    }
 }
 
 impl std::fmt::Display for JobEventProtoError {
@@ -35,7 +48,7 @@ impl std::fmt::Display for JobEventProtoError {
             Self::InvalidTimestamp { value, source } => {
                 write!(f, "protobuf timestamp '{value}' is invalid: {source}")
             }
-            Self::InvalidHeaders(source) => write!(f, "protobuf headers are invalid: {source}"),
+            Self::InvalidHeaders { source } => write!(f, "protobuf headers are invalid: {source}"),
         }
     }
 }
@@ -44,7 +57,7 @@ impl std::error::Error for JobEventProtoError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::InvalidTimestamp { source, .. } => Some(source),
-            Self::InvalidHeaders(source) => Some(source),
+            Self::InvalidHeaders { source } => Some(source.as_ref()),
             Self::MissingEvent
             | Self::MissingJobDetails
             | Self::MissingSchedule
@@ -61,7 +74,7 @@ impl std::error::Error for JobEventProtoError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::domain::{
+    use crate::read_model::{
         JobDetails, JobEventDelivery, JobEventSamplingSource, JobEventSchedule, JobEventStatus, MessageContent,
         MessageEnvelope, MessageHeaders,
     };
