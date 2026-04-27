@@ -21,8 +21,11 @@ use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream};
 use crate::{
     error::CronError,
     kv::{EVENTS_SUBJECT_PREFIX, LEGACY_EVENTS_SUBJECT_PREFIX},
-    proto::{JobEventCodec, JobEventProtoError, v1},
-    read_model::{CronJob, JobEventStatus},
+    proto::{JobEventCodec, v1},
+    read_model::{
+        CronJob, JobEventDelivery, JobEventSamplingSource, JobEventSchedule, JobEventStatus, MessageContent,
+        MessageEnvelope, MessageHeaders,
+    },
     store::{open_cron_jobs_bucket, open_events_stream, open_snapshot_bucket, snapshot_store_config},
 };
 
@@ -69,7 +72,7 @@ pub enum JobStreamState {
 #[derive(Debug)]
 pub enum JobTransitionError {
     InvalidEventId { id: String, source: SubjectTokenViolation },
-    InvalidEvent { source: JobEventProtoError },
+    MalformedEvent { context: &'static str },
     CannotAddExistingJob { id: String },
     CannotAddDeletedJob { id: String },
     MissingJobForStateChange { id: String },
@@ -93,15 +96,7 @@ pub fn apply(
 
     match (state, event.event()) {
         (JobStreamState::Initial, v1::job_event::EventOneof::JobAdded(inner)) => {
-            if !inner.has_job() {
-                return Err(JobTransitionError::InvalidEvent {
-                    source: JobEventProtoError::MissingJobDetails,
-                });
-            }
-            Ok(JobStreamState::Present(
-                CronJob::try_from((stream_id.to_string(), inner.job().to_owned()))
-                    .map_err(|source| JobTransitionError::InvalidEvent { source })?,
-            ))
+            Ok(JobStreamState::Present(project_job(stream_id, inner.job())?))
         }
         (JobStreamState::Initial, v1::job_event::EventOneof::JobPaused(_)) => {
             Err(JobTransitionError::MissingJobForStateChange {
@@ -140,9 +135,86 @@ pub fn apply(
         (JobStreamState::Deleted(id), v1::job_event::EventOneof::JobRemoved(_)) => {
             Err(JobTransitionError::DeletedJobForRemoval { id })
         }
-        (_, v1::job_event::EventOneof::not_set(_)) | (_, _) => Err(JobTransitionError::InvalidEvent {
-            source: JobEventProtoError::MissingEvent,
+        (_, v1::job_event::EventOneof::not_set(_)) | (_, _) => Err(JobTransitionError::MalformedEvent {
+            context: "job event has no supported case",
         }),
+    }
+}
+
+fn project_job(stream_id: &str, job: v1::JobDetailsView<'_>) -> Result<CronJob, JobTransitionError> {
+    Ok(CronJob {
+        id: stream_id.to_string(),
+        status: project_status(job.status()),
+        schedule: project_schedule(job.schedule())?,
+        delivery: project_delivery(job.delivery())?,
+        message: project_message(job.message()),
+    })
+}
+
+fn project_status(status: v1::JobStatus) -> JobEventStatus {
+    if status == v1::JobStatus::Disabled {
+        JobEventStatus::Disabled
+    } else {
+        JobEventStatus::Enabled
+    }
+}
+
+fn project_schedule(schedule: v1::JobScheduleView<'_>) -> Result<JobEventSchedule, JobTransitionError> {
+    match schedule.kind() {
+        v1::job_schedule::KindOneof::At(inner) => Ok(JobEventSchedule::At {
+            at: inner.at().to_string(),
+        }),
+        v1::job_schedule::KindOneof::Every(inner) => Ok(JobEventSchedule::Every {
+            every_sec: inner.every_sec(),
+        }),
+        v1::job_schedule::KindOneof::Cron(inner) => Ok(JobEventSchedule::Cron {
+            expr: inner.expr().to_string(),
+            timezone: inner.has_timezone().then(|| inner.timezone().to_string()),
+        }),
+        v1::job_schedule::KindOneof::not_set(_) | _ => Err(JobTransitionError::MalformedEvent {
+            context: "job schedule has no supported case",
+        }),
+    }
+}
+
+fn project_delivery(delivery: v1::JobDeliveryView<'_>) -> Result<JobEventDelivery, JobTransitionError> {
+    match delivery.kind() {
+        v1::job_delivery::KindOneof::NatsEvent(inner) => Ok(JobEventDelivery::NatsEvent {
+            route: inner.route().to_string(),
+            ttl_sec: inner.has_ttl_sec().then(|| inner.ttl_sec()),
+            source: inner
+                .has_source()
+                .then(|| project_sampling_source(inner.source()))
+                .transpose()?,
+        }),
+        v1::job_delivery::KindOneof::not_set(_) | _ => Err(JobTransitionError::MalformedEvent {
+            context: "job delivery has no supported case",
+        }),
+    }
+}
+
+fn project_sampling_source(
+    source: v1::JobSamplingSourceView<'_>,
+) -> Result<JobEventSamplingSource, JobTransitionError> {
+    match source.kind() {
+        v1::job_sampling_source::KindOneof::LatestFromSubject(inner) => Ok(JobEventSamplingSource::LatestFromSubject {
+            subject: inner.subject().to_string(),
+        }),
+        v1::job_sampling_source::KindOneof::not_set(_) | _ => Err(JobTransitionError::MalformedEvent {
+            context: "job sampling source has no supported case",
+        }),
+    }
+}
+
+fn project_message(message: v1::JobMessageView<'_>) -> MessageEnvelope {
+    MessageEnvelope {
+        content: MessageContent::new(message.content().to_string()),
+        headers: MessageHeaders::from_pairs(
+            message
+                .headers()
+                .iter()
+                .map(|header| (header.name().to_string(), header.value().to_string())),
+        ),
     }
 }
 
@@ -189,7 +261,7 @@ impl std::fmt::Display for JobTransitionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InvalidEventId { id, .. } => write!(f, "job event id '{id}' is invalid"),
-            Self::InvalidEvent { source } => write!(f, "job event is invalid: {source}"),
+            Self::MalformedEvent { context } => write!(f, "job event is malformed: {context}"),
             Self::CannotAddExistingJob { id } => write!(f, "job '{id}' already exists"),
             Self::CannotAddDeletedJob { id } => {
                 write!(f, "job '{id}' was deleted and cannot be added again")
@@ -210,9 +282,13 @@ impl std::fmt::Display for JobTransitionError {
 impl std::error::Error for JobTransitionError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::InvalidEvent { source } => Some(source),
             Self::InvalidEventId { source, .. } => Some(source),
-            _ => None,
+            Self::MalformedEvent { .. }
+            | Self::CannotAddExistingJob { .. }
+            | Self::CannotAddDeletedJob { .. }
+            | Self::MissingJobForStateChange { .. }
+            | Self::DeletedJobForStateChange { .. }
+            | Self::DeletedJobForRemoval { .. } => None,
         }
     }
 }
@@ -640,8 +716,7 @@ mod tests {
     use super::*;
     use crate::proto::v1;
     use crate::{
-        CronJob, JobDetails, JobEventDelivery, JobEventSchedule, JobEventStatus, MessageContent, MessageEnvelope,
-        MessageHeaders,
+        CronJob, JobEventDelivery, JobEventSchedule, JobEventStatus, MessageContent, MessageEnvelope, MessageHeaders,
     };
 
     fn expected_job(id: &str) -> CronJob {
@@ -664,15 +739,32 @@ mod tests {
     fn added_event(id: &str) -> v1::JobEvent {
         let mut event = v1::JobEvent::new();
         let mut inner = v1::JobAdded::new();
-        let job = expected_job(id);
-        inner.set_job(v1::JobDetails::from(&JobDetails {
-            status: job.status,
-            schedule: job.schedule,
-            delivery: job.delivery,
-            message: job.message,
-        }));
+        inner.set_job(proto_job_details(id));
         event.set_job_added(inner);
         event
+    }
+
+    fn proto_job_details(_id: &str) -> v1::JobDetails {
+        let mut details = v1::JobDetails::new();
+        details.set_status(v1::JobStatus::Enabled);
+
+        let mut schedule = v1::JobSchedule::new();
+        let mut every = v1::EverySchedule::new();
+        every.set_every_sec(30);
+        schedule.set_every(every);
+        details.set_schedule(schedule);
+
+        let mut delivery = v1::JobDelivery::new();
+        let mut nats = v1::NatsEventDelivery::new();
+        nats.set_route("agent.run");
+        delivery.set_nats_event(nats);
+        details.set_delivery(delivery);
+
+        let mut message = v1::JobMessage::new();
+        message.set_content(r#"{"kind":"heartbeat"}"#);
+        details.set_message(message);
+
+        details
     }
 
     fn paused_event(_id: &str) -> v1::JobEvent {

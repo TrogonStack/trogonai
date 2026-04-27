@@ -163,7 +163,8 @@ async fn client_rejects_stale_version() {
 #[tokio::test]
 async fn mock_schedule_publisher_records_changes() {
     let publisher = MockSchedulePublisher::new();
-    let resolved = trogon_cron::ResolvedJob::try_from(&expected_job("alpha")).unwrap();
+    let details = trogon_cron::v1::JobDetails::from(&command_base_job("alpha"));
+    let resolved = trogon_cron::ResolvedJob::from_event("alpha", details.as_view()).unwrap();
 
     publisher.upsert_schedule(&resolved).await.unwrap();
     publisher.remove_schedule("alpha").await.unwrap();

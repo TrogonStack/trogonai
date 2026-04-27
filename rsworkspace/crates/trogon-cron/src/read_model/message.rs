@@ -1,7 +1,4 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
-use trogon_cron_jobs_proto::v1;
-
-use crate::proto::JobEventProtoError;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MessageHeadersError {
@@ -48,6 +45,20 @@ impl MessageHeaders {
         }
 
         Ok(Self(headers))
+    }
+
+    pub fn from_pairs<I, N, V>(headers: I) -> Self
+    where
+        I: IntoIterator<Item = (N, V)>,
+        N: Into<String>,
+        V: Into<String>,
+    {
+        Self(
+            headers
+                .into_iter()
+                .map(|(name, value)| (name.into(), value.into()))
+                .collect(),
+        )
     }
 
     pub fn is_empty(&self) -> bool {
@@ -137,37 +148,6 @@ impl From<&str> for MessageContent {
 impl AsRef<[u8]> for MessageContent {
     fn as_ref(&self) -> &[u8] {
         self.as_slice()
-    }
-}
-
-impl From<&MessageEnvelope> for v1::JobMessage {
-    fn from(value: &MessageEnvelope) -> Self {
-        let mut message = v1::JobMessage::new();
-        message.set_content(value.content.as_str());
-        for (name, val) in value.headers.as_slice() {
-            let mut header = v1::Header::new();
-            header.set_name(name.as_str());
-            header.set_value(val.as_str());
-            message.headers_mut().push(header);
-        }
-        message
-    }
-}
-
-impl TryFrom<v1::JobMessage> for MessageEnvelope {
-    type Error = JobEventProtoError;
-
-    fn try_from(value: v1::JobMessage) -> Result<Self, Self::Error> {
-        let headers = value
-            .headers()
-            .iter()
-            .map(|header| (header.name().to_string(), header.value().to_string()))
-            .collect::<Vec<_>>();
-
-        Ok(Self {
-            content: MessageContent::new(value.content().to_string()),
-            headers: MessageHeaders::new(headers).map_err(JobEventProtoError::invalid_headers)?,
-        })
     }
 }
 

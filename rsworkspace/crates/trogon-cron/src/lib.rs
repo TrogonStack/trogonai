@@ -34,7 +34,7 @@ pub use projections::{
     CronJobChange, CronJobWatchStream, JobStreamState, JobTransitionError, LoadAndWatchCronJobsResult,
     ProjectionChange, apply, initial_state, load_and_watch_cron_jobs, projection_change,
 };
-pub use proto::{JobEventCodec, JobEventProtoError, state_v1, v1};
+pub use proto::{JobEventCodec, state_v1, v1};
 pub use queries::{GetJobCommand, JobId, JobIdError, ListJobsCommand, get_job, list_jobs};
 pub use read_model::{
     CronJob, JobDetails, JobEventDelivery, JobEventSamplingSource, JobEventSchedule, JobEventStatus, MessageContent,

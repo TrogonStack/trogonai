@@ -1,8 +1,6 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 use trogon_cron_jobs_proto::v1;
 
-use crate::proto::JobEventProtoError;
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MessageHeadersError {
     InvalidName { name: String },
@@ -151,23 +149,6 @@ impl From<&MessageEnvelope> for v1::JobMessage {
             message.headers_mut().push(header);
         }
         message
-    }
-}
-
-impl TryFrom<v1::JobMessage> for MessageEnvelope {
-    type Error = JobEventProtoError;
-
-    fn try_from(value: v1::JobMessage) -> Result<Self, Self::Error> {
-        let headers = value
-            .headers()
-            .iter()
-            .map(|header| (header.name().to_string(), header.value().to_string()))
-            .collect::<Vec<_>>();
-
-        Ok(Self {
-            content: MessageContent::new(value.content().to_string()),
-            headers: MessageHeaders::new(headers).map_err(JobEventProtoError::invalid_headers)?,
-        })
     }
 }
 
