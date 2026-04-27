@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use protobuf::{Parse as _, Serialize as _};
 use trogon_cron_jobs_proto::v1;
-use trogon_eventsourcing::{CanonicalEventCodec, EventCodec, EventData, EventType, RecordedEvent};
+use trogon_eventsourcing::{CanonicalEventCodec, EventCodec, EventData, EventIdentity, EventType, RecordedEvent};
 
 use crate::commands::event::{
     JobAdded, JobDetails, JobEvent, JobEventDelivery, JobEventSamplingSource, JobEventSchedule, JobEventStatus,
@@ -91,6 +91,8 @@ impl EventType for JobEvent {
         }
     }
 }
+
+impl EventIdentity for JobEvent {}
 
 impl CanonicalEventCodec for JobEvent {
     type Codec = JobEventCodec;

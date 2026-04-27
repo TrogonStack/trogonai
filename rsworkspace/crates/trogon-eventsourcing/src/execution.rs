@@ -1,6 +1,8 @@
 use crate::snapshot::{Snapshot, SnapshotRead, SnapshotSchema, SnapshotStoreConfig, SnapshotWrite};
 use crate::stream::{StreamAppend, StreamRead, StreamState, resolve_stream_state};
-use crate::{CanonicalEventCodec, Decide, Decision, EventCodec, EventData, EventType, NonEmpty, StateMachine};
+use crate::{
+    CanonicalEventCodec, Decide, Decision, EventCodec, EventData, EventIdentity, EventType, NonEmpty, StateMachine,
+};
 
 use std::num::NonZeroU64;
 
@@ -277,7 +279,7 @@ impl<E, C, SErr> CommandExecution<'_, E, C, WithoutSnapshots>
 where
     C: Decide,
     C::State: StateMachine<C::Event>,
-    C::Event: EventType + Clone + CanonicalEventCodec,
+    C::Event: EventType + EventIdentity + Clone + CanonicalEventCodec,
     C::StreamId: AsRef<str>,
     E: StreamRead<C::StreamId, Error = SErr> + StreamAppend<C::StreamId, Error = SErr>,
     <C::Event as CanonicalEventCodec>::Codec: EventCodec<C::Event>,
@@ -296,7 +298,7 @@ impl<E, C, EC, SErr> CommandExecutionWithCodec<'_, E, C, WithoutSnapshots, EC>
 where
     C: Decide,
     C::State: StateMachine<C::Event>,
-    C::Event: EventType + Clone,
+    C::Event: EventType + EventIdentity + Clone,
     C::StreamId: AsRef<str>,
     E: StreamRead<C::StreamId, Error = SErr> + StreamAppend<C::StreamId, Error = SErr>,
     EC: EventCodec<C::Event>,
@@ -356,7 +358,7 @@ where
     C: Decide,
     C::State: Clone,
     C::State: StateMachine<C::Event>,
-    C::Event: EventType + Clone + CanonicalEventCodec,
+    C::Event: EventType + EventIdentity + Clone + CanonicalEventCodec,
     C::StreamId: AsRef<str>,
     E: StreamRead<C::StreamId, Error = SErr> + StreamAppend<C::StreamId, Error = SErr>,
     S: SnapshotRead<C::State, C::StreamId, Error = SErr> + SnapshotWrite<C::State, C::StreamId, Error = SErr>,
@@ -378,7 +380,7 @@ where
     C: Decide,
     C::State: Clone,
     C::State: StateMachine<C::Event>,
-    C::Event: EventType + Clone,
+    C::Event: EventType + EventIdentity + Clone,
     C::StreamId: AsRef<str>,
     E: StreamRead<C::StreamId, Error = SErr> + StreamAppend<C::StreamId, Error = SErr>,
     S: SnapshotRead<C::State, C::StreamId, Error = SErr> + SnapshotWrite<C::State, C::StreamId, Error = SErr>,
@@ -478,7 +480,7 @@ where
 
 fn encode_events<E, C>(stream_id: &str, codec: &C, events: &NonEmpty<E>) -> Result<NonEmpty<EventData>, C::Error>
 where
-    E: EventType + Clone,
+    E: EventType + EventIdentity + Clone,
     C: EventCodec<E>,
 {
     events
@@ -499,7 +501,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        CanonicalEventCodec, EventType, RecordedEvent, SnapshotSchema, StreamCommand, StreamReadResult,
+        CanonicalEventCodec, EventIdentity, EventType, RecordedEvent, SnapshotSchema, StreamCommand, StreamReadResult,
         stream::AppendOutcome,
     };
 
@@ -695,6 +697,8 @@ mod tests {
             }
         }
     }
+
+    impl EventIdentity for TestEvent {}
 
     impl EventType for TestEvent {
         fn event_type(&self) -> &'static str {
