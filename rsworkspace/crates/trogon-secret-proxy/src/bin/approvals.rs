@@ -46,7 +46,7 @@ use trogon_vault_approvals::{
     ApprovalService, LoggingNotifier, Notifier, SlackWebhookNotifier,
     ensure_proposals_stream,
 };
-use trogon_vault_nats::{CryptoCtx, NatsKvVault, ensure_vault_bucket, grace_period_from_env};
+use trogon_vault_nats::{AuditPublisher, CryptoCtx, NatsKvVault, ensure_audit_stream, ensure_vault_bucket, grace_period_from_env};
 
 // ── Vault builders (shared with worker binary) ────────────────────────────────
 
@@ -73,6 +73,7 @@ async fn build_hashicorp_vault(vault_addr: String) -> HashicorpVaultStore {
 async fn build_nats_kv_vault(
     jetstream:   &async_nats::jetstream::Context,
     bucket_name: &str,
+    audit:       Arc<AuditPublisher>,
 ) -> NatsKvVault {
     let kv = ensure_vault_bucket(jetstream, bucket_name, 1)
         .await
@@ -84,6 +85,7 @@ async fn build_nats_kv_vault(
     NatsKvVault::new(kv, crypto, grace_period_from_env())
         .await
         .expect("Failed to initialise NatsKvVault")
+        .with_audit(audit)
 }
 
 // ── Generic runner ────────────────────────────────────────────────────────────
@@ -102,10 +104,16 @@ async fn run_with_vault<V, N>(
     ensure_proposals_stream(&js)
         .await
         .expect("Failed to ensure VAULT_PROPOSALS stream");
+    ensure_audit_stream(&js)
+        .await
+        .expect("Failed to ensure VAULT_AUDIT stream");
+
+    let audit = Arc::new(AuditPublisher::new(js.clone(), vault_name));
 
     tracing::info!(vault = %vault_name, "Approval service starting");
 
     ApprovalService::new(vault, notifier, js, nats, vault_name)
+        .with_audit(audit)
         .run()
         .await
         .expect("ApprovalService exited with error");
@@ -169,8 +177,10 @@ async fn main() {
             let config    = InfisicalConfig::from_env().expect("Infisical env vars required");
             let infisical = InfisicalVaultStore::new(config);
             let bucket    = std::env::var("VAULT_NATS_BUCKET").unwrap();
-            let nats_kv   = build_nats_kv_vault(&js, &bucket).await;
-            let vault     = Arc::new(DualWriteVault::new(infisical, nats_kv));
+            ensure_audit_stream(&js).await.expect("Failed to ensure VAULT_AUDIT stream");
+            let audit   = Arc::new(AuditPublisher::new(js.clone(), &bucket));
+            let nats_kv = build_nats_kv_vault(&js, &bucket, audit).await;
+            let vault   = Arc::new(DualWriteVault::new(infisical, nats_kv));
             run_with_vault_and_notifier(vault, js, nats, &vault_name).await;
         }
         (true, false, _) => {
@@ -182,7 +192,9 @@ async fn main() {
         (false, true, _) => {
             let bucket = std::env::var("VAULT_NATS_BUCKET").unwrap();
             tracing::info!(bucket = %bucket, "Vault backend: NATS KV");
-            let vault = Arc::new(build_nats_kv_vault(&js, &bucket).await);
+            ensure_audit_stream(&js).await.expect("Failed to ensure VAULT_AUDIT stream");
+            let audit = Arc::new(AuditPublisher::new(js.clone(), &bucket));
+            let vault = Arc::new(build_nats_kv_vault(&js, &bucket, audit).await);
             run_with_vault_and_notifier(vault, js, nats, &vault_name).await;
         }
         (false, false, true) => {
