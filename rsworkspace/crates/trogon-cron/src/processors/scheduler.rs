@@ -8,14 +8,14 @@ use async_nats::jetstream::{
     context::ConsumerInfoErrorKind,
 };
 use futures::{Stream, StreamExt};
-use trogon_eventsourcing::record_stream_message;
+use trogon_eventsourcing::{RecordedEvent, record_stream_message};
 use trogon_nats::SubjectTokenViolation;
 use trogon_nats::lease::{LeaderElection, LeaseRenewInterval, LeaseTiming, LeaseTtl, NatsKvLease, NatsKvLeaseConfig};
 use trogon_std::{NowV7, UuidV7Generator};
 
 use crate::{
-    CronJob, JobEventProtoError, JobEventStatus, RecordedJobEvent, ResolvedJob,
-    commands::proto::{JobContractEventCodec, contract_v1},
+    CronJob, JobEventProtoError, JobEventStatus, ResolvedJob,
+    commands::proto::{JobEventCodec, v1},
     error::CronError,
     kv::{EVENTS_SUBJECT_PREFIX, LEADER_BUCKET, LEADER_KEY, LEGACY_EVENTS_SUBJECT_PREFIX},
     nats::NatsSchedulePublisher,
@@ -295,7 +295,7 @@ async fn rebuild_scheduler_state_from_stream(
         let event = decode_recorded_job_event(message)?;
         let stream_id = job_id_from_event_subject(&event.recorded_stream_id)?;
         let data = event
-            .decode_data_with(&JobContractEventCodec)
+            .decode_data_with(&JobEventCodec)
             .map_err(|source| CronError::event_source("failed to decode recorded job event payload", source))?;
         let _ = apply_scheduler_event(&mut desired_jobs, &stream_id, &data)?;
     }
@@ -306,7 +306,7 @@ async fn rebuild_scheduler_state_from_stream(
 fn apply_scheduler_event(
     desired_jobs: &mut DesiredJobs,
     stream_id: &str,
-    event: &contract_v1::JobEvent,
+    event: &v1::JobEvent,
 ) -> Result<SchedulerChange, CronError> {
     validate_event_job_id(stream_id).map_err(|source| {
         CronError::invalid_job_spec(crate::JobSpecError::InvalidId {
@@ -316,7 +316,7 @@ fn apply_scheduler_event(
     })?;
 
     match event.event() {
-        contract_v1::job_event::EventOneof::JobAdded(inner) => {
+        v1::job_event::EventOneof::JobAdded(inner) => {
             if matches!(desired_jobs.get(stream_id), Some(DesiredJobState::Deleted)) {
                 return Err(CronError::event_source(
                     "scheduler received an add event for a deleted job stream",
@@ -334,7 +334,7 @@ fn apply_scheduler_event(
             desired_jobs.insert(job.id.clone(), DesiredJobState::Present(Box::new(job.clone())));
             Ok(SchedulerChange::Upsert(job))
         }
-        contract_v1::job_event::EventOneof::JobPaused(_) => {
+        v1::job_event::EventOneof::JobPaused(_) => {
             let job = desired_jobs.get_mut(stream_id).ok_or_else(|| {
                 CronError::event_source(
                     "scheduler received a pause without current job state",
@@ -352,7 +352,7 @@ fn apply_scheduler_event(
                 )),
             }
         }
-        contract_v1::job_event::EventOneof::JobResumed(_) => {
+        v1::job_event::EventOneof::JobResumed(_) => {
             let job = desired_jobs.get_mut(stream_id).ok_or_else(|| {
                 CronError::event_source(
                     "scheduler received a resume without current job state",
@@ -370,11 +370,11 @@ fn apply_scheduler_event(
                 )),
             }
         }
-        contract_v1::job_event::EventOneof::JobRemoved(_) => {
+        v1::job_event::EventOneof::JobRemoved(_) => {
             desired_jobs.insert(stream_id.to_string(), DesiredJobState::Deleted);
             Ok(SchedulerChange::Delete(stream_id.to_string()))
         }
-        contract_v1::job_event::EventOneof::not_set(_) | _ => Err(CronError::event_source(
+        v1::job_event::EventOneof::not_set(_) | _ => Err(CronError::event_source(
             "scheduler received an event without a oneof case",
             JobEventProtoError::MissingEvent,
         )),
@@ -388,7 +388,7 @@ async fn handle_scheduler_message(
     let event = decode_recorded_watch_message(message)?;
     let stream_id = job_id_from_event_subject(&event.recorded_stream_id)?;
     let data = event
-        .decode_data_with(&JobContractEventCodec)
+        .decode_data_with(&JobEventCodec)
         .map_err(|source| CronError::event_source("failed to decode watched scheduler event payload", source))?;
     apply_scheduler_event(desired_jobs, &stream_id, &data)
 }
@@ -546,12 +546,12 @@ async fn read_raw_scheduler_event_message(
 
 fn decode_recorded_job_event(
     message: async_nats::jetstream::message::StreamMessage,
-) -> Result<RecordedJobEvent, CronError> {
+) -> Result<RecordedEvent, CronError> {
     record_stream_message(message)
         .map_err(|source| CronError::event_source("failed to decode stored job event", source))
 }
 
-fn decode_recorded_watch_message(message: &async_nats::jetstream::Message) -> Result<RecordedJobEvent, CronError> {
+fn decode_recorded_watch_message(message: &async_nats::jetstream::Message) -> Result<RecordedEvent, CronError> {
     let stream_message =
         async_nats::jetstream::message::StreamMessage::try_from(message.message.clone()).map_err(|source| {
             CronError::event_source(
@@ -620,7 +620,7 @@ mod tests {
         CronController, DesiredJobState, SchedulerChange, apply_scheduler_change, apply_scheduler_event,
         default_leader_timing, next_scheduler_start_sequence, reconcile_snapshot, scheduler_consumer_config,
     };
-    use crate::commands::proto::contract_v1;
+    use crate::commands::proto::v1;
     use crate::{
         CronJob, Delivery, Job, JobDetails, JobEventStatus, JobHeaders, JobId, JobMessage, JobStatus, MessageContent,
         MessageEnvelope, MessageHeaders, Schedule,
@@ -648,29 +648,29 @@ mod tests {
         CronJob::from((id.to_string(), JobDetails::from(base_job(id))))
     }
 
-    fn added_event(id: &str) -> contract_v1::JobEvent {
-        let mut event = contract_v1::JobEvent::new();
-        let mut inner = contract_v1::JobAdded::new();
-        inner.set_job(contract_v1::JobDetails::from(&JobDetails::from(base_job(id))));
+    fn added_event(id: &str) -> v1::JobEvent {
+        let mut event = v1::JobEvent::new();
+        let mut inner = v1::JobAdded::new();
+        inner.set_job(v1::JobDetails::from(&JobDetails::from(base_job(id))));
         event.set_job_added(inner);
         event
     }
 
-    fn paused_event(_id: &str) -> contract_v1::JobEvent {
-        let mut event = contract_v1::JobEvent::new();
-        event.set_job_paused(contract_v1::JobPaused::new());
+    fn paused_event(_id: &str) -> v1::JobEvent {
+        let mut event = v1::JobEvent::new();
+        event.set_job_paused(v1::JobPaused::new());
         event
     }
 
-    fn resumed_event(_id: &str) -> contract_v1::JobEvent {
-        let mut event = contract_v1::JobEvent::new();
-        event.set_job_resumed(contract_v1::JobResumed::new());
+    fn resumed_event(_id: &str) -> v1::JobEvent {
+        let mut event = v1::JobEvent::new();
+        event.set_job_resumed(v1::JobResumed::new());
         event
     }
 
-    fn removed_event(_id: &str) -> contract_v1::JobEvent {
-        let mut event = contract_v1::JobEvent::new();
-        event.set_job_removed(contract_v1::JobRemoved::new());
+    fn removed_event(_id: &str) -> v1::JobEvent {
+        let mut event = v1::JobEvent::new();
+        event.set_job_removed(v1::JobRemoved::new());
         event
     }
 

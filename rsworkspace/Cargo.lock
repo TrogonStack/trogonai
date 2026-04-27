@@ -3588,6 +3588,9 @@ name = "trogon-cron-jobs-proto"
 version = "0.1.0"
 dependencies = [
  "protobuf",
+ "serde",
+ "serde_json",
+ "trogon-eventsourcing",
 ]
 
 [[package]]

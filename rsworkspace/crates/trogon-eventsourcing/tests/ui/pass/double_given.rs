@@ -1,5 +1,5 @@
 use trogon_eventsourcing::{
-    Decide, Decision, StateMachine, StreamCommand,
+    Decide, Decision, StateMachineCommand, StreamCommand,
     testing::{TestCase, decider},
 };
 
@@ -38,18 +38,18 @@ impl StreamCommand for TestCommand {
     }
 }
 
-impl StateMachine<TestEvent> for TestState {
+impl StateMachineCommand for TestCommand {
     type EvolveError = TestHistoryError;
 
-    fn initial_state() -> Self {
-        Self::Missing
+    fn initial_state() -> Self::State {
+        TestState::Missing
     }
 
-    fn evolve(self, event: TestEvent) -> Result<Self, Self::EvolveError> {
-        match (self, event) {
-            (Self::Missing, TestEvent::Registered) => Ok(Self::Registered),
-            (Self::Registered, TestEvent::Disabled) => Ok(Self::Disabled),
-            (Self::Disabled, TestEvent::Removed) => Ok(Self::Missing),
+    fn evolve_state(state: Self::State, event: Self::Event) -> Result<Self::State, Self::EvolveError> {
+        match (state, event) {
+            (TestState::Missing, TestEvent::Registered) => Ok(TestState::Registered),
+            (TestState::Registered, TestEvent::Disabled) => Ok(TestState::Disabled),
+            (TestState::Disabled, TestEvent::Removed) => Ok(TestState::Missing),
             _ => Err(TestHistoryError::Invalid),
         }
     }

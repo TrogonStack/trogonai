@@ -6,9 +6,8 @@ use trogon_nats::DottedNatsToken;
 
 use crate::error::{CronError, JobSpecError};
 
-use super::JobId;
-use crate::commands::event::{
-    JobDetails, JobEventDelivery, JobEventSamplingSource, JobEventSchedule, JobEventStatus, MessageContent,
+use super::{
+    JobDetails, JobEventDelivery, JobEventSamplingSource, JobEventSchedule, JobEventStatus, JobId, MessageContent,
     MessageEnvelope, MessageHeaders,
 };
 
