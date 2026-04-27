@@ -3172,6 +3172,7 @@ dependencies = [
  "futures",
  "serde",
  "serde_json",
+ "tokio",
  "trogon-nats",
  "trogon-std",
  "trybuild",
