@@ -232,3 +232,143 @@ async fn wait_ready(rx: &watch::Receiver<bool>) -> Result<(), NatsKvVaultError> 
         .await
         .map_err(|_| NatsKvVaultError::Shutdown)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_nats::jetstream::kv;
+    use bytes::Bytes;
+
+    use crate::crypto::CryptoCtx;
+
+    fn crypto() -> CryptoCtx {
+        CryptoCtx::derive(b"test-password", b"test-salt-16byte").unwrap()
+    }
+
+    fn put_entry(key: &str, value: Bytes) -> kv::Entry {
+        kv::Entry {
+            bucket:       "vault_test".into(),
+            key:          key.into(),
+            value,
+            revision:     1,
+            delta:        0,
+            created:      time::OffsetDateTime::UNIX_EPOCH,
+            operation:    kv::Operation::Put,
+            seen_current: false,
+        }
+    }
+
+    fn delete_entry(key: &str, op: kv::Operation) -> kv::Entry {
+        kv::Entry {
+            bucket:       "vault_test".into(),
+            key:          key.into(),
+            value:        Bytes::new(),
+            revision:     2,
+            delta:        0,
+            created:      time::OffsetDateTime::UNIX_EPOCH,
+            operation:    op,
+            seen_current: false,
+        }
+    }
+
+    // ── apply_entry ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn put_inserts_new_slot() {
+        let cache  = DashMap::new();
+        let crypto = crypto();
+        let ct     = crypto.encrypt(b"sk_live_abc").unwrap();
+
+        apply_entry(&cache, &crypto, put_entry("tok_stripe_prod_abc", ct.into()), Duration::from_secs(30));
+
+        let slot = cache.get("tok_stripe_prod_abc").unwrap();
+        assert_eq!(slot.current, "sk_live_abc");
+        assert!(slot.previous.is_none());
+    }
+
+    #[test]
+    fn put_different_value_rotates_slot() {
+        let cache  = DashMap::new();
+        let crypto = crypto();
+        cache.insert("tok_stripe_prod_abc".to_string(), RotationSlot::new("old_key".to_string()));
+
+        let ct = crypto.encrypt(b"new_key").unwrap();
+        apply_entry(&cache, &crypto, put_entry("tok_stripe_prod_abc", ct.into()), Duration::from_secs(30));
+
+        let slot = cache.get("tok_stripe_prod_abc").unwrap();
+        assert_eq!(slot.current, "new_key");
+        let (prev, _) = slot.previous.as_ref().expect("previous must be set after rotation");
+        assert_eq!(prev, "old_key");
+    }
+
+    #[test]
+    fn put_same_value_does_not_rotate() {
+        let cache  = DashMap::new();
+        let crypto = crypto();
+        cache.insert("tok_stripe_prod_abc".to_string(), RotationSlot::new("same_key".to_string()));
+
+        let ct = crypto.encrypt(b"same_key").unwrap();
+        apply_entry(&cache, &crypto, put_entry("tok_stripe_prod_abc", ct.into()), Duration::from_secs(30));
+
+        let slot = cache.get("tok_stripe_prod_abc").unwrap();
+        assert_eq!(slot.current, "same_key");
+        assert!(slot.previous.is_none(), "same value must not trigger rotation");
+    }
+
+    #[test]
+    fn delete_removes_entry_from_cache() {
+        let cache  = DashMap::new();
+        let crypto = crypto();
+        cache.insert("tok_stripe_prod_abc".to_string(), RotationSlot::new("some_key".to_string()));
+
+        apply_entry(&cache, &crypto, delete_entry("tok_stripe_prod_abc", kv::Operation::Delete), Duration::from_secs(30));
+
+        assert!(cache.get("tok_stripe_prod_abc").is_none());
+    }
+
+    #[test]
+    fn purge_removes_entry_from_cache() {
+        let cache  = DashMap::new();
+        let crypto = crypto();
+        cache.insert("tok_stripe_prod_abc".to_string(), RotationSlot::new("some_key".to_string()));
+
+        apply_entry(&cache, &crypto, delete_entry("tok_stripe_prod_abc", kv::Operation::Purge), Duration::from_secs(30));
+
+        assert!(cache.get("tok_stripe_prod_abc").is_none());
+    }
+
+    #[test]
+    fn invalid_ciphertext_skips_without_crash() {
+        let cache  = DashMap::new();
+        let crypto = crypto();
+
+        apply_entry(&cache, &crypto, put_entry("tok_stripe_prod_abc", Bytes::from_static(b"not_valid_ciphertext")), Duration::from_secs(30));
+
+        assert!(cache.get("tok_stripe_prod_abc").is_none(), "decrypt failure must not insert entry");
+    }
+
+    // ── wait_ready ────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn wait_ready_returns_immediately_when_already_true() {
+        let (_tx, rx) = watch::channel(true);
+        assert!(wait_ready(&rx).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn wait_ready_errors_when_sender_is_dropped_before_signal() {
+        let (tx, rx) = watch::channel(false);
+        drop(tx);
+        assert!(matches!(wait_ready(&rx).await, Err(NatsKvVaultError::Shutdown)));
+    }
+
+    #[tokio::test]
+    async fn wait_ready_unblocks_when_sender_fires() {
+        let (tx, rx) = watch::channel(false);
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            tx.send(true).ok();
+        });
+        assert!(wait_ready(&rx).await.is_ok());
+    }
+}

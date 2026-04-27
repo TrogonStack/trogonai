@@ -154,6 +154,7 @@ mod tests {
             credential_key: "tok_stripe_prod_abc1".into(),
             service:        "api.stripe.com".into(),
             message:        "need stripe".into(),
+            requested_at:   None,
             status:         ProposalStatus::Approved { approved_by: "mario".into() },
         };
         let resp = StatusResponse::from_proposal(&proposal);

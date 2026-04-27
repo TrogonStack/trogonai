@@ -114,6 +114,71 @@ impl Notifier for SlackWebhookNotifier {
 /// Emits tracing events for every approval lifecycle transition.
 pub struct LoggingNotifier;
 
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::proposal::{Proposal, ProposalStatus};
+
+    fn pending() -> Proposal {
+        Proposal {
+            id:             "prop_abc".into(),
+            credential_key: "tok_stripe_prod_abc".into(),
+            service:        "api.stripe.com".into(),
+            message:        "need access for payments".into(),
+            requested_at:   None,
+            status:         ProposalStatus::Pending,
+        }
+    }
+
+    fn approved() -> Proposal {
+        Proposal {
+            status: ProposalStatus::Approved { approved_by: "mario".into() },
+            ..pending()
+        }
+    }
+
+    fn rejected() -> Proposal {
+        Proposal {
+            status: ProposalStatus::Rejected { rejected_by: "luigi".into(), reason: "not authorised".into() },
+            ..pending()
+        }
+    }
+
+    #[tokio::test]
+    async fn noop_notifier_does_not_panic() {
+        let n = NoopNotifier;
+        n.notify_pending(&pending(), "prod").await;
+        n.notify_approved(&approved(), "mario").await;
+        n.notify_rejected(&rejected(), "luigi", "not authorised").await;
+    }
+
+    #[tokio::test]
+    async fn logging_notifier_does_not_panic() {
+        let n = LoggingNotifier;
+        n.notify_pending(&pending(), "staging").await;
+        n.notify_approved(&approved(), "mario").await;
+        n.notify_rejected(&rejected(), "luigi", "expired").await;
+    }
+
+    #[cfg(feature = "slack")]
+    #[test]
+    fn slack_from_env_errors_when_var_missing() {
+        std::env::remove_var("VAULT_SLACK_WEBHOOK_URL");
+        assert!(SlackWebhookNotifier::from_env().is_err());
+    }
+
+    #[cfg(feature = "slack")]
+    #[test]
+    fn slack_from_env_succeeds_when_var_set() {
+        std::env::set_var("VAULT_SLACK_WEBHOOK_URL", "https://hooks.slack.example/T123/B456/xyz");
+        let result = SlackWebhookNotifier::from_env();
+        assert!(result.is_ok());
+        std::env::remove_var("VAULT_SLACK_WEBHOOK_URL");
+    }
+}
+
 #[async_trait::async_trait]
 impl Notifier for LoggingNotifier {
     async fn notify_pending(&self, proposal: &Proposal, vault_name: &str) {

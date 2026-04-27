@@ -138,6 +138,101 @@ pub async fn ensure_audit_stream(js: &jetstream::Context) -> Result<(), NatsKvVa
     ensure_audit_stream_with_max_age(js, DEFAULT_MAX_AGE).await
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── AuditEvent serialization ──────────────────────────────────────────────
+
+    #[test]
+    fn store_event_serializes_type_tag() {
+        let event = AuditEvent::Store {
+            token: "tok_stripe_prod_abc".into(),
+            vault: "prod".into(),
+            actor: "mario".into(),
+        };
+        let v: serde_json::Value = serde_json::to_value(&event).unwrap();
+        assert_eq!(v["type"], "store");
+        assert_eq!(v["token"], "tok_stripe_prod_abc");
+        assert_eq!(v["vault"], "prod");
+        assert_eq!(v["actor"], "mario");
+    }
+
+    #[test]
+    fn resolve_event_serializes_success_and_latency() {
+        let event = AuditEvent::Resolve {
+            token:      "tok_openai_staging_xyz".into(),
+            vault:      "staging".into(),
+            success:    true,
+            latency_us: 42,
+        };
+        let v: serde_json::Value = serde_json::to_value(&event).unwrap();
+        assert_eq!(v["type"], "resolve");
+        assert_eq!(v["success"], true);
+        assert_eq!(v["latency_us"], 42);
+    }
+
+    #[test]
+    fn approve_event_serializes_proposal_fields() {
+        let event = AuditEvent::Approve {
+            proposal_id: "prop_abc123".into(),
+            vault:       "prod".into(),
+            approver:    "luigi".into(),
+        };
+        let v: serde_json::Value = serde_json::to_value(&event).unwrap();
+        assert_eq!(v["type"], "approve");
+        assert_eq!(v["proposal_id"], "prop_abc123");
+        assert_eq!(v["approver"], "luigi");
+    }
+
+    #[test]
+    fn reject_event_serializes_proposal_fields() {
+        let event = AuditEvent::Reject {
+            proposal_id: "prop_xyz".into(),
+            vault:       "prod".into(),
+            approver:    "peach".into(),
+        };
+        let v: serde_json::Value = serde_json::to_value(&event).unwrap();
+        assert_eq!(v["type"], "reject");
+        assert_eq!(v["proposal_id"], "prop_xyz");
+    }
+
+    #[test]
+    fn no_audit_event_contains_plaintext_field() {
+        let events = vec![
+            serde_json::to_value(AuditEvent::Store   { token: "t".into(), vault: "v".into(), actor: "a".into() }).unwrap(),
+            serde_json::to_value(AuditEvent::Resolve { token: "t".into(), vault: "v".into(), success: true, latency_us: 0 }).unwrap(),
+            serde_json::to_value(AuditEvent::Revoke  { token: "t".into(), vault: "v".into(), actor: "a".into() }).unwrap(),
+            serde_json::to_value(AuditEvent::Rotate  { token: "t".into(), vault: "v".into(), actor: "a".into() }).unwrap(),
+            serde_json::to_value(AuditEvent::Approve { proposal_id: "p".into(), vault: "v".into(), approver: "a".into() }).unwrap(),
+            serde_json::to_value(AuditEvent::Reject  { proposal_id: "p".into(), vault: "v".into(), approver: "a".into() }).unwrap(),
+        ];
+        for v in &events {
+            let s = v.to_string();
+            assert!(!s.contains("\"plaintext\""), "audit event must never contain plaintext: {s}");
+            assert!(!s.contains("\"value\""),     "audit event must never contain value: {s}");
+            assert!(!s.contains("\"secret\""),    "audit event must never contain secret: {s}");
+        }
+    }
+
+    // ── AuditEvent::subject ───────────────────────────────────────────────────
+
+    #[test]
+    fn subject_format_for_each_operation() {
+        let cases: &[(&AuditEvent, &str)] = &[
+            (&AuditEvent::Store   { token: "t".into(), vault: "v".into(), actor: "a".into()                     }, "vault.audit.store.prod"),
+            (&AuditEvent::Resolve { token: "t".into(), vault: "v".into(), success: true, latency_us: 0          }, "vault.audit.resolve.prod"),
+            (&AuditEvent::Revoke  { token: "t".into(), vault: "v".into(), actor: "a".into()                     }, "vault.audit.revoke.prod"),
+            (&AuditEvent::Rotate  { token: "t".into(), vault: "v".into(), actor: "a".into()                     }, "vault.audit.rotate.prod"),
+            (&AuditEvent::Approve { proposal_id: "p".into(), vault: "v".into(), approver: "a".into()            }, "vault.audit.approve.prod"),
+            (&AuditEvent::Reject  { proposal_id: "p".into(), vault: "v".into(), approver: "a".into()            }, "vault.audit.reject.prod"),
+        ];
+        for (event, expected) in cases {
+            assert_eq!(event.subject("prod"), *expected);
+        }
+    }
+}
+
 /// Like [`ensure_audit_stream`] but with a configurable max-age for the stream.
 pub async fn ensure_audit_stream_with_max_age(
     js: &jetstream::Context,
