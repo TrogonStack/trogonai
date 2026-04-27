@@ -490,6 +490,17 @@ mod tests {
         assert!(PrActor::parse_entity_key("org.repo.notanumber").is_none());
     }
 
+    #[test]
+    fn parse_entity_key_multi_segment_repo() {
+        // "owner.sub.repo.42" → splitn(3) gives parts[2]="sub.repo.42", rsplit on last '.'
+        // → repo = "sub.sub" joined... let's verify the actual join logic
+        let result = PrActor::parse_entity_key("acme.infra.my-repo.7");
+        assert_eq!(
+            result,
+            Some(("acme".to_string(), "infra.my-repo".to_string(), 7))
+        );
+    }
+
     // ── HTTP error paths ──────────────────────────────────────────────────────
 
     mod http_errors {

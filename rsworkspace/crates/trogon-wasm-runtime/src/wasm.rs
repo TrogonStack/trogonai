@@ -1286,3 +1286,129 @@ pub(crate) async fn run_module_compiled<N: NatsBroker + Send + Sync + 'static>(
 
     Ok(exit_status)
 }
+
+// ── Tests ──────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    // Minimal NatsBroker impl — all methods panic; only needed to satisfy the
+    // type parameter so WasmStoreData<TestNats> compiles without a real client.
+    #[derive(Clone)]
+    struct TestNats;
+
+    impl NatsBroker for TestNats {
+        type Sub = futures::stream::Empty<async_nats::Message>;
+
+        async fn subscribe(
+            &self,
+            _subject: &str,
+        ) -> Result<Self::Sub, Box<dyn std::error::Error + Send + Sync>> {
+            unimplemented!()
+        }
+
+        async fn publish(
+            &self,
+            _subject: async_nats::Subject,
+            _payload: bytes::Bytes,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            unimplemented!()
+        }
+
+        async fn request(
+            &self,
+            _subject: impl Into<String> + Send,
+            _payload: bytes::Bytes,
+        ) -> Result<async_nats::Message, Box<dyn std::error::Error + Send + Sync>> {
+            unimplemented!()
+        }
+    }
+
+    fn store_data(limit: Option<usize>) -> WasmStoreData<TestNats> {
+        WasmStoreData {
+            wasi:                  WasiCtxBuilder::new().build_p1(),
+            limits:                StoreLimitsData { memory_limit: limit },
+            nats:                  None,
+            session_id:            "test".into(),
+            auto_allow_permissions: false,
+            host_call_budget:      1000,
+            subscriptions:         HashMap::new(),
+            next_sub_id:           0,
+            acp_prefix:            "acp".into(),
+        }
+    }
+
+    // ── memory_growing ────────────────────────────────────────────────────────
+
+    #[test]
+    fn memory_growing_no_limit_always_allows() {
+        let mut data = store_data(None);
+        assert!(data.memory_growing(0, usize::MAX, None).unwrap());
+    }
+
+    #[test]
+    fn memory_growing_within_limit_allows() {
+        let mut data = store_data(Some(1024 * 1024));
+        assert!(data.memory_growing(0, 512 * 1024, None).unwrap());
+    }
+
+    #[test]
+    fn memory_growing_exactly_at_limit_allows() {
+        let mut data = store_data(Some(1024));
+        assert!(data.memory_growing(0, 1024, None).unwrap());
+    }
+
+    #[test]
+    fn memory_growing_over_limit_denies() {
+        let mut data = store_data(Some(1024));
+        assert!(!data.memory_growing(0, 1025, None).unwrap());
+    }
+
+    // ── read_str ──────────────────────────────────────────────────────────────
+
+    #[test]
+    fn read_str_valid() {
+        let mem = b"hello world";
+        assert_eq!(read_str(mem, 6, 5), Some("world"));
+    }
+
+    #[test]
+    fn read_str_out_of_bounds_returns_none() {
+        let mem = b"hi";
+        assert_eq!(read_str(mem, 0, 10), None);
+    }
+
+    #[test]
+    fn read_str_pointer_overflow_returns_none() {
+        let mem = b"data";
+        assert_eq!(read_str(mem, usize::MAX, 1), None);
+    }
+
+    #[test]
+    fn read_str_invalid_utf8_returns_none() {
+        let mem: &[u8] = &[0xFF, 0xFE, 0xFD];
+        assert_eq!(read_str(mem, 0, 3), None);
+    }
+
+    // ── read_bytes ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn read_bytes_valid() {
+        let mem = b"abcdef";
+        assert_eq!(read_bytes(mem, 2, 3), Some(b"cde".as_slice()));
+    }
+
+    #[test]
+    fn read_bytes_out_of_bounds_returns_none() {
+        let mem = b"hi";
+        assert_eq!(read_bytes(mem, 0, 100), None);
+    }
+
+    #[test]
+    fn read_bytes_pointer_overflow_returns_none() {
+        let mem = b"x";
+        assert_eq!(read_bytes(mem, usize::MAX, 1), None);
+    }
+}

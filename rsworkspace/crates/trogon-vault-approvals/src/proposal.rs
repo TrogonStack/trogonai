@@ -161,4 +161,65 @@ mod tests {
         assert_eq!(resp.status, "approved");
         assert_eq!(resp.approved_by.as_deref(), Some("mario"));
     }
+
+    #[test]
+    fn status_response_from_pending_proposal() {
+        let proposal = Proposal {
+            id:             "prop_abc".into(),
+            credential_key: "tok_stripe_prod_abc1".into(),
+            service:        "s".into(),
+            message:        "m".into(),
+            requested_at:   None,
+            status:         ProposalStatus::Pending,
+        };
+        let resp = StatusResponse::from_proposal(&proposal);
+        assert_eq!(resp.status, "pending");
+        assert!(resp.approved_by.is_none());
+        assert!(resp.rejected_by.is_none());
+        assert!(resp.reason.is_none());
+    }
+
+    #[test]
+    fn status_response_from_rejected_proposal() {
+        let proposal = Proposal {
+            id:             "prop_abc".into(),
+            credential_key: "tok_stripe_prod_abc1".into(),
+            service:        "s".into(),
+            message:        "m".into(),
+            requested_at:   None,
+            status:         ProposalStatus::Rejected {
+                rejected_by: "luigi".into(),
+                reason:      "not authorised".into(),
+            },
+        };
+        let resp = StatusResponse::from_proposal(&proposal);
+        assert_eq!(resp.status, "rejected");
+        assert_eq!(resp.rejected_by.as_deref(), Some("luigi"));
+        assert_eq!(resp.reason.as_deref(), Some("not authorised"));
+        assert!(resp.approved_by.is_none());
+    }
+
+    #[test]
+    fn proposal_status_serialises_state_tag_pending() {
+        let v = serde_json::to_value(ProposalStatus::Pending).unwrap();
+        assert_eq!(v["state"], "pending");
+    }
+
+    #[test]
+    fn proposal_status_serialises_state_tag_approved() {
+        let v = serde_json::to_value(ProposalStatus::Approved { approved_by: "mario".into() }).unwrap();
+        assert_eq!(v["state"], "approved");
+        assert_eq!(v["approved_by"], "mario");
+    }
+
+    #[test]
+    fn proposal_status_serialises_state_tag_rejected() {
+        let v = serde_json::to_value(ProposalStatus::Rejected {
+            rejected_by: "luigi".into(),
+            reason:      "expired".into(),
+        }).unwrap();
+        assert_eq!(v["state"], "rejected");
+        assert_eq!(v["rejected_by"], "luigi");
+        assert_eq!(v["reason"], "expired");
+    }
 }

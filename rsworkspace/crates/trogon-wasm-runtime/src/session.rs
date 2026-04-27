@@ -105,4 +105,31 @@ mod tests {
         let p = s.resolve_path(Path::new("a/b/../c")).unwrap();
         assert_eq!(p, PathBuf::from("/sandbox/abc/a/c"));
     }
+
+    // ── terminal_cwd ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn terminal_cwd_none_returns_session_dir() {
+        let s = session("/sandbox/abc");
+        assert_eq!(s.terminal_cwd(None), PathBuf::from("/sandbox/abc"));
+    }
+
+    #[test]
+    fn terminal_cwd_valid_path_resolves_inside_sandbox() {
+        let s = session("/sandbox/abc");
+        assert_eq!(
+            s.terminal_cwd(Some(Path::new("work"))),
+            PathBuf::from("/sandbox/abc/work"),
+        );
+    }
+
+    #[test]
+    fn terminal_cwd_out_of_bounds_falls_back_to_session_dir() {
+        let s = session("/sandbox/abc");
+        // "../../outside" escapes the sandbox — resolve_path returns None → fallback
+        assert_eq!(
+            s.terminal_cwd(Some(Path::new("../../outside"))),
+            PathBuf::from("/sandbox/abc"),
+        );
+    }
 }
