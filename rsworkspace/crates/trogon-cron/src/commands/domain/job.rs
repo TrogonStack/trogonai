@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 use trogon_nats::DottedNatsToken;
 
-use crate::error::{CronError, JobSpecError};
+use crate::error::JobSpecError;
 
 use super::{
     JobDetails, JobEventDelivery, JobEventSamplingSource, JobEventSchedule, JobEventStatus, JobId, MessageContent,
@@ -571,18 +571,6 @@ impl From<&Schedule> for JobEventSchedule {
     }
 }
 
-impl TryFrom<JobEventSchedule> for Schedule {
-    type Error = JobSpecError;
-
-    fn try_from(value: JobEventSchedule) -> Result<Self, Self::Error> {
-        match value {
-            JobEventSchedule::At { at } => Ok(Self::At { at }),
-            JobEventSchedule::Every { every_sec } => Self::every(every_sec),
-            JobEventSchedule::Cron { expr, timezone } => Self::cron(expr, timezone),
-        }
-    }
-}
-
 impl From<SamplingSource> for JobEventSamplingSource {
     fn from(value: SamplingSource) -> Self {
         match value {
@@ -599,16 +587,6 @@ impl From<&SamplingSource> for JobEventSamplingSource {
             SamplingSource::LatestFromSubject { subject } => Self::LatestFromSubject {
                 subject: subject.as_str().to_string(),
             },
-        }
-    }
-}
-
-impl TryFrom<JobEventSamplingSource> for SamplingSource {
-    type Error = JobSpecError;
-
-    fn try_from(value: JobEventSamplingSource) -> Result<Self, Self::Error> {
-        match value {
-            JobEventSamplingSource::LatestFromSubject { subject } => Self::latest_from_subject(subject),
         }
     }
 }
@@ -637,32 +615,6 @@ impl From<&Delivery> for JobEventDelivery {
     }
 }
 
-impl TryFrom<JobEventDelivery> for Delivery {
-    type Error = JobSpecError;
-
-    fn try_from(value: JobEventDelivery) -> Result<Self, Self::Error> {
-        match value {
-            JobEventDelivery::NatsEvent { route, ttl_sec, source } => Ok(Self::NatsEvent {
-                route: DeliveryRoute::new(route)?,
-                ttl_sec: ttl_sec.map(TtlSeconds::new).transpose()?,
-                source: source.map(TryInto::try_into).transpose()?,
-            }),
-        }
-    }
-}
-
-impl JobDetails {
-    pub fn try_into_job(self, id: JobId) -> Result<Job, CronError> {
-        Ok(Job {
-            id,
-            status: self.status.into(),
-            schedule: self.schedule.try_into().map_err(CronError::invalid_job_spec)?,
-            delivery: self.delivery.try_into().map_err(CronError::invalid_job_spec)?,
-            message: self.message.try_into().map_err(CronError::invalid_job_spec)?,
-        })
-    }
-}
-
 impl From<Job> for JobDetails {
     fn from(job: Job) -> Self {
         Self {
@@ -682,17 +634,6 @@ impl From<&Job> for JobDetails {
             delivery: (&job.delivery).into(),
             message: (&job.message).into(),
         }
-    }
-}
-
-impl TryFrom<MessageEnvelope> for JobMessage {
-    type Error = JobSpecError;
-
-    fn try_from(value: MessageEnvelope) -> Result<Self, Self::Error> {
-        Ok(Self {
-            content: value.content,
-            headers: value.headers.try_into()?,
-        })
     }
 }
 
@@ -821,30 +762,6 @@ mod tests {
         let decoded: Snapshot<Job> = serde_json::from_str(&json).unwrap();
 
         assert_eq!(decoded, snapshot);
-    }
-
-    #[test]
-    fn job_details_round_trip_through_domain_conversion() {
-        let details = JobDetails {
-            status: JobEventStatus::Enabled,
-            schedule: JobEventSchedule::Every { every_sec: 30 },
-            delivery: JobEventDelivery::NatsEvent {
-                route: "agent.run".to_string(),
-                ttl_sec: Some(15),
-                source: Some(JobEventSamplingSource::LatestFromSubject {
-                    subject: "jobs.latest".to_string(),
-                }),
-            },
-            message: MessageEnvelope {
-                content: MessageContent::from_static(r#"{"kind":"heartbeat"}"#),
-                headers: MessageHeaders::new([("x-kind", "heartbeat")]).unwrap(),
-            },
-        };
-
-        let job = details.clone().try_into_job(job_id("heartbeat")).unwrap();
-
-        assert_eq!(job.id.as_str(), "heartbeat");
-        assert_eq!(JobDetails::from(&job), details);
     }
 
     #[test]
@@ -982,27 +899,6 @@ mod tests {
         .unwrap_err();
 
         assert!(error.to_string().contains("invalid value"));
-    }
-
-    #[test]
-    fn invalid_event_delivery_is_rejected_when_hydrating_domain_spec() {
-        let error = JobDetails {
-            status: JobEventStatus::Enabled,
-            schedule: JobEventSchedule::Every { every_sec: 30 },
-            delivery: JobEventDelivery::NatsEvent {
-                route: "agent.run".to_string(),
-                ttl_sec: Some(0),
-                source: None,
-            },
-            message: MessageEnvelope {
-                content: MessageContent::from_static(r#"{"kind":"heartbeat"}"#),
-                headers: MessageHeaders::default(),
-            },
-        }
-        .try_into_job(job_id("heartbeat"))
-        .unwrap_err();
-
-        assert!(error.to_string().contains("ttl_sec"));
     }
 
     #[test]

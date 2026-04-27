@@ -85,7 +85,10 @@ mod tests {
 
     use super::*;
     use crate::commands::domain::{Delivery, JobHeaders, JobMessage, JobStatus, MessageContent, Schedule};
-    use crate::{CronJob, GetJobCommand, mocks::MockCronStore};
+    use crate::{
+        CronJob, GetJobCommand, JobEventDelivery, JobEventSchedule, JobEventStatus,
+        MessageContent as ReadMessageContent, MessageEnvelope, MessageHeaders, mocks::MockCronStore,
+    };
 
     fn job_id(id: &str) -> JobId {
         JobId::parse(id).unwrap()
@@ -105,7 +108,20 @@ mod tests {
     }
 
     fn expected_job(id: &str) -> CronJob {
-        CronJob::try_from((id.to_string(), v1::JobDetails::from(&job(id)))).unwrap()
+        CronJob {
+            id: id.to_string(),
+            status: JobEventStatus::Enabled,
+            schedule: JobEventSchedule::Every { every_sec: 30 },
+            delivery: JobEventDelivery::NatsEvent {
+                route: "agent.run".to_string(),
+                ttl_sec: None,
+                source: None,
+            },
+            message: MessageEnvelope {
+                content: ReadMessageContent::from_static(r#"{"kind":"heartbeat"}"#),
+                headers: MessageHeaders::default(),
+            },
+        }
     }
 
     fn added(id: &str) -> v1::JobEvent {
