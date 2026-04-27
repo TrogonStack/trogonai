@@ -14,7 +14,7 @@ panic = "deny"
 unwrap_used = "deny"
 
 [dependencies]
-async-nats = { workspace = true, features = ["jetstream", "kv"] }
+async-nats = { workspace = true, features = ["jetstream", "kv", "server_2_12"] }
 chrono = { version = "0.4", features = ["serde"] }
 futures = { workspace = true }
 serde = { workspace = true }
@@ -24,4 +24,5 @@ trogon-std = { path = "../trogon-std", features = ["uuid"] }
 uuid = { workspace = true }
 
 [dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 trybuild = "1"

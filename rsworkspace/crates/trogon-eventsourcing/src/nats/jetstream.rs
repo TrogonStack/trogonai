@@ -236,16 +236,18 @@ impl<Resolver, Projector> JetStreamStore<Resolver, Projector> {
             .map_err(JetStreamStoreError::ResolveSubject)?;
         let current_version = subject_state.current_version;
         let expected_last_subject_sequence = match expected_state {
-            StreamState::Any => current_version.unwrap_or(0),
+            StreamState::Any => None,
             StreamState::StreamExists => {
-                current_version.ok_or_else(|| JetStreamStoreError::OptimisticConcurrencyConflict {
-                    stream_id: stream_id.to_string(),
-                    expected: StreamState::StreamExists,
-                    current_version,
-                })?
+                Some(
+                    current_version.ok_or_else(|| JetStreamStoreError::OptimisticConcurrencyConflict {
+                        stream_id: stream_id.to_string(),
+                        expected: StreamState::StreamExists,
+                        current_version,
+                    })?,
+                )
             }
-            StreamState::NoStream => 0,
-            StreamState::StreamRevision(version) => version,
+            StreamState::NoStream => Some(0),
+            StreamState::StreamRevision(version) => Some(version),
         };
 
         append_stream(

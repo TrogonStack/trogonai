@@ -71,7 +71,7 @@ impl std::error::Error for StreamStoreError {
 pub async fn append_stream<J>(
     js: &J,
     subject: String,
-    expected_last_subject_sequence: u64,
+    expected_last_subject_sequence: Option<u64>,
     events: &NonEmpty<EventData>,
 ) -> Result<(), StreamStoreError>
 where
@@ -83,7 +83,7 @@ where
 async fn append_stream_with_uuid_generator<J, N>(
     js: &J,
     subject: String,
-    expected_last_subject_sequence: u64,
+    expected_last_subject_sequence: Option<u64>,
     events: &NonEmpty<EventData>,
     now_v7: &N,
 ) -> Result<(), StreamStoreError>
@@ -106,7 +106,7 @@ where
     }
 
     let batch_id = now_v7.now_v7().to_string();
-    let mut ack_futures = Vec::with_capacity(events.len());
+    let mut batch_ack = None;
 
     for (index, event) in events.iter().enumerate() {
         let publish = build_publish_message(
@@ -122,21 +122,28 @@ where
             .publish_message(publish.outbound_message(subject.clone()))
             .await
             .map_err(|source| StreamStoreError::publish_source("failed to publish stream event", source))?;
-        ack_futures.push(ack);
+        if index + 1 == events.len() {
+            batch_ack = Some(ack);
+        }
     }
 
-    for ack in ack_futures {
-        match ack.into_future().await {
-            Ok(PublishAck { .. }) => {}
-            Err(error) if error.kind() == PublishErrorKind::WrongLastSequence => {
-                return Err(StreamStoreError::WrongExpectedVersion);
-            }
-            Err(error) => {
-                return Err(StreamStoreError::publish_source(
-                    "failed to acknowledge stream event batch",
-                    error,
-                ));
-            }
+    let Some(batch_ack) = batch_ack else {
+        return Err(StreamStoreError::publish_source(
+            "failed to publish stream event batch",
+            std::io::Error::other("batch commit ack was not created"),
+        ));
+    };
+
+    match batch_ack.into_future().await {
+        Ok(PublishAck { .. }) => {}
+        Err(error) if error.kind() == PublishErrorKind::WrongLastSequence => {
+            return Err(StreamStoreError::WrongExpectedVersion);
+        }
+        Err(error) => {
+            return Err(StreamStoreError::publish_source(
+                "failed to acknowledge stream event batch commit",
+                error,
+            ));
         }
     }
 
@@ -146,7 +153,7 @@ where
 fn build_publish_message(
     event: &EventData,
     payload: Vec<u8>,
-    expected_last_subject_sequence: u64,
+    expected_last_subject_sequence: Option<u64>,
     batch_id: &str,
     index: usize,
     event_count: usize,
@@ -154,10 +161,12 @@ fn build_publish_message(
     let mut publish = PublishMessage::build()
         .payload(payload.into())
         .message_id(event.event_id.to_string())
-        .expected_last_subject_sequence(expected_last_subject_sequence + index as u64)
         .header(TROGON_EVENT_TYPE, event.event_type.as_str())
         .header(NATS_BATCH_ID, batch_id)
         .header(NATS_BATCH_SEQUENCE, (index + 1).to_string());
+    if let (0, Some(expected_last_subject_sequence)) = (index, expected_last_subject_sequence) {
+        publish = publish.expected_last_subject_sequence(expected_last_subject_sequence);
+    }
     if index + 1 == event_count {
         publish = publish.header(NATS_BATCH_COMMIT, "1");
     }
@@ -272,12 +281,12 @@ fn required_header_str<'a>(
 
 #[cfg(test)]
 mod tests {
-    use async_nats::header::NATS_MESSAGE_ID;
+    use async_nats::header::{NATS_EXPECTED_LAST_SUBJECT_SEQUENCE, NATS_MESSAGE_ID};
     use uuid::Uuid;
 
     use crate::{EventData, EventId};
 
-    use super::{TROGON_EVENT_TYPE, build_publish_message};
+    use super::{NATS_BATCH_COMMIT, TROGON_EVENT_TYPE, build_publish_message};
 
     #[test]
     fn build_publish_message_sets_trogon_event_type_header() {
@@ -289,8 +298,8 @@ mod tests {
             metadata: None,
         };
 
-        let message =
-            build_publish_message(&event, Vec::new(), 0, "batch-1", 0, 1).outbound_message("cron.jobs.events.backup");
+        let message = build_publish_message(&event, Vec::new(), Some(0), "batch-1", 0, 1)
+            .outbound_message("cron.jobs.events.backup");
         let headers = message.headers.unwrap_or_default();
 
         assert_eq!(
@@ -300,6 +309,64 @@ mod tests {
         assert_eq!(
             headers.get(NATS_MESSAGE_ID).map(|value| value.as_str()),
             Some("00000000-0000-0000-0000-000000000001")
+        );
+    }
+
+    #[test]
+    fn build_publish_message_sets_atomic_batch_occ_on_first_message_only() {
+        let event = EventData {
+            event_id: EventId::from(Uuid::from_u128(1)),
+            event_type: "trogon.cron.jobs.v1.JobAdded".to_string(),
+            stream_id: "backup".to_string(),
+            payload: Vec::new(),
+            metadata: None,
+        };
+
+        let first = build_publish_message(&event, Vec::new(), Some(8), "batch-1", 0, 2)
+            .outbound_message("cron.jobs.events.backup")
+            .headers
+            .unwrap_or_default();
+        let second = build_publish_message(&event, Vec::new(), Some(8), "batch-1", 1, 2)
+            .outbound_message("cron.jobs.events.backup")
+            .headers
+            .unwrap_or_default();
+
+        assert_eq!(
+            first
+                .get(NATS_EXPECTED_LAST_SUBJECT_SEQUENCE)
+                .map(|value| value.as_str()),
+            Some("8")
+        );
+        assert_eq!(
+            second
+                .get(NATS_EXPECTED_LAST_SUBJECT_SEQUENCE)
+                .map(|value| value.as_str()),
+            None
+        );
+        assert_eq!(first.get(NATS_BATCH_COMMIT).map(|value| value.as_str()), None);
+        assert_eq!(second.get(NATS_BATCH_COMMIT).map(|value| value.as_str()), Some("1"));
+    }
+
+    #[test]
+    fn build_publish_message_omits_occ_header_without_expected_sequence() {
+        let event = EventData {
+            event_id: EventId::from(Uuid::from_u128(1)),
+            event_type: "trogon.cron.jobs.v1.JobAdded".to_string(),
+            stream_id: "backup".to_string(),
+            payload: Vec::new(),
+            metadata: None,
+        };
+
+        let headers = build_publish_message(&event, Vec::new(), None, "batch-1", 0, 1)
+            .outbound_message("cron.jobs.events.backup")
+            .headers
+            .unwrap_or_default();
+
+        assert_eq!(
+            headers
+                .get(NATS_EXPECTED_LAST_SUBJECT_SEQUENCE)
+                .map(|value| value.as_str()),
+            None
         );
     }
 
