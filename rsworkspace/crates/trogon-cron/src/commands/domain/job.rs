@@ -908,4 +908,139 @@ mod tests {
         assert!(!JobStatus::Disabled.is_enabled());
         assert_eq!(JobStatus::Disabled.as_str(), "disabled");
     }
+
+    mod proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        const RESERVED_HEADER_NAMES: [&str; 5] = [
+            "Nats-Schedule",
+            "Nats-Schedule-Source",
+            "Nats-Schedule-Target",
+            "Nats-Schedule-Time-Zone",
+            "Nats-Schedule-TTL",
+        ];
+
+        proptest! {
+            #[test]
+            fn every_seconds_accepts_any_positive_and_round_trips(n in 1u64..) {
+                let every = EverySeconds::new(n).unwrap();
+                prop_assert_eq!(every.get(), n);
+            }
+
+            #[test]
+            fn ttl_seconds_accepts_any_positive_and_round_trips(n in 1u64..) {
+                let ttl = TtlSeconds::new(n).unwrap();
+                prop_assert_eq!(ttl.get(), n);
+            }
+
+            #[test]
+            fn delivery_route_accepts_any_well_formed_dotted_token(
+                s in "[a-z][a-z0-9_-]{0,15}(\\.[a-z][a-z0-9_-]{0,15}){0,5}",
+            ) {
+                let route = DeliveryRoute::new(&s).unwrap();
+                prop_assert_eq!(route.as_str(), s.as_str());
+            }
+
+            #[test]
+            fn delivery_route_rejects_any_string_with_wildcard_or_whitespace(
+                prefix in "[a-z]{1,8}",
+                bad in prop_oneof![Just('*'), Just('>'), Just(' '), Just('\t'), Just('\n')],
+                suffix in "[a-z]{0,8}",
+            ) {
+                let s = format!("{prefix}{bad}{suffix}");
+                prop_assert!(DeliveryRoute::new(&s).is_err());
+            }
+
+            #[test]
+            fn delivery_route_rejects_dot_boundary_violations(
+                core in "[a-z]+(\\.[a-z]+){0,3}",
+                shape in 0u8..3,
+            ) {
+                let s = match shape {
+                    0 => format!(".{core}"),
+                    1 => format!("{core}."),
+                    _ => format!("{core}..tail"),
+                };
+                prop_assert!(DeliveryRoute::new(&s).is_err());
+            }
+
+            #[test]
+            fn sampling_subject_accepts_any_well_formed_dotted_token(
+                s in "[a-z][a-z0-9_-]{0,15}(\\.[a-z][a-z0-9_-]{0,15}){0,5}",
+            ) {
+                let subject = SamplingSubject::new(&s).unwrap();
+                prop_assert_eq!(subject.as_str(), s.as_str());
+            }
+
+            #[test]
+            fn sampling_subject_rejects_any_string_with_wildcard(
+                prefix in "[a-z]{1,8}",
+                wildcard in prop_oneof![Just('*'), Just('>')],
+                suffix in "[a-z]{0,8}",
+            ) {
+                let s = format!("{prefix}{wildcard}{suffix}");
+                prop_assert!(SamplingSubject::new(&s).is_err());
+            }
+
+            #[test]
+            fn schedule_timezone_accepts_any_non_whitespace_non_control_string(
+                s in "[A-Za-z][A-Za-z0-9/_+-]{0,31}",
+            ) {
+                let tz = ScheduleTimezone::new(&s).unwrap();
+                prop_assert_eq!(tz.as_str(), s.as_str());
+            }
+
+            #[test]
+            fn schedule_timezone_rejects_any_string_containing_whitespace(
+                prefix in "[A-Za-z]{1,8}",
+                ws in prop_oneof![Just(' '), Just('\t'), Just('\n')],
+                suffix in "[A-Za-z]{0,8}",
+            ) {
+                let s = format!("{prefix}{ws}{suffix}");
+                prop_assert!(ScheduleTimezone::new(&s).is_err());
+            }
+
+            #[test]
+            fn reserved_scheduler_headers_are_rejected_in_any_case(
+                name_template in proptest::sample::select(&RESERVED_HEADER_NAMES[..]),
+                upper_mask in any::<u64>(),
+                value in "[ -~]{0,16}",
+            ) {
+                let name: String = name_template
+                    .chars()
+                    .enumerate()
+                    .map(|(i, ch)| {
+                        if (upper_mask >> (i % 64)) & 1 == 1 {
+                            ch.to_ascii_uppercase()
+                        } else {
+                            ch.to_ascii_lowercase()
+                        }
+                    })
+                    .collect();
+
+                let result = JobHeaders::new([(name, value)]);
+                let is_reserved_error = matches!(result, Err(JobSpecError::ReservedHeaderName { .. }));
+                prop_assert!(is_reserved_error);
+            }
+
+            #[test]
+            fn non_reserved_headers_pass_the_reserved_check(
+                name in "x-[a-z]{1,12}",
+                value in "[ -~]{0,16}",
+            ) {
+                let headers = JobHeaders::new([(name, value)]).unwrap();
+                prop_assert!(!headers.is_empty());
+            }
+
+            #[test]
+            fn schedule_every_constructor_matches_value_object(n in 1u64..) {
+                let schedule = Schedule::every(n).unwrap();
+                match schedule {
+                    Schedule::Every { every_sec } => prop_assert_eq!(every_sec.get(), n),
+                    other => prop_assert!(false, "expected Every, got {other:?}"),
+                }
+            }
+        }
+    }
 }
