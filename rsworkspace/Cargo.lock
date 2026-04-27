@@ -3132,6 +3132,7 @@ dependencies = [
  "cron",
  "futures",
  "opentelemetry",
+ "protobuf",
  "serde",
  "serde_json",
  "tempfile",
