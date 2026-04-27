@@ -20,6 +20,9 @@ pub struct Proposal {
     pub service:        String,
     /// Human-readable reason provided by the agent.
     pub message:        String,
+    /// ISO-8601 timestamp from the originating agent (preserved as-is).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requested_at:   Option<String>,
     /// Current lifecycle state.
     pub status:         ProposalStatus,
 }
@@ -42,6 +45,9 @@ pub struct CreateRequest {
     pub credential_key: String,
     pub service:        String,
     pub message:        String,
+    /// ISO-8601 timestamp supplied by the agent (optional — ignored if absent).
+    #[serde(default)]
+    pub requested_at:   Option<String>,
 }
 
 /// Published by a human approver to `vault.proposals.{vault}.approve`.

@@ -30,6 +30,10 @@
 //!
 //! ## NATS KV mode (`VAULT_NATS_BUCKET` set, `INFISICAL_URL` absent)
 //!
+//! | Variable              | Default | Description                                        |
+//! |-----------------------|---------|----------------------------------------------------|
+//! | `VAULT_NATS_REPLICAS` | `1`     | JetStream KV replica count (use 3 for production)  |
+//!
 //! ## HashiCorp Vault mode (`VAULT_ADDR` set)
 //!
 //! ## MemoryVault mode (default — development only)
@@ -70,12 +74,19 @@ async fn build_hashicorp_vault(vault_addr: String) -> HashicorpVaultStore {
         .expect("Failed to connect to HashiCorp Vault")
 }
 
+fn nats_kv_replicas() -> usize {
+    std::env::var("VAULT_NATS_REPLICAS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1)
+}
+
 async fn build_nats_kv_vault(
     jetstream:   &async_nats::jetstream::Context,
     bucket_name: &str,
     audit:       Arc<AuditPublisher>,
 ) -> NatsKvVault {
-    let kv = ensure_vault_bucket(jetstream, bucket_name, 1)
+    let kv = ensure_vault_bucket(jetstream, bucket_name, nats_kv_replicas())
         .await
         .expect("Failed to ensure vault KV bucket");
     let crypto = Arc::new(

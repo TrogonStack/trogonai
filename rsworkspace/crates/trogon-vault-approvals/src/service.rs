@@ -200,6 +200,7 @@ where
             credential_key: req.credential_key,
             service:        req.service,
             message:        req.message,
+            requested_at:   req.requested_at,
             status:         ProposalStatus::Pending,
         };
 

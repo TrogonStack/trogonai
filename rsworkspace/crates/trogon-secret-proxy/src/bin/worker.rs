@@ -10,6 +10,7 @@
 //! | `NATS_URL`                | localhost:4222   | NATS server address(es)                        |
 //! | `PROXY_PREFIX`            | `trogon`         | NATS subject prefix                            |
 //! | `WORKER_CONSUMER_NAME`    | `proxy-workers`  | Durable JetStream consumer name                |
+//! | `VAULT_ADMIN_NAME`        | —                | Named vault admin (omit for flat subjects)     |
 //! | `RUST_LOG`                | `info`           | Log filter (tracing-subscriber)                |
 //!
 //! # Vault backend selection (in priority order)
@@ -35,6 +36,10 @@
 //! ## NATS KV mode (`VAULT_NATS_BUCKET` set, `INFISICAL_URL` absent)
 //!
 //! Same `VAULT_*` variables as DualWrite mode except the Infisical vars.
+//!
+//! | Variable              | Default | Description                                        |
+//! |-----------------------|---------|----------------------------------------------------|
+//! | `VAULT_NATS_REPLICAS` | `1`     | JetStream KV replica count (use 3 for production)  |
 //!
 //! ## HashiCorp Vault mode (`VAULT_ADDR` set)
 //!
@@ -82,11 +87,12 @@ async fn run_all<V: VaultStore + 'static>(
     V::Error: std::fmt::Display,
 {
     tokio::spawn({
-        let nats = nats.clone();
-        let vault = Arc::clone(&vault);
-        let prefix = prefix.to_string();
+        let nats       = nats.clone();
+        let vault      = Arc::clone(&vault);
+        let prefix     = prefix.to_string();
+        let vault_name = std::env::var("VAULT_ADMIN_NAME").ok();
         async move {
-            vault_admin::run(nats, vault, &prefix, None)
+            vault_admin::run(nats, vault, &prefix, vault_name.as_deref())
                 .await
                 .expect("Vault admin listener exited with error");
         }
@@ -124,12 +130,19 @@ async fn build_hashicorp_vault(vault_addr: String) -> HashicorpVaultStore {
         .expect("Failed to connect to HashiCorp Vault")
 }
 
+fn nats_kv_replicas() -> usize {
+    std::env::var("VAULT_NATS_REPLICAS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1)
+}
+
 async fn build_nats_kv_vault(
     jetstream:   &async_nats::jetstream::Context,
     bucket_name: &str,
     audit:       Arc<AuditPublisher>,
 ) -> NatsKvVault {
-    let kv = ensure_vault_bucket(jetstream, bucket_name, 1)
+    let kv = ensure_vault_bucket(jetstream, bucket_name, nats_kv_replicas())
         .await
         .expect("Failed to ensure vault KV bucket");
     let crypto = Arc::new(

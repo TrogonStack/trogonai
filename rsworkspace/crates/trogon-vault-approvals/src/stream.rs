@@ -9,10 +9,15 @@ use crate::subjects::{PROPOSALS_STREAM, stream_subjects};
 
 /// Create or open the `VAULT_PROPOSALS` stream.
 ///
-/// Captures `vault.proposals.*.create`, `vault.proposals.*.approve`, and
-/// `vault.proposals.*.reject` with a 90-day retention window.
-/// Status subjects (`vault.proposals.*.status.*`) are intentionally excluded
-/// so that request-reply messages are not persisted in the stream.
+/// Captures `vault.proposals.*.create` (durable proposal records) and
+/// `vault.proposals.*.state.*` (approve/reject state transitions) with a
+/// 90-day retention window.
+///
+/// `vault.proposals.*.approve` and `vault.proposals.*.reject` are intentionally
+/// excluded — those subjects carry plaintext API keys and must never be
+/// persisted by JetStream (at-most-once, ephemeral core NATS only).
+/// Status request-reply subjects (`vault.proposals.*.status.*`) are also
+/// excluded so they are not persisted in the stream.
 ///
 /// Idempotent — safe to call multiple times.
 pub async fn ensure_proposals_stream(js: &jetstream::Context) -> Result<(), ApprovalError> {
