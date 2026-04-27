@@ -17,7 +17,7 @@ pub mod testing;
 pub use decision::{Act, Decide, Decision, NonEmpty, StateMachine, StreamCommand, decide};
 pub use execution::{
     CommandExecution, CommandFailure, CommandInfraError, CommandResult, CommandSnapshotPolicy, ExecutionResult,
-    FrequencySnapshot, NoSnapshot, SnapshotDecision, SnapshotPolicy, Snapshots, WithoutSnapshots,
+    FrequencySnapshot, NoSnapshot, SnapshotDecision, SnapshotPolicy, Snapshots, StateMachineCommand, WithoutSnapshots,
 };
 pub use nats::snapshot_store::{
     SnapshotStoreError, checkpoint_key, list_snapshots, load_snapshot, load_snapshot_map, maybe_advance_checkpoint,
@@ -37,8 +37,16 @@ pub trait EventCodec<T> {
     fn decode(&self, event_type: &str, stream_id: &str, payload: &[u8]) -> Result<T, Self::Error>;
 }
 
+pub trait EventEnvelopeCodec<T>: EventCodec<T> {
+    fn event_type(&self, value: &T) -> Result<&'static str, Self::Error>;
+
+    fn event_id(&self, _value: &T) -> Option<EventId> {
+        None
+    }
+}
+
 pub trait CanonicalEventCodec: Sized {
-    type Codec: EventCodec<Self>;
+    type Codec: EventEnvelopeCodec<Self>;
 
     fn canonical_codec() -> Self::Codec;
 }
@@ -58,6 +66,19 @@ where
 
     fn decode(&self, _event_type: &str, _stream_id: &str, payload: &[u8]) -> Result<T, Self::Error> {
         serde_json::from_slice(payload)
+    }
+}
+
+impl<T> EventEnvelopeCodec<T> for JsonEventCodec
+where
+    T: EventType + EventIdentity + Serialize + DeserializeOwned,
+{
+    fn event_type(&self, value: &T) -> Result<&'static str, Self::Error> {
+        Ok(value.event_type())
+    }
+
+    fn event_id(&self, value: &T) -> Option<EventId> {
+        value.event_id()
     }
 }
 
@@ -174,8 +195,7 @@ impl EventData {
 
     pub fn new_with_codec<E, C>(stream_id: impl AsRef<str>, codec: &C, event: E) -> Result<Self, C::Error>
     where
-        E: EventType + EventIdentity,
-        C: EventCodec<E>,
+        C: EventEnvelopeCodec<E>,
     {
         Self::new_with_codec_and_generator(stream_id, codec, &UuidV7Generator, event)
     }
@@ -186,7 +206,7 @@ impl EventData {
         event: E,
     ) -> serde_json::Result<Self>
     where
-        E: EventType + Serialize + DeserializeOwned,
+        E: EventType + EventIdentity + Serialize + DeserializeOwned,
     {
         Self::new_with_codec_and_event_id(stream_id, &JsonEventCodec, event_id, event)
     }
@@ -198,12 +218,11 @@ impl EventData {
         event: E,
     ) -> Result<Self, C::Error>
     where
-        E: EventType,
-        C: EventCodec<E>,
+        C: EventEnvelopeCodec<E>,
     {
         Ok(Self {
             event_id: event_id.into(),
-            event_type: event.event_type().to_string(),
+            event_type: codec.event_type(&event)?.to_string(),
             stream_id: stream_id.as_ref().to_string(),
             payload: codec.encode(&event)?,
             metadata: None,
@@ -217,11 +236,10 @@ impl EventData {
         event: E,
     ) -> Result<Self, C::Error>
     where
-        E: EventType + EventIdentity,
-        C: EventCodec<E>,
+        C: EventEnvelopeCodec<E>,
         N: NowV7,
     {
-        let event_id = event.event_id().unwrap_or_else(|| EventId::now_v7(now_v7));
+        let event_id = codec.event_id(&event).unwrap_or_else(|| EventId::now_v7(now_v7));
         Self::new_with_codec_and_event_id(stream_id, codec, event_id, event)
     }
 
@@ -251,8 +269,7 @@ impl EventData {
         metadata: Option<M>,
     ) -> Result<Self, CodecError<EC::Error, MC::Error>>
     where
-        E: EventType + EventIdentity,
-        EC: EventCodec<E>,
+        EC: EventEnvelopeCodec<E>,
         MC: EventCodec<M>,
     {
         Self::with_codecs_and_generator(
@@ -272,7 +289,7 @@ impl EventData {
         metadata: Option<M>,
     ) -> serde_json::Result<Self>
     where
-        E: EventType + Serialize + DeserializeOwned,
+        E: EventType + EventIdentity + Serialize + DeserializeOwned,
         M: Serialize + DeserializeOwned,
     {
         Self::with_codecs_and_event_id(stream_id, &JsonEventCodec, &JsonEventCodec, event_id, event, metadata).map_err(
@@ -291,13 +308,12 @@ impl EventData {
         metadata: Option<M>,
     ) -> Result<Self, CodecError<EC::Error, MC::Error>>
     where
-        E: EventType,
-        EC: EventCodec<E>,
+        EC: EventEnvelopeCodec<E>,
         MC: EventCodec<M>,
     {
         Ok(Self {
             event_id: event_id.into(),
-            event_type: event.event_type().to_string(),
+            event_type: event_codec.event_type(&event).map_err(CodecError::Data)?.to_string(),
             stream_id: stream_id.as_ref().to_string(),
             payload: event_codec.encode(&event).map_err(CodecError::Data)?,
             metadata: metadata
@@ -316,12 +332,11 @@ impl EventData {
         metadata: Option<M>,
     ) -> Result<Self, CodecError<EC::Error, MC::Error>>
     where
-        E: EventType + EventIdentity,
-        EC: EventCodec<E>,
+        EC: EventEnvelopeCodec<E>,
         MC: EventCodec<M>,
         N: NowV7,
     {
-        let event_id = event.event_id().unwrap_or_else(|| EventId::now_v7(now_v7));
+        let event_id = event_codec.event_id(&event).unwrap_or_else(|| EventId::now_v7(now_v7));
         Self::with_codecs_and_event_id(stream_id, event_codec, metadata_codec, event_id, event, metadata)
     }
 

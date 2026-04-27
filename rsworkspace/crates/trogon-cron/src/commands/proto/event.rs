@@ -1,149 +1,15 @@
 use chrono::{DateTime, Utc};
-use protobuf::{Parse as _, Serialize as _};
 use trogon_cron_jobs_proto::v1;
-use trogon_eventsourcing::{CanonicalEventCodec, EventCodec, EventData, EventIdentity, EventType, RecordedEvent};
 
-use crate::commands::event::{
-    JobAdded, JobDetails, JobEvent, JobEventDelivery, JobEventSamplingSource, JobEventSchedule, JobEventStatus,
-    JobPaused, JobRemoved, JobResumed, MessageContent, MessageEnvelope, MessageHeaders, MessageHeadersError,
+use crate::commands::domain::{
+    Job, JobDetails, JobEventDelivery, JobEventSamplingSource, JobEventSchedule, JobEventStatus, MessageContent,
+    MessageEnvelope, MessageHeaders, MessageHeadersError,
 };
 
-pub use trogon_cron_jobs_proto::v1 as contract_v1;
-
-pub type JobEventData = EventData;
-pub type RecordedJobEvent = RecordedEvent;
-
-pub const JOB_ADDED_EVENT_TYPE: &str = "trogon.cron.jobs.v1.JobAdded";
-pub const JOB_PAUSED_EVENT_TYPE: &str = "trogon.cron.jobs.v1.JobPaused";
-pub const JOB_RESUMED_EVENT_TYPE: &str = "trogon.cron.jobs.v1.JobResumed";
-pub const JOB_REMOVED_EVENT_TYPE: &str = "trogon.cron.jobs.v1.JobRemoved";
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct JobEventCodec;
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct JobContractEventCodec;
-
-#[derive(Debug)]
-pub enum JobEventCodecError {
-    Decode(protobuf::ParseError),
-    Encode(protobuf::SerializeError),
-    UnknownEventType { value: String },
-    Proto(JobEventProtoError),
-}
-
-pub type JobContractEventCodecError = JobEventCodecError;
-
-impl std::fmt::Display for JobEventCodecError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Decode(source) => write!(f, "{source}"),
-            Self::Encode(source) => write!(f, "{source}"),
-            Self::UnknownEventType { value } => write!(f, "unknown protobuf job event type '{value}'"),
-            Self::Proto(source) => write!(f, "{source}"),
-        }
-    }
-}
-
-impl std::error::Error for JobEventCodecError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Decode(source) => Some(source),
-            Self::Encode(source) => Some(source),
-            Self::UnknownEventType { .. } => None,
-            Self::Proto(source) => Some(source),
-        }
-    }
-}
-
-impl EventCodec<v1::JobEvent> for JobContractEventCodec {
-    type Error = JobContractEventCodecError;
-
-    fn encode(&self, value: &v1::JobEvent) -> Result<Vec<u8>, Self::Error> {
-        encode_contract_event(value)
-    }
-
-    fn decode(&self, event_type: &str, _stream_id: &str, payload: &[u8]) -> Result<v1::JobEvent, Self::Error> {
-        decode_contract_event(event_type, payload)
-    }
-}
-
-impl EventCodec<JobEvent> for JobEventCodec {
-    type Error = JobEventCodecError;
-
-    fn encode(&self, value: &JobEvent) -> Result<Vec<u8>, Self::Error> {
-        encode_domain_event(value).map_err(JobEventCodecError::Encode)
-    }
-
-    fn decode(&self, event_type: &str, stream_id: &str, payload: &[u8]) -> Result<JobEvent, Self::Error> {
-        let event = decode_contract_event(event_type, payload)?;
-        domain_event_from_contract(stream_id, event).map_err(JobEventCodecError::Proto)
-    }
-}
-
-impl EventType for JobEvent {
-    fn event_type(&self) -> &'static str {
-        match self {
-            Self::JobAdded(..) => JOB_ADDED_EVENT_TYPE,
-            Self::JobPaused(..) => JOB_PAUSED_EVENT_TYPE,
-            Self::JobResumed(..) => JOB_RESUMED_EVENT_TYPE,
-            Self::JobRemoved(..) => JOB_REMOVED_EVENT_TYPE,
-        }
-    }
-}
-
-impl EventIdentity for JobEvent {}
-
-impl CanonicalEventCodec for JobEvent {
-    type Codec = JobEventCodec;
-
-    fn canonical_codec() -> Self::Codec {
-        JobEventCodec
-    }
-}
-
-fn encode_contract_event(event: &v1::JobEvent) -> Result<Vec<u8>, JobEventCodecError> {
-    match event.event() {
-        v1::job_event::EventOneof::JobAdded(inner) => inner.serialize().map_err(JobEventCodecError::Encode),
-        v1::job_event::EventOneof::JobPaused(inner) => inner.serialize().map_err(JobEventCodecError::Encode),
-        v1::job_event::EventOneof::JobResumed(inner) => inner.serialize().map_err(JobEventCodecError::Encode),
-        v1::job_event::EventOneof::JobRemoved(inner) => inner.serialize().map_err(JobEventCodecError::Encode),
-        v1::job_event::EventOneof::not_set(_) | _ => Err(JobEventCodecError::Proto(JobEventProtoError::MissingEvent)),
-    }
-}
-
-fn encode_domain_event(event: &JobEvent) -> Result<Vec<u8>, protobuf::SerializeError> {
-    match event {
-        JobEvent::JobAdded(inner) => v1::JobAdded::from(inner).serialize(),
-        JobEvent::JobPaused(inner) => v1::JobPaused::from(inner).serialize(),
-        JobEvent::JobResumed(inner) => v1::JobResumed::from(inner).serialize(),
-        JobEvent::JobRemoved(inner) => v1::JobRemoved::from(inner).serialize(),
-    }
-}
-
-fn decode_contract_event(event_type: &str, payload: &[u8]) -> Result<v1::JobEvent, JobEventCodecError> {
-    let mut event = v1::JobEvent::new();
-    match event_type {
-        JOB_ADDED_EVENT_TYPE => {
-            event.set_job_added(v1::JobAdded::parse(payload).map_err(JobEventCodecError::Decode)?);
-        }
-        JOB_PAUSED_EVENT_TYPE => {
-            event.set_job_paused(v1::JobPaused::parse(payload).map_err(JobEventCodecError::Decode)?);
-        }
-        JOB_RESUMED_EVENT_TYPE => {
-            event.set_job_resumed(v1::JobResumed::parse(payload).map_err(JobEventCodecError::Decode)?);
-        }
-        JOB_REMOVED_EVENT_TYPE => {
-            event.set_job_removed(v1::JobRemoved::parse(payload).map_err(JobEventCodecError::Decode)?);
-        }
-        value => {
-            return Err(JobEventCodecError::UnknownEventType {
-                value: value.to_string(),
-            });
-        }
-    }
-    Ok(event)
-}
+pub use trogon_cron_jobs_proto::{
+    JOB_ADDED_EVENT_TYPE, JOB_PAUSED_EVENT_TYPE, JOB_REMOVED_EVENT_TYPE, JOB_RESUMED_EVENT_TYPE, JobEventCodec,
+    JobEventCodecError,
+};
 
 #[derive(Debug)]
 pub enum JobEventProtoError {
@@ -198,80 +64,6 @@ impl std::error::Error for JobEventProtoError {
     }
 }
 
-impl From<JobEvent> for v1::JobEvent {
-    fn from(value: JobEvent) -> Self {
-        Self::from(&value)
-    }
-}
-
-impl From<&JobEvent> for v1::JobEvent {
-    fn from(value: &JobEvent) -> Self {
-        let mut event = v1::JobEvent::new();
-        match value {
-            JobEvent::JobAdded(inner) => event.set_job_added(v1::JobAdded::from(inner)),
-            JobEvent::JobPaused(inner) => event.set_job_paused(v1::JobPaused::from(inner)),
-            JobEvent::JobResumed(inner) => event.set_job_resumed(v1::JobResumed::from(inner)),
-            JobEvent::JobRemoved(inner) => event.set_job_removed(v1::JobRemoved::from(inner)),
-        }
-        event
-    }
-}
-
-fn domain_event_from_contract(stream_id: &str, value: v1::JobEvent) -> Result<JobEvent, JobEventProtoError> {
-    match value.event() {
-        v1::job_event::EventOneof::JobAdded(inner) => Ok(JobEvent::JobAdded(job_added_from_contract(
-            stream_id,
-            inner.to_owned(),
-        )?)),
-        v1::job_event::EventOneof::JobPaused(_) => Ok(JobEvent::JobPaused(JobPaused {
-            id: stream_id.to_string(),
-        })),
-        v1::job_event::EventOneof::JobResumed(_) => Ok(JobEvent::JobResumed(JobResumed {
-            id: stream_id.to_string(),
-        })),
-        v1::job_event::EventOneof::JobRemoved(_) => Ok(JobEvent::JobRemoved(JobRemoved {
-            id: stream_id.to_string(),
-        })),
-        v1::job_event::EventOneof::not_set(_) | _ => Err(JobEventProtoError::MissingEvent),
-    }
-}
-
-fn job_added_from_contract(stream_id: &str, value: v1::JobAdded) -> Result<JobAdded, JobEventProtoError> {
-    if !value.has_job() {
-        return Err(JobEventProtoError::MissingJobDetails);
-    }
-    Ok(JobAdded {
-        id: stream_id.to_string(),
-        job: value.job().to_owned().try_into()?,
-    })
-}
-
-impl From<&JobAdded> for v1::JobAdded {
-    fn from(value: &JobAdded) -> Self {
-        let mut event = v1::JobAdded::new();
-        event.set_job(v1::JobDetails::from(&value.job));
-        event
-    }
-}
-
-impl From<&JobPaused> for v1::JobPaused {
-    fn from(_value: &JobPaused) -> Self {
-        Self::new()
-    }
-}
-
-impl From<&JobResumed> for v1::JobResumed {
-    fn from(_value: &JobResumed) -> Self {
-        Self::new()
-    }
-}
-
-impl From<&JobRemoved> for v1::JobRemoved {
-    fn from(_value: &JobRemoved) -> Self {
-        Self::new()
-    }
-}
-
 impl From<&JobDetails> for v1::JobDetails {
     fn from(value: &JobDetails) -> Self {
         let mut job = v1::JobDetails::new();
@@ -280,6 +72,12 @@ impl From<&JobDetails> for v1::JobDetails {
         job.set_delivery(v1::JobDelivery::from(&value.delivery));
         job.set_message(v1::JobMessage::from(&value.message));
         job
+    }
+}
+
+impl From<&Job> for v1::JobDetails {
+    fn from(value: &Job) -> Self {
+        Self::from(&JobDetails::from(value))
     }
 }
 
@@ -476,17 +274,14 @@ impl TryFrom<v1::JobMessage> for MessageEnvelope {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use protobuf::Parse as _;
+    use trogon_eventsourcing::{EventCodec, EventData};
 
     #[test]
     fn event_data_and_recorded_event_helpers_work() {
-        let event = JobEventData::new_with_codec(
-            "cleanup",
-            &JobEventCodec,
-            JobEvent::JobRemoved(JobRemoved {
-                id: "cleanup".to_string(),
-            }),
-        )
-        .unwrap();
+        let mut removed = v1::JobEvent::new();
+        removed.set_job_removed(v1::JobRemoved::new());
+        let event = EventData::new_with_codec("cleanup", &JobEventCodec, removed.clone()).unwrap();
         assert_eq!(event.stream_id(), "cleanup");
         assert_eq!(event.event_type, JOB_REMOVED_EVENT_TYPE);
         assert!(v1::JobRemoved::parse(&event.payload).is_ok());
@@ -495,12 +290,7 @@ mod tests {
             "cron.events.jobs.cleanup"
         );
 
-        assert_eq!(
-            event.decode_data_with(&JobEventCodec).unwrap(),
-            JobEvent::JobRemoved(JobRemoved {
-                id: "cleanup".to_string()
-            })
-        );
+        assert_eq!(event.decode_data_with(&JobEventCodec).unwrap(), removed);
 
         let recorded = event.record(
             "cron.jobs.events.cleanup",
@@ -515,12 +305,9 @@ mod tests {
             recorded.subject_with_prefix("cron.events.jobs."),
             "cron.events.jobs.cleanup"
         );
-        assert_eq!(
-            recorded.decode_data_with(&JobEventCodec).unwrap(),
-            JobEvent::JobRemoved(JobRemoved {
-                id: "cleanup".to_string()
-            })
-        );
+        let mut expected = v1::JobEvent::new();
+        expected.set_job_removed(v1::JobRemoved::new());
+        assert_eq!(recorded.decode_data_with(&JobEventCodec).unwrap(), expected);
     }
 
     #[test]
@@ -535,39 +322,39 @@ mod tests {
 
     #[test]
     fn job_added_round_trips_through_contract() {
-        let event = JobEvent::JobAdded(JobAdded {
-            id: "backup".to_string(),
-            job: JobDetails {
-                status: JobEventStatus::Enabled,
-                schedule: JobEventSchedule::Cron {
-                    expr: "0 * * * * *".to_string(),
-                    timezone: Some("UTC".to_string()),
-                },
-                delivery: JobEventDelivery::NatsEvent {
-                    route: "ops.backup".to_string(),
-                    ttl_sec: Some(30),
-                    source: Some(JobEventSamplingSource::LatestFromSubject {
-                        subject: "events.backup".to_string(),
-                    }),
-                },
-                message: MessageEnvelope {
-                    content: MessageContent::from_static("hello"),
-                    headers: MessageHeaders::new([("x-kind", "backup")]).unwrap(),
-                },
+        let details = JobDetails {
+            status: JobEventStatus::Enabled,
+            schedule: JobEventSchedule::Cron {
+                expr: "0 * * * * *".to_string(),
+                timezone: Some("UTC".to_string()),
             },
-        });
+            delivery: JobEventDelivery::NatsEvent {
+                route: "ops.backup".to_string(),
+                ttl_sec: Some(30),
+                source: Some(JobEventSamplingSource::LatestFromSubject {
+                    subject: "events.backup".to_string(),
+                }),
+            },
+            message: MessageEnvelope {
+                content: MessageContent::from_static("hello"),
+                headers: MessageHeaders::new([("x-kind", "backup")]).unwrap(),
+            },
+        };
 
-        let proto = v1::JobEvent::from(&event);
-        let decoded = domain_event_from_contract("backup", proto).unwrap();
+        let mut inner = v1::JobAdded::new();
+        inner.set_job(v1::JobDetails::from(&details));
+        let mut event = v1::JobEvent::new();
+        event.set_job_added(inner);
         let encoded = JobEventCodec.encode(&event).unwrap();
+        let decoded = JobEventCodec.decode(JOB_ADDED_EVENT_TYPE, "backup", &encoded).unwrap();
 
         assert_eq!(decoded, event);
-        assert_eq!(
-            JobEventCodec.decode(JOB_ADDED_EVENT_TYPE, "backup", &encoded).unwrap(),
-            event
-        );
+        let v1::job_event::EventOneof::JobAdded(inner) = decoded.event() else {
+            panic!("decoded event was not job_added");
+        };
+        assert_eq!(JobDetails::try_from(inner.job().to_owned()).unwrap(), details);
         assert!(matches!(
-            JobContractEventCodec
+            JobEventCodec
                 .decode(JOB_ADDED_EVENT_TYPE, "backup", &encoded)
                 .unwrap()
                 .event(),
