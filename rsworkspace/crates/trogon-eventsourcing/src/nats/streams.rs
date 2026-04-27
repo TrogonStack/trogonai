@@ -1,9 +1,13 @@
-use async_nats::jetstream::{self, context, context::PublishErrorKind, message::PublishMessage, publish::PublishAck};
+use async_nats::{
+    HeaderMap, HeaderName,
+    header::NATS_MESSAGE_ID,
+    jetstream::{self, context, context::PublishErrorKind, message::PublishMessage, publish::PublishAck},
+};
 use chrono::{DateTime, Utc};
 use trogon_nats::jetstream::JetStreamPublishMessage;
 use trogon_std::{NowV7, UuidV7Generator};
 
-use crate::{EventData, NonEmpty, RecordedEvent};
+use crate::{EventData, EventId, NonEmpty, RecordedEvent};
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -17,7 +21,6 @@ pub enum StreamStoreError {
     Read { context: &'static str, source: BoxError },
     Publish { context: &'static str, source: BoxError },
     WrongExpectedVersion,
-    Serde(serde_json::Error),
 }
 
 impl StreamStoreError {
@@ -52,7 +55,6 @@ impl std::fmt::Display for StreamStoreError {
             Self::WrongExpectedVersion => {
                 write!(f, "stream publish error: wrong expected version")
             }
-            Self::Serde(source) => write!(f, "stream serialization error: {source}"),
         }
     }
 }
@@ -61,15 +63,8 @@ impl std::error::Error for StreamStoreError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Read { source, .. } | Self::Publish { source, .. } => Some(source.as_ref()),
-            Self::Serde(source) => Some(source),
             Self::WrongExpectedVersion => None,
         }
-    }
-}
-
-impl From<serde_json::Error> for StreamStoreError {
-    fn from(value: serde_json::Error) -> Self {
-        Self::Serde(value)
     }
 }
 
@@ -103,15 +98,20 @@ where
             std::io::Error::other("batch contains events across multiple streams"),
         ));
     }
+    if events.iter().any(|event| event.metadata.is_some()) {
+        return Err(StreamStoreError::publish_source(
+            "failed to publish stream event batch",
+            std::io::Error::other("event metadata is not supported by the JetStream stream store"),
+        ));
+    }
 
     let batch_id = now_v7.now_v7().to_string();
     let mut ack_futures = Vec::with_capacity(events.len());
 
     for (index, event) in events.iter().enumerate() {
-        let payload = serde_json::to_vec(event)?;
         let publish = build_publish_message(
             event,
-            payload,
+            event.payload.clone(),
             expected_last_subject_sequence,
             batch_id.as_str(),
             index,
@@ -189,7 +189,7 @@ pub async fn read_stream_range(
         let Some(message) = read_raw_message(stream, sequence).await? else {
             continue;
         };
-        events.push(record_message(message)?);
+        events.push(record_stream_message(message)?);
     }
 
     Ok(events)
@@ -213,7 +213,9 @@ async fn read_raw_message(
     }
 }
 
-fn record_message(message: async_nats::jetstream::message::StreamMessage) -> Result<RecordedEvent, StreamStoreError> {
+pub fn record_stream_message(
+    message: async_nats::jetstream::message::StreamMessage,
+) -> Result<RecordedEvent, StreamStoreError> {
     let recorded_at = DateTime::<Utc>::from_timestamp(message.time.unix_timestamp(), message.time.nanosecond())
         .ok_or_else(|| {
             StreamStoreError::read_source(
@@ -221,9 +223,51 @@ fn record_message(message: async_nats::jetstream::message::StreamMessage) -> Res
                 std::io::Error::other(message.subject.to_string()),
             )
         })?;
-    let event = EventData::decode(&message.payload)?;
 
-    Ok(event.record(message.subject.to_string(), None, Some(message.sequence), recorded_at))
+    let headers = &message.headers;
+    let event_id = required_header_name(headers, NATS_MESSAGE_ID, "Nats-Msg-Id")?
+        .parse::<EventId>()
+        .map_err(|source| StreamStoreError::read_source("failed to read stream message event id", source))?;
+    let event_type = required_header_str(headers, TROGON_EVENT_TYPE, TROGON_EVENT_TYPE)?.to_string();
+    let subject = message.subject.to_string();
+
+    Ok(RecordedEvent::new(
+        event_id,
+        event_type,
+        subject.clone(),
+        message.payload.to_vec(),
+        None,
+        subject,
+        None,
+        Some(message.sequence),
+        recorded_at,
+    ))
+}
+
+fn required_header_name<'a>(
+    headers: &'a HeaderMap,
+    name: HeaderName,
+    display_name: &'static str,
+) -> Result<&'a str, StreamStoreError> {
+    headers.get(name).map(|value| value.as_str()).ok_or_else(|| {
+        StreamStoreError::read_source(
+            "failed to read stream message event envelope",
+            std::io::Error::other(format!("stream message is missing {display_name} header")),
+        )
+    })
+}
+
+fn required_header_str<'a>(
+    headers: &'a HeaderMap,
+    name: &'static str,
+    display_name: &'static str,
+) -> Result<&'a str, StreamStoreError> {
+    headers.get(name).map(|value| value.as_str()).ok_or_else(|| {
+        StreamStoreError::read_source(
+            "failed to read stream message event envelope",
+            std::io::Error::other(format!("stream message is missing {display_name} header")),
+        )
+    })
 }
 
 #[cfg(test)]
@@ -241,7 +285,7 @@ mod tests {
             event_id: EventId::from(Uuid::from_u128(1)),
             event_type: "trogon.cron.jobs.v1.JobAdded".to_string(),
             stream_id: "backup".to_string(),
-            data: "{}".to_string(),
+            payload: Vec::new(),
             metadata: None,
         };
 
