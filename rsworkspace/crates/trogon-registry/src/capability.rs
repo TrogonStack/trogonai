@@ -51,3 +51,55 @@ impl AgentCapability {
             .any(|c| c.eq_ignore_ascii_case(capability))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn agent(caps: &[&str]) -> AgentCapability {
+        AgentCapability::new("TestActor", caps.iter().copied(), "actors.test.>")
+    }
+
+    #[test]
+    fn new_sets_defaults() {
+        let a = agent(&["code_review"]);
+        assert_eq!(a.agent_type, "TestActor");
+        assert_eq!(a.nats_subject, "actors.test.>");
+        assert_eq!(a.current_load, 0);
+        assert_eq!(a.metadata, serde_json::Value::Null);
+    }
+
+    #[test]
+    fn has_capability_exact_match() {
+        let a = agent(&["code_review", "security"]);
+        assert!(a.has_capability("code_review"));
+    }
+
+    #[test]
+    fn has_capability_case_insensitive() {
+        let a = agent(&["CodeReview"]);
+        assert!(a.has_capability("codereview"));
+        assert!(a.has_capability("CODEREVIEW"));
+        assert!(a.has_capability("CodeReview"));
+    }
+
+    #[test]
+    fn has_capability_absent_returns_false() {
+        let a = agent(&["code_review"]);
+        assert!(!a.has_capability("security_analysis"));
+    }
+
+    #[test]
+    fn has_capability_empty_capabilities_returns_false() {
+        let a = agent(&[]);
+        assert!(!a.has_capability("anything"));
+    }
+
+    #[test]
+    fn serde_round_trip() {
+        let original = agent(&["review", "deploy"]);
+        let json = serde_json::to_string(&original).unwrap();
+        let restored: AgentCapability = serde_json::from_str(&json).unwrap();
+        assert_eq!(original, restored);
+    }
+}
