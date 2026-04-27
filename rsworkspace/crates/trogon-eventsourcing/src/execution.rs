@@ -89,17 +89,9 @@ pub struct ExecutionResult<State, Event> {
     pub state: State,
 }
 
-pub trait StateMachineCommand: Decide {
-    type EvolveError;
-
-    fn initial_state() -> Self::State;
-
-    fn evolve_state(state: Self::State, event: Self::Event) -> Result<Self::State, Self::EvolveError>;
-}
-
 pub type CommandResult<C, InfraError> = Result<
     ExecutionResult<<C as Decide>::State, <C as Decide>::Event>,
-    CommandFailure<<C as Decide>::DecideError, <C as StateMachineCommand>::EvolveError, CommandInfraError<InfraError>>,
+    CommandFailure<<C as Decide>::DecideError, <C as Decide>::EvolveError, CommandInfraError<InfraError>>,
 >;
 
 #[derive(Debug)]
@@ -273,7 +265,7 @@ impl<'a, E, C, S, EC> CommandExecutionWithCodec<'a, E, C, S, EC> {
 
 impl<E, C, SErr> CommandExecution<'_, E, C, WithoutSnapshots>
 where
-    C: StateMachineCommand,
+    C: Decide,
     C::Event: Clone + CanonicalEventCodec,
     C::StreamId: AsRef<str>,
     E: StreamRead<C::StreamId, Error = SErr> + StreamAppend<C::StreamId, Error = SErr>,
@@ -292,7 +284,7 @@ where
 
 impl<E, C, EC, SErr> CommandExecutionWithCodec<'_, E, C, WithoutSnapshots, EC>
 where
-    C: StateMachineCommand,
+    C: Decide,
     C::Event: Clone,
     C::StreamId: AsRef<str>,
     E: StreamRead<C::StreamId, Error = SErr> + StreamAppend<C::StreamId, Error = SErr>,
@@ -320,7 +312,7 @@ where
                 .map_err(box_error)
                 .map_err(CommandInfraError::DecodeEvent)
                 .map_err(CommandFailure::Infra)?;
-            state = C::evolve_state(state, event).map_err(CommandFailure::Evolve)?;
+            state = C::evolve(state, event).map_err(CommandFailure::Evolve)?;
         }
 
         let Decision::Event(events) = C::decide(&state, self.command).map_err(CommandFailure::Decide)?;
@@ -337,7 +329,7 @@ where
             .map_err(CommandFailure::Infra)?;
 
         for event in events.iter().cloned() {
-            state = C::evolve_state(state, event).map_err(CommandFailure::Evolve)?;
+            state = C::evolve(state, event).map_err(CommandFailure::Evolve)?;
         }
 
         Ok(ExecutionResult {
@@ -350,7 +342,7 @@ where
 
 impl<E, S, C, P, SErr> CommandExecution<'_, E, C, Snapshots<'_, S, P>>
 where
-    C: StateMachineCommand,
+    C: Decide,
     C::State: Clone,
     C::Event: Clone + CanonicalEventCodec,
     C::StreamId: AsRef<str>,
@@ -372,7 +364,7 @@ where
 
 impl<E, S, C, P, SErr, EC> CommandExecutionWithCodec<'_, E, C, Snapshots<'_, S, P>, EC>
 where
-    C: StateMachineCommand,
+    C: Decide,
     C::State: Clone,
     C::Event: Clone,
     C::StreamId: AsRef<str>,
@@ -426,7 +418,7 @@ where
                 .map_err(box_error)
                 .map_err(CommandInfraError::DecodeEvent)
                 .map_err(CommandFailure::Infra)?;
-            state = C::evolve_state(state, event).map_err(CommandFailure::Evolve)?;
+            state = C::evolve(state, event).map_err(CommandFailure::Evolve)?;
         }
 
         let Decision::Event(events) = C::decide(&state, self.command).map_err(CommandFailure::Decide)?;
@@ -443,7 +435,7 @@ where
             .map_err(CommandFailure::Infra)?;
 
         for event in events.iter().cloned() {
-            state = C::evolve_state(state, event).map_err(CommandFailure::Evolve)?;
+            state = C::evolve(state, event).map_err(CommandFailure::Evolve)?;
         }
 
         if matches!(
@@ -503,7 +495,7 @@ mod tests {
     use super::*;
     use crate::{
         CanonicalEventCodec, EventEnvelopeCodec, EventIdentity, EventType, RecordedEvent, SnapshotSchema,
-        StreamCommand, StreamReadResult, stream::AppendOutcome,
+        StreamReadResult, stream::AppendOutcome,
     };
 
     #[derive(Debug, Clone)]
@@ -633,26 +625,6 @@ mod tests {
         }
     }
 
-    impl StreamCommand for TestCommand {
-        type StreamId = str;
-
-        fn stream_id(&self) -> &Self::StreamId {
-            self.stream_id_calls.fetch_add(1, Ordering::SeqCst);
-            &self.id
-        }
-    }
-
-    impl StreamCommand for RequiredRegisterCommand {
-        type StreamId = str;
-
-        const REQUIRED_WRITE_PRECONDITION: Option<StreamState> = Some(StreamState::NoStream);
-
-        fn stream_id(&self) -> &Self::StreamId {
-            self.stream_id_calls.fetch_add(1, Ordering::SeqCst);
-            &self.id
-        }
-    }
-
     fn initial_test_state() -> TestState {
         TestState::Missing
     }
@@ -666,34 +638,25 @@ mod tests {
         }
     }
 
-    impl StateMachineCommand for TestCommand {
-        type EvolveError = TestCommandError;
-
-        fn initial_state() -> Self::State {
-            initial_test_state()
-        }
-
-        fn evolve_state(state: Self::State, event: Self::Event) -> Result<Self::State, Self::EvolveError> {
-            evolve_test_state(state, event)
-        }
-    }
-
-    impl StateMachineCommand for RequiredRegisterCommand {
-        type EvolveError = TestCommandError;
-
-        fn initial_state() -> Self::State {
-            initial_test_state()
-        }
-
-        fn evolve_state(state: Self::State, event: Self::Event) -> Result<Self::State, Self::EvolveError> {
-            evolve_test_state(state, event)
-        }
-    }
-
     impl Decide for TestCommand {
+        type StreamId = str;
         type State = TestState;
         type Event = TestEvent;
         type DecideError = TestDecisionError;
+        type EvolveError = TestCommandError;
+
+        fn stream_id(&self) -> &Self::StreamId {
+            self.stream_id_calls.fetch_add(1, Ordering::SeqCst);
+            &self.id
+        }
+
+        fn initial_state() -> Self::State {
+            initial_test_state()
+        }
+
+        fn evolve(state: Self::State, event: Self::Event) -> Result<Self::State, Self::EvolveError> {
+            evolve_test_state(state, event)
+        }
 
         fn decide(state: &TestState, command: &Self) -> Result<Decision<TestEvent>, Self::DecideError> {
             match (state, command.action) {
@@ -715,9 +678,26 @@ mod tests {
     }
 
     impl Decide for RequiredRegisterCommand {
+        type StreamId = str;
         type State = TestState;
         type Event = TestEvent;
         type DecideError = TestDecisionError;
+        type EvolveError = TestCommandError;
+
+        const REQUIRED_WRITE_PRECONDITION: Option<StreamState> = Some(StreamState::NoStream);
+
+        fn stream_id(&self) -> &Self::StreamId {
+            self.stream_id_calls.fetch_add(1, Ordering::SeqCst);
+            &self.id
+        }
+
+        fn initial_state() -> Self::State {
+            initial_test_state()
+        }
+
+        fn evolve(state: Self::State, event: Self::Event) -> Result<Self::State, Self::EvolveError> {
+            evolve_test_state(state, event)
+        }
 
         fn decide(state: &TestState, command: &Self) -> Result<Decision<TestEvent>, Self::DecideError> {
             match state {

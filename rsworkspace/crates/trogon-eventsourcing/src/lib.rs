@@ -14,10 +14,10 @@ pub mod snapshot;
 mod stream;
 pub mod testing;
 
-pub use decision::{Act, Decide, Decision, NonEmpty, StateMachine, StreamCommand, decide};
+pub use decision::{Act, Decide, Decision, NonEmpty, decide};
 pub use execution::{
     CommandExecution, CommandFailure, CommandInfraError, CommandResult, CommandSnapshotPolicy, ExecutionResult,
-    FrequencySnapshot, NoSnapshot, SnapshotDecision, SnapshotPolicy, Snapshots, StateMachineCommand, WithoutSnapshots,
+    FrequencySnapshot, NoSnapshot, SnapshotDecision, SnapshotPolicy, Snapshots, WithoutSnapshots,
 };
 pub use nats::snapshot_store::{
     SnapshotStoreError, checkpoint_key, list_snapshots, load_snapshot, load_snapshot_map, maybe_advance_checkpoint,

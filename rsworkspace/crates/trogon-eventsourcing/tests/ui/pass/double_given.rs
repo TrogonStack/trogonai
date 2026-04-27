@@ -1,5 +1,5 @@
 use trogon_eventsourcing::{
-    Decide, Decision, StateMachineCommand, StreamCommand,
+    Decide, Decision,
     testing::{TestCase, decider},
 };
 
@@ -30,22 +30,22 @@ enum TestDecisionError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct TestCommand;
 
-impl StreamCommand for TestCommand {
+impl Decide for TestCommand {
     type StreamId = str;
+    type State = TestState;
+    type Event = TestEvent;
+    type DecideError = TestDecisionError;
+    type EvolveError = TestHistoryError;
 
     fn stream_id(&self) -> &Self::StreamId {
         "alpha"
     }
-}
-
-impl StateMachineCommand for TestCommand {
-    type EvolveError = TestHistoryError;
 
     fn initial_state() -> Self::State {
         TestState::Missing
     }
 
-    fn evolve_state(state: Self::State, event: Self::Event) -> Result<Self::State, Self::EvolveError> {
+    fn evolve(state: Self::State, event: Self::Event) -> Result<Self::State, Self::EvolveError> {
         match (state, event) {
             (TestState::Missing, TestEvent::Registered) => Ok(TestState::Registered),
             (TestState::Registered, TestEvent::Disabled) => Ok(TestState::Disabled),
@@ -53,12 +53,6 @@ impl StateMachineCommand for TestCommand {
             _ => Err(TestHistoryError::Invalid),
         }
     }
-}
-
-impl Decide for TestCommand {
-    type State = TestState;
-    type Event = TestEvent;
-    type DecideError = TestDecisionError;
 
     fn decide(state: &Self::State, _command: &Self) -> Result<Decision<Self::Event>, Self::DecideError> {
         match state {

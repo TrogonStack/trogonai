@@ -1,7 +1,5 @@
 use trogon_cron_jobs_proto::{state_v1, v1};
-use trogon_eventsourcing::{
-    CommandSnapshotPolicy, Decide, Decision, FrequencySnapshot, StateMachineCommand, StreamCommand,
-};
+use trogon_eventsourcing::{CommandSnapshotPolicy, Decide, Decision, FrequencySnapshot};
 
 use super::JobStateProtoError;
 use crate::JobId;
@@ -25,18 +23,24 @@ impl ResumeJobCommand {
     }
 }
 
-impl StreamCommand for ResumeJobCommand {
+impl Decide for ResumeJobCommand {
     type StreamId = JobId;
+    type State = state_v1::State;
+    type Event = v1::JobEvent;
+    type DecideError = ResumeJobDecisionError;
+    type EvolveError = JobStateProtoError;
 
     fn stream_id(&self) -> &Self::StreamId {
         &self.id
     }
-}
 
-impl Decide for ResumeJobCommand {
-    type State = state_v1::State;
-    type Event = v1::JobEvent;
-    type DecideError = ResumeJobDecisionError;
+    fn initial_state() -> Self::State {
+        super::state::initial_state()
+    }
+
+    fn evolve(state: Self::State, event: Self::Event) -> Result<Self::State, Self::EvolveError> {
+        super::state::evolve(state, event)
+    }
 
     fn decide(state: &state_v1::State, command: &Self) -> Result<Decision<Self::Event>, Self::DecideError> {
         let state = state.state();
@@ -61,18 +65,6 @@ impl Decide for ResumeJobCommand {
                 },
             }),
         }
-    }
-}
-
-impl StateMachineCommand for ResumeJobCommand {
-    type EvolveError = JobStateProtoError;
-
-    fn initial_state() -> Self::State {
-        super::state_machine::initial_state()
-    }
-
-    fn evolve_state(state: Self::State, event: Self::Event) -> Result<Self::State, Self::EvolveError> {
-        super::state_machine::evolve(state, event)
     }
 }
 
