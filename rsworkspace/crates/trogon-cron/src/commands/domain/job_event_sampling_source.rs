@@ -1,8 +1,6 @@
 use serde::{Deserialize, Serialize};
 use trogon_cron_jobs_proto::v1;
 
-use crate::proto::JobEventProtoError;
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum JobEventSamplingSource {
@@ -20,18 +18,5 @@ impl From<&JobEventSamplingSource> for v1::JobSamplingSource {
             }
         }
         source
-    }
-}
-
-impl TryFrom<v1::JobSamplingSource> for JobEventSamplingSource {
-    type Error = JobEventProtoError;
-
-    fn try_from(value: v1::JobSamplingSource) -> Result<Self, Self::Error> {
-        match value.kind() {
-            v1::job_sampling_source::KindOneof::LatestFromSubject(inner) => Ok(Self::LatestFromSubject {
-                subject: inner.subject().to_string(),
-            }),
-            v1::job_sampling_source::KindOneof::not_set(_) | _ => Err(JobEventProtoError::MissingSamplingSourceKind),
-        }
     }
 }

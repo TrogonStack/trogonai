@@ -18,8 +18,7 @@ use crate::{
     error::CronError,
     kv::{EVENTS_SUBJECT_PREFIX, LEADER_BUCKET, LEADER_KEY, LEGACY_EVENTS_SUBJECT_PREFIX},
     nats::NatsSchedulePublisher,
-    proto::{JobEventCodec, JobEventProtoError, v1},
-    read_model::{CronJob, JobEventStatus},
+    proto::{JobEventCodec, v1},
     store::{Store, connect_store},
     traits::{LeaderLock, SchedulePublisher},
 };
@@ -40,14 +39,55 @@ enum ReestablishedProcessor {
 
 #[derive(Debug, Clone, PartialEq)]
 enum SchedulerChange {
-    Upsert(CronJob),
+    Upsert(SchedulerJob),
     Delete(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
 enum DesiredJobState {
-    Present(Box<CronJob>),
+    Present(Box<SchedulerJob>),
     Deleted,
+}
+
+#[derive(Debug, Clone)]
+struct SchedulerJob {
+    id: String,
+    details: v1::JobDetails,
+    enabled: bool,
+}
+
+impl SchedulerJob {
+    fn from_event(id: &str, details: v1::JobDetailsView<'_>) -> Self {
+        let details = details.to_owned();
+        let enabled = details.status() != v1::JobStatus::Disabled;
+        Self {
+            id: id.to_string(),
+            details,
+            enabled,
+        }
+    }
+
+    fn pause(&mut self) {
+        self.enabled = false;
+        self.details.set_status(v1::JobStatus::Disabled);
+    }
+
+    fn resume(&mut self) {
+        self.enabled = true;
+        self.details.set_status(v1::JobStatus::Enabled);
+    }
+
+    fn resolve(&self) -> Result<ResolvedJob, CronError> {
+        ResolvedJob::from_event(&self.id, protobuf::AsView::as_view(&self.details))
+    }
+}
+
+impl PartialEq for SchedulerJob {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+            && self.enabled == other.enabled
+            && protobuf::Serialize::serialize(&self.details).ok() == protobuf::Serialize::serialize(&other.details).ok()
+    }
 }
 
 pub struct CronController<C = Store, P = NatsSchedulePublisher, L = NatsKvLease> {
@@ -324,14 +364,7 @@ fn apply_scheduler_event(
                     std::io::Error::other(stream_id.to_string()),
                 ));
             }
-            if !inner.has_job() {
-                return Err(CronError::event_source(
-                    "scheduler received a job_added event without job details",
-                    JobEventProtoError::MissingJobDetails,
-                ));
-            }
-            let job = CronJob::try_from((stream_id.to_string(), inner.job().to_owned()))
-                .map_err(|source| CronError::event_source("failed to decode scheduler job details", source))?;
+            let job = SchedulerJob::from_event(stream_id, inner.job());
             desired_jobs.insert(job.id.clone(), DesiredJobState::Present(Box::new(job.clone())));
             Ok(SchedulerChange::Upsert(job))
         }
@@ -344,7 +377,7 @@ fn apply_scheduler_event(
             })?;
             match job {
                 DesiredJobState::Present(job) => {
-                    job.status = JobEventStatus::Disabled;
+                    job.pause();
                     Ok(SchedulerChange::Delete(stream_id.to_string()))
                 }
                 DesiredJobState::Deleted => Err(CronError::event_source(
@@ -362,7 +395,7 @@ fn apply_scheduler_event(
             })?;
             match job {
                 DesiredJobState::Present(job) => {
-                    job.status = JobEventStatus::Enabled;
+                    job.resume();
                     Ok(SchedulerChange::Upsert(job.as_ref().clone()))
                 }
                 DesiredJobState::Deleted => Err(CronError::event_source(
@@ -376,8 +409,8 @@ fn apply_scheduler_event(
             Ok(SchedulerChange::Delete(stream_id.to_string()))
         }
         v1::job_event::EventOneof::not_set(_) | _ => Err(CronError::event_source(
-            "scheduler received an event without a oneof case",
-            JobEventProtoError::MissingEvent,
+            "scheduler received an event without a supported case",
+            std::io::Error::other("missing event case"),
         )),
     }
 }
@@ -400,8 +433,8 @@ async fn apply_scheduler_change<P: SchedulePublisher<Error = CronError>>(
 ) -> Result<(), CronError> {
     match change {
         SchedulerChange::Upsert(job) => {
-            if job.is_enabled() {
-                match ResolvedJob::try_from(job) {
+            if job.enabled {
+                match job.resolve() {
                     Ok(resolved) => {
                         publisher.upsert_schedule(&resolved).await?;
                     }
@@ -437,11 +470,11 @@ async fn reconcile_snapshot<P: SchedulePublisher<Error = CronError>>(
         let DesiredJobState::Present(job) = job else {
             continue;
         };
-        if !job.is_enabled() {
+        if !job.enabled {
             continue;
         }
 
-        match ResolvedJob::try_from(job.as_ref()) {
+        match job.resolve() {
             Ok(resolved) => {
                 desired_active_ids.insert(job.id.to_string());
                 resolved_jobs.push(resolved);
@@ -618,49 +651,81 @@ mod tests {
     use async_nats::jetstream::consumer::{AckPolicy, DeliverPolicy, ReplayPolicy};
 
     use super::{
-        CronController, DesiredJobState, SchedulerChange, apply_scheduler_change, apply_scheduler_event,
+        CronController, DesiredJobState, SchedulerChange, SchedulerJob, apply_scheduler_change, apply_scheduler_event,
         default_leader_timing, next_scheduler_start_sequence, reconcile_snapshot, scheduler_consumer_config,
     };
+    use crate::mocks::{MockCronStore, MockLeaderLock, MockSchedulePublisher};
     use crate::proto::v1;
-    use crate::{
-        CronJob, JobDetails, JobEventDelivery, JobEventSchedule, JobEventStatus, MessageContent, MessageEnvelope,
-        MessageHeaders,
-        mocks::{MockCronStore, MockLeaderLock, MockSchedulePublisher},
-    };
 
-    fn base_job(id: &str) -> CronJob {
-        CronJob {
-            id: id.to_string(),
-            status: JobEventStatus::Enabled,
-            schedule: JobEventSchedule::Every { every_sec: 30 },
-            delivery: JobEventDelivery::NatsEvent {
-                route: "agent.run".to_string(),
-                ttl_sec: None,
-                source: None,
-            },
-            message: MessageEnvelope {
-                content: MessageContent::from_static(r#"{"kind":"heartbeat"}"#),
-                headers: MessageHeaders::default(),
-            },
-        }
+    fn base_job_details() -> v1::JobDetails {
+        let mut details = v1::JobDetails::new();
+        details.set_status(v1::JobStatus::Enabled);
+        details.set_schedule(every_schedule(30));
+        details.set_delivery(nats_delivery(None));
+        details.set_message(message(r#"{"kind":"heartbeat"}"#, []));
+        details
     }
 
-    fn expected_job(id: &str) -> CronJob {
-        base_job(id)
+    fn expected_job(id: &str) -> SchedulerJob {
+        let details = base_job_details();
+        SchedulerJob::from_event(id, details.as_view())
     }
 
-    fn added_event(id: &str) -> v1::JobEvent {
+    fn disabled_job(id: &str) -> SchedulerJob {
+        let mut details = base_job_details();
+        details.set_status(v1::JobStatus::Disabled);
+        SchedulerJob::from_event(id, details.as_view())
+    }
+
+    fn added_event(_id: &str) -> v1::JobEvent {
         let mut event = v1::JobEvent::new();
         let mut inner = v1::JobAdded::new();
-        let job = base_job(id);
-        inner.set_job(v1::JobDetails::from(&JobDetails {
-            status: job.status,
-            schedule: job.schedule,
-            delivery: job.delivery,
-            message: job.message,
-        }));
+        inner.set_job(base_job_details());
         event.set_job_added(inner);
         event
+    }
+
+    fn every_schedule(every_sec: u64) -> v1::JobSchedule {
+        let mut schedule = v1::JobSchedule::new();
+        let mut every = v1::EverySchedule::new();
+        every.set_every_sec(every_sec);
+        schedule.set_every(every);
+        schedule
+    }
+
+    fn cron_schedule(expr: &str) -> v1::JobSchedule {
+        let mut schedule = v1::JobSchedule::new();
+        let mut cron = v1::CronSchedule::new();
+        cron.set_expr(expr);
+        schedule.set_cron(cron);
+        schedule
+    }
+
+    fn nats_delivery(source: Option<&str>) -> v1::JobDelivery {
+        let mut delivery = v1::JobDelivery::new();
+        let mut nats = v1::NatsEventDelivery::new();
+        nats.set_route("agent.run");
+        if let Some(subject) = source {
+            let mut source = v1::JobSamplingSource::new();
+            let mut latest = v1::LatestFromSubjectSampling::new();
+            latest.set_subject(subject);
+            source.set_latest_from_subject(latest);
+            nats.set_source(source);
+        }
+        delivery.set_nats_event(nats);
+        delivery
+    }
+
+    fn message<const N: usize>(content: &str, headers: [(&str, &str); N]) -> v1::JobMessage {
+        let mut message = v1::JobMessage::new();
+        message.set_content(content);
+        for (name, value) in headers {
+            let mut header = v1::Header::new();
+            header.set_name(name);
+            header.set_value(value);
+            message.headers_mut().push(header);
+        }
+        message
     }
 
     fn paused_event(_id: &str) -> v1::JobEvent {
@@ -681,24 +746,10 @@ mod tests {
         event
     }
 
-    fn invalid_enabled_job(id: &str) -> CronJob {
-        CronJob {
-            id: id.to_string(),
-            status: JobEventStatus::Enabled,
-            schedule: JobEventSchedule::Cron {
-                expr: "not-a-cron".to_string(),
-                timezone: None,
-            },
-            delivery: JobEventDelivery::NatsEvent {
-                route: "agent.run".to_string(),
-                ttl_sec: None,
-                source: None,
-            },
-            message: MessageEnvelope {
-                content: MessageContent::from_static(r#"{"kind":"heartbeat"}"#),
-                headers: MessageHeaders::default(),
-            },
-        }
+    fn invalid_enabled_job(id: &str) -> SchedulerJob {
+        let mut details = base_job_details();
+        details.set_schedule(cron_schedule("not-a-cron"));
+        SchedulerJob::from_event(id, details.as_view())
     }
 
     #[tokio::test]
@@ -723,9 +774,10 @@ mod tests {
         let publisher = MockSchedulePublisher::new();
         publisher.seed_active_job("disabled");
 
-        let mut disabled = base_job("disabled");
-        disabled.status = JobEventStatus::Disabled;
-        let desired_jobs = HashMap::from([("disabled".to_string(), DesiredJobState::Present(Box::new(disabled)))]);
+        let desired_jobs = HashMap::from([(
+            "disabled".to_string(),
+            DesiredJobState::Present(Box::new(disabled_job("disabled"))),
+        )]);
 
         reconcile_snapshot(&publisher, &desired_jobs).await.unwrap();
 
@@ -771,13 +823,10 @@ mod tests {
 
         let disabled = apply_scheduler_event(&mut desired_jobs, "alpha", &paused_event("alpha")).unwrap();
         assert_eq!(disabled, SchedulerChange::Delete("alpha".to_string()));
-        assert_eq!(
-            match desired_jobs.get("alpha").unwrap() {
-                DesiredJobState::Present(job) => job.status,
-                DesiredJobState::Deleted => panic!("expected present job"),
-            },
-            JobEventStatus::Disabled
-        );
+        assert!(!match desired_jobs.get("alpha").unwrap() {
+            DesiredJobState::Present(job) => job.enabled,
+            DesiredJobState::Deleted => panic!("expected present job"),
+        });
 
         let enabled = apply_scheduler_event(&mut desired_jobs, "alpha", &resumed_event("alpha")).unwrap();
         assert_eq!(enabled, SchedulerChange::Upsert(expected_job("alpha")));
@@ -813,10 +862,8 @@ mod tests {
     #[tokio::test]
     async fn apply_scheduler_change_removes_disabled_and_deleted_jobs() {
         let publisher = MockSchedulePublisher::new();
-        let mut disabled = base_job("disabled");
-        disabled.status = JobEventStatus::Disabled;
 
-        apply_scheduler_change(&publisher, &SchedulerChange::Upsert(disabled))
+        apply_scheduler_change(&publisher, &SchedulerChange::Upsert(disabled_job("disabled")))
             .await
             .unwrap();
         apply_scheduler_change(&publisher, &SchedulerChange::Delete("deleted".to_string()))
