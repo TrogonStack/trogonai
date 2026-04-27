@@ -5228,6 +5228,7 @@ dependencies = [
  "clap",
  "confique",
  "futures-util",
+ "httpmock",
  "reqwest",
  "serde",
  "serde_json",
