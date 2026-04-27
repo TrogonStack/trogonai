@@ -5,6 +5,5 @@ package trogon.cron.jobs.v1;
 import "trogon/cron/jobs/v1/job_details.proto";
 
 message JobAdded {
-  string id = 1;
   JobDetails job = 2;
 }

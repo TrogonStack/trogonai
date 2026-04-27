@@ -34,7 +34,7 @@ pub trait EventCodec<T> {
     type Error;
 
     fn encode(&self, value: &T) -> Result<Vec<u8>, Self::Error>;
-    fn decode(&self, event_type: &str, payload: &[u8]) -> Result<T, Self::Error>;
+    fn decode(&self, event_type: &str, stream_id: &str, payload: &[u8]) -> Result<T, Self::Error>;
 }
 
 pub trait CanonicalEventCodec: Sized {
@@ -56,7 +56,7 @@ where
         serde_json::to_vec(value)
     }
 
-    fn decode(&self, _event_type: &str, payload: &[u8]) -> Result<T, Self::Error> {
+    fn decode(&self, _event_type: &str, _stream_id: &str, payload: &[u8]) -> Result<T, Self::Error> {
         serde_json::from_slice(payload)
     }
 }
@@ -363,7 +363,7 @@ impl EventData {
     where
         C: EventCodec<E>,
     {
-        codec.decode(&self.event_type, &self.payload)
+        codec.decode(&self.event_type, &self.stream_id, &self.payload)
     }
 
     pub fn decode_metadata<M>(&self) -> serde_json::Result<Option<M>>
@@ -379,7 +379,7 @@ impl EventData {
     {
         self.metadata
             .as_deref()
-            .map(|value| codec.decode(&self.event_type, value))
+            .map(|value| codec.decode(&self.event_type, &self.stream_id, value))
             .transpose()
     }
 }
@@ -429,7 +429,7 @@ impl RecordedEvent {
     where
         C: EventCodec<E>,
     {
-        codec.decode(&self.event_type, &self.payload)
+        codec.decode(&self.event_type, &self.event_stream_id, &self.payload)
     }
 
     pub fn decode_metadata<M>(&self) -> serde_json::Result<Option<M>>
@@ -445,7 +445,7 @@ impl RecordedEvent {
     {
         self.metadata
             .as_deref()
-            .map(|value| codec.decode(&self.event_type, value))
+            .map(|value| codec.decode(&self.event_type, &self.event_stream_id, value))
             .transpose()
     }
 }
