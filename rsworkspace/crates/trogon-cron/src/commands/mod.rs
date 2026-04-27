@@ -5,12 +5,12 @@ pub mod proto;
 mod remove_job;
 mod resume_job;
 mod snapshot;
-mod state_machine;
+mod state;
 
 pub use add_job::{AddJobCommand, AddJobDecisionError};
 pub use pause_job::{PauseJobCommand, PauseJobDecisionError};
 pub use proto::{JobEventCodec, JobEventProtoError, v1};
 pub use remove_job::{RemoveJobCommand, RemoveJobDecisionError};
 pub use resume_job::{ResumeJobCommand, ResumeJobDecisionError};
-pub use state_machine::JobStateProtoError;
+pub use state::JobStateProtoError;
 pub use trogon_cron_jobs_proto::state_v1;

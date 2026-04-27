@@ -3,22 +3,6 @@ use crate::stream::StreamState;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Act;
 
-pub trait StreamCommand {
-    type StreamId: ?Sized;
-
-    const REQUIRED_WRITE_PRECONDITION: Option<StreamState> = None;
-
-    fn stream_id(&self) -> &Self::StreamId;
-}
-
-pub trait StateMachine<Event>: Sized {
-    type EvolveError;
-
-    fn initial_state() -> Self;
-
-    fn evolve(self, event: Event) -> Result<Self, Self::EvolveError>;
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NonEmpty<T>(Vec<T>);
 
@@ -95,10 +79,20 @@ impl<E> Decision<E> {
     }
 }
 
-pub trait Decide: StreamCommand + Sized {
+pub trait Decide: Sized {
+    type StreamId: ?Sized;
     type State;
     type Event;
     type DecideError;
+    type EvolveError;
+
+    const REQUIRED_WRITE_PRECONDITION: Option<StreamState> = None;
+
+    fn stream_id(&self) -> &Self::StreamId;
+
+    fn initial_state() -> Self::State;
+
+    fn evolve(state: Self::State, event: Self::Event) -> Result<Self::State, Self::EvolveError>;
 
     fn decide(state: &Self::State, command: &Self) -> Result<Decision<Self::Event>, Self::DecideError>;
 }
@@ -117,30 +111,24 @@ mod tests {
     #[derive(Debug, PartialEq, Eq)]
     struct TestCommand;
 
-    impl StreamCommand for TestCommand {
+    impl Decide for TestCommand {
         type StreamId = str;
+        type State = u8;
+        type Event = &'static str;
+        type DecideError = ();
+        type EvolveError = ();
 
         fn stream_id(&self) -> &Self::StreamId {
             "alpha"
         }
-    }
 
-    impl StateMachine<&'static str> for u8 {
-        type EvolveError = ();
-
-        fn initial_state() -> Self {
+        fn initial_state() -> Self::State {
             0
         }
 
-        fn evolve(self, _event: &'static str) -> Result<Self, Self::EvolveError> {
-            Ok(self)
+        fn evolve(state: Self::State, _event: Self::Event) -> Result<Self::State, Self::EvolveError> {
+            Ok(state)
         }
-    }
-
-    impl Decide for TestCommand {
-        type State = u8;
-        type Event = &'static str;
-        type DecideError = ();
 
         fn decide(state: &Self::State, _command: &Self) -> Result<Decision<Self::Event>, Self::DecideError> {
             Ok(Decision::event(if *state == 1 { "created" } else { "updated" }))
@@ -154,7 +142,7 @@ mod tests {
     }
 
     #[test]
-    fn stream_command_exposes_typed_stream_id() {
+    fn decide_exposes_typed_stream_id() {
         let command = TestCommand;
         assert_eq!(command.stream_id(), "alpha");
     }
