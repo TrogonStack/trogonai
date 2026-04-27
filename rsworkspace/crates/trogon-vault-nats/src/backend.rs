@@ -471,10 +471,14 @@ mod tests {
 
     #[tokio::test]
     async fn resolve_with_previous_returns_both_during_grace_period() {
-        let kv  = InMemoryKv::new();
+        // Call crypto() BEFORE capturing Instant::now(): argon2id is slow and
+        // CPU-contended in parallel test runs, so the expiry must be set after
+        // any expensive setup to avoid a race with the grace period.
+        let kv     = InMemoryKv::new();
+        let crypto = crypto();
         let mut slot = RotationSlot::new("new_key".to_string());
-        slot.previous = Some(("old_key".to_string(), std::time::Instant::now() + Duration::from_secs(30)));
-        let vault = NatsKvVault::new_for_test(kv, crypto(), vec![("tok_stripe_prod_abc1", slot)]);
+        slot.previous = Some(("old_key".to_string(), std::time::Instant::now() + Duration::from_secs(300)));
+        let vault = NatsKvVault::new_for_test(kv, crypto, vec![("tok_stripe_prod_abc1", slot)]);
 
         let (current, previous) = vault.resolve_with_previous(&tok("tok_stripe_prod_abc1")).await.unwrap();
         assert_eq!(current.as_deref(),  Some("new_key"));

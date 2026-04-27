@@ -165,17 +165,131 @@ mod tests {
     #[cfg(feature = "slack")]
     #[test]
     fn slack_from_env_errors_when_var_missing() {
-        std::env::remove_var("VAULT_SLACK_WEBHOOK_URL");
+        unsafe { std::env::remove_var("VAULT_SLACK_WEBHOOK_URL"); }
         assert!(SlackWebhookNotifier::from_env().is_err());
     }
 
     #[cfg(feature = "slack")]
     #[test]
     fn slack_from_env_succeeds_when_var_set() {
-        std::env::set_var("VAULT_SLACK_WEBHOOK_URL", "https://hooks.slack.example/T123/B456/xyz");
+        unsafe { std::env::set_var("VAULT_SLACK_WEBHOOK_URL", "https://hooks.slack.example/T123/B456/xyz"); }
         let result = SlackWebhookNotifier::from_env();
+        unsafe { std::env::remove_var("VAULT_SLACK_WEBHOOK_URL"); }
         assert!(result.is_ok());
-        std::env::remove_var("VAULT_SLACK_WEBHOOK_URL");
+    }
+
+    // ── SlackWebhookNotifier HTTP tests ───────────────────────────────────────
+
+    #[cfg(feature = "slack")]
+    mod slack_http_tests {
+        use super::*;
+        use httpmock::MockServer;
+        use httpmock::Method::POST;
+
+        fn proposal() -> Proposal {
+            pending()
+        }
+
+        #[tokio::test]
+        async fn notify_pending_posts_to_webhook() {
+            let server = MockServer::start();
+            let mock = server.mock(|when, then| {
+                when.method(POST).path("/webhook");
+                then.status(200);
+            });
+
+            let notifier = SlackWebhookNotifier::new(format!("{}/webhook", server.base_url()));
+            notifier.notify_pending(&proposal(), "prod").await;
+            mock.assert();
+        }
+
+        #[tokio::test]
+        async fn notify_pending_body_contains_proposal_fields() {
+            let server = MockServer::start();
+            let mock = server.mock(|when, then| {
+                when.method(POST)
+                    .path("/webhook")
+                    .body_contains("prop_abc")
+                    .body_contains("tok_stripe_prod_abc")
+                    .body_contains("prod");
+                then.status(200);
+            });
+
+            let notifier = SlackWebhookNotifier::new(format!("{}/webhook", server.base_url()));
+            notifier.notify_pending(&proposal(), "prod").await;
+            mock.assert();
+        }
+
+        #[tokio::test]
+        async fn notify_approved_posts_to_webhook() {
+            let server = MockServer::start();
+            let mock = server.mock(|when, then| {
+                when.method(POST).path("/webhook");
+                then.status(200);
+            });
+
+            let notifier = SlackWebhookNotifier::new(format!("{}/webhook", server.base_url()));
+            notifier.notify_approved(&approved(), "mario").await;
+            mock.assert();
+        }
+
+        #[tokio::test]
+        async fn notify_approved_body_contains_approver() {
+            let server = MockServer::start();
+            let mock = server.mock(|when, then| {
+                when.method(POST)
+                    .path("/webhook")
+                    .body_contains("mario")
+                    .body_contains("prop_abc");
+                then.status(200);
+            });
+
+            let notifier = SlackWebhookNotifier::new(format!("{}/webhook", server.base_url()));
+            notifier.notify_approved(&approved(), "mario").await;
+            mock.assert();
+        }
+
+        #[tokio::test]
+        async fn notify_rejected_posts_to_webhook() {
+            let server = MockServer::start();
+            let mock = server.mock(|when, then| {
+                when.method(POST).path("/webhook");
+                then.status(200);
+            });
+
+            let notifier = SlackWebhookNotifier::new(format!("{}/webhook", server.base_url()));
+            notifier.notify_rejected(&rejected(), "luigi", "not authorised").await;
+            mock.assert();
+        }
+
+        #[tokio::test]
+        async fn notify_rejected_body_contains_rejector_and_reason() {
+            let server = MockServer::start();
+            let mock = server.mock(|when, then| {
+                when.method(POST)
+                    .path("/webhook")
+                    .body_contains("luigi")
+                    .body_contains("not authorised");
+                then.status(200);
+            });
+
+            let notifier = SlackWebhookNotifier::new(format!("{}/webhook", server.base_url()));
+            notifier.notify_rejected(&rejected(), "luigi", "not authorised").await;
+            mock.assert();
+        }
+
+        #[tokio::test]
+        async fn non_2xx_response_does_not_panic() {
+            let server = MockServer::start();
+            server.mock(|when, then| {
+                when.method(POST).path("/webhook");
+                then.status(500).body("internal error");
+            });
+
+            let notifier = SlackWebhookNotifier::new(format!("{}/webhook", server.base_url()));
+            notifier.notify_pending(&proposal(), "prod").await;
+            // Must complete without panic despite non-2xx
+        }
     }
 }
 

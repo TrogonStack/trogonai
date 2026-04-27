@@ -401,12 +401,15 @@ mod tests {
         assert_eq!(req.token, "tok_anthropic_prod_abc");
     }
 
-    #[cfg(feature = "test-helpers")]
+    // ── Handler unit tests (use mock NATS + MemoryVault/FailingVault) ─────────
+
     mod handler_tests {
         use super::*;
         use std::sync::Arc;
         use crate::mocks::MockNatsClient;
-        use trogon_vault::MemoryVault;
+        use trogon_vault::{ApiKeyToken, MemoryVault, VaultStore};
+
+        // ── Helpers ───────────────────────────────────────────────────────────
 
         fn make_msg(payload: &[u8], reply: Option<&str>) -> async_nats::Message {
             async_nats::Message {
@@ -420,21 +423,41 @@ mod tests {
             }
         }
 
-        #[tokio::test]
-        async fn handle_store_invalid_json_publishes_error() {
-            let nats = MockNatsClient::new();
-            let vault = Arc::new(MemoryVault::new());
-            let msg = make_msg(b"not valid json", Some("reply.store.2"));
-            handle_store(&nats, &vault, msg).await;
+        fn parsed(nats: &MockNatsClient) -> serde_json::Value {
             let published = nats.published();
-            assert_eq!(published.len(), 1);
-            let v: serde_json::Value = serde_json::from_slice(&published[0].1).unwrap();
-            assert_eq!(v["ok"], false);
-            assert!(v.get("error").is_some());
+            assert_eq!(published.len(), 1, "expected exactly one published reply");
+            serde_json::from_slice(&published[0].1).unwrap()
         }
 
+        /// A vault that always fails every operation.
+        struct FailingVault;
+
+        #[derive(Debug)]
+        struct FailErr;
+        impl std::fmt::Display for FailErr {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "vault unavailable")
+            }
+        }
+        impl std::error::Error for FailErr {}
+
+        impl VaultStore for FailingVault {
+            type Error = FailErr;
+            async fn store(&self, _: &ApiKeyToken, _: &str) -> Result<(), FailErr> {
+                Err(FailErr)
+            }
+            async fn resolve(&self, _: &ApiKeyToken) -> Result<Option<String>, FailErr> {
+                Err(FailErr)
+            }
+            async fn revoke(&self, _: &ApiKeyToken) -> Result<(), FailErr> {
+                Err(FailErr)
+            }
+        }
+
+        // ── handle_store ──────────────────────────────────────────────────────
+
         #[tokio::test]
-        async fn handle_store_no_reply_subject_does_not_publish() {
+        async fn handle_store_no_reply_does_not_publish() {
             let nats = MockNatsClient::new();
             let vault = Arc::new(MemoryVault::new());
             let payload = serde_json::to_vec(&serde_json::json!({
@@ -442,9 +465,184 @@ mod tests {
                 "plaintext": "sk-ant-key"
             }))
             .unwrap();
-            let msg = make_msg(&payload, None);
-            handle_store(&nats, &vault, msg).await;
+            handle_store(&nats, &vault, make_msg(&payload, None)).await;
             assert!(nats.published().is_empty());
+        }
+
+        #[tokio::test]
+        async fn handle_store_invalid_json_publishes_error() {
+            let nats = MockNatsClient::new();
+            let vault = Arc::new(MemoryVault::new());
+            handle_store(&nats, &vault, make_msg(b"not valid json", Some("reply.1"))).await;
+            let v = parsed(&nats);
+            assert_eq!(v["ok"], false);
+            assert!(v.get("error").is_some());
+        }
+
+        #[tokio::test]
+        async fn handle_store_invalid_token_format_publishes_error() {
+            let nats = MockNatsClient::new();
+            let vault = Arc::new(MemoryVault::new());
+            let payload = serde_json::to_vec(&serde_json::json!({
+                "token": "not-a-valid-token",
+                "plaintext": "sk-ant-key"
+            }))
+            .unwrap();
+            handle_store(&nats, &vault, make_msg(&payload, Some("reply.2"))).await;
+            let v = parsed(&nats);
+            assert_eq!(v["ok"], false);
+            assert!(v["error"].as_str().unwrap().contains("Invalid token"));
+        }
+
+        #[tokio::test]
+        async fn handle_store_vault_failure_publishes_error() {
+            let nats = MockNatsClient::new();
+            let vault = Arc::new(FailingVault);
+            let payload = serde_json::to_vec(&serde_json::json!({
+                "token": "tok_anthropic_prod_abc123",
+                "plaintext": "sk-ant-key"
+            }))
+            .unwrap();
+            handle_store(&nats, &vault, make_msg(&payload, Some("reply.3"))).await;
+            let v = parsed(&nats);
+            assert_eq!(v["ok"], false);
+            assert!(v["error"].as_str().unwrap().contains("Store failed"));
+        }
+
+        #[tokio::test]
+        async fn handle_store_success_publishes_ok() {
+            let nats = MockNatsClient::new();
+            let vault = Arc::new(MemoryVault::new());
+            let payload = serde_json::to_vec(&serde_json::json!({
+                "token": "tok_openai_prod_xyz789",
+                "plaintext": "sk-openai-real"
+            }))
+            .unwrap();
+            handle_store(&nats, &vault, make_msg(&payload, Some("reply.4"))).await;
+            let v = parsed(&nats);
+            assert_eq!(v["ok"], true);
+            assert!(v.get("error").is_none());
+        }
+
+        // ── handle_rotate ─────────────────────────────────────────────────────
+
+        #[tokio::test]
+        async fn handle_rotate_no_reply_does_not_publish() {
+            let nats = MockNatsClient::new();
+            let vault = Arc::new(MemoryVault::new());
+            let payload = serde_json::to_vec(&serde_json::json!({
+                "token": "tok_anthropic_prod_abc123",
+                "new_plaintext": "sk-new"
+            }))
+            .unwrap();
+            handle_rotate(&nats, &vault, make_msg(&payload, None)).await;
+            assert!(nats.published().is_empty());
+        }
+
+        #[tokio::test]
+        async fn handle_rotate_invalid_json_publishes_error() {
+            let nats = MockNatsClient::new();
+            let vault = Arc::new(MemoryVault::new());
+            handle_rotate(&nats, &vault, make_msg(b"{bad json", Some("reply.5"))).await;
+            let v = parsed(&nats);
+            assert_eq!(v["ok"], false);
+            assert!(v.get("error").is_some());
+        }
+
+        #[tokio::test]
+        async fn handle_rotate_invalid_token_format_publishes_error() {
+            let nats = MockNatsClient::new();
+            let vault = Arc::new(MemoryVault::new());
+            let payload = serde_json::to_vec(&serde_json::json!({
+                "token": "bad-token-format",
+                "new_plaintext": "sk-new"
+            }))
+            .unwrap();
+            handle_rotate(&nats, &vault, make_msg(&payload, Some("reply.6"))).await;
+            let v = parsed(&nats);
+            assert_eq!(v["ok"], false);
+            assert!(v["error"].as_str().unwrap().contains("Invalid token"));
+        }
+
+        #[tokio::test]
+        async fn handle_rotate_success_publishes_ok() {
+            let nats = MockNatsClient::new();
+            let vault = Arc::new(MemoryVault::new());
+            let payload = serde_json::to_vec(&serde_json::json!({
+                "token": "tok_openai_prod_xyz789",
+                "new_plaintext": "sk-openai-rotated"
+            }))
+            .unwrap();
+            handle_rotate(&nats, &vault, make_msg(&payload, Some("reply.7"))).await;
+            let v = parsed(&nats);
+            assert_eq!(v["ok"], true);
+            assert!(v.get("error").is_none());
+        }
+
+        // ── handle_revoke ─────────────────────────────────────────────────────
+
+        #[tokio::test]
+        async fn handle_revoke_no_reply_does_not_publish() {
+            let nats = MockNatsClient::new();
+            let vault = Arc::new(MemoryVault::new());
+            let payload = serde_json::to_vec(&serde_json::json!({
+                "token": "tok_anthropic_prod_abc123"
+            }))
+            .unwrap();
+            handle_revoke(&nats, &vault, make_msg(&payload, None)).await;
+            assert!(nats.published().is_empty());
+        }
+
+        #[tokio::test]
+        async fn handle_revoke_invalid_json_publishes_error() {
+            let nats = MockNatsClient::new();
+            let vault = Arc::new(MemoryVault::new());
+            handle_revoke(&nats, &vault, make_msg(b"[]", Some("reply.8"))).await;
+            let v = parsed(&nats);
+            assert_eq!(v["ok"], false);
+            assert!(v.get("error").is_some());
+        }
+
+        #[tokio::test]
+        async fn handle_revoke_invalid_token_format_publishes_error() {
+            let nats = MockNatsClient::new();
+            let vault = Arc::new(MemoryVault::new());
+            let payload = serde_json::to_vec(&serde_json::json!({
+                "token": "not_valid"
+            }))
+            .unwrap();
+            handle_revoke(&nats, &vault, make_msg(&payload, Some("reply.9"))).await;
+            let v = parsed(&nats);
+            assert_eq!(v["ok"], false);
+            assert!(v["error"].as_str().unwrap().contains("Invalid token"));
+        }
+
+        #[tokio::test]
+        async fn handle_revoke_success_publishes_ok() {
+            let nats = MockNatsClient::new();
+            let vault = Arc::new(MemoryVault::new());
+            let payload = serde_json::to_vec(&serde_json::json!({
+                "token": "tok_gemini_staging_aabbcc"
+            }))
+            .unwrap();
+            handle_revoke(&nats, &vault, make_msg(&payload, Some("reply.10"))).await;
+            let v = parsed(&nats);
+            assert_eq!(v["ok"], true);
+            assert!(v.get("error").is_none());
+        }
+
+        #[tokio::test]
+        async fn handle_revoke_vault_failure_publishes_error() {
+            let nats = MockNatsClient::new();
+            let vault = Arc::new(FailingVault);
+            let payload = serde_json::to_vec(&serde_json::json!({
+                "token": "tok_gemini_staging_aabbcc"
+            }))
+            .unwrap();
+            handle_revoke(&nats, &vault, make_msg(&payload, Some("reply.11"))).await;
+            let v = parsed(&nats);
+            assert_eq!(v["ok"], false);
+            assert!(v["error"].as_str().unwrap().contains("Revoke failed"));
         }
     }
 }

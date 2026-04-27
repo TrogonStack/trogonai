@@ -430,7 +430,6 @@ where
 mod tests {
     use super::*;
     use trogon_vault::MemoryVault;
-    use trogon_vault_nats::NoopAudit;
 
     use crate::notifier::NoopNotifier;
 
