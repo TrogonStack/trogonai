@@ -1,4 +1,4 @@
-use trogon_eventsourcing::{Decide, Decision, StateMachine, StreamCommand};
+use trogon_eventsourcing::{Decide, Decision, StateMachineCommand, StreamCommand};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TestState {
@@ -32,15 +32,15 @@ impl StreamCommand for TestCommand {
     }
 }
 
-impl StateMachine<TestEvent> for TestState {
+impl StateMachineCommand for TestCommand {
     type EvolveError = TestDomainError;
 
-    fn initial_state() -> Self {
+    fn initial_state() -> Self::State {
         TestState::Missing
     }
 
-    fn evolve(self, event: TestEvent) -> Result<Self, Self::EvolveError> {
-        match (self, event) {
+    fn evolve_state(state: Self::State, event: Self::Event) -> Result<Self::State, Self::EvolveError> {
+        match (state, event) {
             (TestState::Missing, TestEvent::Registered) => Ok(TestState::Present),
             (TestState::Present, TestEvent::Registered) => Err(TestDomainError::InvalidHistory),
         }

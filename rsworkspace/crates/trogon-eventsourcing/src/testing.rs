@@ -2,7 +2,7 @@
 
 use std::{collections::HashMap, fmt::Debug, marker::PhantomData};
 
-use crate::{Decide, Decision, NonEmpty, StateMachine};
+use crate::{Decide, Decision, NonEmpty, StateMachineCommand};
 
 #[macro_export]
 macro_rules! events {
@@ -177,9 +177,11 @@ pub struct NoHistory;
 pub struct When<Event, State, Command> {
     history: Vec<Event>,
     state: State,
-    expected_state: Option<State>,
+    expected_state: Option<StateAssertion<State>>,
     command: Command,
 }
+
+type StateAssertion<State> = Box<dyn FnOnce(&State)>;
 
 #[must_use = "test cases must be completed with .then(...) or .then_error(...)"]
 pub struct TestCase<C, Stage = Start> {
@@ -243,10 +245,9 @@ where
 
 impl<C> TestCase<C, NoHistory>
 where
-    C: Decide,
+    C: StateMachineCommand,
     C::Event: Clone + Debug,
-    C::State: StateMachine<C::Event>,
-    <C::State as StateMachine<C::Event>>::EvolveError: Debug,
+    C::EvolveError: Debug,
 {
     pub fn when(mut self, command: C) -> TestCase<C, When<C::Event, C::State, C>> {
         self.completed = true;
@@ -254,7 +255,7 @@ where
             marker: PhantomData,
             stage: When {
                 history: Vec::new(),
-                state: C::State::initial_state(),
+                state: C::initial_state(),
                 expected_state: None,
                 command,
             },
@@ -265,18 +266,17 @@ where
 
 impl<C> TestCase<C, Given<C::Event>>
 where
-    C: Decide,
+    C: StateMachineCommand,
     C::Event: Clone + Debug,
-    C::State: StateMachine<C::Event>,
-    <C::State as StateMachine<C::Event>>::EvolveError: Debug,
+    C::EvolveError: Debug,
 {
     pub fn when(mut self, command: C) -> TestCase<C, When<C::Event, C::State, C>> {
         self.completed = true;
-        let mut state = C::State::initial_state();
+        let mut state = C::initial_state();
         let history = std::mem::take(&mut self.stage.history);
 
         for (index, event) in history.iter().cloned().enumerate() {
-            state = match state.evolve(event.clone()) {
+            state = match C::evolve_state(state, event.clone()) {
                 Ok(next) => next,
                 Err(error) => panic!(
                     "Given history could not be replayed at event {}:\nevent = {:?}\nerror = {:?}",
@@ -303,13 +303,20 @@ where
 impl<C> TestCase<C, When<C::Event, C::State, C>>
 where
     C: Decide,
-    C::State: PartialEq + Debug,
     C::Event: Clone + PartialEq + Debug,
     C::DecideError: PartialEq + Debug,
     C::StreamId: std::fmt::Display,
 {
-    pub fn state(mut self, state: C::State) -> Self {
-        self.stage.expected_state = Some(state);
+    pub fn state(mut self, expected_state: C::State) -> Self
+    where
+        C::State: PartialEq + Debug + 'static,
+    {
+        self.stage.expected_state = Some(Box::new(move |actual| {
+            assert_eq!(
+                actual, &expected_state,
+                "state(...) replayed state did not match expectation"
+            );
+        }));
         self
     }
 
@@ -318,14 +325,14 @@ where
         E: ThenExpectation<C>,
     {
         self.completed = true;
-        assert_expected_state(self.stage.expected_state.as_ref(), &self.stage.state);
+        assert_expected_state(self.stage.expected_state.take(), &self.stage.state);
         let actual = C::decide(&self.stage.state, &self.stage.command);
         expectation.assert_matches(std::mem::take(&mut self.stage.history), &self.stage.command, actual)
     }
 
     pub fn then_error(mut self, expected_error: C::DecideError) -> ThenError<C::Event, C::DecideError> {
         self.completed = true;
-        assert_expected_state(self.stage.expected_state.as_ref(), &self.stage.state);
+        assert_expected_state(self.stage.expected_state.take(), &self.stage.state);
         let actual = C::decide(&self.stage.state, &self.stage.command);
 
         match actual {
@@ -481,12 +488,9 @@ where
     }
 }
 
-fn assert_expected_state<State>(expected: Option<&State>, actual: &State)
-where
-    State: PartialEq + Debug,
-{
+fn assert_expected_state<State>(expected: Option<StateAssertion<State>>, actual: &State) {
     if let Some(expected) = expected {
-        assert_eq!(actual, expected, "state(...) replayed state did not match expectation");
+        expected(actual);
     }
 }
 
@@ -593,15 +597,15 @@ mod tests {
         }
     }
 
-    impl StateMachine<TestEvent> for TestState {
+    impl StateMachineCommand for TestCommand {
         type EvolveError = TestDomainError;
 
-        fn initial_state() -> Self {
+        fn initial_state() -> Self::State {
             TestState::Missing
         }
 
-        fn evolve(self, event: TestEvent) -> Result<Self, Self::EvolveError> {
-            match (self, event) {
+        fn evolve_state(state: Self::State, event: Self::Event) -> Result<Self::State, Self::EvolveError> {
+            match (state, event) {
                 (TestState::Missing, TestEvent::Registered { .. }) => Ok(TestState::Present { enabled: true }),
                 (TestState::Missing, TestEvent::Disabled { id }) => Err(TestDomainError::MissingJobForDisable { id }),
                 (TestState::Missing, TestEvent::Removed { id }) => Err(TestDomainError::MissingJobForRemoval { id }),

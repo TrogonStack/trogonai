@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     JobDetails, JobEventDelivery, JobEventProtoError, JobEventSchedule, JobEventStatus, MessageEnvelope,
-    commands::proto::contract_v1,
+    commands::proto::v1,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -33,10 +33,10 @@ impl From<(String, JobDetails)> for CronJob {
     }
 }
 
-impl TryFrom<(String, contract_v1::JobDetails)> for CronJob {
+impl TryFrom<(String, v1::JobDetails)> for CronJob {
     type Error = JobEventProtoError;
 
-    fn try_from((id, job): (String, contract_v1::JobDetails)) -> Result<Self, Self::Error> {
+    fn try_from((id, job): (String, v1::JobDetails)) -> Result<Self, Self::Error> {
         Ok(Self::from((id, JobDetails::try_from(job)?)))
     }
 }

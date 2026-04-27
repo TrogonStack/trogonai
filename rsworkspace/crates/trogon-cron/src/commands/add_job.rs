@@ -1,7 +1,10 @@
-use trogon_eventsourcing::{CommandSnapshotPolicy, Decide, Decision, FrequencySnapshot, StreamCommand, StreamState};
+use trogon_cron_jobs_proto::{state_v1, v1};
+use trogon_eventsourcing::{
+    CommandSnapshotPolicy, Decide, Decision, FrequencySnapshot, StateMachineCommand, StreamCommand, StreamState,
+};
 
-use super::JobState;
-use crate::{Job, JobAdded, JobDetails, JobEvent, JobId};
+use super::JobStateProtoError;
+use crate::{Job, JobId};
 
 #[derive(Debug, Clone)]
 pub struct AddJobCommand {
@@ -12,6 +15,7 @@ pub struct AddJobCommand {
 pub enum AddJobDecisionError {
     AlreadyExists { id: JobId },
     JobDeleted { id: JobId },
+    InvalidState { source: JobStateProtoError },
 }
 
 impl AddJobCommand {
@@ -30,23 +34,46 @@ impl StreamCommand for AddJobCommand {
 }
 
 impl Decide for AddJobCommand {
-    type State = JobState;
-    type Event = JobEvent;
+    type State = state_v1::State;
+    type Event = v1::JobEvent;
     type DecideError = AddJobDecisionError;
 
-    fn decide(state: &JobState, command: &Self) -> Result<Decision<JobEvent>, Self::DecideError> {
+    fn decide(state: &state_v1::State, command: &Self) -> Result<Decision<Self::Event>, Self::DecideError> {
+        let state = state.state();
         match state {
-            JobState::Missing => Ok(Decision::event(JobAdded {
-                id: command.stream_id().to_string(),
-                job: JobDetails::from(&command.job),
-            })),
-            JobState::PresentEnabled | JobState::PresentDisabled => Err(AddJobDecisionError::AlreadyExists {
+            state_v1::StateValue::Missing => {
+                let mut inner = v1::JobAdded::new();
+                inner.set_job(v1::JobDetails::from(&command.job));
+                let mut event = v1::JobEvent::new();
+                event.set_job_added(inner);
+                Ok(Decision::event(event))
+            }
+            state_v1::StateValue::PresentEnabled | state_v1::StateValue::PresentDisabled => {
+                Err(AddJobDecisionError::AlreadyExists {
+                    id: command.stream_id().clone(),
+                })
+            }
+            state_v1::StateValue::Deleted => Err(AddJobDecisionError::JobDeleted {
                 id: command.stream_id().clone(),
             }),
-            JobState::Deleted => Err(AddJobDecisionError::JobDeleted {
-                id: command.stream_id().clone(),
+            _ => Err(AddJobDecisionError::InvalidState {
+                source: JobStateProtoError::UnknownStateValue {
+                    value: i32::from(state),
+                },
             }),
         }
+    }
+}
+
+impl StateMachineCommand for AddJobCommand {
+    type EvolveError = JobStateProtoError;
+
+    fn initial_state() -> Self::State {
+        super::state_machine::initial_state()
+    }
+
+    fn evolve_state(state: Self::State, event: Self::Event) -> Result<Self::State, Self::EvolveError> {
+        super::state_machine::evolve(state, event)
     }
 }
 
@@ -65,7 +92,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        CronJob, Delivery, GetJobCommand, JobHeaders, JobMessage, JobRemoved, JobStatus, MessageContent, Schedule,
+        CronJob, Delivery, GetJobCommand, JobDetails, JobHeaders, JobMessage, JobStatus, MessageContent, Schedule,
         mocks::MockCronStore,
     };
 
@@ -90,24 +117,32 @@ mod tests {
         CronJob::from((id.to_string(), JobDetails::from(job(id))))
     }
 
+    fn added(id: &str) -> v1::JobEvent {
+        let mut inner = v1::JobAdded::new();
+        inner.set_job(v1::JobDetails::from(&job(id)));
+        let mut event = v1::JobEvent::new();
+        event.set_job_added(inner);
+        event
+    }
+
+    fn removed() -> v1::JobEvent {
+        let mut event = v1::JobEvent::new();
+        event.set_job_removed(v1::JobRemoved::new());
+        event
+    }
+
     #[test]
     fn given_when_then_supports_register_job_decider() {
         TestCase::new(decider::<AddJobCommand>())
             .given_no_history()
             .when(AddJobCommand::new(job("backup")))
-            .then(trogon_eventsourcing::events![JobAdded {
-                id: "backup".to_string(),
-                job: JobDetails::from(job("backup")),
-            }]);
+            .then(trogon_eventsourcing::events![added("backup")]);
     }
 
     #[test]
     fn given_when_then_supports_register_job_failures() {
         TestCase::new(decider::<AddJobCommand>())
-            .given([JobAdded {
-                id: "backup".to_string(),
-                job: JobDetails::from(job("backup")),
-            }])
+            .given([added("backup")])
             .when(AddJobCommand::new(job("backup")))
             .then_error(AddJobDecisionError::AlreadyExists {
                 id: JobId::parse("backup").unwrap(),
@@ -117,13 +152,8 @@ mod tests {
     #[test]
     fn rejects_adding_deleted_job_ids() {
         TestCase::new(decider::<AddJobCommand>())
-            .given([JobAdded {
-                id: "backup".to_string(),
-                job: JobDetails::from(job("backup")),
-            }])
-            .given([JobRemoved {
-                id: "backup".to_string(),
-            }])
+            .given([added("backup")])
+            .given([removed()])
             .when(AddJobCommand::new(job("backup")))
             .then_error(AddJobDecisionError::JobDeleted {
                 id: JobId::parse("backup").unwrap(),
@@ -140,16 +170,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(outcome.next_expected_version, 1);
-        assert_eq!(
-            outcome.events,
-            NonEmpty::one(
-                JobAdded {
-                    id: "backup".to_string(),
-                    job: JobDetails::from(job("backup")),
-                }
-                .into()
-            )
-        );
+        assert_eq!(outcome.events, NonEmpty::one(added("backup")));
 
         let stored_job = store
             .get_job(GetJobCommand::new(JobId::parse("backup").unwrap()))
@@ -159,7 +180,10 @@ mod tests {
         assert_eq!(stored_job, expected_job("backup"));
 
         let command_snapshot = store
-            .read_command_snapshot::<JobState>(JobState::snapshot_store_config(), &JobId::parse("backup").unwrap())
+            .read_command_snapshot::<state_v1::State>(
+                state_v1::State::snapshot_store_config(),
+                &JobId::parse("backup").unwrap(),
+            )
             .unwrap();
         assert!(command_snapshot.is_none());
     }

@@ -12,3 +12,8 @@ all = "deny"
 
 [dependencies]
 protobuf = { workspace = true }
+serde = { workspace = true }
+trogon-eventsourcing = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

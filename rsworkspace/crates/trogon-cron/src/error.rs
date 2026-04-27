@@ -225,12 +225,6 @@ impl From<crate::commands::proto::JobEventCodecError> for CronError {
     }
 }
 
-impl From<crate::commands::proto::JobEventCodecError> for JetStreamStoreError<CronError> {
-    fn from(value: crate::commands::proto::JobEventCodecError) -> Self {
-        Self::Codec(value.into())
-    }
-}
-
 impl From<MessageHeadersError> for JobSpecError {
     fn from(value: MessageHeadersError) -> Self {
         match value {

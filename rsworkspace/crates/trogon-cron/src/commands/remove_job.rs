@@ -1,7 +1,10 @@
-use trogon_eventsourcing::{CommandSnapshotPolicy, Decide, Decision, FrequencySnapshot, StreamCommand};
+use trogon_cron_jobs_proto::{state_v1, v1};
+use trogon_eventsourcing::{
+    CommandSnapshotPolicy, Decide, Decision, FrequencySnapshot, StateMachineCommand, StreamCommand,
+};
 
-use super::JobState;
-use crate::{JobEvent, JobId, JobRemoved};
+use super::JobStateProtoError;
+use crate::JobId;
 
 #[derive(Debug, Clone)]
 pub struct RemoveJobCommand {
@@ -12,6 +15,7 @@ pub struct RemoveJobCommand {
 pub enum RemoveJobDecisionError {
     JobNotFound { id: JobId },
     JobDeleted { id: JobId },
+    InvalidState { source: JobStateProtoError },
 }
 
 impl RemoveJobCommand {
@@ -29,22 +33,42 @@ impl StreamCommand for RemoveJobCommand {
 }
 
 impl Decide for RemoveJobCommand {
-    type State = JobState;
-    type Event = JobEvent;
+    type State = state_v1::State;
+    type Event = v1::JobEvent;
     type DecideError = RemoveJobDecisionError;
 
-    fn decide(state: &JobState, command: &Self) -> Result<Decision<JobEvent>, Self::DecideError> {
+    fn decide(state: &state_v1::State, command: &Self) -> Result<Decision<Self::Event>, Self::DecideError> {
+        let state = state.state();
         match state {
-            JobState::Missing => Err(RemoveJobDecisionError::JobNotFound {
+            state_v1::StateValue::Missing => Err(RemoveJobDecisionError::JobNotFound {
                 id: command.stream_id().clone(),
             }),
-            JobState::PresentEnabled | JobState::PresentDisabled => Ok(Decision::event(JobRemoved {
-                id: command.stream_id().to_string(),
-            })),
-            JobState::Deleted => Err(RemoveJobDecisionError::JobDeleted {
+            state_v1::StateValue::PresentEnabled | state_v1::StateValue::PresentDisabled => {
+                let mut event = v1::JobEvent::new();
+                event.set_job_removed(v1::JobRemoved::new());
+                Ok(Decision::event(event))
+            }
+            state_v1::StateValue::Deleted => Err(RemoveJobDecisionError::JobDeleted {
                 id: command.stream_id().clone(),
+            }),
+            _ => Err(RemoveJobDecisionError::InvalidState {
+                source: JobStateProtoError::UnknownStateValue {
+                    value: i32::from(state),
+                },
             }),
         }
+    }
+}
+
+impl StateMachineCommand for RemoveJobCommand {
+    type EvolveError = JobStateProtoError;
+
+    fn initial_state() -> Self::State {
+        super::state_machine::initial_state()
+    }
+
+    fn evolve_state(state: Self::State, event: Self::Event) -> Result<Self::State, Self::EvolveError> {
+        super::state_machine::evolve(state, event)
     }
 }
 
@@ -63,8 +87,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        Delivery, GetJobCommand, Job, JobAdded, JobHeaders, JobMessage, JobStatus, MessageContent, Schedule,
-        mocks::MockCronStore,
+        Delivery, GetJobCommand, Job, JobHeaders, JobMessage, JobStatus, MessageContent, Schedule, mocks::MockCronStore,
     };
 
     fn job_id(id: &str) -> JobId {
@@ -84,17 +107,26 @@ mod tests {
         }
     }
 
+    fn added(id: &str) -> v1::JobEvent {
+        let mut inner = v1::JobAdded::new();
+        inner.set_job(v1::JobDetails::from(&job(id)));
+        let mut event = v1::JobEvent::new();
+        event.set_job_added(inner);
+        event
+    }
+
+    fn removed() -> v1::JobEvent {
+        let mut event = v1::JobEvent::new();
+        event.set_job_removed(v1::JobRemoved::new());
+        event
+    }
+
     #[test]
     fn given_when_then_supports_remove_job_decider() {
         TestCase::new(decider::<RemoveJobCommand>())
-            .given([JobAdded {
-                id: "backup".to_string(),
-                job: crate::JobDetails::from(job("backup")),
-            }])
+            .given([added("backup")])
             .when(RemoveJobCommand::new(JobId::parse("backup").unwrap()))
-            .then(trogon_eventsourcing::events![JobRemoved {
-                id: "backup".to_string(),
-            }]);
+            .then(trogon_eventsourcing::events![removed()]);
     }
 
     #[test]
@@ -110,13 +142,8 @@ mod tests {
     #[test]
     fn given_when_then_rejects_removing_deleted_job() {
         TestCase::new(decider::<RemoveJobCommand>())
-            .given([JobAdded {
-                id: "backup".to_string(),
-                job: crate::JobDetails::from(job("backup")),
-            }])
-            .given([JobRemoved {
-                id: "backup".to_string(),
-            }])
+            .given([added("backup")])
+            .given([removed()])
             .when(RemoveJobCommand::new(JobId::parse("backup").unwrap()))
             .then_error(RemoveJobDecisionError::JobDeleted {
                 id: JobId::parse("backup").unwrap(),
@@ -134,15 +161,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(outcome.next_expected_version, 2);
-        assert_eq!(
-            outcome.events,
-            NonEmpty::one(
-                JobRemoved {
-                    id: "backup".to_string(),
-                }
-                .into()
-            )
-        );
+        assert_eq!(outcome.events, NonEmpty::one(removed()));
 
         assert!(
             store
@@ -153,7 +172,10 @@ mod tests {
         );
 
         let command_snapshot = store
-            .read_command_snapshot::<JobState>(JobState::snapshot_store_config(), &JobId::parse("backup").unwrap())
+            .read_command_snapshot::<state_v1::State>(
+                state_v1::State::snapshot_store_config(),
+                &JobId::parse("backup").unwrap(),
+            )
             .unwrap();
         assert!(command_snapshot.is_none());
     }

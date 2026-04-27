@@ -1,7 +1,10 @@
-use trogon_eventsourcing::{CommandSnapshotPolicy, Decide, Decision, FrequencySnapshot, StreamCommand};
+use trogon_cron_jobs_proto::{state_v1, v1};
+use trogon_eventsourcing::{
+    CommandSnapshotPolicy, Decide, Decision, FrequencySnapshot, StateMachineCommand, StreamCommand,
+};
 
-use super::JobState;
-use crate::{JobEvent, JobId, JobResumed};
+use super::JobStateProtoError;
+use crate::JobId;
 
 #[derive(Debug, Clone)]
 pub struct ResumeJobCommand {
@@ -13,6 +16,7 @@ pub enum ResumeJobDecisionError {
     JobNotFound { id: JobId },
     JobDeleted { id: JobId },
     AlreadyActive { id: JobId },
+    InvalidState { source: JobStateProtoError },
 }
 
 impl ResumeJobCommand {
@@ -30,25 +34,45 @@ impl StreamCommand for ResumeJobCommand {
 }
 
 impl Decide for ResumeJobCommand {
-    type State = JobState;
-    type Event = JobEvent;
+    type State = state_v1::State;
+    type Event = v1::JobEvent;
     type DecideError = ResumeJobDecisionError;
 
-    fn decide(state: &JobState, command: &Self) -> Result<Decision<JobEvent>, Self::DecideError> {
+    fn decide(state: &state_v1::State, command: &Self) -> Result<Decision<Self::Event>, Self::DecideError> {
+        let state = state.state();
         match state {
-            JobState::Missing => Err(ResumeJobDecisionError::JobNotFound {
+            state_v1::StateValue::Missing => Err(ResumeJobDecisionError::JobNotFound {
                 id: command.stream_id().clone(),
             }),
-            JobState::Deleted => Err(ResumeJobDecisionError::JobDeleted {
+            state_v1::StateValue::Deleted => Err(ResumeJobDecisionError::JobDeleted {
                 id: command.stream_id().clone(),
             }),
-            JobState::PresentEnabled => Err(ResumeJobDecisionError::AlreadyActive {
+            state_v1::StateValue::PresentEnabled => Err(ResumeJobDecisionError::AlreadyActive {
                 id: command.stream_id().clone(),
             }),
-            JobState::PresentDisabled => Ok(Decision::event(JobResumed {
-                id: command.stream_id().to_string(),
-            })),
+            state_v1::StateValue::PresentDisabled => {
+                let mut event = v1::JobEvent::new();
+                event.set_job_resumed(v1::JobResumed::new());
+                Ok(Decision::event(event))
+            }
+            _ => Err(ResumeJobDecisionError::InvalidState {
+                source: JobStateProtoError::UnknownStateValue {
+                    value: i32::from(state),
+                },
+            }),
         }
+    }
+}
+
+impl StateMachineCommand for ResumeJobCommand {
+    type EvolveError = JobStateProtoError;
+
+    fn initial_state() -> Self::State {
+        super::state_machine::initial_state()
+    }
+
+    fn evolve_state(state: Self::State, event: Self::Event) -> Result<Self::State, Self::EvolveError> {
+        super::state_machine::evolve(state, event)
     }
 }
 
@@ -67,8 +91,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        AddJobCommand, Delivery, GetJobCommand, Job, JobAdded, JobEventStatus, JobHeaders, JobMessage, JobPaused,
-        JobStatus, MessageContent, PauseJobCommand, Schedule, mocks::MockCronStore,
+        AddJobCommand, Delivery, GetJobCommand, Job, JobEventStatus, JobHeaders, JobMessage, JobStatus, MessageContent,
+        PauseJobCommand, Schedule, mocks::MockCronStore,
     };
 
     fn job_id(id: &str) -> JobId {
@@ -94,29 +118,45 @@ mod tests {
         job
     }
 
+    fn added(id: &str) -> v1::JobEvent {
+        let mut inner = v1::JobAdded::new();
+        inner.set_job(v1::JobDetails::from(&active_job(id)));
+        let mut event = v1::JobEvent::new();
+        event.set_job_added(inner);
+        event
+    }
+
+    fn paused() -> v1::JobEvent {
+        let mut event = v1::JobEvent::new();
+        event.set_job_paused(v1::JobPaused::new());
+        event
+    }
+
+    fn resumed() -> v1::JobEvent {
+        let mut event = v1::JobEvent::new();
+        event.set_job_resumed(v1::JobResumed::new());
+        event
+    }
+
+    fn removed() -> v1::JobEvent {
+        let mut event = v1::JobEvent::new();
+        event.set_job_removed(v1::JobRemoved::new());
+        event
+    }
+
     #[test]
     fn given_when_then_supports_resume_job_decider() {
         TestCase::new(decider::<ResumeJobCommand>())
-            .given([JobAdded {
-                id: "backup".to_string(),
-                job: crate::JobDetails::from(active_job("backup")),
-            }])
-            .given([JobPaused {
-                id: "backup".to_string(),
-            }])
+            .given([added("backup")])
+            .given([paused()])
             .when(ResumeJobCommand::new(JobId::parse("backup").unwrap()))
-            .then(trogon_eventsourcing::events![JobResumed {
-                id: "backup".to_string(),
-            }]);
+            .then(trogon_eventsourcing::events![resumed()]);
     }
 
     #[test]
     fn given_when_then_supports_resume_job_failures() {
         TestCase::new(decider::<ResumeJobCommand>())
-            .given([JobAdded {
-                id: "backup".to_string(),
-                job: crate::JobDetails::from(active_job("backup")),
-            }])
+            .given([added("backup")])
             .when(ResumeJobCommand::new(JobId::parse("backup").unwrap()))
             .then_error(ResumeJobDecisionError::AlreadyActive {
                 id: JobId::parse("backup").unwrap(),
@@ -136,16 +176,9 @@ mod tests {
     #[test]
     fn given_when_then_rejects_resuming_deleted_jobs() {
         TestCase::new(decider::<ResumeJobCommand>())
-            .given([JobAdded {
-                id: "backup".to_string(),
-                job: crate::JobDetails::from(active_job("backup")),
-            }])
-            .given([JobPaused {
-                id: "backup".to_string(),
-            }])
-            .given([crate::JobRemoved {
-                id: "backup".to_string(),
-            }])
+            .given([added("backup")])
+            .given([paused()])
+            .given([removed()])
             .when(ResumeJobCommand::new(JobId::parse("backup").unwrap()))
             .then_error(ResumeJobDecisionError::JobDeleted {
                 id: JobId::parse("backup").unwrap(),
@@ -157,39 +190,21 @@ mod tests {
         let register = TestCase::new(decider::<AddJobCommand>())
             .given_no_history()
             .when(AddJobCommand::new(active_job("backup")))
-            .then(trogon_eventsourcing::events![JobAdded {
-                id: "backup".to_string(),
-                job: crate::JobDetails::from(active_job("backup")),
-            }]);
+            .then(trogon_eventsourcing::events![added("backup")]);
 
         let pause = TestCase::new(decider::<PauseJobCommand>())
             .given(register.history())
             .when(PauseJobCommand::new(JobId::parse("backup").unwrap()))
-            .then(trogon_eventsourcing::events![JobPaused {
-                id: "backup".to_string(),
-            }]);
+            .then(trogon_eventsourcing::events![paused()]);
 
         let resume = TestCase::new(decider::<ResumeJobCommand>())
             .given(pause.history())
             .when(ResumeJobCommand::new(JobId::parse("backup").unwrap()))
-            .then(trogon_eventsourcing::events![JobResumed {
-                id: "backup".to_string(),
-            }]);
+            .then(trogon_eventsourcing::events![resumed()]);
 
         Timeline::new().given([register, pause, resume]).then_stream(
             "backup",
-            trogon_eventsourcing::events![
-                JobAdded {
-                    id: "backup".to_string(),
-                    job: crate::JobDetails::from(active_job("backup")),
-                },
-                JobPaused {
-                    id: "backup".to_string(),
-                },
-                JobResumed {
-                    id: "backup".to_string(),
-                },
-            ],
+            trogon_eventsourcing::events![added("backup"), paused(), resumed()],
         );
     }
 
@@ -204,15 +219,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(outcome.next_expected_version, 2);
-        assert_eq!(
-            outcome.events,
-            NonEmpty::one(
-                JobResumed {
-                    id: "backup".to_string(),
-                }
-                .into()
-            )
-        );
+        assert_eq!(outcome.events, NonEmpty::one(resumed()));
 
         let job = store
             .get_job(GetJobCommand::new(JobId::parse("backup").unwrap()))
@@ -222,7 +229,10 @@ mod tests {
         assert_eq!(job.status, JobEventStatus::Enabled);
 
         let command_snapshot = store
-            .read_command_snapshot::<JobState>(JobState::snapshot_store_config(), &JobId::parse("backup").unwrap())
+            .read_command_snapshot::<state_v1::State>(
+                state_v1::State::snapshot_store_config(),
+                &JobId::parse("backup").unwrap(),
+            )
             .unwrap();
         assert!(command_snapshot.is_none());
     }

@@ -1,10 +1,10 @@
 use crate::snapshot::{Snapshot, SnapshotRead, SnapshotSchema, SnapshotStoreConfig, SnapshotWrite};
 use crate::stream::{StreamAppend, StreamRead, StreamState, resolve_stream_state};
-use crate::{
-    CanonicalEventCodec, Decide, Decision, EventCodec, EventData, EventIdentity, EventType, NonEmpty, StateMachine,
-};
+use crate::{CanonicalEventCodec, Decide, Decision, EventCodec, EventData, EventEnvelopeCodec, NonEmpty};
 
 use std::num::NonZeroU64;
+
+type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SnapshotDecision {
@@ -91,14 +91,10 @@ pub struct ExecutionResult<State, Event> {
 
 pub trait StateMachineCommand: Decide {
     type EvolveError;
-}
 
-impl<C> StateMachineCommand for C
-where
-    C: Decide,
-    C::State: StateMachine<C::Event>,
-{
-    type EvolveError = <C::State as StateMachine<C::Event>>::EvolveError;
+    fn initial_state() -> Self::State;
+
+    fn evolve_state(state: Self::State, event: Self::Event) -> Result<Self::State, Self::EvolveError>;
 }
 
 pub type CommandResult<C, InfraError> = Result<
@@ -119,8 +115,8 @@ pub enum CommandInfraError<RuntimeError> {
     SaveSnapshot(RuntimeError),
     ReadStream(RuntimeError),
     Append(RuntimeError),
-    EncodeEvent(RuntimeError),
-    DecodeEvent(RuntimeError),
+    EncodeEvent(BoxError),
+    DecodeEvent(BoxError),
     SnapshotAheadOfStream {
         snapshot_version: u64,
         stream_version: Option<u64>,
@@ -277,13 +273,13 @@ impl<'a, E, C, S, EC> CommandExecutionWithCodec<'a, E, C, S, EC> {
 
 impl<E, C, SErr> CommandExecution<'_, E, C, WithoutSnapshots>
 where
-    C: Decide,
-    C::State: StateMachine<C::Event>,
-    C::Event: EventType + EventIdentity + Clone + CanonicalEventCodec,
+    C: StateMachineCommand,
+    C::Event: Clone + CanonicalEventCodec,
     C::StreamId: AsRef<str>,
     E: StreamRead<C::StreamId, Error = SErr> + StreamAppend<C::StreamId, Error = SErr>,
-    <C::Event as CanonicalEventCodec>::Codec: EventCodec<C::Event>,
-    <<C::Event as CanonicalEventCodec>::Codec as EventCodec<C::Event>>::Error: Into<SErr>,
+    <C::Event as CanonicalEventCodec>::Codec: EventEnvelopeCodec<C::Event>,
+    <<C::Event as CanonicalEventCodec>::Codec as EventCodec<C::Event>>::Error:
+        std::error::Error + Send + Sync + 'static,
 {
     pub async fn execute(self) -> CommandResult<C, SErr> {
         self.execute_result().await
@@ -296,13 +292,12 @@ where
 
 impl<E, C, EC, SErr> CommandExecutionWithCodec<'_, E, C, WithoutSnapshots, EC>
 where
-    C: Decide,
-    C::State: StateMachine<C::Event>,
-    C::Event: EventType + EventIdentity + Clone,
+    C: StateMachineCommand,
+    C::Event: Clone,
     C::StreamId: AsRef<str>,
     E: StreamRead<C::StreamId, Error = SErr> + StreamAppend<C::StreamId, Error = SErr>,
-    EC: EventCodec<C::Event>,
-    EC::Error: Into<SErr>,
+    EC: EventEnvelopeCodec<C::Event>,
+    EC::Error: std::error::Error + Send + Sync + 'static,
 {
     pub async fn execute(self) -> CommandResult<C, SErr> {
         self.execute_result().await
@@ -317,20 +312,20 @@ where
             .map_err(CommandInfraError::ReadStream)
             .map_err(CommandFailure::Infra)?;
         let current_version = stream_read.current_version;
-        let mut state = C::State::initial_state();
+        let mut state = C::initial_state();
 
         for recorded_event in stream_read.events {
             let event = recorded_event
                 .decode_data_with(&self.event_codec)
-                .map_err(Into::into)
+                .map_err(box_error)
                 .map_err(CommandInfraError::DecodeEvent)
                 .map_err(CommandFailure::Infra)?;
-            state = state.evolve(event).map_err(CommandFailure::Evolve)?;
+            state = C::evolve_state(state, event).map_err(CommandFailure::Evolve)?;
         }
 
         let Decision::Event(events) = C::decide(&state, self.command).map_err(CommandFailure::Decide)?;
         let encoded_events = encode_events(stream_id.as_ref(), &self.event_codec, &events)
-            .map_err(Into::into)
+            .map_err(box_error)
             .map_err(CommandInfraError::EncodeEvent)
             .map_err(CommandFailure::Infra)?;
         let stream_state = resolve_stream_state::<C>(self.write_precondition, current_version);
@@ -342,7 +337,7 @@ where
             .map_err(CommandFailure::Infra)?;
 
         for event in events.iter().cloned() {
-            state = state.evolve(event).map_err(CommandFailure::Evolve)?;
+            state = C::evolve_state(state, event).map_err(CommandFailure::Evolve)?;
         }
 
         Ok(ExecutionResult {
@@ -355,16 +350,16 @@ where
 
 impl<E, S, C, P, SErr> CommandExecution<'_, E, C, Snapshots<'_, S, P>>
 where
-    C: Decide,
+    C: StateMachineCommand,
     C::State: Clone,
-    C::State: StateMachine<C::Event>,
-    C::Event: EventType + EventIdentity + Clone + CanonicalEventCodec,
+    C::Event: Clone + CanonicalEventCodec,
     C::StreamId: AsRef<str>,
     E: StreamRead<C::StreamId, Error = SErr> + StreamAppend<C::StreamId, Error = SErr>,
     S: SnapshotRead<C::State, C::StreamId, Error = SErr> + SnapshotWrite<C::State, C::StreamId, Error = SErr>,
     P: SnapshotPolicy<C::State, C::Event>,
-    <C::Event as CanonicalEventCodec>::Codec: EventCodec<C::Event>,
-    <<C::Event as CanonicalEventCodec>::Codec as EventCodec<C::Event>>::Error: Into<SErr>,
+    <C::Event as CanonicalEventCodec>::Codec: EventEnvelopeCodec<C::Event>,
+    <<C::Event as CanonicalEventCodec>::Codec as EventCodec<C::Event>>::Error:
+        std::error::Error + Send + Sync + 'static,
 {
     pub async fn execute(self) -> CommandResult<C, SErr> {
         self.execute_result().await
@@ -377,16 +372,15 @@ where
 
 impl<E, S, C, P, SErr, EC> CommandExecutionWithCodec<'_, E, C, Snapshots<'_, S, P>, EC>
 where
-    C: Decide,
+    C: StateMachineCommand,
     C::State: Clone,
-    C::State: StateMachine<C::Event>,
-    C::Event: EventType + EventIdentity + Clone,
+    C::Event: Clone,
     C::StreamId: AsRef<str>,
     E: StreamRead<C::StreamId, Error = SErr> + StreamAppend<C::StreamId, Error = SErr>,
     S: SnapshotRead<C::State, C::StreamId, Error = SErr> + SnapshotWrite<C::State, C::StreamId, Error = SErr>,
     P: SnapshotPolicy<C::State, C::Event>,
-    EC: EventCodec<C::Event>,
-    EC::Error: Into<SErr>,
+    EC: EventEnvelopeCodec<C::Event>,
+    EC::Error: std::error::Error + Send + Sync + 'static,
 {
     pub async fn execute(self) -> CommandResult<C, SErr> {
         self.execute_result().await
@@ -404,7 +398,7 @@ where
         let snapshot_version = snapshot.as_ref().map(|snapshot| snapshot.version);
         let mut state = snapshot
             .map(|snapshot| snapshot.payload)
-            .unwrap_or_else(C::State::initial_state);
+            .unwrap_or_else(C::initial_state);
         let start_sequence = snapshot_version.map(|version| version.saturating_add(1)).unwrap_or(1);
         let stream_read = self
             .event_store
@@ -429,15 +423,15 @@ where
         for recorded_event in stream_read.events {
             let event = recorded_event
                 .decode_data_with(&self.event_codec)
-                .map_err(Into::into)
+                .map_err(box_error)
                 .map_err(CommandInfraError::DecodeEvent)
                 .map_err(CommandFailure::Infra)?;
-            state = state.evolve(event).map_err(CommandFailure::Evolve)?;
+            state = C::evolve_state(state, event).map_err(CommandFailure::Evolve)?;
         }
 
         let Decision::Event(events) = C::decide(&state, self.command).map_err(CommandFailure::Decide)?;
         let encoded_events = encode_events(stream_id.as_ref(), &self.event_codec, &events)
-            .map_err(Into::into)
+            .map_err(box_error)
             .map_err(CommandInfraError::EncodeEvent)
             .map_err(CommandFailure::Infra)?;
         let stream_state = resolve_stream_state::<C>(self.write_precondition, current_version);
@@ -449,7 +443,7 @@ where
             .map_err(CommandFailure::Infra)?;
 
         for event in events.iter().cloned() {
-            state = state.evolve(event).map_err(CommandFailure::Evolve)?;
+            state = C::evolve_state(state, event).map_err(CommandFailure::Evolve)?;
         }
 
         if matches!(
@@ -478,10 +472,17 @@ where
     }
 }
 
+fn box_error<E>(error: E) -> BoxError
+where
+    E: std::error::Error + Send + Sync + 'static,
+{
+    Box::new(error)
+}
+
 fn encode_events<E, C>(stream_id: &str, codec: &C, events: &NonEmpty<E>) -> Result<NonEmpty<EventData>, C::Error>
 where
-    E: EventType + EventIdentity + Clone,
-    C: EventCodec<E>,
+    E: Clone,
+    C: EventEnvelopeCodec<E>,
 {
     events
         .clone()
@@ -501,8 +502,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        CanonicalEventCodec, EventIdentity, EventType, RecordedEvent, SnapshotSchema, StreamCommand, StreamReadResult,
-        stream::AppendOutcome,
+        CanonicalEventCodec, EventEnvelopeCodec, EventIdentity, EventType, RecordedEvent, SnapshotSchema,
+        StreamCommand, StreamReadResult, stream::AppendOutcome,
     };
 
     #[derive(Debug, Clone)]
@@ -574,6 +575,14 @@ mod tests {
         }
     }
 
+    impl std::fmt::Display for TestInfraError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{self:?}")
+        }
+    }
+
+    impl std::error::Error for TestInfraError {}
+
     impl From<TestDecisionError> for TestCommandError {
         fn from(value: TestDecisionError) -> Self {
             match value {
@@ -644,20 +653,40 @@ mod tests {
         }
     }
 
-    impl StateMachine<TestEvent> for TestState {
+    fn initial_test_state() -> TestState {
+        TestState::Missing
+    }
+
+    fn evolve_test_state(_state: TestState, event: TestEvent) -> Result<TestState, TestCommandError> {
+        match event {
+            TestEvent::Registered { .. } => Ok(TestState::Present { enabled: true }),
+            TestEvent::StateChanged { enabled, .. } => Ok(TestState::Present { enabled }),
+            TestEvent::Removed { .. } => Ok(TestState::Missing),
+            TestEvent::Broken { .. } => Err(TestCommandError::BrokenEvent),
+        }
+    }
+
+    impl StateMachineCommand for TestCommand {
         type EvolveError = TestCommandError;
 
-        fn initial_state() -> Self {
-            TestState::Missing
+        fn initial_state() -> Self::State {
+            initial_test_state()
         }
 
-        fn evolve(self, event: TestEvent) -> Result<Self, Self::EvolveError> {
-            match event {
-                TestEvent::Registered { .. } => Ok(TestState::Present { enabled: true }),
-                TestEvent::StateChanged { enabled, .. } => Ok(TestState::Present { enabled }),
-                TestEvent::Removed { .. } => Ok(TestState::Missing),
-                TestEvent::Broken { .. } => Err(TestCommandError::BrokenEvent),
-            }
+        fn evolve_state(state: Self::State, event: Self::Event) -> Result<Self::State, Self::EvolveError> {
+            evolve_test_state(state, event)
+        }
+    }
+
+    impl StateMachineCommand for RequiredRegisterCommand {
+        type EvolveError = TestCommandError;
+
+        fn initial_state() -> Self::State {
+            initial_test_state()
+        }
+
+        fn evolve_state(state: Self::State, event: Self::Event) -> Result<Self::State, Self::EvolveError> {
+            evolve_test_state(state, event)
         }
     }
 
@@ -736,6 +765,12 @@ mod tests {
             let value = std::str::from_utf8(payload).map_err(|_| TestInfraError::Json)?;
             let json = value.strip_prefix("wrapped:").ok_or(TestInfraError::Json)?;
             serde_json::from_str(json).map_err(Into::into)
+        }
+    }
+
+    impl EventEnvelopeCodec<TestEvent> for WrappedJsonCodec {
+        fn event_type(&self, value: &TestEvent) -> Result<&'static str, Self::Error> {
+            Ok(value.event_type())
         }
     }
 
