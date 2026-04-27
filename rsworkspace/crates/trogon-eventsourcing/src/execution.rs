@@ -312,7 +312,7 @@ where
                 .map_err(box_error)
                 .map_err(CommandInfraError::DecodeEvent)
                 .map_err(CommandFailure::Infra)?;
-            state = C::evolve(state, event).map_err(CommandFailure::Evolve)?;
+            state = C::evolve(state, &event).map_err(CommandFailure::Evolve)?;
         }
 
         let Decision::Event(events) = C::decide(&state, self.command).map_err(CommandFailure::Decide)?;
@@ -328,7 +328,7 @@ where
             .map_err(CommandInfraError::Append)
             .map_err(CommandFailure::Infra)?;
 
-        for event in events.iter().cloned() {
+        for event in events.iter() {
             state = C::evolve(state, event).map_err(CommandFailure::Evolve)?;
         }
 
@@ -418,7 +418,7 @@ where
                 .map_err(box_error)
                 .map_err(CommandInfraError::DecodeEvent)
                 .map_err(CommandFailure::Infra)?;
-            state = C::evolve(state, event).map_err(CommandFailure::Evolve)?;
+            state = C::evolve(state, &event).map_err(CommandFailure::Evolve)?;
         }
 
         let Decision::Event(events) = C::decide(&state, self.command).map_err(CommandFailure::Decide)?;
@@ -434,7 +434,7 @@ where
             .map_err(CommandInfraError::Append)
             .map_err(CommandFailure::Infra)?;
 
-        for event in events.iter().cloned() {
+        for event in events.iter() {
             state = C::evolve(state, event).map_err(CommandFailure::Evolve)?;
         }
 
@@ -629,10 +629,10 @@ mod tests {
         TestState::Missing
     }
 
-    fn evolve_test_state(_state: TestState, event: TestEvent) -> Result<TestState, TestCommandError> {
+    fn evolve_test_state(_state: TestState, event: &TestEvent) -> Result<TestState, TestCommandError> {
         match event {
             TestEvent::Registered { .. } => Ok(TestState::Present { enabled: true }),
-            TestEvent::StateChanged { enabled, .. } => Ok(TestState::Present { enabled }),
+            TestEvent::StateChanged { enabled, .. } => Ok(TestState::Present { enabled: *enabled }),
             TestEvent::Removed { .. } => Ok(TestState::Missing),
             TestEvent::Broken { .. } => Err(TestCommandError::BrokenEvent),
         }
@@ -654,7 +654,7 @@ mod tests {
             initial_test_state()
         }
 
-        fn evolve(state: Self::State, event: Self::Event) -> Result<Self::State, Self::EvolveError> {
+        fn evolve(state: Self::State, event: &Self::Event) -> Result<Self::State, Self::EvolveError> {
             evolve_test_state(state, event)
         }
 
@@ -695,7 +695,7 @@ mod tests {
             initial_test_state()
         }
 
-        fn evolve(state: Self::State, event: Self::Event) -> Result<Self::State, Self::EvolveError> {
+        fn evolve(state: Self::State, event: &Self::Event) -> Result<Self::State, Self::EvolveError> {
             evolve_test_state(state, event)
         }
 

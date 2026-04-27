@@ -92,7 +92,7 @@ pub trait Decide: Sized {
 
     fn initial_state() -> Self::State;
 
-    fn evolve(state: Self::State, event: Self::Event) -> Result<Self::State, Self::EvolveError>;
+    fn evolve(state: Self::State, event: &Self::Event) -> Result<Self::State, Self::EvolveError>;
 
     fn decide(state: &Self::State, command: &Self) -> Result<Decision<Self::Event>, Self::DecideError>;
 }
@@ -126,7 +126,7 @@ mod tests {
             0
         }
 
-        fn evolve(state: Self::State, _event: Self::Event) -> Result<Self::State, Self::EvolveError> {
+        fn evolve(state: Self::State, _event: &Self::Event) -> Result<Self::State, Self::EvolveError> {
             Ok(state)
         }
 

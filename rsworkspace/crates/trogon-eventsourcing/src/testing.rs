@@ -275,8 +275,8 @@ where
         let mut state = C::initial_state();
         let history = std::mem::take(&mut self.stage.history);
 
-        for (index, event) in history.iter().cloned().enumerate() {
-            state = match C::evolve(state, event.clone()) {
+        for (index, event) in history.iter().enumerate() {
+            state = match C::evolve(state, event) {
                 Ok(next) => next,
                 Err(error) => panic!(
                     "Given history could not be replayed at event {}:\nevent = {:?}\nerror = {:?}",
@@ -604,13 +604,17 @@ mod tests {
             TestState::Missing
         }
 
-        fn evolve(state: Self::State, event: Self::Event) -> Result<Self::State, Self::EvolveError> {
+        fn evolve(state: Self::State, event: &Self::Event) -> Result<Self::State, Self::EvolveError> {
             match (state, event) {
                 (TestState::Missing, TestEvent::Registered { .. }) => Ok(TestState::Present { enabled: true }),
-                (TestState::Missing, TestEvent::Disabled { id }) => Err(TestDomainError::MissingJobForDisable { id }),
-                (TestState::Missing, TestEvent::Removed { id }) => Err(TestDomainError::MissingJobForRemoval { id }),
+                (TestState::Missing, TestEvent::Disabled { id }) => {
+                    Err(TestDomainError::MissingJobForDisable { id: id.clone() })
+                }
+                (TestState::Missing, TestEvent::Removed { id }) => {
+                    Err(TestDomainError::MissingJobForRemoval { id: id.clone() })
+                }
                 (TestState::Present { .. }, TestEvent::Registered { id }) => {
-                    Err(TestDomainError::MissingJobForDisable { id })
+                    Err(TestDomainError::MissingJobForDisable { id: id.clone() })
                 }
                 (TestState::Present { .. }, TestEvent::Disabled { .. }) => Ok(TestState::Present { enabled: false }),
                 (TestState::Present { .. }, TestEvent::Removed { .. }) => Ok(TestState::Missing),
