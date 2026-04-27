@@ -20,7 +20,7 @@ use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream};
 
 use crate::{
     CronJob, JobEventData, JobEventProtoError, JobEventStatus, JobId, RecordedJobEvent,
-    commands::proto::{JobContractEventCodec, contract_event_stream_id, contract_v1},
+    commands::proto::{JobContractEventCodec, contract_v1},
     error::CronError,
     kv::{EVENTS_SUBJECT_PREFIX, LEGACY_EVENTS_SUBJECT_PREFIX},
     store::{open_cron_jobs_bucket, open_events_stream, open_snapshot_bucket, snapshot_store_config},
@@ -81,34 +81,40 @@ pub const fn initial_state() -> JobStreamState {
     JobStreamState::Initial
 }
 
-pub fn apply(state: JobStreamState, event: &contract_v1::JobEvent) -> Result<JobStreamState, JobTransitionError> {
+pub fn apply(
+    stream_id: &str,
+    state: JobStreamState,
+    event: &contract_v1::JobEvent,
+) -> Result<JobStreamState, JobTransitionError> {
+    validate_event_job_id(stream_id).map_err(|source| JobTransitionError::InvalidEventId {
+        id: stream_id.to_string(),
+        source,
+    })?;
+
     match (state, event.event()) {
         (JobStreamState::Initial, contract_v1::job_event::EventOneof::JobAdded(inner)) => {
-            let id = inner.id().to_string();
-            validate_event_job_id(&id)
-                .map_err(|source| JobTransitionError::InvalidEventId { id: id.clone(), source })?;
             if !inner.has_job() {
                 return Err(JobTransitionError::InvalidEvent {
                     source: JobEventProtoError::MissingJobDetails,
                 });
             }
             Ok(JobStreamState::Present(
-                CronJob::try_from((id, inner.job().to_owned()))
+                CronJob::try_from((stream_id.to_string(), inner.job().to_owned()))
                     .map_err(|source| JobTransitionError::InvalidEvent { source })?,
             ))
         }
         (JobStreamState::Initial, contract_v1::job_event::EventOneof::JobPaused(_)) => {
             Err(JobTransitionError::MissingJobForStateChange {
-                id: parse_event_job_id(event)?,
+                id: stream_id.to_string(),
             })
         }
         (JobStreamState::Initial, contract_v1::job_event::EventOneof::JobResumed(_)) => {
             Err(JobTransitionError::MissingJobForStateChange {
-                id: parse_event_job_id(event)?,
+                id: stream_id.to_string(),
             })
         }
         (JobStreamState::Initial, contract_v1::job_event::EventOneof::JobRemoved(_)) => {
-            Ok(JobStreamState::Deleted(parse_event_job_id(event)?))
+            Ok(JobStreamState::Deleted(stream_id.to_string()))
         }
         (JobStreamState::Present(job), contract_v1::job_event::EventOneof::JobAdded(_)) => {
             Err(JobTransitionError::CannotAddExistingJob { id: job.id })
@@ -280,11 +286,6 @@ where
                             return None;
                         }
                     };
-                    if let Err(error) = ensure_event_matches_stream(&stream_id, &data) {
-                        tracing::error!(error = %error, "Watched cron job event payload does not match stream subject");
-                        ack_watch_message(&message).await;
-                        return None;
-                    }
                     let projection_change = {
                         let Some(mut state) = (match state.lock() {
                             Ok(state) => Some(state),
@@ -298,7 +299,7 @@ where
                         };
                         (|| -> Result<Option<ProjectionChange>, CronError> {
                             let current = state.get(stream_id.as_str()).cloned().unwrap_or_else(initial_state);
-                            let next = apply(current.clone(), &data).map_err(|error| {
+                            let next = apply(stream_id.as_str(), current.clone(), &data).map_err(|error| {
                                 CronError::event_source("failed to apply watched job event to stream state", error)
                             })?;
                             let change = projection_change(&current, &next);
@@ -445,15 +446,6 @@ pub(crate) async fn project_appended_events(
         .map_err(CronError::from)
 }
 
-fn parse_event_job_id(event: &contract_v1::JobEvent) -> Result<String, JobTransitionError> {
-    let id = contract_event_stream_id(event)
-        .map_err(|source| JobTransitionError::InvalidEvent { source })?
-        .to_string();
-    validate_event_job_id(&id)
-        .map(|()| id.clone())
-        .map_err(|source| JobTransitionError::InvalidEventId { id, source })
-}
-
 async fn rewrite_cron_jobs_projection<J>(js: &J, jobs: &[Snapshot<CronJob>]) -> Result<(), CronError>
 where
     J: JetStreamGetKeyValue<Store = kv::Store>,
@@ -594,9 +586,8 @@ fn apply_event_to_snapshot_map(
     event: &contract_v1::JobEvent,
     version: u64,
 ) -> Result<SnapshotChange<CronJob>, CronError> {
-    ensure_event_matches_stream(stream_id, event)?;
     let current_state = states.get(stream_id).cloned().unwrap_or_else(initial_state);
-    let next_state = apply(current_state, event)
+    let next_state = apply(stream_id, current_state, event)
         .map_err(|source| CronError::event_source("failed to apply job event to stream snapshot state", source))?;
 
     states.insert(stream_id.to_string(), next_state.clone());
@@ -642,22 +633,6 @@ fn job_id_from_event_subject(subject: &str) -> Result<String, CronError> {
         })
 }
 
-fn ensure_event_matches_stream(expected_stream_id: &str, event: &contract_v1::JobEvent) -> Result<(), CronError> {
-    let event_stream_id = contract_event_stream_id(event)
-        .map_err(|source| CronError::event_source("job event is missing its id", source))?;
-    if event_stream_id == expected_stream_id {
-        Ok(())
-    } else {
-        Err(CronError::event_source(
-            "event payload stream id does not match the expected stream",
-            std::io::Error::other(format!(
-                "expected '{}' but event carried '{}'",
-                expected_stream_id, event_stream_id
-            )),
-        ))
-    }
-}
-
 fn validate_event_job_id(id: &str) -> Result<(), SubjectTokenViolation> {
     trogon_nats::NatsToken::new(id).map(|_| ())
 }
@@ -695,25 +670,20 @@ mod tests {
     fn added_event(id: &str) -> contract_v1::JobEvent {
         let mut event = contract_v1::JobEvent::new();
         let mut inner = contract_v1::JobAdded::new();
-        inner.set_id(id);
         inner.set_job(contract_v1::JobDetails::from(&JobDetails::from(job(id))));
         event.set_job_added(inner);
         event
     }
 
-    fn paused_event(id: &str) -> contract_v1::JobEvent {
+    fn paused_event(_id: &str) -> contract_v1::JobEvent {
         let mut event = contract_v1::JobEvent::new();
-        let mut inner = contract_v1::JobPaused::new();
-        inner.set_id(id);
-        event.set_job_paused(inner);
+        event.set_job_paused(contract_v1::JobPaused::new());
         event
     }
 
-    fn removed_event(id: &str) -> contract_v1::JobEvent {
+    fn removed_event(_id: &str) -> contract_v1::JobEvent {
         let mut event = contract_v1::JobEvent::new();
-        let mut inner = contract_v1::JobRemoved::new();
-        inner.set_id(id);
-        event.set_job_removed(inner);
+        event.set_job_removed(contract_v1::JobRemoved::new());
         event
     }
 
@@ -723,7 +693,7 @@ mod tests {
         let mut state = initial_state();
 
         for event in &events {
-            state = apply(state, event).unwrap();
+            state = apply("backup", state, event).unwrap();
         }
 
         assert_eq!(state, JobStreamState::Deleted("backup".to_string()));
@@ -731,14 +701,19 @@ mod tests {
 
     #[test]
     fn event_projection_rejects_recreating_deleted_job() {
-        let error = apply(JobStreamState::Deleted("backup".to_string()), &added_event("backup")).unwrap_err();
+        let error = apply(
+            "backup",
+            JobStreamState::Deleted("backup".to_string()),
+            &added_event("backup"),
+        )
+        .unwrap_err();
 
         assert!(matches!(error, JobTransitionError::CannotAddDeletedJob { .. }));
     }
 
     #[test]
     fn state_change_requires_existing_job() {
-        let error = apply(initial_state(), &paused_event("missing")).unwrap_err();
+        let error = apply("missing", initial_state(), &paused_event("missing")).unwrap_err();
 
         assert!(matches!(error, JobTransitionError::MissingJobForStateChange { .. }));
     }
@@ -746,13 +721,13 @@ mod tests {
     #[test]
     fn projection_change_tracks_latest_state() {
         let before = initial_state();
-        let after = apply(before.clone(), &added_event("backup")).unwrap();
+        let after = apply("backup", before.clone(), &added_event("backup")).unwrap();
         assert_eq!(
             projection_change(&before, &after),
             Some(ProjectionChange::Upsert(expected_job("backup")))
         );
 
-        let updated = apply(after.clone(), &paused_event("backup")).unwrap();
+        let updated = apply("backup", after.clone(), &paused_event("backup")).unwrap();
         match projection_change(&after, &updated).unwrap() {
             ProjectionChange::Upsert(job) => assert_eq!(job.status, JobEventStatus::Disabled),
             ProjectionChange::Delete(_) => panic!("expected upsert change"),
@@ -761,21 +736,19 @@ mod tests {
 
     #[test]
     fn initial_state_rejects_adding_existing_job() {
-        let error = apply(JobStreamState::Present(expected_job("backup")), &added_event("backup")).unwrap_err();
+        let error = apply(
+            "backup",
+            JobStreamState::Present(expected_job("backup")),
+            &added_event("backup"),
+        )
+        .unwrap_err();
         assert!(matches!(error, JobTransitionError::CannotAddExistingJob { .. }));
     }
 
     #[test]
     fn initial_removal_creates_deleted_tombstone() {
-        let state = apply(initial_state(), &removed_event("backup")).unwrap();
+        let state = apply("backup", initial_state(), &removed_event("backup")).unwrap();
         assert_eq!(state, JobStreamState::Deleted("backup".to_string()));
-    }
-
-    #[test]
-    fn reducer_rejects_stream_id_mismatch() {
-        let stream_id = "alpha".to_string();
-        let error = ensure_event_matches_stream(&stream_id, &removed_event("beta")).unwrap_err();
-        assert!(error.to_string().contains("event payload stream id does not match"));
     }
 
     #[test]

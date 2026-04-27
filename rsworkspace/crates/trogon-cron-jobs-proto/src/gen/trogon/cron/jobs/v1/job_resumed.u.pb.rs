@@ -79,25 +79,6 @@ impl<'msg> JobResumedView<'msg> {
     ::protobuf::IntoProxied::into_proxied(*self, ::protobuf::__internal::Private)
   }
 
-  // id: optional string
-  pub fn has_id(self) -> bool {
-    unsafe {
-      self.inner.ptr().has_field_at_index(0)
-    }
-  }
-  pub fn id_opt(self) -> ::protobuf::Optional<&'msg ::protobuf::ProtoStr> {
-        ::protobuf::Optional::new(self.id(), self.has_id())
-  }
-  pub fn id(self) -> ::protobuf::View<'msg, ::protobuf::ProtoString> {
-    let str_view = unsafe {
-      self.inner.ptr().get_string_at_index(
-        0, (b"").into()
-      )
-    };
-    // SAFETY: The runtime doesn't require ProtoStr to be UTF-8.
-    unsafe { ::protobuf::ProtoStr::from_utf8_unchecked(str_view.as_ref()) }
-  }
-
 }
 
 // SAFETY:
@@ -189,40 +170,6 @@ impl<'msg> JobResumedMut<'msg> {
     ::protobuf::AsView::as_view(self).to_owned()
   }
 
-  // id: optional string
-  pub fn has_id(&self) -> bool {
-    unsafe {
-      self.inner.ptr().has_field_at_index(0)
-    }
-  }
-  pub fn clear_id(&mut self) {
-    unsafe {
-      self.inner.ptr().clear_field_at_index(
-        0
-      );
-    }
-  }
-  pub fn id_opt(&self) -> ::protobuf::Optional<&'_ ::protobuf::ProtoStr> {
-        ::protobuf::Optional::new(self.id(), self.has_id())
-  }
-  pub fn id(&self) -> ::protobuf::View<'_, ::protobuf::ProtoString> {
-    let str_view = unsafe {
-      self.inner.ptr().get_string_at_index(
-        0, (b"").into()
-      )
-    };
-    // SAFETY: The runtime doesn't require ProtoStr to be UTF-8.
-    unsafe { ::protobuf::ProtoStr::from_utf8_unchecked(str_view.as_ref()) }
-  }
-  pub fn set_id(&mut self, val: impl ::protobuf::IntoProxied<::protobuf::ProtoString>) {
-    unsafe {
-      ::protobuf::__internal::runtime::message_set_string_field(
-        ::protobuf::AsMut::as_mut(self).inner,
-        0,
-        val);
-    }
-  }
-
 }
 
 // SAFETY:
@@ -287,40 +234,6 @@ impl JobResumed {
     ::protobuf::__internal::runtime::MessageMutInner::mut_of_owned(&mut self.inner).into()
   }
 
-  // id: optional string
-  pub fn has_id(&self) -> bool {
-    unsafe {
-      self.inner.ptr().has_field_at_index(0)
-    }
-  }
-  pub fn clear_id(&mut self) {
-    unsafe {
-      self.inner.ptr().clear_field_at_index(
-        0
-      );
-    }
-  }
-  pub fn id_opt(&self) -> ::protobuf::Optional<&'_ ::protobuf::ProtoStr> {
-        ::protobuf::Optional::new(self.id(), self.has_id())
-  }
-  pub fn id(&self) -> ::protobuf::View<'_, ::protobuf::ProtoString> {
-    let str_view = unsafe {
-      self.inner.ptr().get_string_at_index(
-        0, (b"").into()
-      )
-    };
-    // SAFETY: The runtime doesn't require ProtoStr to be UTF-8.
-    unsafe { ::protobuf::ProtoStr::from_utf8_unchecked(str_view.as_ref()) }
-  }
-  pub fn set_id(&mut self, val: impl ::protobuf::IntoProxied<::protobuf::ProtoString>) {
-    unsafe {
-      ::protobuf::__internal::runtime::message_set_string_field(
-        ::protobuf::AsMut::as_mut(self).inner,
-        0,
-        val);
-    }
-  }
-
 }  // impl JobResumed
 
 impl ::std::ops::Drop for JobResumed {
@@ -356,7 +269,7 @@ unsafe impl ::protobuf::__internal::runtime::AssociatedMiniTable for JobResumed 
     unsafe {
       ONCE_LOCK.get_or_init(|| {
         super::trogon__cron__jobs__v1__JobResumed_msg_init.0 =
-            ::protobuf::__internal::runtime::build_mini_table("$M1");
+            ::protobuf::__internal::runtime::build_mini_table("$");
         ::protobuf::__internal::runtime::link_mini_table(
             super::trogon__cron__jobs__v1__JobResumed_msg_init.0, &[], &[]);
         ::protobuf::__internal::runtime::MiniTableInitPtr(super::trogon__cron__jobs__v1__JobResumed_msg_init.0)

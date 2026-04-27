@@ -63,7 +63,7 @@ impl EventCodec<v1::JobEvent> for JobContractEventCodec {
         encode_contract_event(value)
     }
 
-    fn decode(&self, event_type: &str, payload: &[u8]) -> Result<v1::JobEvent, Self::Error> {
+    fn decode(&self, event_type: &str, _stream_id: &str, payload: &[u8]) -> Result<v1::JobEvent, Self::Error> {
         decode_contract_event(event_type, payload)
     }
 }
@@ -75,9 +75,9 @@ impl EventCodec<JobEvent> for JobEventCodec {
         encode_domain_event(value).map_err(JobEventCodecError::Encode)
     }
 
-    fn decode(&self, event_type: &str, payload: &[u8]) -> Result<JobEvent, Self::Error> {
+    fn decode(&self, event_type: &str, stream_id: &str, payload: &[u8]) -> Result<JobEvent, Self::Error> {
         let event = decode_contract_event(event_type, payload)?;
-        event.try_into().map_err(JobEventCodecError::Proto)
+        domain_event_from_contract(stream_id, event).map_err(JobEventCodecError::Proto)
     }
 }
 
@@ -215,104 +215,58 @@ impl From<&JobEvent> for v1::JobEvent {
     }
 }
 
-impl TryFrom<v1::JobEvent> for JobEvent {
-    type Error = JobEventProtoError;
-
-    fn try_from(value: v1::JobEvent) -> Result<Self, Self::Error> {
-        match value.event() {
-            v1::job_event::EventOneof::JobAdded(inner) => Ok(Self::JobAdded(inner.to_owned().try_into()?)),
-            v1::job_event::EventOneof::JobPaused(inner) => Ok(Self::JobPaused(inner.to_owned().try_into()?)),
-            v1::job_event::EventOneof::JobResumed(inner) => Ok(Self::JobResumed(inner.to_owned().try_into()?)),
-            v1::job_event::EventOneof::JobRemoved(inner) => Ok(Self::JobRemoved(inner.to_owned().try_into()?)),
-            v1::job_event::EventOneof::not_set(_) | _ => Err(JobEventProtoError::MissingEvent),
-        }
+fn domain_event_from_contract(stream_id: &str, value: v1::JobEvent) -> Result<JobEvent, JobEventProtoError> {
+    match value.event() {
+        v1::job_event::EventOneof::JobAdded(inner) => Ok(JobEvent::JobAdded(job_added_from_contract(
+            stream_id,
+            inner.to_owned(),
+        )?)),
+        v1::job_event::EventOneof::JobPaused(_) => Ok(JobEvent::JobPaused(JobPaused {
+            id: stream_id.to_string(),
+        })),
+        v1::job_event::EventOneof::JobResumed(_) => Ok(JobEvent::JobResumed(JobResumed {
+            id: stream_id.to_string(),
+        })),
+        v1::job_event::EventOneof::JobRemoved(_) => Ok(JobEvent::JobRemoved(JobRemoved {
+            id: stream_id.to_string(),
+        })),
+        v1::job_event::EventOneof::not_set(_) | _ => Err(JobEventProtoError::MissingEvent),
     }
 }
 
-pub fn contract_event_stream_id(event: &v1::JobEvent) -> Result<String, JobEventProtoError> {
-    match event.event() {
-        v1::job_event::EventOneof::JobAdded(inner) => Ok(inner.id().to_string()),
-        v1::job_event::EventOneof::JobPaused(inner) => Ok(inner.id().to_string()),
-        v1::job_event::EventOneof::JobResumed(inner) => Ok(inner.id().to_string()),
-        v1::job_event::EventOneof::JobRemoved(inner) => Ok(inner.id().to_string()),
-        v1::job_event::EventOneof::not_set(_) | _ => Err(JobEventProtoError::MissingEvent),
+fn job_added_from_contract(stream_id: &str, value: v1::JobAdded) -> Result<JobAdded, JobEventProtoError> {
+    if !value.has_job() {
+        return Err(JobEventProtoError::MissingJobDetails);
     }
+    Ok(JobAdded {
+        id: stream_id.to_string(),
+        job: value.job().to_owned().try_into()?,
+    })
 }
 
 impl From<&JobAdded> for v1::JobAdded {
     fn from(value: &JobAdded) -> Self {
         let mut event = v1::JobAdded::new();
-        event.set_id(value.id.as_str());
         event.set_job(v1::JobDetails::from(&value.job));
         event
     }
 }
 
-impl TryFrom<v1::JobAdded> for JobAdded {
-    type Error = JobEventProtoError;
-
-    fn try_from(value: v1::JobAdded) -> Result<Self, Self::Error> {
-        if !value.has_job() {
-            return Err(JobEventProtoError::MissingJobDetails);
-        }
-        Ok(Self {
-            id: value.id().to_string(),
-            job: value.job().to_owned().try_into()?,
-        })
-    }
-}
-
 impl From<&JobPaused> for v1::JobPaused {
-    fn from(value: &JobPaused) -> Self {
-        let mut event = v1::JobPaused::new();
-        event.set_id(value.id.as_str());
-        event
-    }
-}
-
-impl TryFrom<v1::JobPaused> for JobPaused {
-    type Error = JobEventProtoError;
-
-    fn try_from(value: v1::JobPaused) -> Result<Self, Self::Error> {
-        Ok(Self {
-            id: value.id().to_string(),
-        })
+    fn from(_value: &JobPaused) -> Self {
+        Self::new()
     }
 }
 
 impl From<&JobResumed> for v1::JobResumed {
-    fn from(value: &JobResumed) -> Self {
-        let mut event = v1::JobResumed::new();
-        event.set_id(value.id.as_str());
-        event
-    }
-}
-
-impl TryFrom<v1::JobResumed> for JobResumed {
-    type Error = JobEventProtoError;
-
-    fn try_from(value: v1::JobResumed) -> Result<Self, Self::Error> {
-        Ok(Self {
-            id: value.id().to_string(),
-        })
+    fn from(_value: &JobResumed) -> Self {
+        Self::new()
     }
 }
 
 impl From<&JobRemoved> for v1::JobRemoved {
-    fn from(value: &JobRemoved) -> Self {
-        let mut event = v1::JobRemoved::new();
-        event.set_id(value.id.as_str());
-        event
-    }
-}
-
-impl TryFrom<v1::JobRemoved> for JobRemoved {
-    type Error = JobEventProtoError;
-
-    fn try_from(value: v1::JobRemoved) -> Result<Self, Self::Error> {
-        Ok(Self {
-            id: value.id().to_string(),
-        })
+    fn from(_value: &JobRemoved) -> Self {
+        Self::new()
     }
 }
 
@@ -533,10 +487,7 @@ mod tests {
         .unwrap();
         assert_eq!(event.stream_id(), "cleanup");
         assert_eq!(event.event_type, JOB_REMOVED_EVENT_TYPE);
-        assert_eq!(
-            v1::JobRemoved::parse(&event.payload).unwrap().id().to_string(),
-            "cleanup"
-        );
+        assert!(v1::JobRemoved::parse(&event.payload).is_ok());
         assert_eq!(
             event.subject_with_prefix("cron.events.jobs."),
             "cron.events.jobs.cleanup"
@@ -572,8 +523,12 @@ mod tests {
 
     #[test]
     fn invalid_payload_fails_decode() {
-        assert!(JobEventCodec.decode(JOB_REMOVED_EVENT_TYPE, b"\0").is_err());
-        assert!(JobEventCodec.decode("trogon.cron.jobs.v1.Unknown", &[]).is_err());
+        assert!(JobEventCodec.decode(JOB_REMOVED_EVENT_TYPE, "cleanup", b"\0").is_err());
+        assert!(
+            JobEventCodec
+                .decode("trogon.cron.jobs.v1.Unknown", "cleanup", &[])
+                .is_err()
+        );
     }
 
     #[test]
@@ -601,14 +556,17 @@ mod tests {
         });
 
         let proto = v1::JobEvent::from(&event);
-        let decoded = JobEvent::try_from(proto).unwrap();
+        let decoded = domain_event_from_contract("backup", proto).unwrap();
         let encoded = JobEventCodec.encode(&event).unwrap();
 
         assert_eq!(decoded, event);
-        assert_eq!(JobEventCodec.decode(JOB_ADDED_EVENT_TYPE, &encoded).unwrap(), event);
+        assert_eq!(
+            JobEventCodec.decode(JOB_ADDED_EVENT_TYPE, "backup", &encoded).unwrap(),
+            event
+        );
         assert!(matches!(
             JobContractEventCodec
-                .decode(JOB_ADDED_EVENT_TYPE, &encoded)
+                .decode(JOB_ADDED_EVENT_TYPE, "backup", &encoded)
                 .unwrap()
                 .event(),
             v1::job_event::EventOneof::JobAdded(_)

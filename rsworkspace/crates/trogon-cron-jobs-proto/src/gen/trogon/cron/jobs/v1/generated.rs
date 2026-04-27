@@ -77,23 +77,23 @@ pub static TROGON_CRON_JOBS_V1_JOB_DETAILS_DESCRIPTOR_INFO: ::protobuf::__intern
   ],
 };
 pub static TROGON_CRON_JOBS_V1_JOB_ADDED_DESCRIPTOR_INFO: ::protobuf::__internal::runtime::__unstable::DescriptorInfo = ::protobuf::__internal::runtime::__unstable::DescriptorInfo {
-  descriptor: b"\n#trogon/cron/jobs/v1/job_added.proto\x12\x13trogon.cron.jobs.v1\x1a%trogon/cron/jobs/v1/job_details.proto\"M\n\x08JobAdded\x12\x0e\n\x02id\x18\x01 \x01(\tR\x02id\x12\x31\n\x03job\x18\x02 \x01(\x0b\x32\x1f.trogon.cron.jobs.v1.JobDetailsR\x03jobb\x08\x65\x64itionsp\xe9\x07",
+  descriptor: b"\n#trogon/cron/jobs/v1/job_added.proto\x12\x13trogon.cron.jobs.v1\x1a%trogon/cron/jobs/v1/job_details.proto\"=\n\x08JobAdded\x12\x31\n\x03job\x18\x02 \x01(\x0b\x32\x1f.trogon.cron.jobs.v1.JobDetailsR\x03jobb\x08\x65\x64itionsp\xe9\x07",
   deps: &[
     &super::__unstable::TROGON_CRON_JOBS_V1_JOB_DETAILS_DESCRIPTOR_INFO,
   ],
 };
 pub static TROGON_CRON_JOBS_V1_JOB_PAUSED_DESCRIPTOR_INFO: ::protobuf::__internal::runtime::__unstable::DescriptorInfo = ::protobuf::__internal::runtime::__unstable::DescriptorInfo {
-  descriptor: b"\n$trogon/cron/jobs/v1/job_paused.proto\x12\x13trogon.cron.jobs.v1\"\x1b\n\tJobPaused\x12\x0e\n\x02id\x18\x01 \x01(\tR\x02idb\x08\x65\x64itionsp\xe9\x07",
+  descriptor: b"\n$trogon/cron/jobs/v1/job_paused.proto\x12\x13trogon.cron.jobs.v1\"\x0b\n\tJobPausedb\x08\x65\x64itionsp\xe9\x07",
   deps: &[
   ],
 };
 pub static TROGON_CRON_JOBS_V1_JOB_REMOVED_DESCRIPTOR_INFO: ::protobuf::__internal::runtime::__unstable::DescriptorInfo = ::protobuf::__internal::runtime::__unstable::DescriptorInfo {
-  descriptor: b"\n%trogon/cron/jobs/v1/job_removed.proto\x12\x13trogon.cron.jobs.v1\"\x1c\n\nJobRemoved\x12\x0e\n\x02id\x18\x01 \x01(\tR\x02idb\x08\x65\x64itionsp\xe9\x07",
+  descriptor: b"\n%trogon/cron/jobs/v1/job_removed.proto\x12\x13trogon.cron.jobs.v1\"\x0c\n\nJobRemovedb\x08\x65\x64itionsp\xe9\x07",
   deps: &[
   ],
 };
 pub static TROGON_CRON_JOBS_V1_JOB_RESUMED_DESCRIPTOR_INFO: ::protobuf::__internal::runtime::__unstable::DescriptorInfo = ::protobuf::__internal::runtime::__unstable::DescriptorInfo {
-  descriptor: b"\n%trogon/cron/jobs/v1/job_resumed.proto\x12\x13trogon.cron.jobs.v1\"\x1c\n\nJobResumed\x12\x0e\n\x02id\x18\x01 \x01(\tR\x02idb\x08\x65\x64itionsp\xe9\x07",
+  descriptor: b"\n%trogon/cron/jobs/v1/job_resumed.proto\x12\x13trogon.cron.jobs.v1\"\x0c\n\nJobResumedb\x08\x65\x64itionsp\xe9\x07",
   deps: &[
   ],
 };
