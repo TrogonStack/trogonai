@@ -61,6 +61,12 @@ where
     }
 }
 
+pub trait EventIdentity {
+    fn event_id(&self) -> Option<EventId> {
+        None
+    }
+}
+
 pub trait EventType {
     fn event_type(&self) -> &'static str;
 }
@@ -161,14 +167,14 @@ pub struct RecordedEvent {
 impl EventData {
     pub fn new<E>(stream_id: impl AsRef<str>, event: E) -> serde_json::Result<Self>
     where
-        E: EventType + Serialize + DeserializeOwned,
+        E: EventType + EventIdentity + Serialize + DeserializeOwned,
     {
         Self::new_with_codec_and_generator(stream_id, &JsonEventCodec, &UuidV7Generator, event)
     }
 
     pub fn new_with_codec<E, C>(stream_id: impl AsRef<str>, codec: &C, event: E) -> Result<Self, C::Error>
     where
-        E: EventType,
+        E: EventType + EventIdentity,
         C: EventCodec<E>,
     {
         Self::new_with_codec_and_generator(stream_id, codec, &UuidV7Generator, event)
@@ -211,16 +217,17 @@ impl EventData {
         event: E,
     ) -> Result<Self, C::Error>
     where
-        E: EventType,
+        E: EventType + EventIdentity,
         C: EventCodec<E>,
         N: NowV7,
     {
-        Self::new_with_codec_and_event_id(stream_id, codec, EventId::now_v7(now_v7), event)
+        let event_id = event.event_id().unwrap_or_else(|| EventId::now_v7(now_v7));
+        Self::new_with_codec_and_event_id(stream_id, codec, event_id, event)
     }
 
     pub fn with_metadata<E, M>(stream_id: impl AsRef<str>, event: E, metadata: Option<M>) -> serde_json::Result<Self>
     where
-        E: EventType + Serialize + DeserializeOwned,
+        E: EventType + EventIdentity + Serialize + DeserializeOwned,
         M: Serialize + DeserializeOwned,
     {
         Self::with_codecs_and_generator(
@@ -244,7 +251,7 @@ impl EventData {
         metadata: Option<M>,
     ) -> Result<Self, CodecError<EC::Error, MC::Error>>
     where
-        E: EventType,
+        E: EventType + EventIdentity,
         EC: EventCodec<E>,
         MC: EventCodec<M>,
     {
@@ -309,19 +316,13 @@ impl EventData {
         metadata: Option<M>,
     ) -> Result<Self, CodecError<EC::Error, MC::Error>>
     where
-        E: EventType,
+        E: EventType + EventIdentity,
         EC: EventCodec<E>,
         MC: EventCodec<M>,
         N: NowV7,
     {
-        Self::with_codecs_and_event_id(
-            stream_id,
-            event_codec,
-            metadata_codec,
-            EventId::now_v7(now_v7),
-            event,
-            metadata,
-        )
+        let event_id = event.event_id().unwrap_or_else(|| EventId::now_v7(now_v7));
+        Self::with_codecs_and_event_id(stream_id, event_codec, metadata_codec, event_id, event, metadata)
     }
 
     pub fn record(
@@ -467,9 +468,29 @@ mod tests {
         value: String,
     }
 
+    impl EventIdentity for TestEvent {}
+
     impl EventType for TestEvent {
         fn event_type(&self) -> &'static str {
             "TestEvent"
+        }
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+    struct IdentifiedEvent {
+        id: EventId,
+        value: String,
+    }
+
+    impl EventIdentity for IdentifiedEvent {
+        fn event_id(&self) -> Option<EventId> {
+            Some(self.id)
+        }
+    }
+
+    impl EventType for IdentifiedEvent {
+        fn event_type(&self) -> &'static str {
+            "IdentifiedEvent"
         }
     }
 
@@ -505,6 +526,38 @@ mod tests {
         .unwrap();
 
         assert_eq!(event.event_id, event_id);
+    }
+
+    #[test]
+    fn event_data_accepts_event_supplied_event_id() {
+        let event_id = EventId::from(Uuid::from_u128(0x018f_8f4d_94a8_7000_8000_0000_0000_0002));
+        let event = EventData::new(
+            "alpha",
+            IdentifiedEvent {
+                id: event_id,
+                value: "beta".to_string(),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(event.event_id, event_id);
+    }
+
+    #[test]
+    fn caller_supplied_event_id_wins_over_event_identity() {
+        let event_id = EventId::from(Uuid::from_u128(0x018f_8f4d_94a8_7000_8000_0000_0000_0003));
+        let explicit_event_id = EventId::from(Uuid::from_u128(0x018f_8f4d_94a8_7000_8000_0000_0000_0004));
+        let event = EventData::new_with_event_id(
+            "alpha",
+            explicit_event_id,
+            IdentifiedEvent {
+                id: event_id,
+                value: "beta".to_string(),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(event.event_id, explicit_event_id);
     }
 
     #[test]
