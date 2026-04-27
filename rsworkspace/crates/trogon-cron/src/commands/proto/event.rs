@@ -1,10 +1,4 @@
-use chrono::{DateTime, Utc};
-use trogon_cron_jobs_proto::v1;
-
-use crate::commands::domain::{
-    Job, JobDetails, JobEventDelivery, JobEventSamplingSource, JobEventSchedule, JobEventStatus, MessageContent,
-    MessageEnvelope, MessageHeaders, MessageHeadersError,
-};
+use crate::commands::domain::MessageHeadersError;
 
 pub use trogon_cron_jobs_proto::{
     JOB_ADDED_EVENT_TYPE, JOB_PAUSED_EVENT_TYPE, JOB_REMOVED_EVENT_TYPE, JOB_RESUMED_EVENT_TYPE, JobEventCodec,
@@ -64,217 +58,15 @@ impl std::error::Error for JobEventProtoError {
     }
 }
 
-impl From<&JobDetails> for v1::JobDetails {
-    fn from(value: &JobDetails) -> Self {
-        let mut job = v1::JobDetails::new();
-        job.set_status(v1::JobStatus::from(value.status));
-        job.set_schedule(v1::JobSchedule::from(&value.schedule));
-        job.set_delivery(v1::JobDelivery::from(&value.delivery));
-        job.set_message(v1::JobMessage::from(&value.message));
-        job
-    }
-}
-
-impl From<&Job> for v1::JobDetails {
-    fn from(value: &Job) -> Self {
-        Self::from(&JobDetails::from(value))
-    }
-}
-
-impl TryFrom<v1::JobDetails> for JobDetails {
-    type Error = JobEventProtoError;
-
-    fn try_from(value: v1::JobDetails) -> Result<Self, Self::Error> {
-        if !value.has_schedule() {
-            return Err(JobEventProtoError::MissingSchedule);
-        }
-        if !value.has_delivery() {
-            return Err(JobEventProtoError::MissingDelivery);
-        }
-        if !value.has_message() {
-            return Err(JobEventProtoError::MissingMessage);
-        }
-        Ok(Self {
-            status: value.status().try_into()?,
-            schedule: value.schedule().to_owned().try_into()?,
-            delivery: value.delivery().to_owned().try_into()?,
-            message: value.message().to_owned().try_into()?,
-        })
-    }
-}
-
-impl From<JobEventStatus> for v1::JobStatus {
-    fn from(value: JobEventStatus) -> Self {
-        match value {
-            JobEventStatus::Enabled => Self::Enabled,
-            JobEventStatus::Disabled => Self::Disabled,
-        }
-    }
-}
-
-impl TryFrom<v1::JobStatus> for JobEventStatus {
-    type Error = JobEventProtoError;
-
-    fn try_from(value: v1::JobStatus) -> Result<Self, Self::Error> {
-        match i32::from(value) {
-            1 => Ok(Self::Enabled),
-            2 => Ok(Self::Disabled),
-            other => Err(JobEventProtoError::UnknownJobStatus { value: other }),
-        }
-    }
-}
-
-impl From<&JobEventSchedule> for v1::JobSchedule {
-    fn from(value: &JobEventSchedule) -> Self {
-        let mut schedule = v1::JobSchedule::new();
-        match value {
-            JobEventSchedule::At { at } => {
-                let mut inner = v1::AtSchedule::new();
-                inner.set_at(at.to_rfc3339());
-                schedule.set_at(inner);
-            }
-            JobEventSchedule::Every { every_sec } => {
-                let mut inner = v1::EverySchedule::new();
-                inner.set_every_sec(*every_sec);
-                schedule.set_every(inner);
-            }
-            JobEventSchedule::Cron { expr, timezone } => {
-                let mut inner = v1::CronSchedule::new();
-                inner.set_expr(expr.as_str());
-                if let Some(timezone) = timezone {
-                    inner.set_timezone(timezone.as_str());
-                }
-                schedule.set_cron(inner);
-            }
-        }
-        schedule
-    }
-}
-
-impl TryFrom<v1::JobSchedule> for JobEventSchedule {
-    type Error = JobEventProtoError;
-
-    fn try_from(value: v1::JobSchedule) -> Result<Self, Self::Error> {
-        match value.kind() {
-            v1::job_schedule::KindOneof::At(inner) => {
-                let at = inner.at().to_string();
-                let parsed = DateTime::parse_from_rfc3339(&at)
-                    .map_err(|source| JobEventProtoError::InvalidTimestamp { value: at, source })?
-                    .with_timezone(&Utc);
-                Ok(Self::At { at: parsed })
-            }
-            v1::job_schedule::KindOneof::Every(inner) => Ok(Self::Every {
-                every_sec: inner.every_sec(),
-            }),
-            v1::job_schedule::KindOneof::Cron(inner) => Ok(Self::Cron {
-                expr: inner.expr().to_string(),
-                timezone: inner.has_timezone().then(|| inner.timezone().to_string()),
-            }),
-            v1::job_schedule::KindOneof::not_set(_) | _ => Err(JobEventProtoError::MissingScheduleKind),
-        }
-    }
-}
-
-impl From<&JobEventDelivery> for v1::JobDelivery {
-    fn from(value: &JobEventDelivery) -> Self {
-        let mut delivery = v1::JobDelivery::new();
-        match value {
-            JobEventDelivery::NatsEvent { route, ttl_sec, source } => {
-                let mut inner = v1::NatsEventDelivery::new();
-                inner.set_route(route.as_str());
-                if let Some(ttl_sec) = ttl_sec {
-                    inner.set_ttl_sec(*ttl_sec);
-                }
-                if let Some(source) = source {
-                    inner.set_source(v1::JobSamplingSource::from(source));
-                }
-                delivery.set_nats_event(inner);
-            }
-        }
-        delivery
-    }
-}
-
-impl TryFrom<v1::JobDelivery> for JobEventDelivery {
-    type Error = JobEventProtoError;
-
-    fn try_from(value: v1::JobDelivery) -> Result<Self, Self::Error> {
-        match value.kind() {
-            v1::job_delivery::KindOneof::NatsEvent(inner) => Ok(Self::NatsEvent {
-                route: inner.route().to_string(),
-                ttl_sec: inner.has_ttl_sec().then(|| inner.ttl_sec()),
-                source: inner
-                    .has_source()
-                    .then(|| inner.source().to_owned().try_into())
-                    .transpose()?,
-            }),
-            v1::job_delivery::KindOneof::not_set(_) | _ => Err(JobEventProtoError::MissingDeliveryKind),
-        }
-    }
-}
-
-impl From<&JobEventSamplingSource> for v1::JobSamplingSource {
-    fn from(value: &JobEventSamplingSource) -> Self {
-        let mut source = v1::JobSamplingSource::new();
-        match value {
-            JobEventSamplingSource::LatestFromSubject { subject } => {
-                let mut inner = v1::LatestFromSubjectSampling::new();
-                inner.set_subject(subject.as_str());
-                source.set_latest_from_subject(inner);
-            }
-        }
-        source
-    }
-}
-
-impl TryFrom<v1::JobSamplingSource> for JobEventSamplingSource {
-    type Error = JobEventProtoError;
-
-    fn try_from(value: v1::JobSamplingSource) -> Result<Self, Self::Error> {
-        match value.kind() {
-            v1::job_sampling_source::KindOneof::LatestFromSubject(inner) => Ok(Self::LatestFromSubject {
-                subject: inner.subject().to_string(),
-            }),
-            v1::job_sampling_source::KindOneof::not_set(_) | _ => Err(JobEventProtoError::MissingSamplingSourceKind),
-        }
-    }
-}
-
-impl From<&MessageEnvelope> for v1::JobMessage {
-    fn from(value: &MessageEnvelope) -> Self {
-        let mut message = v1::JobMessage::new();
-        message.set_content(value.content.as_str());
-        for (name, val) in value.headers.as_slice() {
-            let mut header = v1::Header::new();
-            header.set_name(name.as_str());
-            header.set_value(val.as_str());
-            message.headers_mut().push(header);
-        }
-        message
-    }
-}
-
-impl TryFrom<v1::JobMessage> for MessageEnvelope {
-    type Error = JobEventProtoError;
-
-    fn try_from(value: v1::JobMessage) -> Result<Self, Self::Error> {
-        let headers = value
-            .headers()
-            .iter()
-            .map(|header| (header.name().to_string(), header.value().to_string()))
-            .collect::<Vec<_>>();
-
-        Ok(Self {
-            content: MessageContent::new(value.content().to_string()),
-            headers: MessageHeaders::new(headers).map_err(JobEventProtoError::InvalidHeaders)?,
-        })
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::domain::{
+        JobDetails, JobEventDelivery, JobEventSamplingSource, JobEventSchedule, JobEventStatus, MessageContent,
+        MessageEnvelope, MessageHeaders,
+    };
     use protobuf::Parse as _;
+    use trogon_cron_jobs_proto::v1;
     use trogon_eventsourcing::{EventCodec, EventData};
 
     #[test]
@@ -360,24 +152,5 @@ mod tests {
                 .event(),
             v1::job_event::EventOneof::JobAdded(_)
         ));
-    }
-
-    #[test]
-    fn unknown_status_is_rejected() {
-        let mut details = v1::JobDetails::new();
-        details.set_status(v1::JobStatus::from(99));
-        details.set_schedule(v1::JobSchedule::from(&JobEventSchedule::Every { every_sec: 30 }));
-        details.set_delivery(v1::JobDelivery::from(&JobEventDelivery::NatsEvent {
-            route: "ops.backup".to_string(),
-            ttl_sec: None,
-            source: None,
-        }));
-        details.set_message(v1::JobMessage::from(&MessageEnvelope {
-            content: MessageContent::from_static("hello"),
-            headers: MessageHeaders::default(),
-        }));
-
-        let error = JobDetails::try_from(details).unwrap_err();
-        assert!(matches!(error, JobEventProtoError::UnknownJobStatus { value: 99 }));
     }
 }
