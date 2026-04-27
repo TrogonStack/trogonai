@@ -39,7 +39,7 @@ impl Decide for TestCommand {
         TestState::Missing
     }
 
-    fn evolve(state: Self::State, event: Self::Event) -> Result<Self::State, Self::EvolveError> {
+    fn evolve(state: Self::State, event: &Self::Event) -> Result<Self::State, Self::EvolveError> {
         match (state, event) {
             (TestState::Missing, TestEvent::Registered) => Ok(TestState::Present),
             (TestState::Present, TestEvent::Registered) => Err(TestDomainError::InvalidHistory),

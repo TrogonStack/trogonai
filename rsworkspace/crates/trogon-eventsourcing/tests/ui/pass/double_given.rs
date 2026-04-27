@@ -45,7 +45,7 @@ impl Decide for TestCommand {
         TestState::Missing
     }
 
-    fn evolve(state: Self::State, event: Self::Event) -> Result<Self::State, Self::EvolveError> {
+    fn evolve(state: Self::State, event: &Self::Event) -> Result<Self::State, Self::EvolveError> {
         match (state, event) {
             (TestState::Missing, TestEvent::Registered) => Ok(TestState::Registered),
             (TestState::Registered, TestEvent::Disabled) => Ok(TestState::Disabled),

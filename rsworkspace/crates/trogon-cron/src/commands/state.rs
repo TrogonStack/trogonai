@@ -29,7 +29,7 @@ pub(crate) fn initial_state() -> state_v1::State {
     state
 }
 
-pub(crate) fn evolve(state: state_v1::State, event: v1::JobEvent) -> Result<state_v1::State, JobStateProtoError> {
+pub(crate) fn evolve(state: state_v1::State, event: &v1::JobEvent) -> Result<state_v1::State, JobStateProtoError> {
     let current_state = state.state();
     match current_state {
         state_v1::StateValue::Missing
