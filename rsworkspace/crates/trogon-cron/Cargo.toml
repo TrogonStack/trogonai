@@ -27,6 +27,7 @@ confique = { workspace = true }
 cron = "0.12"
 futures = { workspace = true }
 opentelemetry = { workspace = true }
+protobuf = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["time", "signal", "rt-multi-thread", "macros"] }

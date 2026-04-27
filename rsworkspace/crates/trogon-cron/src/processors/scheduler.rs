@@ -7,14 +7,14 @@ use async_nats::jetstream::{
     consumer::{AckPolicy, DeliverPolicy, ReplayPolicy, pull},
     context::ConsumerInfoErrorKind,
 };
-use chrono::{DateTime, Utc};
 use futures::{Stream, StreamExt};
+use trogon_eventsourcing::record_stream_message;
 use trogon_nats::SubjectTokenViolation;
 use trogon_nats::lease::{LeaderElection, LeaseRenewInterval, LeaseTiming, LeaseTtl, NatsKvLease, NatsKvLeaseConfig};
 use trogon_std::{NowV7, UuidV7Generator};
 
 use crate::{
-    CronJob, JobEventData, JobEventProtoError, JobEventStatus, RecordedJobEvent, ResolvedJob,
+    CronJob, JobEventProtoError, JobEventStatus, RecordedJobEvent, ResolvedJob,
     commands::proto::{JobContractEventCodec, contract_event_stream_id, contract_v1},
     error::CronError,
     kv::{EVENTS_SUBJECT_PREFIX, LEADER_BUCKET, LEADER_KEY, LEGACY_EVENTS_SUBJECT_PREFIX},
@@ -545,19 +545,11 @@ async fn read_raw_scheduler_event_message(
     }
 }
 
-fn decode_job_event_data(payload: &[u8]) -> Result<JobEventData, CronError> {
-    JobEventData::decode(payload).map_err(|source| CronError::event_source("failed to decode stored job event", source))
-}
-
 fn decode_recorded_job_event(
     message: async_nats::jetstream::message::StreamMessage,
 ) -> Result<RecordedJobEvent, CronError> {
-    let recorded_at = recorded_at_from_message(&message)?;
-    let stream_id = message.subject.to_string();
-    let log_position = Some(message.sequence);
-    let event = decode_job_event_data(&message.payload)?;
-
-    Ok(event.record(stream_id, None, log_position, recorded_at))
+    record_stream_message(message)
+        .map_err(|source| CronError::event_source("failed to decode stored job event", source))
 }
 
 fn decode_recorded_watch_message(message: &async_nats::jetstream::Message) -> Result<RecordedJobEvent, CronError> {
@@ -570,17 +562,6 @@ fn decode_recorded_watch_message(message: &async_nats::jetstream::Message) -> Re
         })?;
 
     decode_recorded_job_event(stream_message)
-}
-
-fn recorded_at_from_message(
-    message: &async_nats::jetstream::message::StreamMessage,
-) -> Result<DateTime<Utc>, CronError> {
-    DateTime::<Utc>::from_timestamp(message.time.unix_timestamp(), message.time.nanosecond()).ok_or_else(|| {
-        CronError::event_source(
-            "failed to convert message timestamp into recorded event time",
-            std::io::Error::other(message.subject.to_string()),
-        )
-    })
 }
 
 fn next_scheduler_start_sequence(last_sequence: u64) -> u64 {

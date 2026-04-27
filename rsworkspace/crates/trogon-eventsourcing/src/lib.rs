@@ -23,7 +23,9 @@ pub use nats::snapshot_store::{
     SnapshotStoreError, checkpoint_key, list_snapshots, load_snapshot, load_snapshot_map, maybe_advance_checkpoint,
     persist_snapshot_change, read_checkpoint, snapshot_key, write_checkpoint,
 };
-pub use nats::streams::{StreamStoreError, TROGON_EVENT_TYPE, append_stream, read_stream_from, read_stream_range};
+pub use nats::streams::{
+    StreamStoreError, TROGON_EVENT_TYPE, append_stream, read_stream_from, read_stream_range, record_stream_message,
+};
 pub use snapshot::{Snapshot, SnapshotChange, SnapshotRead, SnapshotSchema, SnapshotStoreConfig, SnapshotWrite};
 pub use stream::{AppendOutcome, StreamAppend, StreamRead, StreamReadResult, StreamState};
 pub use testing::{Decider, TestCase, ThenError, ThenEvents, ThenExpectation, Timeline, decider};
@@ -31,8 +33,8 @@ pub use testing::{Decider, TestCase, ThenError, ThenEvents, ThenExpectation, Tim
 pub trait EventCodec<T> {
     type Error;
 
-    fn encode(&self, value: &T) -> Result<String, Self::Error>;
-    fn decode(&self, value: &str) -> Result<T, Self::Error>;
+    fn encode(&self, value: &T) -> Result<Vec<u8>, Self::Error>;
+    fn decode(&self, event_type: &str, payload: &[u8]) -> Result<T, Self::Error>;
 }
 
 pub trait CanonicalEventCodec: Sized {
@@ -50,12 +52,12 @@ where
 {
     type Error = serde_json::Error;
 
-    fn encode(&self, value: &T) -> Result<String, Self::Error> {
-        serde_json::to_string(value)
+    fn encode(&self, value: &T) -> Result<Vec<u8>, Self::Error> {
+        serde_json::to_vec(value)
     }
 
-    fn decode(&self, value: &str) -> Result<T, Self::Error> {
-        serde_json::from_str(value)
+    fn decode(&self, _event_type: &str, payload: &[u8]) -> Result<T, Self::Error> {
+        serde_json::from_slice(payload)
     }
 }
 
@@ -134,28 +136,24 @@ impl<'de> Deserialize<'de> for EventId {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct EventData {
     pub event_id: EventId,
     pub event_type: String,
     pub stream_id: String,
-    pub data: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub metadata: Option<String>,
+    pub payload: Vec<u8>,
+    pub metadata: Option<Vec<u8>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct RecordedEvent {
     pub event_id: EventId,
     pub event_type: String,
     pub event_stream_id: String,
-    pub data: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub metadata: Option<String>,
+    pub payload: Vec<u8>,
+    pub metadata: Option<Vec<u8>>,
     pub recorded_stream_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub stream_position: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub log_position: Option<u64>,
     pub recorded_at: DateTime<Utc>,
 }
@@ -201,7 +199,7 @@ impl EventData {
             event_id: event_id.into(),
             event_type: event.event_type().to_string(),
             stream_id: stream_id.as_ref().to_string(),
-            data: codec.encode(&event)?,
+            payload: codec.encode(&event)?,
             metadata: None,
         })
     }
@@ -294,7 +292,7 @@ impl EventData {
             event_id: event_id.into(),
             event_type: event.event_type().to_string(),
             stream_id: stream_id.as_ref().to_string(),
-            data: event_codec.encode(&event).map_err(CodecError::Data)?,
+            payload: event_codec.encode(&event).map_err(CodecError::Data)?,
             metadata: metadata
                 .map(|value| metadata_codec.encode(&value))
                 .transpose()
@@ -337,7 +335,7 @@ impl EventData {
             event_id: self.event_id,
             event_type: self.event_type,
             event_stream_id: self.stream_id,
-            data: self.data,
+            payload: self.payload,
             metadata: self.metadata,
             recorded_stream_id: recorded_stream_id.into(),
             stream_position,
@@ -365,7 +363,7 @@ impl EventData {
     where
         C: EventCodec<E>,
     {
-        codec.decode(&self.data)
+        codec.decode(&self.event_type, &self.payload)
     }
 
     pub fn decode_metadata<M>(&self) -> serde_json::Result<Option<M>>
@@ -379,15 +377,39 @@ impl EventData {
     where
         C: EventCodec<M>,
     {
-        self.metadata.as_deref().map(|value| codec.decode(value)).transpose()
-    }
-
-    pub fn decode(payload: &[u8]) -> serde_json::Result<Self> {
-        serde_json::from_slice::<Self>(payload)
+        self.metadata
+            .as_deref()
+            .map(|value| codec.decode(&self.event_type, value))
+            .transpose()
     }
 }
 
 impl RecordedEvent {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        event_id: EventId,
+        event_type: impl Into<String>,
+        event_stream_id: impl Into<String>,
+        payload: Vec<u8>,
+        metadata: Option<Vec<u8>>,
+        recorded_stream_id: impl Into<String>,
+        stream_position: Option<u64>,
+        log_position: Option<u64>,
+        recorded_at: DateTime<Utc>,
+    ) -> Self {
+        Self {
+            event_id,
+            event_type: event_type.into(),
+            event_stream_id: event_stream_id.into(),
+            payload,
+            metadata,
+            recorded_stream_id: recorded_stream_id.into(),
+            stream_position,
+            log_position,
+            recorded_at,
+        }
+    }
+
     pub fn stream_id(&self) -> &str {
         &self.event_stream_id
     }
@@ -407,7 +429,7 @@ impl RecordedEvent {
     where
         C: EventCodec<E>,
     {
-        codec.decode(&self.data)
+        codec.decode(&self.event_type, &self.payload)
     }
 
     pub fn decode_metadata<M>(&self) -> serde_json::Result<Option<M>>
@@ -421,11 +443,10 @@ impl RecordedEvent {
     where
         C: EventCodec<M>,
     {
-        self.metadata.as_deref().map(|value| codec.decode(value)).transpose()
-    }
-
-    pub fn decode(payload: &[u8]) -> serde_json::Result<Self> {
-        serde_json::from_slice::<Self>(payload)
+        self.metadata
+            .as_deref()
+            .map(|value| codec.decode(&self.event_type, value))
+            .transpose()
     }
 }
 
@@ -483,22 +504,12 @@ mod tests {
         )
         .unwrap();
 
-        let payload = serde_json::to_value(&event).unwrap();
-
         assert_eq!(event.event_id, event_id);
-        assert_eq!(payload["event_id"], event_id.to_string());
     }
 
     #[test]
     fn event_data_rejects_non_uuid_event_ids() {
-        let payload = br#"{
-            "event_id": "not-a-uuid",
-            "event_type": "TestEvent",
-            "stream_id": "alpha",
-            "data": "{\"id\":\"alpha\",\"value\":\"beta\"}"
-        }"#;
-
-        assert!(EventData::decode(payload).is_err());
+        assert!(EventId::from_str("not-a-uuid").is_err());
     }
 
     #[test]
@@ -536,10 +547,7 @@ mod tests {
             },
         )
         .unwrap();
-        let event_payload = serde_json::to_vec(&event).unwrap();
-        let decoded_event = EventData::decode(&event_payload).unwrap();
-        assert_eq!(decoded_event, event);
-        assert_eq!(decoded_event.decode_data::<TestEvent>().unwrap().id, "alpha");
+        assert_eq!(event.decode_data::<TestEvent>().unwrap().id, "alpha");
 
         let recorded = event.record(
             "stream-alpha",
@@ -547,9 +555,6 @@ mod tests {
             Some(42),
             DateTime::<Utc>::from_timestamp(1_700_000_001, 0).unwrap(),
         );
-        let recorded_payload = serde_json::to_vec(&recorded).unwrap();
-        let decoded_recorded = RecordedEvent::decode(&recorded_payload).unwrap();
-        assert_eq!(decoded_recorded, recorded);
-        assert_eq!(decoded_recorded.decode_data::<TestEvent>().unwrap().id, "alpha");
+        assert_eq!(recorded.decode_data::<TestEvent>().unwrap().id, "alpha");
     }
 }

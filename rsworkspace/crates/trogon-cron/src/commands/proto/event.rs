@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use serde_json::{Map, Number, Value};
+use protobuf::{Parse as _, Serialize as _};
 use trogon_cron_jobs_proto::v1;
 use trogon_eventsourcing::{CanonicalEventCodec, EventCodec, EventData, EventType, RecordedEvent};
 
@@ -26,7 +26,9 @@ pub struct JobContractEventCodec;
 
 #[derive(Debug)]
 pub enum JobEventCodecError {
-    ProtoJson(JobEventProtoJsonError),
+    Decode(protobuf::ParseError),
+    Encode(protobuf::SerializeError),
+    UnknownEventType { value: String },
     Proto(JobEventProtoError),
 }
 
@@ -35,7 +37,9 @@ pub type JobContractEventCodecError = JobEventCodecError;
 impl std::fmt::Display for JobEventCodecError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::ProtoJson(source) => write!(f, "{source}"),
+            Self::Decode(source) => write!(f, "{source}"),
+            Self::Encode(source) => write!(f, "{source}"),
+            Self::UnknownEventType { value } => write!(f, "unknown protobuf job event type '{value}'"),
             Self::Proto(source) => write!(f, "{source}"),
         }
     }
@@ -44,7 +48,9 @@ impl std::fmt::Display for JobEventCodecError {
 impl std::error::Error for JobEventCodecError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::ProtoJson(source) => Some(source),
+            Self::Decode(source) => Some(source),
+            Self::Encode(source) => Some(source),
+            Self::UnknownEventType { .. } => None,
             Self::Proto(source) => Some(source),
         }
     }
@@ -53,24 +59,24 @@ impl std::error::Error for JobEventCodecError {
 impl EventCodec<v1::JobEvent> for JobContractEventCodec {
     type Error = JobContractEventCodecError;
 
-    fn encode(&self, value: &v1::JobEvent) -> Result<String, Self::Error> {
-        encode_job_event_proto_json(value).map_err(JobEventCodecError::ProtoJson)
+    fn encode(&self, value: &v1::JobEvent) -> Result<Vec<u8>, Self::Error> {
+        encode_contract_event(value)
     }
 
-    fn decode(&self, value: &str) -> Result<v1::JobEvent, Self::Error> {
-        decode_job_event_proto_json(value).map_err(JobEventCodecError::ProtoJson)
+    fn decode(&self, event_type: &str, payload: &[u8]) -> Result<v1::JobEvent, Self::Error> {
+        decode_contract_event(event_type, payload)
     }
 }
 
 impl EventCodec<JobEvent> for JobEventCodec {
     type Error = JobEventCodecError;
 
-    fn encode(&self, value: &JobEvent) -> Result<String, Self::Error> {
-        encode_job_event_proto_json(&v1::JobEvent::from(value)).map_err(JobEventCodecError::ProtoJson)
+    fn encode(&self, value: &JobEvent) -> Result<Vec<u8>, Self::Error> {
+        encode_domain_event(value).map_err(JobEventCodecError::Encode)
     }
 
-    fn decode(&self, value: &str) -> Result<JobEvent, Self::Error> {
-        let event = decode_job_event_proto_json(value).map_err(JobEventCodecError::ProtoJson)?;
+    fn decode(&self, event_type: &str, payload: &[u8]) -> Result<JobEvent, Self::Error> {
+        let event = decode_contract_event(event_type, payload)?;
         event.try_into().map_err(JobEventCodecError::Proto)
     }
 }
@@ -94,619 +100,47 @@ impl CanonicalEventCodec for JobEvent {
     }
 }
 
-#[derive(Debug)]
-pub enum JobEventProtoJsonError {
-    Json(serde_json::Error),
-    ExpectedObject {
-        context: &'static str,
-    },
-    ExpectedArray {
-        context: &'static str,
-        field: &'static str,
-    },
-    InvalidField {
-        context: &'static str,
-        field: &'static str,
-        expected: &'static str,
-    },
-    MissingOneof {
-        context: &'static str,
-    },
-    MultipleOneofCases {
-        context: &'static str,
-    },
-    InvalidEnum {
-        context: &'static str,
-        field: &'static str,
-        value: String,
-    },
-    InvalidUnsignedInteger {
-        context: &'static str,
-        field: &'static str,
-        value: String,
-        source: std::num::ParseIntError,
-    },
-}
-
-impl std::fmt::Display for JobEventProtoJsonError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Json(source) => write!(f, "{source}"),
-            Self::ExpectedObject { context } => write!(f, "protobuf JSON {context} must be an object"),
-            Self::ExpectedArray { context, field } => {
-                write!(f, "protobuf JSON {context}.{field} must be an array")
-            }
-            Self::InvalidField {
-                context,
-                field,
-                expected,
-            } => write!(f, "protobuf JSON {context}.{field} must be {expected}"),
-            Self::MissingOneof { context } => write!(f, "protobuf JSON {context} is missing its oneof case"),
-            Self::MultipleOneofCases { context } => {
-                write!(f, "protobuf JSON {context} contains multiple oneof cases")
-            }
-            Self::InvalidEnum { context, field, value } => {
-                write!(f, "protobuf JSON {context}.{field} enum value '{value}' is invalid")
-            }
-            Self::InvalidUnsignedInteger {
-                context,
-                field,
-                value,
-                source,
-            } => write!(
-                f,
-                "protobuf JSON {context}.{field} unsigned integer value '{value}' is invalid: {source}"
-            ),
-        }
-    }
-}
-
-impl std::error::Error for JobEventProtoJsonError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Json(source) => Some(source),
-            Self::InvalidUnsignedInteger { source, .. } => Some(source),
-            Self::ExpectedObject { .. }
-            | Self::ExpectedArray { .. }
-            | Self::InvalidField { .. }
-            | Self::MissingOneof { .. }
-            | Self::MultipleOneofCases { .. }
-            | Self::InvalidEnum { .. } => None,
-        }
-    }
-}
-
-fn encode_job_event_proto_json(event: &v1::JobEvent) -> Result<String, JobEventProtoJsonError> {
-    serde_json::to_string(&job_event_to_json(event)?).map_err(JobEventProtoJsonError::Json)
-}
-
-fn decode_job_event_proto_json(value: &str) -> Result<v1::JobEvent, JobEventProtoJsonError> {
-    let value = serde_json::from_str(value).map_err(JobEventProtoJsonError::Json)?;
-    job_event_from_json(&value)
-}
-
-fn job_event_to_json(event: &v1::JobEvent) -> Result<Value, JobEventProtoJsonError> {
-    let mut object = Map::new();
+fn encode_contract_event(event: &v1::JobEvent) -> Result<Vec<u8>, JobEventCodecError> {
     match event.event() {
-        v1::job_event::EventOneof::JobAdded(inner) => {
-            object.insert("jobAdded".to_string(), job_added_to_json(&inner.to_owned())?);
-        }
-        v1::job_event::EventOneof::JobPaused(inner) => {
-            object.insert("jobPaused".to_string(), id_event_to_json(inner.id()));
-        }
-        v1::job_event::EventOneof::JobResumed(inner) => {
-            object.insert("jobResumed".to_string(), id_event_to_json(inner.id()));
-        }
-        v1::job_event::EventOneof::JobRemoved(inner) => {
-            object.insert("jobRemoved".to_string(), id_event_to_json(inner.id()));
-        }
-        v1::job_event::EventOneof::not_set(_) | _ => {
-            return Err(JobEventProtoJsonError::MissingOneof {
-                context: "JobEvent.event",
-            });
-        }
-    }
-    Ok(Value::Object(object))
-}
-
-fn job_added_to_json(event: &v1::JobAdded) -> Result<Value, JobEventProtoJsonError> {
-    let mut object = Map::new();
-    object.insert("id".to_string(), Value::String(event.id().to_string()));
-    if event.has_job() {
-        object.insert("job".to_string(), job_details_to_json(&event.job().to_owned())?);
-    }
-    Ok(Value::Object(object))
-}
-
-fn id_event_to_json(id: impl ToString) -> Value {
-    let mut object = Map::new();
-    object.insert("id".to_string(), Value::String(id.to_string()));
-    Value::Object(object)
-}
-
-fn job_details_to_json(job: &v1::JobDetails) -> Result<Value, JobEventProtoJsonError> {
-    let mut object = Map::new();
-    object.insert("status".to_string(), job_status_to_json(job.status()));
-    if job.has_schedule() {
-        object.insert(
-            "schedule".to_string(),
-            job_schedule_to_json(&job.schedule().to_owned())?,
-        );
-    }
-    if job.has_delivery() {
-        object.insert(
-            "delivery".to_string(),
-            job_delivery_to_json(&job.delivery().to_owned())?,
-        );
-    }
-    if job.has_message() {
-        object.insert("message".to_string(), job_message_to_json(&job.message().to_owned()));
-    }
-    Ok(Value::Object(object))
-}
-
-fn job_status_to_json(status: v1::JobStatus) -> Value {
-    match i32::from(status) {
-        0 => Value::String("JOB_STATUS_UNSPECIFIED".to_string()),
-        1 => Value::String("JOB_STATUS_ENABLED".to_string()),
-        2 => Value::String("JOB_STATUS_DISABLED".to_string()),
-        other => Value::Number(Number::from(other)),
+        v1::job_event::EventOneof::JobAdded(inner) => inner.serialize().map_err(JobEventCodecError::Encode),
+        v1::job_event::EventOneof::JobPaused(inner) => inner.serialize().map_err(JobEventCodecError::Encode),
+        v1::job_event::EventOneof::JobResumed(inner) => inner.serialize().map_err(JobEventCodecError::Encode),
+        v1::job_event::EventOneof::JobRemoved(inner) => inner.serialize().map_err(JobEventCodecError::Encode),
+        v1::job_event::EventOneof::not_set(_) | _ => Err(JobEventCodecError::Proto(JobEventProtoError::MissingEvent)),
     }
 }
 
-fn job_schedule_to_json(schedule: &v1::JobSchedule) -> Result<Value, JobEventProtoJsonError> {
-    let mut object = Map::new();
-    match schedule.kind() {
-        v1::job_schedule::KindOneof::At(inner) => {
-            let mut at = Map::new();
-            at.insert("at".to_string(), Value::String(inner.at().to_string()));
-            object.insert("at".to_string(), Value::Object(at));
-        }
-        v1::job_schedule::KindOneof::Every(inner) => {
-            let mut every = Map::new();
-            every.insert("everySec".to_string(), Value::String(inner.every_sec().to_string()));
-            object.insert("every".to_string(), Value::Object(every));
-        }
-        v1::job_schedule::KindOneof::Cron(inner) => {
-            let mut cron = Map::new();
-            cron.insert("expr".to_string(), Value::String(inner.expr().to_string()));
-            if inner.has_timezone() {
-                cron.insert("timezone".to_string(), Value::String(inner.timezone().to_string()));
-            }
-            object.insert("cron".to_string(), Value::Object(cron));
-        }
-        v1::job_schedule::KindOneof::not_set(_) | _ => {
-            return Err(JobEventProtoJsonError::MissingOneof {
-                context: "JobSchedule.kind",
-            });
-        }
+fn encode_domain_event(event: &JobEvent) -> Result<Vec<u8>, protobuf::SerializeError> {
+    match event {
+        JobEvent::JobAdded(inner) => v1::JobAdded::from(inner).serialize(),
+        JobEvent::JobPaused(inner) => v1::JobPaused::from(inner).serialize(),
+        JobEvent::JobResumed(inner) => v1::JobResumed::from(inner).serialize(),
+        JobEvent::JobRemoved(inner) => v1::JobRemoved::from(inner).serialize(),
     }
-    Ok(Value::Object(object))
 }
 
-fn job_delivery_to_json(delivery: &v1::JobDelivery) -> Result<Value, JobEventProtoJsonError> {
-    let mut object = Map::new();
-    match delivery.kind() {
-        v1::job_delivery::KindOneof::NatsEvent(inner) => {
-            let mut nats_event = Map::new();
-            nats_event.insert("route".to_string(), Value::String(inner.route().to_string()));
-            if inner.has_ttl_sec() {
-                nats_event.insert("ttlSec".to_string(), Value::String(inner.ttl_sec().to_string()));
-            }
-            if inner.has_source() {
-                nats_event.insert(
-                    "source".to_string(),
-                    job_sampling_source_to_json(&inner.source().to_owned())?,
-                );
-            }
-            object.insert("natsEvent".to_string(), Value::Object(nats_event));
-        }
-        v1::job_delivery::KindOneof::not_set(_) | _ => {
-            return Err(JobEventProtoJsonError::MissingOneof {
-                context: "JobDelivery.kind",
-            });
-        }
-    }
-    Ok(Value::Object(object))
-}
-
-fn job_sampling_source_to_json(source: &v1::JobSamplingSource) -> Result<Value, JobEventProtoJsonError> {
-    let mut object = Map::new();
-    match source.kind() {
-        v1::job_sampling_source::KindOneof::LatestFromSubject(inner) => {
-            let mut latest = Map::new();
-            latest.insert("subject".to_string(), Value::String(inner.subject().to_string()));
-            object.insert("latestFromSubject".to_string(), Value::Object(latest));
-        }
-        v1::job_sampling_source::KindOneof::not_set(_) | _ => {
-            return Err(JobEventProtoJsonError::MissingOneof {
-                context: "JobSamplingSource.kind",
-            });
-        }
-    }
-    Ok(Value::Object(object))
-}
-
-fn job_message_to_json(message: &v1::JobMessage) -> Value {
-    let mut object = Map::new();
-    object.insert("content".to_string(), Value::String(message.content().to_string()));
-
-    let headers = message
-        .headers()
-        .iter()
-        .map(|header| {
-            let mut object = Map::new();
-            object.insert("name".to_string(), Value::String(header.name().to_string()));
-            object.insert("value".to_string(), Value::String(header.value().to_string()));
-            Value::Object(object)
-        })
-        .collect::<Vec<_>>();
-    if !headers.is_empty() {
-        object.insert("headers".to_string(), Value::Array(headers));
-    }
-
-    Value::Object(object)
-}
-
-fn job_event_from_json(value: &Value) -> Result<v1::JobEvent, JobEventProtoJsonError> {
-    let object = object(value, "JobEvent")?;
+fn decode_contract_event(event_type: &str, payload: &[u8]) -> Result<v1::JobEvent, JobEventCodecError> {
     let mut event = v1::JobEvent::new();
-    match oneof_case(
-        object,
-        "JobEvent.event",
-        &[
-            ("jobAdded", "job_added"),
-            ("jobPaused", "job_paused"),
-            ("jobResumed", "job_resumed"),
-            ("jobRemoved", "job_removed"),
-        ],
-    )? {
-        Some((0, value)) => event.set_job_added(job_added_from_json(value)?),
-        Some((1, value)) => event.set_job_paused(job_paused_from_json(value)?),
-        Some((2, value)) => event.set_job_resumed(job_resumed_from_json(value)?),
-        Some((3, value)) => event.set_job_removed(job_removed_from_json(value)?),
-        Some(_) => unreachable!("oneof case index must map to the provided case list"),
-        None => {
-            return Err(JobEventProtoJsonError::MissingOneof {
-                context: "JobEvent.event",
+    match event_type {
+        JOB_ADDED_EVENT_TYPE => {
+            event.set_job_added(v1::JobAdded::parse(payload).map_err(JobEventCodecError::Decode)?);
+        }
+        JOB_PAUSED_EVENT_TYPE => {
+            event.set_job_paused(v1::JobPaused::parse(payload).map_err(JobEventCodecError::Decode)?);
+        }
+        JOB_RESUMED_EVENT_TYPE => {
+            event.set_job_resumed(v1::JobResumed::parse(payload).map_err(JobEventCodecError::Decode)?);
+        }
+        JOB_REMOVED_EVENT_TYPE => {
+            event.set_job_removed(v1::JobRemoved::parse(payload).map_err(JobEventCodecError::Decode)?);
+        }
+        value => {
+            return Err(JobEventCodecError::UnknownEventType {
+                value: value.to_string(),
             });
         }
     }
     Ok(event)
-}
-
-fn job_added_from_json(value: &Value) -> Result<v1::JobAdded, JobEventProtoJsonError> {
-    let object = object(value, "JobAdded")?;
-    let id = string_field_or_default(object, "JobAdded", "id", "id")?;
-    let mut event = v1::JobAdded::new();
-    event.set_id(id.as_str());
-    if let Some(job) = field(object, "job", "job") {
-        event.set_job(job_details_from_json(job)?);
-    }
-    Ok(event)
-}
-
-fn job_paused_from_json(value: &Value) -> Result<v1::JobPaused, JobEventProtoJsonError> {
-    let object = object(value, "JobPaused")?;
-    let id = string_field_or_default(object, "JobPaused", "id", "id")?;
-    let mut event = v1::JobPaused::new();
-    event.set_id(id.as_str());
-    Ok(event)
-}
-
-fn job_resumed_from_json(value: &Value) -> Result<v1::JobResumed, JobEventProtoJsonError> {
-    let object = object(value, "JobResumed")?;
-    let id = string_field_or_default(object, "JobResumed", "id", "id")?;
-    let mut event = v1::JobResumed::new();
-    event.set_id(id.as_str());
-    Ok(event)
-}
-
-fn job_removed_from_json(value: &Value) -> Result<v1::JobRemoved, JobEventProtoJsonError> {
-    let object = object(value, "JobRemoved")?;
-    let id = string_field_or_default(object, "JobRemoved", "id", "id")?;
-    let mut event = v1::JobRemoved::new();
-    event.set_id(id.as_str());
-    Ok(event)
-}
-
-fn job_details_from_json(value: &Value) -> Result<v1::JobDetails, JobEventProtoJsonError> {
-    let object = object(value, "JobDetails")?;
-    let mut job = v1::JobDetails::new();
-    if let Some(status) = field(object, "status", "status") {
-        job.set_status(job_status_from_json(status, "JobDetails", "status")?);
-    }
-    if let Some(schedule) = field(object, "schedule", "schedule") {
-        job.set_schedule(job_schedule_from_json(schedule)?);
-    }
-    if let Some(delivery) = field(object, "delivery", "delivery") {
-        job.set_delivery(job_delivery_from_json(delivery)?);
-    }
-    if let Some(message) = field(object, "message", "message") {
-        job.set_message(job_message_from_json(message)?);
-    }
-    Ok(job)
-}
-
-fn job_status_from_json(
-    value: &Value,
-    context: &'static str,
-    field: &'static str,
-) -> Result<v1::JobStatus, JobEventProtoJsonError> {
-    match value {
-        Value::String(value) => match value.as_str() {
-            "JOB_STATUS_UNSPECIFIED" => Ok(v1::JobStatus::Unspecified),
-            "JOB_STATUS_ENABLED" => Ok(v1::JobStatus::Enabled),
-            "JOB_STATUS_DISABLED" => Ok(v1::JobStatus::Disabled),
-            other => Err(JobEventProtoJsonError::InvalidEnum {
-                context,
-                field,
-                value: other.to_string(),
-            }),
-        },
-        Value::Number(value) => value
-            .as_i64()
-            .and_then(|value| i32::try_from(value).ok())
-            .map(v1::JobStatus::from)
-            .ok_or(JobEventProtoJsonError::InvalidField {
-                context,
-                field,
-                expected: "a protobuf enum name or i32 value",
-            }),
-        _ => Err(JobEventProtoJsonError::InvalidField {
-            context,
-            field,
-            expected: "a protobuf enum name or i32 value",
-        }),
-    }
-}
-
-fn job_schedule_from_json(value: &Value) -> Result<v1::JobSchedule, JobEventProtoJsonError> {
-    let object = object(value, "JobSchedule")?;
-    let mut schedule = v1::JobSchedule::new();
-    match oneof_case(
-        object,
-        "JobSchedule.kind",
-        &[("at", "at"), ("every", "every"), ("cron", "cron")],
-    )? {
-        Some((0, value)) => schedule.set_at(at_schedule_from_json(value)?),
-        Some((1, value)) => schedule.set_every(every_schedule_from_json(value)?),
-        Some((2, value)) => schedule.set_cron(cron_schedule_from_json(value)?),
-        Some(_) => unreachable!("oneof case index must map to the provided case list"),
-        None => {
-            return Err(JobEventProtoJsonError::MissingOneof {
-                context: "JobSchedule.kind",
-            });
-        }
-    }
-    Ok(schedule)
-}
-
-fn at_schedule_from_json(value: &Value) -> Result<v1::AtSchedule, JobEventProtoJsonError> {
-    let object = object(value, "AtSchedule")?;
-    let at = string_field_or_default(object, "AtSchedule", "at", "at")?;
-    let mut schedule = v1::AtSchedule::new();
-    schedule.set_at(at.as_str());
-    Ok(schedule)
-}
-
-fn every_schedule_from_json(value: &Value) -> Result<v1::EverySchedule, JobEventProtoJsonError> {
-    let object = object(value, "EverySchedule")?;
-    let every_sec = u64_field_or_default(object, "EverySchedule", "everySec", "every_sec")?;
-    let mut schedule = v1::EverySchedule::new();
-    schedule.set_every_sec(every_sec);
-    Ok(schedule)
-}
-
-fn cron_schedule_from_json(value: &Value) -> Result<v1::CronSchedule, JobEventProtoJsonError> {
-    let object = object(value, "CronSchedule")?;
-    let expr = string_field_or_default(object, "CronSchedule", "expr", "expr")?;
-    let mut schedule = v1::CronSchedule::new();
-    schedule.set_expr(expr.as_str());
-    if let Some(timezone) = optional_string_field(object, "CronSchedule", "timezone", "timezone")? {
-        schedule.set_timezone(timezone.as_str());
-    }
-    Ok(schedule)
-}
-
-fn job_delivery_from_json(value: &Value) -> Result<v1::JobDelivery, JobEventProtoJsonError> {
-    let object = object(value, "JobDelivery")?;
-    let mut delivery = v1::JobDelivery::new();
-    match oneof_case(object, "JobDelivery.kind", &[("natsEvent", "nats_event")])? {
-        Some((0, value)) => delivery.set_nats_event(nats_event_delivery_from_json(value)?),
-        Some(_) => unreachable!("oneof case index must map to the provided case list"),
-        None => {
-            return Err(JobEventProtoJsonError::MissingOneof {
-                context: "JobDelivery.kind",
-            });
-        }
-    }
-    Ok(delivery)
-}
-
-fn nats_event_delivery_from_json(value: &Value) -> Result<v1::NatsEventDelivery, JobEventProtoJsonError> {
-    let object = object(value, "NatsEventDelivery")?;
-    let route = string_field_or_default(object, "NatsEventDelivery", "route", "route")?;
-    let mut delivery = v1::NatsEventDelivery::new();
-    delivery.set_route(route.as_str());
-    if let Some(ttl_sec) = optional_u64_field(object, "NatsEventDelivery", "ttlSec", "ttl_sec")? {
-        delivery.set_ttl_sec(ttl_sec);
-    }
-    if let Some(source) = field(object, "source", "source") {
-        delivery.set_source(job_sampling_source_from_json(source)?);
-    }
-    Ok(delivery)
-}
-
-fn job_sampling_source_from_json(value: &Value) -> Result<v1::JobSamplingSource, JobEventProtoJsonError> {
-    let object = object(value, "JobSamplingSource")?;
-    let mut source = v1::JobSamplingSource::new();
-    match oneof_case(
-        object,
-        "JobSamplingSource.kind",
-        &[("latestFromSubject", "latest_from_subject")],
-    )? {
-        Some((0, value)) => source.set_latest_from_subject(latest_from_subject_sampling_from_json(value)?),
-        Some(_) => unreachable!("oneof case index must map to the provided case list"),
-        None => {
-            return Err(JobEventProtoJsonError::MissingOneof {
-                context: "JobSamplingSource.kind",
-            });
-        }
-    }
-    Ok(source)
-}
-
-fn latest_from_subject_sampling_from_json(
-    value: &Value,
-) -> Result<v1::LatestFromSubjectSampling, JobEventProtoJsonError> {
-    let object = object(value, "LatestFromSubjectSampling")?;
-    let subject = string_field_or_default(object, "LatestFromSubjectSampling", "subject", "subject")?;
-    let mut source = v1::LatestFromSubjectSampling::new();
-    source.set_subject(subject.as_str());
-    Ok(source)
-}
-
-fn job_message_from_json(value: &Value) -> Result<v1::JobMessage, JobEventProtoJsonError> {
-    let object = object(value, "JobMessage")?;
-    let content = string_field_or_default(object, "JobMessage", "content", "content")?;
-    let mut message = v1::JobMessage::new();
-    message.set_content(content.as_str());
-
-    if let Some(headers) = field(object, "headers", "headers") {
-        for header in array(headers, "JobMessage", "headers")? {
-            message.headers_mut().push(header_from_json(header)?);
-        }
-    }
-
-    Ok(message)
-}
-
-fn header_from_json(value: &Value) -> Result<v1::Header, JobEventProtoJsonError> {
-    let object = object(value, "Header")?;
-    let name = string_field_or_default(object, "Header", "name", "name")?;
-    let value = string_field_or_default(object, "Header", "value", "value")?;
-    let mut header = v1::Header::new();
-    header.set_name(name.as_str());
-    header.set_value(value.as_str());
-    Ok(header)
-}
-
-fn object<'a>(value: &'a Value, context: &'static str) -> Result<&'a Map<String, Value>, JobEventProtoJsonError> {
-    value
-        .as_object()
-        .ok_or(JobEventProtoJsonError::ExpectedObject { context })
-}
-
-fn array<'a>(
-    value: &'a Value,
-    context: &'static str,
-    field: &'static str,
-) -> Result<&'a Vec<Value>, JobEventProtoJsonError> {
-    value
-        .as_array()
-        .ok_or(JobEventProtoJsonError::ExpectedArray { context, field })
-}
-
-fn field<'a>(object: &'a Map<String, Value>, camel: &'static str, proto: &'static str) -> Option<&'a Value> {
-    object.get(camel).or_else(|| object.get(proto))
-}
-
-fn oneof_case<'a>(
-    object: &'a Map<String, Value>,
-    context: &'static str,
-    cases: &[(&'static str, &'static str)],
-) -> Result<Option<(usize, &'a Value)>, JobEventProtoJsonError> {
-    let mut found = None;
-    for (index, (camel, proto)) in cases.iter().enumerate() {
-        if let Some(value) = object.get(*camel) {
-            if found.is_some() {
-                return Err(JobEventProtoJsonError::MultipleOneofCases { context });
-            }
-            found = Some((index, value));
-        }
-        if camel != proto
-            && let Some(value) = object.get(*proto)
-        {
-            if found.is_some() {
-                return Err(JobEventProtoJsonError::MultipleOneofCases { context });
-            }
-            found = Some((index, value));
-        }
-    }
-    Ok(found)
-}
-
-fn string_field_or_default(
-    object: &Map<String, Value>,
-    context: &'static str,
-    camel: &'static str,
-    proto: &'static str,
-) -> Result<String, JobEventProtoJsonError> {
-    optional_string_field(object, context, camel, proto).map(|value| value.unwrap_or_default())
-}
-
-fn optional_string_field(
-    object: &Map<String, Value>,
-    context: &'static str,
-    camel: &'static str,
-    proto: &'static str,
-) -> Result<Option<String>, JobEventProtoJsonError> {
-    field(object, camel, proto)
-        .map(|value| {
-            value
-                .as_str()
-                .map(ToOwned::to_owned)
-                .ok_or(JobEventProtoJsonError::InvalidField {
-                    context,
-                    field: camel,
-                    expected: "a string",
-                })
-        })
-        .transpose()
-}
-
-fn u64_field_or_default(
-    object: &Map<String, Value>,
-    context: &'static str,
-    camel: &'static str,
-    proto: &'static str,
-) -> Result<u64, JobEventProtoJsonError> {
-    optional_u64_field(object, context, camel, proto).map(|value| value.unwrap_or_default())
-}
-
-fn optional_u64_field(
-    object: &Map<String, Value>,
-    context: &'static str,
-    camel: &'static str,
-    proto: &'static str,
-) -> Result<Option<u64>, JobEventProtoJsonError> {
-    field(object, camel, proto)
-        .map(|value| u64_from_json(value, context, camel))
-        .transpose()
-}
-
-fn u64_from_json(value: &Value, context: &'static str, field: &'static str) -> Result<u64, JobEventProtoJsonError> {
-    match value {
-        Value::String(value) => value
-            .parse()
-            .map_err(|source| JobEventProtoJsonError::InvalidUnsignedInteger {
-                context,
-                field,
-                value: value.clone(),
-                source,
-            }),
-        Value::Number(value) => value.as_u64().ok_or(JobEventProtoJsonError::InvalidField {
-            context,
-            field,
-            expected: "a non-negative integer",
-        }),
-        _ => Err(JobEventProtoJsonError::InvalidField {
-            context,
-            field,
-            expected: "a protobuf uint64 string or non-negative integer",
-        }),
-    }
 }
 
 #[derive(Debug)]
@@ -1100,23 +534,16 @@ mod tests {
         assert_eq!(event.stream_id(), "cleanup");
         assert_eq!(event.event_type, JOB_REMOVED_EVENT_TYPE);
         assert_eq!(
-            serde_json::from_str::<Value>(&event.data).unwrap(),
-            serde_json::json!({
-                "jobRemoved": {
-                    "id": "cleanup"
-                }
-            })
+            v1::JobRemoved::parse(&event.payload).unwrap().id().to_string(),
+            "cleanup"
         );
         assert_eq!(
             event.subject_with_prefix("cron.events.jobs."),
             "cron.events.jobs.cleanup"
         );
 
-        let payload = serde_json::to_vec(&event).unwrap();
-        let decoded = JobEventData::decode(&payload).unwrap();
-        assert_eq!(decoded, event);
         assert_eq!(
-            decoded.decode_data_with(&JobEventCodec).unwrap(),
+            event.decode_data_with(&JobEventCodec).unwrap(),
             JobEvent::JobRemoved(JobRemoved {
                 id: "cleanup".to_string()
             })
@@ -1135,11 +562,8 @@ mod tests {
             recorded.subject_with_prefix("cron.events.jobs."),
             "cron.events.jobs.cleanup"
         );
-        let recorded_payload = serde_json::to_vec(&recorded).unwrap();
-        let decoded = RecordedJobEvent::decode(&recorded_payload).unwrap();
-        assert_eq!(decoded, recorded);
         assert_eq!(
-            decoded.decode_data_with(&JobEventCodec).unwrap(),
+            recorded.decode_data_with(&JobEventCodec).unwrap(),
             JobEvent::JobRemoved(JobRemoved {
                 id: "cleanup".to_string()
             })
@@ -1148,8 +572,8 @@ mod tests {
 
     #[test]
     fn invalid_payload_fails_decode() {
-        assert!(JobEventData::decode(br#"not-json"#).is_err());
-        assert!(RecordedJobEvent::decode(br#"not-json"#).is_err());
+        assert!(JobEventCodec.decode(JOB_REMOVED_EVENT_TYPE, b"\0").is_err());
+        assert!(JobEventCodec.decode("trogon.cron.jobs.v1.Unknown", &[]).is_err());
     }
 
     #[test]
@@ -1181,44 +605,14 @@ mod tests {
         let encoded = JobEventCodec.encode(&event).unwrap();
 
         assert_eq!(decoded, event);
-        assert_eq!(
-            serde_json::from_str::<Value>(&encoded).unwrap(),
-            serde_json::json!({
-                "jobAdded": {
-                    "id": "backup",
-                    "job": {
-                        "status": "JOB_STATUS_ENABLED",
-                        "schedule": {
-                            "cron": {
-                                "expr": "0 * * * * *",
-                                "timezone": "UTC"
-                            }
-                        },
-                        "delivery": {
-                            "natsEvent": {
-                                "route": "ops.backup",
-                                "ttlSec": "30",
-                                "source": {
-                                    "latestFromSubject": {
-                                        "subject": "events.backup"
-                                    }
-                                }
-                            }
-                        },
-                        "message": {
-                            "content": "hello",
-                            "headers": [
-                                {
-                                    "name": "x-kind",
-                                    "value": "backup"
-                                }
-                            ]
-                        }
-                    }
-                }
-            })
-        );
-        assert_eq!(JobEventCodec.decode(&encoded).unwrap(), event);
+        assert_eq!(JobEventCodec.decode(JOB_ADDED_EVENT_TYPE, &encoded).unwrap(), event);
+        assert!(matches!(
+            JobContractEventCodec
+                .decode(JOB_ADDED_EVENT_TYPE, &encoded)
+                .unwrap()
+                .event(),
+            v1::job_event::EventOneof::JobAdded(_)
+        ));
     }
 
     #[test]

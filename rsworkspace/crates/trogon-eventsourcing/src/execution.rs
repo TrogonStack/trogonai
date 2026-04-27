@@ -721,13 +721,15 @@ mod tests {
     impl EventCodec<TestEvent> for WrappedJsonCodec {
         type Error = TestInfraError;
 
-        fn encode(&self, value: &TestEvent) -> Result<String, Self::Error> {
+        fn encode(&self, value: &TestEvent) -> Result<Vec<u8>, Self::Error> {
             serde_json::to_string(value)
                 .map(|json| format!("wrapped:{json}"))
+                .map(String::into_bytes)
                 .map_err(Into::into)
         }
 
-        fn decode(&self, value: &str) -> Result<TestEvent, Self::Error> {
+        fn decode(&self, _event_type: &str, payload: &[u8]) -> Result<TestEvent, Self::Error> {
+            let value = std::str::from_utf8(payload).map_err(|_| TestInfraError::Json)?;
             let json = value.strip_prefix("wrapped:").ok_or(TestInfraError::Json)?;
             serde_json::from_str(json).map_err(Into::into)
         }
@@ -1049,7 +1051,7 @@ mod tests {
 
         assert_eq!(result.state, TestState::Present { enabled: false });
         assert_eq!(appended_events.len(), 1);
-        assert!(appended_events[0].data.starts_with("wrapped:"));
+        assert!(appended_events[0].payload.starts_with(b"wrapped:"));
     }
 
     #[test]
