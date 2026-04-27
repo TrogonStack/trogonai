@@ -28,6 +28,6 @@ pub use notifier::SlackWebhookNotifier;
 pub use proposal::{
     ApproveRequest, CreateRequest, Proposal, ProposalId, ProposalStatus, RejectRequest, StatusResponse,
 };
-pub use service::ApprovalService;
+pub use service::{ApprovalService, JetStreamStatePublisher, NoopStatePublisher, StatePublisher};
 pub use stream::{ensure_proposals_stream, ensure_proposals_stream_with_max_age};
 pub use subjects::{PROPOSALS_STREAM, state_update as state_update_subject};

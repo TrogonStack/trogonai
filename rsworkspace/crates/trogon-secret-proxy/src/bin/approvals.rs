@@ -47,10 +47,10 @@ use trogon_vault::{ApiKeyToken, DualWriteVault, MemoryVault, VaultStore};
 use trogon_vault::{HashicorpVaultConfig, HashicorpVaultStore, VaultAuth};
 use trogon_vault::{InfisicalConfig, InfisicalVaultStore};
 use trogon_vault_approvals::{
-    ApprovalService, LoggingNotifier, Notifier, SlackWebhookNotifier,
+    ApprovalService, JetStreamStatePublisher, LoggingNotifier, Notifier, SlackWebhookNotifier,
     ensure_proposals_stream,
 };
-use trogon_vault_nats::{AuditPublisher, CryptoCtx, NatsKvVault, ensure_audit_stream, ensure_vault_bucket, grace_period_from_env};
+use trogon_vault_nats::{Audit, AuditPublisher, CryptoCtx, NatsKvVault, ensure_audit_stream, ensure_vault_bucket, grace_period_from_env};
 
 // ── Vault builders (shared with worker binary) ────────────────────────────────
 
@@ -84,7 +84,7 @@ fn nats_kv_replicas() -> usize {
 async fn build_nats_kv_vault(
     jetstream:   &async_nats::jetstream::Context,
     bucket_name: &str,
-    audit:       Arc<AuditPublisher>,
+    audit:       Arc<dyn Audit>,
 ) -> NatsKvVault {
     let kv = ensure_vault_bucket(jetstream, bucket_name, nats_kv_replicas())
         .await
@@ -119,13 +119,14 @@ async fn run_with_vault<V, N>(
         .await
         .expect("Failed to ensure VAULT_AUDIT stream");
 
-    let audit = Arc::new(AuditPublisher::new(js.clone(), vault_name));
+    let audit: Arc<dyn Audit> = Arc::new(AuditPublisher::new(js.clone(), vault_name));
+    let publisher = Arc::new(JetStreamStatePublisher::new(js.clone()));
 
     tracing::info!(vault = %vault_name, "Approval service starting");
 
-    ApprovalService::new(vault, notifier, js, nats, vault_name)
+    ApprovalService::new(vault, notifier, publisher, vault_name)
         .with_audit(audit)
-        .run()
+        .run(js, nats)
         .await
         .expect("ApprovalService exited with error");
 }
@@ -189,7 +190,7 @@ async fn main() {
             let infisical = InfisicalVaultStore::new(config);
             let bucket    = std::env::var("VAULT_NATS_BUCKET").unwrap();
             ensure_audit_stream(&js).await.expect("Failed to ensure VAULT_AUDIT stream");
-            let audit   = Arc::new(AuditPublisher::new(js.clone(), &bucket));
+            let audit: Arc<dyn Audit> = Arc::new(AuditPublisher::new(js.clone(), &bucket));
             let nats_kv = build_nats_kv_vault(&js, &bucket, audit).await;
             let vault   = Arc::new(DualWriteVault::new(infisical, nats_kv));
             run_with_vault_and_notifier(vault, js, nats, &vault_name).await;

@@ -12,7 +12,7 @@ pub mod crypto;
 pub mod error;
 pub mod slot;
 
-pub use audit::{AuditEvent, AuditPublisher, ensure_audit_stream, ensure_audit_stream_with_max_age};
+pub use audit::{Audit, AuditEvent, AuditPublisher, NoopAudit, ensure_audit_stream, ensure_audit_stream_with_max_age};
 pub use backend::NatsKvVault;
 pub use bucket::ensure_vault_bucket;
 pub use crypto::CryptoCtx;

@@ -73,7 +73,7 @@ use trogon_std::SystemEnv;
 use trogon_vault::{ApiKeyToken, DualWriteVault, MemoryVault, VaultStore};
 use trogon_vault::{HashicorpVaultConfig, HashicorpVaultStore, VaultAuth};
 use trogon_vault::{InfisicalConfig, InfisicalVaultStore};
-use trogon_vault_nats::{AuditPublisher, CryptoCtx, NatsKvVault, ensure_audit_stream, ensure_vault_bucket, grace_period_from_env};
+use trogon_vault_nats::{Audit, AuditPublisher, CryptoCtx, NatsKvVault, ensure_audit_stream, ensure_vault_bucket, grace_period_from_env};
 
 async fn run_all<V: VaultStore + 'static>(
     nats: async_nats::Client,
@@ -140,7 +140,7 @@ fn nats_kv_replicas() -> usize {
 async fn build_nats_kv_vault(
     jetstream:   &async_nats::jetstream::Context,
     bucket_name: &str,
-    audit:       Arc<AuditPublisher>,
+    audit:       Arc<dyn Audit>,
 ) -> NatsKvVault {
     let kv = ensure_vault_bucket(jetstream, bucket_name, nats_kv_replicas())
         .await
@@ -203,7 +203,7 @@ async fn main() {
             let infisical = InfisicalVaultStore::new(config);
             let bucket    = std::env::var("VAULT_NATS_BUCKET").unwrap();
             ensure_audit_stream(&jetstream).await.expect("Failed to ensure VAULT_AUDIT stream");
-            let audit   = Arc::new(AuditPublisher::new(jetstream.clone(), &bucket));
+            let audit: Arc<dyn Audit> = Arc::new(AuditPublisher::new(jetstream.clone(), &bucket));
             let nats_kv = build_nats_kv_vault(&jetstream, &bucket, audit).await;
             let vault   = Arc::new(DualWriteVault::new(infisical, nats_kv));
             run_all(nats, jetstream, vault, http_client, &consumer_name, &sname, &prefix).await;

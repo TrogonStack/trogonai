@@ -8,7 +8,7 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use trogon_vault::{ApiKeyToken, VaultStore};
 
-use crate::audit::AuditPublisher;
+use crate::audit::Audit;
 use crate::crypto::CryptoCtx;
 use crate::error::{NatsKvVaultError, NatsResult as _};
 use crate::slot::RotationSlot;
@@ -31,7 +31,7 @@ pub struct NatsKvVault {
     kv:       kv::Store,
     ready:    watch::Receiver<bool>,
     crypto:   Arc<CryptoCtx>,
-    audit:    Option<Arc<AuditPublisher>>,
+    audit:    Option<Arc<dyn Audit>>,
     _watcher: JoinHandle<()>,
 }
 
@@ -103,7 +103,7 @@ impl NatsKvVault {
     ///
     /// Call [`ensure_audit_stream`](crate::ensure_audit_stream) before using this
     /// so the `VAULT_AUDIT` stream exists to receive the events.
-    pub fn with_audit(mut self, publisher: Arc<AuditPublisher>) -> Self {
+    pub fn with_audit(mut self, publisher: Arc<dyn Audit>) -> Self {
         self.audit = Some(publisher);
         self
     }

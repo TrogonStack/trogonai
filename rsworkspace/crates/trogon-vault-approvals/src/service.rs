@@ -14,52 +14,123 @@ use async_nats::jetstream::AckKind;
 use dashmap::DashMap;
 use futures_util::StreamExt as _;
 use trogon_vault::{ApiKeyToken, VaultStore};
-use trogon_vault_nats::AuditPublisher;
+use trogon_vault_nats::Audit;
 
 use crate::error::ApprovalError;
 use crate::notifier::Notifier;
 use crate::proposal::{ApproveRequest, CreateRequest, Proposal, ProposalStatus, RejectRequest, StatusResponse};
 use crate::subjects::{self, PROPOSALS_STREAM};
 
-// ── ApprovalService ───────────────────────────────────────────────────────────
+// ── StatePublisher trait ──────────────────────────────────────────────────────
 
-pub struct ApprovalService<V: VaultStore, N: Notifier> {
-    vault:      Arc<V>,
-    notifier:   Arc<N>,
-    js:         jetstream::Context,
-    nats:       async_nats::Client,
-    vault_name: String,
-    proposals:  Arc<DashMap<String, Proposal>>,
-    audit:      Option<Arc<AuditPublisher>>,
+/// Abstraction over fire-and-forget state-update publishing to the VAULT_PROPOSALS stream.
+///
+/// [`JetStreamStatePublisher`] is the real implementation.
+/// [`NoopStatePublisher`] is used in tests where persistence is not under test.
+#[async_trait::async_trait]
+pub trait StatePublisher: Send + Sync + 'static {
+    async fn publish_state_update(
+        &self,
+        vault_name:  &str,
+        proposal_id: &str,
+        state:       &str,
+        by:          &str,
+        reason:      Option<&str>,
+    );
 }
 
-impl<V, N> ApprovalService<V, N>
+// ── JetStreamStatePublisher ───────────────────────────────────────────────────
+
+/// Publishes state-update events to JetStream for audit and crash recovery.
+pub struct JetStreamStatePublisher {
+    js: jetstream::Context,
+}
+
+impl JetStreamStatePublisher {
+    pub fn new(js: jetstream::Context) -> Self {
+        Self { js }
+    }
+}
+
+#[async_trait::async_trait]
+impl StatePublisher for JetStreamStatePublisher {
+    async fn publish_state_update(
+        &self,
+        vault_name:  &str,
+        proposal_id: &str,
+        state:       &str,
+        by:          &str,
+        reason:      Option<&str>,
+    ) {
+        let mut payload = serde_json::json!({
+            "proposal_id": proposal_id,
+            "vault":       vault_name,
+            "state":       state,
+            "by":          by,
+        });
+        if let Some(r) = reason {
+            payload["reason"] = serde_json::Value::String(r.to_string());
+        }
+        let subject = subjects::state_update(vault_name, proposal_id);
+        match serde_json::to_vec(&payload) {
+            Ok(bytes) => {
+                match self.js.publish(subject, bytes.into()).await {
+                    Ok(ack) => { ack.await.ok(); }
+                    Err(e)  => tracing::warn!(error = %e, "vault-approvals: failed to publish state update"),
+                }
+            }
+            Err(e) => tracing::warn!(error = %e, "vault-approvals: failed to serialize state update"),
+        }
+    }
+}
+
+// ── NoopStatePublisher ────────────────────────────────────────────────────────
+
+/// Discards all state-update events — for tests.
+pub struct NoopStatePublisher;
+
+#[async_trait::async_trait]
+impl StatePublisher for NoopStatePublisher {
+    async fn publish_state_update(&self, _: &str, _: &str, _: &str, _: &str, _: Option<&str>) {}
+}
+
+// ── ApprovalService ───────────────────────────────────────────────────────────
+
+pub struct ApprovalService<V: VaultStore, N: Notifier, P: StatePublisher> {
+    vault:      Arc<V>,
+    notifier:   Arc<N>,
+    publisher:  Arc<P>,
+    vault_name: String,
+    proposals:  Arc<DashMap<String, Proposal>>,
+    audit:      Option<Arc<dyn Audit>>,
+}
+
+impl<V, N, P> ApprovalService<V, N, P>
 where
     V: VaultStore + 'static,
     V::Error: std::fmt::Display,
     N: Notifier,
+    P: StatePublisher,
 {
     pub fn new(
         vault:      Arc<V>,
         notifier:   Arc<N>,
-        js:         jetstream::Context,
-        nats:       async_nats::Client,
+        publisher:  Arc<P>,
         vault_name: impl Into<String>,
     ) -> Self {
         Self {
             vault,
             notifier,
-            js,
-            nats,
+            publisher,
             vault_name: vault_name.into(),
             proposals:  Arc::new(DashMap::new()),
             audit:      None,
         }
     }
 
-    /// Attach an [`AuditPublisher`] to emit `Approve` / `Reject` audit events.
-    pub fn with_audit(mut self, publisher: Arc<AuditPublisher>) -> Self {
-        self.audit = Some(publisher);
+    /// Attach an [`Audit`] implementation to emit audit events on approve / reject.
+    pub fn with_audit(mut self, audit: Arc<dyn Audit>) -> Self {
+        self.audit = Some(audit);
         self
     }
 
@@ -70,31 +141,35 @@ where
     /// 2. `consume_approvals`  — Core NATS subscriber (ephemeral — plaintext must not persist).
     /// 3. `consume_rejections` — Core NATS subscriber (ephemeral — same reason as approvals).
     /// 4. `serve_status`       — Core NATS subscriber for status request-reply.
-    pub async fn run(self) -> Result<(), ApprovalError> {
+    pub async fn run(
+        self,
+        js:   jetstream::Context,
+        nats: async_nats::Client,
+    ) -> Result<(), ApprovalError> {
         let this = Arc::new(self);
         tokio::try_join!(
-            Self::consume_creates(Arc::clone(&this)),
-            Self::consume_approvals(Arc::clone(&this)),
-            Self::consume_rejections(Arc::clone(&this)),
-            Self::serve_status(Arc::clone(&this)),
+            Self::consume_creates(Arc::clone(&this), js),
+            Self::consume_approvals(Arc::clone(&this), nats.clone()),
+            Self::consume_rejections(Arc::clone(&this), nats.clone()),
+            Self::serve_status(Arc::clone(&this), nats),
         )?;
         Ok(())
     }
 
     // ── Consumer helpers ──────────────────────────────────────────────────────
 
-    /// Build (or reopen) a durable pull consumer with the given filter subject.
     async fn make_consumer(
-        this:          &Arc<Self>,
-        name_suffix:   &str,
+        js:             &jetstream::Context,
+        vault_name:     &str,
+        name_suffix:    &str,
         filter_subject: String,
     ) -> Result<jetstream::consumer::Consumer<pull::Config>, ApprovalError> {
-        let stream: jetstream::stream::Stream = this.js
+        let stream: jetstream::stream::Stream = js
             .get_stream(PROPOSALS_STREAM)
             .await
             .map_err(|e: async_nats::error::Error<_>| ApprovalError::JetStream(e.to_string()))?;
 
-        let consumer_name = format!("{}-approvals-{name_suffix}", this.vault_name);
+        let consumer_name = format!("{vault_name}-approvals-{name_suffix}");
 
         stream
             .get_or_create_consumer(
@@ -118,12 +193,10 @@ where
     ) -> Result<(), ApprovalError> {
         let kind = match &result {
             Ok(()) => AckKind::Ack,
-            // Parse errors are permanent — retrying won't fix malformed JSON.
             Err(ApprovalError::Serialize(e)) => {
                 tracing::warn!(error = %e, "vault-approvals: malformed message, skipping");
                 AckKind::Ack
             }
-            // Vault / NATS errors may be transient — nack for redelivery.
             Err(e) => {
                 tracing::warn!(error = %e, "vault-approvals: transient error, nacking for retry");
                 AckKind::Nak(None)
@@ -134,11 +207,11 @@ where
             .map_err(|e| ApprovalError::Nats(e.to_string()))
     }
 
-    // ── Three parallel JetStream consumers ────────────────────────────────────
+    // ── Three parallel consumers ──────────────────────────────────────────────
 
-    async fn consume_creates(this: Arc<Self>) -> Result<(), ApprovalError> {
+    async fn consume_creates(this: Arc<Self>, js: jetstream::Context) -> Result<(), ApprovalError> {
         let filter   = subjects::create(&this.vault_name);
-        let consumer = Self::make_consumer(&this, "create", filter).await?;
+        let consumer = Self::make_consumer(&js, &this.vault_name, "create", filter).await?;
         let mut msgs = consumer.messages().await
             .map_err(|e| ApprovalError::JetStream(e.to_string()))?;
 
@@ -151,11 +224,10 @@ where
     }
 
     /// Core NATS subscription — approve messages carry plaintext API keys and must
-    /// never be stored by the JetStream stream. At-most-once delivery is intentional:
-    /// the human can retry if the service is down during the approval.
-    async fn consume_approvals(this: Arc<Self>) -> Result<(), ApprovalError> {
+    /// never be stored by the JetStream stream. At-most-once delivery is intentional.
+    async fn consume_approvals(this: Arc<Self>, nats: async_nats::Client) -> Result<(), ApprovalError> {
         let subject = subjects::approve(&this.vault_name);
-        let mut sub = this.nats
+        let mut sub = nats
             .subscribe(subject)
             .await
             .map_err(|e| ApprovalError::Nats(e.to_string()))?;
@@ -169,9 +241,9 @@ where
     }
 
     /// Core NATS subscription — same plaintext-safety rationale as consume_approvals.
-    async fn consume_rejections(this: Arc<Self>) -> Result<(), ApprovalError> {
+    async fn consume_rejections(this: Arc<Self>, nats: async_nats::Client) -> Result<(), ApprovalError> {
         let subject = subjects::reject(&this.vault_name);
-        let mut sub = this.nats
+        let mut sub = nats
             .subscribe(subject)
             .await
             .map_err(|e| ApprovalError::Nats(e.to_string()))?;
@@ -245,9 +317,7 @@ where
         let proposal_snapshot = entry.clone();
         drop(entry);
 
-        // Persist state transition to JetStream for audit and crash recovery.
-        publish_state_update(
-            &this.js,
+        this.publisher.publish_state_update(
             &this.vault_name,
             &req.proposal_id,
             "approved",
@@ -295,9 +365,7 @@ where
         let proposal_snapshot = entry.clone();
         drop(entry);
 
-        // Persist state transition to JetStream for audit and crash recovery.
-        publish_state_update(
-            &this.js,
+        this.publisher.publish_state_update(
             &this.vault_name,
             &req.proposal_id,
             "rejected",
@@ -316,9 +384,9 @@ where
 
     // ── Status request-reply ──────────────────────────────────────────────────
 
-    async fn serve_status(this: Arc<Self>) -> Result<(), ApprovalError> {
+    async fn serve_status(this: Arc<Self>, nats: async_nats::Client) -> Result<(), ApprovalError> {
         let subject = subjects::status_wildcard(&this.vault_name);
-        let mut sub = this.nats
+        let mut sub = nats
             .subscribe(subject)
             .await
             .map_err(|e| ApprovalError::Nats(e.to_string()))?;
@@ -347,7 +415,7 @@ where
                 }
             };
 
-            if let Err(e) = this.nats.publish(reply.to_string(), payload.into()).await {
+            if let Err(e) = nats.publish(reply.to_string(), payload.into()).await {
                 tracing::warn!(error = %e, "vault-approvals: failed to publish status response");
             }
         }
@@ -356,40 +424,177 @@ where
     }
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Unit tests ────────────────────────────────────────────────────────────────
 
-/// Publish a state-update event to the VAULT_PROPOSALS stream.
-///
-/// This is fire-and-forget — errors are logged but do not fail the handler.
-/// The event persists in JetStream for 90 days (stream retention) and serves
-/// as an audit trail and crash-recovery aid for external consumers.
-async fn publish_state_update(
-    js:          &jetstream::Context,
-    vault_name:  &str,
-    proposal_id: &str,
-    state:       &str,
-    by:          &str,
-    reason:      Option<&str>,
-) {
-    let mut payload = serde_json::json!({
-        "proposal_id": proposal_id,
-        "vault":       vault_name,
-        "state":       state,
-        "by":          by,
-    });
-    if let Some(r) = reason {
-        payload["reason"] = serde_json::Value::String(r.to_string());
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use trogon_vault::MemoryVault;
+    use trogon_vault_nats::NoopAudit;
+
+    use crate::notifier::NoopNotifier;
+
+    fn service() -> ApprovalService<MemoryVault, NoopNotifier, NoopStatePublisher> {
+        ApprovalService::new(
+            Arc::new(MemoryVault::new()),
+            Arc::new(NoopNotifier),
+            Arc::new(NoopStatePublisher),
+            "prod",
+        )
     }
 
-    let subject = subjects::state_update(vault_name, proposal_id);
+    fn arc_service() -> Arc<ApprovalService<MemoryVault, NoopNotifier, NoopStatePublisher>> {
+        Arc::new(service())
+    }
 
-    match serde_json::to_vec(&payload) {
-        Ok(bytes) => {
-            match js.publish(subject, bytes.into()).await {
-                Ok(ack) => { ack.await.ok(); }
-                Err(e)  => tracing::warn!(error = %e, "vault-approvals: failed to publish state update"),
-            }
-        }
-        Err(e) => tracing::warn!(error = %e, "vault-approvals: failed to serialize state update"),
+    // ── handle_create ─────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn create_inserts_pending_proposal() {
+        let svc = arc_service();
+        let payload = br#"{"id":"prop_abc","credential_key":"tok_stripe_prod_abc1","service":"api.stripe.com","message":"need access"}"#;
+
+        ApprovalService::handle_create(&svc, payload).await.unwrap();
+
+        let p = svc.proposals.get("prop_abc").expect("proposal must be in map");
+        assert!(matches!(p.status, ProposalStatus::Pending));
+        assert_eq!(p.service, "api.stripe.com");
+    }
+
+    #[tokio::test]
+    async fn create_duplicate_is_idempotent() {
+        let svc = arc_service();
+        let payload = br#"{"id":"prop_abc","credential_key":"tok_stripe_prod_abc1","service":"api.stripe.com","message":"x"}"#;
+
+        ApprovalService::handle_create(&svc, payload).await.unwrap();
+        ApprovalService::handle_create(&svc, payload).await.unwrap();
+
+        assert_eq!(svc.proposals.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn create_with_requested_at_preserves_timestamp() {
+        let svc = arc_service();
+        let payload = br#"{"id":"prop_ts","credential_key":"tok_stripe_prod_abc1","service":"s","message":"m","requested_at":"2026-04-27T10:00:00Z"}"#;
+
+        ApprovalService::handle_create(&svc, payload).await.unwrap();
+
+        let p = svc.proposals.get("prop_ts").unwrap();
+        assert_eq!(p.requested_at.as_deref(), Some("2026-04-27T10:00:00Z"));
+    }
+
+    #[tokio::test]
+    async fn create_returns_error_on_malformed_json() {
+        let svc = arc_service();
+        let result = ApprovalService::handle_create(&svc, b"not json").await;
+        assert!(matches!(result, Err(ApprovalError::Serialize(_))));
+    }
+
+    // ── handle_approve ────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn approve_stores_credential_and_updates_status() {
+        let svc = arc_service();
+
+        // Create proposal first
+        let create_payload = br#"{"id":"prop_abc","credential_key":"tok_stripe_prod_abc1","service":"s","message":"m"}"#;
+        ApprovalService::handle_create(&svc, create_payload).await.unwrap();
+
+        let approve_payload = br#"{"proposal_id":"prop_abc","approved_by":"mario","plaintext":"sk_live_secret"}"#;
+        ApprovalService::handle_approve(&svc, approve_payload).await.unwrap();
+
+        let p = svc.proposals.get("prop_abc").unwrap();
+        assert!(matches!(&p.status, ProposalStatus::Approved { approved_by } if approved_by == "mario"));
+
+        // Verify the vault actually stored the credential
+        let token = ApiKeyToken::new("tok_stripe_prod_abc1").unwrap();
+        let stored = svc.vault.resolve(&token).await.unwrap();
+        assert_eq!(stored.as_deref(), Some("sk_live_secret"));
+    }
+
+    #[tokio::test]
+    async fn approve_unknown_proposal_is_ignored() {
+        let svc = arc_service();
+        let payload = br#"{"proposal_id":"prop_unknown","approved_by":"mario","plaintext":"sk_live_x"}"#;
+        assert!(ApprovalService::handle_approve(&svc, payload).await.is_ok());
+        assert!(svc.proposals.is_empty());
+    }
+
+    #[tokio::test]
+    async fn approve_non_pending_proposal_is_ignored() {
+        let svc = arc_service();
+
+        let create  = br#"{"id":"prop_abc","credential_key":"tok_stripe_prod_abc1","service":"s","message":"m"}"#;
+        let approve = br#"{"proposal_id":"prop_abc","approved_by":"mario","plaintext":"sk_live_x"}"#;
+        ApprovalService::handle_create(&svc, create).await.unwrap();
+        ApprovalService::handle_approve(&svc, approve).await.unwrap();
+
+        // Second approve on already-approved proposal must be a no-op
+        let second = br#"{"proposal_id":"prop_abc","approved_by":"luigi","plaintext":"sk_live_y"}"#;
+        ApprovalService::handle_approve(&svc, second).await.unwrap();
+
+        let p = svc.proposals.get("prop_abc").unwrap();
+        assert!(matches!(&p.status, ProposalStatus::Approved { approved_by } if approved_by == "mario"),
+            "second approve must not overwrite first");
+    }
+
+    // ── handle_reject ─────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn reject_updates_status_with_reason() {
+        let svc = arc_service();
+
+        let create  = br#"{"id":"prop_abc","credential_key":"tok_stripe_prod_abc1","service":"s","message":"m"}"#;
+        let reject  = br#"{"proposal_id":"prop_abc","rejected_by":"luigi","reason":"not authorised"}"#;
+        ApprovalService::handle_create(&svc, create).await.unwrap();
+        ApprovalService::handle_reject(&svc, reject).await.unwrap();
+
+        let p = svc.proposals.get("prop_abc").unwrap();
+        assert!(matches!(
+            &p.status,
+            ProposalStatus::Rejected { rejected_by, reason }
+            if rejected_by == "luigi" && reason == "not authorised"
+        ));
+    }
+
+    #[tokio::test]
+    async fn reject_unknown_proposal_is_ignored() {
+        let svc = arc_service();
+        let payload = br#"{"proposal_id":"prop_unknown","rejected_by":"luigi","reason":"nope"}"#;
+        assert!(ApprovalService::handle_reject(&svc, payload).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn reject_non_pending_proposal_is_ignored() {
+        let svc = arc_service();
+
+        let create  = br#"{"id":"prop_abc","credential_key":"tok_stripe_prod_abc1","service":"s","message":"m"}"#;
+        let reject1 = br#"{"proposal_id":"prop_abc","rejected_by":"luigi","reason":"first"}"#;
+        let reject2 = br#"{"proposal_id":"prop_abc","rejected_by":"mario","reason":"second"}"#;
+        ApprovalService::handle_create(&svc, create).await.unwrap();
+        ApprovalService::handle_reject(&svc, reject1).await.unwrap();
+        ApprovalService::handle_reject(&svc, reject2).await.unwrap();
+
+        let p = svc.proposals.get("prop_abc").unwrap();
+        assert!(matches!(
+            &p.status,
+            ProposalStatus::Rejected { rejected_by, .. } if rejected_by == "luigi"
+        ), "second reject must not overwrite first");
+    }
+
+    #[tokio::test]
+    async fn reject_without_reason_defaults_to_empty_string() {
+        let svc = arc_service();
+
+        let create = br#"{"id":"prop_abc","credential_key":"tok_stripe_prod_abc1","service":"s","message":"m"}"#;
+        let reject = br#"{"proposal_id":"prop_abc","rejected_by":"luigi"}"#;
+        ApprovalService::handle_create(&svc, create).await.unwrap();
+        ApprovalService::handle_reject(&svc, reject).await.unwrap();
+
+        let p = svc.proposals.get("prop_abc").unwrap();
+        assert!(matches!(
+            &p.status,
+            ProposalStatus::Rejected { reason, .. } if reason.is_empty()
+        ));
     }
 }

@@ -6,6 +6,35 @@ use serde::Serialize;
 use crate::error::{NatsKvVaultError, NatsResult as _};
 
 pub(crate) const VAULT_AUDIT_STREAM: &str = "VAULT_AUDIT";
+
+// ── Audit trait ───────────────────────────────────────────────────────────────
+
+/// Abstraction over audit event publication.
+///
+/// [`AuditPublisher`] is the real implementation (fire-and-forget JetStream).
+/// [`NoopAudit`] is used in tests and deployments that do not need audit logs.
+pub trait Audit: Send + Sync + 'static {
+    fn publish_store(&self, token: &str, actor: &str);
+    fn publish_resolve(&self, token: &str, success: bool, latency_us: u64);
+    fn publish_revoke(&self, token: &str, actor: &str);
+    fn publish_rotate(&self, token: &str, actor: &str);
+    fn publish_approve(&self, proposal_id: &str, approver: &str);
+    fn publish_reject(&self, proposal_id: &str, approver: &str);
+}
+
+// ── NoopAudit ─────────────────────────────────────────────────────────────────
+
+/// Discards every audit event — for tests and deployments without audit logging.
+pub struct NoopAudit;
+
+impl Audit for NoopAudit {
+    fn publish_store(&self, _: &str, _: &str) {}
+    fn publish_resolve(&self, _: &str, _: bool, _: u64) {}
+    fn publish_revoke(&self, _: &str, _: &str) {}
+    fn publish_rotate(&self, _: &str, _: &str) {}
+    fn publish_approve(&self, _: &str, _: &str) {}
+    fn publish_reject(&self, _: &str, _: &str) {}
+}
 const DEFAULT_MAX_AGE: Duration = Duration::from_secs(90 * 24 * 3600);
 
 // ── AuditEvent ────────────────────────────────────────────────────────────────
@@ -61,57 +90,6 @@ impl AuditPublisher {
         Self { js, vault_name: vault_name.into() }
     }
 
-    pub fn publish_store(&self, token: &str, actor: &str) {
-        self.fire(AuditEvent::Store {
-            token: token.to_string(),
-            vault: self.vault_name.clone(),
-            actor: actor.to_string(),
-        });
-    }
-
-    pub fn publish_resolve(&self, token: &str, success: bool, latency_us: u64) {
-        self.fire(AuditEvent::Resolve {
-            token:      token.to_string(),
-            vault:      self.vault_name.clone(),
-            success,
-            latency_us,
-        });
-    }
-
-    pub fn publish_revoke(&self, token: &str, actor: &str) {
-        self.fire(AuditEvent::Revoke {
-            token: token.to_string(),
-            vault: self.vault_name.clone(),
-            actor: actor.to_string(),
-        });
-    }
-
-    pub fn publish_rotate(&self, token: &str, actor: &str) {
-        self.fire(AuditEvent::Rotate {
-            token: token.to_string(),
-            vault: self.vault_name.clone(),
-            actor: actor.to_string(),
-        });
-    }
-
-    /// Used by `trogon-vault-approvals` (Phase 5).
-    pub fn publish_approve(&self, proposal_id: &str, approver: &str) {
-        self.fire(AuditEvent::Approve {
-            proposal_id: proposal_id.to_string(),
-            vault:       self.vault_name.clone(),
-            approver:    approver.to_string(),
-        });
-    }
-
-    /// Used by `trogon-vault-approvals` (Phase 5).
-    pub fn publish_reject(&self, proposal_id: &str, approver: &str) {
-        self.fire(AuditEvent::Reject {
-            proposal_id: proposal_id.to_string(),
-            vault:       self.vault_name.clone(),
-            approver:    approver.to_string(),
-        });
-    }
-
     fn fire(&self, event: AuditEvent) {
         let subject = event.subject(&self.vault_name);
         let js = self.js.clone();
@@ -125,6 +103,27 @@ impl AuditPublisher {
             }
             Err(e) => tracing::warn!(error = %e, "audit: failed to serialize event"),
         }
+    }
+}
+
+impl Audit for AuditPublisher {
+    fn publish_store(&self, token: &str, actor: &str) {
+        self.fire(AuditEvent::Store { token: token.into(), vault: self.vault_name.clone(), actor: actor.into() });
+    }
+    fn publish_resolve(&self, token: &str, success: bool, latency_us: u64) {
+        self.fire(AuditEvent::Resolve { token: token.into(), vault: self.vault_name.clone(), success, latency_us });
+    }
+    fn publish_revoke(&self, token: &str, actor: &str) {
+        self.fire(AuditEvent::Revoke { token: token.into(), vault: self.vault_name.clone(), actor: actor.into() });
+    }
+    fn publish_rotate(&self, token: &str, actor: &str) {
+        self.fire(AuditEvent::Rotate { token: token.into(), vault: self.vault_name.clone(), actor: actor.into() });
+    }
+    fn publish_approve(&self, proposal_id: &str, approver: &str) {
+        self.fire(AuditEvent::Approve { proposal_id: proposal_id.into(), vault: self.vault_name.clone(), approver: approver.into() });
+    }
+    fn publish_reject(&self, proposal_id: &str, approver: &str) {
+        self.fire(AuditEvent::Reject { proposal_id: proposal_id.into(), vault: self.vault_name.clone(), approver: approver.into() });
     }
 }
 
