@@ -728,7 +728,7 @@ mod tests {
                 .map_err(Into::into)
         }
 
-        fn decode(&self, _event_type: &str, payload: &[u8]) -> Result<TestEvent, Self::Error> {
+        fn decode(&self, _event_type: &str, _stream_id: &str, payload: &[u8]) -> Result<TestEvent, Self::Error> {
             let value = std::str::from_utf8(payload).map_err(|_| TestInfraError::Json)?;
             let json = value.strip_prefix("wrapped:").ok_or(TestInfraError::Json)?;
             serde_json::from_str(json).map_err(Into::into)
