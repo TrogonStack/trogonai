@@ -2,7 +2,7 @@
 
 use std::{collections::HashMap, fmt::Debug, marker::PhantomData};
 
-use crate::{Decide, Decision, NonEmpty, StateMachineCommand};
+use crate::{Decide, Decision, NonEmpty};
 
 #[macro_export]
 macro_rules! events {
@@ -245,7 +245,7 @@ where
 
 impl<C> TestCase<C, NoHistory>
 where
-    C: StateMachineCommand,
+    C: Decide,
     C::Event: Clone + Debug,
     C::EvolveError: Debug,
 {
@@ -266,7 +266,7 @@ where
 
 impl<C> TestCase<C, Given<C::Event>>
 where
-    C: StateMachineCommand,
+    C: Decide,
     C::Event: Clone + Debug,
     C::EvolveError: Debug,
 {
@@ -276,7 +276,7 @@ where
         let history = std::mem::take(&mut self.stage.history);
 
         for (index, event) in history.iter().cloned().enumerate() {
-            state = match C::evolve_state(state, event.clone()) {
+            state = match C::evolve(state, event.clone()) {
                 Ok(next) => next,
                 Err(error) => panic!(
                     "Given history could not be replayed at event {}:\nevent = {:?}\nerror = {:?}",
@@ -525,7 +525,7 @@ mod tests {
     use std::panic::{AssertUnwindSafe, catch_unwind};
 
     use super::*;
-    use crate::{Decision, StreamCommand};
+    use crate::Decision;
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     enum TestState {
@@ -589,22 +589,22 @@ mod tests {
         }
     }
 
-    impl StreamCommand for TestCommand {
+    impl Decide for TestCommand {
         type StreamId = str;
+        type State = TestState;
+        type Event = TestEvent;
+        type DecideError = TestCommandError;
+        type EvolveError = TestDomainError;
 
         fn stream_id(&self) -> &Self::StreamId {
             self.id
         }
-    }
-
-    impl StateMachineCommand for TestCommand {
-        type EvolveError = TestDomainError;
 
         fn initial_state() -> Self::State {
             TestState::Missing
         }
 
-        fn evolve_state(state: Self::State, event: Self::Event) -> Result<Self::State, Self::EvolveError> {
+        fn evolve(state: Self::State, event: Self::Event) -> Result<Self::State, Self::EvolveError> {
             match (state, event) {
                 (TestState::Missing, TestEvent::Registered { .. }) => Ok(TestState::Present { enabled: true }),
                 (TestState::Missing, TestEvent::Disabled { id }) => Err(TestDomainError::MissingJobForDisable { id }),
@@ -616,12 +616,6 @@ mod tests {
                 (TestState::Present { .. }, TestEvent::Removed { .. }) => Ok(TestState::Missing),
             }
         }
-    }
-
-    impl Decide for TestCommand {
-        type State = TestState;
-        type Event = TestEvent;
-        type DecideError = TestCommandError;
 
         fn decide(state: &TestState, command: &Self) -> Result<Decision<TestEvent>, Self::DecideError> {
             match (&command.action, state) {
