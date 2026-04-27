@@ -34,7 +34,7 @@ impl StreamStoreError {
         }
     }
 
-    fn publish_source<E>(context: &'static str, source: E) -> Self
+    pub(crate) fn publish_source<E>(context: &'static str, source: E) -> Self
     where
         E: std::error::Error + Send + Sync + 'static,
     {
@@ -73,7 +73,7 @@ pub async fn append_stream<J>(
     subject: String,
     expected_last_subject_sequence: Option<u64>,
     events: &NonEmpty<EventData>,
-) -> Result<(), StreamStoreError>
+) -> Result<u64, StreamStoreError>
 where
     J: JetStreamPublishMessage<PublishError = context::PublishError, AckFuture = context::PublishAckFuture>,
 {
@@ -86,7 +86,7 @@ async fn append_stream_with_uuid_generator<J, N>(
     expected_last_subject_sequence: Option<u64>,
     events: &NonEmpty<EventData>,
     now_v7: &N,
-) -> Result<(), StreamStoreError>
+) -> Result<u64, StreamStoreError>
 where
     J: JetStreamPublishMessage<PublishError = context::PublishError, AckFuture = context::PublishAckFuture>,
     N: NowV7,
@@ -134,8 +134,18 @@ where
         ));
     };
 
-    match batch_ack.into_future().await {
-        Ok(PublishAck { .. }) => {}
+    let batch_sequence = match batch_ack.into_future().await {
+        Ok(PublishAck {
+            sequence,
+            duplicate: false,
+            ..
+        }) => sequence,
+        Ok(PublishAck { duplicate: true, .. }) => {
+            return Err(StreamStoreError::publish_source(
+                "failed to acknowledge stream event batch commit",
+                std::io::Error::other("duplicate event id"),
+            ));
+        }
         Err(error) if error.kind() == PublishErrorKind::WrongLastSequence => {
             return Err(StreamStoreError::WrongExpectedVersion);
         }
@@ -145,9 +155,9 @@ where
                 error,
             ));
         }
-    }
+    };
 
-    Ok(())
+    Ok(batch_sequence)
 }
 
 fn build_publish_message(
@@ -184,6 +194,18 @@ pub async fn read_stream_from(
     read_stream_range(stream, from_sequence, info.state.last_sequence).await
 }
 
+pub(crate) async fn read_subject_from(
+    stream: &jetstream::stream::Stream,
+    subject: &str,
+    from_sequence: u64,
+) -> Result<Vec<RecordedEvent>, StreamStoreError> {
+    let info = stream
+        .get_info()
+        .await
+        .map_err(|source| StreamStoreError::read_source("failed to query stream info", source))?;
+    read_subject_range(stream, subject, from_sequence, info.state.last_sequence).await
+}
+
 pub async fn read_stream_range(
     stream: &jetstream::stream::Stream,
     from_sequence: u64,
@@ -198,6 +220,30 @@ pub async fn read_stream_range(
         let Some(message) = read_raw_message(stream, sequence).await? else {
             continue;
         };
+        events.push(record_stream_message(message)?);
+    }
+
+    Ok(events)
+}
+
+async fn read_subject_range(
+    stream: &jetstream::stream::Stream,
+    subject: &str,
+    from_sequence: u64,
+    to_sequence: u64,
+) -> Result<Vec<RecordedEvent>, StreamStoreError> {
+    if from_sequence == 0 || to_sequence == 0 || from_sequence > to_sequence {
+        return Ok(Vec::new());
+    }
+
+    let mut events = Vec::new();
+    for sequence in from_sequence..=to_sequence {
+        let Some(message) = read_raw_message(stream, sequence).await? else {
+            continue;
+        };
+        if message.subject.as_str() != subject {
+            continue;
+        }
         events.push(record_stream_message(message)?);
     }
 

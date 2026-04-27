@@ -5,7 +5,7 @@ use async_nats::jetstream::{self, kv};
 use serde::{Serialize, de::DeserializeOwned};
 
 use crate::nats::snapshot_store::{SnapshotStoreError, load_snapshot, persist_snapshot_change};
-use crate::nats::streams::{StreamStoreError, append_stream, read_stream_from};
+use crate::nats::streams::{StreamStoreError, append_stream, read_subject_from};
 use crate::snapshot::{Snapshot, SnapshotChange, SnapshotStoreConfig};
 use crate::{
     AppendOutcome, EventData, NonEmpty, SnapshotRead, SnapshotWrite, StreamAppend, StreamRead, StreamReadResult,
@@ -201,11 +201,10 @@ impl<Resolver, Projector> JetStreamStore<Resolver, Projector> {
             .await
             .map_err(JetStreamStoreError::ResolveSubject)?;
         let current_version = subject_state.current_version;
-        let events = read_stream_from(self.events_stream(), from_sequence)
+        let events = read_subject_from(self.events_stream(), &subject_state.subject, from_sequence)
             .await
             .map_err(JetStreamStoreError::ReadStream)?
             .into_iter()
-            .filter(|event| event.recorded_stream_id == subject_state.subject)
             .map(|mut event| {
                 event.event_stream_id = stream_id.as_ref().to_string();
                 event
@@ -234,6 +233,12 @@ impl<Resolver, Projector> JetStreamStore<Resolver, Projector> {
             .resolve_subject_state(self.events_stream(), stream_id)
             .await
             .map_err(JetStreamStoreError::ResolveSubject)?;
+        if events.iter().any(|event| event.stream_id() != stream_id.as_ref()) {
+            return Err(JetStreamStoreError::AppendStream(StreamStoreError::publish_source(
+                "failed to publish stream event batch",
+                std::io::Error::other(format!("batch contains events outside stream '{}'", stream_id.as_ref())),
+            )));
+        }
         let current_version = subject_state.current_version;
         let expected_last_subject_sequence = match expected_state {
             StreamState::Any => None,
@@ -250,7 +255,7 @@ impl<Resolver, Projector> JetStreamStore<Resolver, Projector> {
             StreamState::StreamRevision(version) => Some(version),
         };
 
-        append_stream(
+        let next_expected_version = append_stream(
             self.as_jetstream(),
             subject_state.subject,
             expected_last_subject_sequence,
@@ -266,7 +271,6 @@ impl<Resolver, Projector> JetStreamStore<Resolver, Projector> {
             other => JetStreamStoreError::AppendStream(other),
         })?;
 
-        let next_expected_version = current_version.unwrap_or(0) + events.len() as u64;
         self.append_projector
             .project_appended(
                 self.snapshot_bucket(),

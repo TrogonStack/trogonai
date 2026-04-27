@@ -274,23 +274,35 @@ async fn read_checkpoint_entry(
 }
 
 async fn write_kv_value(bucket: &kv::Store, key: &str, value: Vec<u8>) -> Result<(), SnapshotStoreError> {
-    if let Some(entry) = bucket
-        .entry(key.to_string())
-        .await
-        .map_err(|source| SnapshotStoreError::kv_source("failed to read key-value entry for update", source))?
-    {
-        let _ = bucket
-            .update(key, value.into(), entry.revision)
+    loop {
+        if let Some(entry) = bucket
+            .entry(key.to_string())
             .await
-            .map_err(|source| SnapshotStoreError::kv_source("failed to update key-value entry", source))?;
-    } else {
-        let _ = bucket
-            .create(key, value.into())
-            .await
-            .map_err(|source| SnapshotStoreError::kv_source("failed to create key-value entry", source))?;
+            .map_err(|source| SnapshotStoreError::kv_source("failed to read key-value entry for update", source))?
+        {
+            match bucket.update(key, value.clone().into(), entry.revision).await {
+                Ok(_) => return Ok(()),
+                Err(source) if source.kind() == kv::UpdateErrorKind::WrongLastRevision => continue,
+                Err(source) => {
+                    return Err(SnapshotStoreError::kv_source(
+                        "failed to update key-value entry",
+                        source,
+                    ));
+                }
+            }
+        } else {
+            match bucket.create(key, value.clone().into()).await {
+                Ok(_) => return Ok(()),
+                Err(source) if source.kind() == kv::CreateErrorKind::AlreadyExists => continue,
+                Err(source) => {
+                    return Err(SnapshotStoreError::kv_source(
+                        "failed to create key-value entry",
+                        source,
+                    ));
+                }
+            }
+        }
     }
-
-    Ok(())
 }
 
 async fn write_snapshot_value<T>(
@@ -302,52 +314,69 @@ async fn write_snapshot_value<T>(
 where
     T: DeserializeOwned,
 {
-    let Some(entry) = bucket.entry(key.to_string()).await.map_err(|source| {
-        SnapshotStoreError::kv_source("failed to read key-value entry for snapshot update", source)
-    })?
-    else {
-        return create_snapshot_value(bucket, key, value).await;
-    };
+    loop {
+        let Some(entry) = bucket.entry(key.to_string()).await.map_err(|source| {
+            SnapshotStoreError::kv_source("failed to read key-value entry for snapshot update", source)
+        })?
+        else {
+            match bucket.create(key, value.clone().into()).await {
+                Ok(_) => return Ok(()),
+                Err(source) if source.kind() == kv::CreateErrorKind::AlreadyExists => continue,
+                Err(source) => {
+                    return Err(SnapshotStoreError::kv_source("failed to create snapshot entry", source));
+                }
+            }
+        };
 
-    if entry.operation != kv::Operation::Put {
-        return create_snapshot_value(bucket, key, value).await;
-    }
+        if entry.operation != kv::Operation::Put {
+            match bucket.create(key, value.clone().into()).await {
+                Ok(_) => return Ok(()),
+                Err(source) if source.kind() == kv::CreateErrorKind::AlreadyExists => continue,
+                Err(source) => {
+                    return Err(SnapshotStoreError::kv_source("failed to create snapshot entry", source));
+                }
+            }
+        }
 
-    let current = serde_json::from_slice::<Snapshot<T>>(&entry.value)
-        .map_err(|source| SnapshotStoreError::kv_source("failed to decode current snapshot entry", source))?;
+        let current = serde_json::from_slice::<Snapshot<T>>(&entry.value)
+            .map_err(|source| SnapshotStoreError::kv_source("failed to decode current snapshot entry", source))?;
 
-    if current.version >= snapshot_version {
-        return Ok(());
-    }
+        if current.version >= snapshot_version {
+            return Ok(());
+        }
 
-    match bucket.update(key, value.into(), entry.revision).await {
-        Ok(_) => Ok(()),
-        Err(source) if source.kind() == kv::UpdateErrorKind::WrongLastRevision => Ok(()),
-        Err(source) => Err(SnapshotStoreError::kv_source("failed to update snapshot entry", source)),
-    }
-}
-
-async fn create_snapshot_value(bucket: &kv::Store, key: &str, value: Vec<u8>) -> Result<(), SnapshotStoreError> {
-    match bucket.create(key, value.into()).await {
-        Ok(_) => Ok(()),
-        Err(source) if source.kind() == kv::CreateErrorKind::AlreadyExists => Ok(()),
-        Err(source) => Err(SnapshotStoreError::kv_source("failed to create snapshot entry", source)),
+        match bucket.update(key, value.clone().into(), entry.revision).await {
+            Ok(_) => return Ok(()),
+            Err(source) if source.kind() == kv::UpdateErrorKind::WrongLastRevision => continue,
+            Err(source) => return Err(SnapshotStoreError::kv_source("failed to update snapshot entry", source)),
+        }
     }
 }
 
 async fn delete_kv_value(bucket: &kv::Store, key: &str) -> Result<(), SnapshotStoreError> {
-    if let Some(entry) = bucket
-        .entry(key.to_string())
-        .await
-        .map_err(|source| SnapshotStoreError::kv_source("failed to read key-value entry for delete", source))?
-    {
-        bucket
-            .delete_expect_revision(key, Some(entry.revision))
+    loop {
+        let Some(entry) = bucket
+            .entry(key.to_string())
             .await
-            .map_err(|source| SnapshotStoreError::kv_source("failed to delete key-value entry", source))?;
-    }
+            .map_err(|source| SnapshotStoreError::kv_source("failed to read key-value entry for delete", source))?
+        else {
+            return Ok(());
+        };
+        if entry.operation != kv::Operation::Put {
+            return Ok(());
+        }
 
-    Ok(())
+        match bucket.delete_expect_revision(key, Some(entry.revision)).await {
+            Ok(()) => return Ok(()),
+            Err(source) if source.kind() == kv::DeleteErrorKind::WrongLastRevision => continue,
+            Err(source) => {
+                return Err(SnapshotStoreError::kv_source(
+                    "failed to delete key-value entry",
+                    source,
+                ));
+            }
+        }
+    }
 }
 
 #[cfg(test)]
