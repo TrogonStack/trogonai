@@ -11,6 +11,7 @@ pub fn stream_subjects() -> Vec<String> {
         "vault.proposals.*.create".to_string(),
         "vault.proposals.*.approve".to_string(),
         "vault.proposals.*.reject".to_string(),
+        "vault.proposals.*.state.*".to_string(),
     ]
 }
 
@@ -37,6 +38,14 @@ pub fn status(vault_name: &str, proposal_id: &str) -> String {
 /// Wildcard subscription for all status queries on a vault.
 pub fn status_wildcard(vault_name: &str) -> String {
     format!("vault.proposals.{vault_name}.status.>")
+}
+
+/// State update published by the service after approve or reject.
+///
+/// Goes to the VAULT_PROPOSALS stream for audit and external consumers.
+/// The service does not subscribe to these — they are fire-and-forget records.
+pub fn state_update(vault_name: &str, proposal_id: &str) -> String {
+    format!("vault.proposals.{vault_name}.state.{proposal_id}")
 }
 
 /// Consumer filter for all proposal events (create + approve + reject) on one vault.
@@ -72,8 +81,18 @@ mod tests {
     }
 
     #[test]
-    fn stream_subjects_excludes_status() {
-        for s in stream_subjects() {
+    fn state_update_subject() {
+        assert_eq!(
+            state_update("prod", "prop_abc123"),
+            "vault.proposals.prod.state.prop_abc123"
+        );
+    }
+
+    #[test]
+    fn stream_subjects_includes_state_and_excludes_status() {
+        let subjects = stream_subjects();
+        assert!(subjects.iter().any(|s| s.contains("state")), "stream must capture state updates");
+        for s in &subjects {
             assert!(!s.contains("status"), "stream must not capture status: {s}");
         }
     }

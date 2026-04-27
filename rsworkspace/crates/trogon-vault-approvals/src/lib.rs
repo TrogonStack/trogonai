@@ -30,4 +30,4 @@ pub use proposal::{
 };
 pub use service::ApprovalService;
 pub use stream::{ensure_proposals_stream, ensure_proposals_stream_with_max_age};
-pub use subjects::PROPOSALS_STREAM;
+pub use subjects::{PROPOSALS_STREAM, state_update as state_update_subject};

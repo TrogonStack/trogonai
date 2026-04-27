@@ -1,8 +1,7 @@
 //! Human-in-the-loop approval service for vault credential writes.
 //!
-//! Subscribes to `vault.proposals.{vault_name}.create/approve/reject` via a
-//! durable JetStream pull consumer and serves status queries via core NATS
-//! request-reply.
+//! Three parallel JetStream pull consumers handle create / approve / reject events
+//! independently. A fourth core-NATS subscriber serves status request-reply.
 //!
 //! Run with [`ApprovalService::run`] — the method loops indefinitely until the
 //! NATS connection is closed.
@@ -11,6 +10,7 @@ use std::sync::Arc;
 
 use async_nats::jetstream;
 use async_nats::jetstream::consumer::{AckPolicy, DeliverPolicy, pull};
+use async_nats::jetstream::AckKind;
 use dashmap::DashMap;
 use futures_util::StreamExt as _;
 use trogon_vault::{ApiKeyToken, VaultStore};
@@ -65,76 +65,116 @@ where
 
     /// Run the approval service until the NATS connection is closed.
     ///
-    /// Two concurrent loops:
-    /// 1. JetStream pull consumer — processes create / approve / reject events.
-    /// 2. Core NATS subscriber — serves status request-reply.
+    /// Four concurrent tasks:
+    /// 1. `consume_creates`   — JetStream pull consumer for create events.
+    /// 2. `consume_approvals` — JetStream pull consumer for approve events.
+    /// 3. `consume_rejections`— JetStream pull consumer for reject events.
+    /// 4. `serve_status`      — Core NATS subscriber for status request-reply.
     pub async fn run(self) -> Result<(), ApprovalError> {
         let this = Arc::new(self);
         tokio::try_join!(
-            Self::consume_events(Arc::clone(&this)),
+            Self::consume_creates(Arc::clone(&this)),
+            Self::consume_approvals(Arc::clone(&this)),
+            Self::consume_rejections(Arc::clone(&this)),
             Self::serve_status(Arc::clone(&this)),
         )?;
         Ok(())
     }
 
-    // ── JetStream consumer ────────────────────────────────────────────────────
+    // ── Consumer helpers ──────────────────────────────────────────────────────
 
-    async fn consume_events(this: Arc<Self>) -> Result<(), ApprovalError> {
+    /// Build (or reopen) a durable pull consumer with the given filter subject.
+    async fn make_consumer(
+        this:          &Arc<Self>,
+        name_suffix:   &str,
+        filter_subject: String,
+    ) -> Result<jetstream::consumer::Consumer<pull::Config>, ApprovalError> {
         let stream = this.js
             .get_stream(PROPOSALS_STREAM)
             .await
             .map_err(|e| ApprovalError::JetStream(e.to_string()))?;
 
-        let consumer_name = format!("vault-approvals-{}", this.vault_name);
-        let filter = subjects::vault_wildcard(&this.vault_name);
+        let consumer_name = format!("{}-approvals-{name_suffix}", this.vault_name);
 
-        let consumer: jetstream::consumer::Consumer<pull::Config> = stream
+        stream
             .get_or_create_consumer(
                 &consumer_name,
                 pull::Config {
                     durable_name:   Some(consumer_name.clone()),
-                    filter_subject: filter,
+                    filter_subject,
                     ack_policy:     AckPolicy::Explicit,
                     deliver_policy: DeliverPolicy::All,
                     ..Default::default()
                 },
             )
             .await
-            .map_err(|e| ApprovalError::JetStream(e.to_string()))?;
+            .map_err(|e| ApprovalError::JetStream(e.to_string()))
+    }
 
-        let mut messages = consumer
-            .messages()
-            .await
-            .map_err(|e| ApprovalError::JetStream(e.to_string()))?;
-
-        while let Some(msg) = messages.next().await {
-            let msg = msg.map_err(|e| ApprovalError::JetStream(e.to_string()))?;
-            let subject = msg.subject.to_string();
-
-            let result = if subject.ends_with(".create") {
-                Self::handle_create(&this, &msg.payload).await
-            } else if subject.ends_with(".approve") {
-                Self::handle_approve(&this, &msg.payload).await
-            } else if subject.ends_with(".reject") {
-                Self::handle_reject(&this, &msg.payload).await
-            } else {
-                tracing::warn!(subject = %subject, "vault-approvals: unknown subject, skipping");
-                Ok(())
-            };
-
-            match result {
-                Ok(()) => {
-                    msg.ack().await.map_err(|e| ApprovalError::Nats(e.to_string()))?;
-                }
-                Err(e) => {
-                    tracing::warn!(error = %e, subject = %subject, "vault-approvals: error processing event, nacking");
-                    msg.ack_with(async_nats::jetstream::AckKind::Nak(None))
-                        .await
-                        .map_err(|e| ApprovalError::Nats(e.to_string()))?;
-                }
+    /// Ack on success, nack on transient errors, ack (skip) on parse errors.
+    async fn settle(
+        msg:    jetstream::Message,
+        result: Result<(), ApprovalError>,
+    ) -> Result<(), ApprovalError> {
+        let kind = match &result {
+            Ok(()) => AckKind::Ack,
+            // Parse errors are permanent — retrying won't fix malformed JSON.
+            Err(ApprovalError::Serialize(e)) => {
+                tracing::warn!(error = %e, "vault-approvals: malformed message, skipping");
+                AckKind::Ack
             }
-        }
+            // Vault / NATS errors may be transient — nack for redelivery.
+            Err(e) => {
+                tracing::warn!(error = %e, "vault-approvals: transient error, nacking for retry");
+                AckKind::Nak(None)
+            }
+        };
+        msg.ack_with(kind)
+            .await
+            .map_err(|e| ApprovalError::Nats(e.to_string()))
+    }
 
+    // ── Three parallel JetStream consumers ────────────────────────────────────
+
+    async fn consume_creates(this: Arc<Self>) -> Result<(), ApprovalError> {
+        let filter   = subjects::create(&this.vault_name);
+        let consumer = Self::make_consumer(&this, "create", filter).await?;
+        let mut msgs = consumer.messages().await
+            .map_err(|e| ApprovalError::JetStream(e.to_string()))?;
+
+        while let Some(msg) = msgs.next().await {
+            let msg    = msg.map_err(|e| ApprovalError::JetStream(e.to_string()))?;
+            let result = Self::handle_create(&this, &msg.payload).await;
+            Self::settle(msg, result).await?;
+        }
+        Ok(())
+    }
+
+    async fn consume_approvals(this: Arc<Self>) -> Result<(), ApprovalError> {
+        let filter   = subjects::approve(&this.vault_name);
+        let consumer = Self::make_consumer(&this, "approve", filter).await?;
+        let mut msgs = consumer.messages().await
+            .map_err(|e| ApprovalError::JetStream(e.to_string()))?;
+
+        while let Some(msg) = msgs.next().await {
+            let msg    = msg.map_err(|e| ApprovalError::JetStream(e.to_string()))?;
+            let result = Self::handle_approve(&this, &msg.payload).await;
+            Self::settle(msg, result).await?;
+        }
+        Ok(())
+    }
+
+    async fn consume_rejections(this: Arc<Self>) -> Result<(), ApprovalError> {
+        let filter   = subjects::reject(&this.vault_name);
+        let consumer = Self::make_consumer(&this, "reject", filter).await?;
+        let mut msgs = consumer.messages().await
+            .map_err(|e| ApprovalError::JetStream(e.to_string()))?;
+
+        while let Some(msg) = msgs.next().await {
+            let msg    = msg.map_err(|e| ApprovalError::JetStream(e.to_string()))?;
+            let result = Self::handle_reject(&this, &msg.payload).await;
+            Self::settle(msg, result).await?;
+        }
         Ok(())
     }
 
@@ -144,6 +184,11 @@ where
         let req = serde_json::from_slice::<CreateRequest>(payload)
             .map_err(|e| ApprovalError::Serialize(e.to_string()))?;
 
+        if this.proposals.contains_key(&req.id) {
+            tracing::debug!(id = %req.id, "vault-approvals: duplicate create, skipping");
+            return Ok(());
+        }
+
         let proposal = Proposal {
             id:             req.id.clone(),
             credential_key: req.credential_key,
@@ -151,12 +196,6 @@ where
             message:        req.message,
             status:         ProposalStatus::Pending,
         };
-
-        // Idempotent: if already exists, skip to avoid overwriting a later state.
-        if this.proposals.contains_key(&req.id) {
-            tracing::debug!(id = %req.id, "vault-approvals: duplicate create, skipping");
-            return Ok(());
-        }
 
         this.notifier.notify_pending(&proposal).await;
         this.proposals.insert(req.id, proposal);
@@ -170,7 +209,6 @@ where
         let mut entry = match this.proposals.get_mut(&req.proposal_id) {
             Some(e) => e,
             None => {
-                // Proposal not yet seen (e.g. history replay order). Log and ack.
                 tracing::warn!(
                     proposal_id = %req.proposal_id,
                     "vault-approvals: approve for unknown proposal, ignoring"
@@ -199,6 +237,16 @@ where
 
         let proposal_snapshot = entry.clone();
         drop(entry);
+
+        // Persist state transition to JetStream for audit and crash recovery.
+        publish_state_update(
+            &this.js,
+            &this.vault_name,
+            &req.proposal_id,
+            "approved",
+            &req.approved_by,
+            None,
+        ).await;
 
         this.notifier.notify_approved(&proposal_snapshot, &req.approved_by).await;
 
@@ -239,6 +287,16 @@ where
 
         let proposal_snapshot = entry.clone();
         drop(entry);
+
+        // Persist state transition to JetStream for audit and crash recovery.
+        publish_state_update(
+            &this.js,
+            &this.vault_name,
+            &req.proposal_id,
+            "rejected",
+            &req.rejected_by,
+            Some(&req.reason),
+        ).await;
 
         this.notifier.notify_rejected(&proposal_snapshot, &req.rejected_by, &req.reason).await;
 
@@ -288,5 +346,43 @@ where
         }
 
         Ok(())
+    }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/// Publish a state-update event to the VAULT_PROPOSALS stream.
+///
+/// This is fire-and-forget — errors are logged but do not fail the handler.
+/// The event persists in JetStream for 90 days (stream retention) and serves
+/// as an audit trail and crash-recovery aid for external consumers.
+async fn publish_state_update(
+    js:          &jetstream::Context,
+    vault_name:  &str,
+    proposal_id: &str,
+    state:       &str,
+    by:          &str,
+    reason:      Option<&str>,
+) {
+    let mut payload = serde_json::json!({
+        "proposal_id": proposal_id,
+        "vault":       vault_name,
+        "state":       state,
+        "by":          by,
+    });
+    if let Some(r) = reason {
+        payload["reason"] = serde_json::Value::String(r.to_string());
+    }
+
+    let subject = subjects::state_update(vault_name, proposal_id);
+
+    match serde_json::to_vec(&payload) {
+        Ok(bytes) => {
+            match js.publish(subject, bytes.into()).await {
+                Ok(ack) => { ack.await.ok(); }
+                Err(e)  => tracing::warn!(error = %e, "vault-approvals: failed to publish state update"),
+            }
+        }
+        Err(e) => tracing::warn!(error = %e, "vault-approvals: failed to serialize state update"),
     }
 }

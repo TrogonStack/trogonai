@@ -10,6 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_nats::jetstream;
+use futures_util::StreamExt as _;
 use testcontainers_modules::{
     nats::Nats,
     testcontainers::{ImageExt, runners::AsyncRunner},
@@ -19,6 +20,7 @@ use trogon_vault_approvals::{
     ApprovalService, NoopNotifier,
     ensure_proposals_stream,
     subjects,
+    state_update_subject,
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -380,6 +382,117 @@ async fn named_vaults_are_isolated() {
     );
     // staging vault must not.
     assert_eq!(vault_staging.resolve(&token).await.unwrap(), None);
+}
+
+#[tokio::test]
+async fn approve_publishes_state_update_to_stream() {
+    let (js, nats, _c) = start_nats().await;
+    let _vault = spawn_service(js.clone(), nats.clone(), "prod").await;
+
+    // Subscribe to state updates before the proposal is created.
+    let mut state_sub = nats
+        .subscribe(state_update_subject("prod", ">"))
+        .await
+        .expect("state sub");
+
+    js.publish(
+        subjects::create("prod"),
+        serde_json::to_vec(&serde_json::json!({
+            "id":             "prop_state001",
+            "credential_key": "tok_stripe_prod_state1",
+            "service":        "api.stripe.com",
+            "message":        "state update test"
+        }))
+        .unwrap()
+        .into(),
+    )
+    .await
+    .unwrap()
+    .await
+    .unwrap();
+
+    tokio::time::sleep(Duration::from_millis(150)).await;
+
+    js.publish(
+        subjects::approve("prod"),
+        serde_json::to_vec(&serde_json::json!({
+            "proposal_id": "prop_state001",
+            "approved_by": "mario",
+            "plaintext":   "sk_live_state_test"
+        }))
+        .unwrap()
+        .into(),
+    )
+    .await
+    .unwrap()
+    .await
+    .unwrap();
+
+    // Wait for the state update event.
+    let msg = tokio::time::timeout(Duration::from_secs(2), state_sub.next())
+        .await
+        .expect("timeout waiting for state update")
+        .expect("state sub closed");
+
+    let v: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
+    assert_eq!(v["state"], "approved", "state update must say approved: {v}");
+    assert_eq!(v["by"], "mario");
+    assert_eq!(v["proposal_id"], "prop_state001");
+    assert_eq!(v["vault"], "prod");
+}
+
+#[tokio::test]
+async fn reject_publishes_state_update_to_stream() {
+    let (js, nats, _c) = start_nats().await;
+    let _vault = spawn_service(js.clone(), nats.clone(), "staging").await;
+
+    let mut state_sub = nats
+        .subscribe(state_update_subject("staging", ">"))
+        .await
+        .expect("state sub");
+
+    js.publish(
+        subjects::create("staging"),
+        serde_json::to_vec(&serde_json::json!({
+            "id":             "prop_rstate001",
+            "credential_key": "tok_openai_staging_rstate1",
+            "service":        "api.openai.com",
+            "message":        "reject state test"
+        }))
+        .unwrap()
+        .into(),
+    )
+    .await
+    .unwrap()
+    .await
+    .unwrap();
+
+    tokio::time::sleep(Duration::from_millis(150)).await;
+
+    js.publish(
+        subjects::reject("staging"),
+        serde_json::to_vec(&serde_json::json!({
+            "proposal_id": "prop_rstate001",
+            "rejected_by": "luigi",
+            "reason":      "policy violation"
+        }))
+        .unwrap()
+        .into(),
+    )
+    .await
+    .unwrap()
+    .await
+    .unwrap();
+
+    let msg = tokio::time::timeout(Duration::from_secs(2), state_sub.next())
+        .await
+        .expect("timeout waiting for state update")
+        .expect("state sub closed");
+
+    let v: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
+    assert_eq!(v["state"], "rejected");
+    assert_eq!(v["by"], "luigi");
+    assert_eq!(v["reason"], "policy violation");
 }
 
 #[tokio::test]
