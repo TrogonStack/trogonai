@@ -6,11 +6,15 @@
 pub const PROPOSALS_STREAM: &str = "VAULT_PROPOSALS";
 
 /// Subjects captured by the VAULT_PROPOSALS stream — passed to stream config.
+///
+/// **Security invariant**: `vault.proposals.*.approve` and `vault.proposals.*.reject`
+/// are intentionally excluded. Approve messages carry plaintext API keys that must
+/// never be persisted to JetStream storage. Those subjects are consumed via ephemeral
+/// core-NATS subscriptions (at-most-once) so the plaintext lives only in the transient
+/// message and is immediately consumed and discarded.
 pub fn stream_subjects() -> Vec<String> {
     vec![
         "vault.proposals.*.create".to_string(),
-        "vault.proposals.*.approve".to_string(),
-        "vault.proposals.*.reject".to_string(),
         "vault.proposals.*.state.*".to_string(),
     ]
 }

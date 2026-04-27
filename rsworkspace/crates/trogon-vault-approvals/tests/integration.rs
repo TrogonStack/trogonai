@@ -63,6 +63,28 @@ async fn spawn_service(
     vault
 }
 
+// ── Helper: publish approve/reject via core NATS (not JetStream) ─────────────
+// Approve and reject messages carry plaintext API keys — they must NOT be stored
+// in JetStream. Tests publish them as plain core-NATS messages to match production.
+
+async fn publish_approve(nats: &async_nats::Client, vault_name: &str, payload: serde_json::Value) {
+    nats.publish(
+        subjects::approve(vault_name),
+        serde_json::to_vec(&payload).unwrap().into(),
+    )
+    .await
+    .expect("publish approve");
+}
+
+async fn publish_reject(nats: &async_nats::Client, vault_name: &str, payload: serde_json::Value) {
+    nats.publish(
+        subjects::reject(vault_name),
+        serde_json::to_vec(&payload).unwrap().into(),
+    )
+    .await
+    .expect("publish reject");
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[tokio::test]
@@ -106,7 +128,6 @@ async fn approve_proposal_writes_to_vault_and_updates_status() {
     let (js, nats, _c) = start_nats().await;
     let vault = spawn_service(js.clone(), nats.clone(), "prod").await;
 
-    // Create the proposal.
     js.publish(
         subjects::create("prod"),
         serde_json::to_vec(&serde_json::json!({
@@ -125,30 +146,18 @@ async fn approve_proposal_writes_to_vault_and_updates_status() {
 
     tokio::time::sleep(Duration::from_millis(150)).await;
 
-    // Approve it with the plaintext key.
-    js.publish(
-        subjects::approve("prod"),
-        serde_json::to_vec(&serde_json::json!({
-            "proposal_id": "prop_approve001",
-            "approved_by": "mario",
-            "plaintext":   "sk_live_supersecret"
-        }))
-        .unwrap()
-        .into(),
-    )
-    .await
-    .unwrap()
-    .await
-    .unwrap();
+    publish_approve(&nats, "prod", serde_json::json!({
+        "proposal_id": "prop_approve001",
+        "approved_by": "mario",
+        "plaintext":   "sk_live_supersecret"
+    })).await;
 
     tokio::time::sleep(Duration::from_millis(200)).await;
 
-    // Vault must contain the plaintext.
     let token = ApiKeyToken::new("tok_stripe_prod_abc123").unwrap();
     let resolved = vault.resolve(&token).await.unwrap();
     assert_eq!(resolved, Some("sk_live_supersecret".to_string()), "vault must hold plaintext after approval");
 
-    // Status must be approved.
     let resp = nats
         .request(subjects::status("prod", "prop_approve001"), bytes::Bytes::new())
         .await
@@ -181,28 +190,17 @@ async fn reject_proposal_does_not_write_vault_and_updates_status() {
 
     tokio::time::sleep(Duration::from_millis(150)).await;
 
-    js.publish(
-        subjects::reject("staging"),
-        serde_json::to_vec(&serde_json::json!({
-            "proposal_id": "prop_reject001",
-            "rejected_by": "luigi",
-            "reason":      "budget exceeded"
-        }))
-        .unwrap()
-        .into(),
-    )
-    .await
-    .unwrap()
-    .await
-    .unwrap();
+    publish_reject(&nats, "staging", serde_json::json!({
+        "proposal_id": "prop_reject001",
+        "rejected_by": "luigi",
+        "reason":      "budget exceeded"
+    })).await;
 
     tokio::time::sleep(Duration::from_millis(200)).await;
 
-    // Vault must NOT contain the credential.
     let token = ApiKeyToken::new("tok_openai_staging_xyz789").unwrap();
     assert_eq!(vault.resolve(&token).await.unwrap(), None, "rejected proposal must not write vault");
 
-    // Status must be rejected.
     let resp = nats
         .request(subjects::status("staging", "prop_reject001"), bytes::Bytes::new())
         .await
@@ -235,25 +233,14 @@ async fn approve_unknown_proposal_is_ignored_and_service_continues() {
     let (js, nats, _c) = start_nats().await;
     let _vault = spawn_service(js.clone(), nats.clone(), "default").await;
 
-    // Publish an approve for a proposal that was never created.
-    js.publish(
-        subjects::approve("default"),
-        serde_json::to_vec(&serde_json::json!({
-            "proposal_id": "prop_ghost",
-            "approved_by": "ghost",
-            "plaintext":   "sk_ghost"
-        }))
-        .unwrap()
-        .into(),
-    )
-    .await
-    .unwrap()
-    .await
-    .unwrap();
+    publish_approve(&nats, "default", serde_json::json!({
+        "proposal_id": "prop_ghost",
+        "approved_by": "ghost",
+        "plaintext":   "sk_ghost"
+    })).await;
 
     tokio::time::sleep(Duration::from_millis(150)).await;
 
-    // Service must still be alive — a subsequent status query must work.
     let resp = nats
         .request(subjects::status("default", "prop_ghost"), bytes::Bytes::new())
         .await
@@ -286,43 +273,22 @@ async fn second_approve_for_already_approved_proposal_is_ignored() {
 
     tokio::time::sleep(Duration::from_millis(150)).await;
 
-    // First approval
-    js.publish(
-        subjects::approve("prod"),
-        serde_json::to_vec(&serde_json::json!({
-            "proposal_id": "prop_double001",
-            "approved_by": "mario",
-            "plaintext":   "sk-first"
-        }))
-        .unwrap()
-        .into(),
-    )
-    .await
-    .unwrap()
-    .await
-    .unwrap();
+    publish_approve(&nats, "prod", serde_json::json!({
+        "proposal_id": "prop_double001",
+        "approved_by": "mario",
+        "plaintext":   "sk-first"
+    })).await;
 
     tokio::time::sleep(Duration::from_millis(150)).await;
 
-    // Second approval (different plaintext) must be silently ignored.
-    js.publish(
-        subjects::approve("prod"),
-        serde_json::to_vec(&serde_json::json!({
-            "proposal_id": "prop_double001",
-            "approved_by": "luigi",
-            "plaintext":   "sk-second"
-        }))
-        .unwrap()
-        .into(),
-    )
-    .await
-    .unwrap()
-    .await
-    .unwrap();
+    publish_approve(&nats, "prod", serde_json::json!({
+        "proposal_id": "prop_double001",
+        "approved_by": "luigi",
+        "plaintext":   "sk-second"
+    })).await;
 
     tokio::time::sleep(Duration::from_millis(200)).await;
 
-    // Vault must hold the FIRST plaintext.
     let token = ApiKeyToken::new("tok_anthropic_prod_double1").unwrap();
     assert_eq!(
         vault.resolve(&token).await.unwrap(),
@@ -339,7 +305,6 @@ async fn named_vaults_are_isolated() {
 
     let token = ApiKeyToken::new("tok_anthropic_prod_abc123").unwrap();
 
-    // Create + approve in prod.
     js.publish(
         subjects::create("prod"),
         serde_json::to_vec(&serde_json::json!({
@@ -358,29 +323,18 @@ async fn named_vaults_are_isolated() {
 
     tokio::time::sleep(Duration::from_millis(150)).await;
 
-    js.publish(
-        subjects::approve("prod"),
-        serde_json::to_vec(&serde_json::json!({
-            "proposal_id": "prop_iso001",
-            "approved_by": "mario",
-            "plaintext":   "sk-prod-key"
-        }))
-        .unwrap()
-        .into(),
-    )
-    .await
-    .unwrap()
-    .await
-    .unwrap();
+    publish_approve(&nats, "prod", serde_json::json!({
+        "proposal_id": "prop_iso001",
+        "approved_by": "mario",
+        "plaintext":   "sk-prod-key"
+    })).await;
 
     tokio::time::sleep(Duration::from_millis(200)).await;
 
-    // prod vault must have the key.
     assert_eq!(
         vault_prod.resolve(&token).await.unwrap(),
         Some("sk-prod-key".to_string())
     );
-    // staging vault must not.
     assert_eq!(vault_staging.resolve(&token).await.unwrap(), None);
 }
 
@@ -389,7 +343,6 @@ async fn approve_publishes_state_update_to_stream() {
     let (js, nats, _c) = start_nats().await;
     let _vault = spawn_service(js.clone(), nats.clone(), "prod").await;
 
-    // Subscribe to state updates before the proposal is created.
     let mut state_sub = nats
         .subscribe(state_update_subject("prod", ">"))
         .await
@@ -413,22 +366,12 @@ async fn approve_publishes_state_update_to_stream() {
 
     tokio::time::sleep(Duration::from_millis(150)).await;
 
-    js.publish(
-        subjects::approve("prod"),
-        serde_json::to_vec(&serde_json::json!({
-            "proposal_id": "prop_state001",
-            "approved_by": "mario",
-            "plaintext":   "sk_live_state_test"
-        }))
-        .unwrap()
-        .into(),
-    )
-    .await
-    .unwrap()
-    .await
-    .unwrap();
+    publish_approve(&nats, "prod", serde_json::json!({
+        "proposal_id": "prop_state001",
+        "approved_by": "mario",
+        "plaintext":   "sk_live_state_test"
+    })).await;
 
-    // Wait for the state update event.
     let msg = tokio::time::timeout(Duration::from_secs(2), state_sub.next())
         .await
         .expect("timeout waiting for state update")
@@ -469,20 +412,11 @@ async fn reject_publishes_state_update_to_stream() {
 
     tokio::time::sleep(Duration::from_millis(150)).await;
 
-    js.publish(
-        subjects::reject("staging"),
-        serde_json::to_vec(&serde_json::json!({
-            "proposal_id": "prop_rstate001",
-            "rejected_by": "luigi",
-            "reason":      "policy violation"
-        }))
-        .unwrap()
-        .into(),
-    )
-    .await
-    .unwrap()
-    .await
-    .unwrap();
+    publish_reject(&nats, "staging", serde_json::json!({
+        "proposal_id": "prop_rstate001",
+        "rejected_by": "luigi",
+        "reason":      "policy violation"
+    })).await;
 
     let msg = tokio::time::timeout(Duration::from_secs(2), state_sub.next())
         .await
@@ -500,7 +434,6 @@ async fn malformed_create_message_is_nacked_and_service_continues() {
     let (js, nats, _c) = start_nats().await;
     let _vault = spawn_service(js.clone(), nats.clone(), "default").await;
 
-    // Publish garbage JSON to the create subject.
     js.publish(
         subjects::create("default"),
         bytes::Bytes::from_static(b"not valid json at all"),
@@ -512,7 +445,6 @@ async fn malformed_create_message_is_nacked_and_service_continues() {
 
     tokio::time::sleep(Duration::from_millis(200)).await;
 
-    // Service must still respond to status queries.
     let resp = nats
         .request(subjects::status("default", "any"), bytes::Bytes::new())
         .await

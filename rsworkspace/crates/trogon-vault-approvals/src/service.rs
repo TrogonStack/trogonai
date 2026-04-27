@@ -66,10 +66,10 @@ where
     /// Run the approval service until the NATS connection is closed.
     ///
     /// Four concurrent tasks:
-    /// 1. `consume_creates`   — JetStream pull consumer for create events.
-    /// 2. `consume_approvals` — JetStream pull consumer for approve events.
-    /// 3. `consume_rejections`— JetStream pull consumer for reject events.
-    /// 4. `serve_status`      — Core NATS subscriber for status request-reply.
+    /// 1. `consume_creates`    — JetStream pull consumer (durable, at-least-once).
+    /// 2. `consume_approvals`  — Core NATS subscriber (ephemeral — plaintext must not persist).
+    /// 3. `consume_rejections` — Core NATS subscriber (ephemeral — same reason as approvals).
+    /// 4. `serve_status`       — Core NATS subscriber for status request-reply.
     pub async fn run(self) -> Result<(), ApprovalError> {
         let this = Arc::new(self);
         tokio::try_join!(
@@ -89,10 +89,10 @@ where
         name_suffix:   &str,
         filter_subject: String,
     ) -> Result<jetstream::consumer::Consumer<pull::Config>, ApprovalError> {
-        let stream = this.js
+        let stream: jetstream::stream::Stream = this.js
             .get_stream(PROPOSALS_STREAM)
             .await
-            .map_err(|e| ApprovalError::JetStream(e.to_string()))?;
+            .map_err(|e: async_nats::error::Error<_>| ApprovalError::JetStream(e.to_string()))?;
 
         let consumer_name = format!("{}-approvals-{name_suffix}", this.vault_name);
 
@@ -150,30 +150,36 @@ where
         Ok(())
     }
 
+    /// Core NATS subscription — approve messages carry plaintext API keys and must
+    /// never be stored by the JetStream stream. At-most-once delivery is intentional:
+    /// the human can retry if the service is down during the approval.
     async fn consume_approvals(this: Arc<Self>) -> Result<(), ApprovalError> {
-        let filter   = subjects::approve(&this.vault_name);
-        let consumer = Self::make_consumer(&this, "approve", filter).await?;
-        let mut msgs = consumer.messages().await
-            .map_err(|e| ApprovalError::JetStream(e.to_string()))?;
+        let subject = subjects::approve(&this.vault_name);
+        let mut sub = this.nats
+            .subscribe(subject)
+            .await
+            .map_err(|e| ApprovalError::Nats(e.to_string()))?;
 
-        while let Some(msg) = msgs.next().await {
-            let msg    = msg.map_err(|e| ApprovalError::JetStream(e.to_string()))?;
-            let result = Self::handle_approve(&this, &msg.payload).await;
-            Self::settle(msg, result).await?;
+        while let Some(msg) = sub.next().await {
+            if let Err(e) = Self::handle_approve(&this, &msg.payload).await {
+                tracing::warn!(error = %e, "vault-approvals: error handling approve");
+            }
         }
         Ok(())
     }
 
+    /// Core NATS subscription — same plaintext-safety rationale as consume_approvals.
     async fn consume_rejections(this: Arc<Self>) -> Result<(), ApprovalError> {
-        let filter   = subjects::reject(&this.vault_name);
-        let consumer = Self::make_consumer(&this, "reject", filter).await?;
-        let mut msgs = consumer.messages().await
-            .map_err(|e| ApprovalError::JetStream(e.to_string()))?;
+        let subject = subjects::reject(&this.vault_name);
+        let mut sub = this.nats
+            .subscribe(subject)
+            .await
+            .map_err(|e| ApprovalError::Nats(e.to_string()))?;
 
-        while let Some(msg) = msgs.next().await {
-            let msg    = msg.map_err(|e| ApprovalError::JetStream(e.to_string()))?;
-            let result = Self::handle_reject(&this, &msg.payload).await;
-            Self::settle(msg, result).await?;
+        while let Some(msg) = sub.next().await {
+            if let Err(e) = Self::handle_reject(&this, &msg.payload).await {
+                tracing::warn!(error = %e, "vault-approvals: error handling reject");
+            }
         }
         Ok(())
     }
