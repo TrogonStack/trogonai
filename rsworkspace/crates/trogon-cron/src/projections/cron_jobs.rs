@@ -19,10 +19,10 @@ use trogon_nats::SubjectTokenViolation;
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream};
 
 use crate::{
-    CronJob, JobEventProtoError, JobEventStatus, JobId,
-    commands::proto::{JobEventCodec, v1},
     error::CronError,
     kv::{EVENTS_SUBJECT_PREFIX, LEGACY_EVENTS_SUBJECT_PREFIX},
+    proto::{JobEventCodec, JobEventProtoError, v1},
+    read_model::{CronJob, JobEventStatus},
     store::{open_cron_jobs_bucket, open_events_stream, open_snapshot_bucket, snapshot_store_config},
 };
 
@@ -32,17 +32,17 @@ pub type LoadAndWatchCronJobsResult = Result<(Vec<CronJob>, CronJobWatchStream),
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct CronJobSnapshotProjector;
 
-impl AppendProjector<JobId> for CronJobSnapshotProjector {
+impl AppendProjector<str> for CronJobSnapshotProjector {
     type Error = CronError;
 
     async fn project_appended(
         &self,
         snapshot_bucket: &kv::Store,
-        stream_id: &JobId,
+        stream_id: &str,
         events: &[EventData],
         next_expected_version: u64,
     ) -> Result<(), Self::Error> {
-        project_appended_events(snapshot_bucket, stream_id.as_str(), events, next_expected_version).await
+        project_appended_events(snapshot_bucket, stream_id, events, next_expected_version).await
     }
 }
 
@@ -638,37 +638,39 @@ fn validate_event_job_id(id: &str) -> Result<(), SubjectTokenViolation> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::proto::v1;
+    use crate::proto::v1;
     use crate::{
-        CronJob, Delivery, Job, JobDetails, JobEventStatus, JobHeaders, JobId, JobMessage, JobStatus, MessageContent,
-        Schedule,
+        CronJob, JobDetails, JobEventDelivery, JobEventSchedule, JobEventStatus, MessageContent, MessageEnvelope,
+        MessageHeaders,
     };
 
-    fn job_id(id: &str) -> JobId {
-        JobId::parse(id).unwrap()
-    }
-
-    fn job(id: &str) -> Job {
-        Job {
-            id: job_id(id),
-            status: JobStatus::Enabled,
-            schedule: Schedule::every(30).unwrap(),
-            delivery: Delivery::nats_event("agent.run").unwrap(),
-            message: JobMessage {
+    fn expected_job(id: &str) -> CronJob {
+        CronJob {
+            id: id.to_string(),
+            status: JobEventStatus::Enabled,
+            schedule: JobEventSchedule::Every { every_sec: 30 },
+            delivery: JobEventDelivery::NatsEvent {
+                route: "agent.run".to_string(),
+                ttl_sec: None,
+                source: None,
+            },
+            message: MessageEnvelope {
                 content: MessageContent::from_static(r#"{"kind":"heartbeat"}"#),
-                headers: JobHeaders::default(),
+                headers: MessageHeaders::default(),
             },
         }
-    }
-
-    fn expected_job(id: &str) -> CronJob {
-        CronJob::from((id.to_string(), JobDetails::from(job(id))))
     }
 
     fn added_event(id: &str) -> v1::JobEvent {
         let mut event = v1::JobEvent::new();
         let mut inner = v1::JobAdded::new();
-        inner.set_job(v1::JobDetails::from(&JobDetails::from(job(id))));
+        let job = expected_job(id);
+        inner.set_job(v1::JobDetails::from(&JobDetails {
+            status: job.status,
+            schedule: job.schedule,
+            delivery: job.delivery,
+            message: job.message,
+        }));
         event.set_job_added(inner);
         event
     }

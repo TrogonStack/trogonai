@@ -1,6 +1,8 @@
 use async_nats::jetstream::kv;
 
-use crate::{CronJob, JobId, error::CronError};
+use crate::{error::CronError, read_model::CronJob};
+
+use super::JobId;
 
 #[derive(Debug, Clone)]
 pub struct GetJobCommand {

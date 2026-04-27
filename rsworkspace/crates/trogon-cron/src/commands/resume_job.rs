@@ -2,7 +2,7 @@ use trogon_cron_jobs_proto::{state_v1, v1};
 use trogon_eventsourcing::{CommandSnapshotPolicy, Decide, Decision, FrequencySnapshot};
 
 use super::JobStateProtoError;
-use crate::JobId;
+use super::domain::JobId;
 
 #[derive(Debug, Clone)]
 pub struct ResumeJobCommand {
@@ -24,14 +24,14 @@ impl ResumeJobCommand {
 }
 
 impl Decide for ResumeJobCommand {
-    type StreamId = JobId;
+    type StreamId = str;
     type State = state_v1::State;
     type Event = v1::JobEvent;
     type DecideError = ResumeJobDecisionError;
     type EvolveError = JobStateProtoError;
 
     fn stream_id(&self) -> &Self::StreamId {
-        &self.id
+        self.id.as_str()
     }
 
     fn initial_state() -> Self::State {
@@ -45,15 +45,11 @@ impl Decide for ResumeJobCommand {
     fn decide(state: &state_v1::State, command: &Self) -> Result<Decision<Self::Event>, Self::DecideError> {
         let state = state.state();
         match state {
-            state_v1::StateValue::Missing => Err(ResumeJobDecisionError::JobNotFound {
-                id: command.stream_id().clone(),
-            }),
-            state_v1::StateValue::Deleted => Err(ResumeJobDecisionError::JobDeleted {
-                id: command.stream_id().clone(),
-            }),
-            state_v1::StateValue::PresentEnabled => Err(ResumeJobDecisionError::AlreadyActive {
-                id: command.stream_id().clone(),
-            }),
+            state_v1::StateValue::Missing => Err(ResumeJobDecisionError::JobNotFound { id: command.id.clone() }),
+            state_v1::StateValue::Deleted => Err(ResumeJobDecisionError::JobDeleted { id: command.id.clone() }),
+            state_v1::StateValue::PresentEnabled => {
+                Err(ResumeJobDecisionError::AlreadyActive { id: command.id.clone() })
+            }
             state_v1::StateValue::PresentDisabled => {
                 let mut event = v1::JobEvent::new();
                 event.set_job_resumed(v1::JobResumed::new());
@@ -82,10 +78,8 @@ mod tests {
     };
 
     use super::*;
-    use crate::{
-        AddJobCommand, Delivery, GetJobCommand, Job, JobEventStatus, JobHeaders, JobMessage, JobStatus, MessageContent,
-        PauseJobCommand, Schedule, mocks::MockCronStore,
-    };
+    use crate::commands::domain::{Delivery, Job, JobHeaders, JobMessage, JobStatus, MessageContent, Schedule};
+    use crate::{AddJobCommand, GetJobCommand, JobEventStatus, PauseJobCommand, mocks::MockCronStore};
 
     fn job_id(id: &str) -> JobId {
         JobId::parse(id).unwrap()
@@ -102,12 +96,6 @@ mod tests {
                 headers: JobHeaders::default(),
             },
         }
-    }
-
-    fn paused_job(id: &str) -> Job {
-        let mut job = active_job(id);
-        job.status = JobStatus::Disabled;
-        job
     }
 
     fn added(id: &str) -> v1::JobEvent {
@@ -203,18 +191,27 @@ mod tests {
     #[tokio::test]
     async fn run_resumes_job() {
         let store = MockCronStore::new();
-        store.seed_job(paused_job("backup"));
+        CommandExecution::new(&store, &AddJobCommand::new(active_job("backup")))
+            .with_snapshot(&store)
+            .execute()
+            .await
+            .unwrap();
+        CommandExecution::new(&store, &PauseJobCommand::new(JobId::parse("backup").unwrap()))
+            .with_snapshot(&store)
+            .execute()
+            .await
+            .unwrap();
 
         let outcome = CommandExecution::new(&store, &ResumeJobCommand::new(JobId::parse("backup").unwrap()))
             .with_snapshot(&store)
             .execute()
             .await
             .unwrap();
-        assert_eq!(outcome.next_expected_version, 2);
+        assert_eq!(outcome.next_expected_version, 3);
         assert_eq!(outcome.events, NonEmpty::one(resumed()));
 
         let job = store
-            .get_job(GetJobCommand::new(JobId::parse("backup").unwrap()))
+            .get_job(GetJobCommand::new(crate::JobId::parse("backup").unwrap()))
             .await
             .unwrap()
             .unwrap();

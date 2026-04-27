@@ -2,7 +2,7 @@ use trogon_cron_jobs_proto::v1;
 
 use crate::proto::JobEventProtoError;
 
-use super::{Job, JobEventDelivery, JobEventSchedule, JobEventStatus, MessageEnvelope};
+use super::{JobEventDelivery, JobEventSchedule, JobEventStatus, MessageEnvelope};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct JobDetails {
@@ -20,12 +20,6 @@ impl From<&JobDetails> for v1::JobDetails {
         job.set_delivery(v1::JobDelivery::from(&value.delivery));
         job.set_message(v1::JobMessage::from(&value.message));
         job
-    }
-}
-
-impl From<&Job> for v1::JobDetails {
-    fn from(value: &Job) -> Self {
-        Self::from(&JobDetails::from(value))
     }
 }
 

@@ -2,7 +2,7 @@ use trogon_cron_jobs_proto::{state_v1, v1};
 use trogon_eventsourcing::{CommandSnapshotPolicy, Decide, Decision, FrequencySnapshot};
 
 use super::JobStateProtoError;
-use crate::JobId;
+use super::domain::JobId;
 
 #[derive(Debug, Clone)]
 pub struct RemoveJobCommand {
@@ -23,14 +23,14 @@ impl RemoveJobCommand {
 }
 
 impl Decide for RemoveJobCommand {
-    type StreamId = JobId;
+    type StreamId = str;
     type State = state_v1::State;
     type Event = v1::JobEvent;
     type DecideError = RemoveJobDecisionError;
     type EvolveError = JobStateProtoError;
 
     fn stream_id(&self) -> &Self::StreamId {
-        &self.id
+        self.id.as_str()
     }
 
     fn initial_state() -> Self::State {
@@ -44,17 +44,13 @@ impl Decide for RemoveJobCommand {
     fn decide(state: &state_v1::State, command: &Self) -> Result<Decision<Self::Event>, Self::DecideError> {
         let state = state.state();
         match state {
-            state_v1::StateValue::Missing => Err(RemoveJobDecisionError::JobNotFound {
-                id: command.stream_id().clone(),
-            }),
+            state_v1::StateValue::Missing => Err(RemoveJobDecisionError::JobNotFound { id: command.id.clone() }),
             state_v1::StateValue::PresentEnabled | state_v1::StateValue::PresentDisabled => {
                 let mut event = v1::JobEvent::new();
                 event.set_job_removed(v1::JobRemoved::new());
                 Ok(Decision::event(event))
             }
-            state_v1::StateValue::Deleted => Err(RemoveJobDecisionError::JobDeleted {
-                id: command.stream_id().clone(),
-            }),
+            state_v1::StateValue::Deleted => Err(RemoveJobDecisionError::JobDeleted { id: command.id.clone() }),
             _ => Err(RemoveJobDecisionError::InvalidState {
                 source: JobStateProtoError::UnknownStateValue {
                     value: i32::from(state),
@@ -78,9 +74,8 @@ mod tests {
     };
 
     use super::*;
-    use crate::{
-        Delivery, GetJobCommand, Job, JobHeaders, JobMessage, JobStatus, MessageContent, Schedule, mocks::MockCronStore,
-    };
+    use crate::commands::domain::{Delivery, Job, JobHeaders, JobMessage, JobStatus, MessageContent, Schedule};
+    use crate::{AddJobCommand, GetJobCommand, mocks::MockCronStore};
 
     fn job_id(id: &str) -> JobId {
         JobId::parse(id).unwrap()
@@ -145,7 +140,11 @@ mod tests {
     #[tokio::test]
     async fn run_removes_existing_job() {
         let store = MockCronStore::new();
-        store.seed_job(job("backup"));
+        CommandExecution::new(&store, &AddJobCommand::new(job("backup")))
+            .with_snapshot(&store)
+            .execute()
+            .await
+            .unwrap();
 
         let outcome = CommandExecution::new(&store, &RemoveJobCommand::new(JobId::parse("backup").unwrap()))
             .with_snapshot(&store)
@@ -157,7 +156,7 @@ mod tests {
 
         assert!(
             store
-                .get_job(GetJobCommand::new(JobId::parse("backup").unwrap()))
+                .get_job(GetJobCommand::new(crate::JobId::parse("backup").unwrap()))
                 .await
                 .unwrap()
                 .is_none()

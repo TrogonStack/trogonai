@@ -2,7 +2,6 @@ use async_nats::jetstream;
 use trogon_eventsourcing::nats::jetstream::{StreamSubjectResolver, SubjectState, subject_current_version};
 
 use crate::{
-    JobId,
     config::JobWriteState,
     error::CronError,
     nats::{EventSubjectPrefix, StreamSubjectState, resolve_event_subject_state},
@@ -31,17 +30,17 @@ pub(crate) async fn stream_subject_state(
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct JobEventSubjectResolver;
 
-impl StreamSubjectResolver<JobId> for JobEventSubjectResolver {
+impl StreamSubjectResolver<str> for JobEventSubjectResolver {
     type Error = CronError;
 
     async fn resolve_subject_state(
         &self,
         events_stream: &jetstream::stream::Stream,
-        stream_id: &JobId,
+        stream_id: &str,
     ) -> Result<SubjectState, Self::Error> {
-        let state = stream_subject_state(events_stream, stream_id.as_str()).await?;
+        let state = stream_subject_state(events_stream, stream_id).await?;
         Ok(SubjectState {
-            subject: state.prefix.subject(stream_id.as_str()),
+            subject: state.prefix.subject(stream_id),
             current_version: state.write_state.current_version(),
         })
     }

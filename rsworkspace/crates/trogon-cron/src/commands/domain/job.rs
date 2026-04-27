@@ -8,7 +8,7 @@ use crate::error::{CronError, JobSpecError};
 
 use super::{
     JobDetails, JobEventDelivery, JobEventSamplingSource, JobEventSchedule, JobEventStatus, JobId, MessageContent,
-    MessageEnvelope, MessageHeaders,
+    MessageEnvelope, MessageHeaders, MessageHeadersError,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -241,7 +241,7 @@ impl JobHeaders {
         N: Into<String>,
         V: Into<String>,
     {
-        let headers = MessageHeaders::new(headers).map_err(JobSpecError::from)?;
+        let headers = MessageHeaders::new(headers).map_err(message_headers_error)?;
         Self::try_from(headers)
     }
 
@@ -255,6 +255,13 @@ impl JobHeaders {
 
     pub fn into_message_headers(self) -> MessageHeaders {
         self.0
+    }
+}
+
+fn message_headers_error(source: MessageHeadersError) -> JobSpecError {
+    match source {
+        MessageHeadersError::InvalidName { name } => JobSpecError::InvalidHeaderName { name },
+        MessageHeadersError::InvalidValue { name } => JobSpecError::InvalidHeaderValue { name },
     }
 }
 

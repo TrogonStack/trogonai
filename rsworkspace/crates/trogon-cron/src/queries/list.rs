@@ -2,7 +2,7 @@ use futures::StreamExt;
 
 use async_nats::jetstream::kv;
 
-use crate::{CronJob, error::CronError};
+use crate::{error::CronError, read_model::CronJob};
 
 #[derive(Debug, Clone, Default)]
 pub struct ListJobsCommand;

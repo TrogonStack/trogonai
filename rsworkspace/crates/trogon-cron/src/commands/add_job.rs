@@ -2,7 +2,7 @@ use trogon_cron_jobs_proto::{state_v1, v1};
 use trogon_eventsourcing::{CommandSnapshotPolicy, Decide, Decision, FrequencySnapshot, StreamState};
 
 use super::JobStateProtoError;
-use crate::{Job, JobId};
+use super::domain::{Job, JobId};
 
 #[derive(Debug, Clone)]
 pub struct AddJobCommand {
@@ -23,7 +23,7 @@ impl AddJobCommand {
 }
 
 impl Decide for AddJobCommand {
-    type StreamId = JobId;
+    type StreamId = str;
     type State = state_v1::State;
     type Event = v1::JobEvent;
     type DecideError = AddJobDecisionError;
@@ -32,7 +32,7 @@ impl Decide for AddJobCommand {
     const REQUIRED_WRITE_PRECONDITION: Option<StreamState> = Some(StreamState::NoStream);
 
     fn stream_id(&self) -> &Self::StreamId {
-        &self.job.id
+        self.job.id.as_str()
     }
 
     fn initial_state() -> Self::State {
@@ -55,11 +55,11 @@ impl Decide for AddJobCommand {
             }
             state_v1::StateValue::PresentEnabled | state_v1::StateValue::PresentDisabled => {
                 Err(AddJobDecisionError::AlreadyExists {
-                    id: command.stream_id().clone(),
+                    id: command.job.id.clone(),
                 })
             }
             state_v1::StateValue::Deleted => Err(AddJobDecisionError::JobDeleted {
-                id: command.stream_id().clone(),
+                id: command.job.id.clone(),
             }),
             _ => Err(AddJobDecisionError::InvalidState {
                 source: JobStateProtoError::UnknownStateValue {
@@ -84,10 +84,8 @@ mod tests {
     };
 
     use super::*;
-    use crate::{
-        CronJob, Delivery, GetJobCommand, JobDetails, JobHeaders, JobMessage, JobStatus, MessageContent, Schedule,
-        mocks::MockCronStore,
-    };
+    use crate::commands::domain::{Delivery, JobHeaders, JobMessage, JobStatus, MessageContent, Schedule};
+    use crate::{CronJob, GetJobCommand, mocks::MockCronStore};
 
     fn job_id(id: &str) -> JobId {
         JobId::parse(id).unwrap()
@@ -107,7 +105,7 @@ mod tests {
     }
 
     fn expected_job(id: &str) -> CronJob {
-        CronJob::from((id.to_string(), JobDetails::from(job(id))))
+        CronJob::try_from((id.to_string(), v1::JobDetails::from(&job(id)))).unwrap()
     }
 
     fn added(id: &str) -> v1::JobEvent {
@@ -166,7 +164,7 @@ mod tests {
         assert_eq!(outcome.events, NonEmpty::one(added("backup")));
 
         let stored_job = store
-            .get_job(GetJobCommand::new(JobId::parse("backup").unwrap()))
+            .get_job(GetJobCommand::new(crate::JobId::parse("backup").unwrap()))
             .await
             .unwrap()
             .unwrap();

@@ -6,9 +6,8 @@ use async_nats::Request;
 use async_nats::jetstream;
 use chrono::{Duration as ChronoDuration, Utc};
 use trogon_cron::{
-    AddJobCommand, CronController, Delivery, DeliveryRoute, GetJobCommand, Job, JobEventStatus, JobHeaders, JobId,
-    JobMessage, JobStatus, MessageContent, PauseJobCommand, RemoveJobCommand, SamplingSource, Schedule, TtlSeconds,
-    connect_store, get_job,
+    AddJobCommand, CronController, GetJobCommand, JobEventSchedule, JobEventStatus, JobId, PauseJobCommand,
+    RemoveJobCommand, commands::domain as command_domain, connect_store, get_job,
 };
 use trogon_eventsourcing::CommandExecution;
 use trogon_nats::{NatsConfig, connect as nats_connect};
@@ -17,8 +16,8 @@ fn test_url() -> String {
     std::env::var("NATS_TEST_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string())
 }
 
-fn job_id(id: &str) -> JobId {
-    JobId::parse(id).unwrap()
+fn command_job_id(id: &str) -> command_domain::JobId {
+    command_domain::JobId::parse(id).unwrap()
 }
 
 async fn connect() -> async_nats::Client {
@@ -110,19 +109,19 @@ async fn wait_for_stream_subject(js: &jetstream::Context, stream_name: &str, sub
     .expect("timed out waiting for stream subject to be configured");
 }
 
-fn base_job(id: &str) -> Job {
-    Job {
-        id: job_id(id),
-        status: JobStatus::Enabled,
-        schedule: Schedule::every(2).unwrap(),
-        delivery: Delivery::NatsEvent {
-            route: DeliveryRoute::new("agent.run").unwrap(),
-            ttl_sec: Some(TtlSeconds::new(30).unwrap()),
+fn base_job(id: &str) -> command_domain::Job {
+    command_domain::Job {
+        id: command_job_id(id),
+        status: command_domain::JobStatus::Enabled,
+        schedule: command_domain::Schedule::every(2).unwrap(),
+        delivery: command_domain::Delivery::NatsEvent {
+            route: command_domain::DeliveryRoute::new("agent.run").unwrap(),
+            ttl_sec: Some(command_domain::TtlSeconds::new(30).unwrap()),
             source: None,
         },
-        message: JobMessage {
-            content: MessageContent::from_static(r#"{"kind":"heartbeat"}"#),
-            headers: JobHeaders::default(),
+        message: command_domain::JobMessage {
+            content: command_domain::MessageContent::from_static(r#"{"kind":"heartbeat"}"#),
+            headers: command_domain::JobHeaders::default(),
         },
     }
 }
@@ -172,7 +171,7 @@ async fn controller_reconciles_one_time_job() {
     });
 
     let mut job = base_job("one-time");
-    job.schedule = Schedule::At {
+    job.schedule = command_domain::Schedule::At {
         at: Utc::now() + ChronoDuration::seconds(2),
     };
 
@@ -200,10 +199,10 @@ async fn controller_reconciles_sampling_job() {
     });
 
     let mut job = base_job("sampling");
-    job.delivery = Delivery::NatsEvent {
-        route: DeliveryRoute::new("agent.run").unwrap(),
+    job.delivery = command_domain::Delivery::NatsEvent {
+        route: command_domain::DeliveryRoute::new("agent.run").unwrap(),
         ttl_sec: None,
-        source: Some(SamplingSource::latest_from_subject("sensors.latest").unwrap()),
+        source: Some(command_domain::SamplingSource::latest_from_subject("sensors.latest").unwrap()),
     };
 
     CommandExecution::new(&store.event_store, &AddJobCommand::new(job))
@@ -236,7 +235,7 @@ async fn controller_reconciles_cron_job_with_timezone() {
     });
 
     let mut job = base_job("cron-timezone");
-    job.schedule = Schedule::cron("*/2 * * * * *", Some("UTC".to_string())).unwrap();
+    job.schedule = command_domain::Schedule::cron("*/2 * * * * *", Some("UTC".to_string())).unwrap();
 
     CommandExecution::new(&store.event_store, &AddJobCommand::new(job))
         .with_snapshot(&store.event_store)
@@ -271,7 +270,7 @@ async fn disabling_job_removes_schedule_subject() {
     let stream = js.get_stream(trogon_cron::kv::SCHEDULES_STREAM).await.unwrap();
     wait_for_subject(&stream, "cron.schedules.disabled").await;
 
-    CommandExecution::new(&store.event_store, &PauseJobCommand::new(job_id("disabled")))
+    CommandExecution::new(&store.event_store, &PauseJobCommand::new(command_job_id("disabled")))
         .with_snapshot(&store.event_store)
         .execute()
         .await
@@ -302,7 +301,7 @@ async fn removing_job_removes_schedule_subject() {
     let stream = js.get_stream(trogon_cron::kv::SCHEDULES_STREAM).await.unwrap();
     wait_for_subject(&stream, "cron.schedules.removed").await;
 
-    CommandExecution::new(&store.event_store, &RemoveJobCommand::new(job_id("removed")))
+    CommandExecution::new(&store.event_store, &RemoveJobCommand::new(command_job_id("removed")))
         .with_snapshot(&store.event_store)
         .execute()
         .await
@@ -320,15 +319,18 @@ async fn event_store_rebuilds_current_state_for_new_client() {
 
     let store = connect_store(nats.clone()).await.unwrap();
     let mut job = base_job("eventful");
-    job.schedule = Schedule::cron("*/5 * * * * *", Some("UTC".to_string())).unwrap();
-    let expected_schedule = job.schedule.clone();
+    job.schedule = command_domain::Schedule::cron("*/5 * * * * *", Some("UTC".to_string())).unwrap();
+    let expected_schedule = JobEventSchedule::Cron {
+        expr: "*/5 * * * * *".to_string(),
+        timezone: Some("UTC".to_string()),
+    };
 
     CommandExecution::new(&store.event_store, &AddJobCommand::new(job))
         .with_snapshot(&store.event_store)
         .execute()
         .await
         .unwrap();
-    CommandExecution::new(&store.event_store, &PauseJobCommand::new(job_id("eventful")))
+    CommandExecution::new(&store.event_store, &PauseJobCommand::new(command_job_id("eventful")))
         .with_snapshot(&store.event_store)
         .execute()
         .await
@@ -344,5 +346,5 @@ async fn event_store_rebuilds_current_state_for_new_client() {
     .unwrap();
 
     assert_eq!(rebuilt.status, JobEventStatus::Disabled);
-    assert_eq!(rebuilt.schedule, expected_schedule.into());
+    assert_eq!(rebuilt.schedule, expected_schedule);
 }

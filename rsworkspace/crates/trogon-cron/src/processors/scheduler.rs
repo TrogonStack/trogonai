@@ -14,11 +14,12 @@ use trogon_nats::lease::{LeaderElection, LeaseRenewInterval, LeaseTiming, LeaseT
 use trogon_std::{NowV7, UuidV7Generator};
 
 use crate::{
-    CronJob, JobEventProtoError, JobEventStatus, ResolvedJob,
-    commands::proto::{JobEventCodec, v1},
+    ResolvedJob,
     error::CronError,
     kv::{EVENTS_SUBJECT_PREFIX, LEADER_BUCKET, LEADER_KEY, LEGACY_EVENTS_SUBJECT_PREFIX},
     nats::NatsSchedulePublisher,
+    proto::{JobEventCodec, JobEventProtoError, v1},
+    read_model::{CronJob, JobEventStatus},
     store::{Store, connect_store},
     traits::{LeaderLock, SchedulePublisher},
 };
@@ -620,38 +621,44 @@ mod tests {
         CronController, DesiredJobState, SchedulerChange, apply_scheduler_change, apply_scheduler_event,
         default_leader_timing, next_scheduler_start_sequence, reconcile_snapshot, scheduler_consumer_config,
     };
-    use crate::commands::proto::v1;
+    use crate::proto::v1;
     use crate::{
-        CronJob, Delivery, Job, JobDetails, JobEventStatus, JobHeaders, JobId, JobMessage, JobStatus, MessageContent,
-        MessageEnvelope, MessageHeaders, Schedule,
+        CronJob, JobDetails, JobEventDelivery, JobEventSchedule, JobEventStatus, MessageContent, MessageEnvelope,
+        MessageHeaders,
         mocks::{MockCronStore, MockLeaderLock, MockSchedulePublisher},
     };
 
-    fn job_id(id: &str) -> JobId {
-        JobId::parse(id).unwrap()
-    }
-
-    fn base_job(id: &str) -> Job {
-        Job {
-            id: job_id(id),
-            status: JobStatus::Enabled,
-            schedule: Schedule::every(30).unwrap(),
-            delivery: Delivery::nats_event("agent.run").unwrap(),
-            message: JobMessage {
+    fn base_job(id: &str) -> CronJob {
+        CronJob {
+            id: id.to_string(),
+            status: JobEventStatus::Enabled,
+            schedule: JobEventSchedule::Every { every_sec: 30 },
+            delivery: JobEventDelivery::NatsEvent {
+                route: "agent.run".to_string(),
+                ttl_sec: None,
+                source: None,
+            },
+            message: MessageEnvelope {
                 content: MessageContent::from_static(r#"{"kind":"heartbeat"}"#),
-                headers: JobHeaders::default(),
+                headers: MessageHeaders::default(),
             },
         }
     }
 
     fn expected_job(id: &str) -> CronJob {
-        CronJob::from((id.to_string(), JobDetails::from(base_job(id))))
+        base_job(id)
     }
 
     fn added_event(id: &str) -> v1::JobEvent {
         let mut event = v1::JobEvent::new();
         let mut inner = v1::JobAdded::new();
-        inner.set_job(v1::JobDetails::from(&JobDetails::from(base_job(id))));
+        let job = base_job(id);
+        inner.set_job(v1::JobDetails::from(&JobDetails {
+            status: job.status,
+            schedule: job.schedule,
+            delivery: job.delivery,
+            message: job.message,
+        }));
         event.set_job_added(inner);
         event
     }
@@ -678,11 +685,11 @@ mod tests {
         CronJob {
             id: id.to_string(),
             status: JobEventStatus::Enabled,
-            schedule: crate::JobEventSchedule::Cron {
+            schedule: JobEventSchedule::Cron {
                 expr: "not-a-cron".to_string(),
                 timezone: None,
             },
-            delivery: crate::JobEventDelivery::NatsEvent {
+            delivery: JobEventDelivery::NatsEvent {
                 route: "agent.run".to_string(),
                 ttl_sec: None,
                 source: None,
@@ -717,14 +724,8 @@ mod tests {
         publisher.seed_active_job("disabled");
 
         let mut disabled = base_job("disabled");
-        disabled.status = JobStatus::Disabled;
-        let desired_jobs = HashMap::from([(
-            "disabled".to_string(),
-            DesiredJobState::Present(Box::new(CronJob::from((
-                "disabled".to_string(),
-                JobDetails::from(disabled),
-            )))),
-        )]);
+        disabled.status = JobEventStatus::Disabled;
+        let desired_jobs = HashMap::from([("disabled".to_string(), DesiredJobState::Present(Box::new(disabled)))]);
 
         reconcile_snapshot(&publisher, &desired_jobs).await.unwrap();
 
@@ -813,14 +814,11 @@ mod tests {
     async fn apply_scheduler_change_removes_disabled_and_deleted_jobs() {
         let publisher = MockSchedulePublisher::new();
         let mut disabled = base_job("disabled");
-        disabled.status = JobStatus::Disabled;
+        disabled.status = JobEventStatus::Disabled;
 
-        apply_scheduler_change(
-            &publisher,
-            &SchedulerChange::Upsert(CronJob::from(("disabled".to_string(), JobDetails::from(disabled)))),
-        )
-        .await
-        .unwrap();
+        apply_scheduler_change(&publisher, &SchedulerChange::Upsert(disabled))
+            .await
+            .unwrap();
         apply_scheduler_change(&publisher, &SchedulerChange::Delete("deleted".to_string()))
             .await
             .unwrap();
