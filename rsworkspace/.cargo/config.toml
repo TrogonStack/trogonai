@@ -3,4 +3,6 @@ cov = [
     "llvm-cov",
     "--all-features",
     "--workspace",
+    "--ignore-filename-regex",
+    "crates/trogon-cron-jobs-proto/src/gen/.*|crates/trogon-eventsourcing/src/nats/.*|crates/trogon-cron/src/(nats|kv)\\.rs|crates/trogon-cron/src/store/.*|crates/trogon-nats/src/(client|jetstream/traits)\\.rs",
 ]
