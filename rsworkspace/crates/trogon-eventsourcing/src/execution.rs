@@ -1,4 +1,4 @@
-use crate::snapshot::{Snapshot, SnapshotRead, SnapshotSchema, SnapshotStoreConfig, SnapshotWrite};
+use crate::snapshot::{Snapshot, SnapshotRead, SnapshotSchema, SnapshotSink, SnapshotStoreConfig};
 use crate::stream::{AppendOutcome, StreamAppend, StreamRead, StreamState, resolve_stream_state};
 use crate::{
     CanonicalEventCodec, Decide, Decision, EventCodec, EventData, EventEnvelopeCodec, NonEmpty, RecordedEvent,
@@ -96,7 +96,6 @@ pub enum CommandFailure<DecideError, EvolveError, RuntimeError> {
     Decide(DecideError),
     Evolve(EvolveError),
     ReadSnapshot(RuntimeError),
-    WriteSnapshot(RuntimeError),
     ReadStream(RuntimeError),
     Append(RuntimeError),
     EncodeEvent(BoxError),
@@ -341,7 +340,7 @@ where
     C::Event: Clone + CanonicalEventCodec,
     C::StreamId: AsRef<str>,
     E: StreamRead<C::StreamId, Error = SErr> + StreamAppend<C::StreamId, Error = SErr>,
-    S: SnapshotRead<C::State, C::StreamId, Error = SErr> + SnapshotWrite<C::State, C::StreamId, Error = SErr>,
+    S: SnapshotRead<C::State, C::StreamId, Error = SErr> + SnapshotSink<C::State, C::StreamId>,
     P: SnapshotPolicy<C::State, C::Event>,
     <C::Event as CanonicalEventCodec>::Codec: EventEnvelopeCodec<C::Event>,
     <<C::Event as CanonicalEventCodec>::Codec as EventCodec<C::Event>>::Error:
@@ -363,7 +362,7 @@ where
     C::Event: Clone,
     C::StreamId: AsRef<str>,
     E: StreamRead<C::StreamId, Error = SErr> + StreamAppend<C::StreamId, Error = SErr>,
-    S: SnapshotRead<C::State, C::StreamId, Error = SErr> + SnapshotWrite<C::State, C::StreamId, Error = SErr>,
+    S: SnapshotRead<C::State, C::StreamId, Error = SErr> + SnapshotSink<C::State, C::StreamId>,
     P: SnapshotPolicy<C::State, C::Event>,
     EC: EventEnvelopeCodec<C::Event>,
     EC::Error: std::error::Error + Send + Sync + 'static,
@@ -407,23 +406,19 @@ where
         let state = replay_recorded_events::<C, EC, SErr>(state, stream_read.events, &self.event_codec)?;
         let (append_outcome, events, state) = self.append_decision::<SErr>(current_version, stream_id, state).await?;
 
-        if matches!(
-            self.snapshots.policy.snapshot_decision(SnapshotDecisionContext {
-                next_expected_version: append_outcome.next_expected_version,
-                state: &state,
-                events: &events,
-            }),
-            SnapshotDecision::Take
-        ) {
-            self.snapshots
-                .snapshot_store
-                .write_snapshot(
-                    self.snapshots.snapshot_config.clone(),
-                    stream_id,
-                    Snapshot::new(append_outcome.next_expected_version, state.clone()),
-                )
-                .await
-                .map_err(|source| CommandFailure::WriteSnapshot(source))?;
+        let snapshot_decision = self.snapshots.policy.snapshot_decision(SnapshotDecisionContext {
+            next_expected_version: append_outcome.next_expected_version,
+            state: &state,
+            events: &events,
+        });
+
+        if snapshot_decision == SnapshotDecision::Take {
+            SnapshotSink::write_snapshot(
+                self.snapshots.snapshot_store,
+                self.snapshots.snapshot_config.clone(),
+                stream_id,
+                Snapshot::new(append_outcome.next_expected_version, state.clone()),
+            );
         }
 
         Ok(ExecutionResult {
@@ -557,7 +552,6 @@ mod tests {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     enum TestInfraError {
         ReadSnapshot,
-        WriteSnapshot,
         ReadStream,
         Append,
         Json,
@@ -817,20 +811,11 @@ mod tests {
         }
     }
 
-    impl SnapshotWrite<TestState, str> for FakeRuntime {
-        type Error = TestInfraError;
-
-        async fn write_snapshot(
-            &self,
-            _config: SnapshotStoreConfig,
-            _stream_id: &str,
-            snapshot: Snapshot<TestState>,
-        ) -> Result<(), Self::Error> {
-            if self.fail_write_snapshot {
-                return Err(TestInfraError::WriteSnapshot);
+    impl SnapshotSink<TestState, str> for FakeRuntime {
+        fn write_snapshot(&self, _config: SnapshotStoreConfig, _stream_id: &str, snapshot: Snapshot<TestState>) {
+            if !self.fail_write_snapshot {
+                self.written_snapshots.lock().unwrap().push(snapshot);
             }
-            self.written_snapshots.lock().unwrap().push(snapshot);
-            Ok(())
         }
     }
 
@@ -1243,7 +1228,7 @@ mod tests {
     }
 
     #[test]
-    fn propagates_snapshot_write_failures() {
+    fn does_not_fail_committed_command_when_snapshot_write_fails() {
         let runtime = FakeRuntime {
             next_expected_version: 1,
             fail_write_snapshot: true,
@@ -1251,7 +1236,7 @@ mod tests {
         };
         let command = TestCommand::new("alpha", TestAction::Register);
 
-        let error = block_on(
+        let result = block_on(
             CommandExecution::new(&runtime, &command)
                 .with_snapshot(Snapshots::new(
                     &runtime,
@@ -1260,12 +1245,11 @@ mod tests {
                 ))
                 .execute_result(),
         )
-        .unwrap_err();
+        .unwrap();
 
-        assert!(matches!(
-            error,
-            CommandFailure::WriteSnapshot(TestInfraError::WriteSnapshot)
-        ));
+        assert_eq!(result.next_expected_version, 1);
+        assert_eq!(result.state, TestState::Present { enabled: true });
+        assert!(runtime.written_snapshots.lock().unwrap().is_empty());
     }
 
     #[test]

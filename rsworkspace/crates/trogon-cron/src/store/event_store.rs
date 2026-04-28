@@ -2,8 +2,8 @@ use async_nats::jetstream::{self, kv};
 use serde::{Serialize, de::DeserializeOwned};
 use trogon_eventsourcing::nats::jetstream::JetStreamStore;
 use trogon_eventsourcing::{
-    AppendOutcome, EventData, NonEmpty, Snapshot, SnapshotRead, SnapshotStoreConfig, SnapshotWrite, StreamAppend,
-    StreamRead, StreamReadResult, StreamState,
+    AppendOutcome, EventData, NonEmpty, Snapshot, SnapshotRead, SnapshotSink, SnapshotStoreConfig, SnapshotWrite,
+    StreamAppend, StreamRead, StreamReadResult, StreamState,
 };
 
 use super::stream_subject::JobEventSubjectResolver;
@@ -99,5 +99,14 @@ where
             .write_snapshot(config, stream_id, snapshot)
             .await
             .map_err(CronError::from)
+    }
+}
+
+impl<Payload> SnapshotSink<Payload, str> for EventStore
+where
+    Payload: Serialize + DeserializeOwned + Send + 'static,
+{
+    fn write_snapshot(&self, config: SnapshotStoreConfig, stream_id: &str, snapshot: Snapshot<Payload>) {
+        SnapshotSink::write_snapshot(&self.inner, config, stream_id, snapshot);
     }
 }
