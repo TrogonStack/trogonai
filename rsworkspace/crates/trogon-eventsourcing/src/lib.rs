@@ -16,7 +16,8 @@ pub use event::{CodecError, EventData, RecordedEvent};
 pub use event_id::EventId;
 pub use execution::{
     CommandExecution, CommandFailure, CommandInfraError, CommandResult, CommandSnapshotPolicy, ExecutionResult,
-    FrequencySnapshot, NoSnapshot, SnapshotDecision, SnapshotPolicy, Snapshots, WithoutSnapshots,
+    FrequencySnapshot, NoSnapshot, SnapshotDecision, SnapshotDecisionContext, SnapshotPolicy, Snapshots,
+    WithoutSnapshots,
 };
 pub use nats::snapshot_store::{
     SnapshotStoreError, checkpoint_key, list_snapshots, load_snapshot, load_snapshot_map, maybe_advance_checkpoint,
