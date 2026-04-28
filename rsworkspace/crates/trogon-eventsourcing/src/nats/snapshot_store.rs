@@ -89,7 +89,7 @@ fn stream_id_from_snapshot_key(config: &SnapshotStoreConfig, key: &str) -> Resul
     Ok(Some(stream_id.to_string()))
 }
 
-async fn load_snapshot_entries<T>(
+async fn read_snapshot_entries<T>(
     bucket: &kv::Store,
     config: &SnapshotStoreConfig,
 ) -> Result<Vec<(String, Snapshot<T>)>, SnapshotStoreError>
@@ -123,7 +123,7 @@ where
     Ok(snapshots)
 }
 
-pub async fn load_snapshot<T>(
+pub async fn read_snapshot<T>(
     bucket: &kv::Store,
     config: &SnapshotStoreConfig,
     id: &str,
@@ -144,6 +144,18 @@ where
         .map_err(|source| SnapshotStoreError::kv_source("failed to decode stream snapshot entry", source))
 }
 
+pub async fn write_snapshot<T>(
+    bucket: &kv::Store,
+    config: &SnapshotStoreConfig,
+    id: &str,
+    snapshot: Snapshot<T>,
+) -> Result<(), SnapshotStoreError>
+where
+    T: Serialize + DeserializeOwned,
+{
+    persist_snapshot_change(bucket, config, SnapshotChange::upsert(id, snapshot)).await
+}
+
 pub async fn list_snapshots<T>(
     bucket: &kv::Store,
     config: &SnapshotStoreConfig,
@@ -151,19 +163,19 @@ pub async fn list_snapshots<T>(
 where
     T: DeserializeOwned,
 {
-    load_snapshot_entries(bucket, config)
+    read_snapshot_entries(bucket, config)
         .await
         .map(|entries| entries.into_iter().map(|(_, snapshot)| snapshot).collect())
 }
 
-pub async fn load_snapshot_map<T>(
+pub async fn read_snapshot_map<T>(
     bucket: &kv::Store,
     config: &SnapshotStoreConfig,
 ) -> Result<BTreeMap<String, Snapshot<T>>, SnapshotStoreError>
 where
     T: DeserializeOwned,
 {
-    load_snapshot_entries(bucket, config)
+    read_snapshot_entries(bucket, config)
         .await
         .map(|entries| entries.into_iter().collect())
 }

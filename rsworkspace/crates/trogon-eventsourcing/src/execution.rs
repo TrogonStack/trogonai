@@ -100,8 +100,8 @@ pub enum CommandFailure<DecideError, EvolveError, InfraError> {
 
 #[derive(Debug)]
 pub enum CommandInfraError<RuntimeError> {
-    LoadSnapshot(RuntimeError),
-    SaveSnapshot(RuntimeError),
+    ReadSnapshot(RuntimeError),
+    WriteSnapshot(RuntimeError),
     ReadStream(RuntimeError),
     Append(RuntimeError),
     EncodeEvent(BoxError),
@@ -281,7 +281,7 @@ impl<'a, E, C, S, EC> CommandExecutionWithCodec<'a, E, C, S, EC> {
         let stream_state = resolve_stream_state::<C>(self.write_precondition, current_version);
         let append_outcome = self
             .event_store
-            .append_events(stream_id, stream_state, encoded_events)
+            .append_stream(stream_id, stream_state, encoded_events)
             .await
             .map_err(CommandInfraError::Append)
             .map_err(CommandFailure::Infra)?;
@@ -326,7 +326,7 @@ where
         let stream_id = self.command.stream_id();
         let stream_read = self
             .event_store
-            .read_stream_from(stream_id, 1)
+            .read_stream(stream_id, 1)
             .await
             .map_err(CommandInfraError::ReadStream)
             .map_err(CommandFailure::Infra)?;
@@ -386,9 +386,9 @@ where
         let snapshot = self
             .snapshots
             .snapshot_store
-            .load_snapshot(self.snapshots.snapshot_config.clone(), stream_id)
+            .read_snapshot(self.snapshots.snapshot_config.clone(), stream_id)
             .await
-            .map_err(CommandInfraError::LoadSnapshot)
+            .map_err(CommandInfraError::ReadSnapshot)
             .map_err(CommandFailure::Infra)?;
         let snapshot_version = snapshot.as_ref().map(|snapshot| snapshot.version);
         let state = snapshot
@@ -397,7 +397,7 @@ where
         let start_sequence = snapshot_version.map(|version| version.saturating_add(1)).unwrap_or(1);
         let stream_read = self
             .event_store
-            .read_stream_from(stream_id, start_sequence)
+            .read_stream(stream_id, start_sequence)
             .await
             .map_err(CommandInfraError::ReadStream)
             .map_err(CommandFailure::Infra)?;
@@ -429,13 +429,13 @@ where
         ) {
             self.snapshots
                 .snapshot_store
-                .save_snapshot(
+                .write_snapshot(
                     self.snapshots.snapshot_config.clone(),
                     stream_id,
                     Snapshot::new(append_outcome.next_expected_version, state.clone()),
                 )
                 .await
-                .map_err(CommandInfraError::SaveSnapshot)
+                .map_err(CommandInfraError::WriteSnapshot)
                 .map_err(CommandFailure::Infra)?;
         }
 
@@ -570,8 +570,8 @@ mod tests {
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     enum TestInfraError {
-        LoadSnapshot,
-        SaveSnapshot,
+        ReadSnapshot,
+        WriteSnapshot,
         ReadStream,
         Append,
         Json,
@@ -607,15 +607,15 @@ mod tests {
         current_version: Option<u64>,
         recorded_events: Vec<RecordedEvent>,
         next_expected_version: u64,
-        fail_load_snapshot: bool,
-        fail_save_snapshot: bool,
+        fail_read_snapshot: bool,
+        fail_write_snapshot: bool,
         fail_read_stream: bool,
         fail_append: bool,
         loaded_stream_ids: Arc<Mutex<Vec<String>>>,
         read_from_sequences: Arc<Mutex<Vec<u64>>>,
         stream_states: Arc<Mutex<Vec<StreamState>>>,
         appended_events: Arc<Mutex<Vec<EventData>>>,
-        saved_snapshots: Arc<Mutex<Vec<Snapshot<TestState>>>>,
+        written_snapshots: Arc<Mutex<Vec<Snapshot<TestState>>>>,
     }
 
     impl TestCommand {
@@ -777,11 +777,7 @@ mod tests {
     impl StreamRead<str> for FakeRuntime {
         type Error = TestInfraError;
 
-        async fn read_stream_from(
-            &self,
-            _stream_id: &str,
-            from_sequence: u64,
-        ) -> Result<StreamReadResult, Self::Error> {
+        async fn read_stream(&self, _stream_id: &str, from_sequence: u64) -> Result<StreamReadResult, Self::Error> {
             if self.fail_read_stream {
                 return Err(TestInfraError::ReadStream);
             }
@@ -801,7 +797,7 @@ mod tests {
     impl StreamAppend<str> for FakeRuntime {
         type Error = TestInfraError;
 
-        async fn append_events(
+        async fn append_stream(
             &self,
             _stream_id: &str,
             stream_state: StreamState,
@@ -821,13 +817,13 @@ mod tests {
     impl SnapshotRead<TestState, str> for FakeRuntime {
         type Error = TestInfraError;
 
-        async fn load_snapshot(
+        async fn read_snapshot(
             &self,
             _config: SnapshotStoreConfig,
             stream_id: &str,
         ) -> Result<Option<Snapshot<TestState>>, Self::Error> {
-            if self.fail_load_snapshot {
-                return Err(TestInfraError::LoadSnapshot);
+            if self.fail_read_snapshot {
+                return Err(TestInfraError::ReadSnapshot);
             }
             self.loaded_stream_ids.lock().unwrap().push(stream_id.to_string());
             Ok(self.snapshot.clone())
@@ -837,16 +833,16 @@ mod tests {
     impl SnapshotWrite<TestState, str> for FakeRuntime {
         type Error = TestInfraError;
 
-        async fn save_snapshot(
+        async fn write_snapshot(
             &self,
             _config: SnapshotStoreConfig,
             _stream_id: &str,
             snapshot: Snapshot<TestState>,
         ) -> Result<(), Self::Error> {
-            if self.fail_save_snapshot {
-                return Err(TestInfraError::SaveSnapshot);
+            if self.fail_write_snapshot {
+                return Err(TestInfraError::WriteSnapshot);
             }
-            self.saved_snapshots.lock().unwrap().push(snapshot);
+            self.written_snapshots.lock().unwrap().push(snapshot);
             Ok(())
         }
     }
@@ -1152,7 +1148,7 @@ mod tests {
     }
 
     #[test]
-    fn saves_snapshot_when_policy_requests_it() {
+    fn writes_snapshot_when_policy_requests_it() {
         let runtime = FakeRuntime {
             next_expected_version: 1,
             ..Default::default()
@@ -1172,13 +1168,13 @@ mod tests {
 
         assert_eq!(result.state, TestState::Present { enabled: true });
         assert_eq!(
-            runtime.saved_snapshots.lock().unwrap().as_slice(),
+            runtime.written_snapshots.lock().unwrap().as_slice(),
             &[Snapshot::new(1, TestState::Present { enabled: true })]
         );
     }
 
     #[test]
-    fn frequency_snapshot_saves_on_matching_revision() {
+    fn frequency_snapshot_writes_on_matching_revision() {
         const EVERY_THREE_REVISIONS: NonZeroU64 = NonZeroU64::new(3).expect("snapshot cadence must be non-zero");
         let runtime = FakeRuntime {
             next_expected_version: 3,
@@ -1198,7 +1194,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            runtime.saved_snapshots.lock().unwrap().as_slice(),
+            runtime.written_snapshots.lock().unwrap().as_slice(),
             &[Snapshot::new(3, TestState::Present { enabled: true })]
         );
     }
@@ -1223,11 +1219,11 @@ mod tests {
         )
         .unwrap();
 
-        assert!(runtime.saved_snapshots.lock().unwrap().is_empty());
+        assert!(runtime.written_snapshots.lock().unwrap().is_empty());
     }
 
     #[test]
-    fn does_not_save_snapshot_when_policy_skips_it() {
+    fn does_not_write_snapshot_when_policy_skips_it() {
         let runtime = FakeRuntime {
             next_expected_version: 1,
             ..Default::default()
@@ -1241,14 +1237,14 @@ mod tests {
         )
         .unwrap();
 
-        assert!(runtime.saved_snapshots.lock().unwrap().is_empty());
+        assert!(runtime.written_snapshots.lock().unwrap().is_empty());
     }
 
     #[test]
-    fn propagates_snapshot_save_failures() {
+    fn propagates_snapshot_write_failures() {
         let runtime = FakeRuntime {
             next_expected_version: 1,
-            fail_save_snapshot: true,
+            fail_write_snapshot: true,
             ..Default::default()
         };
         let command = TestCommand::new("alpha", TestAction::Register);
@@ -1266,7 +1262,7 @@ mod tests {
 
         assert!(matches!(
             error,
-            CommandFailure::Infra(CommandInfraError::SaveSnapshot(TestInfraError::SaveSnapshot))
+            CommandFailure::Infra(CommandInfraError::WriteSnapshot(TestInfraError::WriteSnapshot))
         ));
     }
 

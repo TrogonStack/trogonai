@@ -20,11 +20,11 @@ pub use execution::{
     WithoutSnapshots,
 };
 pub use nats::snapshot_store::{
-    SnapshotStoreError, checkpoint_key, list_snapshots, load_snapshot, load_snapshot_map, maybe_advance_checkpoint,
-    persist_snapshot_change, read_checkpoint, snapshot_key, write_checkpoint,
+    SnapshotStoreError, checkpoint_key, list_snapshots, maybe_advance_checkpoint, persist_snapshot_change,
+    read_checkpoint, read_snapshot, read_snapshot_map, snapshot_key, write_checkpoint, write_snapshot,
 };
 pub use nats::streams::{
-    StreamStoreError, TROGON_EVENT_TYPE, append_stream, read_stream_from, read_stream_range, record_stream_message,
+    StreamStoreError, TROGON_EVENT_TYPE, append_stream, read_stream, read_stream_range, record_stream_message,
 };
 pub use snapshot::{Snapshot, SnapshotChange, SnapshotRead, SnapshotSchema, SnapshotStoreConfig, SnapshotWrite};
 pub use stream::{AppendOutcome, StreamAppend, StreamRead, StreamReadResult, StreamState};

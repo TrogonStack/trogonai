@@ -95,7 +95,7 @@ impl<T> SnapshotChange<T> {
 pub trait SnapshotRead<SnapshotPayload, StreamId: ?Sized>: Send + Sync {
     type Error;
 
-    fn load_snapshot(
+    fn read_snapshot(
         &self,
         config: SnapshotStoreConfig,
         stream_id: &StreamId,
@@ -105,7 +105,7 @@ pub trait SnapshotRead<SnapshotPayload, StreamId: ?Sized>: Send + Sync {
 pub trait SnapshotWrite<SnapshotPayload, StreamId: ?Sized>: Send + Sync {
     type Error;
 
-    fn save_snapshot(
+    fn write_snapshot(
         &self,
         config: SnapshotStoreConfig,
         stream_id: &StreamId,

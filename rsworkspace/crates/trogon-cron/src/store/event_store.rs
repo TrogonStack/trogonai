@@ -29,9 +29,9 @@ impl EventStore {
 impl StreamRead<str> for EventStore {
     type Error = CronError;
 
-    async fn read_stream_from(&self, stream_id: &str, from_sequence: u64) -> Result<StreamReadResult, Self::Error> {
+    async fn read_stream(&self, stream_id: &str, from_sequence: u64) -> Result<StreamReadResult, Self::Error> {
         self.inner
-            .read_stream_from(stream_id, from_sequence)
+            .read_stream(stream_id, from_sequence)
             .await
             .map_err(CronError::from)
     }
@@ -40,7 +40,7 @@ impl StreamRead<str> for EventStore {
 impl StreamAppend<str> for EventStore {
     type Error = CronError;
 
-    async fn append_events(
+    async fn append_stream(
         &self,
         stream_id: &str,
         stream_state: StreamState,
@@ -49,7 +49,7 @@ impl StreamAppend<str> for EventStore {
         let projected_events = events.as_slice().to_vec();
         let outcome = self
             .inner
-            .append_events(stream_id, stream_state, events)
+            .append_stream(stream_id, stream_state, events)
             .await
             .map_err(CronError::from)?;
 
@@ -71,13 +71,13 @@ where
 {
     type Error = CronError;
 
-    async fn load_snapshot(
+    async fn read_snapshot(
         &self,
         config: SnapshotStoreConfig,
         stream_id: &str,
     ) -> Result<Option<Snapshot<Payload>>, Self::Error> {
         self.inner
-            .load_snapshot(config, stream_id)
+            .read_snapshot(config, stream_id)
             .await
             .map_err(CronError::from)
     }
@@ -89,14 +89,14 @@ where
 {
     type Error = CronError;
 
-    async fn save_snapshot(
+    async fn write_snapshot(
         &self,
         config: SnapshotStoreConfig,
         stream_id: &str,
         snapshot: Snapshot<Payload>,
     ) -> Result<(), Self::Error> {
         self.inner
-            .save_snapshot(config, stream_id, snapshot)
+            .write_snapshot(config, stream_id, snapshot)
             .await
             .map_err(CronError::from)
     }
