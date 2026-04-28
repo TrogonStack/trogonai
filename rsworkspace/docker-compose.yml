@@ -157,5 +157,177 @@ services:
         condition: service_started
     restart: unless-stopped
 
+  # ── ACP WebSocket bridge ─────────────────────────────────────────────────────
+  acp-nats-ws:
+    build:
+      context: .
+      target: acp-nats-ws
+    ports:
+      - "8085:8085"
+    environment:
+      NATS_URL: nats://nats:4222
+      ACP_PREFIX: acp
+      ACP_WS_HOST: "0.0.0.0"
+      ACP_WS_PORT: "8085"
+      RUST_LOG: info
+    depends_on:
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── ACP agent runner ──────────────────────────────────────────────────────
+  trogon-acp-runner:
+    build:
+      context: .
+      target: trogon-acp-runner
+    environment:
+      NATS_URL: nats://nats:4222
+      ACP_PREFIX: acp
+      PROXY_URL: http://proxy:8080
+      ANTHROPIC_TOKEN: "${ANTHROPIC_TOKEN}"
+      AGENT_MODEL: "${AGENT_MODEL:-claude-opus-4-6}"
+      AGENT_MAX_ITERATIONS: "${AGENT_MAX_ITERATIONS:-10}"
+      RUST_LOG: info
+    depends_on:
+      nats:
+        condition: service_healthy
+      proxy:
+        condition: service_started
+    restart: unless-stopped
+
+  # ── Context compaction service ────────────────────────────────────────────
+  trogon-compactor:
+    build:
+      context: .
+      target: trogon-compactor
+    environment:
+      NATS_URL: nats://nats:4222
+      PROXY_URL: http://proxy:8080
+      ANTHROPIC_TOKEN: "${ANTHROPIC_TOKEN}"
+      COMPACTOR_MODEL: "${COMPACTOR_MODEL:-claude-haiku-4-5-20251001}"
+      RUST_LOG: info
+    depends_on:
+      nats:
+        condition: service_healthy
+      proxy:
+        condition: service_started
+    restart: unless-stopped
+
+  # ── ACP HTTP transport bridge ─────────────────────────────────────────────
+  acp-nats-server:
+    build:
+      context: .
+      target: acp-nats-server
+    ports:
+      - "8086:8086"
+    environment:
+      NATS_URL: nats://nats:4222
+      ACP_PREFIX: acp
+      ACP_SERVER_HOST: "0.0.0.0"
+      ACP_SERVER_PORT: "8086"
+      RUST_LOG: info
+    depends_on:
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── xAI Grok agent runner ────────────────────────────────────────────────
+  trogon-xai-runner:
+    build:
+      context: .
+      target: trogon-xai-runner
+    environment:
+      NATS_URL: nats://nats:4222
+      ACP_PREFIX: acp
+      XAI_API_KEY: "${XAI_API_KEY:-}"
+      XAI_DEFAULT_MODEL: "${XAI_DEFAULT_MODEL:-grok-4}"
+      RUST_LOG: info
+    depends_on:
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── Codex agent runner ───────────────────────────────────────────────────
+  trogon-codex-runner:
+    build:
+      context: .
+      target: trogon-codex-runner
+    environment:
+      NATS_URL: nats://nats:4222
+      ACP_PREFIX: acp
+      CODEX_DEFAULT_MODEL: "${CODEX_DEFAULT_MODEL:-o4-mini}"
+      RUST_LOG: info
+    depends_on:
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── WASM tool execution runtime ──────────────────────────────────────────
+  trogon-wasm-runtime:
+    build:
+      context: .
+      target: trogon-wasm-runtime
+    environment:
+      NATS_URL: nats://nats:4222
+      ACP_PREFIX: acp
+      WASM_SESSION_ROOT: /data/sessions
+      RUST_LOG: info
+    volumes:
+      - wasm-data:/data/sessions
+    depends_on:
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── Console management API ────────────────────────────────────────────────
+  trogon-console:
+    build:
+      context: .
+      target: trogon-console
+    ports:
+      - "8091:8091"
+    environment:
+      NATS_URL: nats://nats:4222
+      CONSOLE_PORT: "8091"
+      RUST_LOG: info
+    depends_on:
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── Event router / LLM dispatch ───────────────────────────────────────────
+  trogon-router:
+    build:
+      context: .
+      target: trogon-router
+    environment:
+      NATS_URL: nats://nats:4222
+      ROUTER_LLM_API_KEY: "${ROUTER_LLM_API_KEY:-}"
+      ROUTER_LLM_API_URL: "${ROUTER_LLM_API_URL:-https://api.x.ai/v1}"
+      ROUTER_LLM_MODEL: "${ROUTER_LLM_MODEL:-grok-3-mini}"
+      RUST_LOG: info
+    depends_on:
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── PR automation actor ────────────────────────────────────────────────────
+  trogon-pr-actor:
+    build:
+      context: .
+      target: trogon-pr-actor
+    environment:
+      NATS_URL: nats://nats:4222
+      PR_ACTOR_LLM_API_KEY: "${PR_ACTOR_LLM_API_KEY:-}"
+      PR_ACTOR_LLM_API_URL: "${PR_ACTOR_LLM_API_URL:-https://api.x.ai/v1}"
+      PR_ACTOR_LLM_MODEL: "${PR_ACTOR_LLM_MODEL:-grok-3-mini}"
+      PR_ACTOR_GITHUB_TOKEN: "${PR_ACTOR_GITHUB_TOKEN:-}"
+      RUST_LOG: info
+    depends_on:
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   nats-data:
+  wasm-data:
