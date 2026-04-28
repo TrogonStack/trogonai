@@ -43,4 +43,4 @@ pub use read_model::{
 pub use schedule::ResolvedJob;
 pub use store::{Store, connect_store, open_snapshot_bucket, snapshot_store_config};
 pub use traits::{LeaderLock, SchedulePublisher};
-pub use trogon_eventsourcing::{CommandFailure, CommandInfraError, CommandResult, ExecutionResult, StreamState};
+pub use trogon_eventsourcing::{CommandFailure, CommandResult, ExecutionResult, StreamState};
