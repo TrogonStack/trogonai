@@ -910,16 +910,18 @@ mod tests {
     }
 
     mod proptests {
+        use super::super::RESERVED_SCHEDULE_HEADERS;
         use super::*;
         use proptest::prelude::*;
 
-        const RESERVED_HEADER_NAMES: [&str; 5] = [
-            "Nats-Schedule",
-            "Nats-Schedule-Source",
-            "Nats-Schedule-Target",
-            "Nats-Schedule-Time-Zone",
-            "Nats-Schedule-TTL",
-        ];
+        const DOTTED_TOKEN_REGEX: &str = "[a-z][a-z0-9_-]{0,15}(\\.[a-z][a-z0-9_-]{0,15}){0,5}";
+
+        #[derive(Debug, Clone)]
+        enum DotShape {
+            Leading,
+            Trailing,
+            Consecutive,
+        }
 
         proptest! {
             #[test]
@@ -935,9 +937,7 @@ mod tests {
             }
 
             #[test]
-            fn delivery_route_accepts_any_well_formed_dotted_token(
-                s in "[a-z][a-z0-9_-]{0,15}(\\.[a-z][a-z0-9_-]{0,15}){0,5}",
-            ) {
+            fn delivery_route_accepts_any_well_formed_dotted_token(s in DOTTED_TOKEN_REGEX) {
                 let route = DeliveryRoute::new(&s).unwrap();
                 prop_assert_eq!(route.as_str(), s.as_str());
             }
@@ -955,20 +955,22 @@ mod tests {
             #[test]
             fn delivery_route_rejects_dot_boundary_violations(
                 core in "[a-z]+(\\.[a-z]+){0,3}",
-                shape in 0u8..3,
+                shape in prop_oneof![
+                    Just(DotShape::Leading),
+                    Just(DotShape::Trailing),
+                    Just(DotShape::Consecutive),
+                ],
             ) {
                 let s = match shape {
-                    0 => format!(".{core}"),
-                    1 => format!("{core}."),
-                    _ => format!("{core}..tail"),
+                    DotShape::Leading => format!(".{core}"),
+                    DotShape::Trailing => format!("{core}."),
+                    DotShape::Consecutive => format!("{core}..tail"),
                 };
                 prop_assert!(DeliveryRoute::new(&s).is_err());
             }
 
             #[test]
-            fn sampling_subject_accepts_any_well_formed_dotted_token(
-                s in "[a-z][a-z0-9_-]{0,15}(\\.[a-z][a-z0-9_-]{0,15}){0,5}",
-            ) {
+            fn sampling_subject_accepts_any_well_formed_dotted_token(s in DOTTED_TOKEN_REGEX) {
                 let subject = SamplingSubject::new(&s).unwrap();
                 prop_assert_eq!(subject.as_str(), s.as_str());
             }
@@ -1003,20 +1005,14 @@ mod tests {
 
             #[test]
             fn reserved_scheduler_headers_are_rejected_in_any_case(
-                name_template in proptest::sample::select(&RESERVED_HEADER_NAMES[..]),
-                upper_mask in any::<u64>(),
+                name_template in proptest::sample::select(&RESERVED_SCHEDULE_HEADERS[..]),
+                upper_flags in proptest::collection::vec(any::<bool>(), 32),
                 value in "[ -~]{0,16}",
             ) {
                 let name: String = name_template
                     .chars()
-                    .enumerate()
-                    .map(|(i, ch)| {
-                        if (upper_mask >> (i % 64)) & 1 == 1 {
-                            ch.to_ascii_uppercase()
-                        } else {
-                            ch.to_ascii_lowercase()
-                        }
-                    })
+                    .zip(upper_flags.iter())
+                    .map(|(ch, &upper)| if upper { ch.to_ascii_uppercase() } else { ch.to_ascii_lowercase() })
                     .collect();
 
                 let result = JobHeaders::new([(name, value)]);
@@ -1025,12 +1021,15 @@ mod tests {
             }
 
             #[test]
-            fn non_reserved_headers_pass_the_reserved_check(
+            fn non_reserved_headers_construct_and_preserve_input(
                 name in "x-[a-z]{1,12}",
                 value in "[ -~]{0,16}",
             ) {
-                let headers = JobHeaders::new([(name, value)]).unwrap();
-                prop_assert!(!headers.is_empty());
+                let headers = JobHeaders::new([(name.clone(), value.clone())]).unwrap();
+                let slice = headers.as_slice();
+                prop_assert_eq!(slice.len(), 1);
+                prop_assert_eq!(slice[0].0.as_str(), name.as_str());
+                prop_assert_eq!(slice[0].1.as_str(), value.as_str());
             }
 
             #[test]
