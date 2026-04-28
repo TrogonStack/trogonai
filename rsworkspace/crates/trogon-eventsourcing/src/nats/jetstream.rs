@@ -240,20 +240,8 @@ impl<Resolver, Projector> JetStreamStore<Resolver, Projector> {
             )));
         }
         let current_version = subject_state.current_version;
-        let expected_last_subject_sequence = match expected_state {
-            StreamState::Any => None,
-            StreamState::StreamExists => {
-                Some(
-                    current_version.ok_or_else(|| JetStreamStoreError::OptimisticConcurrencyConflict {
-                        stream_id: stream_id.to_string(),
-                        expected: StreamState::StreamExists,
-                        current_version,
-                    })?,
-                )
-            }
-            StreamState::NoStream => Some(0),
-            StreamState::StreamRevision(version) => Some(version),
-        };
+        let expected_last_subject_sequence =
+            resolve_expected_last_subject_sequence(stream_id, expected_state, current_version)?;
 
         let next_expected_version = append_stream(
             self.as_jetstream(),
@@ -319,6 +307,28 @@ impl<Resolver, Projector> JetStreamStore<Resolver, Projector> {
         )
         .await
         .map_err(JetStreamStoreError::Snapshot)
+    }
+}
+
+fn resolve_expected_last_subject_sequence<StreamId, Error>(
+    stream_id: &StreamId,
+    expected_state: StreamState,
+    current_version: Option<u64>,
+) -> Result<Option<u64>, JetStreamStoreError<Error>>
+where
+    StreamId: ToString + ?Sized,
+{
+    match expected_state {
+        StreamState::Any => Ok(None),
+        StreamState::StreamExists => current_version
+            .ok_or_else(|| JetStreamStoreError::OptimisticConcurrencyConflict {
+                stream_id: stream_id.to_string(),
+                expected: StreamState::StreamExists,
+                current_version,
+            })
+            .map(Some),
+        StreamState::NoStream => Ok(Some(0)),
+        StreamState::StreamRevision(version) => Ok(Some(version)),
     }
 }
 

@@ -10,6 +10,7 @@ use trogon_std::{NowV7, UuidV7Generator};
 use crate::{EventData, EventId, NonEmpty, RecordedEvent};
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
+type StreamMessage = async_nats::jetstream::message::StreamMessage;
 
 const NATS_BATCH_COMMIT: &str = "Nats-Batch-Commit";
 const NATS_BATCH_ID: &str = "Nats-Batch-Id";
@@ -211,19 +212,7 @@ pub async fn read_stream_range(
     from_sequence: u64,
     to_sequence: u64,
 ) -> Result<Vec<RecordedEvent>, StreamStoreError> {
-    if from_sequence == 0 || to_sequence == 0 || from_sequence > to_sequence {
-        return Ok(Vec::new());
-    }
-
-    let mut events = Vec::new();
-    for sequence in from_sequence..=to_sequence {
-        let Some(message) = read_raw_message(stream, sequence).await? else {
-            continue;
-        };
-        events.push(record_stream_message(message)?);
-    }
-
-    Ok(events)
+    read_message_range(stream, from_sequence, to_sequence, |_| true).await
 }
 
 async fn read_subject_range(
@@ -231,6 +220,18 @@ async fn read_subject_range(
     subject: &str,
     from_sequence: u64,
     to_sequence: u64,
+) -> Result<Vec<RecordedEvent>, StreamStoreError> {
+    read_message_range(stream, from_sequence, to_sequence, |message| {
+        message.subject.as_str() == subject
+    })
+    .await
+}
+
+async fn read_message_range(
+    stream: &jetstream::stream::Stream,
+    from_sequence: u64,
+    to_sequence: u64,
+    mut include: impl FnMut(&StreamMessage) -> bool,
 ) -> Result<Vec<RecordedEvent>, StreamStoreError> {
     if from_sequence == 0 || to_sequence == 0 || from_sequence > to_sequence {
         return Ok(Vec::new());
@@ -241,7 +242,7 @@ async fn read_subject_range(
         let Some(message) = read_raw_message(stream, sequence).await? else {
             continue;
         };
-        if message.subject.as_str() != subject {
+        if !include(&message) {
             continue;
         }
         events.push(record_stream_message(message)?);
@@ -253,7 +254,7 @@ async fn read_subject_range(
 async fn read_raw_message(
     stream: &jetstream::stream::Stream,
     sequence: u64,
-) -> Result<Option<async_nats::jetstream::message::StreamMessage>, StreamStoreError> {
+) -> Result<Option<StreamMessage>, StreamStoreError> {
     match stream.get_raw_message(sequence).await {
         Ok(message) => Ok(Some(message)),
         Err(source)
@@ -268,9 +269,7 @@ async fn read_raw_message(
     }
 }
 
-pub fn record_stream_message(
-    message: async_nats::jetstream::message::StreamMessage,
-) -> Result<RecordedEvent, StreamStoreError> {
+pub fn record_stream_message(message: StreamMessage) -> Result<RecordedEvent, StreamStoreError> {
     let recorded_at = DateTime::<Utc>::from_timestamp(message.time.unix_timestamp(), message.time.nanosecond())
         .ok_or_else(|| {
             StreamStoreError::read_source(
