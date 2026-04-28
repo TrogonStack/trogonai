@@ -17,8 +17,8 @@ use trogon_eventsourcing::{
     SnapshotChange, SnapshotStoreConfig, Snapshots, StreamState,
 };
 use trogon_eventsourcing::{
-    SnapshotStoreError, StreamStoreError, TROGON_EVENT_TYPE, checkpoint_key, load_snapshot_map,
-    maybe_advance_checkpoint, persist_snapshot_change, read_checkpoint, snapshot_key, write_checkpoint,
+    SnapshotStoreError, StreamStoreError, TROGON_EVENT_TYPE, checkpoint_key, maybe_advance_checkpoint,
+    persist_snapshot_change, read_checkpoint, read_snapshot_map, snapshot_key, write_checkpoint,
 };
 use uuid::Uuid;
 
@@ -249,7 +249,7 @@ async fn append_one(
     value: impl Into<String>,
 ) -> Result<AppendOutcome, JetStreamStoreError<std::io::Error>> {
     store
-        .append_to_stream(stream_id, stream_state, NonEmpty::one(test_event(stream_id, value)?))
+        .append_stream(stream_id, stream_state, NonEmpty::one(test_event(stream_id, value)?))
         .await
 }
 
@@ -268,7 +268,7 @@ async fn append_many(
             "events must be non-empty",
         )));
     };
-    store.append_to_stream(stream_id, stream_state, events).await
+    store.append_stream(stream_id, stream_state, events).await
 }
 
 fn assert_occ_conflict(
@@ -322,7 +322,7 @@ async fn assert_missing_append_succeeds(stream_state: StreamState) -> TestResult
     let outcome = append_one(&fixture.store, "alpha", stream_state, "created").await?;
     assert_eq!(outcome.next_expected_version, 1);
 
-    let read = fixture.store.read_events_from("alpha", 1).await?;
+    let read = fixture.store.read_stream("alpha", 1).await?;
     assert_eq!(read.current_version, Some(1));
     assert_eq!(read.events.len(), 1);
 
@@ -334,7 +334,7 @@ async fn assert_missing_append_conflicts(stream_state: StreamState) -> TestResul
     let result = append_one(&fixture.store, "alpha", stream_state, "created").await;
     assert_occ_conflict(result, stream_state, None)?;
 
-    let read = fixture.store.read_events_from("alpha", 1).await?;
+    let read = fixture.store.read_stream("alpha", 1).await?;
     assert_eq!(read.current_version, None);
     assert!(read.events.is_empty());
 
@@ -346,7 +346,7 @@ async fn existing_fixture() -> TestResult<(JetStreamFixture, u64)> {
     let outcome = append_one(&fixture.store, "alpha", StreamState::NoStream, "seed").await?;
     assert_eq!(outcome.next_expected_version, 1);
 
-    let read = fixture.store.read_events_from("alpha", 1).await?;
+    let read = fixture.store.read_stream("alpha", 1).await?;
     assert_eq!(read.current_version, Some(1));
     Ok((fixture, 1))
 }
@@ -356,7 +356,7 @@ async fn assert_existing_append_succeeds(stream_state: StreamState) -> TestResul
     let outcome = append_one(&fixture.store, "alpha", stream_state, "next").await?;
     assert_eq!(outcome.next_expected_version, current_version + 1);
 
-    let read = fixture.store.read_events_from("alpha", 1).await?;
+    let read = fixture.store.read_stream("alpha", 1).await?;
     assert_eq!(read.current_version, Some(current_version + 1));
     assert_eq!(read.events.len(), 2);
 
@@ -368,7 +368,7 @@ async fn assert_existing_append_conflicts(stream_state: StreamState) -> TestResu
     let result = append_one(&fixture.store, "alpha", stream_state, "next").await;
     assert_occ_conflict(result, stream_state, Some(current_version))?;
 
-    let read = fixture.store.read_events_from("alpha", 1).await?;
+    let read = fixture.store.read_stream("alpha", 1).await?;
     assert_eq!(read.current_version, Some(current_version));
     assert_eq!(read.events.len(), 1);
 
@@ -388,7 +388,7 @@ async fn jetstream_store_appends_reads_filters_and_preserves_event_envelope() ->
 
     let outcome = fixture
         .store
-        .append_to_stream(
+        .append_stream(
             "alpha",
             StreamState::NoStream,
             event_batch(vec![
@@ -402,7 +402,7 @@ async fn jetstream_store_appends_reads_filters_and_preserves_event_envelope() ->
     append_one(&fixture.store, "beta", StreamState::NoStream, "beta-one").await?;
     append_one(&fixture.store, "alpha", StreamState::StreamRevision(2), "alpha-three").await?;
 
-    let read = fixture.store.read_events_from("alpha", 1).await?;
+    let read = fixture.store.read_stream("alpha", 1).await?;
     assert_eq!(read.current_version, Some(4));
     assert_eq!(read.events.len(), 3);
 
@@ -427,7 +427,7 @@ async fn jetstream_store_appends_reads_filters_and_preserves_event_envelope() ->
     let third_log_position = third
         .log_position
         .ok_or_else(|| std::io::Error::other("third event must have a log position"))?;
-    let read_from_third = fixture.store.read_events_from("alpha", third_log_position).await?;
+    let read_from_third = fixture.store.read_stream("alpha", third_log_position).await?;
     assert_eq!(read_from_third.current_version, Some(third_log_position));
     assert_eq!(read_from_third.events.len(), 1);
     assert_eq!(
@@ -435,7 +435,7 @@ async fn jetstream_store_appends_reads_filters_and_preserves_event_envelope() ->
         "alpha-three"
     );
 
-    let read_after_third = fixture.store.read_events_from("alpha", third_log_position + 1).await?;
+    let read_after_third = fixture.store.read_stream("alpha", third_log_position + 1).await?;
     assert_eq!(read_after_third.current_version, Some(third_log_position));
     assert!(read_after_third.events.is_empty());
 
@@ -450,17 +450,17 @@ async fn jetstream_store_read_ranges_keep_current_version() -> TestResult {
     append_one(&fixture.store, "alpha", StreamState::StreamRevision(1), "two").await?;
     append_one(&fixture.store, "alpha", StreamState::StreamRevision(2), "three").await?;
 
-    let read_from_zero = fixture.store.read_events_from("alpha", 0).await?;
+    let read_from_zero = fixture.store.read_stream("alpha", 0).await?;
     assert_eq!(read_from_zero.current_version, Some(3));
     assert!(read_from_zero.events.is_empty());
 
-    let read_from_two = fixture.store.read_events_from("alpha", 2).await?;
+    let read_from_two = fixture.store.read_stream("alpha", 2).await?;
     assert_eq!(read_from_two.current_version, Some(3));
     assert_eq!(read_from_two.events.len(), 2);
     assert_eq!(read_from_two.events[0].decode_data::<TestEvent>()?.value, "two");
     assert_eq!(read_from_two.events[1].decode_data::<TestEvent>()?.value, "three");
 
-    let read_after_end = fixture.store.read_events_from("alpha", 4).await?;
+    let read_after_end = fixture.store.read_stream("alpha", 4).await?;
     assert_eq!(read_after_end.current_version, Some(3));
     assert!(read_after_end.events.is_empty());
 
@@ -487,7 +487,7 @@ async fn jetstream_store_reads_subject_suffixes_from_global_offsets() -> TestRes
     ];
 
     for (from_sequence, expected_positions, expected_values) in cases {
-        let read = fixture.store.read_events_from("alpha", from_sequence).await?;
+        let read = fixture.store.read_stream("alpha", from_sequence).await?;
         assert_eq!(read.current_version, Some(5));
         assert_eq!(
             read.events.iter().map(|event| event.log_position).collect::<Vec<_>>(),
@@ -512,7 +512,7 @@ async fn jetstream_store_append_outcomes_match_recorded_log_positions() -> TestR
     let beta_one = append_one(&fixture.store, "beta", StreamState::NoStream, "beta-one").await?;
     let alpha_batch = fixture
         .store
-        .append_to_stream(
+        .append_stream(
             "alpha",
             StreamState::StreamRevision(alpha_one.next_expected_version),
             event_batch(vec![
@@ -534,13 +534,13 @@ async fn jetstream_store_append_outcomes_match_recorded_log_positions() -> TestR
     assert_eq!(alpha_batch.next_expected_version, 4);
     assert_eq!(beta_two.next_expected_version, 5);
 
-    let alpha = fixture.store.read_events_from("alpha", 1).await?;
+    let alpha = fixture.store.read_stream("alpha", 1).await?;
     assert_eq!(alpha.current_version, Some(alpha_batch.next_expected_version));
     assert_eq!(
         alpha.events.iter().map(|event| event.log_position).collect::<Vec<_>>(),
         vec![Some(1), Some(3), Some(4)]
     );
-    let beta = fixture.store.read_events_from("beta", 1).await?;
+    let beta = fixture.store.read_stream("beta", 1).await?;
     assert_eq!(beta.current_version, Some(beta_two.next_expected_version));
     assert_eq!(
         beta.events.iter().map(|event| event.log_position).collect::<Vec<_>>(),
@@ -566,7 +566,7 @@ async fn jetstream_store_skips_deleted_messages_inside_read_range() -> TestResul
             .await?
     );
 
-    let read = fixture.store.read_events_from("alpha", 1).await?;
+    let read = fixture.store.read_stream("alpha", 1).await?;
     assert_eq!(read.current_version, Some(3));
     assert_eq!(read.events.len(), 2);
     assert_eq!(read.events[0].decode_data::<TestEvent>()?.value, "one");
@@ -589,7 +589,7 @@ async fn jetstream_store_uses_previous_subject_sequence_after_latest_message_del
             .await?
     );
 
-    let read_after_delete = fixture.store.read_events_from("alpha", 1).await?;
+    let read_after_delete = fixture.store.read_stream("alpha", 1).await?;
     assert_eq!(read_after_delete.current_version, Some(1));
     assert_eq!(read_after_delete.events.len(), 1);
     assert_eq!(read_after_delete.events[0].log_position, Some(1));
@@ -597,7 +597,7 @@ async fn jetstream_store_uses_previous_subject_sequence_after_latest_message_del
 
     let appended = append_one(&fixture.store, "alpha", StreamState::StreamRevision(1), "three").await?;
     assert_eq!(appended.next_expected_version, 3);
-    let read_after_append = fixture.store.read_events_from("alpha", 1).await?;
+    let read_after_append = fixture.store.read_stream("alpha", 1).await?;
     assert_eq!(read_after_append.current_version, Some(3));
     assert_eq!(read_after_append.events.len(), 2);
     assert_eq!(read_after_append.events[0].log_position, Some(1));
@@ -630,7 +630,7 @@ async fn jetstream_store_read_rejects_messages_missing_event_envelope_headers() 
         .await?
         .await?;
 
-    assert_read_stream_error(fixture.store.read_events_from("alpha", 1).await)?;
+    assert_read_stream_error(fixture.store.read_stream("alpha", 1).await)?;
 
     let mut headers = HeaderMap::new();
     headers.insert(TROGON_EVENT_TYPE, "test.event");
@@ -648,7 +648,7 @@ async fn jetstream_store_read_rejects_messages_missing_event_envelope_headers() 
         .await?
         .await?;
 
-    assert_read_stream_error(fixture.store.read_events_from("beta", 1).await)?;
+    assert_read_stream_error(fixture.store.read_stream("beta", 1).await)?;
 
     let mut headers = HeaderMap::new();
     headers.insert(NATS_MESSAGE_ID, "not-a-uuid");
@@ -667,7 +667,7 @@ async fn jetstream_store_read_rejects_messages_missing_event_envelope_headers() 
         .await?
         .await?;
 
-    assert_read_stream_error(fixture.store.read_events_from("gamma", 1).await)?;
+    assert_read_stream_error(fixture.store.read_stream("gamma", 1).await)?;
 
     fixture.delete().await
 }
@@ -694,12 +694,12 @@ async fn jetstream_store_ignores_corrupt_messages_from_other_subjects() -> TestR
         .await?
         .await?;
 
-    let read = fixture.store.read_events_from("alpha", 1).await?;
+    let read = fixture.store.read_stream("alpha", 1).await?;
     assert_eq!(read.current_version, Some(1));
     assert_eq!(read.events.len(), 1);
     assert_eq!(read.events[0].decode_data::<TestEvent>()?.value, "alpha-one");
 
-    assert_read_stream_error(fixture.store.read_events_from("beta", 1).await)?;
+    assert_read_stream_error(fixture.store.read_stream("beta", 1).await)?;
 
     fixture.delete().await
 }
@@ -726,9 +726,9 @@ async fn jetstream_store_read_from_sequence_skips_earlier_corrupt_same_subject_m
     let append = append_one(&fixture.store, "alpha", StreamState::Any, "alpha-valid").await?;
     assert_eq!(append.next_expected_version, 2);
 
-    assert_read_stream_error(fixture.store.read_events_from("alpha", 1).await)?;
+    assert_read_stream_error(fixture.store.read_stream("alpha", 1).await)?;
 
-    let read_from_valid = fixture.store.read_events_from("alpha", 2).await?;
+    let read_from_valid = fixture.store.read_stream("alpha", 2).await?;
     assert_eq!(read_from_valid.current_version, Some(2));
     assert_eq!(read_from_valid.events.len(), 1);
     assert_eq!(read_from_valid.events[0].log_position, Some(2));
@@ -737,7 +737,7 @@ async fn jetstream_store_read_from_sequence_skips_earlier_corrupt_same_subject_m
         "alpha-valid"
     );
 
-    let read_after_valid = fixture.store.read_events_from("alpha", 3).await?;
+    let read_after_valid = fixture.store.read_stream("alpha", 3).await?;
     assert_eq!(read_after_valid.current_version, Some(2));
     assert!(read_after_valid.events.is_empty());
 
@@ -751,7 +751,7 @@ async fn jetstream_store_requires_atomic_publish_stream_support() -> TestResult 
     let result = append_one(&fixture.store, "alpha", StreamState::NoStream, "created").await;
     assert_append_publish_error(result)?;
 
-    let read = fixture.store.read_events_from("alpha", 1).await?;
+    let read = fixture.store.read_stream("alpha", 1).await?;
     assert_eq!(read.current_version, None);
     assert!(read.events.is_empty());
 
@@ -787,7 +787,7 @@ async fn jetstream_store_uses_subject_occ_for_new_streams_after_global_history()
     let fixture = JetStreamFixture::new().await?;
     append_one(&fixture.store, "alpha", StreamState::NoStream, "alpha-one").await?;
 
-    let missing = fixture.store.read_events_from("beta", 1).await?;
+    let missing = fixture.store.read_stream("beta", 1).await?;
     assert_eq!(missing.current_version, None);
     assert!(missing.events.is_empty());
 
@@ -800,13 +800,13 @@ async fn jetstream_store_uses_subject_occ_for_new_streams_after_global_history()
     let gamma = append_one(&fixture.store, "gamma", StreamState::StreamRevision(0), "gamma-one").await?;
     assert_eq!(gamma.next_expected_version, 3);
 
-    let beta_read = fixture.store.read_events_from("beta", 1).await?;
+    let beta_read = fixture.store.read_stream("beta", 1).await?;
     assert_eq!(beta_read.current_version, Some(2));
     assert_eq!(beta_read.events.len(), 1);
     assert_eq!(beta_read.events[0].log_position, Some(2));
     assert_eq!(beta_read.events[0].decode_data::<TestEvent>()?.value, "beta-one");
 
-    let gamma_read = fixture.store.read_events_from("gamma", 1).await?;
+    let gamma_read = fixture.store.read_stream("gamma", 1).await?;
     assert_eq!(gamma_read.current_version, Some(3));
     assert_eq!(gamma_read.events.len(), 1);
     assert_eq!(gamma_read.events[0].log_position, Some(3));
@@ -827,7 +827,7 @@ async fn jetstream_store_stream_exists_uses_subject_sequence_after_interleaving(
     let alpha_three = append_one(&fixture.store, "alpha", StreamState::StreamExists, "alpha-three").await?;
     assert_eq!(alpha_three.next_expected_version, 5);
 
-    let alpha = fixture.store.read_events_from("alpha", 1).await?;
+    let alpha = fixture.store.read_stream("alpha", 1).await?;
     assert_eq!(alpha.current_version, Some(5));
     assert_eq!(alpha.events.len(), 3);
     assert_eq!(alpha.events[0].log_position, Some(1));
@@ -847,7 +847,7 @@ async fn jetstream_store_any_can_start_new_subject_after_global_history() -> Tes
     let gamma = append_one(&fixture.store, "gamma", StreamState::Any, "gamma-one").await?;
     assert_eq!(gamma.next_expected_version, 3);
 
-    let gamma_read = fixture.store.read_events_from("gamma", 1).await?;
+    let gamma_read = fixture.store.read_stream("gamma", 1).await?;
     assert_eq!(gamma_read.current_version, Some(3));
     assert_eq!(gamma_read.events.len(), 1);
     assert_eq!(gamma_read.events[0].log_position, Some(3));
@@ -862,7 +862,7 @@ async fn jetstream_store_rejects_unsupported_append_batches() -> TestResult {
 
     let outside_target_stream = fixture
         .store
-        .append_to_stream(
+        .append_stream(
             "alpha",
             StreamState::NoStream,
             NonEmpty::one(test_event("beta", "wrong-stream")?),
@@ -872,7 +872,7 @@ async fn jetstream_store_rejects_unsupported_append_batches() -> TestResult {
 
     let mixed_streams = fixture
         .store
-        .append_to_stream(
+        .append_stream(
             "alpha",
             StreamState::NoStream,
             event_batch(vec![test_event("alpha", "one")?, test_event("beta", "two")?])?,
@@ -892,11 +892,11 @@ async fn jetstream_store_rejects_unsupported_append_batches() -> TestResult {
     )?;
     let metadata_result = fixture
         .store
-        .append_to_stream("alpha", StreamState::NoStream, NonEmpty::one(metadata_event))
+        .append_stream("alpha", StreamState::NoStream, NonEmpty::one(metadata_event))
         .await;
     assert_append_publish_error(metadata_result)?;
 
-    let read = fixture.store.read_events_from("alpha", 1).await?;
+    let read = fixture.store.read_stream("alpha", 1).await?;
     assert_eq!(read.current_version, None);
     assert!(read.events.is_empty());
 
@@ -920,7 +920,7 @@ async fn jetstream_store_executes_commands_with_snapshots() -> TestResult {
 
     let first_snapshot = fixture
         .store
-        .load_snapshot_entry::<_, CounterState>(test_snapshot_config(), "counter")
+        .read_snapshot::<_, CounterState>(test_snapshot_config(), "counter")
         .await?
         .ok_or_else(|| std::io::Error::other("counter snapshot should exist"))?;
     assert_eq!(first_snapshot, Snapshot::new(1, CounterState { total: 2 }));
@@ -936,12 +936,12 @@ async fn jetstream_store_executes_commands_with_snapshots() -> TestResult {
 
     let second_snapshot = fixture
         .store
-        .load_snapshot_entry::<_, CounterState>(test_snapshot_config(), "counter")
+        .read_snapshot::<_, CounterState>(test_snapshot_config(), "counter")
         .await?
         .ok_or_else(|| std::io::Error::other("counter snapshot should exist"))?;
     assert_eq!(second_snapshot, Snapshot::new(2, CounterState { total: 5 }));
 
-    let read = fixture.store.read_events_from("counter", 1).await?;
+    let read = fixture.store.read_stream("counter", 1).await?;
     assert_eq!(read.current_version, Some(2));
     assert_eq!(read.events.len(), 2);
     assert_eq!(read.events[0].decode_data::<CounterIncreased>()?.amount, 2);
@@ -966,10 +966,8 @@ async fn jetstream_command_execution_respects_snapshot_cadence() -> TestResult {
         .map_err(debug_error)?;
     assert_eq!(first.next_expected_version, 1);
     assert_eq!(first.state, CounterState { total: 1 });
-    let first_snapshot: Option<Snapshot<CounterState>> = fixture
-        .store
-        .load_snapshot_entry(test_snapshot_config(), "counter")
-        .await?;
+    let first_snapshot: Option<Snapshot<CounterState>> =
+        fixture.store.read_snapshot(test_snapshot_config(), "counter").await?;
     assert_eq!(first_snapshot, None);
 
     let second_command = IncreaseCounterCommand::new("counter", 2);
@@ -982,7 +980,7 @@ async fn jetstream_command_execution_respects_snapshot_cadence() -> TestResult {
     assert_eq!(second.state, CounterState { total: 3 });
     let second_snapshot = fixture
         .store
-        .load_snapshot_entry::<_, CounterState>(test_snapshot_config(), "counter")
+        .read_snapshot::<_, CounterState>(test_snapshot_config(), "counter")
         .await?
         .ok_or_else(|| std::io::Error::other("counter snapshot should exist"))?;
     assert_eq!(second_snapshot, Snapshot::new(2, CounterState { total: 3 }));
@@ -997,7 +995,7 @@ async fn jetstream_command_execution_respects_snapshot_cadence() -> TestResult {
     assert_eq!(third.state, CounterState { total: 6 });
     let third_snapshot = fixture
         .store
-        .load_snapshot_entry::<_, CounterState>(test_snapshot_config(), "counter")
+        .read_snapshot::<_, CounterState>(test_snapshot_config(), "counter")
         .await?
         .ok_or_else(|| std::io::Error::other("counter snapshot should still exist"))?;
     assert_eq!(third_snapshot, Snapshot::new(2, CounterState { total: 3 }));
@@ -1012,7 +1010,7 @@ async fn jetstream_command_execution_respects_snapshot_cadence() -> TestResult {
     assert_eq!(fourth.state, CounterState { total: 10 });
     let fourth_snapshot = fixture
         .store
-        .load_snapshot_entry::<_, CounterState>(test_snapshot_config(), "counter")
+        .read_snapshot::<_, CounterState>(test_snapshot_config(), "counter")
         .await?
         .ok_or_else(|| std::io::Error::other("counter snapshot should exist"))?;
     assert_eq!(fourth_snapshot, Snapshot::new(4, CounterState { total: 10 }));
@@ -1048,7 +1046,7 @@ async fn jetstream_command_execution_snapshots_use_log_sequence_after_interleave
 
     let second_snapshot = fixture
         .store
-        .load_snapshot_entry::<_, CounterState>(test_snapshot_config(), "counter")
+        .read_snapshot::<_, CounterState>(test_snapshot_config(), "counter")
         .await?
         .ok_or_else(|| std::io::Error::other("counter snapshot should exist"))?;
     assert_eq!(second_snapshot, Snapshot::new(3, CounterState { total: 5 }));
@@ -1109,18 +1107,18 @@ async fn jetstream_command_execution_keeps_interleaved_stream_state_isolated() -
 
     let alpha_snapshot = fixture
         .store
-        .load_snapshot_entry::<_, CounterState>(test_snapshot_config(), "alpha")
+        .read_snapshot::<_, CounterState>(test_snapshot_config(), "alpha")
         .await?
         .ok_or_else(|| std::io::Error::other("alpha snapshot should exist"))?;
     assert_eq!(alpha_snapshot, Snapshot::new(3, CounterState { total: 3 }));
     let beta_snapshot = fixture
         .store
-        .load_snapshot_entry::<_, CounterState>(test_snapshot_config(), "beta")
+        .read_snapshot::<_, CounterState>(test_snapshot_config(), "beta")
         .await?
         .ok_or_else(|| std::io::Error::other("beta snapshot should exist"))?;
     assert_eq!(beta_snapshot, Snapshot::new(4, CounterState { total: 15 }));
 
-    let alpha = fixture.store.read_events_from("alpha", 1).await?;
+    let alpha = fixture.store.read_stream("alpha", 1).await?;
     assert_eq!(alpha.current_version, Some(3));
     assert_eq!(
         alpha.events.iter().map(|event| event.log_position).collect::<Vec<_>>(),
@@ -1133,7 +1131,7 @@ async fn jetstream_command_execution_keeps_interleaved_stream_state_isolated() -
         .collect::<serde_json::Result<Vec<_>>>()?;
     assert_eq!(alpha_amounts, vec![1, 2]);
 
-    let beta = fixture.store.read_events_from("beta", 1).await?;
+    let beta = fixture.store.read_stream("beta", 1).await?;
     assert_eq!(beta.current_version, Some(4));
     assert_eq!(
         beta.events.iter().map(|event| event.log_position).collect::<Vec<_>>(),
@@ -1172,7 +1170,7 @@ async fn jetstream_command_execution_snapshot_skips_earlier_corrupt_same_subject
     )?;
     let seed_outcome = fixture
         .store
-        .append_to_stream("counter", StreamState::Any, NonEmpty::one(seed))
+        .append_stream("counter", StreamState::Any, NonEmpty::one(seed))
         .await?;
     assert_eq!(seed_outcome.next_expected_version, 2);
 
@@ -1185,7 +1183,7 @@ async fn jetstream_command_execution_snapshot_skips_earlier_corrupt_same_subject
 
     fixture
         .store
-        .save_snapshot_entry(
+        .write_snapshot(
             test_snapshot_config(),
             "counter",
             Snapshot::new(2, CounterState { total: 5 }),
@@ -1233,12 +1231,10 @@ async fn jetstream_command_execution_does_not_snapshot_failed_appends() -> TestR
         )))
     ));
 
-    let snapshot: Option<Snapshot<CounterState>> = fixture
-        .store
-        .load_snapshot_entry(test_snapshot_config(), "counter")
-        .await?;
+    let snapshot: Option<Snapshot<CounterState>> =
+        fixture.store.read_snapshot(test_snapshot_config(), "counter").await?;
     assert_eq!(snapshot, None);
-    let read = fixture.store.read_events_from("counter", 1).await?;
+    let read = fixture.store.read_stream("counter", 1).await?;
     assert_eq!(read.current_version, Some(1));
     assert_eq!(read.events.len(), 1);
     assert_eq!(read.events[0].decode_data::<CounterIncreased>()?.amount, 1);
@@ -1274,13 +1270,13 @@ async fn jetstream_command_execution_ignores_corrupt_events_from_other_subjects(
     assert_eq!(result.next_expected_version, 2);
     assert_eq!(result.state, CounterState { total: 5 });
 
-    let read = fixture.store.read_events_from("counter", 1).await?;
+    let read = fixture.store.read_stream("counter", 1).await?;
     assert_eq!(read.current_version, Some(2));
     assert_eq!(read.events.len(), 1);
     assert_eq!(read.events[0].log_position, Some(2));
     assert_eq!(read.events[0].decode_data::<CounterIncreased>()?.amount, 5);
 
-    let missing = fixture.store.read_events_from("missing", 1).await?;
+    let missing = fixture.store.read_stream("missing", 1).await?;
     assert_eq!(missing.current_version, None);
     assert!(missing.events.is_empty());
 
@@ -1300,7 +1296,7 @@ async fn jetstream_command_execution_reports_decode_errors_from_corrupt_events()
     };
     fixture
         .store
-        .append_to_stream("counter", StreamState::NoStream, NonEmpty::one(corrupt_event))
+        .append_stream("counter", StreamState::NoStream, NonEmpty::one(corrupt_event))
         .await?;
 
     let command = IncreaseCounterCommand::new("counter", 1);
@@ -1319,7 +1315,7 @@ async fn jetstream_command_execution_rejects_snapshot_ahead_of_stream() -> TestR
     let fixture = JetStreamFixture::new().await?;
     fixture
         .store
-        .save_snapshot_entry(
+        .write_snapshot(
             test_snapshot_config(),
             "counter",
             Snapshot::new(10, CounterState { total: 10 }),
@@ -1357,7 +1353,7 @@ async fn jetstream_command_execution_rejects_snapshot_ahead_of_existing_stream()
         .map_err(debug_error)?;
     fixture
         .store
-        .save_snapshot_entry(
+        .write_snapshot(
             test_snapshot_config(),
             "counter",
             Snapshot::new(10, CounterState { total: 10 }),
@@ -1403,7 +1399,7 @@ async fn jetstream_store_allows_only_one_concurrent_no_stream_append() -> TestRe
     assert_eq!(success_count, 1);
     assert_eq!(conflict_count, attempts - 1);
 
-    let read = fixture.store.read_events_from("alpha", 1).await?;
+    let read = fixture.store.read_stream("alpha", 1).await?;
     assert_eq!(read.current_version, Some(1));
     assert_eq!(read.events.len(), 1);
     assert!(read.events[0].decode_data::<TestEvent>()?.value.starts_with("attempt-"));
@@ -1438,7 +1434,7 @@ async fn jetstream_store_allows_only_one_concurrent_stream_revision_zero_append(
     assert_eq!(success_count, 1);
     assert_eq!(conflict_count, attempts - 1);
 
-    let read = fixture.store.read_events_from("alpha", 1).await?;
+    let read = fixture.store.read_stream("alpha", 1).await?;
     assert_eq!(read.current_version, Some(1));
     assert_eq!(read.events.len(), 1);
 
@@ -1473,7 +1469,7 @@ async fn jetstream_store_allows_only_one_concurrent_no_stream_batch_append() -> 
     assert_eq!(success_count, 1);
     assert_eq!(conflict_count, attempts - 1);
 
-    let read = fixture.store.read_events_from("alpha", 1).await?;
+    let read = fixture.store.read_stream("alpha", 1).await?;
     assert_eq!(read.current_version, Some(events_per_attempt));
     assert_eq!(read.events.len(), events_per_attempt as usize);
 
@@ -1494,7 +1490,7 @@ async fn jetstream_store_any_allows_concurrent_appends_without_occ_guard() -> Te
     let success_count = results.iter().filter(|result| result.is_ok()).count();
     assert_eq!(success_count, attempts);
 
-    let read = fixture.store.read_events_from("alpha", 1).await?;
+    let read = fixture.store.read_stream("alpha", 1).await?;
     assert_eq!(read.current_version, Some(attempts as u64));
     assert_eq!(read.events.len(), attempts);
 
@@ -1515,7 +1511,7 @@ async fn jetstream_store_any_concurrent_appends_preserve_every_event_once() -> T
         result?;
     }
 
-    let read = fixture.store.read_events_from("alpha", 1).await?;
+    let read = fixture.store.read_stream("alpha", 1).await?;
     assert_eq!(read.current_version, Some(attempts as u64));
     assert_eq!(
         read.events.iter().map(|event| event.log_position).collect::<Vec<_>>(),
@@ -1557,7 +1553,7 @@ async fn jetstream_store_any_allows_concurrent_multi_event_batches() -> TestResu
     let success_count = results.iter().filter(|result| result.is_ok()).count();
     assert_eq!(success_count, attempts);
 
-    let read = fixture.store.read_events_from("alpha", 1).await?;
+    let read = fixture.store.read_stream("alpha", 1).await?;
     assert_eq!(read.current_version, Some((attempts * events_per_attempt) as u64));
     assert_eq!(read.events.len(), attempts * events_per_attempt);
 
@@ -1582,7 +1578,7 @@ async fn jetstream_store_any_rejects_concurrent_duplicate_event_ids_without_adva
             )
             .map_err(|source| JetStreamStoreError::Codec(std::io::Error::other(source)))?;
             store
-                .append_to_stream("alpha", StreamState::Any, NonEmpty::one(event))
+                .append_stream("alpha", StreamState::Any, NonEmpty::one(event))
                 .await
         }
     }))
@@ -1601,7 +1597,7 @@ async fn jetstream_store_any_rejects_concurrent_duplicate_event_ids_without_adva
     assert_eq!(success_count, 1);
     assert_eq!(publish_error_count, attempts - 1);
 
-    let read = fixture.store.read_events_from("alpha", 1).await?;
+    let read = fixture.store.read_stream("alpha", 1).await?;
     assert_eq!(read.current_version, Some(1));
     assert_eq!(read.events.len(), 1);
     assert_eq!(read.events[0].event_id, EventId::from(event_id));
@@ -1637,7 +1633,7 @@ async fn jetstream_store_allows_only_one_concurrent_exact_revision_append() -> T
     assert_eq!(success_count, 1);
     assert_eq!(conflict_count, attempts - 1);
 
-    let read = fixture.store.read_events_from("alpha", 1).await?;
+    let read = fixture.store.read_stream("alpha", 1).await?;
     assert_eq!(read.current_version, Some(2));
     assert_eq!(read.events.len(), 2);
 
@@ -1676,7 +1672,7 @@ async fn jetstream_store_allows_only_one_concurrent_exact_revision_batch_append(
     assert_eq!(success_count, 1);
     assert_eq!(conflict_count, attempts - 1);
 
-    let read = fixture.store.read_events_from("alpha", 1).await?;
+    let read = fixture.store.read_stream("alpha", 1).await?;
     assert_eq!(read.current_version, Some(1 + events_per_attempt));
     assert_eq!(read.events.len(), 1 + events_per_attempt as usize);
 
@@ -1711,7 +1707,7 @@ async fn jetstream_store_allows_only_one_concurrent_stream_exists_append() -> Te
     assert_eq!(success_count, 1);
     assert_eq!(conflict_count, attempts - 1);
 
-    let read = fixture.store.read_events_from("alpha", 1).await?;
+    let read = fixture.store.read_stream("alpha", 1).await?;
     assert_eq!(read.current_version, Some(2));
     assert_eq!(read.events.len(), 2);
 
@@ -1747,7 +1743,7 @@ async fn jetstream_store_allows_only_one_concurrent_stream_exists_batch_append()
     assert_eq!(success_count, 1);
     assert_eq!(conflict_count, attempts - 1);
 
-    let read = fixture.store.read_events_from("alpha", 1).await?;
+    let read = fixture.store.read_stream("alpha", 1).await?;
     assert_eq!(read.current_version, Some(1 + events_per_attempt));
     assert_eq!(read.events.len(), 1 + events_per_attempt as usize);
 
@@ -1761,7 +1757,7 @@ async fn jetstream_store_rejects_duplicate_event_id_without_advancing_stream() -
     let event_id = Uuid::from_u128(0x018f_8f4d_94a8_7000_8000_0000_0000_0201);
     let outcome = fixture
         .store
-        .append_to_stream(
+        .append_stream(
             "alpha",
             StreamState::NoStream,
             NonEmpty::one(test_event_with_id("alpha", event_id, "first")?),
@@ -1771,7 +1767,7 @@ async fn jetstream_store_rejects_duplicate_event_id_without_advancing_stream() -
 
     let duplicate = fixture
         .store
-        .append_to_stream(
+        .append_stream(
             "alpha",
             StreamState::StreamRevision(1),
             NonEmpty::one(test_event_with_id("alpha", event_id, "duplicate")?),
@@ -1779,7 +1775,7 @@ async fn jetstream_store_rejects_duplicate_event_id_without_advancing_stream() -
         .await;
     assert_append_publish_error(duplicate)?;
 
-    let read = fixture.store.read_events_from("alpha", 1).await?;
+    let read = fixture.store.read_stream("alpha", 1).await?;
     assert_eq!(read.current_version, Some(1));
     assert_eq!(read.events.len(), 1);
     assert_eq!(read.events[0].decode_data::<TestEvent>()?.value, "first");
@@ -1794,7 +1790,7 @@ async fn jetstream_store_rejects_duplicate_event_id_with_any_without_advancing_s
     let event_id = Uuid::from_u128(0x018f_8f4d_94a8_7000_8000_0000_0000_0205);
     fixture
         .store
-        .append_to_stream(
+        .append_stream(
             "alpha",
             StreamState::NoStream,
             NonEmpty::one(test_event_with_id("alpha", event_id, "first")?),
@@ -1803,7 +1799,7 @@ async fn jetstream_store_rejects_duplicate_event_id_with_any_without_advancing_s
 
     let duplicate = fixture
         .store
-        .append_to_stream(
+        .append_stream(
             "alpha",
             StreamState::Any,
             NonEmpty::one(test_event_with_id("alpha", event_id, "duplicate")?),
@@ -1811,7 +1807,7 @@ async fn jetstream_store_rejects_duplicate_event_id_with_any_without_advancing_s
         .await;
     assert_append_publish_error(duplicate)?;
 
-    let read = fixture.store.read_events_from("alpha", 1).await?;
+    let read = fixture.store.read_stream("alpha", 1).await?;
     assert_eq!(read.current_version, Some(1));
     assert_eq!(read.events.len(), 1);
     assert_eq!(read.events[0].decode_data::<TestEvent>()?.value, "first");
@@ -1826,7 +1822,7 @@ async fn jetstream_store_rejects_duplicate_event_id_inside_atomic_batch_without_
     let event_id = Uuid::from_u128(0x018f_8f4d_94a8_7000_8000_0000_0000_0202);
     fixture
         .store
-        .append_to_stream(
+        .append_stream(
             "alpha",
             StreamState::NoStream,
             NonEmpty::one(test_event_with_id("alpha", event_id, "seed")?),
@@ -1835,7 +1831,7 @@ async fn jetstream_store_rejects_duplicate_event_id_inside_atomic_batch_without_
 
     let duplicate_first = fixture
         .store
-        .append_to_stream(
+        .append_stream(
             "alpha",
             StreamState::StreamRevision(1),
             event_batch(vec![
@@ -1848,7 +1844,7 @@ async fn jetstream_store_rejects_duplicate_event_id_inside_atomic_batch_without_
 
     let duplicate_last = fixture
         .store
-        .append_to_stream(
+        .append_stream(
             "alpha",
             StreamState::StreamRevision(1),
             event_batch(vec![
@@ -1859,7 +1855,7 @@ async fn jetstream_store_rejects_duplicate_event_id_inside_atomic_batch_without_
         .await;
     assert_append_publish_error(duplicate_last)?;
 
-    let read = fixture.store.read_events_from("alpha", 1).await?;
+    let read = fixture.store.read_stream("alpha", 1).await?;
     assert_eq!(read.current_version, Some(1));
     assert_eq!(read.events.len(), 1);
     assert_eq!(read.events[0].decode_data::<TestEvent>()?.value, "seed");
@@ -1875,7 +1871,7 @@ async fn jetstream_store_rejects_duplicate_event_id_inside_new_atomic_batch_with
 
     let duplicate_batch = fixture
         .store
-        .append_to_stream(
+        .append_stream(
             "alpha",
             StreamState::NoStream,
             event_batch(vec![
@@ -1886,7 +1882,7 @@ async fn jetstream_store_rejects_duplicate_event_id_inside_new_atomic_batch_with
         .await;
     assert_append_publish_error(duplicate_batch)?;
 
-    let read = fixture.store.read_events_from("alpha", 1).await?;
+    let read = fixture.store.read_stream("alpha", 1).await?;
     assert_eq!(read.current_version, None);
     assert!(read.events.is_empty());
 
@@ -1901,7 +1897,7 @@ async fn jetstream_store_rejects_duplicate_event_id_across_streams_without_parti
 
     fixture
         .store
-        .append_to_stream(
+        .append_stream(
             "alpha",
             StreamState::NoStream,
             NonEmpty::one(test_event_with_id("alpha", event_id, "alpha")?),
@@ -1909,7 +1905,7 @@ async fn jetstream_store_rejects_duplicate_event_id_across_streams_without_parti
         .await?;
     let duplicate = fixture
         .store
-        .append_to_stream(
+        .append_stream(
             "beta",
             StreamState::NoStream,
             NonEmpty::one(test_event_with_id("beta", event_id, "beta")?),
@@ -1917,10 +1913,10 @@ async fn jetstream_store_rejects_duplicate_event_id_across_streams_without_parti
         .await;
     assert_append_publish_error(duplicate)?;
 
-    let alpha = fixture.store.read_events_from("alpha", 1).await?;
+    let alpha = fixture.store.read_stream("alpha", 1).await?;
     assert_eq!(alpha.current_version, Some(1));
     assert_eq!(alpha.events.len(), 1);
-    let beta = fixture.store.read_events_from("beta", 1).await?;
+    let beta = fixture.store.read_stream("beta", 1).await?;
     assert_eq!(beta.current_version, None);
     assert!(beta.events.is_empty());
 
@@ -1942,7 +1938,7 @@ async fn jetstream_store_uses_last_subject_sequence_for_occ_after_interleaved_su
     let outcome = append_one(&fixture.store, "alpha", StreamState::StreamRevision(3), "alpha-three").await?;
     assert_eq!(outcome.next_expected_version, 4);
 
-    let read = fixture.store.read_events_from("alpha", 1).await?;
+    let read = fixture.store.read_stream("alpha", 1).await?;
     assert_eq!(read.current_version, Some(4));
     assert_eq!(read.events.len(), 3);
     assert_eq!(read.events[0].log_position, Some(1));
@@ -1961,7 +1957,7 @@ async fn jetstream_store_returns_batch_commit_sequence_after_interleaved_subject
 
     let outcome = fixture
         .store
-        .append_to_stream(
+        .append_stream(
             "alpha",
             StreamState::StreamRevision(1),
             event_batch(vec![
@@ -1972,7 +1968,7 @@ async fn jetstream_store_returns_batch_commit_sequence_after_interleaved_subject
         .await?;
     assert_eq!(outcome.next_expected_version, 4);
 
-    let read = fixture.store.read_events_from("alpha", 1).await?;
+    let read = fixture.store.read_stream("alpha", 1).await?;
     assert_eq!(read.current_version, Some(4));
     assert_eq!(read.events.len(), 3);
     assert_eq!(read.events[0].log_position, Some(1));
@@ -1990,7 +1986,7 @@ async fn jetstream_store_rejects_stale_atomic_batch_without_partial_write() -> T
 
     let stale_batch = fixture
         .store
-        .append_to_stream(
+        .append_stream(
             "alpha",
             StreamState::StreamRevision(0),
             event_batch(vec![test_event("alpha", "one")?, test_event("alpha", "two")?])?,
@@ -1998,7 +1994,7 @@ async fn jetstream_store_rejects_stale_atomic_batch_without_partial_write() -> T
         .await;
     assert_occ_conflict(stale_batch, StreamState::StreamRevision(0), Some(1))?;
 
-    let read = fixture.store.read_events_from("alpha", 1).await?;
+    let read = fixture.store.read_stream("alpha", 1).await?;
     assert_eq!(read.current_version, Some(1));
     assert_eq!(read.events.len(), 1);
     assert_eq!(read.events[0].decode_data::<TestEvent>()?.value, "seed");
@@ -2012,12 +2008,12 @@ async fn jetstream_snapshot_store_persists_lists_deletes_and_advances_checkpoint
     let fixture = JetStreamFixture::new().await?;
     let config = SnapshotStoreConfig::with_checkpoint_name("snapshots.v1.", "last_event_sequence");
 
-    let missing: Option<Snapshot<TestSnapshot>> = fixture.store.load_snapshot_entry(config.clone(), "alpha").await?;
+    let missing: Option<Snapshot<TestSnapshot>> = fixture.store.read_snapshot(config.clone(), "alpha").await?;
     assert_eq!(missing, None);
 
     fixture
         .store
-        .save_snapshot_entry(
+        .write_snapshot(
             config.clone(),
             "alpha",
             Snapshot::new(
@@ -2030,7 +2026,7 @@ async fn jetstream_snapshot_store_persists_lists_deletes_and_advances_checkpoint
         .await?;
     fixture
         .store
-        .save_snapshot_entry(
+        .write_snapshot(
             config.clone(),
             "alpha",
             Snapshot::new(
@@ -2043,7 +2039,7 @@ async fn jetstream_snapshot_store_persists_lists_deletes_and_advances_checkpoint
         .await?;
     fixture
         .store
-        .save_snapshot_entry(
+        .write_snapshot(
             config.clone(),
             "alpha",
             Snapshot::new(
@@ -2056,7 +2052,7 @@ async fn jetstream_snapshot_store_persists_lists_deletes_and_advances_checkpoint
         .await?;
     fixture
         .store
-        .save_snapshot_entry(
+        .write_snapshot(
             config.clone(),
             "beta",
             Snapshot::new(
@@ -2070,7 +2066,7 @@ async fn jetstream_snapshot_store_persists_lists_deletes_and_advances_checkpoint
 
     let loaded_alpha = fixture
         .store
-        .load_snapshot_entry::<_, TestSnapshot>(config.clone(), "alpha")
+        .read_snapshot::<_, TestSnapshot>(config.clone(), "alpha")
         .await?
         .ok_or_else(|| std::io::Error::other("alpha snapshot should exist"))?;
     assert_eq!(
@@ -2089,7 +2085,7 @@ async fn jetstream_snapshot_store_persists_lists_deletes_and_advances_checkpoint
         .put("other.namespace", "ignored".into())
         .await?;
     let snapshot_map: std::collections::BTreeMap<String, Snapshot<TestSnapshot>> =
-        load_snapshot_map(fixture.store.snapshot_bucket(), &config).await?;
+        read_snapshot_map(fixture.store.snapshot_bucket(), &config).await?;
     assert_eq!(snapshot_map.len(), 2);
     assert_eq!(snapshot_map.get("alpha"), Some(&loaded_alpha));
     assert_eq!(
@@ -2118,12 +2114,11 @@ async fn jetstream_snapshot_store_persists_lists_deletes_and_advances_checkpoint
         SnapshotChange::delete("alpha"),
     )
     .await?;
-    let deleted_alpha: Option<Snapshot<TestSnapshot>> =
-        fixture.store.load_snapshot_entry(config.clone(), "alpha").await?;
+    let deleted_alpha: Option<Snapshot<TestSnapshot>> = fixture.store.read_snapshot(config.clone(), "alpha").await?;
     assert_eq!(deleted_alpha, None);
 
     let snapshot_map_after_delete: std::collections::BTreeMap<String, Snapshot<TestSnapshot>> =
-        load_snapshot_map(fixture.store.snapshot_bucket(), &config).await?;
+        read_snapshot_map(fixture.store.snapshot_bucket(), &config).await?;
     assert_eq!(snapshot_map_after_delete.len(), 1);
     assert!(!snapshot_map_after_delete.contains_key("alpha"));
     assert!(snapshot_map_after_delete.contains_key("beta"));
@@ -2143,7 +2138,7 @@ async fn jetstream_snapshot_store_persists_lists_deletes_and_advances_checkpoint
 
     fixture
         .store
-        .save_snapshot_entry(
+        .write_snapshot(
             config.clone(),
             "alpha",
             Snapshot::new(
@@ -2156,7 +2151,7 @@ async fn jetstream_snapshot_store_persists_lists_deletes_and_advances_checkpoint
         .await?;
     let recreated_alpha = fixture
         .store
-        .load_snapshot_entry::<_, TestSnapshot>(config.clone(), "alpha")
+        .read_snapshot::<_, TestSnapshot>(config.clone(), "alpha")
         .await?
         .ok_or_else(|| std::io::Error::other("alpha snapshot should exist after recreate"))?;
     assert_eq!(
@@ -2191,13 +2186,13 @@ async fn jetstream_snapshot_store_persists_lists_deletes_and_advances_checkpoint
     assert_snapshot_error(
         fixture
             .store
-            .load_snapshot_entry::<_, TestSnapshot>(config.clone(), "corrupt")
+            .read_snapshot::<_, TestSnapshot>(config.clone(), "corrupt")
             .await,
     )?;
     assert_snapshot_error(
         fixture
             .store
-            .save_snapshot_entry(
+            .write_snapshot(
                 config.clone(),
                 "corrupt",
                 Snapshot::new(
@@ -2216,11 +2211,11 @@ async fn jetstream_snapshot_store_persists_lists_deletes_and_advances_checkpoint
     )
     .await?;
     let deleted_corrupt: Option<Snapshot<TestSnapshot>> =
-        fixture.store.load_snapshot_entry(config.clone(), "corrupt").await?;
+        fixture.store.read_snapshot(config.clone(), "corrupt").await?;
     assert_eq!(deleted_corrupt, None);
     fixture
         .store
-        .save_snapshot_entry(
+        .write_snapshot(
             config.clone(),
             "corrupt",
             Snapshot::new(
@@ -2233,7 +2228,7 @@ async fn jetstream_snapshot_store_persists_lists_deletes_and_advances_checkpoint
         .await?;
     let recreated_corrupt = fixture
         .store
-        .load_snapshot_entry::<_, TestSnapshot>(config.clone(), "corrupt")
+        .read_snapshot::<_, TestSnapshot>(config.clone(), "corrupt")
         .await?
         .ok_or_else(|| std::io::Error::other("corrupt snapshot key should be recreated"))?;
     assert_eq!(
@@ -2268,7 +2263,7 @@ async fn jetstream_snapshot_store_concurrent_upserts_keep_highest_version() -> T
         let config = config.clone();
         async move {
             store
-                .save_snapshot_entry(
+                .write_snapshot(
                     config,
                     "alpha",
                     Snapshot::new(
@@ -2289,7 +2284,7 @@ async fn jetstream_snapshot_store_concurrent_upserts_keep_highest_version() -> T
 
     let loaded = fixture
         .store
-        .load_snapshot_entry::<_, TestSnapshot>(config, "alpha")
+        .read_snapshot::<_, TestSnapshot>(config, "alpha")
         .await?
         .ok_or_else(|| std::io::Error::other("alpha snapshot should exist"))?;
     assert_eq!(
@@ -2313,7 +2308,7 @@ async fn jetstream_snapshot_store_map_and_list_agree_after_mixed_changes() -> Te
 
     fixture
         .store
-        .save_snapshot_entry(
+        .write_snapshot(
             config.clone(),
             "alpha",
             Snapshot::new(
@@ -2326,7 +2321,7 @@ async fn jetstream_snapshot_store_map_and_list_agree_after_mixed_changes() -> Te
         .await?;
     fixture
         .store
-        .save_snapshot_entry(
+        .write_snapshot(
             config.clone(),
             "alpha",
             Snapshot::new(
@@ -2339,7 +2334,7 @@ async fn jetstream_snapshot_store_map_and_list_agree_after_mixed_changes() -> Te
         .await?;
     fixture
         .store
-        .save_snapshot_entry(
+        .write_snapshot(
             config.clone(),
             "beta",
             Snapshot::new(
@@ -2352,7 +2347,7 @@ async fn jetstream_snapshot_store_map_and_list_agree_after_mixed_changes() -> Te
         .await?;
     fixture
         .store
-        .save_snapshot_entry(
+        .write_snapshot(
             config.clone(),
             "gamma",
             Snapshot::new(
@@ -2371,7 +2366,7 @@ async fn jetstream_snapshot_store_map_and_list_agree_after_mixed_changes() -> Te
     .await?;
 
     let snapshot_map: std::collections::BTreeMap<String, Snapshot<TestSnapshot>> =
-        load_snapshot_map(fixture.store.snapshot_bucket(), &config).await?;
+        read_snapshot_map(fixture.store.snapshot_bucket(), &config).await?;
     assert_eq!(snapshot_map.len(), 2);
     assert_eq!(
         snapshot_map.get("alpha"),
@@ -2411,7 +2406,7 @@ async fn jetstream_snapshot_store_concurrent_deletes_are_idempotent() -> TestRes
     let config = SnapshotStoreConfig::without_checkpoint("snapshots.delete.");
     fixture
         .store
-        .save_snapshot_entry(
+        .write_snapshot(
             config.clone(),
             "alpha",
             Snapshot::new(
@@ -2438,11 +2433,10 @@ async fn jetstream_snapshot_store_concurrent_deletes_are_idempotent() -> TestRes
         result?;
     }
 
-    let deleted_alpha: Option<Snapshot<TestSnapshot>> =
-        fixture.store.load_snapshot_entry(config.clone(), "alpha").await?;
+    let deleted_alpha: Option<Snapshot<TestSnapshot>> = fixture.store.read_snapshot(config.clone(), "alpha").await?;
     assert_eq!(deleted_alpha, None);
     let snapshot_map: std::collections::BTreeMap<String, Snapshot<TestSnapshot>> =
-        load_snapshot_map(fixture.store.snapshot_bucket(), &config).await?;
+        read_snapshot_map(fixture.store.snapshot_bucket(), &config).await?;
     assert!(!snapshot_map.contains_key("alpha"));
 
     fixture.delete().await
@@ -2532,7 +2526,7 @@ async fn jetstream_snapshot_store_rejects_invalid_snapshot_key_from_live_bucket_
         .await?;
 
     let result: Result<std::collections::BTreeMap<String, Snapshot<TestSnapshot>>, SnapshotStoreError> =
-        load_snapshot_map(fixture.store.snapshot_bucket(), &config).await;
+        read_snapshot_map(fixture.store.snapshot_bucket(), &config).await;
     assert!(matches!(
         result,
         Err(SnapshotStoreError::InvalidSnapshotKey { key }) if key == config.key_prefix()
@@ -2548,7 +2542,7 @@ async fn jetstream_snapshot_store_rejects_corrupt_snapshot_from_live_bucket_list
     let config = SnapshotStoreConfig::without_checkpoint("snapshots.corrupt.");
     fixture
         .store
-        .save_snapshot_entry(
+        .write_snapshot(
             config.clone(),
             "alpha",
             Snapshot::new(
@@ -2566,7 +2560,7 @@ async fn jetstream_snapshot_store_rejects_corrupt_snapshot_from_live_bucket_list
         .await?;
 
     let result: Result<std::collections::BTreeMap<String, Snapshot<TestSnapshot>>, SnapshotStoreError> =
-        load_snapshot_map(fixture.store.snapshot_bucket(), &config).await;
+        read_snapshot_map(fixture.store.snapshot_bucket(), &config).await;
     match result {
         Err(SnapshotStoreError::Kv { .. }) => {}
         other => return Err(std::io::Error::other(format!("expected corrupt snapshot error, got {other:?}")).into()),
@@ -2582,7 +2576,7 @@ async fn jetstream_snapshot_store_ignores_corrupt_entries_outside_snapshot_names
     let config = SnapshotStoreConfig::without_checkpoint("snapshots.clean.");
     fixture
         .store
-        .save_snapshot_entry(
+        .write_snapshot(
             config.clone(),
             "alpha",
             Snapshot::new(
@@ -2600,7 +2594,7 @@ async fn jetstream_snapshot_store_ignores_corrupt_entries_outside_snapshot_names
         .await?;
 
     let snapshot_map: std::collections::BTreeMap<String, Snapshot<TestSnapshot>> =
-        load_snapshot_map(fixture.store.snapshot_bucket(), &config).await?;
+        read_snapshot_map(fixture.store.snapshot_bucket(), &config).await?;
     assert_eq!(snapshot_map.len(), 1);
     assert_eq!(
         snapshot_map.get("alpha"),

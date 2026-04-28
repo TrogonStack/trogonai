@@ -40,7 +40,7 @@ pub struct AppendOutcome {
 pub trait StreamRead<StreamId: ?Sized>: Send + Sync {
     type Error;
 
-    fn read_stream_from(
+    fn read_stream(
         &self,
         stream_id: &StreamId,
         from_sequence: u64,
@@ -50,7 +50,7 @@ pub trait StreamRead<StreamId: ?Sized>: Send + Sync {
 pub trait StreamAppend<StreamId: ?Sized>: Send + Sync {
     type Error;
 
-    fn append_events(
+    fn append_stream(
         &self,
         stream_id: &StreamId,
         stream_state: StreamState,

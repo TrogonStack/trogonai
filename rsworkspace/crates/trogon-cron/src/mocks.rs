@@ -366,7 +366,7 @@ fn message_from_proto(message: v1::JobMessageView<'_>) -> MessageEnvelope {
 impl StreamRead<str> for MockCronStore {
     type Error = CronError;
 
-    async fn read_stream_from(&self, stream_id: &str, from_sequence: u64) -> Result<StreamReadResult, Self::Error> {
+    async fn read_stream(&self, stream_id: &str, from_sequence: u64) -> Result<StreamReadResult, Self::Error> {
         let current_version = self.stream_versions.lock().unwrap().get(stream_id).copied();
         let stream_events = self.events.lock().unwrap().get(stream_id).cloned().unwrap_or_default();
         if from_sequence == 0 {
@@ -404,7 +404,7 @@ impl StreamRead<str> for MockCronStore {
 impl StreamAppend<str> for MockCronStore {
     type Error = CronError;
 
-    async fn append_events(
+    async fn append_stream(
         &self,
         stream_id: &str,
         expected_state: StreamState,
@@ -516,7 +516,7 @@ where
 {
     type Error = CronError;
 
-    async fn load_snapshot(
+    async fn read_snapshot(
         &self,
         config: SnapshotStoreConfig,
         stream_id: &str,
@@ -531,7 +531,7 @@ where
 {
     type Error = CronError;
 
-    async fn save_snapshot(
+    async fn write_snapshot(
         &self,
         config: SnapshotStoreConfig,
         stream_id: &str,

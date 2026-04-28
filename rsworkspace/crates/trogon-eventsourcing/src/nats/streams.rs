@@ -184,7 +184,7 @@ fn build_publish_message(
     publish
 }
 
-pub async fn read_stream_from(
+pub async fn read_stream(
     stream: &jetstream::stream::Stream,
     from_sequence: u64,
 ) -> Result<Vec<RecordedEvent>, StreamStoreError> {
@@ -195,7 +195,7 @@ pub async fn read_stream_from(
     read_stream_range(stream, from_sequence, info.state.last_sequence).await
 }
 
-pub(crate) async fn read_subject_from(
+pub(crate) async fn read_subject_stream(
     stream: &jetstream::stream::Stream,
     subject: &str,
     from_sequence: u64,

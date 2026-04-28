@@ -6,9 +6,9 @@ pub use jetstream::{
     JetStreamStore, JetStreamStoreError, StreamSubjectResolver, SubjectState, subject_current_version,
 };
 pub use snapshot_store::{
-    SnapshotStoreError, checkpoint_key, list_snapshots, load_snapshot, load_snapshot_map, maybe_advance_checkpoint,
-    persist_snapshot_change, read_checkpoint, snapshot_key, write_checkpoint,
+    SnapshotStoreError, checkpoint_key, list_snapshots, maybe_advance_checkpoint, persist_snapshot_change,
+    read_checkpoint, read_snapshot, read_snapshot_map, snapshot_key, write_checkpoint, write_snapshot,
 };
 pub use streams::{
-    StreamStoreError, TROGON_EVENT_TYPE, append_stream, read_stream_from, read_stream_range, record_stream_message,
+    StreamStoreError, TROGON_EVENT_TYPE, append_stream, read_stream, read_stream_range, record_stream_message,
 };

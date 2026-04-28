@@ -11,8 +11,8 @@ use async_nats::jetstream::{
 use futures::{Stream, StreamExt, future};
 use trogon_eventsourcing::snapshot::{Snapshot, SnapshotChange};
 use trogon_eventsourcing::{
-    EventData, RecordedEvent, load_snapshot, load_snapshot_map, maybe_advance_checkpoint, persist_snapshot_change,
-    read_checkpoint, record_stream_message, write_checkpoint,
+    EventData, RecordedEvent, maybe_advance_checkpoint, persist_snapshot_change, read_checkpoint, read_snapshot,
+    read_snapshot_map, record_stream_message, write_checkpoint,
 };
 use trogon_nats::SubjectTokenViolation;
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream};
@@ -420,7 +420,7 @@ where
         return Ok(());
     }
 
-    let mut snapshots = load_snapshot_map(&bucket, &snapshot_store_config())
+    let mut snapshots = read_snapshot_map(&bucket, &snapshot_store_config())
         .await
         .map_err(CronError::from)?;
     let mut states = snapshot_state_map(&snapshots);
@@ -467,7 +467,7 @@ pub(crate) async fn project_appended_events(
 
     let mut snapshots = BTreeMap::new();
     let mut states = BTreeMap::new();
-    if let Some(snapshot) = load_snapshot(bucket, &snapshot_store_config(), job_id)
+    if let Some(snapshot) = read_snapshot(bucket, &snapshot_store_config(), job_id)
         .await
         .map_err(CronError::from)?
     {
