@@ -10,8 +10,8 @@ use chrono::{DateTime, Utc};
 use serde::{Serialize, de::DeserializeOwned};
 use trogon_eventsourcing::snapshot::{Snapshot, SnapshotStoreConfig};
 use trogon_eventsourcing::{
-    AppendOutcome, EventData, NonEmpty, SnapshotRead, SnapshotSink, SnapshotWrite, StreamAppend, StreamRead,
-    StreamReadResult, StreamState,
+    AppendOutcome, EventData, NonEmpty, SnapshotRead, SnapshotWrite, StreamAppend, StreamRead, StreamReadResult,
+    StreamState,
 };
 use trogon_nats::lease::{ReleaseLease, RenewLease, TryAcquireLease};
 
@@ -548,26 +548,9 @@ where
     }
 }
 
-impl<Payload> SnapshotSink<Payload, str> for MockCronStore
-where
-    Payload: Serialize + DeserializeOwned + Send,
-{
-    fn write_snapshot(&self, config: SnapshotStoreConfig, stream_id: &str, snapshot: Snapshot<Payload>) {
-        let Ok(snapshot) = serde_json::to_string(&snapshot) else {
-            return;
-        };
-        self.command_snapshots
-            .lock()
-            .unwrap()
-            .entry(config.key_prefix().to_string())
-            .or_default()
-            .insert(stream_id.to_string(), snapshot);
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use trogon_eventsourcing::{CommandExecution, CommandFailure};
+    use trogon_eventsourcing::{CommandExecution, CommandFailure, run_task_immediately};
 
     use super::*;
     use crate::commands::domain as command_domain;
@@ -670,6 +653,7 @@ mod tests {
 
         CommandExecution::new(&store, &AddJobCommand::new(command_base_job("alpha")))
             .with_snapshot(&store)
+            .with_task_runtime(run_task_immediately)
             .execute()
             .await
             .unwrap();
@@ -682,6 +666,7 @@ mod tests {
 
         CommandExecution::new(&store, &PauseJobCommand::new(command_job_id("alpha")))
             .with_snapshot(&store)
+            .with_task_runtime(run_task_immediately)
             .execute()
             .await
             .unwrap();
@@ -708,6 +693,7 @@ mod tests {
 
         CommandExecution::new(&store, &RemoveJobCommand::new(command_job_id("alpha")))
             .with_snapshot(&store)
+            .with_task_runtime(run_task_immediately)
             .execute()
             .await
             .unwrap();
@@ -721,6 +707,7 @@ mod tests {
 
         let deleted_error = CommandExecution::new(&store, &AddJobCommand::new(command_base_job("alpha")))
             .with_snapshot(&store)
+            .with_task_runtime(run_task_immediately)
             .execute()
             .await
             .unwrap_err();
@@ -748,11 +735,13 @@ mod tests {
 
         CommandExecution::new(&store, &AddJobCommand::new(command_base_job("alpha")))
             .with_snapshot(&store)
+            .with_task_runtime(run_task_immediately)
             .execute()
             .await
             .unwrap();
         let same_state_error = CommandExecution::new(&store, &ResumeJobCommand::new(command_job_id("alpha")))
             .with_snapshot(&store)
+            .with_task_runtime(run_task_immediately)
             .execute()
             .await
             .unwrap_err();
@@ -763,6 +752,7 @@ mod tests {
 
         let missing_error = CommandExecution::new(&store, &PauseJobCommand::new(command_job_id("missing")))
             .with_snapshot(&store)
+            .with_task_runtime(run_task_immediately)
             .execute()
             .await
             .unwrap_err();

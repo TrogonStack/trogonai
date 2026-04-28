@@ -15,8 +15,9 @@ pub use decision::{Act, Decide, Decision, NonEmpty, decide};
 pub use event::{CodecError, EventData, RecordedEvent};
 pub use event_id::EventId;
 pub use execution::{
-    CommandExecution, CommandFailure, CommandResult, CommandSnapshotPolicy, ExecutionResult, FrequencySnapshot,
-    NoSnapshot, SnapshotDecision, SnapshotDecisionContext, SnapshotPolicy, Snapshots, WithoutSnapshots,
+    BoxTask, CommandExecution, CommandFailure, CommandResult, CommandSnapshotPolicy, ExecutionResult,
+    FrequencySnapshot, NoSnapshot, SnapshotDecision, SnapshotDecisionContext, SnapshotPolicy, Snapshots,
+    WithoutSnapshotTaskScheduler, WithoutSnapshots, run_task_immediately, spawn_on_tokio,
 };
 pub use nats::snapshot_store::{
     SnapshotStoreError, checkpoint_key, list_snapshots, maybe_advance_checkpoint, persist_snapshot_change,
@@ -25,8 +26,6 @@ pub use nats::snapshot_store::{
 pub use nats::streams::{
     StreamStoreError, TROGON_EVENT_TYPE, append_stream, read_stream, read_stream_range, record_stream_message,
 };
-pub use snapshot::{
-    Snapshot, SnapshotChange, SnapshotRead, SnapshotSchema, SnapshotSink, SnapshotStoreConfig, SnapshotWrite,
-};
+pub use snapshot::{Snapshot, SnapshotChange, SnapshotRead, SnapshotSchema, SnapshotStoreConfig, SnapshotWrite};
 pub use stream::{AppendOutcome, StreamAppend, StreamRead, StreamReadResult, StreamState};
 pub use testing::{Decider, TestCase, ThenError, ThenEvents, ThenExpectation, Timeline, decider};

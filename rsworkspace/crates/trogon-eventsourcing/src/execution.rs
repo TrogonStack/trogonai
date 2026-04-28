@@ -1,15 +1,32 @@
-use crate::snapshot::{Snapshot, SnapshotRead, SnapshotSchema, SnapshotSink, SnapshotStoreConfig};
+use crate::snapshot::{Snapshot, SnapshotRead, SnapshotSchema, SnapshotStoreConfig, SnapshotWrite};
 use crate::stream::{AppendOutcome, StreamAppend, StreamRead, StreamState, resolve_stream_state};
 use crate::{
     CanonicalEventCodec, Decide, Decision, EventCodec, EventData, EventEnvelopeCodec, NonEmpty, RecordedEvent,
 };
 
-use std::num::NonZeroU64;
+use std::{borrow::Borrow, future::Future, num::NonZeroU64, pin::Pin};
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
+pub type BoxTask = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
 type ExecutionFailure<C, RuntimeError> =
     CommandFailure<<C as Decide>::DecideError, <C as Decide>::EvolveError, RuntimeError>;
 type ExecutionStep<C, RuntimeError, T> = Result<T, ExecutionFailure<C, RuntimeError>>;
+
+pub fn spawn_on_tokio(task: BoxTask) {
+    let Ok(handle) = tokio::runtime::Handle::try_current() else {
+        tracing::warn!("failed to schedule background task without an active Tokio runtime");
+        return;
+    };
+
+    drop(handle.spawn(task));
+}
+
+pub fn run_task_immediately(task: BoxTask) {
+    let handle = std::thread::spawn(move || futures::executor::block_on(task));
+    if handle.join().is_err() {
+        tracing::warn!("background task panicked");
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SnapshotDecision {
@@ -109,18 +126,37 @@ pub enum CommandFailure<DecideError, EvolveError, RuntimeError> {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct WithoutSnapshots;
 
-pub struct Snapshots<'a, S, P> {
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct WithoutSnapshotTaskScheduler;
+
+pub struct Snapshots<'a, S, P, Spawn = WithoutSnapshotTaskScheduler> {
     snapshot_store: &'a S,
     snapshot_config: SnapshotStoreConfig,
     policy: P,
+    schedule_snapshot_task: Spawn,
 }
 
-impl<'a, S, P> Snapshots<'a, S, P> {
+impl<'a, S, P> Snapshots<'a, S, P, WithoutSnapshotTaskScheduler> {
     pub fn new(snapshot_store: &'a S, snapshot_config: SnapshotStoreConfig, policy: P) -> Self {
         Self {
             snapshot_store,
             snapshot_config,
             policy,
+            schedule_snapshot_task: WithoutSnapshotTaskScheduler,
+        }
+    }
+}
+
+impl<'a, S, P, Spawn> Snapshots<'a, S, P, Spawn> {
+    fn schedule_snapshot_tasks_with<NextSpawn>(
+        self,
+        schedule_snapshot_task: NextSpawn,
+    ) -> Snapshots<'a, S, P, NextSpawn> {
+        Snapshots {
+            snapshot_store: self.snapshot_store,
+            snapshot_config: self.snapshot_config,
+            policy: self.policy,
+            schedule_snapshot_task,
         }
     }
 }
@@ -131,18 +167,20 @@ where
 {
     type Store;
     type Policy;
+    type SnapshotTaskScheduler;
 
-    fn into_snapshots(self) -> Snapshots<'a, Self::Store, Self::Policy>;
+    fn into_snapshots(self) -> Snapshots<'a, Self::Store, Self::Policy, Self::SnapshotTaskScheduler>;
 }
 
-impl<'a, C, S, P> IntoSnapshots<'a, C> for Snapshots<'a, S, P>
+impl<'a, C, S, P, Spawn> IntoSnapshots<'a, C> for Snapshots<'a, S, P, Spawn>
 where
     C: Decide,
 {
     type Store = S;
     type Policy = P;
+    type SnapshotTaskScheduler = Spawn;
 
-    fn into_snapshots(self) -> Snapshots<'a, Self::Store, Self::Policy> {
+    fn into_snapshots(self) -> Snapshots<'a, Self::Store, Self::Policy, Self::SnapshotTaskScheduler> {
         self
     }
 }
@@ -154,8 +192,9 @@ where
 {
     type Store = S;
     type Policy = C::SnapshotPolicy;
+    type SnapshotTaskScheduler = WithoutSnapshotTaskScheduler;
 
-    fn into_snapshots(self) -> Snapshots<'a, Self::Store, Self::Policy> {
+    fn into_snapshots(self) -> Snapshots<'a, Self::Store, Self::Policy, Self::SnapshotTaskScheduler> {
         C::snapshots(self)
     }
 }
@@ -180,7 +219,21 @@ where
         }
     }
 
-    pub fn with_snapshot<I>(self, snapshots: I) -> CommandExecution<'a, E, C, Snapshots<'a, I::Store, I::Policy>>
+    #[allow(clippy::type_complexity)]
+    pub fn with_snapshot<I>(
+        self,
+        snapshots: I,
+    ) -> CommandExecution<
+        'a,
+        E,
+        C,
+        Snapshots<
+            'a,
+            <I as IntoSnapshots<'a, C>>::Store,
+            <I as IntoSnapshots<'a, C>>::Policy,
+            <I as IntoSnapshots<'a, C>>::SnapshotTaskScheduler,
+        >,
+    >
     where
         I: IntoSnapshots<'a, C>,
     {
@@ -227,10 +280,22 @@ impl<'a, E, C, S, EC> CommandExecutionWithCodec<'a, E, C, S, EC>
 where
     C: Decide,
 {
+    #[allow(clippy::type_complexity)]
     pub fn with_snapshot<I>(
         self,
         snapshots: I,
-    ) -> CommandExecutionWithCodec<'a, E, C, Snapshots<'a, I::Store, I::Policy>, EC>
+    ) -> CommandExecutionWithCodec<
+        'a,
+        E,
+        C,
+        Snapshots<
+            'a,
+            <I as IntoSnapshots<'a, C>>::Store,
+            <I as IntoSnapshots<'a, C>>::Policy,
+            <I as IntoSnapshots<'a, C>>::SnapshotTaskScheduler,
+        >,
+        EC,
+    >
     where
         I: IntoSnapshots<'a, C>,
     {
@@ -279,6 +344,35 @@ impl<'a, E, C, S, EC> CommandExecutionWithCodec<'a, E, C, S, EC> {
             .map_err(|source| CommandFailure::Append(source))?;
 
         Ok((append_outcome, events, state))
+    }
+}
+
+impl<'a, E, S, C, P, Spawn> CommandExecution<'a, E, C, Snapshots<'a, S, P, Spawn>> {
+    pub fn with_task_runtime<NextSpawn>(
+        self,
+        schedule_snapshot_task: NextSpawn,
+    ) -> CommandExecution<'a, E, C, Snapshots<'a, S, P, NextSpawn>> {
+        CommandExecution {
+            event_store: self.event_store,
+            command: self.command,
+            write_precondition: self.write_precondition,
+            snapshots: self.snapshots.schedule_snapshot_tasks_with(schedule_snapshot_task),
+        }
+    }
+}
+
+impl<'a, E, S, C, P, Spawn, EC> CommandExecutionWithCodec<'a, E, C, Snapshots<'a, S, P, Spawn>, EC> {
+    pub fn with_task_runtime<NextSpawn>(
+        self,
+        schedule_snapshot_task: NextSpawn,
+    ) -> CommandExecutionWithCodec<'a, E, C, Snapshots<'a, S, P, NextSpawn>, EC> {
+        CommandExecutionWithCodec {
+            event_store: self.event_store,
+            command: self.command,
+            write_precondition: self.write_precondition,
+            snapshots: self.snapshots.schedule_snapshot_tasks_with(schedule_snapshot_task),
+            event_codec: self.event_codec,
+        }
     }
 }
 
@@ -333,15 +427,21 @@ where
     }
 }
 
-impl<E, S, C, P, SErr> CommandExecution<'_, E, C, Snapshots<'_, S, P>>
+impl<E, S, C, P, Spawn, SErr> CommandExecution<'_, E, C, Snapshots<'_, S, P, Spawn>>
 where
     C: Decide,
-    C::State: Clone,
+    C::State: Clone + Send + 'static,
     C::Event: Clone + CanonicalEventCodec,
-    C::StreamId: AsRef<str>,
+    C::StreamId: AsRef<str> + ToOwned,
+    <C::StreamId as ToOwned>::Owned: Borrow<C::StreamId> + Send + 'static,
     E: StreamRead<C::StreamId, Error = SErr> + StreamAppend<C::StreamId, Error = SErr>,
-    S: SnapshotRead<C::State, C::StreamId, Error = SErr> + SnapshotSink<C::State, C::StreamId>,
+    S: Clone
+        + SnapshotRead<C::State, C::StreamId, Error = SErr>
+        + SnapshotWrite<C::State, C::StreamId, Error = SErr>
+        + 'static,
     P: SnapshotPolicy<C::State, C::Event>,
+    Spawn: Fn(BoxTask) + Send + Sync,
+    SErr: std::fmt::Display + Send + 'static,
     <C::Event as CanonicalEventCodec>::Codec: EventEnvelopeCodec<C::Event>,
     <<C::Event as CanonicalEventCodec>::Codec as EventCodec<C::Event>>::Error:
         std::error::Error + Send + Sync + 'static,
@@ -355,15 +455,21 @@ where
     }
 }
 
-impl<E, S, C, P, SErr, EC> CommandExecutionWithCodec<'_, E, C, Snapshots<'_, S, P>, EC>
+impl<E, S, C, P, Spawn, SErr, EC> CommandExecutionWithCodec<'_, E, C, Snapshots<'_, S, P, Spawn>, EC>
 where
     C: Decide,
-    C::State: Clone,
+    C::State: Clone + Send + 'static,
     C::Event: Clone,
-    C::StreamId: AsRef<str>,
+    C::StreamId: AsRef<str> + ToOwned,
+    <C::StreamId as ToOwned>::Owned: Borrow<C::StreamId> + Send + 'static,
     E: StreamRead<C::StreamId, Error = SErr> + StreamAppend<C::StreamId, Error = SErr>,
-    S: SnapshotRead<C::State, C::StreamId, Error = SErr> + SnapshotSink<C::State, C::StreamId>,
+    S: Clone
+        + SnapshotRead<C::State, C::StreamId, Error = SErr>
+        + SnapshotWrite<C::State, C::StreamId, Error = SErr>
+        + 'static,
     P: SnapshotPolicy<C::State, C::Event>,
+    Spawn: Fn(BoxTask) + Send + Sync,
+    SErr: std::fmt::Display + Send + 'static,
     EC: EventEnvelopeCodec<C::Event>,
     EC::Error: std::error::Error + Send + Sync + 'static,
 {
@@ -413,7 +519,8 @@ where
         });
 
         if snapshot_decision == SnapshotDecision::Take {
-            SnapshotSink::write_snapshot(
+            schedule_snapshot_write(
+                &self.snapshots.schedule_snapshot_task,
                 self.snapshots.snapshot_store,
                 self.snapshots.snapshot_config.clone(),
                 stream_id,
@@ -434,6 +541,34 @@ where
     E: std::error::Error + Send + Sync + 'static,
 {
     Box::new(error)
+}
+
+fn schedule_snapshot_write<S, State, StreamId, Spawn>(
+    schedule_snapshot_task: &Spawn,
+    snapshot_store: &S,
+    snapshot_config: SnapshotStoreConfig,
+    stream_id: &StreamId,
+    snapshot: Snapshot<State>,
+) where
+    S: SnapshotWrite<State, StreamId> + Clone + Send + Sync + 'static,
+    S::Error: std::fmt::Display + Send + 'static,
+    State: Send + 'static,
+    StreamId: AsRef<str> + ToOwned + ?Sized,
+    StreamId::Owned: Borrow<StreamId> + Send + 'static,
+    Spawn: Fn(BoxTask) + Send + Sync,
+{
+    let snapshot_store = snapshot_store.clone();
+    let stream_id_for_log = stream_id.as_ref().to_string();
+    let stream_id = stream_id.to_owned();
+
+    schedule_snapshot_task(Box::pin(async move {
+        if let Err(source) = snapshot_store
+            .write_snapshot(snapshot_config, stream_id.borrow(), snapshot)
+            .await
+        {
+            tracing::warn!(stream_id = %stream_id_for_log, error = %source, "failed to write snapshot");
+        }
+    }));
 }
 
 fn replay_recorded_events<C, EC, SErr>(
@@ -552,6 +687,7 @@ mod tests {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     enum TestInfraError {
         ReadSnapshot,
+        WriteSnapshot,
         ReadStream,
         Append,
         Json,
@@ -755,6 +891,11 @@ mod tests {
         TestState::snapshot_store_config()
     }
 
+    fn test_snapshots<P>(runtime: &FakeRuntime, policy: P) -> Snapshots<'_, FakeRuntime, P, fn(BoxTask)> {
+        Snapshots::new(runtime, test_snapshot_config(), policy)
+            .schedule_snapshot_tasks_with(run_task_immediately as fn(BoxTask))
+    }
+
     impl StreamRead<str> for FakeRuntime {
         type Error = TestInfraError;
 
@@ -811,11 +952,20 @@ mod tests {
         }
     }
 
-    impl SnapshotSink<TestState, str> for FakeRuntime {
-        fn write_snapshot(&self, _config: SnapshotStoreConfig, _stream_id: &str, snapshot: Snapshot<TestState>) {
-            if !self.fail_write_snapshot {
-                self.written_snapshots.lock().unwrap().push(snapshot);
+    impl SnapshotWrite<TestState, str> for FakeRuntime {
+        type Error = TestInfraError;
+
+        async fn write_snapshot(
+            &self,
+            _config: SnapshotStoreConfig,
+            _stream_id: &str,
+            snapshot: Snapshot<TestState>,
+        ) -> Result<(), Self::Error> {
+            if self.fail_write_snapshot {
+                return Err(TestInfraError::WriteSnapshot);
             }
+            self.written_snapshots.lock().unwrap().push(snapshot);
+            Ok(())
         }
     }
 
@@ -886,7 +1036,7 @@ mod tests {
 
         let result = block_on(
             CommandExecution::new(&runtime, &command)
-                .with_snapshot(Snapshots::new(&runtime, test_snapshot_config(), NoSnapshot))
+                .with_snapshot(test_snapshots(&runtime, NoSnapshot))
                 .execute_result(),
         )
         .unwrap();
@@ -910,7 +1060,7 @@ mod tests {
 
         let error = block_on(
             CommandExecution::new(&runtime, &command)
-                .with_snapshot(Snapshots::new(&runtime, test_snapshot_config(), NoSnapshot))
+                .with_snapshot(test_snapshots(&runtime, NoSnapshot))
                 .execute_result(),
         )
         .unwrap_err();
@@ -935,7 +1085,7 @@ mod tests {
 
         let error = block_on(
             CommandExecution::new(&runtime, &command)
-                .with_snapshot(Snapshots::new(&runtime, test_snapshot_config(), NoSnapshot))
+                .with_snapshot(test_snapshots(&runtime, NoSnapshot))
                 .execute_result(),
         )
         .unwrap_err();
@@ -994,7 +1144,7 @@ mod tests {
 
         let error = block_on(
             CommandExecution::new(&runtime, &command)
-                .with_snapshot(Snapshots::new(&runtime, test_snapshot_config(), NoSnapshot))
+                .with_snapshot(test_snapshots(&runtime, NoSnapshot))
                 .execute_result(),
         )
         .unwrap_err();
@@ -1017,7 +1167,7 @@ mod tests {
 
         let result = block_on(
             CommandExecution::new(&runtime, &command)
-                .with_snapshot(Snapshots::new(&runtime, test_snapshot_config(), NoSnapshot))
+                .with_snapshot(test_snapshots(&runtime, NoSnapshot))
                 .execute_result(),
         )
         .unwrap();
@@ -1144,11 +1294,7 @@ mod tests {
 
         let result = block_on(
             CommandExecution::new(&runtime, &command)
-                .with_snapshot(Snapshots::new(
-                    &runtime,
-                    test_snapshot_config(),
-                    FrequencySnapshot::new(NonZeroU64::MIN),
-                ))
+                .with_snapshot(test_snapshots(&runtime, FrequencySnapshot::new(NonZeroU64::MIN)))
                 .execute_result(),
         )
         .unwrap();
@@ -1171,11 +1317,7 @@ mod tests {
 
         let _ = block_on(
             CommandExecution::new(&runtime, &command)
-                .with_snapshot(Snapshots::new(
-                    &runtime,
-                    test_snapshot_config(),
-                    FrequencySnapshot::new(EVERY_THREE_REVISIONS),
-                ))
+                .with_snapshot(test_snapshots(&runtime, FrequencySnapshot::new(EVERY_THREE_REVISIONS)))
                 .execute_result(),
         )
         .unwrap();
@@ -1197,11 +1339,7 @@ mod tests {
 
         let _ = block_on(
             CommandExecution::new(&runtime, &command)
-                .with_snapshot(Snapshots::new(
-                    &runtime,
-                    test_snapshot_config(),
-                    FrequencySnapshot::new(EVERY_THREE_REVISIONS),
-                ))
+                .with_snapshot(test_snapshots(&runtime, FrequencySnapshot::new(EVERY_THREE_REVISIONS)))
                 .execute_result(),
         )
         .unwrap();
@@ -1219,7 +1357,7 @@ mod tests {
 
         let _ = block_on(
             CommandExecution::new(&runtime, &command)
-                .with_snapshot(Snapshots::new(&runtime, test_snapshot_config(), NoSnapshot))
+                .with_snapshot(test_snapshots(&runtime, NoSnapshot))
                 .execute_result(),
         )
         .unwrap();
@@ -1238,11 +1376,7 @@ mod tests {
 
         let result = block_on(
             CommandExecution::new(&runtime, &command)
-                .with_snapshot(Snapshots::new(
-                    &runtime,
-                    test_snapshot_config(),
-                    FrequencySnapshot::new(NonZeroU64::MIN),
-                ))
+                .with_snapshot(test_snapshots(&runtime, FrequencySnapshot::new(NonZeroU64::MIN)))
                 .execute_result(),
         )
         .unwrap();

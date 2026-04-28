@@ -79,7 +79,7 @@ impl CommandSnapshotPolicy for AddJobCommand {
 mod tests {
     use trogon_eventsourcing::snapshot::SnapshotSchema;
     use trogon_eventsourcing::{
-        CommandExecution, CommandFailure, NonEmpty,
+        CommandExecution, CommandFailure, NonEmpty, run_task_immediately,
         testing::{TestCase, decider},
     };
 
@@ -173,6 +173,7 @@ mod tests {
 
         let outcome = CommandExecution::new(&store, &AddJobCommand::new(job("backup")))
             .with_snapshot(&store)
+            .with_task_runtime(run_task_immediately)
             .execute()
             .await
             .unwrap();
@@ -201,12 +202,14 @@ mod tests {
 
         CommandExecution::new(&store, &AddJobCommand::new(job("backup")))
             .with_snapshot(&store)
+            .with_task_runtime(run_task_immediately)
             .execute()
             .await
             .unwrap();
 
         let error = CommandExecution::new(&store, &AddJobCommand::new(job("backup")))
             .with_snapshot(&store)
+            .with_task_runtime(run_task_immediately)
             .execute()
             .await
             .unwrap_err();
@@ -224,17 +227,20 @@ mod tests {
 
         CommandExecution::new(&store, &AddJobCommand::new(job("backup")))
             .with_snapshot(&store)
+            .with_task_runtime(run_task_immediately)
             .execute()
             .await
             .unwrap();
         CommandExecution::new(&store, &crate::RemoveJobCommand::new(JobId::parse("backup").unwrap()))
             .with_snapshot(&store)
+            .with_task_runtime(run_task_immediately)
             .execute()
             .await
             .unwrap();
 
         let error = CommandExecution::new(&store, &AddJobCommand::new(job("backup")))
             .with_snapshot(&store)
+            .with_task_runtime(run_task_immediately)
             .execute()
             .await
             .unwrap_err();
