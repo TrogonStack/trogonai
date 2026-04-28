@@ -1230,4 +1230,258 @@ mod tests {
             .expect("server task did not shut down");
         conn_thread.join().unwrap();
     }
+
+    // ── E2E tests: real NATS + TrogonAgent ────────────────────────────────────
+    mod http_runner_e2e {
+        use crate::constants::{ACP_CONNECTION_ID_HEADER, ACP_ENDPOINT, ACP_PROTOCOL_VERSION_HEADER, THREAD_NAME};
+        use crate::transport::{AppState, ManagerRequest};
+        use acp_nats::{AcpPrefix, Config, NatsAuth, NatsConfig};
+        use acp_nats_agent::AgentSideNatsConnection;
+        use async_nats::jetstream;
+        use serde_json::Value;
+        use std::net::{IpAddr, Ipv4Addr};
+        use std::sync::Arc;
+        use std::time::Duration;
+        use testcontainers_modules::nats::Nats;
+        use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
+        use tokio::net::TcpListener;
+        use tokio::sync::{RwLock, mpsc, watch};
+        use trogon_acp_runner::{NatsSessionNotifier, NatsSessionStore, TrogonAgent};
+        use trogon_agent_core::{agent_loop::AgentLoop, tools::ToolContext};
+        use trogon_nats::jetstream::NatsJetStreamClient;
+
+        async fn start_nats() -> (ContainerAsync<Nats>, async_nats::Client, u16) {
+            let container = Nats::default()
+                .with_cmd(["--jetstream"])
+                .start()
+                .await
+                .expect("Failed to start NATS container — is Docker running?");
+            let port = container.get_host_port_ipv4(4222).await.unwrap();
+            let nats = async_nats::connect(format!("127.0.0.1:{port}"))
+                .await
+                .expect("connect to NATS");
+            (container, nats, port)
+        }
+
+        fn make_agent_loop() -> AgentLoop {
+            let http = reqwest::Client::new();
+            AgentLoop {
+                http_client: http.clone(),
+                proxy_url: String::new(),
+                anthropic_token: String::new(),
+                anthropic_base_url: None,
+                anthropic_extra_headers: vec![],
+                model: "claude-opus-4-6".to_string(),
+                max_iterations: 10,
+                thinking_budget: None,
+                tool_context: Arc::new(ToolContext { http_client: http, proxy_url: String::new() }),
+                memory_owner: None,
+                memory_repo: None,
+                memory_path: None,
+                mcp_tool_defs: vec![],
+                mcp_dispatch: vec![],
+                permission_checker: None,
+            }
+        }
+
+        async fn start_agent(nats: async_nats::Client) {
+            let gateway_config = Arc::new(RwLock::new(None));
+            std::thread::spawn(move || {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap();
+                let local = tokio::task::LocalSet::new();
+                let store = rt.block_on(async {
+                    let js = jetstream::new(nats.clone());
+                    NatsSessionStore::open(&js).await.unwrap()
+                });
+                let ta = TrogonAgent::new(
+                    NatsSessionNotifier::new(nats.clone()),
+                    store,
+                    make_agent_loop(),
+                    "acp",
+                    "claude-opus-4-6",
+                    None,
+                    gateway_config,
+                );
+                let prefix = AcpPrefix::new("acp").unwrap();
+                let (_, io_task) = AgentSideNatsConnection::new(ta, nats, prefix, |fut| {
+                    tokio::task::spawn_local(fut);
+                });
+                rt.block_on(local.run_until(async move { io_task.await.ok(); }));
+            });
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+
+        async fn start_server(
+            nats_port: u16,
+        ) -> (String, watch::Sender<bool>, std::thread::JoinHandle<()>) {
+            let nats = async_nats::connect(format!("127.0.0.1:{nats_port}"))
+                .await
+                .expect("connect for HTTP bridge");
+            let js = NatsJetStreamClient::new(jetstream::new(nats.clone()));
+            let config = Config::new(
+                AcpPrefix::new("acp").unwrap(),
+                NatsConfig {
+                    servers: vec![format!("127.0.0.1:{nats_port}")],
+                    auth: NatsAuth::None,
+                },
+            )
+            .with_operation_timeout(Duration::from_secs(5));
+
+            let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
+            let (manager_tx, manager_rx) = mpsc::unbounded_channel::<ManagerRequest>();
+
+            let conn_thread = std::thread::Builder::new()
+                .name(THREAD_NAME.into())
+                .spawn(move || crate::run_connection_thread(manager_rx, nats, js, config))
+                .expect("spawn connection thread");
+
+            let state = AppState {
+                bind_host: IpAddr::V4(Ipv4Addr::LOCALHOST),
+                manager_tx,
+                shutdown_tx: shutdown_tx.clone(),
+            };
+
+            let router = axum::Router::new()
+                .route(
+                    ACP_ENDPOINT,
+                    axum::routing::get(crate::transport::get)
+                        .post(crate::transport::post)
+                        .delete(crate::transport::delete),
+                )
+                .with_state(state);
+
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            tokio::spawn(async move {
+                axum::serve(listener, router)
+                    .with_graceful_shutdown(async move {
+                        let _ = shutdown_rx.changed().await;
+                    })
+                    .await
+                    .unwrap();
+            });
+
+            (format!("http://{addr}"), shutdown_tx, conn_thread)
+        }
+
+        /// E2E: HTTP bridge → NATS → TrogonAgent → back.
+        /// TrogonAgent handles `initialize` and returns real capabilities.
+        #[tokio::test]
+        async fn e2e_http_initialize_with_real_agent() {
+            let (_container, nats, nats_port) = start_nats().await;
+            start_agent(nats).await;
+            let (base_url, shutdown_tx, conn_thread) = start_server(nats_port).await;
+
+            let client = reqwest::Client::new();
+            let url = format!("{base_url}{ACP_ENDPOINT}");
+
+            let response = tokio::time::timeout(
+                Duration::from_secs(10),
+                client
+                    .post(&url)
+                    .header("Content-Type", "application/json")
+                    .header("Accept", "application/json, text/event-stream")
+                    .body(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#)
+                    .send(),
+            )
+            .await
+            .expect("timed out waiting for initialize response")
+            .unwrap();
+
+            assert_eq!(response.status(), 200u16);
+            let body: Value = response.json().await.unwrap();
+            assert_eq!(body["id"], 1);
+            assert!(
+                body["result"]["protocolVersion"].is_number(),
+                "must have protocolVersion: {body}"
+            );
+
+            shutdown_tx.send(true).unwrap();
+            let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;
+        }
+
+        /// E2E: HTTP bridge → NATS → TrogonAgent creates session → SSE delivers session ID.
+        #[tokio::test]
+        async fn e2e_http_session_new_with_real_agent() {
+            let (_container, nats, nats_port) = start_nats().await;
+            start_agent(nats).await;
+            let (base_url, shutdown_tx, conn_thread) = start_server(nats_port).await;
+
+            let client = reqwest::Client::builder().build().unwrap();
+            let url = format!("{base_url}{ACP_ENDPOINT}");
+
+            // Initialize to obtain connection_id.
+            let init_resp = tokio::time::timeout(
+                Duration::from_secs(10),
+                client
+                    .post(&url)
+                    .header("Content-Type", "application/json")
+                    .header("Accept", "application/json, text/event-stream")
+                    .body(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#)
+                    .send(),
+            )
+            .await
+            .expect("timed out on initialize")
+            .unwrap();
+            assert_eq!(init_resp.status(), 200u16);
+            let connection_id = init_resp
+                .headers()
+                .get(ACP_CONNECTION_ID_HEADER)
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .to_owned();
+            let init_body: Value = init_resp.json().await.unwrap();
+            // Use the negotiated protocol version for all subsequent requests.
+            let proto_ver = init_body["result"]["protocolVersion"]
+                .as_u64()
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "0".to_string());
+
+            // Open SSE stream.
+            let get = client
+                .get(&url)
+                .header("Accept", "text/event-stream")
+                .header(ACP_CONNECTION_ID_HEADER, &connection_id)
+                .header(ACP_PROTOCOL_VERSION_HEADER, &proto_ver)
+                .send()
+                .await
+                .unwrap();
+            let get_status = get.status();
+            if get_status.as_u16() != 200 {
+                let body = get.text().await.unwrap_or_default();
+                panic!("GET returned {} with body: {:?}", get_status, body);
+            }
+            let mut stream = get.bytes_stream();
+
+            // session/new — reply arrives asynchronously on the SSE stream.
+            let new_resp = client
+                .post(&url)
+                .header("Content-Type", "application/json")
+                .header("Accept", "application/json, text/event-stream")
+                .header(ACP_CONNECTION_ID_HEADER, &connection_id)
+                .header(ACP_PROTOCOL_VERSION_HEADER, &proto_ver)
+                .body(r#"{"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":"/tmp","mcpServers":[]}}"#)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(new_resp.status(), 202u16);
+
+            let event = tokio::time::timeout(
+                Duration::from_secs(10),
+                super::next_json_sse_event(&mut stream),
+            )
+            .await
+            .expect("timed out waiting for session/new SSE event");
+            assert_eq!(event["id"], 2);
+            let session_id = event["result"]["sessionId"].as_str().unwrap_or("");
+            assert!(!session_id.is_empty(), "must have non-empty sessionId: {event}");
+
+            shutdown_tx.send(true).unwrap();
+            let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;
+        }
+    }
 }
