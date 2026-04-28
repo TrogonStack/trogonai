@@ -225,6 +225,7 @@ async fn start_with_options(
         agent_id,
         agent_loader,
         skill_loader,
+        compactor_nats: None,
     };
     let app = router(state);
 
