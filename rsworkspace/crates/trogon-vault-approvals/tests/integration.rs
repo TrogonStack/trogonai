@@ -15,13 +15,14 @@ use testcontainers_modules::{
     nats::Nats,
     testcontainers::{ImageExt, runners::AsyncRunner},
 };
-use trogon_vault::{ApiKeyToken, MemoryVault, VaultStore};
+use trogon_vault::{ApiKeyToken, DualWriteVault, InfisicalAuth, InfisicalConfig, InfisicalVaultStore, MemoryVault, VaultStore};
 use trogon_vault_approvals::{
-    ApprovalService, NoopNotifier,
+    ApprovalService, JetStreamStatePublisher, NoopNotifier,
     ensure_proposals_stream,
     subjects,
     state_update_subject,
 };
+use trogon_vault_nats::{CryptoCtx, NatsKvVault, ensure_vault_bucket};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -48,17 +49,17 @@ async fn spawn_service(
 ) -> Arc<MemoryVault> {
     ensure_proposals_stream(&js).await.expect("proposals stream");
 
-    let vault    = Arc::new(MemoryVault::new());
-    let notifier = Arc::new(NoopNotifier);
-    let svc      = ApprovalService::new(
+    let vault     = Arc::new(MemoryVault::new());
+    let notifier  = Arc::new(NoopNotifier);
+    let publisher = Arc::new(JetStreamStatePublisher::new(js.clone()));
+    let svc       = ApprovalService::new(
         Arc::clone(&vault),
         notifier,
-        js,
-        nats,
+        publisher,
         vault_name,
     );
 
-    tokio::spawn(async move { svc.run().await.ok(); });
+    tokio::spawn(async move { svc.run(js, nats).await.ok(); });
     tokio::time::sleep(Duration::from_millis(100)).await;
     vault
 }
@@ -427,6 +428,339 @@ async fn reject_publishes_state_update_to_stream() {
     assert_eq!(v["state"], "rejected");
     assert_eq!(v["by"], "luigi");
     assert_eq!(v["reason"], "policy violation");
+}
+
+// ── NatsKvVault backend ───────────────────────────────────────────────────────
+
+fn crypto() -> Arc<CryptoCtx> {
+    Arc::new(CryptoCtx::derive(b"approval-test-pw", b"approval-salt-16").unwrap())
+}
+
+async fn make_nats_kv_vault(js: &jetstream::Context, name: &str) -> NatsKvVault {
+    let kv = ensure_vault_bucket(js, name, 1).await.expect("bucket");
+    NatsKvVault::new(kv, crypto(), Duration::from_secs(30))
+        .await
+        .expect("vault")
+}
+
+/// Approving a proposal causes the plaintext to be written to a NatsKvVault —
+/// verifying that the approval workflow integrates with the encrypted KV backend.
+#[tokio::test]
+async fn approve_proposal_writes_to_nats_kv_vault() {
+    let (js, nats, _c) = start_nats().await;
+
+    ensure_proposals_stream(&js).await.expect("proposals stream");
+
+    let vault     = Arc::new(make_nats_kv_vault(&js, "approvals-kv-test").await);
+    let notifier  = Arc::new(NoopNotifier);
+    let publisher = Arc::new(JetStreamStatePublisher::new(js.clone()));
+    let svc = ApprovalService::new(Arc::clone(&vault), notifier, publisher, "default");
+    let (js_svc, nats_svc) = (js.clone(), nats.clone());
+    tokio::spawn(async move { svc.run(js_svc, nats_svc).await.ok(); });
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    js.publish(
+        subjects::create("default"),
+        serde_json::to_vec(&serde_json::json!({
+            "id":             "prop_kv001",
+            "credential_key": "tok_anthropic_prod_kv0001",
+            "service":        "api.anthropic.com",
+            "message":        "need access"
+        }))
+        .unwrap()
+        .into(),
+    )
+    .await
+    .unwrap()
+    .await
+    .unwrap();
+
+    tokio::time::sleep(Duration::from_millis(150)).await;
+
+    nats.publish(
+        subjects::approve("default"),
+        serde_json::to_vec(&serde_json::json!({
+            "proposal_id": "prop_kv001",
+            "approved_by": "mario",
+            "plaintext":   "sk-ant-from-kv-approval"
+        }))
+        .unwrap()
+        .into(),
+    )
+    .await
+    .unwrap();
+
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    let token = ApiKeyToken::new("tok_anthropic_prod_kv0001").unwrap();
+    let resolved = vault.resolve(&token).await.unwrap();
+    assert_eq!(
+        resolved,
+        Some("sk-ant-from-kv-approval".to_string()),
+        "approved plaintext must be readable from NatsKvVault"
+    );
+}
+
+/// Rejecting a proposal must NOT write anything to NatsKvVault.
+#[tokio::test]
+async fn reject_proposal_does_not_write_to_nats_kv_vault() {
+    let (js, nats, _c) = start_nats().await;
+
+    ensure_proposals_stream(&js).await.expect("proposals stream");
+
+    let vault     = Arc::new(make_nats_kv_vault(&js, "approvals-kv-rej-test").await);
+    let notifier  = Arc::new(NoopNotifier);
+    let publisher = Arc::new(JetStreamStatePublisher::new(js.clone()));
+    let svc = ApprovalService::new(Arc::clone(&vault), notifier, publisher, "default");
+    let (js_svc, nats_svc) = (js.clone(), nats.clone());
+    tokio::spawn(async move { svc.run(js_svc, nats_svc).await.ok(); });
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    js.publish(
+        subjects::create("default"),
+        serde_json::to_vec(&serde_json::json!({
+            "id":             "prop_kv_rej001",
+            "credential_key": "tok_openai_staging_kv0001",
+            "service":        "api.openai.com",
+            "message":        "need access"
+        }))
+        .unwrap()
+        .into(),
+    )
+    .await
+    .unwrap()
+    .await
+    .unwrap();
+
+    tokio::time::sleep(Duration::from_millis(150)).await;
+
+    nats.publish(
+        subjects::reject("default"),
+        serde_json::to_vec(&serde_json::json!({
+            "proposal_id": "prop_kv_rej001",
+            "rejected_by": "luigi",
+            "reason":      "not needed"
+        }))
+        .unwrap()
+        .into(),
+    )
+    .await
+    .unwrap();
+
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let token = ApiKeyToken::new("tok_openai_staging_kv0001").unwrap();
+    assert_eq!(
+        vault.resolve(&token).await.unwrap(),
+        None,
+        "rejected proposal must not write to NatsKvVault"
+    );
+}
+
+// ── InfisicalVaultStore backend ───────────────────────────────────────────────
+
+fn make_infisical_store(server: &httpmock::MockServer) -> InfisicalVaultStore {
+    InfisicalVaultStore::new(InfisicalConfig::new(
+        format!("http://{}", server.address()),
+        "proj-test123",
+        InfisicalAuth::ServiceToken("st.test".to_string()),
+    ))
+}
+
+/// Approving a proposal with an InfisicalVaultStore causes the approval
+/// service to POST the plaintext to the Infisical API.
+#[tokio::test]
+async fn approve_with_infisical_store_calls_infisical_api() {
+    let infisical = httpmock::MockServer::start_async().await;
+    let post_mock = infisical
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/api/v3/secrets/raw/anthropic_inf0001");
+            then.status(200)
+                .json_body(serde_json::json!({"secret": {"secretKey": "anthropic_inf0001"}}));
+        })
+        .await;
+
+    let (js, nats, _c) = start_nats().await;
+    ensure_proposals_stream(&js).await.expect("proposals stream");
+
+    let vault     = Arc::new(make_infisical_store(&infisical));
+    let notifier  = Arc::new(NoopNotifier);
+    let publisher = Arc::new(JetStreamStatePublisher::new(js.clone()));
+    let svc = ApprovalService::new(vault, notifier, publisher, "prod");
+    let (js_svc, nats_svc) = (js.clone(), nats.clone());
+    tokio::spawn(async move { svc.run(js_svc, nats_svc).await.ok(); });
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    js.publish(
+        subjects::create("prod"),
+        serde_json::to_vec(&serde_json::json!({
+            "id":             "prop_inf0001",
+            "credential_key": "tok_anthropic_prod_inf0001",
+            "service":        "api.anthropic.com",
+            "message":        "need access"
+        }))
+        .unwrap()
+        .into(),
+    )
+    .await
+    .unwrap()
+    .await
+    .unwrap();
+
+    tokio::time::sleep(Duration::from_millis(150)).await;
+
+    nats.publish(
+        subjects::approve("prod"),
+        serde_json::to_vec(&serde_json::json!({
+            "proposal_id": "prop_inf0001",
+            "approved_by": "mario",
+            "plaintext":   "sk-ant-infisical-key"
+        }))
+        .unwrap()
+        .into(),
+    )
+    .await
+    .unwrap();
+
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    post_mock.assert_async().await;
+}
+
+/// When the vault is a DualWriteVault<InfisicalVaultStore, NatsKvVault>,
+/// approving a proposal must write to both backends.  Verified by:
+/// - Infisical POST mock was hit (primary written).
+/// - Resolving via the shared Arc returns the value (cache written).
+#[tokio::test]
+async fn approve_with_dual_write_vault_writes_to_both_backends() {
+    let infisical = httpmock::MockServer::start_async().await;
+    let post_mock = infisical
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/api/v3/secrets/raw/anthropic_dw0002");
+            then.status(200)
+                .json_body(serde_json::json!({"secret": {"secretKey": "anthropic_dw0002"}}));
+        })
+        .await;
+
+    let (js, nats, _c) = start_nats().await;
+    ensure_proposals_stream(&js).await.expect("proposals stream");
+
+    let nk_vault = make_nats_kv_vault(&js, "approvals-dual-test").await;
+    let dual     = Arc::new(DualWriteVault::new(make_infisical_store(&infisical), nk_vault));
+    let dual_check = Arc::clone(&dual);
+
+    let notifier  = Arc::new(NoopNotifier);
+    let publisher = Arc::new(JetStreamStatePublisher::new(js.clone()));
+    let svc = ApprovalService::new(Arc::clone(&dual), notifier, publisher, "prod");
+    let (js_svc, nats_svc) = (js.clone(), nats.clone());
+    tokio::spawn(async move { svc.run(js_svc, nats_svc).await.ok(); });
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    js.publish(
+        subjects::create("prod"),
+        serde_json::to_vec(&serde_json::json!({
+            "id":             "prop_dw0002",
+            "credential_key": "tok_anthropic_prod_dw0002",
+            "service":        "api.anthropic.com",
+            "message":        "dual write test"
+        }))
+        .unwrap()
+        .into(),
+    )
+    .await
+    .unwrap()
+    .await
+    .unwrap();
+
+    tokio::time::sleep(Duration::from_millis(150)).await;
+
+    nats.publish(
+        subjects::approve("prod"),
+        serde_json::to_vec(&serde_json::json!({
+            "proposal_id": "prop_dw0002",
+            "approved_by": "mario",
+            "plaintext":   "sk-dual-write-key"
+        }))
+        .unwrap()
+        .into(),
+    )
+    .await
+    .unwrap();
+
+    // Wait for approval processing and NatsKvVault watcher propagation.
+    tokio::time::sleep(Duration::from_millis(400)).await;
+
+    post_mock.assert_async().await;
+
+    // Cache was written — resolve must return the approved value.
+    // No Infisical GET mock is set up; a cache miss would return Ok(None).
+    let token = ApiKeyToken::new("tok_anthropic_prod_dw0002").unwrap();
+    let resolved = dual_check.resolve(&token).await.unwrap();
+    assert_eq!(
+        resolved,
+        Some("sk-dual-write-key".to_string()),
+        "NatsKvVault cache must hold the value after dual-write approval"
+    );
+}
+
+/// Multiple proposals submitted and approved sequentially must all end up
+/// in the vault with their correct individual values — no interference
+/// between proposals.
+#[tokio::test]
+async fn multiple_proposals_all_approved_with_correct_values() {
+    let (js, nats, _c) = start_nats().await;
+    let vault = spawn_service(js.clone(), nats.clone(), "multi").await;
+
+    const N: usize = 5;
+
+    for i in 0..N {
+        js.publish(
+            subjects::create("multi"),
+            serde_json::to_vec(&serde_json::json!({
+                "id":             format!("prop_multi{i:04}"),
+                "credential_key": format!("tok_anthropic_prod_mult{i:04}"),
+                "service":        "api.anthropic.com",
+                "message":        format!("proposal {i}")
+            }))
+            .unwrap()
+            .into(),
+        )
+        .await
+        .unwrap()
+        .await
+        .unwrap();
+    }
+
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    for i in 0..N {
+        nats.publish(
+            subjects::approve("multi"),
+            serde_json::to_vec(&serde_json::json!({
+                "proposal_id": format!("prop_multi{i:04}"),
+                "approved_by": "mario",
+                "plaintext":   format!("sk-secret-{i}")
+            }))
+            .unwrap()
+            .into(),
+        )
+        .await
+        .unwrap();
+    }
+
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    for i in 0..N {
+        let token = ApiKeyToken::new(&format!("tok_anthropic_prod_mult{i:04}")).unwrap();
+        let resolved = vault.resolve(&token).await.unwrap();
+        assert_eq!(
+            resolved,
+            Some(format!("sk-secret-{i}")),
+            "proposal {i} must be in vault with correct plaintext"
+        );
+    }
 }
 
 #[tokio::test]
