@@ -1,10 +1,15 @@
 use crate::snapshot::{Snapshot, SnapshotRead, SnapshotSchema, SnapshotStoreConfig, SnapshotWrite};
-use crate::stream::{StreamAppend, StreamRead, StreamState, resolve_stream_state};
-use crate::{CanonicalEventCodec, Decide, Decision, EventCodec, EventData, EventEnvelopeCodec, NonEmpty};
+use crate::stream::{AppendOutcome, StreamAppend, StreamRead, StreamState, resolve_stream_state};
+use crate::{
+    CanonicalEventCodec, Decide, Decision, EventCodec, EventData, EventEnvelopeCodec, NonEmpty, RecordedEvent,
+};
 
 use std::num::NonZeroU64;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
+type ExecutionFailure<C, RuntimeError> =
+    CommandFailure<<C as Decide>::DecideError, <C as Decide>::EvolveError, CommandInfraError<RuntimeError>>;
+type ExecutionStep<C, RuntimeError, T> = Result<T, ExecutionFailure<C, RuntimeError>>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SnapshotDecision {
@@ -253,6 +258,36 @@ impl<'a, E, C, S, EC> CommandExecutionWithCodec<'a, E, C, S, EC> {
         self.write_precondition = write_precondition.into();
         self
     }
+
+    async fn append_decision<SErr>(
+        &self,
+        current_version: Option<u64>,
+        stream_id: &C::StreamId,
+        state: &C::State,
+    ) -> ExecutionStep<C, SErr, (AppendOutcome, NonEmpty<C::Event>)>
+    where
+        C: Decide,
+        C::Event: Clone,
+        C::StreamId: AsRef<str>,
+        E: StreamAppend<C::StreamId, Error = SErr>,
+        EC: EventEnvelopeCodec<C::Event>,
+        EC::Error: std::error::Error + Send + Sync + 'static,
+    {
+        let Decision::Event(events) = C::decide(state, self.command).map_err(CommandFailure::Decide)?;
+        let encoded_events = encode_events(stream_id.as_ref(), &self.event_codec, &events)
+            .map_err(box_error)
+            .map_err(CommandInfraError::EncodeEvent)
+            .map_err(CommandFailure::Infra)?;
+        let stream_state = resolve_stream_state::<C>(self.write_precondition, current_version);
+        let append_outcome = self
+            .event_store
+            .append_events(stream_id, stream_state, encoded_events)
+            .await
+            .map_err(CommandInfraError::Append)
+            .map_err(CommandFailure::Infra)?;
+
+        Ok((append_outcome, events))
+    }
 }
 
 impl<E, C, SErr> CommandExecution<'_, E, C, WithoutSnapshots>
@@ -296,33 +331,9 @@ where
             .map_err(CommandInfraError::ReadStream)
             .map_err(CommandFailure::Infra)?;
         let current_version = stream_read.current_version;
-        let mut state = C::initial_state();
-
-        for recorded_event in stream_read.events {
-            let event = recorded_event
-                .decode_data_with(&self.event_codec)
-                .map_err(box_error)
-                .map_err(CommandInfraError::DecodeEvent)
-                .map_err(CommandFailure::Infra)?;
-            state = C::evolve(state, &event).map_err(CommandFailure::Evolve)?;
-        }
-
-        let Decision::Event(events) = C::decide(&state, self.command).map_err(CommandFailure::Decide)?;
-        let encoded_events = encode_events(stream_id.as_ref(), &self.event_codec, &events)
-            .map_err(box_error)
-            .map_err(CommandInfraError::EncodeEvent)
-            .map_err(CommandFailure::Infra)?;
-        let stream_state = resolve_stream_state::<C>(self.write_precondition, current_version);
-        let append_outcome = self
-            .event_store
-            .append_events(stream_id, stream_state, encoded_events)
-            .await
-            .map_err(CommandInfraError::Append)
-            .map_err(CommandFailure::Infra)?;
-
-        for event in events.iter() {
-            state = C::evolve(state, event).map_err(CommandFailure::Evolve)?;
-        }
+        let state = replay_recorded_events::<C, EC, SErr>(C::initial_state(), stream_read.events, &self.event_codec)?;
+        let (append_outcome, events) = self.append_decision::<SErr>(current_version, stream_id, &state).await?;
+        let state = evolve_events::<C, SErr>(state, &events)?;
 
         Ok(ExecutionResult {
             next_expected_version: append_outcome.next_expected_version,
@@ -380,7 +391,7 @@ where
             .map_err(CommandInfraError::LoadSnapshot)
             .map_err(CommandFailure::Infra)?;
         let snapshot_version = snapshot.as_ref().map(|snapshot| snapshot.version);
-        let mut state = snapshot
+        let state = snapshot
             .map(|snapshot| snapshot.payload)
             .unwrap_or_else(C::initial_state);
         let start_sequence = snapshot_version.map(|version| version.saturating_add(1)).unwrap_or(1);
@@ -404,31 +415,9 @@ where
             }
         }
 
-        for recorded_event in stream_read.events {
-            let event = recorded_event
-                .decode_data_with(&self.event_codec)
-                .map_err(box_error)
-                .map_err(CommandInfraError::DecodeEvent)
-                .map_err(CommandFailure::Infra)?;
-            state = C::evolve(state, &event).map_err(CommandFailure::Evolve)?;
-        }
-
-        let Decision::Event(events) = C::decide(&state, self.command).map_err(CommandFailure::Decide)?;
-        let encoded_events = encode_events(stream_id.as_ref(), &self.event_codec, &events)
-            .map_err(box_error)
-            .map_err(CommandInfraError::EncodeEvent)
-            .map_err(CommandFailure::Infra)?;
-        let stream_state = resolve_stream_state::<C>(self.write_precondition, current_version);
-        let append_outcome = self
-            .event_store
-            .append_events(stream_id, stream_state, encoded_events)
-            .await
-            .map_err(CommandInfraError::Append)
-            .map_err(CommandFailure::Infra)?;
-
-        for event in events.iter() {
-            state = C::evolve(state, event).map_err(CommandFailure::Evolve)?;
-        }
+        let state = replay_recorded_events::<C, EC, SErr>(state, stream_read.events, &self.event_codec)?;
+        let (append_outcome, events) = self.append_decision::<SErr>(current_version, stream_id, &state).await?;
+        let state = evolve_events::<C, SErr>(state, &events)?;
 
         if matches!(
             self.snapshots.policy.snapshot_decision(SnapshotDecisionContext {
@@ -463,6 +452,39 @@ where
     E: std::error::Error + Send + Sync + 'static,
 {
     Box::new(error)
+}
+
+fn replay_recorded_events<C, EC, SErr>(
+    mut state: C::State,
+    recorded_events: Vec<RecordedEvent>,
+    event_codec: &EC,
+) -> ExecutionStep<C, SErr, C::State>
+where
+    C: Decide,
+    EC: EventCodec<C::Event>,
+    EC::Error: std::error::Error + Send + Sync + 'static,
+{
+    for recorded_event in recorded_events {
+        let event = recorded_event
+            .decode_data_with(event_codec)
+            .map_err(box_error)
+            .map_err(CommandInfraError::DecodeEvent)
+            .map_err(CommandFailure::Infra)?;
+        state = C::evolve(state, &event).map_err(CommandFailure::Evolve)?;
+    }
+
+    Ok(state)
+}
+
+fn evolve_events<C, SErr>(mut state: C::State, events: &NonEmpty<C::Event>) -> ExecutionStep<C, SErr, C::State>
+where
+    C: Decide,
+{
+    for event in events.iter() {
+        state = C::evolve(state, event).map_err(CommandFailure::Evolve)?;
+    }
+
+    Ok(state)
 }
 
 fn encode_events<E, C>(stream_id: &str, codec: &C, events: &NonEmpty<E>) -> Result<NonEmpty<EventData>, C::Error>
