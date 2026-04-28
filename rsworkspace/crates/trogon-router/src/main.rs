@@ -90,10 +90,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Router::new(llm, registry, publisher, nats, js_client).with_dlq(UNROUTABLE_SUBJECT_PREFIX);
 
     // ── Run ───────────────────────────────────────────────────────────────────
-    info!(subject = %cfg.events_subject, "router listening");
+    let subjects: Vec<&str> = cfg.events_subject.split(',').map(str::trim).collect();
+    info!(subjects = ?subjects, "router listening");
 
     tokio::select! {
-        result = router.run(&cfg.events_subject) => {
+        result = router.run(&subjects) => {
             result?;
         }
         _ = acp_telemetry::signal::shutdown_signal() => {

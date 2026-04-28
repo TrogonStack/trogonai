@@ -109,7 +109,7 @@ async fn router_forwards_event_to_actor_subject() {
     // Spawn router first, then publish after it has subscribed.
     let nats_clone = nats.clone();
     let router_handle = tokio::spawn(async move {
-        router.run("trogon.events.>").await.ok();
+        router.run(&["trogon.events.>"]).await.ok();
     });
 
     publish_after_subscribe(
@@ -151,7 +151,7 @@ async fn router_records_routing_decision_in_transcript() {
 
     let nats_clone = nats.clone();
     let router_handle = tokio::spawn(async move {
-        router.run("trogon.events.>").await.ok();
+        router.run(&["trogon.events.>"]).await.ok();
     });
 
     publish_after_subscribe(
@@ -188,7 +188,7 @@ async fn unroutable_event_does_not_forward_to_any_actor() {
 
     let nats_clone = nats.clone();
     let router_handle = tokio::spawn(async move {
-        router.run("trogon.events.>").await.ok();
+        router.run(&["trogon.events.>"]).await.ok();
     });
 
     publish_after_subscribe(
@@ -226,7 +226,7 @@ async fn router_records_unroutable_entry_in_transcript() {
 
     let nats_clone = nats.clone();
     let router_handle = tokio::spawn(async move {
-        router.run("trogon.events.>").await.ok();
+        router.run(&["trogon.events.>"]).await.ok();
     });
 
     publish_after_subscribe(
@@ -273,7 +273,7 @@ async fn router_uses_real_jetstream_transcript() {
 
     let nats_clone = nats.clone();
     let router_handle = tokio::spawn(async move {
-        router.run("trogon.events.>").await.ok();
+        router.run(&["trogon.events.>"]).await.ok();
     });
 
     publish_after_subscribe(
@@ -327,7 +327,7 @@ async fn forwarded_message_carries_routing_headers() {
 
     let nats_clone = nats.clone();
     let router_handle = tokio::spawn(async move {
-        router.run("trogon.events.>").await.ok();
+        router.run(&["trogon.events.>"]).await.ok();
     });
 
     publish_after_subscribe(
@@ -397,7 +397,7 @@ async fn router_loop_continues_after_routing_error() {
 
     let nats_clone = nats.clone();
     let router_handle = tokio::spawn(async move {
-        router.run("trogon.events.>").await.ok();
+        router.run(&["trogon.events.>"]).await.ok();
     });
 
     // Publish the first event (triggers UnknownAgentType error).
@@ -452,7 +452,7 @@ async fn router_prompt_contains_live_registry_data() {
 
     let nats_clone = nats.clone();
     let router_handle = tokio::spawn(async move {
-        router.run("trogon.events.>").await.ok();
+        router.run(&["trogon.events.>"]).await.ok();
     });
 
     publish_after_subscribe(

@@ -25,6 +25,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use tracing::{info, warn};
 
 use crate::agent_loop::{AgentLoop, Message};
 use crate::handlers::{DEFAULT_MEMORY_PATH, fetch_memory};
@@ -46,6 +47,66 @@ pub struct ChatAppState<R: SessionRepository> {
     pub agent_loader: Option<Arc<dyn crate::agent_loader::AgentLoading>>,
     /// Skill loader shared with the automation dispatcher.
     pub skill_loader: Option<Arc<dyn crate::skill_loader::SkillLoading>>,
+    /// When `Some`, context compaction is attempted before each `run_chat` call
+    /// via a NATS request to `trogon.compactor.compact`. Degrades gracefully.
+    pub compactor_nats: Option<async_nats::Client>,
+}
+
+// ── Context compaction ────────────────────────────────────────────────────────
+
+/// Sends the conversation history to `trogon-compactor` via NATS request-reply.
+/// Returns the original messages unchanged if the compactor is unavailable.
+#[cfg_attr(coverage, coverage(off))]
+async fn compact_messages(
+    nats: &async_nats::Client,
+    messages: Vec<Message>,
+    session_id: &str,
+) -> Vec<Message> {
+    #[derive(serde::Serialize)]
+    struct CompactReq<'a> {
+        messages: &'a [Message],
+    }
+    #[derive(serde::Deserialize)]
+    struct CompactResp {
+        messages: Vec<Message>,
+        #[serde(default)]
+        compacted: bool,
+        #[serde(default)]
+        tokens_before: usize,
+        #[serde(default)]
+        tokens_after: usize,
+    }
+
+    let Ok(payload) = serde_json::to_vec(&CompactReq { messages: &messages }) else {
+        return messages;
+    };
+    let reply = match nats
+        .request("trogon.compactor.compact", payload.into())
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            warn!(session_id, error = %e, "compactor unavailable — skipping compaction");
+            return messages;
+        }
+    };
+    match serde_json::from_slice::<CompactResp>(&reply.payload) {
+        Ok(resp) => {
+            if resp.compacted {
+                info!(
+                    session_id,
+                    tokens_before = resp.tokens_before,
+                    tokens_after = resp.tokens_after,
+                    "context compacted"
+                );
+            }
+            resp.messages
+        }
+        Err(e) => {
+            warn!(session_id, error = %e, "compactor returned invalid response — skipping");
+            messages
+        }
+    }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -411,6 +472,12 @@ async fn send_message<R: SessionRepository>(
         (None, Some(mem)) => Some(mem.to_string()),
         (None, None) => None,
     };
+
+    // Compact context window before sending to the LLM (degrades gracefully).
+    if let Some(ref nats) = state.compactor_nats {
+        let msgs = session.messages.clone();
+        session.messages = compact_messages(nats, msgs, &id).await;
+    }
 
     // Run the chat loop — returns (final_text, updated_messages).
     match agent
@@ -782,6 +849,7 @@ mod tests {
             agent_id: None,
             agent_loader: None,
             skill_loader: None,
+            compactor_nats: None,
         };
         router(state)
     }
@@ -794,6 +862,7 @@ mod tests {
             agent_id: None,
             agent_loader: None,
             skill_loader: None,
+            compactor_nats: None,
         };
         router(state)
     }
@@ -806,6 +875,7 @@ mod tests {
             agent_id: None,
             agent_loader: None,
             skill_loader: None,
+            compactor_nats: None,
         };
         router(state)
     }
@@ -1195,6 +1265,7 @@ mod tests {
             agent_id: None,
             agent_loader: None,
             skill_loader: None,
+            compactor_nats: None,
         };
         router(state)
     }
