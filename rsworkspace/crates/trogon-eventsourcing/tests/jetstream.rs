@@ -14,7 +14,7 @@ use trogon_eventsourcing::nats::{
 use trogon_eventsourcing::{
     AppendOutcome, CanonicalEventCodec, CommandExecution, CommandFailure, Decide, Decision, EventData, EventId,
     EventIdentity, EventType, FrequencySnapshot, JsonEventCodec, NonEmpty, Snapshot, SnapshotChange,
-    SnapshotStoreConfig, Snapshots, StreamState,
+    SnapshotStoreConfig, Snapshots, StreamState, spawn_on_tokio,
 };
 use trogon_eventsourcing::{
     SnapshotStoreError, StreamStoreError, TROGON_EVENT_TYPE, checkpoint_key, maybe_advance_checkpoint,
@@ -933,13 +933,14 @@ async fn jetstream_store_rejects_unsupported_append_batches() -> TestResult {
 
 #[tokio::test]
 #[ignore = "requires actual NATS JetStream"]
-async fn jetstream_store_executes_commands_with_snapshots() -> TestResult {
+async fn jetstream_store_executes_commands_snapshots() -> TestResult {
     let fixture = JetStreamFixture::new().await?;
     let snapshot_policy = FrequencySnapshot::new(NonZeroU64::MIN);
     let first_command = IncreaseCounterCommand::new("counter", 2);
 
     let first = CommandExecution::new(&fixture.store, &first_command)
         .with_snapshot(Snapshots::new(&fixture.store, test_snapshot_config(), snapshot_policy))
+        .with_task_runtime(spawn_on_tokio)
         .execute()
         .await
         .map_err(debug_error)?;
@@ -953,6 +954,7 @@ async fn jetstream_store_executes_commands_with_snapshots() -> TestResult {
     let second_command = IncreaseCounterCommand::new("counter", 3);
     let second = CommandExecution::new(&fixture.store, &second_command)
         .with_snapshot(Snapshots::new(&fixture.store, test_snapshot_config(), snapshot_policy))
+        .with_task_runtime(spawn_on_tokio)
         .execute()
         .await
         .map_err(debug_error)?;
@@ -983,6 +985,7 @@ async fn jetstream_command_execution_respects_snapshot_cadence() -> TestResult {
     let first_command = IncreaseCounterCommand::new("counter", 1);
     let first = CommandExecution::new(&fixture.store, &first_command)
         .with_snapshot(Snapshots::new(&fixture.store, test_snapshot_config(), snapshot_policy))
+        .with_task_runtime(spawn_on_tokio)
         .execute()
         .await
         .map_err(debug_error)?;
@@ -995,6 +998,7 @@ async fn jetstream_command_execution_respects_snapshot_cadence() -> TestResult {
     let second_command = IncreaseCounterCommand::new("counter", 2);
     let second = CommandExecution::new(&fixture.store, &second_command)
         .with_snapshot(Snapshots::new(&fixture.store, test_snapshot_config(), snapshot_policy))
+        .with_task_runtime(spawn_on_tokio)
         .execute()
         .await
         .map_err(debug_error)?;
@@ -1007,6 +1011,7 @@ async fn jetstream_command_execution_respects_snapshot_cadence() -> TestResult {
     let third_command = IncreaseCounterCommand::new("counter", 3);
     let third = CommandExecution::new(&fixture.store, &third_command)
         .with_snapshot(Snapshots::new(&fixture.store, test_snapshot_config(), snapshot_policy))
+        .with_task_runtime(spawn_on_tokio)
         .execute()
         .await
         .map_err(debug_error)?;
@@ -1019,6 +1024,7 @@ async fn jetstream_command_execution_respects_snapshot_cadence() -> TestResult {
     let fourth_command = IncreaseCounterCommand::new("counter", 4);
     let fourth = CommandExecution::new(&fixture.store, &fourth_command)
         .with_snapshot(Snapshots::new(&fixture.store, test_snapshot_config(), snapshot_policy))
+        .with_task_runtime(spawn_on_tokio)
         .execute()
         .await
         .map_err(debug_error)?;
@@ -1040,6 +1046,7 @@ async fn jetstream_command_execution_snapshots_use_log_sequence_after_interleave
     let first_command = IncreaseCounterCommand::new("counter", 2);
     let first = CommandExecution::new(&fixture.store, &first_command)
         .with_snapshot(Snapshots::new(&fixture.store, test_snapshot_config(), snapshot_policy))
+        .with_task_runtime(spawn_on_tokio)
         .execute()
         .await
         .map_err(debug_error)?;
@@ -1051,6 +1058,7 @@ async fn jetstream_command_execution_snapshots_use_log_sequence_after_interleave
     let second_command = IncreaseCounterCommand::new("counter", 3);
     let second = CommandExecution::new(&fixture.store, &second_command)
         .with_snapshot(Snapshots::new(&fixture.store, test_snapshot_config(), snapshot_policy))
+        .with_task_runtime(spawn_on_tokio)
         .execute()
         .await
         .map_err(debug_error)?;
@@ -1064,6 +1072,7 @@ async fn jetstream_command_execution_snapshots_use_log_sequence_after_interleave
     let third_command = IncreaseCounterCommand::new("counter", 1);
     let third = CommandExecution::new(&fixture.store, &third_command)
         .with_snapshot(Snapshots::new(&fixture.store, test_snapshot_config(), snapshot_policy))
+        .with_task_runtime(spawn_on_tokio)
         .execute()
         .await
         .map_err(debug_error)?;
@@ -1082,6 +1091,7 @@ async fn jetstream_command_execution_keeps_interleaved_stream_state_isolated() -
     let alpha_one = IncreaseCounterCommand::new("alpha", 1);
     let alpha_one = CommandExecution::new(&fixture.store, &alpha_one)
         .with_snapshot(Snapshots::new(&fixture.store, test_snapshot_config(), snapshot_policy))
+        .with_task_runtime(spawn_on_tokio)
         .execute()
         .await
         .map_err(debug_error)?;
@@ -1091,6 +1101,7 @@ async fn jetstream_command_execution_keeps_interleaved_stream_state_isolated() -
     let beta_one = IncreaseCounterCommand::new("beta", 10);
     let beta_one = CommandExecution::new(&fixture.store, &beta_one)
         .with_snapshot(Snapshots::new(&fixture.store, test_snapshot_config(), snapshot_policy))
+        .with_task_runtime(spawn_on_tokio)
         .execute()
         .await
         .map_err(debug_error)?;
@@ -1100,6 +1111,7 @@ async fn jetstream_command_execution_keeps_interleaved_stream_state_isolated() -
     let alpha_two = IncreaseCounterCommand::new("alpha", 2);
     let alpha_two = CommandExecution::new(&fixture.store, &alpha_two)
         .with_snapshot(Snapshots::new(&fixture.store, test_snapshot_config(), snapshot_policy))
+        .with_task_runtime(spawn_on_tokio)
         .execute()
         .await
         .map_err(debug_error)?;
@@ -1109,6 +1121,7 @@ async fn jetstream_command_execution_keeps_interleaved_stream_state_isolated() -
     let beta_two = IncreaseCounterCommand::new("beta", 5);
     let beta_two = CommandExecution::new(&fixture.store, &beta_two)
         .with_snapshot(Snapshots::new(&fixture.store, test_snapshot_config(), snapshot_policy))
+        .with_task_runtime(spawn_on_tokio)
         .execute()
         .await
         .map_err(debug_error)?;
@@ -1190,17 +1203,18 @@ async fn jetstream_command_execution_snapshot_skips_earlier_corrupt_same_subject
             Snapshot::new(2, CounterState { total: 5 }),
         )
         .await?;
-    let with_snapshot = CommandExecution::new(&fixture.store, &command)
+    let snapshot = CommandExecution::new(&fixture.store, &command)
         .with_snapshot(Snapshots::new(
             &fixture.store,
             test_snapshot_config(),
             FrequencySnapshot::new(NonZeroU64::MIN),
         ))
+        .with_task_runtime(spawn_on_tokio)
         .execute()
         .await
         .map_err(debug_error)?;
-    assert_eq!(with_snapshot.next_expected_version, 3);
-    assert_eq!(with_snapshot.state, CounterState { total: 6 });
+    assert_eq!(snapshot.next_expected_version, 3);
+    assert_eq!(snapshot.state, CounterState { total: 6 });
 
     fixture.delete().await
 }
@@ -1223,6 +1237,7 @@ async fn jetstream_command_execution_does_not_snapshot_failed_appends() -> TestR
             test_snapshot_config(),
             FrequencySnapshot::new(NonZeroU64::MIN),
         ))
+        .with_task_runtime(spawn_on_tokio)
         .execute()
         .await;
     assert!(matches!(
@@ -1327,6 +1342,7 @@ async fn jetstream_command_execution_rejects_snapshot_ahead_of_stream() -> TestR
             test_snapshot_config(),
             FrequencySnapshot::new(NonZeroU64::MIN),
         ))
+        .with_task_runtime(spawn_on_tokio)
         .execute()
         .await;
     assert!(matches!(
@@ -1365,6 +1381,7 @@ async fn jetstream_command_execution_rejects_snapshot_ahead_of_existing_stream()
             test_snapshot_config(),
             FrequencySnapshot::new(NonZeroU64::MIN),
         ))
+        .with_task_runtime(spawn_on_tokio)
         .execute()
         .await;
     assert!(matches!(

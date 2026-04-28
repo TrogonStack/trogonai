@@ -9,7 +9,7 @@ use trogon_cron::{
     AddJobCommand, CronController, GetJobCommand, JobEventSchedule, JobEventStatus, JobId, PauseJobCommand,
     RemoveJobCommand, commands::domain as command_domain, connect_store, get_job,
 };
-use trogon_eventsourcing::CommandExecution;
+use trogon_eventsourcing::{CommandExecution, spawn_on_tokio};
 use trogon_nats::{NatsConfig, connect as nats_connect};
 
 fn test_url() -> String {
@@ -177,6 +177,7 @@ async fn controller_reconciles_one_time_job() {
 
     CommandExecution::new(&store.event_store, &AddJobCommand::new(job))
         .with_snapshot(&store.event_store)
+        .with_task_runtime(spawn_on_tokio)
         .execute()
         .await
         .unwrap();
@@ -207,6 +208,7 @@ async fn controller_reconciles_sampling_job() {
 
     CommandExecution::new(&store.event_store, &AddJobCommand::new(job))
         .with_snapshot(&store.event_store)
+        .with_task_runtime(spawn_on_tokio)
         .execute()
         .await
         .unwrap();
@@ -239,6 +241,7 @@ async fn controller_reconciles_cron_job_with_timezone() {
 
     CommandExecution::new(&store.event_store, &AddJobCommand::new(job))
         .with_snapshot(&store.event_store)
+        .with_task_runtime(spawn_on_tokio)
         .execute()
         .await
         .unwrap();
@@ -263,6 +266,7 @@ async fn disabling_job_removes_schedule_subject() {
     let job = base_job("disabled");
     CommandExecution::new(&store.event_store, &AddJobCommand::new(job))
         .with_snapshot(&store.event_store)
+        .with_task_runtime(spawn_on_tokio)
         .execute()
         .await
         .unwrap();
@@ -272,6 +276,7 @@ async fn disabling_job_removes_schedule_subject() {
 
     CommandExecution::new(&store.event_store, &PauseJobCommand::new(command_job_id("disabled")))
         .with_snapshot(&store.event_store)
+        .with_task_runtime(spawn_on_tokio)
         .execute()
         .await
         .unwrap();
@@ -294,6 +299,7 @@ async fn removing_job_removes_schedule_subject() {
     let job = base_job("removed");
     CommandExecution::new(&store.event_store, &AddJobCommand::new(job))
         .with_snapshot(&store.event_store)
+        .with_task_runtime(spawn_on_tokio)
         .execute()
         .await
         .unwrap();
@@ -303,6 +309,7 @@ async fn removing_job_removes_schedule_subject() {
 
     CommandExecution::new(&store.event_store, &RemoveJobCommand::new(command_job_id("removed")))
         .with_snapshot(&store.event_store)
+        .with_task_runtime(spawn_on_tokio)
         .execute()
         .await
         .unwrap();
@@ -327,11 +334,13 @@ async fn event_store_rebuilds_current_state_for_new_client() {
 
     CommandExecution::new(&store.event_store, &AddJobCommand::new(job))
         .with_snapshot(&store.event_store)
+        .with_task_runtime(spawn_on_tokio)
         .execute()
         .await
         .unwrap();
     CommandExecution::new(&store.event_store, &PauseJobCommand::new(command_job_id("eventful")))
         .with_snapshot(&store.event_store)
+        .with_task_runtime(spawn_on_tokio)
         .execute()
         .await
         .unwrap();
