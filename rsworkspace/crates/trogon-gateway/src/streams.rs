@@ -36,6 +36,10 @@ pub(crate) async fn provision<C: JetStreamContext>(client: &C, config: &Resolved
         trogon_source_linear::provision(client, cfg).await?;
         info!(source = "linear", "stream provisioned");
     }
+    if let Some(ref cfg) = config.microsoft_teams {
+        trogon_source_microsoft_teams::provision(client, cfg).await?;
+        info!(source = "microsoft-teams", "stream provisioned");
+    }
     if let Some(ref cfg) = config.notion {
         trogon_source_notion::provision(client, cfg).await?;
         info!(source = "notion", "stream provisioned");
@@ -90,6 +94,9 @@ signing_secret = "whsec_dGVzdC1zZWNyZXQ="
 [sources.linear]
 webhook_secret = "linear-secret"
 
+[sources.microsoft_teams]
+client_state = "microsoft-teams-client-state"
+
 [sources.notion]
 verification_token = "notion-verification-token-example"
 
@@ -117,7 +124,7 @@ client_secret = "sentry-client-secret"
 
         provision(&js, &cfg).await.expect("provision should succeed");
 
-        assert_eq!(js.created_streams().len(), 10);
+        assert_eq!(js.created_streams().len(), 11);
     }
 
     #[tokio::test]
@@ -148,6 +155,9 @@ signing_secret = "whsec_dGVzdC1zZWNyZXQ="
 [sources.linear]
 webhook_secret = "linear-secret"
 
+[sources.microsoft_teams]
+client_state = "microsoft-teams-client-state"
+
 [sources.notion]
 verification_token = "notion-verification-token-example"
 
@@ -160,6 +170,6 @@ client_secret = "sentry-client-secret"
 
         provision(&js, &cfg).await.expect("provision should succeed");
 
-        assert_eq!(js.created_streams().len(), 9);
+        assert_eq!(js.created_streams().len(), 10);
     }
 }

@@ -39,6 +39,9 @@ All webhook sources share one HTTP port (`TROGON_GATEWAY_PORT`, default `8080`) 
 | Twitter/X | `/twitter/webhook` |
 | GitLab | `/gitlab/webhook` |
 | Linear | `/linear/webhook` |
+| Microsoft Teams | `/microsoft-teams/webhook` |
+| Notion | `/notion/webhook` |
+| Sentry | `/sentry/webhook` |
 
 ## Source enablement
 
@@ -53,6 +56,9 @@ A source is enabled only when its required setting is present:
 | Twitter/X | `TROGON_SOURCE_TWITTER_CONSUMER_SECRET` |
 | GitLab | `TROGON_SOURCE_GITLAB_WEBHOOK_SECRET` |
 | Linear | `TROGON_SOURCE_LINEAR_WEBHOOK_SECRET` |
+| Microsoft Teams | `TROGON_SOURCE_MICROSOFT_TEAMS_CLIENT_STATE` |
+| Notion | `TROGON_SOURCE_NOTION_VERIFICATION_TOKEN` |
+| Sentry | `TROGON_SOURCE_SENTRY_CLIENT_SECRET` |
 
 ## Core configuration
 
@@ -70,14 +76,15 @@ NATS auth is resolved in this priority order:
 
 Per-source optional tuning (with defaults):
 
-- `TROGON_SOURCE_<SOURCE>_SUBJECT_PREFIX` (defaults: `github`, `discord`, `slack`, `telegram`, `gitlab`, `linear`)
-- `TROGON_SOURCE_<SOURCE>_STREAM_NAME` (defaults: `GITHUB`, `DISCORD`, `SLACK`, `TELEGRAM`, `TWITTER`, `GITLAB`, `LINEAR`)
+- `TROGON_SOURCE_<SOURCE>_SUBJECT_PREFIX` (defaults include `github`, `discord`, `slack`, `telegram`, `twitter`, `gitlab`, `linear`, `microsoft-teams`, `incidentio`, `notion`, `sentry`)
+- `TROGON_SOURCE_<SOURCE>_STREAM_NAME` (defaults include `GITHUB`, `DISCORD`, `SLACK`, `TELEGRAM`, `TWITTER`, `GITLAB`, `LINEAR`, `MICROSOFT_TEAMS`, `INCIDENTIO`, `NOTION`, `SENTRY`)
 - `TROGON_SOURCE_<SOURCE>_STREAM_MAX_AGE_SECS` (default: `604800`)
 - `TROGON_SOURCE_<SOURCE>_NATS_ACK_TIMEOUT_SECS` (default: `10`)
 
 Source-specific extras:
 
 - `TROGON_SOURCE_DISCORD_GATEWAY_INTENTS`
+- `TROGON_SOURCE_MICROSOFT_TEAMS_CLIENT_STATE` must match the `clientState` used when creating Microsoft Graph subscriptions
 - `TROGON_SOURCE_SLACK_TIMESTAMP_MAX_DRIFT_SECS` (default: `300`)
 - `TROGON_SOURCE_LINEAR_TIMESTAMP_TOLERANCE_SECS` (default: `60`, `0` disables tolerance)
 - `TROGON_SOURCE_TWITTER_CONSUMER_SECRET` is used for both CRC responses and `x-twitter-webhooks-signature` validation
@@ -118,4 +125,13 @@ webhook_secret = "gitlab-secret"
 
 [sources.linear]
 webhook_secret = "linear-secret"
+
+[sources.microsoft_teams]
+client_state = "microsoft-teams-client-state"
+
+[sources.notion]
+verification_token = "notion-verification-token-example"
+
+[sources.sentry]
+client_secret = "sentry-client-secret"
 ```

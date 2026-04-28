@@ -14,6 +14,7 @@ use trogon_source_gitlab::config::GitLabWebhookSecret;
 use trogon_source_incidentio::config::IncidentioConfig as IncidentioSourceConfig;
 use trogon_source_incidentio::incidentio_signing_secret::IncidentioSigningSecret;
 use trogon_source_linear::config::LinearWebhookSecret;
+use trogon_source_microsoft_teams::MicrosoftTeamsClientState;
 use trogon_source_notion::NotionVerificationToken;
 use trogon_source_sentry::SentryClientSecret;
 use trogon_source_slack::config::SlackSigningSecret;
@@ -199,6 +200,8 @@ struct SourcesConfig {
     #[config(nested)]
     linear: LinearConfig,
     #[config(nested)]
+    microsoft_teams: MicrosoftTeamsConfig,
+    #[config(nested)]
     notion: NotionConfig,
     #[config(nested)]
     sentry: SentryConfig,
@@ -323,6 +326,22 @@ struct LinearConfig {
 }
 
 #[derive(Config)]
+struct MicrosoftTeamsConfig {
+    #[config(env = "TROGON_SOURCE_MICROSOFT_TEAMS_STATUS")]
+    status: Option<String>,
+    #[config(env = "TROGON_SOURCE_MICROSOFT_TEAMS_CLIENT_STATE")]
+    client_state: Option<String>,
+    #[config(env = "TROGON_SOURCE_MICROSOFT_TEAMS_SUBJECT_PREFIX", default = "microsoft-teams")]
+    subject_prefix: String,
+    #[config(env = "TROGON_SOURCE_MICROSOFT_TEAMS_STREAM_NAME", default = "MICROSOFT_TEAMS")]
+    stream_name: String,
+    #[config(env = "TROGON_SOURCE_MICROSOFT_TEAMS_STREAM_MAX_AGE_SECS", default = 604_800)]
+    stream_max_age_secs: u64,
+    #[config(env = "TROGON_SOURCE_MICROSOFT_TEAMS_NATS_ACK_TIMEOUT_SECS", default = 10)]
+    nats_ack_timeout_secs: u64,
+}
+
+#[derive(Config)]
 struct IncidentioConfig {
     #[config(env = "TROGON_SOURCE_INCIDENTIO_STATUS")]
     status: Option<String>,
@@ -388,6 +407,7 @@ pub struct ResolvedConfig {
     pub gitlab: Option<trogon_source_gitlab::GitlabConfig>,
     pub incidentio: Option<trogon_source_incidentio::IncidentioConfig>,
     pub linear: Option<trogon_source_linear::LinearConfig>,
+    pub microsoft_teams: Option<trogon_source_microsoft_teams::MicrosoftTeamsConfig>,
     pub notion: Option<trogon_source_notion::NotionConfig>,
     pub sentry: Option<trogon_source_sentry::SentryConfig>,
 }
@@ -402,6 +422,7 @@ impl ResolvedConfig {
             || self.gitlab.is_some()
             || self.incidentio.is_some()
             || self.linear.is_some()
+            || self.microsoft_teams.is_some()
             || self.notion.is_some()
             || self.sentry.is_some()
     }
@@ -432,6 +453,7 @@ fn resolve(cfg: GatewayConfig, nats_overrides: &NatsArgs) -> Result<ResolvedConf
     let gitlab = resolve_gitlab(cfg.sources.gitlab, &mut errors);
     let incidentio = resolve_incidentio(cfg.sources.incidentio, &mut errors);
     let linear = resolve_linear(cfg.sources.linear, &mut errors);
+    let microsoft_teams = resolve_microsoft_teams(cfg.sources.microsoft_teams, &mut errors);
     let notion = resolve_notion(cfg.sources.notion, &mut errors);
     let sentry = resolve_sentry(cfg.sources.sentry, &mut errors);
 
@@ -465,6 +487,7 @@ fn resolve(cfg: GatewayConfig, nats_overrides: &NatsArgs) -> Result<ResolvedConf
         gitlab,
         incidentio,
         linear,
+        microsoft_teams,
         notion,
         sentry,
     })
@@ -943,6 +966,92 @@ fn resolve_linear(
     })
 }
 
+fn resolve_microsoft_teams(
+    section: MicrosoftTeamsConfig,
+    errors: &mut Vec<ConfigValidationError>,
+) -> Option<trogon_source_microsoft_teams::MicrosoftTeamsConfig> {
+    let explicitly_enabled = matches!(
+        section.status.as_deref(),
+        Some(status) if status.trim().eq_ignore_ascii_case("enabled")
+    );
+
+    if !resolve_source_status("microsoft_teams", section.status.as_deref(), errors) {
+        return None;
+    }
+
+    let client_state = match section.client_state {
+        Some(client_state) => match MicrosoftTeamsClientState::new(client_state) {
+            Ok(client_state) => client_state,
+            Err(error) => {
+                errors.push(ConfigValidationError::invalid("microsoft_teams", "client_state", error));
+                return None;
+            }
+        },
+        None => {
+            if explicitly_enabled {
+                errors.push(ConfigValidationError::missing("microsoft_teams", "client_state"));
+            }
+            return None;
+        }
+    };
+
+    let subject_prefix = match NatsToken::new(section.subject_prefix) {
+        Ok(token) => token,
+        Err(error) => {
+            errors.push(ConfigValidationError::invalid_subject_token(
+                "microsoft_teams",
+                "subject_prefix",
+                error,
+            ));
+            return None;
+        }
+    };
+
+    let stream_name = match NatsToken::new(section.stream_name) {
+        Ok(token) => token,
+        Err(error) => {
+            errors.push(ConfigValidationError::invalid_subject_token(
+                "microsoft_teams",
+                "stream_name",
+                error,
+            ));
+            return None;
+        }
+    };
+
+    let nats_ack_timeout = match NonZeroDuration::from_secs(section.nats_ack_timeout_secs) {
+        Ok(duration) => duration,
+        Err(error) => {
+            errors.push(ConfigValidationError::invalid(
+                "microsoft_teams",
+                "nats_ack_timeout_secs",
+                error,
+            ));
+            return None;
+        }
+    };
+
+    let stream_max_age = match StreamMaxAge::from_secs(section.stream_max_age_secs) {
+        Ok(age) => age,
+        Err(error) => {
+            errors.push(ConfigValidationError::invalid(
+                "microsoft_teams",
+                "stream_max_age_secs",
+                error,
+            ));
+            return None;
+        }
+    };
+
+    Some(trogon_source_microsoft_teams::MicrosoftTeamsConfig {
+        client_state,
+        subject_prefix,
+        stream_name,
+        stream_max_age,
+        nats_ack_timeout,
+    })
+}
+
 fn resolve_incidentio(
     section: IncidentioConfig,
     errors: &mut Vec<ConfigValidationError>,
@@ -1283,6 +1392,15 @@ webhook_secret = "{secret}"
         )
     }
 
+    fn microsoft_teams_toml(client_state: &str) -> String {
+        format!(
+            r#"
+[sources.microsoft_teams]
+client_state = "{client_state}"
+"#
+        )
+    }
+
     fn incidentio_toml(secret: &str) -> String {
         format!(
             r#"
@@ -1567,6 +1685,48 @@ webhook_secret = "linear-webhook-secret"
     }
 
     #[test]
+    fn microsoft_teams_resolves_with_valid_client_state() {
+        let f = write_toml(&microsoft_teams_toml("microsoft-teams-client-state"));
+        let cfg = load(Some(f.path())).expect("load failed");
+        assert!(cfg.microsoft_teams.is_some());
+    }
+
+    #[test]
+    fn microsoft_teams_disabled_returns_none() {
+        let toml = r#"
+[sources.microsoft_teams]
+status = "disabled"
+client_state = "microsoft-teams-client-state"
+"#;
+        let f = write_toml(toml);
+        let cfg = load(Some(f.path())).expect("load failed");
+        assert!(cfg.microsoft_teams.is_none());
+    }
+
+    #[test]
+    fn microsoft_teams_missing_client_state_returns_none_when_status_unspecified() {
+        let toml = r#"
+[sources.microsoft_teams]
+"#;
+        let f = write_toml(toml);
+        let cfg = load(Some(f.path())).expect("load failed");
+        assert!(cfg.microsoft_teams.is_none());
+    }
+
+    #[test]
+    fn microsoft_teams_enabled_without_client_state_is_invalid() {
+        let toml = r#"
+[sources.microsoft_teams]
+status = "enabled"
+"#;
+        let f = write_toml(toml);
+        let result = load(Some(f.path()));
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("microsoft_teams: missing client_state")))
+        );
+    }
+
+    #[test]
     fn incidentio_resolves_with_valid_secret() {
         let f = write_toml(&incidentio_toml(&incidentio_valid_test_secret()));
         let cfg = load(Some(f.path())).expect("load failed");
@@ -1836,6 +1996,34 @@ stream_max_age_secs = 0
         let result = load(Some(f.path()));
         assert!(
             matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("stream_max_age_secs must not be zero")))
+        );
+    }
+
+    #[test]
+    fn microsoft_teams_zero_nats_ack_timeout_is_error() {
+        let toml = r#"
+[sources.microsoft_teams]
+client_state = "microsoft-teams-client-state"
+nats_ack_timeout_secs = 0
+"#;
+        let f = write_toml(toml);
+        let result = load(Some(f.path()));
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("microsoft_teams: nats_ack_timeout_secs must not be zero")))
+        );
+    }
+
+    #[test]
+    fn microsoft_teams_zero_stream_max_age_is_error() {
+        let toml = r#"
+[sources.microsoft_teams]
+client_state = "microsoft-teams-client-state"
+stream_max_age_secs = 0
+"#;
+        let f = write_toml(toml);
+        let result = load(Some(f.path()));
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("microsoft_teams: stream_max_age_secs must not be zero")))
         );
     }
 
@@ -2202,6 +2390,15 @@ port = 9090
     }
 
     #[test]
+    fn microsoft_teams_empty_client_state_is_invalid() {
+        let f = write_toml(&microsoft_teams_toml(""));
+        let result = load(Some(f.path()));
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("microsoft_teams: invalid client_state")))
+        );
+    }
+
+    #[test]
     fn incidentio_empty_secret_is_invalid() {
         let f = write_toml(&incidentio_toml(""));
         let result = load(Some(f.path()));
@@ -2331,6 +2528,20 @@ subject_prefix = "has.dots"
     }
 
     #[test]
+    fn microsoft_teams_invalid_subject_prefix() {
+        let toml = r#"
+[sources.microsoft_teams]
+client_state = "microsoft-teams-client-state"
+subject_prefix = "has.dots"
+"#;
+        let f = write_toml(toml);
+        let result = load(Some(f.path()));
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("microsoft_teams: invalid subject_prefix")))
+        );
+    }
+
+    #[test]
     fn incidentio_invalid_subject_prefix() {
         let toml = format!(
             r#"
@@ -2442,6 +2653,20 @@ stream_name = "has.dots"
         let result = load(Some(f.path()));
         assert!(
             matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("stream_name")))
+        );
+    }
+
+    #[test]
+    fn microsoft_teams_invalid_stream_name() {
+        let toml = r#"
+[sources.microsoft_teams]
+client_state = "microsoft-teams-client-state"
+stream_name = "has.dots"
+"#;
+        let f = write_toml(toml);
+        let result = load(Some(f.path()));
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("microsoft_teams: invalid stream_name")))
         );
     }
 
