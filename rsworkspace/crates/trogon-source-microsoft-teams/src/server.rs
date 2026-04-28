@@ -376,12 +376,11 @@ fn graph_resource_kind(raw: &str) -> Option<&'static str> {
     const GRAPH_NAMESPACE: &str = "microsoft.graph.";
 
     let raw = raw.trim().trim_start_matches('#');
-    let graph_type =
-        if raw.len() >= GRAPH_NAMESPACE.len() && raw[..GRAPH_NAMESPACE.len()].eq_ignore_ascii_case(GRAPH_NAMESPACE) {
-            &raw[GRAPH_NAMESPACE.len()..]
-        } else {
-            raw
-        };
+    let graph_type = raw
+        .get(..GRAPH_NAMESPACE.len())
+        .filter(|prefix| prefix.eq_ignore_ascii_case(GRAPH_NAMESPACE))
+        .and_then(|_| raw.get(GRAPH_NAMESPACE.len()..))
+        .unwrap_or(raw);
 
     match graph_type.to_ascii_lowercase().as_str() {
         "aaduserconversationmember" => Some("aad_user_conversation_member"),
@@ -910,6 +909,7 @@ mod tests {
         assert_eq!(graph_resource_kind("#Microsoft.Graph.Team"), Some("team"));
         assert_eq!(graph_resource_kind("#Microsoft.Graph.Teams"), Some("team"));
         assert_eq!(graph_resource_kind("#Microsoft.Graph.todoTask"), None);
+        assert_eq!(graph_resource_kind("Microsoft.Graphé.chatMessage"), None);
         assert_eq!(graph_resource_kind("#Microsoft.Graph."), None);
     }
 }
