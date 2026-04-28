@@ -3,9 +3,9 @@ use std::fmt;
 use async_nats::jetstream::{self, kv};
 use serde::{Serialize, de::DeserializeOwned};
 
-use crate::nats::snapshot_store::{SnapshotStoreError, load_snapshot, persist_snapshot_change};
-use crate::nats::streams::{StreamStoreError, append_stream, read_subject_from};
-use crate::snapshot::{Snapshot, SnapshotChange, SnapshotStoreConfig};
+use crate::nats::snapshot_store::SnapshotStoreError;
+use crate::nats::streams::{StreamStoreError, append_stream as append_subject_stream, read_subject_stream};
+use crate::snapshot::{Snapshot, SnapshotStoreConfig};
 use crate::{
     AppendOutcome, EventData, NonEmpty, SnapshotRead, SnapshotWrite, StreamAppend, StreamRead, StreamReadResult,
     StreamState,
@@ -131,7 +131,7 @@ impl<Resolver> JetStreamStore<Resolver> {
         &self.snapshot_bucket
     }
 
-    pub async fn read_events_from<StreamId>(
+    pub async fn read_stream<StreamId>(
         &self,
         stream_id: &StreamId,
         from_sequence: u64,
@@ -146,7 +146,7 @@ impl<Resolver> JetStreamStore<Resolver> {
             .await
             .map_err(JetStreamStoreError::ResolveSubject)?;
         let current_version = subject_state.current_version;
-        let events = read_subject_from(self.events_stream(), &subject_state.subject, from_sequence)
+        let events = read_subject_stream(self.events_stream(), &subject_state.subject, from_sequence)
             .await
             .map_err(JetStreamStoreError::ReadStream)?
             .into_iter()
@@ -162,7 +162,7 @@ impl<Resolver> JetStreamStore<Resolver> {
         })
     }
 
-    pub async fn append_to_stream<StreamId>(
+    pub async fn append_stream<StreamId>(
         &self,
         stream_id: &StreamId,
         expected_state: StreamState,
@@ -187,7 +187,7 @@ impl<Resolver> JetStreamStore<Resolver> {
         let expected_last_subject_sequence =
             resolve_expected_last_subject_sequence(stream_id, expected_state, current_version)?;
 
-        let next_expected_version = append_stream(
+        let next_expected_version = append_subject_stream(
             self.as_jetstream(),
             subject_state.subject,
             expected_last_subject_sequence,
@@ -206,7 +206,7 @@ impl<Resolver> JetStreamStore<Resolver> {
         Ok(AppendOutcome { next_expected_version })
     }
 
-    pub async fn load_snapshot_entry<StreamId, Payload>(
+    pub async fn read_snapshot<StreamId, Payload>(
         &self,
         config: SnapshotStoreConfig,
         stream_id: &StreamId,
@@ -216,12 +216,12 @@ impl<Resolver> JetStreamStore<Resolver> {
         Payload: Serialize + DeserializeOwned + Send,
         Resolver: StreamSubjectResolver<StreamId>,
     {
-        load_snapshot(self.snapshot_bucket(), &config, stream_id.as_ref())
+        crate::nats::snapshot_store::read_snapshot(self.snapshot_bucket(), &config, stream_id.as_ref())
             .await
             .map_err(JetStreamStoreError::Snapshot)
     }
 
-    pub async fn save_snapshot_entry<StreamId, Payload>(
+    pub async fn write_snapshot<StreamId, Payload>(
         &self,
         config: SnapshotStoreConfig,
         stream_id: &StreamId,
@@ -232,13 +232,9 @@ impl<Resolver> JetStreamStore<Resolver> {
         Payload: Serialize + DeserializeOwned + Send,
         Resolver: StreamSubjectResolver<StreamId>,
     {
-        persist_snapshot_change(
-            self.snapshot_bucket(),
-            &config,
-            SnapshotChange::upsert(stream_id.as_ref(), snapshot),
-        )
-        .await
-        .map_err(JetStreamStoreError::Snapshot)
+        crate::nats::snapshot_store::write_snapshot(self.snapshot_bucket(), &config, stream_id.as_ref(), snapshot)
+            .await
+            .map_err(JetStreamStoreError::Snapshot)
     }
 }
 
@@ -292,12 +288,8 @@ where
 {
     type Error = JetStreamStoreError<Resolver::Error>;
 
-    async fn read_stream_from(
-        &self,
-        stream_id: &StreamId,
-        from_sequence: u64,
-    ) -> Result<StreamReadResult, Self::Error> {
-        self.read_events_from(stream_id, from_sequence).await
+    async fn read_stream(&self, stream_id: &StreamId, from_sequence: u64) -> Result<StreamReadResult, Self::Error> {
+        JetStreamStore::read_stream(self, stream_id, from_sequence).await
     }
 }
 
@@ -308,13 +300,13 @@ where
 {
     type Error = JetStreamStoreError<Resolver::Error>;
 
-    async fn append_events(
+    async fn append_stream(
         &self,
         stream_id: &StreamId,
         expected_state: StreamState,
         events: NonEmpty<EventData>,
     ) -> Result<AppendOutcome, Self::Error> {
-        self.append_to_stream(stream_id, expected_state, events).await
+        JetStreamStore::append_stream(self, stream_id, expected_state, events).await
     }
 }
 
@@ -326,12 +318,14 @@ where
 {
     type Error = JetStreamStoreError<Resolver::Error>;
 
-    async fn load_snapshot(
+    async fn read_snapshot(
         &self,
         config: SnapshotStoreConfig,
         stream_id: &StreamId,
     ) -> Result<Option<Snapshot<Payload>>, Self::Error> {
-        self.load_snapshot_entry(config, stream_id).await
+        crate::nats::snapshot_store::read_snapshot(self.snapshot_bucket(), &config, stream_id.as_ref())
+            .await
+            .map_err(JetStreamStoreError::Snapshot)
     }
 }
 
@@ -343,12 +337,14 @@ where
 {
     type Error = JetStreamStoreError<Resolver::Error>;
 
-    async fn save_snapshot(
+    async fn write_snapshot(
         &self,
         config: SnapshotStoreConfig,
         stream_id: &StreamId,
         snapshot: Snapshot<Payload>,
     ) -> Result<(), Self::Error> {
-        self.save_snapshot_entry(config, stream_id, snapshot).await
+        crate::nats::snapshot_store::write_snapshot(self.snapshot_bucket(), &config, stream_id.as_ref(), snapshot)
+            .await
+            .map_err(JetStreamStoreError::Snapshot)
     }
 }
