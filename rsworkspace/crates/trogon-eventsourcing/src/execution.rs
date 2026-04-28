@@ -12,13 +12,15 @@ pub enum SnapshotDecision {
     Take,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct SnapshotDecisionContext<'a, State, Event> {
+    pub next_expected_version: u64,
+    pub state: &'a State,
+    pub events: &'a NonEmpty<Event>,
+}
+
 pub trait SnapshotPolicy<State, Event> {
-    fn snapshot_decision(
-        &self,
-        next_expected_version: u64,
-        state: &State,
-        events: &NonEmpty<Event>,
-    ) -> SnapshotDecision;
+    fn snapshot_decision(&self, context: SnapshotDecisionContext<'_, State, Event>) -> SnapshotDecision;
 }
 
 pub trait CommandSnapshotPolicy: Decide
@@ -42,12 +44,7 @@ where
 pub struct NoSnapshot;
 
 impl<State, Event> SnapshotPolicy<State, Event> for NoSnapshot {
-    fn snapshot_decision(
-        &self,
-        _next_expected_version: u64,
-        _state: &State,
-        _events: &NonEmpty<Event>,
-    ) -> SnapshotDecision {
+    fn snapshot_decision(&self, _context: SnapshotDecisionContext<'_, State, Event>) -> SnapshotDecision {
         SnapshotDecision::Skip
     }
 }
@@ -68,13 +65,8 @@ impl FrequencySnapshot {
 }
 
 impl<State, Event> SnapshotPolicy<State, Event> for FrequencySnapshot {
-    fn snapshot_decision(
-        &self,
-        next_expected_version: u64,
-        _state: &State,
-        _events: &NonEmpty<Event>,
-    ) -> SnapshotDecision {
-        if next_expected_version.is_multiple_of(self.frequency.get()) {
+    fn snapshot_decision(&self, context: SnapshotDecisionContext<'_, State, Event>) -> SnapshotDecision {
+        if context.next_expected_version.is_multiple_of(self.frequency.get()) {
             SnapshotDecision::Take
         } else {
             SnapshotDecision::Skip
@@ -439,9 +431,11 @@ where
         }
 
         if matches!(
-            self.snapshots
-                .policy
-                .snapshot_decision(append_outcome.next_expected_version, &state, &events,),
+            self.snapshots.policy.snapshot_decision(SnapshotDecisionContext {
+                next_expected_version: append_outcome.next_expected_version,
+                state: &state,
+                events: &events,
+            }),
             SnapshotDecision::Take
         ) {
             self.snapshots
