@@ -285,26 +285,31 @@ where
         let req = serde_json::from_slice::<ApproveRequest>(payload)
             .map_err(|e| ApprovalError::Serialize(e.to_string()))?;
 
-        let mut entry = match this.proposals.get_mut(&req.proposal_id) {
-            Some(e) => e,
-            None => {
+        // Extract what we need and release the lock BEFORE any async IO.
+        // DashMap's RefMut holds a write-lock on its shard; keeping it across
+        // an await blocks serve_status's concurrent proposals.get() reads.
+        let credential_key = {
+            let entry = match this.proposals.get(&req.proposal_id) {
+                Some(e) => e,
+                None => {
+                    tracing::warn!(
+                        proposal_id = %req.proposal_id,
+                        "vault-approvals: approve for unknown proposal, ignoring"
+                    );
+                    return Ok(());
+                }
+            };
+            if !matches!(entry.status, ProposalStatus::Pending) {
                 tracing::warn!(
                     proposal_id = %req.proposal_id,
-                    "vault-approvals: approve for unknown proposal, ignoring"
+                    "vault-approvals: approve for non-pending proposal, ignoring"
                 );
                 return Ok(());
             }
-        };
+            entry.credential_key.clone()
+        }; // read lock released here
 
-        if !matches!(entry.status, ProposalStatus::Pending) {
-            tracing::warn!(
-                proposal_id = %req.proposal_id,
-                "vault-approvals: approve for non-pending proposal, ignoring"
-            );
-            return Ok(());
-        }
-
-        let token = ApiKeyToken::new(&entry.credential_key)
+        let token = ApiKeyToken::new(&credential_key)
             .map_err(|e| ApprovalError::Vault(e.to_string()))?;
 
         this.vault
@@ -312,6 +317,14 @@ where
             .await
             .map_err(|e| ApprovalError::Vault(e.to_string()))?;
 
+        // Re-acquire as write to update status; guard against concurrent approvals.
+        let mut entry = match this.proposals.get_mut(&req.proposal_id) {
+            Some(e) => e,
+            None    => return Ok(()),
+        };
+        if !matches!(entry.status, ProposalStatus::Pending) {
+            return Ok(());
+        }
         entry.status = ProposalStatus::Approved { approved_by: req.approved_by.clone() };
 
         let proposal_snapshot = entry.clone();
