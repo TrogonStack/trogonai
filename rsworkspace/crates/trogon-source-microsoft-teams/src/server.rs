@@ -373,20 +373,27 @@ fn attach_validation_tokens(notification: &mut Value, tokens: &[String]) {
 }
 
 fn graph_resource_kind(raw: &str) -> Option<&'static str> {
-    let raw = raw.trim().trim_start_matches('#');
-    let graph_type = raw.strip_prefix("Microsoft.Graph.").unwrap_or(raw);
+    const GRAPH_NAMESPACE: &str = "microsoft.graph.";
 
-    match graph_type {
-        "aadUserConversationMember" => Some("aad_user_conversation_member"),
-        "callRecording" => Some("call_recording"),
-        "callTranscript" => Some("call_transcript"),
+    let raw = raw.trim().trim_start_matches('#');
+    let graph_type =
+        if raw.len() >= GRAPH_NAMESPACE.len() && raw[..GRAPH_NAMESPACE.len()].eq_ignore_ascii_case(GRAPH_NAMESPACE) {
+            &raw[GRAPH_NAMESPACE.len()..]
+        } else {
+            raw
+        };
+
+    match graph_type.to_ascii_lowercase().as_str() {
+        "aaduserconversationmember" => Some("aad_user_conversation_member"),
+        "callrecording" => Some("call_recording"),
+        "calltranscript" => Some("call_transcript"),
         "channel" => Some("channel"),
         "chat" => Some("chat"),
-        "chatMessage" => Some("chat_message"),
-        "conversationMember" => Some("conversation_member"),
-        "onlineMeeting" => Some("online_meeting"),
+        "chatmessage" => Some("chat_message"),
+        "conversationmember" => Some("conversation_member"),
+        "onlinemeeting" => Some("online_meeting"),
         "presence" => Some("presence"),
-        "team" => Some("team"),
+        "team" | "teams" => Some("team"),
         _ => None,
     }
 }
@@ -878,9 +885,14 @@ mod tests {
             Some("call_transcript")
         );
         assert_eq!(graph_resource_kind("#Microsoft.Graph.channel"), Some("channel"));
+        assert_eq!(graph_resource_kind("#Microsoft.Graph.Channel"), Some("channel"));
         assert_eq!(graph_resource_kind("#Microsoft.Graph.chat"), Some("chat"));
         assert_eq!(
             graph_resource_kind("#Microsoft.Graph.chatMessage"),
+            Some("chat_message")
+        );
+        assert_eq!(
+            graph_resource_kind("#Microsoft.Graph.ChatMessage"),
             Some("chat_message")
         );
         assert_eq!(graph_resource_kind("chatMessage"), Some("chat_message"));
@@ -895,6 +907,8 @@ mod tests {
         );
         assert_eq!(graph_resource_kind("#Microsoft.Graph.presence"), Some("presence"));
         assert_eq!(graph_resource_kind("#Microsoft.Graph.team"), Some("team"));
+        assert_eq!(graph_resource_kind("#Microsoft.Graph.Team"), Some("team"));
+        assert_eq!(graph_resource_kind("#Microsoft.Graph.Teams"), Some("team"));
         assert_eq!(graph_resource_kind("#Microsoft.Graph.todoTask"), None);
         assert_eq!(graph_resource_kind("#Microsoft.Graph."), None);
     }
