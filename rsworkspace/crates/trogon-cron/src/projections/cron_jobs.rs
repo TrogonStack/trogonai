@@ -9,7 +9,6 @@ use async_nats::jetstream::{
     kv,
 };
 use futures::{Stream, StreamExt, future};
-use trogon_eventsourcing::nats::jetstream::AppendProjector;
 use trogon_eventsourcing::snapshot::{Snapshot, SnapshotChange};
 use trogon_eventsourcing::{
     EventData, RecordedEvent, load_snapshot, load_snapshot_map, maybe_advance_checkpoint, persist_snapshot_change,
@@ -31,23 +30,6 @@ use crate::{
 
 pub type CronJobWatchStream = Pin<Box<dyn Stream<Item = CronJobChange> + Send + 'static>>;
 pub type LoadAndWatchCronJobsResult = Result<(Vec<CronJob>, CronJobWatchStream), CronError>;
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct CronJobSnapshotProjector;
-
-impl AppendProjector<str> for CronJobSnapshotProjector {
-    type Error = CronError;
-
-    async fn project_appended(
-        &self,
-        snapshot_bucket: &kv::Store,
-        stream_id: &str,
-        events: &[EventData],
-        next_expected_version: u64,
-    ) -> Result<(), Self::Error> {
-        project_appended_events(snapshot_bucket, stream_id, events, next_expected_version).await
-    }
-}
 
 #[derive(Debug, Clone)]
 pub enum CronJobChange {
