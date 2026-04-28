@@ -300,8 +300,6 @@ async fn publish_notification<P: JetStreamPublisher, S: ObjectStorePut>(
 
     let mut headers = async_nats::HeaderMap::new();
     metadata.apply_headers(&mut headers);
-    headers.insert(NATS_HEADER_RESOURCE_TYPE, resource_kind);
-    headers.insert(NATS_HEADER_CHANGE_TYPE, change_type.as_str());
 
     let outcome = state
         .publisher
