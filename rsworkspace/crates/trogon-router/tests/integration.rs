@@ -480,3 +480,74 @@ async fn router_prompt_contains_live_registry_data() {
         "prompt should include event type"
     );
 }
+
+/// When the router is started with multiple subjects, events published on any
+/// of them are received and routed — each subject is subscribed independently.
+#[tokio::test]
+async fn router_receives_events_from_multiple_subjects() {
+    let (nats, js, js_client, _container) = setup().await;
+
+    let store = provision_registry(&js).await.unwrap();
+    let registry = Registry::new(store);
+    registry.register(&pr_actor()).await.unwrap();
+
+    let mut actor_sub = nats.subscribe("actors.pr.>").await.unwrap();
+
+    let llm = MockLlmClient::new();
+    llm.push_response(LlmRoutingResponse::Routed {
+        agent_type: "PrActor".into(),
+        entity_key: "org/repo/1".into(),
+        reasoning: "github event".into(),
+    });
+    llm.push_response(LlmRoutingResponse::Routed {
+        agent_type: "PrActor".into(),
+        entity_key: "org/repo/2".into(),
+        reasoning: "linear event".into(),
+    });
+
+    let publisher = MockTranscriptPublisher::new();
+    let router = Router::new(llm, registry, publisher, nats.clone(), js_client);
+
+    let router_handle = tokio::spawn(async move {
+        router.run(&["github.>", "linear.>"]).await.ok();
+    });
+
+    // Let router subscribe before publishing.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    nats.publish(
+        "github.pull_request",
+        Bytes::from_static(br#"{"action":"opened","number":1}"#),
+    )
+    .await
+    .unwrap();
+    nats.publish(
+        "linear.issue",
+        Bytes::from_static(br#"{"type":"Issue","action":"create"}"#),
+    )
+    .await
+    .unwrap();
+
+    let msg1 = tokio::time::timeout(Duration::from_secs(3), actor_sub.next())
+        .await
+        .expect("timed out waiting for first actor message")
+        .expect("subscription ended");
+    let msg2 = tokio::time::timeout(Duration::from_secs(3), actor_sub.next())
+        .await
+        .expect("timed out waiting for second actor message")
+        .expect("subscription ended");
+
+    assert!(
+        msg1.subject.as_str().starts_with("actors.pr."),
+        "first event must be routed to actor"
+    );
+    assert!(
+        msg2.subject.as_str().starts_with("actors.pr."),
+        "second event must be routed to actor"
+    );
+    assert_ne!(
+        msg1.subject, msg2.subject,
+        "events from different subjects must produce distinct routing keys"
+    );
+
+    router_handle.abort();
+}

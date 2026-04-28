@@ -1477,3 +1477,156 @@ async fn send_message_injects_skill_content_into_system_prompt() {
     assert_eq!(res["content"], "skills received");
     skill_mock.assert_hits_async(1).await;
 }
+
+// ── Compactor wiring ──────────────────────────────────────────────────────────
+
+/// Build a TestEnv with `compactor_nats` wired and return the bare NATS client
+/// so the test can stand up a fake compactor subscriber.
+async fn start_with_compactor_nats() -> (TestEnv, async_nats::Client) {
+    let container = Nats::default()
+        .with_cmd(["--jetstream"])
+        .start()
+        .await
+        .expect("NATS container");
+    let port = container.get_host_port_ipv4(4222).await.expect("port");
+    let nats = async_nats::connect(format!("nats://127.0.0.1:{port}"))
+        .await
+        .expect("NATS connect");
+    let js = jetstream::new(nats.clone());
+    let session_store = SessionStore::open(&js).await.expect("SessionStore");
+
+    let mock_server = MockServer::start_async().await;
+    let http = reqwest::Client::new();
+    let tool_ctx = Arc::new(ToolContext::new(
+        http.clone(),
+        mock_server.base_url(),
+        "tok_g".to_string(),
+        "tok_l".to_string(),
+        String::new(),
+    ));
+    let agent = Arc::new(AgentLoop {
+        anthropic_client: Arc::new(ReqwestAnthropicClient::new(
+            http,
+            mock_server.base_url(),
+            "tok_a".to_string(),
+        )),
+        model: "claude-opus-4-6".to_string(),
+        max_iterations: 5,
+        tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),
+        tool_context: tool_ctx,
+        memory_owner: None,
+        memory_repo: None,
+        memory_path: None,
+        mcp_tool_defs: vec![],
+        mcp_dispatch: vec![],
+        flag_client: Arc::new(AlwaysOnFlagClient),
+        tenant_id: "test".to_string(),
+        promise_store: None,
+        promise_id: None,
+    });
+
+    let state = ChatAppState {
+        agent,
+        session_store,
+        promise_store: Arc::new(NoOpPromiseStore),
+        agent_id: None,
+        agent_loader: None,
+        skill_loader: None,
+        compactor_nats: Some(nats.clone()),
+    };
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    tokio::spawn(async move { axum::serve(listener, router(state)).await.expect("server") });
+
+    let env = TestEnv {
+        base_url: format!("http://{addr}"),
+        client: Client::new(),
+        mock_server,
+        _nats: Box::new(container),
+    };
+    (env, nats)
+}
+
+/// When `compactor_nats` is wired, `send_message` must publish a request to
+/// `trogon.compactor.compact` on every turn and honour the reply.
+#[tokio::test]
+async fn send_message_calls_compactor_when_wired() {
+    use futures_util::StreamExt;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+
+    let (env, nats) = start_with_compactor_nats().await;
+
+    // Fake compactor: echo messages back unchanged, set `called` flag.
+    let called = Arc::new(AtomicBool::new(false));
+    let called2 = Arc::clone(&called);
+    let nats2 = nats.clone();
+    tokio::spawn(async move {
+        let mut sub = nats2
+            .subscribe("trogon.compactor.compact")
+            .await
+            .expect("subscribe to compactor subject");
+        if let Some(msg) = sub.next().await {
+            called2.store(true, Ordering::SeqCst);
+            if let Some(reply) = msg.reply {
+                let req: serde_json::Value =
+                    serde_json::from_slice(&msg.payload).unwrap_or_default();
+                let resp = serde_json::json!({
+                    "messages": req.get("messages").cloned().unwrap_or(serde_json::json!([])),
+                    "compacted": false,
+                    "tokens_before": 0,
+                    "tokens_after": 0
+                });
+                nats2
+                    .publish(reply, serde_json::to_vec(&resp).unwrap().into())
+                    .await
+                    .ok();
+            }
+        }
+    });
+
+    // Give the subscriber time to register before the API call.
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    env.mock_server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(end_turn("hi"));
+    });
+
+    let created: Value = env
+        .client
+        .post(format!("{}/sessions", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = created["id"].as_str().unwrap();
+
+    let res = env
+        .client
+        .post(format!("{}/sessions/{id}/messages", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({"content": "hello"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200, "send_message must succeed");
+
+    // Brief pause for the NATS round-trip to complete.
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+    assert!(
+        called.load(Ordering::SeqCst),
+        "compactor must receive a NATS request when compactor_nats is wired"
+    );
+}
