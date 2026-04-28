@@ -141,7 +141,6 @@ pub trait JetStreamConsumer: Send + Sync + 'static {
 pub type JsMessageOf<J> =
     <<<J as JetStreamGetStream>::Stream as JetStreamCreateConsumer>::Consumer as JetStreamConsumer>::Message;
 
-#[cfg(not(coverage))]
 impl JetStreamKeyValueStatus for jetstream::kv::Store {
     fn status(
         &self,
@@ -150,28 +149,24 @@ impl JetStreamKeyValueStatus for jetstream::kv::Store {
     }
 }
 
-#[cfg(not(coverage))]
 impl JetStreamKeyValueCreateWithTtl for jetstream::kv::Store {
     async fn create_with_ttl(&self, key: &str, value: Bytes, ttl: std::time::Duration) -> Result<u64, kv::CreateError> {
         self.create_with_ttl(key, value, ttl).await
     }
 }
 
-#[cfg(not(coverage))]
 impl JetStreamKeyValueUpdate for jetstream::kv::Store {
     async fn update(&self, key: &str, value: Bytes, revision: u64) -> Result<u64, kv::UpdateError> {
         self.update(key, value, revision).await
     }
 }
 
-#[cfg(not(coverage))]
 impl JetStreamKeyValueDeleteExpectRevision for jetstream::kv::Store {
     async fn delete_expect_revision(&self, key: &str, revision: Option<u64>) -> Result<(), kv::DeleteError> {
         self.delete_expect_revision(key, revision).await
     }
 }
 
-#[cfg(not(coverage))]
 impl JetStreamCreateKeyValue for jetstream::Context {
     type Store = kv::Store;
 
@@ -183,7 +178,6 @@ impl JetStreamCreateKeyValue for jetstream::Context {
     }
 }
 
-#[cfg(not(coverage))]
 impl JetStreamGetKeyValue for jetstream::Context {
     type Store = kv::Store;
 
@@ -195,7 +189,6 @@ impl JetStreamGetKeyValue for jetstream::Context {
     }
 }
 
-#[cfg(not(coverage))]
 impl JetStreamPublisher for jetstream::Context {
     type PublishError = context::PublishError;
     type AckFuture = context::PublishAckFuture;
@@ -210,7 +203,6 @@ impl JetStreamPublisher for jetstream::Context {
     }
 }
 
-#[cfg(not(coverage))]
 impl JetStreamPublishMessage for jetstream::Context {
     type PublishError = context::PublishError;
     type AckFuture = context::PublishAckFuture;
