@@ -1,20 +1,10 @@
-use serde::{Deserialize, Serialize};
 use trogon_cron_jobs_proto::v1;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq)]
 pub enum JobEventSchedule {
-    At {
-        at: chrono::DateTime<chrono::Utc>,
-    },
-    Every {
-        every_sec: u64,
-    },
-    Cron {
-        expr: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        timezone: Option<String>,
-    },
+    At { at: chrono::DateTime<chrono::Utc> },
+    Every { every_sec: u64 },
+    Cron { expr: String, timezone: Option<String> },
 }
 
 impl From<&JobEventSchedule> for v1::JobSchedule {
