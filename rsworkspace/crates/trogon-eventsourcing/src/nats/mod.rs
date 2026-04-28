@@ -3,8 +3,7 @@ pub mod snapshot_store;
 pub mod streams;
 
 pub use jetstream::{
-    AppendProjector, JetStreamStore, JetStreamStoreError, NoAppendProjection, StreamSubjectResolver, SubjectState,
-    subject_current_version,
+    JetStreamStore, JetStreamStoreError, StreamSubjectResolver, SubjectState, subject_current_version,
 };
 pub use snapshot_store::{
     SnapshotStoreError, checkpoint_key, list_snapshots, load_snapshot, load_snapshot_map, maybe_advance_checkpoint,

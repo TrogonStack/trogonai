@@ -1,10 +1,4 @@
-use std::{
-    convert::Infallible,
-    error::Error,
-    num::NonZeroU64,
-    sync::{Arc, Mutex},
-    time::Duration,
-};
+use std::{convert::Infallible, error::Error, num::NonZeroU64, time::Duration};
 
 use async_nats::{
     HeaderMap,
@@ -15,8 +9,7 @@ use futures::future::join_all;
 use serde::{Deserialize, Serialize};
 use trogon_eventsourcing::list_snapshots;
 use trogon_eventsourcing::nats::{
-    AppendProjector, JetStreamStore, JetStreamStoreError, NoAppendProjection, StreamSubjectResolver, SubjectState,
-    subject_current_version,
+    JetStreamStore, JetStreamStoreError, StreamSubjectResolver, SubjectState, subject_current_version,
 };
 use trogon_eventsourcing::{
     AppendOutcome, CanonicalEventCodec, CommandExecution, CommandFailure, CommandInfraError, Decide, Decision,
@@ -32,7 +25,7 @@ use uuid::Uuid;
 const TEST_TIMEOUT: Duration = Duration::from_secs(10);
 
 type TestResult<T = ()> = Result<T, Box<dyn Error + Send + Sync>>;
-type TestStore<P = NoAppendProjection<std::io::Error>> = JetStreamStore<TestSubjectResolver, P>;
+type TestStore = JetStreamStore<TestSubjectResolver>;
 
 #[derive(Debug, Clone)]
 struct TestSubjectResolver {
@@ -143,97 +136,24 @@ impl Decide for IncreaseCounterCommand {
     }
 }
 
-#[derive(Debug, Clone, Default)]
-struct RecordingProjection {
-    projected: Arc<Mutex<Vec<ProjectedAppend>>>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ProjectedAppend {
-    stream_id: String,
-    event_count: usize,
-    next_expected_version: u64,
-}
-
-impl RecordingProjection {
-    fn projected(&self) -> TestResult<Vec<ProjectedAppend>> {
-        self.projected
-            .lock()
-            .map(|projected| projected.clone())
-            .map_err(|_| std::io::Error::other("projection lock poisoned").into())
-    }
-}
-
-impl AppendProjector<str> for RecordingProjection {
-    type Error = std::io::Error;
-
-    async fn project_appended(
-        &self,
-        _snapshot_bucket: &kv::Store,
-        stream_id: &str,
-        events: &[EventData],
-        next_expected_version: u64,
-    ) -> Result<(), Self::Error> {
-        let mut projected = self
-            .projected
-            .lock()
-            .map_err(|_| std::io::Error::other("projection lock poisoned"))?;
-        projected.push(ProjectedAppend {
-            stream_id: stream_id.to_string(),
-            event_count: events.len(),
-            next_expected_version,
-        });
-        Ok(())
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct FailingProjection;
-
-impl AppendProjector<str> for FailingProjection {
-    type Error = std::io::Error;
-
-    async fn project_appended(
-        &self,
-        _snapshot_bucket: &kv::Store,
-        _stream_id: &str,
-        _events: &[EventData],
-        _next_expected_version: u64,
-    ) -> Result<(), Self::Error> {
-        Err(std::io::Error::other("projection failed"))
-    }
-}
-
-struct JetStreamFixture<P = NoAppendProjection<std::io::Error>> {
+struct JetStreamFixture {
     js: jetstream::Context,
     stream_name: String,
     bucket_name: String,
     subject_prefix: String,
-    store: TestStore<P>,
+    store: TestStore,
 }
 
-impl JetStreamFixture<NoAppendProjection<std::io::Error>> {
+impl JetStreamFixture {
     async fn new() -> TestResult<Self> {
-        Self::new_with_projector(NoAppendProjection::<std::io::Error>::default()).await
+        Self::new_with_atomic_publish(true).await
     }
 
     async fn without_atomic_publish() -> TestResult<Self> {
-        Self::new_with_projector_and_atomic_publish(NoAppendProjection::<std::io::Error>::default(), false).await
-    }
-}
-
-impl<P> JetStreamFixture<P>
-where
-    P: AppendProjector<str, Error = std::io::Error>,
-{
-    async fn new_with_projector(append_projector: P) -> TestResult<Self> {
-        Self::new_with_projector_and_atomic_publish(append_projector, true).await
+        Self::new_with_atomic_publish(false).await
     }
 
-    async fn new_with_projector_and_atomic_publish(
-        append_projector: P,
-        allow_atomic_publish: bool,
-    ) -> TestResult<Self> {
+    async fn new_with_atomic_publish(allow_atomic_publish: bool) -> TestResult<Self> {
         let client = tokio::time::timeout(TEST_TIMEOUT, async_nats::connect(nats_test_url()))
             .await
             .map_err(|source| std::io::Error::other(format!("timed out connecting to NATS: {source}")))??;
@@ -264,7 +184,6 @@ where
             TestSubjectResolver {
                 prefix: subject_prefix.clone(),
             },
-            append_projector,
         );
 
         Ok(Self {
@@ -323,29 +242,23 @@ where
     std::io::Error::other(format!("{error:?}"))
 }
 
-async fn append_one<P>(
-    store: &TestStore<P>,
+async fn append_one(
+    store: &TestStore,
     stream_id: &str,
     stream_state: StreamState,
     value: impl Into<String>,
-) -> Result<AppendOutcome, JetStreamStoreError<std::io::Error>>
-where
-    P: AppendProjector<str, Error = std::io::Error>,
-{
+) -> Result<AppendOutcome, JetStreamStoreError<std::io::Error>> {
     store
         .append_to_stream(stream_id, stream_state, NonEmpty::one(test_event(stream_id, value)?))
         .await
 }
 
-async fn append_many<P>(
-    store: &TestStore<P>,
+async fn append_many(
+    store: &TestStore,
     stream_id: &str,
     stream_state: StreamState,
     values: Vec<String>,
-) -> Result<AppendOutcome, JetStreamStoreError<std::io::Error>>
-where
-    P: AppendProjector<str, Error = std::io::Error>,
-{
+) -> Result<AppendOutcome, JetStreamStoreError<std::io::Error>> {
     let mut events = Vec::with_capacity(values.len());
     for value in values {
         events.push(test_event(stream_id, value)?);
@@ -381,13 +294,6 @@ fn assert_append_publish_error(result: Result<AppendOutcome, JetStreamStoreError
     match result {
         Err(JetStreamStoreError::AppendStream(StreamStoreError::Publish { .. })) => Ok(()),
         other => Err(std::io::Error::other(format!("expected append publish error, got {other:?}")).into()),
-    }
-}
-
-fn assert_project_append_error(result: Result<AppendOutcome, JetStreamStoreError<std::io::Error>>) -> TestResult {
-    match result {
-        Err(JetStreamStoreError::ProjectAppend(_)) => Ok(()),
-        other => Err(std::io::Error::other(format!("expected project append error, got {other:?}")).into()),
     }
 }
 
@@ -993,154 +899,6 @@ async fn jetstream_store_rejects_unsupported_append_batches() -> TestResult {
     let read = fixture.store.read_events_from("alpha", 1).await?;
     assert_eq!(read.current_version, None);
     assert!(read.events.is_empty());
-
-    fixture.delete().await
-}
-
-#[tokio::test]
-#[ignore = "requires actual NATS JetStream"]
-async fn jetstream_store_runs_append_projector_after_successful_append() -> TestResult {
-    let projector = RecordingProjection::default();
-    let fixture = JetStreamFixture::new_with_projector(projector.clone()).await?;
-
-    let outcome = append_one(&fixture.store, "alpha", StreamState::NoStream, "created").await?;
-    assert_eq!(outcome.next_expected_version, 1);
-    assert_eq!(
-        projector.projected()?,
-        vec![ProjectedAppend {
-            stream_id: "alpha".to_string(),
-            event_count: 1,
-            next_expected_version: 1,
-        }]
-    );
-
-    let conflict = append_one(&fixture.store, "alpha", StreamState::NoStream, "duplicate").await;
-    assert_occ_conflict(conflict, StreamState::NoStream, Some(1))?;
-    assert_eq!(projector.projected()?.len(), 1);
-
-    fixture.delete().await
-}
-
-#[tokio::test]
-#[ignore = "requires actual NATS JetStream"]
-async fn jetstream_store_projects_batch_commit_sequence_after_interleaved_subjects() -> TestResult {
-    let projector = RecordingProjection::default();
-    let fixture = JetStreamFixture::new_with_projector(projector.clone()).await?;
-
-    append_one(&fixture.store, "alpha", StreamState::NoStream, "alpha-one").await?;
-    append_one(&fixture.store, "beta", StreamState::NoStream, "beta-one").await?;
-    let outcome = fixture
-        .store
-        .append_to_stream(
-            "alpha",
-            StreamState::StreamRevision(1),
-            event_batch(vec![
-                test_event("alpha", "alpha-two")?,
-                test_event("alpha", "alpha-three")?,
-            ])?,
-        )
-        .await?;
-    assert_eq!(outcome.next_expected_version, 4);
-
-    assert_eq!(
-        projector.projected()?,
-        vec![
-            ProjectedAppend {
-                stream_id: "alpha".to_string(),
-                event_count: 1,
-                next_expected_version: 1,
-            },
-            ProjectedAppend {
-                stream_id: "beta".to_string(),
-                event_count: 1,
-                next_expected_version: 2,
-            },
-            ProjectedAppend {
-                stream_id: "alpha".to_string(),
-                event_count: 2,
-                next_expected_version: 4,
-            },
-        ]
-    );
-
-    fixture.delete().await
-}
-
-#[tokio::test]
-#[ignore = "requires actual NATS JetStream"]
-async fn jetstream_store_does_not_project_rejected_appends() -> TestResult {
-    let projector = RecordingProjection::default();
-    let fixture = JetStreamFixture::new_with_projector(projector.clone()).await?;
-    let event_id = Uuid::from_u128(0x018f_8f4d_94a8_7000_8000_0000_0000_0501);
-
-    fixture
-        .store
-        .append_to_stream(
-            "alpha",
-            StreamState::NoStream,
-            NonEmpty::one(test_event_with_id("alpha", event_id, "seed")?),
-        )
-        .await?;
-    assert_eq!(projector.projected()?.len(), 1);
-
-    let stale = append_one(&fixture.store, "alpha", StreamState::StreamRevision(0), "stale").await;
-    assert_occ_conflict(stale, StreamState::StreamRevision(0), Some(1))?;
-    assert_eq!(projector.projected()?.len(), 1);
-
-    let duplicate = fixture
-        .store
-        .append_to_stream(
-            "alpha",
-            StreamState::Any,
-            NonEmpty::one(test_event_with_id("alpha", event_id, "duplicate")?),
-        )
-        .await;
-    assert_append_publish_error(duplicate)?;
-    assert_eq!(projector.projected()?.len(), 1);
-
-    let outside_target_stream = fixture
-        .store
-        .append_to_stream(
-            "beta",
-            StreamState::NoStream,
-            NonEmpty::one(test_event("gamma", "wrong-stream")?),
-        )
-        .await;
-    assert_append_publish_error(outside_target_stream)?;
-    assert_eq!(projector.projected()?.len(), 1);
-
-    let metadata_event = EventData::with_metadata_and_event_id(
-        "beta",
-        EventId::from(Uuid::new_v4()),
-        TestEvent {
-            value: "metadata".to_string(),
-        },
-        Some(TestSnapshot {
-            value: "metadata".to_string(),
-        }),
-    )?;
-    let metadata = fixture
-        .store
-        .append_to_stream("beta", StreamState::NoStream, NonEmpty::one(metadata_event))
-        .await;
-    assert_append_publish_error(metadata)?;
-    assert_eq!(projector.projected()?.len(), 1);
-
-    fixture.delete().await
-}
-
-#[tokio::test]
-#[ignore = "requires actual NATS JetStream"]
-async fn jetstream_store_keeps_appended_events_when_projector_fails() -> TestResult {
-    let fixture = JetStreamFixture::new_with_projector(FailingProjection).await?;
-
-    let result = append_one(&fixture.store, "alpha", StreamState::NoStream, "created").await;
-    assert_project_append_error(result)?;
-
-    let read = fixture.store.read_events_from("alpha", 1).await?;
-    assert_eq!(read.current_version, Some(1));
-    assert_eq!(read.events.len(), 1);
-    assert_eq!(read.events[0].decode_data::<TestEvent>()?.value, "created");
 
     fixture.delete().await
 }

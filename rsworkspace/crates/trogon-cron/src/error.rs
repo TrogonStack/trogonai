@@ -253,7 +253,7 @@ impl From<trogon_eventsourcing::SnapshotStoreError> for CronError {
 impl From<JetStreamStoreError<CronError>> for CronError {
     fn from(value: JetStreamStoreError<CronError>) -> Self {
         match value {
-            JetStreamStoreError::ResolveSubject(source) | JetStreamStoreError::ProjectAppend(source) => source,
+            JetStreamStoreError::ResolveSubject(source) => source,
             JetStreamStoreError::ReadStream(source) => {
                 Self::event_source("failed to read job stream while catching up command state", source)
             }
