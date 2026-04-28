@@ -1,8 +1,6 @@
-use serde::{Deserialize, Serialize};
 use trogon_cron_jobs_proto::v1;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq)]
 pub enum JobEventSamplingSource {
     LatestFromSubject { subject: String },
 }
