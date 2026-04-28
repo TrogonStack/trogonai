@@ -12,9 +12,9 @@ use trogon_eventsourcing::nats::{
     JetStreamStore, JetStreamStoreError, StreamSubjectResolver, SubjectState, subject_current_version,
 };
 use trogon_eventsourcing::{
-    AppendOutcome, CanonicalEventCodec, CommandExecution, CommandFailure, CommandInfraError, Decide, Decision,
-    EventData, EventId, EventIdentity, EventType, FrequencySnapshot, JsonEventCodec, NonEmpty, Snapshot,
-    SnapshotChange, SnapshotStoreConfig, Snapshots, StreamState,
+    AppendOutcome, CanonicalEventCodec, CommandExecution, CommandFailure, Decide, Decision, EventData, EventId,
+    EventIdentity, EventType, FrequencySnapshot, JsonEventCodec, NonEmpty, Snapshot, SnapshotChange,
+    SnapshotStoreConfig, Snapshots, StreamState,
 };
 use trogon_eventsourcing::{
     SnapshotStoreError, StreamStoreError, TROGON_EVENT_TYPE, checkpoint_key, maybe_advance_checkpoint,
@@ -1176,10 +1176,7 @@ async fn jetstream_command_execution_snapshot_skips_earlier_corrupt_same_subject
 
     let command = IncreaseCounterCommand::new("counter", 1);
     let without_snapshot = CommandExecution::new(&fixture.store, &command).execute().await;
-    assert!(matches!(
-        without_snapshot,
-        Err(CommandFailure::Infra(CommandInfraError::ReadStream(_)))
-    ));
+    assert!(matches!(without_snapshot, Err(CommandFailure::ReadStream(_))));
 
     fixture
         .store
@@ -1226,9 +1223,9 @@ async fn jetstream_command_execution_does_not_snapshot_failed_appends() -> TestR
         .await;
     assert!(matches!(
         result,
-        Err(CommandFailure::Infra(CommandInfraError::Append(
+        Err(CommandFailure::Append(
             JetStreamStoreError::OptimisticConcurrencyConflict { .. }
-        )))
+        ))
     ));
 
     let snapshot: Option<Snapshot<CounterState>> =
@@ -1301,10 +1298,7 @@ async fn jetstream_command_execution_reports_decode_errors_from_corrupt_events()
 
     let command = IncreaseCounterCommand::new("counter", 1);
     let result = CommandExecution::new(&fixture.store, &command).execute().await;
-    assert!(matches!(
-        result,
-        Err(CommandFailure::Infra(CommandInfraError::DecodeEvent(_)))
-    ));
+    assert!(matches!(result, Err(CommandFailure::DecodeEvent(_))));
 
     fixture.delete().await
 }
@@ -1333,10 +1327,10 @@ async fn jetstream_command_execution_rejects_snapshot_ahead_of_stream() -> TestR
         .await;
     assert!(matches!(
         result,
-        Err(CommandFailure::Infra(CommandInfraError::SnapshotAheadOfStream {
+        Err(CommandFailure::SnapshotAheadOfStream {
             snapshot_version: 10,
             stream_version: None,
-        }))
+        })
     ));
 
     fixture.delete().await
@@ -1371,10 +1365,10 @@ async fn jetstream_command_execution_rejects_snapshot_ahead_of_existing_stream()
         .await;
     assert!(matches!(
         result,
-        Err(CommandFailure::Infra(CommandInfraError::SnapshotAheadOfStream {
+        Err(CommandFailure::SnapshotAheadOfStream {
             snapshot_version: 10,
             stream_version: Some(1),
-        }))
+        })
     ));
 
     fixture.delete().await

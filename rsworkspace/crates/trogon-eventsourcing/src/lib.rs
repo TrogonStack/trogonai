@@ -15,9 +15,8 @@ pub use decision::{Act, Decide, Decision, NonEmpty, decide};
 pub use event::{CodecError, EventData, RecordedEvent};
 pub use event_id::EventId;
 pub use execution::{
-    CommandExecution, CommandFailure, CommandInfraError, CommandResult, CommandSnapshotPolicy, ExecutionResult,
-    FrequencySnapshot, NoSnapshot, SnapshotDecision, SnapshotDecisionContext, SnapshotPolicy, Snapshots,
-    WithoutSnapshots,
+    CommandExecution, CommandFailure, CommandResult, CommandSnapshotPolicy, ExecutionResult, FrequencySnapshot,
+    NoSnapshot, SnapshotDecision, SnapshotDecisionContext, SnapshotPolicy, Snapshots, WithoutSnapshots,
 };
 pub use nats::snapshot_store::{
     SnapshotStoreError, checkpoint_key, list_snapshots, maybe_advance_checkpoint, persist_snapshot_change,
