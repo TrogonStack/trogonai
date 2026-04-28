@@ -242,6 +242,34 @@ where
     std::io::Error::other(format!("{error:?}"))
 }
 
+async fn read_counter_snapshot_until(
+    store: &TestStore,
+    stream_id: &str,
+    expected: Snapshot<CounterState>,
+) -> TestResult<Snapshot<CounterState>> {
+    let deadline = tokio::time::Instant::now() + TEST_TIMEOUT;
+
+    loop {
+        let snapshot = store
+            .read_snapshot::<_, CounterState>(test_snapshot_config(), stream_id)
+            .await?;
+
+        let snapshot = match snapshot {
+            Some(snapshot) if snapshot == expected => return Ok(snapshot),
+            snapshot => snapshot,
+        };
+
+        if tokio::time::Instant::now() >= deadline {
+            return Err(std::io::Error::other(format!(
+                "timed out waiting for snapshot {expected:?}, got {snapshot:?}"
+            ))
+            .into());
+        }
+
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
 async fn append_one(
     store: &TestStore,
     stream_id: &str,
@@ -918,11 +946,8 @@ async fn jetstream_store_executes_commands_with_snapshots() -> TestResult {
     assert_eq!(first.next_expected_version, 1);
     assert_eq!(first.state, CounterState { total: 2 });
 
-    let first_snapshot = fixture
-        .store
-        .read_snapshot::<_, CounterState>(test_snapshot_config(), "counter")
-        .await?
-        .ok_or_else(|| std::io::Error::other("counter snapshot should exist"))?;
+    let first_snapshot =
+        read_counter_snapshot_until(&fixture.store, "counter", Snapshot::new(1, CounterState { total: 2 })).await?;
     assert_eq!(first_snapshot, Snapshot::new(1, CounterState { total: 2 }));
 
     let second_command = IncreaseCounterCommand::new("counter", 3);
@@ -934,11 +959,8 @@ async fn jetstream_store_executes_commands_with_snapshots() -> TestResult {
     assert_eq!(second.next_expected_version, 2);
     assert_eq!(second.state, CounterState { total: 5 });
 
-    let second_snapshot = fixture
-        .store
-        .read_snapshot::<_, CounterState>(test_snapshot_config(), "counter")
-        .await?
-        .ok_or_else(|| std::io::Error::other("counter snapshot should exist"))?;
+    let second_snapshot =
+        read_counter_snapshot_until(&fixture.store, "counter", Snapshot::new(2, CounterState { total: 5 })).await?;
     assert_eq!(second_snapshot, Snapshot::new(2, CounterState { total: 5 }));
 
     let read = fixture.store.read_stream("counter", 1).await?;
@@ -978,11 +1000,8 @@ async fn jetstream_command_execution_respects_snapshot_cadence() -> TestResult {
         .map_err(debug_error)?;
     assert_eq!(second.next_expected_version, 2);
     assert_eq!(second.state, CounterState { total: 3 });
-    let second_snapshot = fixture
-        .store
-        .read_snapshot::<_, CounterState>(test_snapshot_config(), "counter")
-        .await?
-        .ok_or_else(|| std::io::Error::other("counter snapshot should exist"))?;
+    let second_snapshot =
+        read_counter_snapshot_until(&fixture.store, "counter", Snapshot::new(2, CounterState { total: 3 })).await?;
     assert_eq!(second_snapshot, Snapshot::new(2, CounterState { total: 3 }));
 
     let third_command = IncreaseCounterCommand::new("counter", 3);
@@ -993,11 +1012,8 @@ async fn jetstream_command_execution_respects_snapshot_cadence() -> TestResult {
         .map_err(debug_error)?;
     assert_eq!(third.next_expected_version, 3);
     assert_eq!(third.state, CounterState { total: 6 });
-    let third_snapshot = fixture
-        .store
-        .read_snapshot::<_, CounterState>(test_snapshot_config(), "counter")
-        .await?
-        .ok_or_else(|| std::io::Error::other("counter snapshot should still exist"))?;
+    let third_snapshot =
+        read_counter_snapshot_until(&fixture.store, "counter", Snapshot::new(2, CounterState { total: 3 })).await?;
     assert_eq!(third_snapshot, Snapshot::new(2, CounterState { total: 3 }));
 
     let fourth_command = IncreaseCounterCommand::new("counter", 4);
@@ -1008,11 +1024,8 @@ async fn jetstream_command_execution_respects_snapshot_cadence() -> TestResult {
         .map_err(debug_error)?;
     assert_eq!(fourth.next_expected_version, 4);
     assert_eq!(fourth.state, CounterState { total: 10 });
-    let fourth_snapshot = fixture
-        .store
-        .read_snapshot::<_, CounterState>(test_snapshot_config(), "counter")
-        .await?
-        .ok_or_else(|| std::io::Error::other("counter snapshot should exist"))?;
+    let fourth_snapshot =
+        read_counter_snapshot_until(&fixture.store, "counter", Snapshot::new(4, CounterState { total: 10 })).await?;
     assert_eq!(fourth_snapshot, Snapshot::new(4, CounterState { total: 10 }));
 
     fixture.delete().await
@@ -1044,11 +1057,8 @@ async fn jetstream_command_execution_snapshots_use_log_sequence_after_interleave
     assert_eq!(second.next_expected_version, 3);
     assert_eq!(second.state, CounterState { total: 5 });
 
-    let second_snapshot = fixture
-        .store
-        .read_snapshot::<_, CounterState>(test_snapshot_config(), "counter")
-        .await?
-        .ok_or_else(|| std::io::Error::other("counter snapshot should exist"))?;
+    let second_snapshot =
+        read_counter_snapshot_until(&fixture.store, "counter", Snapshot::new(3, CounterState { total: 5 })).await?;
     assert_eq!(second_snapshot, Snapshot::new(3, CounterState { total: 5 }));
 
     let third_command = IncreaseCounterCommand::new("counter", 1);
@@ -1105,17 +1115,11 @@ async fn jetstream_command_execution_keeps_interleaved_stream_state_isolated() -
     assert_eq!(beta_two.next_expected_version, 4);
     assert_eq!(beta_two.state, CounterState { total: 15 });
 
-    let alpha_snapshot = fixture
-        .store
-        .read_snapshot::<_, CounterState>(test_snapshot_config(), "alpha")
-        .await?
-        .ok_or_else(|| std::io::Error::other("alpha snapshot should exist"))?;
+    let alpha_snapshot =
+        read_counter_snapshot_until(&fixture.store, "alpha", Snapshot::new(3, CounterState { total: 3 })).await?;
     assert_eq!(alpha_snapshot, Snapshot::new(3, CounterState { total: 3 }));
-    let beta_snapshot = fixture
-        .store
-        .read_snapshot::<_, CounterState>(test_snapshot_config(), "beta")
-        .await?
-        .ok_or_else(|| std::io::Error::other("beta snapshot should exist"))?;
+    let beta_snapshot =
+        read_counter_snapshot_until(&fixture.store, "beta", Snapshot::new(4, CounterState { total: 15 })).await?;
     assert_eq!(beta_snapshot, Snapshot::new(4, CounterState { total: 15 }));
 
     let alpha = fixture.store.read_stream("alpha", 1).await?;

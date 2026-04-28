@@ -19,6 +19,8 @@ chrono = { version = "0.4", features = ["serde"] }
 futures = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+tokio = { workspace = true, features = ["rt"] }
+tracing = { workspace = true }
 trogon-nats = { path = "../trogon-nats" }
 trogon-std = { path = "../trogon-std", features = ["uuid"] }
 uuid = { workspace = true }

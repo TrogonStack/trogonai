@@ -10,8 +10,8 @@ use chrono::{DateTime, Utc};
 use serde::{Serialize, de::DeserializeOwned};
 use trogon_eventsourcing::snapshot::{Snapshot, SnapshotStoreConfig};
 use trogon_eventsourcing::{
-    AppendOutcome, EventData, NonEmpty, SnapshotRead, SnapshotWrite, StreamAppend, StreamRead, StreamReadResult,
-    StreamState,
+    AppendOutcome, EventData, NonEmpty, SnapshotRead, SnapshotSink, SnapshotWrite, StreamAppend, StreamRead,
+    StreamReadResult, StreamState,
 };
 use trogon_nats::lease::{ReleaseLease, RenewLease, TryAcquireLease};
 
@@ -545,6 +545,23 @@ where
             .or_default()
             .insert(stream_id.to_string(), snapshot);
         Ok(())
+    }
+}
+
+impl<Payload> SnapshotSink<Payload, str> for MockCronStore
+where
+    Payload: Serialize + DeserializeOwned + Send,
+{
+    fn write_snapshot(&self, config: SnapshotStoreConfig, stream_id: &str, snapshot: Snapshot<Payload>) {
+        let Ok(snapshot) = serde_json::to_string(&snapshot) else {
+            return;
+        };
+        self.command_snapshots
+            .lock()
+            .unwrap()
+            .entry(config.key_prefix().to_string())
+            .or_default()
+            .insert(stream_id.to_string(), snapshot);
     }
 }
 
