@@ -77,13 +77,8 @@ pub fn checkpoint_key(config: &SnapshotStoreConfig) -> Result<String, SnapshotSt
         })
 }
 
-fn snapshot_key_prefix(config: &SnapshotStoreConfig) -> String {
-    config.key_prefix().to_string()
-}
-
 fn stream_id_from_snapshot_key(config: &SnapshotStoreConfig, key: &str) -> Result<Option<String>, SnapshotStoreError> {
-    let prefix = snapshot_key_prefix(config);
-    let Some(stream_id) = key.strip_prefix(&prefix) else {
+    let Some(stream_id) = key.strip_prefix(config.key_prefix()) else {
         return Ok(None);
     };
 
@@ -197,9 +192,10 @@ pub async fn maybe_advance_checkpoint(
         return Ok(());
     }
 
+    let checkpoint_key = checkpoint_key(config)?;
     let value = checkpoint_value(sequence);
     match revision {
-        Some(revision) => match bucket.update(&checkpoint_key(config)?, value.into(), revision).await {
+        Some(revision) => match bucket.update(&checkpoint_key, value.into(), revision).await {
             Ok(_) => Ok(()),
             Err(source) if source.kind() == kv::UpdateErrorKind::WrongLastRevision => Ok(()),
             Err(source) => Err(SnapshotStoreError::kv_source(
@@ -207,7 +203,7 @@ pub async fn maybe_advance_checkpoint(
                 source,
             )),
         },
-        None => match bucket.create(&checkpoint_key(config)?, value.into()).await {
+        None => match bucket.create(&checkpoint_key, value.into()).await {
             Ok(_) => Ok(()),
             Err(source) if source.kind() == kv::CreateErrorKind::AlreadyExists => Ok(()),
             Err(source) => Err(SnapshotStoreError::kv_source(
@@ -319,23 +315,17 @@ where
             SnapshotStoreError::kv_source("failed to read key-value entry for snapshot update", source)
         })?
         else {
-            match bucket.create(key, value.clone().into()).await {
-                Ok(_) => return Ok(()),
-                Err(source) if source.kind() == kv::CreateErrorKind::AlreadyExists => continue,
-                Err(source) => {
-                    return Err(SnapshotStoreError::kv_source("failed to create snapshot entry", source));
-                }
+            if create_snapshot_value(bucket, key, value.clone()).await? {
+                return Ok(());
             }
+            continue;
         };
 
         if entry.operation != kv::Operation::Put {
-            match bucket.create(key, value.clone().into()).await {
-                Ok(_) => return Ok(()),
-                Err(source) if source.kind() == kv::CreateErrorKind::AlreadyExists => continue,
-                Err(source) => {
-                    return Err(SnapshotStoreError::kv_source("failed to create snapshot entry", source));
-                }
+            if create_snapshot_value(bucket, key, value.clone()).await? {
+                return Ok(());
             }
+            continue;
         }
 
         let current = serde_json::from_slice::<Snapshot<T>>(&entry.value)
@@ -350,6 +340,14 @@ where
             Err(source) if source.kind() == kv::UpdateErrorKind::WrongLastRevision => continue,
             Err(source) => return Err(SnapshotStoreError::kv_source("failed to update snapshot entry", source)),
         }
+    }
+}
+
+async fn create_snapshot_value(bucket: &kv::Store, key: &str, value: Vec<u8>) -> Result<bool, SnapshotStoreError> {
+    match bucket.create(key, value.into()).await {
+        Ok(_) => Ok(true),
+        Err(source) if source.kind() == kv::CreateErrorKind::AlreadyExists => Ok(false),
+        Err(source) => Err(SnapshotStoreError::kv_source("failed to create snapshot entry", source)),
     }
 }
 

@@ -21,14 +21,9 @@ pub fn resolve_stream_state<C>(write_precondition: Option<StreamState>, current_
 where
     C: Decide,
 {
-    if let Some(stream_state) = C::REQUIRED_WRITE_PRECONDITION {
-        return stream_state;
-    }
-
-    match write_precondition {
-        Some(stream_state) => stream_state,
-        None => StreamState::from_current_version(current_version),
-    }
+    C::REQUIRED_WRITE_PRECONDITION
+        .or(write_precondition)
+        .unwrap_or_else(|| StreamState::from_current_version(current_version))
 }
 
 #[derive(Debug, Clone, PartialEq)]
