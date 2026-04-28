@@ -402,6 +402,30 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn store_patches_on_400_already_exists() {
+        let server = MockServer::start();
+        let post_m = server.mock(|when, then| {
+            when.method(POST).path("/api/v3/secrets/raw/anthropic_a1b2c3");
+            then.status(400)
+                .json_body(serde_json::json!({"message": "Secret already exists"}));
+        });
+        let patch_m = server.mock(|when, then| {
+            when.method(PATCH)
+                .path("/api/v3/secrets/raw/anthropic_a1b2c3")
+                .json_body_partial(r#"{"secretValue":"sk-ant-key"}"#);
+            then.status(200)
+                .json_body(serde_json::json!({"secret": {}}));
+        });
+
+        store(&server)
+            .store(&tok("tok_anthropic_prod_a1b2c3"), "sk-ant-key")
+            .await
+            .unwrap();
+        post_m.assert();
+        patch_m.assert();
+    }
+
+    #[tokio::test]
     async fn store_propagates_api_errors() {
         let server = MockServer::start();
         server.mock(|when, then| {
@@ -493,9 +517,10 @@ mod tests {
     async fn revoke_sends_delete() {
         let server = MockServer::start();
         let m = server.mock(|when, then| {
+            // revoke() sends env in the JSON body, not as a query param.
             when.method(DELETE)
                 .path("/api/v3/secrets/raw/anthropic_a1b2c3")
-                .query_param("environment", "prod");
+                .json_body_partial(r#"{"environment":"prod","workspaceId":"proj-abc123"}"#);
             then.status(200).json_body(serde_json::json!({"secret": {}}));
         });
 
