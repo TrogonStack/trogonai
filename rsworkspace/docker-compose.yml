@@ -150,6 +150,12 @@ services:
       # MEMORY_REPO: my-repo
       # MEMORY_PATH: .trogon/memory.md
       # INCIDENTIO_STREAM_NAME: INCIDENTIO
+      # Console skill injection (reads CONSOLE_AGENTS KV from trogon-console):
+      # AGENT_ID: ""
+      # MCP_SERVERS: "tool-name=http://mcp-server:port"
+      # Feature flags via Split.io evaluator sidecar:
+      # SPLIT_EVALUATOR_URL: "http://split-evaluator:7548"
+      # SPLIT_EVALUATOR_AUTH_TOKEN: ""
     depends_on:
       nats:
         condition: service_healthy
@@ -244,6 +250,8 @@ services:
       XAI_API_KEY: "${XAI_API_KEY:-}"
       XAI_DEFAULT_MODEL: "${XAI_DEFAULT_MODEL:-grok-4}"
       RUST_LOG: info
+      # Console integration (reads CONSOLE_AGENTS KV, writes SESSIONS KV):
+      # AGENT_ID: ""
     depends_on:
       nats:
         condition: service_healthy
