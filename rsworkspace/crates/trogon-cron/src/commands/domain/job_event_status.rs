@@ -1,8 +1,6 @@
-use serde::{Deserialize, Serialize};
 use trogon_cron_jobs_proto::v1;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum JobEventStatus {
     #[default]
     Enabled,
