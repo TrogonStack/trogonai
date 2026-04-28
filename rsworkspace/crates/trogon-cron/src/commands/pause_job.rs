@@ -73,7 +73,7 @@ impl CommandSnapshotPolicy for PauseJobCommand {
 mod tests {
     use trogon_eventsourcing::snapshot::SnapshotSchema;
     use trogon_eventsourcing::{
-        CommandExecution, NonEmpty,
+        CommandExecution, NonEmpty, run_task_immediately,
         testing::{TestCase, Timeline, decider},
     };
 
@@ -181,12 +181,14 @@ mod tests {
         let store = MockCronStore::new();
         CommandExecution::new(&store, &AddJobCommand::new(job("backup")))
             .with_snapshot(&store)
+            .with_task_runtime(run_task_immediately)
             .execute()
             .await
             .unwrap();
 
         let outcome = CommandExecution::new(&store, &PauseJobCommand::new(JobId::parse("backup").unwrap()))
             .with_snapshot(&store)
+            .with_task_runtime(run_task_immediately)
             .execute()
             .await
             .unwrap();

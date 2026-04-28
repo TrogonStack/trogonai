@@ -7,7 +7,7 @@ use trogon_cron::{
     commands::domain as command_domain,
     mocks::{MockCronStore, MockLeaderLock, MockSchedulePublisher},
 };
-use trogon_eventsourcing::CommandExecution;
+use trogon_eventsourcing::{CommandExecution, run_task_immediately};
 
 fn command_job_id(id: &str) -> command_domain::JobId {
     command_domain::JobId::parse(id).unwrap()
@@ -50,6 +50,7 @@ async fn client_register_then_get() {
     let job = command_base_job("backup");
     CommandExecution::new(&store, &AddJobCommand::new(job))
         .with_snapshot(&store)
+        .with_task_runtime(run_task_immediately)
         .execute()
         .await
         .unwrap();
@@ -67,11 +68,13 @@ async fn client_pause_job_toggles_job() {
 
     CommandExecution::new(&store, &AddJobCommand::new(command_base_job("toggle")))
         .with_snapshot(&store)
+        .with_task_runtime(run_task_immediately)
         .execute()
         .await
         .unwrap();
     CommandExecution::new(&store, &PauseJobCommand::new(command_job_id("toggle")))
         .with_snapshot(&store)
+        .with_task_runtime(run_task_immediately)
         .execute()
         .await
         .unwrap();
@@ -90,11 +93,13 @@ async fn client_remove_and_list_jobs_use_store_paths() {
 
     CommandExecution::new(&store, &AddJobCommand::new(command_base_job("alpha")))
         .with_snapshot(&store)
+        .with_task_runtime(run_task_immediately)
         .execute()
         .await
         .unwrap();
     CommandExecution::new(&store, &AddJobCommand::new(command_base_job("beta")))
         .with_snapshot(&store)
+        .with_task_runtime(run_task_immediately)
         .execute()
         .await
         .unwrap();
@@ -104,6 +109,7 @@ async fn client_remove_and_list_jobs_use_store_paths() {
 
     CommandExecution::new(&store, &RemoveJobCommand::new(command_job_id("beta")))
         .with_snapshot(&store)
+        .with_task_runtime(run_task_immediately)
         .execute()
         .await
         .unwrap();

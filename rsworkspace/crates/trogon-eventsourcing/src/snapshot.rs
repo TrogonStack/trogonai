@@ -112,7 +112,3 @@ pub trait SnapshotWrite<SnapshotPayload, StreamId: ?Sized>: Send + Sync {
         snapshot: Snapshot<SnapshotPayload>,
     ) -> impl std::future::Future<Output = Result<(), Self::Error>> + Send;
 }
-
-pub trait SnapshotSink<SnapshotPayload, StreamId: ?Sized>: Send + Sync {
-    fn write_snapshot(&self, config: SnapshotStoreConfig, stream_id: &StreamId, snapshot: Snapshot<SnapshotPayload>);
-}

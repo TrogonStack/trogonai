@@ -5,7 +5,7 @@ use serde::{Serialize, de::DeserializeOwned};
 
 use crate::nats::snapshot_store::SnapshotStoreError;
 use crate::nats::streams::{StreamStoreError, append_stream as append_subject_stream, read_subject_stream};
-use crate::snapshot::{Snapshot, SnapshotSink, SnapshotStoreConfig};
+use crate::snapshot::{Snapshot, SnapshotStoreConfig};
 use crate::{
     AppendOutcome, EventData, NonEmpty, SnapshotRead, SnapshotWrite, StreamAppend, StreamRead, StreamReadResult,
     StreamState,
@@ -346,30 +346,5 @@ where
         crate::nats::snapshot_store::write_snapshot(self.snapshot_bucket(), &config, stream_id.as_ref(), snapshot)
             .await
             .map_err(JetStreamStoreError::Snapshot)
-    }
-}
-
-impl<StreamId, Payload, Resolver> SnapshotSink<Payload, StreamId> for JetStreamStore<Resolver>
-where
-    StreamId: AsRef<str> + Send + Sync + ?Sized,
-    Payload: Serialize + DeserializeOwned + Send + 'static,
-    Resolver: Send + Sync,
-{
-    fn write_snapshot(&self, config: SnapshotStoreConfig, stream_id: &StreamId, snapshot: Snapshot<Payload>) {
-        let bucket = self.snapshot_bucket().clone();
-        let stream_id = stream_id.as_ref().to_string();
-
-        let Ok(handle) = tokio::runtime::Handle::try_current() else {
-            tracing::warn!(%stream_id, "failed to schedule snapshot write without an active Tokio runtime");
-            return;
-        };
-
-        drop(handle.spawn(async move {
-            if let Err(source) =
-                crate::nats::snapshot_store::write_snapshot(&bucket, &config, stream_id.as_str(), snapshot).await
-            {
-                tracing::warn!(%stream_id, error = %source, "failed to write snapshot");
-            }
-        }));
     }
 }
