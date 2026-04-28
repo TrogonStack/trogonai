@@ -111,8 +111,8 @@ async fn vault_admin_infisical_store_via_nats() {
 }
 
 /// Rotating a token via NATS delegates to `store()`, which POSTs to Infisical.
-/// On a 409 Conflict (secret already exists), InfisicalVaultStore follows up
-/// with a PATCH to update the value.
+/// On a 400 "Secret already exists" (real Infisical behavior), InfisicalVaultStore
+/// follows up with a PATCH to update the value. 409 is also handled for compatibility.
 #[tokio::test]
 async fn vault_admin_infisical_rotate_via_nats() {
     let infisical = httpmock::MockServer::start_async().await;
@@ -121,7 +121,7 @@ async fn vault_admin_infisical_rotate_via_nats() {
         .mock_async(|when, then| {
             when.method(httpmock::Method::POST)
                 .path("/api/v3/secrets/raw/openai_xyz789");
-            then.status(409)
+            then.status(400)
                 .json_body(serde_json::json!({"message": "Secret already exists"}));
         })
         .await;
@@ -168,7 +168,7 @@ async fn vault_admin_infisical_revoke_via_nats() {
         .mock_async(|when, then| {
             when.method(httpmock::Method::DELETE)
                 .path("/api/v3/secrets/raw/gemini_aabbcc")
-                .query_param("environment", "staging");
+                .json_body_partial(r#"{"environment":"staging"}"#);
             then.status(200)
                 .json_body(serde_json::json!({"secret": {}}));
         })
@@ -605,7 +605,7 @@ async fn vault_admin_dual_write_rotate_updates_both_backends() {
         .mock_async(|when, then| {
             when.method(httpmock::Method::POST)
                 .path("/api/v3/secrets/raw/anthropic_dw0002");
-            then.status(409)
+            then.status(400)
                 .json_body(serde_json::json!({"message": "Secret already exists"}));
         })
         .await;
@@ -681,7 +681,7 @@ async fn vault_admin_dual_write_revoke_removes_from_both_backends() {
         .mock_async(|when, then| {
             when.method(httpmock::Method::DELETE)
                 .path("/api/v3/secrets/raw/anthropic_dw0003")
-                .query_param("environment", "prod");
+                .json_body_partial(r#"{"environment":"prod"}"#);
             then.status(200)
                 .json_body(serde_json::json!({"secret": {}}));
         })
@@ -1291,7 +1291,7 @@ async fn custom_secret_path_is_threaded_through_all_infisical_requests() {
             when.method(httpmock::Method::POST)
                 .path("/api/v3/secrets/raw/anthropic_scpath1")
                 .json_body_partial(r#"{"secretValue":"sk-ant-path-v2"}"#);
-            then.status(409)
+            then.status(400)
                 .json_body(serde_json::json!({"message": "Secret already exists"}));
         })
         .await;
@@ -1327,7 +1327,7 @@ async fn custom_secret_path_is_threaded_through_all_infisical_requests() {
         .mock_async(|when, then| {
             when.method(httpmock::Method::DELETE)
                 .path("/api/v3/secrets/raw/anthropic_scpath1")
-                .query_param("secretPath", "/payment-keys");
+                .json_body_partial(r#"{"secretPath":"/payment-keys"}"#);
             then.status(200)
                 .json_body(serde_json::json!({"secret": {}}));
         })

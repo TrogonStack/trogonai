@@ -218,15 +218,17 @@ impl VaultStore for InfisicalVaultStore {
             return Ok(());
         }
 
-        // 409 Conflict = secret already exists → update in place.
+        // 409 Conflict or 400 "Secret already exists" → update in place.
+        // The real Infisical API returns 400 for duplicates; some versions return 409.
         if status.as_u16() == 409 {
             return self.patch_secret(&name, &env, plaintext).await;
         }
+        let message = parse_error(resp).await;
+        if status.as_u16() == 400 && message.to_lowercase().contains("already exists") {
+            return self.patch_secret(&name, &env, plaintext).await;
+        }
 
-        Err(InfisicalError::Api {
-            status:  status.as_u16(),
-            message: parse_error(resp).await,
-        })
+        Err(InfisicalError::Api { status: status.as_u16(), message })
     }
 
     async fn resolve(&self, token: &ApiKeyToken) -> Result<Option<String>, Self::Error> {
@@ -279,11 +281,11 @@ impl VaultStore for InfisicalVaultStore {
             .client
             .delete(self.secret_url(&name))
             .header("Authorization", self.bearer())
-            .query(&[
-                ("workspaceId", self.project_id.as_str()),
-                ("environment", env.as_str()),
-                ("secretPath", self.secret_path.as_str()),
-            ])
+            .json(&serde_json::json!({
+                "workspaceId": self.project_id,
+                "environment": env,
+                "secretPath": self.secret_path,
+            }))
             .send()
             .await
             .map_err(InfisicalError::Http)?;
