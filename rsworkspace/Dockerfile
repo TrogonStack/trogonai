@@ -75,7 +75,7 @@ ENTRYPOINT ["worker"]
 
 # ── Stage 6: agent runtime ───────────────────────────────────────────────────
 FROM debian:bookworm-slim AS agent
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /workspace/target/release/agent /usr/local/bin/agent
 EXPOSE 8090

@@ -1432,10 +1432,57 @@ impl AgentLoop {
                     // if trimming still cannot bring the payload under CHECKPOINT_MAX_BYTES.
                     let mut checkpointing_disabled = false;
                     let results = self.execute_tools(&response.content).await;
+                    let input_tokens = response.usage.as_ref().map_or(0, |u| u.input_tokens);
                     let mut assistant_msg = Message::assistant(response.content);
                     assistant_msg.usage = response.usage;
                     messages.push(assistant_msg);
                     messages.push(Message::tool_results(results));
+
+                    // ── Live context trim ─────────────────────────────────────
+                    // If the previous request consumed a large share of the model's
+                    // context window, trim the oldest messages before the next call.
+                    // Uses the same summarize_dropped_messages mechanism as the
+                    // checkpoint trim, but triggered by token count rather than KV
+                    // payload size — and works regardless of whether a promise store
+                    // is configured.
+                    const CONTEXT_TOKEN_THRESHOLD: u32 = 150_000;
+                    const LIVE_TRIM_KEEP: usize = 4;
+                    if input_tokens > CONTEXT_TOKEN_THRESHOLD {
+                        let keep = (messages.len() / 2)
+                            .max(LIVE_TRIM_KEEP)
+                            .min(messages.len());
+                        let mut drop_count = messages.len() - keep;
+                        // Walk back to a user-role boundary — never start a trimmed
+                        // history on an assistant message.
+                        while drop_count > 0 && messages[drop_count].role != "user" {
+                            drop_count -= 1;
+                        }
+                        if drop_count > 0 {
+                            let summary = tokio::time::timeout(
+                                std::time::Duration::from_secs(30),
+                                summarize_dropped_messages(
+                                    &*self.anthropic_client,
+                                    &self.model,
+                                    &messages[..drop_count],
+                                ),
+                            )
+                            .await
+                            .unwrap_or_default();
+                            messages = if summary.is_empty() {
+                                messages[drop_count..].to_vec()
+                            } else {
+                                let mut v = summary;
+                                v.extend_from_slice(&messages[drop_count..]);
+                                v
+                            };
+                            warn!(
+                                input_tokens,
+                                kept = messages.len(),
+                                "live context trim — history truncated before next Anthropic call"
+                            );
+                        }
+                    }
+
                     // `recovering` is flipped to `false` inside the successful
                     // checkpoint write arm below, not here. This ensures the tool
                     // result cache is still consulted on the next tool turn if the
@@ -9632,6 +9679,168 @@ mod tests {
         assert!(
             !p.messages.is_empty(),
             "checkpoint must be written with trimmed messages after plain-trim fallback"
+        );
+    }
+
+    /// When `input_tokens` in a tool_use response exceeds `CONTEXT_TOKEN_THRESHOLD`,
+    /// `run()` must trim the live `messages` vec before the next Anthropic call.
+    ///
+    /// Proof-by-substitution: the mock queue is ordered
+    ///   [tool_use(low), tool_use(low), tool_use(HIGH→triggers_trim), summary, end_turn].
+    /// If the trim fires, call 4 is consumed by `summarize_dropped_messages` and call 5
+    /// is consumed by the main loop, returning "done".
+    /// If the trim does not fire, call 4 (the summary response) is consumed by the
+    /// main loop as an `end_turn`, returning "Summary of earlier context." — the assert
+    /// would fail.
+    #[tokio::test]
+    async fn live_context_trim_fires_when_input_tokens_exceed_threshold() {
+        use crate::tools::mock::MockToolDispatcher;
+        use mock::SequencedMockAnthropicClient;
+
+        let low = |id: &'static str| {
+            serde_json::json!({
+                "stop_reason": "tool_use",
+                "content": [{"type": "tool_use", "id": id, "name": "my_tool", "input": {}}],
+                "usage": {"input_tokens": 1_000u32, "output_tokens": 50u32}
+            })
+        };
+        let high_usage_tool_use = serde_json::json!({
+            "stop_reason": "tool_use",
+            "content": [{"type": "tool_use", "id": "tu3", "name": "my_tool", "input": {}}],
+            // input_tokens > CONTEXT_TOKEN_THRESHOLD (150_000) → trim fires
+            "usage": {"input_tokens": 160_000u32, "output_tokens": 50u32}
+        });
+        let summary_response = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "Summary of earlier context."}]
+        });
+        let end_turn = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "done"}]
+        });
+
+        let anthropic = Arc::new(SequencedMockAnthropicClient::new(vec![
+            low("tu1"),
+            low("tu2"),
+            high_usage_tool_use,
+            summary_response,
+            end_turn,
+        ]));
+
+        let tool_ctx =
+            Arc::new(crate::tools::ToolContext::for_test("http://127.0.0.1:1", "", "", ""));
+        let agent = AgentLoop {
+            anthropic_client: Arc::clone(&anthropic) as Arc<dyn AnthropicClient>,
+            model: "test".to_string(),
+            max_iterations: 10,
+            tool_dispatcher: Arc::new(MockToolDispatcher::new("ok")),
+            tool_context: tool_ctx,
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            flag_client: Arc::new(crate::flag_client::AlwaysOnFlagClient),
+            tenant_id: "test".to_string(),
+            promise_store: None,
+            promise_id: None,
+        };
+
+        let result = agent
+            .run(vec![Message::user_text("start task")], &[], None)
+            .await;
+
+        assert_eq!(
+            result.unwrap(),
+            "done",
+            "trim must consume the summary response (call 4) and return 'done' (call 5)"
+        );
+    }
+
+    /// When `summarize_dropped_messages` fails (LLM returns a malformed response),
+    /// the live context trim must fall back to a plain slice of the tail and the
+    /// run must still complete successfully.
+    #[tokio::test]
+    async fn live_context_trim_falls_back_to_plain_trim_on_summarize_failure() {
+        use crate::tools::mock::MockToolDispatcher;
+        use std::future::Future;
+        use std::pin::Pin;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct CallCountClient {
+            count: Arc<AtomicUsize>,
+        }
+
+        impl AnthropicClient for CallCountClient {
+            fn complete<'a>(
+                &'a self,
+                _body: serde_json::Value,
+            ) -> Pin<
+                Box<dyn Future<Output = Result<serde_json::Value, reqwest::Error>> + Send + 'a>,
+            > {
+                let n = self.count.fetch_add(1, Ordering::SeqCst);
+                let low = serde_json::json!({
+                    "stop_reason": "tool_use",
+                    "content": [{"type": "tool_use", "id": "tu", "name": "my_tool", "input": {}}],
+                    "usage": {"input_tokens": 1_000u32, "output_tokens": 50u32}
+                });
+                let high = serde_json::json!({
+                    "stop_reason": "tool_use",
+                    "content": [{"type": "tool_use", "id": "tu", "name": "my_tool", "input": {}}],
+                    "usage": {"input_tokens": 160_000u32, "output_tokens": 50u32}
+                });
+                // call 3 (n=3): summarize_dropped_messages — return malformed JSON
+                // so deserialization fails and the function returns vec![].
+                let malformed = serde_json::json!({});
+                let end = serde_json::json!({
+                    "stop_reason": "end_turn",
+                    "content": [{"type": "text", "text": "done"}]
+                });
+                let resp = match n {
+                    0 | 1 => low,
+                    2 => high,
+                    3 => malformed,
+                    _ => end,
+                };
+                Box::pin(async move { Ok(resp) })
+            }
+        }
+
+        let count = Arc::new(AtomicUsize::new(0));
+        let tool_ctx =
+            Arc::new(crate::tools::ToolContext::for_test("http://127.0.0.1:1", "", "", ""));
+        let agent = AgentLoop {
+            anthropic_client: Arc::new(CallCountClient {
+                count: Arc::clone(&count),
+            }),
+            model: "test".to_string(),
+            max_iterations: 10,
+            tool_dispatcher: Arc::new(MockToolDispatcher::new("ok")),
+            tool_context: tool_ctx,
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            flag_client: Arc::new(crate::flag_client::AlwaysOnFlagClient),
+            tenant_id: "test".to_string(),
+            promise_store: None,
+            promise_id: None,
+        };
+
+        let result = agent
+            .run(vec![Message::user_text("start task")], &[], None)
+            .await;
+
+        assert_eq!(
+            result.unwrap(),
+            "done",
+            "plain trim fallback must allow run to complete after summarize failure"
+        );
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            5,
+            "must make exactly 5 calls: tu1, tu2, tu3(high), summarize(fails), end_turn"
         );
     }
 }
