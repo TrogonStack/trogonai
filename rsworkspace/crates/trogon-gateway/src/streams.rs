@@ -36,9 +36,9 @@ pub(crate) async fn provision<C: JetStreamContext>(client: &C, config: &Resolved
         trogon_source_linear::provision(client, cfg).await?;
         info!(source = "linear", "stream provisioned");
     }
-    if let Some(ref cfg) = config.microsoft_teams {
-        trogon_source_microsoft_teams::provision(client, cfg).await?;
-        info!(source = "microsoft-teams", "stream provisioned");
+    if let Some(ref cfg) = config.microsoft_graph {
+        trogon_source_microsoft_graph::provision(client, cfg).await?;
+        info!(source = "microsoft-graph", "stream provisioned");
     }
     if let Some(ref cfg) = config.notion {
         trogon_source_notion::provision(client, cfg).await?;
@@ -94,8 +94,8 @@ signing_secret = "whsec_dGVzdC1zZWNyZXQ="
 [sources.linear]
 webhook_secret = "linear-secret"
 
-[sources.microsoft_teams]
-client_state = "microsoft-teams-client-state"
+[sources.microsoft_graph]
+client_state = "microsoft-graph-client-state"
 
 [sources.notion]
 verification_token = "notion-verification-token-example"
@@ -155,8 +155,8 @@ signing_secret = "whsec_dGVzdC1zZWNyZXQ="
 [sources.linear]
 webhook_secret = "linear-secret"
 
-[sources.microsoft_teams]
-client_state = "microsoft-teams-client-state"
+[sources.microsoft_graph]
+client_state = "microsoft-graph-client-state"
 
 [sources.notion]
 verification_token = "notion-verification-token-example"
