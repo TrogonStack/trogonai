@@ -884,3 +884,181 @@ async fn e2e_ws_codex_fork_creates_child_session() {
     shutdown_tx.send(true).unwrap();
     let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;
 }
+
+/// E2E: WS → DefaultCodexAgent → session/close terminates the session.
+#[tokio::test]
+async fn e2e_ws_codex_close_terminates_session() {
+    let _lock = codex_bin_lock().lock().await;
+    unsafe { std::env::set_var("CODEX_BIN", mock_codex_bin()) };
+
+    let (_container, nats, js, nats_port) = start_nats().await;
+    setup_streams(&js).await;
+    start_codex_agent(nats).await;
+    let (ws_url, shutdown_tx, conn_thread) = start_ws_server(nats_port).await;
+    let (mut ws, _) = connect_async(&ws_url).await.unwrap();
+
+    ws.send(Message::Text(
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#.into(),
+    ))
+    .await
+    .unwrap();
+    next_with_id(&mut ws, 1).await;
+
+    ws.send(Message::Text(
+        r#"{"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":"/tmp","mcpServers":[]}}"#.into(),
+    ))
+    .await
+    .unwrap();
+    let new_val = next_with_id(&mut ws, 2).await;
+    let session_id = new_val["result"]["sessionId"]
+        .as_str()
+        .unwrap_or_else(|| panic!("must have sessionId: {new_val}"))
+        .to_string();
+
+    let msg = serde_json::json!({
+        "jsonrpc": "2.0", "id": 3,
+        "method": "session/close",
+        "params": { "sessionId": session_id }
+    });
+    ws.send(Message::Text(msg.to_string().into())).await.unwrap();
+
+    let val = next_with_id(&mut ws, 3).await;
+    assert!(val["result"].is_object(), "session/close must return a result: {val}");
+    assert!(val["error"].is_null(), "session/close must not return an error: {val}");
+
+    shutdown_tx.send(true).unwrap();
+    let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;
+}
+
+/// E2E: WS → DefaultCodexAgent → session/set_mode returns a result.
+#[tokio::test]
+async fn e2e_ws_codex_set_session_mode() {
+    let _lock = codex_bin_lock().lock().await;
+    unsafe { std::env::set_var("CODEX_BIN", mock_codex_bin()) };
+
+    let (_container, nats, js, nats_port) = start_nats().await;
+    setup_streams(&js).await;
+    start_codex_agent(nats).await;
+    let (ws_url, shutdown_tx, conn_thread) = start_ws_server(nats_port).await;
+    let (mut ws, _) = connect_async(&ws_url).await.unwrap();
+
+    ws.send(Message::Text(
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#.into(),
+    ))
+    .await
+    .unwrap();
+    next_with_id(&mut ws, 1).await;
+
+    ws.send(Message::Text(
+        r#"{"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":"/tmp","mcpServers":[]}}"#.into(),
+    ))
+    .await
+    .unwrap();
+    let new_val = next_with_id(&mut ws, 2).await;
+    let session_id = new_val["result"]["sessionId"]
+        .as_str()
+        .unwrap_or_else(|| panic!("must have sessionId: {new_val}"))
+        .to_string();
+
+    let msg = serde_json::json!({
+        "jsonrpc": "2.0", "id": 3,
+        "method": "session/set_mode",
+        "params": { "sessionId": session_id, "modeId": "default" }
+    });
+    ws.send(Message::Text(msg.to_string().into())).await.unwrap();
+
+    let val = next_with_id(&mut ws, 3).await;
+    assert!(val["result"].is_object(), "session/set_mode must return a result: {val}");
+    assert!(val["error"].is_null(), "session/set_mode must not return an error: {val}");
+
+    shutdown_tx.send(true).unwrap();
+    let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;
+}
+
+/// E2E: WS → DefaultCodexAgent → session/set_model returns a result.
+#[tokio::test]
+async fn e2e_ws_codex_set_session_model() {
+    let _lock = codex_bin_lock().lock().await;
+    unsafe { std::env::set_var("CODEX_BIN", mock_codex_bin()) };
+
+    let (_container, nats, js, nats_port) = start_nats().await;
+    setup_streams(&js).await;
+    start_codex_agent(nats).await;
+    let (ws_url, shutdown_tx, conn_thread) = start_ws_server(nats_port).await;
+    let (mut ws, _) = connect_async(&ws_url).await.unwrap();
+
+    ws.send(Message::Text(
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#.into(),
+    ))
+    .await
+    .unwrap();
+    next_with_id(&mut ws, 1).await;
+
+    ws.send(Message::Text(
+        r#"{"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":"/tmp","mcpServers":[]}}"#.into(),
+    ))
+    .await
+    .unwrap();
+    let new_val = next_with_id(&mut ws, 2).await;
+    let session_id = new_val["result"]["sessionId"]
+        .as_str()
+        .unwrap_or_else(|| panic!("must have sessionId: {new_val}"))
+        .to_string();
+
+    let msg = serde_json::json!({
+        "jsonrpc": "2.0", "id": 3,
+        "method": "session/set_model",
+        "params": { "sessionId": session_id, "modelId": "o4-mini" }
+    });
+    ws.send(Message::Text(msg.to_string().into())).await.unwrap();
+
+    let val = next_with_id(&mut ws, 3).await;
+    assert!(val["result"].is_object(), "session/set_model must return a result: {val}");
+    assert!(val["error"].is_null(), "session/set_model must not return an error: {val}");
+
+    shutdown_tx.send(true).unwrap();
+    let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;
+}
+
+/// E2E: WS → XaiAgent → session/resume returns a result after session/new.
+#[tokio::test]
+async fn e2e_ws_resume_session_returns_result() {
+    let (_container, nats, js, nats_port) = start_nats().await;
+    setup_streams(&js).await;
+    let mock = Arc::new(MockXaiHttpClient::default());
+    start_xai_agent(nats, mock).await;
+    let (ws_url, shutdown_tx, conn_thread) = start_ws_server(nats_port).await;
+    let (mut ws, _) = connect_async(&ws_url).await.unwrap();
+
+    ws.send(Message::Text(
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#.into(),
+    ))
+    .await
+    .unwrap();
+    next_with_id(&mut ws, 1).await;
+
+    ws.send(Message::Text(
+        r#"{"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":"/tmp","mcpServers":[]}}"#.into(),
+    ))
+    .await
+    .unwrap();
+    let new_val = next_with_id(&mut ws, 2).await;
+    let session_id = new_val["result"]["sessionId"]
+        .as_str()
+        .unwrap_or_else(|| panic!("must have sessionId: {new_val}"))
+        .to_string();
+
+    let msg = serde_json::json!({
+        "jsonrpc": "2.0", "id": 3,
+        "method": "session/resume",
+        "params": { "sessionId": session_id, "cwd": "/tmp" }
+    });
+    ws.send(Message::Text(msg.to_string().into())).await.unwrap();
+
+    let val = next_with_id(&mut ws, 3).await;
+    assert!(val["result"].is_object(), "session/resume must return a result: {val}");
+    assert!(val["error"].is_null(), "session/resume must not return an error: {val}");
+
+    shutdown_tx.send(true).unwrap();
+    let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;
+}
