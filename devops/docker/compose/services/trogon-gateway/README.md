@@ -91,8 +91,11 @@ subscriptions. Configure `TROGON_SOURCE_MICROSOFT_TEAMS_CLIENT_STATE` with the
 same secret `clientState` used when creating the Graph subscription, then point
 the notification URL at `/microsoft-teams/webhook`. The gateway answers Graph's
 `validationToken` handshake and forwards each validated Graph notification
-collection to NATS on `{subject_prefix}.batch`, for example
-`microsoft-teams.batch`.
+collection to NATS on `{subject_prefix}.change_notification_collection`, for
+example `microsoft-teams.change_notification_collection`. The collection publish
+uses a deterministic NATS message ID derived from the Graph notification
+identities so exact webhook retries can be deduplicated at the collection
+boundary.
 
 For subscriptions that include resource data, the gateway preserves Graph's
 collection payload, including `validationTokens`. Downstream consumers remain

@@ -10,6 +10,7 @@ use axum::{
 };
 use serde::Deserialize;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use tracing::{info, instrument, warn};
 use trogon_nats::NatsToken;
 use trogon_nats::jetstream::{ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut};
@@ -115,19 +116,18 @@ async fn handle_notification_collection<P: JetStreamPublisher, S: ObjectStorePut
         }
     }
 
-    let subject = format!("{}.batch", state.subject_prefix);
+    let subject = format!("{}.change_notification_collection", state.subject_prefix);
     let span = tracing::Span::current();
     span.record("notification_count", collection.value.len());
     span.record("subject", &subject);
 
+    let message_id = change_notification_collection_message_id(&collection.value);
+    let mut headers = async_nats::HeaderMap::new();
+    headers.insert(async_nats::header::NATS_MESSAGE_ID, message_id.as_str());
+
     let outcome = state
         .publisher
-        .publish_event(
-            subject,
-            async_nats::HeaderMap::new(),
-            body,
-            state.nats_ack_timeout.into(),
-        )
+        .publish_event(subject, headers, body, state.nats_ack_timeout.into())
         .await;
 
     if outcome.is_ok() {
@@ -141,6 +141,28 @@ async fn handle_notification_collection<P: JetStreamPublisher, S: ObjectStorePut
 
 fn client_state_from_notification(notification: &Value) -> Option<&str> {
     notification.get("clientState").and_then(Value::as_str)
+}
+
+fn change_notification_collection_message_id(notifications: &[Value]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(b"microsoft-teams.change_notification_collection.v1");
+
+    for notification in notifications {
+        hasher.update(b"\x1fnotification\x1e");
+        if let Some(subscription_id) = notification.get("subscriptionId").and_then(Value::as_str) {
+            hasher.update(b"subscriptionId\x1e");
+            hasher.update(subscription_id.as_bytes());
+        }
+        if let Some(id) = notification.get("id").and_then(Value::as_str) {
+            hasher.update(b"id\x1e");
+            hasher.update(id.as_bytes());
+        } else {
+            hasher.update(b"payload\x1e");
+            hasher.update(serde_json::to_vec(notification).expect("serde_json::Value serialization should not fail"));
+        }
+    }
+
+    format!("{:x}", hasher.finalize())
 }
 
 fn validation_token_from_query(query: Option<&str>) -> Option<String> {
@@ -279,7 +301,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn valid_collection_publishes_one_batch_to_nats() {
+    async fn valid_collection_publishes_to_nats() {
         let _guard = tracing_guard();
         let publisher = MockJetStreamPublisher::new();
         let app = mock_app(publisher.clone());
@@ -291,15 +313,25 @@ mod tests {
         assert_eq!(response.status(), StatusCode::ACCEPTED);
         let messages = publisher.published_messages();
         assert_eq!(messages.len(), 1);
-        assert_eq!(messages[0].subject, "microsoft-teams.batch");
+        assert_eq!(messages[0].subject, "microsoft-teams.change_notification_collection");
+        let expected_payload = serde_json::from_slice::<Value>(&body).unwrap();
+        let expected_message_id =
+            change_notification_collection_message_id(expected_payload["value"].as_array().unwrap().as_slice());
+        assert_eq!(
+            messages[0]
+                .headers
+                .get(async_nats::header::NATS_MESSAGE_ID)
+                .map(|value| value.as_str()),
+            Some(expected_message_id.as_str())
+        );
         assert_eq!(
             serde_json::from_slice::<Value>(messages[0].payload.as_ref()).unwrap(),
-            serde_json::from_slice::<Value>(&body).unwrap()
+            expected_payload
         );
     }
 
     #[tokio::test]
-    async fn routing_fields_are_not_required_for_batch_publish() {
+    async fn routing_fields_are_not_required_for_collection_publish() {
         let _guard = tracing_guard();
         let publisher = MockJetStreamPublisher::new();
         let app = mock_app(publisher.clone());
@@ -313,7 +345,7 @@ mod tests {
         assert_eq!(response.status(), StatusCode::ACCEPTED);
         let messages = publisher.published_messages();
         assert_eq!(messages.len(), 1);
-        assert_eq!(messages[0].subject, "microsoft-teams.batch");
+        assert_eq!(messages[0].subject, "microsoft-teams.change_notification_collection");
     }
 
     #[tokio::test]
@@ -340,7 +372,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn publishes_multi_notification_collection_as_one_batch() {
+    async fn publishes_multi_notification_collection_as_one_message() {
         let _guard = tracing_guard();
         let publisher = MockJetStreamPublisher::new();
         let app = mock_app(publisher.clone());
@@ -365,7 +397,7 @@ mod tests {
         assert_eq!(response.status(), StatusCode::ACCEPTED);
         let messages = publisher.published_messages();
         assert_eq!(messages.len(), 1);
-        assert_eq!(messages[0].subject, "microsoft-teams.batch");
+        assert_eq!(messages[0].subject, "microsoft-teams.change_notification_collection");
         let payload = serde_json::from_slice::<Value>(messages[0].payload.as_ref()).unwrap();
         assert_eq!(payload["value"].as_array().unwrap().len(), 2);
     }
@@ -450,6 +482,43 @@ mod tests {
         assert_eq!(
             validation_token_from_query(Some("validationToken=&validationToken=hello%20world")),
             Some("hello world".to_string())
+        );
+    }
+
+    #[test]
+    fn change_notification_collection_message_id_is_stable_for_notification_identity() {
+        let first = notification_value();
+        let mut second = notification_value();
+        second["tenantId"] = Value::String("tenant-changed".to_string());
+
+        assert_eq!(
+            change_notification_collection_message_id(&[first]),
+            change_notification_collection_message_id(&[second])
+        );
+    }
+
+    #[test]
+    fn change_notification_collection_message_id_changes_for_different_notification_ids() {
+        let first = notification_value();
+        let mut second = notification_value();
+        second["id"] = Value::String("notification-2".to_string());
+
+        assert_ne!(
+            change_notification_collection_message_id(&[first]),
+            change_notification_collection_message_id(&[second])
+        );
+    }
+
+    #[test]
+    fn change_notification_collection_message_id_uses_payload_when_notification_id_is_missing() {
+        let mut first = notification_value();
+        first.as_object_mut().unwrap().remove("id");
+        let mut second = first.clone();
+        second["tenantId"] = Value::String("tenant-changed".to_string());
+
+        assert_ne!(
+            change_notification_collection_message_id(&[first]),
+            change_notification_collection_message_id(&[second])
         );
     }
 }
