@@ -1483,6 +1483,83 @@ mod tests {
             shutdown_tx.send(true).unwrap();
             let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;
         }
+
+        /// E2E: HTTP bridge → NATS → TrogonAgent → authenticate returns a result on SSE stream.
+        #[tokio::test]
+        async fn e2e_http_authenticate_returns_ok() {
+            let (_container, nats, nats_port) = start_nats().await;
+            start_agent(nats).await;
+            let (base_url, shutdown_tx, conn_thread) = start_server(nats_port).await;
+
+            let client = reqwest::Client::builder().build().unwrap();
+            let url = format!("{base_url}{ACP_ENDPOINT}");
+
+            // initialize — returns 200 with inline JSON and connection_id header
+            let init_resp = tokio::time::timeout(
+                Duration::from_secs(10),
+                client
+                    .post(&url)
+                    .header("Content-Type", "application/json")
+                    .header("Accept", "application/json, text/event-stream")
+                    .body(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#)
+                    .send(),
+            )
+            .await
+            .expect("timed out on initialize")
+            .unwrap();
+            assert_eq!(init_resp.status(), 200u16);
+            let connection_id = init_resp
+                .headers()
+                .get(ACP_CONNECTION_ID_HEADER)
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .to_owned();
+            let init_body: Value = init_resp.json().await.unwrap();
+            let proto_ver = init_body["result"]["protocolVersion"]
+                .as_u64()
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "0".to_string());
+
+            // open SSE GET stream — all non-initialize responses arrive here
+            let get = client
+                .get(&url)
+                .header("Accept", "text/event-stream")
+                .header(ACP_CONNECTION_ID_HEADER, &connection_id)
+                .header(ACP_PROTOCOL_VERSION_HEADER, &proto_ver)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(get.status(), 200u16);
+            let mut stream = get.bytes_stream();
+
+            // POST authenticate → 202, result arrives on SSE
+            let auth_resp = client
+                .post(&url)
+                .header("Content-Type", "application/json")
+                .header("Accept", "application/json, text/event-stream")
+                .header(ACP_CONNECTION_ID_HEADER, &connection_id)
+                .header(ACP_PROTOCOL_VERSION_HEADER, &proto_ver)
+                .body(r#"{"jsonrpc":"2.0","id":2,"method":"authenticate","params":{"methodId":"password"}}"#)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(auth_resp.status(), 202u16, "authenticate must be accepted");
+
+            let auth_event = super::next_json_sse_event(&mut stream).await;
+            assert_eq!(auth_event["id"], 2, "response id must match: {auth_event}");
+            assert!(
+                auth_event["error"].is_null(),
+                "authenticate must not return an error: {auth_event}"
+            );
+            assert!(
+                auth_event["result"].is_object(),
+                "authenticate must return a result: {auth_event}"
+            );
+
+            shutdown_tx.send(true).unwrap();
+            let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;
+        }
     }
 
     // ── E2E tests: real NATS + xAI runner (mock HTTP) ─────────────────────────
@@ -1977,6 +2054,247 @@ mod tests {
             assert!(
                 prompt_event["result"]["stopReason"].is_string(),
                 "prompt result must have stopReason: {prompt_event}"
+            );
+
+            shutdown_tx.send(true).unwrap();
+            let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;
+        }
+
+        /// E2E: HTTP bridge → NATS → XaiAgent → session/close returns a result.
+        #[tokio::test]
+        async fn e2e_http_session_close_removes_session() {
+            let (_container, nats, nats_port) = start_nats().await;
+            setup_streams(&jetstream::new(nats.clone())).await;
+
+            let mock = Arc::new(MockXaiHttpClient::default());
+            start_xai_agent(nats, mock).await;
+            let (base_url, shutdown_tx, conn_thread) = start_server(nats_port).await;
+
+            let client = reqwest::Client::new();
+            let url = format!("{base_url}{ACP_ENDPOINT}");
+
+            let (connection_id, proto_ver, session_id, mut stream) =
+                run_initialize_and_session_new(&client, &url).await;
+
+            let close_body = serde_json::json!({
+                "jsonrpc": "2.0", "id": 3,
+                "method": "session/close",
+                "params": { "sessionId": session_id }
+            });
+            let close_resp = client
+                .post(&url)
+                .header("Content-Type", "application/json")
+                .header("Accept", "application/json, text/event-stream")
+                .header(ACP_CONNECTION_ID_HEADER, &connection_id)
+                .header(ACP_PROTOCOL_VERSION_HEADER, &proto_ver)
+                .header(ACP_SESSION_ID_HEADER, &session_id)
+                .body(serde_json::to_string(&close_body).unwrap())
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(close_resp.status(), 202u16, "session/close must be accepted");
+
+            let close_event = find_sse_event_with_id(&mut stream, 3).await;
+            assert!(
+                close_event["result"].is_object(),
+                "session/close must return a result: {close_event}"
+            );
+            assert!(
+                close_event["error"].is_null(),
+                "session/close must not return an error: {close_event}"
+            );
+
+            shutdown_tx.send(true).unwrap();
+            let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;
+        }
+
+        /// E2E: HTTP bridge → NATS → XaiAgent → session/fork returns a new session ID.
+        #[tokio::test]
+        async fn e2e_http_session_fork_creates_child_session() {
+            let (_container, nats, nats_port) = start_nats().await;
+            setup_streams(&jetstream::new(nats.clone())).await;
+
+            let mock = Arc::new(MockXaiHttpClient::default());
+            start_xai_agent(nats, mock).await;
+            let (base_url, shutdown_tx, conn_thread) = start_server(nats_port).await;
+
+            let client = reqwest::Client::new();
+            let url = format!("{base_url}{ACP_ENDPOINT}");
+
+            let (connection_id, proto_ver, session_id, mut stream) =
+                run_initialize_and_session_new(&client, &url).await;
+
+            let fork_body = serde_json::json!({
+                "jsonrpc": "2.0", "id": 3,
+                "method": "session/fork",
+                "params": { "sessionId": session_id, "cwd": "/tmp", "mcpServers": [] }
+            });
+            let fork_resp = client
+                .post(&url)
+                .header("Content-Type", "application/json")
+                .header("Accept", "application/json, text/event-stream")
+                .header(ACP_CONNECTION_ID_HEADER, &connection_id)
+                .header(ACP_PROTOCOL_VERSION_HEADER, &proto_ver)
+                .header(ACP_SESSION_ID_HEADER, &session_id)
+                .body(serde_json::to_string(&fork_body).unwrap())
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(fork_resp.status(), 202u16, "session/fork must be accepted");
+
+            let fork_event = find_sse_event_with_id(&mut stream, 3).await;
+            assert!(
+                fork_event["error"].is_null(),
+                "session/fork must not return an error: {fork_event}"
+            );
+            let new_session_id = fork_event["result"]["sessionId"]
+                .as_str()
+                .unwrap_or_else(|| panic!("session/fork must return new sessionId: {fork_event}"));
+            assert!(!new_session_id.is_empty());
+            assert_ne!(new_session_id, session_id);
+
+            shutdown_tx.send(true).unwrap();
+            let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;
+        }
+
+        /// E2E: HTTP bridge → NATS → XaiAgent → session/set_mode returns a result.
+        #[tokio::test]
+        async fn e2e_http_session_set_mode_persists() {
+            let (_container, nats, nats_port) = start_nats().await;
+            setup_streams(&jetstream::new(nats.clone())).await;
+
+            let mock = Arc::new(MockXaiHttpClient::default());
+            start_xai_agent(nats, mock).await;
+            let (base_url, shutdown_tx, conn_thread) = start_server(nats_port).await;
+
+            let client = reqwest::Client::new();
+            let url = format!("{base_url}{ACP_ENDPOINT}");
+
+            let (connection_id, proto_ver, session_id, mut stream) =
+                run_initialize_and_session_new(&client, &url).await;
+
+            let set_mode_body = serde_json::json!({
+                "jsonrpc": "2.0", "id": 3,
+                "method": "session/set_mode",
+                "params": { "sessionId": session_id, "modeId": "default" }
+            });
+            let resp = client
+                .post(&url)
+                .header("Content-Type", "application/json")
+                .header("Accept", "application/json, text/event-stream")
+                .header(ACP_CONNECTION_ID_HEADER, &connection_id)
+                .header(ACP_PROTOCOL_VERSION_HEADER, &proto_ver)
+                .header(ACP_SESSION_ID_HEADER, &session_id)
+                .body(serde_json::to_string(&set_mode_body).unwrap())
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), 202u16, "session/set_mode must be accepted");
+
+            let event = find_sse_event_with_id(&mut stream, 3).await;
+            assert!(
+                event["result"].is_object(),
+                "session/set_mode must return a result: {event}"
+            );
+            assert!(
+                event["error"].is_null(),
+                "session/set_mode must not return an error: {event}"
+            );
+
+            shutdown_tx.send(true).unwrap();
+            let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;
+        }
+
+        /// E2E: HTTP bridge → NATS → XaiAgent → session/set_model returns a result.
+        #[tokio::test]
+        async fn e2e_http_session_set_model_persists() {
+            let (_container, nats, nats_port) = start_nats().await;
+            setup_streams(&jetstream::new(nats.clone())).await;
+
+            let mock = Arc::new(MockXaiHttpClient::default());
+            start_xai_agent(nats, mock).await;
+            let (base_url, shutdown_tx, conn_thread) = start_server(nats_port).await;
+
+            let client = reqwest::Client::new();
+            let url = format!("{base_url}{ACP_ENDPOINT}");
+
+            let (connection_id, proto_ver, session_id, mut stream) =
+                run_initialize_and_session_new(&client, &url).await;
+
+            let set_model_body = serde_json::json!({
+                "jsonrpc": "2.0", "id": 3,
+                "method": "session/set_model",
+                "params": { "sessionId": session_id, "modelId": "grok-3-mini" }
+            });
+            let resp = client
+                .post(&url)
+                .header("Content-Type", "application/json")
+                .header("Accept", "application/json, text/event-stream")
+                .header(ACP_CONNECTION_ID_HEADER, &connection_id)
+                .header(ACP_PROTOCOL_VERSION_HEADER, &proto_ver)
+                .header(ACP_SESSION_ID_HEADER, &session_id)
+                .body(serde_json::to_string(&set_model_body).unwrap())
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), 202u16, "session/set_model must be accepted");
+
+            let event = find_sse_event_with_id(&mut stream, 3).await;
+            assert!(
+                event["result"].is_object(),
+                "session/set_model must return a result: {event}"
+            );
+            assert!(
+                event["error"].is_null(),
+                "session/set_model must not return an error: {event}"
+            );
+
+            shutdown_tx.send(true).unwrap();
+            let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;
+        }
+
+        /// E2E: HTTP bridge → NATS → XaiAgent → session/set_config_option returns a result.
+        #[tokio::test]
+        async fn e2e_http_session_set_config_option_persists() {
+            let (_container, nats, nats_port) = start_nats().await;
+            setup_streams(&jetstream::new(nats.clone())).await;
+
+            let mock = Arc::new(MockXaiHttpClient::default());
+            start_xai_agent(nats, mock).await;
+            let (base_url, shutdown_tx, conn_thread) = start_server(nats_port).await;
+
+            let client = reqwest::Client::new();
+            let url = format!("{base_url}{ACP_ENDPOINT}");
+
+            let (connection_id, proto_ver, session_id, mut stream) =
+                run_initialize_and_session_new(&client, &url).await;
+
+            let set_config_body = serde_json::json!({
+                "jsonrpc": "2.0", "id": 3,
+                "method": "session/set_config_option",
+                "params": { "sessionId": session_id, "configId": "web_search", "value": "on" }
+            });
+            let resp = client
+                .post(&url)
+                .header("Content-Type", "application/json")
+                .header("Accept", "application/json, text/event-stream")
+                .header(ACP_CONNECTION_ID_HEADER, &connection_id)
+                .header(ACP_PROTOCOL_VERSION_HEADER, &proto_ver)
+                .header(ACP_SESSION_ID_HEADER, &session_id)
+                .body(serde_json::to_string(&set_config_body).unwrap())
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), 202u16, "session/set_config_option must be accepted");
+
+            let event = find_sse_event_with_id(&mut stream, 3).await;
+            assert!(
+                event["result"].is_object(),
+                "session/set_config_option must return a result: {event}"
+            );
+            assert!(
+                event["error"].is_null(),
+                "session/set_config_option must not return an error: {event}"
             );
 
             shutdown_tx.send(true).unwrap();
