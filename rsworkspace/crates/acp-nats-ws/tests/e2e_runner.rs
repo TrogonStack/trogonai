@@ -419,3 +419,64 @@ async fn e2e_ws_prompt_returns_stop_reason() {
     shutdown_tx.send(true).unwrap();
     let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;
 }
+
+/// E2E: WS client creates a session then loads it — verifies the full reconnect path.
+/// TrogonAgent stores session state in JetStream KV; session/load restores it.
+#[tokio::test]
+async fn e2e_ws_session_load_reconnects_to_existing_session() {
+    let (_container, nats, js, nats_port) = start_nats().await;
+    setup_streams(&js).await;
+    let mock = Arc::new(MockXaiHttpClient::default());
+    start_xai_agent(nats.clone(), mock).await;
+    let _ = start_rpc_server(nats, js).await;
+    let (ws_url, shutdown_tx, conn_thread) = start_ws_server(nats_port).await;
+
+    let (mut ws, _) = connect_async(&ws_url).await.unwrap();
+
+    // initialize
+    ws.send(Message::Text(
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#.into(),
+    ))
+    .await
+    .unwrap();
+    next_with_id(&mut ws, 1).await;
+
+    // session/new
+    ws.send(Message::Text(
+        r#"{"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":"/tmp","mcpServers":[]}}"#.into(),
+    ))
+    .await
+    .unwrap();
+    let new_val = next_with_id(&mut ws, 2).await;
+    let session_id = new_val["result"]["sessionId"]
+        .as_str()
+        .unwrap_or_else(|| panic!("must have sessionId: {new_val}"))
+        .to_string();
+
+    // session/load — reconnect to the session that was just created
+    let load_msg = serde_json::json!({
+        "jsonrpc": "2.0", "id": 3,
+        "method": "session/load",
+        "params": {
+            "sessionId": session_id,
+            "cwd": "/tmp",
+            "mcpServers": []
+        }
+    });
+    ws.send(Message::Text(load_msg.to_string().into()))
+        .await
+        .unwrap();
+
+    let load_val = next_with_id(&mut ws, 3).await;
+    assert!(
+        load_val["result"].is_object(),
+        "session/load must return a result: {load_val}"
+    );
+    assert!(
+        load_val["error"].is_null(),
+        "session/load must not return an error: {load_val}"
+    );
+
+    shutdown_tx.send(true).unwrap();
+    let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;
+}

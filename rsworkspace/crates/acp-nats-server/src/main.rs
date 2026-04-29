@@ -1749,6 +1749,59 @@ mod tests {
             (connection_id, proto_ver, session_id, stream)
         }
 
+        /// E2E: HTTP bridge → NATS → XaiAgent → session/load returns a valid result.
+        /// Verifies the full reconnect path: create a session then load it again.
+        #[tokio::test]
+        async fn e2e_http_session_load_reconnects_to_existing_session() {
+            let (_container, nats, nats_port) = start_nats().await;
+            setup_streams(&jetstream::new(nats.clone())).await;
+
+            let mock = Arc::new(MockXaiHttpClient::default());
+            start_xai_agent(nats, mock).await;
+            let (base_url, shutdown_tx, conn_thread) = start_server(nats_port).await;
+
+            let client = reqwest::Client::new();
+            let url = format!("{base_url}{ACP_ENDPOINT}");
+
+            let (connection_id, proto_ver, session_id, mut stream) =
+                run_initialize_and_session_new(&client, &url).await;
+
+            let load_body = serde_json::json!({
+                "jsonrpc": "2.0", "id": 3,
+                "method": "session/load",
+                "params": {
+                    "sessionId": session_id,
+                    "cwd": "/tmp",
+                    "mcpServers": []
+                }
+            });
+            let load_resp = client
+                .post(&url)
+                .header("Content-Type", "application/json")
+                .header("Accept", "application/json, text/event-stream")
+                .header(ACP_CONNECTION_ID_HEADER, &connection_id)
+                .header(ACP_PROTOCOL_VERSION_HEADER, &proto_ver)
+                .header(ACP_SESSION_ID_HEADER, &session_id)
+                .body(serde_json::to_string(&load_body).unwrap())
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(load_resp.status(), 202u16, "session/load must be accepted");
+
+            let load_event = find_sse_event_with_id(&mut stream, 3).await;
+            assert!(
+                load_event["result"].is_object(),
+                "session/load must return a result: {load_event}"
+            );
+            assert!(
+                load_event["error"].is_null(),
+                "session/load must not return an error: {load_event}"
+            );
+
+            shutdown_tx.send(true).unwrap();
+            let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;
+        }
+
         /// E2E: HTTP POST session/cancel is accepted and prompt completes without crashing.
         /// Verifies that the cancel notification is routed through the full HTTP stack.
         /// The prompt may finish before cancel arrives (stopReason "done") or be interrupted
