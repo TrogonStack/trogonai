@@ -200,7 +200,7 @@ struct SourcesConfig {
     #[config(nested)]
     linear: LinearConfig,
     #[config(nested)]
-    microsoft_teams: MicrosoftTeamsConfig,
+    microsoft_teams: MicrosoftTeamsConfigInput,
     #[config(nested)]
     notion: NotionConfig,
     #[config(nested)]
@@ -326,7 +326,7 @@ struct LinearConfig {
 }
 
 #[derive(Config)]
-struct MicrosoftTeamsConfig {
+struct MicrosoftTeamsConfigInput {
     #[config(env = "TROGON_SOURCE_MICROSOFT_TEAMS_STATUS")]
     status: Option<String>,
     #[config(env = "TROGON_SOURCE_MICROSOFT_TEAMS_CLIENT_STATE")]
@@ -967,7 +967,7 @@ fn resolve_linear(
 }
 
 fn resolve_microsoft_teams(
-    section: MicrosoftTeamsConfig,
+    section: MicrosoftTeamsConfigInput,
     errors: &mut Vec<ConfigValidationError>,
 ) -> Option<trogon_source_microsoft_teams::MicrosoftTeamsConfig> {
     let explicitly_enabled = matches!(

@@ -48,12 +48,38 @@ impl RejectReason {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GraphChangeType {
+    Created,
+    Updated,
+    Deleted,
+}
+
+impl GraphChangeType {
+    fn from_wire(value: &str) -> Result<Self, RejectReason> {
+        match value {
+            "created" => Ok(Self::Created),
+            "updated" => Ok(Self::Updated),
+            "deleted" => Ok(Self::Deleted),
+            _ => Err(RejectReason::InvalidChange),
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Created => "created",
+            Self::Updated => "updated",
+            Self::Deleted => "deleted",
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 struct NotificationMetadata {
     id: Option<String>,
     subscription_id: Option<String>,
     client_state: Option<String>,
-    change_type: Option<String>,
+    change_type: Result<GraphChangeType, RejectReason>,
     resource_type: Option<&'static str>,
 }
 
@@ -69,7 +95,11 @@ impl NotificationMetadata {
             id: value.get("id").and_then(Value::as_str).map(str::to_owned),
             subscription_id: value.get("subscriptionId").and_then(Value::as_str).map(str::to_owned),
             client_state: value.get("clientState").and_then(Value::as_str).map(str::to_owned),
-            change_type: value.get("changeType").and_then(Value::as_str).map(str::to_owned),
+            change_type: value
+                .get("changeType")
+                .and_then(Value::as_str)
+                .ok_or(RejectReason::MissingChange)
+                .and_then(GraphChangeType::from_wire),
             resource_type,
         }
     }
@@ -85,7 +115,7 @@ impl NotificationMetadata {
         if let Some(resource_type) = self.resource_type {
             headers.insert(NATS_HEADER_RESOURCE_TYPE, resource_type);
         }
-        if let Some(ref change_type) = self.change_type {
+        if let Ok(change_type) = self.change_type {
             headers.insert(NATS_HEADER_CHANGE_TYPE, change_type.as_str());
         }
     }
@@ -94,9 +124,8 @@ impl NotificationMetadata {
         self.resource_type
     }
 
-    fn change_type_token(&self) -> Result<NatsToken, RejectReason> {
-        let change_type = self.change_type.as_deref().ok_or(RejectReason::MissingChange)?;
-        NatsToken::new(change_type).map_err(|_| RejectReason::InvalidChange)
+    fn change_type(&self) -> Result<GraphChangeType, RejectReason> {
+        self.change_type
     }
 }
 
@@ -216,14 +245,23 @@ async fn handle_notification_collection<P: JetStreamPublisher, S: ObjectStorePut
 
     tracing::Span::current().record("notification_count", notifications.len());
 
+    let mut published_count = 0usize;
+    let mut failed_count = 0usize;
+
     for (notification, metadata) in notifications {
         let status = publish_notification(&state, notification, &metadata).await;
         if status.is_server_error() {
-            return status;
+            failed_count += 1;
+        } else {
+            published_count += 1;
         }
     }
 
-    StatusCode::ACCEPTED
+    match (published_count, failed_count) {
+        (_, 0) => StatusCode::ACCEPTED,
+        (0, _) => StatusCode::INTERNAL_SERVER_ERROR,
+        _ => StatusCode::MULTI_STATUS,
+    }
 }
 
 async fn publish_notification<P: JetStreamPublisher, S: ObjectStorePut>(
@@ -246,7 +284,7 @@ async fn publish_notification<P: JetStreamPublisher, S: ObjectStorePut>(
         .await;
     };
 
-    let change_type = match metadata.change_type_token() {
+    let change_type = match metadata.change_type() {
         Ok(change_type) => change_type,
         Err(reason) => {
             warn!("Microsoft Teams notification is missing a routable change type");
@@ -262,7 +300,7 @@ async fn publish_notification<P: JetStreamPublisher, S: ObjectStorePut>(
         }
     };
 
-    let subject = format!("{}.{}.{}", state.subject_prefix, resource_kind, change_type);
+    let subject = format!("{}.{}.{}", state.subject_prefix, resource_kind, change_type.as_str());
     let span = tracing::Span::current();
     span.record(
         "subscription_id",
@@ -609,6 +647,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn partial_publish_failure_returns_207_and_continues_collection() {
+        let _guard = tracing_guard();
+        let publisher = MockJetStreamPublisher::new();
+        publisher.fail_next_js_publish();
+        let app = mock_app(publisher.clone());
+        let second = serde_json::json!({
+            "id": "notification-2",
+            "subscriptionId": "subscription-1",
+            "clientState": TEST_CLIENT_STATE,
+            "changeType": "updated",
+            "resource": "teams('team-1')/channels('channel-1')",
+            "resourceData": {
+                "id": "channel-1",
+                "@odata.type": "#Microsoft.Graph.channel"
+            }
+        });
+        let body = serde_json::to_vec(&serde_json::json!({
+            "value": [notification_value(), second]
+        }))
+        .unwrap();
+
+        let response = app.oneshot(webhook_request("/webhook", body)).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::MULTI_STATUS);
+        assert_eq!(publisher.published_subjects(), vec!["microsoft-teams.channel.updated"]);
+    }
+
+    #[tokio::test]
     async fn mismatched_client_state_returns_401() {
         let _guard = tracing_guard();
         let publisher = MockJetStreamPublisher::new();
@@ -748,7 +814,7 @@ mod tests {
         let publisher = MockJetStreamPublisher::new();
         let app = mock_app(publisher.clone());
         let mut notification = notification_value();
-        notification["changeType"] = Value::String("updated.created".to_string());
+        notification["changeType"] = Value::String("renamed".to_string());
         let body = collection_body(notification);
 
         let response = app.oneshot(webhook_request("/webhook", body)).await.unwrap();
