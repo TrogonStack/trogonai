@@ -1,5 +1,5 @@
 [package]
-name = "trogon-source-microsoft-teams"
+name = "trogon-source-microsoft-graph"
 version = "0.1.0"
 edition = "2024"
 
