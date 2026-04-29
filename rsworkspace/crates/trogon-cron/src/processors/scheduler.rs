@@ -7,7 +7,7 @@ use async_nats::jetstream::{
     consumer::{AckPolicy, DeliverPolicy, ReplayPolicy, pull},
     context::ConsumerInfoErrorKind,
 };
-use futures::{Stream, StreamExt};
+use futures::{Stream, StreamExt, future};
 use trogon_eventsourcing::{RecordedEvent, record_stream_message};
 use trogon_nats::SubjectTokenViolation;
 use trogon_nats::lease::{LeaderElection, LeaseRenewInterval, LeaseTiming, LeaseTtl, NatsKvLease, NatsKvLeaseConfig};
@@ -199,15 +199,21 @@ where
                 message = scheduler_watcher.next() => {
                     match message {
                         Some(Ok(message)) => {
-                            let change = match handle_scheduler_message(&mut desired_jobs, &message).await {
+                            let mut next_desired_jobs = desired_jobs.clone();
+                            let change = match handle_scheduler_message(&mut next_desired_jobs, &message).await {
                                 Ok(change) => change,
                                 Err(error) => {
                                     tracing::error!(error = %error, "Failed to apply scheduler event");
-                                    ack_scheduler_message(&message).await;
+                                    nak_scheduler_message(&message).await;
                                     continue;
                                 }
                             };
-                            apply_scheduler_change(&self.schedule_publisher, &change).await?;
+                            if let Err(error) = apply_scheduler_change(&self.schedule_publisher, &change).await {
+                                tracing::error!(error = %error, "Failed to publish scheduler change");
+                                nak_scheduler_message(&message).await;
+                                continue;
+                            }
+                            desired_jobs = next_desired_jobs;
                             ack_scheduler_message(&message).await;
                         }
                         Some(Err(error)) => {
@@ -327,18 +333,41 @@ async fn rebuild_scheduler_state_from_stream(
         return Ok(desired_jobs);
     }
 
-    for sequence in first_sequence..=last_sequence {
-        let Some(message) =
-            read_raw_scheduler_event_message(stream, sequence, "failed to read job event from stream").await?
-        else {
-            continue;
-        };
-        let event = decode_recorded_job_event(message)?;
+    let consumer = stream
+        .create_consumer(scheduler_replay_consumer_config(first_sequence))
+        .await
+        .map_err(|source| CronError::event_source("failed to create scheduler replay consumer", source))?;
+    let mut messages = consumer
+        .messages()
+        .await
+        .map_err(|source| CronError::event_source("failed to open scheduler replay stream", source))?;
+
+    while let Some(message) = messages.next().await {
+        let message =
+            message.map_err(|source| CronError::event_source("failed to read scheduler replay event", source))?;
+        let sequence = message
+            .info()
+            .map_err(|source| {
+                CronError::event_source(
+                    "failed to read scheduler replay event metadata",
+                    std::io::Error::other(source.to_string()),
+                )
+            })?
+            .stream_sequence;
+        if sequence > last_sequence {
+            break;
+        }
+        let reached_bootstrap_tail = sequence >= last_sequence;
+
+        let event = decode_recorded_watch_message(&message)?;
         let stream_id = job_id_from_event_subject(&event.recorded_stream_id)?;
         let data = event
             .decode_data_with(&JobEventCodec)
             .map_err(|source| CronError::event_source("failed to decode recorded job event payload", source))?;
         let _ = apply_scheduler_event(&mut desired_jobs, &stream_id, &data)?;
+        if reached_bootstrap_tail {
+            break;
+        }
     }
 
     Ok(desired_jobs)
@@ -495,13 +524,8 @@ async fn reconcile_snapshot<P: SchedulePublisher<Error = CronError>>(
         .cloned()
         .collect::<Vec<_>>();
 
-    for id in stale_ids {
-        publisher.remove_schedule(&id).await?;
-    }
-
-    for resolved in resolved_jobs {
-        publisher.upsert_schedule(&resolved).await?;
-    }
+    future::try_join_all(stale_ids.iter().map(|id| publisher.remove_schedule(id))).await?;
+    future::try_join_all(resolved_jobs.iter().map(|resolved| publisher.upsert_schedule(resolved))).await?;
 
     Ok(())
 }
@@ -559,25 +583,6 @@ async fn recreate_scheduler_consumer(stream: &jetstream::stream::Stream, start_s
     Ok(())
 }
 
-async fn read_raw_scheduler_event_message(
-    stream: &jetstream::stream::Stream,
-    sequence: u64,
-    context: &'static str,
-) -> Result<Option<async_nats::jetstream::message::StreamMessage>, CronError> {
-    match stream.get_raw_message(sequence).await {
-        Ok(message) => Ok(Some(message)),
-        Err(source)
-            if matches!(
-                source.kind(),
-                async_nats::jetstream::stream::RawMessageErrorKind::NoMessageFound
-            ) =>
-        {
-            Ok(None)
-        }
-        Err(source) => Err(CronError::event_source(context, source)),
-    }
-}
-
 fn decode_recorded_job_event(
     message: async_nats::jetstream::message::StreamMessage,
 ) -> Result<RecordedEvent, CronError> {
@@ -613,9 +618,23 @@ fn scheduler_consumer_config(start_sequence: u64) -> pull::Config {
     }
 }
 
+fn scheduler_replay_consumer_config(start_sequence: u64) -> pull::OrderedConfig {
+    pull::OrderedConfig {
+        deliver_policy: DeliverPolicy::ByStartSequence { start_sequence },
+        replay_policy: ReplayPolicy::Instant,
+        ..Default::default()
+    }
+}
+
 async fn ack_scheduler_message(message: &jetstream::Message) {
     if let Err(error) = message.ack().await {
         tracing::error!(error = %error, "Failed to acknowledge scheduler event");
+    }
+}
+
+async fn nak_scheduler_message(message: &jetstream::Message) {
+    if let Err(error) = message.ack_with(jetstream::AckKind::Nak(None)).await {
+        tracing::error!(error = %error, "Failed to negatively acknowledge scheduler event");
     }
 }
 
@@ -653,6 +672,7 @@ mod tests {
     use super::{
         CronController, DesiredJobState, SchedulerChange, SchedulerJob, apply_scheduler_change, apply_scheduler_event,
         default_leader_timing, next_scheduler_start_sequence, reconcile_snapshot, scheduler_consumer_config,
+        scheduler_replay_consumer_config,
     };
     use crate::mocks::{MockCronStore, MockLeaderLock, MockSchedulePublisher};
     use crate::proto::v1;
@@ -911,6 +931,8 @@ mod tests {
     #[test]
     fn scheduler_consumer_helpers_use_expected_values() {
         let config = scheduler_consumer_config(42);
+        let replay_config = scheduler_replay_consumer_config(42);
+
         assert_eq!(config.durable_name.as_deref(), Some("cron_scheduler"));
         assert_eq!(config.name.as_deref(), Some("cron_scheduler"));
         assert_eq!(next_scheduler_start_sequence(0), 1);
@@ -921,5 +943,10 @@ mod tests {
         ));
         assert_eq!(config.ack_policy, AckPolicy::Explicit);
         assert_eq!(config.replay_policy, ReplayPolicy::Instant);
+        assert_eq!(
+            replay_config.deliver_policy,
+            DeliverPolicy::ByStartSequence { start_sequence: 42 }
+        );
+        assert_eq!(replay_config.replay_policy, ReplayPolicy::Instant);
     }
 }
