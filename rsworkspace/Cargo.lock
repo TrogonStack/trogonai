@@ -71,8 +71,10 @@ dependencies = [
  "tracing-subscriber",
  "trogon-acp-runner",
  "trogon-agent-core",
+ "trogon-codex-runner",
  "trogon-nats",
  "trogon-std",
+ "trogon-xai-runner",
  "uuid",
 ]
 

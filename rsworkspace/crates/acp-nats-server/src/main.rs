@@ -1484,4 +1484,374 @@ mod tests {
             let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;
         }
     }
+
+    // ── E2E tests: real NATS + xAI runner (mock HTTP) ─────────────────────────
+    mod http_xai_e2e {
+        use std::sync::{Arc, OnceLock};
+        use std::time::Duration;
+
+        use acp_nats::{AcpPrefix, Config, NatsAuth, NatsConfig};
+        use acp_nats_agent::AgentSideNatsConnection;
+        use async_nats::jetstream;
+        use serde_json::Value;
+        use testcontainers_modules::nats::Nats;
+        use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
+        use tokio::net::TcpListener;
+        use tokio::sync::{Mutex, mpsc, watch};
+        use trogon_codex_runner::DefaultCodexAgent;
+        use trogon_nats::jetstream::NatsJetStreamClient;
+        use trogon_xai_runner::{MockXaiHttpClient, NatsSessionNotifier, XaiAgent, XaiEvent};
+
+        use crate::constants::{ACP_CONNECTION_ID_HEADER, ACP_ENDPOINT, ACP_PROTOCOL_VERSION_HEADER, ACP_SESSION_ID_HEADER, THREAD_NAME};
+        use crate::transport::{AppState, ManagerRequest};
+
+        static CODEX_BIN_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        fn codex_bin_lock() -> &'static Mutex<()> {
+            CODEX_BIN_LOCK.get_or_init(Mutex::default)
+        }
+
+        /// Locate mock_codex_server binary: test binary lives in target/<profile>/deps/,
+        /// the mock binary lives in target/<profile>/.
+        fn mock_codex_bin() -> std::path::PathBuf {
+            let exe = std::env::current_exe().unwrap();
+            let bin = exe.parent().unwrap().parent().unwrap().join("mock_codex_server");
+            assert!(
+                bin.exists(),
+                "mock_codex_server not found at {bin:?} — run: cargo build -p trogon-codex-runner"
+            );
+            bin
+        }
+
+        async fn start_nats() -> (ContainerAsync<Nats>, async_nats::Client, u16) {
+            let container = Nats::default()
+                .with_cmd(["--jetstream"])
+                .start()
+                .await
+                .expect("start NATS container — is Docker running?");
+            let port = container.get_host_port_ipv4(4222).await.unwrap();
+            let nats = async_nats::connect(format!("127.0.0.1:{port}"))
+                .await
+                .expect("connect to NATS");
+            (container, nats, port)
+        }
+
+        async fn setup_streams(js: &jetstream::Context) {
+            let prefix = AcpPrefix::new("acp").unwrap();
+            for config in acp_nats::jetstream::streams::all_configs(&prefix) {
+                js.get_or_create_stream(config).await.unwrap();
+            }
+        }
+
+        async fn start_xai_agent(nats: async_nats::Client, mock: Arc<MockXaiHttpClient>) {
+            std::thread::spawn(move || {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap();
+                let local = tokio::task::LocalSet::new();
+                rt.block_on(local.run_until(async move {
+                    let prefix = AcpPrefix::new("acp").unwrap();
+                    let js_client = NatsJetStreamClient::new(jetstream::new(nats.clone()));
+                    let notifier = NatsSessionNotifier::new(nats.clone(), prefix.clone());
+                    let agent = XaiAgent::with_deps(notifier, "grok-4", "dummy", mock);
+                    let (_, io_task) = AgentSideNatsConnection::with_jetstream(
+                        agent,
+                        nats,
+                        js_client,
+                        prefix,
+                        |fut| {
+                            tokio::task::spawn_local(fut);
+                        },
+                    );
+                    io_task.await.ok();
+                }));
+            });
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+
+        async fn start_codex_agent(nats: async_nats::Client) {
+            std::thread::spawn(move || {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap();
+                let local = tokio::task::LocalSet::new();
+                rt.block_on(local.run_until(async move {
+                    let prefix = AcpPrefix::new("acp").unwrap();
+                    let js_client = NatsJetStreamClient::new(jetstream::new(nats.clone()));
+                    let agent = DefaultCodexAgent::with_nats(nats.clone(), prefix.clone(), "o4-mini");
+                    let (_, io_task) = AgentSideNatsConnection::with_jetstream(
+                        agent,
+                        nats,
+                        js_client,
+                        prefix,
+                        |fut| {
+                            tokio::task::spawn_local(fut);
+                        },
+                    );
+                    io_task.await.ok();
+                }));
+            });
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+
+        async fn start_server(nats_port: u16) -> (String, watch::Sender<bool>, std::thread::JoinHandle<()>) {
+            let nats = async_nats::connect(format!("127.0.0.1:{nats_port}"))
+                .await
+                .expect("connect for HTTP bridge");
+            let js = NatsJetStreamClient::new(jetstream::new(nats.clone()));
+            let config = Config::new(
+                AcpPrefix::new("acp").unwrap(),
+                NatsConfig {
+                    servers: vec![format!("127.0.0.1:{nats_port}")],
+                    auth: NatsAuth::None,
+                },
+            )
+            .with_operation_timeout(Duration::from_secs(10));
+
+            let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
+            let (manager_tx, manager_rx) = mpsc::unbounded_channel::<ManagerRequest>();
+
+            let conn_thread = std::thread::Builder::new()
+                .name(THREAD_NAME.into())
+                .spawn(move || crate::run_connection_thread(manager_rx, nats, js, config))
+                .expect("spawn connection thread");
+
+            let state = AppState {
+                bind_host: std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
+                manager_tx,
+                shutdown_tx: shutdown_tx.clone(),
+            };
+
+            let router = axum::Router::new()
+                .route(
+                    ACP_ENDPOINT,
+                    axum::routing::get(crate::transport::get)
+                        .post(crate::transport::post)
+                        .delete(crate::transport::delete),
+                )
+                .with_state(state);
+
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            tokio::spawn(async move {
+                axum::serve(listener, router)
+                    .with_graceful_shutdown(async move {
+                        let _ = shutdown_rx.changed().await;
+                    })
+                    .await
+                    .unwrap();
+            });
+
+            (format!("http://{addr}"), shutdown_tx, conn_thread)
+        }
+
+        /// Drains SSE events until finding one with `"id": expected_id`.
+        /// Skips intermediate notifications (session/update, keepalives) that have no id.
+        /// Uses a 10-second per-chunk timeout to accommodate JetStream round-trips.
+        async fn find_sse_event_with_id<S>(stream: &mut S, expected_id: i64) -> Value
+        where
+            S: futures_util::Stream<Item = Result<bytes::Bytes, reqwest::Error>> + Unpin,
+        {
+            use futures_util::StreamExt as _;
+            let mut buffer = String::new();
+            for _ in 0..50usize {
+                let chunk = tokio::time::timeout(Duration::from_secs(10), stream.next())
+                    .await
+                    .expect("timeout waiting for SSE chunk")
+                    .expect("SSE stream ended")
+                    .expect("failed to read SSE chunk");
+                buffer.push_str(&String::from_utf8_lossy(&chunk));
+
+                let mut consumed = 0usize;
+                while let Some(relative_end) = buffer[consumed..].find('\n') {
+                    let end = consumed + relative_end;
+                    let line = buffer[consumed..end].trim_end_matches('\r');
+                    consumed = end + 1;
+                    if let Some(json) = line.strip_prefix("data: ")
+                        && !json.is_empty()
+                    {
+                        if let Ok(v) = serde_json::from_str::<Value>(json) {
+                            if v.get("id").and_then(|x| x.as_i64()) == Some(expected_id) {
+                                return v;
+                            }
+                        }
+                    }
+                }
+                if consumed > 0 {
+                    buffer.drain(..consumed);
+                }
+            }
+            panic!("did not receive SSE event with id={expected_id} within 50 chunks");
+        }
+
+        async fn run_initialize_and_session_new(
+            client: &reqwest::Client,
+            url: &str,
+        ) -> (String, String, String, impl futures_util::Stream<Item = Result<bytes::Bytes, reqwest::Error>> + Unpin) {
+            // initialize
+            let init_resp = tokio::time::timeout(
+                Duration::from_secs(10),
+                client
+                    .post(url)
+                    .header("Content-Type", "application/json")
+                    .header("Accept", "application/json, text/event-stream")
+                    .body(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#)
+                    .send(),
+            )
+            .await
+            .expect("timeout on initialize")
+            .unwrap();
+            assert_eq!(init_resp.status(), 200u16);
+            let connection_id = init_resp
+                .headers()
+                .get(ACP_CONNECTION_ID_HEADER)
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .to_owned();
+            let init_body: Value = init_resp.json().await.unwrap();
+            let proto_ver = init_body["result"]["protocolVersion"]
+                .as_u64()
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "0".to_string());
+
+            // open SSE GET stream
+            let get = client
+                .get(url)
+                .header("Accept", "text/event-stream")
+                .header(ACP_CONNECTION_ID_HEADER, &connection_id)
+                .header(ACP_PROTOCOL_VERSION_HEADER, &proto_ver)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(get.status(), 200u16);
+            let mut stream = get.bytes_stream();
+
+            // session/new
+            let session_new_resp = client
+                .post(url)
+                .header("Content-Type", "application/json")
+                .header("Accept", "application/json, text/event-stream")
+                .header(ACP_CONNECTION_ID_HEADER, &connection_id)
+                .header(ACP_PROTOCOL_VERSION_HEADER, &proto_ver)
+                .body(r#"{"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":"/tmp","mcpServers":[]}}"#)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(session_new_resp.status(), 202u16);
+            drop(session_new_resp);
+
+            let session_event = find_sse_event_with_id(&mut stream, 2).await;
+            let session_id = session_event["result"]["sessionId"].as_str().unwrap_or("").to_string();
+            assert!(!session_id.is_empty(), "must have non-empty sessionId: {session_event}");
+
+            (connection_id, proto_ver, session_id, stream)
+        }
+
+        /// E2E: HTTP client → bridge → NATS → XaiAgent (mock HTTP) → prompt → SSE back.
+        /// Verifies the full prompt path without real xAI credentials.
+        #[tokio::test]
+        async fn e2e_http_prompt_with_xai_runner() {
+            let (_container, nats, nats_port) = start_nats().await;
+            setup_streams(&jetstream::new(nats.clone())).await;
+
+            let mock = Arc::new(MockXaiHttpClient::default());
+            mock.push_response(vec![
+                XaiEvent::TextDelta { text: "hello from xai mock".to_string() },
+                XaiEvent::Done,
+            ]);
+            start_xai_agent(nats, mock).await;
+            let (base_url, shutdown_tx, conn_thread) = start_server(nats_port).await;
+
+            let client = reqwest::Client::new();
+            let url = format!("{base_url}{ACP_ENDPOINT}");
+
+            let (connection_id, proto_ver, session_id, mut stream) =
+                run_initialize_and_session_new(&client, &url).await;
+
+            // session/prompt
+            let prompt_body = serde_json::json!({
+                "jsonrpc": "2.0", "id": 3,
+                "method": "session/prompt",
+                "params": {
+                    "sessionId": session_id,
+                    "prompt": [{"type": "text", "text": "ping"}]
+                }
+            });
+            client
+                .post(&url)
+                .header("Content-Type", "application/json")
+                .header("Accept", "application/json, text/event-stream")
+                .header(ACP_CONNECTION_ID_HEADER, &connection_id)
+                .header(ACP_PROTOCOL_VERSION_HEADER, &proto_ver)
+                .header(ACP_SESSION_ID_HEADER, &session_id)
+                .body(serde_json::to_string(&prompt_body).unwrap())
+                .send()
+                .await
+                .unwrap();
+
+            let prompt_event = find_sse_event_with_id(&mut stream, 3).await;
+
+            assert!(
+                prompt_event["result"]["stopReason"].is_string(),
+                "prompt result must have stopReason: {prompt_event}"
+            );
+
+            shutdown_tx.send(true).unwrap();
+            let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;
+        }
+
+        /// E2E: HTTP client → bridge → NATS → DefaultCodexAgent (mock binary) → prompt → SSE back.
+        /// Verifies the full prompt path without real Codex/OpenAI credentials.
+        #[tokio::test]
+        async fn e2e_http_prompt_with_codex_runner() {
+            let _lock = codex_bin_lock().lock().await;
+            // SAFETY: serialized by CODEX_BIN_LOCK within this test binary.
+            unsafe { std::env::set_var("CODEX_BIN", mock_codex_bin()) };
+
+            let (_container, nats, nats_port) = start_nats().await;
+            setup_streams(&jetstream::new(nats.clone())).await;
+
+            start_codex_agent(nats).await;
+            let (base_url, shutdown_tx, conn_thread) = start_server(nats_port).await;
+
+            let client = reqwest::Client::new();
+            let url = format!("{base_url}{ACP_ENDPOINT}");
+
+            let (connection_id, proto_ver, session_id, mut stream) =
+                run_initialize_and_session_new(&client, &url).await;
+
+            // session/prompt
+            let prompt_body = serde_json::json!({
+                "jsonrpc": "2.0", "id": 3,
+                "method": "session/prompt",
+                "params": {
+                    "sessionId": session_id,
+                    "prompt": [{"type": "text", "text": "ping"}]
+                }
+            });
+            client
+                .post(&url)
+                .header("Content-Type", "application/json")
+                .header("Accept", "application/json, text/event-stream")
+                .header(ACP_CONNECTION_ID_HEADER, &connection_id)
+                .header(ACP_PROTOCOL_VERSION_HEADER, &proto_ver)
+                .header(ACP_SESSION_ID_HEADER, &session_id)
+                .body(serde_json::to_string(&prompt_body).unwrap())
+                .send()
+                .await
+                .unwrap();
+
+            let prompt_event = find_sse_event_with_id(&mut stream, 3).await;
+
+            assert!(
+                prompt_event["result"]["stopReason"].is_string(),
+                "prompt result must have stopReason: {prompt_event}"
+            );
+
+            shutdown_tx.send(true).unwrap();
+            let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;
+        }
+    }
 }
