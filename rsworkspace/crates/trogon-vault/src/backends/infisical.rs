@@ -623,6 +623,55 @@ mod tests {
         m.assert();
     }
 
+    // ── secret_path ───────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn store_sends_custom_secret_path_in_body() {
+        let server = MockServer::start();
+        let m = server.mock(|when, then| {
+            when.method(POST)
+                .path("/api/v3/secrets/raw/anthropic_a1b2c3")
+                .json_body_partial(r#"{"secretPath":"/services/stripe"}"#);
+            then.status(200).json_body(serde_json::json!({"secret": {}}));
+        });
+
+        let vault = InfisicalVaultStore::new(
+            InfisicalConfig::new(
+                format!("http://{}", server.address()),
+                "proj-abc123",
+                InfisicalAuth::ServiceToken("st.test-token".to_string()),
+            )
+            .with_secret_path("/services/stripe"),
+        );
+        vault.store(&tok("tok_anthropic_prod_a1b2c3"), "sk-ant-key").await.unwrap();
+        m.assert();
+    }
+
+    #[tokio::test]
+    async fn resolve_sends_custom_secret_path_as_query_param() {
+        let server = MockServer::start();
+        let m = server.mock(|when, then| {
+            when.method(GET)
+                .path("/api/v3/secrets/raw/anthropic_a1b2c3")
+                .query_param("secretPath", "/services/stripe");
+            then.status(200).json_body(serde_json::json!({
+                "secret": { "secretValue": "sk-ant-real" }
+            }));
+        });
+
+        let vault = InfisicalVaultStore::new(
+            InfisicalConfig::new(
+                format!("http://{}", server.address()),
+                "proj-abc123",
+                InfisicalAuth::ServiceToken("st.test-token".to_string()),
+            )
+            .with_secret_path("/services/stripe"),
+        );
+        let result = vault.resolve(&tok("tok_anthropic_prod_a1b2c3")).await.unwrap();
+        assert_eq!(result, Some("sk-ant-real".to_string()));
+        m.assert();
+    }
+
     // ── from_env() ────────────────────────────────────────────────────────────
 
     mod from_env {
