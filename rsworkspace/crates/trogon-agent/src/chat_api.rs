@@ -138,6 +138,8 @@ struct SessionSummary {
     message_count: usize,
     created_at: String,
     updated_at: String,
+    total_input_tokens: u64,
+    total_output_tokens: u64,
 }
 
 impl From<&ChatSession> for SessionSummary {
@@ -152,6 +154,8 @@ impl From<&ChatSession> for SessionSummary {
             message_count: s.messages.len(),
             created_at: s.created_at.clone(),
             updated_at: s.updated_at.clone(),
+            total_input_tokens: s.total_input_tokens,
+            total_output_tokens: s.total_output_tokens,
         }
     }
 }
@@ -192,6 +196,10 @@ pub struct SendMessageResponse {
     pub content: String,
     /// Total messages in the session after this turn.
     pub message_count: usize,
+    /// Input tokens consumed in this turn.
+    pub input_tokens: u64,
+    /// Output tokens produced in this turn.
+    pub output_tokens: u64,
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
@@ -237,6 +245,8 @@ async fn create_session<R: SessionRepository>(
         started_at_secs: now_secs,
         duration_ms: 0,
         agent_id: state.agent_id.clone(),
+        total_input_tokens: 0,
+        total_output_tokens: 0,
     };
     match state.session_store.put(&session).await {
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e),
@@ -413,12 +423,21 @@ async fn send_message<R: SessionRepository>(
     };
 
     // Run the chat loop — returns (final_text, updated_messages).
+    let prev_message_count = session.messages.len();
     match agent
         .run_chat(session.messages.clone(), &tools, system_prompt.as_deref())
         .await
     {
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
         Ok((text, updated_messages)) => {
+            let (turn_input, turn_output) = updated_messages[prev_message_count..]
+                .iter()
+                .filter_map(|m| m.usage.as_ref())
+                .fold((0u64, 0u64), |(i, o), u| {
+                    (i + u.input_tokens as u64, o + u.output_tokens as u64)
+                });
+            session.total_input_tokens  += turn_input;
+            session.total_output_tokens += turn_output;
             let message_count = updated_messages.len();
             session.messages = updated_messages;
             let now_secs = now_epoch_secs();
@@ -441,6 +460,8 @@ async fn send_message<R: SessionRepository>(
                 axum::Json(SendMessageResponse {
                     content: text,
                     message_count,
+                    input_tokens:  turn_input,
+                    output_tokens: turn_output,
                 }),
             )
                 .into_response()
@@ -567,6 +588,8 @@ mod tests {
             started_at_secs: 0,
             duration_ms: 0,
             agent_id: None,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
         };
         let summary = SessionSummary::from(&s);
         assert_eq!(summary.message_count, 2);
@@ -833,6 +856,8 @@ mod tests {
             started_at_secs: 0,
             duration_ms: 0,
             agent_id: None,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
         }
     }
 
