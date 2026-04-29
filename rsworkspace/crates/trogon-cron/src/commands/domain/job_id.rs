@@ -101,4 +101,70 @@ mod tests {
 
         assert_eq!(source.to_string(), SubjectTokenViolation::Empty.to_string());
     }
+
+    mod proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            #[test]
+            fn job_id_accepts_any_valid_single_token(s in "[a-z0-9_-]{1,128}") {
+                let id = JobId::parse(&s).unwrap();
+                prop_assert_eq!(id.as_str(), s.as_str());
+            }
+
+            #[test]
+            fn job_id_serde_round_trips(s in "[a-z0-9_-]{1,64}") {
+                let id = JobId::parse(&s).unwrap();
+                let json = serde_json::to_string(&id).unwrap();
+                let decoded: JobId = serde_json::from_str(&json).unwrap();
+                prop_assert_eq!(decoded, id);
+            }
+
+            #[test]
+            fn job_id_rejects_string_containing_dot(
+                prefix in "[a-z]{1,8}",
+                suffix in "[a-z]{0,8}",
+            ) {
+                let s = format!("{prefix}.{suffix}");
+                prop_assert!(JobId::parse(&s).is_err());
+            }
+
+            #[test]
+            fn job_id_rejects_string_containing_wildcard(
+                prefix in "[a-z]{1,8}",
+                wildcard in prop_oneof![Just('*'), Just('>')],
+                suffix in "[a-z]{0,8}",
+            ) {
+                let s = format!("{prefix}{wildcard}{suffix}");
+                prop_assert!(JobId::parse(&s).is_err());
+            }
+
+            #[test]
+            fn job_id_rejects_string_containing_whitespace(
+                prefix in "[a-z]{1,8}",
+                ws in prop_oneof![Just(' '), Just('\t'), Just('\n'), Just('\r')],
+                suffix in "[a-z]{0,8}",
+            ) {
+                let s = format!("{prefix}{ws}{suffix}");
+                prop_assert!(JobId::parse(&s).is_err());
+            }
+
+            #[test]
+            fn job_id_rejects_non_ascii(
+                prefix in "[a-z]{0,5}",
+                non_ascii in "[^\x00-\x7F]{1,3}",
+                suffix in "[a-z]{0,5}",
+            ) {
+                let s = format!("{prefix}{non_ascii}{suffix}");
+                prop_assert!(JobId::parse(&s).is_err());
+            }
+
+            #[test]
+            fn job_id_rejects_string_over_max_length(n in 129usize..200usize) {
+                let s = "a".repeat(n);
+                prop_assert!(JobId::parse(&s).is_err());
+            }
+        }
+    }
 }
