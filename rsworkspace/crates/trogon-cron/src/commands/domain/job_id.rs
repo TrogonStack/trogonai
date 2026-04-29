@@ -143,7 +143,7 @@ mod tests {
             #[test]
             fn job_id_rejects_string_containing_whitespace(
                 prefix in "[a-z]{1,8}",
-                ws in prop_oneof![Just(' '), Just('\t'), Just('\n')],
+                ws in prop_oneof![Just(' '), Just('\t'), Just('\n'), Just('\r')],
                 suffix in "[a-z]{0,8}",
             ) {
                 let s = format!("{prefix}{ws}{suffix}");

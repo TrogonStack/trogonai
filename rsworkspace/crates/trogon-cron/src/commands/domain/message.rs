@@ -186,7 +186,7 @@ mod tests {
                 name in "x-[a-z]{1,16}",
                 value in "[ -~]{0,32}",
             ) {
-                let headers = MessageHeaders::new([(name.clone(), value.clone())]).unwrap();
+                let headers = MessageHeaders::new([(name.as_str(), value.as_str())]).unwrap();
                 let slice = headers.as_slice();
                 prop_assert_eq!(slice.len(), 1);
                 prop_assert_eq!(slice[0].0.as_str(), name.as_str());
