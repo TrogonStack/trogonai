@@ -1026,6 +1026,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn create_session_response_includes_zero_token_totals() {
+        let app = mock_app(MockSessionStore::new());
+        let req = Request::builder()
+            .method("POST")
+            .uri("/sessions")
+            .header("x-tenant-id", "acme")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"name":"S"}"#))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["total_input_tokens"], 0);
+        assert_eq!(json["total_output_tokens"], 0);
+    }
+
+    #[tokio::test]
     async fn get_session_missing_tenant_returns_400() {
         let app = mock_app(MockSessionStore::new());
         let req = Request::builder()
@@ -1067,6 +1087,27 @@ mod tests {
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["id"], "sess-1");
         assert_eq!(json["messages"].as_array().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn get_session_response_includes_token_totals() {
+        let store = MockSessionStore::new();
+        let mut s = sample_session("sess-tok", "acme");
+        s.total_input_tokens = 99;
+        s.total_output_tokens = 33;
+        store.insert(s);
+        let app = mock_app(store);
+        let resp = app
+            .oneshot(get_req("/sessions/sess-tok", "acme"))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["total_input_tokens"], 99);
+        assert_eq!(json["total_output_tokens"], 33);
     }
 
     #[tokio::test]
