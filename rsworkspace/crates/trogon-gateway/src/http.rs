@@ -54,12 +54,12 @@ where
         info!(source = "linear", "mounted at /linear");
     }
 
-    if let Some(ref cfg) = config.microsoft_teams {
+    if let Some(ref cfg) = config.microsoft_graph {
         app = app.nest(
-            "/microsoft-teams",
-            trogon_source_microsoft_teams::router(publisher.clone(), cfg),
+            "/microsoft-graph",
+            trogon_source_microsoft_graph::router(publisher.clone(), cfg),
         );
-        info!(source = "microsoft-teams", "mounted at /microsoft-teams");
+        info!(source = "microsoft-graph", "mounted at /microsoft-graph");
     }
 
     if let Some(ref cfg) = config.notion {
@@ -129,8 +129,8 @@ signing_secret = "whsec_dGVzdC1zZWNyZXQ="
 [sources.linear]
 webhook_secret = "linear-secret"
 
-[sources.microsoft_teams]
-client_state = "microsoft-teams-client-state"
+[sources.microsoft_graph]
+client_state = "microsoft-graph-client-state"
 
 [sources.notion]
 verification_token = "notion-verification-token-example"
