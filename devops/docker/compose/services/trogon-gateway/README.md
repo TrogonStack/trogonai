@@ -16,6 +16,7 @@ prefix:
 | GitLab | `/gitlab/webhook` | `TROGON_SOURCE_GITLAB_WEBHOOK_SECRET` |
 | incident.io | `/incidentio/webhook` | `TROGON_SOURCE_INCIDENTIO_SIGNING_SECRET` |
 | Linear | `/linear/webhook` | `TROGON_SOURCE_LINEAR_WEBHOOK_SECRET` |
+| Microsoft Teams | `/microsoft-teams/webhook` | `TROGON_SOURCE_MICROSOFT_TEAMS_CLIENT_STATE` |
 | Notion | `/notion/webhook` | `TROGON_SOURCE_NOTION_VERIFICATION_TOKEN` |
 | Sentry | `/sentry/webhook` | `TROGON_SOURCE_SENTRY_CLIENT_SECRET` |
 
@@ -82,6 +83,24 @@ Sentry integration-platform webhooks sign the raw JSON body with the app client
 secret. Configure `TROGON_SOURCE_SENTRY_CLIENT_SECRET`, point the webhook URL
 at `/sentry/webhook`, and the gateway will forward verified payloads to NATS on
 `{subject_prefix}.{resource}.{action}` subjects such as `sentry.issue.created`.
+
+## Microsoft Teams webhooks
+
+Microsoft Teams change notifications arrive through Microsoft Graph webhook
+subscriptions. Configure `TROGON_SOURCE_MICROSOFT_TEAMS_CLIENT_STATE` with the
+same secret `clientState` used when creating the Graph subscription, then point
+the notification URL at `/microsoft-teams/webhook`. The gateway answers Graph's
+`validationToken` handshake and forwards each validated Graph notification
+collection to NATS on `{subject_prefix}.change_notification_collection`, for
+example `microsoft-teams.change_notification_collection`. The collection publish
+uses a deterministic NATS message ID derived from the Graph notification
+identities so exact webhook retries can be deduplicated at the collection
+boundary.
+
+For subscriptions that include resource data, the gateway preserves Graph's
+collection payload, including `validationTokens`. Downstream consumers remain
+responsible for validating those tokens, decrypting `encryptedContent`, and
+splitting individual notifications when they need per-resource routing.
 
 ## Exposing webhooks with ngrok
 
