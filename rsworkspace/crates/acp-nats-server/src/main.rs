@@ -2300,5 +2300,101 @@ mod tests {
             shutdown_tx.send(true).unwrap();
             let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;
         }
+
+        /// E2E: HTTP bridge → NATS → XaiAgent → session/resume returns a result.
+        #[tokio::test]
+        async fn e2e_http_resume_session_returns_result() {
+            let (_container, nats, nats_port) = start_nats().await;
+            setup_streams(&jetstream::new(nats.clone())).await;
+
+            let mock = Arc::new(MockXaiHttpClient::default());
+            start_xai_agent(nats, mock).await;
+            let (base_url, shutdown_tx, conn_thread) = start_server(nats_port).await;
+
+            let client = reqwest::Client::new();
+            let url = format!("{base_url}{ACP_ENDPOINT}");
+
+            let (connection_id, proto_ver, session_id, mut stream) =
+                run_initialize_and_session_new(&client, &url).await;
+
+            let resume_body = serde_json::json!({
+                "jsonrpc": "2.0", "id": 3,
+                "method": "session/resume",
+                "params": { "sessionId": session_id, "cwd": "/tmp" }
+            });
+            let resp = client
+                .post(&url)
+                .header("Content-Type", "application/json")
+                .header("Accept", "application/json, text/event-stream")
+                .header(ACP_CONNECTION_ID_HEADER, &connection_id)
+                .header(ACP_PROTOCOL_VERSION_HEADER, &proto_ver)
+                .header(ACP_SESSION_ID_HEADER, &session_id)
+                .body(serde_json::to_string(&resume_body).unwrap())
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), 202u16, "session/resume must be accepted");
+
+            let event = find_sse_event_with_id(&mut stream, 3).await;
+            assert!(
+                event["result"].is_object(),
+                "session/resume must return a result: {event}"
+            );
+            assert!(
+                event["error"].is_null(),
+                "session/resume must not return an error: {event}"
+            );
+
+            shutdown_tx.send(true).unwrap();
+            let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;
+        }
+
+        /// E2E: HTTP bridge → NATS → XaiAgent → session/list returns the created session.
+        #[tokio::test]
+        async fn e2e_http_list_sessions_returns_session() {
+            let (_container, nats, nats_port) = start_nats().await;
+            setup_streams(&jetstream::new(nats.clone())).await;
+
+            let mock = Arc::new(MockXaiHttpClient::default());
+            start_xai_agent(nats, mock).await;
+            let (base_url, shutdown_tx, conn_thread) = start_server(nats_port).await;
+
+            let client = reqwest::Client::new();
+            let url = format!("{base_url}{ACP_ENDPOINT}");
+
+            let (connection_id, proto_ver, session_id, mut stream) =
+                run_initialize_and_session_new(&client, &url).await;
+
+            let list_body = serde_json::json!({
+                "jsonrpc": "2.0", "id": 3,
+                "method": "session/list",
+                "params": {}
+            });
+            let resp = client
+                .post(&url)
+                .header("Content-Type", "application/json")
+                .header("Accept", "application/json, text/event-stream")
+                .header(ACP_CONNECTION_ID_HEADER, &connection_id)
+                .header(ACP_PROTOCOL_VERSION_HEADER, &proto_ver)
+                .body(serde_json::to_string(&list_body).unwrap())
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), 202u16, "session/list must be accepted");
+
+            let event = find_sse_event_with_id(&mut stream, 3).await;
+            assert!(
+                event["error"].is_null(),
+                "session/list must not return an error: {event}"
+            );
+            let sessions = event["result"]["sessions"]
+                .as_array()
+                .unwrap_or_else(|| panic!("session/list must return sessions array: {event}"));
+            let found = sessions.iter().any(|s| s["sessionId"].as_str() == Some(&session_id));
+            assert!(found, "listed sessions must include the created session {session_id}: {event}");
+
+            shutdown_tx.send(true).unwrap();
+            let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;
+        }
     }
 }

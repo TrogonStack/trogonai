@@ -8,7 +8,7 @@
 //! Run with:
 //!   cargo test -p acp-nats-ws --test e2e_runner
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use acp_nats::{AcpPrefix, Config, NatsAuth, NatsConfig};
@@ -20,12 +20,13 @@ use futures_util::{SinkExt, StreamExt};
 use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
 use tokio::net::TcpListener;
-use tokio::sync::{RwLock, mpsc, watch};
+use tokio::sync::{Mutex, RwLock, mpsc, watch};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
 use trogon_acp_runner::{NatsSessionNotifier, NatsSessionStore, SessionStore as _, TrogonAgent};
 use trogon_agent_core::agent_loop::AgentLoop;
 use trogon_agent_core::tools::ToolContext;
+use trogon_codex_runner::DefaultCodexAgent;
 use trogon_nats::jetstream::NatsJetStreamClient;
 use trogon_xai_runner::{MockXaiHttpClient, NatsSessionNotifier as XaiSessionNotifier, XaiAgent, XaiEvent};
 
@@ -211,6 +212,45 @@ async fn start_xai_agent(nats: async_nats::Client, mock: Arc<MockXaiHttpClient>)
             let js_client = NatsJetStreamClient::new(jetstream::new(nats.clone()));
             let notifier = XaiSessionNotifier::new(nats.clone(), prefix.clone());
             let agent = XaiAgent::with_deps(notifier, "grok-4", "dummy", mock);
+            let (_, io_task) = AgentSideNatsConnection::with_jetstream(
+                agent,
+                nats,
+                js_client,
+                prefix,
+                |fut| { tokio::task::spawn_local(fut); },
+            );
+            io_task.await.ok();
+        }));
+    });
+    tokio::time::sleep(Duration::from_millis(500)).await;
+}
+
+static CODEX_BIN_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+fn codex_bin_lock() -> &'static Mutex<()> {
+    CODEX_BIN_LOCK.get_or_init(Mutex::default)
+}
+
+fn mock_codex_bin() -> std::path::PathBuf {
+    let exe = std::env::current_exe().unwrap();
+    let bin = exe.parent().unwrap().parent().unwrap().join("mock_codex_server");
+    assert!(
+        bin.exists(),
+        "mock_codex_server not found at {bin:?} — run: cargo build -p trogon-codex-runner"
+    );
+    bin
+}
+
+async fn start_codex_agent(nats: async_nats::Client) {
+    std::thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let local = tokio::task::LocalSet::new();
+        rt.block_on(local.run_until(async move {
+            let prefix = AcpPrefix::new("acp").unwrap();
+            let js_client = NatsJetStreamClient::new(jetstream::new(nats.clone()));
+            let agent = DefaultCodexAgent::with_nats(nats.clone(), prefix.clone(), "o4-mini");
             let (_, io_task) = AgentSideNatsConnection::with_jetstream(
                 agent,
                 nats,
@@ -596,6 +636,212 @@ async fn e2e_ws_session_fork_creates_child_session() {
     setup_streams(&js).await;
     let mock = Arc::new(MockXaiHttpClient::default());
     start_xai_agent(nats, mock).await;
+    let (ws_url, shutdown_tx, conn_thread) = start_ws_server(nats_port).await;
+    let (mut ws, _) = connect_async(&ws_url).await.unwrap();
+
+    ws.send(Message::Text(
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#.into(),
+    ))
+    .await
+    .unwrap();
+    next_with_id(&mut ws, 1).await;
+
+    ws.send(Message::Text(
+        r#"{"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":"/tmp","mcpServers":[]}}"#.into(),
+    ))
+    .await
+    .unwrap();
+    let new_val = next_with_id(&mut ws, 2).await;
+    let session_id = new_val["result"]["sessionId"]
+        .as_str()
+        .unwrap_or_else(|| panic!("must have sessionId: {new_val}"))
+        .to_string();
+
+    let fork_msg = serde_json::json!({
+        "jsonrpc": "2.0", "id": 3,
+        "method": "session/fork",
+        "params": { "sessionId": session_id, "cwd": "/tmp", "mcpServers": [] }
+    });
+    ws.send(Message::Text(fork_msg.to_string().into())).await.unwrap();
+
+    let fork_val = next_with_id(&mut ws, 3).await;
+    assert!(
+        fork_val["error"].is_null(),
+        "session/fork must not return an error: {fork_val}"
+    );
+    let new_session_id = fork_val["result"]["sessionId"]
+        .as_str()
+        .unwrap_or_else(|| panic!("session/fork must return new sessionId: {fork_val}"));
+    assert!(!new_session_id.is_empty());
+    assert_ne!(new_session_id, session_id);
+
+    shutdown_tx.send(true).unwrap();
+    let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;
+}
+
+/// E2E: WS → DefaultCodexAgent (mock binary) → prompt returns a stopReason.
+#[tokio::test]
+async fn e2e_ws_codex_prompt_returns_stop_reason() {
+    let _lock = codex_bin_lock().lock().await;
+    // SAFETY: serialized by CODEX_BIN_LOCK within this test binary.
+    unsafe { std::env::set_var("CODEX_BIN", mock_codex_bin()) };
+
+    let (_container, nats, js, nats_port) = start_nats().await;
+    setup_streams(&js).await;
+    start_codex_agent(nats).await;
+    let (ws_url, shutdown_tx, conn_thread) = start_ws_server(nats_port).await;
+    let (mut ws, _) = connect_async(&ws_url).await.unwrap();
+
+    ws.send(Message::Text(
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#.into(),
+    ))
+    .await
+    .unwrap();
+    next_with_id(&mut ws, 1).await;
+
+    ws.send(Message::Text(
+        r#"{"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":"/tmp","mcpServers":[]}}"#.into(),
+    ))
+    .await
+    .unwrap();
+    let new_val = next_with_id(&mut ws, 2).await;
+    let session_id = new_val["result"]["sessionId"]
+        .as_str()
+        .unwrap_or_else(|| panic!("must have sessionId: {new_val}"))
+        .to_string();
+
+    let prompt_msg = serde_json::json!({
+        "jsonrpc": "2.0", "id": 3,
+        "method": "session/prompt",
+        "params": { "sessionId": session_id, "prompt": [{"type": "text", "text": "ping"}] }
+    });
+    ws.send(Message::Text(prompt_msg.to_string().into())).await.unwrap();
+
+    let prompt_val = next_with_id(&mut ws, 3).await;
+    assert!(
+        prompt_val["result"]["stopReason"].is_string(),
+        "codex prompt must return stopReason: {prompt_val}"
+    );
+
+    shutdown_tx.send(true).unwrap();
+    let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;
+}
+
+/// E2E: WS → DefaultCodexAgent → cancel sent immediately after prompt; prompt
+/// must still complete with a valid stopReason (completed or cancelled).
+#[tokio::test]
+async fn e2e_ws_codex_cancel_during_prompt_completes() {
+    let _lock = codex_bin_lock().lock().await;
+    unsafe { std::env::set_var("CODEX_BIN", mock_codex_bin()) };
+
+    let (_container, nats, js, nats_port) = start_nats().await;
+    setup_streams(&js).await;
+    start_codex_agent(nats).await;
+    let (ws_url, shutdown_tx, conn_thread) = start_ws_server(nats_port).await;
+    let (mut ws, _) = connect_async(&ws_url).await.unwrap();
+
+    ws.send(Message::Text(
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#.into(),
+    ))
+    .await
+    .unwrap();
+    next_with_id(&mut ws, 1).await;
+
+    ws.send(Message::Text(
+        r#"{"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":"/tmp","mcpServers":[]}}"#.into(),
+    ))
+    .await
+    .unwrap();
+    let new_val = next_with_id(&mut ws, 2).await;
+    let session_id = new_val["result"]["sessionId"]
+        .as_str()
+        .unwrap_or_else(|| panic!("must have sessionId: {new_val}"))
+        .to_string();
+
+    let prompt_msg = serde_json::json!({
+        "jsonrpc": "2.0", "id": 3,
+        "method": "session/prompt",
+        "params": { "sessionId": session_id, "prompt": [{"type": "text", "text": "ping"}] }
+    });
+    ws.send(Message::Text(prompt_msg.to_string().into())).await.unwrap();
+
+    let cancel_msg = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "session/cancel",
+        "params": { "sessionId": session_id }
+    });
+    ws.send(Message::Text(cancel_msg.to_string().into())).await.unwrap();
+
+    let prompt_val = next_with_id(&mut ws, 3).await;
+    assert!(
+        prompt_val["result"]["stopReason"].is_string(),
+        "prompt must return stopReason after cancel: {prompt_val}"
+    );
+
+    shutdown_tx.send(true).unwrap();
+    let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;
+}
+
+/// E2E: WS → DefaultCodexAgent → session/load reconnects to existing session.
+#[tokio::test]
+async fn e2e_ws_codex_load_session_reconnects() {
+    let _lock = codex_bin_lock().lock().await;
+    unsafe { std::env::set_var("CODEX_BIN", mock_codex_bin()) };
+
+    let (_container, nats, js, nats_port) = start_nats().await;
+    setup_streams(&js).await;
+    start_codex_agent(nats).await;
+    let (ws_url, shutdown_tx, conn_thread) = start_ws_server(nats_port).await;
+    let (mut ws, _) = connect_async(&ws_url).await.unwrap();
+
+    ws.send(Message::Text(
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#.into(),
+    ))
+    .await
+    .unwrap();
+    next_with_id(&mut ws, 1).await;
+
+    ws.send(Message::Text(
+        r#"{"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":"/tmp","mcpServers":[]}}"#.into(),
+    ))
+    .await
+    .unwrap();
+    let new_val = next_with_id(&mut ws, 2).await;
+    let session_id = new_val["result"]["sessionId"]
+        .as_str()
+        .unwrap_or_else(|| panic!("must have sessionId: {new_val}"))
+        .to_string();
+
+    let load_msg = serde_json::json!({
+        "jsonrpc": "2.0", "id": 3,
+        "method": "session/load",
+        "params": { "sessionId": session_id, "cwd": "/tmp", "mcpServers": [] }
+    });
+    ws.send(Message::Text(load_msg.to_string().into())).await.unwrap();
+
+    let load_val = next_with_id(&mut ws, 3).await;
+    assert!(
+        load_val["result"].is_object(),
+        "session/load must return a result: {load_val}"
+    );
+    assert!(
+        load_val["error"].is_null(),
+        "session/load must not return an error: {load_val}"
+    );
+
+    shutdown_tx.send(true).unwrap();
+    let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;
+}
+
+/// E2E: WS → DefaultCodexAgent → session/fork returns a new child session ID.
+#[tokio::test]
+async fn e2e_ws_codex_fork_creates_child_session() {
+    let _lock = codex_bin_lock().lock().await;
+    unsafe { std::env::set_var("CODEX_BIN", mock_codex_bin()) };
+
+    let (_container, nats, js, nats_port) = start_nats().await;
+    setup_streams(&js).await;
+    start_codex_agent(nats).await;
     let (ws_url, shutdown_tx, conn_thread) = start_ws_server(nats_port).await;
     let (mut ws, _) = connect_async(&ws_url).await.unwrap();
 
