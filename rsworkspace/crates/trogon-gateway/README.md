@@ -79,6 +79,7 @@ Source-specific extras:
 
 - `TROGON_SOURCE_DISCORD_GATEWAY_INTENTS`
 - `TROGON_SOURCE_SLACK_TIMESTAMP_MAX_DRIFT_SECS` (default: `300`)
+- `TROGON_SOURCE_TELEGRAM_WEBHOOK_REGISTRATION_MODE=startup` attempts Telegram webhook registration on startup and requires `TROGON_SOURCE_TELEGRAM_BOT_TOKEN` plus `TROGON_SOURCE_TELEGRAM_PUBLIC_WEBHOOK_URL`
 - `TROGON_SOURCE_LINEAR_TIMESTAMP_TOLERANCE_SECS` (default: `60`, `0` disables tolerance)
 - `TROGON_SOURCE_TWITTER_CONSUMER_SECRET` is used for both CRC responses and `x-twitter-webhooks-signature` validation
 
@@ -109,6 +110,9 @@ signing_secret = "slack-secret"
 
 [sources.telegram]
 webhook_secret = "telegram-secret"
+# webhook_registration_mode = "startup"
+# bot_token = "<telegram-bot-token>"
+# public_webhook_url = "https://example.com/telegram/webhook"
 
 [sources.twitter]
 consumer_secret = "twitter-consumer-secret"

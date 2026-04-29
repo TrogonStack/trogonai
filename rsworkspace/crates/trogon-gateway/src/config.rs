@@ -17,7 +17,9 @@ use trogon_source_linear::config::LinearWebhookSecret;
 use trogon_source_notion::NotionVerificationToken;
 use trogon_source_sentry::SentryClientSecret;
 use trogon_source_slack::config::SlackSigningSecret;
-use trogon_source_telegram::config::TelegramWebhookSecret;
+use trogon_source_telegram::config::{
+    TelegramBotToken, TelegramPublicWebhookUrl, TelegramWebhookRegistrationConfig, TelegramWebhookSecret,
+};
 use trogon_source_twitter::config::TwitterConsumerSecret;
 use trogon_std::{NonZeroDuration, ZeroDuration};
 
@@ -58,6 +60,54 @@ impl fmt::Display for DurationTooLong {
 impl std::error::Error for DurationTooLong {}
 
 const SENTRY_MAX_ACK_TIMEOUT_SECS: u64 = 1;
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum TelegramWebhookRegistrationMode {
+    #[default]
+    Manual,
+    Startup,
+}
+
+impl TelegramWebhookRegistrationMode {
+    fn registers_on_startup(self) -> bool {
+        matches!(self, Self::Startup)
+    }
+}
+
+impl std::str::FromStr for TelegramWebhookRegistrationMode {
+    type Err = TelegramWebhookRegistrationModeError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "manual" => Ok(Self::Manual),
+            "startup" => Ok(Self::Startup),
+            _ => Err(TelegramWebhookRegistrationModeError::new(value)),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct TelegramWebhookRegistrationModeError {
+    value: String,
+}
+
+impl TelegramWebhookRegistrationModeError {
+    fn new(value: impl Into<String>) -> Self {
+        Self { value: value.into() }
+    }
+}
+
+impl fmt::Display for TelegramWebhookRegistrationModeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "unsupported registration mode '{}' ; expected 'manual' or 'startup'",
+            self.value
+        )
+    }
+}
+
+impl std::error::Error for TelegramWebhookRegistrationModeError {}
 
 #[derive(Debug)]
 pub enum ConfigValidationError {
@@ -262,6 +312,12 @@ struct TelegramConfig {
     status: Option<String>,
     #[config(env = "TROGON_SOURCE_TELEGRAM_WEBHOOK_SECRET")]
     webhook_secret: Option<String>,
+    #[config(env = "TROGON_SOURCE_TELEGRAM_WEBHOOK_REGISTRATION_MODE", default = "manual")]
+    webhook_registration_mode: String,
+    #[config(env = "TROGON_SOURCE_TELEGRAM_BOT_TOKEN")]
+    bot_token: Option<String>,
+    #[config(env = "TROGON_SOURCE_TELEGRAM_PUBLIC_WEBHOOK_URL")]
+    public_webhook_url: Option<String>,
     #[config(env = "TROGON_SOURCE_TELEGRAM_SUBJECT_PREFIX", default = "telegram")]
     subject_prefix: String,
     #[config(env = "TROGON_SOURCE_TELEGRAM_STREAM_NAME", default = "TELEGRAM")]
@@ -699,6 +755,17 @@ fn resolve_telegram(
         }
     };
 
+    let registration = match resolve_telegram_registration(
+        section.webhook_registration_mode.as_str(),
+        section.bot_token,
+        section.public_webhook_url,
+        errors,
+    ) {
+        Some(Ok(registration)) => Some(registration),
+        Some(Err(())) => return None,
+        None => None,
+    };
+
     let subject_prefix = match NatsToken::new(section.subject_prefix) {
         Ok(t) => t,
         Err(e) => {
@@ -741,11 +808,75 @@ fn resolve_telegram(
 
     Some(trogon_source_telegram::TelegramSourceConfig {
         webhook_secret,
+        registration,
         subject_prefix,
         stream_name,
         stream_max_age,
         nats_ack_timeout,
     })
+}
+
+fn resolve_telegram_registration(
+    webhook_registration_mode: &str,
+    bot_token: Option<String>,
+    public_webhook_url: Option<String>,
+    errors: &mut Vec<ConfigValidationError>,
+) -> Option<Result<TelegramWebhookRegistrationConfig, ()>> {
+    let mode = match webhook_registration_mode.parse::<TelegramWebhookRegistrationMode>() {
+        Ok(mode) => mode,
+        Err(error) => {
+            errors.push(ConfigValidationError::invalid(
+                "telegram",
+                "webhook_registration_mode",
+                error,
+            ));
+            return Some(Err(()));
+        }
+    };
+
+    if !mode.registers_on_startup() {
+        return None;
+    }
+
+    let public_webhook_url = public_webhook_url.filter(|value| !value.is_empty());
+
+    match (bot_token, public_webhook_url) {
+        (None, None) => {
+            errors.push(ConfigValidationError::missing("telegram", "bot_token"));
+            errors.push(ConfigValidationError::missing("telegram", "public_webhook_url"));
+            Some(Err(()))
+        }
+        (Some(_), None) => {
+            errors.push(ConfigValidationError::missing("telegram", "public_webhook_url"));
+            Some(Err(()))
+        }
+        (None, Some(_)) => {
+            errors.push(ConfigValidationError::missing("telegram", "bot_token"));
+            Some(Err(()))
+        }
+        (Some(bot_token), Some(public_webhook_url)) => {
+            let bot_token = match TelegramBotToken::new(bot_token) {
+                Ok(value) => value,
+                Err(error) => {
+                    errors.push(ConfigValidationError::invalid("telegram", "bot_token", error));
+                    return Some(Err(()));
+                }
+            };
+
+            let public_webhook_url = match TelegramPublicWebhookUrl::new(public_webhook_url) {
+                Ok(value) => value,
+                Err(error) => {
+                    errors.push(ConfigValidationError::invalid("telegram", "public_webhook_url", error));
+                    return Some(Err(()));
+                }
+            };
+
+            Some(Ok(TelegramWebhookRegistrationConfig {
+                bot_token,
+                public_webhook_url,
+            }))
+        }
+    }
 }
 
 fn resolve_twitter(
@@ -1482,6 +1613,139 @@ signing_secret = "slack-secret"
         let f = write_toml(&telegram_toml("telegram-webhook-secret"));
         let cfg = load(Some(f.path())).expect("load failed");
         assert!(cfg.telegram.is_some());
+    }
+
+    #[test]
+    fn telegram_resolves_auto_registration_config() {
+        let toml = r#"
+[sources.telegram]
+webhook_secret = "telegram-webhook-secret"
+webhook_registration_mode = "startup"
+bot_token = "123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+public_webhook_url = "https://example.com/telegram/webhook"
+"#;
+        let f = write_toml(toml);
+        let cfg = load(Some(f.path())).expect("load failed");
+        let telegram = cfg.telegram.as_ref().expect("telegram should be Some");
+        let registration = telegram.registration.as_ref().expect("registration should be Some");
+
+        assert_eq!(registration.bot_token.as_str(), "123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+        assert_eq!(
+            registration.public_webhook_url.as_str(),
+            "https://example.com/telegram/webhook"
+        );
+    }
+
+    #[test]
+    fn telegram_startup_registration_without_public_webhook_url_is_invalid() {
+        let toml = r#"
+[sources.telegram]
+webhook_secret = "telegram-webhook-secret"
+webhook_registration_mode = "startup"
+bot_token = "123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+"#;
+        let f = write_toml(toml);
+        let result = load(Some(f.path()));
+
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("telegram: missing public_webhook_url")))
+        );
+    }
+
+    #[test]
+    fn telegram_startup_registration_without_credentials_is_invalid() {
+        let toml = r#"
+[sources.telegram]
+webhook_secret = "telegram-webhook-secret"
+webhook_registration_mode = "startup"
+"#;
+        let f = write_toml(toml);
+        let result = load(Some(f.path()));
+
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("telegram: missing bot_token")) && errs.iter().any(|e| e.contains("telegram: missing public_webhook_url")))
+        );
+    }
+
+    #[test]
+    fn telegram_startup_registration_with_empty_bot_token_is_invalid() {
+        let toml = r#"
+[sources.telegram]
+webhook_secret = "telegram-webhook-secret"
+webhook_registration_mode = "startup"
+bot_token = ""
+public_webhook_url = "https://example.com/telegram/webhook"
+"#;
+        let f = write_toml(toml);
+        let result = load(Some(f.path()));
+
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("telegram: invalid bot_token")))
+        );
+    }
+
+    #[test]
+    fn telegram_startup_registration_without_bot_token_is_invalid() {
+        let toml = r#"
+[sources.telegram]
+webhook_secret = "telegram-webhook-secret"
+webhook_registration_mode = "startup"
+public_webhook_url = "https://example.com/telegram/webhook"
+"#;
+        let f = write_toml(toml);
+        let result = load(Some(f.path()));
+
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("telegram: missing bot_token")))
+        );
+    }
+
+    #[test]
+    fn telegram_http_public_webhook_url_is_invalid() {
+        let toml = r#"
+[sources.telegram]
+webhook_secret = "telegram-webhook-secret"
+webhook_registration_mode = "startup"
+bot_token = "123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+public_webhook_url = "http://example.com/telegram/webhook"
+"#;
+        let f = write_toml(toml);
+        let result = load(Some(f.path()));
+
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("telegram: invalid public_webhook_url")))
+        );
+    }
+
+    #[test]
+    fn telegram_registration_values_in_manual_mode_are_ignored() {
+        let toml = r#"
+[sources.telegram]
+webhook_secret = "telegram-webhook-secret"
+webhook_registration_mode = "manual"
+bot_token = "123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+public_webhook_url = "https://example.com/telegram/webhook"
+"#;
+        let f = write_toml(toml);
+        let cfg = load(Some(f.path())).expect("load failed");
+        let telegram = cfg.telegram.as_ref().expect("telegram should be Some");
+
+        assert!(telegram.registration.is_none());
+    }
+
+    #[test]
+    fn telegram_invalid_webhook_registration_mode_is_invalid() {
+        let toml = r#"
+[sources.telegram]
+webhook_secret = "telegram-webhook-secret"
+webhook_registration_mode = "sometimes"
+"#;
+        let f = write_toml(toml);
+        let result = load(Some(f.path()));
+
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("telegram: invalid webhook_registration_mode")))
+        );
     }
 
     #[test]

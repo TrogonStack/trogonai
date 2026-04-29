@@ -3677,6 +3677,7 @@ dependencies = [
  "async-nats",
  "axum",
  "bytes",
+ "reqwest",
  "serde",
  "serde_json",
  "sha2",
@@ -3687,6 +3688,7 @@ dependencies = [
  "tracing-subscriber",
  "trogon-nats",
  "trogon-std",
+ "url",
 ]
 
 [[package]]
