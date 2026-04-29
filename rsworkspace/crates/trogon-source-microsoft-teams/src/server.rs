@@ -21,8 +21,7 @@ use trogon_std::NonZeroDuration;
 use crate::config::MicrosoftTeamsConfig;
 use crate::constants::{
     HTTP_BODY_SIZE_MAX, NATS_HEADER_CHANGE_TYPE, NATS_HEADER_NOTIFICATION_ID, NATS_HEADER_REJECT_REASON,
-    NATS_HEADER_RESOURCE, NATS_HEADER_RESOURCE_ID, NATS_HEADER_RESOURCE_TYPE, NATS_HEADER_SUBSCRIPTION_EXPIRATION,
-    NATS_HEADER_SUBSCRIPTION_ID, NATS_HEADER_TENANT_ID,
+    NATS_HEADER_RESOURCE_TYPE, NATS_HEADER_SUBSCRIPTION_ID,
 };
 
 #[derive(Deserialize)]
@@ -53,12 +52,8 @@ impl RejectReason {
 struct NotificationMetadata {
     id: Option<String>,
     subscription_id: Option<String>,
-    subscription_expiration_date_time: Option<String>,
     client_state: Option<String>,
     change_type: Option<String>,
-    resource: Option<String>,
-    tenant_id: Option<String>,
-    resource_id: Option<String>,
     resource_type: Option<&'static str>,
 }
 
@@ -73,15 +68,8 @@ impl NotificationMetadata {
         Self {
             id: value.get("id").and_then(Value::as_str).map(str::to_owned),
             subscription_id: value.get("subscriptionId").and_then(Value::as_str).map(str::to_owned),
-            subscription_expiration_date_time: value
-                .get("subscriptionExpirationDateTime")
-                .and_then(Value::as_str)
-                .map(str::to_owned),
             client_state: value.get("clientState").and_then(Value::as_str).map(str::to_owned),
             change_type: value.get("changeType").and_then(Value::as_str).map(str::to_owned),
-            resource: value.get("resource").and_then(Value::as_str).map(str::to_owned),
-            tenant_id: value.get("tenantId").and_then(Value::as_str).map(str::to_owned),
-            resource_id: resource_data.get("id").and_then(Value::as_str).map(str::to_owned),
             resource_type,
         }
     }
@@ -93,18 +81,6 @@ impl NotificationMetadata {
         }
         if let Some(ref subscription_id) = self.subscription_id {
             headers.insert(NATS_HEADER_SUBSCRIPTION_ID, subscription_id.as_str());
-        }
-        if let Some(ref expiration) = self.subscription_expiration_date_time {
-            headers.insert(NATS_HEADER_SUBSCRIPTION_EXPIRATION, expiration.as_str());
-        }
-        if let Some(ref tenant_id) = self.tenant_id {
-            headers.insert(NATS_HEADER_TENANT_ID, tenant_id.as_str());
-        }
-        if let Some(ref resource) = self.resource {
-            headers.insert(NATS_HEADER_RESOURCE, resource.as_str());
-        }
-        if let Some(ref resource_id) = self.resource_id {
-            headers.insert(NATS_HEADER_RESOURCE_ID, resource_id.as_str());
         }
         if let Some(resource_type) = self.resource_type {
             headers.insert(NATS_HEADER_RESOURCE_TYPE, resource_type);
@@ -398,8 +374,8 @@ mod tests {
     use super::*;
     use crate::client_state::MicrosoftTeamsClientState;
     use crate::constants::{
-        NATS_HEADER_CHANGE_TYPE, NATS_HEADER_NOTIFICATION_ID, NATS_HEADER_REJECT_REASON, NATS_HEADER_RESOURCE,
-        NATS_HEADER_RESOURCE_ID, NATS_HEADER_RESOURCE_TYPE, NATS_HEADER_SUBSCRIPTION_ID, NATS_HEADER_TENANT_ID,
+        NATS_HEADER_CHANGE_TYPE, NATS_HEADER_NOTIFICATION_ID, NATS_HEADER_REJECT_REASON, NATS_HEADER_RESOURCE_TYPE,
+        NATS_HEADER_SUBSCRIPTION_ID,
     };
     use axum::body::{Body, to_bytes};
     use axum::http::Request;
@@ -559,27 +535,6 @@ mod tests {
                 .get(NATS_HEADER_SUBSCRIPTION_ID)
                 .map(|value| value.as_str()),
             Some("subscription-1")
-        );
-        assert_eq!(
-            messages[0]
-                .headers
-                .get(NATS_HEADER_TENANT_ID)
-                .map(|value| value.as_str()),
-            Some("tenant-1")
-        );
-        assert_eq!(
-            messages[0]
-                .headers
-                .get(NATS_HEADER_RESOURCE)
-                .map(|value| value.as_str()),
-            Some("teams('team-1')/channels('channel-1')/messages('message-1')")
-        );
-        assert_eq!(
-            messages[0]
-                .headers
-                .get(NATS_HEADER_RESOURCE_ID)
-                .map(|value| value.as_str()),
-            Some("message-1")
         );
         assert_eq!(
             messages[0]
