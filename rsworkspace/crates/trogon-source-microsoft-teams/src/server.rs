@@ -64,26 +64,24 @@ struct NotificationMetadata {
 
 impl NotificationMetadata {
     fn from_value(value: &Value) -> Self {
-        let text_field = |source: &Value, key: &str| {
-            source
-                .get(key)
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(str::to_owned)
-        };
         let resource_data = value.get("resourceData").unwrap_or(&Value::Null);
-        let resource_type = text_field(resource_data, "@odata.type").and_then(|raw| graph_resource_kind(&raw));
+        let resource_type = resource_data
+            .get("@odata.type")
+            .and_then(Value::as_str)
+            .and_then(graph_resource_kind);
 
         Self {
-            id: text_field(value, "id"),
-            subscription_id: text_field(value, "subscriptionId"),
-            subscription_expiration_date_time: text_field(value, "subscriptionExpirationDateTime"),
-            client_state: text_field(value, "clientState"),
-            change_type: text_field(value, "changeType"),
-            resource: text_field(value, "resource"),
-            tenant_id: text_field(value, "tenantId"),
-            resource_id: text_field(resource_data, "id"),
+            id: value.get("id").and_then(Value::as_str).map(str::to_owned),
+            subscription_id: value.get("subscriptionId").and_then(Value::as_str).map(str::to_owned),
+            subscription_expiration_date_time: value
+                .get("subscriptionExpirationDateTime")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+            client_state: value.get("clientState").and_then(Value::as_str).map(str::to_owned),
+            change_type: value.get("changeType").and_then(Value::as_str).map(str::to_owned),
+            resource: value.get("resource").and_then(Value::as_str).map(str::to_owned),
+            tenant_id: value.get("tenantId").and_then(Value::as_str).map(str::to_owned),
+            resource_id: resource_data.get("id").and_then(Value::as_str).map(str::to_owned),
             resource_type,
         }
     }
