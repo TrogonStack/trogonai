@@ -3,6 +3,6 @@ pub mod config;
 pub mod constants;
 pub mod server;
 
-pub use client_state::MicrosoftTeamsClientState;
-pub use config::MicrosoftTeamsConfig;
+pub use client_state::MicrosoftGraphClientState;
+pub use config::MicrosoftGraphConfig;
 pub use server::{provision, router};

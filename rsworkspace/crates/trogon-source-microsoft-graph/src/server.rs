@@ -16,7 +16,7 @@ use trogon_nats::NatsToken;
 use trogon_nats::jetstream::{ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut};
 use trogon_std::NonZeroDuration;
 
-use crate::config::MicrosoftTeamsConfig;
+use crate::config::MicrosoftGraphConfig;
 use crate::constants::HTTP_BODY_SIZE_MAX;
 
 #[derive(Deserialize)]
@@ -27,12 +27,12 @@ struct ChangeNotificationCollection {
 #[derive(Clone)]
 struct AppState<P: JetStreamPublisher, S: ObjectStorePut> {
     publisher: ClaimCheckPublisher<P, S>,
-    client_state: crate::client_state::MicrosoftTeamsClientState,
+    client_state: crate::client_state::MicrosoftGraphClientState,
     subject_prefix: NatsToken,
     nats_ack_timeout: NonZeroDuration,
 }
 
-pub async fn provision<C: JetStreamContext>(js: &C, config: &MicrosoftTeamsConfig) -> Result<(), C::Error> {
+pub async fn provision<C: JetStreamContext>(js: &C, config: &MicrosoftGraphConfig) -> Result<(), C::Error> {
     js.get_or_create_stream(async_nats::jetstream::stream::Config {
         name: config.stream_name.to_string(),
         subjects: vec![format!("{}.>", config.subject_prefix)],
@@ -49,7 +49,7 @@ pub async fn provision<C: JetStreamContext>(js: &C, config: &MicrosoftTeamsConfi
 
 pub fn router<P: JetStreamPublisher, S: ObjectStorePut>(
     publisher: ClaimCheckPublisher<P, S>,
-    config: &MicrosoftTeamsConfig,
+    config: &MicrosoftGraphConfig,
 ) -> Router {
     let state = AppState {
         publisher,
@@ -78,7 +78,7 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
 }
 
 #[instrument(
-    name = "microsoft_teams.webhook",
+    name = "microsoft_graph.webhook",
     skip_all,
     fields(
         notification_count = tracing::field::Empty,
@@ -92,13 +92,13 @@ async fn handle_notification_collection<P: JetStreamPublisher, S: ObjectStorePut
     let collection = match serde_json::from_slice::<ChangeNotificationCollection>(&body) {
         Ok(collection) => collection,
         Err(error) => {
-            warn!(error = %error, "Failed to parse Microsoft Teams webhook body as JSON");
+            warn!(error = %error, "Failed to parse Microsoft Graph notification body as JSON");
             return StatusCode::BAD_REQUEST;
         }
     };
 
     if collection.value.is_empty() {
-        warn!("Microsoft Teams webhook body contained no notifications");
+        warn!("Microsoft Graph notification body contained no notifications");
         return StatusCode::BAD_REQUEST;
     }
 
@@ -106,11 +106,11 @@ async fn handle_notification_collection<P: JetStreamPublisher, S: ObjectStorePut
         match client_state_from_notification(notification) {
             Some(client_state) if state.client_state.matches(client_state) => {}
             Some(_) => {
-                warn!("Microsoft Teams clientState validation failed");
+                warn!("Microsoft Graph clientState validation failed");
                 return StatusCode::UNAUTHORIZED;
             }
             None => {
-                warn!("Microsoft Teams notification missing clientState");
+                warn!("Microsoft Graph notification missing clientState");
                 return StatusCode::UNAUTHORIZED;
             }
         }
@@ -131,10 +131,10 @@ async fn handle_notification_collection<P: JetStreamPublisher, S: ObjectStorePut
         .await;
 
     if outcome.is_ok() {
-        info!("Published Microsoft Teams notification collection to NATS");
+        info!("Published Microsoft Graph notification collection to NATS");
         StatusCode::ACCEPTED
     } else {
-        outcome.log_on_error("microsoft-teams");
+        outcome.log_on_error("microsoft-graph");
         StatusCode::INTERNAL_SERVER_ERROR
     }
 }
@@ -145,7 +145,7 @@ fn client_state_from_notification(notification: &Value) -> Option<&str> {
 
 fn change_notification_collection_message_id(notifications: &[Value]) -> String {
     let mut hasher = Sha256::new();
-    hasher.update(b"microsoft-teams.change_notification_collection.v1");
+    hasher.update(b"microsoft-graph.change_notification_collection.v1");
 
     for notification in notifications {
         hasher.update(b"\x1fnotification\x1e");
@@ -179,7 +179,7 @@ fn validation_token_from_query(query: Option<&str>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::client_state::MicrosoftTeamsClientState;
+    use crate::client_state::MicrosoftGraphClientState;
     use axum::body::{Body, to_bytes};
     use axum::http::Request;
     use tower::ServiceExt;
@@ -202,11 +202,11 @@ mod tests {
         )
     }
 
-    fn test_config() -> MicrosoftTeamsConfig {
-        MicrosoftTeamsConfig {
-            client_state: MicrosoftTeamsClientState::new(TEST_CLIENT_STATE).unwrap(),
-            subject_prefix: NatsToken::new("microsoft-teams").unwrap(),
-            stream_name: NatsToken::new("MICROSOFT_TEAMS").unwrap(),
+    fn test_config() -> MicrosoftGraphConfig {
+        MicrosoftGraphConfig {
+            client_state: MicrosoftGraphClientState::new(TEST_CLIENT_STATE).unwrap(),
+            subject_prefix: NatsToken::new("microsoft-graph").unwrap(),
+            stream_name: NatsToken::new("MICROSOFT_GRAPH").unwrap(),
             stream_max_age: StreamMaxAge::from_secs(3600).unwrap(),
             nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),
         }
@@ -232,11 +232,11 @@ mod tests {
             "clientState": TEST_CLIENT_STATE,
             "changeType": "created",
             "tenantId": "tenant-1",
-            "resource": "teams('team-1')/channels('channel-1')/messages('message-1')",
+            "resource": "users('user-1')/messages('message-1')",
             "resourceData": {
                 "id": "message-1",
-                "@odata.type": "#Microsoft.Graph.chatMessage",
-                "@odata.id": "teams('team-1')/channels('channel-1')/messages('message-1')"
+                "@odata.type": "#Microsoft.Graph.message",
+                "@odata.id": "users('user-1')/messages('message-1')"
             }
         })
     }
@@ -259,8 +259,8 @@ mod tests {
 
         let streams = js.created_streams();
         assert_eq!(streams.len(), 1);
-        assert_eq!(streams[0].name, "MICROSOFT_TEAMS");
-        assert_eq!(streams[0].subjects, vec!["microsoft-teams.>"]);
+        assert_eq!(streams[0].name, "MICROSOFT_GRAPH");
+        assert_eq!(streams[0].subjects, vec!["microsoft-graph.>"]);
         assert_eq!(streams[0].max_age, Duration::from_secs(3600));
     }
 
@@ -313,7 +313,7 @@ mod tests {
         assert_eq!(response.status(), StatusCode::ACCEPTED);
         let messages = publisher.published_messages();
         assert_eq!(messages.len(), 1);
-        assert_eq!(messages[0].subject, "microsoft-teams.change_notification_collection");
+        assert_eq!(messages[0].subject, "microsoft-graph.change_notification_collection");
         let expected_payload = serde_json::from_slice::<Value>(&body).unwrap();
         let expected_message_id =
             change_notification_collection_message_id(expected_payload["value"].as_array().unwrap().as_slice());
@@ -345,7 +345,7 @@ mod tests {
         assert_eq!(response.status(), StatusCode::ACCEPTED);
         let messages = publisher.published_messages();
         assert_eq!(messages.len(), 1);
-        assert_eq!(messages[0].subject, "microsoft-teams.change_notification_collection");
+        assert_eq!(messages[0].subject, "microsoft-graph.change_notification_collection");
     }
 
     #[tokio::test]
@@ -381,10 +381,10 @@ mod tests {
             "subscriptionId": "subscription-1",
             "clientState": TEST_CLIENT_STATE,
             "changeType": "updated",
-            "resource": "teams('team-1')/channels('channel-1')",
+            "resource": "users('user-1')",
             "resourceData": {
-                "id": "channel-1",
-                "@odata.type": "#Microsoft.Graph.channel"
+                "id": "user-1",
+                "@odata.type": "#Microsoft.Graph.user"
             }
         });
         let body = serde_json::to_vec(&serde_json::json!({
@@ -397,7 +397,7 @@ mod tests {
         assert_eq!(response.status(), StatusCode::ACCEPTED);
         let messages = publisher.published_messages();
         assert_eq!(messages.len(), 1);
-        assert_eq!(messages[0].subject, "microsoft-teams.change_notification_collection");
+        assert_eq!(messages[0].subject, "microsoft-graph.change_notification_collection");
         let payload = serde_json::from_slice::<Value>(messages[0].payload.as_ref()).unwrap();
         assert_eq!(payload["value"].as_array().unwrap().len(), 2);
     }
