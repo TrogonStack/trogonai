@@ -111,7 +111,7 @@ fn tok(s: &str) -> ApiKeyToken {
 /// Spawn the vault_admin listener backed by a `HashicorpVaultStore`.
 async fn spawn_hashicorp_admin(nats: async_nats::Client, vault: Arc<HashicorpVaultStore>) {
     tokio::spawn(async move {
-        vault_admin::run(nats, vault, PREFIX)
+        vault_admin::run(nats, vault, PREFIX, None)
             .await
             .expect("vault admin error");
     });

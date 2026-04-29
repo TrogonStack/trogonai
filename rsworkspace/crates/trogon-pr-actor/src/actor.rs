@@ -37,13 +37,27 @@ pub struct PrState {
 /// If the LLM API key or GitHub token is not configured the actor degrades
 /// gracefully: it still increments the event counter and writes transcript
 /// entries, but skips the LLM and GitHub calls.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct PrActor {
     http: reqwest::Client,
     llm_api_url: String,
     llm_api_key: String,
     llm_model: String,
     github_token: String,
+    github_api_url: String,
+}
+
+impl Default for PrActor {
+    fn default() -> Self {
+        Self {
+            http: reqwest::Client::new(),
+            llm_api_url: String::new(),
+            llm_api_key: String::new(),
+            llm_model: String::new(),
+            github_token: String::new(),
+            github_api_url: "https://api.github.com".to_string(),
+        }
+    }
 }
 
 impl PrActor {
@@ -61,7 +75,15 @@ impl PrActor {
             llm_api_key: llm_api_key.into(),
             llm_model: llm_model.into(),
             github_token: github_token.into(),
+            github_api_url: "https://api.github.com".to_string(),
         }
+    }
+
+    /// Override the GitHub API base URL (used in tests to point at a mock server).
+    #[cfg(test)]
+    fn with_github_api_url(mut self, url: impl Into<String>) -> Self {
+        self.github_api_url = url.into();
+        self
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
@@ -108,7 +130,7 @@ impl PrActor {
         repo: &str,
         number: u64,
     ) -> Result<(String, String), String> {
-        let url = format!("https://api.github.com/repos/{owner}/{repo}/pulls/{number}");
+        let url = format!("{}/repos/{owner}/{repo}/pulls/{number}", self.github_api_url);
 
         // First call: JSON to get HEAD SHA.
         let info: serde_json::Value = self
@@ -232,7 +254,7 @@ impl PrActor {
         number: u64,
         body: &str,
     ) -> Result<(), String> {
-        let url = format!("https://api.github.com/repos/{owner}/{repo}/pulls/{number}/reviews");
+        let url = format!("{}/repos/{owner}/{repo}/pulls/{number}/reviews", self.github_api_url);
 
         let payload = serde_json::json!({
             "body": body,
@@ -466,5 +488,144 @@ mod tests {
     #[test]
     fn parse_entity_key_non_numeric_pr_returns_none() {
         assert!(PrActor::parse_entity_key("org.repo.notanumber").is_none());
+    }
+
+    #[test]
+    fn parse_entity_key_multi_segment_repo() {
+        // "owner.sub.repo.42" → splitn(3) gives parts[2]="sub.repo.42", rsplit on last '.'
+        // → repo = "sub.sub" joined... let's verify the actual join logic
+        let result = PrActor::parse_entity_key("acme.infra.my-repo.7");
+        assert_eq!(
+            result,
+            Some(("acme".to_string(), "infra.my-repo".to_string(), 7))
+        );
+    }
+
+    // ── HTTP error paths ──────────────────────────────────────────────────────
+
+    mod http_errors {
+        use super::*;
+        use httpmock::MockServer;
+        use httpmock::Method::{GET, POST};
+
+        fn actor_for_github(base_url: &str) -> PrActor {
+            PrActor::new(
+                reqwest::Client::new(),
+                "http://unused-llm",
+                "test-llm-key",
+                "test-model",
+                "test-gh-token",
+            )
+            .with_github_api_url(base_url)
+        }
+
+        fn actor_for_llm(base_url: &str) -> PrActor {
+            PrActor::new(
+                reqwest::Client::new(),
+                base_url,
+                "test-llm-key",
+                "test-model",
+                "test-gh-token",
+            )
+        }
+
+        #[tokio::test]
+        async fn fetch_pr_diff_returns_err_on_404() {
+            let server = MockServer::start();
+            server.mock(|when, then| {
+                when.method(GET).path_contains("/pulls/");
+                then.status(404).body("{\"message\":\"Not Found\"}");
+            });
+
+            let actor = actor_for_github(&server.base_url());
+            let result = actor.fetch_pr_diff_and_sha("owner", "repo", 1).await;
+            assert!(result.is_err(), "expected Err on 404, got Ok");
+            let msg = result.unwrap_err();
+            assert!(msg.contains("404"), "error should mention status 404, got: {msg}");
+        }
+
+        #[tokio::test]
+        async fn fetch_pr_diff_returns_err_on_500() {
+            let server = MockServer::start();
+            server.mock(|when, then| {
+                when.method(GET).path_contains("/pulls/");
+                then.status(500).body("internal server error");
+            });
+
+            let actor = actor_for_github(&server.base_url());
+            let result = actor.fetch_pr_diff_and_sha("owner", "repo", 2).await;
+            assert!(result.is_err());
+        }
+
+        #[tokio::test]
+        async fn review_with_llm_returns_err_on_500() {
+            let server = MockServer::start();
+            server.mock(|when, then| {
+                when.method(POST).path("/chat/completions");
+                then.status(500).body("overloaded");
+            });
+
+            let actor = actor_for_llm(&server.base_url());
+            let result = actor.review_with_llm("owner.repo.1", 1, "diff text").await;
+            assert!(result.is_err());
+            let msg = result.unwrap_err();
+            assert!(msg.contains("500"), "error should mention status 500, got: {msg}");
+        }
+
+        #[tokio::test]
+        async fn review_with_llm_returns_err_on_missing_choices_field() {
+            let server = MockServer::start();
+            server.mock(|when, then| {
+                when.method(POST).path("/chat/completions");
+                then.status(200).json_body(serde_json::json!({"result": "ok"}));
+            });
+
+            let actor = actor_for_llm(&server.base_url());
+            let result = actor.review_with_llm("owner.repo.1", 1, "diff").await;
+            assert!(result.is_err(), "expected Err for missing choices path");
+        }
+
+        #[tokio::test]
+        async fn review_with_llm_returns_err_when_content_is_not_valid_json() {
+            let server = MockServer::start();
+            server.mock(|when, then| {
+                when.method(POST).path("/chat/completions");
+                then.status(200).json_body(serde_json::json!({
+                    "choices": [{"message": {"content": "not json {"}}]
+                }));
+            });
+
+            let actor = actor_for_llm(&server.base_url());
+            let result = actor.review_with_llm("owner.repo.1", 1, "diff").await;
+            assert!(result.is_err(), "expected Err for invalid content JSON");
+        }
+
+        #[tokio::test]
+        async fn post_review_comment_returns_err_on_422() {
+            let server = MockServer::start();
+            server.mock(|when, then| {
+                when.method(POST).path_contains("/reviews");
+                then.status(422).body("validation failed");
+            });
+
+            let actor = actor_for_github(&server.base_url());
+            let result = actor.post_review_comment("owner", "repo", 3, "body text").await;
+            assert!(result.is_err());
+            let msg = result.unwrap_err();
+            assert!(msg.contains("422"), "error should mention 422, got: {msg}");
+        }
+
+        #[tokio::test]
+        async fn post_review_comment_ok_on_200() {
+            let server = MockServer::start();
+            server.mock(|when, then| {
+                when.method(POST).path_contains("/reviews");
+                then.status(200).body("{}");
+            });
+
+            let actor = actor_for_github(&server.base_url());
+            let result = actor.post_review_comment("owner", "repo", 4, "LGTM").await;
+            assert!(result.is_ok());
+        }
     }
 }

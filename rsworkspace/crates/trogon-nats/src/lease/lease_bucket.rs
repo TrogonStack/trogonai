@@ -27,3 +27,35 @@ impl LeaseBucket {
         ch.is_ascii_alphanumeric() || ch == '-' || ch == '_'
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn valid_alphanumeric_bucket() {
+        let b = LeaseBucket::new("my-bucket_01").unwrap();
+        assert_eq!(b.as_str(), "my-bucket_01");
+    }
+
+    #[test]
+    fn empty_bucket_is_rejected() {
+        assert!(matches!(LeaseBucket::new(""), Err(LeaseConfigError::EmptyBucket)));
+    }
+
+    #[test]
+    fn bucket_with_dot_is_rejected() {
+        // dots are allowed in keys but NOT in buckets
+        assert!(matches!(LeaseBucket::new("my.bucket"), Err(LeaseConfigError::InvalidBucketName(_))));
+    }
+
+    #[test]
+    fn bucket_with_slash_is_rejected() {
+        assert!(matches!(LeaseBucket::new("a/b"), Err(LeaseConfigError::InvalidBucketName(_))));
+    }
+
+    #[test]
+    fn bucket_with_space_is_rejected() {
+        assert!(matches!(LeaseBucket::new("bad bucket"), Err(LeaseConfigError::InvalidBucketName(_))));
+    }
+}

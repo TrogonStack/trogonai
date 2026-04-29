@@ -30,6 +30,7 @@ trogon-transcript = { workspace = true }
 [dev-dependencies]
 bytes = { workspace = true }
 futures-util = { workspace = true }
+httpmock = "0.7"
 serde_json = { workspace = true }
 testcontainers-modules = { workspace = true }
 trogon-actor = { workspace = true, features = ["test-support"] }

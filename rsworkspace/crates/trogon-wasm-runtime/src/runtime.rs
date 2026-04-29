@@ -1209,3 +1209,527 @@ where
         WasmRuntime::cleanup_all_sessions(self).await
     }
 }
+
+// ── Unit tests ─────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use agent_client_protocol::{
+        PermissionOption, PermissionOptionKind, ReadTextFileRequest, RequestPermissionOutcome,
+        RequestPermissionRequest, ToolCallUpdate, ToolCallUpdateFields, WriteTextFileRequest,
+    };
+    use std::io;
+    use std::marker::PhantomData;
+    use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::{Arc, Mutex};
+
+    // ── MockFs ────────────────────────────────────────────────────────────────
+
+    #[derive(Clone)]
+    struct MockFs(Arc<Mutex<std::collections::HashMap<PathBuf, Vec<u8>>>>);
+
+    impl MockFs {
+        fn new() -> Self {
+            Self(Arc::new(Mutex::new(std::collections::HashMap::new())))
+        }
+
+        fn get(&self, path: &Path) -> Option<Vec<u8>> {
+            self.0.lock().unwrap().get(path).cloned()
+        }
+    }
+
+    impl Fs for MockFs {
+        async fn create_dir_all(&self, _path: &Path) -> io::Result<()> {
+            Ok(())
+        }
+
+        async fn write(&self, path: &Path, data: &[u8]) -> io::Result<()> {
+            self.0.lock().unwrap().insert(path.to_owned(), data.to_vec());
+            Ok(())
+        }
+
+        async fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
+            let mut map = self.0.lock().unwrap();
+            match map.remove(from) {
+                Some(data) => {
+                    map.insert(to.to_owned(), data);
+                    Ok(())
+                }
+                None => Err(io::Error::new(io::ErrorKind::NotFound, "source not found")),
+            }
+        }
+
+        async fn read_to_string(&self, path: &Path) -> io::Result<String> {
+            self.0
+                .lock()
+                .unwrap()
+                .get(path)
+                .map(|b| String::from_utf8_lossy(b).into_owned())
+                .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "not found"))
+        }
+
+        async fn remove_dir_all(&self, _path: &Path) -> io::Result<()> {
+            Ok(())
+        }
+
+        async fn remove_file(&self, path: &Path) -> io::Result<()> {
+            self.0.lock().unwrap().remove(path);
+            Ok(())
+        }
+
+        async fn list_subdirs(&self, _path: &Path) -> io::Result<Vec<PathBuf>> {
+            Ok(vec![])
+        }
+    }
+
+    // ── FailFs — succeeds at create_dir_all, fails at write and read ──────────
+
+    #[derive(Clone)]
+    struct FailFs;
+
+    impl Fs for FailFs {
+        async fn create_dir_all(&self, _: &Path) -> io::Result<()> {
+            Ok(())
+        }
+
+        async fn write(&self, _: &Path, _: &[u8]) -> io::Result<()> {
+            Err(io::Error::new(io::ErrorKind::PermissionDenied, "disk full"))
+        }
+
+        async fn rename(&self, _: &Path, _: &Path) -> io::Result<()> {
+            Err(io::Error::new(io::ErrorKind::PermissionDenied, "disk full"))
+        }
+
+        async fn read_to_string(&self, _: &Path) -> io::Result<String> {
+            Err(io::Error::new(io::ErrorKind::PermissionDenied, "disk full"))
+        }
+
+        async fn remove_dir_all(&self, _: &Path) -> io::Result<()> {
+            Ok(())
+        }
+
+        async fn remove_file(&self, _: &Path) -> io::Result<()> {
+            Ok(())
+        }
+
+        async fn list_subdirs(&self, _: &Path) -> io::Result<Vec<PathBuf>> {
+            Ok(vec![])
+        }
+    }
+
+    // ── MockIdGenerator ───────────────────────────────────────────────────────
+
+    #[derive(Clone)]
+    struct MockIdGenerator(Arc<AtomicU64>);
+
+    impl MockIdGenerator {
+        fn new() -> Self {
+            Self(Arc::new(AtomicU64::new(0)))
+        }
+    }
+
+    impl IdGenerator for MockIdGenerator {
+        fn new_id(&self) -> String {
+            format!("mock-id-{}", self.0.fetch_add(1, Ordering::SeqCst))
+        }
+    }
+
+    // ── MockClock ─────────────────────────────────────────────────────────────
+
+    #[derive(Clone)]
+    struct MockClock(Arc<Mutex<std::time::Instant>>);
+
+    impl MockClock {
+        fn new() -> Self {
+            Self(Arc::new(Mutex::new(std::time::Instant::now())))
+        }
+
+        fn advance(&self, d: std::time::Duration) {
+            let mut t = self.0.lock().unwrap();
+            *t += d;
+        }
+    }
+
+    impl Clock for MockClock {
+        fn now(&self) -> std::time::Instant {
+            *self.0.lock().unwrap()
+        }
+    }
+
+    // ── UnlimitedTaskLimiter ──────────────────────────────────────────────────
+
+    #[derive(Clone)]
+    struct UnlimitedTaskLimiter;
+
+    impl TaskLimiter for UnlimitedTaskLimiter {
+        type Permit = ();
+        async fn acquire(&self) {}
+    }
+
+    // ── NeverHandle / NeverProcessSpawner ─────────────────────────────────────
+
+    struct NeverHandle;
+
+    impl ChildProcessHandle for NeverHandle {
+        type Stdin = tokio::io::Sink;
+        type Stdout = tokio::io::Empty;
+        type Stderr = tokio::io::Empty;
+
+        fn take_stdin(&mut self) -> Option<Self::Stdin> {
+            panic!("NeverHandle used in test")
+        }
+        fn take_stdout(&mut self) -> Option<Self::Stdout> {
+            panic!("NeverHandle used in test")
+        }
+        fn take_stderr(&mut self) -> Option<Self::Stderr> {
+            panic!("NeverHandle used in test")
+        }
+        async fn wait(&mut self) -> io::Result<std::process::ExitStatus> {
+            panic!("NeverHandle used in test")
+        }
+        async fn kill(&mut self) -> io::Result<()> {
+            panic!("NeverHandle used in test")
+        }
+    }
+
+    #[derive(Clone)]
+    struct NeverProcessSpawner;
+
+    impl ProcessSpawner for NeverProcessSpawner {
+        type Handle = NeverHandle;
+
+        async fn spawn(
+            &self,
+            _: &str,
+            _: &[String],
+            _: &[(String, String)],
+            _: &Path,
+            _: &Path,
+            _: &Path,
+        ) -> io::Result<NeverHandle> {
+            panic!("NeverProcessSpawner::spawn called in test")
+        }
+    }
+
+    // ── NeverWasmExecutor ─────────────────────────────────────────────────────
+
+    #[derive(Clone)]
+    struct NeverWasmExecutor<N: NatsBroker + Send + Sync>(PhantomData<N>);
+
+    impl<N: NatsBroker + Send + Sync> WasmExecutor<N> for NeverWasmExecutor<N> {
+        async fn run(
+            &self,
+            _: WasmRunConfig<N>,
+        ) -> Result<agent_client_protocol::TerminalExitStatus, anyhow::Error> {
+            panic!("NeverWasmExecutor::run called in test")
+        }
+    }
+
+    // ── NoNatsBroker ──────────────────────────────────────────────────────────
+
+    #[derive(Clone)]
+    struct NoNatsBroker;
+
+    impl NatsBroker for NoNatsBroker {
+        type Sub = futures::stream::Empty<async_nats::Message>;
+
+        async fn subscribe(
+            &self,
+            _: &str,
+        ) -> Result<Self::Sub, Box<dyn std::error::Error + Send + Sync>> {
+            Err("no nats broker".into())
+        }
+
+        async fn publish(
+            &self,
+            _: async_nats::Subject,
+            _: bytes::Bytes,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            Err("no nats broker".into())
+        }
+
+        async fn request(
+            &self,
+            _: impl Into<String> + Send,
+            _: bytes::Bytes,
+        ) -> Result<async_nats::Message, Box<dyn std::error::Error + Send + Sync>> {
+            Err("no nats broker".into())
+        }
+    }
+
+    // ── Test helpers ──────────────────────────────────────────────────────────
+
+    type TestRuntime<FS = MockFs> = WasmRuntime<
+        FS,
+        NeverProcessSpawner,
+        NoNatsBroker,
+        NeverWasmExecutor<NoNatsBroker>,
+        MockClock,
+        MockIdGenerator,
+        UnlimitedTaskLimiter,
+    >;
+
+    fn test_config() -> Config {
+        Config {
+            session_root:              PathBuf::from("/test-root"),
+            output_byte_limit:         1024 * 1024,
+            auto_allow_permissions:    false,
+            wasm_timeout_secs:         None,
+            wasm_only:                 false,
+            wasm_memory_limit_bytes:   None,
+            module_cache_dir:          None,
+            wasm_allow_network:        false,
+            wasm_fuel_limit:           1_000_000_000,
+            wasm_host_call_limit:      10_000,
+            acp_prefix:                "acp".into(),
+            wasm_max_concurrent_tasks: 4,
+            session_idle_timeout_secs: 3600,
+            wasm_max_module_size_bytes: 100 * 1024 * 1024,
+            wait_for_exit_timeout_secs: 300,
+        }
+    }
+
+    fn make_runtime_with<FS: Fs>(
+        config: Config,
+        fs: FS,
+        clock: MockClock,
+    ) -> TestRuntime<FS> {
+        WasmRuntime::with_services(
+            &config,
+            None,
+            fs,
+            NeverProcessSpawner,
+            NeverWasmExecutor(PhantomData),
+            clock,
+            MockIdGenerator::new(),
+            UnlimitedTaskLimiter,
+        )
+        .unwrap()
+    }
+
+    fn make_runtime() -> TestRuntime {
+        make_runtime_with(test_config(), MockFs::new(), MockClock::new())
+    }
+
+    // ── handle_write_text_file ────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn write_text_file_stores_content_in_sandbox() {
+        let fs = MockFs::new();
+        let rt = make_runtime_with(test_config(), fs.clone(), MockClock::new());
+        let req = WriteTextFileRequest::new("sess1", PathBuf::from("/hello.txt"), "world");
+        rt.handle_write_text_file("sess1", req).await.unwrap();
+        let data = fs.get(Path::new("/test-root/sess1/hello.txt")).unwrap();
+        assert_eq!(data, b"world");
+    }
+
+    #[tokio::test]
+    async fn write_text_file_rejects_path_traversal() {
+        let rt = make_runtime();
+        let req = WriteTextFileRequest::new("sess1", PathBuf::from("../../etc/passwd"), "bad");
+        let err = rt.handle_write_text_file("sess1", req).await.unwrap_err();
+        assert!(err.message.contains("outside the session sandbox"));
+    }
+
+    #[tokio::test]
+    async fn write_text_file_propagates_fs_write_error() {
+        let rt = make_runtime_with(test_config(), FailFs, MockClock::new());
+        let req = WriteTextFileRequest::new("sess1", PathBuf::from("/file.txt"), "data");
+        assert!(
+            rt.handle_write_text_file("sess1", req).await.is_err(),
+            "FS write error must be surfaced"
+        );
+    }
+
+    #[tokio::test]
+    async fn write_text_file_creates_nested_directories() {
+        let fs = MockFs::new();
+        let rt = make_runtime_with(test_config(), fs.clone(), MockClock::new());
+        let req = WriteTextFileRequest::new("sess1", PathBuf::from("/sub/dir/file.txt"), "data");
+        rt.handle_write_text_file("sess1", req).await.unwrap();
+        assert!(fs.get(Path::new("/test-root/sess1/sub/dir/file.txt")).is_some());
+    }
+
+    // ── handle_read_text_file ─────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn read_text_file_returns_existing_content() {
+        let fs = MockFs::new();
+        fs.0.lock().unwrap().insert(
+            PathBuf::from("/test-root/sess1/doc.txt"),
+            b"hello there".to_vec(),
+        );
+        let rt = make_runtime_with(test_config(), fs, MockClock::new());
+        let req = ReadTextFileRequest::new("sess1", PathBuf::from("/doc.txt"));
+        let resp = rt.handle_read_text_file("sess1", req).await.unwrap();
+        assert_eq!(resp.content, "hello there");
+    }
+
+    #[tokio::test]
+    async fn read_text_file_rejects_path_traversal() {
+        let rt = make_runtime();
+        let req = ReadTextFileRequest::new("sess1", PathBuf::from("../../etc/passwd"));
+        let err = rt.handle_read_text_file("sess1", req).await.unwrap_err();
+        assert!(err.message.contains("outside the session sandbox"));
+    }
+
+    #[tokio::test]
+    async fn read_text_file_not_found_returns_error() {
+        let rt = make_runtime();
+        let req = ReadTextFileRequest::new("sess1", PathBuf::from("/nonexistent.txt"));
+        assert!(rt.handle_read_text_file("sess1", req).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn write_then_read_roundtrip() {
+        let rt = make_runtime();
+        let write_req =
+            WriteTextFileRequest::new("s1", PathBuf::from("/roundtrip.txt"), "round and round");
+        rt.handle_write_text_file("s1", write_req).await.unwrap();
+        let read_req = ReadTextFileRequest::new("s1", PathBuf::from("/roundtrip.txt"));
+        let resp = rt.handle_read_text_file("s1", read_req).await.unwrap();
+        assert_eq!(resp.content, "round and round");
+    }
+
+    // ── handle_request_permission ─────────────────────────────────────────────
+
+    fn perm_req(options: Vec<PermissionOption>) -> RequestPermissionRequest {
+        RequestPermissionRequest::new(
+            "sess1",
+            ToolCallUpdate::new("tc1", ToolCallUpdateFields::default()),
+            options,
+        )
+    }
+
+    fn allow_option() -> PermissionOption {
+        PermissionOption::new("opt-allow", "Allow", PermissionOptionKind::AllowOnce)
+    }
+
+    #[tokio::test]
+    async fn request_permission_auto_allows_first_option() {
+        let mut config = test_config();
+        config.auto_allow_permissions = true;
+        let rt = make_runtime_with(config, MockFs::new(), MockClock::new());
+        let resp = rt.handle_request_permission(perm_req(vec![allow_option()])).unwrap();
+        assert!(
+            matches!(&resp.outcome, RequestPermissionOutcome::Selected(s) if s.option_id.0.as_ref() == "opt-allow"),
+            "first option must be selected when auto_allow is true"
+        );
+    }
+
+    #[tokio::test]
+    async fn request_permission_cancelled_when_no_options() {
+        let mut config = test_config();
+        config.auto_allow_permissions = true;
+        let rt = make_runtime_with(config, MockFs::new(), MockClock::new());
+        let resp = rt.handle_request_permission(perm_req(vec![])).unwrap();
+        assert_eq!(resp.outcome, RequestPermissionOutcome::Cancelled);
+    }
+
+    #[tokio::test]
+    async fn request_permission_cancelled_when_auto_allow_disabled() {
+        let rt = make_runtime(); // auto_allow_permissions = false
+        let resp = rt.handle_request_permission(perm_req(vec![allow_option()])).unwrap();
+        assert_eq!(resp.outcome, RequestPermissionOutcome::Cancelled);
+    }
+
+    // ── list_sessions / list_terminals ────────────────────────────────────────
+
+    #[tokio::test]
+    async fn list_sessions_initially_empty() {
+        let rt = make_runtime();
+        assert!(rt.list_sessions().is_empty());
+    }
+
+    #[tokio::test]
+    async fn list_sessions_populated_after_write() {
+        let rt = make_runtime();
+        let req = WriteTextFileRequest::new("my-session", PathBuf::from("/f.txt"), "x");
+        rt.handle_write_text_file("my-session", req).await.unwrap();
+        assert!(rt.list_sessions().contains(&"my-session".to_string()));
+    }
+
+    #[tokio::test]
+    async fn list_terminals_initially_empty() {
+        let rt = make_runtime();
+        assert!(rt.list_terminals().is_empty());
+    }
+
+    #[tokio::test]
+    async fn multiple_sessions_all_listed() {
+        let rt = make_runtime();
+        for id in ["alice", "bob", "carol"] {
+            let req = WriteTextFileRequest::new(id, PathBuf::from("/f.txt"), "x");
+            rt.handle_write_text_file(id, req).await.unwrap();
+        }
+        let sessions = rt.list_sessions();
+        assert!(sessions.contains(&"alice".to_string()));
+        assert!(sessions.contains(&"bob".to_string()));
+        assert!(sessions.contains(&"carol".to_string()));
+    }
+
+    // ── cleanup_idle_sessions ─────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn cleanup_idle_sessions_noop_when_disabled() {
+        let mut config = test_config();
+        config.session_idle_timeout_secs = 0;
+        let rt = make_runtime_with(config, MockFs::new(), MockClock::new());
+        let req = WriteTextFileRequest::new("s1", PathBuf::from("/f.txt"), "x");
+        rt.handle_write_text_file("s1", req).await.unwrap();
+        // No LocalSet needed: early return before any spawn_local call.
+        rt.cleanup_idle_sessions();
+        assert!(
+            rt.list_sessions().contains(&"s1".to_string()),
+            "session must not be evicted when cleanup is disabled"
+        );
+    }
+
+    #[tokio::test]
+    async fn cleanup_idle_sessions_removes_expired_session() {
+        let mut config = test_config();
+        config.session_idle_timeout_secs = 60;
+        let clock = MockClock::new();
+        let rt = make_runtime_with(config, MockFs::new(), clock.clone());
+
+        // cleanup_idle_sessions calls spawn_local → must run inside a LocalSet.
+        let ls = tokio::task::LocalSet::new();
+        ls.run_until(async {
+            let req = WriteTextFileRequest::new("s1", PathBuf::from("/f.txt"), "x");
+            rt.handle_write_text_file("s1", req).await.unwrap();
+            clock.advance(std::time::Duration::from_secs(61));
+            rt.cleanup_idle_sessions();
+        })
+        .await;
+
+        assert!(
+            !rt.list_sessions().contains(&"s1".to_string()),
+            "expired session must be evicted"
+        );
+    }
+
+    #[tokio::test]
+    async fn cleanup_idle_sessions_keeps_fresh_session() {
+        let mut config = test_config();
+        config.session_idle_timeout_secs = 60;
+        let clock = MockClock::new();
+        let rt = make_runtime_with(config, MockFs::new(), clock.clone());
+
+        let ls = tokio::task::LocalSet::new();
+        ls.run_until(async {
+            let req = WriteTextFileRequest::new("s1", PathBuf::from("/f.txt"), "x");
+            rt.handle_write_text_file("s1", req).await.unwrap();
+            // Advance only 30 s — still within the 60 s window.
+            clock.advance(std::time::Duration::from_secs(30));
+            rt.cleanup_idle_sessions();
+        })
+        .await;
+
+        assert!(
+            rt.list_sessions().contains(&"s1".to_string()),
+            "fresh session must not be evicted"
+        );
+    }
+}

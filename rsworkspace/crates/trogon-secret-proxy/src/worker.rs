@@ -120,8 +120,8 @@ where
     V::Error: std::fmt::Display,
     H: HttpClient,
 {
-    let real_key = match resolve_token(vault, &request.headers).await {
-        Ok(key) => key,
+    let (real_key, previous_key) = match resolve_token(vault, &request.headers).await {
+        Ok(pair) => pair,
         Err(e) => {
             tracing::warn!(error = %e, "Token resolution failed");
             return OutboundHttpResponse {
@@ -147,28 +147,77 @@ where
     forwarded_headers.push(("Authorization".to_string(), format!("Bearer {}", real_key)));
     forwarded_headers.push(("X-Request-Id".to_string(), request.idempotency_key.clone()));
 
-    match forward_request_with_retry(http_client, request, &forwarded_headers).await {
-        Ok(mut resp) => {
-            // Strip any response header whose value contains the real API key.
-            // A misbehaving provider might echo it back; the caller must never
-            // see it regardless.
-            resp.headers.retain(|(_, v)| !v.contains(real_key.as_str()));
-            resp
-        }
+    let resp = match forward_request_with_retry(http_client, request, &forwarded_headers).await {
+        Ok(resp) => resp,
         Err(e) => {
             tracing::error!(error = %e, url = %request.url, "Upstream HTTP call failed after retries");
-            OutboundHttpResponse {
+            return OutboundHttpResponse {
                 status: 502,
                 headers: vec![],
                 body: vec![],
                 error: Some(e),
-            }
+            };
+        }
+    };
+
+    // Fallback-on-401: if upstream rejects the current key during a rotation grace period,
+    // retry once with the previous key before surfacing the 401 to the caller.
+    if resp.status == 401 {
+        if let Some(prev) = previous_key {
+            tracing::warn!(
+                url = %request.url,
+                "Current key rejected (401), retrying with previous key during rotation grace period"
+            );
+            let mut fallback_headers: Vec<(String, String)> = request
+                .headers
+                .iter()
+                .filter(|(k, _)| {
+                    !k.eq_ignore_ascii_case("authorization")
+                        && !k.eq_ignore_ascii_case("x-request-id")
+                })
+                .cloned()
+                .collect();
+            fallback_headers
+                .push(("Authorization".to_string(), format!("Bearer {}", prev)));
+            fallback_headers
+                .push(("X-Request-Id".to_string(), request.idempotency_key.clone()));
+            return match forward_request(http_client, request, &fallback_headers).await {
+                Ok(mut r) => {
+                    r.headers.retain(|(_, v)| !v.contains(prev.as_str()));
+                    r
+                }
+                Err(e) => {
+                    tracing::error!(
+                        error = %e,
+                        url = %request.url,
+                        "Fallback request with previous key failed"
+                    );
+                    OutboundHttpResponse {
+                        status: 502,
+                        headers: vec![],
+                        body: vec![],
+                        error: Some(e),
+                    }
+                }
+            };
         }
     }
+
+    // Strip any response header whose value contains the real API key.
+    // A misbehaving provider might echo it back; the caller must never see it.
+    let mut resp = resp;
+    resp.headers.retain(|(_, v)| !v.contains(real_key.as_str()));
+    resp
 }
 
 /// Extract the `tok_...` token from the Authorization header and resolve it.
-async fn resolve_token<V>(vault: &V, headers: &[(String, String)]) -> Result<String, String>
+///
+/// Returns `(current_key, previous_key)`. `previous_key` is `Some` only during
+/// a rotation grace period — used by the caller for fallback-on-401.
+async fn resolve_token<V>(
+    vault: &V,
+    headers: &[(String, String)],
+) -> Result<(String, Option<String>), String>
 where
     V: VaultStore,
     V::Error: std::fmt::Display,
@@ -195,17 +244,19 @@ where
     let token = trogon_vault::ApiKeyToken::new(raw_token)
         .map_err(|e| format!("Invalid proxy token: {}", e))?;
 
-    let real_key = vault
-        .resolve(&token)
+    let (current_opt, previous_opt) = vault
+        .resolve_with_previous(&token)
         .await
-        .map_err(|e| format!("Vault error: {}", e))?
+        .map_err(|e| format!("Vault error: {}", e))?;
+
+    let real_key = current_opt
         .ok_or_else(|| format!("Token not found in vault: {}", token))?;
 
     if real_key.is_empty() {
         return Err(format!("Vault returned an empty key for token: {}", token));
     }
 
-    Ok(real_key)
+    Ok((real_key, previous_opt))
 }
 
 /// Retry wrapper around [`forward_request`] using exponential backoff.
@@ -400,7 +451,7 @@ mod tests {
         vault.store(&token, "sk-ant-realkey").await.unwrap();
 
         let headers = make_headers("Bearer tok_anthropic_prod_abc123");
-        let key = resolve_token(&vault, &headers).await.unwrap();
+        let (key, _prev) = resolve_token(&vault, &headers).await.unwrap();
         assert_eq!(key, "sk-ant-realkey");
     }
 
@@ -511,7 +562,7 @@ mod tests {
             "Bearer tok_anthropic_prod_abc999".to_string(),
         )];
 
-        let key = resolve_token(&vault, &headers).await.unwrap();
+        let (key, _prev) = resolve_token(&vault, &headers).await.unwrap();
         assert_eq!(key, "sk-ant-value");
     }
 
@@ -1550,7 +1601,7 @@ mod tests {
             ),
         ];
 
-        let key = resolve_token(&vault, &headers).await.unwrap();
+        let (key, _prev) = resolve_token(&vault, &headers).await.unwrap();
         assert_eq!(
             key, "sk-ant-first-key",
             "First Authorization header must win; second must be ignored"
@@ -1800,7 +1851,7 @@ mod tests {
             result
         );
         assert_eq!(
-            result.unwrap(),
+            result.unwrap().0,
             " ",
             "Whitespace key must be returned unchanged"
         );
@@ -1874,7 +1925,7 @@ mod tests {
             "Bearer tok_anthropic_prod_mixcase1".to_string(),
         )];
 
-        let key = resolve_token(&vault, &headers).await.unwrap();
+        let (key, _prev) = resolve_token(&vault, &headers).await.unwrap();
         assert_eq!(
             key, "sk-ant-mixcase-key",
             "Mixed-case header name must match via eq_ignore_ascii_case"
@@ -2024,6 +2075,75 @@ mod tests {
             "Full 17-char token must NOT appear — must be truncated at 16: {}",
             err
         );
+    }
+
+    // ── Fallback-on-401 ───────────────────────────────────────────────────────
+
+    /// When upstream rejects the current key with 401 during a rotation grace
+    /// period, process_request retries once with the previous key and returns
+    /// that response.
+    #[tokio::test]
+    async fn process_request_fallback_on_401_uses_previous_key() {
+        use trogon_vault::{ApiKeyToken as VaultToken, VaultStore as VaultStoreTrait};
+
+        struct VaultWithPrevious;
+        impl VaultStoreTrait for VaultWithPrevious {
+            type Error = std::io::Error;
+            fn store(&self, _: &VaultToken, _: &str)
+                -> impl std::future::Future<Output = Result<(), Self::Error>> + Send
+            { async { Ok(()) } }
+            fn resolve(&self, _: &VaultToken)
+                -> impl std::future::Future<Output = Result<Option<String>, Self::Error>> + Send
+            { async { Ok(Some("sk-current".to_string())) } }
+            fn revoke(&self, _: &VaultToken)
+                -> impl std::future::Future<Output = Result<(), Self::Error>> + Send
+            { async { Ok(()) } }
+            fn resolve_with_previous(&self, _: &VaultToken)
+                -> impl std::future::Future<Output = Result<(Option<String>, Option<String>), Self::Error>> + Send
+            { async { Ok((Some("sk-current".to_string()), Some("sk-previous".to_string()))) } }
+        }
+
+        let vault = VaultWithPrevious;
+        let http = MockHttpClient::new();
+        http.enqueue_ok(401, vec![], b"unauthorized".to_vec());
+        http.enqueue_ok(200, vec![], br#"{"id":"ok"}"#.to_vec());
+
+        let request = make_request(
+            "https://api.anthropic.com/v1/messages",
+            "Bearer tok_anthropic_prod_abc123",
+            "idem-fallback-01",
+        );
+
+        let resp = process_request(&request, &vault, &http).await;
+
+        assert_eq!(resp.status, 200, "Fallback to previous key must succeed");
+        assert!(resp.error.is_none());
+    }
+
+    /// When upstream returns 401 and there is no previous key, the 401 is
+    /// returned to the caller — no fallback attempt is made.
+    #[tokio::test]
+    async fn process_request_401_returned_when_no_previous_key() {
+        let vault = MemoryVault::new();
+        let token = ApiKeyToken::new("tok_anthropic_prod_abc123").unwrap();
+        vault.store(&token, "sk-current").await.unwrap();
+
+        let http = MockHttpClient::new();
+        http.enqueue_ok(401, vec![], b"unauthorized".to_vec());
+
+        let request = make_request(
+            "https://api.anthropic.com/v1/messages",
+            "Bearer tok_anthropic_prod_abc123",
+            "idem-no-fallback-01",
+        );
+
+        let resp = process_request(&request, &vault, &http).await;
+
+        assert_eq!(
+            resp.status, 401,
+            "Without a previous key, 401 must be forwarded as-is"
+        );
+        assert!(resp.error.is_none(), "Upstream 401 must not set the error field");
     }
 
     /// Verify that retry backoff calculation is deterministic.
