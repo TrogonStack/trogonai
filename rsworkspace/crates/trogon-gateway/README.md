@@ -39,7 +39,7 @@ All webhook sources share one HTTP port (`TROGON_GATEWAY_PORT`, default `8080`) 
 | Twitter/X | `/twitter/webhook` |
 | GitLab | `/gitlab/webhook` |
 | Linear | `/linear/webhook` |
-| Microsoft Teams | `/microsoft-teams/webhook` |
+| Microsoft Graph change notifications | `/microsoft-graph/webhook` |
 | Notion | `/notion/webhook` |
 | Sentry | `/sentry/webhook` |
 
@@ -56,7 +56,7 @@ A source is enabled only when its required setting is present:
 | Twitter/X | `TROGON_SOURCE_TWITTER_CONSUMER_SECRET` |
 | GitLab | `TROGON_SOURCE_GITLAB_WEBHOOK_SECRET` |
 | Linear | `TROGON_SOURCE_LINEAR_WEBHOOK_SECRET` |
-| Microsoft Teams | `TROGON_SOURCE_MICROSOFT_TEAMS_CLIENT_STATE` |
+| Microsoft Graph change notifications | `TROGON_SOURCE_MICROSOFT_GRAPH_CLIENT_STATE` |
 | Notion | `TROGON_SOURCE_NOTION_VERIFICATION_TOKEN` |
 | Sentry | `TROGON_SOURCE_SENTRY_CLIENT_SECRET` |
 
@@ -76,15 +76,15 @@ NATS auth is resolved in this priority order:
 
 Per-source optional tuning (with defaults):
 
-- `TROGON_SOURCE_<SOURCE>_SUBJECT_PREFIX` (defaults include `github`, `discord`, `slack`, `telegram`, `twitter`, `gitlab`, `linear`, `microsoft-teams`, `incidentio`, `notion`, `sentry`)
-- `TROGON_SOURCE_<SOURCE>_STREAM_NAME` (defaults include `GITHUB`, `DISCORD`, `SLACK`, `TELEGRAM`, `TWITTER`, `GITLAB`, `LINEAR`, `MICROSOFT_TEAMS`, `INCIDENTIO`, `NOTION`, `SENTRY`)
+- `TROGON_SOURCE_<SOURCE>_SUBJECT_PREFIX` (defaults include `github`, `discord`, `slack`, `telegram`, `twitter`, `gitlab`, `linear`, `microsoft-graph`, `incidentio`, `notion`, `sentry`)
+- `TROGON_SOURCE_<SOURCE>_STREAM_NAME` (defaults include `GITHUB`, `DISCORD`, `SLACK`, `TELEGRAM`, `TWITTER`, `GITLAB`, `LINEAR`, `MICROSOFT_GRAPH`, `INCIDENTIO`, `NOTION`, `SENTRY`)
 - `TROGON_SOURCE_<SOURCE>_STREAM_MAX_AGE_SECS` (default: `604800`)
 - `TROGON_SOURCE_<SOURCE>_NATS_ACK_TIMEOUT_SECS` (default: `10`)
 
 Source-specific extras:
 
 - `TROGON_SOURCE_DISCORD_GATEWAY_INTENTS`
-- `TROGON_SOURCE_MICROSOFT_TEAMS_CLIENT_STATE` must match the `clientState` used when creating Microsoft Graph subscriptions
+- `TROGON_SOURCE_MICROSOFT_GRAPH_CLIENT_STATE` must match the `clientState` used when creating Microsoft Graph subscriptions
 - `TROGON_SOURCE_SLACK_TIMESTAMP_MAX_DRIFT_SECS` (default: `300`)
 - `TROGON_SOURCE_LINEAR_TIMESTAMP_TOLERANCE_SECS` (default: `60`, `0` disables tolerance)
 - `TROGON_SOURCE_TWITTER_CONSUMER_SECRET` is used for both CRC responses and `x-twitter-webhooks-signature` validation
@@ -126,8 +126,8 @@ webhook_secret = "gitlab-secret"
 [sources.linear]
 webhook_secret = "linear-secret"
 
-[sources.microsoft_teams]
-client_state = "microsoft-teams-client-state"
+[sources.microsoft_graph]
+client_state = "microsoft-graph-client-state"
 
 [sources.notion]
 verification_token = "notion-verification-token-example"
@@ -135,3 +135,15 @@ verification_token = "notion-verification-token-example"
 [sources.sentry]
 client_secret = "sentry-client-secret"
 ```
+
+## Microsoft Graph change notifications
+
+This source receives Microsoft Graph change notifications. It does not implement
+Bot Framework conversations or send replies.
+
+Create Microsoft Graph subscriptions, then use `/microsoft-graph/webhook` as
+the subscription `notificationUrl`. The gateway responds to Graph's
+`validationToken` challenge, validates each notification's `clientState`, and
+publishes the Graph `changeNotificationCollection` to NATS on
+`{subject_prefix}.change_notification_collection`, for example
+`microsoft-graph.change_notification_collection`.

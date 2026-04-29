@@ -3474,7 +3474,7 @@ dependencies = [
  "trogon-source-gitlab",
  "trogon-source-incidentio",
  "trogon-source-linear",
- "trogon-source-microsoft-teams",
+ "trogon-source-microsoft-graph",
  "trogon-source-notion",
  "trogon-source-sentry",
  "trogon-source-slack",
@@ -3611,7 +3611,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "trogon-source-microsoft-teams"
+name = "trogon-source-microsoft-graph"
 version = "0.1.0"
 dependencies = [
  "async-nats",
