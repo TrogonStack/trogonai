@@ -90,13 +90,14 @@ Microsoft Teams change notifications arrive through Microsoft Graph webhook
 subscriptions. Configure `TROGON_SOURCE_MICROSOFT_TEAMS_CLIENT_STATE` with the
 same secret `clientState` used when creating the Graph subscription, then point
 the notification URL at `/microsoft-teams/webhook`. The gateway answers Graph's
-`validationToken` handshake and forwards validated notifications to NATS on
-`{subject_prefix}.{resource_type}.{change_type}` subjects such as
-`microsoft-teams.chat_message.created`.
+`validationToken` handshake and forwards each validated Graph notification
+collection to NATS on `{subject_prefix}.batch`, for example
+`microsoft-teams.batch`.
 
 For subscriptions that include resource data, the gateway preserves Graph's
-`validationTokens` with each published notification. Downstream consumers remain
-responsible for validating those tokens and decrypting `encryptedContent`.
+collection payload, including `validationTokens`. Downstream consumers remain
+responsible for validating those tokens, decrypting `encryptedContent`, and
+splitting individual notifications when they need per-resource routing.
 
 ## Exposing webhooks with ngrok
 
