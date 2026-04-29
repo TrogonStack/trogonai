@@ -766,6 +766,36 @@ mod tests {
         );
     }
 
+    /// Sessions stored before token tracking was added have no
+    /// `total_input_tokens` / `total_output_tokens` fields.  They must
+    /// deserialize successfully with both fields defaulting to 0.
+    #[test]
+    fn chat_session_without_token_fields_deserializes_to_zero() {
+        use crate::session::ChatSession;
+
+        let json = r#"{
+            "id": "sess-old",
+            "tenant_id": "acme",
+            "name": "legacy-session",
+            "tools": [],
+            "messages": [],
+            "created_at": "2025-01-01T00:00:00Z",
+            "updated_at": "2025-01-01T00:00:00Z"
+        }"#;
+
+        let session: ChatSession = serde_json::from_str(json)
+            .expect("ChatSession must deserialize even when token fields are absent");
+
+        assert_eq!(
+            session.total_input_tokens, 0,
+            "total_input_tokens must default to 0 for legacy records"
+        );
+        assert_eq!(
+            session.total_output_tokens, 0,
+            "total_output_tokens must default to 0 for legacy records"
+        );
+    }
+
     // ── Handler tests ─────────────────────────────────────────────────────────
 
     fn make_test_agent() -> Arc<AgentLoop> {
@@ -1561,5 +1591,52 @@ mod tests {
             session.total_output_tokens, 13,
             "total_output_tokens must accumulate across turns (5 + 8)"
         );
+    }
+
+    #[tokio::test]
+    async fn send_message_returns_zero_tokens_when_llm_omits_usage() {
+        let store = MockSessionStore::new();
+        store.insert(sample_session("sess-3", "acme"));
+
+        let no_usage_response = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "no usage here"}]
+        });
+        let app = mock_app_with_agent(store.clone(), make_mock_agent(vec![no_usage_response]));
+        let resp = app.oneshot(send_msg_req("sess-3", "hello")).await.unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["input_tokens"], 0, "input_tokens must be 0 when usage is absent");
+        assert_eq!(json["output_tokens"], 0, "output_tokens must be 0 when usage is absent");
+
+        let session = store.snapshot().remove("acme.sess-3").unwrap();
+        assert_eq!(session.total_input_tokens, 0);
+        assert_eq!(session.total_output_tokens, 0);
+    }
+
+    #[tokio::test]
+    async fn session_summary_exposes_token_totals() {
+        let mut session = sample_session("sess-4", "acme");
+        session.total_input_tokens = 42;
+        session.total_output_tokens = 17;
+
+        let store = MockSessionStore::new();
+        store.insert(session);
+
+        let app = mock_app(store);
+        let resp = app.oneshot(get_req("/sessions", "acme")).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let summary = &json.as_array().unwrap()[0];
+        assert_eq!(summary["total_input_tokens"], 42);
+        assert_eq!(summary["total_output_tokens"], 17);
     }
 }
