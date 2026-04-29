@@ -51,6 +51,20 @@ docker compose up
 Discord does not use the HTTP ingress or ngrok. It opens an outbound WebSocket
 connection to Discord and publishes every gateway event to NATS.
 
+## Telegram webhooks
+
+Set `TROGON_SOURCE_TELEGRAM_WEBHOOK_SECRET` before starting the gateway. To let
+the gateway register the webhook on startup, also set
+`TROGON_SOURCE_TELEGRAM_WEBHOOK_REGISTRATION_MODE=startup`,
+`TROGON_SOURCE_TELEGRAM_BOT_TOKEN`, and
+`TROGON_SOURCE_TELEGRAM_PUBLIC_WEBHOOK_URL`.
+The URL must be the public HTTPS endpoint for `/telegram/webhook`.
+
+In `manual` mode, the gateway only serves the local webhook receiver and the
+Telegram webhook must be configured separately. In `startup` mode, the bot token
+and public webhook URL are required. Registration failures are logged and do not
+block the gateway from serving configured sources.
+
 ## incident.io webhooks
 
 incident.io uses Svix-style webhook signing. Set `TROGON_SOURCE_INCIDENTIO_SIGNING_SECRET`
