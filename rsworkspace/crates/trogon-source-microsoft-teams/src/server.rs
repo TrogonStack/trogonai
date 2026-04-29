@@ -591,6 +591,30 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn deleted_notification_publishes_to_deleted_subject() {
+        let _guard = tracing_guard();
+        let publisher = MockJetStreamPublisher::new();
+        let app = mock_app(publisher.clone());
+        let mut notification = notification_value();
+        notification["changeType"] = Value::String("deleted".to_string());
+        let body = collection_body(notification);
+
+        let response = app.oneshot(webhook_request("/webhook", body)).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        let messages = publisher.published_messages();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].subject, "microsoft-teams.chat_message.deleted");
+        assert_eq!(
+            messages[0]
+                .headers
+                .get(NATS_HEADER_CHANGE_TYPE)
+                .map(|value| value.as_str()),
+            Some("deleted")
+        );
+    }
+
+    #[tokio::test]
     async fn validation_tokens_are_preserved_on_published_notification() {
         let _guard = tracing_guard();
         let publisher = MockJetStreamPublisher::new();
