@@ -163,6 +163,7 @@ mod tests {
     fn test_config() -> TelegramSourceConfig {
         TelegramSourceConfig {
             webhook_secret: TelegramWebhookSecret::new(TEST_SECRET).unwrap(),
+            registration: None,
             subject_prefix: NatsToken::new("telegram").unwrap(),
             stream_name: NatsToken::new("TELEGRAM").unwrap(),
             stream_max_age: StreamMaxAge::from_secs(3600).unwrap(),
