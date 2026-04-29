@@ -20,6 +20,7 @@ trogon-source-github = { path = "crates/trogon-source-github" }
 trogon-source-gitlab = { path = "crates/trogon-source-gitlab" }
 trogon-source-incidentio = { path = "crates/trogon-source-incidentio" }
 trogon-source-linear = { path = "crates/trogon-source-linear" }
+trogon-source-microsoft-teams = { path = "crates/trogon-source-microsoft-teams" }
 trogon-source-notion = { path = "crates/trogon-source-notion" }
 trogon-source-sentry = { path = "crates/trogon-source-sentry" }
 trogon-source-slack = { path = "crates/trogon-source-slack" }
