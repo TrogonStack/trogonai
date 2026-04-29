@@ -93,6 +93,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = NatsJetStreamClient::new(js_context);
 
     streams::provision(&client, &resolved).await?;
+    if let Some(ref cfg) = resolved.telegram
+        && cfg.registration.is_some()
+    {
+        let telegram_http_client = trogon_source_telegram::registration_http_client()?;
+        trogon_source_telegram::register_webhook(cfg, &telegram_http_client).await?;
+    }
 
     let port = resolved.http_server.port;
     let mut join_set: JoinSet<SourceResult> = JoinSet::new();
