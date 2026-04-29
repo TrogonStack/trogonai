@@ -480,3 +480,161 @@ async fn e2e_ws_session_load_reconnects_to_existing_session() {
     shutdown_tx.send(true).unwrap();
     let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;
 }
+
+/// E2E: WS session/cancel notification is delivered while prompt is in flight.
+/// The cancel is sent immediately after the prompt; the prompt must still return
+/// a valid stopReason (either completed or cancelled — both are fine).
+#[tokio::test]
+async fn e2e_ws_cancel_accepted_and_prompt_completes() {
+    let (_container, nats, js, nats_port) = start_nats().await;
+    setup_streams(&js).await;
+    let mock = Arc::new(MockXaiHttpClient::default());
+    mock.push_response(vec![
+        XaiEvent::TextDelta { text: "pong".to_string() },
+        XaiEvent::Done,
+    ]);
+    start_xai_agent(nats, mock).await;
+    let (ws_url, shutdown_tx, conn_thread) = start_ws_server(nats_port).await;
+    let (mut ws, _) = connect_async(&ws_url).await.unwrap();
+
+    ws.send(Message::Text(
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#.into(),
+    ))
+    .await
+    .unwrap();
+    next_with_id(&mut ws, 1).await;
+
+    ws.send(Message::Text(
+        r#"{"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":"/tmp","mcpServers":[]}}"#.into(),
+    ))
+    .await
+    .unwrap();
+    let new_val = next_with_id(&mut ws, 2).await;
+    let session_id = new_val["result"]["sessionId"]
+        .as_str()
+        .unwrap_or_else(|| panic!("must have sessionId: {new_val}"))
+        .to_string();
+
+    let prompt_msg = serde_json::json!({
+        "jsonrpc": "2.0", "id": 3,
+        "method": "session/prompt",
+        "params": { "sessionId": session_id, "prompt": [{"type": "text", "text": "ping"}] }
+    });
+    ws.send(Message::Text(prompt_msg.to_string().into())).await.unwrap();
+
+    let cancel_msg = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "session/cancel",
+        "params": { "sessionId": session_id }
+    });
+    ws.send(Message::Text(cancel_msg.to_string().into())).await.unwrap();
+
+    let prompt_val = next_with_id(&mut ws, 3).await;
+    assert!(
+        prompt_val["result"]["stopReason"].is_string(),
+        "prompt result must have stopReason: {prompt_val}"
+    );
+
+    shutdown_tx.send(true).unwrap();
+    let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;
+}
+
+/// E2E: WS session/close terminates the session — the response must be a
+/// result object with no error.
+#[tokio::test]
+async fn e2e_ws_session_close_terminates_session() {
+    let (_container, nats, js, nats_port) = start_nats().await;
+    setup_streams(&js).await;
+    let mock = Arc::new(MockXaiHttpClient::default());
+    start_xai_agent(nats, mock).await;
+    let (ws_url, shutdown_tx, conn_thread) = start_ws_server(nats_port).await;
+    let (mut ws, _) = connect_async(&ws_url).await.unwrap();
+
+    ws.send(Message::Text(
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#.into(),
+    ))
+    .await
+    .unwrap();
+    next_with_id(&mut ws, 1).await;
+
+    ws.send(Message::Text(
+        r#"{"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":"/tmp","mcpServers":[]}}"#.into(),
+    ))
+    .await
+    .unwrap();
+    let new_val = next_with_id(&mut ws, 2).await;
+    let session_id = new_val["result"]["sessionId"]
+        .as_str()
+        .unwrap_or_else(|| panic!("must have sessionId: {new_val}"))
+        .to_string();
+
+    let close_msg = serde_json::json!({
+        "jsonrpc": "2.0", "id": 3,
+        "method": "session/close",
+        "params": { "sessionId": session_id }
+    });
+    ws.send(Message::Text(close_msg.to_string().into())).await.unwrap();
+
+    let close_val = next_with_id(&mut ws, 3).await;
+    assert!(
+        close_val["result"].is_object(),
+        "session/close must return a result: {close_val}"
+    );
+    assert!(
+        close_val["error"].is_null(),
+        "session/close must not return an error: {close_val}"
+    );
+
+    shutdown_tx.send(true).unwrap();
+    let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;
+}
+
+/// E2E: WS session/fork creates a new child session with a different ID.
+#[tokio::test]
+async fn e2e_ws_session_fork_creates_child_session() {
+    let (_container, nats, js, nats_port) = start_nats().await;
+    setup_streams(&js).await;
+    let mock = Arc::new(MockXaiHttpClient::default());
+    start_xai_agent(nats, mock).await;
+    let (ws_url, shutdown_tx, conn_thread) = start_ws_server(nats_port).await;
+    let (mut ws, _) = connect_async(&ws_url).await.unwrap();
+
+    ws.send(Message::Text(
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#.into(),
+    ))
+    .await
+    .unwrap();
+    next_with_id(&mut ws, 1).await;
+
+    ws.send(Message::Text(
+        r#"{"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":"/tmp","mcpServers":[]}}"#.into(),
+    ))
+    .await
+    .unwrap();
+    let new_val = next_with_id(&mut ws, 2).await;
+    let session_id = new_val["result"]["sessionId"]
+        .as_str()
+        .unwrap_or_else(|| panic!("must have sessionId: {new_val}"))
+        .to_string();
+
+    let fork_msg = serde_json::json!({
+        "jsonrpc": "2.0", "id": 3,
+        "method": "session/fork",
+        "params": { "sessionId": session_id, "cwd": "/tmp", "mcpServers": [] }
+    });
+    ws.send(Message::Text(fork_msg.to_string().into())).await.unwrap();
+
+    let fork_val = next_with_id(&mut ws, 3).await;
+    assert!(
+        fork_val["error"].is_null(),
+        "session/fork must not return an error: {fork_val}"
+    );
+    let new_session_id = fork_val["result"]["sessionId"]
+        .as_str()
+        .unwrap_or_else(|| panic!("session/fork must return new sessionId: {fork_val}"));
+    assert!(!new_session_id.is_empty());
+    assert_ne!(new_session_id, session_id);
+
+    shutdown_tx.send(true).unwrap();
+    let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;
+}
