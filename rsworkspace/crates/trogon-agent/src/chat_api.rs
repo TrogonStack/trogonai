@@ -1232,6 +1232,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn update_session_preserves_token_totals_in_response() {
+        let store = MockSessionStore::new();
+        let mut s = sample_session("sess-tok-upd", "acme");
+        s.total_input_tokens = 55;
+        s.total_output_tokens = 22;
+        store.insert(s);
+        let app = mock_app(store);
+        let req = Request::builder()
+            .method("PATCH")
+            .uri("/sessions/sess-tok-upd")
+            .header("x-tenant-id", "acme")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"name":"Renamed"}"#))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["total_input_tokens"], 55, "update_session must not reset token totals");
+        assert_eq!(json["total_output_tokens"], 22, "update_session must not reset token totals");
+    }
+
+    #[tokio::test]
     async fn update_session_updates_name_and_returns_summary() {
         let store = MockSessionStore::new();
         store.insert(sample_session("sess-1", "acme"));
