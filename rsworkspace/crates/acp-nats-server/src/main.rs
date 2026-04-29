@@ -1749,6 +1749,82 @@ mod tests {
             (connection_id, proto_ver, session_id, stream)
         }
 
+        /// E2E: HTTP POST session/cancel is accepted and prompt completes without crashing.
+        /// Verifies that the cancel notification is routed through the full HTTP stack.
+        /// The prompt may finish before cancel arrives (stopReason "done") or be interrupted
+        /// ("cancelled") — both are valid; the test asserts neither path 500s.
+        #[tokio::test]
+        async fn e2e_http_cancel_accepted_and_prompt_completes() {
+            let (_container, nats, nats_port) = start_nats().await;
+            setup_streams(&jetstream::new(nats.clone())).await;
+
+            let mock = Arc::new(MockXaiHttpClient::default());
+            mock.push_response(vec![
+                XaiEvent::TextDelta { text: "hi".to_string() },
+                XaiEvent::Done,
+            ]);
+            start_xai_agent(nats, mock).await;
+            let (base_url, shutdown_tx, conn_thread) = start_server(nats_port).await;
+
+            let client = reqwest::Client::new();
+            let url = format!("{base_url}{ACP_ENDPOINT}");
+
+            let (connection_id, proto_ver, session_id, mut stream) =
+                run_initialize_and_session_new(&client, &url).await;
+
+            // POST session/prompt (fire-and-forget — 202 Accepted)
+            let prompt_body = serde_json::json!({
+                "jsonrpc": "2.0", "id": 3,
+                "method": "session/prompt",
+                "params": {
+                    "sessionId": session_id,
+                    "prompt": [{"type": "text", "text": "ping"}]
+                }
+            });
+            let prompt_resp = client
+                .post(&url)
+                .header("Content-Type", "application/json")
+                .header("Accept", "application/json, text/event-stream")
+                .header(ACP_CONNECTION_ID_HEADER, &connection_id)
+                .header(ACP_PROTOCOL_VERSION_HEADER, &proto_ver)
+                .header(ACP_SESSION_ID_HEADER, &session_id)
+                .body(serde_json::to_string(&prompt_body).unwrap())
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(prompt_resp.status(), 202u16, "prompt must be accepted");
+
+            // POST session/cancel immediately — fire-and-forget notification
+            let cancel_body = serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "session/cancel",
+                "params": { "sessionId": session_id }
+            });
+            let cancel_resp = client
+                .post(&url)
+                .header("Content-Type", "application/json")
+                .header("Accept", "application/json, text/event-stream")
+                .header(ACP_CONNECTION_ID_HEADER, &connection_id)
+                .header(ACP_PROTOCOL_VERSION_HEADER, &proto_ver)
+                .header(ACP_SESSION_ID_HEADER, &session_id)
+                .body(serde_json::to_string(&cancel_body).unwrap())
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(cancel_resp.status(), 202u16, "cancel must be accepted");
+
+            // Prompt response arrives on SSE; stopReason is any valid value
+            // ("end_turn", "cancelled", etc. depending on whether cancel arrived in time)
+            let prompt_event = find_sse_event_with_id(&mut stream, 3).await;
+            assert!(
+                prompt_event["result"]["stopReason"].is_string(),
+                "prompt result must have stopReason: {prompt_event}"
+            );
+
+            shutdown_tx.send(true).unwrap();
+            let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;
+        }
+
         /// E2E: HTTP client → bridge → NATS → XaiAgent (mock HTTP) → prompt → SSE back.
         /// Verifies the full prompt path without real xAI credentials.
         #[tokio::test]

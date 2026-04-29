@@ -26,6 +26,8 @@ use tokio_tungstenite::tungstenite::Message;
 use trogon_acp_runner::{NatsSessionNotifier, NatsSessionStore, SessionStore as _, TrogonAgent};
 use trogon_agent_core::agent_loop::AgentLoop;
 use trogon_agent_core::tools::ToolContext;
+use trogon_nats::jetstream::NatsJetStreamClient;
+use trogon_xai_runner::{MockXaiHttpClient, NatsSessionNotifier as XaiSessionNotifier, XaiAgent, XaiEvent};
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -158,12 +160,12 @@ async fn start_ws_server(
     (format!("ws://{addr}/ws"), shutdown_tx, conn_thread)
 }
 
+type WsStream = tokio_tungstenite::WebSocketStream<
+    tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+>;
+
 /// Read the next Text message from a WS stream, skipping non-Text frames.
-async fn next_text(
-    ws: &mut tokio_tungstenite::WebSocketStream<
-        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-    >,
-) -> String {
+async fn next_text(ws: &mut WsStream) -> String {
     loop {
         match ws.next().await {
             Some(Ok(Message::Text(t))) => return t.to_string(),
@@ -171,6 +173,55 @@ async fn next_text(
             other => panic!("unexpected ws message: {other:?}"),
         }
     }
+}
+
+/// Read text frames until finding one whose `"id"` field matches `expected_id`.
+/// Skips notifications (no `"id"` field) and mismatched responses.
+async fn next_with_id(ws: &mut WsStream, expected_id: i64) -> serde_json::Value {
+    for _ in 0..100usize {
+        let text = tokio::time::timeout(Duration::from_secs(10), next_text(ws))
+            .await
+            .expect("timeout waiting for WS frame");
+        let val: serde_json::Value = serde_json::from_str(&text).unwrap();
+        if val["id"].as_i64() == Some(expected_id) {
+            return val;
+        }
+    }
+    panic!("did not receive response with id={expected_id} after 100 frames");
+}
+
+/// Create all required JetStream streams for the ACP protocol.
+async fn setup_streams(js: &jetstream::Context) {
+    let prefix = AcpPrefix::new("acp").unwrap();
+    for config in acp_nats::jetstream::streams::all_configs(&prefix) {
+        js.get_or_create_stream(config).await.unwrap();
+    }
+}
+
+/// Start an XaiAgent backed by a MockXaiHttpClient on its own thread.
+async fn start_xai_agent(nats: async_nats::Client, mock: Arc<MockXaiHttpClient>) {
+    std::thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let local = tokio::task::LocalSet::new();
+        rt.block_on(local.run_until(async move {
+            let prefix = AcpPrefix::new("acp").unwrap();
+            let js_client = NatsJetStreamClient::new(jetstream::new(nats.clone()));
+            let notifier = XaiSessionNotifier::new(nats.clone(), prefix.clone());
+            let agent = XaiAgent::with_deps(notifier, "grok-4", "dummy", mock);
+            let (_, io_task) = AgentSideNatsConnection::with_jetstream(
+                agent,
+                nats,
+                js_client,
+                prefix,
+                |fut| { tokio::task::spawn_local(fut); },
+            );
+            io_task.await.ok();
+        }));
+    });
+    tokio::time::sleep(Duration::from_millis(500)).await;
 }
 
 // ── tests ─────────────────────────────────────────────────────────────────────
@@ -299,6 +350,71 @@ async fn e2e_authenticate_returns_ok() {
     assert_eq!(val["id"], 6);
     assert!(val["result"].is_object(), "must have result: {text}");
     assert!(val["error"].is_null(), "must not have error: {text}");
+
+    shutdown_tx.send(true).unwrap();
+    let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;
+}
+
+/// E2E: WS client → bridge → NATS JetStream → XaiAgent (mock HTTP) → prompt response.
+/// Verifies the full session/prompt path over the WebSocket transport end-to-end.
+#[tokio::test]
+async fn e2e_ws_prompt_returns_stop_reason() {
+    let (_container, nats, js, nats_port) = start_nats().await;
+    setup_streams(&js).await;
+
+    let mock = Arc::new(MockXaiHttpClient::default());
+    mock.push_response(vec![
+        XaiEvent::TextDelta { text: "hello from ws".to_string() },
+        XaiEvent::Done,
+    ]);
+    start_xai_agent(nats, mock).await;
+    let (ws_url, shutdown_tx, conn_thread) = start_ws_server(nats_port).await;
+
+    let (mut ws, _) = connect_async(&ws_url).await.unwrap();
+
+    // initialize
+    ws.send(Message::Text(
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#.into(),
+    ))
+    .await
+    .unwrap();
+    let init_val = next_with_id(&mut ws, 1).await;
+    assert!(
+        init_val["result"]["protocolVersion"].is_number(),
+        "must have protocolVersion: {init_val}"
+    );
+
+    // session/new
+    ws.send(Message::Text(
+        r#"{"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":"/tmp","mcpServers":[]}}"#.into(),
+    ))
+    .await
+    .unwrap();
+    let new_val = next_with_id(&mut ws, 2).await;
+    let session_id = new_val["result"]["sessionId"]
+        .as_str()
+        .unwrap_or_else(|| panic!("must have sessionId: {new_val}"))
+        .to_string();
+    assert!(!session_id.is_empty());
+
+    // session/prompt
+    let prompt_msg = serde_json::json!({
+        "jsonrpc": "2.0", "id": 3,
+        "method": "session/prompt",
+        "params": {
+            "sessionId": session_id,
+            "prompt": [{"type": "text", "text": "ping"}]
+        }
+    });
+    ws.send(Message::Text(prompt_msg.to_string().into()))
+        .await
+        .unwrap();
+
+    let prompt_val = next_with_id(&mut ws, 3).await;
+    assert!(
+        prompt_val["result"]["stopReason"].is_string(),
+        "prompt result must have stopReason: {prompt_val}"
+    );
 
     shutdown_tx.send(true).unwrap();
     let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;

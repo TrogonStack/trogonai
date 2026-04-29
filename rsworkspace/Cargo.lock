@@ -130,6 +130,7 @@ dependencies = [
  "trogon-agent-core",
  "trogon-nats",
  "trogon-std",
+ "trogon-xai-runner",
 ]
 
 [[package]]
