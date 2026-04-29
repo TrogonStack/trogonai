@@ -797,6 +797,42 @@ mod tests {
         })
     }
 
+    fn make_mock_agent(responses: Vec<serde_json::Value>) -> Arc<AgentLoop> {
+        use crate::agent_loop::mock::SequencedMockAnthropicClient;
+        use crate::flag_client::AlwaysOnFlagClient;
+        use crate::tools::{DefaultToolDispatcher, ToolContext};
+
+        let tool_ctx = Arc::new(ToolContext::for_test("http://127.0.0.1:1", "", "", ""));
+        Arc::new(AgentLoop {
+            anthropic_client: Arc::new(SequencedMockAnthropicClient::new(responses)),
+            model: "test".to_string(),
+            max_iterations: 1,
+            tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),
+            tool_context: tool_ctx,
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            flag_client: Arc::new(AlwaysOnFlagClient),
+            tenant_id: "test-tenant".to_string(),
+            promise_store: None,
+            promise_id: None,
+        })
+    }
+
+    fn mock_app_with_agent(store: MockSessionStore, agent: Arc<AgentLoop>) -> axum::Router {
+        let state = ChatAppState {
+            agent,
+            session_store: store,
+            promise_store: Arc::new(crate::promise_store::mock::MockPromiseStore::new()),
+            agent_id: None,
+            agent_loader: None,
+            skill_loader: None,
+        };
+        router(state)
+    }
+
     fn get_ok_put_error_app() -> axum::Router {
         let state = ChatAppState {
             agent: make_test_agent(),
@@ -1451,5 +1487,79 @@ mod tests {
             .unwrap();
         let resp = error_app().oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    // ── Token tracking ────────────────────────────────────────────────────────
+
+    fn llm_response(text: &str, input_tokens: u32, output_tokens: u32) -> serde_json::Value {
+        serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": text}],
+            "usage": {"input_tokens": input_tokens, "output_tokens": output_tokens}
+        })
+    }
+
+    fn send_msg_req(session_id: &str, content: &str) -> Request<Body> {
+        Request::builder()
+            .method("POST")
+            .uri(format!("/sessions/{session_id}/messages"))
+            .header("x-tenant-id", "acme")
+            .header("content-type", "application/json")
+            .body(Body::from(format!(r#"{{"content":"{content}"}}"#)))
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn send_message_returns_token_counts_from_llm_response() {
+        let store = MockSessionStore::new();
+        store.insert(sample_session("sess-1", "acme"));
+
+        let app = mock_app_with_agent(store, make_mock_agent(vec![llm_response("hi", 10, 5)]));
+        let resp = app.oneshot(send_msg_req("sess-1", "hello")).await.unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["input_tokens"], 10, "input_tokens must match usage field");
+        assert_eq!(json["output_tokens"], 5, "output_tokens must match usage field");
+    }
+
+    #[tokio::test]
+    async fn send_message_accumulates_tokens_across_turns() {
+        let store = MockSessionStore::new();
+        store.insert(sample_session("sess-2", "acme"));
+
+        let agent = make_mock_agent(vec![
+            llm_response("turn 1", 10, 5),
+            llm_response("turn 2", 20, 8),
+        ]);
+        let app = mock_app_with_agent(store.clone(), agent);
+
+        let resp1 = app.clone().oneshot(send_msg_req("sess-2", "first")).await.unwrap();
+        assert_eq!(resp1.status(), StatusCode::OK);
+
+        let resp2 = app.oneshot(send_msg_req("sess-2", "second")).await.unwrap();
+        assert_eq!(resp2.status(), StatusCode::OK);
+        let body2 = axum::body::to_bytes(resp2.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json2: serde_json::Value = serde_json::from_slice(&body2).unwrap();
+        assert_eq!(json2["input_tokens"], 20);
+        assert_eq!(json2["output_tokens"], 8);
+
+        let session = store
+            .snapshot()
+            .remove("acme.sess-2")
+            .expect("session must be persisted");
+        assert_eq!(
+            session.total_input_tokens, 30,
+            "total_input_tokens must accumulate across turns (10 + 20)"
+        );
+        assert_eq!(
+            session.total_output_tokens, 13,
+            "total_output_tokens must accumulate across turns (5 + 8)"
+        );
     }
 }
