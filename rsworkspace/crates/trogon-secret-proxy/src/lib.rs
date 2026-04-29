@@ -28,7 +28,7 @@ pub mod traits;
 pub mod vault_admin;
 pub mod worker;
 
-#[cfg(feature = "test-helpers")]
+#[cfg(any(test, feature = "test-helpers"))]
 pub mod mocks;
 
 pub use traits::{

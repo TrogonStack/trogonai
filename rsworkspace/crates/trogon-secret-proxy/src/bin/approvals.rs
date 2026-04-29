@@ -1,23 +1,20 @@
-//! Detokenization worker binary.
+//! Human-in-the-loop approval service binary.
 //!
-//! Pulls requests from JetStream, resolves tokens via the vault,
-//! forwards to the AI provider, and replies via Core NATS.
+//! Listens for vault credential proposals, notifies via Slack, and writes
+//! approved credentials to the configured vault backend.
 //!
 //! # Environment variables
 //!
 //! | Variable                  | Default          | Description                                    |
 //! |---------------------------|------------------|------------------------------------------------|
 //! | `NATS_URL`                | localhost:4222   | NATS server address(es)                        |
-//! | `PROXY_PREFIX`            | `trogon`         | NATS subject prefix                            |
-//! | `WORKER_CONSUMER_NAME`    | `proxy-workers`  | Durable JetStream consumer name                |
-//! | `VAULT_ADMIN_NAME`        | —                | Named vault admin (omit for flat subjects)     |
+//! | `APPROVAL_VAULT_NAME`     | `default`        | Vault name this service manages                |
+//! | `VAULT_SLACK_WEBHOOK_URL` | —                | Slack incoming-webhook URL (enables Slack)     |
 //! | `RUST_LOG`                | `info`           | Log filter (tracing-subscriber)                |
 //!
-//! # Vault backend selection (in priority order)
+//! # Vault backend selection (same priority order as the worker binary)
 //!
 //! ## DualWrite mode (`INFISICAL_URL` + `VAULT_NATS_BUCKET` both set)
-//!
-//! Infisical is the source of truth; NatsKvVault is the encrypted NATS KV cache.
 //!
 //! | Variable                  | Description                                          |
 //! |---------------------------|------------------------------------------------------|
@@ -31,11 +28,7 @@
 //!
 //! ## Infisical-only mode (`INFISICAL_URL` set, `VAULT_NATS_BUCKET` absent)
 //!
-//! Same `INFISICAL_*` variables as above.
-//!
 //! ## NATS KV mode (`VAULT_NATS_BUCKET` set, `INFISICAL_URL` absent)
-//!
-//! Same `VAULT_*` variables as DualWrite mode except the Infisical vars.
 //!
 //! | Variable              | Default | Description                                        |
 //! |-----------------------|---------|----------------------------------------------------|
@@ -43,72 +36,23 @@
 //!
 //! ## HashiCorp Vault mode (`VAULT_ADDR` set)
 //!
-//! | Variable              | Default   | Description                                      |
-//! |-----------------------|-----------|--------------------------------------------------|
-//! | `VAULT_ADDR`          | —         | URL of the Vault server (e.g. `http://vault:8200`)|
-//! | `VAULT_MOUNT`         | `secret`  | KV v2 mount name                                 |
-//! | `VAULT_AUTH_METHOD`   | `token`   | Auth method: `token`, `approle`, `kubernetes`    |
-//! | `VAULT_TOKEN`         | —         | Static token (method `token`)                    |
-//! | `VAULT_ROLE_ID`       | —         | Role ID (method `approle`)                       |
-//! | `VAULT_SECRET_ID`     | —         | Secret ID (method `approle`)                     |
-//! | `VAULT_K8S_ROLE`      | —         | Kubernetes role (method `kubernetes`)            |
-//! | `VAULT_K8S_JWT_PATH`  | —         | Path to JWT file (optional, has K8s default)     |
-//!
-//! ## MemoryVault mode (default, when none of the above are set)
-//!
-//! | Variable              | Description                                          |
-//! |-----------------------|------------------------------------------------------|
-//! | `VAULT_TOKEN_<token>` | Seed vault: key=token name, value=real API key       |
-//!
-//! ```
-//! VAULT_TOKEN_tok_anthropic_prod_abc123=sk-ant-realkey...
-//! ```
+//! ## MemoryVault mode (default — development only)
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use trogon_nats::{NatsConfig, connect};
-use trogon_secret_proxy::{stream, subjects, vault_admin, worker};
 use trogon_std::SystemEnv;
 use trogon_vault::{ApiKeyToken, DualWriteVault, MemoryVault, VaultStore};
 use trogon_vault::{HashicorpVaultConfig, HashicorpVaultStore, VaultAuth};
 use trogon_vault::{InfisicalConfig, InfisicalVaultStore};
+use trogon_vault_approvals::{
+    ApprovalService, JetStreamStatePublisher, LoggingNotifier, Notifier, SlackWebhookNotifier,
+    ensure_proposals_stream,
+};
 use trogon_vault_nats::{Audit, AuditPublisher, CryptoCtx, NatsKvVault, ensure_audit_stream, ensure_vault_bucket, grace_period_from_env};
 
-async fn run_all<V: VaultStore + 'static>(
-    nats: async_nats::Client,
-    jetstream: async_nats::jetstream::Context,
-    vault: Arc<V>,
-    http_client: reqwest::Client,
-    consumer_name: &str,
-    stream_name: &str,
-    prefix: &str,
-) where
-    V::Error: std::fmt::Display,
-{
-    tokio::spawn({
-        let nats       = nats.clone();
-        let vault      = Arc::clone(&vault);
-        let prefix     = prefix.to_string();
-        let vault_name = std::env::var("VAULT_ADMIN_NAME").ok();
-        async move {
-            vault_admin::run(nats, vault, &prefix, vault_name.as_deref())
-                .await
-                .expect("Vault admin listener exited with error");
-        }
-    });
-
-    worker::run(
-        jetstream,
-        nats,
-        vault,
-        http_client,
-        consumer_name,
-        stream_name,
-    )
-    .await
-    .expect("Worker exited with error");
-}
+// ── Vault builders (shared with worker binary) ────────────────────────────────
 
 async fn build_hashicorp_vault(vault_addr: String) -> HashicorpVaultStore {
     let mount = std::env::var("VAULT_MOUNT").unwrap_or_else(|_| "secret".to_string());
@@ -147,13 +91,72 @@ async fn build_nats_kv_vault(
         .expect("Failed to ensure vault KV bucket");
     let crypto = Arc::new(
         CryptoCtx::from_env()
-            .expect("VAULT_MASTER_PASSWORD and VAULT_KEY_SALT are required for NATS KV vault"),
+            .expect("VAULT_MASTER_PASSWORD and VAULT_KEY_SALT required for NATS KV vault"),
     );
     NatsKvVault::new(kv, crypto, grace_period_from_env())
         .await
         .expect("Failed to initialise NatsKvVault")
         .with_audit(audit)
 }
+
+// ── Generic runner ────────────────────────────────────────────────────────────
+
+async fn run_with_vault<V, N>(
+    vault:      Arc<V>,
+    notifier:   Arc<N>,
+    js:         async_nats::jetstream::Context,
+    nats:       async_nats::Client,
+    vault_name: &str,
+) where
+    V: VaultStore + 'static,
+    V::Error: std::fmt::Display,
+    N: Notifier,
+{
+    ensure_proposals_stream(&js)
+        .await
+        .expect("Failed to ensure VAULT_PROPOSALS stream");
+    ensure_audit_stream(&js)
+        .await
+        .expect("Failed to ensure VAULT_AUDIT stream");
+
+    let audit: Arc<dyn Audit> = Arc::new(AuditPublisher::new(js.clone(), vault_name));
+    let publisher = Arc::new(JetStreamStatePublisher::new(js.clone()));
+
+    tracing::info!(vault = %vault_name, "Approval service starting");
+
+    ApprovalService::new(vault, notifier, publisher, vault_name)
+        .with_audit(audit)
+        .run(js, nats)
+        .await
+        .expect("ApprovalService exited with error");
+}
+
+// ── Notifier selection ────────────────────────────────────────────────────────
+
+async fn run_with_vault_and_notifier<V>(
+    vault:      Arc<V>,
+    js:         async_nats::jetstream::Context,
+    nats:       async_nats::Client,
+    vault_name: &str,
+) where
+    V: VaultStore + 'static,
+    V::Error: std::fmt::Display,
+{
+    match std::env::var("VAULT_SLACK_WEBHOOK_URL") {
+        Ok(url) => {
+            tracing::info!("Notifier: Slack webhook");
+            let notifier = Arc::new(SlackWebhookNotifier::new(url));
+            run_with_vault(vault, notifier, js, nats, vault_name).await;
+        }
+        Err(_) => {
+            tracing::info!("Notifier: structured logs (set VAULT_SLACK_WEBHOOK_URL for Slack)");
+            let notifier = Arc::new(LoggingNotifier);
+            run_with_vault(vault, notifier, js, nats, vault_name).await;
+        }
+    }
+}
+
+// ── main ──────────────────────────────────────────────────────────────────────
 
 #[tokio::main]
 async fn main() {
@@ -164,8 +167,8 @@ async fn main() {
         )
         .init();
 
-    let prefix        = std::env::var("PROXY_PREFIX").unwrap_or_else(|_| "trogon".to_string());
-    let consumer_name = std::env::var("WORKER_CONSUMER_NAME").unwrap_or_else(|_| "proxy-workers".to_string());
+    let vault_name = std::env::var("APPROVAL_VAULT_NAME")
+        .unwrap_or_else(|_| "default".to_string());
 
     let nats_config = NatsConfig::from_env(&SystemEnv);
     tracing::info!(servers = ?nats_config.servers, "Connecting to NATS");
@@ -174,27 +177,11 @@ async fn main() {
         .await
         .expect("Failed to connect to NATS");
 
-    let jetstream = async_nats::jetstream::new(nats.clone());
-
-    let outbound_subject = subjects::outbound(&prefix);
-    let sname = stream::stream_name(&prefix);
-    stream::ensure_stream(&jetstream, &prefix, &outbound_subject)
-        .await
-        .expect("Failed to ensure JetStream stream");
-
-    let http_client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(30))
-        // Never follow HTTP redirects — the real API key must not be forwarded
-        // to an uncontrolled redirect target.
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .expect("Failed to build HTTP client");
+    let js = async_nats::jetstream::new(nats.clone());
 
     let has_infisical = std::env::var("INFISICAL_URL").is_ok();
     let has_nats_kv   = std::env::var("VAULT_NATS_BUCKET").is_ok();
     let has_hashicorp = std::env::var("VAULT_ADDR").is_ok();
-
-    tracing::info!(consumer = %consumer_name, "Detokenization worker starting");
 
     match (has_infisical, has_nats_kv, has_hashicorp) {
         (true, true, _) => {
@@ -202,41 +189,44 @@ async fn main() {
             let config    = InfisicalConfig::from_env().expect("Infisical env vars required");
             let infisical = InfisicalVaultStore::new(config);
             let bucket    = std::env::var("VAULT_NATS_BUCKET").unwrap();
-            ensure_audit_stream(&jetstream).await.expect("Failed to ensure VAULT_AUDIT stream");
-            let audit: Arc<dyn Audit> = Arc::new(AuditPublisher::new(jetstream.clone(), &bucket));
-            let nats_kv = build_nats_kv_vault(&jetstream, &bucket, audit).await;
+            ensure_audit_stream(&js).await.expect("Failed to ensure VAULT_AUDIT stream");
+            let audit: Arc<dyn Audit> = Arc::new(AuditPublisher::new(js.clone(), &bucket));
+            let nats_kv = build_nats_kv_vault(&js, &bucket, audit).await;
             let vault   = Arc::new(DualWriteVault::new(infisical, nats_kv));
-            run_all(nats, jetstream, vault, http_client, &consumer_name, &sname, &prefix).await;
+            run_with_vault_and_notifier(vault, js, nats, &vault_name).await;
         }
         (true, false, _) => {
             tracing::info!("Vault backend: Infisical");
             let config = InfisicalConfig::from_env().expect("Infisical env vars required");
             let vault  = Arc::new(InfisicalVaultStore::new(config));
-            run_all(nats, jetstream, vault, http_client, &consumer_name, &sname, &prefix).await;
+            run_with_vault_and_notifier(vault, js, nats, &vault_name).await;
         }
         (false, true, _) => {
             let bucket = std::env::var("VAULT_NATS_BUCKET").unwrap();
             tracing::info!(bucket = %bucket, "Vault backend: NATS KV");
-            ensure_audit_stream(&jetstream).await.expect("Failed to ensure VAULT_AUDIT stream");
-            let audit = Arc::new(AuditPublisher::new(jetstream.clone(), &bucket));
-            let vault = Arc::new(build_nats_kv_vault(&jetstream, &bucket, audit).await);
-            run_all(nats, jetstream, vault, http_client, &consumer_name, &sname, &prefix).await;
+            ensure_audit_stream(&js).await.expect("Failed to ensure VAULT_AUDIT stream");
+            let audit = Arc::new(AuditPublisher::new(js.clone(), &bucket));
+            let vault = Arc::new(build_nats_kv_vault(&js, &bucket, audit).await);
+            run_with_vault_and_notifier(vault, js, nats, &vault_name).await;
         }
         (false, false, true) => {
             let vault_addr = std::env::var("VAULT_ADDR").unwrap();
             tracing::info!(addr = %vault_addr, "Vault backend: HashiCorp Vault");
             let vault = Arc::new(build_hashicorp_vault(vault_addr).await);
-            run_all(nats, jetstream, vault, http_client, &consumer_name, &sname, &prefix).await;
+            run_with_vault_and_notifier(vault, js, nats, &vault_name).await;
         }
         _ => {
-            tracing::info!("Vault backend: in-memory (development mode)");
+            tracing::warn!(
+                "No vault backend configured. Running in-memory (development mode only). \
+                 Set INFISICAL_URL, VAULT_NATS_BUCKET, or VAULT_ADDR for production."
+            );
             let vault = Arc::new(MemoryVault::new());
             let mut seeded = 0usize;
             for (key, value) in std::env::vars() {
                 let Some(token_str) = key.strip_prefix("VAULT_TOKEN_") else { continue };
                 match ApiKeyToken::new(token_str) {
                     Ok(token) => {
-                        vault.store(&token, &value).await.expect("Failed to store vault token");
+                        vault.store(&token, &value).await.expect("Failed to seed vault token");
                         tracing::info!(token = %token, "Vault token seeded");
                         seeded += 1;
                     }
@@ -246,7 +236,7 @@ async fn main() {
                 }
             }
             tracing::info!(seeded, "Vault seeding complete");
-            run_all(nats, jetstream, vault, http_client, &consumer_name, &sname, &prefix).await;
+            run_with_vault_and_notifier(vault, js, nats, &vault_name).await;
         }
     }
 }

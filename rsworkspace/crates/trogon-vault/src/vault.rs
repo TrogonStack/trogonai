@@ -47,6 +47,23 @@ pub trait VaultStore: Send + Sync {
     ) -> impl std::future::Future<Output = Result<(), Self::Error>> + Send {
         self.store(token, new_plaintext)
     }
+
+    /// Look up both the current and previous plaintext API keys for `token`.
+    ///
+    /// Returns `(current, previous)`. `previous` is `Some` only during a rotation
+    /// grace period, allowing a proxy to fall back to the previous key if the upstream
+    /// rejects the current one with 401.
+    ///
+    /// Default: delegates to [`resolve`](VaultStore::resolve) with `previous = None`.
+    /// Override in rotation-aware backends (e.g. [`NatsKvVault`]) to expose the slot.
+    fn resolve_with_previous(
+        &self,
+        token: &ApiKeyToken,
+    ) -> impl std::future::Future<Output = Result<(Option<String>, Option<String>), Self::Error>> + Send
+    {
+        let fut = self.resolve(token);
+        async move { Ok((fut.await?, None)) }
+    }
 }
 
 #[cfg(test)]

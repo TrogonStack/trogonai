@@ -174,3 +174,143 @@ fn signal_name(sig: i32) -> &'static str {
         _ => "UNKNOWN",
     }
 }
+
+// ── Tests ──────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::AtomicBool;
+
+    fn make_buf() -> (Arc<Mutex<Vec<u8>>>, Arc<AtomicBool>) {
+        (Arc::new(Mutex::new(Vec::new())), Arc::new(AtomicBool::new(false)))
+    }
+
+    // ── append_output ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn append_within_limit_no_truncation() {
+        let (buf, trunc) = make_buf();
+        append_output(&buf, &trunc, 100, b"hello");
+        assert_eq!(*buf.lock().unwrap(), b"hello");
+        assert!(!trunc.load(std::sync::atomic::Ordering::Relaxed));
+    }
+
+    #[test]
+    fn append_exactly_at_limit_no_truncation() {
+        let (buf, trunc) = make_buf();
+        append_output(&buf, &trunc, 5, b"hello");
+        assert_eq!(*buf.lock().unwrap(), b"hello");
+        assert!(!trunc.load(std::sync::atomic::Ordering::Relaxed));
+    }
+
+    #[test]
+    fn append_overflow_drops_oldest_bytes() {
+        let (buf, trunc) = make_buf();
+        append_output(&buf, &trunc, 5, b"hello world");
+        let guard = buf.lock().unwrap();
+        assert_eq!(guard.len(), 5);
+        assert_eq!(&*guard, b"world");
+        drop(guard);
+        assert!(trunc.load(std::sync::atomic::Ordering::Relaxed));
+    }
+
+    #[test]
+    fn append_sets_was_truncated_on_first_overflow() {
+        let (buf, trunc) = make_buf();
+        append_output(&buf, &trunc, 10, b"12345");
+        assert!(!trunc.load(std::sync::atomic::Ordering::Relaxed));
+        append_output(&buf, &trunc, 10, b"678901234");
+        assert!(trunc.load(std::sync::atomic::Ordering::Relaxed));
+    }
+
+    #[test]
+    fn append_preserves_utf8_boundaries() {
+        // "AB€" = 5 bytes (€ = 3 bytes: 0xE2 0x82 0xAC), limit = 4
+        // excess = 1, trim_at advances past the ASCII 'A', stops at 'B' (not continuation)
+        // result = "B€" (4 bytes) — valid UTF-8
+        let (buf, trunc) = make_buf();
+        append_output(&buf, &trunc, 4, b"AB\xe2\x82\xac");
+        let guard = buf.lock().unwrap();
+        let s = std::str::from_utf8(&guard).expect("must be valid utf-8");
+        assert!(s.ends_with('€'), "expected trailing '€', got: {s:?}");
+        drop(guard);
+        assert!(trunc.load(std::sync::atomic::Ordering::Relaxed));
+    }
+
+    #[test]
+    fn append_skips_continuation_bytes_at_trim_boundary() {
+        // Pre-load "XY", then append "€" (0xE2 0x82 0xAC) with limit 4.
+        // Total = 5, excess = 1, guard[1] = 'Y' (not a continuation byte) → drain(..1)
+        // Result: "Y€" (4 bytes)
+        let (buf, trunc) = make_buf();
+        append_output(&buf, &trunc, 100, b"XY");
+        append_output(&buf, &trunc, 4, b"\xe2\x82\xac");
+        let guard = buf.lock().unwrap();
+        let s = std::str::from_utf8(&guard).expect("must be valid utf-8");
+        assert_eq!(s, "Y€");
+        drop(guard);
+        assert!(trunc.load(std::sync::atomic::Ordering::Relaxed));
+    }
+
+    #[test]
+    fn append_multiple_writes_accumulate() {
+        let (buf, trunc) = make_buf();
+        append_output(&buf, &trunc, 20, b"abc");
+        append_output(&buf, &trunc, 20, b"def");
+        assert_eq!(*buf.lock().unwrap(), b"abcdef");
+        assert!(!trunc.load(std::sync::atomic::Ordering::Relaxed));
+    }
+
+    // ── exit_status_from_std ──────────────────────────────────────────────────
+
+    #[cfg(unix)]
+    #[test]
+    fn exit_code_zero() {
+        use std::os::unix::process::ExitStatusExt;
+        let status = std::process::ExitStatus::from_raw(0);
+        let ts = exit_status_from_std(&status);
+        assert_eq!(ts.exit_code, Some(0));
+        assert_eq!(ts.signal, None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn exit_code_nonzero() {
+        use std::os::unix::process::ExitStatusExt;
+        // waitpid raw: exit_code is in bits 8-15
+        let status = std::process::ExitStatus::from_raw(1 << 8);
+        let ts = exit_status_from_std(&status);
+        assert_eq!(ts.exit_code, Some(1));
+        assert_eq!(ts.signal, None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn signal_sigkill_mapped() {
+        use std::os::unix::process::ExitStatusExt;
+        let status = std::process::ExitStatus::from_raw(9);
+        let ts = exit_status_from_std(&status);
+        assert_eq!(ts.signal, Some("SIGKILL".to_string()));
+        assert_eq!(ts.exit_code, None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn signal_sigterm_mapped() {
+        use std::os::unix::process::ExitStatusExt;
+        let status = std::process::ExitStatus::from_raw(15);
+        let ts = exit_status_from_std(&status);
+        assert_eq!(ts.signal, Some("SIGTERM".to_string()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn signal_unknown_returns_unknown_string() {
+        use std::os::unix::process::ExitStatusExt;
+        // Signal 31 is not in the map → "UNKNOWN"
+        let status = std::process::ExitStatus::from_raw(31);
+        let ts = exit_status_from_std(&status);
+        assert_eq!(ts.signal, Some("UNKNOWN".to_string()));
+    }
+}

@@ -24,6 +24,7 @@ pub mod backends;
 pub mod token;
 pub mod vault;
 
+pub use backends::dual_write::DualWriteVault;
 pub use backends::memory::{MemoryVault, MemoryVaultError};
 pub use token::{AiProvider, ApiKeyToken, Env, TokenError};
 pub use vault::VaultStore;
@@ -31,4 +32,9 @@ pub use vault::VaultStore;
 #[cfg(feature = "hashicorp-vault")]
 pub use backends::hashicorp_vault::{
     HashicorpVaultConfig, HashicorpVaultError, HashicorpVaultStore, VaultAuth,
+};
+
+#[cfg(feature = "infisical")]
+pub use backends::infisical::{
+    InfisicalAuth, InfisicalConfig, InfisicalError, InfisicalVaultStore,
 };

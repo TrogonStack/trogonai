@@ -414,3 +414,537 @@ async fn reply_error<N: NatsBroker>(
         }
     }
 }
+
+// ── Unit tests ─────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use acp_nats::nats::ClientMethod;
+    use agent_client_protocol::{
+        ContentBlock, ContentChunk, CreateTerminalResponse, KillTerminalResponse,
+        ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalResponse,
+        RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
+        SessionNotification, SessionUpdate, TerminalExitStatus, TerminalId,
+        TerminalOutputResponse, TerminalOutputRequest, WaitForTerminalExitResponse,
+        WriteTextFileRequest, WriteTextFileResponse,
+    };
+    use bytes::Bytes;
+    use std::cell::RefCell;
+    use std::path::PathBuf;
+    use std::rc::Rc;
+    use std::sync::{Arc, Mutex};
+
+    // ── RecordingBroker ───────────────────────────────────────────────────────
+
+    /// Captures every `publish` call; `subscribe` returns an empty stream so
+    /// the dispatcher loop never blocks waiting for messages.
+    #[derive(Clone)]
+    struct RecordingBroker {
+        published: Arc<Mutex<Vec<(String, Vec<u8>)>>>,
+    }
+
+    impl RecordingBroker {
+        fn new() -> Self {
+            Self { published: Arc::new(Mutex::new(vec![])) }
+        }
+
+        fn published(&self) -> Vec<(String, Vec<u8>)> {
+            self.published.lock().unwrap().clone()
+        }
+
+        fn first_reply_json(&self) -> serde_json::Value {
+            let msgs = self.published();
+            assert!(!msgs.is_empty(), "expected at least one published message");
+            serde_json::from_slice(&msgs[0].1).expect("reply is valid JSON")
+        }
+    }
+
+    impl NatsBroker for RecordingBroker {
+        type Sub = futures::stream::Empty<async_nats::Message>;
+
+        async fn subscribe(
+            &self,
+            _: &str,
+        ) -> Result<Self::Sub, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(futures::stream::empty())
+        }
+
+        async fn publish(
+            &self,
+            subject: async_nats::Subject,
+            payload: bytes::Bytes,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            self.published
+                .lock()
+                .unwrap()
+                .push((subject.to_string(), payload.to_vec()));
+            Ok(())
+        }
+
+        async fn request(
+            &self,
+            _: impl Into<String> + Send,
+            _: bytes::Bytes,
+        ) -> Result<async_nats::Message, Box<dyn std::error::Error + Send + Sync>> {
+            Err("recording broker: request not supported".into())
+        }
+    }
+
+    // ── MockRuntime ───────────────────────────────────────────────────────────
+
+    /// Records every method invocation as `"method_name:arg"` strings so tests
+    /// can assert on routing and session-id forwarding without touching real FS
+    /// or processes.
+    struct MockRuntime {
+        calls:     RefCell<Vec<String>>,
+        sessions:  Vec<String>,
+        terminals: Vec<(String, String)>,
+    }
+
+    impl MockRuntime {
+        fn new() -> Self {
+            Self { calls: RefCell::new(vec![]), sessions: vec![], terminals: vec![] }
+        }
+
+        fn with_sessions(sessions: Vec<String>) -> Self {
+            Self { calls: RefCell::new(vec![]), sessions, terminals: vec![] }
+        }
+
+        fn with_terminals(terminals: Vec<(String, String)>) -> Self {
+            Self { calls: RefCell::new(vec![]), sessions: vec![], terminals }
+        }
+
+        fn calls(&self) -> Vec<String> {
+            self.calls.borrow().clone()
+        }
+    }
+
+    impl Runtime for MockRuntime {
+        async fn handle_create_terminal(
+            &self,
+            session_id: &str,
+            _: agent_client_protocol::CreateTerminalRequest,
+        ) -> agent_client_protocol::Result<CreateTerminalResponse> {
+            self.calls.borrow_mut().push(format!("create_terminal:{session_id}"));
+            Ok(CreateTerminalResponse::new(TerminalId::new("mock-tid")))
+        }
+
+        async fn handle_terminal_output(
+            &self,
+            req: TerminalOutputRequest,
+        ) -> agent_client_protocol::Result<TerminalOutputResponse> {
+            self.calls
+                .borrow_mut()
+                .push(format!("terminal_output:{}", req.terminal_id.0.as_ref()));
+            Ok(TerminalOutputResponse::new("", false))
+        }
+
+        async fn handle_kill_terminal(
+            &self,
+            req: agent_client_protocol::KillTerminalRequest,
+        ) -> agent_client_protocol::Result<KillTerminalResponse> {
+            self.calls
+                .borrow_mut()
+                .push(format!("kill_terminal:{}", req.terminal_id.0.as_ref()));
+            Ok(KillTerminalResponse::new())
+        }
+
+        async fn handle_write_to_terminal(
+            &self,
+            terminal_id: &str,
+            _: &[u8],
+        ) -> agent_client_protocol::Result<()> {
+            self.calls
+                .borrow_mut()
+                .push(format!("write_to_terminal:{terminal_id}"));
+            Ok(())
+        }
+
+        fn handle_close_terminal_stdin(
+            &self,
+            terminal_id: &str,
+        ) -> agent_client_protocol::Result<()> {
+            self.calls
+                .borrow_mut()
+                .push(format!("close_stdin:{terminal_id}"));
+            Ok(())
+        }
+
+        async fn handle_release_terminal(
+            &self,
+            req: agent_client_protocol::ReleaseTerminalRequest,
+        ) -> agent_client_protocol::Result<ReleaseTerminalResponse> {
+            self.calls
+                .borrow_mut()
+                .push(format!("release_terminal:{}", req.terminal_id.0.as_ref()));
+            Ok(ReleaseTerminalResponse::new())
+        }
+
+        async fn handle_wait_for_terminal_exit(
+            &self,
+            req: agent_client_protocol::WaitForTerminalExitRequest,
+        ) -> agent_client_protocol::Result<WaitForTerminalExitResponse> {
+            self.calls
+                .borrow_mut()
+                .push(format!("wait_for_exit:{}", req.terminal_id.0.as_ref()));
+            Ok(WaitForTerminalExitResponse::new(TerminalExitStatus::new()))
+        }
+
+        async fn handle_write_text_file(
+            &self,
+            session_id: &str,
+            req: WriteTextFileRequest,
+        ) -> agent_client_protocol::Result<WriteTextFileResponse> {
+            self.calls.borrow_mut().push(format!(
+                "write_text_file:{session_id}:{}",
+                req.path.display()
+            ));
+            Ok(WriteTextFileResponse::new())
+        }
+
+        async fn handle_read_text_file(
+            &self,
+            session_id: &str,
+            req: ReadTextFileRequest,
+        ) -> agent_client_protocol::Result<ReadTextFileResponse> {
+            self.calls.borrow_mut().push(format!(
+                "read_text_file:{session_id}:{}",
+                req.path.display()
+            ));
+            Ok(ReadTextFileResponse::new("mock content"))
+        }
+
+        fn handle_request_permission(
+            &self,
+            _: RequestPermissionRequest,
+        ) -> agent_client_protocol::Result<RequestPermissionResponse> {
+            self.calls.borrow_mut().push("request_permission".into());
+            Ok(RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled))
+        }
+
+        fn handle_session_notification(&self, notif: SessionNotification) {
+            self.calls
+                .borrow_mut()
+                .push(format!("session_notification:{}", notif.session_id.0.as_ref()));
+        }
+
+        fn list_sessions(&self) -> Vec<String> {
+            self.sessions.clone()
+        }
+
+        fn list_terminals(&self) -> Vec<(String, String)> {
+            self.terminals.clone()
+        }
+
+        fn cleanup_idle_sessions(&self) {
+            self.calls.borrow_mut().push("cleanup_idle_sessions".into());
+        }
+
+        async fn cleanup_all_sessions(&self) {
+            self.calls.borrow_mut().push("cleanup_all_sessions".into());
+        }
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    fn reply(s: &str) -> Option<async_nats::Subject> {
+        Some(async_nats::Subject::from(s))
+    }
+
+    fn json_bytes(v: &serde_json::Value) -> Bytes {
+        Bytes::from(serde_json::to_vec(v).unwrap())
+    }
+
+    fn error_code(body: &serde_json::Value) -> i64 {
+        body["error"]["code"].as_i64().expect("error.code must be present")
+    }
+
+    // ── Invalid-JSON parse errors (code -32600) ───────────────────────────────
+
+    #[tokio::test]
+    async fn write_text_file_invalid_json_replies_32600() {
+        let broker = RecordingBroker::new();
+        let rt = Rc::new(MockRuntime::new());
+        dispatch(broker.clone(), "s1".into(), ClientMethod::FsWriteTextFile,
+            Bytes::from_static(b"not json"), reply("reply.to"), rt).await;
+        assert_eq!(error_code(&broker.first_reply_json()), -32600);
+    }
+
+    #[tokio::test]
+    async fn read_text_file_invalid_json_replies_32600() {
+        let broker = RecordingBroker::new();
+        let rt = Rc::new(MockRuntime::new());
+        dispatch(broker.clone(), "s1".into(), ClientMethod::FsReadTextFile,
+            Bytes::from_static(b"{}invalid"), reply("reply.to"), rt).await;
+        assert_eq!(error_code(&broker.first_reply_json()), -32600);
+    }
+
+    #[tokio::test]
+    async fn terminal_create_invalid_json_replies_32600() {
+        let broker = RecordingBroker::new();
+        let rt = Rc::new(MockRuntime::new());
+        dispatch(broker.clone(), "s1".into(), ClientMethod::TerminalCreate,
+            Bytes::from_static(b"bad"), reply("reply.to"), rt).await;
+        assert_eq!(error_code(&broker.first_reply_json()), -32600);
+    }
+
+    #[tokio::test]
+    async fn terminal_kill_invalid_json_replies_32600() {
+        let broker = RecordingBroker::new();
+        let rt = Rc::new(MockRuntime::new());
+        dispatch(broker.clone(), "s1".into(), ClientMethod::TerminalKill,
+            Bytes::from_static(b"bad"), reply("reply.to"), rt).await;
+        assert_eq!(error_code(&broker.first_reply_json()), -32600);
+    }
+
+    #[tokio::test]
+    async fn request_permission_invalid_json_replies_32600() {
+        let broker = RecordingBroker::new();
+        let rt = Rc::new(MockRuntime::new());
+        dispatch(broker.clone(), "s1".into(), ClientMethod::SessionRequestPermission,
+            Bytes::from_static(b"bad"), reply("reply.to"), rt).await;
+        assert_eq!(error_code(&broker.first_reply_json()), -32600);
+    }
+
+    #[tokio::test]
+    async fn write_stdin_invalid_json_replies_32600() {
+        let broker = RecordingBroker::new();
+        let rt = Rc::new(MockRuntime::new());
+        dispatch(broker.clone(), "s1".into(),
+            ClientMethod::Ext("terminal.write_stdin".into()),
+            Bytes::from_static(b"not json"), reply("reply.to"), rt).await;
+        assert_eq!(error_code(&broker.first_reply_json()), -32600);
+    }
+
+    #[tokio::test]
+    async fn close_stdin_invalid_json_replies_32600() {
+        let broker = RecordingBroker::new();
+        let rt = Rc::new(MockRuntime::new());
+        dispatch(broker.clone(), "s1".into(),
+            ClientMethod::Ext("terminal.close_stdin".into()),
+            Bytes::from_static(b"bad"), reply("reply.to"), rt).await;
+        assert_eq!(error_code(&broker.first_reply_json()), -32600);
+    }
+
+    // ── Routing and session-id forwarding ─────────────────────────────────────
+
+    #[tokio::test]
+    async fn write_text_file_forwards_session_id() {
+        let broker = RecordingBroker::new();
+        let rt = Rc::new(MockRuntime::new());
+        let payload = serde_json::to_vec(
+            &WriteTextFileRequest::new("s1", PathBuf::from("/f.txt"), "hi")
+        ).unwrap();
+        dispatch(broker, "my-session".into(), ClientMethod::FsWriteTextFile,
+            Bytes::from(payload), reply("r"), Rc::clone(&rt)).await;
+        assert!(rt.calls()[0].starts_with("write_text_file:my-session:"),
+            "session_id must come from the subject, not the request body; got {:?}", rt.calls());
+    }
+
+    #[tokio::test]
+    async fn read_text_file_forwards_session_id() {
+        let broker = RecordingBroker::new();
+        let rt = Rc::new(MockRuntime::new());
+        let payload = serde_json::to_vec(
+            &ReadTextFileRequest::new("s1", PathBuf::from("/f.txt"))
+        ).unwrap();
+        dispatch(broker, "other-session".into(), ClientMethod::FsReadTextFile,
+            Bytes::from(payload), reply("r"), Rc::clone(&rt)).await;
+        assert!(rt.calls()[0].starts_with("read_text_file:other-session:"),
+            "session_id must come from the subject; got {:?}", rt.calls());
+    }
+
+    #[tokio::test]
+    async fn terminal_create_routes_with_session_id() {
+        let broker = RecordingBroker::new();
+        let rt = Rc::new(MockRuntime::new());
+        let payload = json_bytes(&serde_json::json!({"sessionId": "s1", "command": "echo"}));
+        dispatch(broker, "sess42".into(), ClientMethod::TerminalCreate,
+            payload, reply("r"), Rc::clone(&rt)).await;
+        assert_eq!(rt.calls()[0], "create_terminal:sess42");
+    }
+
+    #[tokio::test]
+    async fn terminal_kill_routes_to_runtime() {
+        let broker = RecordingBroker::new();
+        let rt = Rc::new(MockRuntime::new());
+        let payload = json_bytes(&serde_json::json!({"sessionId": "s1", "terminalId": "tid1"}));
+        dispatch(broker, "s1".into(), ClientMethod::TerminalKill,
+            payload, reply("r"), Rc::clone(&rt)).await;
+        assert_eq!(rt.calls()[0], "kill_terminal:tid1");
+    }
+
+    #[tokio::test]
+    async fn terminal_output_routes_to_runtime() {
+        let broker = RecordingBroker::new();
+        let rt = Rc::new(MockRuntime::new());
+        let payload = json_bytes(&serde_json::json!({"sessionId": "s1", "terminalId": "tid2"}));
+        dispatch(broker, "s1".into(), ClientMethod::TerminalOutput,
+            payload, reply("r"), Rc::clone(&rt)).await;
+        assert_eq!(rt.calls()[0], "terminal_output:tid2");
+    }
+
+    #[tokio::test]
+    async fn terminal_release_routes_to_runtime() {
+        let broker = RecordingBroker::new();
+        let rt = Rc::new(MockRuntime::new());
+        let payload = json_bytes(&serde_json::json!({"sessionId": "s1", "terminalId": "tid3"}));
+        dispatch(broker, "s1".into(), ClientMethod::TerminalRelease,
+            payload, reply("r"), Rc::clone(&rt)).await;
+        assert_eq!(rt.calls()[0], "release_terminal:tid3");
+    }
+
+    #[tokio::test]
+    async fn terminal_wait_for_exit_routes_to_runtime() {
+        let broker = RecordingBroker::new();
+        let rt = Rc::new(MockRuntime::new());
+        let payload = json_bytes(&serde_json::json!({"sessionId": "s1", "terminalId": "tid4"}));
+        dispatch(broker, "s1".into(), ClientMethod::TerminalWaitForExit,
+            payload, reply("r"), Rc::clone(&rt)).await;
+        assert_eq!(rt.calls()[0], "wait_for_exit:tid4");
+    }
+
+    #[tokio::test]
+    async fn request_permission_routes_to_runtime() {
+        let broker = RecordingBroker::new();
+        let rt = Rc::new(MockRuntime::new());
+        let payload = json_bytes(&serde_json::json!({
+            "sessionId": "s1",
+            "toolCall": {"toolCallId": "tc1"},
+            "options": []
+        }));
+        dispatch(broker, "s1".into(), ClientMethod::SessionRequestPermission,
+            payload, reply("r"), Rc::clone(&rt)).await;
+        assert_eq!(rt.calls()[0], "request_permission");
+    }
+
+    #[tokio::test]
+    async fn write_stdin_routes_to_runtime() {
+        let broker = RecordingBroker::new();
+        let rt = Rc::new(MockRuntime::new());
+        let payload = json_bytes(&serde_json::json!({"terminal_id": "tid5", "data": [104, 105]}));
+        dispatch(broker, "s1".into(),
+            ClientMethod::Ext("terminal.write_stdin".into()),
+            payload, reply("r"), Rc::clone(&rt)).await;
+        assert_eq!(rt.calls()[0], "write_to_terminal:tid5");
+    }
+
+    #[tokio::test]
+    async fn close_stdin_routes_to_runtime() {
+        let broker = RecordingBroker::new();
+        let rt = Rc::new(MockRuntime::new());
+        let payload = json_bytes(&serde_json::json!({"terminal_id": "tid6"}));
+        dispatch(broker, "s1".into(),
+            ClientMethod::Ext("terminal.close_stdin".into()),
+            payload, reply("r"), Rc::clone(&rt)).await;
+        assert_eq!(rt.calls()[0], "close_stdin:tid6");
+    }
+
+    // ── Session update (fire-and-forget, no reply) ─────────────────────────────
+
+    #[tokio::test]
+    async fn session_update_calls_runtime_and_publishes_nothing() {
+        let broker = RecordingBroker::new();
+        let rt = Rc::new(MockRuntime::new());
+        let notif = SessionNotification::new(
+            "sess99",
+            SessionUpdate::AgentMessageChunk(ContentChunk::new(
+                ContentBlock::Text(agent_client_protocol::TextContent::new("hi")),
+            )),
+        );
+        let payload = Bytes::from(serde_json::to_vec(&notif).unwrap());
+        dispatch(broker.clone(), "sess99".into(), ClientMethod::SessionUpdate,
+            payload, reply("r"), Rc::clone(&rt)).await;
+        assert!(broker.published().is_empty(), "session_update must not publish a reply");
+        assert_eq!(rt.calls()[0], "session_notification:sess99");
+    }
+
+    #[tokio::test]
+    async fn session_update_invalid_json_warns_and_does_not_publish() {
+        let broker = RecordingBroker::new();
+        let rt = Rc::new(MockRuntime::new());
+        dispatch(broker.clone(), "s1".into(), ClientMethod::SessionUpdate,
+            Bytes::from_static(b"bad json"), reply("r"), rt).await;
+        assert!(broker.published().is_empty(), "invalid session_update must not reply");
+    }
+
+    // ── No reply subject → nothing published ──────────────────────────────────
+
+    #[tokio::test]
+    async fn no_reply_subject_produces_no_publish() {
+        let broker = RecordingBroker::new();
+        let rt = Rc::new(MockRuntime::new());
+        let payload = Bytes::from(serde_json::to_vec(
+            &WriteTextFileRequest::new("s1", PathBuf::from("/f.txt"), "x")
+        ).unwrap());
+        dispatch(broker.clone(), "s1".into(), ClientMethod::FsWriteTextFile,
+            payload, None, Rc::clone(&rt)).await;
+        assert!(broker.published().is_empty(), "no reply subject → no publish");
+        assert_eq!(rt.calls()[0], "write_text_file:s1:/f.txt");
+    }
+
+    // ── Extension method — unsupported Ext → -32601 ───────────────────────────
+
+    #[tokio::test]
+    async fn unknown_ext_method_replies_32601() {
+        let broker = RecordingBroker::new();
+        let rt = Rc::new(MockRuntime::new());
+        dispatch(broker.clone(), "s1".into(),
+            ClientMethod::Ext("no.such.method".into()),
+            Bytes::new(), reply("r"), rt).await;
+        assert_eq!(error_code(&broker.first_reply_json()), -32601);
+    }
+
+    #[tokio::test]
+    async fn ext_session_prompt_response_replies_32601() {
+        let broker = RecordingBroker::new();
+        let rt = Rc::new(MockRuntime::new());
+        dispatch(broker.clone(), "s1".into(), ClientMethod::ExtSessionPromptResponse,
+            Bytes::new(), reply("r"), rt).await;
+        assert_eq!(error_code(&broker.first_reply_json()), -32601);
+    }
+
+    // ── Extension methods — runtime.list_sessions / list_terminals ────────────
+
+    #[tokio::test]
+    async fn list_sessions_ext_returns_sessions_json() {
+        let broker = RecordingBroker::new();
+        let rt = Rc::new(MockRuntime::with_sessions(vec![
+            "alice".into(), "bob".into(),
+        ]));
+        dispatch(broker.clone(), "s1".into(),
+            ClientMethod::Ext("runtime.list_sessions".into()),
+            Bytes::new(), reply("reply.subj"), rt).await;
+        let body = broker.first_reply_json();
+        let sessions: Vec<String> = serde_json::from_value(body["sessions"].clone()).unwrap();
+        assert!(sessions.contains(&"alice".to_string()));
+        assert!(sessions.contains(&"bob".to_string()));
+    }
+
+    #[tokio::test]
+    async fn list_terminals_ext_returns_terminals_json() {
+        let broker = RecordingBroker::new();
+        let rt = Rc::new(MockRuntime::with_terminals(vec![
+            ("tid-a".into(), "sess-a".into()),
+        ]));
+        dispatch(broker.clone(), "s1".into(),
+            ClientMethod::Ext("runtime.list_terminals".into()),
+            Bytes::new(), reply("reply.subj"), rt).await;
+        let body = broker.first_reply_json();
+        let items = body["terminals"].as_array().unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["terminal_id"], "tid-a");
+        assert_eq!(items[0]["session_id"], "sess-a");
+    }
+
+    #[tokio::test]
+    async fn list_sessions_no_reply_subject_does_not_publish() {
+        let broker = RecordingBroker::new();
+        let rt = Rc::new(MockRuntime::with_sessions(vec!["s1".into()]));
+        dispatch(broker.clone(), "s1".into(),
+            ClientMethod::Ext("runtime.list_sessions".into()),
+            Bytes::new(), None, rt).await;
+        assert!(broker.published().is_empty());
+    }
+}

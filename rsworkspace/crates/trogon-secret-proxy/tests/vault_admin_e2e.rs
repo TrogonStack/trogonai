@@ -41,7 +41,7 @@ const PREFIX: &str = "test";
 /// Returns the vault so tests can inspect its state.
 async fn spawn_admin(nats: async_nats::Client, vault: Arc<MemoryVault>) {
     tokio::spawn(async move {
-        vault_admin::run(nats, vault, PREFIX)
+        vault_admin::run(nats, vault, PREFIX, None)
             .await
             .expect("vault admin error");
     });
@@ -535,7 +535,7 @@ async fn vault_admin_run_task_is_abortable() {
     let nats = nats_client(port).await;
     let vault = Arc::new(MemoryVault::new());
 
-    let handle = tokio::spawn(async move { vault_admin::run(nats, vault, PREFIX).await });
+    let handle = tokio::spawn(async move { vault_admin::run(nats, vault, PREFIX, None).await });
 
     // Let subscriptions settle.
     tokio::time::sleep(Duration::from_millis(50)).await;
@@ -565,7 +565,7 @@ async fn vault_admin_run_exits_when_nats_server_shuts_down() {
     let nats = nats_client(port).await;
     let vault = Arc::new(MemoryVault::new());
 
-    let run_handle = tokio::spawn(async move { vault_admin::run(nats, vault, PREFIX).await });
+    let run_handle = tokio::spawn(async move { vault_admin::run(nats, vault, PREFIX, None).await });
 
     // Let subscriptions settle.
     tokio::time::sleep(Duration::from_millis(50)).await;
@@ -620,6 +620,87 @@ async fn vault_admin_handles_concurrent_requests_without_stalling() {
         let v: serde_json::Value = serde_json::from_slice(&resp.payload).unwrap();
         assert_eq!(v["ok"], true, "concurrent request {i} must succeed");
     }
+}
+
+// ── Named vault routing ───────────────────────────────────────────────────────
+
+/// When `vault_name = Some("prod")`, the admin listens on the named subjects
+/// `{prefix}.vault.prod.store/rotate/revoke`.  Requests to the flat subjects
+/// (`{prefix}.vault.store`) are NOT handled — the subscription simply doesn't exist.
+#[tokio::test]
+async fn vault_admin_named_vault_routes_to_named_subjects() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let vault = Arc::new(MemoryVault::new());
+
+    tokio::spawn({
+        let nats = nats.clone();
+        let vault = Arc::clone(&vault);
+        async move {
+            vault_admin::run(nats, vault, PREFIX, Some("prod"))
+                .await
+                .expect("vault admin error");
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // store on named subject
+    let payload = serde_json::json!({
+        "token": "tok_anthropic_prod_named001",
+        "plaintext": "sk-named-key"
+    });
+    let resp = nats
+        .request(
+            subjects::vault_store_for(PREFIX, "prod"),
+            serde_json::to_vec(&payload).unwrap().into(),
+        )
+        .await
+        .expect("NATS request failed");
+
+    let v: serde_json::Value = serde_json::from_slice(&resp.payload).unwrap();
+    assert_eq!(v["ok"], true, "named store must succeed: {v}");
+
+    let token = tok("tok_anthropic_prod_named001");
+    assert_eq!(
+        vault.resolve(&token).await.unwrap(),
+        Some("sk-named-key".to_string()),
+        "vault must hold the value stored via named subject"
+    );
+
+    // rotate on named subject
+    let rotate_payload = serde_json::json!({
+        "token": "tok_anthropic_prod_named001",
+        "new_plaintext": "sk-named-key-v2"
+    });
+    let resp = nats
+        .request(
+            subjects::vault_rotate_for(PREFIX, "prod"),
+            serde_json::to_vec(&rotate_payload).unwrap().into(),
+        )
+        .await
+        .expect("NATS rotate request failed");
+
+    let v: serde_json::Value = serde_json::from_slice(&resp.payload).unwrap();
+    assert_eq!(v["ok"], true, "named rotate must succeed: {v}");
+    assert_eq!(
+        vault.resolve(&token).await.unwrap(),
+        Some("sk-named-key-v2".to_string()),
+        "vault must hold the rotated value"
+    );
+
+    // revoke on named subject
+    let revoke_payload = serde_json::json!({ "token": "tok_anthropic_prod_named001" });
+    let resp = nats
+        .request(
+            subjects::vault_revoke_for(PREFIX, "prod"),
+            serde_json::to_vec(&revoke_payload).unwrap().into(),
+        )
+        .await
+        .expect("NATS revoke request failed");
+
+    let v: serde_json::Value = serde_json::from_slice(&resp.payload).unwrap();
+    assert_eq!(v["ok"], true, "named revoke must succeed: {v}");
+    assert_eq!(vault.resolve(&token).await.unwrap(), None);
 }
 
 /// store + immediately rotate within the same session works end-to-end and the

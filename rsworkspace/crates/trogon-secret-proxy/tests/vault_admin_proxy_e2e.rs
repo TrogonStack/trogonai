@@ -123,7 +123,7 @@ async fn vault_admin_store_then_proxy_request_succeeds() {
     let admin_nats = nats.clone();
     let admin_vault = Arc::clone(&vault);
     tokio::spawn(async move {
-        vault_admin::run(admin_nats, admin_vault, "trogon")
+        vault_admin::run(admin_nats, admin_vault, "trogon", None)
             .await
             .expect("Vault admin error");
     });
@@ -246,7 +246,7 @@ async fn vault_admin_revoke_then_proxy_request_fails() {
     let admin_nats = nats.clone();
     let admin_vault = Arc::clone(&vault);
     tokio::spawn(async move {
-        vault_admin::run(admin_nats, admin_vault, "trogon")
+        vault_admin::run(admin_nats, admin_vault, "trogon", None)
             .await
             .ok();
     });
@@ -393,7 +393,7 @@ async fn vault_admin_rotate_then_proxy_uses_new_key() {
     let admin_nats = nats.clone();
     let admin_vault = Arc::clone(&vault);
     tokio::spawn(async move {
-        vault_admin::run(admin_nats, admin_vault, "trogon")
+        vault_admin::run(admin_nats, admin_vault, "trogon", None)
             .await
             .ok();
     });
