@@ -14,10 +14,13 @@ use trogon_source_gitlab::config::GitLabWebhookSecret;
 use trogon_source_incidentio::config::IncidentioConfig as IncidentioSourceConfig;
 use trogon_source_incidentio::incidentio_signing_secret::IncidentioSigningSecret;
 use trogon_source_linear::config::LinearWebhookSecret;
+use trogon_source_microsoft_graph::MicrosoftGraphClientState;
 use trogon_source_notion::NotionVerificationToken;
 use trogon_source_sentry::SentryClientSecret;
 use trogon_source_slack::config::SlackSigningSecret;
-use trogon_source_telegram::config::TelegramWebhookSecret;
+use trogon_source_telegram::config::{
+    TelegramBotToken, TelegramPublicWebhookUrl, TelegramWebhookRegistrationConfig, TelegramWebhookSecret,
+};
 use trogon_source_twitter::config::TwitterConsumerSecret;
 use trogon_std::{NonZeroDuration, ZeroDuration};
 
@@ -58,6 +61,54 @@ impl fmt::Display for DurationTooLong {
 impl std::error::Error for DurationTooLong {}
 
 const SENTRY_MAX_ACK_TIMEOUT_SECS: u64 = 1;
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum TelegramWebhookRegistrationMode {
+    #[default]
+    Manual,
+    Startup,
+}
+
+impl TelegramWebhookRegistrationMode {
+    fn registers_on_startup(self) -> bool {
+        matches!(self, Self::Startup)
+    }
+}
+
+impl std::str::FromStr for TelegramWebhookRegistrationMode {
+    type Err = TelegramWebhookRegistrationModeError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "manual" => Ok(Self::Manual),
+            "startup" => Ok(Self::Startup),
+            _ => Err(TelegramWebhookRegistrationModeError::new(value)),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct TelegramWebhookRegistrationModeError {
+    value: String,
+}
+
+impl TelegramWebhookRegistrationModeError {
+    fn new(value: impl Into<String>) -> Self {
+        Self { value: value.into() }
+    }
+}
+
+impl fmt::Display for TelegramWebhookRegistrationModeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "unsupported registration mode '{}' ; expected 'manual' or 'startup'",
+            self.value
+        )
+    }
+}
+
+impl std::error::Error for TelegramWebhookRegistrationModeError {}
 
 #[derive(Debug)]
 pub enum ConfigValidationError {
@@ -199,6 +250,8 @@ struct SourcesConfig {
     #[config(nested)]
     linear: LinearConfig,
     #[config(nested)]
+    microsoft_graph: MicrosoftGraphConfigInput,
+    #[config(nested)]
     notion: NotionConfig,
     #[config(nested)]
     sentry: SentryConfig,
@@ -262,6 +315,12 @@ struct TelegramConfig {
     status: Option<String>,
     #[config(env = "TROGON_SOURCE_TELEGRAM_WEBHOOK_SECRET")]
     webhook_secret: Option<String>,
+    #[config(env = "TROGON_SOURCE_TELEGRAM_WEBHOOK_REGISTRATION_MODE", default = "manual")]
+    webhook_registration_mode: String,
+    #[config(env = "TROGON_SOURCE_TELEGRAM_BOT_TOKEN")]
+    bot_token: Option<String>,
+    #[config(env = "TROGON_SOURCE_TELEGRAM_PUBLIC_WEBHOOK_URL")]
+    public_webhook_url: Option<String>,
     #[config(env = "TROGON_SOURCE_TELEGRAM_SUBJECT_PREFIX", default = "telegram")]
     subject_prefix: String,
     #[config(env = "TROGON_SOURCE_TELEGRAM_STREAM_NAME", default = "TELEGRAM")]
@@ -320,6 +379,22 @@ struct LinearConfig {
     nats_ack_timeout_secs: u64,
     #[config(env = "TROGON_SOURCE_LINEAR_TIMESTAMP_TOLERANCE_SECS", default = 60)]
     timestamp_tolerance_secs: u64,
+}
+
+#[derive(Config)]
+struct MicrosoftGraphConfigInput {
+    #[config(env = "TROGON_SOURCE_MICROSOFT_GRAPH_STATUS")]
+    status: Option<String>,
+    #[config(env = "TROGON_SOURCE_MICROSOFT_GRAPH_CLIENT_STATE")]
+    client_state: Option<String>,
+    #[config(env = "TROGON_SOURCE_MICROSOFT_GRAPH_SUBJECT_PREFIX", default = "microsoft-graph")]
+    subject_prefix: String,
+    #[config(env = "TROGON_SOURCE_MICROSOFT_GRAPH_STREAM_NAME", default = "MICROSOFT_GRAPH")]
+    stream_name: String,
+    #[config(env = "TROGON_SOURCE_MICROSOFT_GRAPH_STREAM_MAX_AGE_SECS", default = 604_800)]
+    stream_max_age_secs: u64,
+    #[config(env = "TROGON_SOURCE_MICROSOFT_GRAPH_NATS_ACK_TIMEOUT_SECS", default = 10)]
+    nats_ack_timeout_secs: u64,
 }
 
 #[derive(Config)]
@@ -388,6 +463,7 @@ pub struct ResolvedConfig {
     pub gitlab: Option<trogon_source_gitlab::GitlabConfig>,
     pub incidentio: Option<trogon_source_incidentio::IncidentioConfig>,
     pub linear: Option<trogon_source_linear::LinearConfig>,
+    pub microsoft_graph: Option<trogon_source_microsoft_graph::MicrosoftGraphConfig>,
     pub notion: Option<trogon_source_notion::NotionConfig>,
     pub sentry: Option<trogon_source_sentry::SentryConfig>,
 }
@@ -402,6 +478,7 @@ impl ResolvedConfig {
             || self.gitlab.is_some()
             || self.incidentio.is_some()
             || self.linear.is_some()
+            || self.microsoft_graph.is_some()
             || self.notion.is_some()
             || self.sentry.is_some()
     }
@@ -432,6 +509,7 @@ fn resolve(cfg: GatewayConfig, nats_overrides: &NatsArgs) -> Result<ResolvedConf
     let gitlab = resolve_gitlab(cfg.sources.gitlab, &mut errors);
     let incidentio = resolve_incidentio(cfg.sources.incidentio, &mut errors);
     let linear = resolve_linear(cfg.sources.linear, &mut errors);
+    let microsoft_graph = resolve_microsoft_graph(cfg.sources.microsoft_graph, &mut errors);
     let notion = resolve_notion(cfg.sources.notion, &mut errors);
     let sentry = resolve_sentry(cfg.sources.sentry, &mut errors);
 
@@ -465,6 +543,7 @@ fn resolve(cfg: GatewayConfig, nats_overrides: &NatsArgs) -> Result<ResolvedConf
         gitlab,
         incidentio,
         linear,
+        microsoft_graph,
         notion,
         sentry,
     })
@@ -699,6 +778,17 @@ fn resolve_telegram(
         }
     };
 
+    let registration = match resolve_telegram_registration(
+        section.webhook_registration_mode.as_str(),
+        section.bot_token,
+        section.public_webhook_url,
+        errors,
+    ) {
+        Some(Ok(registration)) => Some(registration),
+        Some(Err(())) => return None,
+        None => None,
+    };
+
     let subject_prefix = match NatsToken::new(section.subject_prefix) {
         Ok(t) => t,
         Err(e) => {
@@ -741,11 +831,75 @@ fn resolve_telegram(
 
     Some(trogon_source_telegram::TelegramSourceConfig {
         webhook_secret,
+        registration,
         subject_prefix,
         stream_name,
         stream_max_age,
         nats_ack_timeout,
     })
+}
+
+fn resolve_telegram_registration(
+    webhook_registration_mode: &str,
+    bot_token: Option<String>,
+    public_webhook_url: Option<String>,
+    errors: &mut Vec<ConfigValidationError>,
+) -> Option<Result<TelegramWebhookRegistrationConfig, ()>> {
+    let mode = match webhook_registration_mode.parse::<TelegramWebhookRegistrationMode>() {
+        Ok(mode) => mode,
+        Err(error) => {
+            errors.push(ConfigValidationError::invalid(
+                "telegram",
+                "webhook_registration_mode",
+                error,
+            ));
+            return Some(Err(()));
+        }
+    };
+
+    if !mode.registers_on_startup() {
+        return None;
+    }
+
+    let public_webhook_url = public_webhook_url.filter(|value| !value.is_empty());
+
+    match (bot_token, public_webhook_url) {
+        (None, None) => {
+            errors.push(ConfigValidationError::missing("telegram", "bot_token"));
+            errors.push(ConfigValidationError::missing("telegram", "public_webhook_url"));
+            Some(Err(()))
+        }
+        (Some(_), None) => {
+            errors.push(ConfigValidationError::missing("telegram", "public_webhook_url"));
+            Some(Err(()))
+        }
+        (None, Some(_)) => {
+            errors.push(ConfigValidationError::missing("telegram", "bot_token"));
+            Some(Err(()))
+        }
+        (Some(bot_token), Some(public_webhook_url)) => {
+            let bot_token = match TelegramBotToken::new(bot_token) {
+                Ok(value) => value,
+                Err(error) => {
+                    errors.push(ConfigValidationError::invalid("telegram", "bot_token", error));
+                    return Some(Err(()));
+                }
+            };
+
+            let public_webhook_url = match TelegramPublicWebhookUrl::new(public_webhook_url) {
+                Ok(value) => value,
+                Err(error) => {
+                    errors.push(ConfigValidationError::invalid("telegram", "public_webhook_url", error));
+                    return Some(Err(()));
+                }
+            };
+
+            Some(Ok(TelegramWebhookRegistrationConfig {
+                bot_token,
+                public_webhook_url,
+            }))
+        }
+    }
 }
 
 fn resolve_twitter(
@@ -939,6 +1093,92 @@ fn resolve_linear(
         stream_name,
         stream_max_age,
         timestamp_tolerance: NonZeroDuration::from_secs(section.timestamp_tolerance_secs).ok(),
+        nats_ack_timeout,
+    })
+}
+
+fn resolve_microsoft_graph(
+    section: MicrosoftGraphConfigInput,
+    errors: &mut Vec<ConfigValidationError>,
+) -> Option<trogon_source_microsoft_graph::MicrosoftGraphConfig> {
+    let explicitly_enabled = matches!(
+        section.status.as_deref(),
+        Some(status) if status.trim().eq_ignore_ascii_case("enabled")
+    );
+
+    if !resolve_source_status("microsoft_graph", section.status.as_deref(), errors) {
+        return None;
+    }
+
+    let client_state = match section.client_state {
+        Some(client_state) => match MicrosoftGraphClientState::new(client_state) {
+            Ok(client_state) => client_state,
+            Err(error) => {
+                errors.push(ConfigValidationError::invalid("microsoft_graph", "client_state", error));
+                return None;
+            }
+        },
+        None => {
+            if explicitly_enabled {
+                errors.push(ConfigValidationError::missing("microsoft_graph", "client_state"));
+            }
+            return None;
+        }
+    };
+
+    let subject_prefix = match NatsToken::new(section.subject_prefix) {
+        Ok(token) => token,
+        Err(error) => {
+            errors.push(ConfigValidationError::invalid_subject_token(
+                "microsoft_graph",
+                "subject_prefix",
+                error,
+            ));
+            return None;
+        }
+    };
+
+    let stream_name = match NatsToken::new(section.stream_name) {
+        Ok(token) => token,
+        Err(error) => {
+            errors.push(ConfigValidationError::invalid_subject_token(
+                "microsoft_graph",
+                "stream_name",
+                error,
+            ));
+            return None;
+        }
+    };
+
+    let nats_ack_timeout = match NonZeroDuration::from_secs(section.nats_ack_timeout_secs) {
+        Ok(duration) => duration,
+        Err(error) => {
+            errors.push(ConfigValidationError::invalid(
+                "microsoft_graph",
+                "nats_ack_timeout_secs",
+                error,
+            ));
+            return None;
+        }
+    };
+
+    let stream_max_age = match StreamMaxAge::from_secs(section.stream_max_age_secs) {
+        Ok(age) => age,
+        Err(error) => {
+            errors.push(ConfigValidationError::invalid(
+                "microsoft_graph",
+                "stream_max_age_secs",
+                error,
+            ));
+            return None;
+        }
+    };
+
+    Some(trogon_source_microsoft_graph::MicrosoftGraphConfig {
+        client_state,
+        subject_prefix,
+        stream_name,
+        stream_max_age,
         nats_ack_timeout,
     })
 }
@@ -1283,6 +1523,15 @@ webhook_secret = "{secret}"
         )
     }
 
+    fn microsoft_graph_toml(client_state: &str) -> String {
+        format!(
+            r#"
+[sources.microsoft_graph]
+client_state = "{client_state}"
+"#
+        )
+    }
+
     fn incidentio_toml(secret: &str) -> String {
         format!(
             r#"
@@ -1485,6 +1734,139 @@ signing_secret = "slack-secret"
     }
 
     #[test]
+    fn telegram_resolves_auto_registration_config() {
+        let toml = r#"
+[sources.telegram]
+webhook_secret = "telegram-webhook-secret"
+webhook_registration_mode = "startup"
+bot_token = "123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+public_webhook_url = "https://example.com/telegram/webhook"
+"#;
+        let f = write_toml(toml);
+        let cfg = load(Some(f.path())).expect("load failed");
+        let telegram = cfg.telegram.as_ref().expect("telegram should be Some");
+        let registration = telegram.registration.as_ref().expect("registration should be Some");
+
+        assert_eq!(registration.bot_token.as_str(), "123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+        assert_eq!(
+            registration.public_webhook_url.as_str(),
+            "https://example.com/telegram/webhook"
+        );
+    }
+
+    #[test]
+    fn telegram_startup_registration_without_public_webhook_url_is_invalid() {
+        let toml = r#"
+[sources.telegram]
+webhook_secret = "telegram-webhook-secret"
+webhook_registration_mode = "startup"
+bot_token = "123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+"#;
+        let f = write_toml(toml);
+        let result = load(Some(f.path()));
+
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("telegram: missing public_webhook_url")))
+        );
+    }
+
+    #[test]
+    fn telegram_startup_registration_without_credentials_is_invalid() {
+        let toml = r#"
+[sources.telegram]
+webhook_secret = "telegram-webhook-secret"
+webhook_registration_mode = "startup"
+"#;
+        let f = write_toml(toml);
+        let result = load(Some(f.path()));
+
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("telegram: missing bot_token")) && errs.iter().any(|e| e.contains("telegram: missing public_webhook_url")))
+        );
+    }
+
+    #[test]
+    fn telegram_startup_registration_with_empty_bot_token_is_invalid() {
+        let toml = r#"
+[sources.telegram]
+webhook_secret = "telegram-webhook-secret"
+webhook_registration_mode = "startup"
+bot_token = ""
+public_webhook_url = "https://example.com/telegram/webhook"
+"#;
+        let f = write_toml(toml);
+        let result = load(Some(f.path()));
+
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("telegram: invalid bot_token")))
+        );
+    }
+
+    #[test]
+    fn telegram_startup_registration_without_bot_token_is_invalid() {
+        let toml = r#"
+[sources.telegram]
+webhook_secret = "telegram-webhook-secret"
+webhook_registration_mode = "startup"
+public_webhook_url = "https://example.com/telegram/webhook"
+"#;
+        let f = write_toml(toml);
+        let result = load(Some(f.path()));
+
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("telegram: missing bot_token")))
+        );
+    }
+
+    #[test]
+    fn telegram_http_public_webhook_url_is_invalid() {
+        let toml = r#"
+[sources.telegram]
+webhook_secret = "telegram-webhook-secret"
+webhook_registration_mode = "startup"
+bot_token = "123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+public_webhook_url = "http://example.com/telegram/webhook"
+"#;
+        let f = write_toml(toml);
+        let result = load(Some(f.path()));
+
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("telegram: invalid public_webhook_url")))
+        );
+    }
+
+    #[test]
+    fn telegram_registration_values_in_manual_mode_are_ignored() {
+        let toml = r#"
+[sources.telegram]
+webhook_secret = "telegram-webhook-secret"
+webhook_registration_mode = "manual"
+bot_token = "123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+public_webhook_url = "https://example.com/telegram/webhook"
+"#;
+        let f = write_toml(toml);
+        let cfg = load(Some(f.path())).expect("load failed");
+        let telegram = cfg.telegram.as_ref().expect("telegram should be Some");
+
+        assert!(telegram.registration.is_none());
+    }
+
+    #[test]
+    fn telegram_invalid_webhook_registration_mode_is_invalid() {
+        let toml = r#"
+[sources.telegram]
+webhook_secret = "telegram-webhook-secret"
+webhook_registration_mode = "sometimes"
+"#;
+        let f = write_toml(toml);
+        let result = load(Some(f.path()));
+
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("telegram: invalid webhook_registration_mode")))
+        );
+    }
+
+    #[test]
     fn telegram_disabled_returns_none() {
         let toml = r#"
 [sources.telegram]
@@ -1564,6 +1946,48 @@ webhook_secret = "linear-webhook-secret"
         let f = write_toml(toml);
         let cfg = load(Some(f.path())).expect("load failed");
         assert!(cfg.linear.is_none());
+    }
+
+    #[test]
+    fn microsoft_graph_resolves_with_valid_client_state() {
+        let f = write_toml(&microsoft_graph_toml("microsoft-graph-client-state"));
+        let cfg = load(Some(f.path())).expect("load failed");
+        assert!(cfg.microsoft_graph.is_some());
+    }
+
+    #[test]
+    fn microsoft_graph_disabled_returns_none() {
+        let toml = r#"
+[sources.microsoft_graph]
+status = "disabled"
+client_state = "microsoft-graph-client-state"
+"#;
+        let f = write_toml(toml);
+        let cfg = load(Some(f.path())).expect("load failed");
+        assert!(cfg.microsoft_graph.is_none());
+    }
+
+    #[test]
+    fn microsoft_graph_missing_client_state_returns_none_when_status_unspecified() {
+        let toml = r#"
+[sources.microsoft_graph]
+"#;
+        let f = write_toml(toml);
+        let cfg = load(Some(f.path())).expect("load failed");
+        assert!(cfg.microsoft_graph.is_none());
+    }
+
+    #[test]
+    fn microsoft_graph_enabled_without_client_state_is_invalid() {
+        let toml = r#"
+[sources.microsoft_graph]
+status = "enabled"
+"#;
+        let f = write_toml(toml);
+        let result = load(Some(f.path()));
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("microsoft_graph: missing client_state")))
+        );
     }
 
     #[test]
@@ -1836,6 +2260,34 @@ stream_max_age_secs = 0
         let result = load(Some(f.path()));
         assert!(
             matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("stream_max_age_secs must not be zero")))
+        );
+    }
+
+    #[test]
+    fn microsoft_graph_zero_nats_ack_timeout_is_error() {
+        let toml = r#"
+[sources.microsoft_graph]
+client_state = "microsoft-graph-client-state"
+nats_ack_timeout_secs = 0
+"#;
+        let f = write_toml(toml);
+        let result = load(Some(f.path()));
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("microsoft_graph: nats_ack_timeout_secs must not be zero")))
+        );
+    }
+
+    #[test]
+    fn microsoft_graph_zero_stream_max_age_is_error() {
+        let toml = r#"
+[sources.microsoft_graph]
+client_state = "microsoft-graph-client-state"
+stream_max_age_secs = 0
+"#;
+        let f = write_toml(toml);
+        let result = load(Some(f.path()));
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("microsoft_graph: stream_max_age_secs must not be zero")))
         );
     }
 
@@ -2202,6 +2654,15 @@ port = 9090
     }
 
     #[test]
+    fn microsoft_graph_empty_client_state_is_invalid() {
+        let f = write_toml(&microsoft_graph_toml(""));
+        let result = load(Some(f.path()));
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("microsoft_graph: invalid client_state")))
+        );
+    }
+
+    #[test]
     fn incidentio_empty_secret_is_invalid() {
         let f = write_toml(&incidentio_toml(""));
         let result = load(Some(f.path()));
@@ -2331,6 +2792,20 @@ subject_prefix = "has.dots"
     }
 
     #[test]
+    fn microsoft_graph_invalid_subject_prefix() {
+        let toml = r#"
+[sources.microsoft_graph]
+client_state = "microsoft-graph-client-state"
+subject_prefix = "has.dots"
+"#;
+        let f = write_toml(toml);
+        let result = load(Some(f.path()));
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("microsoft_graph: invalid subject_prefix")))
+        );
+    }
+
+    #[test]
     fn incidentio_invalid_subject_prefix() {
         let toml = format!(
             r#"
@@ -2442,6 +2917,20 @@ stream_name = "has.dots"
         let result = load(Some(f.path()));
         assert!(
             matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("stream_name")))
+        );
+    }
+
+    #[test]
+    fn microsoft_graph_invalid_stream_name() {
+        let toml = r#"
+[sources.microsoft_graph]
+client_state = "microsoft-graph-client-state"
+stream_name = "has.dots"
+"#;
+        let f = write_toml(toml);
+        let result = load(Some(f.path()));
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("microsoft_graph: invalid stream_name")))
         );
     }
 
