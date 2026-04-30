@@ -32,8 +32,10 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 tower = { version = "0.5", features = ["util"] }
 tokio-tungstenite = { workspace = true }
 acp-nats-agent    = { path = "../acp-nats-agent" }
-trogon-acp-runner = { path = "../trogon-acp-runner" }
-trogon-agent-core = { path = "../trogon-agent-core" }
+trogon-acp-runner   = { path = "../trogon-acp-runner" }
+trogon-agent-core   = { path = "../trogon-agent-core" }
+trogon-xai-runner   = { path = "../trogon-xai-runner", features = ["test-helpers"] }
+trogon-codex-runner = { path = "../trogon-codex-runner" }
 trogon-nats = { workspace = true, features = ["test-support"] }
 tracing-subscriber = { workspace = true, features = ["fmt"] }
 trogon-std = { workspace = true, features = ["test-support"] }

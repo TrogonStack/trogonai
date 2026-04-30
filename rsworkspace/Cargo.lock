@@ -71,8 +71,10 @@ dependencies = [
  "tracing-subscriber",
  "trogon-acp-runner",
  "trogon-agent-core",
+ "trogon-codex-runner",
  "trogon-nats",
  "trogon-std",
+ "trogon-xai-runner",
  "uuid",
 ]
 
@@ -126,8 +128,10 @@ dependencies = [
  "tracing-subscriber",
  "trogon-acp-runner",
  "trogon-agent-core",
+ "trogon-codex-runner",
  "trogon-nats",
  "trogon-std",
+ "trogon-xai-runner",
 ]
 
 [[package]]
@@ -5007,6 +5011,7 @@ dependencies = [
  "async-trait",
  "serde",
  "serde_json",
+ "testcontainers-modules",
  "tokio",
  "tracing",
  "tracing-subscriber",

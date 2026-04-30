@@ -18,6 +18,7 @@
 #   trogon-console     — Console management API (port 8091)
 #   trogon-router      — Event router / LLM dispatch (NATS only)
 #   trogon-pr-actor    — PR automation actor (NATS only)
+#   trogon-gateway     — Unified event gateway for all sources (port 8087)
 #
 # Build examples:
 #   docker build --target agent  -t trogon-agent  .
@@ -56,7 +57,8 @@ RUN cargo build --release \
     -p trogon-wasm-runtime \
     -p trogon-console \
     -p trogon-router \
-    -p trogon-pr-actor
+    -p trogon-pr-actor \
+    -p trogon-gateway
 
 # ── Stage 4: proxy runtime ───────────────────────────────────────────────────
 FROM debian:bookworm-slim AS proxy
@@ -75,7 +77,7 @@ ENTRYPOINT ["worker"]
 
 # ── Stage 6: agent runtime ───────────────────────────────────────────────────
 FROM debian:bookworm-slim AS agent
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /workspace/target/release/agent /usr/local/bin/agent
 EXPOSE 8090
@@ -195,3 +197,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /workspace/target/release/trogon-pr-actor /usr/local/bin/trogon-pr-actor
 ENTRYPOINT ["trogon-pr-actor"]
+
+# ── Stage 21: trogon-gateway runtime ─────────────────────────────────────────
+FROM debian:bookworm-slim AS trogon-gateway
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /workspace/target/release/trogon-gateway /usr/local/bin/trogon-gateway
+EXPOSE 8087
+HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
+    CMD ["sh", "-c", "curl -sf http://localhost:${TROGON_GATEWAY_PORT:-8087}/-/liveness || exit 1"]
+ENTRYPOINT ["trogon-gateway", "serve"]

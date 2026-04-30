@@ -10,6 +10,10 @@ test-helpers = []
 name = "xai_integration"
 required-features = ["test-helpers"]
 
+[[test]]
+name = "nats_e2e"
+required-features = ["test-helpers"]
+
 [lints]
 workspace = true
 

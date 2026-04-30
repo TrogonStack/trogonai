@@ -88,6 +88,19 @@ pub fn init_logger<E: ReadEnv, F: CreateDirAll + OpenAppendFile>(
             .json()
     });
 
+    if !otel_endpoint_configured(env) {
+        tracing_subscriber::registry()
+            .with(env_filter)
+            .with(stderr_layer)
+            .with(file_layer)
+            .init();
+        tracing::info!("OpenTelemetry disabled (OTEL_EXPORTER_OTLP_ENDPOINT not set)");
+        if let Some(msg) = file_layer_info {
+            tracing::info!("{}", msg);
+        }
+        return;
+    }
+
     match try_init_otel(service_name, acp_prefix) {
         Ok((tracer_provider, meter_provider, logger_provider)) => {
             opentelemetry::global::set_text_map_propagator(TraceContextPropagator::new());
@@ -138,6 +151,10 @@ pub fn init_logger<E: ReadEnv, F: CreateDirAll + OpenAppendFile>(
             }
         }
     }
+}
+
+fn otel_endpoint_configured(env: &impl ReadEnv) -> bool {
+    env.var("OTEL_EXPORTER_OTLP_ENDPOINT").is_ok()
 }
 
 #[cfg_attr(coverage, coverage(off))]
@@ -268,6 +285,19 @@ mod tests {
         assert!(writer.is_none());
         let msg = info.unwrap();
         assert!(msg.contains("Failed to create log file"), "got: {msg}");
+    }
+
+    #[test]
+    fn otel_disabled_when_endpoint_not_set() {
+        let env = InMemoryEnv::new();
+        assert!(!otel_endpoint_configured(&env));
+    }
+
+    #[test]
+    fn otel_enabled_when_endpoint_set() {
+        let env = InMemoryEnv::new();
+        env.set("OTEL_EXPORTER_OTLP_ENDPOINT", "http://collector:4318");
+        assert!(otel_endpoint_configured(&env));
     }
 
     #[test]
