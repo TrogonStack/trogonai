@@ -23,6 +23,9 @@
 //! | Variable | Default | Description |
 //! |---|---|---|
 //! | `TELEGRAM_WEBHOOK_SECRET` | **required** | Secret token configured via `setWebhook` |
+//! | `TELEGRAM_WEBHOOK_REGISTRATION_MODE` | `manual` | Use `startup` to register the webhook on startup |
+//! | `TELEGRAM_BOT_TOKEN` | — | Bot token used to register the webhook on startup |
+//! | `TELEGRAM_PUBLIC_WEBHOOK_URL` | — | Public HTTPS URL registered with Telegram |
 //! | `TELEGRAM_SOURCE_PORT` | `8080` | HTTP listening port |
 //! | `TELEGRAM_SUBJECT_PREFIX` | `telegram` | NATS subject prefix |
 //! | `TELEGRAM_STREAM_NAME` | `TELEGRAM` | JetStream stream name |
@@ -33,9 +36,11 @@
 
 pub mod config;
 pub mod constants;
+pub mod registration;
 pub mod server;
 pub mod signature;
 
 pub use config::TelegramSourceConfig;
+pub use registration::{RegistrationError, register_webhook, registration_http_client};
 pub use server::{provision, router};
 pub use signature::SignatureError;
