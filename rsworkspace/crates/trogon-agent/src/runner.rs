@@ -113,7 +113,7 @@ impl From<trogon_nats::ConnectError> for RunnerError {
 
 pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
     let nats = trogon_nats::connect(&cfg.nats, NATS_CONNECT_TIMEOUT).await?;
-    let js = jetstream::new(nats);
+    let js = jetstream::new(nats.clone());
 
     let http_client = reqwest::Client::new();
 
@@ -278,6 +278,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
             agent_id: cfg.agent_id.clone(),
             agent_loader: agent_loader.clone(),
             skill_loader: skill_loader.clone(),
+            compactor_nats: Some(nats.clone()),
         };
         let api_port = cfg.api_port;
         tokio::spawn(async move {

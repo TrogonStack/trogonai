@@ -145,7 +145,7 @@ async fn router_routes_to_actor_and_both_write_transcript() {
     });
     let router = Router::new(llm, registry_for_router, publisher, nats.clone(), js_client);
     let router_handle = tokio::spawn(async move {
-        router.run("trogon.events.>").await.ok();
+        router.run(&["trogon.events.>"]).await.ok();
     });
 
     // ── Let both services subscribe before publishing ─────────────────────────
@@ -259,7 +259,7 @@ async fn actor_state_is_persisted_after_routing() {
     });
     let router = Router::new(llm, registry_for_router, publisher, nats.clone(), js_client);
     let router_handle = tokio::spawn(async move {
-        router.run("trogon.events.>").await.ok();
+        router.run(&["trogon.events.>"]).await.ok();
     });
 
     tokio::time::sleep(Duration::from_millis(200)).await;
