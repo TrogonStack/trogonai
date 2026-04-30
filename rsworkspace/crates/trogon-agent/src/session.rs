@@ -56,6 +56,12 @@ pub struct ChatSession {
     /// ID of the agent definition from the console (populated when `AGENT_ID` is set).
     #[serde(default)]
     pub agent_id: Option<String>,
+    /// Cumulative input tokens consumed across all turns in this session.
+    #[serde(default)]
+    pub total_input_tokens: u64,
+    /// Cumulative output tokens produced across all turns in this session.
+    #[serde(default)]
+    pub total_output_tokens: u64,
 }
 
 /// An error from the session store.
@@ -329,6 +335,8 @@ pub mod mock {
                 started_at_secs: 0,
                 duration_ms: 0,
                 agent_id: None,
+                total_input_tokens: 0,
+                total_output_tokens: 0,
             }
         }
     }
@@ -450,6 +458,8 @@ mod tests {
             started_at_secs: 0,
             duration_ms: 0,
             agent_id: None,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
         }
     }
 

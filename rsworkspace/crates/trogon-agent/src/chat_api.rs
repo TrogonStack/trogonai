@@ -199,6 +199,8 @@ struct SessionSummary {
     message_count: usize,
     created_at: String,
     updated_at: String,
+    total_input_tokens: u64,
+    total_output_tokens: u64,
 }
 
 impl From<&ChatSession> for SessionSummary {
@@ -213,6 +215,8 @@ impl From<&ChatSession> for SessionSummary {
             message_count: s.messages.len(),
             created_at: s.created_at.clone(),
             updated_at: s.updated_at.clone(),
+            total_input_tokens: s.total_input_tokens,
+            total_output_tokens: s.total_output_tokens,
         }
     }
 }
@@ -253,6 +257,10 @@ pub struct SendMessageResponse {
     pub content: String,
     /// Total messages in the session after this turn.
     pub message_count: usize,
+    /// Input tokens consumed in this turn.
+    pub input_tokens: u64,
+    /// Output tokens produced in this turn.
+    pub output_tokens: u64,
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
@@ -298,6 +306,8 @@ async fn create_session<R: SessionRepository>(
         started_at_secs: now_secs,
         duration_ms: 0,
         agent_id: state.agent_id.clone(),
+        total_input_tokens: 0,
+        total_output_tokens: 0,
     };
     match state.session_store.put(&session).await {
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e),
@@ -480,12 +490,21 @@ async fn send_message<R: SessionRepository>(
     }
 
     // Run the chat loop — returns (final_text, updated_messages).
+    let prev_message_count = session.messages.len();
     match agent
         .run_chat(session.messages.clone(), &tools, system_prompt.as_deref())
         .await
     {
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
         Ok((text, updated_messages)) => {
+            let (turn_input, turn_output) = updated_messages[prev_message_count..]
+                .iter()
+                .filter_map(|m| m.usage.as_ref())
+                .fold((0u64, 0u64), |(i, o), u| {
+                    (i + u.input_tokens as u64, o + u.output_tokens as u64)
+                });
+            session.total_input_tokens  += turn_input;
+            session.total_output_tokens += turn_output;
             let message_count = updated_messages.len();
             session.messages = updated_messages;
             let now_secs = now_epoch_secs();
@@ -508,6 +527,8 @@ async fn send_message<R: SessionRepository>(
                 axum::Json(SendMessageResponse {
                     content: text,
                     message_count,
+                    input_tokens:  turn_input,
+                    output_tokens: turn_output,
                 }),
             )
                 .into_response()
@@ -634,6 +655,8 @@ mod tests {
             started_at_secs: 0,
             duration_ms: 0,
             agent_id: None,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
         };
         let summary = SessionSummary::from(&s);
         assert_eq!(summary.message_count, 2);
@@ -810,6 +833,36 @@ mod tests {
         );
     }
 
+    /// Sessions stored before token tracking was added have no
+    /// `total_input_tokens` / `total_output_tokens` fields.  They must
+    /// deserialize successfully with both fields defaulting to 0.
+    #[test]
+    fn chat_session_without_token_fields_deserializes_to_zero() {
+        use crate::session::ChatSession;
+
+        let json = r#"{
+            "id": "sess-old",
+            "tenant_id": "acme",
+            "name": "legacy-session",
+            "tools": [],
+            "messages": [],
+            "created_at": "2025-01-01T00:00:00Z",
+            "updated_at": "2025-01-01T00:00:00Z"
+        }"#;
+
+        let session: ChatSession = serde_json::from_str(json)
+            .expect("ChatSession must deserialize even when token fields are absent");
+
+        assert_eq!(
+            session.total_input_tokens, 0,
+            "total_input_tokens must default to 0 for legacy records"
+        );
+        assert_eq!(
+            session.total_output_tokens, 0,
+            "total_output_tokens must default to 0 for legacy records"
+        );
+    }
+
     // ── Handler tests ─────────────────────────────────────────────────────────
 
     fn make_test_agent() -> Arc<AgentLoop> {
@@ -839,6 +892,42 @@ mod tests {
             promise_store: None,
             promise_id: None,
         })
+    }
+
+    fn make_mock_agent(responses: Vec<serde_json::Value>) -> Arc<AgentLoop> {
+        use crate::agent_loop::mock::SequencedMockAnthropicClient;
+        use crate::flag_client::AlwaysOnFlagClient;
+        use crate::tools::{DefaultToolDispatcher, ToolContext};
+
+        let tool_ctx = Arc::new(ToolContext::for_test("http://127.0.0.1:1", "", "", ""));
+        Arc::new(AgentLoop {
+            anthropic_client: Arc::new(SequencedMockAnthropicClient::new(responses)),
+            model: "test".to_string(),
+            max_iterations: 1,
+            tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),
+            tool_context: tool_ctx,
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            flag_client: Arc::new(AlwaysOnFlagClient),
+            tenant_id: "test-tenant".to_string(),
+            promise_store: None,
+            promise_id: None,
+        })
+    }
+
+    fn mock_app_with_agent(store: MockSessionStore, agent: Arc<AgentLoop>) -> axum::Router {
+        let state = ChatAppState {
+            agent,
+            session_store: store,
+            promise_store: Arc::new(crate::promise_store::mock::MockPromiseStore::new()),
+            agent_id: None,
+            agent_loader: None,
+            skill_loader: None,
+        };
+        router(state)
     }
 
     fn get_ok_put_error_app() -> axum::Router {
@@ -903,6 +992,8 @@ mod tests {
             started_at_secs: 0,
             duration_ms: 0,
             agent_id: None,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
         }
     }
 
@@ -1005,6 +1096,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn create_session_response_includes_zero_token_totals() {
+        let app = mock_app(MockSessionStore::new());
+        let req = Request::builder()
+            .method("POST")
+            .uri("/sessions")
+            .header("x-tenant-id", "acme")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"name":"S"}"#))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["total_input_tokens"], 0);
+        assert_eq!(json["total_output_tokens"], 0);
+    }
+
+    #[tokio::test]
     async fn get_session_missing_tenant_returns_400() {
         let app = mock_app(MockSessionStore::new());
         let req = Request::builder()
@@ -1046,6 +1157,27 @@ mod tests {
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["id"], "sess-1");
         assert_eq!(json["messages"].as_array().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn get_session_response_includes_token_totals() {
+        let store = MockSessionStore::new();
+        let mut s = sample_session("sess-tok", "acme");
+        s.total_input_tokens = 99;
+        s.total_output_tokens = 33;
+        store.insert(s);
+        let app = mock_app(store);
+        let resp = app
+            .oneshot(get_req("/sessions/sess-tok", "acme"))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["total_input_tokens"], 99);
+        assert_eq!(json["total_output_tokens"], 33);
     }
 
     #[tokio::test]
@@ -1167,6 +1299,31 @@ mod tests {
         assert_eq!(s.name, "Multi");
         assert_eq!(s.model.as_deref(), Some("claude-haiku-4-5"));
         assert_eq!(s.tools, vec!["get_pr_diff"]);
+    }
+
+    #[tokio::test]
+    async fn update_session_preserves_token_totals_in_response() {
+        let store = MockSessionStore::new();
+        let mut s = sample_session("sess-tok-upd", "acme");
+        s.total_input_tokens = 55;
+        s.total_output_tokens = 22;
+        store.insert(s);
+        let app = mock_app(store);
+        let req = Request::builder()
+            .method("PATCH")
+            .uri("/sessions/sess-tok-upd")
+            .header("x-tenant-id", "acme")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"name":"Renamed"}"#))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["total_input_tokens"], 55, "update_session must not reset token totals");
+        assert_eq!(json["total_output_tokens"], 22, "update_session must not reset token totals");
     }
 
     #[tokio::test]
@@ -1497,5 +1654,126 @@ mod tests {
             .unwrap();
         let resp = error_app().oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    // ── Token tracking ────────────────────────────────────────────────────────
+
+    fn llm_response(text: &str, input_tokens: u32, output_tokens: u32) -> serde_json::Value {
+        serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": text}],
+            "usage": {"input_tokens": input_tokens, "output_tokens": output_tokens}
+        })
+    }
+
+    fn send_msg_req(session_id: &str, content: &str) -> Request<Body> {
+        Request::builder()
+            .method("POST")
+            .uri(format!("/sessions/{session_id}/messages"))
+            .header("x-tenant-id", "acme")
+            .header("content-type", "application/json")
+            .body(Body::from(format!(r#"{{"content":"{content}"}}"#)))
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn send_message_returns_token_counts_from_llm_response() {
+        let store = MockSessionStore::new();
+        store.insert(sample_session("sess-1", "acme"));
+
+        let app = mock_app_with_agent(store, make_mock_agent(vec![llm_response("hi", 10, 5)]));
+        let resp = app.oneshot(send_msg_req("sess-1", "hello")).await.unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["input_tokens"], 10, "input_tokens must match usage field");
+        assert_eq!(json["output_tokens"], 5, "output_tokens must match usage field");
+    }
+
+    #[tokio::test]
+    async fn send_message_accumulates_tokens_across_turns() {
+        let store = MockSessionStore::new();
+        store.insert(sample_session("sess-2", "acme"));
+
+        let agent = make_mock_agent(vec![
+            llm_response("turn 1", 10, 5),
+            llm_response("turn 2", 20, 8),
+        ]);
+        let app = mock_app_with_agent(store.clone(), agent);
+
+        let resp1 = app.clone().oneshot(send_msg_req("sess-2", "first")).await.unwrap();
+        assert_eq!(resp1.status(), StatusCode::OK);
+
+        let resp2 = app.oneshot(send_msg_req("sess-2", "second")).await.unwrap();
+        assert_eq!(resp2.status(), StatusCode::OK);
+        let body2 = axum::body::to_bytes(resp2.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json2: serde_json::Value = serde_json::from_slice(&body2).unwrap();
+        assert_eq!(json2["input_tokens"], 20);
+        assert_eq!(json2["output_tokens"], 8);
+
+        let session = store
+            .snapshot()
+            .remove("acme.sess-2")
+            .expect("session must be persisted");
+        assert_eq!(
+            session.total_input_tokens, 30,
+            "total_input_tokens must accumulate across turns (10 + 20)"
+        );
+        assert_eq!(
+            session.total_output_tokens, 13,
+            "total_output_tokens must accumulate across turns (5 + 8)"
+        );
+    }
+
+    #[tokio::test]
+    async fn send_message_returns_zero_tokens_when_llm_omits_usage() {
+        let store = MockSessionStore::new();
+        store.insert(sample_session("sess-3", "acme"));
+
+        let no_usage_response = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "no usage here"}]
+        });
+        let app = mock_app_with_agent(store.clone(), make_mock_agent(vec![no_usage_response]));
+        let resp = app.oneshot(send_msg_req("sess-3", "hello")).await.unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["input_tokens"], 0, "input_tokens must be 0 when usage is absent");
+        assert_eq!(json["output_tokens"], 0, "output_tokens must be 0 when usage is absent");
+
+        let session = store.snapshot().remove("acme.sess-3").unwrap();
+        assert_eq!(session.total_input_tokens, 0);
+        assert_eq!(session.total_output_tokens, 0);
+    }
+
+    #[tokio::test]
+    async fn session_summary_exposes_token_totals() {
+        let mut session = sample_session("sess-4", "acme");
+        session.total_input_tokens = 42;
+        session.total_output_tokens = 17;
+
+        let store = MockSessionStore::new();
+        store.insert(session);
+
+        let app = mock_app(store);
+        let resp = app.oneshot(get_req("/sessions", "acme")).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let summary = &json.as_array().unwrap()[0];
+        assert_eq!(summary["total_input_tokens"], 42);
+        assert_eq!(summary["total_output_tokens"], 17);
     }
 }
