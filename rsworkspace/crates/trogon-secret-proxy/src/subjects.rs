@@ -14,19 +14,34 @@ pub fn reply(prefix: &str, id: &str) -> String {
     format!("{}.proxy.reply.{}", prefix, id)
 }
 
-/// Core NATS subject for vault store requests (admin).
+/// Core NATS subject for vault store requests (admin) — default vault.
 pub fn vault_store(prefix: &str) -> String {
     format!("{}.vault.store", prefix)
 }
 
-/// Core NATS subject for vault rotate requests (admin).
+/// Core NATS subject for vault rotate requests (admin) — default vault.
 pub fn vault_rotate(prefix: &str) -> String {
     format!("{}.vault.rotate", prefix)
 }
 
-/// Core NATS subject for vault revoke requests (admin).
+/// Core NATS subject for vault revoke requests (admin) — default vault.
 pub fn vault_revoke(prefix: &str) -> String {
     format!("{}.vault.revoke", prefix)
+}
+
+/// Core NATS subject for vault store requests targeting a named vault.
+pub fn vault_store_for(prefix: &str, vault_name: &str) -> String {
+    format!("{}.vault.{}.store", prefix, vault_name)
+}
+
+/// Core NATS subject for vault rotate requests targeting a named vault.
+pub fn vault_rotate_for(prefix: &str, vault_name: &str) -> String {
+    format!("{}.vault.{}.rotate", prefix, vault_name)
+}
+
+/// Core NATS subject for vault revoke requests targeting a named vault.
+pub fn vault_revoke_for(prefix: &str, vault_name: &str) -> String {
+    format!("{}.vault.{}.revoke", prefix, vault_name)
 }
 
 #[cfg(test)]
@@ -99,5 +114,29 @@ mod tests {
     #[test]
     fn vault_revoke_subject() {
         assert_eq!(vault_revoke("trogon"), "trogon.vault.revoke");
+    }
+
+    #[test]
+    fn vault_store_for_subject() {
+        assert_eq!(vault_store_for("trogon", "prod"), "trogon.vault.prod.store");
+        assert_eq!(vault_store_for("trogon", "staging"), "trogon.vault.staging.store");
+    }
+
+    #[test]
+    fn vault_rotate_for_subject() {
+        assert_eq!(vault_rotate_for("trogon", "prod"), "trogon.vault.prod.rotate");
+    }
+
+    #[test]
+    fn vault_revoke_for_subject() {
+        assert_eq!(vault_revoke_for("trogon", "prod"), "trogon.vault.prod.revoke");
+    }
+
+    #[test]
+    fn vault_named_subjects_are_distinct_from_flat() {
+        // Named subject for "default" is structurally different from the flat shorthand.
+        // The flat subject preserves backward compatibility; the named form is explicit.
+        assert_ne!(vault_store("trogon"), vault_store_for("trogon", "default"));
+        assert_eq!(vault_store_for("trogon", "default"), "trogon.vault.default.store");
     }
 }

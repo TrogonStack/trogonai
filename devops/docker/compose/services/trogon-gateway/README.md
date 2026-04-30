@@ -16,6 +16,7 @@ prefix:
 | GitLab | `/gitlab/webhook` | `TROGON_SOURCE_GITLAB_WEBHOOK_SECRET` |
 | incident.io | `/incidentio/webhook` | `TROGON_SOURCE_INCIDENTIO_SIGNING_SECRET` |
 | Linear | `/linear/webhook` | `TROGON_SOURCE_LINEAR_WEBHOOK_SECRET` |
+| Microsoft Graph change notifications | `/microsoft-graph/webhook` | `TROGON_SOURCE_MICROSOFT_GRAPH_CLIENT_STATE` |
 | Notion | `/notion/webhook` | `TROGON_SOURCE_NOTION_VERIFICATION_TOKEN` |
 | Sentry | `/sentry/webhook` | `TROGON_SOURCE_SENTRY_CLIENT_SECRET` |
 
@@ -50,6 +51,20 @@ docker compose up
 Discord does not use the HTTP ingress or ngrok. It opens an outbound WebSocket
 connection to Discord and publishes every gateway event to NATS.
 
+## Telegram webhooks
+
+Set `TROGON_SOURCE_TELEGRAM_WEBHOOK_SECRET` before starting the gateway. To let
+the gateway register the webhook on startup, also set
+`TROGON_SOURCE_TELEGRAM_WEBHOOK_REGISTRATION_MODE=startup`,
+`TROGON_SOURCE_TELEGRAM_BOT_TOKEN`, and
+`TROGON_SOURCE_TELEGRAM_PUBLIC_WEBHOOK_URL`.
+The URL must be the public HTTPS endpoint for `/telegram/webhook`.
+
+In `manual` mode, the gateway only serves the local webhook receiver and the
+Telegram webhook must be configured separately. In `startup` mode, the bot token
+and public webhook URL are required. Registration failures are logged and do not
+block the gateway from serving configured sources.
+
 ## incident.io webhooks
 
 incident.io uses Svix-style webhook signing. Set `TROGON_SOURCE_INCIDENTIO_SIGNING_SECRET`
@@ -82,6 +97,26 @@ Sentry integration-platform webhooks sign the raw JSON body with the app client
 secret. Configure `TROGON_SOURCE_SENTRY_CLIENT_SECRET`, point the webhook URL
 at `/sentry/webhook`, and the gateway will forward verified payloads to NATS on
 `{subject_prefix}.{resource}.{action}` subjects such as `sentry.issue.created`.
+
+## Microsoft Graph change notifications
+
+This source receives Microsoft Graph change notifications. It does not implement
+Bot Framework conversations or send replies.
+
+Configure `TROGON_SOURCE_MICROSOFT_GRAPH_CLIENT_STATE` with the same secret
+`clientState` used when creating the Graph subscription, then point the
+subscription `notificationUrl` at `/microsoft-graph/webhook`. The gateway
+answers Graph's `validationToken` handshake and forwards each validated Graph
+notification collection to NATS on
+`{subject_prefix}.change_notification_collection`, for example
+`microsoft-graph.change_notification_collection`. The collection publish uses a
+deterministic NATS message ID derived from the Graph notification identities so
+exact webhook retries can be deduplicated at the collection boundary.
+
+For subscriptions that include resource data, the gateway preserves Graph's
+collection payload, including `validationTokens`. Downstream consumers remain
+responsible for validating those tokens, decrypting `encryptedContent`, and
+splitting individual notifications when they need per-resource routing.
 
 ## Exposing webhooks with ngrok
 

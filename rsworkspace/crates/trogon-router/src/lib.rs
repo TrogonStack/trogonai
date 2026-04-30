@@ -44,7 +44,7 @@
 //!     let publisher = NatsTranscriptPublisher::new(js.clone());
 //!
 //!     let router = Router::new(llm, registry, publisher, nats, js);
-//!     router.run("trogon.events.>").await.unwrap();
+//!     router.run(&["trogon.events.>"]).await.unwrap();
 //! }
 //! ```
 
