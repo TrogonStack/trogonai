@@ -3,6 +3,7 @@
 pub mod agent;
 pub mod agent_runner;
 pub mod permission;
+pub mod permission_bridge;
 pub mod prompt_converter;
 pub mod session_notifier;
 pub mod session_store;
