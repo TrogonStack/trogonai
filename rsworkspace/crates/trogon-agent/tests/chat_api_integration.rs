@@ -1425,6 +1425,122 @@ async fn send_message_persists_usage_on_assistant_message() {
 }
 
 #[tokio::test]
+async fn send_message_response_includes_token_counts() {
+    let env = start().await;
+
+    env.mock_server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(end_turn_with_usage("hi", 10, 5));
+    });
+
+    let created: Value = env
+        .client
+        .post(format!("{}/sessions", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = created["id"].as_str().unwrap();
+
+    let res: Value = env
+        .client
+        .post(format!("{}/sessions/{id}/messages", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({"content": "hello"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(res["input_tokens"], 10, "input_tokens must match Anthropic usage");
+    assert_eq!(res["output_tokens"], 5, "output_tokens must match Anthropic usage");
+}
+
+#[tokio::test]
+async fn send_message_accumulates_token_totals_across_turns() {
+    let env = start().await;
+
+    // httpmock uses FIFO matching — the first registered mock that matches wins.
+    // Turn 2's Anthropic body contains both "msg-turn-one" (from history) and
+    // "msg-turn-two" (the new message), so we register the turn-2 mock first with
+    // a body_contains discriminator. Turn 1's body only contains "msg-turn-one",
+    // so the turn-2 mock doesn't match and the fallback (turn-1 mock) is used.
+    env.mock_server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages")
+            .body_contains("msg-turn-two");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(end_turn_with_usage("turn two", 20, 8));
+    });
+    env.mock_server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(end_turn_with_usage("turn one", 10, 5));
+    });
+
+    let created: Value = env
+        .client
+        .post(format!("{}/sessions", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = created["id"].as_str().unwrap();
+
+    env.client
+        .post(format!("{}/sessions/{id}/messages", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({"content": "msg-turn-one"}))
+        .send()
+        .await
+        .unwrap();
+
+    env.client
+        .post(format!("{}/sessions/{id}/messages", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({"content": "msg-turn-two"}))
+        .send()
+        .await
+        .unwrap();
+
+    let got: Value = env
+        .client
+        .get(format!("{}/sessions/{id}", env.base_url))
+        .header("x-tenant-id", "acme")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        got["total_input_tokens"], 30,
+        "total_input_tokens must be 10 + 20 = 30"
+    );
+    assert_eq!(
+        got["total_output_tokens"], 13,
+        "total_output_tokens must be 5 + 8 = 13"
+    );
+}
+
+#[tokio::test]
 async fn send_message_injects_skill_content_into_system_prompt() {
     let env = start_with_options(
         Some("agent_skills_test".to_string()),
