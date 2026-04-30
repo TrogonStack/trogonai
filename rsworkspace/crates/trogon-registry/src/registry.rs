@@ -62,6 +62,20 @@ impl<S: RegistryStore> Registry<S> {
         self.register(capability).await
     }
 
+    /// Look up a single agent by its `agent_type` key.
+    ///
+    /// Returns `Ok(None)` when the agent is not registered (or its TTL has expired).
+    #[instrument(skip(self), fields(agent_type), err)]
+    pub async fn get(&self, agent_type: &str) -> Result<Option<AgentCapability>, RegistryError> {
+        match self.store.get(agent_type).await.map_err(|e| RegistryError::Get(Box::new(e)))? {
+            Some(bytes) => {
+                let cap = serde_json::from_slice(&bytes).map_err(RegistryError::Serialization)?;
+                Ok(Some(cap))
+            }
+            None => Ok(None),
+        }
+    }
+
     /// Remove an agent's capability record from the registry immediately.
     ///
     /// Agents that crash do not need to call this — their entry will expire
@@ -315,5 +329,44 @@ mod tests {
         let all = r.list_all().await.unwrap();
         assert_eq!(all.len(), 1);
         assert_eq!(all[0].agent_type, "PrActor");
+    }
+
+    #[tokio::test]
+    async fn get_returns_capability_for_registered_agent() {
+        let r = registry();
+        r.register(&pr_actor()).await.unwrap();
+        let cap = r.get("PrActor").await.unwrap();
+        assert_eq!(cap.unwrap().agent_type, "PrActor");
+    }
+
+    #[tokio::test]
+    async fn get_returns_none_for_unregistered_agent() {
+        let r = registry();
+        let cap = r.get("NonExistent").await.unwrap();
+        assert!(cap.is_none());
+    }
+
+    #[tokio::test]
+    async fn get_reflects_latest_value_after_refresh() {
+        let r = registry();
+        let mut cap = pr_actor();
+        r.register(&cap).await.unwrap();
+        cap.current_load = 42;
+        r.refresh(&cap).await.unwrap();
+        let fetched = r.get("PrActor").await.unwrap().unwrap();
+        assert_eq!(fetched.current_load, 42);
+    }
+
+    #[tokio::test]
+    async fn get_returns_err_for_corrupted_bytes() {
+        use crate::store::RegistryStore as _;
+        let store = MockRegistryStore::new();
+        let r = Registry::new(store.clone());
+        store
+            .put("BadAgent", bytes::Bytes::from_static(b"not-valid-json"))
+            .await
+            .unwrap();
+        let result = r.get("BadAgent").await;
+        assert!(result.is_err());
     }
 }

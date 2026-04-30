@@ -189,7 +189,8 @@ services:
       target: trogon-acp-runner
     environment:
       NATS_URL: nats://nats:4222
-      ACP_PREFIX: acp
+      ACP_PREFIX: acp.claude
+      AGENT_TYPE: claude
       PROXY_URL: http://proxy:8080
       ANTHROPIC_TOKEN: "${ANTHROPIC_TOKEN}"
       AGENT_MODEL: "${AGENT_MODEL:-claude-opus-4-6}"
@@ -246,7 +247,8 @@ services:
       target: trogon-xai-runner
     environment:
       NATS_URL: nats://nats:4222
-      ACP_PREFIX: acp
+      ACP_PREFIX: acp.xai
+      AGENT_TYPE: xai
       XAI_API_KEY: "${XAI_API_KEY:-}"
       XAI_DEFAULT_MODEL: "${XAI_DEFAULT_MODEL:-grok-4}"
       RUST_LOG: info
@@ -264,7 +266,8 @@ services:
       target: trogon-codex-runner
     environment:
       NATS_URL: nats://nats:4222
-      ACP_PREFIX: acp
+      ACP_PREFIX: acp.codex
+      AGENT_TYPE: codex
       CODEX_DEFAULT_MODEL: "${CODEX_DEFAULT_MODEL:-o4-mini}"
       RUST_LOG: info
     depends_on:

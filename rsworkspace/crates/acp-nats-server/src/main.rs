@@ -10,8 +10,9 @@ use transport::{AppState, ManagerRequest};
 
 #[cfg(not(coverage))]
 use {
-    acp_nats::nats, acp_telemetry::ServiceName, clap::Parser, std::net::SocketAddr, tracing::error,
-    trogon_std::env::SystemEnv, trogon_std::fs::SystemFs,
+    acp_nats::nats, acp_telemetry::ServiceName, clap::Parser, std::net::SocketAddr,
+    std::sync::Arc, tracing::error, trogon_std::env::SystemEnv, trogon_std::fs::SystemFs,
+    transport::RegistryExtension,
 };
 
 #[cfg(not(coverage))]
@@ -33,6 +34,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let nats_client = nats::connect(server_config.acp.nats(), nats_connect_timeout).await?;
 
     let js_context = async_nats::jetstream::new(nats_client.clone());
+
+    let registry_ext = {
+        let store = trogon_registry::provision(&js_context).await?;
+        Arc::new(RegistryExtension {
+            registry: trogon_registry::Registry::new(store),
+            base_config: server_config.acp.clone(),
+        })
+    };
+
     let js_client = trogon_nats::jetstream::NatsJetStreamClient::new(js_context);
 
     let (shutdown_tx, _) = watch::channel(false);
@@ -52,10 +62,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         axum::Router::new()
             .route(
                 ACP_ENDPOINT,
-                axum::routing::get(transport::get)
-                    .post(transport::post)
-                    .delete(transport::delete),
+                axum::routing::get(|| async {
+                    (
+                        axum::http::StatusCode::GONE,
+                        "ACP endpoint moved — use /acp/{agent_type} (e.g. /acp/claude)",
+                    )
+                })
+                .post(|| async {
+                    (
+                        axum::http::StatusCode::GONE,
+                        "ACP endpoint moved — use /acp/{agent_type} (e.g. /acp/claude)",
+                    )
+                })
+                .delete(|| async {
+                    (
+                        axum::http::StatusCode::GONE,
+                        "ACP endpoint moved — use /acp/{agent_type} (e.g. /acp/claude)",
+                    )
+                }),
             )
+            .route(
+                "/acp/{agent_type}",
+                axum::routing::get(transport::get_with_agent_type::<trogon_registry::KvStore>)
+                    .post(transport::post_with_agent_type::<trogon_registry::KvStore>)
+                    .delete(transport::delete_with_agent_type::<trogon_registry::KvStore>),
+            )
+            .layer(axum::extract::Extension(registry_ext))
             .with_state(state),
     );
 
@@ -785,6 +817,35 @@ mod tests {
         let _ = shutdown_tx.send(true);
         drop(app);
         conn_thread.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn legacy_acp_endpoint_returns_410_gone() {
+        let (manager_tx, _) = mpsc::unbounded_channel::<ManagerRequest>();
+        let (shutdown_tx, _) = watch::channel(false);
+        let state = AppState {
+            bind_host: IpAddr::V4(Ipv4Addr::LOCALHOST),
+            manager_tx,
+            shutdown_tx,
+        };
+
+        let app = axum::Router::new()
+            .route(
+                ACP_ENDPOINT,
+                axum::routing::get(|| async { (StatusCode::GONE, "moved") })
+                    .post(|| async { (StatusCode::GONE, "moved") })
+                    .delete(|| async { (StatusCode::GONE, "moved") }),
+            )
+            .with_state(state);
+
+        for method in ["GET", "POST", "DELETE"] {
+            let resp = app
+                .clone()
+                .oneshot(Request::builder().method(method).uri(ACP_ENDPOINT).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), StatusCode::GONE, "{method} {ACP_ENDPOINT} should return 410");
+        }
     }
 
     #[tokio::test]
@@ -1556,6 +1617,228 @@ mod tests {
                 auth_event["result"].is_object(),
                 "authenticate must return a result: {auth_event}"
             );
+
+            shutdown_tx.send(true).unwrap();
+            let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;
+        }
+    }
+
+    // ── E2E tests: real NATS + live registry → /acp/:agent_type routing ────────
+    mod registry_e2e {
+        use std::net::{IpAddr, Ipv4Addr};
+        use std::sync::Arc;
+        use std::time::Duration;
+
+        use acp_nats::{AcpPrefix, Config, NatsAuth, NatsConfig};
+        use agent_client_protocol::{InitializeResponse, ProtocolVersion};
+        use async_nats::jetstream;
+        use serde_json::Value;
+        use testcontainers_modules::nats::Nats;
+        use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
+        use tokio::net::TcpListener;
+        use tokio::sync::{mpsc, watch};
+        use trogon_nats::jetstream::NatsJetStreamClient;
+        use trogon_registry::{AgentCapability, KvStore, Registry};
+
+        use crate::constants::THREAD_NAME;
+        use crate::transport::{AppState, ManagerRequest, RegistryExtension};
+        use futures_util::StreamExt as _;
+
+        async fn start_nats() -> (ContainerAsync<Nats>, async_nats::Client, u16) {
+            let container = Nats::default()
+                .with_cmd(["--jetstream"])
+                .start()
+                .await
+                .expect("start NATS+JetStream container — is Docker running?");
+            let port = container.get_host_port_ipv4(4222).await.unwrap();
+            let nats = async_nats::connect(format!("127.0.0.1:{port}"))
+                .await
+                .expect("connect to NATS");
+            (container, nats, port)
+        }
+
+        async fn start_server_with_registry(
+            nats_port: u16,
+        ) -> (
+            String,
+            watch::Sender<bool>,
+            std::thread::JoinHandle<()>,
+            Registry<KvStore>,
+        ) {
+            let nats = async_nats::connect(format!("127.0.0.1:{nats_port}"))
+                .await
+                .expect("connect to NATS for server");
+            let js_ctx = jetstream::new(nats.clone());
+            let js = NatsJetStreamClient::new(js_ctx.clone());
+
+            let store = trogon_registry::provision(&js_ctx)
+                .await
+                .expect("provision registry");
+            let registry = Registry::new(store);
+
+            let base_config = Config::new(
+                AcpPrefix::new("acp").unwrap(),
+                NatsConfig {
+                    servers: vec![format!("127.0.0.1:{nats_port}")],
+                    auth: NatsAuth::None,
+                },
+            )
+            .with_operation_timeout(Duration::from_secs(5));
+
+            let registry_ext = Arc::new(RegistryExtension {
+                registry: registry.clone(),
+                base_config: base_config.clone(),
+            });
+
+            let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
+            let (manager_tx, manager_rx) = mpsc::unbounded_channel::<ManagerRequest>();
+
+            let conn_thread = std::thread::Builder::new()
+                .name(THREAD_NAME.into())
+                .spawn(move || crate::run_connection_thread(manager_rx, nats, js, base_config))
+                .expect("spawn connection thread");
+
+            let state = AppState {
+                bind_host: IpAddr::V4(Ipv4Addr::LOCALHOST),
+                manager_tx,
+                shutdown_tx: shutdown_tx.clone(),
+            };
+
+            let router = axum::Router::new()
+                .route(
+                    "/acp/{agent_type}",
+                    axum::routing::get(crate::transport::get_with_agent_type::<KvStore>)
+                        .post(crate::transport::post_with_agent_type::<KvStore>)
+                        .delete(crate::transport::delete_with_agent_type::<KvStore>),
+                )
+                .layer(axum::extract::Extension(registry_ext))
+                .with_state(state);
+
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+
+            tokio::spawn(async move {
+                axum::serve(listener, router)
+                    .with_graceful_shutdown(async move {
+                        let _ = shutdown_rx.changed().await;
+                    })
+                    .await
+                    .unwrap();
+            });
+
+            (format!("http://{addr}"), shutdown_tx, conn_thread, registry)
+        }
+
+        /// POST to `/acp/:agent_type` with a registered agent correctly routes the
+        /// request to the agent's dedicated NATS prefix instead of the default `acp.*`.
+        #[tokio::test]
+        async fn e2e_post_agent_type_routes_to_registered_prefix() {
+            let (_container, nats_client, nats_port) = start_nats().await;
+            let (base_url, shutdown_tx, conn_thread, registry) =
+                start_server_with_registry(nats_port).await;
+
+            let cap = AgentCapability {
+                agent_type: "xai".to_string(),
+                capabilities: vec!["chat".to_string()],
+                nats_subject: "acp.xai.agent.>".to_string(),
+                current_load: 0,
+                metadata: serde_json::json!({ "acp_prefix": "acp.xai" }),
+            };
+            registry.register(&cap).await.expect("register xai agent");
+
+            // Mock agent on the xai-prefixed initialize subject.
+            let mut agent_sub = nats_client
+                .subscribe("acp.xai.agent.initialize")
+                .await
+                .unwrap();
+            let nats_reply = nats_client.clone();
+            tokio::spawn(async move {
+                while let Some(msg) = agent_sub.next().await {
+                    let resp =
+                        serde_json::to_vec(&InitializeResponse::new(ProtocolVersion::LATEST))
+                            .unwrap();
+                    if let Some(reply) = msg.reply {
+                        nats_reply.publish(reply, resp.into()).await.ok();
+                    }
+                }
+            });
+
+            let client = reqwest::Client::new();
+            let response = tokio::time::timeout(
+                Duration::from_secs(10),
+                client
+                    .post(format!("{base_url}/acp/xai"))
+                    .header("Content-Type", "application/json")
+                    .header("Accept", "application/json, text/event-stream")
+                    .body(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#)
+                    .send(),
+            )
+            .await
+            .expect("timed out waiting for response")
+            .expect("reqwest failed");
+
+            assert_eq!(response.status().as_u16(), 200, "expected 200 OK");
+            let body: Value = response.json().await.unwrap();
+            assert!(
+                body["result"]["protocolVersion"].is_number(),
+                "must have protocolVersion in result: {body}"
+            );
+
+            shutdown_tx.send(true).unwrap();
+            let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;
+        }
+
+        /// POST to an unregistered agent type returns 404 before any NATS traffic.
+        #[tokio::test]
+        async fn e2e_post_agent_type_unregistered_returns_404() {
+            let (_container, _nats, nats_port) = start_nats().await;
+            let (base_url, shutdown_tx, conn_thread, _registry) =
+                start_server_with_registry(nats_port).await;
+
+            let client = reqwest::Client::new();
+            let response = client
+                .post(format!("{base_url}/acp/ghost"))
+                .header("Content-Type", "application/json")
+                .header("Accept", "application/json, text/event-stream")
+                .body(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#)
+                .send()
+                .await
+                .expect("reqwest failed");
+
+            assert_eq!(
+                response.status().as_u16(),
+                404,
+                "unregistered agent must return 404"
+            );
+
+            shutdown_tx.send(true).unwrap();
+            let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;
+        }
+
+        /// WebSocket upgrade to an unregistered agent type returns 404.
+        #[tokio::test]
+        async fn e2e_get_agent_type_unregistered_returns_404() {
+            use tokio_tungstenite::connect_async;
+
+            let (_container, _nats, nats_port) = start_nats().await;
+            let (base_url, shutdown_tx, conn_thread, _registry) =
+                start_server_with_registry(nats_port).await;
+
+            let ws_url = base_url.replacen("http://", "ws://", 1);
+            let result = connect_async(format!("{ws_url}/acp/ghost")).await;
+
+            match result {
+                Err(tokio_tungstenite::tungstenite::Error::Http(resp)) => {
+                    assert_eq!(
+                        resp.status().as_u16(),
+                        404,
+                        "expected 404, got {}",
+                        resp.status()
+                    );
+                }
+                Ok(_) => panic!("expected WebSocket upgrade to be rejected with 404"),
+                Err(e) => panic!("unexpected error: {e}"),
+            }
 
             shutdown_tx.send(true).unwrap();
             let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;

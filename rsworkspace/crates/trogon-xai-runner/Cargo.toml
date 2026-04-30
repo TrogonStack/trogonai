@@ -34,6 +34,7 @@ agent-client-protocol = { workspace = true, features = [
 ] }
 async-nats      = { workspace = true, features = ["jetstream", "kv"] }
 trogon-nats     = { workspace = true }
+trogon-registry = { workspace = true }
 async-trait     = { workspace = true }
 bytes           = { workspace = true }
 futures-util    = { workspace = true }
