@@ -5111,6 +5111,7 @@ dependencies = [
  "trogon-source-gitlab",
  "trogon-source-incidentio",
  "trogon-source-linear",
+ "trogon-source-microsoft-graph",
  "trogon-source-notion",
  "trogon-source-sentry",
  "trogon-source-slack",
@@ -5426,6 +5427,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-source-microsoft-graph"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "axum",
+ "form_urlencoded",
+ "serde",
+ "serde_json",
+ "sha2",
+ "subtle",
+ "tokio",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+ "trogon-nats",
+ "trogon-std",
+]
+
+[[package]]
 name = "trogon-source-notion"
 version = "0.1.0"
 dependencies = [
@@ -5500,6 +5520,7 @@ dependencies = [
  "axum 0.8.8",
  "bytes",
  "futures-util",
+ "reqwest",
  "serde",
  "serde_json",
  "sha2",
@@ -5511,6 +5532,7 @@ dependencies = [
  "tracing-subscriber",
  "trogon-nats",
  "trogon-std",
+ "url",
 ]
 
 [[package]]
