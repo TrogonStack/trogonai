@@ -42,6 +42,7 @@ pub struct ConnectionRequest {
     pub connection_id: AcpConnectionId,
     pub socket: WebSocket,
     pub shutdown_rx: watch::Receiver<bool>,
+    pub config_override: Option<acp_nats::Config>,
 }
 
 pub enum ManagerRequest {
@@ -53,6 +54,8 @@ pub enum ManagerRequest {
         message: IncomingHttpMessage,
         response: oneshot::Sender<Result<HttpPostOutcome, HttpTransportError>>,
         shutdown_rx: watch::Receiver<bool>,
+        /// When `Some`, overrides the thread-default ACP config for new connections.
+        config_override: Option<acp_nats::Config>,
     },
     HttpGet {
         connection_id: AcpConnectionId,
@@ -592,6 +595,7 @@ fn undelivered_response_outcome(
     }
 }
 
+#[cfg(test)]
 pub async fn get(State(state): State<AppState>, request: Request) -> Response {
     if let Err(error) = validate_origin(request.headers(), state.bind_host) {
         return error.into_response();
@@ -600,7 +604,7 @@ pub async fn get(State(state): State<AppState>, request: Request) -> Response {
     if is_websocket_request(request.headers()) {
         let (mut parts, _body) = request.into_parts();
         match WebSocketUpgrade::from_request_parts(&mut parts, &state).await {
-            Ok(ws) => websocket_response(ws, state),
+            Ok(ws) => websocket_response(ws, state, None),
             Err(_) => HttpTransportError::bad_request("invalid WebSocket upgrade request").into_response(),
         }
     } else {
@@ -611,17 +615,19 @@ pub async fn get(State(state): State<AppState>, request: Request) -> Response {
     }
 }
 
+#[cfg(test)]
 pub async fn post(headers: HeaderMap, State(state): State<AppState>, body: String) -> Response {
     if let Err(error) = validate_origin(&headers, state.bind_host) {
         return error.into_response();
     }
 
-    match http_post(headers, state, body).await {
+    match http_post(headers, state, body, None).await {
         Ok(response) => response,
         Err(error) => error.into_response(),
     }
 }
 
+#[cfg(test)]
 pub async fn delete(headers: HeaderMap, State(state): State<AppState>) -> Response {
     if let Err(error) = validate_origin(&headers, state.bind_host) {
         return error.into_response();
@@ -633,7 +639,138 @@ pub async fn delete(headers: HeaderMap, State(state): State<AppState>) -> Respon
     }
 }
 
-fn websocket_response(ws: WebSocketUpgrade, state: AppState) -> Response {
+/// Shared registry state injected via axum Extension for `/acp/:agent_type` routes.
+///
+/// Generic over the registry store so tests can inject a
+/// [`MockRegistryStore`][trogon_registry::MockRegistryStore] without a live NATS
+/// connection. Production builds use the default `S = `[`KvStore`][trogon_registry::KvStore].
+#[derive(Clone)]
+pub struct RegistryExtension<S: trogon_registry::RegistryStore = trogon_registry::KvStore> {
+    pub registry: trogon_registry::Registry<S>,
+    pub base_config: acp_nats::Config,
+}
+
+/// Core registry lookup logic, generic over the store so tests can inject
+/// a `MockRegistryStore` without a live NATS connection.
+async fn resolve_config_inner<S: trogon_registry::RegistryStore>(
+    agent_type: &str,
+    registry: &trogon_registry::Registry<S>,
+    base_config: &acp_nats::Config,
+) -> Result<acp_nats::Config, (StatusCode, String)> {
+    match registry.get(agent_type).await {
+        Ok(Some(cap)) => {
+            let prefix_str = cap
+                .metadata
+                .get("acp_prefix")
+                .and_then(|v| v.as_str())
+                .unwrap_or_else(|| {
+                    warn!(agent_type, "registry entry missing acp_prefix metadata");
+                    cap.nats_subject.trim_end_matches(".agent.>")
+                });
+            acp_nats::AcpPrefix::new(prefix_str)
+                .map(|prefix| base_config.for_prefix(prefix))
+                .map_err(|e| {
+                    error!(agent_type, error = %e, "invalid acp_prefix in registry");
+                    (StatusCode::INTERNAL_SERVER_ERROR, "invalid agent prefix in registry".to_string())
+                })
+        }
+        Ok(None) => Err((
+            StatusCode::NOT_FOUND,
+            format!("agent type '{agent_type}' is not registered"),
+        )),
+        Err(e) => {
+            error!(agent_type, error = %e, "registry lookup failed");
+            Err((StatusCode::SERVICE_UNAVAILABLE, "registry temporarily unavailable".to_string()))
+        }
+    }
+}
+
+async fn resolve_agent_config<S: trogon_registry::RegistryStore>(
+    agent_type: &str,
+    registry_ext: &RegistryExtension<S>,
+) -> Result<acp_nats::Config, Response> {
+    resolve_config_inner(agent_type, &registry_ext.registry, &registry_ext.base_config)
+        .await
+        .map_err(|(status, msg)| (status, msg).into_response())
+}
+
+pub async fn get_with_agent_type<S: trogon_registry::RegistryStore + 'static>(
+    axum::extract::Path(agent_type): axum::extract::Path<String>,
+    State(state): State<AppState>,
+    axum::extract::Extension(registry_ext): axum::extract::Extension<
+        std::sync::Arc<RegistryExtension<S>>,
+    >,
+    request: Request,
+) -> Response {
+    if let Err(error) = validate_origin(request.headers(), state.bind_host) {
+        return error.into_response();
+    }
+
+    if is_websocket_request(request.headers()) {
+        let config_override = match resolve_agent_config(&agent_type, &registry_ext).await {
+            Ok(c) => c,
+            Err(r) => return r,
+        };
+        let (mut parts, _body) = request.into_parts();
+        match WebSocketUpgrade::from_request_parts(&mut parts, &state).await {
+            Ok(ws) => websocket_response(ws, state, Some(config_override)),
+            Err(_) => HttpTransportError::bad_request("invalid WebSocket upgrade request").into_response(),
+        }
+    } else {
+        match http_get(request.headers().clone(), state).await {
+            Ok(response) => response,
+            Err(error) => error.into_response(),
+        }
+    }
+}
+
+pub async fn post_with_agent_type<S: trogon_registry::RegistryStore + 'static>(
+    axum::extract::Path(agent_type): axum::extract::Path<String>,
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    axum::extract::Extension(registry_ext): axum::extract::Extension<
+        std::sync::Arc<RegistryExtension<S>>,
+    >,
+    body: String,
+) -> Response {
+    if let Err(error) = validate_origin(&headers, state.bind_host) {
+        return error.into_response();
+    }
+
+    let config_override = match resolve_agent_config(&agent_type, &registry_ext).await {
+        Ok(c) => Some(c),
+        Err(r) => return r,
+    };
+
+    match http_post(headers, state, body, config_override).await {
+        Ok(response) => response,
+        Err(error) => error.into_response(),
+    }
+}
+
+pub async fn delete_with_agent_type<S: trogon_registry::RegistryStore + 'static>(
+    axum::extract::Path(_agent_type): axum::extract::Path<String>,
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    axum::extract::Extension(_registry_ext): axum::extract::Extension<
+        std::sync::Arc<RegistryExtension<S>>,
+    >,
+) -> Response {
+    if let Err(error) = validate_origin(&headers, state.bind_host) {
+        return error.into_response();
+    }
+
+    match http_delete(headers, state).await {
+        Ok(response) => response,
+        Err(error) => error.into_response(),
+    }
+}
+
+fn websocket_response(
+    ws: WebSocketUpgrade,
+    state: AppState,
+    config_override: Option<acp_nats::Config>,
+) -> Response {
     let connection_id = AcpConnectionId::default();
     let response_header = HeaderValue::from_str(&connection_id.to_string())
         .expect("generated ACP connection id must be a valid header value");
@@ -645,6 +782,7 @@ fn websocket_response(ws: WebSocketUpgrade, state: AppState) -> Response {
                 connection_id,
                 socket,
                 shutdown_rx,
+                config_override,
             })))
             .is_err()
         {
@@ -655,7 +793,12 @@ fn websocket_response(ws: WebSocketUpgrade, state: AppState) -> Response {
     response
 }
 
-async fn http_post(headers: HeaderMap, state: AppState, body: String) -> Result<Response, HttpTransportError> {
+async fn http_post(
+    headers: HeaderMap,
+    state: AppState,
+    body: String,
+    config_override: Option<acp_nats::Config>,
+) -> Result<Response, HttpTransportError> {
     validate_post_headers(&headers)?;
 
     let message = IncomingHttpMessage::parse(body)?;
@@ -679,6 +822,7 @@ async fn http_post(headers: HeaderMap, state: AppState, body: String) -> Result<
             message,
             response: response_tx,
             shutdown_rx: state.shutdown_tx.subscribe(),
+            config_override,
         })
         .map_err(|error| HttpTransportError::internal_with("connection manager is unavailable", error))?;
 
@@ -1365,13 +1509,15 @@ pub async fn process_manager_request<N, J>(
                 connection_id,
                 socket,
                 shutdown_rx,
+                config_override,
             } = *request;
+            let cfg = config_override.unwrap_or_else(|| config.clone());
             websocket_handles.push(tokio::task::spawn_local(connection::handle(
                 connection_id,
                 socket,
                 nats_client.clone(),
                 js_client.clone(),
-                config.clone(),
+                cfg,
                 shutdown_rx,
             )));
         }
@@ -1382,6 +1528,7 @@ pub async fn process_manager_request<N, J>(
             message,
             response,
             shutdown_rx,
+            config_override,
         } => {
             let connection_id = match connection_id {
                 Some(connection_id) => connection_id,
@@ -1391,6 +1538,7 @@ pub async fn process_manager_request<N, J>(
                         return;
                     }
 
+                    let cfg = config_override.unwrap_or_else(|| config.clone());
                     let connection_id = AcpConnectionId::default();
                     let (command_tx, command_rx) = mpsc::unbounded_channel();
                     http_connections.insert(
@@ -1403,7 +1551,7 @@ pub async fn process_manager_request<N, J>(
                         connection_id.clone(),
                         nats_client.clone(),
                         js_client.clone(),
-                        config.clone(),
+                        cfg,
                         command_rx,
                         shutdown_rx,
                     )));
@@ -2225,6 +2373,45 @@ mod tests {
             headers,
             state,
             r#"{"jsonrpc":"2.0","method":"initialized"}"#.to_string(),
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+    }
+
+    #[tokio::test]
+    async fn http_post_config_override_is_forwarded_to_manager() {
+        let (state, mut manager_rx) = test_state();
+        let connection_id = AcpConnectionId::default();
+        let claude_config =
+            test_config().for_prefix(acp_nats::AcpPrefix::new("acp.claude").unwrap());
+
+        tokio::spawn(async move {
+            match manager_rx.recv().await.unwrap() {
+                ManagerRequest::HttpPost { config_override, response, .. } => {
+                    assert_eq!(
+                        config_override.as_ref().map(|c| c.acp_prefix()),
+                        Some("acp.claude"),
+                    );
+                    let _ = response.send(Ok(HttpPostOutcome::Accepted));
+                }
+                _ => panic!("expected HttpPost"),
+            }
+        });
+
+        let mut headers = post_headers();
+        headers.insert(
+            ACP_CONNECTION_ID_HEADER,
+            HeaderValue::from_str(&connection_id.to_string()).unwrap(),
+        );
+
+        let response = http_post(
+            headers,
+            state,
+            r#"{"jsonrpc":"2.0","method":"initialized"}"#.to_string(),
+            Some(claude_config),
         )
         .await
         .unwrap();
@@ -2268,7 +2455,7 @@ mod tests {
             HeaderValue::from_str(session_id.as_str()).unwrap(),
         );
 
-        let response = http_post(headers, state, r#"{"jsonrpc":"2.0","id":1,"result":null}"#.to_string())
+        let response = http_post(headers, state, r#"{"jsonrpc":"2.0","id":1,"result":null}"#.to_string(), None)
             .await
             .unwrap();
 
@@ -2314,6 +2501,7 @@ mod tests {
             post_headers(),
             state,
             r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#.to_string(),
+            None,
         )
         .await
         .unwrap();
@@ -2488,6 +2676,7 @@ mod tests {
                 message: post_message,
                 response: post_response_tx,
                 shutdown_rx: shutdown_rx.clone(),
+                config_override: None,
             },
             &mut http_connections,
             &mut websocket_handles,
@@ -2624,6 +2813,7 @@ mod tests {
                         message: initialize,
                         response: response_tx,
                         shutdown_rx,
+                        config_override: None,
                     },
                     &mut http_connections,
                     &mut websocket_handles,
@@ -2652,5 +2842,370 @@ mod tests {
                 .expect("HTTP connection task did not finish after shutdown");
             })
             .await;
+    }
+
+    // ── FailingRegistryStore — injects a get() error for 503 branch tests ────
+
+    #[derive(Clone)]
+    struct FailingRegistryStore;
+
+    #[derive(Debug)]
+    struct StoreUnavailable;
+    impl std::fmt::Display for StoreUnavailable {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "store unavailable")
+        }
+    }
+    impl std::error::Error for StoreUnavailable {}
+
+    impl trogon_registry::RegistryStore for FailingRegistryStore {
+        type PutError = StoreUnavailable;
+        type GetError = StoreUnavailable;
+        type DeleteError = StoreUnavailable;
+        type KeysError = StoreUnavailable;
+        async fn put(&self, _: &str, _: bytes::Bytes) -> Result<u64, Self::PutError> { Ok(0) }
+        async fn get(&self, _: &str) -> Result<Option<bytes::Bytes>, Self::GetError> {
+            Err(StoreUnavailable)
+        }
+        async fn delete(&self, _: &str) -> Result<(), Self::DeleteError> { Ok(()) }
+        async fn keys(&self) -> Result<Vec<String>, Self::KeysError> { Ok(vec![]) }
+    }
+
+    // ── resolve_config_inner tests ────────────────────────────────────────────
+
+    async fn registry_with_cap(cap: trogon_registry::AgentCapability) -> trogon_registry::Registry<trogon_registry::MockRegistryStore> {
+        let r = trogon_registry::Registry::new(trogon_registry::MockRegistryStore::new());
+        r.register(&cap).await.unwrap();
+        r
+    }
+
+    #[tokio::test]
+    async fn resolve_config_inner_registered_returns_prefixed_config() {
+        let cap = trogon_registry::AgentCapability {
+            agent_type: "claude".to_string(),
+            capabilities: vec!["chat".to_string()],
+            nats_subject: "acp.claude.agent.>".to_string(),
+            current_load: 0,
+            metadata: serde_json::json!({ "acp_prefix": "acp.claude" }),
+        };
+        let reg = registry_with_cap(cap).await;
+        let result = resolve_config_inner("claude", &reg, &test_config()).await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().acp_prefix(), "acp.claude");
+    }
+
+    #[tokio::test]
+    async fn resolve_config_inner_unregistered_returns_not_found() {
+        let reg = trogon_registry::Registry::new(trogon_registry::MockRegistryStore::new());
+        let (status, _) = resolve_config_inner("unknown", &reg, &test_config()).await.err().unwrap();
+        assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn resolve_config_inner_falls_back_to_nats_subject_without_metadata() {
+        let cap = trogon_registry::AgentCapability {
+            agent_type: "xai".to_string(),
+            capabilities: vec!["chat".to_string()],
+            nats_subject: "acp.xai.agent.>".to_string(),
+            current_load: 0,
+            metadata: serde_json::Value::Null,
+        };
+        let reg = registry_with_cap(cap).await;
+        let result = resolve_config_inner("xai", &reg, &test_config()).await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().acp_prefix(), "acp.xai");
+    }
+
+    #[tokio::test]
+    async fn resolve_config_inner_invalid_prefix_returns_internal_error() {
+        let cap = trogon_registry::AgentCapability {
+            agent_type: "bad".to_string(),
+            capabilities: vec!["chat".to_string()],
+            nats_subject: "acp.bad.agent.>".to_string(),
+            current_load: 0,
+            metadata: serde_json::json!({ "acp_prefix": "invalid prefix!" }),
+        };
+        let reg = registry_with_cap(cap).await;
+        let (status, _) = resolve_config_inner("bad", &reg, &test_config()).await.err().unwrap();
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn resolve_config_inner_store_error_returns_service_unavailable() {
+        let reg = trogon_registry::Registry::new(FailingRegistryStore);
+        let (status, _) = resolve_config_inner("any", &reg, &test_config()).await.err().unwrap();
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    // ── process_manager_request config_override tests ─────────────────────────
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn process_manager_request_http_post_uses_config_override() {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let nats_client = AdvancedMockNatsClient::new();
+                let js_client = MockJs::new();
+                let config = test_config();
+                let mut http_connections = HashMap::new();
+                let mut websocket_handles = Vec::new();
+                let mut http_connection_handles = Vec::new();
+                let (_shutdown_tx, shutdown_rx) = watch::channel(false);
+
+                let claude_config =
+                    test_config().for_prefix(acp_nats::AcpPrefix::new("acp.claude").unwrap());
+
+                let (response_tx, _response_rx) = oneshot::channel();
+                let initialize = IncomingHttpMessage::parse(
+                    r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#
+                        .to_string(),
+                )
+                .unwrap();
+
+                process_manager_request(
+                    ManagerRequest::HttpPost {
+                        connection_id: None,
+                        protocol_version: None,
+                        session_id: None,
+                        message: initialize,
+                        response: response_tx,
+                        shutdown_rx,
+                        config_override: Some(claude_config),
+                    },
+                    &mut http_connections,
+                    &mut websocket_handles,
+                    &mut http_connection_handles,
+                    &nats_client,
+                    &js_client,
+                    &config,
+                )
+                .await;
+
+                // Yield control so the spawned local tasks run far enough to call subscribe.
+                for _ in 0..20 {
+                    tokio::task::yield_now().await;
+                }
+
+                let subjects = nats_client.subscribed_to();
+                assert!(
+                    subjects.iter().any(|s| s == "acp.claude.session.*.client.>"),
+                    "expected subscription to acp.claude.session.*.client.>, got: {subjects:?}",
+                );
+            })
+            .await;
+    }
+
+    // ── agent-type route handler tests ────────────────────────────────────────
+
+    async fn registry_ext_with_claude() -> std::sync::Arc<RegistryExtension<trogon_registry::MockRegistryStore>> {
+        let reg = trogon_registry::Registry::new(trogon_registry::MockRegistryStore::new());
+        let cap = trogon_registry::AgentCapability {
+            agent_type: "claude".to_string(),
+            capabilities: vec!["chat".to_string()],
+            nats_subject: "acp.claude.agent.>".to_string(),
+            current_load: 0,
+            metadata: serde_json::json!({ "acp_prefix": "acp.claude" }),
+        };
+        reg.register(&cap).await.unwrap();
+        std::sync::Arc::new(RegistryExtension { registry: reg, base_config: test_config() })
+    }
+
+    fn empty_registry_ext() -> std::sync::Arc<RegistryExtension<trogon_registry::MockRegistryStore>> {
+        std::sync::Arc::new(RegistryExtension {
+            registry: trogon_registry::Registry::new(trogon_registry::MockRegistryStore::new()),
+            base_config: test_config(),
+        })
+    }
+
+    #[tokio::test]
+    async fn post_with_agent_type_registered_agent_routes_to_correct_prefix() {
+        let registry_ext = registry_ext_with_claude().await;
+        let (state, mut manager_rx) = test_state();
+        let connection_id = AcpConnectionId::default();
+
+        tokio::spawn(async move {
+            match manager_rx.recv().await.unwrap() {
+                ManagerRequest::HttpPost { config_override, response, .. } => {
+                    assert_eq!(
+                        config_override.as_ref().map(|c| c.acp_prefix()),
+                        Some("acp.claude"),
+                    );
+                    let _ = response.send(Ok(HttpPostOutcome::Accepted));
+                }
+                _ => panic!("expected HttpPost"),
+            }
+        });
+
+        let mut headers = post_headers();
+        headers.insert(
+            ACP_CONNECTION_ID_HEADER,
+            HeaderValue::from_str(&connection_id.to_string()).unwrap(),
+        );
+
+        let response = post_with_agent_type::<trogon_registry::MockRegistryStore>(
+            axum::extract::Path("claude".to_string()),
+            headers,
+            State(state),
+            axum::extract::Extension(registry_ext),
+            r#"{"jsonrpc":"2.0","method":"initialized"}"#.to_string(),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+    }
+
+    #[tokio::test]
+    async fn post_with_agent_type_unregistered_agent_returns_404() {
+        let (state, _manager_rx) = test_state();
+
+        let response = post_with_agent_type::<trogon_registry::MockRegistryStore>(
+            axum::extract::Path("ghost".to_string()),
+            post_headers(),
+            State(state),
+            axum::extract::Extension(empty_registry_ext()),
+            r#"{"jsonrpc":"2.0","method":"initialized"}"#.to_string(),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn get_with_agent_type_unregistered_agent_returns_404() {
+        let (state, _manager_rx) = test_state();
+
+        // Must be a WebSocket upgrade request so the registry lookup runs.
+        // The registry returns 404 before WebSocketUpgrade::from_request_parts is called.
+        let request = HttpRequest::builder()
+            .method("GET")
+            .uri("/acp/ghost")
+            .header("upgrade", "websocket")
+            .body(Body::empty())
+            .unwrap();
+
+        let response = get_with_agent_type::<trogon_registry::MockRegistryStore>(
+            axum::extract::Path("ghost".to_string()),
+            State(state),
+            axum::extract::Extension(empty_registry_ext()),
+            request,
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn delete_with_agent_type_unregistered_agent_returns_404_on_unknown_connection() {
+        let (state, mut manager_rx) = test_state();
+
+        tokio::spawn(async move {
+            match manager_rx.recv().await.unwrap() {
+                ManagerRequest::HttpDelete { response, .. } => {
+                    let _ = response.send(Err(HttpTransportError::not_found("unknown ACP connection")));
+                }
+                _ => panic!("expected HttpDelete"),
+            }
+        });
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            ACP_CONNECTION_ID_HEADER,
+            HeaderValue::from_static("00000000-0000-0000-0000-000000000000"),
+        );
+
+        let response = delete_with_agent_type::<trogon_registry::MockRegistryStore>(
+            axum::extract::Path("claude".to_string()),
+            headers,
+            State(state),
+            axum::extract::Extension(empty_registry_ext()),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    // ── get_with_agent_type edge cases ────────────────────────────────────────
+
+    #[tokio::test]
+    async fn get_with_agent_type_registered_agent_incomplete_ws_upgrade_returns_400() {
+        let registry_ext = registry_ext_with_claude().await;
+        let (state, _manager_rx) = test_state();
+
+        // `upgrade: websocket` passes is_websocket_request → registry lookup succeeds →
+        // WebSocketUpgrade::from_request_parts fails (missing sec-websocket-key etc.) → 400.
+        let request = HttpRequest::builder()
+            .method("GET")
+            .uri("/acp/claude")
+            .header("upgrade", "websocket")
+            .body(Body::empty())
+            .unwrap();
+
+        let response = get_with_agent_type::<trogon_registry::MockRegistryStore>(
+            axum::extract::Path("claude".to_string()),
+            State(state),
+            axum::extract::Extension(registry_ext),
+            request,
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    // ── origin validation for *_with_agent_type handlers ─────────────────────
+
+    #[tokio::test]
+    async fn post_with_agent_type_rejects_disallowed_origin() {
+        let (state, _manager_rx) = test_state();
+        let mut headers = post_headers();
+        headers.insert(ORIGIN, HeaderValue::from_static("https://evil.example"));
+
+        let response = post_with_agent_type::<trogon_registry::MockRegistryStore>(
+            axum::extract::Path("claude".to_string()),
+            headers,
+            State(state),
+            axum::extract::Extension(empty_registry_ext()),
+            r#"{"jsonrpc":"2.0","method":"initialized"}"#.to_string(),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn get_with_agent_type_rejects_disallowed_origin() {
+        let (state, _manager_rx) = test_state();
+        let request = HttpRequest::builder()
+            .method("GET")
+            .uri("/acp/claude")
+            .header(ORIGIN, "https://evil.example")
+            .body(Body::empty())
+            .unwrap();
+
+        let response = get_with_agent_type::<trogon_registry::MockRegistryStore>(
+            axum::extract::Path("claude".to_string()),
+            State(state),
+            axum::extract::Extension(empty_registry_ext()),
+            request,
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn delete_with_agent_type_rejects_disallowed_origin() {
+        let (state, _manager_rx) = test_state();
+        let mut headers = HeaderMap::new();
+        headers.insert(ORIGIN, HeaderValue::from_static("https://evil.example"));
+
+        let response = delete_with_agent_type::<trogon_registry::MockRegistryStore>(
+            axum::extract::Path("claude".to_string()),
+            headers,
+            State(state),
+            axum::extract::Extension(empty_registry_ext()),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
     }
 }

@@ -61,8 +61,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     local
         .run_until(async {
             let shutdown_signal = acp_telemetry::signal::shutdown_signal();
+            // Subscribe to all runner sub-prefixes (e.g. acp.*.session.*) so a
+            // single instance covers every runner without reconfiguration.
+            let subject = format!("{acp_prefix}.*.session.*.client.>");
             let mut dispatch_task =
-                tokio::task::spawn_local(dispatcher::run(nats, acp_prefix, runtime, shutdown_rx));
+                tokio::task::spawn_local(dispatcher::run(nats, subject, runtime, shutdown_rx));
             tokio::select! {
                 result = &mut dispatch_task => {
                     match result {

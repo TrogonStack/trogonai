@@ -70,6 +70,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .await
         .map_err(|e| format!("failed to provision JetStream streams: {e}"))?;
 
+    // ── Registry self-registration ────────────────────────────────────────────
+
+    let agent_type = std::env::var("AGENT_TYPE").unwrap_or_else(|_| "xai".to_string());
+    let reg_store = trogon_registry::provision(&js_ctx).await
+        .map_err(|e| format!("registry provisioning failed: {e}"))?;
+    let registry = trogon_registry::Registry::new(reg_store);
+    let cap = trogon_registry::AgentCapability {
+        agent_type: agent_type.clone(),
+        capabilities: vec!["chat".to_string()],
+        nats_subject: format!("{}.agent.>", prefix),
+        current_load: 0,
+        metadata: serde_json::json!({ "acp_prefix": &prefix }),
+    };
+    registry.register(&cap).await
+        .map_err(|e| format!("initial registry registration failed: {e}"))?;
+    info!(agent_type, prefix, "registered in agent registry");
+    tokio::spawn({
+        let cap = cap.clone();
+        async move {
+            let mut interval = tokio::time::interval(trogon_registry::HEARTBEAT_INTERVAL);
+            loop {
+                interval.tick().await;
+                if let Err(e) = registry.refresh(&cap).await {
+                    warn!(error = %e, "registry heartbeat failed");
+                }
+            }
+        }
+    });
+
     let notifier = NatsSessionNotifier::new(nats.clone(), acp_prefix.clone());
     let mut agent = XaiAgent::new(notifier, default_model, api_key);
 
