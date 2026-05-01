@@ -306,6 +306,7 @@ mod tests {
                 mcp_tool_defs: vec![],
                 mcp_dispatch: vec![],
                 permission_checker: None,
+                elicitation_provider: None,
             };
             let store = rt.block_on(async {
                 let js = async_nats::jetstream::new(nats_for_server.clone());
@@ -317,6 +318,7 @@ mod tests {
                 agent_loop,
                 "acp",
                 "claude-opus-4-6",
+                None,
                 None,
                 gateway_config,
             );

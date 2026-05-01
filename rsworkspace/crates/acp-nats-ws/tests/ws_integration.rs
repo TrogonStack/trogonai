@@ -179,6 +179,113 @@ async fn ws_connection_closes_cleanly_on_server_shutdown() {
     let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;
 }
 
+/// Full E2E for request_permission: agent sends a NATS request →
+/// WS bridge forwards it to the WS client as a JSON-RPC
+/// `session/request_permission` call → WS client replies with AllowOnce →
+/// WS bridge publishes the raw `RequestPermissionResponse` JSON back to the
+/// NATS reply subject → the NATS request resolves with a Selected outcome.
+///
+/// This verifies the Phase 2 fix: the bridge now uses raw JSON on the NATS
+/// wire (matching what `NatsClientProxy::request_permission` sends/expects)
+/// instead of the old JSON-RPC envelope format.
+#[tokio::test]
+async fn ws_request_permission_forwarded_and_replied_via_nats() {
+    use agent_client_protocol::{
+        PermissionOption, PermissionOptionKind, RequestPermissionOutcome, RequestPermissionRequest,
+        RequestPermissionResponse, SelectedPermissionOutcome, ToolCallUpdate, ToolCallUpdateFields,
+    };
+
+    let (_container, nats_port) = start_nats().await;
+    let (ws_url, shutdown_tx, conn_thread) = start_server(nats_port).await;
+
+    // WS client connects (simulates Zed/editor).
+    let (mut ws, _) = connect_async(&ws_url).await.unwrap();
+
+    // Wait for client::run to establish the NATS wildcard subscription.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    // Agent side: NATS request simulating trogon-acp-runner calling
+    // NatsClientProxy::request_permission. Payload is raw JSON (no JSON-RPC
+    // envelope), matching what NatsClientProxy actually sends.
+    let agent_nats = async_nats::connect(format!("127.0.0.1:{nats_port}"))
+        .await
+        .expect("agent NATS connect");
+
+    const SESSION: &str = "sess-42";
+    let subject = format!("acp.session.{SESSION}.client.session.request_permission");
+    let perm_request = RequestPermissionRequest::new(
+        SESSION,
+        ToolCallUpdate::new("call-1", ToolCallUpdateFields::new()),
+        vec![
+            PermissionOption::new("allow", "Allow", PermissionOptionKind::AllowOnce),
+            PermissionOption::new("reject", "Reject", PermissionOptionKind::RejectOnce),
+        ],
+    );
+    let request_payload = serde_json::to_vec(&perm_request).unwrap();
+
+    // Spawn the NATS request; it blocks until the WS client replies (or times out).
+    let nats_request_handle = tokio::spawn(async move {
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            agent_nats.request(subject, request_payload.into()),
+        )
+        .await
+    });
+
+    // WS client receives the JSON-RPC session/request_permission call.
+    let rpc_msg_str = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            match ws.next().await {
+                Some(Ok(Message::Text(t))) => return t.to_string(),
+                Some(Ok(_)) => continue,
+                other => panic!("unexpected WS message: {other:?}"),
+            }
+        }
+    })
+    .await
+    .expect("timed out waiting for session/request_permission JSON-RPC message");
+
+    let rpc_msg: serde_json::Value = serde_json::from_str(&rpc_msg_str).unwrap();
+    assert_eq!(
+        rpc_msg["method"], "session/request_permission",
+        "expected session/request_permission method, got: {rpc_msg_str}"
+    );
+    let rpc_id = rpc_msg["id"].clone();
+
+    // WS client replies with AllowOnce.
+    let allow_result = RequestPermissionResponse::new(RequestPermissionOutcome::Selected(
+        SelectedPermissionOutcome::new("allow"),
+    ));
+    let rpc_reply = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": rpc_id,
+        "result": allow_result,
+    });
+    ws.send(Message::Text(rpc_reply.to_string().into()))
+        .await
+        .unwrap();
+
+    // The NATS reply should be a raw RequestPermissionResponse JSON (no JSON-RPC
+    // envelope), because that's what NatsClientProxy::request_with_timeout parses.
+    let nats_outcome = nats_request_handle
+        .await
+        .expect("task panicked")
+        .expect("NATS request timed out")
+        .expect("NATS request failed");
+
+    let nats_response: RequestPermissionResponse =
+        serde_json::from_slice(&nats_outcome.payload)
+            .expect("NATS reply payload should deserialize as raw RequestPermissionResponse");
+
+    assert!(
+        matches!(nats_response.outcome, RequestPermissionOutcome::Selected(_)),
+        "expected Selected outcome"
+    );
+
+    shutdown_tx.send(true).unwrap();
+    let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;
+}
+
 /// Two WebSocket clients connect simultaneously, each sends an `initialize`
 /// request, and each receives its own correctly-correlated response.
 #[tokio::test]

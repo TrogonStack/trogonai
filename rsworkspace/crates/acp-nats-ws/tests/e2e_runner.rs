@@ -80,6 +80,7 @@ fn make_agent_loop() -> AgentLoop {
         mcp_tool_defs: vec![],
         mcp_dispatch: vec![],
         permission_checker: None,
+        elicitation_provider: None,
     }
 }
 
@@ -106,6 +107,7 @@ async fn start_rpc_server(nats: async_nats::Client, js: jetstream::Context) -> N
             make_agent_loop(),
             "acp",
             "claude-opus-4-6",
+            None,
             None,
             gateway_config,
         );

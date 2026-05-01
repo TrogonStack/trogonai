@@ -14,6 +14,7 @@ agent-client-protocol = { version = "0.10.2", features = [
     "unstable_auth_methods",
     "unstable_boolean_config",
     "unstable_cancel_request",
+    "unstable_elicitation",
     "unstable_message_id",
     "unstable_session_close",
     "unstable_session_fork",
@@ -58,4 +59,5 @@ futures                = "0.3"
 httpmock               = "0.7"
 opentelemetry          = { workspace = true }
 testcontainers-modules = { version = "0.8", features = ["nats"] }
+trogon-nats            = { path = "../trogon-nats", features = ["test-support"] }
 trogon-std             = { path = "../trogon-std", features = ["test-support"] }

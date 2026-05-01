@@ -1,5 +1,6 @@
 mod fs_read_text_file;
 mod fs_write_text_file;
+mod session_elicitation;
 mod session_request_permission;
 mod session_update;
 mod terminal_create;
@@ -10,6 +11,7 @@ mod terminal_wait_for_exit;
 
 pub use fs_read_text_file::FsReadTextFileSubject;
 pub use fs_write_text_file::FsWriteTextFileSubject;
+pub use session_elicitation::SessionElicitationSubject;
 pub use session_request_permission::SessionRequestPermissionSubject;
 pub use session_update::SessionUpdateSubject;
 pub use terminal_create::TerminalCreateSubject;

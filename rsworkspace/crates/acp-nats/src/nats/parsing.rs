@@ -98,6 +98,7 @@ fn try_parse_session_agent(subject: &str) -> Option<ParsedAgentSubject> {
 pub enum ClientMethod {
     FsReadTextFile,
     FsWriteTextFile,
+    SessionElicitation,
     SessionRequestPermission,
     SessionUpdate,
     TerminalCreate,
@@ -114,6 +115,7 @@ impl ClientMethod {
         match suffix {
             "fs.read_text_file" => Some(Self::FsReadTextFile),
             "fs.write_text_file" => Some(Self::FsWriteTextFile),
+            "session.elicitation" => Some(Self::SessionElicitation),
             "session.request_permission" => Some(Self::SessionRequestPermission),
             "session.update" => Some(Self::SessionUpdate),
             "terminal.create" => Some(Self::TerminalCreate),
@@ -355,6 +357,13 @@ mod tests {
         let parsed = parse_client_subject("acp.session.s1.client.fs.write_text_file").unwrap();
         assert_eq!(parsed.session_id.as_str(), "s1");
         assert_eq!(parsed.method, ClientMethod::FsWriteTextFile);
+    }
+
+    #[test]
+    fn parse_client_session_elicitation() {
+        let parsed = parse_client_subject("acp.session.s1.client.session.elicitation").unwrap();
+        assert_eq!(parsed.session_id.as_str(), "s1");
+        assert_eq!(parsed.method, ClientMethod::SessionElicitation);
     }
 
     #[test]
