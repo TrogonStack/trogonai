@@ -150,6 +150,12 @@ services:
       # MEMORY_REPO: my-repo
       # MEMORY_PATH: .trogon/memory.md
       # INCIDENTIO_STREAM_NAME: INCIDENTIO
+      # Console skill injection (reads CONSOLE_AGENTS KV from trogon-console):
+      # AGENT_ID: ""
+      # MCP_SERVERS: "tool-name=http://mcp-server:port"
+      # Feature flags via Split.io evaluator sidecar:
+      # SPLIT_EVALUATOR_URL: "http://split-evaluator:7548"
+      # SPLIT_EVALUATOR_AUTH_TOKEN: ""
     depends_on:
       nats:
         condition: service_healthy
@@ -157,5 +163,238 @@ services:
         condition: service_started
     restart: unless-stopped
 
+  # ── ACP WebSocket bridge ─────────────────────────────────────────────────────
+  acp-nats-ws:
+    build:
+      context: .
+      target: acp-nats-ws
+    ports:
+      - "8085:8085"
+    environment:
+      NATS_URL: nats://nats:4222
+      ACP_PREFIX: acp
+      ACP_WS_HOST: "0.0.0.0"
+      ACP_WS_PORT: "8085"
+      RUST_LOG: info
+      # OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"  # enable tracing
+    depends_on:
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── ACP agent runner ──────────────────────────────────────────────────────
+  trogon-acp-runner:
+    build:
+      context: .
+      target: trogon-acp-runner
+    environment:
+      NATS_URL: nats://nats:4222
+      ACP_PREFIX: acp
+      PROXY_URL: http://proxy:8080
+      ANTHROPIC_TOKEN: "${ANTHROPIC_TOKEN}"
+      AGENT_MODEL: "${AGENT_MODEL:-claude-opus-4-6}"
+      AGENT_MAX_ITERATIONS: "${AGENT_MAX_ITERATIONS:-10}"
+      RUST_LOG: info
+    depends_on:
+      nats:
+        condition: service_healthy
+      proxy:
+        condition: service_started
+    restart: unless-stopped
+
+  # ── Context compaction service ────────────────────────────────────────────
+  trogon-compactor:
+    build:
+      context: .
+      target: trogon-compactor
+    environment:
+      NATS_URL: nats://nats:4222
+      PROXY_URL: http://proxy:8080
+      ANTHROPIC_TOKEN: "${ANTHROPIC_TOKEN}"
+      COMPACTOR_MODEL: "${COMPACTOR_MODEL:-claude-haiku-4-5-20251001}"
+      RUST_LOG: info
+    depends_on:
+      nats:
+        condition: service_healthy
+      proxy:
+        condition: service_started
+    restart: unless-stopped
+
+  # ── ACP HTTP transport bridge ─────────────────────────────────────────────
+  acp-nats-server:
+    build:
+      context: .
+      target: acp-nats-server
+    ports:
+      - "8086:8086"
+    environment:
+      NATS_URL: nats://nats:4222
+      ACP_PREFIX: acp
+      ACP_SERVER_HOST: "0.0.0.0"
+      ACP_SERVER_PORT: "8086"
+      RUST_LOG: info
+      # OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"  # enable tracing
+    depends_on:
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── xAI Grok agent runner ────────────────────────────────────────────────
+  trogon-xai-runner:
+    build:
+      context: .
+      target: trogon-xai-runner
+    environment:
+      NATS_URL: nats://nats:4222
+      ACP_PREFIX: acp
+      XAI_API_KEY: "${XAI_API_KEY:-}"
+      XAI_DEFAULT_MODEL: "${XAI_DEFAULT_MODEL:-grok-4}"
+      RUST_LOG: info
+      # Console integration (reads CONSOLE_AGENTS KV, writes SESSIONS KV):
+      # AGENT_ID: ""
+    depends_on:
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── Codex agent runner ───────────────────────────────────────────────────
+  trogon-codex-runner:
+    build:
+      context: .
+      target: trogon-codex-runner
+    environment:
+      NATS_URL: nats://nats:4222
+      ACP_PREFIX: acp
+      CODEX_DEFAULT_MODEL: "${CODEX_DEFAULT_MODEL:-o4-mini}"
+      RUST_LOG: info
+    depends_on:
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── WASM tool execution runtime ──────────────────────────────────────────
+  trogon-wasm-runtime:
+    build:
+      context: .
+      target: trogon-wasm-runtime
+    environment:
+      NATS_URL: nats://nats:4222
+      ACP_PREFIX: acp
+      WASM_SESSION_ROOT: /data/sessions
+      RUST_LOG: info
+    volumes:
+      - wasm-data:/data/sessions
+    depends_on:
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── Console management API ────────────────────────────────────────────────
+  trogon-console:
+    build:
+      context: .
+      target: trogon-console
+    ports:
+      - "8091:8091"
+    environment:
+      NATS_URL: nats://nats:4222
+      CONSOLE_PORT: "8091"
+      RUST_LOG: info
+    depends_on:
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── Event router / LLM dispatch ───────────────────────────────────────────
+  trogon-router:
+    build:
+      context: .
+      target: trogon-router
+    environment:
+      NATS_URL: nats://nats:4222
+      ROUTER_LLM_API_KEY: "${ROUTER_LLM_API_KEY:-}"
+      ROUTER_LLM_API_URL: "${ROUTER_LLM_API_URL:-https://api.x.ai/v1}"
+      ROUTER_LLM_MODEL: "${ROUTER_LLM_MODEL:-grok-3-mini}"
+      ROUTER_EVENTS_SUBJECT: "github.>,linear.>,datadog.>,incidentio.>,gitlab.>,slack.>,discord.>,telegram.>,notion.>,sentry.>,twitter.>"
+      RUST_LOG: info
+    depends_on:
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── PR automation actor ────────────────────────────────────────────────────
+  trogon-pr-actor:
+    build:
+      context: .
+      target: trogon-pr-actor
+    environment:
+      NATS_URL: nats://nats:4222
+      PR_ACTOR_LLM_API_KEY: "${PR_ACTOR_LLM_API_KEY:-}"
+      PR_ACTOR_LLM_API_URL: "${PR_ACTOR_LLM_API_URL:-https://api.x.ai/v1}"
+      PR_ACTOR_LLM_MODEL: "${PR_ACTOR_LLM_MODEL:-grok-3-mini}"
+      PR_ACTOR_GITHUB_TOKEN: "${PR_ACTOR_GITHUB_TOKEN:-}"
+      RUST_LOG: info
+      # OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"  # enable tracing
+    depends_on:
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── Unified event gateway (replaces individual source services) ──────────────
+  # Aggregates GitHub, GitLab, Linear, incident.io, Slack, Discord, Telegram,
+  # Notion, Sentry, and Twitter/X into a single configurable service.
+  #
+  # Requires at least one source credential to start.
+  # Enable with: docker compose --profile gateway up trogon-gateway
+  #
+  # Webhook URLs (once running):
+  #   GitHub    → http://host:8087/github/webhook
+  #   GitLab    → http://host:8087/gitlab/webhook
+  #   Linear    → http://host:8087/linear/webhook
+  #   Slack     → http://host:8087/slack/events
+  #   incident  → http://host:8087/incidentio/webhook
+  #   Notion    → http://host:8087/notion/webhook
+  #   Sentry    → http://host:8087/sentry/webhook
+  #   Telegram  → http://host:8087/telegram/webhook
+  #   Twitter   → http://host:8087/twitter/webhook
+  trogon-gateway:
+    build:
+      context: .
+      target: trogon-gateway
+    profiles: ["gateway"]
+    ports:
+      - "8087:8087"
+    environment:
+      NATS_URL: nats://nats:4222
+      TROGON_GATEWAY_PORT: "8087"
+      RUST_LOG: info
+      # ── Enable each source by providing its credential ──────────────────────
+      # GitHub (webhook secret is required to mount the /github route)
+      # TROGON_SOURCE_GITHUB_WEBHOOK_SECRET: ""
+      # GitLab
+      # TROGON_SOURCE_GITLAB_WEBHOOK_SECRET: ""
+      # Linear
+      # TROGON_SOURCE_LINEAR_WEBHOOK_SECRET: ""
+      # incident.io
+      # TROGON_SOURCE_INCIDENTIO_SIGNING_SECRET: ""
+      # Slack
+      # TROGON_SOURCE_SLACK_SIGNING_SECRET: ""
+      # Discord (Gateway bot token, not webhook)
+      # TROGON_SOURCE_DISCORD_BOT_TOKEN: ""
+      # Telegram
+      # TROGON_SOURCE_TELEGRAM_WEBHOOK_SECRET: ""
+      # Notion
+      # TROGON_SOURCE_NOTION_VERIFICATION_TOKEN: ""
+      # Sentry
+      # TROGON_SOURCE_SENTRY_CLIENT_SECRET: ""
+      # Twitter/X
+      # TROGON_SOURCE_TWITTER_CONSUMER_SECRET: ""
+      # OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"  # enable tracing
+    depends_on:
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   nats-data:
+  wasm-data:

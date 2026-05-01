@@ -46,6 +46,8 @@ fn sample_session(id: &str, tenant_id: &str) -> ChatSession {
         started_at_secs: 0,
         duration_ms: 0,
         agent_id: None,
+        total_input_tokens: 0,
+        total_output_tokens: 0,
     }
 }
 
@@ -191,6 +193,8 @@ async fn session_metadata_fields_round_trip() {
         started_at_secs: 1776384000,
         duration_ms: 42500,
         agent_id: Some("agent_abc123".to_string()),
+        total_input_tokens: 0,
+        total_output_tokens: 0,
     };
     store.put(&s).await.expect("put");
 

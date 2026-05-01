@@ -113,7 +113,7 @@ impl From<trogon_nats::ConnectError> for RunnerError {
 
 pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
     let nats = trogon_nats::connect(&cfg.nats, NATS_CONNECT_TIMEOUT).await?;
-    let js = jetstream::new(nats);
+    let js = jetstream::new(nats.clone());
 
     let http_client = reqwest::Client::new();
 
@@ -165,8 +165,6 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
         // Promise fields are set per-run by `prepare_agent_with_promise`.
         promise_store: None,
         promise_id: None,
-        permission_checker: None,
-        elicitation_provider: None,
     });
 
     let store = Arc::new(
@@ -274,14 +272,13 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
             run_store: (*run_store).clone(),
         };
         let chat_state = ChatAppState {
-            agent: Arc::clone(&agent) as Arc<dyn crate::chat_api::ChatRunner>,
+            agent: Arc::clone(&agent),
             session_store,
             promise_store: Arc::clone(&promise_store),
             agent_id: cfg.agent_id.clone(),
             agent_loader: agent_loader.clone(),
             skill_loader: skill_loader.clone(),
-            approval_registry: Default::default(),
-            elicitation_registry: Default::default(),
+            compactor_nats: Some(nats.clone()),
         };
         let api_port = cfg.api_port;
         tokio::spawn(async move {
@@ -2057,8 +2054,6 @@ mod tests {
             tenant_id: "test".to_string(),
             promise_store: None,
             promise_id: None,
-            permission_checker: None,
-            elicitation_provider: None,
         })
     }
 
@@ -2178,8 +2173,6 @@ mod tests {
             tenant_id: "acme".to_string(),
             promise_store: None,
             promise_id: None,
-            permission_checker: None,
-            elicitation_provider: None,
         })
     }
 
@@ -3980,8 +3973,6 @@ mod tests {
             tenant_id: "test".to_string(),
             promise_store: None,
             promise_id: None,
-            permission_checker: None,
-            elicitation_provider: None,
         });
 
         let (rs, _container) = make_run_store().await;
@@ -4719,8 +4710,6 @@ mod tests {
             tenant_id: "acme".to_string(),
             promise_store: None,
             promise_id: None,
-            permission_checker: None,
-            elicitation_provider: None,
         });
 
         // Auto-advance handles the 30 s AUTO_RETRY_DELAY inside the spawned task.
@@ -7028,8 +7017,6 @@ mod tests {
             tenant_id: "test".to_string(),
             promise_store: None,
             promise_id: None,
-            permission_checker: None,
-            elicitation_provider: None,
         });
 
         // Stale promise with a message history large enough to exceed

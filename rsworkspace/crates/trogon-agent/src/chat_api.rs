@@ -2,353 +2,42 @@
 //!
 //! ## Routes
 //!
-//! | Method | Path                                          | Action                              |
-//! |--------|-----------------------------------------------|-------------------------------------|
-//! | GET    | `/sessions`                                   | List tenant's sessions              |
-//! | POST   | `/sessions`                                   | Create a new session                |
-//! | GET    | `/sessions/:id`                               | Get session with history            |
-//! | PATCH  | `/sessions/:id`                               | Update name / model / tools         |
-//! | DELETE | `/sessions/:id`                               | Delete session                      |
-//! | POST   | `/sessions/:id/messages`                      | Send message (JSON or SSE stream)   |
-//! | POST   | `/sessions/:id/approvals/:tool_call_id`       | Approve or deny a pending tool call |
-//! | POST   | `/sessions/:id/elicitations/:elicitation_id`  | Answer or cancel a pending question |
+//! | Method | Path                              | Action                        |
+//! |--------|-----------------------------------|-------------------------------|
+//! | GET    | `/sessions`                       | List tenant's sessions        |
+//! | POST   | `/sessions`                       | Create a new session          |
+//! | GET    | `/sessions/:id`                   | Get session with history      |
+//! | PATCH  | `/sessions/:id`                   | Update name / model / tools   |
+//! | DELETE | `/sessions/:id`                   | Delete session                |
+//! | POST   | `/sessions/:id/messages`          | Send message, run agent       |
 //!
 //! ## Tenant identification
 //! Every request must carry the `X-Tenant-Id` header.
-//!
-//! ## Streaming + approval gates + elicitations
-//! Add `Accept: text/event-stream` to `POST /sessions/:id/messages` to receive an SSE
-//! stream. Events have the format `data: <json>\n\n` where the JSON has a `type` field:
-//! - `permission_required` — agent wants to run a tool; respond via the approvals endpoint.
-//! - `elicitation_required` — agent asks a question; respond via the elicitations endpoint.
-//! - `done` — agent completed; contains `content` and `message_count`.
-//! - `error` — agent returned an error; contains `message`.
 
-use std::collections::HashMap;
-use std::convert::Infallible;
 use std::sync::Arc;
-use std::time::Duration;
 
 use axum::{
     Router,
     extract::{Path, State},
     http::{HeaderMap, StatusCode},
-    response::{IntoResponse, Response, sse::{Event, Sse}},
+    response::{IntoResponse, Response},
     routing::{get, post},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use tokio::sync::{Mutex, mpsc, oneshot};
-use tokio_stream::wrappers::ReceiverStream;
-use tokio_stream::StreamExt as _;
+use tracing::{info, warn};
 
 use crate::agent_loop::{AgentLoop, Message};
 use crate::handlers::{DEFAULT_MEMORY_PATH, fetch_memory};
 use crate::promise_store::{AgentPromise, PromiseRepository, PromiseStatus};
 use crate::session::{ChatSession, SessionRepository};
-use crate::tools::{ToolDef, all_tool_defs};
-use trogon_agent_core::agent_loop::{ElicitationProvider, PermissionChecker};
-
-// ── ChatRunner trait ──────────────────────────────────────────────────────────
-
-/// The minimal interface `send_message` needs from the AI backend.
-///
-/// Abstracting this allows unit tests to inject a `MockChatRunner` without
-/// a real HTTP stack, while `runner.rs` wires the production `AgentLoop`.
-pub trait ChatRunner: Send + Sync + 'static {
-    /// Default model name; may be overridden per-session.
-    fn default_model(&self) -> &str;
-
-    /// Fetch memory from the backing store (if configured) and combine it with
-    /// pre-loaded skill content to produce the final system prompt.
-    fn build_system_prompt<'a>(
-        &'a self,
-        session_memory_path: Option<&'a str>,
-        skill_content: Option<String>,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<String>> + Send + 'a>>;
-
-    /// Run one agent turn; return the final reply text and the updated message
-    /// history.  The `permission_checker` and `elicitation_provider` are only
-    /// set in SSE mode.
-    fn run<'a>(
-        &'a self,
-        messages: Vec<Message>,
-        tools: Vec<ToolDef>,
-        system_prompt: Option<String>,
-        model: String,
-        permission_checker: Option<Arc<dyn PermissionChecker>>,
-        elicitation_provider: Option<Arc<dyn ElicitationProvider>>,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<(String, Vec<Message>), String>> + Send + 'a>,
-    >;
-}
-
-impl ChatRunner for AgentLoop {
-    fn default_model(&self) -> &str {
-        &self.model
-    }
-
-    fn build_system_prompt<'a>(
-        &'a self,
-        session_memory_path: Option<&'a str>,
-        skill_content: Option<String>,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<String>> + Send + 'a>> {
-        Box::pin(async move {
-            let mem_path = session_memory_path
-                .or(self.memory_path.as_deref())
-                .unwrap_or(DEFAULT_MEMORY_PATH);
-            let memory = match (&self.memory_owner, &self.memory_repo) {
-                (Some(owner), Some(repo)) => fetch_memory(self, owner, repo, mem_path).await,
-                _ => None,
-            };
-            match (skill_content.as_deref(), memory.as_deref()) {
-                (Some(skills), Some(mem)) => Some(format!("{skills}\n\n---\n\n{mem}")),
-                (Some(skills), None) => Some(skills.to_string()),
-                (None, Some(mem)) => Some(mem.to_string()),
-                (None, None) => None,
-            }
-        })
-    }
-
-    fn run<'a>(
-        &'a self,
-        messages: Vec<Message>,
-        tools: Vec<ToolDef>,
-        system_prompt: Option<String>,
-        model: String,
-        permission_checker: Option<Arc<dyn PermissionChecker>>,
-        elicitation_provider: Option<Arc<dyn ElicitationProvider>>,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<(String, Vec<Message>), String>> + Send + 'a>,
-    > {
-        // Clone Arc fields up-front; the future captures only owned values.
-        let anthropic_client = Arc::clone(&self.anthropic_client);
-        let max_iterations = self.max_iterations;
-        let tool_dispatcher = Arc::clone(&self.tool_dispatcher);
-        let tool_context = Arc::clone(&self.tool_context);
-        let memory_owner = self.memory_owner.clone();
-        let memory_repo = self.memory_repo.clone();
-        let memory_path = self.memory_path.clone();
-        let mcp_tool_defs = self.mcp_tool_defs.clone();
-        let mcp_dispatch = self.mcp_dispatch.clone();
-        let flag_client = Arc::clone(&self.flag_client);
-        let tenant_id = self.tenant_id.clone();
-
-        Box::pin(async move {
-            let req_agent = AgentLoop {
-                anthropic_client,
-                model,
-                max_iterations,
-                tool_dispatcher,
-                tool_context,
-                memory_owner,
-                memory_repo,
-                memory_path,
-                mcp_tool_defs,
-                mcp_dispatch,
-                flag_client,
-                tenant_id,
-                promise_store: None,
-                promise_id: None,
-                permission_checker,
-                elicitation_provider,
-            };
-            req_agent
-                .run_chat(messages, &tools, system_prompt.as_deref())
-                .await
-                .map_err(|e| e.to_string())
-        })
-    }
-}
-
-// ── Approval registry ─────────────────────────────────────────────────────────
-
-/// Holds in-flight tool approval requests keyed by `tool_call_id`.
-type PendingApprovals = Mutex<HashMap<String, oneshot::Sender<bool>>>;
-
-/// Registry mapping session_id → active approval map for `send_message` SSE runs.
-#[derive(Clone, Default)]
-pub struct ApprovalRegistry(Arc<Mutex<HashMap<String, Arc<PendingApprovals>>>>);
-
-impl ApprovalRegistry {
-    pub fn new() -> Self {
-        Self(Arc::new(Mutex::new(HashMap::new())))
-    }
-
-    async fn register(&self, session_id: &str) -> Arc<PendingApprovals> {
-        let pending = Arc::new(Mutex::new(HashMap::new()));
-        self.0.lock().await.insert(session_id.to_string(), Arc::clone(&pending));
-        pending
-    }
-
-    pub async fn resolve(&self, session_id: &str, tool_call_id: &str, allowed: bool) -> bool {
-        let guard = self.0.lock().await;
-        if let Some(pending) = guard.get(session_id) {
-            let mut map = pending.lock().await;
-            if let Some(tx) = map.remove(tool_call_id) {
-                let _ = tx.send(allowed);
-                return true;
-            }
-        }
-        false
-    }
-
-    async fn deregister(&self, session_id: &str) {
-        self.0.lock().await.remove(session_id);
-    }
-}
-
-// ── HTTP permission checker ───────────────────────────────────────────────────
-
-/// `PermissionChecker` for HTTP sessions: emits a `permission_required` SSE event and
-/// waits for the client to POST to `/sessions/{id}/approvals/{tool_call_id}`.
-struct HttpPermissionChecker {
-    pending: Arc<PendingApprovals>,
-    event_tx: mpsc::Sender<SsePayload>,
-}
-
-impl PermissionChecker for HttpPermissionChecker {
-    fn check<'a>(
-        &'a self,
-        tool_call_id: &'a str,
-        tool_name: &'a str,
-        tool_input: &'a serde_json::Value,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send + 'a>> {
-        Box::pin(async move {
-            let (resp_tx, resp_rx) = oneshot::channel();
-            self.pending
-                .lock()
-                .await
-                .insert(tool_call_id.to_string(), resp_tx);
-
-            let event = SsePayload::PermissionRequired {
-                tool_call_id: tool_call_id.to_string(),
-                tool_name: tool_name.to_string(),
-                tool_input: tool_input.clone(),
-            };
-            if self.event_tx.send(event).await.is_err() {
-                return false; // client disconnected
-            }
-
-            match tokio::time::timeout(Duration::from_secs(60), resp_rx).await {
-                Ok(Ok(allowed)) => allowed,
-                _ => false,
-            }
-        })
-    }
-}
-
-// ── Elicitation registry ──────────────────────────────────────────────────────
-
-/// Holds in-flight elicitation requests keyed by a per-request `elicitation_id`.
-type PendingElicitations = Mutex<HashMap<String, oneshot::Sender<Option<String>>>>;
-
-/// Registry mapping session_id → active elicitation map for SSE `send_message` runs.
-#[derive(Clone, Default)]
-pub struct ElicitationRegistry(Arc<Mutex<HashMap<String, Arc<PendingElicitations>>>>);
-
-impl ElicitationRegistry {
-    pub fn new() -> Self {
-        Self(Arc::new(Mutex::new(HashMap::new())))
-    }
-
-    async fn register(&self, session_id: &str) -> Arc<PendingElicitations> {
-        let pending = Arc::new(Mutex::new(HashMap::new()));
-        self.0.lock().await.insert(session_id.to_string(), Arc::clone(&pending));
-        pending
-    }
-
-    pub async fn respond(&self, session_id: &str, elicitation_id: &str, answer: Option<String>) -> bool {
-        let guard = self.0.lock().await;
-        if let Some(pending) = guard.get(session_id) {
-            let mut map = pending.lock().await;
-            if let Some(tx) = map.remove(elicitation_id) {
-                let _ = tx.send(answer);
-                return true;
-            }
-        }
-        false
-    }
-
-    async fn deregister(&self, session_id: &str) {
-        self.0.lock().await.remove(session_id);
-    }
-}
-
-// ── HTTP elicitation provider ─────────────────────────────────────────────────
-
-/// `ElicitationProvider` for HTTP sessions: emits an `elicitation_required` SSE event
-/// and waits for the client to POST to `/sessions/{id}/elicitations/{elicitation_id}`.
-struct HttpElicitationProvider {
-    pending: Arc<PendingElicitations>,
-    event_tx: mpsc::Sender<SsePayload>,
-}
-
-impl trogon_agent_core::agent_loop::ElicitationProvider for HttpElicitationProvider {
-    fn elicit<'a>(
-        &'a self,
-        question: &'a str,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<String>> + Send + 'a>> {
-        Box::pin(async move {
-            let elicitation_id = uuid::Uuid::new_v4().to_string();
-            let (resp_tx, resp_rx) = oneshot::channel();
-            self.pending
-                .lock()
-                .await
-                .insert(elicitation_id.clone(), resp_tx);
-
-            let event = SsePayload::ElicitationRequired {
-                elicitation_id,
-                question: question.to_string(),
-            };
-            if self.event_tx.send(event).await.is_err() {
-                return None; // client disconnected
-            }
-
-            // Elicitations can take longer — give the user 5 minutes.
-            match tokio::time::timeout(Duration::from_secs(300), resp_rx).await {
-                Ok(Ok(answer)) => answer,
-                _ => None,
-            }
-        })
-    }
-}
-
-// ── SSE event types ───────────────────────────────────────────────────────────
-
-#[derive(Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub(crate) enum SsePayload {
-    PermissionRequired {
-        tool_call_id: String,
-        tool_name: String,
-        tool_input: serde_json::Value,
-    },
-    ElicitationRequired {
-        elicitation_id: String,
-        question: String,
-    },
-    Done {
-        content: String,
-        message_count: usize,
-    },
-    Error {
-        message: String,
-    },
-}
-
-impl SsePayload {
-    fn into_event(self) -> Result<Event, Infallible> {
-        Ok(Event::default()
-            .data(serde_json::to_string(&self).unwrap_or_default()))
-    }
-}
+use crate::tools::all_tool_defs;
 
 // ── App state ─────────────────────────────────────────────────────────────────
 
 #[derive(Clone)]
 pub struct ChatAppState<R: SessionRepository> {
-    pub agent: Arc<dyn ChatRunner>,
+    pub agent: Arc<AgentLoop>,
     pub session_store: R,
     pub promise_store: Arc<dyn PromiseRepository>,
     /// Agent definition ID from CONSOLE_AGENTS (populated when `AGENT_ID` is set).
@@ -358,10 +47,66 @@ pub struct ChatAppState<R: SessionRepository> {
     pub agent_loader: Option<Arc<dyn crate::agent_loader::AgentLoading>>,
     /// Skill loader shared with the automation dispatcher.
     pub skill_loader: Option<Arc<dyn crate::skill_loader::SkillLoading>>,
-    /// Registry of in-flight approval requests for SSE-mode `send_message`.
-    pub approval_registry: ApprovalRegistry,
-    /// Registry of in-flight elicitation requests for SSE-mode `send_message`.
-    pub elicitation_registry: ElicitationRegistry,
+    /// When `Some`, context compaction is attempted before each `run_chat` call
+    /// via a NATS request to `trogon.compactor.compact`. Degrades gracefully.
+    pub compactor_nats: Option<async_nats::Client>,
+}
+
+// ── Context compaction ────────────────────────────────────────────────────────
+
+/// Sends the conversation history to `trogon-compactor` via NATS request-reply.
+/// Returns the original messages unchanged if the compactor is unavailable.
+#[cfg_attr(coverage, coverage(off))]
+async fn compact_messages(
+    nats: &async_nats::Client,
+    messages: Vec<Message>,
+    session_id: &str,
+) -> Vec<Message> {
+    #[derive(serde::Serialize)]
+    struct CompactReq<'a> {
+        messages: &'a [Message],
+    }
+    #[derive(serde::Deserialize)]
+    struct CompactResp {
+        messages: Vec<Message>,
+        #[serde(default)]
+        compacted: bool,
+        #[serde(default)]
+        tokens_before: usize,
+        #[serde(default)]
+        tokens_after: usize,
+    }
+
+    let Ok(payload) = serde_json::to_vec(&CompactReq { messages: &messages }) else {
+        return messages;
+    };
+    let reply = match nats
+        .request("trogon.compactor.compact", payload.into())
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            warn!(session_id, error = %e, "compactor unavailable — skipping compaction");
+            return messages;
+        }
+    };
+    match serde_json::from_slice::<CompactResp>(&reply.payload) {
+        Ok(resp) => {
+            if resp.compacted {
+                info!(
+                    session_id,
+                    tokens_before = resp.tokens_before,
+                    tokens_after = resp.tokens_after,
+                    "context compacted"
+                );
+            }
+            resp.messages
+        }
+        Err(e) => {
+            warn!(session_id, error = %e, "compactor returned invalid response — skipping");
+            messages
+        }
+    }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -454,6 +199,8 @@ struct SessionSummary {
     message_count: usize,
     created_at: String,
     updated_at: String,
+    total_input_tokens: u64,
+    total_output_tokens: u64,
 }
 
 impl From<&ChatSession> for SessionSummary {
@@ -468,6 +215,8 @@ impl From<&ChatSession> for SessionSummary {
             message_count: s.messages.len(),
             created_at: s.created_at.clone(),
             updated_at: s.updated_at.clone(),
+            total_input_tokens: s.total_input_tokens,
+            total_output_tokens: s.total_output_tokens,
         }
     }
 }
@@ -508,18 +257,10 @@ pub struct SendMessageResponse {
     pub content: String,
     /// Total messages in the session after this turn.
     pub message_count: usize,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct ApprovalRequest {
-    /// `true` to allow the tool call, `false` to deny it.
-    pub allowed: bool,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct ElicitationResponseRequest {
-    /// The user's answer. `None` means the user cancelled.
-    pub answer: Option<String>,
+    /// Input tokens consumed in this turn.
+    pub input_tokens: u64,
+    /// Output tokens produced in this turn.
+    pub output_tokens: u64,
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
@@ -565,6 +306,8 @@ async fn create_session<R: SessionRepository>(
         started_at_secs: now_secs,
         duration_ms: 0,
         agent_id: state.agent_id.clone(),
+        total_input_tokens: 0,
+        total_output_tokens: 0,
     };
     match state.session_store.put(&session).await {
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e),
@@ -682,11 +425,44 @@ async fn send_message<R: SessionRepository>(
             .collect()
     };
 
-    // Resolve the effective model.
+    // Resolve the effective agent: override model if the session specifies one.
     let effective_model = session
         .model
         .clone()
-        .unwrap_or_else(|| state.agent.default_model().to_string());
+        .unwrap_or_else(|| state.agent.model.clone());
+    let temp_agent;
+    let agent: &AgentLoop = if effective_model == state.agent.model {
+        &state.agent
+    } else {
+        temp_agent = AgentLoop {
+            anthropic_client: Arc::clone(&state.agent.anthropic_client),
+            model: effective_model,
+            max_iterations: state.agent.max_iterations,
+            tool_dispatcher: Arc::clone(&state.agent.tool_dispatcher),
+            tool_context: Arc::clone(&state.agent.tool_context),
+            memory_owner: state.agent.memory_owner.clone(),
+            memory_repo: state.agent.memory_repo.clone(),
+            memory_path: state.agent.memory_path.clone(),
+            mcp_tool_defs: state.agent.mcp_tool_defs.clone(),
+            mcp_dispatch: state.agent.mcp_dispatch.clone(),
+            flag_client: Arc::clone(&state.agent.flag_client),
+            tenant_id: state.agent.tenant_id.clone(),
+            promise_store: None,
+            promise_id: None,
+        };
+        &temp_agent
+    };
+
+    // Fetch memory (system prompt).
+    let mem_path = session
+        .memory_path
+        .as_deref()
+        .or(agent.memory_path.as_deref())
+        .unwrap_or(DEFAULT_MEMORY_PATH);
+    let memory = match (&agent.memory_owner, &agent.memory_repo) {
+        (Some(owner), Some(repo)) => fetch_memory(agent, owner, repo, mem_path).await,
+        _ => None,
+    };
 
     // Fetch current skill_ids from the agent definition (reads CONSOLE_AGENTS KV
     // on every turn so console updates propagate without an agent restart).
@@ -695,102 +471,40 @@ async fn send_message<R: SessionRepository>(
         _ => vec![],
     };
 
-    // Load skills for this agent definition.
+    // Load skills for this agent definition and combine with memory.
     let skill_content: Option<String> = match &state.skill_loader {
         Some(loader) if !skill_ids.is_empty() => loader.load(&skill_ids).await,
         _ => None,
     };
+    let system_prompt: Option<String> = match (skill_content.as_deref(), memory.as_deref()) {
+        (Some(skills), Some(mem)) => Some(format!("{skills}\n\n---\n\n{mem}")),
+        (Some(skills), None) => Some(skills.to_string()),
+        (None, Some(mem)) => Some(mem.to_string()),
+        (None, None) => None,
+    };
 
-    // Fetch memory and combine with skill content into the final system prompt.
-    // Both steps are delegated to the ChatRunner so the handler stays generic.
-    let system_prompt = state
-        .agent
-        .build_system_prompt(session.memory_path.as_deref(), skill_content)
-        .await;
-
-    // If the client requested SSE, run as a stream with approval gate support.
-    let wants_sse = headers
-        .get("accept")
-        .and_then(|v| v.to_str().ok())
-        .map(|v| v.contains("text/event-stream"))
-        .unwrap_or(false);
-
-    if wants_sse {
-        let (event_tx, event_rx) = mpsc::channel::<SsePayload>(32);
-
-        let approval_pending = state.approval_registry.register(&id).await;
-        let permission_checker: Option<Arc<dyn PermissionChecker>> =
-            Some(Arc::new(HttpPermissionChecker {
-                pending: approval_pending,
-                event_tx: event_tx.clone(),
-            }));
-
-        let elic_pending = state.elicitation_registry.register(&id).await;
-        let elicitation_provider: Option<Arc<dyn ElicitationProvider>> =
-            Some(Arc::new(HttpElicitationProvider {
-                pending: elic_pending,
-                event_tx: event_tx.clone(),
-            }));
-
-        let agent = Arc::clone(&state.agent);
-        let session_store = state.session_store.clone();
-        let approval_registry = state.approval_registry.clone();
-        let elicitation_registry = state.elicitation_registry.clone();
-        let session_id = id.clone();
-
-        tokio::spawn(async move {
-            let result = agent
-                .run(
-                    session.messages.clone(),
-                    tools,
-                    system_prompt,
-                    effective_model,
-                    permission_checker,
-                    elicitation_provider,
-                )
-                .await;
-
-            let payload = match result {
-                Err(e) => SsePayload::Error { message: e },
-                Ok((text, updated_messages)) => {
-                    let message_count = updated_messages.len();
-                    session.messages = updated_messages;
-                    let now_secs = now_epoch_secs();
-                    session.updated_at = epoch_to_iso8601(now_secs);
-                    if session.started_at_secs > 0 {
-                        session.duration_ms = now_secs
-                            .saturating_sub(session.started_at_secs)
-                            .saturating_mul(1000);
-                    }
-                    let _ = session_store.put(&session).await;
-                    SsePayload::Done { content: text, message_count }
-                }
-            };
-
-            let _ = event_tx.send(payload).await;
-            approval_registry.deregister(&session_id).await;
-            elicitation_registry.deregister(&session_id).await;
-        });
-
-        let stream = ReceiverStream::new(event_rx).map(SsePayload::into_event);
-        return Sse::new(stream).into_response();
+    // Compact context window before sending to the LLM (degrades gracefully).
+    if let Some(ref nats) = state.compactor_nats {
+        let msgs = session.messages.clone();
+        session.messages = compact_messages(nats, msgs, &id).await;
     }
 
-    // Non-SSE path: run synchronously and return JSON.
-    match state
-        .agent
-        .run(
-            session.messages.clone(),
-            tools,
-            system_prompt,
-            effective_model,
-            None,
-            None,
-        )
+    // Run the chat loop — returns (final_text, updated_messages).
+    let prev_message_count = session.messages.len();
+    match agent
+        .run_chat(session.messages.clone(), &tools, system_prompt.as_deref())
         .await
     {
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
         Ok((text, updated_messages)) => {
+            let (turn_input, turn_output) = updated_messages[prev_message_count..]
+                .iter()
+                .filter_map(|m| m.usage.as_ref())
+                .fold((0u64, 0u64), |(i, o), u| {
+                    (i + u.input_tokens as u64, o + u.output_tokens as u64)
+                });
+            session.total_input_tokens  += turn_input;
+            session.total_output_tokens += turn_output;
             let message_count = updated_messages.len();
             session.messages = updated_messages;
             let now_secs = now_epoch_secs();
@@ -813,54 +527,12 @@ async fn send_message<R: SessionRepository>(
                 axum::Json(SendMessageResponse {
                     content: text,
                     message_count,
+                    input_tokens:  turn_input,
+                    output_tokens: turn_output,
                 }),
             )
                 .into_response()
         }
-    }
-}
-
-/// `POST /sessions/:id/approvals/:tool_call_id` — resolve a pending tool approval.
-///
-/// Body: `{"allowed": true}` or `{"allowed": false}`.
-/// Returns 200 on success, 404 if there is no matching pending approval.
-async fn approve_tool_call<R: SessionRepository>(
-    headers: HeaderMap,
-    State(state): State<ChatAppState<R>>,
-    Path((id, tool_call_id)): Path<(String, String)>,
-    axum::Json(body): axum::Json<ApprovalRequest>,
-) -> Response {
-    match tenant_id(&headers) {
-        Ok(_) => {}
-        Err(r) => return r,
-    };
-
-    if state.approval_registry.resolve(&id, &tool_call_id, body.allowed).await {
-        StatusCode::OK.into_response()
-    } else {
-        err(StatusCode::NOT_FOUND, "no pending approval for that tool_call_id")
-    }
-}
-
-/// `POST /sessions/:id/elicitations/:elicitation_id` — answer or cancel a pending elicitation.
-///
-/// Body: `{"answer": "some text"}` to answer, or `{"answer": null}` to cancel.
-/// Returns 200 on success, 404 if there is no matching pending elicitation.
-async fn respond_to_elicitation<R: SessionRepository>(
-    headers: HeaderMap,
-    State(state): State<ChatAppState<R>>,
-    Path((id, elicitation_id)): Path<(String, String)>,
-    axum::Json(body): axum::Json<ElicitationResponseRequest>,
-) -> Response {
-    match tenant_id(&headers) {
-        Ok(_) => {}
-        Err(r) => return r,
-    };
-
-    if state.elicitation_registry.respond(&id, &elicitation_id, body.answer).await {
-        StatusCode::OK.into_response()
-    } else {
-        err(StatusCode::NOT_FOUND, "no pending elicitation for that elicitation_id")
     }
 }
 
@@ -947,14 +619,6 @@ pub fn router<R: SessionRepository>(state: ChatAppState<R>) -> Router {
                 .delete(delete_session::<R>),
         )
         .route("/sessions/{id}/messages", post(send_message::<R>))
-        .route(
-            "/sessions/{id}/approvals/{tool_call_id}",
-            post(approve_tool_call::<R>),
-        )
-        .route(
-            "/sessions/{id}/elicitations/{elicitation_id}",
-            post(respond_to_elicitation::<R>),
-        )
         .route("/admin/promises", get(list_promises::<R>))
         .with_state(state)
 }
@@ -964,73 +628,10 @@ pub fn router<R: SessionRepository>(state: ChatAppState<R>) -> Router {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent_loop::ContentBlock;
     use crate::session::mock::{ErrorSessionStore, GetOkPutErrorSessionStore, MockSessionStore};
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use tower::util::ServiceExt as _;
-
-    // ── MockChatRunner ────────────────────────────────────────────────────────
-
-    /// Test double for `ChatRunner`.  Configured with a fixed reply; the
-    /// `fail` flag makes `run` return an error to exercise error-path handlers.
-    struct MockChatRunner {
-        response: String,
-        fail: bool,
-    }
-
-    impl MockChatRunner {
-        fn new(response: &str) -> Self {
-            Self { response: response.to_string(), fail: false }
-        }
-
-        fn failing() -> Self {
-            Self { response: String::new(), fail: true }
-        }
-    }
-
-    impl ChatRunner for MockChatRunner {
-        fn default_model(&self) -> &str {
-            "mock-model"
-        }
-
-        fn build_system_prompt<'a>(
-            &'a self,
-            _session_memory_path: Option<&'a str>,
-            skill_content: Option<String>,
-        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<String>> + Send + 'a>>
-        {
-            Box::pin(async move { skill_content })
-        }
-
-        fn run<'a>(
-            &'a self,
-            mut messages: Vec<Message>,
-            _tools: Vec<ToolDef>,
-            _system_prompt: Option<String>,
-            _model: String,
-            _permission_checker: Option<Arc<dyn PermissionChecker>>,
-            _elicitation_provider: Option<Arc<dyn ElicitationProvider>>,
-        ) -> std::pin::Pin<
-            Box<
-                dyn std::future::Future<Output = Result<(String, Vec<Message>), String>>
-                    + Send
-                    + 'a,
-            >,
-        > {
-            let response = self.response.clone();
-            let fail = self.fail;
-            Box::pin(async move {
-                if fail {
-                    return Err("mock agent error".to_string());
-                }
-                messages.push(Message::assistant(vec![ContentBlock::Text {
-                    text: response.clone(),
-                }]));
-                Ok((response, messages))
-            })
-        }
-    }
 
     #[test]
     fn now_iso8601_has_correct_format() {
@@ -1054,6 +655,8 @@ mod tests {
             started_at_secs: 0,
             duration_ms: 0,
             agent_id: None,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
         };
         let summary = SessionSummary::from(&s);
         assert_eq!(summary.message_count, 2);
@@ -1230,54 +833,138 @@ mod tests {
         );
     }
 
+    /// Sessions stored before token tracking was added have no
+    /// `total_input_tokens` / `total_output_tokens` fields.  They must
+    /// deserialize successfully with both fields defaulting to 0.
+    #[test]
+    fn chat_session_without_token_fields_deserializes_to_zero() {
+        use crate::session::ChatSession;
+
+        let json = r#"{
+            "id": "sess-old",
+            "tenant_id": "acme",
+            "name": "legacy-session",
+            "tools": [],
+            "messages": [],
+            "created_at": "2025-01-01T00:00:00Z",
+            "updated_at": "2025-01-01T00:00:00Z"
+        }"#;
+
+        let session: ChatSession = serde_json::from_str(json)
+            .expect("ChatSession must deserialize even when token fields are absent");
+
+        assert_eq!(
+            session.total_input_tokens, 0,
+            "total_input_tokens must default to 0 for legacy records"
+        );
+        assert_eq!(
+            session.total_output_tokens, 0,
+            "total_output_tokens must default to 0 for legacy records"
+        );
+    }
+
     // ── Handler tests ─────────────────────────────────────────────────────────
 
-    fn mock_runner() -> Arc<dyn ChatRunner> {
-        Arc::new(MockChatRunner::new("ok"))
+    fn make_test_agent() -> Arc<AgentLoop> {
+        use crate::agent_loop::ReqwestAnthropicClient;
+        use crate::flag_client::AlwaysOnFlagClient;
+        use crate::tools::{DefaultToolDispatcher, ToolContext};
+
+        let http = reqwest::Client::new();
+        let tool_ctx = Arc::new(ToolContext::for_test("http://127.0.0.1:1", "", "", ""));
+        Arc::new(AgentLoop {
+            anthropic_client: Arc::new(ReqwestAnthropicClient::new(
+                http,
+                "http://127.0.0.1:1".to_string(),
+                String::new(),
+            )),
+            model: "test".to_string(),
+            max_iterations: 1,
+            tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),
+            tool_context: tool_ctx,
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            flag_client: Arc::new(AlwaysOnFlagClient),
+            tenant_id: "test-tenant".to_string(),
+            promise_store: None,
+            promise_id: None,
+        })
+    }
+
+    fn make_mock_agent(responses: Vec<serde_json::Value>) -> Arc<AgentLoop> {
+        use crate::agent_loop::mock::SequencedMockAnthropicClient;
+        use crate::flag_client::AlwaysOnFlagClient;
+        use crate::tools::{DefaultToolDispatcher, ToolContext};
+
+        let tool_ctx = Arc::new(ToolContext::for_test("http://127.0.0.1:1", "", "", ""));
+        Arc::new(AgentLoop {
+            anthropic_client: Arc::new(SequencedMockAnthropicClient::new(responses)),
+            model: "test".to_string(),
+            max_iterations: 1,
+            tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),
+            tool_context: tool_ctx,
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            flag_client: Arc::new(AlwaysOnFlagClient),
+            tenant_id: "test-tenant".to_string(),
+            promise_store: None,
+            promise_id: None,
+        })
+    }
+
+    fn mock_app_with_agent(store: MockSessionStore, agent: Arc<AgentLoop>) -> axum::Router {
+        let state = ChatAppState {
+            agent,
+            session_store: store,
+            promise_store: Arc::new(crate::promise_store::mock::MockPromiseStore::new()),
+            agent_id: None,
+            agent_loader: None,
+            skill_loader: None,
+        };
+        router(state)
     }
 
     fn get_ok_put_error_app() -> axum::Router {
         let state = ChatAppState {
-            agent: mock_runner(),
+            agent: make_test_agent(),
             session_store: GetOkPutErrorSessionStore::new(),
             promise_store: Arc::new(crate::promise_store::mock::MockPromiseStore::new()),
             agent_id: None,
             agent_loader: None,
             skill_loader: None,
-            approval_registry: ApprovalRegistry::new(),
-            elicitation_registry: ElicitationRegistry::new(),
+            compactor_nats: None,
         };
         router(state)
     }
 
     fn error_app() -> axum::Router {
         let state = ChatAppState {
-            agent: mock_runner(),
+            agent: make_test_agent(),
             session_store: ErrorSessionStore::new(),
             promise_store: Arc::new(crate::promise_store::mock::MockPromiseStore::new()),
             agent_id: None,
             agent_loader: None,
             skill_loader: None,
-            approval_registry: ApprovalRegistry::new(),
-            elicitation_registry: ElicitationRegistry::new(),
+            compactor_nats: None,
         };
         router(state)
     }
 
     fn mock_app(store: MockSessionStore) -> axum::Router {
-        mock_app_with_runner(store, MockChatRunner::new("ok"))
-    }
-
-    fn mock_app_with_runner(store: MockSessionStore, runner: MockChatRunner) -> axum::Router {
         let state = ChatAppState {
-            agent: Arc::new(runner) as Arc<dyn ChatRunner>,
+            agent: make_test_agent(),
             session_store: store,
             promise_store: Arc::new(crate::promise_store::mock::MockPromiseStore::new()),
             agent_id: None,
             agent_loader: None,
             skill_loader: None,
-            approval_registry: ApprovalRegistry::new(),
-            elicitation_registry: ElicitationRegistry::new(),
+            compactor_nats: None,
         };
         router(state)
     }
@@ -1305,6 +992,8 @@ mod tests {
             started_at_secs: 0,
             duration_ms: 0,
             agent_id: None,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
         }
     }
 
@@ -1407,6 +1096,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn create_session_response_includes_zero_token_totals() {
+        let app = mock_app(MockSessionStore::new());
+        let req = Request::builder()
+            .method("POST")
+            .uri("/sessions")
+            .header("x-tenant-id", "acme")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"name":"S"}"#))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["total_input_tokens"], 0);
+        assert_eq!(json["total_output_tokens"], 0);
+    }
+
+    #[tokio::test]
     async fn get_session_missing_tenant_returns_400() {
         let app = mock_app(MockSessionStore::new());
         let req = Request::builder()
@@ -1448,6 +1157,27 @@ mod tests {
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["id"], "sess-1");
         assert_eq!(json["messages"].as_array().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn get_session_response_includes_token_totals() {
+        let store = MockSessionStore::new();
+        let mut s = sample_session("sess-tok", "acme");
+        s.total_input_tokens = 99;
+        s.total_output_tokens = 33;
+        store.insert(s);
+        let app = mock_app(store);
+        let resp = app
+            .oneshot(get_req("/sessions/sess-tok", "acme"))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["total_input_tokens"], 99);
+        assert_eq!(json["total_output_tokens"], 33);
     }
 
     #[tokio::test]
@@ -1572,6 +1302,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn update_session_preserves_token_totals_in_response() {
+        let store = MockSessionStore::new();
+        let mut s = sample_session("sess-tok-upd", "acme");
+        s.total_input_tokens = 55;
+        s.total_output_tokens = 22;
+        store.insert(s);
+        let app = mock_app(store);
+        let req = Request::builder()
+            .method("PATCH")
+            .uri("/sessions/sess-tok-upd")
+            .header("x-tenant-id", "acme")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"name":"Renamed"}"#))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["total_input_tokens"], 55, "update_session must not reset token totals");
+        assert_eq!(json["total_output_tokens"], 22, "update_session must not reset token totals");
+    }
+
+    #[tokio::test]
     async fn update_session_updates_name_and_returns_summary() {
         let store = MockSessionStore::new();
         store.insert(sample_session("sess-1", "acme"));
@@ -1661,14 +1416,13 @@ mod tests {
         promise_store: Arc<dyn crate::promise_store::PromiseRepository>,
     ) -> axum::Router {
         let state = ChatAppState {
-            agent: mock_runner(),
+            agent: make_test_agent(),
             session_store,
             promise_store,
             agent_id: None,
             agent_loader: None,
             skill_loader: None,
-            approval_registry: ApprovalRegistry::new(),
-            elicitation_registry: ElicitationRegistry::new(),
+            compactor_nats: None,
         };
         router(state)
     }
@@ -1902,176 +1656,124 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 
-    #[tokio::test]
-    async fn send_message_returns_200_with_agent_content() {
-        let store = MockSessionStore::new();
-        store.insert(sample_session("sess-1", "acme"));
-        let app = mock_app_with_runner(store, MockChatRunner::new("Hello from agent"));
+    // ── Token tracking ────────────────────────────────────────────────────────
 
-        let req = Request::builder()
+    fn llm_response(text: &str, input_tokens: u32, output_tokens: u32) -> serde_json::Value {
+        serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": text}],
+            "usage": {"input_tokens": input_tokens, "output_tokens": output_tokens}
+        })
+    }
+
+    fn send_msg_req(session_id: &str, content: &str) -> Request<Body> {
+        Request::builder()
             .method("POST")
-            .uri("/sessions/sess-1/messages")
+            .uri(format!("/sessions/{session_id}/messages"))
             .header("x-tenant-id", "acme")
             .header("content-type", "application/json")
-            .body(Body::from(r#"{"content":"hi"}"#))
-            .unwrap();
-        let resp = app.oneshot(req).await.unwrap();
+            .body(Body::from(format!(r#"{{"content":"{content}"}}"#)))
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn send_message_returns_token_counts_from_llm_response() {
+        let store = MockSessionStore::new();
+        store.insert(sample_session("sess-1", "acme"));
+
+        let app = mock_app_with_agent(store, make_mock_agent(vec![llm_response("hi", 10, 5)]));
+        let resp = app.oneshot(send_msg_req("sess-1", "hello")).await.unwrap();
+
         assert_eq!(resp.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json["content"], "Hello from agent");
-        assert_eq!(json["message_count"], 2); // user + assistant
+        assert_eq!(json["input_tokens"], 10, "input_tokens must match usage field");
+        assert_eq!(json["output_tokens"], 5, "output_tokens must match usage field");
     }
 
     #[tokio::test]
-    async fn send_message_agent_error_returns_500() {
+    async fn send_message_accumulates_tokens_across_turns() {
         let store = MockSessionStore::new();
-        store.insert(sample_session("sess-1", "acme"));
-        let app = mock_app_with_runner(store, MockChatRunner::failing());
+        store.insert(sample_session("sess-2", "acme"));
 
-        let req = Request::builder()
-            .method("POST")
-            .uri("/sessions/sess-1/messages")
-            .header("x-tenant-id", "acme")
-            .header("content-type", "application/json")
-            .body(Body::from(r#"{"content":"hi"}"#))
+        let agent = make_mock_agent(vec![
+            llm_response("turn 1", 10, 5),
+            llm_response("turn 2", 20, 8),
+        ]);
+        let app = mock_app_with_agent(store.clone(), agent);
+
+        let resp1 = app.clone().oneshot(send_msg_req("sess-2", "first")).await.unwrap();
+        assert_eq!(resp1.status(), StatusCode::OK);
+
+        let resp2 = app.oneshot(send_msg_req("sess-2", "second")).await.unwrap();
+        assert_eq!(resp2.status(), StatusCode::OK);
+        let body2 = axum::body::to_bytes(resp2.into_body(), usize::MAX)
+            .await
             .unwrap();
-        let resp = app.oneshot(req).await.unwrap();
-        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
-    }
+        let json2: serde_json::Value = serde_json::from_slice(&body2).unwrap();
+        assert_eq!(json2["input_tokens"], 20);
+        assert_eq!(json2["output_tokens"], 8);
 
-    // ── ApprovalRegistry unit tests ───────────────────────────────────────────
-
-    #[tokio::test]
-    async fn approval_registry_resolve_returns_true_on_match() {
-        let registry = ApprovalRegistry::new();
-        let pending = registry.register("sess-1").await;
-
-        // Manually insert a oneshot sender into the pending map.
-        let (tx, rx) = tokio::sync::oneshot::channel::<bool>();
-        pending.lock().await.insert("tc-1".to_string(), tx);
-
-        let found = registry.resolve("sess-1", "tc-1", true).await;
-        assert!(found, "resolve should return true when tool_call_id matches");
-        assert!(rx.await.unwrap(), "oneshot should receive true");
-    }
-
-    #[tokio::test]
-    async fn approval_registry_resolve_returns_false_when_session_not_found() {
-        let registry = ApprovalRegistry::new();
-        let found = registry.resolve("missing-session", "tc-1", true).await;
-        assert!(!found);
+        let session = store
+            .snapshot()
+            .remove("acme.sess-2")
+            .expect("session must be persisted");
+        assert_eq!(
+            session.total_input_tokens, 30,
+            "total_input_tokens must accumulate across turns (10 + 20)"
+        );
+        assert_eq!(
+            session.total_output_tokens, 13,
+            "total_output_tokens must accumulate across turns (5 + 8)"
+        );
     }
 
     #[tokio::test]
-    async fn approval_registry_resolve_returns_false_when_tool_call_not_found() {
-        let registry = ApprovalRegistry::new();
-        registry.register("sess-1").await;
-        let found = registry.resolve("sess-1", "nonexistent-tc", true).await;
-        assert!(!found);
-    }
-
-    #[tokio::test]
-    async fn approval_registry_deregister_removes_session() {
-        let registry = ApprovalRegistry::new();
-        registry.register("sess-1").await;
-        registry.deregister("sess-1").await;
-        let found = registry.resolve("sess-1", "tc-1", true).await;
-        assert!(!found, "after deregister, resolve should find nothing");
-    }
-
-    #[tokio::test]
-    async fn approve_tool_call_returns_404_when_no_pending_approval() {
+    async fn send_message_returns_zero_tokens_when_llm_omits_usage() {
         let store = MockSessionStore::new();
-        store.insert(sample_session("sess-1", "acme"));
+        store.insert(sample_session("sess-3", "acme"));
+
+        let no_usage_response = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "no usage here"}]
+        });
+        let app = mock_app_with_agent(store.clone(), make_mock_agent(vec![no_usage_response]));
+        let resp = app.oneshot(send_msg_req("sess-3", "hello")).await.unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["input_tokens"], 0, "input_tokens must be 0 when usage is absent");
+        assert_eq!(json["output_tokens"], 0, "output_tokens must be 0 when usage is absent");
+
+        let session = store.snapshot().remove("acme.sess-3").unwrap();
+        assert_eq!(session.total_input_tokens, 0);
+        assert_eq!(session.total_output_tokens, 0);
+    }
+
+    #[tokio::test]
+    async fn session_summary_exposes_token_totals() {
+        let mut session = sample_session("sess-4", "acme");
+        session.total_input_tokens = 42;
+        session.total_output_tokens = 17;
+
+        let store = MockSessionStore::new();
+        store.insert(session);
+
         let app = mock_app(store);
+        let resp = app.oneshot(get_req("/sessions", "acme")).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
 
-        let req = Request::builder()
-            .method("POST")
-            .uri("/sessions/sess-1/approvals/tc-99")
-            .header("x-tenant-id", "acme")
-            .header("content-type", "application/json")
-            .body(Body::from(r#"{"allowed":true}"#))
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
             .unwrap();
-        let resp = app.oneshot(req).await.unwrap();
-        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
-    }
-
-    #[tokio::test]
-    async fn approve_tool_call_missing_tenant_returns_400() {
-        let app = mock_app(MockSessionStore::new());
-        let req = Request::builder()
-            .method("POST")
-            .uri("/sessions/sess-1/approvals/tc-1")
-            .header("content-type", "application/json")
-            .body(Body::from(r#"{"allowed":true}"#))
-            .unwrap();
-        let resp = app.oneshot(req).await.unwrap();
-        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
-    }
-
-    // ── ElicitationRegistry unit tests ───────────────────────────────────────
-
-    #[tokio::test]
-    async fn elicitation_registry_respond_delivers_answer() {
-        let registry = ElicitationRegistry::new();
-        let pending = registry.register("sess-1").await;
-
-        let (tx, rx) = tokio::sync::oneshot::channel::<Option<String>>();
-        pending.lock().await.insert("elic-1".to_string(), tx);
-
-        let found = registry.respond("sess-1", "elic-1", Some("42".to_string())).await;
-        assert!(found);
-        assert_eq!(rx.await.unwrap(), Some("42".to_string()));
-    }
-
-    #[tokio::test]
-    async fn elicitation_registry_respond_delivers_cancel() {
-        let registry = ElicitationRegistry::new();
-        let pending = registry.register("sess-1").await;
-
-        let (tx, rx) = tokio::sync::oneshot::channel::<Option<String>>();
-        pending.lock().await.insert("elic-2".to_string(), tx);
-
-        let found = registry.respond("sess-1", "elic-2", None).await;
-        assert!(found);
-        assert_eq!(rx.await.unwrap(), None);
-    }
-
-    #[tokio::test]
-    async fn elicitation_registry_respond_returns_false_when_not_found() {
-        let registry = ElicitationRegistry::new();
-        let found = registry.respond("missing", "elic-1", Some("x".to_string())).await;
-        assert!(!found);
-    }
-
-    #[tokio::test]
-    async fn respond_to_elicitation_returns_404_when_no_pending() {
-        let store = MockSessionStore::new();
-        store.insert(sample_session("sess-1", "acme"));
-        let app = mock_app(store);
-
-        let req = Request::builder()
-            .method("POST")
-            .uri("/sessions/sess-1/elicitations/elic-99")
-            .header("x-tenant-id", "acme")
-            .header("content-type", "application/json")
-            .body(Body::from(r#"{"answer":"hello"}"#))
-            .unwrap();
-        let resp = app.oneshot(req).await.unwrap();
-        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
-    }
-
-    #[tokio::test]
-    async fn respond_to_elicitation_missing_tenant_returns_400() {
-        let app = mock_app(MockSessionStore::new());
-        let req = Request::builder()
-            .method("POST")
-            .uri("/sessions/sess-1/elicitations/elic-1")
-            .header("content-type", "application/json")
-            .body(Body::from(r#"{"answer":"hi"}"#))
-            .unwrap();
-        let resp = app.oneshot(req).await.unwrap();
-        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let summary = &json.as_array().unwrap()[0];
+        assert_eq!(summary["total_input_tokens"], 42);
+        assert_eq!(summary["total_output_tokens"], 17);
     }
 }

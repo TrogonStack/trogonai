@@ -178,3 +178,252 @@ impl Config {
         errors
     }
 }
+
+// ── Tests ──────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    // Env-var mutations are process-global. Serialize all config tests with
+    // a static lock so parallel test threads don't interfere with each other.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn clear_all_vars() {
+        let vars = [
+            "WASM_SESSION_ROOT", "WASM_OUTPUT_BYTE_LIMIT", "WASM_AUTO_ALLOW_PERMISSIONS",
+            "WASM_TIMEOUT_SECS", "WASM_ONLY", "WASM_MEMORY_LIMIT_BYTES",
+            "WASM_MODULE_CACHE_DIR", "WASM_ALLOW_NETWORK", "WASM_FUEL_LIMIT",
+            "WASM_HOST_CALL_LIMIT", "ACP_PREFIX", "WASM_MAX_CONCURRENT_TASKS",
+            "SESSION_IDLE_TIMEOUT_SECS", "WASM_MAX_MODULE_SIZE_BYTES",
+            "WAIT_FOR_EXIT_TIMEOUT_SECS",
+        ];
+        for v in &vars {
+            unsafe { std::env::remove_var(v); }
+        }
+    }
+
+    #[test]
+    fn defaults_when_no_env_vars_set() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        clear_all_vars();
+        let cfg = Config::from_env();
+        assert_eq!(cfg.session_root, std::path::PathBuf::from("/tmp/trogon-wasm-runtime"));
+        assert_eq!(cfg.output_byte_limit, 10 * 1024 * 1024);
+        assert!(!cfg.auto_allow_permissions);
+        assert_eq!(cfg.wasm_timeout_secs, None);
+        assert!(cfg.wasm_only);
+        assert_eq!(cfg.wasm_memory_limit_bytes, None);
+        assert_eq!(cfg.module_cache_dir, None);
+        assert!(!cfg.wasm_allow_network);
+        assert_eq!(cfg.wasm_fuel_limit, 1_000_000_000);
+        assert_eq!(cfg.wasm_host_call_limit, 10_000);
+        assert_eq!(cfg.wasm_max_concurrent_tasks, 32);
+        assert_eq!(cfg.session_idle_timeout_secs, 3600);
+        assert_eq!(cfg.wasm_max_module_size_bytes, 100 * 1024 * 1024);
+        assert_eq!(cfg.wait_for_exit_timeout_secs, 300);
+    }
+
+    #[test]
+    fn session_root_override() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        clear_all_vars();
+        unsafe { std::env::set_var("WASM_SESSION_ROOT", "/custom/root"); }
+        let cfg = Config::from_env();
+        unsafe { std::env::remove_var("WASM_SESSION_ROOT"); }
+        assert_eq!(cfg.session_root, std::path::PathBuf::from("/custom/root"));
+    }
+
+    #[test]
+    fn output_byte_limit_override() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        clear_all_vars();
+        unsafe { std::env::set_var("WASM_OUTPUT_BYTE_LIMIT", "4096"); }
+        let cfg = Config::from_env();
+        unsafe { std::env::remove_var("WASM_OUTPUT_BYTE_LIMIT"); }
+        assert_eq!(cfg.output_byte_limit, 4096);
+    }
+
+    #[test]
+    fn auto_allow_permissions_true_from_one() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        clear_all_vars();
+        unsafe { std::env::set_var("WASM_AUTO_ALLOW_PERMISSIONS", "1"); }
+        let cfg = Config::from_env();
+        unsafe { std::env::remove_var("WASM_AUTO_ALLOW_PERMISSIONS"); }
+        assert!(cfg.auto_allow_permissions);
+    }
+
+    #[test]
+    fn auto_allow_permissions_true_from_true_word() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        clear_all_vars();
+        unsafe { std::env::set_var("WASM_AUTO_ALLOW_PERMISSIONS", "True"); }
+        let cfg = Config::from_env();
+        unsafe { std::env::remove_var("WASM_AUTO_ALLOW_PERMISSIONS"); }
+        assert!(cfg.auto_allow_permissions);
+    }
+
+    #[test]
+    fn auto_allow_permissions_false_from_zero() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        clear_all_vars();
+        unsafe { std::env::set_var("WASM_AUTO_ALLOW_PERMISSIONS", "0"); }
+        let cfg = Config::from_env();
+        unsafe { std::env::remove_var("WASM_AUTO_ALLOW_PERMISSIONS"); }
+        assert!(!cfg.auto_allow_permissions);
+    }
+
+    #[test]
+    fn wasm_timeout_secs_zero_treated_as_none() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        clear_all_vars();
+        unsafe { std::env::set_var("WASM_TIMEOUT_SECS", "0"); }
+        let cfg = Config::from_env();
+        unsafe { std::env::remove_var("WASM_TIMEOUT_SECS"); }
+        assert_eq!(cfg.wasm_timeout_secs, None);
+    }
+
+    #[test]
+    fn wasm_timeout_secs_positive_is_some() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        clear_all_vars();
+        unsafe { std::env::set_var("WASM_TIMEOUT_SECS", "30"); }
+        let cfg = Config::from_env();
+        unsafe { std::env::remove_var("WASM_TIMEOUT_SECS"); }
+        assert_eq!(cfg.wasm_timeout_secs, Some(30));
+    }
+
+    #[test]
+    fn wasm_only_false_from_zero() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        clear_all_vars();
+        unsafe { std::env::set_var("WASM_ONLY", "0"); }
+        let cfg = Config::from_env();
+        unsafe { std::env::remove_var("WASM_ONLY"); }
+        assert!(!cfg.wasm_only);
+    }
+
+    #[test]
+    fn wasm_only_default_is_true() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        clear_all_vars();
+        let cfg = Config::from_env();
+        assert!(cfg.wasm_only);
+    }
+
+    #[test]
+    fn wasm_memory_limit_bytes_override() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        clear_all_vars();
+        unsafe { std::env::set_var("WASM_MEMORY_LIMIT_BYTES", "67108864"); }
+        let cfg = Config::from_env();
+        unsafe { std::env::remove_var("WASM_MEMORY_LIMIT_BYTES"); }
+        assert_eq!(cfg.wasm_memory_limit_bytes, Some(67108864));
+    }
+
+    #[test]
+    fn module_cache_dir_override() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        clear_all_vars();
+        unsafe { std::env::set_var("WASM_MODULE_CACHE_DIR", "/tmp/module-cache"); }
+        let cfg = Config::from_env();
+        unsafe { std::env::remove_var("WASM_MODULE_CACHE_DIR"); }
+        assert_eq!(cfg.module_cache_dir, Some(std::path::PathBuf::from("/tmp/module-cache")));
+    }
+
+    #[test]
+    fn wasm_allow_network_true_from_one() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        clear_all_vars();
+        unsafe { std::env::set_var("WASM_ALLOW_NETWORK", "1"); }
+        let cfg = Config::from_env();
+        unsafe { std::env::remove_var("WASM_ALLOW_NETWORK"); }
+        assert!(cfg.wasm_allow_network);
+    }
+
+    #[test]
+    fn fuel_limit_override() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        clear_all_vars();
+        unsafe { std::env::set_var("WASM_FUEL_LIMIT", "500000000"); }
+        let cfg = Config::from_env();
+        unsafe { std::env::remove_var("WASM_FUEL_LIMIT"); }
+        assert_eq!(cfg.wasm_fuel_limit, 500_000_000);
+    }
+
+    #[test]
+    fn host_call_limit_override() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        clear_all_vars();
+        unsafe { std::env::set_var("WASM_HOST_CALL_LIMIT", "1000"); }
+        let cfg = Config::from_env();
+        unsafe { std::env::remove_var("WASM_HOST_CALL_LIMIT"); }
+        assert_eq!(cfg.wasm_host_call_limit, 1000);
+    }
+
+    #[test]
+    fn max_concurrent_tasks_override() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        clear_all_vars();
+        unsafe { std::env::set_var("WASM_MAX_CONCURRENT_TASKS", "8"); }
+        let cfg = Config::from_env();
+        unsafe { std::env::remove_var("WASM_MAX_CONCURRENT_TASKS"); }
+        assert_eq!(cfg.wasm_max_concurrent_tasks, 8);
+    }
+
+    #[test]
+    fn session_idle_timeout_override() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        clear_all_vars();
+        unsafe { std::env::set_var("SESSION_IDLE_TIMEOUT_SECS", "7200"); }
+        let cfg = Config::from_env();
+        unsafe { std::env::remove_var("SESSION_IDLE_TIMEOUT_SECS"); }
+        assert_eq!(cfg.session_idle_timeout_secs, 7200);
+    }
+
+    #[test]
+    fn max_module_size_override() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        clear_all_vars();
+        unsafe { std::env::set_var("WASM_MAX_MODULE_SIZE_BYTES", "52428800"); }
+        let cfg = Config::from_env();
+        unsafe { std::env::remove_var("WASM_MAX_MODULE_SIZE_BYTES"); }
+        assert_eq!(cfg.wasm_max_module_size_bytes, 52428800);
+    }
+
+    #[test]
+    fn wait_for_exit_timeout_override() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        clear_all_vars();
+        unsafe { std::env::set_var("WAIT_FOR_EXIT_TIMEOUT_SECS", "60"); }
+        let cfg = Config::from_env();
+        unsafe { std::env::remove_var("WAIT_FOR_EXIT_TIMEOUT_SECS"); }
+        assert_eq!(cfg.wait_for_exit_timeout_secs, 60);
+    }
+
+    #[test]
+    fn validate_returns_error_when_output_byte_limit_is_zero() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        clear_all_vars();
+        let mut cfg = Config::from_env();
+        cfg.output_byte_limit = 0;
+        let errors = cfg.validate();
+        assert!(
+            errors.iter().any(|e| e.contains("WASM_OUTPUT_BYTE_LIMIT")),
+            "expected error about output_byte_limit, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn validate_returns_no_errors_for_valid_config() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        clear_all_vars();
+        let mut cfg = Config::from_env();
+        cfg.session_root = std::env::temp_dir().join("trogon-config-test");
+        cfg.module_cache_dir = None;
+        let errors = cfg.validate();
+        assert!(errors.is_empty(), "expected no errors, got: {errors:?}");
+    }
+}

@@ -1,0 +1,27 @@
+[package]
+name    = "trogon-vault-approvals"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+default = []
+slack   = ["dep:reqwest"]
+
+[dependencies]
+async-nats   = { workspace = true, features = ["jetstream"] }
+async-trait  = { workspace = true }
+bytes        = { workspace = true }
+dashmap      = "6"
+futures-util = { workspace = true }
+reqwest      = { workspace = true, optional = true }
+serde        = { workspace = true }
+serde_json   = { workspace = true }
+tokio        = { workspace = true, features = ["sync"] }
+tracing      = { workspace = true }
+trogon-vault = { path = "../trogon-vault", features = ["infisical"] }
+trogon-vault-nats = { path = "../trogon-vault-nats" }
+
+[dev-dependencies]
+httpmock               = "0.7"
+testcontainers-modules = { version = "0.8", features = ["nats"] }
+tokio                  = { version = "1.49.0", features = ["macros", "rt-multi-thread", "time"] }

@@ -216,8 +216,6 @@ async fn start_with_options(
         tenant_id: "test".to_string(),
         promise_store: None,
         promise_id: None,
-        permission_checker: None,
-        elicitation_provider: None,
     });
 
     let state = ChatAppState {
@@ -227,8 +225,7 @@ async fn start_with_options(
         agent_id,
         agent_loader,
         skill_loader,
-        approval_registry: Default::default(),
-        elicitation_registry: Default::default(),
+        compactor_nats: None,
     };
     let app = router(state);
 
@@ -1429,6 +1426,427 @@ async fn send_message_persists_usage_on_assistant_message() {
 }
 
 #[tokio::test]
+async fn send_message_response_includes_token_counts() {
+    let env = start().await;
+
+    env.mock_server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(end_turn_with_usage("hi", 10, 5));
+    });
+
+    let created: Value = env
+        .client
+        .post(format!("{}/sessions", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = created["id"].as_str().unwrap();
+
+    let res: Value = env
+        .client
+        .post(format!("{}/sessions/{id}/messages", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({"content": "hello"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(res["input_tokens"], 10, "input_tokens must match Anthropic usage");
+    assert_eq!(res["output_tokens"], 5, "output_tokens must match Anthropic usage");
+}
+
+#[tokio::test]
+async fn send_message_accumulates_token_totals_across_turns() {
+    let env = start().await;
+
+    // httpmock uses FIFO matching — the first registered mock that matches wins.
+    // Turn 2's Anthropic body contains both "msg-turn-one" (from history) and
+    // "msg-turn-two" (the new message), so we register the turn-2 mock first with
+    // a body_contains discriminator. Turn 1's body only contains "msg-turn-one",
+    // so the turn-2 mock doesn't match and the fallback (turn-1 mock) is used.
+    env.mock_server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages")
+            .body_contains("msg-turn-two");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(end_turn_with_usage("turn two", 20, 8));
+    });
+    env.mock_server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(end_turn_with_usage("turn one", 10, 5));
+    });
+
+    let created: Value = env
+        .client
+        .post(format!("{}/sessions", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = created["id"].as_str().unwrap();
+
+    env.client
+        .post(format!("{}/sessions/{id}/messages", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({"content": "msg-turn-one"}))
+        .send()
+        .await
+        .unwrap();
+
+    env.client
+        .post(format!("{}/sessions/{id}/messages", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({"content": "msg-turn-two"}))
+        .send()
+        .await
+        .unwrap();
+
+    let got: Value = env
+        .client
+        .get(format!("{}/sessions/{id}", env.base_url))
+        .header("x-tenant-id", "acme")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        got["total_input_tokens"], 30,
+        "total_input_tokens must be 10 + 20 = 30"
+    );
+    assert_eq!(
+        got["total_output_tokens"], 13,
+        "total_output_tokens must be 5 + 8 = 13"
+    );
+}
+
+#[tokio::test]
+async fn create_session_returns_zero_token_totals() {
+    let env = start().await;
+
+    let res: Value = env
+        .client
+        .post(format!("{}/sessions", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(res["total_input_tokens"], 0);
+    assert_eq!(res["total_output_tokens"], 0);
+}
+
+#[tokio::test]
+async fn update_session_does_not_reset_token_totals() {
+    let env = start().await;
+
+    env.mock_server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(end_turn_with_usage("ok", 15, 6));
+    });
+
+    let created: Value = env
+        .client
+        .post(format!("{}/sessions", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = created["id"].as_str().unwrap();
+
+    env.client
+        .post(format!("{}/sessions/{id}/messages", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({"content": "hello"}))
+        .send()
+        .await
+        .unwrap();
+
+    env.client
+        .patch(format!("{}/sessions/{id}", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({"name": "renamed"}))
+        .send()
+        .await
+        .unwrap();
+
+    let got: Value = env
+        .client
+        .get(format!("{}/sessions/{id}", env.base_url))
+        .header("x-tenant-id", "acme")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(got["total_input_tokens"], 15, "PATCH must not zero out token totals");
+    assert_eq!(got["total_output_tokens"], 6, "PATCH must not zero out token totals");
+}
+
+#[tokio::test]
+async fn list_sessions_includes_token_totals() {
+    let env = start().await;
+
+    env.mock_server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(end_turn_with_usage("ok", 25, 9));
+    });
+
+    let created: Value = env
+        .client
+        .post(format!("{}/sessions", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = created["id"].as_str().unwrap();
+
+    env.client
+        .post(format!("{}/sessions/{id}/messages", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({"content": "hello"}))
+        .send()
+        .await
+        .unwrap();
+
+    let list: Value = env
+        .client
+        .get(format!("{}/sessions", env.base_url))
+        .header("x-tenant-id", "acme")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let session = list
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["id"] == id)
+        .expect("session must appear in list");
+
+    assert_eq!(session["total_input_tokens"], 25, "list must surface accumulated input tokens");
+    assert_eq!(session["total_output_tokens"], 9, "list must surface accumulated output tokens");
+}
+
+#[tokio::test]
+async fn send_message_without_llm_usage_returns_zero_tokens() {
+    let env = start().await;
+
+    env.mock_server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(end_turn("no usage here"));
+    });
+
+    let created: Value = env
+        .client
+        .post(format!("{}/sessions", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = created["id"].as_str().unwrap();
+
+    let res: Value = env
+        .client
+        .post(format!("{}/sessions/{id}/messages", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({"content": "hello"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(res["input_tokens"], 0, "missing usage must produce 0 input_tokens");
+    assert_eq!(res["output_tokens"], 0, "missing usage must produce 0 output_tokens");
+
+    let got: Value = env
+        .client
+        .get(format!("{}/sessions/{id}", env.base_url))
+        .header("x-tenant-id", "acme")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(got["total_input_tokens"], 0, "no-usage turn must not increment total_input_tokens");
+    assert_eq!(got["total_output_tokens"], 0, "no-usage turn must not increment total_output_tokens");
+}
+
+#[tokio::test]
+async fn update_session_response_includes_token_totals() {
+    let env = start().await;
+
+    env.mock_server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(end_turn_with_usage("ok", 11, 4));
+    });
+
+    let created: Value = env
+        .client
+        .post(format!("{}/sessions", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = created["id"].as_str().unwrap();
+
+    env.client
+        .post(format!("{}/sessions/{id}/messages", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({"content": "hello"}))
+        .send()
+        .await
+        .unwrap();
+
+    let patch_res: Value = env
+        .client
+        .patch(format!("{}/sessions/{id}", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({"name": "renamed"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(patch_res["total_input_tokens"], 11, "PATCH response must include accumulated token totals");
+    assert_eq!(patch_res["total_output_tokens"], 4, "PATCH response must include accumulated token totals");
+}
+
+#[tokio::test]
+async fn send_message_persists_cache_tokens_on_assistant_message() {
+    let env = start().await;
+
+    env.mock_server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(json!({
+                "stop_reason": "end_turn",
+                "content": [{ "type": "text", "text": "cached answer" }],
+                "usage": {
+                    "input_tokens": 20,
+                    "output_tokens": 8,
+                    "cache_creation_input_tokens": 500,
+                    "cache_read_input_tokens": 0
+                }
+            }));
+    });
+
+    let created: Value = env
+        .client
+        .post(format!("{}/sessions", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = created["id"].as_str().unwrap();
+
+    env.client
+        .post(format!("{}/sessions/{id}/messages", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({"content": "question"}))
+        .send()
+        .await
+        .unwrap();
+
+    let got: Value = env
+        .client
+        .get(format!("{}/sessions/{id}", env.base_url))
+        .header("x-tenant-id", "acme")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let assistant = got["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["role"] == "assistant")
+        .expect("assistant message must be present");
+
+    assert_eq!(assistant["usage"]["input_tokens"], 20);
+    assert_eq!(assistant["usage"]["output_tokens"], 8);
+    assert_eq!(assistant["usage"]["cache_creation_input_tokens"], 500, "cache_creation_input_tokens must be persisted on message");
+
+    assert_eq!(
+        got["total_input_tokens"], 20,
+        "cache_creation_input_tokens must NOT be counted in total_input_tokens (only input_tokens counts)"
+    );
+    assert_eq!(got["total_output_tokens"], 8);
+}
+
+#[tokio::test]
 async fn send_message_injects_skill_content_into_system_prompt() {
     let env = start_with_options(
         Some("agent_skills_test".to_string()),
@@ -1481,48 +1899,128 @@ async fn send_message_injects_skill_content_into_system_prompt() {
     skill_mock.assert_hits_async(1).await;
 }
 
-// ── SSE helpers ───────────────────────────────────────────────────────────────
+// ── Compactor wiring ──────────────────────────────────────────────────────────
 
-/// Parse incoming SSE chunks into JSON values and forward them on a channel.
-///
-/// Each SSE event is a `data: <json>\n\n` segment. The task runs until the
-/// response body is exhausted or the receiver is dropped.
-fn spawn_sse_reader(response: reqwest::Response) -> tokio::sync::mpsc::Receiver<Value> {
-    let (tx, rx) = tokio::sync::mpsc::channel::<Value>(16);
+/// Build a TestEnv with `compactor_nats` wired and return the bare NATS client
+/// so the test can stand up a fake compactor subscriber.
+async fn start_with_compactor_nats() -> (TestEnv, async_nats::Client) {
+    let container = Nats::default()
+        .with_cmd(["--jetstream"])
+        .start()
+        .await
+        .expect("NATS container");
+    let port = container.get_host_port_ipv4(4222).await.expect("port");
+    let nats = async_nats::connect(format!("nats://127.0.0.1:{port}"))
+        .await
+        .expect("NATS connect");
+    let js = jetstream::new(nats.clone());
+    let session_store = SessionStore::open(&js).await.expect("SessionStore");
+
+    let mock_server = MockServer::start_async().await;
+    let http = reqwest::Client::new();
+    let tool_ctx = Arc::new(ToolContext::new(
+        http.clone(),
+        mock_server.base_url(),
+        "tok_g".to_string(),
+        "tok_l".to_string(),
+        String::new(),
+    ));
+    let agent = Arc::new(AgentLoop {
+        anthropic_client: Arc::new(ReqwestAnthropicClient::new(
+            http,
+            mock_server.base_url(),
+            "tok_a".to_string(),
+        )),
+        model: "claude-opus-4-6".to_string(),
+        max_iterations: 5,
+        tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),
+        tool_context: tool_ctx,
+        memory_owner: None,
+        memory_repo: None,
+        memory_path: None,
+        mcp_tool_defs: vec![],
+        mcp_dispatch: vec![],
+        flag_client: Arc::new(AlwaysOnFlagClient),
+        tenant_id: "test".to_string(),
+        promise_store: None,
+        promise_id: None,
+    });
+
+    let state = ChatAppState {
+        agent,
+        session_store,
+        promise_store: Arc::new(NoOpPromiseStore),
+        agent_id: None,
+        agent_loader: None,
+        skill_loader: None,
+        compactor_nats: Some(nats.clone()),
+    };
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    tokio::spawn(async move { axum::serve(listener, router(state)).await.expect("server") });
+
+    let env = TestEnv {
+        base_url: format!("http://{addr}"),
+        client: Client::new(),
+        mock_server,
+        _nats: Box::new(container),
+    };
+    (env, nats)
+}
+
+/// When `compactor_nats` is wired, `send_message` must publish a request to
+/// `trogon.compactor.compact` on every turn and honour the reply.
+#[tokio::test]
+async fn send_message_calls_compactor_when_wired() {
+    use futures_util::StreamExt;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+
+    let (env, nats) = start_with_compactor_nats().await;
+
+    // Fake compactor: echo messages back unchanged, set `called` flag.
+    let called = Arc::new(AtomicBool::new(false));
+    let called2 = Arc::clone(&called);
+    let nats2 = nats.clone();
     tokio::spawn(async move {
-        let mut buf = String::new();
-        let mut response = response;
-        loop {
-            if let Some(pos) = buf.find("\n\n") {
-                let segment = buf[..pos].to_string();
-                buf = buf[pos + 2..].to_string();
-                for line in segment.lines() {
-                    if let Some(data) = line.strip_prefix("data: ") {
-                        if let Ok(val) = serde_json::from_str::<Value>(data) {
-                            if tx.send(val).await.is_err() {
-                                return;
-                            }
-                        }
-                    }
-                }
-                continue;
-            }
-            match response.chunk().await {
-                Ok(Some(chunk)) => {
-                    let s = std::str::from_utf8(&chunk)
-                        .unwrap_or("")
-                        .replace("\r\n", "\n");
-                    buf.push_str(&s);
-                }
-                _ => break,
+        let mut sub = nats2
+            .subscribe("trogon.compactor.compact")
+            .await
+            .expect("subscribe to compactor subject");
+        if let Some(msg) = sub.next().await {
+            called2.store(true, Ordering::SeqCst);
+            if let Some(reply) = msg.reply {
+                let req: serde_json::Value =
+                    serde_json::from_slice(&msg.payload).unwrap_or_default();
+                let resp = serde_json::json!({
+                    "messages": req.get("messages").cloned().unwrap_or(serde_json::json!([])),
+                    "compacted": false,
+                    "tokens_before": 0,
+                    "tokens_after": 0
+                });
+                nats2
+                    .publish(reply, serde_json::to_vec(&resp).unwrap().into())
+                    .await
+                    .ok();
             }
         }
     });
-    rx
-}
 
-async fn create_session_id(env: &TestEnv) -> String {
-    let res: Value = env
+    // Give the subscriber time to register before the API call.
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    env.mock_server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(end_turn("hi"));
+    });
+
+    let created: Value = env
         .client
         .post(format!("{}/sessions", env.base_url))
         .header("x-tenant-id", "acme")
@@ -1533,792 +2031,23 @@ async fn create_session_id(env: &TestEnv) -> String {
         .json()
         .await
         .unwrap();
-    res["id"].as_str().unwrap().to_string()
-}
-
-// ── SSE approval / elicitation integration tests ──────────────────────────────
-
-/// SSE mode with no tool calls: the stream must emit a single `done` event.
-#[tokio::test]
-async fn sse_plain_request_delivers_done_event() {
-    let env = start().await;
-
-    env.mock_server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
-        then.status(200)
-            .header("content-type", "application/json")
-            .json_body(end_turn("hello from sse"));
-    });
-
-    let id = create_session_id(&env).await;
-
-    let response = env
-        .client
-        .post(format!("{}/sessions/{id}/messages", env.base_url))
-        .header("x-tenant-id", "acme")
-        .header("accept", "text/event-stream")
-        .json(&json!({"content": "hi"}))
-        .send()
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), 200);
-
-    let mut rx = spawn_sse_reader(response);
-    let event = tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv())
-        .await
-        .expect("timed out waiting for SSE event")
-        .expect("SSE channel closed before done event");
-
-    assert_eq!(event["type"], "done");
-    assert_eq!(event["content"], "hello from sse");
-}
-
-/// SSE mode with a tool call that gets approved: the stream must emit
-/// `permission_required` followed by `done`.
-#[tokio::test]
-async fn sse_permission_approved_resumes_agent_to_done() {
-    let env = start().await;
-
-    // Register specific mock first — fires when the body contains "tool_use_id"
-    // (i.e., the second turn where the agent returns the tool result).
-    env.mock_server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages")
-            .body_contains("tool_use_id");
-        then.status(200)
-            .header("content-type", "application/json")
-            .json_body(end_turn("tool approved and done"));
-    });
-    // General mock second — fires for the first turn (no tool result in body yet).
-    env.mock_server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
-        then.status(200)
-            .header("content-type", "application/json")
-            .json_body(json!({
-                "stop_reason": "tool_use",
-                "content": [{
-                    "type": "tool_use",
-                    "id": "tc-perm-1",
-                    "name": "__test_perm_gate__",
-                    "input": {}
-                }]
-            }));
-    });
-
-    let id = create_session_id(&env).await;
-
-    let response = env
-        .client
-        .post(format!("{}/sessions/{id}/messages", env.base_url))
-        .header("x-tenant-id", "acme")
-        .header("accept", "text/event-stream")
-        .json(&json!({"content": "run the tool"}))
-        .send()
-        .await
-        .unwrap();
-
-    let mut rx = spawn_sse_reader(response);
-
-    // First event: permission gate fires before tool execution.
-    let perm_event = tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv())
-        .await
-        .expect("timed out waiting for permission_required event")
-        .expect("SSE channel closed");
-
-    assert_eq!(perm_event["type"], "permission_required");
-    assert_eq!(perm_event["tool_call_id"], "tc-perm-1");
-    assert_eq!(perm_event["tool_name"], "__test_perm_gate__");
-
-    // Approve the tool call.
-    let approve = env
-        .client
-        .post(format!("{}/sessions/{id}/approvals/tc-perm-1", env.base_url))
-        .header("x-tenant-id", "acme")
-        .json(&json!({"allowed": true}))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(approve.status(), 200);
-
-    // Second event: agent completes after running the tool.
-    let done_event = tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv())
-        .await
-        .expect("timed out waiting for done event")
-        .expect("SSE channel closed");
-
-    assert_eq!(done_event["type"], "done");
-    assert_eq!(done_event["content"], "tool approved and done");
-}
-
-/// SSE mode with a tool call that gets denied: the agent receives a
-/// "Permission denied" tool result and still reaches `done`.
-#[tokio::test]
-async fn sse_permission_denied_agent_receives_denied_message() {
-    let env = start().await;
-
-    env.mock_server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages")
-            .body_contains("tool_use_id");
-        then.status(200)
-            .header("content-type", "application/json")
-            .json_body(end_turn("understood, tool denied"));
-    });
-    env.mock_server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
-        then.status(200)
-            .header("content-type", "application/json")
-            .json_body(json!({
-                "stop_reason": "tool_use",
-                "content": [{
-                    "type": "tool_use",
-                    "id": "tc-deny-1",
-                    "name": "__test_perm_gate__",
-                    "input": {}
-                }]
-            }));
-    });
-
-    let id = create_session_id(&env).await;
-
-    let response = env
-        .client
-        .post(format!("{}/sessions/{id}/messages", env.base_url))
-        .header("x-tenant-id", "acme")
-        .header("accept", "text/event-stream")
-        .json(&json!({"content": "run the tool"}))
-        .send()
-        .await
-        .unwrap();
-
-    let mut rx = spawn_sse_reader(response);
-
-    let perm_event = tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv())
-        .await
-        .expect("timed out waiting for permission_required event")
-        .expect("SSE channel closed");
-
-    assert_eq!(perm_event["type"], "permission_required");
-    assert_eq!(perm_event["tool_call_id"], "tc-deny-1");
-
-    // Deny the tool call.
-    let deny = env
-        .client
-        .post(format!("{}/sessions/{id}/approvals/tc-deny-1", env.base_url))
-        .header("x-tenant-id", "acme")
-        .json(&json!({"allowed": false}))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(deny.status(), 200);
-
-    let done_event = tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv())
-        .await
-        .expect("timed out waiting for done event")
-        .expect("SSE channel closed");
-
-    assert_eq!(done_event["type"], "done");
-    assert_eq!(done_event["content"], "understood, tool denied");
-}
-
-/// SSE mode with `ask_user`: the stream emits `elicitation_required`, and
-/// after the client posts an answer the agent completes with `done`.
-#[tokio::test]
-async fn sse_elicitation_answer_reaches_agent() {
-    let env = start().await;
-
-    // Second turn: agent received the user's answer as a tool result.
-    env.mock_server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages")
-            .body_contains("tool_use_id");
-        then.status(200)
-            .header("content-type", "application/json")
-            .json_body(end_turn("got your answer"));
-    });
-    // First turn: model invokes the built-in ask_user tool.
-    env.mock_server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
-        then.status(200)
-            .header("content-type", "application/json")
-            .json_body(json!({
-                "stop_reason": "tool_use",
-                "content": [{
-                    "type": "tool_use",
-                    "id": "tc-elicit-1",
-                    "name": "ask_user",
-                    "input": {"question": "What is your name?"}
-                }]
-            }));
-    });
-
-    let id = create_session_id(&env).await;
-
-    let response = env
-        .client
-        .post(format!("{}/sessions/{id}/messages", env.base_url))
-        .header("x-tenant-id", "acme")
-        .header("accept", "text/event-stream")
-        .json(&json!({"content": "tell me"}))
-        .send()
-        .await
-        .unwrap();
-
-    let mut rx = spawn_sse_reader(response);
-
-    let elicit_event = tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv())
-        .await
-        .expect("timed out waiting for elicitation_required event")
-        .expect("SSE channel closed");
-
-    assert_eq!(elicit_event["type"], "elicitation_required");
-    assert_eq!(elicit_event["question"], "What is your name?");
-    let elicitation_id = elicit_event["elicitation_id"].as_str().unwrap().to_string();
-
-    // Post the user's answer.
-    let answer = env
-        .client
-        .post(format!(
-            "{}/sessions/{id}/elicitations/{elicitation_id}",
-            env.base_url
-        ))
-        .header("x-tenant-id", "acme")
-        .json(&json!({"answer": "Jorge"}))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(answer.status(), 200);
-
-    let done_event = tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv())
-        .await
-        .expect("timed out waiting for done event")
-        .expect("SSE channel closed");
-
-    assert_eq!(done_event["type"], "done");
-    assert_eq!(done_event["content"], "got your answer");
-}
-
-/// SSE mode with `ask_user` cancelled (null answer): the agent receives
-/// "The user declined or cancelled the request." and still reaches `done`.
-#[tokio::test]
-async fn sse_elicitation_cancelled_delivers_done() {
-    let env = start().await;
-
-    env.mock_server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages")
-            .body_contains("tool_use_id");
-        then.status(200)
-            .header("content-type", "application/json")
-            .json_body(end_turn("understood, no answer"));
-    });
-    env.mock_server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
-        then.status(200)
-            .header("content-type", "application/json")
-            .json_body(json!({
-                "stop_reason": "tool_use",
-                "content": [{
-                    "type": "tool_use",
-                    "id": "tc-cancel-1",
-                    "name": "ask_user",
-                    "input": {"question": "Confirm?"}
-                }]
-            }));
-    });
-
-    let id = create_session_id(&env).await;
-
-    let response = env
-        .client
-        .post(format!("{}/sessions/{id}/messages", env.base_url))
-        .header("x-tenant-id", "acme")
-        .header("accept", "text/event-stream")
-        .json(&json!({"content": "confirm please"}))
-        .send()
-        .await
-        .unwrap();
-
-    let mut rx = spawn_sse_reader(response);
-
-    let elicit_event = tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv())
-        .await
-        .expect("timed out waiting for elicitation_required event")
-        .expect("SSE channel closed");
-
-    assert_eq!(elicit_event["type"], "elicitation_required");
-    let elicitation_id = elicit_event["elicitation_id"].as_str().unwrap().to_string();
-
-    // Cancel (null answer).
-    let cancel = env
-        .client
-        .post(format!(
-            "{}/sessions/{id}/elicitations/{elicitation_id}",
-            env.base_url
-        ))
-        .header("x-tenant-id", "acme")
-        .json(&json!({"answer": null}))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(cancel.status(), 200);
-
-    let done_event = tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv())
-        .await
-        .expect("timed out waiting for done event")
-        .expect("SSE channel closed");
-
-    assert_eq!(done_event["type"], "done");
-    assert_eq!(done_event["content"], "understood, no answer");
-}
-
-/// Posting to the approvals endpoint when no SSE stream is active returns 404.
-#[tokio::test]
-async fn approve_returns_404_when_no_active_sse_stream() {
-    let env = start().await;
+    let id = created["id"].as_str().unwrap();
 
     let res = env
         .client
-        .post(format!(
-            "{}/sessions/nonexistent-session/approvals/some-tool-call",
-            env.base_url
-        ))
-        .header("x-tenant-id", "acme")
-        .json(&json!({"allowed": true}))
-        .send()
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), 404);
-}
-
-/// Posting to the elicitations endpoint when no SSE stream is active returns 404.
-#[tokio::test]
-async fn elicitation_respond_returns_404_when_no_active_sse_stream() {
-    let env = start().await;
-
-    let res = env
-        .client
-        .post(format!(
-            "{}/sessions/nonexistent-session/elicitations/some-elicitation",
-            env.base_url
-        ))
-        .header("x-tenant-id", "acme")
-        .json(&json!({"answer": "hello"}))
-        .send()
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), 404);
-}
-
-/// The SSE response must carry `Content-Type: text/event-stream`.
-#[tokio::test]
-async fn sse_response_has_event_stream_content_type() {
-    let env = start().await;
-
-    env.mock_server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
-        then.status(200)
-            .header("content-type", "application/json")
-            .json_body(end_turn("ok"));
-    });
-
-    let id = create_session_id(&env).await;
-
-    let response = env
-        .client
         .post(format!("{}/sessions/{id}/messages", env.base_url))
         .header("x-tenant-id", "acme")
-        .header("accept", "text/event-stream")
-        .json(&json!({"content": "hi"}))
-        .send()
-        .await
-        .unwrap();
-
-    let ct = response
-        .headers()
-        .get("content-type")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
-    assert!(
-        ct.contains("text/event-stream"),
-        "expected text/event-stream, got: {ct}"
-    );
-
-    // Drain the stream.
-    let mut rx = spawn_sse_reader(response);
-    tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv())
-        .await
-        .expect("timed out")
-        .expect("channel closed");
-}
-
-/// The `done` event must carry the correct `message_count` (user + assistant = 2).
-#[tokio::test]
-async fn sse_done_event_message_count_is_correct() {
-    let env = start().await;
-
-    env.mock_server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
-        then.status(200)
-            .header("content-type", "application/json")
-            .json_body(end_turn("reply"));
-    });
-
-    let id = create_session_id(&env).await;
-
-    let response = env
-        .client
-        .post(format!("{}/sessions/{id}/messages", env.base_url))
-        .header("x-tenant-id", "acme")
-        .header("accept", "text/event-stream")
         .json(&json!({"content": "hello"}))
         .send()
         .await
         .unwrap();
+    assert_eq!(res.status(), 200, "send_message must succeed");
 
-    let mut rx = spawn_sse_reader(response);
-    let done = tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv())
-        .await
-        .expect("timed out")
-        .expect("channel closed");
+    // Brief pause for the NATS round-trip to complete.
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
 
-    assert_eq!(done["type"], "done");
-    // One user message + one assistant message = 2.
-    assert_eq!(done["message_count"], 2);
-}
-
-/// After the SSE stream closes, the session history must be persisted in NATS
-/// so a subsequent GET reflects the completed turn.
-#[tokio::test]
-async fn sse_session_history_persisted_after_completion() {
-    let env = start().await;
-
-    env.mock_server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
-        then.status(200)
-            .header("content-type", "application/json")
-            .json_body(end_turn("stored reply"));
-    });
-
-    let id = create_session_id(&env).await;
-
-    let response = env
-        .client
-        .post(format!("{}/sessions/{id}/messages", env.base_url))
-        .header("x-tenant-id", "acme")
-        .header("accept", "text/event-stream")
-        .json(&json!({"content": "persist me"}))
-        .send()
-        .await
-        .unwrap();
-
-    let mut rx = spawn_sse_reader(response);
-    let done = tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv())
-        .await
-        .expect("timed out")
-        .expect("channel closed");
-    assert_eq!(done["type"], "done");
-
-    // session_store.put happens before the done event is sent, so the session
-    // is already persisted by the time we receive it.
-    let session: Value = env
-        .client
-        .get(format!("{}/sessions/{id}", env.base_url))
-        .header("x-tenant-id", "acme")
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-
-    let messages = session["messages"].as_array().expect("messages array");
-    assert_eq!(messages.len(), 2, "user + assistant = 2 messages");
-    assert_eq!(messages[0]["role"], "user");
-    assert_eq!(messages[1]["role"], "assistant");
-}
-
-/// When the Anthropic API errors during an SSE run the stream emits an `error`
-/// event instead of `done`.
-///
-/// Uses 400 (non-retryable) so the agent fails immediately — 5xx would trigger
-/// three retries with a 2 s + 4 s + 8 s backoff before giving up.
-#[tokio::test]
-async fn sse_anthropic_error_emits_error_event() {
-    let env = start().await;
-
-    env.mock_server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
-        then.status(400).body("Bad Request");
-    });
-
-    let id = create_session_id(&env).await;
-
-    let response = env
-        .client
-        .post(format!("{}/sessions/{id}/messages", env.base_url))
-        .header("x-tenant-id", "acme")
-        .header("accept", "text/event-stream")
-        .json(&json!({"content": "trigger error"}))
-        .send()
-        .await
-        .unwrap();
-
-    // SSE responds 200 immediately (stream starts before agent completes).
-    assert_eq!(response.status(), 200);
-
-    let mut rx = spawn_sse_reader(response);
-    let event = tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv())
-        .await
-        .expect("timed out waiting for error event")
-        .expect("channel closed");
-
-    assert_eq!(event["type"], "error");
     assert!(
-        !event["message"].as_str().unwrap_or("").is_empty(),
-        "error event must carry a non-empty message"
+        called.load(Ordering::SeqCst),
+        "compactor must receive a NATS request when compactor_nats is wired"
     );
-}
-
-/// Posting an approval for an unrecognised `tool_call_id` while the SSE stream
-/// IS active (session registered) returns 404 — only the wrong key is missing.
-#[tokio::test]
-async fn sse_wrong_tool_call_id_returns_404_while_stream_active() {
-    let env = start().await;
-
-    env.mock_server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages")
-            .body_contains("tool_use_id");
-        then.status(200)
-            .header("content-type", "application/json")
-            .json_body(end_turn("done after corrected approval"));
-    });
-    env.mock_server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
-        then.status(200)
-            .header("content-type", "application/json")
-            .json_body(json!({
-                "stop_reason": "tool_use",
-                "content": [{
-                    "type": "tool_use",
-                    "id": "tc-real-id",
-                    "name": "__test_perm_gate__",
-                    "input": {}
-                }]
-            }));
-    });
-
-    let id = create_session_id(&env).await;
-
-    let response = env
-        .client
-        .post(format!("{}/sessions/{id}/messages", env.base_url))
-        .header("x-tenant-id", "acme")
-        .header("accept", "text/event-stream")
-        .json(&json!({"content": "run tool"}))
-        .send()
-        .await
-        .unwrap();
-
-    let mut rx = spawn_sse_reader(response);
-
-    // Wait until the agent is paused at the permission gate.
-    let perm_event = tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv())
-        .await
-        .expect("timed out")
-        .expect("channel closed");
-    assert_eq!(perm_event["type"], "permission_required");
-
-    // Wrong ID → session IS registered but tool_call_id is not in the map.
-    let wrong = env
-        .client
-        .post(format!("{}/sessions/{id}/approvals/wrong-tool-call-id", env.base_url))
-        .header("x-tenant-id", "acme")
-        .json(&json!({"allowed": true}))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(wrong.status(), 404);
-
-    // Correct ID → unblocks the agent.
-    let correct = env
-        .client
-        .post(format!("{}/sessions/{id}/approvals/tc-real-id", env.base_url))
-        .header("x-tenant-id", "acme")
-        .json(&json!({"allowed": true}))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(correct.status(), 200);
-
-    let done = tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv())
-        .await
-        .expect("timed out")
-        .expect("channel closed");
-    assert_eq!(done["type"], "done");
-}
-
-/// SSE mode also auto-names a session from the first user message.
-#[tokio::test]
-async fn sse_auto_names_session_from_first_message() {
-    let env = start().await;
-
-    env.mock_server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
-        then.status(200)
-            .header("content-type", "application/json")
-            .json_body(end_turn("ok"));
-    });
-
-    let id = create_session_id(&env).await;
-
-    // Confirm initial name is the default.
-    let before: Value = env
-        .client
-        .get(format!("{}/sessions/{id}", env.base_url))
-        .header("x-tenant-id", "acme")
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-    assert_eq!(before["name"], "New Agent");
-
-    let response = env
-        .client
-        .post(format!("{}/sessions/{id}/messages", env.base_url))
-        .header("x-tenant-id", "acme")
-        .header("accept", "text/event-stream")
-        .json(&json!({"content": "rename me please"}))
-        .send()
-        .await
-        .unwrap();
-
-    let mut rx = spawn_sse_reader(response);
-    tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv())
-        .await
-        .expect("timed out")
-        .expect("channel closed");
-
-    let after: Value = env
-        .client
-        .get(format!("{}/sessions/{id}", env.base_url))
-        .header("x-tenant-id", "acme")
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-    assert_eq!(after["name"], "rename me please");
-}
-
-/// When the model returns two tool uses in a single response, the permission gate
-/// fires sequentially — each must be approved before the agent proceeds.
-#[tokio::test]
-async fn sse_sequential_tool_approvals_both_required() {
-    let env = start().await;
-
-    // Second turn: both tool results are in the body.
-    env.mock_server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages")
-            .body_contains("tool_use_id");
-        then.status(200)
-            .header("content-type", "application/json")
-            .json_body(end_turn("both tools approved"));
-    });
-    // First turn: model returns two tool uses at once.
-    env.mock_server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
-        then.status(200)
-            .header("content-type", "application/json")
-            .json_body(json!({
-                "stop_reason": "tool_use",
-                "content": [
-                    {
-                        "type": "tool_use",
-                        "id": "tc-seq-1",
-                        "name": "__test_perm_gate__",
-                        "input": {}
-                    },
-                    {
-                        "type": "tool_use",
-                        "id": "tc-seq-2",
-                        "name": "__test_perm_gate__",
-                        "input": {}
-                    }
-                ]
-            }));
-    });
-
-    let id = create_session_id(&env).await;
-
-    let response = env
-        .client
-        .post(format!("{}/sessions/{id}/messages", env.base_url))
-        .header("x-tenant-id", "acme")
-        .header("accept", "text/event-stream")
-        .json(&json!({"content": "run two tools"}))
-        .send()
-        .await
-        .unwrap();
-
-    let mut rx = spawn_sse_reader(response);
-
-    // Gate fires for first tool.
-    let perm1 = tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv())
-        .await
-        .expect("timed out waiting for first permission_required")
-        .expect("channel closed");
-    assert_eq!(perm1["type"], "permission_required");
-    assert_eq!(perm1["tool_call_id"], "tc-seq-1");
-
-    env.client
-        .post(format!("{}/sessions/{id}/approvals/tc-seq-1", env.base_url))
-        .header("x-tenant-id", "acme")
-        .json(&json!({"allowed": true}))
-        .send()
-        .await
-        .unwrap();
-
-    // Gate fires for second tool before the agent loops back to Anthropic.
-    let perm2 = tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv())
-        .await
-        .expect("timed out waiting for second permission_required")
-        .expect("channel closed");
-    assert_eq!(perm2["type"], "permission_required");
-    assert_eq!(perm2["tool_call_id"], "tc-seq-2");
-
-    env.client
-        .post(format!("{}/sessions/{id}/approvals/tc-seq-2", env.base_url))
-        .header("x-tenant-id", "acme")
-        .json(&json!({"allowed": true}))
-        .send()
-        .await
-        .unwrap();
-
-    let done = tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv())
-        .await
-        .expect("timed out waiting for done event")
-        .expect("channel closed");
-    assert_eq!(done["type"], "done");
-    assert_eq!(done["content"], "both tools approved");
 }

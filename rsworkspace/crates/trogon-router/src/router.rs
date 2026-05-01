@@ -88,19 +88,24 @@ where
         self
     }
 
-    /// Subscribe to `trogon.events.>` and route events until the subscription
-    /// ends or an unrecoverable error occurs.
-    #[instrument(skip(self), err)]
-    pub async fn run(&self, subject: &str) -> Result<(), RouterError> {
-        let mut sub = self
-            .nats
-            .subscribe(subject.to_string())
-            .await
-            .map_err(|e| RouterError::Subscribe(e.to_string()))?;
+    /// Subscribe to one or more NATS subjects and route events until all
+    /// subscriptions end or an unrecoverable error occurs.
+    #[instrument(skip(self), fields(subjects = ?subjects), err)]
+    pub async fn run(&self, subjects: &[&str]) -> Result<(), RouterError> {
+        let mut subs = Vec::with_capacity(subjects.len());
+        for &subject in subjects {
+            let sub = self
+                .nats
+                .subscribe(subject.to_string())
+                .await
+                .map_err(|e| RouterError::Subscribe(e.to_string()))?;
+            subs.push(sub);
+        }
 
-        tracing::info!(subject, "Router listening for events");
+        tracing::info!(?subjects, "Router listening for events");
 
-        while let Some(msg) = sub.next().await {
+        let mut merged = futures_util::stream::select_all(subs);
+        while let Some(msg) = merged.next().await {
             let event = RouterEvent::from(msg);
             if let Err(e) = self.route_event(event).await {
                 warn!(error = %e, "error routing event — continuing");
@@ -503,7 +508,7 @@ mod tests {
         sender.unbounded_send(msg).unwrap();
         drop(sender); // close channel → subscription stream ends → run() exits
 
-        router.run("trogon.events.>").await.unwrap();
+        router.run(&["trogon.events.>"]).await.unwrap();
 
         // The message was dispatched to the actor subject via JetStream.
         let subjects = js.published_subjects();
@@ -537,7 +542,7 @@ mod tests {
         drop(sender);
 
         // run() must return Ok even though route_event errored for the one message.
-        router.run("trogon.events.>").await.unwrap();
+        router.run(&["trogon.events.>"]).await.unwrap();
     }
 
     /// Line 63: MockNatsClient.subscribe() returns Err when no stream is injected.
@@ -545,7 +550,7 @@ mod tests {
     async fn run_returns_subscribe_error_when_subscribe_fails() {
         let (router, _llm, _store, _publisher, _nats, _js) = make_router();
         // No inject_messages() call → subscribe() returns MockError → mapped to RouterError::Subscribe
-        let err = router.run("trogon.events.>").await.unwrap_err();
+        let err = router.run(&["trogon.events.>"]).await.unwrap_err();
         assert!(matches!(err, RouterError::Subscribe(_)));
     }
 
