@@ -1493,3 +1493,44 @@ async fn runner_completes_prompt_without_any_cancel_signal() {
         })
         .await;
 }
+
+/// Verifies the runner registration contract: the `acp_prefix` metadata stored
+/// in the registry must match the `ACP_PREFIX` env var. The bridge reads this
+/// field to derive the NATS routing prefix — a mismatch breaks routing silently.
+#[tokio::test]
+async fn claude_runner_registers_with_correct_acp_prefix_metadata() {
+    let (_container, _nats, js) = start_nats().await;
+
+    let prefix = "acp.claude";
+    let agent_type = "claude";
+
+    let store = trogon_registry::provision(&js).await.expect("provision registry");
+    let registry = trogon_registry::Registry::new(store);
+
+    let cap = trogon_registry::AgentCapability {
+        agent_type: agent_type.to_string(),
+        capabilities: vec!["chat".to_string()],
+        nats_subject: format!("{}.agent.>", prefix),
+        current_load: 0,
+        metadata: serde_json::json!({ "acp_prefix": prefix }),
+    };
+    registry.register(&cap).await.expect("registration must succeed");
+
+    let entry = registry
+        .get(agent_type)
+        .await
+        .expect("get must not error")
+        .expect("registered entry must exist");
+
+    assert_eq!(
+        entry.metadata["acp_prefix"].as_str(),
+        Some(prefix),
+        "bridge relies on acp_prefix matching ACP_PREFIX — got {:?}",
+        entry.metadata
+    );
+    assert_eq!(
+        entry.nats_subject,
+        format!("{}.agent.>", prefix),
+        "nats_subject must be derived from ACP_PREFIX"
+    );
+}
