@@ -2,35 +2,153 @@
 //!
 //! ## Routes
 //!
-//! | Method | Path                              | Action                        |
-//! |--------|-----------------------------------|-------------------------------|
-//! | GET    | `/sessions`                       | List tenant's sessions        |
-//! | POST   | `/sessions`                       | Create a new session          |
-//! | GET    | `/sessions/:id`                   | Get session with history      |
-//! | PATCH  | `/sessions/:id`                   | Update name / model / tools   |
-//! | DELETE | `/sessions/:id`                   | Delete session                |
-//! | POST   | `/sessions/:id/messages`          | Send message, run agent       |
+//! | Method | Path                                          | Action                              |
+//! |--------|-----------------------------------------------|-------------------------------------|
+//! | GET    | `/sessions`                                   | List tenant's sessions              |
+//! | POST   | `/sessions`                                   | Create a new session                |
+//! | GET    | `/sessions/:id`                               | Get session with history            |
+//! | PATCH  | `/sessions/:id`                               | Update name / model / tools         |
+//! | DELETE | `/sessions/:id`                               | Delete session                      |
+//! | POST   | `/sessions/:id/messages`                      | Send message (JSON or SSE stream)   |
+//! | POST   | `/sessions/:id/approvals/:tool_call_id`       | Approve or deny a pending tool call |
 //!
 //! ## Tenant identification
 //! Every request must carry the `X-Tenant-Id` header.
+//!
+//! ## Streaming + approval gates
+//! Add `Accept: text/event-stream` to `POST /sessions/:id/messages` to receive an SSE
+//! stream. Events have the format `data: <json>\n\n` where the JSON has a `type` field:
+//! - `permission_required` — agent wants to run a tool; respond via the approvals endpoint.
+//! - `done` — agent completed; contains `content` and `message_count`.
+//! - `error` — agent returned an error; contains `message`.
 
+use std::collections::HashMap;
+use std::convert::Infallible;
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::{
     Router,
     extract::{Path, State},
     http::{HeaderMap, StatusCode},
-    response::{IntoResponse, Response},
+    response::{IntoResponse, Response, sse::{Event, Sse}},
     routing::{get, post},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use tokio::sync::{Mutex, mpsc, oneshot};
+use tokio_stream::wrappers::ReceiverStream;
+use tokio_stream::StreamExt as _;
 
 use crate::agent_loop::{AgentLoop, Message};
 use crate::handlers::{DEFAULT_MEMORY_PATH, fetch_memory};
 use crate::promise_store::{AgentPromise, PromiseRepository, PromiseStatus};
 use crate::session::{ChatSession, SessionRepository};
 use crate::tools::all_tool_defs;
+use trogon_agent_core::agent_loop::PermissionChecker;
+
+// ── Approval registry ─────────────────────────────────────────────────────────
+
+/// Holds in-flight tool approval requests keyed by `tool_call_id`.
+type PendingApprovals = Mutex<HashMap<String, oneshot::Sender<bool>>>;
+
+/// Registry mapping session_id → active approval map for `send_message` SSE runs.
+#[derive(Clone, Default)]
+pub struct ApprovalRegistry(Arc<Mutex<HashMap<String, Arc<PendingApprovals>>>>);
+
+impl ApprovalRegistry {
+    pub fn new() -> Self {
+        Self(Arc::new(Mutex::new(HashMap::new())))
+    }
+
+    async fn register(&self, session_id: &str) -> Arc<PendingApprovals> {
+        let pending = Arc::new(Mutex::new(HashMap::new()));
+        self.0.lock().await.insert(session_id.to_string(), Arc::clone(&pending));
+        pending
+    }
+
+    pub async fn resolve(&self, session_id: &str, tool_call_id: &str, allowed: bool) -> bool {
+        let guard = self.0.lock().await;
+        if let Some(pending) = guard.get(session_id) {
+            let mut map = pending.lock().await;
+            if let Some(tx) = map.remove(tool_call_id) {
+                let _ = tx.send(allowed);
+                return true;
+            }
+        }
+        false
+    }
+
+    async fn deregister(&self, session_id: &str) {
+        self.0.lock().await.remove(session_id);
+    }
+}
+
+// ── HTTP permission checker ───────────────────────────────────────────────────
+
+/// `PermissionChecker` for HTTP sessions: emits a `permission_required` SSE event and
+/// waits for the client to POST to `/sessions/{id}/approvals/{tool_call_id}`.
+struct HttpPermissionChecker {
+    pending: Arc<PendingApprovals>,
+    event_tx: mpsc::Sender<SsePayload>,
+}
+
+impl PermissionChecker for HttpPermissionChecker {
+    fn check<'a>(
+        &'a self,
+        tool_call_id: &'a str,
+        tool_name: &'a str,
+        tool_input: &'a serde_json::Value,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send + 'a>> {
+        Box::pin(async move {
+            let (resp_tx, resp_rx) = oneshot::channel();
+            self.pending
+                .lock()
+                .await
+                .insert(tool_call_id.to_string(), resp_tx);
+
+            let event = SsePayload::PermissionRequired {
+                tool_call_id: tool_call_id.to_string(),
+                tool_name: tool_name.to_string(),
+                tool_input: tool_input.clone(),
+            };
+            if self.event_tx.send(event).await.is_err() {
+                return false; // client disconnected
+            }
+
+            match tokio::time::timeout(Duration::from_secs(60), resp_rx).await {
+                Ok(Ok(allowed)) => allowed,
+                _ => false,
+            }
+        })
+    }
+}
+
+// ── SSE event types ───────────────────────────────────────────────────────────
+
+#[derive(Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub(crate) enum SsePayload {
+    PermissionRequired {
+        tool_call_id: String,
+        tool_name: String,
+        tool_input: serde_json::Value,
+    },
+    Done {
+        content: String,
+        message_count: usize,
+    },
+    Error {
+        message: String,
+    },
+}
+
+impl SsePayload {
+    fn into_event(self) -> Result<Event, Infallible> {
+        Ok(Event::default()
+            .data(serde_json::to_string(&self).unwrap_or_default()))
+    }
+}
 
 // ── App state ─────────────────────────────────────────────────────────────────
 
@@ -46,6 +164,8 @@ pub struct ChatAppState<R: SessionRepository> {
     pub agent_loader: Option<Arc<dyn crate::agent_loader::AgentLoading>>,
     /// Skill loader shared with the automation dispatcher.
     pub skill_loader: Option<Arc<dyn crate::skill_loader::SkillLoading>>,
+    /// Registry of in-flight approval requests for SSE-mode `send_message`.
+    pub approval_registry: ApprovalRegistry,
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -192,6 +312,12 @@ pub struct SendMessageResponse {
     pub content: String,
     /// Total messages in the session after this turn.
     pub message_count: usize,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ApprovalRequest {
+    /// `true` to allow the tool call, `false` to deny it.
+    pub allowed: bool,
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
@@ -354,44 +480,41 @@ async fn send_message<R: SessionRepository>(
             .collect()
     };
 
-    // Resolve the effective agent: override model if the session specifies one.
+    // Resolve the effective model.
     let effective_model = session
         .model
         .clone()
         .unwrap_or_else(|| state.agent.model.clone());
-    let temp_agent;
-    let agent: &AgentLoop = if effective_model == state.agent.model {
-        &state.agent
-    } else {
-        temp_agent = AgentLoop {
-            anthropic_client: Arc::clone(&state.agent.anthropic_client),
-            model: effective_model,
-            max_iterations: state.agent.max_iterations,
-            tool_dispatcher: Arc::clone(&state.agent.tool_dispatcher),
-            tool_context: Arc::clone(&state.agent.tool_context),
-            memory_owner: state.agent.memory_owner.clone(),
-            memory_repo: state.agent.memory_repo.clone(),
-            memory_path: state.agent.memory_path.clone(),
-            mcp_tool_defs: state.agent.mcp_tool_defs.clone(),
-            mcp_dispatch: state.agent.mcp_dispatch.clone(),
-            flag_client: Arc::clone(&state.agent.flag_client),
-            tenant_id: state.agent.tenant_id.clone(),
-            promise_store: None,
-            promise_id: None,
-            permission_checker: None,
-            elicitation_provider: None,
-        };
-        &temp_agent
+
+    // Build a per-request AgentLoop so the caller can set the permission_checker
+    // without mutating the shared state.agent.
+    let mut req_agent = AgentLoop {
+        anthropic_client: Arc::clone(&state.agent.anthropic_client),
+        model: effective_model,
+        max_iterations: state.agent.max_iterations,
+        tool_dispatcher: Arc::clone(&state.agent.tool_dispatcher),
+        tool_context: Arc::clone(&state.agent.tool_context),
+        memory_owner: state.agent.memory_owner.clone(),
+        memory_repo: state.agent.memory_repo.clone(),
+        memory_path: state.agent.memory_path.clone(),
+        mcp_tool_defs: state.agent.mcp_tool_defs.clone(),
+        mcp_dispatch: state.agent.mcp_dispatch.clone(),
+        flag_client: Arc::clone(&state.agent.flag_client),
+        tenant_id: state.agent.tenant_id.clone(),
+        promise_store: None,
+        promise_id: None,
+        permission_checker: None,
+        elicitation_provider: None,
     };
 
     // Fetch memory (system prompt).
     let mem_path = session
         .memory_path
         .as_deref()
-        .or(agent.memory_path.as_deref())
+        .or(req_agent.memory_path.as_deref())
         .unwrap_or(DEFAULT_MEMORY_PATH);
-    let memory = match (&agent.memory_owner, &agent.memory_repo) {
-        (Some(owner), Some(repo)) => fetch_memory(agent, owner, repo, mem_path).await,
+    let memory = match (&req_agent.memory_owner, &req_agent.memory_repo) {
+        (Some(owner), Some(repo)) => fetch_memory(&req_agent, owner, repo, mem_path).await,
         _ => None,
     };
 
@@ -414,8 +537,58 @@ async fn send_message<R: SessionRepository>(
         (None, None) => None,
     };
 
-    // Run the chat loop — returns (final_text, updated_messages).
-    match agent
+    // If the client requested SSE, run as a stream with approval gate support.
+    let wants_sse = headers
+        .get("accept")
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v.contains("text/event-stream"))
+        .unwrap_or(false);
+
+    if wants_sse {
+        let (event_tx, event_rx) = mpsc::channel::<SsePayload>(32);
+        let pending = state.approval_registry.register(&id).await;
+
+        req_agent.permission_checker = Some(Arc::new(HttpPermissionChecker {
+            pending,
+            event_tx: event_tx.clone(),
+        }));
+
+        let session_store = state.session_store.clone();
+        let registry = state.approval_registry.clone();
+        let session_id = id.clone();
+
+        tokio::spawn(async move {
+            let result = req_agent
+                .run_chat(session.messages.clone(), &tools, system_prompt.as_deref())
+                .await;
+
+            let payload = match result {
+                Err(e) => SsePayload::Error { message: e.to_string() },
+                Ok((text, updated_messages)) => {
+                    let message_count = updated_messages.len();
+                    session.messages = updated_messages;
+                    let now_secs = now_epoch_secs();
+                    session.updated_at = epoch_to_iso8601(now_secs);
+                    if session.started_at_secs > 0 {
+                        session.duration_ms = now_secs
+                            .saturating_sub(session.started_at_secs)
+                            .saturating_mul(1000);
+                    }
+                    let _ = session_store.put(&session).await;
+                    SsePayload::Done { content: text, message_count }
+                }
+            };
+
+            let _ = event_tx.send(payload).await;
+            registry.deregister(&session_id).await;
+        });
+
+        let stream = ReceiverStream::new(event_rx).map(SsePayload::into_event);
+        return Sse::new(stream).into_response();
+    }
+
+    // Non-SSE path: run synchronously and return JSON.
+    match req_agent
         .run_chat(session.messages.clone(), &tools, system_prompt.as_deref())
         .await
     {
@@ -447,6 +620,28 @@ async fn send_message<R: SessionRepository>(
             )
                 .into_response()
         }
+    }
+}
+
+/// `POST /sessions/:id/approvals/:tool_call_id` — resolve a pending tool approval.
+///
+/// Body: `{"allowed": true}` or `{"allowed": false}`.
+/// Returns 200 on success, 404 if there is no matching pending approval.
+async fn approve_tool_call<R: SessionRepository>(
+    headers: HeaderMap,
+    State(state): State<ChatAppState<R>>,
+    Path((id, tool_call_id)): Path<(String, String)>,
+    axum::Json(body): axum::Json<ApprovalRequest>,
+) -> Response {
+    match tenant_id(&headers) {
+        Ok(_) => {}
+        Err(r) => return r,
+    };
+
+    if state.approval_registry.resolve(&id, &tool_call_id, body.allowed).await {
+        StatusCode::OK.into_response()
+    } else {
+        err(StatusCode::NOT_FOUND, "no pending approval for that tool_call_id")
     }
 }
 
@@ -533,6 +728,10 @@ pub fn router<R: SessionRepository>(state: ChatAppState<R>) -> Router {
                 .delete(delete_session::<R>),
         )
         .route("/sessions/{id}/messages", post(send_message::<R>))
+        .route(
+            "/sessions/{id}/approvals/{tool_call_id}",
+            post(approve_tool_call::<R>),
+        )
         .route("/admin/promises", get(list_promises::<R>))
         .with_state(state)
 }
@@ -786,6 +985,7 @@ mod tests {
             agent_id: None,
             agent_loader: None,
             skill_loader: None,
+            approval_registry: ApprovalRegistry::new(),
         };
         router(state)
     }
@@ -798,6 +998,7 @@ mod tests {
             agent_id: None,
             agent_loader: None,
             skill_loader: None,
+            approval_registry: ApprovalRegistry::new(),
         };
         router(state)
     }
@@ -810,6 +1011,7 @@ mod tests {
             agent_id: None,
             agent_loader: None,
             skill_loader: None,
+            approval_registry: ApprovalRegistry::new(),
         };
         router(state)
     }
@@ -1199,6 +1401,7 @@ mod tests {
             agent_id: None,
             agent_loader: None,
             skill_loader: None,
+            approval_registry: ApprovalRegistry::new(),
         };
         router(state)
     }
@@ -1430,5 +1633,75 @@ mod tests {
             .unwrap();
         let resp = error_app().oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    // ── ApprovalRegistry unit tests ───────────────────────────────────────────
+
+    #[tokio::test]
+    async fn approval_registry_resolve_returns_true_on_match() {
+        let registry = ApprovalRegistry::new();
+        let pending = registry.register("sess-1").await;
+
+        // Manually insert a oneshot sender into the pending map.
+        let (tx, rx) = tokio::sync::oneshot::channel::<bool>();
+        pending.lock().await.insert("tc-1".to_string(), tx);
+
+        let found = registry.resolve("sess-1", "tc-1", true).await;
+        assert!(found, "resolve should return true when tool_call_id matches");
+        assert!(rx.await.unwrap(), "oneshot should receive true");
+    }
+
+    #[tokio::test]
+    async fn approval_registry_resolve_returns_false_when_session_not_found() {
+        let registry = ApprovalRegistry::new();
+        let found = registry.resolve("missing-session", "tc-1", true).await;
+        assert!(!found);
+    }
+
+    #[tokio::test]
+    async fn approval_registry_resolve_returns_false_when_tool_call_not_found() {
+        let registry = ApprovalRegistry::new();
+        registry.register("sess-1").await;
+        let found = registry.resolve("sess-1", "nonexistent-tc", true).await;
+        assert!(!found);
+    }
+
+    #[tokio::test]
+    async fn approval_registry_deregister_removes_session() {
+        let registry = ApprovalRegistry::new();
+        registry.register("sess-1").await;
+        registry.deregister("sess-1").await;
+        let found = registry.resolve("sess-1", "tc-1", true).await;
+        assert!(!found, "after deregister, resolve should find nothing");
+    }
+
+    #[tokio::test]
+    async fn approve_tool_call_returns_404_when_no_pending_approval() {
+        let store = MockSessionStore::new();
+        store.insert(sample_session("sess-1", "acme"));
+        let app = mock_app(store);
+
+        let req = Request::builder()
+            .method("POST")
+            .uri("/sessions/sess-1/approvals/tc-99")
+            .header("x-tenant-id", "acme")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"allowed":true}"#))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn approve_tool_call_missing_tenant_returns_400() {
+        let app = mock_app(MockSessionStore::new());
+        let req = Request::builder()
+            .method("POST")
+            .uri("/sessions/sess-1/approvals/tc-1")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"allowed":true}"#))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     }
 }

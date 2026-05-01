@@ -227,6 +227,7 @@ async fn start_with_options(
         agent_id,
         agent_loader,
         skill_loader,
+        approval_registry: Default::default(),
     };
     let app = router(state);
 
