@@ -66,6 +66,7 @@ fn make_agent_loop() -> AgentLoop {
         mcp_tool_defs: vec![],
         mcp_dispatch: vec![],
         permission_checker: None,
+        elicitation_provider: None,
     }
 }
 
@@ -86,6 +87,7 @@ async fn start_agent(
         make_agent_loop(),
         prefix,
         "claude-opus-4-6",
+        None,
         None,
         gateway_config,
     );

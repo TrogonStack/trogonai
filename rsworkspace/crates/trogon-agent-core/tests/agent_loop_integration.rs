@@ -35,6 +35,7 @@ fn make_agent(base_url: &str) -> AgentLoop {
         mcp_tool_defs: vec![],
         mcp_dispatch: vec![],
         permission_checker: None,
+        elicitation_provider: None,
     }
 }
 
@@ -647,6 +648,7 @@ async fn run_with_extra_headers_and_tools() {
         mcp_tool_defs: vec![],
         mcp_dispatch: vec![],
         permission_checker: None,
+        elicitation_provider: None,
     };
 
     let result = agent
@@ -688,6 +690,7 @@ async fn run_chat_with_system_prompt_tools_and_extra_headers() {
         mcp_tool_defs: vec![],
         mcp_dispatch: vec![],
         permission_checker: None,
+        elicitation_provider: None,
     };
 
     let (text, msgs) = agent
@@ -783,6 +786,7 @@ async fn run_chat_streaming_comprehensive() {
         mcp_tool_defs: vec![],
         mcp_dispatch: vec![],
         permission_checker: None,
+        elicitation_provider: None,
     };
 
     let (tx, mut rx) = tokio::sync::mpsc::channel(64);
@@ -900,6 +904,7 @@ async fn run_chat_streaming_permission_denied() {
         mcp_tool_defs: vec![],
         mcp_dispatch: vec![],
         permission_checker: Some(Arc::new(DenyAll)),
+        elicitation_provider: None,
     };
 
     let (tx, mut rx) = tokio::sync::mpsc::channel(32);
@@ -1053,6 +1058,7 @@ async fn run_uses_proxy_url_when_no_anthropic_base_url() {
         mcp_tool_defs: vec![],
         mcp_dispatch: vec![],
         permission_checker: None,
+        elicitation_provider: None,
     };
 
     let result = agent.run(vec![Message::user_text("hi")], &[], None).await;

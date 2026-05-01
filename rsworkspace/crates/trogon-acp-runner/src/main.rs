@@ -103,6 +103,7 @@ async fn main() -> anyhow::Result<()> {
         mcp_tool_defs: vec![],
         mcp_dispatch: vec![],
         permission_checker: None,
+        elicitation_provider: None,
         thinking_budget,
     };
 
@@ -127,7 +128,6 @@ async fn main() -> anyhow::Result<()> {
     // an agent-side ElicitationProvider.
 
     let (elic_tx, mut elic_rx) = mpsc::channel::<ElicitationReq>(32);
-    let _elic_tx = elic_tx;
 
     // ── Session store ─────────────────────────────────────────────────────────
 
@@ -146,6 +146,7 @@ async fn main() -> anyhow::Result<()> {
         acp_prefix.clone(),
         model,
         Some(perm_tx),
+        Some(elic_tx),
         gateway_config,
     )
     .with_compactor(nats.clone());

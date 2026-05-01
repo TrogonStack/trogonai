@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use tokio::sync::mpsc;
-use trogon_agent_core::agent_loop::{AgentError, AgentEvent, Message, PermissionChecker};
+use trogon_agent_core::agent_loop::{AgentError, AgentEvent, ElicitationProvider, Message, PermissionChecker};
 use trogon_agent_core::tools::ToolDef;
 
 use crate::agent::GatewayConfig;
@@ -29,6 +29,9 @@ pub trait AgentRunner: Clone {
 
     /// Install a permission checker that gates every tool execution.
     fn set_permission_checker(&mut self, checker: Arc<dyn PermissionChecker>);
+
+    /// Install an elicitation provider for the built-in `ask_user` tool.
+    fn set_elicitation_provider(&mut self, provider: Arc<dyn ElicitationProvider>);
 
     /// Override proxy / token / extra-headers from a `GatewayConfig`.
     fn apply_gateway(&mut self, config: &GatewayConfig);
@@ -72,6 +75,10 @@ impl AgentRunner for trogon_agent_core::agent_loop::AgentLoop {
 
     fn set_permission_checker(&mut self, checker: Arc<dyn PermissionChecker>) {
         self.permission_checker = Some(checker);
+    }
+
+    fn set_elicitation_provider(&mut self, provider: Arc<dyn ElicitationProvider>) {
+        self.elicitation_provider = Some(provider);
     }
 
     fn apply_gateway(&mut self, config: &GatewayConfig) {
@@ -210,6 +217,8 @@ pub mod mock {
         }
 
         fn set_permission_checker(&mut self, _checker: Arc<dyn PermissionChecker>) {}
+
+        fn set_elicitation_provider(&mut self, _provider: Arc<dyn ElicitationProvider>) {}
 
         fn apply_gateway(&mut self, _config: &GatewayConfig) {}
 

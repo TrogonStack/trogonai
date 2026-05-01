@@ -32,6 +32,7 @@ fn make_agent() -> TrogonAgent<MemorySessionStore, MockAgentRunner, MockSessionN
         "acp",
         "claude-test",
         None,
+        None,
         Arc::new(RwLock::new(None::<GatewayConfig>)),
     )
 }
@@ -49,6 +50,7 @@ fn make_agent_parts() -> (
         MockAgentRunner::new("claude-test"),
         "acp",
         "claude-test",
+        None,
         None,
         Arc::new(RwLock::new(None::<GatewayConfig>)),
     );
@@ -1053,6 +1055,7 @@ async fn prompt_runs_agent_and_saves_messages() {
         "acp",
         "claude-test",
         None,
+        None,
         Arc::new(RwLock::new(None::<GatewayConfig>)),
     );
 
@@ -1123,6 +1126,7 @@ async fn prompt_max_iterations_returns_max_turn_requests() {
         "acp",
         "claude-test",
         None,
+        None,
         Arc::new(RwLock::new(None::<GatewayConfig>)),
     );
 
@@ -1160,6 +1164,7 @@ async fn prompt_max_tokens_returns_max_tokens_stop_reason() {
         "acp",
         "claude-test",
         None,
+        None,
         Arc::new(RwLock::new(None::<GatewayConfig>)),
     );
 
@@ -1196,6 +1201,7 @@ async fn prompt_steer_subject_contains_session_id() {
         MockAgentRunner::new("claude-test"),
         "acp",
         "claude-test",
+        None,
         None,
         Arc::new(RwLock::new(None::<GatewayConfig>)),
     );
@@ -1241,6 +1247,7 @@ async fn prompt_steer_message_reaches_runner() {
         "acp",
         "claude-test",
         None,
+        None,
         Arc::new(RwLock::new(None::<GatewayConfig>)),
     );
 
@@ -1278,6 +1285,7 @@ async fn prompt_multiple_steer_messages_all_reach_runner() {
         "acp",
         "claude-test",
         None,
+        None,
         Arc::new(RwLock::new(None::<GatewayConfig>)),
     );
 
@@ -1313,6 +1321,7 @@ async fn prompt_no_steer_runner_receives_empty() {
         runner.clone(),
         "acp",
         "claude-test",
+        None,
         None,
         Arc::new(RwLock::new(None::<GatewayConfig>)),
     );
@@ -1352,6 +1361,7 @@ async fn prompt_steer_subscribe_failure_prompt_still_succeeds() {
         runner.clone(),
         "acp",
         "claude-test",
+        None,
         None,
         Arc::new(RwLock::new(None::<GatewayConfig>)),
     );
@@ -1394,6 +1404,7 @@ async fn prompt_text_delta_events_are_forwarded_without_error() {
         runner,
         "acp",
         "claude-test",
+        None,
         None,
         Arc::new(RwLock::new(None::<GatewayConfig>)),
     );

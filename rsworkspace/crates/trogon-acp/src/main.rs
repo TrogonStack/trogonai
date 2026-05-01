@@ -108,6 +108,7 @@ async fn main() -> anyhow::Result<()> {
         mcp_tool_defs: vec![],
         mcp_dispatch: vec![],
         permission_checker: None,
+        elicitation_provider: None,
         thinking_budget: None,
     };
 
@@ -141,6 +142,7 @@ async fn main() -> anyhow::Result<()> {
         acp_prefix.clone(),
         model.clone(),
         Some(perm_tx),
+        None,
         gateway_config.clone(),
     );
     let acp_prefix_typed = AcpPrefix::new(&acp_prefix)?;

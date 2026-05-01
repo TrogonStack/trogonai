@@ -7,9 +7,13 @@
 
 use std::time::Duration;
 
-use agent_client_protocol::{ElicitationRequest, ElicitationResponse};
+use agent_client_protocol::{
+    ElicitationAcceptAction, ElicitationAction, ElicitationContentValue, ElicitationFormMode,
+    ElicitationMode, ElicitationRequest, ElicitationResponse, ElicitationSchema,
+};
 use acp_nats::{acp_prefix::AcpPrefix, client_proxy::NatsClientProxy, session_id::AcpSessionId};
 use tokio::sync::{mpsc, oneshot};
+use trogon_agent_core::agent_loop::ElicitationProvider;
 use trogon_nats::{FlushClient, PublishClient, RequestClient};
 use tracing::warn;
 
@@ -22,6 +26,50 @@ pub struct ElicitationReq {
 
 /// Sender half — given to the Runner so it can forward elicitation requests.
 pub type ElicitationTx = mpsc::Sender<ElicitationReq>;
+
+/// Implements `ElicitationProvider` by routing requests through the channel to
+/// the LocalSet task, which forwards them to the ACP client via NATS.
+pub struct ChannelElicitationProvider {
+    pub session_id: String,
+    pub tx: ElicitationTx,
+}
+
+impl ElicitationProvider for ChannelElicitationProvider {
+    fn elicit<'a>(
+        &'a self,
+        question: &'a str,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<String>> + Send + 'a>> {
+        Box::pin(async move {
+            let (response_tx, response_rx) = oneshot::channel();
+            let schema = ElicitationSchema::new().string("answer", true);
+            let request = ElicitationRequest::new(
+                self.session_id.clone(),
+                ElicitationMode::Form(ElicitationFormMode::new(schema)),
+                question,
+            );
+            let req = ElicitationReq { request, response_tx };
+            if self.tx.send(req).await.is_err() {
+                return None;
+            }
+            match response_rx.await {
+                Ok(Ok(response)) => match response.action {
+                    ElicitationAction::Accept(ElicitationAcceptAction { content: Some(fields), .. }) => {
+                        fields.get("answer").map(|v| match v {
+                            ElicitationContentValue::String(s) => s.clone(),
+                            ElicitationContentValue::Integer(n) => n.to_string(),
+                            ElicitationContentValue::Number(n) => n.to_string(),
+                            ElicitationContentValue::Boolean(b) => b.to_string(),
+                            ElicitationContentValue::StringArray(arr) => arr.join(", "),
+                            _ => String::new(),
+                        })
+                    }
+                    _ => None,
+                },
+                _ => None,
+            }
+        })
+    }
+}
 
 /// Forward a single `ElicitationReq` to the ACP client and send the response
 /// back on the embedded oneshot channel.
