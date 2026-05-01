@@ -11,14 +11,16 @@
 //! | DELETE | `/sessions/:id`                               | Delete session                      |
 //! | POST   | `/sessions/:id/messages`                      | Send message (JSON or SSE stream)   |
 //! | POST   | `/sessions/:id/approvals/:tool_call_id`       | Approve or deny a pending tool call |
+//! | POST   | `/sessions/:id/elicitations/:elicitation_id`  | Answer or cancel a pending question |
 //!
 //! ## Tenant identification
 //! Every request must carry the `X-Tenant-Id` header.
 //!
-//! ## Streaming + approval gates
+//! ## Streaming + approval gates + elicitations
 //! Add `Accept: text/event-stream` to `POST /sessions/:id/messages` to receive an SSE
 //! stream. Events have the format `data: <json>\n\n` where the JSON has a `type` field:
 //! - `permission_required` — agent wants to run a tool; respond via the approvals endpoint.
+//! - `elicitation_required` — agent asks a question; respond via the elicitations endpoint.
 //! - `done` — agent completed; contains `content` and `message_count`.
 //! - `error` — agent returned an error; contains `message`.
 
@@ -124,6 +126,82 @@ impl PermissionChecker for HttpPermissionChecker {
     }
 }
 
+// ── Elicitation registry ──────────────────────────────────────────────────────
+
+/// Holds in-flight elicitation requests keyed by a per-request `elicitation_id`.
+type PendingElicitations = Mutex<HashMap<String, oneshot::Sender<Option<String>>>>;
+
+/// Registry mapping session_id → active elicitation map for SSE `send_message` runs.
+#[derive(Clone, Default)]
+pub struct ElicitationRegistry(Arc<Mutex<HashMap<String, Arc<PendingElicitations>>>>);
+
+impl ElicitationRegistry {
+    pub fn new() -> Self {
+        Self(Arc::new(Mutex::new(HashMap::new())))
+    }
+
+    async fn register(&self, session_id: &str) -> Arc<PendingElicitations> {
+        let pending = Arc::new(Mutex::new(HashMap::new()));
+        self.0.lock().await.insert(session_id.to_string(), Arc::clone(&pending));
+        pending
+    }
+
+    pub async fn respond(&self, session_id: &str, elicitation_id: &str, answer: Option<String>) -> bool {
+        let guard = self.0.lock().await;
+        if let Some(pending) = guard.get(session_id) {
+            let mut map = pending.lock().await;
+            if let Some(tx) = map.remove(elicitation_id) {
+                let _ = tx.send(answer);
+                return true;
+            }
+        }
+        false
+    }
+
+    async fn deregister(&self, session_id: &str) {
+        self.0.lock().await.remove(session_id);
+    }
+}
+
+// ── HTTP elicitation provider ─────────────────────────────────────────────────
+
+/// `ElicitationProvider` for HTTP sessions: emits an `elicitation_required` SSE event
+/// and waits for the client to POST to `/sessions/{id}/elicitations/{elicitation_id}`.
+struct HttpElicitationProvider {
+    pending: Arc<PendingElicitations>,
+    event_tx: mpsc::Sender<SsePayload>,
+}
+
+impl trogon_agent_core::agent_loop::ElicitationProvider for HttpElicitationProvider {
+    fn elicit<'a>(
+        &'a self,
+        question: &'a str,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<String>> + Send + 'a>> {
+        Box::pin(async move {
+            let elicitation_id = uuid::Uuid::new_v4().to_string();
+            let (resp_tx, resp_rx) = oneshot::channel();
+            self.pending
+                .lock()
+                .await
+                .insert(elicitation_id.clone(), resp_tx);
+
+            let event = SsePayload::ElicitationRequired {
+                elicitation_id,
+                question: question.to_string(),
+            };
+            if self.event_tx.send(event).await.is_err() {
+                return None; // client disconnected
+            }
+
+            // Elicitations can take longer — give the user 5 minutes.
+            match tokio::time::timeout(Duration::from_secs(300), resp_rx).await {
+                Ok(Ok(answer)) => answer,
+                _ => None,
+            }
+        })
+    }
+}
+
 // ── SSE event types ───────────────────────────────────────────────────────────
 
 #[derive(Serialize)]
@@ -133,6 +211,10 @@ pub(crate) enum SsePayload {
         tool_call_id: String,
         tool_name: String,
         tool_input: serde_json::Value,
+    },
+    ElicitationRequired {
+        elicitation_id: String,
+        question: String,
     },
     Done {
         content: String,
@@ -166,6 +248,8 @@ pub struct ChatAppState<R: SessionRepository> {
     pub skill_loader: Option<Arc<dyn crate::skill_loader::SkillLoading>>,
     /// Registry of in-flight approval requests for SSE-mode `send_message`.
     pub approval_registry: ApprovalRegistry,
+    /// Registry of in-flight elicitation requests for SSE-mode `send_message`.
+    pub elicitation_registry: ElicitationRegistry,
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -318,6 +402,12 @@ pub struct SendMessageResponse {
 pub struct ApprovalRequest {
     /// `true` to allow the tool call, `false` to deny it.
     pub allowed: bool,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ElicitationResponseRequest {
+    /// The user's answer. `None` means the user cancelled.
+    pub answer: Option<String>,
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
@@ -546,15 +636,22 @@ async fn send_message<R: SessionRepository>(
 
     if wants_sse {
         let (event_tx, event_rx) = mpsc::channel::<SsePayload>(32);
-        let pending = state.approval_registry.register(&id).await;
 
+        let approval_pending = state.approval_registry.register(&id).await;
         req_agent.permission_checker = Some(Arc::new(HttpPermissionChecker {
-            pending,
+            pending: approval_pending,
+            event_tx: event_tx.clone(),
+        }));
+
+        let elic_pending = state.elicitation_registry.register(&id).await;
+        req_agent.elicitation_provider = Some(Arc::new(HttpElicitationProvider {
+            pending: elic_pending,
             event_tx: event_tx.clone(),
         }));
 
         let session_store = state.session_store.clone();
-        let registry = state.approval_registry.clone();
+        let approval_registry = state.approval_registry.clone();
+        let elicitation_registry = state.elicitation_registry.clone();
         let session_id = id.clone();
 
         tokio::spawn(async move {
@@ -580,7 +677,8 @@ async fn send_message<R: SessionRepository>(
             };
 
             let _ = event_tx.send(payload).await;
-            registry.deregister(&session_id).await;
+            approval_registry.deregister(&session_id).await;
+            elicitation_registry.deregister(&session_id).await;
         });
 
         let stream = ReceiverStream::new(event_rx).map(SsePayload::into_event);
@@ -642,6 +740,28 @@ async fn approve_tool_call<R: SessionRepository>(
         StatusCode::OK.into_response()
     } else {
         err(StatusCode::NOT_FOUND, "no pending approval for that tool_call_id")
+    }
+}
+
+/// `POST /sessions/:id/elicitations/:elicitation_id` — answer or cancel a pending elicitation.
+///
+/// Body: `{"answer": "some text"}` to answer, or `{"answer": null}` to cancel.
+/// Returns 200 on success, 404 if there is no matching pending elicitation.
+async fn respond_to_elicitation<R: SessionRepository>(
+    headers: HeaderMap,
+    State(state): State<ChatAppState<R>>,
+    Path((id, elicitation_id)): Path<(String, String)>,
+    axum::Json(body): axum::Json<ElicitationResponseRequest>,
+) -> Response {
+    match tenant_id(&headers) {
+        Ok(_) => {}
+        Err(r) => return r,
+    };
+
+    if state.elicitation_registry.respond(&id, &elicitation_id, body.answer).await {
+        StatusCode::OK.into_response()
+    } else {
+        err(StatusCode::NOT_FOUND, "no pending elicitation for that elicitation_id")
     }
 }
 
@@ -731,6 +851,10 @@ pub fn router<R: SessionRepository>(state: ChatAppState<R>) -> Router {
         .route(
             "/sessions/{id}/approvals/{tool_call_id}",
             post(approve_tool_call::<R>),
+        )
+        .route(
+            "/sessions/{id}/elicitations/{elicitation_id}",
+            post(respond_to_elicitation::<R>),
         )
         .route("/admin/promises", get(list_promises::<R>))
         .with_state(state)
@@ -986,6 +1110,7 @@ mod tests {
             agent_loader: None,
             skill_loader: None,
             approval_registry: ApprovalRegistry::new(),
+            elicitation_registry: ElicitationRegistry::new(),
         };
         router(state)
     }
@@ -999,6 +1124,7 @@ mod tests {
             agent_loader: None,
             skill_loader: None,
             approval_registry: ApprovalRegistry::new(),
+            elicitation_registry: ElicitationRegistry::new(),
         };
         router(state)
     }
@@ -1012,6 +1138,7 @@ mod tests {
             agent_loader: None,
             skill_loader: None,
             approval_registry: ApprovalRegistry::new(),
+            elicitation_registry: ElicitationRegistry::new(),
         };
         router(state)
     }
@@ -1402,6 +1529,7 @@ mod tests {
             agent_loader: None,
             skill_loader: None,
             approval_registry: ApprovalRegistry::new(),
+            elicitation_registry: ElicitationRegistry::new(),
         };
         router(state)
     }
@@ -1700,6 +1828,71 @@ mod tests {
             .uri("/sessions/sess-1/approvals/tc-1")
             .header("content-type", "application/json")
             .body(Body::from(r#"{"allowed":true}"#))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    // ── ElicitationRegistry unit tests ───────────────────────────────────────
+
+    #[tokio::test]
+    async fn elicitation_registry_respond_delivers_answer() {
+        let registry = ElicitationRegistry::new();
+        let pending = registry.register("sess-1").await;
+
+        let (tx, rx) = tokio::sync::oneshot::channel::<Option<String>>();
+        pending.lock().await.insert("elic-1".to_string(), tx);
+
+        let found = registry.respond("sess-1", "elic-1", Some("42".to_string())).await;
+        assert!(found);
+        assert_eq!(rx.await.unwrap(), Some("42".to_string()));
+    }
+
+    #[tokio::test]
+    async fn elicitation_registry_respond_delivers_cancel() {
+        let registry = ElicitationRegistry::new();
+        let pending = registry.register("sess-1").await;
+
+        let (tx, rx) = tokio::sync::oneshot::channel::<Option<String>>();
+        pending.lock().await.insert("elic-2".to_string(), tx);
+
+        let found = registry.respond("sess-1", "elic-2", None).await;
+        assert!(found);
+        assert_eq!(rx.await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn elicitation_registry_respond_returns_false_when_not_found() {
+        let registry = ElicitationRegistry::new();
+        let found = registry.respond("missing", "elic-1", Some("x".to_string())).await;
+        assert!(!found);
+    }
+
+    #[tokio::test]
+    async fn respond_to_elicitation_returns_404_when_no_pending() {
+        let store = MockSessionStore::new();
+        store.insert(sample_session("sess-1", "acme"));
+        let app = mock_app(store);
+
+        let req = Request::builder()
+            .method("POST")
+            .uri("/sessions/sess-1/elicitations/elic-99")
+            .header("x-tenant-id", "acme")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"answer":"hello"}"#))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn respond_to_elicitation_missing_tenant_returns_400() {
+        let app = mock_app(MockSessionStore::new());
+        let req = Request::builder()
+            .method("POST")
+            .uri("/sessions/sess-1/elicitations/elic-1")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"answer":"hi"}"#))
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);

@@ -281,6 +281,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
             agent_loader: agent_loader.clone(),
             skill_loader: skill_loader.clone(),
             approval_registry: Default::default(),
+            elicitation_registry: Default::default(),
         };
         let api_port = cfg.api_port;
         tokio::spawn(async move {

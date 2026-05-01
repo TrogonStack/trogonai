@@ -228,6 +228,7 @@ async fn start_with_options(
         agent_loader,
         skill_loader,
         approval_registry: Default::default(),
+        elicitation_registry: Default::default(),
     };
     let app = router(state);
 
