@@ -5,6 +5,7 @@
 pub enum ServiceName {
     AcpNatsStdio,
     AcpNatsServer,
+    AcpNatsWs,
     TrogonGateway,
     TrogonPrActor,
     TrogonRouter,
@@ -21,6 +22,7 @@ impl ServiceName {
         match self {
             Self::AcpNatsStdio => "acp-nats-stdio",
             Self::AcpNatsServer => "acp-nats-server",
+            Self::AcpNatsWs => "acp-nats-ws",
             Self::TrogonGateway => "trogon-gateway",
             Self::TrogonPrActor => "trogon-pr-actor",
             Self::TrogonRouter => "trogon-router",
@@ -48,6 +50,7 @@ mod tests {
     fn as_str_returns_expected_values() {
         assert_eq!(ServiceName::AcpNatsStdio.as_str(), "acp-nats-stdio");
         assert_eq!(ServiceName::AcpNatsServer.as_str(), "acp-nats-server");
+        assert_eq!(ServiceName::AcpNatsWs.as_str(), "acp-nats-ws");
         assert_eq!(ServiceName::TrogonGateway.as_str(), "trogon-gateway");
         assert_eq!(ServiceName::TrogonPrActor.as_str(), "trogon-pr-actor");
         assert_eq!(ServiceName::TrogonRouter.as_str(), "trogon-router");
@@ -81,6 +84,7 @@ mod tests {
     fn display_delegates_to_as_str() {
         assert_eq!(format!("{}", ServiceName::AcpNatsStdio), "acp-nats-stdio");
         assert_eq!(format!("{}", ServiceName::AcpNatsServer), "acp-nats-server");
+        assert_eq!(format!("{}", ServiceName::AcpNatsWs), "acp-nats-ws");
         assert_eq!(format!("{}", ServiceName::TrogonGateway), "trogon-gateway");
         assert_eq!(format!("{}", ServiceName::TrogonPrActor), "trogon-pr-actor");
         assert_eq!(format!("{}", ServiceName::TrogonRouter), "trogon-router");
