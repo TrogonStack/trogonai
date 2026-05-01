@@ -4,12 +4,15 @@ pub(crate) mod fs_read_text_file;
 pub(crate) mod fs_write_text_file;
 pub(crate) mod request_permission;
 pub(crate) mod rpc_reply;
+pub(crate) mod session_elicitation;
 pub(crate) mod session_update;
 pub(crate) mod terminal_create;
 pub(crate) mod terminal_kill;
 pub(crate) mod terminal_output;
 pub(crate) mod terminal_release;
 pub(crate) mod terminal_wait_for_exit;
+
+pub use session_elicitation::ElicitationClient;
 
 use crate::agent::Bridge;
 use crate::error::AGENT_UNAVAILABLE;
@@ -52,7 +55,7 @@ async fn publish_backpressure_error_reply<N: PublishClient + FlushClient, S: Jso
 #[cfg_attr(coverage, coverage(off))]
 pub async fn run<
     N: SubscribeClient + RequestClient + PublishClient + FlushClient,
-    Cl: Client + 'static,
+    Cl: Client + ElicitationClient + 'static,
     C: GetElapsed + 'static,
     J: 'static,
     S: Clone + JsonSerialize + 'static,
@@ -168,7 +171,7 @@ where
 #[instrument(skip(payload, ctx), fields(subject = %subject, session_id = tracing::field::Empty))]
 async fn dispatch_client_method<
     N: SubscribeClient + RequestClient + PublishClient + FlushClient,
-    Cl: Client,
+    Cl: Client + ElicitationClient,
     C: GetElapsed + 'static,
     J: 'static,
     S: JsonSerialize,
@@ -195,6 +198,17 @@ async fn dispatch_client_method<
         }
         ClientMethod::FsWriteTextFile => {
             fs_write_text_file::handle(
+                &payload,
+                ctx.client,
+                reply.as_deref(),
+                ctx.nats,
+                parsed.session_id.as_str(),
+                ctx.serializer,
+            )
+            .await;
+        }
+        ClientMethod::SessionElicitation => {
+            session_elicitation::handle(
                 &payload,
                 ctx.client,
                 reply.as_deref(),

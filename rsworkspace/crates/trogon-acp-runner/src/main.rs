@@ -36,10 +36,14 @@ use acp_nats::acp_prefix::AcpPrefix;
 use acp_nats::jetstream::provision::provision_streams;
 use acp_nats_agent::AgentSideNatsConnection;
 use async_nats::jetstream;
-use tokio::sync::RwLock;
+use tokio::sync::{mpsc, RwLock};
 use tokio::task::LocalSet;
 use tracing::info;
 use trogon_nats::jetstream::NatsJetStreamClient;
+
+use trogon_acp_runner::elicitation::handle_elicitation_request_nats;
+use trogon_acp_runner::permission_bridge::handle_permission_request_nats;
+use trogon_acp_runner::{ElicitationReq, PermissionReq};
 
 use trogon_agent_core::agent_loop::AgentLoop;
 use trogon_agent_core::tools::ToolContext;
@@ -137,6 +141,7 @@ async fn main() -> anyhow::Result<()> {
         mcp_tool_defs: vec![],
         mcp_dispatch: vec![],
         permission_checker: None,
+        elicitation_provider: None,
         thinking_budget,
     };
 
@@ -147,6 +152,20 @@ async fn main() -> anyhow::Result<()> {
     // ── Shared gateway config ─────────────────────────────────────────────────
 
     let gateway_config = Arc::new(RwLock::new(None::<trogon_acp_runner::GatewayConfig>));
+
+    // ── Permission gate channel ───────────────────────────────────────────────
+    // TrogonAgent sends PermissionReq over this channel; the LocalSet task below
+    // handles each request by calling NatsClientProxy::request_permission.
+
+    let (perm_tx, mut perm_rx) = mpsc::channel::<PermissionReq>(32);
+
+    // ── Elicitation channel ───────────────────────────────────────────────────
+    // When the agent needs structured user input, it sends ElicitationReq here;
+    // the LocalSet task forwards it to the ACP client via NatsClientProxy.
+    // The sender is kept alive (currently inert) for future phases that wire
+    // an agent-side ElicitationProvider.
+
+    let (elic_tx, mut elic_rx) = mpsc::channel::<ElicitationReq>(32);
 
     // ── Session store ─────────────────────────────────────────────────────────
 
@@ -160,15 +179,21 @@ async fn main() -> anyhow::Result<()> {
 
     let agent = trogon_acp_runner::TrogonAgent::new(
         notifier,
-        store,
+        store.clone(),
         agent_loop,
         acp_prefix.clone(),
         model,
-        None, // no in-process permission gate
+        Some(perm_tx),
+        Some(elic_tx),
         gateway_config,
     )
     .with_compactor(nats.clone());
 
+    let prefix = AcpPrefix::new(&acp_prefix)?;
+    let nats_for_perm = nats.clone();
+    let nats_for_elic = nats.clone();
+    let prefix_for_perm = prefix.clone();
+    let prefix_for_elic = prefix.clone();
     let (_conn, io_task) =
         AgentSideNatsConnection::new(agent, nats, acp_prefix_parsed, |fut| {
             tokio::task::spawn_local(fut);
@@ -177,7 +202,29 @@ async fn main() -> anyhow::Result<()> {
     info!("trogon-acp-runner started");
 
     let local = LocalSet::new();
-    local.run_until(io_task).await?;
+    local
+        .run_until(async move {
+            // Drain PermissionReq messages and forward each to the ACP client via NATS.
+            tokio::task::spawn_local(async move {
+                while let Some(req) = perm_rx.recv().await {
+                    let nats = nats_for_perm.clone();
+                    let prefix = prefix_for_perm.clone();
+                    handle_permission_request_nats(req, nats, prefix, &store).await;
+                }
+            });
+
+            // Drain ElicitationReq messages and forward each to the ACP client via NATS.
+            tokio::task::spawn_local(async move {
+                while let Some(req) = elic_rx.recv().await {
+                    let nats = nats_for_elic.clone();
+                    let prefix = prefix_for_elic.clone();
+                    handle_elicitation_request_nats(req, nats, prefix).await;
+                }
+            });
+
+            io_task.await
+        })
+        .await?;
 
     Ok(())
 }

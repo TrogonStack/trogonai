@@ -2,11 +2,11 @@ use crate::acp_prefix::AcpPrefix;
 use crate::nats::session;
 use crate::session_id::AcpSessionId;
 use agent_client_protocol::{
-    Client, CreateTerminalRequest, CreateTerminalResponse, Error, ErrorCode, KillTerminalRequest, KillTerminalResponse,
-    ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse,
-    RequestPermissionRequest, RequestPermissionResponse, Result, SessionNotification, TerminalOutputRequest,
-    TerminalOutputResponse, WaitForTerminalExitRequest, WaitForTerminalExitResponse, WriteTextFileRequest,
-    WriteTextFileResponse,
+    Client, CreateTerminalRequest, CreateTerminalResponse, ElicitationRequest, ElicitationResponse, Error, ErrorCode,
+    KillTerminalRequest, KillTerminalResponse, ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest,
+    ReleaseTerminalResponse, RequestPermissionRequest, RequestPermissionResponse, Result, SessionNotification,
+    TerminalOutputRequest, TerminalOutputResponse, WaitForTerminalExitRequest, WaitForTerminalExitResponse,
+    WriteTextFileRequest, WriteTextFileResponse,
 };
 use std::time::Duration;
 use trogon_nats::{FlushClient, PublishClient, RequestClient, publish, request_with_timeout};
@@ -65,6 +65,14 @@ impl<N: RequestClient + PublishClient + FlushClient> NatsClientProxy<N> {
         )
         .await
         .map_err(to_acp_error)
+    }
+}
+
+impl<N: RequestClient + PublishClient + FlushClient> NatsClientProxy<N> {
+    /// Forward an elicitation request to the ACP client via NATS request-reply.
+    pub async fn request_elicitation(&self, args: ElicitationRequest) -> Result<ElicitationResponse> {
+        let s = session::client::SessionElicitationSubject::new(self.prefix(), self.session_id());
+        self.request(&s, &args).await
     }
 }
 
@@ -132,6 +140,30 @@ mod tests {
             AcpPrefix::new("acp").unwrap(),
             Duration::from_secs(5),
         )
+    }
+
+    #[tokio::test]
+    async fn request_elicitation_publishes_to_correct_subject() {
+        use agent_client_protocol::{
+            ElicitationAction, ElicitationFormMode, ElicitationMode, ElicitationResponse, ElicitationSchema,
+        };
+        let nats = AdvancedMockNatsClient::new();
+        let response = ElicitationResponse::new(ElicitationAction::Cancel);
+        nats.set_response(
+            "acp.session.s1.client.session.elicitation",
+            serde_json::to_vec(&response).unwrap().into(),
+        );
+
+        let p = proxy(nats.clone());
+        let request = agent_client_protocol::ElicitationRequest::new(
+            "s1".to_string(),
+            ElicitationMode::Form(ElicitationFormMode::new(ElicitationSchema::new())),
+            "Need input",
+        );
+        let result = p.request_elicitation(request).await;
+
+        assert!(result.is_ok());
+        assert!(matches!(result.unwrap().action, ElicitationAction::Cancel));
     }
 
     #[tokio::test]

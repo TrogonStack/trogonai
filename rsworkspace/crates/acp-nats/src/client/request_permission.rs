@@ -1,8 +1,7 @@
 use crate::client::rpc_reply;
-use crate::jsonrpc::extract_request_id;
 use crate::nats::{FlushClient, PublishClient};
 use agent_client_protocol::{
-    Client, ErrorCode, Request, RequestPermissionRequest, RequestPermissionResponse, Response,
+    Client, ErrorCode, RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
 };
 use bytes::Bytes;
 use serde::de::Error as SerdeDeError;
@@ -43,8 +42,13 @@ pub fn error_code_and_message(e: &RequestPermissionError) -> (ErrorCode, String)
     }
 }
 
-/// Handles session/request_permission: parses JSON-RPC request, calls client, wraps response in
-/// JSON-RPC envelope, and publishes to reply subject. Reply is required (request-reply pattern).
+/// Handles session/request_permission: parses raw JSON request, calls client, publishes raw JSON
+/// response to reply subject. Reply is required (request-reply pattern).
+///
+/// The payload is raw JSON (`RequestPermissionRequest`), not JSON-RPC-wrapped, matching the format
+/// that `NatsClientProxy::request_permission` sends.  On error the handler publishes a
+/// `RequestPermissionResponse` with `Cancelled` outcome so the caller receives a valid (deny)
+/// decision instead of a deserialization failure.
 #[instrument(
     name = "acp.client.session.request_permission",
     skip(payload, client, nats, serializer)
@@ -68,34 +72,33 @@ pub async fn handle<N: PublishClient + FlushClient, C: Client, S: JsonSerialize>
         }
     };
 
-    let request_id = extract_request_id(payload);
+    let cancelled = RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled);
+
     match forward_to_client(payload, client, session_id).await {
         Ok(response) => {
             let (response_bytes, content_type) = serializer
-                .to_vec(&Response::Result {
-                    id: request_id.clone(),
-                    result: response,
-                })
+                .to_vec(&response)
                 .map(|v| (Bytes::from(v), rpc_reply::CONTENT_TYPE_JSON))
                 .unwrap_or_else(|e| {
-                    warn!(error = %e, "JSON serialization of response failed, sending error reply");
-                    rpc_reply::error_response_bytes(
-                        serializer,
-                        request_id,
-                        ErrorCode::InternalError,
-                        &format!("Failed to serialize response: {}", e),
-                    )
+                    warn!(error = %e, "JSON serialization of response failed, sending cancelled reply");
+                    serializer
+                        .to_vec(&cancelled)
+                        .map(|v| (Bytes::from(v), rpc_reply::CONTENT_TYPE_JSON))
+                        .unwrap_or_else(|_| (Bytes::new(), rpc_reply::CONTENT_TYPE_JSON))
                 });
             rpc_reply::publish_reply(nats, reply_to, response_bytes, content_type, "request_permission reply").await;
         }
         Err(e) => {
-            let (code, message) = error_code_and_message(&e);
+            let (_, message) = error_code_and_message(&e);
             warn!(
-                error = %e,
+                error = %message,
                 session_id = %session_id,
-                "Failed to handle request_permission"
+                "Failed to handle request_permission — replying Cancelled"
             );
-            let (bytes, content_type) = rpc_reply::error_response_bytes(serializer, request_id, code, &message);
+            let (bytes, content_type) = serializer
+                .to_vec(&cancelled)
+                .map(|v| (Bytes::from(v), rpc_reply::CONTENT_TYPE_JSON))
+                .unwrap_or_else(|_| (Bytes::new(), rpc_reply::CONTENT_TYPE_JSON));
             rpc_reply::publish_reply(nats, reply_to, bytes, content_type, "request_permission error reply").await;
         }
     }
@@ -106,19 +109,14 @@ async fn forward_to_client<C: Client>(
     client: &C,
     expected_session_id: &str,
 ) -> Result<RequestPermissionResponse, RequestPermissionError> {
-    let envelope: Request<RequestPermissionRequest> =
+    let request: RequestPermissionRequest =
         serde_json::from_slice(payload).map_err(RequestPermissionError::InvalidRequest)?;
-    let request = envelope.params.ok_or_else(|| {
-        RequestPermissionError::InvalidRequest(serde_json::Error::custom("params is null or missing"))
-    })?;
     let params_session_id = request.session_id.to_string();
     if params_session_id != expected_session_id {
-        return Err(RequestPermissionError::InvalidRequest(serde_json::Error::custom(
-            format!(
-                "params.sessionId ({}) does not match subject session id ({})",
-                params_session_id, expected_session_id
-            ),
-        )));
+        return Err(RequestPermissionError::InvalidRequest(serde_json::Error::custom(format!(
+            "params.sessionId ({}) does not match subject session id ({})",
+            params_session_id, expected_session_id
+        ))));
     }
     client
         .request_permission(request)
@@ -130,7 +128,7 @@ async fn forward_to_client<C: Client>(
 mod tests {
     use super::*;
     use agent_client_protocol::{
-        ContentBlock, ContentChunk, PermissionOption, PermissionOptionKind, RequestId, RequestPermissionOutcome,
+        ContentBlock, ContentChunk, PermissionOption, PermissionOptionKind, RequestPermissionOutcome,
         RequestPermissionResponse, SessionNotification, SessionUpdate, ToolCallUpdate, ToolCallUpdateFields,
     };
     use std::error::Error;
@@ -148,7 +146,7 @@ mod tests {
     }
 
     #[async_trait::async_trait(?Send)]
-    impl Client for MockClient {
+    impl agent_client_protocol::Client for MockClient {
         async fn session_notification(&self, _: SessionNotification) -> agent_client_protocol::Result<()> {
             Ok(())
         }
@@ -164,7 +162,7 @@ mod tests {
     struct FailingClient;
 
     #[async_trait::async_trait(?Send)]
-    impl Client for FailingClient {
+    impl agent_client_protocol::Client for FailingClient {
         async fn session_notification(&self, _: SessionNotification) -> agent_client_protocol::Result<()> {
             Ok(())
         }
@@ -178,6 +176,20 @@ mod tests {
                 "permission denied",
             ))
         }
+    }
+
+    fn make_raw_payload(request: RequestPermissionRequest) -> Vec<u8> {
+        serde_json::to_vec(&request).unwrap()
+    }
+
+    fn make_request() -> RequestPermissionRequest {
+        let tool_call = ToolCallUpdate::new("call-1", ToolCallUpdateFields::new());
+        let options = vec![PermissionOption::new(
+            "allow-once",
+            "Allow once",
+            PermissionOptionKind::AllowOnce,
+        )];
+        RequestPermissionRequest::new("session-001", tool_call, options)
     }
 
     #[tokio::test]
@@ -202,26 +214,11 @@ mod tests {
         assert!(result.is_ok());
     }
 
-    fn make_envelope(request: RequestPermissionRequest) -> Vec<u8> {
-        let envelope = Request {
-            id: RequestId::Number(1),
-            method: std::sync::Arc::from("session/request_permission"),
-            params: Some(request),
-        };
-        serde_json::to_vec(&envelope).unwrap()
-    }
-
     #[tokio::test]
     async fn request_permission_forwards_request_and_returns_response() {
         let client = MockClient::new(RequestPermissionOutcome::Cancelled);
-        let tool_call = ToolCallUpdate::new("call-1", ToolCallUpdateFields::new());
-        let options = vec![PermissionOption::new(
-            "allow-once",
-            "Allow once",
-            PermissionOptionKind::AllowOnce,
-        )];
-        let request = RequestPermissionRequest::new("session-001", tool_call, options);
-        let payload = make_envelope(request);
+        let request = make_request();
+        let payload = make_raw_payload(request);
 
         let result = forward_to_client(&payload, &client, "session-001").await;
         assert!(result.is_ok());
@@ -239,9 +236,7 @@ mod tests {
     #[tokio::test]
     async fn request_permission_returns_client_error_when_client_fails() {
         let client = FailingClient;
-        let tool_call = ToolCallUpdate::new("call-1", ToolCallUpdateFields::new());
-        let request = RequestPermissionRequest::new("session-001", tool_call, vec![]);
-        let payload = make_envelope(request);
+        let payload = make_raw_payload(make_request());
 
         let result = forward_to_client(&payload, &client, "session-001").await;
         assert!(result.is_err());
@@ -249,26 +244,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn request_permission_returns_invalid_request_when_params_missing() {
-        let client = MockClient::new(RequestPermissionOutcome::Cancelled);
-        let envelope = Request::<RequestPermissionRequest> {
-            id: RequestId::Number(1),
-            method: std::sync::Arc::from("session/request_permission"),
-            params: None,
-        };
-        let payload = serde_json::to_vec(&envelope).unwrap();
-
-        let result = forward_to_client(&payload, &client, "session-001").await;
-        assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), RequestPermissionError::InvalidRequest(_)));
-    }
-
-    #[tokio::test]
     async fn request_permission_returns_invalid_request_when_session_id_mismatch() {
         let client = MockClient::new(RequestPermissionOutcome::Cancelled);
         let tool_call = ToolCallUpdate::new("call-1", ToolCallUpdateFields::new());
         let request = RequestPermissionRequest::new("session-other", tool_call, vec![]);
-        let payload = make_envelope(request);
+        let payload = make_raw_payload(request);
 
         let result = forward_to_client(&payload, &client, "session-001").await;
         assert!(result.is_err());
@@ -318,30 +298,22 @@ mod tests {
     async fn handle_success_publishes_response_to_reply_subject() {
         let nats = MockNatsClient::new();
         let client = MockClient::new(RequestPermissionOutcome::Cancelled);
-        let tool_call = ToolCallUpdate::new("call-1", ToolCallUpdateFields::new());
-        let request = RequestPermissionRequest::new("session-001", tool_call, vec![]);
-        let payload = make_envelope(request);
+        let payload = make_raw_payload(make_request());
 
-        handle(
-            &payload,
-            &client,
-            Some("_INBOX.reply"),
-            &nats,
-            "session-001",
-            &StdJsonSerialize,
-        )
-        .await;
+        handle(&payload, &client, Some("_INBOX.reply"), &nats, "session-001", &StdJsonSerialize).await;
 
         assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
+        // Verify the reply is a valid RequestPermissionResponse (raw JSON, not JSON-RPC wrapped)
+        let payloads = nats.published_payloads();
+        let parsed: RequestPermissionResponse = serde_json::from_slice(payloads[0].as_ref()).unwrap();
+        assert_eq!(parsed.outcome, RequestPermissionOutcome::Cancelled);
     }
 
     #[tokio::test]
     async fn handle_no_reply_does_not_publish() {
         let nats = MockNatsClient::new();
         let client = MockClient::new(RequestPermissionOutcome::Cancelled);
-        let tool_call = ToolCallUpdate::new("call-1", ToolCallUpdateFields::new());
-        let request = RequestPermissionRequest::new("session-001", tool_call, vec![]);
-        let payload = make_envelope(request);
+        let payload = make_raw_payload(make_request());
 
         handle(&payload, &client, None, &nats, "session-001", &StdJsonSerialize).await;
 
@@ -349,83 +321,57 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn handle_session_id_mismatch_publishes_error_reply() {
+    async fn handle_session_id_mismatch_publishes_cancelled_reply() {
         let nats = MockNatsClient::new();
         let client = MockClient::new(RequestPermissionOutcome::Cancelled);
         let tool_call = ToolCallUpdate::new("call-1", ToolCallUpdateFields::new());
         let request = RequestPermissionRequest::new("session-other", tool_call, vec![]);
-        let payload = make_envelope(request);
+        let payload = make_raw_payload(request);
 
-        handle(
-            &payload,
-            &client,
-            Some("_INBOX.err"),
-            &nats,
-            "session-001",
-            &StdJsonSerialize,
-        )
-        .await;
+        handle(&payload, &client, Some("_INBOX.err"), &nats, "session-001", &StdJsonSerialize).await;
 
         assert_eq!(nats.published_messages(), vec!["_INBOX.err"]);
+        // Error path publishes a Cancelled response
+        let payloads = nats.published_payloads();
+        let parsed: RequestPermissionResponse = serde_json::from_slice(payloads[0].as_ref()).unwrap();
+        assert_eq!(parsed.outcome, RequestPermissionOutcome::Cancelled);
     }
 
     #[tokio::test]
-    async fn handle_invalid_payload_publishes_error_reply() {
+    async fn handle_invalid_payload_publishes_cancelled_reply() {
         let nats = MockNatsClient::new();
         let client = MockClient::new(RequestPermissionOutcome::Cancelled);
 
-        handle(
-            b"not json",
-            &client,
-            Some("_INBOX.err"),
-            &nats,
-            "session-001",
-            &StdJsonSerialize,
-        )
-        .await;
+        handle(b"not json", &client, Some("_INBOX.err"), &nats, "session-001", &StdJsonSerialize).await;
 
         assert_eq!(nats.published_messages(), vec!["_INBOX.err"]);
+        let payloads = nats.published_payloads();
+        let parsed: RequestPermissionResponse = serde_json::from_slice(payloads[0].as_ref()).unwrap();
+        assert_eq!(parsed.outcome, RequestPermissionOutcome::Cancelled);
     }
 
     #[tokio::test]
-    async fn handle_client_error_publishes_error_reply() {
+    async fn handle_client_error_publishes_cancelled_reply() {
         let nats = MockNatsClient::new();
         let client = FailingClient;
-        let tool_call = ToolCallUpdate::new("call-1", ToolCallUpdateFields::new());
-        let request = RequestPermissionRequest::new("session-001", tool_call, vec![]);
-        let payload = make_envelope(request);
+        let payload = make_raw_payload(make_request());
 
-        handle(
-            &payload,
-            &client,
-            Some("_INBOX.err"),
-            &nats,
-            "session-001",
-            &StdJsonSerialize,
-        )
-        .await;
+        handle(&payload, &client, Some("_INBOX.err"), &nats, "session-001", &StdJsonSerialize).await;
 
         assert_eq!(nats.published_messages(), vec!["_INBOX.err"]);
+        let payloads = nats.published_payloads();
+        let parsed: RequestPermissionResponse = serde_json::from_slice(payloads[0].as_ref()).unwrap();
+        assert_eq!(parsed.outcome, RequestPermissionOutcome::Cancelled);
     }
 
     #[tokio::test]
-    async fn handle_success_serialization_fallback_sends_error_reply() {
+    async fn handle_success_serialization_fallback_sends_cancelled_reply() {
         let nats = MockNatsClient::new();
         let client = MockClient::new(RequestPermissionOutcome::Cancelled);
         let serializer = FailNextSerialize::new(1);
-        let tool_call = ToolCallUpdate::new("call-1", ToolCallUpdateFields::new());
-        let request = RequestPermissionRequest::new("session-001", tool_call, vec![]);
-        let payload = make_envelope(request);
+        let payload = make_raw_payload(make_request());
 
-        handle(
-            &payload,
-            &client,
-            Some("_INBOX.reply"),
-            &nats,
-            "session-001",
-            &serializer,
-        )
-        .await;
+        handle(&payload, &client, Some("_INBOX.reply"), &nats, "session-001", &serializer).await;
 
         assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
     }
@@ -435,19 +381,9 @@ mod tests {
         let nats = AdvancedMockNatsClient::new();
         nats.fail_next_flush();
         let client = MockClient::new(RequestPermissionOutcome::Cancelled);
-        let tool_call = ToolCallUpdate::new("call-1", ToolCallUpdateFields::new());
-        let request = RequestPermissionRequest::new("session-001", tool_call, vec![]);
-        let payload = make_envelope(request);
+        let payload = make_raw_payload(make_request());
 
-        handle(
-            &payload,
-            &client,
-            Some("_INBOX.reply"),
-            &nats,
-            "session-001",
-            &StdJsonSerialize,
-        )
-        .await;
+        handle(&payload, &client, Some("_INBOX.reply"), &nats, "session-001", &StdJsonSerialize).await;
 
         assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
     }
@@ -457,34 +393,23 @@ mod tests {
         let nats = AdvancedMockNatsClient::new();
         nats.fail_next_publish();
         let client = MockClient::new(RequestPermissionOutcome::Cancelled);
-        let tool_call = ToolCallUpdate::new("call-1", ToolCallUpdateFields::new());
-        let request = RequestPermissionRequest::new("session-001", tool_call, vec![]);
-        let payload = make_envelope(request);
+        let payload = make_raw_payload(make_request());
 
-        handle(
-            &payload,
-            &client,
-            Some("_INBOX.reply"),
-            &nats,
-            "session-001",
-            &StdJsonSerialize,
-        )
-        .await;
+        handle(&payload, &client, Some("_INBOX.reply"), &nats, "session-001", &StdJsonSerialize).await;
 
         assert!(nats.published_messages().is_empty());
     }
 
     #[tokio::test]
-    async fn handle_client_error_serialization_last_resort_returns_plain_text() {
+    async fn handle_client_error_serialization_last_resort_exercises_empty_path() {
         let nats = MockNatsClient::new();
         let client = FailingClient;
         let serializer = FailNextSerialize::new(2);
-        let tool_call = ToolCallUpdate::new("call-1", ToolCallUpdateFields::new());
-        let request = RequestPermissionRequest::new("session-001", tool_call, vec![]);
-        let payload = make_envelope(request);
+        let payload = make_raw_payload(make_request());
 
         handle(&payload, &client, Some("_INBOX.err"), &nats, "session-001", &serializer).await;
 
+        // Both cancelled serialization attempts fail → empty bytes published
         assert_eq!(nats.published_messages(), vec!["_INBOX.err"]);
     }
 }

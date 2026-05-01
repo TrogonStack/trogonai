@@ -151,6 +151,8 @@ pub async fn run_automation(
             // even when the automation overrides the model or MCP dispatch.
             promise_store: agent.promise_store.clone(),
             promise_id: agent.promise_id.clone(),
+            permission_checker: agent.permission_checker.clone(),
+            elicitation_provider: agent.elicitation_provider.clone(),
         };
         &merged
     };
@@ -373,6 +375,8 @@ mod tests {
             tenant_id: "test".to_string(),
             promise_store: None,
             promise_id: None,
+            permission_checker: None,
+            elicitation_provider: None,
         };
         let mut automation = make_automation(vec![]);
         automation.memory_path = Some("custom/notes.md".to_string()); // override
@@ -412,6 +416,8 @@ mod tests {
             tenant_id: "test".to_string(),
             promise_store: None,
             promise_id: None,
+            permission_checker: None,
+            elicitation_provider: None,
         }
     }
 
@@ -440,6 +446,8 @@ mod tests {
             tenant_id: "test".to_string(),
             promise_store: None,
             promise_id: None,
+            permission_checker: None,
+            elicitation_provider: None,
         }
     }
 

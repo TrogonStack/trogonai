@@ -88,6 +88,7 @@ fn make_agent(base_url: &str) -> AgentLoop {
         mcp_tool_defs: vec![],
         mcp_dispatch: vec![],
         permission_checker: None,
+        elicitation_provider: None,
     }
 }
 
@@ -109,6 +110,7 @@ async fn start_agent(
         prefix,
         "claude-test",
         permission_tx,
+        None,
         gateway_config,
     );
     let acp_prefix = AcpPrefix::new(prefix).unwrap();
@@ -994,6 +996,7 @@ async fn runner_uses_gateway_config_base_url_and_token() {
                 &js,
                 prefix,
                 make_agent("http://127.0.0.1:1"),
+                None,
                 None,
                 gateway_config,
             )
