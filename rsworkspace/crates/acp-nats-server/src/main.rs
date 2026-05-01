@@ -1815,6 +1815,45 @@ mod tests {
             let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;
         }
 
+        /// WebSocket upgrade to a registered agent type succeeds with 101.
+        /// Verifies the full registry-lookup → WS-upgrade path, including
+        /// the `acp-connection-id` response header that the client needs.
+        #[tokio::test]
+        async fn e2e_get_agent_type_registered_agent_ws_upgrade_returns_101() {
+            use tokio_tungstenite::connect_async;
+
+            let (_container, _nats, nats_port) = start_nats().await;
+            let (base_url, shutdown_tx, conn_thread, registry) =
+                start_server_with_registry(nats_port).await;
+
+            let cap = AgentCapability {
+                agent_type: "xai".to_string(),
+                capabilities: vec!["chat".to_string()],
+                nats_subject: "acp.xai.agent.>".to_string(),
+                current_load: 0,
+                metadata: serde_json::json!({ "acp_prefix": "acp.xai" }),
+            };
+            registry.register(&cap).await.expect("register xai agent");
+
+            let ws_url = base_url.replacen("http://", "ws://", 1);
+            let (ws, response) = connect_async(format!("{ws_url}/acp/xai"))
+                .await
+                .expect("WS upgrade must succeed for a registered agent");
+
+            assert_eq!(
+                response.status().as_u16(),
+                101,
+                "expected 101 Switching Protocols"
+            );
+            assert!(
+                response.headers().contains_key("acp-connection-id"),
+                "response must carry acp-connection-id header"
+            );
+            drop(ws);
+            shutdown_tx.send(true).unwrap();
+            let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;
+        }
+
         /// WebSocket upgrade to an unregistered agent type returns 404.
         #[tokio::test]
         async fn e2e_get_agent_type_unregistered_returns_404() {
@@ -1839,6 +1878,233 @@ mod tests {
                 Ok(_) => panic!("expected WebSocket upgrade to be rejected with 404"),
                 Err(e) => panic!("unexpected error: {e}"),
             }
+
+            shutdown_tx.send(true).unwrap();
+            let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;
+        }
+
+        // ── helpers: real agent + registry ───────────────────────────────────────
+
+        /// Provisions all ACP JetStream streams for the given prefix.
+        async fn setup_streams_with_prefix(js: &jetstream::Context, prefix_str: &str) {
+            let prefix = AcpPrefix::new(prefix_str).unwrap();
+            for config in acp_nats::jetstream::streams::all_configs(&prefix) {
+                js.get_or_create_stream(config).await.unwrap();
+            }
+        }
+
+        /// Starts a real XaiAgent (mock HTTP client) subscribed on `{prefix}.*` subjects.
+        async fn start_xai_agent_on_prefix(nats: async_nats::Client, prefix_str: String) {
+            use acp_nats_agent::AgentSideNatsConnection;
+            use trogon_xai_runner::{MockXaiHttpClient, NatsSessionNotifier, XaiAgent};
+
+            std::thread::spawn(move || {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap();
+                let local = tokio::task::LocalSet::new();
+                rt.block_on(local.run_until(async move {
+                    let prefix = AcpPrefix::new(&prefix_str).unwrap();
+                    let js_client = NatsJetStreamClient::new(jetstream::new(nats.clone()));
+                    let notifier = NatsSessionNotifier::new(nats.clone(), prefix.clone());
+                    let agent = XaiAgent::with_deps(
+                        notifier,
+                        "grok-4",
+                        "dummy",
+                        MockXaiHttpClient::default(),
+                    );
+                    let (_, io_task) = AgentSideNatsConnection::with_jetstream(
+                        agent,
+                        nats,
+                        js_client,
+                        prefix,
+                        |fut| {
+                            tokio::task::spawn_local(fut);
+                        },
+                    );
+                    io_task.await.ok();
+                }));
+            });
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+
+        /// Drains SSE chunks until finding the JSON-RPC event matching `expected_id`.
+        async fn find_sse_event<S>(stream: &mut S, expected_id: i64) -> Value
+        where
+            S: futures_util::Stream<Item = Result<bytes::Bytes, reqwest::Error>> + Unpin,
+        {
+            let mut buffer = String::new();
+            for _ in 0..50usize {
+                let chunk = tokio::time::timeout(Duration::from_secs(10), stream.next())
+                    .await
+                    .expect("timeout waiting for SSE chunk")
+                    .expect("SSE stream ended")
+                    .expect("failed to read SSE chunk");
+                buffer.push_str(&String::from_utf8_lossy(&chunk));
+                let mut consumed = 0usize;
+                while let Some(relative_end) = buffer[consumed..].find('\n') {
+                    let end = consumed + relative_end;
+                    let line = buffer[consumed..end].trim_end_matches('\r');
+                    consumed = end + 1;
+                    if let Some(json) = line.strip_prefix("data: ")
+                        && !json.is_empty()
+                    {
+                        if let Ok(v) = serde_json::from_str::<Value>(json) {
+                            if v.get("id").and_then(|x| x.as_i64()) == Some(expected_id) {
+                                return v;
+                            }
+                        }
+                    }
+                }
+                if consumed > 0 {
+                    buffer.drain(..consumed);
+                }
+            }
+            panic!("did not receive SSE event with id={expected_id} within 50 chunks");
+        }
+
+        // ── real-agent integration tests ──────────────────────────────────────────
+
+        /// Full production path: POST /acp/xai → registry lookup → config_override
+        /// with acp.xai prefix → real XaiAgent → initialize returns protocolVersion.
+        ///
+        /// This is the path that was missing: registry_e2e tests previously only used
+        /// a bare mock NATS subscriber; http_xai_e2e tests used a real agent but via
+        /// the non-registry plain `/acp` route. This test exercises both together.
+        #[tokio::test]
+        async fn e2e_registry_route_initialize_with_real_xai_agent() {
+            let (_container, nats, nats_port) = start_nats().await;
+            setup_streams_with_prefix(&jetstream::new(nats.clone()), "acp.xai").await;
+            start_xai_agent_on_prefix(nats, "acp.xai".to_string()).await;
+
+            let (base_url, shutdown_tx, conn_thread, registry) =
+                start_server_with_registry(nats_port).await;
+            registry
+                .register(&AgentCapability {
+                    agent_type: "xai".to_string(),
+                    capabilities: vec!["chat".to_string()],
+                    nats_subject: "acp.xai.agent.>".to_string(),
+                    current_load: 0,
+                    metadata: serde_json::json!({ "acp_prefix": "acp.xai" }),
+                })
+                .await
+                .expect("register xai");
+
+            let client = reqwest::Client::new();
+            let url = format!("{base_url}/acp/xai");
+
+            let resp = tokio::time::timeout(
+                Duration::from_secs(15),
+                client
+                    .post(&url)
+                    .header("Content-Type", "application/json")
+                    .header("Accept", "application/json, text/event-stream")
+                    .body(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#)
+                    .send(),
+            )
+            .await
+            .expect("timeout on initialize")
+            .expect("reqwest error");
+
+            assert_eq!(resp.status().as_u16(), 200, "initialize must return 200");
+            let body: Value = resp.json().await.unwrap();
+            assert!(
+                body["result"]["protocolVersion"].is_number(),
+                "must have protocolVersion in result: {body}"
+            );
+
+            shutdown_tx.send(true).unwrap();
+            let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;
+        }
+
+        /// Full production path continued: after initialize via /acp/xai, session/new
+        /// also reaches the xai-prefixed agent and returns a non-empty sessionId.
+        ///
+        /// Verifies that config_override is correctly propagated through the connection
+        /// manager for subsequent requests on the same ACP-Connection-Id.
+        #[tokio::test]
+        async fn e2e_registry_route_session_new_with_real_xai_agent() {
+            use crate::constants::{ACP_CONNECTION_ID_HEADER, ACP_PROTOCOL_VERSION_HEADER};
+
+            let (_container, nats, nats_port) = start_nats().await;
+            setup_streams_with_prefix(&jetstream::new(nats.clone()), "acp.xai").await;
+            start_xai_agent_on_prefix(nats, "acp.xai".to_string()).await;
+
+            let (base_url, shutdown_tx, conn_thread, registry) =
+                start_server_with_registry(nats_port).await;
+            registry
+                .register(&AgentCapability {
+                    agent_type: "xai".to_string(),
+                    capabilities: vec!["chat".to_string()],
+                    nats_subject: "acp.xai.agent.>".to_string(),
+                    current_load: 0,
+                    metadata: serde_json::json!({ "acp_prefix": "acp.xai" }),
+                })
+                .await
+                .expect("register xai");
+
+            let client = reqwest::Client::new();
+            let url = format!("{base_url}/acp/xai");
+
+            // initialize
+            let init_resp = tokio::time::timeout(
+                Duration::from_secs(15),
+                client
+                    .post(&url)
+                    .header("Content-Type", "application/json")
+                    .header("Accept", "application/json, text/event-stream")
+                    .body(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#)
+                    .send(),
+            )
+            .await
+            .expect("timeout on initialize")
+            .expect("reqwest error");
+            assert_eq!(init_resp.status().as_u16(), 200);
+
+            let connection_id = init_resp
+                .headers()
+                .get(ACP_CONNECTION_ID_HEADER)
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .to_owned();
+            let init_body: Value = init_resp.json().await.unwrap();
+            let proto_ver = init_body["result"]["protocolVersion"]
+                .as_u64()
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "0".to_string());
+
+            // open SSE stream
+            let get = client
+                .get(&url)
+                .header("Accept", "text/event-stream")
+                .header(ACP_CONNECTION_ID_HEADER, &connection_id)
+                .header(ACP_PROTOCOL_VERSION_HEADER, &proto_ver)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(get.status().as_u16(), 200);
+            let mut stream = get.bytes_stream();
+
+            // session/new
+            let _ = client
+                .post(&url)
+                .header("Content-Type", "application/json")
+                .header("Accept", "application/json, text/event-stream")
+                .header(ACP_CONNECTION_ID_HEADER, &connection_id)
+                .header(ACP_PROTOCOL_VERSION_HEADER, &proto_ver)
+                .body(r#"{"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":"/tmp","mcpServers":[]}}"#)
+                .send()
+                .await
+                .unwrap();
+
+            let event = find_sse_event(&mut stream, 2).await;
+            let session_id = event["result"]["sessionId"].as_str().unwrap_or("");
+            assert!(
+                !session_id.is_empty(),
+                "session/new must return non-empty sessionId: {event}"
+            );
 
             shutdown_tx.send(true).unwrap();
             let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;

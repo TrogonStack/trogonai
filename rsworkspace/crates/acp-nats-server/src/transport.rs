@@ -3208,4 +3208,34 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
     }
+
+    #[tokio::test]
+    async fn delete_with_agent_type_registered_agent_returns_202() {
+        let (state, mut manager_rx) = test_state();
+
+        tokio::spawn(async move {
+            match manager_rx.recv().await.unwrap() {
+                ManagerRequest::HttpDelete { response, .. } => {
+                    let _ = response.send(Ok(None));
+                }
+                _ => panic!("expected HttpDelete"),
+            }
+        });
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            ACP_CONNECTION_ID_HEADER,
+            HeaderValue::from_static("00000000-0000-0000-0000-000000000000"),
+        );
+
+        let response = delete_with_agent_type::<trogon_registry::MockRegistryStore>(
+            axum::extract::Path("claude".to_string()),
+            headers,
+            State(state),
+            axum::extract::Extension(registry_ext_with_claude().await),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+    }
 }
