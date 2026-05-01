@@ -101,7 +101,7 @@ async fn process_connections<N, J>(
         conn_handles.retain(|h| !h.is_finished());
         let client = nats_client.clone();
         let js = js_client.clone();
-        let cfg = config.clone();
+        let cfg = req.config_override.unwrap_or_else(|| config.clone());
         conn_handles.push(tokio::task::spawn_local(connection::handle(
             req.socket,
             client,

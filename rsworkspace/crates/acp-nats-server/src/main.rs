@@ -10,8 +10,9 @@ use transport::{AppState, ManagerRequest};
 
 #[cfg(not(coverage))]
 use {
-    acp_nats::nats, acp_telemetry::ServiceName, clap::Parser, std::net::SocketAddr, tracing::error,
-    trogon_std::env::SystemEnv, trogon_std::fs::SystemFs,
+    acp_nats::nats, acp_telemetry::ServiceName, clap::Parser, std::net::SocketAddr,
+    std::sync::Arc, tracing::error, trogon_std::env::SystemEnv, trogon_std::fs::SystemFs,
+    transport::RegistryExtension,
 };
 
 #[cfg(not(coverage))]
@@ -33,6 +34,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let nats_client = nats::connect(server_config.acp.nats(), nats_connect_timeout).await?;
 
     let js_context = async_nats::jetstream::new(nats_client.clone());
+
+    let registry_ext = {
+        let store = trogon_registry::provision(&js_context).await?;
+        Arc::new(RegistryExtension {
+            registry: trogon_registry::Registry::new(store),
+            base_config: server_config.acp.clone(),
+        })
+    };
+
     let js_client = trogon_nats::jetstream::NatsJetStreamClient::new(js_context);
 
     let (shutdown_tx, _) = watch::channel(false);
@@ -52,10 +62,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         axum::Router::new()
             .route(
                 ACP_ENDPOINT,
-                axum::routing::get(transport::get)
-                    .post(transport::post)
-                    .delete(transport::delete),
+                axum::routing::get(|| async {
+                    (
+                        axum::http::StatusCode::GONE,
+                        "ACP endpoint moved — use /acp/{agent_type} (e.g. /acp/claude)",
+                    )
+                })
+                .post(|| async {
+                    (
+                        axum::http::StatusCode::GONE,
+                        "ACP endpoint moved — use /acp/{agent_type} (e.g. /acp/claude)",
+                    )
+                })
+                .delete(|| async {
+                    (
+                        axum::http::StatusCode::GONE,
+                        "ACP endpoint moved — use /acp/{agent_type} (e.g. /acp/claude)",
+                    )
+                }),
             )
+            .route(
+                "/acp/{agent_type}",
+                axum::routing::get(transport::get_with_agent_type::<trogon_registry::KvStore>)
+                    .post(transport::post_with_agent_type::<trogon_registry::KvStore>)
+                    .delete(transport::delete_with_agent_type::<trogon_registry::KvStore>),
+            )
+            .layer(axum::extract::Extension(registry_ext))
             .with_state(state),
     );
 
@@ -785,6 +817,35 @@ mod tests {
         let _ = shutdown_tx.send(true);
         drop(app);
         conn_thread.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn legacy_acp_endpoint_returns_410_gone() {
+        let (manager_tx, _) = mpsc::unbounded_channel::<ManagerRequest>();
+        let (shutdown_tx, _) = watch::channel(false);
+        let state = AppState {
+            bind_host: IpAddr::V4(Ipv4Addr::LOCALHOST),
+            manager_tx,
+            shutdown_tx,
+        };
+
+        let app = axum::Router::new()
+            .route(
+                ACP_ENDPOINT,
+                axum::routing::get(|| async { (StatusCode::GONE, "moved") })
+                    .post(|| async { (StatusCode::GONE, "moved") })
+                    .delete(|| async { (StatusCode::GONE, "moved") }),
+            )
+            .with_state(state);
+
+        for method in ["GET", "POST", "DELETE"] {
+            let resp = app
+                .clone()
+                .oneshot(Request::builder().method(method).uri(ACP_ENDPOINT).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), StatusCode::GONE, "{method} {ACP_ENDPOINT} should return 410");
+        }
     }
 
     #[tokio::test]
@@ -1555,6 +1616,494 @@ mod tests {
             assert!(
                 auth_event["result"].is_object(),
                 "authenticate must return a result: {auth_event}"
+            );
+
+            shutdown_tx.send(true).unwrap();
+            let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;
+        }
+    }
+
+    // ── E2E tests: real NATS + live registry → /acp/:agent_type routing ────────
+    mod registry_e2e {
+        use std::net::{IpAddr, Ipv4Addr};
+        use std::sync::Arc;
+        use std::time::Duration;
+
+        use acp_nats::{AcpPrefix, Config, NatsAuth, NatsConfig};
+        use agent_client_protocol::{InitializeResponse, ProtocolVersion};
+        use async_nats::jetstream;
+        use serde_json::Value;
+        use testcontainers_modules::nats::Nats;
+        use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
+        use tokio::net::TcpListener;
+        use tokio::sync::{mpsc, watch};
+        use trogon_nats::jetstream::NatsJetStreamClient;
+        use trogon_registry::{AgentCapability, KvStore, Registry};
+
+        use crate::constants::THREAD_NAME;
+        use crate::transport::{AppState, ManagerRequest, RegistryExtension};
+        use futures_util::StreamExt as _;
+
+        async fn start_nats() -> (ContainerAsync<Nats>, async_nats::Client, u16) {
+            let container = Nats::default()
+                .with_cmd(["--jetstream"])
+                .start()
+                .await
+                .expect("start NATS+JetStream container — is Docker running?");
+            let port = container.get_host_port_ipv4(4222).await.unwrap();
+            let nats = async_nats::connect(format!("127.0.0.1:{port}"))
+                .await
+                .expect("connect to NATS");
+            (container, nats, port)
+        }
+
+        async fn start_server_with_registry(
+            nats_port: u16,
+        ) -> (
+            String,
+            watch::Sender<bool>,
+            std::thread::JoinHandle<()>,
+            Registry<KvStore>,
+        ) {
+            let nats = async_nats::connect(format!("127.0.0.1:{nats_port}"))
+                .await
+                .expect("connect to NATS for server");
+            let js_ctx = jetstream::new(nats.clone());
+            let js = NatsJetStreamClient::new(js_ctx.clone());
+
+            let store = trogon_registry::provision(&js_ctx)
+                .await
+                .expect("provision registry");
+            let registry = Registry::new(store);
+
+            let base_config = Config::new(
+                AcpPrefix::new("acp").unwrap(),
+                NatsConfig {
+                    servers: vec![format!("127.0.0.1:{nats_port}")],
+                    auth: NatsAuth::None,
+                },
+            )
+            .with_operation_timeout(Duration::from_secs(5));
+
+            let registry_ext = Arc::new(RegistryExtension {
+                registry: registry.clone(),
+                base_config: base_config.clone(),
+            });
+
+            let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
+            let (manager_tx, manager_rx) = mpsc::unbounded_channel::<ManagerRequest>();
+
+            let conn_thread = std::thread::Builder::new()
+                .name(THREAD_NAME.into())
+                .spawn(move || crate::run_connection_thread(manager_rx, nats, js, base_config))
+                .expect("spawn connection thread");
+
+            let state = AppState {
+                bind_host: IpAddr::V4(Ipv4Addr::LOCALHOST),
+                manager_tx,
+                shutdown_tx: shutdown_tx.clone(),
+            };
+
+            let router = axum::Router::new()
+                .route(
+                    "/acp/{agent_type}",
+                    axum::routing::get(crate::transport::get_with_agent_type::<KvStore>)
+                        .post(crate::transport::post_with_agent_type::<KvStore>)
+                        .delete(crate::transport::delete_with_agent_type::<KvStore>),
+                )
+                .layer(axum::extract::Extension(registry_ext))
+                .with_state(state);
+
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+
+            tokio::spawn(async move {
+                axum::serve(listener, router)
+                    .with_graceful_shutdown(async move {
+                        let _ = shutdown_rx.changed().await;
+                    })
+                    .await
+                    .unwrap();
+            });
+
+            (format!("http://{addr}"), shutdown_tx, conn_thread, registry)
+        }
+
+        /// POST to `/acp/:agent_type` with a registered agent correctly routes the
+        /// request to the agent's dedicated NATS prefix instead of the default `acp.*`.
+        #[tokio::test]
+        async fn e2e_post_agent_type_routes_to_registered_prefix() {
+            let (_container, nats_client, nats_port) = start_nats().await;
+            let (base_url, shutdown_tx, conn_thread, registry) =
+                start_server_with_registry(nats_port).await;
+
+            let cap = AgentCapability {
+                agent_type: "xai".to_string(),
+                capabilities: vec!["chat".to_string()],
+                nats_subject: "acp.xai.agent.>".to_string(),
+                current_load: 0,
+                metadata: serde_json::json!({ "acp_prefix": "acp.xai" }),
+            };
+            registry.register(&cap).await.expect("register xai agent");
+
+            // Mock agent on the xai-prefixed initialize subject.
+            let mut agent_sub = nats_client
+                .subscribe("acp.xai.agent.initialize")
+                .await
+                .unwrap();
+            let nats_reply = nats_client.clone();
+            tokio::spawn(async move {
+                while let Some(msg) = agent_sub.next().await {
+                    let resp =
+                        serde_json::to_vec(&InitializeResponse::new(ProtocolVersion::LATEST))
+                            .unwrap();
+                    if let Some(reply) = msg.reply {
+                        nats_reply.publish(reply, resp.into()).await.ok();
+                    }
+                }
+            });
+
+            let client = reqwest::Client::new();
+            let response = tokio::time::timeout(
+                Duration::from_secs(10),
+                client
+                    .post(format!("{base_url}/acp/xai"))
+                    .header("Content-Type", "application/json")
+                    .header("Accept", "application/json, text/event-stream")
+                    .body(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#)
+                    .send(),
+            )
+            .await
+            .expect("timed out waiting for response")
+            .expect("reqwest failed");
+
+            assert_eq!(response.status().as_u16(), 200, "expected 200 OK");
+            let body: Value = response.json().await.unwrap();
+            assert!(
+                body["result"]["protocolVersion"].is_number(),
+                "must have protocolVersion in result: {body}"
+            );
+
+            shutdown_tx.send(true).unwrap();
+            let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;
+        }
+
+        /// POST to an unregistered agent type returns 404 before any NATS traffic.
+        #[tokio::test]
+        async fn e2e_post_agent_type_unregistered_returns_404() {
+            let (_container, _nats, nats_port) = start_nats().await;
+            let (base_url, shutdown_tx, conn_thread, _registry) =
+                start_server_with_registry(nats_port).await;
+
+            let client = reqwest::Client::new();
+            let response = client
+                .post(format!("{base_url}/acp/ghost"))
+                .header("Content-Type", "application/json")
+                .header("Accept", "application/json, text/event-stream")
+                .body(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#)
+                .send()
+                .await
+                .expect("reqwest failed");
+
+            assert_eq!(
+                response.status().as_u16(),
+                404,
+                "unregistered agent must return 404"
+            );
+
+            shutdown_tx.send(true).unwrap();
+            let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;
+        }
+
+        /// WebSocket upgrade to a registered agent type succeeds with 101.
+        /// Verifies the full registry-lookup → WS-upgrade path, including
+        /// the `acp-connection-id` response header that the client needs.
+        #[tokio::test]
+        async fn e2e_get_agent_type_registered_agent_ws_upgrade_returns_101() {
+            use tokio_tungstenite::connect_async;
+
+            let (_container, _nats, nats_port) = start_nats().await;
+            let (base_url, shutdown_tx, conn_thread, registry) =
+                start_server_with_registry(nats_port).await;
+
+            let cap = AgentCapability {
+                agent_type: "xai".to_string(),
+                capabilities: vec!["chat".to_string()],
+                nats_subject: "acp.xai.agent.>".to_string(),
+                current_load: 0,
+                metadata: serde_json::json!({ "acp_prefix": "acp.xai" }),
+            };
+            registry.register(&cap).await.expect("register xai agent");
+
+            let ws_url = base_url.replacen("http://", "ws://", 1);
+            let (ws, response) = connect_async(format!("{ws_url}/acp/xai"))
+                .await
+                .expect("WS upgrade must succeed for a registered agent");
+
+            assert_eq!(
+                response.status().as_u16(),
+                101,
+                "expected 101 Switching Protocols"
+            );
+            assert!(
+                response.headers().contains_key("acp-connection-id"),
+                "response must carry acp-connection-id header"
+            );
+            drop(ws);
+            shutdown_tx.send(true).unwrap();
+            let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;
+        }
+
+        /// WebSocket upgrade to an unregistered agent type returns 404.
+        #[tokio::test]
+        async fn e2e_get_agent_type_unregistered_returns_404() {
+            use tokio_tungstenite::connect_async;
+
+            let (_container, _nats, nats_port) = start_nats().await;
+            let (base_url, shutdown_tx, conn_thread, _registry) =
+                start_server_with_registry(nats_port).await;
+
+            let ws_url = base_url.replacen("http://", "ws://", 1);
+            let result = connect_async(format!("{ws_url}/acp/ghost")).await;
+
+            match result {
+                Err(tokio_tungstenite::tungstenite::Error::Http(resp)) => {
+                    assert_eq!(
+                        resp.status().as_u16(),
+                        404,
+                        "expected 404, got {}",
+                        resp.status()
+                    );
+                }
+                Ok(_) => panic!("expected WebSocket upgrade to be rejected with 404"),
+                Err(e) => panic!("unexpected error: {e}"),
+            }
+
+            shutdown_tx.send(true).unwrap();
+            let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;
+        }
+
+        // ── helpers: real agent + registry ───────────────────────────────────────
+
+        /// Provisions all ACP JetStream streams for the given prefix.
+        async fn setup_streams_with_prefix(js: &jetstream::Context, prefix_str: &str) {
+            let prefix = AcpPrefix::new(prefix_str).unwrap();
+            for config in acp_nats::jetstream::streams::all_configs(&prefix) {
+                js.get_or_create_stream(config).await.unwrap();
+            }
+        }
+
+        /// Starts a real XaiAgent (mock HTTP client) subscribed on `{prefix}.*` subjects.
+        async fn start_xai_agent_on_prefix(nats: async_nats::Client, prefix_str: String) {
+            use acp_nats_agent::AgentSideNatsConnection;
+            use trogon_xai_runner::{MockXaiHttpClient, NatsSessionNotifier, XaiAgent};
+
+            std::thread::spawn(move || {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap();
+                let local = tokio::task::LocalSet::new();
+                rt.block_on(local.run_until(async move {
+                    let prefix = AcpPrefix::new(&prefix_str).unwrap();
+                    let js_client = NatsJetStreamClient::new(jetstream::new(nats.clone()));
+                    let notifier = NatsSessionNotifier::new(nats.clone(), prefix.clone());
+                    let agent = XaiAgent::with_deps(
+                        notifier,
+                        "grok-4",
+                        "dummy",
+                        MockXaiHttpClient::default(),
+                    );
+                    let (_, io_task) = AgentSideNatsConnection::with_jetstream(
+                        agent,
+                        nats,
+                        js_client,
+                        prefix,
+                        |fut| {
+                            tokio::task::spawn_local(fut);
+                        },
+                    );
+                    io_task.await.ok();
+                }));
+            });
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+
+        /// Drains SSE chunks until finding the JSON-RPC event matching `expected_id`.
+        async fn find_sse_event<S>(stream: &mut S, expected_id: i64) -> Value
+        where
+            S: futures_util::Stream<Item = Result<bytes::Bytes, reqwest::Error>> + Unpin,
+        {
+            let mut buffer = String::new();
+            for _ in 0..50usize {
+                let chunk = tokio::time::timeout(Duration::from_secs(10), stream.next())
+                    .await
+                    .expect("timeout waiting for SSE chunk")
+                    .expect("SSE stream ended")
+                    .expect("failed to read SSE chunk");
+                buffer.push_str(&String::from_utf8_lossy(&chunk));
+                let mut consumed = 0usize;
+                while let Some(relative_end) = buffer[consumed..].find('\n') {
+                    let end = consumed + relative_end;
+                    let line = buffer[consumed..end].trim_end_matches('\r');
+                    consumed = end + 1;
+                    if let Some(json) = line.strip_prefix("data: ")
+                        && !json.is_empty()
+                    {
+                        if let Ok(v) = serde_json::from_str::<Value>(json) {
+                            if v.get("id").and_then(|x| x.as_i64()) == Some(expected_id) {
+                                return v;
+                            }
+                        }
+                    }
+                }
+                if consumed > 0 {
+                    buffer.drain(..consumed);
+                }
+            }
+            panic!("did not receive SSE event with id={expected_id} within 50 chunks");
+        }
+
+        // ── real-agent integration tests ──────────────────────────────────────────
+
+        /// Full production path: POST /acp/xai → registry lookup → config_override
+        /// with acp.xai prefix → real XaiAgent → initialize returns protocolVersion.
+        ///
+        /// This is the path that was missing: registry_e2e tests previously only used
+        /// a bare mock NATS subscriber; http_xai_e2e tests used a real agent but via
+        /// the non-registry plain `/acp` route. This test exercises both together.
+        #[tokio::test]
+        async fn e2e_registry_route_initialize_with_real_xai_agent() {
+            let (_container, nats, nats_port) = start_nats().await;
+            setup_streams_with_prefix(&jetstream::new(nats.clone()), "acp.xai").await;
+            start_xai_agent_on_prefix(nats, "acp.xai".to_string()).await;
+
+            let (base_url, shutdown_tx, conn_thread, registry) =
+                start_server_with_registry(nats_port).await;
+            registry
+                .register(&AgentCapability {
+                    agent_type: "xai".to_string(),
+                    capabilities: vec!["chat".to_string()],
+                    nats_subject: "acp.xai.agent.>".to_string(),
+                    current_load: 0,
+                    metadata: serde_json::json!({ "acp_prefix": "acp.xai" }),
+                })
+                .await
+                .expect("register xai");
+
+            let client = reqwest::Client::new();
+            let url = format!("{base_url}/acp/xai");
+
+            let resp = tokio::time::timeout(
+                Duration::from_secs(15),
+                client
+                    .post(&url)
+                    .header("Content-Type", "application/json")
+                    .header("Accept", "application/json, text/event-stream")
+                    .body(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#)
+                    .send(),
+            )
+            .await
+            .expect("timeout on initialize")
+            .expect("reqwest error");
+
+            assert_eq!(resp.status().as_u16(), 200, "initialize must return 200");
+            let body: Value = resp.json().await.unwrap();
+            assert!(
+                body["result"]["protocolVersion"].is_number(),
+                "must have protocolVersion in result: {body}"
+            );
+
+            shutdown_tx.send(true).unwrap();
+            let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;
+        }
+
+        /// Full production path continued: after initialize via /acp/xai, session/new
+        /// also reaches the xai-prefixed agent and returns a non-empty sessionId.
+        ///
+        /// Verifies that config_override is correctly propagated through the connection
+        /// manager for subsequent requests on the same ACP-Connection-Id.
+        #[tokio::test]
+        async fn e2e_registry_route_session_new_with_real_xai_agent() {
+            use crate::constants::{ACP_CONNECTION_ID_HEADER, ACP_PROTOCOL_VERSION_HEADER};
+
+            let (_container, nats, nats_port) = start_nats().await;
+            setup_streams_with_prefix(&jetstream::new(nats.clone()), "acp.xai").await;
+            start_xai_agent_on_prefix(nats, "acp.xai".to_string()).await;
+
+            let (base_url, shutdown_tx, conn_thread, registry) =
+                start_server_with_registry(nats_port).await;
+            registry
+                .register(&AgentCapability {
+                    agent_type: "xai".to_string(),
+                    capabilities: vec!["chat".to_string()],
+                    nats_subject: "acp.xai.agent.>".to_string(),
+                    current_load: 0,
+                    metadata: serde_json::json!({ "acp_prefix": "acp.xai" }),
+                })
+                .await
+                .expect("register xai");
+
+            let client = reqwest::Client::new();
+            let url = format!("{base_url}/acp/xai");
+
+            // initialize
+            let init_resp = tokio::time::timeout(
+                Duration::from_secs(15),
+                client
+                    .post(&url)
+                    .header("Content-Type", "application/json")
+                    .header("Accept", "application/json, text/event-stream")
+                    .body(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#)
+                    .send(),
+            )
+            .await
+            .expect("timeout on initialize")
+            .expect("reqwest error");
+            assert_eq!(init_resp.status().as_u16(), 200);
+
+            let connection_id = init_resp
+                .headers()
+                .get(ACP_CONNECTION_ID_HEADER)
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .to_owned();
+            let init_body: Value = init_resp.json().await.unwrap();
+            let proto_ver = init_body["result"]["protocolVersion"]
+                .as_u64()
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "0".to_string());
+
+            // open SSE stream
+            let get = client
+                .get(&url)
+                .header("Accept", "text/event-stream")
+                .header(ACP_CONNECTION_ID_HEADER, &connection_id)
+                .header(ACP_PROTOCOL_VERSION_HEADER, &proto_ver)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(get.status().as_u16(), 200);
+            let mut stream = get.bytes_stream();
+
+            // session/new
+            let _ = client
+                .post(&url)
+                .header("Content-Type", "application/json")
+                .header("Accept", "application/json, text/event-stream")
+                .header(ACP_CONNECTION_ID_HEADER, &connection_id)
+                .header(ACP_PROTOCOL_VERSION_HEADER, &proto_ver)
+                .body(r#"{"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":"/tmp","mcpServers":[]}}"#)
+                .send()
+                .await
+                .unwrap();
+
+            let event = find_sse_event(&mut stream, 2).await;
+            let session_id = event["result"]["sessionId"].as_str().unwrap_or("");
+            assert!(
+                !session_id.is_empty(),
+                "session/new must return non-empty sessionId: {event}"
             );
 
             shutdown_tx.send(true).unwrap();

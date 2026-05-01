@@ -73,6 +73,7 @@ dependencies = [
  "trogon-agent-core",
  "trogon-codex-runner",
  "trogon-nats",
+ "trogon-registry",
  "trogon-std",
  "trogon-xai-runner",
  "uuid",
@@ -130,6 +131,7 @@ dependencies = [
  "trogon-agent-core",
  "trogon-codex-runner",
  "trogon-nats",
+ "trogon-registry",
  "trogon-std",
  "trogon-xai-runner",
 ]
@@ -4907,6 +4909,7 @@ dependencies = [
  "trogon-agent-core",
  "trogon-mcp",
  "trogon-nats",
+ "trogon-registry",
  "trogon-std",
  "uuid",
 ]
@@ -5015,6 +5018,8 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "trogon-nats",
+ "trogon-registry",
  "uuid",
 ]
 
@@ -5028,6 +5033,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "testcontainers-modules",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -5436,7 +5442,7 @@ name = "trogon-source-microsoft-graph"
 version = "0.1.0"
 dependencies = [
  "async-nats",
- "axum",
+ "axum 0.8.8",
  "form_urlencoded",
  "serde",
  "serde_json",
@@ -5681,10 +5687,12 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "testcontainers-modules",
  "tokio",
  "tracing",
  "tracing-subscriber",
  "trogon-nats",
+ "trogon-registry",
  "trogon-std",
  "uuid",
  "wasmtime",
@@ -5713,6 +5721,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "trogon-nats",
+ "trogon-registry",
  "uuid",
 ]
 
