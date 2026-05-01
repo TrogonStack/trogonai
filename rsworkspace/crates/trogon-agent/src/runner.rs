@@ -274,7 +274,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
             run_store: (*run_store).clone(),
         };
         let chat_state = ChatAppState {
-            agent: Arc::clone(&agent),
+            agent: Arc::clone(&agent) as Arc<dyn crate::chat_api::ChatRunner>,
             session_store,
             promise_store: Arc::clone(&promise_store),
             agent_id: cfg.agent_id.clone(),

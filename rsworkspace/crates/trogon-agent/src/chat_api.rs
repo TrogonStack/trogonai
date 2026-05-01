@@ -46,8 +46,120 @@ use crate::agent_loop::{AgentLoop, Message};
 use crate::handlers::{DEFAULT_MEMORY_PATH, fetch_memory};
 use crate::promise_store::{AgentPromise, PromiseRepository, PromiseStatus};
 use crate::session::{ChatSession, SessionRepository};
-use crate::tools::all_tool_defs;
-use trogon_agent_core::agent_loop::PermissionChecker;
+use crate::tools::{ToolDef, all_tool_defs};
+use trogon_agent_core::agent_loop::{ElicitationProvider, PermissionChecker};
+
+// ── ChatRunner trait ──────────────────────────────────────────────────────────
+
+/// The minimal interface `send_message` needs from the AI backend.
+///
+/// Abstracting this allows unit tests to inject a `MockChatRunner` without
+/// a real HTTP stack, while `runner.rs` wires the production `AgentLoop`.
+pub trait ChatRunner: Send + Sync + 'static {
+    /// Default model name; may be overridden per-session.
+    fn default_model(&self) -> &str;
+
+    /// Fetch memory from the backing store (if configured) and combine it with
+    /// pre-loaded skill content to produce the final system prompt.
+    fn build_system_prompt<'a>(
+        &'a self,
+        session_memory_path: Option<&'a str>,
+        skill_content: Option<String>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<String>> + Send + 'a>>;
+
+    /// Run one agent turn; return the final reply text and the updated message
+    /// history.  The `permission_checker` and `elicitation_provider` are only
+    /// set in SSE mode.
+    fn run<'a>(
+        &'a self,
+        messages: Vec<Message>,
+        tools: Vec<ToolDef>,
+        system_prompt: Option<String>,
+        model: String,
+        permission_checker: Option<Arc<dyn PermissionChecker>>,
+        elicitation_provider: Option<Arc<dyn ElicitationProvider>>,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<(String, Vec<Message>), String>> + Send + 'a>,
+    >;
+}
+
+impl ChatRunner for AgentLoop {
+    fn default_model(&self) -> &str {
+        &self.model
+    }
+
+    fn build_system_prompt<'a>(
+        &'a self,
+        session_memory_path: Option<&'a str>,
+        skill_content: Option<String>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<String>> + Send + 'a>> {
+        Box::pin(async move {
+            let mem_path = session_memory_path
+                .or(self.memory_path.as_deref())
+                .unwrap_or(DEFAULT_MEMORY_PATH);
+            let memory = match (&self.memory_owner, &self.memory_repo) {
+                (Some(owner), Some(repo)) => fetch_memory(self, owner, repo, mem_path).await,
+                _ => None,
+            };
+            match (skill_content.as_deref(), memory.as_deref()) {
+                (Some(skills), Some(mem)) => Some(format!("{skills}\n\n---\n\n{mem}")),
+                (Some(skills), None) => Some(skills.to_string()),
+                (None, Some(mem)) => Some(mem.to_string()),
+                (None, None) => None,
+            }
+        })
+    }
+
+    fn run<'a>(
+        &'a self,
+        messages: Vec<Message>,
+        tools: Vec<ToolDef>,
+        system_prompt: Option<String>,
+        model: String,
+        permission_checker: Option<Arc<dyn PermissionChecker>>,
+        elicitation_provider: Option<Arc<dyn ElicitationProvider>>,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<(String, Vec<Message>), String>> + Send + 'a>,
+    > {
+        // Clone Arc fields up-front; the future captures only owned values.
+        let anthropic_client = Arc::clone(&self.anthropic_client);
+        let max_iterations = self.max_iterations;
+        let tool_dispatcher = Arc::clone(&self.tool_dispatcher);
+        let tool_context = Arc::clone(&self.tool_context);
+        let memory_owner = self.memory_owner.clone();
+        let memory_repo = self.memory_repo.clone();
+        let memory_path = self.memory_path.clone();
+        let mcp_tool_defs = self.mcp_tool_defs.clone();
+        let mcp_dispatch = self.mcp_dispatch.clone();
+        let flag_client = Arc::clone(&self.flag_client);
+        let tenant_id = self.tenant_id.clone();
+
+        Box::pin(async move {
+            let req_agent = AgentLoop {
+                anthropic_client,
+                model,
+                max_iterations,
+                tool_dispatcher,
+                tool_context,
+                memory_owner,
+                memory_repo,
+                memory_path,
+                mcp_tool_defs,
+                mcp_dispatch,
+                flag_client,
+                tenant_id,
+                promise_store: None,
+                promise_id: None,
+                permission_checker,
+                elicitation_provider,
+            };
+            req_agent
+                .run_chat(messages, &tools, system_prompt.as_deref())
+                .await
+                .map_err(|e| e.to_string())
+        })
+    }
+}
 
 // ── Approval registry ─────────────────────────────────────────────────────────
 
@@ -236,7 +348,7 @@ impl SsePayload {
 
 #[derive(Clone)]
 pub struct ChatAppState<R: SessionRepository> {
-    pub agent: Arc<AgentLoop>,
+    pub agent: Arc<dyn ChatRunner>,
     pub session_store: R,
     pub promise_store: Arc<dyn PromiseRepository>,
     /// Agent definition ID from CONSOLE_AGENTS (populated when `AGENT_ID` is set).
@@ -574,39 +686,7 @@ async fn send_message<R: SessionRepository>(
     let effective_model = session
         .model
         .clone()
-        .unwrap_or_else(|| state.agent.model.clone());
-
-    // Build a per-request AgentLoop so the caller can set the permission_checker
-    // without mutating the shared state.agent.
-    let mut req_agent = AgentLoop {
-        anthropic_client: Arc::clone(&state.agent.anthropic_client),
-        model: effective_model,
-        max_iterations: state.agent.max_iterations,
-        tool_dispatcher: Arc::clone(&state.agent.tool_dispatcher),
-        tool_context: Arc::clone(&state.agent.tool_context),
-        memory_owner: state.agent.memory_owner.clone(),
-        memory_repo: state.agent.memory_repo.clone(),
-        memory_path: state.agent.memory_path.clone(),
-        mcp_tool_defs: state.agent.mcp_tool_defs.clone(),
-        mcp_dispatch: state.agent.mcp_dispatch.clone(),
-        flag_client: Arc::clone(&state.agent.flag_client),
-        tenant_id: state.agent.tenant_id.clone(),
-        promise_store: None,
-        promise_id: None,
-        permission_checker: None,
-        elicitation_provider: None,
-    };
-
-    // Fetch memory (system prompt).
-    let mem_path = session
-        .memory_path
-        .as_deref()
-        .or(req_agent.memory_path.as_deref())
-        .unwrap_or(DEFAULT_MEMORY_PATH);
-    let memory = match (&req_agent.memory_owner, &req_agent.memory_repo) {
-        (Some(owner), Some(repo)) => fetch_memory(&req_agent, owner, repo, mem_path).await,
-        _ => None,
-    };
+        .unwrap_or_else(|| state.agent.default_model().to_string());
 
     // Fetch current skill_ids from the agent definition (reads CONSOLE_AGENTS KV
     // on every turn so console updates propagate without an agent restart).
@@ -615,17 +695,18 @@ async fn send_message<R: SessionRepository>(
         _ => vec![],
     };
 
-    // Load skills for this agent definition and combine with memory.
+    // Load skills for this agent definition.
     let skill_content: Option<String> = match &state.skill_loader {
         Some(loader) if !skill_ids.is_empty() => loader.load(&skill_ids).await,
         _ => None,
     };
-    let system_prompt: Option<String> = match (skill_content.as_deref(), memory.as_deref()) {
-        (Some(skills), Some(mem)) => Some(format!("{skills}\n\n---\n\n{mem}")),
-        (Some(skills), None) => Some(skills.to_string()),
-        (None, Some(mem)) => Some(mem.to_string()),
-        (None, None) => None,
-    };
+
+    // Fetch memory and combine with skill content into the final system prompt.
+    // Both steps are delegated to the ChatRunner so the handler stays generic.
+    let system_prompt = state
+        .agent
+        .build_system_prompt(session.memory_path.as_deref(), skill_content)
+        .await;
 
     // If the client requested SSE, run as a stream with approval gate support.
     let wants_sse = headers
@@ -638,29 +719,39 @@ async fn send_message<R: SessionRepository>(
         let (event_tx, event_rx) = mpsc::channel::<SsePayload>(32);
 
         let approval_pending = state.approval_registry.register(&id).await;
-        req_agent.permission_checker = Some(Arc::new(HttpPermissionChecker {
-            pending: approval_pending,
-            event_tx: event_tx.clone(),
-        }));
+        let permission_checker: Option<Arc<dyn PermissionChecker>> =
+            Some(Arc::new(HttpPermissionChecker {
+                pending: approval_pending,
+                event_tx: event_tx.clone(),
+            }));
 
         let elic_pending = state.elicitation_registry.register(&id).await;
-        req_agent.elicitation_provider = Some(Arc::new(HttpElicitationProvider {
-            pending: elic_pending,
-            event_tx: event_tx.clone(),
-        }));
+        let elicitation_provider: Option<Arc<dyn ElicitationProvider>> =
+            Some(Arc::new(HttpElicitationProvider {
+                pending: elic_pending,
+                event_tx: event_tx.clone(),
+            }));
 
+        let agent = Arc::clone(&state.agent);
         let session_store = state.session_store.clone();
         let approval_registry = state.approval_registry.clone();
         let elicitation_registry = state.elicitation_registry.clone();
         let session_id = id.clone();
 
         tokio::spawn(async move {
-            let result = req_agent
-                .run_chat(session.messages.clone(), &tools, system_prompt.as_deref())
+            let result = agent
+                .run(
+                    session.messages.clone(),
+                    tools,
+                    system_prompt,
+                    effective_model,
+                    permission_checker,
+                    elicitation_provider,
+                )
                 .await;
 
             let payload = match result {
-                Err(e) => SsePayload::Error { message: e.to_string() },
+                Err(e) => SsePayload::Error { message: e },
                 Ok((text, updated_messages)) => {
                     let message_count = updated_messages.len();
                     session.messages = updated_messages;
@@ -686,8 +777,16 @@ async fn send_message<R: SessionRepository>(
     }
 
     // Non-SSE path: run synchronously and return JSON.
-    match req_agent
-        .run_chat(session.messages.clone(), &tools, system_prompt.as_deref())
+    match state
+        .agent
+        .run(
+            session.messages.clone(),
+            tools,
+            system_prompt,
+            effective_model,
+            None,
+            None,
+        )
         .await
     {
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
@@ -865,10 +964,73 @@ pub fn router<R: SessionRepository>(state: ChatAppState<R>) -> Router {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent_loop::ContentBlock;
     use crate::session::mock::{ErrorSessionStore, GetOkPutErrorSessionStore, MockSessionStore};
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use tower::util::ServiceExt as _;
+
+    // ── MockChatRunner ────────────────────────────────────────────────────────
+
+    /// Test double for `ChatRunner`.  Configured with a fixed reply; the
+    /// `fail` flag makes `run` return an error to exercise error-path handlers.
+    struct MockChatRunner {
+        response: String,
+        fail: bool,
+    }
+
+    impl MockChatRunner {
+        fn new(response: &str) -> Self {
+            Self { response: response.to_string(), fail: false }
+        }
+
+        fn failing() -> Self {
+            Self { response: String::new(), fail: true }
+        }
+    }
+
+    impl ChatRunner for MockChatRunner {
+        fn default_model(&self) -> &str {
+            "mock-model"
+        }
+
+        fn build_system_prompt<'a>(
+            &'a self,
+            _session_memory_path: Option<&'a str>,
+            skill_content: Option<String>,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<String>> + Send + 'a>>
+        {
+            Box::pin(async move { skill_content })
+        }
+
+        fn run<'a>(
+            &'a self,
+            mut messages: Vec<Message>,
+            _tools: Vec<ToolDef>,
+            _system_prompt: Option<String>,
+            _model: String,
+            _permission_checker: Option<Arc<dyn PermissionChecker>>,
+            _elicitation_provider: Option<Arc<dyn ElicitationProvider>>,
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<Output = Result<(String, Vec<Message>), String>>
+                    + Send
+                    + 'a,
+            >,
+        > {
+            let response = self.response.clone();
+            let fail = self.fail;
+            Box::pin(async move {
+                if fail {
+                    return Err("mock agent error".to_string());
+                }
+                messages.push(Message::assistant(vec![ContentBlock::Text {
+                    text: response.clone(),
+                }]));
+                Ok((response, messages))
+            })
+        }
+    }
 
     #[test]
     fn now_iso8601_has_correct_format() {
@@ -1070,40 +1232,13 @@ mod tests {
 
     // ── Handler tests ─────────────────────────────────────────────────────────
 
-    fn make_test_agent() -> Arc<AgentLoop> {
-        use crate::agent_loop::ReqwestAnthropicClient;
-        use crate::flag_client::AlwaysOnFlagClient;
-        use crate::tools::{DefaultToolDispatcher, ToolContext};
-
-        let http = reqwest::Client::new();
-        let tool_ctx = Arc::new(ToolContext::for_test("http://127.0.0.1:1", "", "", ""));
-        Arc::new(AgentLoop {
-            anthropic_client: Arc::new(ReqwestAnthropicClient::new(
-                http,
-                "http://127.0.0.1:1".to_string(),
-                String::new(),
-            )),
-            model: "test".to_string(),
-            max_iterations: 1,
-            tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),
-            tool_context: tool_ctx,
-            memory_owner: None,
-            memory_repo: None,
-            memory_path: None,
-            mcp_tool_defs: vec![],
-            mcp_dispatch: vec![],
-            flag_client: Arc::new(AlwaysOnFlagClient),
-            tenant_id: "test-tenant".to_string(),
-            promise_store: None,
-            promise_id: None,
-            permission_checker: None,
-            elicitation_provider: None,
-        })
+    fn mock_runner() -> Arc<dyn ChatRunner> {
+        Arc::new(MockChatRunner::new("ok"))
     }
 
     fn get_ok_put_error_app() -> axum::Router {
         let state = ChatAppState {
-            agent: make_test_agent(),
+            agent: mock_runner(),
             session_store: GetOkPutErrorSessionStore::new(),
             promise_store: Arc::new(crate::promise_store::mock::MockPromiseStore::new()),
             agent_id: None,
@@ -1117,7 +1252,7 @@ mod tests {
 
     fn error_app() -> axum::Router {
         let state = ChatAppState {
-            agent: make_test_agent(),
+            agent: mock_runner(),
             session_store: ErrorSessionStore::new(),
             promise_store: Arc::new(crate::promise_store::mock::MockPromiseStore::new()),
             agent_id: None,
@@ -1130,8 +1265,12 @@ mod tests {
     }
 
     fn mock_app(store: MockSessionStore) -> axum::Router {
+        mock_app_with_runner(store, MockChatRunner::new("ok"))
+    }
+
+    fn mock_app_with_runner(store: MockSessionStore, runner: MockChatRunner) -> axum::Router {
         let state = ChatAppState {
-            agent: make_test_agent(),
+            agent: Arc::new(runner) as Arc<dyn ChatRunner>,
             session_store: store,
             promise_store: Arc::new(crate::promise_store::mock::MockPromiseStore::new()),
             agent_id: None,
@@ -1522,7 +1661,7 @@ mod tests {
         promise_store: Arc<dyn crate::promise_store::PromiseRepository>,
     ) -> axum::Router {
         let state = ChatAppState {
-            agent: make_test_agent(),
+            agent: mock_runner(),
             session_store,
             promise_store,
             agent_id: None,
@@ -1760,6 +1899,44 @@ mod tests {
             .body(Body::from(r#"{"content":"hello"}"#))
             .unwrap();
         let resp = error_app().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn send_message_returns_200_with_agent_content() {
+        let store = MockSessionStore::new();
+        store.insert(sample_session("sess-1", "acme"));
+        let app = mock_app_with_runner(store, MockChatRunner::new("Hello from agent"));
+
+        let req = Request::builder()
+            .method("POST")
+            .uri("/sessions/sess-1/messages")
+            .header("x-tenant-id", "acme")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"content":"hi"}"#))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["content"], "Hello from agent");
+        assert_eq!(json["message_count"], 2); // user + assistant
+    }
+
+    #[tokio::test]
+    async fn send_message_agent_error_returns_500() {
+        let store = MockSessionStore::new();
+        store.insert(sample_session("sess-1", "acme"));
+        let app = mock_app_with_runner(store, MockChatRunner::failing());
+
+        let req = Request::builder()
+            .method("POST")
+            .uri("/sessions/sess-1/messages")
+            .header("x-tenant-id", "acme")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"content":"hi"}"#))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 

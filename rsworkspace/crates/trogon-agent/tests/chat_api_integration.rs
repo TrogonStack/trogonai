@@ -1480,3 +1480,845 @@ async fn send_message_injects_skill_content_into_system_prompt() {
     assert_eq!(res["content"], "skills received");
     skill_mock.assert_hits_async(1).await;
 }
+
+// ── SSE helpers ───────────────────────────────────────────────────────────────
+
+/// Parse incoming SSE chunks into JSON values and forward them on a channel.
+///
+/// Each SSE event is a `data: <json>\n\n` segment. The task runs until the
+/// response body is exhausted or the receiver is dropped.
+fn spawn_sse_reader(response: reqwest::Response) -> tokio::sync::mpsc::Receiver<Value> {
+    let (tx, rx) = tokio::sync::mpsc::channel::<Value>(16);
+    tokio::spawn(async move {
+        let mut buf = String::new();
+        let mut response = response;
+        loop {
+            if let Some(pos) = buf.find("\n\n") {
+                let segment = buf[..pos].to_string();
+                buf = buf[pos + 2..].to_string();
+                for line in segment.lines() {
+                    if let Some(data) = line.strip_prefix("data: ") {
+                        if let Ok(val) = serde_json::from_str::<Value>(data) {
+                            if tx.send(val).await.is_err() {
+                                return;
+                            }
+                        }
+                    }
+                }
+                continue;
+            }
+            match response.chunk().await {
+                Ok(Some(chunk)) => {
+                    let s = std::str::from_utf8(&chunk)
+                        .unwrap_or("")
+                        .replace("\r\n", "\n");
+                    buf.push_str(&s);
+                }
+                _ => break,
+            }
+        }
+    });
+    rx
+}
+
+async fn create_session_id(env: &TestEnv) -> String {
+    let res: Value = env
+        .client
+        .post(format!("{}/sessions", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    res["id"].as_str().unwrap().to_string()
+}
+
+// ── SSE approval / elicitation integration tests ──────────────────────────────
+
+/// SSE mode with no tool calls: the stream must emit a single `done` event.
+#[tokio::test]
+async fn sse_plain_request_delivers_done_event() {
+    let env = start().await;
+
+    env.mock_server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(end_turn("hello from sse"));
+    });
+
+    let id = create_session_id(&env).await;
+
+    let response = env
+        .client
+        .post(format!("{}/sessions/{id}/messages", env.base_url))
+        .header("x-tenant-id", "acme")
+        .header("accept", "text/event-stream")
+        .json(&json!({"content": "hi"}))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), 200);
+
+    let mut rx = spawn_sse_reader(response);
+    let event = tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv())
+        .await
+        .expect("timed out waiting for SSE event")
+        .expect("SSE channel closed before done event");
+
+    assert_eq!(event["type"], "done");
+    assert_eq!(event["content"], "hello from sse");
+}
+
+/// SSE mode with a tool call that gets approved: the stream must emit
+/// `permission_required` followed by `done`.
+#[tokio::test]
+async fn sse_permission_approved_resumes_agent_to_done() {
+    let env = start().await;
+
+    // Register specific mock first — fires when the body contains "tool_use_id"
+    // (i.e., the second turn where the agent returns the tool result).
+    env.mock_server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages")
+            .body_contains("tool_use_id");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(end_turn("tool approved and done"));
+    });
+    // General mock second — fires for the first turn (no tool result in body yet).
+    env.mock_server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(json!({
+                "stop_reason": "tool_use",
+                "content": [{
+                    "type": "tool_use",
+                    "id": "tc-perm-1",
+                    "name": "__test_perm_gate__",
+                    "input": {}
+                }]
+            }));
+    });
+
+    let id = create_session_id(&env).await;
+
+    let response = env
+        .client
+        .post(format!("{}/sessions/{id}/messages", env.base_url))
+        .header("x-tenant-id", "acme")
+        .header("accept", "text/event-stream")
+        .json(&json!({"content": "run the tool"}))
+        .send()
+        .await
+        .unwrap();
+
+    let mut rx = spawn_sse_reader(response);
+
+    // First event: permission gate fires before tool execution.
+    let perm_event = tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv())
+        .await
+        .expect("timed out waiting for permission_required event")
+        .expect("SSE channel closed");
+
+    assert_eq!(perm_event["type"], "permission_required");
+    assert_eq!(perm_event["tool_call_id"], "tc-perm-1");
+    assert_eq!(perm_event["tool_name"], "__test_perm_gate__");
+
+    // Approve the tool call.
+    let approve = env
+        .client
+        .post(format!("{}/sessions/{id}/approvals/tc-perm-1", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({"allowed": true}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(approve.status(), 200);
+
+    // Second event: agent completes after running the tool.
+    let done_event = tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv())
+        .await
+        .expect("timed out waiting for done event")
+        .expect("SSE channel closed");
+
+    assert_eq!(done_event["type"], "done");
+    assert_eq!(done_event["content"], "tool approved and done");
+}
+
+/// SSE mode with a tool call that gets denied: the agent receives a
+/// "Permission denied" tool result and still reaches `done`.
+#[tokio::test]
+async fn sse_permission_denied_agent_receives_denied_message() {
+    let env = start().await;
+
+    env.mock_server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages")
+            .body_contains("tool_use_id");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(end_turn("understood, tool denied"));
+    });
+    env.mock_server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(json!({
+                "stop_reason": "tool_use",
+                "content": [{
+                    "type": "tool_use",
+                    "id": "tc-deny-1",
+                    "name": "__test_perm_gate__",
+                    "input": {}
+                }]
+            }));
+    });
+
+    let id = create_session_id(&env).await;
+
+    let response = env
+        .client
+        .post(format!("{}/sessions/{id}/messages", env.base_url))
+        .header("x-tenant-id", "acme")
+        .header("accept", "text/event-stream")
+        .json(&json!({"content": "run the tool"}))
+        .send()
+        .await
+        .unwrap();
+
+    let mut rx = spawn_sse_reader(response);
+
+    let perm_event = tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv())
+        .await
+        .expect("timed out waiting for permission_required event")
+        .expect("SSE channel closed");
+
+    assert_eq!(perm_event["type"], "permission_required");
+    assert_eq!(perm_event["tool_call_id"], "tc-deny-1");
+
+    // Deny the tool call.
+    let deny = env
+        .client
+        .post(format!("{}/sessions/{id}/approvals/tc-deny-1", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({"allowed": false}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(deny.status(), 200);
+
+    let done_event = tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv())
+        .await
+        .expect("timed out waiting for done event")
+        .expect("SSE channel closed");
+
+    assert_eq!(done_event["type"], "done");
+    assert_eq!(done_event["content"], "understood, tool denied");
+}
+
+/// SSE mode with `ask_user`: the stream emits `elicitation_required`, and
+/// after the client posts an answer the agent completes with `done`.
+#[tokio::test]
+async fn sse_elicitation_answer_reaches_agent() {
+    let env = start().await;
+
+    // Second turn: agent received the user's answer as a tool result.
+    env.mock_server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages")
+            .body_contains("tool_use_id");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(end_turn("got your answer"));
+    });
+    // First turn: model invokes the built-in ask_user tool.
+    env.mock_server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(json!({
+                "stop_reason": "tool_use",
+                "content": [{
+                    "type": "tool_use",
+                    "id": "tc-elicit-1",
+                    "name": "ask_user",
+                    "input": {"question": "What is your name?"}
+                }]
+            }));
+    });
+
+    let id = create_session_id(&env).await;
+
+    let response = env
+        .client
+        .post(format!("{}/sessions/{id}/messages", env.base_url))
+        .header("x-tenant-id", "acme")
+        .header("accept", "text/event-stream")
+        .json(&json!({"content": "tell me"}))
+        .send()
+        .await
+        .unwrap();
+
+    let mut rx = spawn_sse_reader(response);
+
+    let elicit_event = tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv())
+        .await
+        .expect("timed out waiting for elicitation_required event")
+        .expect("SSE channel closed");
+
+    assert_eq!(elicit_event["type"], "elicitation_required");
+    assert_eq!(elicit_event["question"], "What is your name?");
+    let elicitation_id = elicit_event["elicitation_id"].as_str().unwrap().to_string();
+
+    // Post the user's answer.
+    let answer = env
+        .client
+        .post(format!(
+            "{}/sessions/{id}/elicitations/{elicitation_id}",
+            env.base_url
+        ))
+        .header("x-tenant-id", "acme")
+        .json(&json!({"answer": "Jorge"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(answer.status(), 200);
+
+    let done_event = tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv())
+        .await
+        .expect("timed out waiting for done event")
+        .expect("SSE channel closed");
+
+    assert_eq!(done_event["type"], "done");
+    assert_eq!(done_event["content"], "got your answer");
+}
+
+/// SSE mode with `ask_user` cancelled (null answer): the agent receives
+/// "The user declined or cancelled the request." and still reaches `done`.
+#[tokio::test]
+async fn sse_elicitation_cancelled_delivers_done() {
+    let env = start().await;
+
+    env.mock_server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages")
+            .body_contains("tool_use_id");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(end_turn("understood, no answer"));
+    });
+    env.mock_server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(json!({
+                "stop_reason": "tool_use",
+                "content": [{
+                    "type": "tool_use",
+                    "id": "tc-cancel-1",
+                    "name": "ask_user",
+                    "input": {"question": "Confirm?"}
+                }]
+            }));
+    });
+
+    let id = create_session_id(&env).await;
+
+    let response = env
+        .client
+        .post(format!("{}/sessions/{id}/messages", env.base_url))
+        .header("x-tenant-id", "acme")
+        .header("accept", "text/event-stream")
+        .json(&json!({"content": "confirm please"}))
+        .send()
+        .await
+        .unwrap();
+
+    let mut rx = spawn_sse_reader(response);
+
+    let elicit_event = tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv())
+        .await
+        .expect("timed out waiting for elicitation_required event")
+        .expect("SSE channel closed");
+
+    assert_eq!(elicit_event["type"], "elicitation_required");
+    let elicitation_id = elicit_event["elicitation_id"].as_str().unwrap().to_string();
+
+    // Cancel (null answer).
+    let cancel = env
+        .client
+        .post(format!(
+            "{}/sessions/{id}/elicitations/{elicitation_id}",
+            env.base_url
+        ))
+        .header("x-tenant-id", "acme")
+        .json(&json!({"answer": null}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(cancel.status(), 200);
+
+    let done_event = tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv())
+        .await
+        .expect("timed out waiting for done event")
+        .expect("SSE channel closed");
+
+    assert_eq!(done_event["type"], "done");
+    assert_eq!(done_event["content"], "understood, no answer");
+}
+
+/// Posting to the approvals endpoint when no SSE stream is active returns 404.
+#[tokio::test]
+async fn approve_returns_404_when_no_active_sse_stream() {
+    let env = start().await;
+
+    let res = env
+        .client
+        .post(format!(
+            "{}/sessions/nonexistent-session/approvals/some-tool-call",
+            env.base_url
+        ))
+        .header("x-tenant-id", "acme")
+        .json(&json!({"allowed": true}))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 404);
+}
+
+/// Posting to the elicitations endpoint when no SSE stream is active returns 404.
+#[tokio::test]
+async fn elicitation_respond_returns_404_when_no_active_sse_stream() {
+    let env = start().await;
+
+    let res = env
+        .client
+        .post(format!(
+            "{}/sessions/nonexistent-session/elicitations/some-elicitation",
+            env.base_url
+        ))
+        .header("x-tenant-id", "acme")
+        .json(&json!({"answer": "hello"}))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 404);
+}
+
+/// The SSE response must carry `Content-Type: text/event-stream`.
+#[tokio::test]
+async fn sse_response_has_event_stream_content_type() {
+    let env = start().await;
+
+    env.mock_server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(end_turn("ok"));
+    });
+
+    let id = create_session_id(&env).await;
+
+    let response = env
+        .client
+        .post(format!("{}/sessions/{id}/messages", env.base_url))
+        .header("x-tenant-id", "acme")
+        .header("accept", "text/event-stream")
+        .json(&json!({"content": "hi"}))
+        .send()
+        .await
+        .unwrap();
+
+    let ct = response
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    assert!(
+        ct.contains("text/event-stream"),
+        "expected text/event-stream, got: {ct}"
+    );
+
+    // Drain the stream.
+    let mut rx = spawn_sse_reader(response);
+    tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv())
+        .await
+        .expect("timed out")
+        .expect("channel closed");
+}
+
+/// The `done` event must carry the correct `message_count` (user + assistant = 2).
+#[tokio::test]
+async fn sse_done_event_message_count_is_correct() {
+    let env = start().await;
+
+    env.mock_server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(end_turn("reply"));
+    });
+
+    let id = create_session_id(&env).await;
+
+    let response = env
+        .client
+        .post(format!("{}/sessions/{id}/messages", env.base_url))
+        .header("x-tenant-id", "acme")
+        .header("accept", "text/event-stream")
+        .json(&json!({"content": "hello"}))
+        .send()
+        .await
+        .unwrap();
+
+    let mut rx = spawn_sse_reader(response);
+    let done = tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv())
+        .await
+        .expect("timed out")
+        .expect("channel closed");
+
+    assert_eq!(done["type"], "done");
+    // One user message + one assistant message = 2.
+    assert_eq!(done["message_count"], 2);
+}
+
+/// After the SSE stream closes, the session history must be persisted in NATS
+/// so a subsequent GET reflects the completed turn.
+#[tokio::test]
+async fn sse_session_history_persisted_after_completion() {
+    let env = start().await;
+
+    env.mock_server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(end_turn("stored reply"));
+    });
+
+    let id = create_session_id(&env).await;
+
+    let response = env
+        .client
+        .post(format!("{}/sessions/{id}/messages", env.base_url))
+        .header("x-tenant-id", "acme")
+        .header("accept", "text/event-stream")
+        .json(&json!({"content": "persist me"}))
+        .send()
+        .await
+        .unwrap();
+
+    let mut rx = spawn_sse_reader(response);
+    let done = tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv())
+        .await
+        .expect("timed out")
+        .expect("channel closed");
+    assert_eq!(done["type"], "done");
+
+    // session_store.put happens before the done event is sent, so the session
+    // is already persisted by the time we receive it.
+    let session: Value = env
+        .client
+        .get(format!("{}/sessions/{id}", env.base_url))
+        .header("x-tenant-id", "acme")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let messages = session["messages"].as_array().expect("messages array");
+    assert_eq!(messages.len(), 2, "user + assistant = 2 messages");
+    assert_eq!(messages[0]["role"], "user");
+    assert_eq!(messages[1]["role"], "assistant");
+}
+
+/// When the Anthropic API errors during an SSE run the stream emits an `error`
+/// event instead of `done`.
+///
+/// Uses 400 (non-retryable) so the agent fails immediately — 5xx would trigger
+/// three retries with a 2 s + 4 s + 8 s backoff before giving up.
+#[tokio::test]
+async fn sse_anthropic_error_emits_error_event() {
+    let env = start().await;
+
+    env.mock_server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
+        then.status(400).body("Bad Request");
+    });
+
+    let id = create_session_id(&env).await;
+
+    let response = env
+        .client
+        .post(format!("{}/sessions/{id}/messages", env.base_url))
+        .header("x-tenant-id", "acme")
+        .header("accept", "text/event-stream")
+        .json(&json!({"content": "trigger error"}))
+        .send()
+        .await
+        .unwrap();
+
+    // SSE responds 200 immediately (stream starts before agent completes).
+    assert_eq!(response.status(), 200);
+
+    let mut rx = spawn_sse_reader(response);
+    let event = tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv())
+        .await
+        .expect("timed out waiting for error event")
+        .expect("channel closed");
+
+    assert_eq!(event["type"], "error");
+    assert!(
+        !event["message"].as_str().unwrap_or("").is_empty(),
+        "error event must carry a non-empty message"
+    );
+}
+
+/// Posting an approval for an unrecognised `tool_call_id` while the SSE stream
+/// IS active (session registered) returns 404 — only the wrong key is missing.
+#[tokio::test]
+async fn sse_wrong_tool_call_id_returns_404_while_stream_active() {
+    let env = start().await;
+
+    env.mock_server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages")
+            .body_contains("tool_use_id");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(end_turn("done after corrected approval"));
+    });
+    env.mock_server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(json!({
+                "stop_reason": "tool_use",
+                "content": [{
+                    "type": "tool_use",
+                    "id": "tc-real-id",
+                    "name": "__test_perm_gate__",
+                    "input": {}
+                }]
+            }));
+    });
+
+    let id = create_session_id(&env).await;
+
+    let response = env
+        .client
+        .post(format!("{}/sessions/{id}/messages", env.base_url))
+        .header("x-tenant-id", "acme")
+        .header("accept", "text/event-stream")
+        .json(&json!({"content": "run tool"}))
+        .send()
+        .await
+        .unwrap();
+
+    let mut rx = spawn_sse_reader(response);
+
+    // Wait until the agent is paused at the permission gate.
+    let perm_event = tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv())
+        .await
+        .expect("timed out")
+        .expect("channel closed");
+    assert_eq!(perm_event["type"], "permission_required");
+
+    // Wrong ID → session IS registered but tool_call_id is not in the map.
+    let wrong = env
+        .client
+        .post(format!("{}/sessions/{id}/approvals/wrong-tool-call-id", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({"allowed": true}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(wrong.status(), 404);
+
+    // Correct ID → unblocks the agent.
+    let correct = env
+        .client
+        .post(format!("{}/sessions/{id}/approvals/tc-real-id", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({"allowed": true}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(correct.status(), 200);
+
+    let done = tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv())
+        .await
+        .expect("timed out")
+        .expect("channel closed");
+    assert_eq!(done["type"], "done");
+}
+
+/// SSE mode also auto-names a session from the first user message.
+#[tokio::test]
+async fn sse_auto_names_session_from_first_message() {
+    let env = start().await;
+
+    env.mock_server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(end_turn("ok"));
+    });
+
+    let id = create_session_id(&env).await;
+
+    // Confirm initial name is the default.
+    let before: Value = env
+        .client
+        .get(format!("{}/sessions/{id}", env.base_url))
+        .header("x-tenant-id", "acme")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(before["name"], "New Agent");
+
+    let response = env
+        .client
+        .post(format!("{}/sessions/{id}/messages", env.base_url))
+        .header("x-tenant-id", "acme")
+        .header("accept", "text/event-stream")
+        .json(&json!({"content": "rename me please"}))
+        .send()
+        .await
+        .unwrap();
+
+    let mut rx = spawn_sse_reader(response);
+    tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv())
+        .await
+        .expect("timed out")
+        .expect("channel closed");
+
+    let after: Value = env
+        .client
+        .get(format!("{}/sessions/{id}", env.base_url))
+        .header("x-tenant-id", "acme")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(after["name"], "rename me please");
+}
+
+/// When the model returns two tool uses in a single response, the permission gate
+/// fires sequentially — each must be approved before the agent proceeds.
+#[tokio::test]
+async fn sse_sequential_tool_approvals_both_required() {
+    let env = start().await;
+
+    // Second turn: both tool results are in the body.
+    env.mock_server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages")
+            .body_contains("tool_use_id");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(end_turn("both tools approved"));
+    });
+    // First turn: model returns two tool uses at once.
+    env.mock_server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(json!({
+                "stop_reason": "tool_use",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "tc-seq-1",
+                        "name": "__test_perm_gate__",
+                        "input": {}
+                    },
+                    {
+                        "type": "tool_use",
+                        "id": "tc-seq-2",
+                        "name": "__test_perm_gate__",
+                        "input": {}
+                    }
+                ]
+            }));
+    });
+
+    let id = create_session_id(&env).await;
+
+    let response = env
+        .client
+        .post(format!("{}/sessions/{id}/messages", env.base_url))
+        .header("x-tenant-id", "acme")
+        .header("accept", "text/event-stream")
+        .json(&json!({"content": "run two tools"}))
+        .send()
+        .await
+        .unwrap();
+
+    let mut rx = spawn_sse_reader(response);
+
+    // Gate fires for first tool.
+    let perm1 = tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv())
+        .await
+        .expect("timed out waiting for first permission_required")
+        .expect("channel closed");
+    assert_eq!(perm1["type"], "permission_required");
+    assert_eq!(perm1["tool_call_id"], "tc-seq-1");
+
+    env.client
+        .post(format!("{}/sessions/{id}/approvals/tc-seq-1", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({"allowed": true}))
+        .send()
+        .await
+        .unwrap();
+
+    // Gate fires for second tool before the agent loops back to Anthropic.
+    let perm2 = tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv())
+        .await
+        .expect("timed out waiting for second permission_required")
+        .expect("channel closed");
+    assert_eq!(perm2["type"], "permission_required");
+    assert_eq!(perm2["tool_call_id"], "tc-seq-2");
+
+    env.client
+        .post(format!("{}/sessions/{id}/approvals/tc-seq-2", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({"allowed": true}))
+        .send()
+        .await
+        .unwrap();
+
+    let done = tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv())
+        .await
+        .expect("timed out waiting for done event")
+        .expect("channel closed");
+    assert_eq!(done["type"], "done");
+    assert_eq!(done["content"], "both tools approved");
+}
