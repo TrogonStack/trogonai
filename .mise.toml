@@ -21,6 +21,11 @@ depends = ["check:rust"]
 dir = "rsworkspace"
 run = "cargo clippy --workspace && cargo fmt --check"
 
+[tasks."run:agent"]
+description = "Run the LLM agent"
+dir = "rsworkspace"
+run = "cargo run -p acp-agent-llm"
+
 [tasks."rsc"]
 description = "Format and check all Rust code (fmt, clippy, all targets, all features)"
 dir = "rsworkspace"
