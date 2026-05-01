@@ -1,5 +1,5 @@
 use std::rc::Rc;
-use tracing::info;
+use tracing::{info, warn};
 use trogon_wasm_runtime::{dispatcher, Config, WasmRuntime};
 
 #[tokio::main]
@@ -23,9 +23,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
     let acp_prefix =
-        std::env::var("ACP_PREFIX").unwrap_or_else(|_| acp_nats::DEFAULT_ACP_PREFIX.to_string());
+        std::env::var("ACP_PREFIX").unwrap_or_else(|_| "acp.wasm".to_string());
+    let agent_type =
+        std::env::var("AGENT_TYPE").unwrap_or_else(|_| "wasm".to_string());
 
-    info!(%nats_url, %acp_prefix, session_root = %cfg.session_root.display(), "WASM runtime starting");
+    info!(%nats_url, %acp_prefix, %agent_type, session_root = %cfg.session_root.display(), "WASM runtime starting");
 
     // Use ConnectOptions with indefinite reconnect.
     // Retry the initial connect in a loop — max_reconnects(None) only covers
@@ -52,8 +54,42 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     };
+
     let runtime = Rc::new(WasmRuntime::with_nats(&cfg, Some(nats.clone()))?);
     runtime.cleanup_stale_sessions().await;
+
+    // ── Registry self-registration ────────────────────────────────────────────
+
+    let js_ctx = async_nats::jetstream::new(nats.clone());
+    let reg_store = trogon_registry::provision(&js_ctx)
+        .await
+        .map_err(|e| format!("registry provisioning failed: {e}"))?;
+    let registry = trogon_registry::Registry::new(reg_store);
+    let cap = trogon_registry::AgentCapability {
+        agent_type: agent_type.clone(),
+        capabilities: vec!["execution".to_string()],
+        nats_subject: format!("{acp_prefix}.agent.>"),
+        current_load: 0,
+        metadata: serde_json::json!({ "acp_prefix": &acp_prefix }),
+    };
+    registry
+        .register(&cap)
+        .await
+        .map_err(|e| format!("initial registry registration failed: {e}"))?;
+    info!(agent_type, acp_prefix, "registered in agent registry");
+    tokio::spawn({
+        let cap = cap.clone();
+        async move {
+            let mut interval =
+                tokio::time::interval(trogon_registry::HEARTBEAT_INTERVAL);
+            loop {
+                interval.tick().await;
+                if let Err(e) = registry.refresh(&cap).await {
+                    warn!(error = %e, "registry heartbeat failed");
+                }
+            }
+        }
+    });
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
@@ -61,9 +97,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     local
         .run_until(async {
             let shutdown_signal = acp_telemetry::signal::shutdown_signal();
-            // Subscribe to all runner sub-prefixes (e.g. acp.*.session.*) so a
-            // single instance covers every runner without reconfiguration.
-            let subject = format!("{acp_prefix}.*.session.*.client.>");
+            // Subscribe to client-op subjects for this runtime's ACP prefix
+            // (e.g. acp.wasm.session.*.client.*) so tool calls from wasm sessions
+            // are handled by this instance.
+            let subject = format!("{acp_prefix}.session.*.client.>");
             let mut dispatch_task =
                 tokio::task::spawn_local(dispatcher::run(nats, subject, runtime, shutdown_rx));
             tokio::select! {
@@ -75,9 +112,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 _ = shutdown_signal => {
                     info!("Shutdown signal received");
-                    // Signal the dispatcher to stop accepting new messages and drain.
                     let _ = shutdown_tx.send(true);
-                    // Wait for the dispatcher to finish draining.
                     let _ = dispatch_task.await;
                 }
             }

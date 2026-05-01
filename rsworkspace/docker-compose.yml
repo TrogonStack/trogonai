@@ -282,7 +282,8 @@ services:
       target: trogon-wasm-runtime
     environment:
       NATS_URL: nats://nats:4222
-      ACP_PREFIX: acp
+      ACP_PREFIX: acp.wasm
+      AGENT_TYPE: wasm
       WASM_SESSION_ROOT: /data/sessions
       RUST_LOG: info
     volumes:

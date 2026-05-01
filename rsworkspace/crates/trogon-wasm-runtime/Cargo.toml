@@ -17,6 +17,7 @@ test = false
 acp-nats = { workspace = true }
 acp-telemetry = { workspace = true }
 trogon-nats = { workspace = true }
+trogon-registry = { workspace = true }
 trogon-std = { workspace = true }
 agent-client-protocol = { workspace = true }
 async-nats = { workspace = true }
