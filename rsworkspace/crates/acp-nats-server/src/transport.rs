@@ -3238,4 +3238,142 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::ACCEPTED);
     }
+
+    // ── error propagation through *_with_agent_type handlers ─────────────────
+
+    #[tokio::test]
+    async fn post_with_agent_type_propagates_500_for_invalid_registry_prefix() {
+        let reg = trogon_registry::Registry::new(trogon_registry::MockRegistryStore::new());
+        reg.register(&trogon_registry::AgentCapability {
+            agent_type: "bad".to_string(),
+            capabilities: vec![],
+            nats_subject: "acp.bad.agent.>".to_string(),
+            current_load: 0,
+            metadata: serde_json::json!({ "acp_prefix": "invalid prefix!" }),
+        })
+        .await
+        .unwrap();
+        let registry_ext = std::sync::Arc::new(RegistryExtension {
+            registry: reg,
+            base_config: test_config(),
+        });
+        let (state, _manager_rx) = test_state();
+
+        let response = post_with_agent_type::<trogon_registry::MockRegistryStore>(
+            axum::extract::Path("bad".to_string()),
+            post_headers(),
+            State(state),
+            axum::extract::Extension(registry_ext),
+            r#"{"jsonrpc":"2.0","method":"initialized"}"#.to_string(),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn post_with_agent_type_propagates_503_on_store_error() {
+        let registry_ext = std::sync::Arc::new(RegistryExtension {
+            registry: trogon_registry::Registry::new(FailingRegistryStore),
+            base_config: test_config(),
+        });
+        let (state, _manager_rx) = test_state();
+
+        let response = post_with_agent_type::<FailingRegistryStore>(
+            axum::extract::Path("any".to_string()),
+            post_headers(),
+            State(state),
+            axum::extract::Extension(registry_ext),
+            r#"{"jsonrpc":"2.0","method":"initialized"}"#.to_string(),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[tokio::test]
+    async fn get_with_agent_type_propagates_500_for_invalid_registry_prefix() {
+        let reg = trogon_registry::Registry::new(trogon_registry::MockRegistryStore::new());
+        reg.register(&trogon_registry::AgentCapability {
+            agent_type: "bad".to_string(),
+            capabilities: vec![],
+            nats_subject: "acp.bad.agent.>".to_string(),
+            current_load: 0,
+            metadata: serde_json::json!({ "acp_prefix": "invalid prefix!" }),
+        })
+        .await
+        .unwrap();
+        let registry_ext = std::sync::Arc::new(RegistryExtension {
+            registry: reg,
+            base_config: test_config(),
+        });
+        let (state, _manager_rx) = test_state();
+
+        let request = HttpRequest::builder()
+            .method("GET")
+            .uri("/acp/bad")
+            .header("upgrade", "websocket")
+            .body(Body::empty())
+            .unwrap();
+
+        let response = get_with_agent_type::<trogon_registry::MockRegistryStore>(
+            axum::extract::Path("bad".to_string()),
+            State(state),
+            axum::extract::Extension(registry_ext),
+            request,
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn get_with_agent_type_propagates_503_on_store_error() {
+        let registry_ext = std::sync::Arc::new(RegistryExtension {
+            registry: trogon_registry::Registry::new(FailingRegistryStore),
+            base_config: test_config(),
+        });
+        let (state, _manager_rx) = test_state();
+
+        let request = HttpRequest::builder()
+            .method("GET")
+            .uri("/acp/any")
+            .header("upgrade", "websocket")
+            .body(Body::empty())
+            .unwrap();
+
+        let response = get_with_agent_type::<FailingRegistryStore>(
+            axum::extract::Path("any".to_string()),
+            State(state),
+            axum::extract::Extension(registry_ext),
+            request,
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[tokio::test]
+    async fn get_with_agent_type_non_ws_request_skips_registry_returns_406() {
+        // Plain HTTP GET (no upgrade header) → http_get() is called directly without
+        // consulting the registry. validate_get_headers rejects missing Accept header
+        // with 406, not 404, proving the registry lookup was bypassed entirely.
+        let (state, _manager_rx) = test_state();
+
+        let request = HttpRequest::builder()
+            .method("GET")
+            .uri("/acp/unregistered")
+            .body(Body::empty())
+            .unwrap();
+
+        let response = get_with_agent_type::<trogon_registry::MockRegistryStore>(
+            axum::extract::Path("unregistered".to_string()),
+            State(state),
+            axum::extract::Extension(empty_registry_ext()),
+            request,
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::NOT_ACCEPTABLE);
+    }
 }
