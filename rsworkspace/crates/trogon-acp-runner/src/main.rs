@@ -39,8 +39,9 @@ use tokio::sync::{mpsc, RwLock};
 use tokio::task::LocalSet;
 use tracing::info;
 
+use trogon_acp_runner::elicitation::handle_elicitation_request_nats;
 use trogon_acp_runner::permission_bridge::handle_permission_request_nats;
-use trogon_acp_runner::PermissionReq;
+use trogon_acp_runner::{ElicitationReq, PermissionReq};
 
 use trogon_agent_core::agent_loop::AgentLoop;
 use trogon_agent_core::tools::ToolContext;
@@ -119,6 +120,15 @@ async fn main() -> anyhow::Result<()> {
 
     let (perm_tx, mut perm_rx) = mpsc::channel::<PermissionReq>(32);
 
+    // ── Elicitation channel ───────────────────────────────────────────────────
+    // When the agent needs structured user input, it sends ElicitationReq here;
+    // the LocalSet task forwards it to the ACP client via NatsClientProxy.
+    // The sender is kept alive (currently inert) for future phases that wire
+    // an agent-side ElicitationProvider.
+
+    let (elic_tx, mut elic_rx) = mpsc::channel::<ElicitationReq>(32);
+    let _elic_tx = elic_tx;
+
     // ── Session store ─────────────────────────────────────────────────────────
 
     let store = trogon_acp_runner::NatsSessionStore::open(&js).await?;
@@ -142,7 +152,9 @@ async fn main() -> anyhow::Result<()> {
 
     let prefix = AcpPrefix::new(&acp_prefix)?;
     let nats_for_perm = nats.clone();
+    let nats_for_elic = nats.clone();
     let prefix_for_perm = prefix.clone();
+    let prefix_for_elic = prefix.clone();
     let (_conn, io_task) =
         AgentSideNatsConnection::new(agent, nats, prefix, |fut| {
             tokio::task::spawn_local(fut);
@@ -159,6 +171,15 @@ async fn main() -> anyhow::Result<()> {
                     let nats = nats_for_perm.clone();
                     let prefix = prefix_for_perm.clone();
                     handle_permission_request_nats(req, nats, prefix, &store).await;
+                }
+            });
+
+            // Drain ElicitationReq messages and forward each to the ACP client via NATS.
+            tokio::task::spawn_local(async move {
+                while let Some(req) = elic_rx.recv().await {
+                    let nats = nats_for_elic.clone();
+                    let prefix = prefix_for_elic.clone();
+                    handle_elicitation_request_nats(req, nats, prefix).await;
                 }
             });
 
