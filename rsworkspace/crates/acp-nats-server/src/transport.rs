@@ -3376,4 +3376,55 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::NOT_ACCEPTABLE);
     }
+
+    // ── Real NATS KV integration ──────────────────────────────────────────────
+
+    /// Verifies that `resolve_config_inner` correctly reads agent registrations
+    /// from a real JetStream KV store (not MockRegistryStore). This covers the
+    /// path that `main.rs` takes: provision → register → route by agent_type.
+    #[tokio::test]
+    async fn registry_routing_with_real_nats_kv_routes_registered_and_rejects_unknown() {
+        use testcontainers_modules::nats::Nats;
+        use testcontainers_modules::testcontainers::{ImageExt, runners::AsyncRunner};
+
+        let container = Nats::default()
+            .with_cmd(["--jetstream"])
+            .start()
+            .await
+            .expect("Failed to start NATS container — is Docker running?");
+        let port = container.get_host_port_ipv4(4222).await.unwrap();
+        let nats = async_nats::connect(format!("127.0.0.1:{port}"))
+            .await
+            .expect("connect to NATS");
+        let js = async_nats::jetstream::new(nats);
+
+        let store = trogon_registry::provision(&js).await.expect("provision registry");
+        let registry = trogon_registry::Registry::new(store);
+        registry
+            .register(&trogon_registry::AgentCapability {
+                agent_type: "claude".to_string(),
+                capabilities: vec!["chat".to_string()],
+                nats_subject: "acp.claude.agent.>".to_string(),
+                current_load: 0,
+                metadata: serde_json::json!({ "acp_prefix": "acp.claude" }),
+            })
+            .await
+            .expect("register must succeed");
+
+        // Registered agent resolves to the correct NATS prefix.
+        let result = resolve_config_inner("claude", &registry, &test_config()).await;
+        assert!(result.is_ok(), "registered agent must resolve");
+        assert_eq!(
+            result.unwrap().acp_prefix(),
+            "acp.claude",
+            "bridge derives NATS prefix from registry metadata"
+        );
+
+        // Unknown agent returns NOT_FOUND.
+        let (status, _) = resolve_config_inner("unknown", &registry, &test_config())
+            .await
+            .err()
+            .expect("unregistered agent must fail");
+        assert_eq!(status, StatusCode::NOT_FOUND);
+    }
 }
