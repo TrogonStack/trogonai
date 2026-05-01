@@ -69,6 +69,7 @@ fn make_agent(store: NatsSessionStore) -> TestAgent {
         "acp",
         "claude-test",
         None,
+        None,
         Arc::new(RwLock::new(None::<GatewayConfig>)),
     )
 }

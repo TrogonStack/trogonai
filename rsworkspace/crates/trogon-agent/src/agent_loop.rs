@@ -19,6 +19,7 @@ use tracing::{debug, error, info, warn};
 use crate::flag_client::FeatureFlagClient;
 use crate::promise_store::PromiseRepository;
 use crate::tools::{ToolDef, ToolDispatcher};
+use trogon_agent_core::agent_loop::{ElicitationProvider, PermissionChecker};
 
 // ── AnthropicClient trait ──────────────────────────────────────────────────────
 
@@ -461,6 +462,10 @@ pub struct AgentLoop {
     /// Unique identifier for the current run, used as the KV checkpoint key.
     /// `None` when `promise_store` is `None`.
     pub promise_id: Option<String>,
+    /// Optional gate called before each tool execution — `None` means all tools are auto-allowed.
+    pub permission_checker: Option<Arc<dyn PermissionChecker>>,
+    /// Optional provider for the built-in `ask_user` tool; `None` means the tool is not offered.
+    pub elicitation_provider: Option<Arc<dyn ElicitationProvider>>,
 }
 
 /// Recursively sort JSON object keys so that serialization is order-independent.
@@ -935,6 +940,23 @@ impl AgentLoop {
         // Merge caller-supplied tools with MCP tool definitions.
         let mut all_tools: Vec<ToolDef> = tools.to_vec();
         all_tools.extend(self.mcp_tool_defs.iter().cloned());
+        if self.elicitation_provider.is_some() {
+            all_tools.push(ToolDef {
+                name: "ask_user".to_string(),
+                description: "Ask the user a question and wait for their response. Use this when you need clarification or additional information to proceed.".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "question": {
+                            "type": "string",
+                            "description": "The question to ask the user."
+                        }
+                    },
+                    "required": ["question"]
+                }),
+                cache_control: None,
+            });
+        }
 
         // Mark the last tool with cache_control so Anthropic caches the entire
         // tool definitions block across repeated requests.
@@ -1932,6 +1954,23 @@ impl AgentLoop {
 
         let mut all_tools: Vec<ToolDef> = tools.to_vec();
         all_tools.extend(self.mcp_tool_defs.iter().cloned());
+        if self.elicitation_provider.is_some() {
+            all_tools.push(ToolDef {
+                name: "ask_user".to_string(),
+                description: "Ask the user a question and wait for their response. Use this when you need clarification or additional information to proceed.".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "question": {
+                            "type": "string",
+                            "description": "The question to ask the user."
+                        }
+                    },
+                    "required": ["question"]
+                }),
+                cache_control: None,
+            });
+        }
         let mut cached_tools: Vec<ToolDef> = all_tools;
         if let Some(last) = cached_tools.last_mut() {
             last.cache_control = Some(serde_json::json!({"type": "ephemeral"}));
@@ -2124,6 +2163,37 @@ impl AgentLoop {
                 } else {
                     input.clone()
                 };
+
+                // Built-in `ask_user` tool — handled directly, bypasses permission gate.
+                if name == "ask_user" {
+                    let question = input
+                        .get("question")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    let answer = match &self.elicitation_provider {
+                        Some(provider) => match provider.elicit(question).await {
+                            Some(a) => a,
+                            None => "The user declined or cancelled the request.".to_string(),
+                        },
+                        None => "ask_user tool is not available in this context.".to_string(),
+                    };
+                    results.push(ToolResult {
+                        tool_use_id: id.clone(),
+                        content: answer,
+                    });
+                    continue;
+                }
+
+                // Permission gate — fires before MCP and built-in tool dispatch.
+                if let Some(checker) = &self.permission_checker {
+                    if !checker.check(id, name, input).await {
+                        results.push(ToolResult {
+                            tool_use_id: id.clone(),
+                            content: format!("Permission denied: user refused to run tool `{name}`"),
+                        });
+                        continue;
+                    }
+                }
 
                 // Check MCP dispatch first, then fall back to built-in tools.
                 //
@@ -2479,6 +2549,8 @@ mod tests {
             tenant_id: "test-tenant".to_string(),
             promise_store: None,
             promise_id: None,
+            permission_checker: None,
+            elicitation_provider: None,
         }
     }
 
@@ -2586,6 +2658,8 @@ mod tests {
             tenant_id: "acme".to_string(),
             promise_store: Some(promise_store),
             promise_id: Some(promise_id.to_string()),
+            permission_checker: None,
+            elicitation_provider: None,
         }
     }
 
@@ -2934,6 +3008,8 @@ mod tests {
             tenant_id: "acme".to_string(),
             promise_store: Some(Arc::clone(&store) as Arc<dyn PromiseRepository>),
             promise_id: Some("p1".to_string()),
+            permission_checker: None,
+            elicitation_provider: None,
         };
 
         let result = agent.run(vec![Message::user_text("go")], &[], None).await;
@@ -4308,6 +4384,8 @@ mod tests {
             tenant_id: "acme".to_string(),
             promise_store: Some(Arc::clone(&store) as Arc<dyn PromiseRepository>),
             promise_id: Some("p1".to_string()),
+            permission_checker: None,
+            elicitation_provider: None,
         };
 
         agent
@@ -4478,6 +4556,8 @@ mod tests {
             tenant_id: "acme".to_string(),
             promise_store: None,
             promise_id: None,
+            permission_checker: None,
+            elicitation_provider: None,
         };
 
         let result = agent
@@ -4885,6 +4965,8 @@ mod tests {
             tenant_id: "acme".to_string(),
             promise_store: Some(Arc::clone(&store) as Arc<dyn PromiseRepository>),
             promise_id: Some("p1".to_string()),
+            permission_checker: None,
+            elicitation_provider: None,
         };
 
         let result = agent
@@ -5036,6 +5118,8 @@ mod tests {
             tenant_id: "acme".to_string(),
             promise_store: Some(Arc::clone(&store) as Arc<dyn PromiseRepository>),
             promise_id: Some("p1".to_string()),
+            permission_checker: None,
+            elicitation_provider: None,
         };
 
         let (result, _) = tokio::join!(
@@ -5322,6 +5406,8 @@ mod tests {
             tenant_id: "acme".to_string(),
             promise_store: None,
             promise_id: None,
+            permission_checker: None,
+            elicitation_provider: None,
         };
 
         let (text, messages) = agent
@@ -5379,6 +5465,8 @@ mod tests {
             tenant_id: "acme".to_string(),
             promise_store: None,
             promise_id: None,
+            permission_checker: None,
+            elicitation_provider: None,
         };
 
         let (text, messages) = agent
@@ -5432,6 +5520,8 @@ mod tests {
             tenant_id: "acme".to_string(),
             promise_store: None,
             promise_id: None,
+            permission_checker: None,
+            elicitation_provider: None,
         };
 
         let result = agent
@@ -5496,6 +5586,8 @@ mod tests {
             tenant_id: "acme".to_string(),
             promise_store: None,
             promise_id: None,
+            permission_checker: None,
+            elicitation_provider: None,
         };
 
         let result = agent
@@ -5533,6 +5625,8 @@ mod tests {
             tenant_id: "acme".to_string(),
             promise_store: None,
             promise_id: None,
+            permission_checker: None,
+            elicitation_provider: None,
         };
 
         let result = agent
@@ -5578,6 +5672,8 @@ mod tests {
             tenant_id: "acme".to_string(),
             promise_store: None,
             promise_id: None,
+            permission_checker: None,
+            elicitation_provider: None,
         };
 
         let result = agent
@@ -6375,6 +6471,8 @@ mod tests {
             tenant_id: "acme".to_string(),
             promise_store: Some(Arc::clone(&store) as Arc<dyn PromiseRepository>),
             promise_id: Some("p1".to_string()),
+            permission_checker: None,
+            elicitation_provider: None,
         }
     }
 
@@ -6758,6 +6856,8 @@ mod tests {
             tenant_id: "acme".to_string(),
             promise_store: None,
             promise_id: None,
+            permission_checker: None,
+            elicitation_provider: None,
         };
 
         let result = agent
@@ -6802,6 +6902,8 @@ mod tests {
             tenant_id: "acme".to_string(),
             promise_store: None,
             promise_id: None,
+            permission_checker: None,
+            elicitation_provider: None,
         };
 
         let (text, _) = agent
@@ -6984,6 +7086,8 @@ mod tests {
             tenant_id: "acme".to_string(),
             promise_store: None,
             promise_id: None,
+            permission_checker: None,
+            elicitation_provider: None,
         };
 
         let result = agent
@@ -7146,6 +7250,8 @@ mod tests {
             tenant_id: "acme".to_string(),
             promise_store: Some(Arc::clone(&store) as Arc<dyn PromiseRepository>),
             promise_id: None, // paired guard requires both — None disables all checkpointing
+            permission_checker: None,
+            elicitation_provider: None,
         };
 
         let result = agent
@@ -7219,6 +7325,8 @@ mod tests {
             tenant_id: "acme".to_string(),
             promise_store: Some(Arc::clone(&store) as Arc<dyn PromiseRepository>),
             promise_id: None,
+            permission_checker: None,
+            elicitation_provider: None,
         };
 
         let result = agent
@@ -7275,6 +7383,8 @@ mod tests {
             tenant_id: "acme".to_string(),
             promise_store: Some(Arc::clone(&store) as Arc<dyn PromiseRepository>),
             promise_id: Some("p1".to_string()),
+            permission_checker: None,
+            elicitation_provider: None,
         };
 
         let result = agent.run(vec![Message::user_text("go")], &[], None).await;
@@ -7322,6 +7432,8 @@ mod tests {
             tenant_id: "acme".to_string(),
             promise_store: None,
             promise_id: None,
+            permission_checker: None,
+            elicitation_provider: None,
         };
 
         let result = agent.run(vec![Message::user_text("go")], &[], None).await;
@@ -7388,6 +7500,8 @@ mod tests {
             tenant_id: "acme".to_string(),
             promise_store: None,
             promise_id: None,
+            permission_checker: None,
+            elicitation_provider: None,
         };
 
         let result = agent
@@ -7491,6 +7605,8 @@ mod tests {
             tenant_id: "acme".to_string(),
             promise_store: None,
             promise_id: None,
+            permission_checker: None,
+            elicitation_provider: None,
         };
 
         let (text, _) = agent
@@ -7575,6 +7691,8 @@ mod tests {
             tenant_id: "acme".to_string(),
             promise_store: None,
             promise_id: None,
+            permission_checker: None,
+            elicitation_provider: None,
         };
 
         let result = agent
@@ -7700,6 +7818,8 @@ mod tests {
             tenant_id: "acme".to_string(),
             promise_store: Some(Arc::clone(&store) as Arc<dyn PromiseRepository>),
             promise_id: Some("p1".to_string()),
+            permission_checker: None,
+            elicitation_provider: None,
         };
 
         let result = agent
@@ -7855,6 +7975,8 @@ mod tests {
             tenant_id: "acme".to_string(),
             promise_store: Some(Arc::clone(&store) as Arc<dyn PromiseRepository>),
             promise_id: Some("p-chat".to_string()),
+            permission_checker: None,
+            elicitation_provider: None,
         };
 
         let (text, _messages) = agent
@@ -9139,6 +9261,8 @@ mod tests {
             tenant_id: "acme".to_string(),
             promise_store: Some(Arc::clone(&store) as Arc<dyn PromiseRepository>),
             promise_id: Some("p1".to_string()),
+            permission_checker: None,
+            elicitation_provider: None,
         }
     }
 
