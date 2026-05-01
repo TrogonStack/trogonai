@@ -11,8 +11,9 @@ use upgrade::{ConnectionRequest, UpgradeState};
 
 #[cfg(not(coverage))]
 use {
-    acp_nats::nats, acp_telemetry::ServiceName, clap::Parser, std::net::SocketAddr, tracing::error,
-    trogon_std::env::SystemEnv, trogon_std::fs::SystemFs,
+    acp_nats::nats, acp_telemetry::ServiceName, clap::Parser, std::net::SocketAddr,
+    std::sync::Arc, tracing::error, trogon_std::env::SystemEnv, trogon_std::fs::SystemFs,
+    upgrade::RegistryExtension,
 };
 
 #[cfg(not(coverage))]
@@ -34,7 +35,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let nats_client = nats::connect(ws_config.acp.nats(), nats_connect_timeout).await?;
 
     let js_context = async_nats::jetstream::new(nats_client.clone());
-    let js_client = trogon_nats::jetstream::NatsJetStreamClient::new(js_context);
+    let js_client = trogon_nats::jetstream::NatsJetStreamClient::new(js_context.clone());
+
+    // ── Agent registry ────────────────────────────────────────────────────────
+    let registry_ext = {
+        let store = trogon_registry::provision(&js_context).await?;
+        Arc::new(RegistryExtension {
+            registry: trogon_registry::Registry::new(store),
+            base_config: ws_config.acp.clone(),
+        })
+    };
 
     let (shutdown_tx, _) = watch::channel(false);
     let (conn_tx, conn_rx) = mpsc::unbounded_channel::<ConnectionRequest>();
@@ -50,7 +60,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let app = trogon_std::telemetry::http::instrument_router(
         axum::Router::new()
-            .route("/ws", axum::routing::get(upgrade::handle))
+            .route(
+                "/ws",
+                axum::routing::get(|| async {
+                    (
+                        axum::http::StatusCode::GONE,
+                        "WebSocket endpoint moved — use /ws/{agent_type} (e.g. /ws/claude)",
+                    )
+                }),
+            )
+            .route("/ws/{agent_type}", axum::routing::get(upgrade::handle_with_agent_type::<trogon_registry::KvStore>))
+            .layer(axum::extract::Extension(registry_ext))
             .with_state(state),
     );
 
@@ -153,7 +173,7 @@ async fn process_connections<N, J>(
         conn_handles.retain(|h| !h.is_finished());
         let client = nats_client.clone();
         let js = js_client.clone();
-        let cfg = config.clone();
+        let cfg = req.config_override.unwrap_or_else(|| config.clone());
         conn_handles.push(tokio::task::spawn_local(connection::handle(
             req.socket,
             client,

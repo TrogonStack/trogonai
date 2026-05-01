@@ -50,6 +50,7 @@ fn test_config() -> TelegramSourceConfig {
         stream_name: NatsToken::new("TELEGRAM").unwrap(),
         stream_max_age: StreamMaxAge::from_secs(3600).unwrap(),
         nats_ack_timeout: NonZeroDuration::from_secs(5).unwrap(),
+        registration: None,
     }
 }
 

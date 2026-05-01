@@ -3221,3 +3221,47 @@ async fn ext_list_children_integration_routes_to_ext_subject() {
         "session/list_children must route to global ext NATS subject"
     );
 }
+
+/// Verifies the runner registration contract: the `acp_prefix` metadata stored
+/// in the registry must match the `ACP_PREFIX` env var.  The bridge
+/// (`acp-nats-ws`, `acp-nats-server`) reads this field to derive the NATS
+/// routing prefix — a mismatch breaks routing silently in production.
+#[tokio::test]
+async fn acp_runner_registers_with_correct_acp_prefix_metadata() {
+    let (_container, port) = start_nats().await;
+    let nats = nats_client(port).await;
+    let js = async_nats::jetstream::new(nats.clone());
+
+    let prefix = "acp.claude";
+    let agent_type = "claude";
+
+    let store = trogon_registry::provision(&js).await.expect("provision registry");
+    let registry = trogon_registry::Registry::new(store);
+
+    let cap = trogon_registry::AgentCapability {
+        agent_type: agent_type.to_string(),
+        capabilities: vec!["chat".to_string()],
+        nats_subject: format!("{}.agent.>", prefix),
+        current_load: 0,
+        metadata: serde_json::json!({ "acp_prefix": prefix }),
+    };
+    registry.register(&cap).await.expect("registration must succeed");
+
+    let entry = registry
+        .get(agent_type)
+        .await
+        .expect("get must not error")
+        .expect("registered entry must exist");
+
+    assert_eq!(
+        entry.metadata["acp_prefix"].as_str(),
+        Some(prefix),
+        "bridge relies on acp_prefix matching ACP_PREFIX — got {:?}",
+        entry.metadata
+    );
+    assert_eq!(
+        entry.nats_subject,
+        format!("{}.agent.>", prefix),
+        "nats_subject must be derived from ACP_PREFIX"
+    );
+}

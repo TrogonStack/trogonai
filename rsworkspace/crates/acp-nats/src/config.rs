@@ -36,6 +36,13 @@ impl Config {
         Self::new(acp_prefix, nats)
     }
 
+    /// Clone this config, replacing only the ACP prefix.
+    pub fn for_prefix(&self, acp_prefix: AcpPrefix) -> Self {
+        let mut c = self.clone();
+        c.acp_prefix = acp_prefix;
+        c
+    }
+
     pub fn with_operation_timeout(mut self, timeout: Duration) -> Self {
         self.operation_timeout = timeout;
         self
@@ -307,6 +314,24 @@ mod tests {
             let config = apply_timeout_overrides(Config::for_test("acp"), &env);
             assert_eq!(config.prompt_timeout(), Duration::from_secs(3600));
         });
+    }
+
+    #[test]
+    fn for_prefix_replaces_prefix_preserves_rest() {
+        let original = Config::new(AcpPrefix::new("acp").unwrap(), default_nats())
+            .with_operation_timeout(Duration::from_secs(42))
+            .with_prompt_timeout(Duration::from_secs(99));
+        let derived = original.for_prefix(AcpPrefix::new("acp.claude").unwrap());
+        assert_eq!(derived.acp_prefix(), "acp.claude");
+        assert_eq!(derived.operation_timeout(), Duration::from_secs(42));
+        assert_eq!(derived.prompt_timeout(), Duration::from_secs(99));
+    }
+
+    #[test]
+    fn for_prefix_does_not_mutate_original() {
+        let original = Config::new(AcpPrefix::new("acp").unwrap(), default_nats());
+        let _derived = original.for_prefix(AcpPrefix::new("acp.xai").unwrap());
+        assert_eq!(original.acp_prefix(), "acp");
     }
 
     /// `char::is_whitespace()` covers Unicode whitespace (e.g. U+00A0 NO-BREAK

@@ -10,9 +10,12 @@ use futures::StreamExt;
 use std::rc::Rc;
 use tracing::{debug, error, info, warn};
 
-/// Subscribes to all ACP client subjects and dispatches to a [`Runtime`].
+/// Subscribes to ACP client subjects and dispatches to a [`Runtime`].
 ///
-/// Subject pattern: `{prefix}.session.*.client.>`
+/// `subject` is the full NATS subscription pattern, e.g.
+/// `acp.*.session.*.client.>` — the wildcard covers all runner sub-prefixes
+/// (`acp.claude`, `acp.xai`, `acp.codex`, …) so a single dispatcher instance
+/// serves every runner without needing reconfiguration when runners are added.
 ///
 /// This loop is intentionally session-aware: each message carries the
 /// `session_id` in its subject, which is forwarded to every runtime handler.
@@ -35,14 +38,13 @@ use tracing::{debug, error, info, warn};
 /// restrict each client to its own session subject.
 pub async fn run<N, R>(
     nats: N,
-    prefix: String,
+    subject: String,
     runtime: Rc<R>,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) where
     N: NatsBroker,
     R: Runtime + 'static,
 {
-    let subject = format!("{prefix}.session.*.client.>");
     info!(%subject, "WASM runtime dispatcher subscribing");
 
     let mut sub = match nats.subscribe(&subject).await {

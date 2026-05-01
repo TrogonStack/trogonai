@@ -33,11 +33,13 @@
 use std::sync::Arc;
 
 use acp_nats::acp_prefix::AcpPrefix;
+use acp_nats::jetstream::provision::provision_streams;
 use acp_nats_agent::AgentSideNatsConnection;
 use async_nats::jetstream;
 use tokio::sync::RwLock;
 use tokio::task::LocalSet;
 use tracing::info;
+use trogon_nats::jetstream::NatsJetStreamClient;
 
 use trogon_agent_core::agent_loop::AgentLoop;
 use trogon_agent_core::tools::ToolContext;
@@ -75,6 +77,42 @@ async fn main() -> anyhow::Result<()> {
     info!(url = %nats_url, "connected to NATS");
 
     let js = jetstream::new(nats.clone());
+
+    // ── JetStream stream provisioning ─────────────────────────────────────────
+
+    let acp_prefix_parsed = AcpPrefix::new(&acp_prefix)?;
+    provision_streams(&NatsJetStreamClient::new(js.clone()), &acp_prefix_parsed)
+        .await
+        .map_err(|e| anyhow::anyhow!("failed to provision JetStream streams: {e}"))?;
+
+    // ── Registry self-registration ────────────────────────────────────────────
+
+    let agent_type = std::env::var("AGENT_TYPE").unwrap_or_else(|_| "claude".to_string());
+    let reg_store = trogon_registry::provision(&js).await
+        .map_err(|e| anyhow::anyhow!("registry provisioning failed: {e}"))?;
+    let registry = trogon_registry::Registry::new(reg_store);
+    let cap = trogon_registry::AgentCapability {
+        agent_type: agent_type.clone(),
+        capabilities: vec!["chat".to_string()],
+        nats_subject: format!("{}.agent.>", acp_prefix),
+        current_load: 0,
+        metadata: serde_json::json!({ "acp_prefix": &acp_prefix }),
+    };
+    registry.register(&cap).await
+        .map_err(|e| anyhow::anyhow!("initial registry registration failed: {e}"))?;
+    info!(agent_type, acp_prefix, "registered in agent registry");
+    tokio::spawn({
+        let cap = cap.clone();
+        async move {
+            let mut interval = tokio::time::interval(trogon_registry::HEARTBEAT_INTERVAL);
+            loop {
+                interval.tick().await;
+                if let Err(e) = registry.refresh(&cap).await {
+                    tracing::warn!(error = %e, "registry heartbeat failed");
+                }
+            }
+        }
+    });
 
     // ── AgentLoop ─────────────────────────────────────────────────────────────
 
@@ -131,9 +169,8 @@ async fn main() -> anyhow::Result<()> {
     )
     .with_compactor(nats.clone());
 
-    let prefix = AcpPrefix::new(&acp_prefix)?;
     let (_conn, io_task) =
-        AgentSideNatsConnection::new(agent, nats, prefix, |fut| {
+        AgentSideNatsConnection::new(agent, nats, acp_prefix_parsed, |fut| {
             tokio::task::spawn_local(fut);
         });
 

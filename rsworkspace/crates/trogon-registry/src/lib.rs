@@ -62,5 +62,15 @@ pub use provision::{BUCKET_NAME, ENTRY_TTL, HEARTBEAT_INTERVAL, provision};
 pub use registry::Registry;
 pub use store::RegistryStore;
 
+/// Convenience alias for the production registry backed by NATS KV.
+pub type KvRegistry = Registry<async_nats::jetstream::kv::Store>;
+
+/// The underlying KV store type used by [`KvRegistry`].
+///
+/// Re-exported so callers can use `trogon_registry::KvStore` as the type
+/// parameter when monomorphising generic handlers for production builds, e.g.:
+/// `handle_with_agent_type::<trogon_registry::KvStore>`.
+pub type KvStore = async_nats::jetstream::kv::Store;
+
 #[cfg(any(test, feature = "test-support"))]
 pub use store::mock::MockRegistryStore;
