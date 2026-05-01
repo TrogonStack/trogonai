@@ -1,6 +1,9 @@
 use std::rc::Rc;
 use tracing::{info, warn};
 use trogon_wasm_runtime::{dispatcher, Config, WasmRuntime};
+use acp_nats::acp_prefix::AcpPrefix;
+use acp_nats::jetstream::provision::provision_streams;
+use trogon_nats::jetstream::NatsJetStreamClient;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -58,9 +61,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let runtime = Rc::new(WasmRuntime::with_nats(&cfg, Some(nats.clone()))?);
     runtime.cleanup_stale_sessions().await;
 
-    // ── Registry self-registration ────────────────────────────────────────────
+    // ── JetStream streams + registry ─────────────────────────────────────────
 
     let js_ctx = async_nats::jetstream::new(nats.clone());
+    let acp_prefix_typed = AcpPrefix::new(&acp_prefix)
+        .map_err(|e| format!("invalid ACP_PREFIX '{acp_prefix}': {e}"))?;
+    let js = NatsJetStreamClient::new(js_ctx.clone());
+    provision_streams(&js, &acp_prefix_typed)
+        .await
+        .map_err(|e| format!("failed to provision JetStream streams: {e}"))?;
+
     let reg_store = trogon_registry::provision(&js_ctx)
         .await
         .map_err(|e| format!("registry provisioning failed: {e}"))?;
