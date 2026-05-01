@@ -21,6 +21,7 @@ sha2               = "0.10"
 axum         = "0.8"
 trogon-automations = { path = "../trogon-automations" }
 uuid               = { version = "1", features = ["v4"] }
+trogon-agent-core = { path = "../trogon-agent-core" }
 trogon-mcp     = { path = "../trogon-mcp" }
 trogon-nats    = { path = "../trogon-nats" }
 trogon-splitio = { path = "../trogon-splitio" }

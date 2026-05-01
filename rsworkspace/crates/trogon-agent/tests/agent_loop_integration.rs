@@ -44,6 +44,8 @@ fn make_agent(proxy_url: &str) -> AgentLoop {
         tenant_id: "test".to_string(),
         promise_store: None,
         promise_id: None,
+        permission_checker: None,
+        elicitation_provider: None,
     }
 }
 
@@ -221,6 +223,8 @@ async fn agent_loop_max_iterations_reached() {
         tenant_id: "test".to_string(),
         promise_store: None,
         promise_id: None,
+        permission_checker: None,
+        elicitation_provider: None,
     };
 
     let result = agent
@@ -486,6 +490,8 @@ async fn run_chat_max_iterations_reached() {
         tenant_id: "test".to_string(),
         promise_store: None,
         promise_id: None,
+        permission_checker: None,
+        elicitation_provider: None,
     };
 
     let result = agent

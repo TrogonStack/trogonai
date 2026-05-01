@@ -165,6 +165,8 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
         // Promise fields are set per-run by `prepare_agent_with_promise`.
         promise_store: None,
         promise_id: None,
+        permission_checker: None,
+        elicitation_provider: None,
     });
 
     let store = Arc::new(
@@ -2053,6 +2055,8 @@ mod tests {
             tenant_id: "test".to_string(),
             promise_store: None,
             promise_id: None,
+            permission_checker: None,
+            elicitation_provider: None,
         })
     }
 
@@ -2172,6 +2176,8 @@ mod tests {
             tenant_id: "acme".to_string(),
             promise_store: None,
             promise_id: None,
+            permission_checker: None,
+            elicitation_provider: None,
         })
     }
 
@@ -3972,6 +3978,8 @@ mod tests {
             tenant_id: "test".to_string(),
             promise_store: None,
             promise_id: None,
+            permission_checker: None,
+            elicitation_provider: None,
         });
 
         let (rs, _container) = make_run_store().await;
@@ -4709,6 +4717,8 @@ mod tests {
             tenant_id: "acme".to_string(),
             promise_store: None,
             promise_id: None,
+            permission_checker: None,
+            elicitation_provider: None,
         });
 
         // Auto-advance handles the 30 s AUTO_RETRY_DELAY inside the spawned task.
@@ -7016,6 +7026,8 @@ mod tests {
             tenant_id: "test".to_string(),
             promise_store: None,
             promise_id: None,
+            permission_checker: None,
+            elicitation_provider: None,
         });
 
         // Stale promise with a message history large enough to exceed

@@ -378,6 +378,8 @@ async fn send_message<R: SessionRepository>(
             tenant_id: state.agent.tenant_id.clone(),
             promise_store: None,
             promise_id: None,
+            permission_checker: None,
+            elicitation_provider: None,
         };
         &temp_agent
     };
@@ -771,6 +773,8 @@ mod tests {
             tenant_id: "test-tenant".to_string(),
             promise_store: None,
             promise_id: None,
+            permission_checker: None,
+            elicitation_provider: None,
         })
     }
 

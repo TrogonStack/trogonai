@@ -151,6 +151,8 @@ mod tests {
             tenant_id: "test".to_string(),
             promise_store: None,
             promise_id: None,
+            permission_checker: None,
+            elicitation_provider: None,
         }
     }
 
@@ -435,6 +437,8 @@ mod tests {
             tenant_id: "test".to_string(),
             promise_store: None,
             promise_id: None,
+            permission_checker: None,
+            elicitation_provider: None,
         };
 
         let payload = serde_json::json!({
@@ -523,6 +527,8 @@ mod tests {
             tenant_id: "test".to_string(),
             promise_store: None,
             promise_id: None,
+            permission_checker: None,
+            elicitation_provider: None,
         };
 
         let payload = serde_json::json!({
@@ -595,6 +601,8 @@ mod tests {
             tenant_id: "test".to_string(),
             promise_store: None,
             promise_id: None,
+            permission_checker: None,
+            elicitation_provider: None,
         };
 
         let payload = serde_json::json!({

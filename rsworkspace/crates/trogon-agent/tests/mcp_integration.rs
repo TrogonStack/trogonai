@@ -66,6 +66,8 @@ fn make_agent_with_mcp(
         tenant_id: "test".to_string(),
         promise_store: None,
         promise_id: None,
+        permission_checker: None,
+        elicitation_provider: None,
     }
 }
 

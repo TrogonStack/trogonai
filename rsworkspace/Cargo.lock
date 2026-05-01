@@ -4803,6 +4803,7 @@ dependencies = [
  "tower",
  "tracing",
  "tracing-subscriber",
+ "trogon-agent-core",
  "trogon-automations",
  "trogon-datadog",
  "trogon-github",
