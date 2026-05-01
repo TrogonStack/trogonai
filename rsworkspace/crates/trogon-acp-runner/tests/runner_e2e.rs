@@ -120,6 +120,35 @@ async fn start_agent(
     store
 }
 
+/// Start a `TrogonAgent` with context compaction enabled (`.with_compactor()`).
+/// Must be called inside a `LocalSet`.
+async fn start_agent_with_compactor(
+    nats: async_nats::Client,
+    js: &jetstream::Context,
+    prefix: &str,
+    agent: AgentLoop,
+) -> NatsSessionStore {
+    let store = NatsSessionStore::open(js).await.unwrap();
+    let notifier = NatsSessionNotifier::new(nats.clone());
+    let ta = TrogonAgent::new(
+        notifier,
+        store.clone(),
+        agent,
+        prefix,
+        "claude-test",
+        None,
+        Arc::new(RwLock::new(None)),
+    )
+    .with_compactor(nats.clone());
+    let acp_prefix = AcpPrefix::new(prefix).unwrap();
+    let (_, io_task) = AgentSideNatsConnection::new(ta, nats, acp_prefix, |fut| {
+        tokio::task::spawn_local(fut);
+    });
+    tokio::task::spawn_local(io_task);
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    store
+}
+
 /// Subscribe to session notifications and send a prompt as NATS request-reply.
 /// Returns (notif_sub, resp_sub) — use with `collect_notifs_and_response`.
 async fn subscribe_and_send(
@@ -1533,4 +1562,99 @@ async fn claude_runner_registers_with_correct_acp_prefix_metadata() {
         format!("{}.agent.>", prefix),
         "nats_subject must be derived from ACP_PREFIX"
     );
+}
+
+// ── Compactor integration ─────────────────────────────────────────────────────
+
+/// When `.with_compactor()` is enabled, the runner sends session history to
+/// `trogon.compactor.compact` before each LLM call and uses the returned
+/// (compacted) messages.  Verified by running a mock compactor service that
+/// always returns a compacted response, then checking the persisted session
+/// contains the `<context-summary>` marker.
+#[tokio::test]
+async fn runner_calls_compactor_and_uses_compacted_history() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(end_turn_body("reply after compaction"));
+    });
+
+    // Spawn a mock compactor that always replies with a compacted conversation.
+    let nats_for_compactor = nats.clone();
+    tokio::spawn(async move {
+        let mut sub = nats_for_compactor
+            .subscribe("trogon.compactor.compact")
+            .await
+            .unwrap();
+        while let Some(msg) = sub.next().await {
+            let Some(reply) = msg.reply else { continue };
+            let compacted = serde_json::json!({
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [{
+                            "type": "text",
+                            "text": "<context-summary>\n## Summary\nCompacted\n</context-summary>"
+                        }]
+                    },
+                    {
+                        "role": "assistant",
+                        "content": [{
+                            "type": "text",
+                            "text": "I've reviewed the conversation summary and will continue from this context."
+                        }]
+                    }
+                ],
+                "compacted": true,
+                "tokens_before": 50000,
+                "tokens_after": 500
+            });
+            nats_for_compactor
+                .publish(reply, serde_json::to_vec(&compacted).unwrap().into())
+                .await
+                .ok();
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let prefix = "test-compact";
+    let session_id = "sess-compact-1";
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent_with_compactor(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+            )
+            .await;
+
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "hello").await;
+
+            let (_notifs, resp) =
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn with compaction enabled; got: {resp}"
+            );
+
+            // The persisted session must contain the compacted history returned by
+            // the mock compactor service.
+            let state = store.load(session_id).await.unwrap();
+            let json = serde_json::to_string(&state.messages).unwrap();
+            assert!(
+                json.contains("context-summary"),
+                "expected <context-summary> in persisted messages after compaction; got: {json}"
+            );
+        })
+        .await;
 }
