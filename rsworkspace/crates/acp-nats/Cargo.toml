@@ -11,6 +11,7 @@ agent-client-protocol = { workspace = true, features = [
     "unstable_auth_methods",
     "unstable_boolean_config",
     "unstable_cancel_request",
+    "unstable_elicitation",
     "unstable_message_id",
     "unstable_session_close",
     "unstable_session_fork",

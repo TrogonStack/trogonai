@@ -33,9 +33,9 @@ pub mod session {
 
     pub mod client {
         pub use super::super::client_ops::{
-            FsReadTextFileSubject, FsWriteTextFileSubject, SessionRequestPermissionSubject, SessionUpdateSubject,
-            TerminalCreateSubject, TerminalKillSubject, TerminalOutputSubject, TerminalReleaseSubject,
-            TerminalWaitForExitSubject,
+            FsReadTextFileSubject, FsWriteTextFileSubject, SessionElicitationSubject,
+            SessionRequestPermissionSubject, SessionUpdateSubject, TerminalCreateSubject, TerminalKillSubject,
+            TerminalOutputSubject, TerminalReleaseSubject, TerminalWaitForExitSubject,
         };
     }
 
@@ -269,6 +269,14 @@ mod tests {
     }
 
     #[test]
+    fn session_client_session_elicitation() {
+        assert_eq!(
+            session::client::SessionElicitationSubject::new(&p("acp"), &sid("s1")).to_string(),
+            "acp.session.s1.client.session.elicitation"
+        );
+    }
+
+    #[test]
     fn session_client_request_permission() {
         assert_eq!(
             session::client::SessionRequestPermissionSubject::new(&p("acp"), &sid("s1")).to_string(),
@@ -444,6 +452,10 @@ mod tests {
             Some(AcpStream::ClientOps)
         );
         assert_eq!(
+            session::client::SessionElicitationSubject::STREAM,
+            Some(AcpStream::ClientOps)
+        );
+        assert_eq!(
             session::client::SessionRequestPermissionSubject::STREAM,
             Some(AcpStream::ClientOps)
         );
@@ -565,6 +577,11 @@ mod tests {
         );
         assert!(
             session::client::FsWriteTextFileSubject::new(&prefix, &session_id)
+                .to_string()
+                .starts_with(&expected)
+        );
+        assert!(
+            session::client::SessionElicitationSubject::new(&prefix, &session_id)
                 .to_string()
                 .starts_with(&expected)
         );

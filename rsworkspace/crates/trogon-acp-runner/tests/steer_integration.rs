@@ -59,6 +59,7 @@ async fn nats_steer_publish_reaches_runner() {
         "acp",
         "claude-test",
         None,
+        None,
         Arc::new(RwLock::new(None::<GatewayConfig>)),
     );
 
@@ -122,6 +123,7 @@ async fn nats_multiple_steer_messages_all_arrive() {
         runner.clone(),
         "acp",
         "claude-test",
+        None,
         None,
         Arc::new(RwLock::new(None::<GatewayConfig>)),
     );
@@ -197,6 +199,7 @@ async fn nats_steer_is_session_scoped() {
         runner.clone(),
         "acp",
         "claude-test",
+        None,
         None,
         Arc::new(RwLock::new(None::<GatewayConfig>)),
     );
@@ -275,6 +278,7 @@ async fn nats_steer_invalid_utf8_is_delivered_lossily() {
         runner.clone(),
         "acp",
         "claude-test",
+        None,
         None,
         Arc::new(RwLock::new(None::<GatewayConfig>)),
     );

@@ -1426,6 +1426,427 @@ async fn send_message_persists_usage_on_assistant_message() {
 }
 
 #[tokio::test]
+async fn send_message_response_includes_token_counts() {
+    let env = start().await;
+
+    env.mock_server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(end_turn_with_usage("hi", 10, 5));
+    });
+
+    let created: Value = env
+        .client
+        .post(format!("{}/sessions", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = created["id"].as_str().unwrap();
+
+    let res: Value = env
+        .client
+        .post(format!("{}/sessions/{id}/messages", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({"content": "hello"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(res["input_tokens"], 10, "input_tokens must match Anthropic usage");
+    assert_eq!(res["output_tokens"], 5, "output_tokens must match Anthropic usage");
+}
+
+#[tokio::test]
+async fn send_message_accumulates_token_totals_across_turns() {
+    let env = start().await;
+
+    // httpmock uses FIFO matching — the first registered mock that matches wins.
+    // Turn 2's Anthropic body contains both "msg-turn-one" (from history) and
+    // "msg-turn-two" (the new message), so we register the turn-2 mock first with
+    // a body_contains discriminator. Turn 1's body only contains "msg-turn-one",
+    // so the turn-2 mock doesn't match and the fallback (turn-1 mock) is used.
+    env.mock_server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages")
+            .body_contains("msg-turn-two");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(end_turn_with_usage("turn two", 20, 8));
+    });
+    env.mock_server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(end_turn_with_usage("turn one", 10, 5));
+    });
+
+    let created: Value = env
+        .client
+        .post(format!("{}/sessions", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = created["id"].as_str().unwrap();
+
+    env.client
+        .post(format!("{}/sessions/{id}/messages", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({"content": "msg-turn-one"}))
+        .send()
+        .await
+        .unwrap();
+
+    env.client
+        .post(format!("{}/sessions/{id}/messages", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({"content": "msg-turn-two"}))
+        .send()
+        .await
+        .unwrap();
+
+    let got: Value = env
+        .client
+        .get(format!("{}/sessions/{id}", env.base_url))
+        .header("x-tenant-id", "acme")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        got["total_input_tokens"], 30,
+        "total_input_tokens must be 10 + 20 = 30"
+    );
+    assert_eq!(
+        got["total_output_tokens"], 13,
+        "total_output_tokens must be 5 + 8 = 13"
+    );
+}
+
+#[tokio::test]
+async fn create_session_returns_zero_token_totals() {
+    let env = start().await;
+
+    let res: Value = env
+        .client
+        .post(format!("{}/sessions", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(res["total_input_tokens"], 0);
+    assert_eq!(res["total_output_tokens"], 0);
+}
+
+#[tokio::test]
+async fn update_session_does_not_reset_token_totals() {
+    let env = start().await;
+
+    env.mock_server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(end_turn_with_usage("ok", 15, 6));
+    });
+
+    let created: Value = env
+        .client
+        .post(format!("{}/sessions", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = created["id"].as_str().unwrap();
+
+    env.client
+        .post(format!("{}/sessions/{id}/messages", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({"content": "hello"}))
+        .send()
+        .await
+        .unwrap();
+
+    env.client
+        .patch(format!("{}/sessions/{id}", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({"name": "renamed"}))
+        .send()
+        .await
+        .unwrap();
+
+    let got: Value = env
+        .client
+        .get(format!("{}/sessions/{id}", env.base_url))
+        .header("x-tenant-id", "acme")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(got["total_input_tokens"], 15, "PATCH must not zero out token totals");
+    assert_eq!(got["total_output_tokens"], 6, "PATCH must not zero out token totals");
+}
+
+#[tokio::test]
+async fn list_sessions_includes_token_totals() {
+    let env = start().await;
+
+    env.mock_server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(end_turn_with_usage("ok", 25, 9));
+    });
+
+    let created: Value = env
+        .client
+        .post(format!("{}/sessions", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = created["id"].as_str().unwrap();
+
+    env.client
+        .post(format!("{}/sessions/{id}/messages", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({"content": "hello"}))
+        .send()
+        .await
+        .unwrap();
+
+    let list: Value = env
+        .client
+        .get(format!("{}/sessions", env.base_url))
+        .header("x-tenant-id", "acme")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let session = list
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["id"] == id)
+        .expect("session must appear in list");
+
+    assert_eq!(session["total_input_tokens"], 25, "list must surface accumulated input tokens");
+    assert_eq!(session["total_output_tokens"], 9, "list must surface accumulated output tokens");
+}
+
+#[tokio::test]
+async fn send_message_without_llm_usage_returns_zero_tokens() {
+    let env = start().await;
+
+    env.mock_server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(end_turn("no usage here"));
+    });
+
+    let created: Value = env
+        .client
+        .post(format!("{}/sessions", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = created["id"].as_str().unwrap();
+
+    let res: Value = env
+        .client
+        .post(format!("{}/sessions/{id}/messages", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({"content": "hello"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(res["input_tokens"], 0, "missing usage must produce 0 input_tokens");
+    assert_eq!(res["output_tokens"], 0, "missing usage must produce 0 output_tokens");
+
+    let got: Value = env
+        .client
+        .get(format!("{}/sessions/{id}", env.base_url))
+        .header("x-tenant-id", "acme")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(got["total_input_tokens"], 0, "no-usage turn must not increment total_input_tokens");
+    assert_eq!(got["total_output_tokens"], 0, "no-usage turn must not increment total_output_tokens");
+}
+
+#[tokio::test]
+async fn update_session_response_includes_token_totals() {
+    let env = start().await;
+
+    env.mock_server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(end_turn_with_usage("ok", 11, 4));
+    });
+
+    let created: Value = env
+        .client
+        .post(format!("{}/sessions", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = created["id"].as_str().unwrap();
+
+    env.client
+        .post(format!("{}/sessions/{id}/messages", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({"content": "hello"}))
+        .send()
+        .await
+        .unwrap();
+
+    let patch_res: Value = env
+        .client
+        .patch(format!("{}/sessions/{id}", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({"name": "renamed"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(patch_res["total_input_tokens"], 11, "PATCH response must include accumulated token totals");
+    assert_eq!(patch_res["total_output_tokens"], 4, "PATCH response must include accumulated token totals");
+}
+
+#[tokio::test]
+async fn send_message_persists_cache_tokens_on_assistant_message() {
+    let env = start().await;
+
+    env.mock_server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(json!({
+                "stop_reason": "end_turn",
+                "content": [{ "type": "text", "text": "cached answer" }],
+                "usage": {
+                    "input_tokens": 20,
+                    "output_tokens": 8,
+                    "cache_creation_input_tokens": 500,
+                    "cache_read_input_tokens": 0
+                }
+            }));
+    });
+
+    let created: Value = env
+        .client
+        .post(format!("{}/sessions", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = created["id"].as_str().unwrap();
+
+    env.client
+        .post(format!("{}/sessions/{id}/messages", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({"content": "question"}))
+        .send()
+        .await
+        .unwrap();
+
+    let got: Value = env
+        .client
+        .get(format!("{}/sessions/{id}", env.base_url))
+        .header("x-tenant-id", "acme")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let assistant = got["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["role"] == "assistant")
+        .expect("assistant message must be present");
+
+    assert_eq!(assistant["usage"]["input_tokens"], 20);
+    assert_eq!(assistant["usage"]["output_tokens"], 8);
+    assert_eq!(assistant["usage"]["cache_creation_input_tokens"], 500, "cache_creation_input_tokens must be persisted on message");
+
+    assert_eq!(
+        got["total_input_tokens"], 20,
+        "cache_creation_input_tokens must NOT be counted in total_input_tokens (only input_tokens counts)"
+    );
+    assert_eq!(got["total_output_tokens"], 8);
+}
+
+#[tokio::test]
 async fn send_message_injects_skill_content_into_system_prompt() {
     let env = start_with_options(
         Some("agent_skills_test".to_string()),

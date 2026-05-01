@@ -26,6 +26,7 @@ use trogon_agent_core::agent_loop::{AgentEvent, ContentBlock as AgentContentBloc
 use trogon_agent_core::tools::ToolDef;
 
 use crate::agent_runner::AgentRunner;
+use crate::elicitation::{ChannelElicitationProvider, ElicitationTx};
 use crate::permission::{ChannelPermissionChecker, PermissionTx};
 use crate::prompt_converter::PromptEventConverter;
 use crate::session_notifier::{PromptEventClient, SessionNotifier};
@@ -237,6 +238,7 @@ pub struct TrogonAgent<
     prefix: String,
     default_model: String,
     permission_tx: Option<PermissionTx>,
+    elicitation_tx: Option<ElicitationTx>,
     gateway_config: Arc<RwLock<Option<GatewayConfig>>>,
     /// Per-session semaphore (1 permit) to serialize concurrent prompt calls.
     session_locks: Arc<std::sync::Mutex<HashMap<String, Arc<tokio::sync::Semaphore>>>>,
@@ -252,6 +254,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> TrogonAgent<
         prefix: impl Into<String>,
         default_model: impl Into<String>,
         permission_tx: Option<PermissionTx>,
+        elicitation_tx: Option<ElicitationTx>,
         gateway_config: Arc<RwLock<Option<GatewayConfig>>>,
     ) -> Self {
         Self {
@@ -261,6 +264,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> TrogonAgent<
             prefix: prefix.into(),
             default_model: default_model.into(),
             permission_tx,
+            elicitation_tx,
             gateway_config,
             session_locks: Arc::new(std::sync::Mutex::new(HashMap::new())),
             compactor_nats: None,
@@ -398,10 +402,13 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> TrogonAgent<
         let needs_perm = self.permission_tx.is_some() && state.mode != "bypassPermissions";
         let gateway = self.gateway_config.read().await.clone();
 
+        let needs_elic = self.elicitation_tx.is_some();
+
         let agent: Arc<A> = {
             let needs_clone = state.model.is_some()
                 || !state.mcp_servers.is_empty()
                 || needs_perm
+                || needs_elic
                 || gateway.is_some();
             if needs_clone {
                 let mut a = (*self.agent).clone();
@@ -420,6 +427,12 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> TrogonAgent<
                             allowed_tools: state.allowed_tools.clone(),
                         }));
                     }
+                }
+                if let Some(ref elic_tx) = self.elicitation_tx {
+                    a.set_elicitation_provider(Arc::new(ChannelElicitationProvider {
+                        session_id: session_id.clone(),
+                        tx: elic_tx.clone(),
+                    }));
                 }
                 if let Some(ref gw) = gateway {
                     a.apply_gateway(gw);

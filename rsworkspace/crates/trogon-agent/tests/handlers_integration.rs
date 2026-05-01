@@ -44,6 +44,8 @@ fn make_agent(proxy_url: &str) -> AgentLoop {
         tenant_id: "test".to_string(),
         promise_store: None,
         promise_id: None,
+        permission_checker: None,
+        elicitation_provider: None,
     }
 }
 

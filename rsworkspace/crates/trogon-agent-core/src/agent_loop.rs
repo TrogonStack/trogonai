@@ -28,6 +28,17 @@ pub trait PermissionChecker: Send + Sync {
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send + 'a>>;
 }
 
+// ── ElicitationProvider ───────────────────────────────────────────────────────
+
+/// Called by the agent loop when the model uses the built-in `ask_user` tool.
+/// Returns the user's answer, or `None` if the user declined or cancelled.
+pub trait ElicitationProvider: Send + Sync {
+    fn elicit<'a>(
+        &'a self,
+        question: &'a str,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<String>> + Send + 'a>>;
+}
+
 // ── Wire types ────────────────────────────────────────────────────────────────
 
 /// A single message in the Anthropic conversation history.
@@ -275,6 +286,8 @@ pub struct AgentLoop {
     pub mcp_dispatch: Vec<(String, String, Arc<trogon_mcp::McpClient>)>,
     /// Optional gate called before each tool execution — `None` means all tools are auto-allowed.
     pub permission_checker: Option<Arc<dyn PermissionChecker>>,
+    /// Optional provider for the built-in `ask_user` tool; `None` means the tool is not offered.
+    pub elicitation_provider: Option<Arc<dyn ElicitationProvider>>,
 }
 
 impl AgentLoop {
@@ -534,6 +547,23 @@ impl AgentLoop {
 
         let mut all_tools: Vec<ToolDef> = tools.to_vec();
         all_tools.extend(self.mcp_tool_defs.iter().cloned());
+        if self.elicitation_provider.is_some() {
+            all_tools.push(ToolDef {
+                name: "ask_user".to_string(),
+                description: "Ask the user a question and wait for their response. Use this when you need clarification or additional information to proceed.".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "question": {
+                            "type": "string",
+                            "description": "The question to ask the user."
+                        }
+                    },
+                    "required": ["question"]
+                }),
+                cache_control: None,
+            });
+        }
         let mut cached_tools: Vec<ToolDef> = all_tools;
         if let Some(last) = cached_tools.last_mut() {
             last.cache_control = Some(serde_json::json!({"type": "ephemeral"}));
@@ -730,25 +760,38 @@ impl AgentLoop {
                     })
                     .await;
 
-                // Ask permission before executing (if a checker is installed)
-                let allowed = match &self.permission_checker {
-                    Some(checker) => checker.check(id, name, input).await,
-                    None => true,
-                };
-
-                let output = if !allowed {
-                    format!("Permission denied: user refused to run tool `{name}`")
-                } else if let Some((_, original, client)) = self
-                    .mcp_dispatch
-                    .iter()
-                    .find(|(prefixed, _, _)| prefixed == name)
-                {
-                    match client.call_tool(original, input).await {
-                        Ok(out) => out,
-                        Err(e) => format!("Tool error: {e}"),
+                let output = if name == "ask_user" {
+                    let question = input
+                        .get("question")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    match &self.elicitation_provider {
+                        Some(provider) => match provider.elicit(question).await {
+                            Some(answer) => answer,
+                            None => "The user declined or cancelled the request.".to_string(),
+                        },
+                        None => "ask_user tool is not available in this context.".to_string(),
                     }
                 } else {
-                    dispatch_tool(&self.tool_context, name, input).await
+                    // Ask permission before executing (if a checker is installed)
+                    let allowed = match &self.permission_checker {
+                        Some(checker) => checker.check(id, name, input).await,
+                        None => true,
+                    };
+                    if !allowed {
+                        format!("Permission denied: user refused to run tool `{name}`")
+                    } else if let Some((_, original, client)) = self
+                        .mcp_dispatch
+                        .iter()
+                        .find(|(prefixed, _, _)| prefixed == name)
+                    {
+                        match client.call_tool(original, input).await {
+                            Ok(out) => out,
+                            Err(e) => format!("Tool error: {e}"),
+                        }
+                    } else {
+                        dispatch_tool(&self.tool_context, name, input).await
+                    }
                 };
 
                 let _ = event_tx
@@ -781,26 +824,39 @@ impl AgentLoop {
             {
                 debug!(tool = %name, "Executing tool");
 
-                // Ask permission before executing (if a checker is installed).
-                let allowed = match &self.permission_checker {
-                    Some(checker) => checker.check(id, name, input).await,
-                    None => true,
-                };
-
-                // Check MCP dispatch first, then fall back to built-in tools.
-                let output = if !allowed {
-                    format!("Permission denied: user refused to run tool `{name}`")
-                } else if let Some((_, original, client)) = self
-                    .mcp_dispatch
-                    .iter()
-                    .find(|(prefixed, _, _)| prefixed == name)
-                {
-                    match client.call_tool(original, input).await {
-                        Ok(out) => out,
-                        Err(e) => format!("Tool error: {e}"),
+                let output = if name == "ask_user" {
+                    let question = input
+                        .get("question")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    match &self.elicitation_provider {
+                        Some(provider) => match provider.elicit(question).await {
+                            Some(answer) => answer,
+                            None => "The user declined or cancelled the request.".to_string(),
+                        },
+                        None => "ask_user tool is not available in this context.".to_string(),
                     }
                 } else {
-                    dispatch_tool(&self.tool_context, name, input).await
+                    // Ask permission before executing (if a checker is installed).
+                    let allowed = match &self.permission_checker {
+                        Some(checker) => checker.check(id, name, input).await,
+                        None => true,
+                    };
+                    // Check MCP dispatch first, then fall back to built-in tools.
+                    if !allowed {
+                        format!("Permission denied: user refused to run tool `{name}`")
+                    } else if let Some((_, original, client)) = self
+                        .mcp_dispatch
+                        .iter()
+                        .find(|(prefixed, _, _)| prefixed == name)
+                    {
+                        match client.call_tool(original, input).await {
+                            Ok(out) => out,
+                            Err(e) => format!("Tool error: {e}"),
+                        }
+                    } else {
+                        dispatch_tool(&self.tool_context, name, input).await
+                    }
                 };
 
                 results.push(ToolResult {
@@ -1000,6 +1056,7 @@ mod tests {
             mcp_tool_defs: vec![],
             mcp_dispatch: vec![],
             permission_checker: None,
+            elicitation_provider: None,
         }
     }
 
@@ -1181,6 +1238,7 @@ mod tests {
             mcp_tool_defs: vec![],
             mcp_dispatch: vec![],
             permission_checker: None,
+            elicitation_provider: None,
         };
         let result = agent
             .run_chat_streaming(vec![Message::user_text("hello")], &[], None, tx, None)
