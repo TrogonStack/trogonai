@@ -5502,6 +5502,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "trogon-nats",
+ "trogon-registry",
  "trogon-std",
  "uuid",
  "wasmtime",
