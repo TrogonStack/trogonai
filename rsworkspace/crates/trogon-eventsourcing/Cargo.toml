@@ -2,6 +2,9 @@
 name = "trogon-eventsourcing"
 version = "0.1.0"
 edition = "2024"
+description = "Event-sourcing primitives and JetStream-backed storage for Trogon services"
+license = "MIT"
+repository = "https://github.com/TrogonStack/trogonai"
 
 [lints.rust]
 warnings = "deny"
@@ -21,8 +24,8 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["rt"] }
 tracing = { workspace = true }
-trogon-nats = { path = "../trogon-nats" }
-trogon-std = { path = "../trogon-std", features = ["uuid"] }
+trogon-nats = { version = "0.1.0", path = "../trogon-nats" }
+trogon-std = { version = "0.1.0", path = "../trogon-std", features = ["uuid"] }
 uuid = { workspace = true }
 
 [dev-dependencies]
