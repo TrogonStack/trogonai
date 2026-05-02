@@ -1696,7 +1696,7 @@ async fn jetstream_store_allows_only_one_concurrent_exact_revision_batch_append(
 
 #[tokio::test]
 #[ignore = "requires actual NATS JetStream"]
-async fn jetstream_store_allows_only_one_concurrent_stream_exists_append() -> TestResult {
+async fn jetstream_store_allows_concurrent_stream_exists_appends() -> TestResult {
     let fixture = JetStreamFixture::new().await?;
     append_one(&fixture.store, "alpha", StreamState::NoStream, "seed").await?;
     let attempts = 24;
@@ -1715,23 +1715,21 @@ async fn jetstream_store_allows_only_one_concurrent_stream_exists_append() -> Te
     .await;
 
     let success_count = results.iter().filter(|result| result.is_ok()).count();
-    let conflict_count = results
-        .iter()
-        .filter(|result| matches!(result, Err(JetStreamStoreError::OptimisticConcurrencyConflict { .. })))
-        .count();
-    assert_eq!(success_count, 1);
-    assert_eq!(conflict_count, attempts - 1);
+    assert_eq!(success_count, attempts);
 
     let read = fixture.store.read_stream("alpha", 1).await?;
-    assert_eq!(read.current_version, Some(2));
-    assert_eq!(read.events.len(), 2);
+    assert_eq!(read.events.len(), 1 + attempts);
+    assert_eq!(
+        read.current_version,
+        read.events.last().and_then(|event| event.log_position)
+    );
 
     fixture.delete().await
 }
 
 #[tokio::test]
 #[ignore = "requires actual NATS JetStream"]
-async fn jetstream_store_allows_only_one_concurrent_stream_exists_batch_append() -> TestResult {
+async fn jetstream_store_allows_concurrent_stream_exists_batch_appends() -> TestResult {
     let fixture = JetStreamFixture::new().await?;
     append_one(&fixture.store, "alpha", StreamState::NoStream, "seed").await?;
     let attempts = 12;
@@ -1751,16 +1749,14 @@ async fn jetstream_store_allows_only_one_concurrent_stream_exists_batch_append()
     .await;
 
     let success_count = results.iter().filter(|result| result.is_ok()).count();
-    let conflict_count = results
-        .iter()
-        .filter(|result| matches!(result, Err(JetStreamStoreError::OptimisticConcurrencyConflict { .. })))
-        .count();
-    assert_eq!(success_count, 1);
-    assert_eq!(conflict_count, attempts - 1);
+    assert_eq!(success_count, attempts);
 
     let read = fixture.store.read_stream("alpha", 1).await?;
-    assert_eq!(read.current_version, Some(1 + events_per_attempt));
-    assert_eq!(read.events.len(), 1 + events_per_attempt as usize);
+    assert_eq!(read.events.len(), 1 + attempts * events_per_attempt);
+    assert_eq!(
+        read.current_version,
+        read.events.last().and_then(|event| event.log_position)
+    );
 
     fixture.delete().await
 }
