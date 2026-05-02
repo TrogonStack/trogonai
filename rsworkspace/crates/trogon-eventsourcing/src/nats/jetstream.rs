@@ -248,13 +248,15 @@ where
 {
     match expected_state {
         StreamState::Any => Ok(None),
-        StreamState::StreamExists => current_version
-            .ok_or_else(|| JetStreamStoreError::OptimisticConcurrencyConflict {
-                stream_id: stream_id.to_string(),
-                expected: StreamState::StreamExists,
-                current_version,
-            })
-            .map(Some),
+        StreamState::StreamExists => {
+            current_version
+                .map(|_| None)
+                .ok_or_else(|| JetStreamStoreError::OptimisticConcurrencyConflict {
+                    stream_id: stream_id.to_string(),
+                    expected: StreamState::StreamExists,
+                    current_version,
+                })
+        }
         StreamState::NoStream => Ok(Some(0)),
         StreamState::StreamRevision(version) => Ok(Some(version)),
     }

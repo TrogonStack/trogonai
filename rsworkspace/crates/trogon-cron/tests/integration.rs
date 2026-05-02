@@ -6,10 +6,11 @@ use async_nats::Request;
 use async_nats::jetstream;
 use chrono::{Duration as ChronoDuration, Utc};
 use trogon_cron::{
-    AddJobCommand, CronController, GetJobCommand, JobEventSchedule, JobEventStatus, JobId, PauseJobCommand,
-    RemoveJobCommand, commands::domain as command_domain, connect_store, get_job,
+    AddJobCommand, CronController, GetJobCommand, JobEventCodec, JobEventSchedule, JobEventStatus, JobId,
+    PauseJobCommand, RemoveJobCommand, ResumeJobCommand, commands::domain as command_domain, connect_store, get_job,
+    state_v1, v1,
 };
-use trogon_eventsourcing::{CommandExecution, spawn_on_tokio};
+use trogon_eventsourcing::{CommandExecution, StreamRead, spawn_on_tokio};
 use trogon_nats::{NatsConfig, connect as nats_connect};
 
 fn test_url() -> String {
@@ -37,9 +38,7 @@ async fn connect_js() -> (async_nats::Client, jetstream::Context) {
 }
 
 async fn reset_state(js: &jetstream::Context) {
-    if let Ok(stream) = js.get_stream(trogon_cron::kv::EVENTS_STREAM).await {
-        let _ = stream.purge().await;
-    }
+    let _ = js.delete_stream(trogon_cron::kv::EVENTS_STREAM).await;
     if let Ok(stream) = js.get_stream(trogon_cron::kv::SCHEDULES_STREAM).await {
         let _ = stream.purge().await;
     }
@@ -356,4 +355,66 @@ async fn event_store_rebuilds_current_state_for_new_client() {
 
     assert_eq!(rebuilt.status, JobEventStatus::Disabled);
     assert_eq!(rebuilt.schedule, expected_schedule);
+}
+
+#[tokio::test]
+#[ignore = "requires NATS test broker"]
+async fn commands_execute_full_lifecycle_against_event_store() {
+    let (nats, js) = connect_js().await;
+    reset_state(&js).await;
+    let store = connect_store(nats.clone()).await.unwrap();
+
+    let job = base_job("lifecycle");
+    let command_id = command_job_id("lifecycle");
+
+    let added = CommandExecution::new(&store.event_store, &AddJobCommand::new(job))
+        .with_snapshot(&store.event_store)
+        .with_task_runtime(spawn_on_tokio)
+        .execute()
+        .await
+        .unwrap();
+    let added_version = added.next_expected_version;
+    assert_eq!(added.state.state(), state_v1::StateValue::PresentEnabled);
+
+    let paused = CommandExecution::new(&store.event_store, &PauseJobCommand::new(command_id.clone()))
+        .with_snapshot(&store.event_store)
+        .with_task_runtime(spawn_on_tokio)
+        .execute()
+        .await
+        .unwrap();
+    assert_eq!(paused.next_expected_version, added_version + 1);
+    assert_eq!(paused.state.state(), state_v1::StateValue::PresentDisabled);
+
+    let resumed = CommandExecution::new(&store.event_store, &ResumeJobCommand::new(command_id.clone()))
+        .with_snapshot(&store.event_store)
+        .with_task_runtime(spawn_on_tokio)
+        .execute()
+        .await
+        .unwrap();
+    assert_eq!(resumed.next_expected_version, paused.next_expected_version + 1);
+    assert_eq!(resumed.state.state(), state_v1::StateValue::PresentEnabled);
+
+    let removed = CommandExecution::new(&store.event_store, &RemoveJobCommand::new(command_id))
+        .with_snapshot(&store.event_store)
+        .with_task_runtime(spawn_on_tokio)
+        .execute()
+        .await
+        .unwrap();
+    assert_eq!(removed.next_expected_version, resumed.next_expected_version + 1);
+    assert_eq!(removed.state.state(), state_v1::StateValue::Deleted);
+
+    let fresh = connect_store(nats).await.unwrap();
+    let stream = fresh.event_store.read_stream("lifecycle", 1).await.unwrap();
+    assert_eq!(stream.current_version, Some(removed.next_expected_version));
+    assert_eq!(stream.events.len(), 4);
+
+    let events = stream
+        .events
+        .iter()
+        .map(|event| event.decode_data_with::<v1::JobEvent, _>(&JobEventCodec).unwrap())
+        .collect::<Vec<_>>();
+    assert!(matches!(events[0].event(), v1::job_event::EventOneof::JobAdded(_)));
+    assert!(matches!(events[1].event(), v1::job_event::EventOneof::JobPaused(_)));
+    assert!(matches!(events[2].event(), v1::job_event::EventOneof::JobResumed(_)));
+    assert!(matches!(events[3].event(), v1::job_event::EventOneof::JobRemoved(_)));
 }
