@@ -12,7 +12,7 @@ axum = { workspace = true }
 form_urlencoded = "1"
 serde = { workspace = true }
 serde_json = { workspace = true }
-sha2 = "0.10"
+sha2 = "0.11"
 subtle = "2.6"
 tracing = { workspace = true }
 trogon-nats = { workspace = true }
