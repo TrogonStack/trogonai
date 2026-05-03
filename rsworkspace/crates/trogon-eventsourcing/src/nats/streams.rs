@@ -78,20 +78,6 @@ pub async fn append_stream<J>(
 where
     J: JetStreamPublishMessage<PublishError = context::PublishError, AckFuture = context::PublishAckFuture>,
 {
-    append_stream_with_uuid_generator(js, subject, expected_last_subject_sequence, events, &UuidV7Generator).await
-}
-
-async fn append_stream_with_uuid_generator<J, N>(
-    js: &J,
-    subject: String,
-    expected_last_subject_sequence: Option<u64>,
-    events: &NonEmpty<EventData>,
-    now_v7: &N,
-) -> Result<u64, StreamStoreError>
-where
-    J: JetStreamPublishMessage<PublishError = context::PublishError, AckFuture = context::PublishAckFuture>,
-    N: NowV7,
-{
     let first_stream_id = events.first().stream_id().to_string();
     if events.iter().any(|event| event.stream_id() != first_stream_id) {
         return Err(StreamStoreError::publish_source(
@@ -106,7 +92,7 @@ where
         ));
     }
 
-    let batch_id = now_v7.now_v7().to_string();
+    let batch_id = UuidV7Generator.now_v7().to_string();
     let mut batch_ack = None;
 
     for (index, event) in events.iter().enumerate() {

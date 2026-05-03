@@ -5,13 +5,14 @@ mod decision;
 mod event;
 mod event_id;
 mod execution;
+mod json_event_codec;
 pub mod nats;
 pub mod snapshot;
 mod stream;
 pub mod testing;
 
-pub use codec::{CanonicalEventCodec, EventCodec, EventEnvelopeCodec, EventIdentity, EventType, JsonEventCodec};
-pub use decision::{Act, Decide, Decision, NonEmpty, decide};
+pub use codec::{CanonicalEventCodec, EventCodec, EventEnvelopeCodec, EventIdentity, EventType};
+pub use decision::{Act, Decide, Decision, NonEmpty};
 pub use event::{CodecError, EventData, RecordedEvent};
 pub use event_id::EventId;
 pub use execution::{
@@ -19,6 +20,7 @@ pub use execution::{
     FrequencySnapshot, NoSnapshot, SnapshotDecision, SnapshotDecisionContext, SnapshotPolicy, Snapshots,
     WithoutSnapshotTaskScheduler, WithoutSnapshots, run_task_immediately, spawn_on_tokio,
 };
+pub use json_event_codec::JsonEventCodec;
 pub use nats::snapshot_store::{
     SnapshotStoreError, checkpoint_key, list_snapshots, maybe_advance_checkpoint, persist_snapshot_change,
     read_checkpoint, read_snapshot, read_snapshot_map, snapshot_key, write_checkpoint, write_snapshot,
