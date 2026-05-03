@@ -97,13 +97,6 @@ pub trait Decide: Sized {
     fn decide(state: &Self::State, command: &Self) -> Result<Decision<Self::Event>, Self::DecideError>;
 }
 
-pub fn decide<C>(state: &C::State, command: &C) -> Result<Decision<C::Event>, C::DecideError>
-where
-    C: Decide,
-{
-    C::decide(state, command)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -159,11 +152,5 @@ mod tests {
         assert_eq!(events.len(), 3);
         assert_eq!(events.iter().copied().collect::<Vec<_>>(), vec![1, 2, 3]);
         assert_eq!(events.map(|value| value.to_string()).into_vec(), vec!["1", "2", "3"]);
-    }
-
-    #[test]
-    fn decide_dispatches_to_trait_implementation() {
-        let decision = decide(&1, &TestCommand).unwrap();
-        assert_eq!(decision, Decision::event("created"));
     }
 }
