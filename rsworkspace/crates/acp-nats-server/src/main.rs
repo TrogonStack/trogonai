@@ -1332,6 +1332,7 @@ mod tests {
                 anthropic_token: String::new(),
                 anthropic_base_url: None,
                 anthropic_extra_headers: vec![],
+                streaming_client: None,
                 model: "claude-opus-4-6".to_string(),
                 max_iterations: 10,
                 thinking_budget: None,

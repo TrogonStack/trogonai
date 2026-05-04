@@ -53,6 +53,7 @@ fn make_agent_loop() -> AgentLoop {
         anthropic_token: "test-token".to_string(),
         anthropic_base_url: Some("http://127.0.0.1:1".to_string()),
         anthropic_extra_headers: vec![],
+        streaming_client: None,
         model: "claude-test".to_string(),
         max_iterations: 1,
         thinking_budget: None,

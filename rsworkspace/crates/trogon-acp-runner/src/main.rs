@@ -132,6 +132,7 @@ async fn main() -> anyhow::Result<()> {
         anthropic_token,
         anthropic_base_url: None,
         anthropic_extra_headers: vec![],
+        streaming_client: None,
         model: model.clone(),
         max_iterations,
         tool_context,

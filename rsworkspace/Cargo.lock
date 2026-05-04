@@ -4974,6 +4974,7 @@ dependencies = [
 name = "trogon-agent-core"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "futures-util",
  "httpmock",
  "reqwest",

@@ -7,9 +7,11 @@
 //!    results, and send another request.
 //! 4. Repeat until `end_turn` or `max_iterations` is reached.
 
+use std::pin::Pin;
 use std::sync::Arc;
 
-use futures_util::StreamExt;
+use bytes::Bytes;
+use futures_util::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tracing::{debug, info, warn};
@@ -306,6 +308,70 @@ pub enum AgentEvent {
     },
 }
 
+// ── AnthropicStreamingClient ──────────────────────────────────────────────────
+
+/// Sends a streaming request to the Anthropic messages API and returns the
+/// raw byte chunks of the SSE response. Returned stream must be `'static` so
+/// it can outlive the call site without holding a borrow on the loop.
+pub trait AnthropicStreamingClient: Send + Sync + 'static {
+    fn complete_streaming(
+        &self,
+        body: serde_json::Value,
+    ) -> Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'static>>;
+}
+
+/// Concrete [`AnthropicStreamingClient`] backed by a [`reqwest::Client`].
+pub struct ReqwestAnthropicStreamingClient {
+    pub http: reqwest::Client,
+    pub proxy_url: String,
+    pub anthropic_token: String,
+    pub anthropic_base_url: Option<String>,
+    pub anthropic_extra_headers: Vec<(String, String)>,
+}
+
+impl ReqwestAnthropicStreamingClient {
+    fn messages_url(&self) -> String {
+        if let Some(ref base) = self.anthropic_base_url {
+            format!("{base}/messages")
+        } else {
+            format!("{}/anthropic/v1/messages", self.proxy_url)
+        }
+    }
+}
+
+impl AnthropicStreamingClient for ReqwestAnthropicStreamingClient {
+    fn complete_streaming(
+        &self,
+        body: serde_json::Value,
+    ) -> Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'static>> {
+        let url = self.messages_url();
+        let token = self.anthropic_token.clone();
+        let http = self.http.clone();
+        let extra_headers = self.anthropic_extra_headers.clone();
+
+        Box::pin(
+            futures_util::stream::once(async move {
+                let mut req = http
+                    .post(&url)
+                    .header("Authorization", format!("Bearer {token}"))
+                    .header("anthropic-version", "2023-06-01");
+                for (k, v) in &extra_headers {
+                    req = req.header(k.as_str(), v.as_str());
+                }
+                req.json(&body).send().await.and_then(|r| r.error_for_status())
+            })
+            .flat_map(
+                |result| -> Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send>> {
+                    match result {
+                        Ok(resp) => Box::pin(resp.bytes_stream()),
+                        Err(e) => Box::pin(futures_util::stream::once(std::future::ready(Err(e)))),
+                    }
+                },
+            ),
+        )
+    }
+}
+
 // ── AgentLoop ─────────────────────────────────────────────────────────────────
 
 /// Runs the Anthropic tool-use loop, routing all AI calls through the proxy.
@@ -316,6 +382,9 @@ pub struct AgentLoop<H = reqwest::Client> {
     pub proxy_url: String,
     /// Opaque proxy token for Anthropic (never the real API key).
     pub anthropic_token: String,
+    /// When set, `run_chat_streaming` dispatches through this trait instead of
+    /// building a raw reqwest request. Useful for injecting mocks in tests.
+    pub streaming_client: Option<Arc<dyn AnthropicStreamingClient>>,
     /// When set, overrides `proxy_url` as the Anthropic messages base URL.
     /// Format: `https://gateway.example.com/v1` (without trailing `/messages`).
     pub anthropic_base_url: Option<String>,
@@ -646,24 +715,30 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
             // Inject stream: true so Anthropic sends SSE events.
             body["stream"] = serde_json::json!(true);
 
-            let mut req_builder = self
-                .http_client
-                .post(self.messages_url())
-                .header("Authorization", format!("Bearer {}", self.anthropic_token))
-                .header("anthropic-version", "2023-06-01");
-            for (k, v) in &self.anthropic_extra_headers {
-                req_builder = req_builder.header(k.as_str(), v.as_str());
-            }
-            let http_resp = req_builder
-                .json(&body)
-                .send()
-                .await
-                .map_err(AgentError::Http)?
-                .error_for_status()
-                .map_err(AgentError::Http)?;
+            // ── Obtain the SSE byte stream ────────────────────────────────────
+            let mut byte_stream: Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send>> =
+                if let Some(client) = &self.streaming_client {
+                    client.complete_streaming(body)
+                } else {
+                    let mut req_builder = self
+                        .http_client
+                        .post(self.messages_url())
+                        .header("Authorization", format!("Bearer {}", self.anthropic_token))
+                        .header("anthropic-version", "2023-06-01");
+                    for (k, v) in &self.anthropic_extra_headers {
+                        req_builder = req_builder.header(k.as_str(), v.as_str());
+                    }
+                    let http_resp = req_builder
+                        .json(&body)
+                        .send()
+                        .await
+                        .map_err(AgentError::Http)?
+                        .error_for_status()
+                        .map_err(AgentError::Http)?;
+                    Box::pin(http_resp.bytes_stream())
+                };
 
             // ── Parse SSE stream ──────────────────────────────────────────────
-            let mut byte_stream = http_resp.bytes_stream();
             let mut sse = SseParser::new();
 
             let mut stop_reason = String::new();
@@ -1276,6 +1351,35 @@ mod tests {
         assert!(cached_tools.is_empty());
     }
 
+    fn make_test_agent() -> AgentLoop {
+        use crate::tools::ToolContext;
+        let http_client = reqwest::Client::new();
+        let tool_context = Arc::new(ToolContext {
+            http_client: http_client.clone(),
+            proxy_url: "http://unused:9999".to_string(),
+        });
+        AgentLoop {
+            http_client,
+            proxy_url: "http://unused:9999".to_string(),
+            anthropic_token: "test".to_string(),
+            anthropic_base_url: None,
+            anthropic_extra_headers: vec![],
+            streaming_client: None,
+            model: "claude-opus-4-6".to_string(),
+            max_iterations: 1,
+            thinking_budget: None,
+            tool_context,
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            permission_checker: None,
+            elicitation_provider: None,
+        }
+    }
+
+
     /// Covers line 706: closing `}` of the if-let in execute_tools_streaming
     /// when content contains a ToolUse block with no matching MCP dispatch entry.
     #[tokio::test]
@@ -1407,6 +1511,7 @@ mod tests {
             anthropic_token: "test".to_string(),
             anthropic_base_url: None,
             anthropic_extra_headers: vec![],
+            streaming_client: None,
             model: "claude-opus-4-6".to_string(),
             max_iterations: 1,
             thinking_budget: None,
@@ -1434,6 +1539,48 @@ mod tests {
                 .iter()
                 .any(|e| matches!(e, AgentEvent::TextDelta { text } if text == "partial")),
             "expected TextDelta with 'partial' text, got: {events:?}"
+        );
+    }
+
+    /// Injects a `MockAnthropicStreamingClient` and asserts that
+    /// `run_chat_streaming` emits `TextDelta` events without any real HTTP server.
+    #[tokio::test]
+    async fn run_chat_streaming_uses_streaming_client_trait() {
+        struct MockStreamingClient {
+            sse: &'static [u8],
+        }
+        impl AnthropicStreamingClient for MockStreamingClient {
+            fn complete_streaming(
+                &self,
+                _body: serde_json::Value,
+            ) -> Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'static>> {
+                let data = Bytes::from_static(self.sse);
+                Box::pin(futures_util::stream::once(std::future::ready(Ok(data))))
+            }
+        }
+
+        let sse: &'static [u8] = b"\
+event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":3,\"output_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0}}}\n\n\
+event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n\
+event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hi\"}}\n\n\
+event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n\
+event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}\n\n\
+event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
+
+        let mut agent = make_test_agent();
+        agent.streaming_client = Some(Arc::new(MockStreamingClient { sse }));
+
+        let (tx, mut rx) = tokio::sync::mpsc::channel(32);
+        let result = agent
+            .run_chat_streaming(vec![Message::user_text("hello")], &[], None, tx, None)
+            .await;
+        assert!(result.is_ok(), "expected Ok, got {result:?}");
+        let events: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::TextDelta { text } if text == "hi")),
+            "expected TextDelta('hi'), got {events:?}"
         );
     }
 
