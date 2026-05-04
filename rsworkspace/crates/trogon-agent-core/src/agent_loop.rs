@@ -1683,4 +1683,68 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
             results[0].content
         );
     }
+
+    /// Proves TextDelta events are emitted as SSE bytes arrive, not buffered
+    /// until the full stream closes. A DelayedStreamingClient delivers the
+    /// text-delta chunk immediately and holds back the closing chunk for 100ms.
+    /// At the 50ms mark the receiver must already contain TextDelta("chunk1").
+    #[tokio::test]
+    async fn run_chat_streaming_emits_text_delta_incrementally() {
+        use std::future::ready;
+        use std::time::Duration;
+        use tokio::time::sleep;
+
+        struct DelayedStreamingClient;
+        impl AnthropicStreamingClient for DelayedStreamingClient {
+            fn complete_streaming(
+                &self,
+                _body: serde_json::Value,
+            ) -> Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'static>> {
+                let chunk1 = Bytes::from(concat!(
+                    "event: message_start\n",
+                    "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0}}}\n\n",
+                    "event: content_block_start\n",
+                    "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+                    "event: content_block_delta\n",
+                    "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"chunk1\"}}\n\n",
+                ));
+                let chunk2 = Bytes::from(concat!(
+                    "event: content_block_stop\n",
+                    "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+                    "event: message_delta\n",
+                    "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}\n\n",
+                    "event: message_stop\n",
+                    "data: {\"type\":\"message_stop\"}\n\n",
+                ));
+                let stream = futures_util::stream::once(ready(Ok::<Bytes, reqwest::Error>(chunk1)))
+                    .chain(futures_util::stream::once(async move {
+                        sleep(Duration::from_millis(100)).await;
+                        Ok::<Bytes, reqwest::Error>(chunk2)
+                    }));
+                Box::pin(stream)
+            }
+        }
+
+        let mut agent = make_test_agent();
+        agent.streaming_client = Some(Arc::new(DelayedStreamingClient));
+
+        let (tx, mut rx) = tokio::sync::mpsc::channel(32);
+        let handle = tokio::spawn(async move {
+            agent
+                .run_chat_streaming(vec![Message::user_text("hello")], &[], None, tx, None)
+                .await
+        });
+
+        sleep(Duration::from_millis(50)).await;
+        let early_events: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+        assert!(
+            early_events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::TextDelta { text } if text == "chunk1")),
+            "TextDelta('chunk1') must arrive before stream closes; got {early_events:?}"
+        );
+
+        let result = handle.await.expect("task panicked");
+        assert!(result.is_ok(), "run_chat_streaming failed: {result:?}");
+    }
 }

@@ -490,7 +490,6 @@ impl std::error::Error for WorkerError {}
 #[cfg(test)]
 mod tests {
     use std::collections::VecDeque;
-    use std::future::Future;
     use std::pin::Pin;
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
