@@ -163,15 +163,15 @@ struct AnthropicRequest<'a> {
 }
 
 #[derive(Debug, Deserialize)]
-struct AnthropicResponse {
-    stop_reason: String,
-    content: Vec<ContentBlock>,
+pub(crate) struct AnthropicResponse {
+    pub(crate) stop_reason: String,
+    pub(crate) content: Vec<ContentBlock>,
     #[serde(default)]
-    usage: Option<AnthropicUsage>,
+    pub(crate) usage: Option<AnthropicUsage>,
 }
 
 #[derive(Debug, Default, Deserialize)]
-struct AnthropicUsage {
+pub(crate) struct AnthropicUsage {
     input_tokens: u32,
     output_tokens: u32,
     #[serde(default)]
@@ -180,11 +180,65 @@ struct AnthropicUsage {
     cache_read_input_tokens: u32,
 }
 
+// ── AnthropicHttpClient ───────────────────────────────────────────────────────
+
+pub(crate) trait AnthropicHttpClient: Send + Sync + Clone + 'static {
+    fn call_anthropic<'a>(
+        &'a self,
+        url: &'a str,
+        token: &'a str,
+        extra_headers: &'a [(String, String)],
+        body: &'a Value,
+    ) -> impl std::future::Future<Output = Result<AnthropicResponse, AgentError>> + Send + 'a;
+}
+
+impl AnthropicHttpClient for reqwest::Client {
+    fn call_anthropic<'a>(
+        &'a self,
+        url: &'a str,
+        token: &'a str,
+        extra_headers: &'a [(String, String)],
+        body: &'a Value,
+    ) -> impl std::future::Future<Output = Result<AnthropicResponse, AgentError>> + Send + 'a {
+        async move {
+            let mut req_builder = self
+                .post(url)
+                .header("Authorization", format!("Bearer {token}"))
+                .header("anthropic-version", "2023-06-01");
+            for (k, v) in extra_headers {
+                req_builder = req_builder.header(k.as_str(), v.as_str());
+            }
+            Ok(req_builder
+                .json(body)
+                .send()
+                .await
+                .map_err(|e| AgentError::Http(HttpError(e.to_string())))?
+                .error_for_status()
+                .map_err(|e| AgentError::Http(HttpError(e.to_string())))?
+                .json::<AnthropicResponse>()
+                .await
+                .map_err(|e| AgentError::Http(HttpError(e.to_string())))?)
+        }
+    }
+}
+
 // ── Errors ────────────────────────────────────────────────────────────────────
+
+/// Opaque HTTP error that preserves the error chain without exposing the transport type.
+#[derive(Debug)]
+pub struct HttpError(String);
+
+impl std::fmt::Display for HttpError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for HttpError {}
 
 #[derive(Debug)]
 pub enum AgentError {
-    Http(reqwest::Error),
+    Http(HttpError),
     MaxIterationsReached,
     MaxTokens,
     UnexpectedStopReason(String),
@@ -202,13 +256,14 @@ impl std::fmt::Display for AgentError {
 }
 
 impl std::error::Error for AgentError {
-    #[cfg_attr(coverage, coverage(off))]
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        if let Self::Http(e) = self {
-            Some(e)
-        } else {
-            None
-        }
+        if let Self::Http(e) = self { Some(e) } else { None }
+    }
+}
+
+impl From<reqwest::Error> for AgentError {
+    fn from(e: reqwest::Error) -> Self {
+        Self::Http(HttpError(e.to_string()))
     }
 }
 
@@ -254,8 +309,8 @@ pub enum AgentEvent {
 
 /// Runs the Anthropic tool-use loop, routing all AI calls through the proxy.
 #[derive(Clone)]
-pub struct AgentLoop {
-    pub http_client: reqwest::Client,
+pub struct AgentLoop<H = reqwest::Client> {
+    pub http_client: H,
     /// Base URL of the running `trogon-secret-proxy`.
     pub proxy_url: String,
     /// Opaque proxy token for Anthropic (never the real API key).
@@ -283,14 +338,15 @@ pub struct AgentLoop {
     /// Extra tool definitions from MCP servers — appended to every `run` call.
     pub mcp_tool_defs: Vec<ToolDef>,
     /// Dispatch map for MCP tools: prefixed_name → (client, original_tool_name).
-    pub mcp_dispatch: Vec<(String, String, Arc<trogon_mcp::McpClient>)>,
+    pub mcp_dispatch: Vec<(String, String, Arc<dyn trogon_mcp::McpCallTool>)>,
     /// Optional gate called before each tool execution — `None` means all tools are auto-allowed.
     pub permission_checker: Option<Arc<dyn PermissionChecker>>,
     /// Optional provider for the built-in `ask_user` tool; `None` means the tool is not offered.
     pub elicitation_provider: Option<Arc<dyn ElicitationProvider>>,
 }
 
-impl AgentLoop {
+#[allow(private_bounds)]
+impl<H: AnthropicHttpClient> AgentLoop<H> {
     /// Build the Anthropic messages API URL, respecting the gateway override.
     fn messages_url(&self) -> String {
         if let Some(ref base) = self.anthropic_base_url {
@@ -359,24 +415,15 @@ impl AgentLoop {
                 });
             }
 
-            let mut req_builder = self
+            let response = self
                 .http_client
-                .post(self.messages_url())
-                .header("Authorization", format!("Bearer {}", self.anthropic_token))
-                .header("anthropic-version", "2023-06-01");
-            for (k, v) in &self.anthropic_extra_headers {
-                req_builder = req_builder.header(k.as_str(), v.as_str());
-            }
-            let response = req_builder
-                .json(&body)
-                .send()
-                .await
-                .map_err(AgentError::Http)?
-                .error_for_status()
-                .map_err(AgentError::Http)?
-                .json::<AnthropicResponse>()
-                .await
-                .map_err(AgentError::Http)?;
+                .call_anthropic(
+                    &self.messages_url(),
+                    &self.anthropic_token,
+                    &self.anthropic_extra_headers,
+                    &body,
+                )
+                .await?;
 
             debug!(stop_reason = %response.stop_reason, "Model response received");
 
@@ -469,24 +516,15 @@ impl AgentLoop {
                 });
             }
 
-            let mut req_builder = self
+            let response = self
                 .http_client
-                .post(self.messages_url())
-                .header("Authorization", format!("Bearer {}", self.anthropic_token))
-                .header("anthropic-version", "2023-06-01");
-            for (k, v) in &self.anthropic_extra_headers {
-                req_builder = req_builder.header(k.as_str(), v.as_str());
-            }
-            let response = req_builder
-                .json(&body)
-                .send()
-                .await
-                .map_err(AgentError::Http)?
-                .error_for_status()
-                .map_err(AgentError::Http)?
-                .json::<AnthropicResponse>()
-                .await
-                .map_err(AgentError::Http)?;
+                .call_anthropic(
+                    &self.messages_url(),
+                    &self.anthropic_token,
+                    &self.anthropic_extra_headers,
+                    &body,
+                )
+                .await?;
 
             match response.stop_reason.as_str() {
                 "end_turn" => {
@@ -604,24 +642,15 @@ impl AgentLoop {
                 });
             }
 
-            let mut req_builder = self
+            let response = self
                 .http_client
-                .post(self.messages_url())
-                .header("Authorization", format!("Bearer {}", self.anthropic_token))
-                .header("anthropic-version", "2023-06-01");
-            for (k, v) in &self.anthropic_extra_headers {
-                req_builder = req_builder.header(k.as_str(), v.as_str());
-            }
-            let response = req_builder
-                .json(&body)
-                .send()
-                .await
-                .map_err(AgentError::Http)?
-                .error_for_status()
-                .map_err(AgentError::Http)?
-                .json::<AnthropicResponse>()
-                .await
-                .map_err(AgentError::Http)?;
+                .call_anthropic(
+                    &self.messages_url(),
+                    &self.anthropic_token,
+                    &self.anthropic_extra_headers,
+                    &body,
+                )
+                .await?;
 
             if let Some(ref u) = response.usage {
                 total_input = total_input.saturating_add(u.input_tokens);
@@ -876,6 +905,60 @@ impl AgentLoop {
 mod tests {
     use super::*;
 
+    // ── MockAnthropicClient ───────────────────────────────────────────────────
+
+    #[derive(Clone)]
+    struct MockAnthropicClient {
+        response_json: String,
+    }
+
+    impl MockAnthropicClient {
+        fn with_response(json: impl Into<String>) -> Self {
+            Self { response_json: json.into() }
+        }
+    }
+
+    impl AnthropicHttpClient for MockAnthropicClient {
+        fn call_anthropic<'a>(
+            &'a self,
+            _url: &'a str,
+            _token: &'a str,
+            _extra_headers: &'a [(String, String)],
+            _body: &'a Value,
+        ) -> impl std::future::Future<Output = Result<AnthropicResponse, AgentError>> + Send + 'a {
+            let resp: AnthropicResponse = serde_json::from_str(&self.response_json)
+                .expect("test fixture must be valid JSON");
+            async move { Ok(resp) }
+        }
+    }
+
+    fn make_test_agent() -> AgentLoop<MockAnthropicClient> {
+        use crate::tools::ToolContext;
+        let tool_context = Arc::new(ToolContext {
+            proxy_url: "http://unused:9999".to_string(),
+        });
+        AgentLoop {
+            http_client: MockAnthropicClient::with_response(
+                r#"{"stop_reason":"end_turn","content":[],"usage":null}"#,
+            ),
+            proxy_url: "http://unused:9999".to_string(),
+            anthropic_token: "test".to_string(),
+            anthropic_base_url: None,
+            anthropic_extra_headers: vec![],
+            model: "claude-opus-4-6".to_string(),
+            max_iterations: 1,
+            thinking_budget: None,
+            tool_context,
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            permission_checker: None,
+            elicitation_provider: None,
+        }
+    }
+
     #[test]
     fn message_user_text_has_correct_role_and_content() {
         let msg = Message::user_text("hello");
@@ -912,32 +995,20 @@ mod tests {
                 .contains("pause")
         );
         assert!(AgentError::MaxTokens.to_string().contains("max_tokens"));
-        let http_err = reqwest::Client::new()
-            .get("not-a-url:///")
-            .build()
-            .unwrap_err();
-        assert!(
-            AgentError::Http(http_err)
-                .to_string()
-                .contains("HTTP error")
-        );
+        assert!(AgentError::Http(HttpError("connection refused".into())).to_string().contains("HTTP error"));
     }
 
     #[test]
     fn agent_error_source_for_http_variant() {
-        // Construct a dummy reqwest error via a failed parse (no network needed).
-        let err = reqwest::Client::new()
-            .get("not a url at all:///")
-            .build()
-            .unwrap_err();
-        let agent_err = AgentError::Http(err);
-        assert!(agent_err.to_string().contains("HTTP error"));
+        let agent_err = AgentError::Http(HttpError("connect error".into()));
         assert!(std::error::Error::source(&agent_err).is_some());
     }
 
     #[test]
     fn agent_error_source_none_for_non_http() {
         assert!(std::error::Error::source(&AgentError::MaxIterationsReached).is_none());
+        assert!(std::error::Error::source(&AgentError::MaxTokens).is_none());
+        assert!(std::error::Error::source(&AgentError::UnexpectedStopReason("x".into())).is_none());
     }
 
     /// When `system_prompt` is `Some`, the serialized request body contains a
@@ -1033,33 +1104,6 @@ mod tests {
         assert!(cached_tools.is_empty());
     }
 
-    fn make_test_agent() -> AgentLoop {
-        use crate::tools::ToolContext;
-        let http_client = reqwest::Client::new();
-        let tool_context = Arc::new(ToolContext {
-            http_client: http_client.clone(),
-            proxy_url: "http://unused:9999".to_string(),
-        });
-        AgentLoop {
-            http_client,
-            proxy_url: "http://unused:9999".to_string(),
-            anthropic_token: "test".to_string(),
-            anthropic_base_url: None,
-            anthropic_extra_headers: vec![],
-            model: "claude-opus-4-6".to_string(),
-            max_iterations: 1,
-            thinking_budget: None,
-            tool_context,
-            memory_owner: None,
-            memory_repo: None,
-            memory_path: None,
-            mcp_tool_defs: vec![],
-            mcp_dispatch: vec![],
-            permission_checker: None,
-            elicitation_provider: None,
-        }
-    }
-
     /// Covers line 706: closing `}` of the if-let in execute_tools_streaming
     /// when content contains a ToolUse block with no matching MCP dispatch entry.
     #[tokio::test]
@@ -1093,23 +1137,17 @@ mod tests {
         assert!(results[0].content.contains("Unknown tool"));
     }
 
-    /// Covers lines 685-686 (MCP Ok arm) in execute_tools_streaming.
+    /// Covers MCP Ok arm in execute_tools_streaming.
     #[tokio::test]
     async fn execute_tools_streaming_mcp_ok_covers_ok_arm() {
-        use httpmock::prelude::*;
-        let server = MockServer::start_async().await;
-        server
-            .mock_async(|when, then| {
-                when.method(POST).path("/mcp");
-                then.status(200).body(
-                    r#"{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"mcp ok"}],"isError":false}}"#,
-                );
-            })
-            .await;
-        let http = reqwest::Client::new();
-        let client = Arc::new(trogon_mcp::McpClient::new(http, server.url("/mcp")));
+        let mock = Arc::new(trogon_mcp::MockMcpClient::new());
+        mock.set_response("mcp ok");
         let mut agent = make_test_agent();
-        agent.mcp_dispatch = vec![("srv__tool".to_string(), "tool".to_string(), client)];
+        agent.mcp_dispatch = vec![(
+            "srv__tool".to_string(),
+            "tool".to_string(),
+            mock as Arc<dyn trogon_mcp::McpCallTool>,
+        )];
         let (tx, _rx) = tokio::sync::mpsc::channel(32);
         let content = vec![ContentBlock::ToolUse {
             id: "m1".to_string(),
@@ -1121,23 +1159,17 @@ mod tests {
         assert_eq!(results[0].content, "mcp ok");
     }
 
-    /// Covers line 687 (MCP Err arm) in execute_tools_streaming.
+    /// Covers MCP Err arm in execute_tools_streaming.
     #[tokio::test]
     async fn execute_tools_streaming_mcp_err_covers_err_arm() {
-        use httpmock::prelude::*;
-        let server = MockServer::start_async().await;
-        server
-            .mock_async(|when, then| {
-                when.method(POST).path("/mcp");
-                then.status(200).body(
-                    r#"{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"tool failed"}],"isError":true}}"#,
-                );
-            })
-            .await;
-        let http = reqwest::Client::new();
-        let client = Arc::new(trogon_mcp::McpClient::new(http, server.url("/mcp")));
+        let mock = Arc::new(trogon_mcp::MockMcpClient::new());
+        mock.set_error("tool failed");
         let mut agent = make_test_agent();
-        agent.mcp_dispatch = vec![("srv__tool2".to_string(), "tool2".to_string(), client)];
+        agent.mcp_dispatch = vec![(
+            "srv__tool2".to_string(),
+            "tool2".to_string(),
+            mock as Arc<dyn trogon_mcp::McpCallTool>,
+        )];
         let (tx, _rx) = tokio::sync::mpsc::channel(32);
         let content = vec![ContentBlock::ToolUse {
             id: "m2".to_string(),
@@ -1149,23 +1181,17 @@ mod tests {
         assert!(results[0].content.contains("Tool error"));
     }
 
-    /// Covers lines 725-726 (MCP Ok arm) in execute_tools.
+    /// Covers MCP Ok arm in execute_tools.
     #[tokio::test]
     async fn execute_tools_mcp_ok_covers_ok_arm() {
-        use httpmock::prelude::*;
-        let server = MockServer::start_async().await;
-        server
-            .mock_async(|when, then| {
-                when.method(POST).path("/mcp");
-                then.status(200).body(
-                    r#"{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"sync ok"}],"isError":false}}"#,
-                );
-            })
-            .await;
-        let http = reqwest::Client::new();
-        let client = Arc::new(trogon_mcp::McpClient::new(http, server.url("/mcp")));
+        let mock = Arc::new(trogon_mcp::MockMcpClient::new());
+        mock.set_response("sync ok");
         let mut agent = make_test_agent();
-        agent.mcp_dispatch = vec![("s__t".to_string(), "t".to_string(), client)];
+        agent.mcp_dispatch = vec![(
+            "s__t".to_string(),
+            "t".to_string(),
+            mock as Arc<dyn trogon_mcp::McpCallTool>,
+        )];
         let content = vec![ContentBlock::ToolUse {
             id: "m3".to_string(),
             name: "s__t".to_string(),
@@ -1176,23 +1202,17 @@ mod tests {
         assert_eq!(results[0].content, "sync ok");
     }
 
-    /// Covers line 727 (MCP Err arm) in execute_tools.
+    /// Covers MCP Err arm in execute_tools.
     #[tokio::test]
     async fn execute_tools_mcp_err_covers_err_arm() {
-        use httpmock::prelude::*;
-        let server = MockServer::start_async().await;
-        server
-            .mock_async(|when, then| {
-                when.method(POST).path("/mcp");
-                then.status(200).body(
-                    r#"{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"sync fail"}],"isError":true}}"#,
-                );
-            })
-            .await;
-        let http = reqwest::Client::new();
-        let client = Arc::new(trogon_mcp::McpClient::new(http, server.url("/mcp")));
+        let mock = Arc::new(trogon_mcp::MockMcpClient::new());
+        mock.set_error("sync fail");
         let mut agent = make_test_agent();
-        agent.mcp_dispatch = vec![("s__t2".to_string(), "t2".to_string(), client)];
+        agent.mcp_dispatch = vec![(
+            "s__t2".to_string(),
+            "t2".to_string(),
+            mock as Arc<dyn trogon_mcp::McpCallTool>,
+        )];
         let content = vec![ContentBlock::ToolUse {
             id: "m4".to_string(),
             name: "s__t2".to_string(),
@@ -1203,35 +1223,24 @@ mod tests {
         assert!(results[0].content.contains("Tool error"));
     }
 
-    /// Covers line 629: TextDelta emitted in the max_tokens path when text is non-empty.
+    /// Covers: TextDelta emitted in the max_tokens path when text is non-empty.
     #[tokio::test]
     async fn run_chat_streaming_max_tokens_with_text_emits_text_delta() {
-        use httpmock::prelude::*;
-        let server = MockServer::start_async().await;
-        server
-            .mock_async(|when, then| {
-                when.method(POST);
-                then.status(200).body(
-                    r#"{"stop_reason":"max_tokens","content":[{"type":"text","text":"partial"}],"usage":{"input_tokens":10,"output_tokens":5}}"#,
-                );
-            })
-            .await;
-        let http = reqwest::Client::new();
         let (tx, mut rx) = tokio::sync::mpsc::channel(32);
-        let tool_context = Arc::new(crate::tools::ToolContext {
-            http_client: http.clone(),
-            proxy_url: server.url(""),
-        });
         let agent = AgentLoop {
-            http_client: http,
-            proxy_url: server.url(""),
+            http_client: MockAnthropicClient::with_response(
+                r#"{"stop_reason":"max_tokens","content":[{"type":"text","text":"partial"}],"usage":{"input_tokens":10,"output_tokens":5}}"#,
+            ),
+            proxy_url: "http://unused".to_string(),
             anthropic_token: "test".to_string(),
             anthropic_base_url: None,
             anthropic_extra_headers: vec![],
             model: "claude-opus-4-6".to_string(),
             max_iterations: 1,
             thinking_budget: None,
-            tool_context,
+            tool_context: Arc::new(crate::tools::ToolContext {
+                proxy_url: "http://unused".to_string(),
+            }),
             memory_owner: None,
             memory_repo: None,
             memory_path: None,

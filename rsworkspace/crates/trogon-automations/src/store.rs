@@ -246,9 +246,9 @@ impl AutomationRepository for AutomationStore {
     }
 }
 
-// ── In-memory mock (test-only) ────────────────────────────────────────────────
+// ── In-memory mock (test-only / test-support feature) ────────────────────────
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub mod mock {
     use super::*;
     use std::collections::HashMap;

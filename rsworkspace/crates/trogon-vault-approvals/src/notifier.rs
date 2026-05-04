@@ -1,8 +1,5 @@
 //! Notification abstraction for approval lifecycle events.
 
-#[cfg(feature = "slack")]
-use reqwest::Client;
-
 use crate::proposal::Proposal;
 
 // ── Trait ─────────────────────────────────────────────────────────────────────
@@ -37,19 +34,51 @@ impl Notifier for NoopNotifier {
 
 // ── SlackWebhookNotifier ──────────────────────────────────────────────────────
 
+/// Sends a JSON POST to a Slack incoming-webhook URL.
+///
+/// Implemented by `reqwest::Client` for production; unit tests use
+/// [`MockSlackHttpClient`] defined in the test module.
+#[cfg(feature = "slack")]
+pub(crate) trait SlackHttpClient: Send + Sync + 'static {
+    fn post_json<'a>(
+        &'a self,
+        url: &'a str,
+        body: &'a serde_json::Value,
+    ) -> impl std::future::Future<Output = Result<u16, String>> + Send + 'a;
+}
+
+#[cfg(feature = "slack")]
+impl SlackHttpClient for reqwest::Client {
+    fn post_json<'a>(
+        &'a self,
+        url: &'a str,
+        body: &'a serde_json::Value,
+    ) -> impl std::future::Future<Output = Result<u16, String>> + Send + 'a {
+        async move {
+            let resp = self
+                .post(url)
+                .json(body)
+                .send()
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(resp.status().as_u16())
+        }
+    }
+}
+
 /// Posts Slack Block Kit messages to an incoming-webhook URL on every lifecycle event.
 ///
 /// Enable with the `slack` Cargo feature.
 #[cfg(feature = "slack")]
-pub struct SlackWebhookNotifier {
-    client:      Client,
+pub struct SlackWebhookNotifier<H = reqwest::Client> {
+    client:      H,
     webhook_url: String,
 }
 
 #[cfg(feature = "slack")]
-impl SlackWebhookNotifier {
+impl SlackWebhookNotifier<reqwest::Client> {
     pub fn new(webhook_url: impl Into<String>) -> Self {
-        Self { client: Client::new(), webhook_url: webhook_url.into() }
+        Self { client: reqwest::Client::new(), webhook_url: webhook_url.into() }
     }
 
     /// Build from `VAULT_SLACK_WEBHOOK_URL` env var.
@@ -58,17 +87,19 @@ impl SlackWebhookNotifier {
             .map_err(|_| "missing env var: VAULT_SLACK_WEBHOOK_URL".to_string())?;
         Ok(Self::new(url))
     }
+}
+
+#[cfg(feature = "slack")]
+impl<H: SlackHttpClient> SlackWebhookNotifier<H> {
+    pub fn with_client(webhook_url: impl Into<String>, client: H) -> Self {
+        Self { client, webhook_url: webhook_url.into() }
+    }
 
     async fn post(&self, text: &str) {
-        let result = self
-            .client
-            .post(&self.webhook_url)
-            .json(&serde_json::json!({ "text": text }))
-            .send()
-            .await;
-        match result {
-            Ok(r) if r.status().is_success() => {}
-            Ok(r)  => tracing::warn!(status = %r.status(), "Slack webhook returned non-2xx"),
+        let body = serde_json::json!({ "text": text });
+        match self.client.post_json(&self.webhook_url, &body).await {
+            Ok(status) if (200..300).contains(&status) => {}
+            Ok(status) => tracing::warn!(status, "Slack webhook returned non-2xx"),
             Err(e) => tracing::warn!(error = %e, "Slack webhook request failed"),
         }
     }
@@ -76,7 +107,7 @@ impl SlackWebhookNotifier {
 
 #[cfg(feature = "slack")]
 #[async_trait::async_trait]
-impl Notifier for SlackWebhookNotifier {
+impl<H: SlackHttpClient> Notifier for SlackWebhookNotifier<H> {
     async fn notify_pending(&self, proposal: &Proposal, vault_name: &str) {
         self.post(&format!(
             ":hourglass: *Approval pending*\n\
@@ -113,6 +144,37 @@ impl Notifier for SlackWebhookNotifier {
 
 /// Emits tracing events for every approval lifecycle transition.
 pub struct LoggingNotifier;
+
+#[async_trait::async_trait]
+impl Notifier for LoggingNotifier {
+    async fn notify_pending(&self, proposal: &Proposal, vault_name: &str) {
+        tracing::info!(
+            id             = %proposal.id,
+            credential_key = %proposal.credential_key,
+            service        = %proposal.service,
+            message        = %proposal.message,
+            vault          = %vault_name,
+            "approval pending"
+        );
+    }
+
+    async fn notify_approved(&self, proposal: &Proposal, approved_by: &str) {
+        tracing::info!(
+            id          = %proposal.id,
+            approved_by = %approved_by,
+            "proposal approved"
+        );
+    }
+
+    async fn notify_rejected(&self, proposal: &Proposal, rejected_by: &str, reason: &str) {
+        tracing::info!(
+            id          = %proposal.id,
+            rejected_by = %rejected_by,
+            reason      = %reason,
+            "proposal rejected"
+        );
+    }
+}
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
@@ -178,148 +240,116 @@ mod tests {
         assert!(result.is_ok());
     }
 
-    // ── SlackWebhookNotifier HTTP tests ───────────────────────────────────────
+    // ── SlackWebhookNotifier unit tests via MockSlackHttpClient ───────────────
 
     #[cfg(feature = "slack")]
-    mod slack_http_tests {
+    mod slack_tests {
+        use std::sync::Mutex;
         use super::*;
-        use httpmock::MockServer;
-        use httpmock::Method::POST;
 
-        fn proposal() -> Proposal {
-            pending()
+        #[derive(Default)]
+        struct MockSlackHttpClient {
+            response_status: u16,
+            last_url:  Mutex<Option<String>>,
+            last_body: Mutex<Option<serde_json::Value>>,
+        }
+
+        impl MockSlackHttpClient {
+            fn ok() -> Self {
+                Self { response_status: 200, ..Default::default() }
+            }
+
+            fn error(status: u16) -> Self {
+                Self { response_status: status, ..Default::default() }
+            }
+
+            fn last_url(&self) -> Option<String> {
+                self.last_url.lock().unwrap().clone()
+            }
+
+            fn last_body(&self) -> Option<serde_json::Value> {
+                self.last_body.lock().unwrap().clone()
+            }
+        }
+
+        impl SlackHttpClient for MockSlackHttpClient {
+            fn post_json<'a>(
+                &'a self,
+                url: &'a str,
+                body: &'a serde_json::Value,
+            ) -> impl std::future::Future<Output = Result<u16, String>> + Send + 'a {
+                *self.last_url.lock().unwrap() = Some(url.to_string());
+                *self.last_body.lock().unwrap() = Some(body.clone());
+                let status = self.response_status;
+                async move { Ok(status) }
+            }
+        }
+
+        fn notifier(mock: MockSlackHttpClient) -> SlackWebhookNotifier<MockSlackHttpClient> {
+            SlackWebhookNotifier::with_client("https://hooks.slack.example/webhook", mock)
         }
 
         #[tokio::test]
         async fn notify_pending_posts_to_webhook() {
-            let server = MockServer::start();
-            let mock = server.mock(|when, then| {
-                when.method(POST).path("/webhook");
-                then.status(200);
-            });
-
-            let notifier = SlackWebhookNotifier::new(format!("{}/webhook", server.base_url()));
-            notifier.notify_pending(&proposal(), "prod").await;
-            mock.assert();
+            let mock = MockSlackHttpClient::ok();
+            let n = notifier(mock);
+            n.notify_pending(&pending(), "prod").await;
+            assert!(n.client.last_url().is_some(), "expected a POST to be made");
         }
 
         #[tokio::test]
         async fn notify_pending_body_contains_proposal_fields() {
-            let server = MockServer::start();
-            let mock = server.mock(|when, then| {
-                when.method(POST)
-                    .path("/webhook")
-                    .body_contains("prop_abc")
-                    .body_contains("tok_stripe_prod_abc")
-                    .body_contains("prod");
-                then.status(200);
-            });
-
-            let notifier = SlackWebhookNotifier::new(format!("{}/webhook", server.base_url()));
-            notifier.notify_pending(&proposal(), "prod").await;
-            mock.assert();
+            let mock = MockSlackHttpClient::ok();
+            let n = notifier(mock);
+            n.notify_pending(&pending(), "prod").await;
+            let body = n.client.last_body().unwrap().to_string();
+            assert!(body.contains("prop_abc"), "missing proposal id");
+            assert!(body.contains("tok_stripe_prod_abc"), "missing credential key");
+            assert!(body.contains("prod"), "missing vault name");
         }
 
         #[tokio::test]
         async fn notify_approved_posts_to_webhook() {
-            let server = MockServer::start();
-            let mock = server.mock(|when, then| {
-                when.method(POST).path("/webhook");
-                then.status(200);
-            });
-
-            let notifier = SlackWebhookNotifier::new(format!("{}/webhook", server.base_url()));
-            notifier.notify_approved(&approved(), "mario").await;
-            mock.assert();
+            let mock = MockSlackHttpClient::ok();
+            let n = notifier(mock);
+            n.notify_approved(&approved(), "mario").await;
+            assert!(n.client.last_url().is_some());
         }
 
         #[tokio::test]
         async fn notify_approved_body_contains_approver() {
-            let server = MockServer::start();
-            let mock = server.mock(|when, then| {
-                when.method(POST)
-                    .path("/webhook")
-                    .body_contains("mario")
-                    .body_contains("prop_abc");
-                then.status(200);
-            });
-
-            let notifier = SlackWebhookNotifier::new(format!("{}/webhook", server.base_url()));
-            notifier.notify_approved(&approved(), "mario").await;
-            mock.assert();
+            let mock = MockSlackHttpClient::ok();
+            let n = notifier(mock);
+            n.notify_approved(&approved(), "mario").await;
+            let body = n.client.last_body().unwrap().to_string();
+            assert!(body.contains("mario"), "missing approver name");
+            assert!(body.contains("prop_abc"), "missing proposal id");
         }
 
         #[tokio::test]
         async fn notify_rejected_posts_to_webhook() {
-            let server = MockServer::start();
-            let mock = server.mock(|when, then| {
-                when.method(POST).path("/webhook");
-                then.status(200);
-            });
-
-            let notifier = SlackWebhookNotifier::new(format!("{}/webhook", server.base_url()));
-            notifier.notify_rejected(&rejected(), "luigi", "not authorised").await;
-            mock.assert();
+            let mock = MockSlackHttpClient::ok();
+            let n = notifier(mock);
+            n.notify_rejected(&rejected(), "luigi", "not authorised").await;
+            assert!(n.client.last_url().is_some());
         }
 
         #[tokio::test]
         async fn notify_rejected_body_contains_rejector_and_reason() {
-            let server = MockServer::start();
-            let mock = server.mock(|when, then| {
-                when.method(POST)
-                    .path("/webhook")
-                    .body_contains("luigi")
-                    .body_contains("not authorised");
-                then.status(200);
-            });
-
-            let notifier = SlackWebhookNotifier::new(format!("{}/webhook", server.base_url()));
-            notifier.notify_rejected(&rejected(), "luigi", "not authorised").await;
-            mock.assert();
+            let mock = MockSlackHttpClient::ok();
+            let n = notifier(mock);
+            n.notify_rejected(&rejected(), "luigi", "not authorised").await;
+            let body = n.client.last_body().unwrap().to_string();
+            assert!(body.contains("luigi"), "missing rejector name");
+            assert!(body.contains("not authorised"), "missing reason");
         }
 
         #[tokio::test]
         async fn non_2xx_response_does_not_panic() {
-            let server = MockServer::start();
-            server.mock(|when, then| {
-                when.method(POST).path("/webhook");
-                then.status(500).body("internal error");
-            });
-
-            let notifier = SlackWebhookNotifier::new(format!("{}/webhook", server.base_url()));
-            notifier.notify_pending(&proposal(), "prod").await;
+            let mock = MockSlackHttpClient::error(500);
+            let n = notifier(mock);
+            n.notify_pending(&pending(), "prod").await;
             // Must complete without panic despite non-2xx
         }
-    }
-}
-
-#[async_trait::async_trait]
-impl Notifier for LoggingNotifier {
-    async fn notify_pending(&self, proposal: &Proposal, vault_name: &str) {
-        tracing::info!(
-            id             = %proposal.id,
-            credential_key = %proposal.credential_key,
-            service        = %proposal.service,
-            message        = %proposal.message,
-            vault          = %vault_name,
-            "approval pending"
-        );
-    }
-
-    async fn notify_approved(&self, proposal: &Proposal, approved_by: &str) {
-        tracing::info!(
-            id          = %proposal.id,
-            approved_by = %approved_by,
-            "proposal approved"
-        );
-    }
-
-    async fn notify_rejected(&self, proposal: &Proposal, rejected_by: &str, reason: &str) {
-        tracing::info!(
-            id          = %proposal.id,
-            rejected_by = %rejected_by,
-            reason      = %reason,
-            "proposal rejected"
-        );
     }
 }

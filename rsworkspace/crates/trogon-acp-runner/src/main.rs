@@ -122,7 +122,6 @@ async fn main() -> anyhow::Result<()> {
 
     let http_client = reqwest::Client::new();
     let tool_context = Arc::new(ToolContext {
-        http_client: http_client.clone(),
         proxy_url: proxy_url.clone(),
     });
 

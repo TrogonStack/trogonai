@@ -23,12 +23,33 @@ use trogon_agent_core::agent_loop::{ElicitationProvider, PermissionChecker};
 
 // ── AnthropicClient trait ──────────────────────────────────────────────────────
 
+/// Error returned by [`AnthropicClient::complete`].
+///
+/// `Permanent` means the request was rejected with a non-retryable 4xx — retrying
+/// won't help. `Transient` covers transport failures, timeouts, 5xx, and 429 —
+/// the upstream may recover on a subsequent attempt.
+#[derive(Debug, Clone)]
+pub enum AnthropicClientError {
+    Permanent(String),
+    Transient(String),
+}
+
+impl std::fmt::Display for AnthropicClientError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Permanent(msg) | Self::Transient(msg) => f.write_str(msg),
+        }
+    }
+}
+
+impl std::error::Error for AnthropicClientError {}
+
 /// Trait for sending a request to the Anthropic messages API.
 pub trait AnthropicClient: Send + Sync + 'static {
     fn complete<'a>(
         &'a self,
         body: serde_json::Value,
-    ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, reqwest::Error>> + Send + 'a>>;
+    ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, AnthropicClientError>> + Send + 'a>>;
 }
 
 /// Concrete [`AnthropicClient`] backed by a [`reqwest::Client`].
@@ -52,7 +73,8 @@ impl AnthropicClient for ReqwestAnthropicClient {
     fn complete<'a>(
         &'a self,
         body: serde_json::Value,
-    ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, reqwest::Error>> + Send + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, AnthropicClientError>> + Send + 'a>>
+    {
         Box::pin(async move {
             // Retry up to 3 times on transient errors. Backoff: 2s → 4s → 8s.
             //
@@ -68,7 +90,7 @@ impl AnthropicClient for ReqwestAnthropicClient {
             //
             // Non-retryable 4xx (400, 401, 403) also become `reqwest::Error`
             // via `error_for_status()` but `is_retryable_error` returns false
-            // for those status codes, so they propagate immediately to the caller.
+            // for those status codes, so they propagate as Permanent errors.
             let mut attempts = 0u32;
             loop {
                 let send_result = self
@@ -96,7 +118,7 @@ impl AnthropicClient for ReqwestAnthropicClient {
                         tokio::time::sleep(std::time::Duration::from_secs(1 << attempts)).await;
                         continue;
                     }
-                    Err(e) => return Err(e),
+                    Err(e) => return Err(AnthropicClientError::Transient(e.to_string())),
                 };
 
                 // 429: respect Retry-After header (default: 60 s).
@@ -128,7 +150,9 @@ impl AnthropicClient for ReqwestAnthropicClient {
                         tokio::time::sleep(std::time::Duration::from_secs(1 << attempts)).await;
                         continue;
                     }
-                    Err(e) => return Err(e),
+                    Err(e) => {
+                        return Err(reqwest_error_to_anthropic_error(e));
+                    }
                 };
 
                 match response.json::<serde_json::Value>().await {
@@ -142,7 +166,7 @@ impl AnthropicClient for ReqwestAnthropicClient {
                         );
                         tokio::time::sleep(std::time::Duration::from_secs(1 << attempts)).await;
                     }
-                    Err(e) => return Err(e),
+                    Err(e) => return Err(AnthropicClientError::Transient(e.to_string())),
                 }
             }
         })
@@ -165,6 +189,22 @@ fn is_retryable_error(e: &reqwest::Error) -> bool {
         || e.is_timeout()
         || e.is_request()
         || e.status().map(|s| s.is_server_error()).unwrap_or(false)
+}
+
+/// Converts a `reqwest::Error` (from `error_for_status`) into `AnthropicClientError`.
+///
+/// 4xx errors (except 429, which is retried before reaching this) are `Permanent`
+/// since retrying the same broken request won't help. Everything else is `Transient`.
+fn reqwest_error_to_anthropic_error(e: reqwest::Error) -> AnthropicClientError {
+    let is_permanent = e
+        .status()
+        .map(|s| s.is_client_error() && s != 429)
+        .unwrap_or(false);
+    if is_permanent {
+        AnthropicClientError::Permanent(e.to_string())
+    } else {
+        AnthropicClientError::Transient(e.to_string())
+    }
 }
 
 /// Parse the `Retry-After` header value as a number of seconds.
@@ -194,7 +234,7 @@ pub mod mock {
         fn complete<'a>(
             &'a self,
             _body: serde_json::Value,
-        ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, reqwest::Error>> + Send + 'a>>
+        ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, AnthropicClientError>> + Send + 'a>>
         {
             let resp = self.response.clone();
             Box::pin(async move { Ok(resp) })
@@ -205,24 +245,35 @@ pub mod mock {
     ///
     /// Panics if called when the queue is empty — useful for asserting Anthropic
     /// is never called (pass an empty `Vec`).
+    ///
+    /// All request bodies passed to `complete` are recorded in `captured_bodies`
+    /// so tests can assert on what was sent to the API.
     pub struct SequencedMockAnthropicClient {
         responses: Mutex<VecDeque<serde_json::Value>>,
+        captured: Mutex<Vec<serde_json::Value>>,
     }
 
     impl SequencedMockAnthropicClient {
         pub fn new(responses: Vec<serde_json::Value>) -> Self {
             Self {
                 responses: Mutex::new(responses.into_iter().collect()),
+                captured: Mutex::new(Vec::new()),
             }
+        }
+
+        /// Returns all request bodies received by `complete`, in call order.
+        pub fn captured_bodies(&self) -> Vec<serde_json::Value> {
+            self.captured.lock().unwrap().clone()
         }
     }
 
     impl AnthropicClient for SequencedMockAnthropicClient {
         fn complete<'a>(
             &'a self,
-            _body: serde_json::Value,
-        ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, reqwest::Error>> + Send + 'a>>
+            body: serde_json::Value,
+        ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, AnthropicClientError>> + Send + 'a>>
         {
+            self.captured.lock().unwrap().push(body);
             let resp = self
                 .responses
                 .lock()
@@ -233,7 +284,7 @@ pub mod mock {
         }
     }
 
-    /// An `AnthropicClient` that always returns a `reqwest::Error` — used to
+    /// An `AnthropicClient` that always returns a transient error — used to
     /// test graceful degradation paths that call the LLM and handle failure.
     pub struct AlwaysErrAnthropicClient;
 
@@ -241,16 +292,9 @@ pub mod mock {
         fn complete<'a>(
             &'a self,
             _body: serde_json::Value,
-        ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, reqwest::Error>> + Send + 'a>>
+        ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, AnthropicClientError>> + Send + 'a>>
         {
-            Box::pin(async move {
-                // Construct a real reqwest::Error via a URL-parse failure
-                // (no network I/O — the build() call fails synchronously).
-                Err(reqwest::Client::new()
-                    .get("not a url at all:///")
-                    .build()
-                    .unwrap_err())
-            })
+            Box::pin(async move { Err(AnthropicClientError::Transient("simulated error".into())) })
         }
     }
 }
@@ -390,7 +434,7 @@ struct AnthropicResponse {
 
 #[derive(Debug)]
 pub enum AgentError {
-    Http(reqwest::Error),
+    Http(AnthropicClientError),
     MaxIterationsReached,
     UnexpectedStopReason(String),
     /// NATS KV timed out on the initial `get_promise` load after all retries.
@@ -1260,11 +1304,7 @@ impl AgentLoop {
                         // redelivery wastes Anthropic credits on a hopeless run.
                         // Exhausted 429 retries and 5xx / transport errors use
                         // Failed — NATS redelivery may succeed.
-                        let terminal_status = if e
-                            .status()
-                            .map(|s| s.is_client_error() && s != 429)
-                            .unwrap_or(false)
-                        {
+                        let terminal_status = if matches!(e, AnthropicClientError::Permanent(_)) {
                             crate::promise_store::PromiseStatus::PermanentFailed
                         } else {
                             crate::promise_store::PromiseStatus::Failed
@@ -1279,11 +1319,7 @@ impl AgentLoop {
                             "HTTP error",
                         )
                         .await;
-                    } else if e
-                        .status()
-                        .map(|s| s.is_client_error() && s != 429)
-                        .unwrap_or(false)
-                    {
+                    } else if matches!(e, AnthropicClientError::Permanent(_)) {
                         // checkpoint=None (CAS revision lost) + deterministic 4xx — attempt fresh write
                         // to prevent infinite startup-recovery cycling on a hopeless run.
                         if let (Some(store), Some(pid)) = (&self.promise_store, &self.promise_id) {
@@ -2383,12 +2419,7 @@ mod tests {
 
     #[test]
     fn agent_error_source_for_http_variant() {
-        // Construct a dummy reqwest error via a failed parse (no network needed).
-        let err = reqwest::Client::new()
-            .get("not a url at all:///")
-            .build()
-            .unwrap_err();
-        let agent_err = AgentError::Http(err);
+        let agent_err = AgentError::Http(AnthropicClientError::Transient("simulated error".into()));
         assert!(std::error::Error::source(&agent_err).is_some());
     }
 
@@ -2518,11 +2549,11 @@ mod tests {
     // ── is_flag_enabled ───────────────────────────────────────────────────────
 
     fn make_test_agent(split_client: Option<trogon_splitio::SplitClient>) -> AgentLoop {
+        use crate::agent_loop::mock::SequencedMockAnthropicClient;
         use crate::flag_client::{AlwaysOnFlagClient, SplitFlagClient};
         use crate::tools::{DefaultToolDispatcher, ToolContext};
         use std::sync::Arc;
 
-        let http = reqwest::Client::new();
         let tool_ctx = Arc::new(ToolContext::for_test("http://127.0.0.1:1", "", "", ""));
 
         let flag_client: Arc<dyn crate::flag_client::FeatureFlagClient> = match split_client {
@@ -2531,11 +2562,7 @@ mod tests {
         };
 
         AgentLoop {
-            anthropic_client: Arc::new(ReqwestAnthropicClient::new(
-                http,
-                "http://127.0.0.1:1".to_string(),
-                String::new(),
-            )),
+            anthropic_client: Arc::new(SequencedMockAnthropicClient::new(vec![])),
             model: "test".to_string(),
             max_iterations: 1,
             tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),
@@ -3567,7 +3594,7 @@ mod tests {
                 body: serde_json::Value,
             ) -> std::pin::Pin<
                 Box<
-                    dyn std::future::Future<Output = Result<serde_json::Value, reqwest::Error>>
+                    dyn std::future::Future<Output = Result<serde_json::Value, AnthropicClientError>>
                         + Send
                         + 'a,
                 >,
@@ -3661,6 +3688,25 @@ mod tests {
     }
 
     // ── is_retryable_error ────────────────────────────────────────────────────
+
+    /// Spin up a minimal TCP server that responds with the given HTTP status code.
+    /// Returns a real `reqwest::Error` for testing the `is_retryable_error` adapter function.
+    async fn make_http_error(status: u16) -> reqwest::Error {
+        use tokio::io::AsyncWriteExt;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            if let Ok((mut stream, _)) = listener.accept().await {
+                let response = format!(
+                    "HTTP/1.1 {status} Status\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                );
+                let _ = stream.write_all(response.as_bytes()).await;
+            }
+        });
+        let client = reqwest::Client::new();
+        let resp = client.get(format!("http://{addr}/")).send().await.unwrap();
+        resp.error_for_status().unwrap_err()
+    }
 
     /// HTTP 5xx errors are retryable — Anthropic-side transient failures.
     #[tokio::test]
@@ -3808,25 +3854,21 @@ mod tests {
 
     // ── HTTP error classification ─────────────────────────────────────────────
 
-    /// Spin up a minimal TCP server that responds with the given HTTP status
-    /// code. Returns a real `reqwest::Error` with that status attached so tests
-    /// can verify status-based promise state transitions without a real
-    /// Anthropic endpoint.
-    async fn make_http_error(status: u16) -> reqwest::Error {
-        use tokio::io::AsyncWriteExt;
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        tokio::spawn(async move {
-            if let Ok((mut stream, _)) = listener.accept().await {
-                let response = format!(
-                    "HTTP/1.1 {status} Status\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-                );
-                let _ = stream.write_all(response.as_bytes()).await;
-            }
-        });
-        let client = reqwest::Client::new();
-        let resp = client.get(format!("http://{addr}/")).send().await.unwrap();
-        resp.error_for_status().unwrap_err()
+    struct FixedErrorClient(AnthropicClientError);
+    impl AnthropicClient for FixedErrorClient {
+        fn complete<'a>(
+            &'a self,
+            _body: serde_json::Value,
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<Output = Result<serde_json::Value, AnthropicClientError>>
+                    + Send
+                    + 'a,
+            >,
+        > {
+            let e = self.0.clone();
+            Box::pin(async move { Err(e) })
+        }
     }
 
     /// A non-retryable 4xx HTTP error (status 400) must write `PermanentFailed`
@@ -3837,37 +3879,12 @@ mod tests {
         use crate::promise_store::mock::MockPromiseStore;
         use crate::promise_store::{PromiseRepository, PromiseStatus};
         use crate::tools::mock::MockToolDispatcher;
-        use std::sync::Mutex;
-
-        let err = make_http_error(400).await;
-
-        struct ErrorClient(Arc<Mutex<Option<reqwest::Error>>>);
-        impl AnthropicClient for ErrorClient {
-            fn complete<'a>(
-                &'a self,
-                _body: serde_json::Value,
-            ) -> std::pin::Pin<
-                Box<
-                    dyn std::future::Future<Output = Result<serde_json::Value, reqwest::Error>>
-                        + Send
-                        + 'a,
-                >,
-            > {
-                let e = self
-                    .0
-                    .lock()
-                    .unwrap()
-                    .take()
-                    .expect("error already consumed");
-                Box::pin(async move { Err(e) })
-            }
-        }
 
         let store = Arc::new(MockPromiseStore::new());
         store.insert_promise(make_test_promise("p1"));
 
         let agent = make_durable_agent(
-            Arc::new(ErrorClient(Arc::new(Mutex::new(Some(err))))),
+            Arc::new(FixedErrorClient(AnthropicClientError::Permanent("400 Bad Request".into()))),
             Arc::new(MockToolDispatcher::new("unused")),
             Arc::clone(&store) as Arc<dyn PromiseRepository>,
             "p1",
@@ -3891,37 +3908,12 @@ mod tests {
         use crate::promise_store::mock::MockPromiseStore;
         use crate::promise_store::{PromiseRepository, PromiseStatus};
         use crate::tools::mock::MockToolDispatcher;
-        use std::sync::Mutex;
-
-        let err = make_http_error(500).await;
-
-        struct ErrorClient(Arc<Mutex<Option<reqwest::Error>>>);
-        impl AnthropicClient for ErrorClient {
-            fn complete<'a>(
-                &'a self,
-                _body: serde_json::Value,
-            ) -> std::pin::Pin<
-                Box<
-                    dyn std::future::Future<Output = Result<serde_json::Value, reqwest::Error>>
-                        + Send
-                        + 'a,
-                >,
-            > {
-                let e = self
-                    .0
-                    .lock()
-                    .unwrap()
-                    .take()
-                    .expect("error already consumed");
-                Box::pin(async move { Err(e) })
-            }
-        }
 
         let store = Arc::new(MockPromiseStore::new());
         store.insert_promise(make_test_promise("p1"));
 
         let agent = make_durable_agent(
-            Arc::new(ErrorClient(Arc::new(Mutex::new(Some(err))))),
+            Arc::new(FixedErrorClient(AnthropicClientError::Transient("500 Internal Server Error".into()))),
             Arc::new(MockToolDispatcher::new("unused")),
             Arc::clone(&store) as Arc<dyn PromiseRepository>,
             "p1",
@@ -4807,7 +4799,7 @@ mod tests {
                 body: serde_json::Value,
             ) -> std::pin::Pin<
                 Box<
-                    dyn std::future::Future<Output = Result<serde_json::Value, reqwest::Error>>
+                    dyn std::future::Future<Output = Result<serde_json::Value, AnthropicClientError>>
                         + Send
                         + 'a,
                 >,
@@ -4897,7 +4889,7 @@ mod tests {
                 body: serde_json::Value,
             ) -> std::pin::Pin<
                 Box<
-                    dyn std::future::Future<Output = Result<serde_json::Value, reqwest::Error>>
+                    dyn std::future::Future<Output = Result<serde_json::Value, AnthropicClientError>>
                         + Send
                         + 'a,
                 >,
@@ -5546,33 +5538,20 @@ mod tests {
         use crate::tools::{ToolContext, mock::MockToolDispatcher};
         use std::future::Future;
         use std::pin::Pin;
-        use std::sync::Mutex;
 
-        struct ErrorClient(Arc<Mutex<Option<reqwest::Error>>>);
+        struct ErrorClient;
         impl AnthropicClient for ErrorClient {
             fn complete<'a>(
                 &'a self,
                 _body: serde_json::Value,
-            ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, reqwest::Error>> + Send + 'a>>
+            ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, AnthropicClientError>> + Send + 'a>>
             {
-                let e = self
-                    .0
-                    .lock()
-                    .unwrap()
-                    .take()
-                    .expect("error already consumed");
-                Box::pin(async move { Err(e) })
+                Box::pin(async move { Err(AnthropicClientError::Transient("simulated error".into())) })
             }
         }
 
-        // A URL-parse error gives a real reqwest::Error without a network call.
-        let err = reqwest::Client::new()
-            .get("not a url at all:///")
-            .build()
-            .unwrap_err();
-
         let agent = AgentLoop {
-            anthropic_client: Arc::new(ErrorClient(Arc::new(Mutex::new(Some(err))))),
+            anthropic_client: Arc::new(ErrorClient),
             model: "test".to_string(),
             max_iterations: 5,
             tool_dispatcher: Arc::new(MockToolDispatcher::new("unused")),
@@ -7573,7 +7552,7 @@ mod tests {
             fn complete<'a>(
                 &'a self,
                 body: serde_json::Value,
-            ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, reqwest::Error>> + Send + 'a>>
+            ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, AnthropicClientError>> + Send + 'a>>
             {
                 *self.captured.lock().unwrap() = Some(body);
                 let resp = self.response.clone();
@@ -7659,7 +7638,7 @@ mod tests {
             fn complete<'a>(
                 &'a self,
                 body: serde_json::Value,
-            ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, reqwest::Error>> + Send + 'a>>
+            ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, AnthropicClientError>> + Send + 'a>>
             {
                 *self.captured.lock().unwrap() = Some(body);
                 let resp = self.response.clone();
@@ -7767,11 +7746,7 @@ mod tests {
     /// for the `Http` variant.
     #[test]
     fn agent_error_http_display_starts_with_http_error() {
-        let err = reqwest::Client::new()
-            .get("not a url at all:///")
-            .build()
-            .unwrap_err();
-        let display = AgentError::Http(err).to_string();
+        let display = AgentError::Http(AnthropicClientError::Transient("connection refused".into())).to_string();
         assert!(
             display.starts_with("HTTP error:"),
             "AgentError::Http display must start with 'HTTP error:'; got: {display}"
@@ -7861,19 +7836,14 @@ mod tests {
             fn complete<'a>(
                 &'a self,
                 _body: serde_json::Value,
-            ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, reqwest::Error>> + Send + 'a>>
+            ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, AnthropicClientError>> + Send + 'a>>
             {
                 let n = self.calls.fetch_add(1, Ordering::SeqCst);
                 if n == 0 {
                     let resp = self.first_response.clone();
                     Box::pin(async move { Ok(resp) })
                 } else {
-                    // Construct a non-retryable error without a real HTTP call.
-                    let err = reqwest::Client::new()
-                        .get("not a url at all:///")
-                        .build()
-                        .unwrap_err();
-                    Box::pin(async move { Err(err) })
+                    Box::pin(async move { Err(AnthropicClientError::Transient("simulated error".into())) })
                 }
             }
         }
@@ -8083,12 +8053,8 @@ mod tests {
         );
 
         assert!(
-            result.is_err(),
-            "must return Err after all retries exhausted"
-        );
-        assert!(
-            result.unwrap_err().is_connect(),
-            "final error must be a connect error"
+            matches!(result.unwrap_err(), AnthropicClientError::Transient(_)),
+            "connect error after exhausted retries must be Transient"
         );
     }
 
@@ -8143,8 +8109,8 @@ mod tests {
 
         let err = result.expect_err("must fail after exhausting retries on 5xx");
         assert!(
-            err.status().map(|s| s.is_server_error()).unwrap_or(false),
-            "final error must carry a 5xx status; got: {err}"
+            matches!(err, AnthropicClientError::Transient(_)),
+            "5xx error after exhausted retries must be Transient; got: {err}"
         );
     }
 
@@ -8203,10 +8169,9 @@ mod tests {
         );
 
         let err = result.expect_err("must fail after exhausting 429 retries");
-        assert_eq!(
-            err.status().map(|s| s.as_u16()),
-            Some(429),
-            "final error must carry status 429"
+        assert!(
+            matches!(err, AnthropicClientError::Transient(_)),
+            "429 error after exhausted retries must be Transient; got: {err}"
         );
     }
 
@@ -8233,7 +8198,7 @@ mod tests {
                 body: serde_json::Value,
             ) -> std::pin::Pin<
                 Box<
-                    dyn std::future::Future<Output = Result<serde_json::Value, reqwest::Error>>
+                    dyn std::future::Future<Output = Result<serde_json::Value, AnthropicClientError>>
                         + Send
                         + 'a,
                 >,
@@ -9743,7 +9708,7 @@ mod tests {
             fn complete<'a>(
                 &'a self,
                 _body: serde_json::Value,
-            ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, reqwest::Error>> + Send + 'a>>
+            ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, AnthropicClientError>> + Send + 'a>>
             {
                 let n = self.count.fetch_add(1, Ordering::SeqCst);
                 let tool_use_resp = serde_json::json!({
@@ -9868,6 +9833,8 @@ mod tests {
             tenant_id: "test".to_string(),
             promise_store: None,
             promise_id: None,
+            permission_checker: None,
+            elicitation_provider: None,
         };
 
         let result = agent
@@ -9900,7 +9867,7 @@ mod tests {
                 &'a self,
                 _body: serde_json::Value,
             ) -> Pin<
-                Box<dyn Future<Output = Result<serde_json::Value, reqwest::Error>> + Send + 'a>,
+                Box<dyn Future<Output = Result<serde_json::Value, AnthropicClientError>> + Send + 'a>,
             > {
                 let n = self.count.fetch_add(1, Ordering::SeqCst);
                 let low = serde_json::json!({
@@ -9950,6 +9917,8 @@ mod tests {
             tenant_id: "test".to_string(),
             promise_store: None,
             promise_id: None,
+            permission_checker: None,
+            elicitation_provider: None,
         };
 
         let result = agent

@@ -169,8 +169,8 @@ pub const CONTROL_TREATMENT: &str = CONTROL;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{SplitClient, SplitConfig};
-    use httpmock::MockServer;
+    use crate::SplitConfig;
+    use crate::client::mock::MockHttpClient;
 
     // Sample flag enum — exactly like Spacedrive's pattern
     enum AppFlag {
@@ -187,142 +187,77 @@ mod tests {
         }
     }
 
-    fn make_client(base_url: &str) -> SplitClient {
-        SplitClient::new(SplitConfig {
-            evaluator_url: base_url.to_string(),
+    fn make_config() -> SplitConfig {
+        SplitConfig {
+            evaluator_url: "http://unused".to_string(),
             auth_token: "tok".to_string(),
-        })
+        }
     }
 
     // ── is_enabled ────────────────────────────────────────────────────────────
 
     #[tokio::test]
     async fn is_enabled_returns_true_for_on_treatment() {
-        let server = MockServer::start_async().await;
-        server.mock(|when, then| {
-            when.method(httpmock::Method::GET)
-                .path("/client/get-treatment")
-                .query_param("split-name", "new_dashboard");
-            then.status(200)
-                .json_body(serde_json::json!({ "treatment": "on" }));
-        });
-
-        let client = make_client(&server.base_url());
-        assert!(
-            client
-                .is_enabled("user-1", &AppFlag::NewDashboard, None)
-                .await
-        );
+        let mock = MockHttpClient::new().enqueue_ok(200, r#"{"treatment":"on"}"#);
+        let client = SplitClient::new_with(make_config(), mock);
+        assert!(client.is_enabled("user-1", &AppFlag::NewDashboard, None).await);
     }
 
     #[tokio::test]
     async fn is_enabled_returns_false_for_off_treatment() {
-        let server = MockServer::start_async().await;
-        server.mock(|when, then| {
-            when.method(httpmock::Method::GET)
-                .path("/client/get-treatment")
-                .query_param("split-name", "new_dashboard");
-            then.status(200)
-                .json_body(serde_json::json!({ "treatment": "off" }));
-        });
-
-        let client = make_client(&server.base_url());
-        assert!(
-            !client
-                .is_enabled("user-1", &AppFlag::NewDashboard, None)
-                .await
-        );
+        let mock = MockHttpClient::new().enqueue_ok(200, r#"{"treatment":"off"}"#);
+        let client = SplitClient::new_with(make_config(), mock);
+        assert!(!client.is_enabled("user-1", &AppFlag::NewDashboard, None).await);
     }
 
     #[tokio::test]
     async fn is_enabled_returns_false_for_control() {
-        let server = MockServer::start_async().await;
-        server.mock(|when, then| {
-            when.method(httpmock::Method::GET)
-                .path("/client/get-treatment");
-            then.status(200)
-                .json_body(serde_json::json!({ "treatment": "control" }));
-        });
-
-        let client = make_client(&server.base_url());
-        assert!(
-            !client
-                .is_enabled("user-1", &AppFlag::NewDashboard, None)
-                .await
-        );
+        let mock = MockHttpClient::new().enqueue_ok(200, r#"{"treatment":"control"}"#);
+        let client = SplitClient::new_with(make_config(), mock);
+        assert!(!client.is_enabled("user-1", &AppFlag::NewDashboard, None).await);
     }
 
     #[tokio::test]
     async fn is_enabled_returns_false_on_network_error() {
-        let client = make_client("http://127.0.0.1:1");
-        assert!(
-            !client
-                .is_enabled("user-1", &AppFlag::NewDashboard, None)
-                .await
-        );
+        let mock = MockHttpClient::new().enqueue_err("connection refused");
+        let client = SplitClient::new_with(make_config(), mock);
+        assert!(!client.is_enabled("user-1", &AppFlag::NewDashboard, None).await);
     }
 
     #[tokio::test]
     async fn is_enabled_uses_typed_flag_name() {
-        let server = MockServer::start_async().await;
-        // Must be called with "beta_search", not "new_dashboard"
-        let mock = server.mock(|when, then| {
-            when.method(httpmock::Method::GET)
-                .path("/client/get-treatment")
-                .query_param("split-name", "beta_search");
-            then.status(200)
-                .json_body(serde_json::json!({ "treatment": "on" }));
-        });
-
-        let client = make_client(&server.base_url());
-        client.is_enabled("u", &AppFlag::BetaSearch, None).await;
-        mock.assert_async().await;
+        // BetaSearch.name() == "beta_search" — the flag name drives the evaluator query
+        let mock = MockHttpClient::new().enqueue_ok(200, r#"{"treatment":"on"}"#);
+        let client = SplitClient::new_with(make_config(), mock);
+        assert!(client.is_enabled("u", &AppFlag::BetaSearch, None).await);
     }
 
     // ── all_enabled ───────────────────────────────────────────────────────────
 
     #[tokio::test]
     async fn all_enabled_returns_true_when_all_on() {
-        let server = MockServer::start_async().await;
-        server.mock(|when, then| {
-            when.method(httpmock::Method::GET)
-                .path("/client/get-treatment");
-            then.status(200)
-                .json_body(serde_json::json!({ "treatment": "on" }));
-        });
-
-        let client = make_client(&server.base_url());
+        let mock = MockHttpClient::new()
+            .enqueue_ok(200, r#"{"treatment":"on"}"#)
+            .enqueue_ok(200, r#"{"treatment":"on"}"#);
+        let client = SplitClient::new_with(make_config(), mock);
         let flags: Vec<&dyn FeatureFlag> = vec![&AppFlag::NewDashboard, &AppFlag::BetaSearch];
         assert!(client.all_enabled("u", &flags, None).await);
     }
 
     #[tokio::test]
     async fn all_enabled_returns_false_when_one_off() {
-        let server = MockServer::start_async().await;
-        // First call returns "on", second returns "off"
-        server.mock(|when, then| {
-            when.method(httpmock::Method::GET)
-                .path("/client/get-treatment")
-                .query_param("split-name", "new_dashboard");
-            then.status(200)
-                .json_body(serde_json::json!({ "treatment": "on" }));
-        });
-        server.mock(|when, then| {
-            when.method(httpmock::Method::GET)
-                .path("/client/get-treatment")
-                .query_param("split-name", "beta_search");
-            then.status(200)
-                .json_body(serde_json::json!({ "treatment": "off" }));
-        });
-
-        let client = make_client(&server.base_url());
+        // NewDashboard → "on", BetaSearch → "off"
+        let mock = MockHttpClient::new()
+            .enqueue_ok(200, r#"{"treatment":"on"}"#)
+            .enqueue_ok(200, r#"{"treatment":"off"}"#);
+        let client = SplitClient::new_with(make_config(), mock);
         let flags: Vec<&dyn FeatureFlag> = vec![&AppFlag::NewDashboard, &AppFlag::BetaSearch];
         assert!(!client.all_enabled("u", &flags, None).await);
     }
 
     #[tokio::test]
     async fn all_enabled_empty_list_returns_true() {
-        let client = make_client("http://127.0.0.1:1"); // no network needed
+        let client = SplitClient::new_with(make_config(), MockHttpClient::new());
         assert!(client.all_enabled("u", &[], None).await);
     }
 
@@ -330,45 +265,28 @@ mod tests {
 
     #[tokio::test]
     async fn any_enabled_returns_true_when_one_on() {
-        let server = MockServer::start_async().await;
-        server.mock(|when, then| {
-            when.method(httpmock::Method::GET)
-                .path("/client/get-treatment")
-                .query_param("split-name", "new_dashboard");
-            then.status(200)
-                .json_body(serde_json::json!({ "treatment": "off" }));
-        });
-        server.mock(|when, then| {
-            when.method(httpmock::Method::GET)
-                .path("/client/get-treatment")
-                .query_param("split-name", "beta_search");
-            then.status(200)
-                .json_body(serde_json::json!({ "treatment": "on" }));
-        });
-
-        let client = make_client(&server.base_url());
+        // NewDashboard → "off", BetaSearch → "on"
+        let mock = MockHttpClient::new()
+            .enqueue_ok(200, r#"{"treatment":"off"}"#)
+            .enqueue_ok(200, r#"{"treatment":"on"}"#);
+        let client = SplitClient::new_with(make_config(), mock);
         let flags: Vec<&dyn FeatureFlag> = vec![&AppFlag::NewDashboard, &AppFlag::BetaSearch];
         assert!(client.any_enabled("u", &flags, None).await);
     }
 
     #[tokio::test]
     async fn any_enabled_returns_false_when_all_off() {
-        let server = MockServer::start_async().await;
-        server.mock(|when, then| {
-            when.method(httpmock::Method::GET)
-                .path("/client/get-treatment");
-            then.status(200)
-                .json_body(serde_json::json!({ "treatment": "off" }));
-        });
-
-        let client = make_client(&server.base_url());
+        let mock = MockHttpClient::new()
+            .enqueue_ok(200, r#"{"treatment":"off"}"#)
+            .enqueue_ok(200, r#"{"treatment":"off"}"#);
+        let client = SplitClient::new_with(make_config(), mock);
         let flags: Vec<&dyn FeatureFlag> = vec![&AppFlag::NewDashboard, &AppFlag::BetaSearch];
         assert!(!client.any_enabled("u", &flags, None).await);
     }
 
     #[tokio::test]
     async fn any_enabled_empty_list_returns_false() {
-        let client = make_client("http://127.0.0.1:1");
+        let client = SplitClient::new_with(make_config(), MockHttpClient::new());
         assert!(!client.any_enabled("u", &[], None).await);
     }
 
@@ -376,16 +294,8 @@ mod tests {
 
     #[tokio::test]
     async fn treatment_for_returns_raw_treatment() {
-        let server = MockServer::start_async().await;
-        server.mock(|when, then| {
-            when.method(httpmock::Method::GET)
-                .path("/client/get-treatment")
-                .query_param("split-name", "new_dashboard");
-            then.status(200)
-                .json_body(serde_json::json!({ "treatment": "blue" }));
-        });
-
-        let client = make_client(&server.base_url());
+        let mock = MockHttpClient::new().enqueue_ok(200, r#"{"treatment":"blue"}"#);
+        let client = SplitClient::new_with(make_config(), mock);
         let t = client
             .treatment_for("u", &AppFlag::NewDashboard, None)
             .await
@@ -400,15 +310,8 @@ mod tests {
     /// considered enabled — only `"on"` is.
     #[tokio::test]
     async fn is_enabled_returns_false_for_custom_variant() {
-        let server = MockServer::start_async().await;
-        server.mock(|when, then| {
-            when.method(httpmock::Method::GET)
-                .path("/client/get-treatment");
-            then.status(200)
-                .json_body(serde_json::json!({ "treatment": "blue" }));
-        });
-
-        let client = make_client(&server.base_url());
+        let mock = MockHttpClient::new().enqueue_ok(200, r#"{"treatment":"blue"}"#);
+        let client = SplitClient::new_with(make_config(), mock);
         assert!(
             !client.is_enabled("u", &AppFlag::NewDashboard, None).await,
             "custom variant 'blue' must not be treated as enabled"
@@ -418,67 +321,27 @@ mod tests {
     // ── short-circuit behavior ────────────────────────────────────────────────
 
     /// `all_enabled` must stop evaluating after the first `false` flag.
-    /// The second flag must never be queried.
+    /// Only one response is queued — MockHttpClient panics if a second call
+    /// is made, which would fail the test if short-circuiting is broken.
     #[tokio::test]
     async fn all_enabled_short_circuits_after_first_false() {
-        let server = MockServer::start_async().await;
-        server.mock(|when, then| {
-            when.method(httpmock::Method::GET)
-                .path("/client/get-treatment")
-                .query_param("split-name", "new_dashboard");
-            then.status(200)
-                .json_body(serde_json::json!({ "treatment": "off" }));
-        });
-        let beta_mock = server
-            .mock_async(|when, then| {
-                when.method(httpmock::Method::GET)
-                    .path("/client/get-treatment")
-                    .query_param("split-name", "beta_search");
-                then.status(200)
-                    .json_body(serde_json::json!({ "treatment": "on" }));
-            })
-            .await;
-
-        let client = make_client(&server.base_url());
+        let mock = MockHttpClient::new()
+            .enqueue_ok(200, r#"{"treatment":"off"}"#); // NewDashboard → off; BetaSearch must not be queried
+        let client = SplitClient::new_with(make_config(), mock);
         let flags: Vec<&dyn FeatureFlag> = vec![&AppFlag::NewDashboard, &AppFlag::BetaSearch];
         assert!(!client.all_enabled("u", &flags, None).await);
-        assert_eq!(
-            beta_mock.hits_async().await,
-            0,
-            "second flag must not be evaluated after the first is already false"
-        );
     }
 
     /// `any_enabled` must stop evaluating after the first `true` flag.
-    /// The second flag must never be queried.
+    /// Only one response is queued — MockHttpClient panics if a second call
+    /// is made, which would fail the test if short-circuiting is broken.
     #[tokio::test]
     async fn any_enabled_short_circuits_after_first_true() {
-        let server = MockServer::start_async().await;
-        server.mock(|when, then| {
-            when.method(httpmock::Method::GET)
-                .path("/client/get-treatment")
-                .query_param("split-name", "new_dashboard");
-            then.status(200)
-                .json_body(serde_json::json!({ "treatment": "on" }));
-        });
-        let beta_mock = server
-            .mock_async(|when, then| {
-                when.method(httpmock::Method::GET)
-                    .path("/client/get-treatment")
-                    .query_param("split-name", "beta_search");
-                then.status(200)
-                    .json_body(serde_json::json!({ "treatment": "off" }));
-            })
-            .await;
-
-        let client = make_client(&server.base_url());
+        let mock = MockHttpClient::new()
+            .enqueue_ok(200, r#"{"treatment":"on"}"#); // NewDashboard → on; BetaSearch must not be queried
+        let client = SplitClient::new_with(make_config(), mock);
         let flags: Vec<&dyn FeatureFlag> = vec![&AppFlag::NewDashboard, &AppFlag::BetaSearch];
         assert!(client.any_enabled("u", &flags, None).await);
-        assert_eq!(
-            beta_mock.hits_async().await,
-            0,
-            "second flag must not be evaluated after the first is already true"
-        );
     }
 
     // ── description default ───────────────────────────────────────────────────

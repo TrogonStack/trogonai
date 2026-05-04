@@ -1335,13 +1335,14 @@ mod tests {
                 model: "claude-opus-4-6".to_string(),
                 max_iterations: 10,
                 thinking_budget: None,
-                tool_context: Arc::new(ToolContext { http_client: http, proxy_url: String::new() }),
+                tool_context: Arc::new(ToolContext { proxy_url: String::new() }),
                 memory_owner: None,
                 memory_repo: None,
                 memory_path: None,
                 mcp_tool_defs: vec![],
                 mcp_dispatch: vec![],
                 permission_checker: None,
+                elicitation_provider: None,
             }
         }
 
@@ -1363,6 +1364,7 @@ mod tests {
                     make_agent_loop(),
                     "acp",
                     "claude-opus-4-6",
+                    None,
                     None,
                     gateway_config,
                 );

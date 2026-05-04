@@ -73,11 +73,11 @@ struct SetWebhookResponse {
     description: Option<String>,
 }
 
-trait HttpSend {
+trait HttpPost {
     type Response: HttpResponse;
     type Error;
 
-    async fn send(&self, request: reqwest::Request) -> Result<Self::Response, Self::Error>;
+    async fn post_json<B: Serialize>(&self, url: &str, body: &B) -> Result<Self::Response, Self::Error>;
 }
 
 trait HttpResponse {
@@ -88,12 +88,12 @@ trait HttpResponse {
     async fn json<T: DeserializeOwned>(self) -> Result<T, Self::Error>;
 }
 
-impl HttpSend for reqwest::Client {
+impl HttpPost for reqwest::Client {
     type Response = reqwest::Response;
     type Error = reqwest::Error;
 
-    async fn send(&self, request: reqwest::Request) -> Result<Self::Response, Self::Error> {
-        self.execute(request).await
+    async fn post_json<B: Serialize>(&self, url: &str, body: &B) -> Result<Self::Response, Self::Error> {
+        self.post(url).json(body).send().await
     }
 }
 
@@ -120,17 +120,16 @@ pub async fn register_webhook(
     config: &TelegramSourceConfig,
     http_client: &reqwest::Client,
 ) -> Result<(), RegistrationError> {
-    register_with_http(http_client, http_client, TELEGRAM_API_BASE, config).await
+    register_with_http(http_client, TELEGRAM_API_BASE, config).await
 }
 
 async fn register_with_http<H>(
-    request_client: &reqwest::Client,
     http: &H,
     api_base: &str,
     config: &TelegramSourceConfig,
 ) -> Result<(), RegistrationError>
 where
-    H: HttpSend,
+    H: HttpPost,
     RegistrationError: From<H::Error> + From<<H::Response as HttpResponse>::Error>,
 {
     let Some(registration) = config.registration.as_ref() else {
@@ -143,7 +142,7 @@ where
         webhook_secret: config.webhook_secret.as_str().to_string(),
     };
 
-    let response = set_webhook(request_client, http, api_base, &request).await?;
+    let response = set_webhook(http, api_base, &request).await?;
 
     if !response.status.is_success() || !response.ok {
         return Err(RegistrationError::Rejected {
@@ -159,13 +158,12 @@ where
 }
 
 async fn set_webhook<H>(
-    request_client: &reqwest::Client,
     http: &H,
     api_base: &str,
     request: &SetWebhook,
 ) -> Result<SetWebhookResponse, RegistrationError>
 where
-    H: HttpSend,
+    H: HttpPost,
     RegistrationError: From<H::Error> + From<<H::Response as HttpResponse>::Error>,
 {
     let endpoint = set_webhook_endpoint(api_base, &request.bot_token);
@@ -174,8 +172,7 @@ where
         secret_token: &request.webhook_secret,
     };
 
-    let http_request = request_client.post(endpoint).json(&request_body).build()?;
-    let response = http.send(http_request).await.map_err(RegistrationError::from)?;
+    let response = http.post_json(&endpoint, &request_body).await.map_err(RegistrationError::from)?;
     let status = response.status();
     let body = response
         .json::<TelegramResponse>()
@@ -199,7 +196,6 @@ mod tests {
     use crate::config::{
         TelegramBotToken, TelegramPublicWebhookUrl, TelegramWebhookRegistrationConfig, TelegramWebhookSecret,
     };
-    use reqwest::header::CONTENT_TYPE;
     use serde_json::{Value, json};
     use std::error::Error;
     #[cfg(coverage)]
@@ -214,11 +210,9 @@ mod tests {
     const TEST_BOT_TOKEN: &str = "123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
     #[derive(Clone, Debug, PartialEq, Eq)]
-    struct RecordedHttpRequest {
-        method: reqwest::Method,
+    struct RecordedRequest {
         url: String,
-        content_type: Option<String>,
-        body: Vec<u8>,
+        body: Value,
     }
 
     #[derive(Debug)]
@@ -284,44 +278,31 @@ mod tests {
     }
 
     #[derive(Default)]
-    struct FakeHttpSend {
-        requests: Mutex<Vec<RecordedHttpRequest>>,
+    struct FakeHttpPost {
+        requests: Mutex<Vec<RecordedRequest>>,
         response: Mutex<Option<Result<FakeHttpResponse, FakeHttpError>>>,
     }
 
-    impl FakeHttpSend {
+    impl FakeHttpPost {
         async fn respond_with(&self, response: Result<FakeHttpResponse, FakeHttpError>) {
             *self.response.lock().await = Some(response);
         }
 
-        async fn requests(&self) -> Vec<RecordedHttpRequest> {
+        async fn requests(&self) -> Vec<RecordedRequest> {
             self.requests.lock().await.clone()
         }
     }
 
-    impl HttpSend for FakeHttpSend {
+    impl HttpPost for FakeHttpPost {
         type Response = FakeHttpResponse;
         type Error = FakeHttpError;
 
-        async fn send(&self, request: reqwest::Request) -> Result<Self::Response, Self::Error> {
-            let content_type = request
-                .headers()
-                .get(CONTENT_TYPE)
-                .and_then(|value| value.to_str().ok())
-                .map(str::to_string);
-            let body = request
-                .body()
-                .and_then(|body| body.as_bytes())
-                .unwrap_or_default()
-                .to_vec();
-
-            self.requests.lock().await.push(RecordedHttpRequest {
-                method: request.method().clone(),
-                url: request.url().to_string(),
-                content_type,
-                body,
+        async fn post_json<B: Serialize>(&self, url: &str, body: &B) -> Result<Self::Response, Self::Error> {
+            let body_value = serde_json::to_value(body).map_err(FakeHttpError::from)?;
+            self.requests.lock().await.push(RecordedRequest {
+                url: url.to_string(),
+                body: body_value,
             });
-
             self.response
                 .lock()
                 .await
@@ -380,10 +361,9 @@ mod tests {
     async fn missing_registration_is_noop() {
         let mut config = test_config();
         config.registration = None;
-        let request_client = reqwest::Client::new();
-        let http = FakeHttpSend::default();
+        let http = FakeHttpPost::default();
 
-        register_with_http(&request_client, &http, TELEGRAM_API_BASE, &config)
+        register_with_http(&http, TELEGRAM_API_BASE, &config)
             .await
             .unwrap();
 
@@ -402,24 +382,21 @@ mod tests {
     #[tokio::test]
     async fn successful_registration_sets_webhook_with_config_values() {
         let config = test_config();
-        let request_client = reqwest::Client::new();
-        let http = FakeHttpSend::default();
+        let http = FakeHttpPost::default();
 
-        register_with_http(&request_client, &http, TELEGRAM_API_BASE, &config)
+        register_with_http(&http, TELEGRAM_API_BASE, &config)
             .await
             .unwrap();
 
         let requests = http.requests().await;
         assert_eq!(requests.len(), 1);
         let request = &requests[0];
-        assert_eq!(request.method, reqwest::Method::POST);
         assert_eq!(
             request.url,
             "https://api.telegram.org/bot123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ/setWebhook"
         );
-        assert_eq!(request.content_type.as_deref(), Some("application/json"));
         assert_eq!(
-            serde_json::from_slice::<Value>(&request.body).unwrap(),
+            request.body,
             json!({
                 "url": "https://example.com/telegram/webhook",
                 "secret_token": "webhook-secret",
@@ -430,15 +407,14 @@ mod tests {
     #[tokio::test]
     async fn telegram_rejection_preserves_description() {
         let config = test_config();
-        let request_client = reqwest::Client::new();
-        let http = FakeHttpSend::default();
+        let http = FakeHttpPost::default();
         http.respond_with(Ok(FakeHttpResponse::json(
             StatusCode::BAD_REQUEST,
             json!({ "ok": false, "description": "bad token" }),
         )))
         .await;
 
-        let err = register_with_http(&request_client, &http, TELEGRAM_API_BASE, &config)
+        let err = register_with_http(&http, TELEGRAM_API_BASE, &config)
             .await
             .unwrap_err();
 
@@ -452,12 +428,11 @@ mod tests {
     #[tokio::test]
     async fn telegram_rejection_without_description_uses_fallback() {
         let config = test_config();
-        let request_client = reqwest::Client::new();
-        let http = FakeHttpSend::default();
+        let http = FakeHttpPost::default();
         http.respond_with(Ok(FakeHttpResponse::json(StatusCode::OK, json!({ "ok": false }))))
             .await;
 
-        let err = register_with_http(&request_client, &http, TELEGRAM_API_BASE, &config)
+        let err = register_with_http(&http, TELEGRAM_API_BASE, &config)
             .await
             .unwrap_err();
 
@@ -470,11 +445,10 @@ mod tests {
     #[tokio::test]
     async fn http_send_error_propagates() {
         let config = test_config();
-        let request_client = reqwest::Client::new();
-        let http = FakeHttpSend::default();
+        let http = FakeHttpPost::default();
         http.respond_with(Err(FakeHttpError::new("network down"))).await;
 
-        let err = register_with_http(&request_client, &http, TELEGRAM_API_BASE, &config)
+        let err = register_with_http(&http, TELEGRAM_API_BASE, &config)
             .await
             .unwrap_err();
 
@@ -487,11 +461,10 @@ mod tests {
     #[tokio::test]
     async fn http_response_decode_error_propagates() {
         let config = test_config();
-        let request_client = reqwest::Client::new();
-        let http = FakeHttpSend::default();
+        let http = FakeHttpPost::default();
         http.respond_with(Ok(FakeHttpResponse::decode_error("not json"))).await;
 
-        let err = register_with_http(&request_client, &http, TELEGRAM_API_BASE, &config)
+        let err = register_with_http(&http, TELEGRAM_API_BASE, &config)
             .await
             .unwrap_err();
 
@@ -504,15 +477,14 @@ mod tests {
     #[tokio::test]
     async fn http_response_json_error_propagates() {
         let config = test_config();
-        let request_client = reqwest::Client::new();
-        let http = FakeHttpSend::default();
+        let http = FakeHttpPost::default();
         http.respond_with(Ok(FakeHttpResponse::json(
             StatusCode::OK,
             json!({ "description": "missing ok" }),
         )))
         .await;
 
-        let err = register_with_http(&request_client, &http, TELEGRAM_API_BASE, &config)
+        let err = register_with_http(&http, TELEGRAM_API_BASE, &config)
             .await
             .unwrap_err();
 
@@ -529,17 +501,17 @@ mod tests {
             .build()
             .unwrap();
 
-        register_with_http(&client, &client, &api_base, &config).await.unwrap();
+        register_with_http(&client, &api_base, &config).await.unwrap();
     }
 
+    // Verifies that URL-embedded bot tokens are stripped from error messages via `without_url()`.
+    // Uses reqwest::Client directly because the error originates from URL parsing in the concrete layer.
     #[tokio::test]
     async fn request_build_failure_is_sanitized_by_registration_error() {
-        let request_client = reqwest::Client::new();
-        let http = FakeHttpSend::default();
+        let client = reqwest::Client::new();
 
         let err = set_webhook(
-            &request_client,
-            &http,
+            &client,
             "http://not a valid url",
             &SetWebhook {
                 bot_token: TEST_BOT_TOKEN.to_string(),

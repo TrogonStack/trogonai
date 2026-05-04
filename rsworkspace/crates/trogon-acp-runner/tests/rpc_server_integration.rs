@@ -57,7 +57,6 @@ fn make_agent_loop() -> AgentLoop {
         max_iterations: 1,
         thinking_budget: None,
         tool_context: Arc::new(ToolContext {
-            http_client: http,
             proxy_url: "http://127.0.0.1:1".to_string(),
         }),
         memory_owner: None,

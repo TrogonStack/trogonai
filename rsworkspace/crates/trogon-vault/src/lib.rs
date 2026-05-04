@@ -21,6 +21,7 @@
 //! ```
 
 pub mod backends;
+pub mod http;
 pub mod token;
 pub mod vault;
 

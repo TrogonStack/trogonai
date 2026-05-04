@@ -79,7 +79,6 @@ fn make_agent(base_url: &str) -> AgentLoop {
         max_iterations: 5,
         thinking_budget: None,
         tool_context: Arc::new(ToolContext {
-            http_client: http,
             proxy_url: "http://127.0.0.1:1".to_string(),
         }),
         memory_owner: None,
@@ -138,6 +137,7 @@ async fn start_agent_with_compactor(
         agent,
         prefix,
         "claude-test",
+        None,
         None,
         Arc::new(RwLock::new(None)),
     )
@@ -996,7 +996,6 @@ async fn runner_uses_gateway_config_base_url_and_token() {
                 &js,
                 prefix,
                 make_agent("http://127.0.0.1:1"),
-                None,
                 None,
                 gateway_config,
             )

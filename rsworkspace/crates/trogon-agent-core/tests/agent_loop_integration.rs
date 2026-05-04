@@ -16,7 +16,7 @@ use trogon_agent_core::tools::{ToolContext, tool_def};
 fn make_agent(base_url: &str) -> AgentLoop {
     let http = reqwest::Client::new();
     AgentLoop {
-        http_client: http.clone(),
+        http_client: http,
         proxy_url: "http://127.0.0.1:1".to_string(),
         anthropic_token: "test-token".to_string(),
         // Override the Anthropic endpoint so all requests hit our mock server.
@@ -26,7 +26,6 @@ fn make_agent(base_url: &str) -> AgentLoop {
         max_iterations: 5,
         thinking_budget: None,
         tool_context: Arc::new(ToolContext {
-            http_client: http,
             proxy_url: "http://127.0.0.1:1".to_string(),
         }),
         memory_owner: None,
@@ -639,7 +638,6 @@ async fn run_with_extra_headers_and_tools() {
         max_iterations: 5,
         thinking_budget: None,
         tool_context: Arc::new(ToolContext {
-            http_client: http,
             proxy_url: "http://127.0.0.1:1".to_string(),
         }),
         memory_owner: None,
@@ -681,7 +679,6 @@ async fn run_chat_with_system_prompt_tools_and_extra_headers() {
         max_iterations: 5,
         thinking_budget: None,
         tool_context: Arc::new(ToolContext {
-            http_client: http,
             proxy_url: "http://127.0.0.1:1".to_string(),
         }),
         memory_owner: None,
@@ -777,7 +774,6 @@ async fn run_chat_streaming_comprehensive() {
         max_iterations: 5,
         thinking_budget: Some(1000), // enables the thinking branch
         tool_context: Arc::new(ToolContext {
-            http_client: http,
             proxy_url: "http://127.0.0.1:1".to_string(),
         }),
         memory_owner: None,
@@ -895,7 +891,6 @@ async fn run_chat_streaming_permission_denied() {
         max_iterations: 5,
         thinking_budget: None,
         tool_context: Arc::new(ToolContext {
-            http_client: http,
             proxy_url: "http://127.0.0.1:1".to_string(),
         }),
         memory_owner: None,
@@ -1049,7 +1044,6 @@ async fn run_uses_proxy_url_when_no_anthropic_base_url() {
         max_iterations: 1,
         thinking_budget: None,
         tool_context: Arc::new(ToolContext {
-            http_client: http,
             proxy_url: "http://127.0.0.1:1".to_string(),
         }),
         memory_owner: None,

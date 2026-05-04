@@ -234,6 +234,9 @@ pub mod mock {
         /// Value returned by `fetch_github_contents`. `None` simulates a
         /// 404 / unreachable host.
         pub github_contents: Option<Value>,
+        /// Records the last URL passed to `fetch_github_contents` — use
+        /// `last_fetched_url()` to assert on path routing without real HTTP.
+        pub last_fetched_url: std::sync::Mutex<Option<String>>,
     }
 
     impl Default for MockAgentConfig {
@@ -244,7 +247,15 @@ pub mod mock {
                 linear_token: String::new(),
                 slack_token: String::new(),
                 github_contents: None,
+                last_fetched_url: std::sync::Mutex::new(None),
             }
+        }
+    }
+
+    impl MockAgentConfig {
+        /// Returns the last URL that was passed to `fetch_github_contents`.
+        pub fn last_fetched_url(&self) -> Option<String> {
+            self.last_fetched_url.lock().unwrap().clone()
         }
     }
 
@@ -264,9 +275,10 @@ pub mod mock {
 
         fn fetch_github_contents<'a>(
             &'a self,
-            _url: &'a str,
+            url: &'a str,
             _token: &'a str,
         ) -> Pin<Box<dyn Future<Output = Option<Value>> + Send + 'a>> {
+            *self.last_fetched_url.lock().unwrap() = Some(url.to_string());
             let body = self.github_contents.clone();
             Box::pin(async move { body })
         }

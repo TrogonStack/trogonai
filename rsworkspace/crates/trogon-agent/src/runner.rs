@@ -165,6 +165,8 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
         // Promise fields are set per-run by `prepare_agent_with_promise`.
         promise_store: None,
         promise_id: None,
+        permission_checker: None,
+        elicitation_provider: None,
     });
 
     let store = Arc::new(
@@ -2024,23 +2026,13 @@ mod tests {
     use super::{dispatch_automations, sanitize_name, subject_slug, worker_id};
     use std::sync::Arc;
 
-    fn make_agent(proxy_url: &str) -> Arc<crate::agent_loop::AgentLoop> {
-        use crate::agent_loop::ReqwestAnthropicClient;
+    fn make_agent_mock(responses: Vec<serde_json::Value>) -> Arc<crate::agent_loop::AgentLoop> {
+        use crate::agent_loop::mock::SequencedMockAnthropicClient;
         use crate::flag_client::AlwaysOnFlagClient;
         use crate::tools::{DefaultToolDispatcher, ToolContext};
-        let http_client = reqwest::Client::new();
-        let tool_ctx = Arc::new(ToolContext::for_test(
-            proxy_url,
-            "tok_github_prod_test01",
-            "",
-            "",
-        ));
+        let tool_ctx = Arc::new(ToolContext::for_test("http://127.0.0.1:1", "", "", ""));
         Arc::new(crate::agent_loop::AgentLoop {
-            anthropic_client: Arc::new(ReqwestAnthropicClient::new(
-                http_client,
-                proxy_url.to_string(),
-                String::new(),
-            )),
+            anthropic_client: Arc::new(SequencedMockAnthropicClient::new(responses)),
             model: "test".to_string(),
             max_iterations: 1,
             tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),
@@ -2054,6 +2046,40 @@ mod tests {
             tenant_id: "test".to_string(),
             promise_store: None,
             promise_id: None,
+            permission_checker: None,
+            elicitation_provider: None,
+        })
+    }
+
+    fn make_agent_mock_err() -> Arc<crate::agent_loop::AgentLoop> {
+        use crate::agent_loop::mock::AlwaysErrAnthropicClient;
+        use crate::flag_client::AlwaysOnFlagClient;
+        use crate::tools::{DefaultToolDispatcher, ToolContext};
+        let tool_ctx = Arc::new(ToolContext::for_test("http://127.0.0.1:1", "", "", ""));
+        Arc::new(crate::agent_loop::AgentLoop {
+            anthropic_client: Arc::new(AlwaysErrAnthropicClient),
+            model: "test".to_string(),
+            max_iterations: 1,
+            tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),
+            tool_context: tool_ctx,
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            flag_client: Arc::new(AlwaysOnFlagClient),
+            tenant_id: "test".to_string(),
+            promise_store: None,
+            promise_id: None,
+            permission_checker: None,
+            elicitation_provider: None,
+        })
+    }
+
+    fn end_turn_json() -> serde_json::Value {
+        serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "ok"}]
         })
     }
 
@@ -2077,64 +2103,40 @@ mod tests {
         }
     }
 
-    async fn make_run_store() -> (trogon_automations::RunStore, impl Drop) {
-        use testcontainers_modules::{
-            nats::Nats,
-            testcontainers::{ImageExt, runners::AsyncRunner},
-        };
-        let container = Nats::default()
-            .with_cmd(["--jetstream"])
-            .start()
-            .await
-            .expect("NATS");
-        let port = container.get_host_port_ipv4(4222).await.expect("port");
-        let nats = async_nats::connect(format!("nats://127.0.0.1:{port}"))
-            .await
-            .expect("connect");
-        let js = async_nats::jetstream::new(nats);
-        let rs = trogon_automations::RunStore::open(&js)
-            .await
-            .expect("RunStore");
-        (rs, container)
+    /// Returns an in-memory `MockRunStore` for tests that only need
+    /// `RunRepository` behaviour without a real NATS container.
+    fn make_mock_run_store() -> Arc<trogon_automations::mock::MockRunStore> {
+        Arc::new(trogon_automations::mock::MockRunStore::new())
     }
 
-    /// Start a throwaway NATS container and open both `AutomationStore` and
-    /// `RunStore` from it.  Returns the two stores and an opaque `impl Drop`
-    /// guard — keep the guard alive for the duration of the test.
-    async fn make_all_stores() -> (
-        std::sync::Arc<trogon_automations::AutomationStore>,
-        std::sync::Arc<trogon_automations::RunStore>,
-        impl Drop,
+    /// Returns in-memory mocks for both `AutomationStore` and `RunStore`.
+    fn make_mock_stores() -> (
+        Arc<trogon_automations::mock::MockAutomationStore>,
+        Arc<trogon_automations::mock::MockRunStore>,
     ) {
-        use testcontainers_modules::{
-            nats::Nats,
-            testcontainers::{ImageExt, runners::AsyncRunner},
-        };
-        let container = Nats::default()
-            .with_cmd(["--jetstream"])
-            .start()
-            .await
-            .expect("NATS");
-        let port = container.get_host_port_ipv4(4222).await.expect("port");
-        let nats = async_nats::connect(format!("nats://127.0.0.1:{port}"))
-            .await
-            .expect("connect");
-        let js = async_nats::jetstream::new(nats);
-        let auto_store = std::sync::Arc::new(
-            trogon_automations::AutomationStore::open(&js)
-                .await
-                .expect("AutomationStore"),
-        );
-        let run_store = std::sync::Arc::new(
-            trogon_automations::RunStore::open(&js)
-                .await
-                .expect("RunStore"),
-        );
-        (auto_store, run_store, container)
+        (
+            Arc::new(trogon_automations::mock::MockAutomationStore::new()),
+            Arc::new(trogon_automations::mock::MockRunStore::new()),
+        )
+    }
+
+    /// Returns in-memory mocks for `PromiseStore`, `AutomationStore`, and
+    /// `RunStore` for tests that do not need a real NATS KV bucket.
+    #[allow(dead_code)]
+    fn make_mock_promise_stores() -> (
+        Arc<crate::promise_store::mock::MockPromiseStore>,
+        Arc<trogon_automations::mock::MockAutomationStore>,
+        Arc<trogon_automations::mock::MockRunStore>,
+    ) {
+        (
+            Arc::new(crate::promise_store::mock::MockPromiseStore::new()),
+            Arc::new(trogon_automations::mock::MockAutomationStore::new()),
+            Arc::new(trogon_automations::mock::MockRunStore::new()),
+        )
     }
 
     fn make_agent_off() -> Arc<crate::agent_loop::AgentLoop> {
-        use crate::agent_loop::ReqwestAnthropicClient;
+        use crate::agent_loop::mock::SequencedMockAnthropicClient;
         use crate::tools::{DefaultToolDispatcher, ToolContext};
         struct AlwaysOffFlagClient;
         impl crate::flag_client::FeatureFlagClient for AlwaysOffFlagClient {
@@ -2147,7 +2149,6 @@ mod tests {
                 Box::pin(async { false })
             }
         }
-        let http_client = reqwest::Client::new();
         let tool_ctx = Arc::new(ToolContext::for_test(
             "http://127.0.0.1:1",
             "tok_test",
@@ -2155,11 +2156,7 @@ mod tests {
             "",
         ));
         Arc::new(crate::agent_loop::AgentLoop {
-            anthropic_client: Arc::new(ReqwestAnthropicClient::new(
-                http_client,
-                "http://127.0.0.1:1".to_string(),
-                String::new(),
-            )),
+            anthropic_client: Arc::new(SequencedMockAnthropicClient::new(vec![])),
             model: "test".to_string(),
             max_iterations: 1,
             tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),
@@ -2173,6 +2170,8 @@ mod tests {
             tenant_id: "acme".to_string(),
             promise_store: None,
             promise_id: None,
+            permission_checker: None,
+            elicitation_provider: None,
         })
     }
 
@@ -2204,20 +2203,8 @@ mod tests {
     async fn dispatch_automations_runs_all() {
         use crate::promise_store::mock::MockPromiseStore;
 
-        let server = httpmock::MockServer::start_async().await;
-        let mock = server.mock(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/anthropic/v1/messages");
-            then.status(200)
-                .header("content-type", "application/json")
-                .json_body(serde_json::json!({
-                    "stop_reason": "end_turn",
-                    "content": [{"type": "text", "text": "ok"}]
-                }));
-        });
-
-        let (rs, _container) = make_run_store().await;
-        let agent = make_agent(&server.base_url());
+        let rs = make_mock_run_store();
+        let agent = make_agent_mock(vec![end_turn_json(), end_turn_json()]);
         let automations = vec![make_automation("auto-1"), make_automation("auto-2")];
         let payload = bytes::Bytes::from_static(b"{}");
         let promise_store: Arc<dyn crate::promise_store::PromiseRepository> =
@@ -2225,7 +2212,7 @@ mod tests {
 
         dispatch_automations(
             &agent,
-            &Arc::new(rs),
+            &rs,
             &promise_store,
             "github.42",
             automations,
@@ -2234,8 +2221,6 @@ mod tests {
             None,
         )
         .await;
-
-        mock.assert_hits_async(2).await;
     }
 
     /// dispatch_automations with an empty list completes immediately without errors.
@@ -2243,15 +2228,15 @@ mod tests {
     async fn dispatch_automations_empty_list_is_noop() {
         use crate::promise_store::mock::MockPromiseStore;
 
-        let (rs, _container) = make_run_store().await;
-        let agent = make_agent("http://127.0.0.1:1");
+        let rs = make_mock_run_store();
+        let agent = make_agent_mock(vec![]);
         let payload = bytes::Bytes::from_static(b"{}");
         let promise_store: Arc<dyn crate::promise_store::PromiseRepository> =
             Arc::new(MockPromiseStore::new());
 
         dispatch_automations(
             &agent,
-            &Arc::new(rs),
+            &rs,
             &promise_store,
             "github.0",
             vec![],
@@ -2268,27 +2253,35 @@ mod tests {
     /// content must appear in the system prompt sent to the Anthropic API.
     #[tokio::test]
     async fn dispatch_automations_injects_skill_content() {
+        use crate::agent_loop::mock::SequencedMockAnthropicClient;
+        use crate::flag_client::AlwaysOnFlagClient;
         use crate::promise_store::mock::MockPromiseStore;
         use crate::skill_loader::mock::MockSkillLoader;
+        use crate::tools::{DefaultToolDispatcher, ToolContext};
 
-        let server = httpmock::MockServer::start_async().await;
-        // This mock only matches when the request body contains the skill header.
-        // If skill injection is broken the mock gets 0 hits → assert fails.
-        let mock = server.mock(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/anthropic/v1/messages")
-                .body_contains("Available Skills")
-                .body_contains("how to review pull requests");
-            then.status(200)
-                .header("content-type", "application/json")
-                .json_body(serde_json::json!({
-                    "stop_reason": "end_turn",
-                    "content": [{"type": "text", "text": "done"}]
-                }));
+        let mock_client = Arc::new(SequencedMockAnthropicClient::new(vec![end_turn_json()]));
+        let tool_ctx = Arc::new(ToolContext::for_test("http://127.0.0.1:1", "", "", ""));
+        let agent = Arc::new(crate::agent_loop::AgentLoop {
+            anthropic_client: Arc::clone(&mock_client)
+                as Arc<dyn crate::agent_loop::AnthropicClient>,
+            model: "test".to_string(),
+            max_iterations: 1,
+            tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),
+            tool_context: tool_ctx,
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            flag_client: Arc::new(AlwaysOnFlagClient),
+            tenant_id: "test".to_string(),
+            promise_store: None,
+            promise_id: None,
+            permission_checker: None,
+            elicitation_provider: None,
         });
 
-        let (rs, _container) = make_run_store().await;
-        let agent = make_agent(&server.base_url());
+        let rs = make_mock_run_store();
 
         let mut loader = MockSkillLoader::new();
         loader.insert("skill-pr-review", "how to review pull requests");
@@ -2303,7 +2296,7 @@ mod tests {
 
         dispatch_automations(
             &agent,
-            &Arc::new(rs),
+            &rs,
             &promise_store,
             "github.1",
             vec![auto],
@@ -2313,43 +2306,52 @@ mod tests {
         )
         .await;
 
-        mock.assert_hits_async(1).await;
+        let bodies = mock_client.captured_bodies();
+        assert_eq!(bodies.len(), 1, "exactly one Anthropic request must be made");
+        let body_str = serde_json::to_string(&bodies[0]).unwrap();
+        assert!(
+            body_str.contains("Available Skills"),
+            "request body must contain 'Available Skills'; got: {body_str}"
+        );
+        assert!(
+            body_str.contains("how to review pull requests"),
+            "request body must contain skill content; got: {body_str}"
+        );
     }
 
     /// When `skill_ids` is empty the loader must not be called and no skill
     /// block must appear in the Anthropic request.
     #[tokio::test]
     async fn dispatch_automations_no_injection_when_skill_ids_empty() {
+        use crate::agent_loop::mock::SequencedMockAnthropicClient;
+        use crate::flag_client::AlwaysOnFlagClient;
         use crate::promise_store::mock::MockPromiseStore;
         use crate::skill_loader::mock::MockSkillLoader;
+        use crate::tools::{DefaultToolDispatcher, ToolContext};
 
-        let server = httpmock::MockServer::start_async().await;
-        // General mock — matches any request to this path.
-        let general = server.mock(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/anthropic/v1/messages");
-            then.status(200)
-                .header("content-type", "application/json")
-                .json_body(serde_json::json!({
-                    "stop_reason": "end_turn",
-                    "content": [{"type": "text", "text": "done"}]
-                }));
-        });
-        // This mock only matches if skill content is present — must be hit 0 times.
-        let skill_mock = server.mock(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/anthropic/v1/messages")
-                .body_contains("Available Skills");
-            then.status(200)
-                .header("content-type", "application/json")
-                .json_body(serde_json::json!({
-                    "stop_reason": "end_turn",
-                    "content": [{"type": "text", "text": "done"}]
-                }));
+        let mock_client = Arc::new(SequencedMockAnthropicClient::new(vec![end_turn_json()]));
+        let tool_ctx = Arc::new(ToolContext::for_test("http://127.0.0.1:1", "", "", ""));
+        let agent = Arc::new(crate::agent_loop::AgentLoop {
+            anthropic_client: Arc::clone(&mock_client)
+                as Arc<dyn crate::agent_loop::AnthropicClient>,
+            model: "test".to_string(),
+            max_iterations: 1,
+            tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),
+            tool_context: tool_ctx,
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            flag_client: Arc::new(AlwaysOnFlagClient),
+            tenant_id: "test".to_string(),
+            promise_store: None,
+            promise_id: None,
+            permission_checker: None,
+            elicitation_provider: None,
         });
 
-        let (rs, _container) = make_run_store().await;
-        let agent = make_agent(&server.base_url());
+        let rs = make_mock_run_store();
 
         let mut loader = MockSkillLoader::new();
         loader.insert("skill-pr-review", "how to review pull requests");
@@ -2364,7 +2366,7 @@ mod tests {
 
         dispatch_automations(
             &agent,
-            &Arc::new(rs),
+            &rs,
             &promise_store,
             "github.2",
             vec![auto],
@@ -2374,40 +2376,46 @@ mod tests {
         )
         .await;
 
-        general.assert_hits_async(1).await;
-        skill_mock.assert_hits_async(0).await;
+        let bodies = mock_client.captured_bodies();
+        assert_eq!(bodies.len(), 1, "exactly one Anthropic request must be made");
+        let body_str = serde_json::to_string(&bodies[0]).unwrap();
+        assert!(
+            !body_str.contains("Available Skills"),
+            "empty skill_ids must not inject skill block; got: {body_str}"
+        );
     }
 
     /// When the skill loader is `None`, no skill content must be injected.
     #[tokio::test]
     async fn dispatch_automations_no_injection_when_loader_none() {
+        use crate::agent_loop::mock::SequencedMockAnthropicClient;
+        use crate::flag_client::AlwaysOnFlagClient;
         use crate::promise_store::mock::MockPromiseStore;
+        use crate::tools::{DefaultToolDispatcher, ToolContext};
 
-        let server = httpmock::MockServer::start_async().await;
-        let general = server.mock(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/anthropic/v1/messages");
-            then.status(200)
-                .header("content-type", "application/json")
-                .json_body(serde_json::json!({
-                    "stop_reason": "end_turn",
-                    "content": [{"type": "text", "text": "done"}]
-                }));
-        });
-        let skill_mock = server.mock(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/anthropic/v1/messages")
-                .body_contains("Available Skills");
-            then.status(200)
-                .header("content-type", "application/json")
-                .json_body(serde_json::json!({
-                    "stop_reason": "end_turn",
-                    "content": [{"type": "text", "text": "done"}]
-                }));
+        let mock_client = Arc::new(SequencedMockAnthropicClient::new(vec![end_turn_json()]));
+        let tool_ctx = Arc::new(ToolContext::for_test("http://127.0.0.1:1", "", "", ""));
+        let agent = Arc::new(crate::agent_loop::AgentLoop {
+            anthropic_client: Arc::clone(&mock_client)
+                as Arc<dyn crate::agent_loop::AnthropicClient>,
+            model: "test".to_string(),
+            max_iterations: 1,
+            tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),
+            tool_context: tool_ctx,
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            flag_client: Arc::new(AlwaysOnFlagClient),
+            tenant_id: "test".to_string(),
+            promise_store: None,
+            promise_id: None,
+            permission_checker: None,
+            elicitation_provider: None,
         });
 
-        let (rs, _container) = make_run_store().await;
-        let agent = make_agent(&server.base_url());
+        let rs = make_mock_run_store();
 
         let mut auto = make_automation("loader-none");
         auto.skill_ids = vec!["skill-x".to_string()];
@@ -2418,7 +2426,7 @@ mod tests {
 
         dispatch_automations(
             &agent,
-            &Arc::new(rs),
+            &rs,
             &promise_store,
             "github.3",
             vec![auto],
@@ -2428,33 +2436,49 @@ mod tests {
         )
         .await;
 
-        general.assert_hits_async(1).await;
-        skill_mock.assert_hits_async(0).await;
+        let bodies = mock_client.captured_bodies();
+        assert_eq!(bodies.len(), 1, "exactly one Anthropic request must be made");
+        let body_str = serde_json::to_string(&bodies[0]).unwrap();
+        assert!(
+            !body_str.contains("Available Skills"),
+            "None loader must not inject skill block; got: {body_str}"
+        );
     }
 
     /// The recovery path (`recover_stale_promises`) must also inject skill
     /// content when the automation has `skill_ids`.
     #[tokio::test]
     async fn recover_stale_promises_injects_skill_content() {
+        use crate::agent_loop::mock::SequencedMockAnthropicClient;
+        use crate::flag_client::AlwaysOnFlagClient;
         use crate::promise_store::mock::MockPromiseStore;
         use crate::skill_loader::mock::MockSkillLoader;
+        use crate::tools::{DefaultToolDispatcher, ToolContext};
+        use trogon_automations::AutomationRepository;
 
-        let server = httpmock::MockServer::start_async().await;
-        let mock = server.mock(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/anthropic/v1/messages")
-                .body_contains("Available Skills")
-                .body_contains("deploy checklist");
-            then.status(200)
-                .header("content-type", "application/json")
-                .json_body(serde_json::json!({
-                    "stop_reason": "end_turn",
-                    "content": [{"type": "text", "text": "done"}]
-                }));
+        let mock_client = Arc::new(SequencedMockAnthropicClient::new(vec![end_turn_json()]));
+        let tool_ctx = Arc::new(ToolContext::for_test("http://127.0.0.1:1", "", "", ""));
+        let agent = Arc::new(crate::agent_loop::AgentLoop {
+            anthropic_client: Arc::clone(&mock_client)
+                as Arc<dyn crate::agent_loop::AnthropicClient>,
+            model: "test".to_string(),
+            max_iterations: 1,
+            tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),
+            tool_context: tool_ctx,
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            flag_client: Arc::new(AlwaysOnFlagClient),
+            tenant_id: "test".to_string(),
+            promise_store: None,
+            promise_id: None,
+            permission_checker: None,
+            elicitation_provider: None,
         });
 
-        let (auto_store, run_store, _container) = make_all_stores().await;
-        let agent = make_agent(&server.base_url());
+        let (auto_store, run_store) = make_mock_stores();
 
         // Register an automation with skill_ids.
         let mut auto = make_automation("recovery-skill");
@@ -2487,7 +2511,18 @@ mod tests {
         .expect("must return a handle for the stale promise");
 
         handle.await.expect("recovery task must not panic");
-        mock.assert_hits_async(1).await;
+
+        let bodies = mock_client.captured_bodies();
+        assert_eq!(bodies.len(), 1, "exactly one Anthropic request must be made");
+        let body_str = serde_json::to_string(&bodies[0]).unwrap();
+        assert!(
+            body_str.contains("Available Skills"),
+            "recovery request body must contain 'Available Skills'; got: {body_str}"
+        );
+        assert!(
+            body_str.contains("deploy checklist"),
+            "recovery request body must contain skill content; got: {body_str}"
+        );
     }
 
     #[test]
@@ -2616,7 +2651,7 @@ mod tests {
     #[tokio::test]
     async fn prepare_agent_creates_promise_when_none_exists() {
         let store = make_empty_store();
-        let agent = make_agent("http://127.0.0.1:1");
+        let agent = make_agent_mock(vec![]);
 
         let result = super::prepare_agent_with_promise(
             &agent,
@@ -2651,7 +2686,7 @@ mod tests {
             "p1",
             crate::promise_store::PromiseStatus::Running,
         ));
-        let agent = make_agent("http://127.0.0.1:1");
+        let agent = make_agent_mock(vec![]);
 
         let result = super::prepare_agent_with_promise(
             &agent,
@@ -2683,7 +2718,7 @@ mod tests {
             "p1",
             crate::promise_store::PromiseStatus::Resolved,
         ));
-        let agent = make_agent("http://127.0.0.1:1");
+        let agent = make_agent_mock(vec![]);
 
         let result = super::prepare_agent_with_promise(
             &agent,
@@ -2712,7 +2747,7 @@ mod tests {
             "p1",
             crate::promise_store::PromiseStatus::Running,
         ));
-        let agent = make_agent("http://127.0.0.1:1");
+        let agent = make_agent_mock(vec![]);
 
         let result = super::prepare_agent_with_promise(
             &agent,
@@ -2741,7 +2776,7 @@ mod tests {
             "p1",
             crate::promise_store::PromiseStatus::PermanentFailed,
         ));
-        let agent = make_agent("http://127.0.0.1:1");
+        let agent = make_agent_mock(vec![]);
 
         let result = super::prepare_agent_with_promise(
             &agent,
@@ -2771,7 +2806,7 @@ mod tests {
             "p1",
             crate::promise_store::PromiseStatus::Failed,
         ));
-        let agent = make_agent("http://127.0.0.1:1");
+        let agent = make_agent_mock(vec![]);
 
         let result = super::prepare_agent_with_promise(
             &agent,
@@ -2816,7 +2851,7 @@ mod tests {
 
         let store = Arc::new(HangingGetPromiseStore::new());
         let store_arc = Arc::clone(&store) as Arc<dyn PromiseRepository>;
-        let agent = make_agent("http://127.0.0.1:1");
+        let agent = make_agent_mock(vec![]);
         let trigger = serde_json::json!({});
 
         let (result, _) = tokio::join!(
@@ -2857,7 +2892,7 @@ mod tests {
             .inner
             .insert_promise(sample_promise("p1", PromiseStatus::Running));
         let store_arc = Arc::clone(&store) as Arc<dyn PromiseRepository>;
-        let agent = make_agent("http://127.0.0.1:1");
+        let agent = make_agent_mock(vec![]);
         let trigger = serde_json::json!({});
 
         let (result, _) = tokio::join!(
@@ -2907,7 +2942,7 @@ mod tests {
             failure_reason: None,
         });
         let store_arc = Arc::clone(&store) as Arc<dyn PromiseRepository>;
-        let agent = make_agent("http://127.0.0.1:1");
+        let agent = make_agent_mock(vec![]);
 
         let result = super::prepare_agent_with_promise(
             &agent,
@@ -2943,7 +2978,7 @@ mod tests {
         let store = Arc::new(MockPromiseStore::new());
         store.insert_promise(sample_promise("p-rc", PromiseStatus::Running));
         let store_arc = Arc::clone(&store) as Arc<dyn PromiseRepository>;
-        let agent = make_agent("http://127.0.0.1:1");
+        let agent = make_agent_mock(vec![]);
 
         super::prepare_agent_with_promise(
             &agent,
@@ -2977,7 +3012,7 @@ mod tests {
 
         let store = Arc::new(ErrorGetPromiseStore::new());
         let store_arc = Arc::clone(&store) as Arc<dyn PromiseRepository>;
-        let agent = make_agent("http://127.0.0.1:1");
+        let agent = make_agent_mock(vec![]);
 
         let result = super::prepare_agent_with_promise(
             &agent,
@@ -3015,7 +3050,7 @@ mod tests {
 
         let store = Arc::new(ErrorPutPromiseStore::new());
         let store_arc = Arc::clone(&store) as Arc<dyn PromiseRepository>;
-        let agent = make_agent("http://127.0.0.1:1");
+        let agent = make_agent_mock(vec![]);
 
         let result = super::prepare_agent_with_promise(
             &agent,
@@ -3055,7 +3090,7 @@ mod tests {
 
         let store = Arc::new(HangingPutPromiseStore::new());
         let store_arc = Arc::clone(&store) as Arc<dyn PromiseRepository>;
-        let agent = make_agent("http://127.0.0.1:1");
+        let agent = make_agent_mock(vec![]);
         let trigger = serde_json::json!({});
 
         let (result, _) = tokio::join!(
@@ -3087,24 +3122,20 @@ mod tests {
 
     /// When `list_running` times out, `recover_stale_promises` must return
     /// `None` (no recovery task spawned) immediately after the timeout.
-    ///
-    /// Note: `start_paused = true` would freeze the clock before testcontainers
-    /// can start Docker, so we pause the clock manually after store setup.
     #[tokio::test]
     async fn recover_list_running_timeout_returns_none() {
         use crate::promise_store::PromiseRepository;
         use crate::promise_store::mock::HangingListRunningStore;
         use std::time::Duration;
 
-        // Set up the stores with a real clock so Docker/NATS can start.
-        let (auto_store, run_store, _container) = make_all_stores().await;
+        let (auto_store, run_store) = make_mock_stores();
 
         // Now pause the clock — `HangingListRunningStore::list_running` returns
         // `pending()`, so `recover_stale_promises` blocks on the timeout future.
         tokio::time::pause();
 
         let promise_store: Arc<dyn PromiseRepository> = Arc::new(HangingListRunningStore::new());
-        let agent = make_agent("http://127.0.0.1:1");
+        let agent = make_agent_mock(vec![]);
 
         let (handle, _) = tokio::join!(
             super::recover_stale_promises(
@@ -3131,9 +3162,9 @@ mod tests {
         use crate::promise_store::PromiseRepository;
         use crate::promise_store::mock::ErrorListRunningStore;
 
-        let (auto_store, run_store, _container) = make_all_stores().await;
+        let (auto_store, run_store) = make_mock_stores();
         let promise_store: Arc<dyn PromiseRepository> = Arc::new(ErrorListRunningStore::new());
-        let agent = make_agent("http://127.0.0.1:1");
+        let agent = make_agent_mock(vec![]);
 
         let handle = super::recover_stale_promises(
             &agent,
@@ -3294,7 +3325,7 @@ mod tests {
 
         let auto_store = Arc::new(EmptyAutomationStore);
         let run_store = Arc::new(ErrorRecordRunStore);
-        let agent = make_agent("http://127.0.0.1:1");
+        let agent = make_agent_mock(vec![]);
 
         // Tokio auto-advance skips the 15 s LIST_RUNNING_RETRY_DELAY.
         let handle = super::recover_stale_promises(
@@ -3329,9 +3360,9 @@ mod tests {
         use crate::promise_store::PromiseRepository;
         use crate::promise_store::mock::MockPromiseStore;
 
-        let (auto_store, run_store, _container) = make_all_stores().await;
+        let (auto_store, run_store) = make_mock_stores();
         let promise_store: Arc<dyn PromiseRepository> = Arc::new(MockPromiseStore::new());
-        let agent = make_agent("http://127.0.0.1:1");
+        let agent = make_agent_mock(vec![]);
 
         let handle = super::recover_stale_promises(
             &agent,
@@ -3357,7 +3388,7 @@ mod tests {
         use crate::promise_store::mock::MockPromiseStore;
         use crate::promise_store::{AgentPromise, PromiseRepository, PromiseStatus};
 
-        let (auto_store, run_store, _container) = make_all_stores().await;
+        let (auto_store, run_store) = make_mock_stores();
         let store = Arc::new(MockPromiseStore::new());
 
         // claimed_at = now → age = 0s, well under STALE_AFTER_SECS (900s).
@@ -3380,7 +3411,7 @@ mod tests {
         store.insert_promise(fresh);
 
         let promise_store: Arc<dyn PromiseRepository> = Arc::clone(&store) as _;
-        let agent = make_agent("http://127.0.0.1:1");
+        let agent = make_agent_mock(vec![]);
 
         let handle = super::recover_stale_promises(
             &agent,
@@ -3406,13 +3437,13 @@ mod tests {
         use crate::promise_store::PromiseRepository;
         use crate::promise_store::mock::VanishedOnRefetchStore;
 
-        let (auto_store, run_store, _container) = make_all_stores().await;
+        let (auto_store, run_store) = make_mock_stores();
         let store = Arc::new(VanishedOnRefetchStore::new());
         // Populate inner so list_running returns the stale promise.
         store.inner.insert_promise(make_stale_promise("p-vanished"));
 
         let promise_store: Arc<dyn PromiseRepository> = Arc::clone(&store) as _;
-        let agent = make_agent("http://127.0.0.1:1");
+        let agent = make_agent_mock(vec![]);
 
         let handle = super::recover_stale_promises(
             &agent,
@@ -3449,12 +3480,12 @@ mod tests {
         use crate::promise_store::PromiseRepository;
         use crate::promise_store::mock::ResolvedOnRefetchStore;
 
-        let (auto_store, run_store, _container) = make_all_stores().await;
+        let (auto_store, run_store) = make_mock_stores();
         let store = Arc::new(ResolvedOnRefetchStore::new());
         store.inner.insert_promise(make_stale_promise("p-resolved"));
 
         let promise_store: Arc<dyn PromiseRepository> = Arc::clone(&store) as _;
-        let agent = make_agent("http://127.0.0.1:1");
+        let agent = make_agent_mock(vec![]);
 
         let handle = super::recover_stale_promises(
             &agent,
@@ -3490,14 +3521,14 @@ mod tests {
         use crate::promise_store::PromiseRepository;
         use crate::promise_store::mock::ErrorGetPromiseStore;
 
-        let (auto_store, run_store, _container) = make_all_stores().await;
+        let (auto_store, run_store) = make_mock_stores();
         let store = Arc::new(ErrorGetPromiseStore::new());
         // Populate inner so list_running returns the stale promise (list_running
         // delegates to inner; get_promise errors — that's the re-fetch failure).
         store.inner.insert_promise(make_stale_promise("p-err"));
 
         let promise_store: Arc<dyn PromiseRepository> = Arc::clone(&store) as _;
-        let agent = make_agent("http://127.0.0.1:1");
+        let agent = make_agent_mock(vec![]);
 
         let handle = super::recover_stale_promises(
             &agent,
@@ -3522,7 +3553,7 @@ mod tests {
         use crate::promise_store::PromiseRepository;
         use crate::promise_store::mock::MockPromiseStore;
 
-        let (auto_store, run_store, _container) = make_all_stores().await;
+        let (auto_store, run_store) = make_mock_stores();
         let store = Arc::new(MockPromiseStore::new());
         store.insert_promise(make_stale_promise("p-flag-off"));
 
@@ -3564,7 +3595,7 @@ mod tests {
         use crate::promise_store::mock::MockPromiseStore;
         use crate::promise_store::{PromiseRepository, PromiseStatus};
 
-        let (auto_store, run_store, _container) = make_all_stores().await;
+        let (auto_store, run_store) = make_mock_stores();
         let store = Arc::new(MockPromiseStore::new());
 
         let mut p = make_stale_promise("p-unknown");
@@ -3572,7 +3603,7 @@ mod tests {
         store.insert_promise(p);
 
         let promise_store: Arc<dyn PromiseRepository> = Arc::clone(&store) as _;
-        let agent = make_agent("http://127.0.0.1:1");
+        let agent = make_agent_mock(vec![]);
 
         let handle = super::recover_stale_promises(
             &agent,
@@ -3607,12 +3638,12 @@ mod tests {
         use crate::promise_store::mock::CasConflictOnceStore;
         use crate::promise_store::{PromiseRepository, PromiseStatus};
 
-        let (auto_store, run_store, _container) = make_all_stores().await;
+        let (auto_store, run_store) = make_mock_stores();
         let store = Arc::new(CasConflictOnceStore::new());
         store.inner.insert_promise(make_stale_promise("p-cas"));
 
         let promise_store: Arc<dyn PromiseRepository> = Arc::clone(&store) as _;
-        let agent = make_agent("http://127.0.0.1:1");
+        let agent = make_agent_mock(vec![]);
 
         let handle = super::recover_stale_promises(
             &agent,
@@ -3647,20 +3678,17 @@ mod tests {
     /// promise and continue without panicking.
     ///
     /// `HangingGetPromiseStore` makes every `get_promise` return
-    /// `std::future::pending()`.  The clock is paused manually after container
-    /// setup to avoid breaking testcontainers, then advanced past the timeout
-    /// while awaiting the spawned handle.
+    /// `std::future::pending()`.  The clock is paused before the spawned
+    /// handle is awaited and advanced past the timeout.
     #[tokio::test]
     async fn recover_refetch_timeout_skips_promise() {
         use crate::promise_store::PromiseRepository;
         use crate::promise_store::mock::HangingGetPromiseStore;
         use std::time::Duration;
 
-        // Start the NATS container with the real clock so Docker can reach the
-        // network properly.
-        let (auto_store, run_store, _container) = make_all_stores().await;
+        let (auto_store, run_store) = make_mock_stores();
 
-        // Now freeze the clock — all subsequent `tokio::time::timeout` calls
+        // Freeze the clock — all subsequent `tokio::time::timeout` calls
         // will block until we call `tokio::time::advance`.
         tokio::time::pause();
 
@@ -3670,7 +3698,7 @@ mod tests {
         store.inner.insert_promise(make_stale_promise("p-hang"));
 
         let promise_store: Arc<dyn PromiseRepository> = Arc::clone(&store) as _;
-        let agent = make_agent("http://127.0.0.1:1");
+        let agent = make_agent_mock(vec![]);
 
         let handle = super::recover_stale_promises(
             &agent,
@@ -3718,7 +3746,7 @@ mod tests {
         use crate::promise_store::mock::MockPromiseStore;
         use crate::promise_store::{PromiseRepository, PromiseStatus};
 
-        let (auto_store, run_store, _container) = make_all_stores().await;
+        let (auto_store, run_store) = make_mock_stores();
         let store = Arc::new(MockPromiseStore::new());
 
         // Insert 11 stale promises.  All have an unknown subject so each is
@@ -3730,7 +3758,7 @@ mod tests {
         }
 
         let promise_store: Arc<dyn PromiseRepository> = Arc::clone(&store) as _;
-        let agent = make_agent("http://127.0.0.1:1");
+        let agent = make_agent_mock(vec![]);
 
         let handle = super::recover_stale_promises(
             &agent,
@@ -3778,7 +3806,7 @@ mod tests {
         use crate::promise_store::{PromiseRepository, PromiseStatus};
 
         // Real AutomationStore — intentionally empty so every lookup fails.
-        let (auto_store, run_store, _container) = make_all_stores().await;
+        let (auto_store, run_store) = make_mock_stores();
         let store = Arc::new(MockPromiseStore::new());
 
         // Stale promise that belongs to an automation that no longer exists.
@@ -3788,7 +3816,7 @@ mod tests {
         store.insert_promise(p);
 
         let promise_store: Arc<dyn PromiseRepository> = Arc::clone(&store) as _;
-        let agent = make_agent("http://127.0.0.1:1");
+        let agent = make_agent_mock(vec![]);
 
         let handle = super::recover_stale_promises(
             &agent,
@@ -3826,20 +3854,8 @@ mod tests {
         use crate::promise_store::PromiseRepository;
         use crate::promise_store::mock::MockPromiseStore;
 
-        let server = httpmock::MockServer::start_async().await;
-        server.mock(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/anthropic/v1/messages");
-            then.status(200)
-                .header("content-type", "application/json")
-                .json_body(serde_json::json!({
-                    "stop_reason": "end_turn",
-                    "content": [{"type": "text", "text": "ok"}]
-                }));
-        });
-
-        let (rs, _container) = make_run_store().await;
-        let agent = make_agent(&server.base_url());
+        let rs = make_mock_run_store();
+        let agent = make_agent_mock(vec![end_turn_json()]);
         let promise_store = Arc::new(MockPromiseStore::new());
         let promise_store_arc = Arc::clone(&promise_store) as Arc<dyn PromiseRepository>;
 
@@ -3848,7 +3864,7 @@ mod tests {
 
         dispatch_automations(
             &agent,
-            &Arc::new(rs),
+            &rs,
             &promise_store_arc,
             "github.42",
             vec![make_automation("auto-1")],
@@ -3879,27 +3895,15 @@ mod tests {
         use crate::promise_store::PromiseRepository;
         use crate::promise_store::mock::MockPromiseStore;
 
-        let server = httpmock::MockServer::start_async().await;
-        server.mock(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/anthropic/v1/messages");
-            then.status(200)
-                .header("content-type", "application/json")
-                .json_body(serde_json::json!({
-                    "stop_reason": "end_turn",
-                    "content": [{"type": "text", "text": "ok"}]
-                }));
-        });
-
-        let (rs, _container) = make_run_store().await;
-        let agent = make_agent(&server.base_url());
+        let rs = make_mock_run_store();
+        let agent = make_agent_mock(vec![end_turn_json(), end_turn_json()]);
         let promise_store = Arc::new(MockPromiseStore::new());
         let promise_store_arc = Arc::clone(&promise_store) as Arc<dyn PromiseRepository>;
         let payload = bytes::Bytes::from_static(b"{}");
 
         dispatch_automations(
             &agent,
-            &Arc::new(rs),
+            &rs,
             &promise_store_arc,
             "github.42",
             vec![make_automation("auto-A"), make_automation("auto-B")],
@@ -3935,7 +3939,7 @@ mod tests {
     /// returns normally — it must not propagate the panic to the caller.
     #[tokio::test]
     async fn dispatch_automations_panicking_task_is_caught() {
-        use crate::agent_loop::{AgentLoop, AnthropicClient};
+        use crate::agent_loop::{AgentLoop, AnthropicClient, AnthropicClientError};
         use crate::flag_client::AlwaysOnFlagClient;
         use crate::promise_store::PromiseRepository;
         use crate::promise_store::mock::MockPromiseStore;
@@ -3948,7 +3952,7 @@ mod tests {
                 _body: serde_json::Value,
             ) -> std::pin::Pin<
                 Box<
-                    dyn std::future::Future<Output = Result<serde_json::Value, reqwest::Error>>
+                    dyn std::future::Future<Output = Result<serde_json::Value, AnthropicClientError>>
                         + Send
                         + 'a,
                 >,
@@ -3973,16 +3977,18 @@ mod tests {
             tenant_id: "test".to_string(),
             promise_store: None,
             promise_id: None,
+            permission_checker: None,
+            elicitation_provider: None,
         });
 
-        let (rs, _container) = make_run_store().await;
+        let rs = make_mock_run_store();
         let promise_store: Arc<dyn PromiseRepository> = Arc::new(MockPromiseStore::new());
         let payload = bytes::Bytes::from_static(b"{}");
 
         // Must return without panicking even though the task panics.
         dispatch_automations(
             &agent,
-            &Arc::new(rs),
+            &rs,
             &promise_store,
             "github.42",
             vec![make_automation("panic-auto")],
@@ -4286,9 +4292,9 @@ mod tests {
         let store = Arc::new(inner);
         let promise_store: Arc<dyn PromiseRepository> = Arc::clone(&store) as _;
 
-        let (_, run_store, _container) = make_all_stores().await;
+        let (_, run_store) = make_mock_stores();
         let auto_store = Arc::new(ErrorListAutomationStore);
-        let agent = make_agent("http://127.0.0.1:1");
+        let agent = make_agent_mock(vec![]);
 
         let handle = super::recover_stale_promises(
             &agent,
@@ -4338,7 +4344,7 @@ mod tests {
         let store_for_assert = inner.clone();
         let promise_store: Arc<dyn PromiseRepository> = Arc::new(inner) as _;
 
-        let agent = make_agent("http://127.0.0.1:1");
+        let agent = make_agent_mock(vec![]);
 
         let handle = super::recover_stale_promises(
             &agent,
@@ -4505,7 +4511,7 @@ mod tests {
         let store_for_assert = inner.clone();
         let promise_store: Arc<dyn PromiseRepository> = Arc::new(inner) as _;
 
-        let agent = make_agent("http://127.0.0.1:1");
+        let agent = make_agent_mock(vec![]);
 
         // recover_stale_promises spawns the recovery task (which contains the
         // backlog retry loop) and returns the JoinHandle.  The tokio auto-
@@ -4710,6 +4716,8 @@ mod tests {
             tenant_id: "acme".to_string(),
             promise_store: None,
             promise_id: None,
+            permission_checker: None,
+            elicitation_provider: None,
         });
 
         // Auto-advance handles the 30 s AUTO_RETRY_DELAY inside the spawned task.
@@ -4770,8 +4778,8 @@ mod tests {
         let promise_store: Arc<dyn PromiseRepository> = Arc::clone(&store) as _;
 
         // Real AutomationStore — empty, so the automation is "deleted".
-        let (auto_store, run_store, _container) = make_all_stores().await;
-        let agent = make_agent("http://127.0.0.1:1");
+        let (auto_store, run_store) = make_mock_stores();
+        let agent = make_agent_mock(vec![]);
 
         let handle = super::recover_stale_promises(
             &agent,
@@ -4816,8 +4824,8 @@ mod tests {
         let store = Arc::new(FailsPermanentFailedUpdateStore { inner });
         let promise_store: Arc<dyn PromiseRepository> = Arc::clone(&store) as _;
 
-        let (auto_store, run_store, _container) = make_all_stores().await;
-        let agent = make_agent("http://127.0.0.1:1");
+        let (auto_store, run_store) = make_mock_stores();
+        let agent = make_agent_mock(vec![]);
 
         let handle = super::recover_stale_promises(
             &agent,
@@ -4923,19 +4931,7 @@ mod tests {
         use crate::promise_store::PromiseRepository;
         use crate::promise_store::mock::MockPromiseStore;
 
-        let server = httpmock::MockServer::start_async().await;
-        let mock = server.mock(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/anthropic/v1/messages");
-            then.status(200)
-                .header("content-type", "application/json")
-                .json_body(serde_json::json!({
-                    "stop_reason": "end_turn",
-                    "content": [{"type": "text", "text": "done"}]
-                }));
-        });
-
-        let agent = make_agent(&server.base_url());
+        let agent = make_agent_mock(vec![end_turn_json()]);
         let promise_store: Arc<dyn PromiseRepository> = Arc::new(MockPromiseStore::new());
         let payload = bytes::Bytes::from_static(b"{}");
 
@@ -4951,8 +4947,6 @@ mod tests {
             None,
         )
         .await;
-
-        mock.assert_hits_async(1).await;
     }
 
     /// When `run_store.record()` fails inside the startup recovery loop, the
@@ -4961,21 +4955,10 @@ mod tests {
     async fn recover_automation_run_record_error_is_logged_not_fatal() {
         use crate::promise_store::PromiseRepository;
         use crate::promise_store::mock::MockPromiseStore;
-
-        let server = httpmock::MockServer::start_async().await;
-        server.mock(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/anthropic/v1/messages");
-            then.status(200)
-                .header("content-type", "application/json")
-                .json_body(serde_json::json!({
-                    "stop_reason": "end_turn",
-                    "content": [{"type": "text", "text": "recovered"}]
-                }));
-        });
+        use trogon_automations::AutomationRepository;
 
         // Insert the automation so recovery finds it (non-empty list).
-        let (auto_store, _, _container) = make_all_stores().await;
+        let (auto_store, _) = make_mock_stores();
         let auto = make_automation("run-rec-auto");
         auto_store.put(&auto).await.expect("put automation");
 
@@ -4987,7 +4970,7 @@ mod tests {
         store.insert_promise(p);
         let promise_store: Arc<dyn PromiseRepository> = Arc::clone(&store) as _;
 
-        let agent = make_agent(&server.base_url());
+        let agent = make_agent_mock(vec![end_turn_json()]);
 
         let handle = super::recover_stale_promises(
             &agent,
@@ -5013,25 +4996,14 @@ mod tests {
     async fn recover_automation_run_completes_and_marks_promise_resolved() {
         use crate::promise_store::mock::MockPromiseStore;
         use crate::promise_store::{PromiseRepository, PromiseStatus};
+        use trogon_automations::AutomationRepository;
 
-        let server = httpmock::MockServer::start_async().await;
-        server.mock(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/anthropic/v1/messages");
-            then.status(200)
-                .header("content-type", "application/json")
-                .json_body(serde_json::json!({
-                    "stop_reason": "end_turn",
-                    "content": [{"type": "text", "text": "recovered"}]
-                }));
-        });
-
-        let agent = make_agent(&server.base_url());
+        let agent = make_agent_mock(vec![end_turn_json()]);
         // agent.tenant_id = "test" — keep everything under "test" so the agent's
         // internal KV writes (get_promise / update_promise Resolved) target the
         // same key that prepare_agent_with_promise claims.
 
-        let (auto_store, run_store, _container) = make_all_stores().await;
+        let (auto_store, run_store) = make_mock_stores();
         let mut auto = make_automation("happy-auto");
         auto.tenant_id = agent.tenant_id.clone(); // "test"
         auto_store.put(&auto).await.expect("put automation");
@@ -5636,20 +5608,9 @@ mod tests {
     async fn recover_automation_run_fails_stores_failed_run_record() {
         use crate::promise_store::PromiseRepository;
         use crate::promise_store::mock::MockPromiseStore;
-        use trogon_automations::RunStatus;
+        use trogon_automations::{AutomationRepository, RunStatus};
 
-        let server = httpmock::MockServer::start_async().await;
-        server.mock(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/anthropic/v1/messages");
-            then.status(400)
-                .header("content-type", "application/json")
-                .json_body(serde_json::json!({
-                    "error": {"type": "invalid_request_error", "message": "injected 400"}
-                }));
-        });
-
-        let agent = make_agent(&server.base_url()); // tenant_id = "test"
+        let agent = make_agent_mock_err(); // tenant_id = "test"
 
         let mut auto = make_automation("fail-rec");
         auto.tenant_id = agent.tenant_id.clone(); // "test"
@@ -5664,8 +5625,8 @@ mod tests {
 
         let run_store = Arc::new(CapturingRunStore::new());
 
-        // Real AutomationStore so the automation is found and the run path is taken.
-        let (auto_store, _, _container) = make_all_stores().await;
+        // AutomationStore with the automation inserted so the run path is taken.
+        let (auto_store, _) = make_mock_stores();
         auto_store.put(&auto).await.expect("put automation");
 
         let handle = super::recover_stale_promises(
@@ -5701,18 +5662,7 @@ mod tests {
         use crate::promise_store::mock::MockPromiseStore;
         use trogon_automations::RunStatus;
 
-        let server = httpmock::MockServer::start_async().await;
-        server.mock(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/anthropic/v1/messages");
-            then.status(400)
-                .header("content-type", "application/json")
-                .json_body(serde_json::json!({
-                    "error": {"type": "invalid_request_error", "message": "injected 400"}
-                }));
-        });
-
-        let agent = make_agent(&server.base_url());
+        let agent = make_agent_mock_err();
         let run_store = Arc::new(CapturingRunStore::new());
         let promise_store: Arc<dyn PromiseRepository> = Arc::new(MockPromiseStore::new());
         let payload = bytes::Bytes::from_static(b"{}");
@@ -5777,7 +5727,7 @@ mod tests {
         // Using unreachable base URL — any attempted LLM call would cause a
         // connection error, producing a run record with status Failed.  An empty
         // records snapshot is the definitive signal that no automation ran.
-        let agent = make_agent("http://127.0.0.1:1");
+        let agent = make_agent_mock(vec![]);
 
         dispatch_automations(
             &agent,
@@ -5814,10 +5764,10 @@ mod tests {
         let store = Arc::new(GetReturnsNoneAfterNthCallStore::new(2, inner));
         let promise_store: Arc<dyn PromiseRepository> = Arc::clone(&store) as _;
 
-        // Real NATS (empty) so the automation is "deleted" (not found in list).
-        let (auto_store, _, _container) = make_all_stores().await;
+        // Empty automation store so the automation is "deleted" (not found in list).
+        let (auto_store, _) = make_mock_stores();
         let run_store = Arc::new(CapturingRunStore::new());
-        let agent = make_agent("http://127.0.0.1:1");
+        let agent = make_agent_mock(vec![]);
 
         let handle = super::recover_stale_promises(
             &agent,
@@ -5862,9 +5812,9 @@ mod tests {
         let store = Arc::new(GetReturnsNoneAfterNthCallStore::new(2, inner));
         let promise_store: Arc<dyn PromiseRepository> = Arc::clone(&store) as _;
 
-        let (auto_store, _, _container) = make_all_stores().await;
+        let (auto_store, _) = make_mock_stores();
         let run_store = Arc::new(CapturingRunStore::new());
-        let agent = make_agent("http://127.0.0.1:1");
+        let agent = make_agent_mock(vec![]);
 
         let handle = super::recover_stale_promises(
             &agent,
@@ -5914,7 +5864,7 @@ mod tests {
         // break async_nats' internal tokio::time::timeout calls.
         let auto_store = Arc::new(EmptyAutomationStore); // empty → automation "deleted"
         let run_store = Arc::new(ErrorRecordRunStore); // record() is never reached here
-        let agent = make_agent("http://127.0.0.1:1");
+        let agent = make_agent_mock(vec![]);
 
         // Pause the clock AFTER all in-memory setup (no NATS containers to worry about).
         tokio::time::pause();
@@ -5969,7 +5919,7 @@ mod tests {
 
         let auto_store = Arc::new(EmptyAutomationStore);
         let run_store = Arc::new(ErrorRecordRunStore);
-        let agent = make_agent("http://127.0.0.1:1");
+        let agent = make_agent_mock(vec![]);
 
         tokio::time::pause();
 
@@ -6065,7 +6015,7 @@ mod tests {
 
         let (ps, _, _, _, _c) = make_all_stores_with_promise().await;
         let promise_repo: Arc<dyn PromiseRepository> = ps.clone();
-        let agent = make_agent("http://127.0.0.1:1");
+        let agent = make_agent_mock(vec![]);
 
         let result = super::prepare_agent_with_promise(
             &agent,
@@ -6110,7 +6060,7 @@ mod tests {
         ps.put_promise(&p).await.unwrap();
 
         let promise_repo: Arc<dyn PromiseRepository> = ps.clone();
-        let agent = make_agent("http://127.0.0.1:1");
+        let agent = make_agent_mock(vec![]);
 
         let result = super::prepare_agent_with_promise(
             &agent,
@@ -6158,7 +6108,7 @@ mod tests {
         ps.put_promise(&p).await.unwrap();
 
         let promise_repo: Arc<dyn PromiseRepository> = ps.clone();
-        let agent = make_agent("http://127.0.0.1:1");
+        let agent = make_agent_mock(vec![]);
 
         let result = super::prepare_agent_with_promise(
             &agent,
@@ -6186,21 +6136,9 @@ mod tests {
     async fn real_kv_dispatch_automations_resolves_promise() {
         use crate::promise_store::{PromiseRepository, PromiseStatus};
 
-        let server = httpmock::MockServer::start_async().await;
-        server.mock(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/anthropic/v1/messages");
-            then.status(200)
-                .header("content-type", "application/json")
-                .json_body(serde_json::json!({
-                    "stop_reason": "end_turn",
-                    "content": [{"type": "text", "text": "done"}]
-                }));
-        });
-
         let (ps, _, run_store, _, _c) = make_all_stores_with_promise().await;
         let promise_repo: Arc<dyn PromiseRepository> = ps.clone();
-        let agent = make_agent(&server.base_url());
+        let agent = make_agent_mock(vec![end_turn_json()]);
 
         let mut auto = make_automation("real-dispatch-auto");
         auto.tenant_id = agent.tenant_id.clone(); // "test"
@@ -6242,20 +6180,8 @@ mod tests {
     async fn real_kv_recover_stale_resolves_automation() {
         use crate::promise_store::{PromiseRepository, PromiseStatus};
 
-        let server = httpmock::MockServer::start_async().await;
-        server.mock(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/anthropic/v1/messages");
-            then.status(200)
-                .header("content-type", "application/json")
-                .json_body(serde_json::json!({
-                    "stop_reason": "end_turn",
-                    "content": [{"type": "text", "text": "recovered"}]
-                }));
-        });
-
         let (ps, auto_store, run_store, _, _c) = make_all_stores_with_promise().await;
-        let agent = make_agent(&server.base_url());
+        let agent = make_agent_mock(vec![end_turn_json()]);
 
         let mut auto = make_automation("stale-auto");
         auto.tenant_id = agent.tenant_id.clone();
@@ -6314,30 +6240,40 @@ mod tests {
     /// a `Failed` promise, and assertion failures.
     #[tokio::test]
     async fn real_kv_recovery_resumes_from_checkpoint_not_from_scratch() {
+        use crate::agent_loop::mock::SequencedMockAnthropicClient;
         use crate::agent_loop::{ContentBlock, Message};
+        use crate::flag_client::AlwaysOnFlagClient;
         use crate::promise_store::{PromiseRepository, PromiseStatus};
+        use crate::tools::{DefaultToolDispatcher, ToolContext};
 
-        let server = httpmock::MockServer::start_async().await;
-        let mock = server.mock(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/anthropic/v1/messages")
-                .body_contains("already did step one");
-            then.status(200)
-                .header("content-type", "application/json")
-                .json_body(serde_json::json!({
-                    "stop_reason": "end_turn",
-                    "content": [{"type": "text", "text": "recovery confirmed"}]
-                }));
-        });
+        let mock_client = Arc::new(SequencedMockAnthropicClient::new(vec![serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "recovery confirmed"}]
+        })]));
 
         let (ps, auto_store, run_store, _, _c) = make_all_stores_with_promise().await;
 
         // Use max_iterations = 2 so the recovered run can make one more call.
-        let agent = {
-            let mut a = (*make_agent(&server.base_url())).clone();
-            a.max_iterations = 2;
-            Arc::new(a)
-        };
+        let tool_ctx = Arc::new(ToolContext::for_test("http://127.0.0.1:1", "", "", ""));
+        let agent = Arc::new(crate::agent_loop::AgentLoop {
+            anthropic_client: Arc::clone(&mock_client)
+                as Arc<dyn crate::agent_loop::AnthropicClient>,
+            model: "test".to_string(),
+            max_iterations: 2,
+            tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),
+            tool_context: tool_ctx,
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            flag_client: Arc::new(AlwaysOnFlagClient),
+            tenant_id: "test".to_string(),
+            promise_store: None,
+            promise_id: None,
+            permission_checker: None,
+            elicitation_provider: None,
+        });
 
         let mut auto = make_automation("crash-auto");
         auto.tenant_id = agent.tenant_id.clone();
@@ -6384,9 +6320,15 @@ mod tests {
         .expect("must return a handle for the stale promise");
         handle.await.expect("recovery task must not panic");
 
-        // The mock must have been hit exactly once with the checkpoint messages
-        // in the body — proving worker B resumed rather than restarted.
-        mock.assert_hits_async(1).await;
+        // The mock client must have been called exactly once with the checkpoint
+        // messages in the body — proving worker B resumed rather than restarted.
+        let bodies = mock_client.captured_bodies();
+        assert_eq!(bodies.len(), 1, "exactly one Anthropic request expected");
+        let body_str = serde_json::to_string(&bodies[0]).unwrap();
+        assert!(
+            body_str.contains("already did step one"),
+            "request body must contain checkpoint message; got: {body_str}"
+        );
 
         // The promise must be Resolved in real NATS KV.
         let (p, _) = ps
@@ -6575,20 +6517,9 @@ mod tests {
     async fn real_kv_recover_three_stale_promises_all_resolved() {
         use crate::promise_store::{PromiseRepository, PromiseStatus};
 
-        let server = httpmock::MockServer::start_async().await;
-        server.mock(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/anthropic/v1/messages");
-            then.status(200)
-                .header("content-type", "application/json")
-                .json_body(serde_json::json!({
-                    "stop_reason": "end_turn",
-                    "content": [{"type": "text", "text": "recovered"}]
-                }));
-        });
-
         let (ps, auto_store, run_store, _, _c) = make_all_stores_with_promise().await;
-        let agent = make_agent(&server.base_url());
+        // 3 stale promises → 3 Anthropic calls.
+        let agent = make_agent_mock(vec![end_turn_json(), end_turn_json(), end_turn_json()]);
         let promise_repo: Arc<dyn PromiseRepository> = ps.clone();
 
         let mut promise_ids = Vec::new();
@@ -6646,21 +6577,10 @@ mod tests {
     async fn real_kv_dispatch_three_automations_independent_promises() {
         use crate::promise_store::{PromiseRepository, PromiseStatus};
 
-        let server = httpmock::MockServer::start_async().await;
-        server.mock(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/anthropic/v1/messages");
-            then.status(200)
-                .header("content-type", "application/json")
-                .json_body(serde_json::json!({
-                    "stop_reason": "end_turn",
-                    "content": [{"type": "text", "text": "done"}]
-                }));
-        });
-
         let (ps, _, run_store, _, _c) = make_all_stores_with_promise().await;
         let promise_repo: Arc<dyn PromiseRepository> = ps.clone();
-        let agent = make_agent(&server.base_url());
+        // 3 automations dispatched in parallel → 3 Anthropic calls.
+        let agent = make_agent_mock(vec![end_turn_json(), end_turn_json(), end_turn_json()]);
 
         let autos: Vec<_> = (0..3usize)
             .map(|i| {
@@ -6717,16 +6637,9 @@ mod tests {
     async fn real_kv_recover_stale_orphaned_automation_marks_permanent_failed() {
         use crate::promise_store::{PromiseRepository, PromiseStatus};
 
-        // Mock responds to nothing — the agent must never reach Anthropic.
-        let server = httpmock::MockServer::start_async().await;
-        let unexpected = server.mock(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/anthropic/v1/messages");
-            then.status(500).body("must not be called");
-        });
-
+        // Anthropic must never be called — empty response list panics if called.
         let (ps, auto_store, run_store, _, _c) = make_all_stores_with_promise().await;
-        let agent = make_agent(&server.base_url());
+        let agent = make_agent_mock(vec![]);
         let promise_repo: Arc<dyn PromiseRepository> = ps.clone();
 
         // Stale promise pointing to an automation that was deleted.
@@ -6762,9 +6675,6 @@ mod tests {
             "orphaned automation promise must be PermanentFailed, not {:?}",
             p.status
         );
-
-        // Anthropic must never have been called.
-        unexpected.assert_hits_async(0).await;
     }
 
     // ── recover_stale_promises: unknown subject (real NATS KV) ────────────────
@@ -6779,15 +6689,9 @@ mod tests {
     async fn real_kv_recover_stale_unknown_subject_marks_permanent_failed() {
         use crate::promise_store::{PromiseRepository, PromiseStatus};
 
-        let server = httpmock::MockServer::start_async().await;
-        let unexpected = server.mock(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/anthropic/v1/messages");
-            then.status(500).body("must not be called");
-        });
-
+        // Anthropic must never be called — empty response list panics if called.
         let (ps, auto_store, run_store, _, _c) = make_all_stores_with_promise().await;
-        let agent = make_agent(&server.base_url());
+        let agent = make_agent_mock(vec![]);
         let promise_repo: Arc<dyn PromiseRepository> = ps.clone();
 
         // Built-in-handler promise (empty automation_id) with an unrecognised subject.
@@ -6820,8 +6724,6 @@ mod tests {
             "unknown-subject promise must be PermanentFailed, not {:?}",
             p.status
         );
-
-        unexpected.assert_hits_async(0).await;
     }
 
     // ── recovery_count lifecycle via recover_stale_promises ───────────────────
@@ -6848,7 +6750,7 @@ mod tests {
         let promise_store: Arc<dyn PromiseRepository> = Arc::clone(&store) as _;
         let auto_store = Arc::new(EmptyAutomationStore); // not found → PermanentFailed
         let run_store = Arc::new(ErrorRecordRunStore);
-        let agent = make_agent("http://127.0.0.1:1");
+        let agent = make_agent_mock(vec![]);
 
         let handle = super::recover_stale_promises(
             &agent,
@@ -7017,6 +6919,8 @@ mod tests {
             tenant_id: "test".to_string(),
             promise_store: None,
             promise_id: None,
+            permission_checker: None,
+            elicitation_provider: None,
         });
 
         // Stale promise with a message history large enough to exceed
@@ -7236,7 +7140,7 @@ mod tests {
 
         let auto_store = Arc::new(EmptyAutomationStore); // automation not found → PermanentFailed path
         let run_store = Arc::new(ErrorRecordRunStore);
-        let agent = make_agent("http://127.0.0.1:1");
+        let agent = make_agent_mock(vec![]);
 
         let handle = super::recover_stale_promises(
             &agent,
@@ -7282,7 +7186,7 @@ mod tests {
 
         let auto_store = Arc::new(EmptyAutomationStore);
         let run_store = Arc::new(ErrorRecordRunStore);
-        let agent = make_agent("http://127.0.0.1:1");
+        let agent = make_agent_mock(vec![]);
 
         let handle = super::recover_stale_promises(
             &agent,

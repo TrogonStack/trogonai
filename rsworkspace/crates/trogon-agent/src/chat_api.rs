@@ -449,6 +449,8 @@ async fn send_message<R: SessionRepository>(
             tenant_id: state.agent.tenant_id.clone(),
             promise_store: None,
             promise_id: None,
+            permission_checker: None,
+            elicitation_provider: None,
         };
         &temp_agent
     };
@@ -865,34 +867,6 @@ mod tests {
 
     // ── Handler tests ─────────────────────────────────────────────────────────
 
-    fn make_test_agent() -> Arc<AgentLoop> {
-        use crate::agent_loop::ReqwestAnthropicClient;
-        use crate::flag_client::AlwaysOnFlagClient;
-        use crate::tools::{DefaultToolDispatcher, ToolContext};
-
-        let http = reqwest::Client::new();
-        let tool_ctx = Arc::new(ToolContext::for_test("http://127.0.0.1:1", "", "", ""));
-        Arc::new(AgentLoop {
-            anthropic_client: Arc::new(ReqwestAnthropicClient::new(
-                http,
-                "http://127.0.0.1:1".to_string(),
-                String::new(),
-            )),
-            model: "test".to_string(),
-            max_iterations: 1,
-            tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),
-            tool_context: tool_ctx,
-            memory_owner: None,
-            memory_repo: None,
-            memory_path: None,
-            mcp_tool_defs: vec![],
-            mcp_dispatch: vec![],
-            flag_client: Arc::new(AlwaysOnFlagClient),
-            tenant_id: "test-tenant".to_string(),
-            promise_store: None,
-            promise_id: None,
-        })
-    }
 
     fn make_mock_agent(responses: Vec<serde_json::Value>) -> Arc<AgentLoop> {
         use crate::agent_loop::mock::SequencedMockAnthropicClient;
@@ -915,6 +889,8 @@ mod tests {
             tenant_id: "test-tenant".to_string(),
             promise_store: None,
             promise_id: None,
+            permission_checker: None,
+            elicitation_provider: None,
         })
     }
 
@@ -926,13 +902,14 @@ mod tests {
             agent_id: None,
             agent_loader: None,
             skill_loader: None,
+            compactor_nats: None,
         };
         router(state)
     }
 
     fn get_ok_put_error_app() -> axum::Router {
         let state = ChatAppState {
-            agent: make_test_agent(),
+            agent: make_mock_agent(vec![]),
             session_store: GetOkPutErrorSessionStore::new(),
             promise_store: Arc::new(crate::promise_store::mock::MockPromiseStore::new()),
             agent_id: None,
@@ -945,7 +922,7 @@ mod tests {
 
     fn error_app() -> axum::Router {
         let state = ChatAppState {
-            agent: make_test_agent(),
+            agent: make_mock_agent(vec![]),
             session_store: ErrorSessionStore::new(),
             promise_store: Arc::new(crate::promise_store::mock::MockPromiseStore::new()),
             agent_id: None,
@@ -958,7 +935,7 @@ mod tests {
 
     fn mock_app(store: MockSessionStore) -> axum::Router {
         let state = ChatAppState {
-            agent: make_test_agent(),
+            agent: make_mock_agent(vec![]),
             session_store: store,
             promise_store: Arc::new(crate::promise_store::mock::MockPromiseStore::new()),
             agent_id: None,
@@ -1416,7 +1393,7 @@ mod tests {
         promise_store: Arc<dyn crate::promise_store::PromiseRepository>,
     ) -> axum::Router {
         let state = ChatAppState {
-            agent: make_test_agent(),
+            agent: make_mock_agent(vec![]),
             session_store,
             promise_store,
             agent_id: None,
