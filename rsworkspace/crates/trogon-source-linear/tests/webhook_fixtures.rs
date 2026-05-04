@@ -1,6 +1,6 @@
 use axum::body::Body;
 use axum::http::Request;
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
 use tower::ServiceExt;
 use trogon_nats::NatsToken;
