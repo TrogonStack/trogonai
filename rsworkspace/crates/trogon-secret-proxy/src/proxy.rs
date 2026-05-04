@@ -648,5 +648,108 @@ mod tests {
             let resp = app.oneshot(req).await.unwrap();
             assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
         }
+
+        fn make_nats_msg(payload: Bytes) -> async_nats::Message {
+            async_nats::Message {
+                subject: "reply.ignored".into(),
+                reply: None,
+                payload,
+                headers: None,
+                length: 0,
+                status: None,
+                description: None,
+            }
+        }
+
+        /// A streaming request (body contains `"stream": true`) must be assembled
+        /// from Start → Chunk → End frames published to the reply subject.
+        /// This test exercises the proxy-side streaming path without Docker.
+        #[tokio::test]
+        async fn streaming_request_assembles_body_from_frames() {
+            use crate::messages::StreamFrame;
+
+            let nats = MockNatsClient::new();
+
+            let start = serde_json::to_vec(&StreamFrame::Start {
+                status: 200,
+                headers: vec![("content-type".to_string(), "text/event-stream".to_string())],
+            })
+            .unwrap();
+            nats.seed_next_subscription(make_nats_msg(Bytes::from(start)));
+
+            let chunk = serde_json::to_vec(&StreamFrame::Chunk {
+                seq: 0,
+                data: b"data: hello\n\n".to_vec(),
+            })
+            .unwrap();
+            nats.seed_next_subscription(make_nats_msg(Bytes::from(chunk)));
+
+            let end = serde_json::to_vec(&StreamFrame::End { error: None }).unwrap();
+            nats.seed_next_subscription(make_nats_msg(Bytes::from(end)));
+
+            let js = MockJetStreamPublisher::new();
+            let app = make_app(nats, js, Some("http://unused.local".to_string()));
+
+            let req = axum::http::Request::builder()
+                .method("POST")
+                .uri("/anthropic/v1/messages")
+                .header("content-type", "application/json")
+                .header("authorization", "Bearer tok_test_stream")
+                .body(axum::body::Body::from(r#"{"stream":true}"#))
+                .unwrap();
+
+            let resp = app.oneshot(req).await.unwrap();
+            assert_eq!(resp.status(), StatusCode::OK);
+
+            let ct = resp
+                .headers()
+                .get("content-type")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("");
+            assert!(ct.contains("text/event-stream"), "content-type must be text/event-stream");
+
+            let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            assert_eq!(body.as_ref(), b"data: hello\n\n");
+        }
+
+        /// Start frame with a 4xx status (e.g. 401) must be forwarded to the caller.
+        #[tokio::test]
+        async fn streaming_request_with_401_start_frame_returns_401() {
+            use crate::messages::StreamFrame;
+
+            let nats = MockNatsClient::new();
+
+            let start = serde_json::to_vec(&StreamFrame::Start {
+                status: 401,
+                headers: vec![],
+            })
+            .unwrap();
+            nats.seed_next_subscription(make_nats_msg(Bytes::from(start)));
+
+            let chunk = serde_json::to_vec(&StreamFrame::Chunk {
+                seq: 0,
+                data: b"unauthorized".to_vec(),
+            })
+            .unwrap();
+            nats.seed_next_subscription(make_nats_msg(Bytes::from(chunk)));
+
+            let end = serde_json::to_vec(&StreamFrame::End { error: None }).unwrap();
+            nats.seed_next_subscription(make_nats_msg(Bytes::from(end)));
+
+            let js = MockJetStreamPublisher::new();
+            let app = make_app(nats, js, Some("http://unused.local".to_string()));
+
+            let req = axum::http::Request::builder()
+                .method("POST")
+                .uri("/anthropic/v1/messages")
+                .header("authorization", "Bearer tok_test_stream")
+                .body(axum::body::Body::from(r#"{"stream":true}"#))
+                .unwrap();
+
+            let resp = app.oneshot(req).await.unwrap();
+            assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        }
     }
 }

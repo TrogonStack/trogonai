@@ -555,7 +555,10 @@ mod tests {
     #[derive(Clone)]
     struct MockHttpClient {
         responses: Arc<Mutex<VecDeque<Result<HttpResponse, String>>>>,
-        streaming: Arc<Mutex<VecDeque<Result<(u16, Vec<(String, String)>, Vec<Vec<u8>>), String>>>>,
+        /// Each entry is either a connection-level Err or a successful response
+        /// whose chunk list may contain per-chunk Err items to simulate mid-stream
+        /// failures.
+        streaming: Arc<Mutex<VecDeque<Result<(u16, Vec<(String, String)>, Vec<Result<Vec<u8>, String>>), String>>>>,
     }
 
     impl MockHttpClient {
@@ -584,10 +587,29 @@ mod tests {
             headers: Vec<(String, String)>,
             chunks: Vec<Vec<u8>>,
         ) {
+            let ok_chunks = chunks.into_iter().map(Ok).collect();
             self.streaming
                 .lock()
                 .unwrap()
-                .push_back(Ok((status, headers, chunks)));
+                .push_back(Ok((status, headers, ok_chunks)));
+        }
+
+        /// Queue a streaming response where good chunks are delivered first, then
+        /// one error chunk — simulating a mid-stream failure.
+        fn enqueue_streaming_with_mid_error(
+            &self,
+            status: u16,
+            headers: Vec<(String, String)>,
+            good_chunks: Vec<Vec<u8>>,
+            error: impl Into<String>,
+        ) {
+            let mut mixed: Vec<Result<Vec<u8>, String>> =
+                good_chunks.into_iter().map(Ok).collect();
+            mixed.push(Err(error.into()));
+            self.streaming
+                .lock()
+                .unwrap()
+                .push_back(Ok((status, headers, mixed)));
         }
 
         fn enqueue_streaming_err(&self, msg: impl Into<String>) {
@@ -596,49 +618,42 @@ mod tests {
     }
 
     impl HttpClient for MockHttpClient {
-        fn send_request(
+        async fn send_request(
             &self,
             _method: &str,
             _url: &str,
             _headers: &[(String, String)],
             _body: &[u8],
-        ) -> Pin<Box<dyn Future<Output = Result<HttpResponse, String>> + Send + '_>> {
-            let result = self
-                .responses
+        ) -> Result<HttpResponse, String> {
+            self.responses
                 .lock()
                 .unwrap()
                 .pop_front()
-                .unwrap_or_else(|| Err("MockHttpClient: no more responses enqueued".to_string()));
-            Box::pin(async move { result })
+                .unwrap_or_else(|| Err("MockHttpClient: no more responses enqueued".to_string()))
         }
 
-        fn send_request_streaming(
+        async fn send_request_streaming(
             &self,
             _method: &str,
             _url: &str,
             _headers: &[(String, String)],
             _body: &[u8],
-        ) -> Pin<Box<dyn Future<Output = Result<StreamingHttpResponse, String>> + Send + '_>> {
+        ) -> Result<StreamingHttpResponse, String> {
             let entry = self
                 .streaming
                 .lock()
                 .unwrap()
                 .pop_front()
-                .unwrap_or_else(|| Err("MockHttpClient: no streaming responses enqueued".to_string()));
-            Box::pin(async move {
-                match entry {
-                    Ok((status, headers, chunks)) => {
-                        let stream = futures_util::stream::iter(
-                            chunks.into_iter().map(|c| Ok::<Bytes, String>(Bytes::from(c))),
-                        );
-                        Ok(StreamingHttpResponse {
-                            status,
-                            headers,
-                            chunks: Box::pin(stream),
-                        })
-                    }
-                    Err(e) => Err(e),
-                }
+                .unwrap_or_else(|| Err("MockHttpClient: no streaming responses enqueued".to_string()))?;
+
+            let (status, headers, chunks) = entry;
+            let stream = futures_util::stream::iter(
+                chunks.into_iter().map(|c| c.map(Bytes::from)),
+            );
+            Ok(StreamingHttpResponse {
+                status,
+                headers,
+                chunks: Box::pin(stream),
             })
         }
     }
@@ -2549,5 +2564,44 @@ mod tests {
         assert_eq!(frames.len(), 2, "Start + End only when body is empty");
         assert!(matches!(frames[0], StreamFrame::Start { status: 200, .. }));
         assert!(matches!(frames[1], StreamFrame::End { error: None }));
+    }
+
+    /// When the upstream stream yields an error mid-way, the worker must publish
+    /// the chunks received so far and then an End frame carrying the error.
+    ///
+    /// This tests the `Some(Err(e))` branch in `process_request_streaming`.
+    #[tokio::test]
+    async fn process_request_streaming_mid_stream_error_emits_end_with_error() {
+        let vault = MemoryVault::new();
+        let token = ApiKeyToken::new("tok_anthropic_prod_stream6").unwrap();
+        vault.store(&token, "sk-ant-realkey").await.unwrap();
+
+        let http = MockHttpClient::new();
+        http.enqueue_streaming_with_mid_error(
+            200,
+            vec![],
+            vec![b"partial data".to_vec()],
+            "upstream connection reset",
+        );
+
+        let nats = MockNatsClient::new();
+        let request = make_streaming_request("Bearer tok_anthropic_prod_stream6");
+
+        process_request_streaming(&request, &vault, &http, &nats, "test.reply").await;
+
+        let frames = nats.published_frames();
+        // Start + one good Chunk + End{error: Some(...)}
+        assert_eq!(frames.len(), 3, "Start + Chunk + End(error) = 3 frames");
+        assert!(matches!(frames[0], StreamFrame::Start { status: 200, .. }));
+        if let StreamFrame::Chunk { seq, ref data } = frames[1] {
+            assert_eq!(seq, 0);
+            assert_eq!(data, b"partial data");
+        } else {
+            panic!("Expected Chunk at index 1, got {:?}", frames[1]);
+        }
+        assert!(
+            matches!(frames[2], StreamFrame::End { error: Some(_) }),
+            "End frame must carry the mid-stream error"
+        );
     }
 }
