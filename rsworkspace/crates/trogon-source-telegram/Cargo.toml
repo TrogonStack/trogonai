@@ -14,7 +14,7 @@ bytes = { workspace = true }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
-sha2 = "0.10"
+sha2 = "0.11"
 subtle = "2.6"
 tokio = { workspace = true, features = ["full"] }
 tracing = { workspace = true }

@@ -162,7 +162,7 @@ fn change_notification_collection_message_id(notifications: &[Value]) -> String 
         }
     }
 
-    format!("{:x}", hasher.finalize())
+    hex::encode(hasher.finalize())
 }
 
 fn validation_token_from_query(query: Option<&str>) -> Option<String> {
