@@ -342,8 +342,9 @@ impl ReqwestAnthropicStreamingClient {
 impl AnthropicStreamingClient for ReqwestAnthropicStreamingClient {
     fn complete_streaming(
         &self,
-        body: serde_json::Value,
+        mut body: serde_json::Value,
     ) -> Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'static>> {
+        body["stream"] = serde_json::json!(true);
         let url = self.messages_url();
         let token = self.anthropic_token.clone();
         let http = self.http.clone();
@@ -712,31 +713,25 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                 });
             }
 
-            // Inject stream: true so Anthropic sends SSE events.
-            body["stream"] = serde_json::json!(true);
-
             // ── Obtain the SSE byte stream ────────────────────────────────────
-            let mut byte_stream: Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send>> =
-                if let Some(client) = &self.streaming_client {
-                    client.complete_streaming(body)
-                } else {
-                    let mut req_builder = self
-                        .http_client
-                        .post(self.messages_url())
-                        .header("Authorization", format!("Bearer {}", self.anthropic_token))
-                        .header("anthropic-version", "2023-06-01");
-                    for (k, v) in &self.anthropic_extra_headers {
-                        req_builder = req_builder.header(k.as_str(), v.as_str());
-                    }
-                    let http_resp = req_builder
-                        .json(&body)
-                        .send()
-                        .await
-                        .map_err(AgentError::Http)?
-                        .error_for_status()
-                        .map_err(AgentError::Http)?;
-                    Box::pin(http_resp.bytes_stream())
-                };
+            // Build a concrete client from the loop's current fields when no
+            // mock is injected. This means apply_gateway() mutations are always
+            // picked up — the client is never stale.
+            let built_client: Arc<dyn AnthropicStreamingClient>;
+            let streaming: &dyn AnthropicStreamingClient = match &self.streaming_client {
+                Some(c) => c.as_ref(),
+                None => {
+                    built_client = Arc::new(ReqwestAnthropicStreamingClient {
+                        http: self.http_client.clone(),
+                        proxy_url: self.proxy_url.clone(),
+                        anthropic_token: self.anthropic_token.clone(),
+                        anthropic_base_url: self.anthropic_base_url.clone(),
+                        anthropic_extra_headers: self.anthropic_extra_headers.clone(),
+                    });
+                    built_client.as_ref()
+                }
+            };
+            let mut byte_stream = streaming.complete_streaming(body);
 
             // ── Parse SSE stream ──────────────────────────────────────────────
             let mut sse = SseParser::new();
