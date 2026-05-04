@@ -27,14 +27,46 @@ where
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct StreamReadResult {
+pub struct ReadStreamRequest<'a, StreamId: ?Sized> {
+    pub stream_id: &'a StreamId,
+    pub from_sequence: u64,
+}
+
+impl<'a, StreamId: ?Sized> ReadStreamRequest<'a, StreamId> {
+    pub const fn new(stream_id: &'a StreamId, from_sequence: u64) -> Self {
+        Self {
+            stream_id,
+            from_sequence,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReadStreamResponse {
     pub current_version: Option<u64>,
     pub events: Vec<RecordedEvent>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct AppendOutcome {
+pub struct AppendStreamResponse {
     pub next_expected_version: u64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AppendStreamRequest<'a, StreamId: ?Sized> {
+    pub stream_id: &'a StreamId,
+    pub stream_state: StreamState,
+    pub events: NonEmpty<EventData>,
+}
+
+impl<'a, StreamId: ?Sized> AppendStreamRequest<'a, StreamId> {
+    pub const fn new(stream_id: &'a StreamId, stream_state: StreamState, events: NonEmpty<EventData>) -> Self {
+        Self {
+            stream_id,
+            stream_state,
+            events,
+        }
+    }
 }
 
 pub trait StreamRead<StreamId: ?Sized>: Send + Sync {
@@ -42,9 +74,8 @@ pub trait StreamRead<StreamId: ?Sized>: Send + Sync {
 
     fn read_stream(
         &self,
-        stream_id: &StreamId,
-        from_sequence: u64,
-    ) -> impl std::future::Future<Output = Result<StreamReadResult, Self::Error>> + Send;
+        request: ReadStreamRequest<'_, StreamId>,
+    ) -> impl std::future::Future<Output = Result<ReadStreamResponse, Self::Error>> + Send;
 }
 
 pub trait StreamAppend<StreamId: ?Sized>: Send + Sync {
@@ -52,8 +83,6 @@ pub trait StreamAppend<StreamId: ?Sized>: Send + Sync {
 
     fn append_stream(
         &self,
-        stream_id: &StreamId,
-        stream_state: StreamState,
-        events: NonEmpty<EventData>,
-    ) -> impl std::future::Future<Output = Result<AppendOutcome, Self::Error>> + Send;
+        request: AppendStreamRequest<'_, StreamId>,
+    ) -> impl std::future::Future<Output = Result<AppendStreamResponse, Self::Error>> + Send;
 }

@@ -2,8 +2,9 @@ use async_nats::jetstream::{self, kv};
 use serde::{Serialize, de::DeserializeOwned};
 use trogon_eventsourcing::nats::jetstream::JetStreamStore;
 use trogon_eventsourcing::{
-    AppendOutcome, EventData, NonEmpty, Snapshot, SnapshotRead, SnapshotStoreConfig, SnapshotWrite, StreamAppend,
-    StreamRead, StreamReadResult, StreamState,
+    AppendStreamRequest, AppendStreamResponse, ReadSnapshotRequest, ReadSnapshotResponse, ReadStreamRequest,
+    ReadStreamResponse, SnapshotRead, SnapshotWrite, StreamAppend, StreamRead, WriteSnapshotRequest,
+    WriteSnapshotResponse,
 };
 
 use super::stream_subject::JobEventSubjectResolver;
@@ -29,29 +30,18 @@ impl EventStore {
 impl StreamRead<str> for EventStore {
     type Error = CronError;
 
-    async fn read_stream(&self, stream_id: &str, from_sequence: u64) -> Result<StreamReadResult, Self::Error> {
-        self.inner
-            .read_stream(stream_id, from_sequence)
-            .await
-            .map_err(CronError::from)
+    async fn read_stream(&self, request: ReadStreamRequest<'_, str>) -> Result<ReadStreamResponse, Self::Error> {
+        self.inner.read_stream(request).await.map_err(CronError::from)
     }
 }
 
 impl StreamAppend<str> for EventStore {
     type Error = CronError;
 
-    async fn append_stream(
-        &self,
-        stream_id: &str,
-        stream_state: StreamState,
-        events: NonEmpty<EventData>,
-    ) -> Result<AppendOutcome, Self::Error> {
-        let projected_events = events.as_slice().to_vec();
-        let outcome = self
-            .inner
-            .append_stream(stream_id, stream_state, events)
-            .await
-            .map_err(CronError::from)?;
+    async fn append_stream(&self, request: AppendStreamRequest<'_, str>) -> Result<AppendStreamResponse, Self::Error> {
+        let stream_id = request.stream_id;
+        let projected_events = request.events.as_slice().to_vec();
+        let outcome = self.inner.append_stream(request).await.map_err(CronError::from)?;
 
         project_appended_events(
             self.inner.snapshot_bucket(),
@@ -73,13 +63,9 @@ where
 
     async fn read_snapshot(
         &self,
-        config: SnapshotStoreConfig,
-        stream_id: &str,
-    ) -> Result<Option<Snapshot<Payload>>, Self::Error> {
-        self.inner
-            .read_snapshot(config, stream_id)
-            .await
-            .map_err(CronError::from)
+        request: ReadSnapshotRequest<'_, str>,
+    ) -> Result<ReadSnapshotResponse<Payload>, Self::Error> {
+        self.inner.read_snapshot(request).await.map_err(CronError::from)
     }
 }
 
@@ -91,13 +77,8 @@ where
 
     async fn write_snapshot(
         &self,
-        config: SnapshotStoreConfig,
-        stream_id: &str,
-        snapshot: Snapshot<Payload>,
-    ) -> Result<(), Self::Error> {
-        self.inner
-            .write_snapshot(config, stream_id, snapshot)
-            .await
-            .map_err(CronError::from)
+        request: WriteSnapshotRequest<'_, Payload, str>,
+    ) -> Result<WriteSnapshotResponse, Self::Error> {
+        self.inner.write_snapshot(request).await.map_err(CronError::from)
     }
 }

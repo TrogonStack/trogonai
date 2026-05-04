@@ -8,10 +8,11 @@ use async_nats::jetstream::kv;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use serde::{Serialize, de::DeserializeOwned};
-use trogon_eventsourcing::snapshot::{Snapshot, SnapshotStoreConfig};
+use trogon_eventsourcing::snapshot::Snapshot;
 use trogon_eventsourcing::{
-    AppendOutcome, EventData, NonEmpty, SnapshotRead, SnapshotWrite, StreamAppend, StreamRead, StreamReadResult,
-    StreamState,
+    AppendStreamRequest, AppendStreamResponse, EventData, ReadSnapshotRequest, ReadSnapshotResponse, ReadStreamRequest,
+    ReadStreamResponse, SnapshotRead, SnapshotWrite, StreamAppend, StreamRead, StreamState, WriteSnapshotRequest,
+    WriteSnapshotResponse,
 };
 use trogon_nats::lease::{ReleaseLease, RenewLease, TryAcquireLease};
 
@@ -366,11 +367,13 @@ fn message_from_proto(message: v1::JobMessageView<'_>) -> MessageEnvelope {
 impl StreamRead<str> for MockCronStore {
     type Error = CronError;
 
-    async fn read_stream(&self, stream_id: &str, from_sequence: u64) -> Result<StreamReadResult, Self::Error> {
+    async fn read_stream(&self, request: ReadStreamRequest<'_, str>) -> Result<ReadStreamResponse, Self::Error> {
+        let stream_id = request.stream_id;
+        let from_sequence = request.from_sequence;
         let current_version = self.stream_versions.lock().unwrap().get(stream_id).copied();
         let stream_events = self.events.lock().unwrap().get(stream_id).cloned().unwrap_or_default();
         if from_sequence == 0 {
-            return Ok(StreamReadResult {
+            return Ok(ReadStreamResponse {
                 current_version,
                 events: Vec::new(),
             });
@@ -394,7 +397,7 @@ impl StreamRead<str> for MockCronStore {
                 })?,
             ));
         }
-        Ok(StreamReadResult {
+        Ok(ReadStreamResponse {
             current_version,
             events: recorded,
         })
@@ -404,13 +407,10 @@ impl StreamRead<str> for MockCronStore {
 impl StreamAppend<str> for MockCronStore {
     type Error = CronError;
 
-    async fn append_stream(
-        &self,
-        stream_id: &str,
-        expected_state: StreamState,
-        events: NonEmpty<EventData>,
-    ) -> Result<AppendOutcome, Self::Error> {
-        let stream_id = stream_id.to_string();
+    async fn append_stream(&self, request: AppendStreamRequest<'_, str>) -> Result<AppendStreamResponse, Self::Error> {
+        let stream_id = request.stream_id.to_string();
+        let expected_state = request.stream_state;
+        let events = request.events;
         let jobs = self.jobs.clone();
         let stream_versions = self.stream_versions.clone();
         let event_log = self.events.clone();
@@ -504,7 +504,7 @@ impl StreamAppend<str> for MockCronStore {
         } else {
             jobs.remove(stream_id.as_str());
         }
-        Ok(AppendOutcome {
+        Ok(AppendStreamResponse {
             next_expected_version: current_version.unwrap_or(0) + appended_events,
         })
     }
@@ -518,10 +518,10 @@ where
 
     async fn read_snapshot(
         &self,
-        config: SnapshotStoreConfig,
-        stream_id: &str,
-    ) -> Result<Option<Snapshot<Payload>>, Self::Error> {
-        self.read_command_snapshot(config, stream_id)
+        request: ReadSnapshotRequest<'_, str>,
+    ) -> Result<ReadSnapshotResponse<Payload>, Self::Error> {
+        self.read_command_snapshot(request.config, request.stream_id)
+            .map(ReadSnapshotResponse::new)
     }
 }
 
@@ -533,18 +533,16 @@ where
 
     async fn write_snapshot(
         &self,
-        config: SnapshotStoreConfig,
-        stream_id: &str,
-        snapshot: Snapshot<Payload>,
-    ) -> Result<(), Self::Error> {
-        let snapshot = serde_json::to_string(&snapshot)?;
+        request: WriteSnapshotRequest<'_, Payload, str>,
+    ) -> Result<WriteSnapshotResponse, Self::Error> {
+        let snapshot = serde_json::to_string(&request.snapshot)?;
         self.command_snapshots
             .lock()
             .unwrap()
-            .entry(config.key_prefix().to_string())
+            .entry(request.config.key_prefix().to_string())
             .or_default()
-            .insert(stream_id.to_string(), snapshot);
-        Ok(())
+            .insert(request.stream_id.to_string(), snapshot);
+        Ok(WriteSnapshotResponse::new())
     }
 }
 
