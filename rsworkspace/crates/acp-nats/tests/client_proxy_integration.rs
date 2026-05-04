@@ -14,11 +14,11 @@ use acp_nats::{AcpPrefix, Bridge, Config, NatsAuth, NatsConfig, StdJsonSerialize
 use agent_client_protocol::{
     Client, CreateTerminalRequest, CreateTerminalResponse, KillTerminalRequest,
     KillTerminalResponse, PromptResponse, ReadTextFileRequest, ReadTextFileResponse,
-    ReleaseTerminalRequest, ReleaseTerminalResponse, Request, RequestId, RequestPermissionRequest,
-    RequestPermissionResponse, SessionNotification, SessionUpdate, StopReason, TerminalExitStatus,
-    TerminalOutputRequest, TerminalOutputResponse, ToolCallUpdate, ToolCallUpdateFields,
-    WaitForTerminalExitRequest, WaitForTerminalExitResponse, WriteTextFileRequest,
-    WriteTextFileResponse,
+    ReleaseTerminalRequest, ReleaseTerminalResponse, Request, RequestId, RequestPermissionOutcome,
+    RequestPermissionRequest, RequestPermissionResponse, SessionNotification, SessionUpdate,
+    StopReason, TerminalExitStatus, TerminalOutputRequest, TerminalOutputResponse, ToolCallUpdate,
+    ToolCallUpdateFields, WaitForTerminalExitRequest, WaitForTerminalExitResponse,
+    WriteTextFileRequest, WriteTextFileResponse,
 };
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -302,13 +302,10 @@ async fn request_permission_through_proxy_returns_outcome() {
 
             tokio::time::sleep(Duration::from_millis(100)).await;
 
+            // request_permission uses raw JSON protocol (not JSON-RPC), matching NatsClientProxy.
             let tool_call = ToolCallUpdate::new("call-1", ToolCallUpdateFields::new());
-            let envelope = Request {
-                id: RequestId::Number(3),
-                method: std::sync::Arc::from("session/request_permission"),
-                params: Some(RequestPermissionRequest::new("sess-1", tool_call, vec![])),
-            };
-            let payload = serde_json::to_vec(&envelope).unwrap();
+            let req = RequestPermissionRequest::new("sess-1", tool_call, vec![]);
+            let payload = serde_json::to_vec(&req).unwrap();
             let reply = nats1
                 .request(
                     "acp.session.sess-1.client.session.request_permission",
@@ -317,16 +314,12 @@ async fn request_permission_through_proxy_returns_outcome() {
                 .await
                 .expect("request must succeed");
 
-            let response: serde_json::Value = serde_json::from_slice(&reply.payload).unwrap();
-            assert!(
-                response["result"].is_object(),
-                "expected result in reply, got: {}",
-                response
-            );
-            assert!(
-                response["result"].get("outcome").is_some(),
-                "expected outcome field, got: {}",
-                response["result"]
+            let response: RequestPermissionResponse =
+                serde_json::from_slice(&reply.payload).expect("response must deserialize");
+            assert_eq!(
+                response.outcome,
+                RequestPermissionOutcome::Cancelled,
+                "MockClient returns Cancelled"
             );
         })
         .await;
