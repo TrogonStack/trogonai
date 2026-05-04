@@ -50,6 +50,14 @@ pub struct HttpResponse {
     pub body: Vec<u8>,
 }
 
+/// Streaming HTTP response: status and headers are available immediately;
+/// the body arrives as a sequence of [`Bytes`] chunks.
+pub struct StreamingHttpResponse {
+    pub status: u16,
+    pub headers: Vec<(String, String)>,
+    pub chunks: Pin<Box<dyn Stream<Item = Result<Bytes, String>> + Send>>,
+}
+
 /// Forward HTTP requests to upstream AI providers (worker-side).
 pub trait HttpClient: Clone + Send + Sync + 'static {
     fn send_request(
@@ -59,6 +67,21 @@ pub trait HttpClient: Clone + Send + Sync + 'static {
         headers: &[(String, String)],
         body: &[u8],
     ) -> impl Future<Output = Result<HttpResponse, String>> + Send;
+
+    /// Like [`send_request`] but returns the response body as a stream of chunks.
+    ///
+    /// The default implementation returns `Err` so that existing mock
+    /// implementations do not need to change.
+    fn send_request_streaming(
+        &self,
+        method: &str,
+        url: &str,
+        headers: &[(String, String)],
+        body: &[u8],
+    ) -> impl Future<Output = Result<StreamingHttpResponse, String>> + Send {
+        let _ = (method, url, headers, body);
+        async { Err("streaming not supported by this client".to_string()) }
+    }
 }
 
 // ── JetStreamConsumerClient ───────────────────────────────────────────────────

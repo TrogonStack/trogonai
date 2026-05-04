@@ -9,6 +9,7 @@
 
 use std::sync::Arc;
 
+use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tracing::{debug, info, warn};
@@ -642,50 +643,129 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                 });
             }
 
-            let response = self
-                .http_client
-                .call_anthropic(
-                    &self.messages_url(),
-                    &self.anthropic_token,
-                    &self.anthropic_extra_headers,
-                    &body,
-                )
-                .await?;
+            // Inject stream: true so Anthropic sends SSE events.
+            body["stream"] = serde_json::json!(true);
 
-            if let Some(ref u) = response.usage {
-                total_input = total_input.saturating_add(u.input_tokens);
-                total_output = total_output.saturating_add(u.output_tokens);
-                total_cache_creation =
-                    total_cache_creation.saturating_add(u.cache_creation_input_tokens);
-                total_cache_read = total_cache_read.saturating_add(u.cache_read_input_tokens);
+            let mut req_builder = self
+                .http_client
+                .post(self.messages_url())
+                .header("Authorization", format!("Bearer {}", self.anthropic_token))
+                .header("anthropic-version", "2023-06-01");
+            for (k, v) in &self.anthropic_extra_headers {
+                req_builder = req_builder.header(k.as_str(), v.as_str());
+            }
+            let http_resp = req_builder
+                .json(&body)
+                .send()
+                .await
+                .map_err(AgentError::Http)?
+                .error_for_status()
+                .map_err(AgentError::Http)?;
+
+            // ── Parse SSE stream ──────────────────────────────────────────────
+            let mut byte_stream = http_resp.bytes_stream();
+            let mut sse = SseParser::new();
+
+            let mut stop_reason = String::new();
+            let mut block_builders: Vec<Option<ContentBlockBuilder>> = Vec::new();
+            let mut turn_input = 0u32;
+            let mut turn_output = 0u32;
+            let mut turn_cache_creation = 0u32;
+            let mut turn_cache_read = 0u32;
+
+            while let Some(chunk_result) = byte_stream.next().await {
+                let bytes = chunk_result.map_err(AgentError::Http)?;
+
+                for (event_type, data) in sse.feed(&bytes) {
+                    match event_type.as_str() {
+                        "message_start" => {
+                            let u = &data["message"]["usage"];
+                            turn_input = u["input_tokens"].as_u64().unwrap_or(0) as u32;
+                            turn_cache_creation = u["cache_creation_input_tokens"].as_u64().unwrap_or(0) as u32;
+                            turn_cache_read = u["cache_read_input_tokens"].as_u64().unwrap_or(0) as u32;
+                        }
+                        "content_block_start" => {
+                            let idx = data["index"].as_u64().unwrap_or(0) as usize;
+                            while block_builders.len() <= idx {
+                                block_builders.push(None);
+                            }
+                            let cb = &data["content_block"];
+                            block_builders[idx] = match cb["type"].as_str() {
+                                Some("text") => Some(ContentBlockBuilder::Text(String::new())),
+                                Some("thinking") => Some(ContentBlockBuilder::Thinking(String::new())),
+                                Some("tool_use") => {
+                                    let id = cb["id"].as_str().unwrap_or("").to_string();
+                                    let name = cb["name"].as_str().unwrap_or("").to_string();
+                                    Some(ContentBlockBuilder::ToolUse { id, name, input_buf: String::new() })
+                                }
+                                _ => None,
+                            };
+                        }
+                        "content_block_delta" => {
+                            let idx = data["index"].as_u64().unwrap_or(0) as usize;
+                            let delta = &data["delta"];
+                            if let Some(Some(builder)) = block_builders.get_mut(idx) {
+                                match (delta["type"].as_str(), builder) {
+                                    (Some("text_delta"), ContentBlockBuilder::Text(t)) => {
+                                        if let Some(text) = delta["text"].as_str() {
+                                            t.push_str(text);
+                                            let _ = event_tx
+                                                .send(AgentEvent::TextDelta { text: text.to_string() })
+                                                .await;
+                                        }
+                                    }
+                                    (Some("thinking_delta"), ContentBlockBuilder::Thinking(t)) => {
+                                        if let Some(thinking) = delta["thinking"].as_str() {
+                                            t.push_str(thinking);
+                                            let _ = event_tx
+                                                .send(AgentEvent::ThinkingDelta { text: thinking.to_string() })
+                                                .await;
+                                        }
+                                    }
+                                    (Some("input_json_delta"), ContentBlockBuilder::ToolUse { input_buf, .. }) => {
+                                        if let Some(partial) = delta["partial_json"].as_str() {
+                                            input_buf.push_str(partial);
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                        "message_delta" => {
+                            stop_reason = data["delta"]["stop_reason"]
+                                .as_str()
+                                .unwrap_or("")
+                                .to_string();
+                            turn_output = data["usage"]["output_tokens"].as_u64().unwrap_or(0) as u32;
+                        }
+                        _ => {}
+                    }
+                }
             }
 
-            match response.stop_reason.as_str() {
-                "end_turn" => {
-                    // Emit thinking blocks before text
-                    for block in &response.content {
-                        if let ContentBlock::Thinking { thinking } = block {
-                            let _ = event_tx
-                                .send(AgentEvent::ThinkingDelta {
-                                    text: thinking.clone(),
-                                })
-                                .await;
-                        }
+            // Reconstruct the content blocks from builders.
+            let response_content: Vec<ContentBlock> = block_builders
+                .into_iter()
+                .filter_map(|opt| match opt? {
+                    ContentBlockBuilder::Text(t) => Some(ContentBlock::Text { text: t }),
+                    ContentBlockBuilder::Thinking(t) => Some(ContentBlock::Thinking { thinking: t }),
+                    ContentBlockBuilder::ToolUse { id, name, input_buf } => {
+                        let input = serde_json::from_str(&input_buf)
+                            .unwrap_or(serde_json::Value::Object(Default::default()));
+                        Some(ContentBlock::ToolUse { id, name, input, parent_tool_use_id: None })
                     }
+                })
+                .collect();
 
-                    let text = response
-                        .content
-                        .iter()
-                        .filter_map(|b| {
-                            if let ContentBlock::Text { text } = b {
-                                Some(text.as_str())
-                            } else {
-                                None
-                            }
-                        })
-                        .collect::<Vec<_>>()
-                        .join("\n");
+            // Accumulate per-turn usage into session totals.
+            total_input = total_input.saturating_add(turn_input);
+            total_output = total_output.saturating_add(turn_output);
+            total_cache_creation = total_cache_creation.saturating_add(turn_cache_creation);
+            total_cache_read = total_cache_read.saturating_add(turn_cache_read);
 
+            match stop_reason.as_str() {
+                "end_turn" => {
+                    // TextDelta and ThinkingDelta were already emitted incrementally above.
                     let _ = event_tx
                         .send(AgentEvent::UsageSummary {
                             input_tokens: total_input,
@@ -694,26 +774,12 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                             cache_read_tokens: total_cache_read,
                         })
                         .await;
-                    let _ = event_tx.send(AgentEvent::TextDelta { text }).await;
 
-                    messages.push(Message::assistant(response.content));
+                    messages.push(Message::assistant(response_content));
                     info!(iterations = iteration + 1, "Streaming chat completed");
                     return Ok(messages);
                 }
                 "max_tokens" => {
-                    // Emit whatever partial text was in the response before signalling
-                    let text = response
-                        .content
-                        .iter()
-                        .filter_map(|b| {
-                            if let ContentBlock::Text { text } = b {
-                                Some(text.as_str())
-                            } else {
-                                None
-                            }
-                        })
-                        .collect::<Vec<_>>()
-                        .join("\n");
                     let _ = event_tx
                         .send(AgentEvent::UsageSummary {
                             input_tokens: total_input,
@@ -722,15 +788,15 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                             cache_read_tokens: total_cache_read,
                         })
                         .await;
-                    Self::emit_partial_text(&event_tx, text).await;
+                    // Text was already emitted incrementally during the SSE parse above.
                     warn!(iteration, "Streaming chat hit max_tokens (context full)");
                     return Err(AgentError::MaxTokens);
                 }
                 "tool_use" => {
                     let results = self
-                        .execute_tools_streaming(&response.content, &event_tx)
+                        .execute_tools_streaming(&response_content, &event_tx)
                         .await;
-                    messages.push(Message::assistant(response.content));
+                    messages.push(Message::assistant(response_content));
                     let mut tool_results_msg = Message::tool_results(results);
                     if let Some(ref mut rx) = steer_rx {
                         while let Ok(text) = rx.try_recv() {
@@ -750,16 +816,6 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
             "Streaming chat reached max iterations"
         );
         Err(AgentError::MaxIterationsReached)
-    }
-
-    /// Sends a [`AgentEvent::TextDelta`] when `text` is non-empty.
-    /// Extracted to allow `#[coverage(off)]` — the closing `}` of an async
-    /// `if` block is an LLVM coverage artifact in state-machine code.
-    #[cfg_attr(coverage, coverage(off))]
-    async fn emit_partial_text(event_tx: &tokio::sync::mpsc::Sender<AgentEvent>, text: String) {
-        if !text.is_empty() {
-            let _ = event_tx.send(AgentEvent::TextDelta { text }).await;
-        }
     }
 
     #[cfg_attr(coverage, coverage(off))]
@@ -896,6 +952,122 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
         }
 
         results
+    }
+}
+
+// ── SSE streaming helpers ─────────────────────────────────────────────────────
+
+/// Incremental SSE parser.  Feed raw bytes and receive parsed `(event_type,
+/// data_json)` pairs.  Handles SSE streams split across multiple network chunks.
+struct SseParser {
+    buf: String,
+}
+
+impl SseParser {
+    fn new() -> Self {
+        Self { buf: String::new() }
+    }
+
+    fn feed(&mut self, bytes: &[u8]) -> Vec<(String, serde_json::Value)> {
+        let Ok(text) = std::str::from_utf8(bytes) else {
+            return vec![];
+        };
+        self.buf.push_str(text);
+
+        let mut events = Vec::new();
+        while let Some(pos) = self.buf.find("\n\n") {
+            let raw = self.buf[..pos].to_string();
+            self.buf = self.buf[pos + 2..].to_string();
+
+            let mut event_type = String::new();
+            let mut data = String::new();
+            for line in raw.lines() {
+                if let Some(val) = line.strip_prefix("event: ") {
+                    event_type = val.to_string();
+                } else if let Some(val) = line.strip_prefix("data: ") {
+                    data = val.to_string();
+                }
+            }
+
+            if !data.is_empty() {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&data) {
+                    events.push((event_type, v));
+                }
+            }
+        }
+        events
+    }
+}
+
+/// Accumulator for a single content block during SSE streaming.
+enum ContentBlockBuilder {
+    Text(String),
+    Thinking(String),
+    ToolUse {
+        id: String,
+        name: String,
+        input_buf: String,
+    },
+}
+
+// ── SSE parser tests ──────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod sse_parser_tests {
+    use super::SseParser;
+
+    #[test]
+    fn single_complete_event_is_parsed() {
+        let mut p = SseParser::new();
+        let events = p.feed(b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\"}\n\n");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].0, "content_block_delta");
+    }
+
+    #[test]
+    fn event_split_across_two_chunks_is_assembled() {
+        let mut p = SseParser::new();
+        let first = p.feed(b"event: message_start\ndata: {\"type\":");
+        assert!(first.is_empty(), "incomplete event must not be returned early");
+        let second = p.feed(b"\"message_start\"}\n\n");
+        assert_eq!(second.len(), 1);
+        assert_eq!(second[0].0, "message_start");
+    }
+
+    #[test]
+    fn two_events_in_one_chunk() {
+        let mut p = SseParser::new();
+        let events = p.feed(
+            b"event: ping\ndata: {\"type\":\"ping\"}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+        );
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].0, "ping");
+        assert_eq!(events[1].0, "message_stop");
+    }
+
+    #[test]
+    fn non_json_data_line_is_skipped_silently() {
+        let mut p = SseParser::new();
+        let events = p.feed(b"event: ping\ndata: not-valid-json\n\n");
+        assert!(events.is_empty(), "invalid JSON data must be silently dropped");
+    }
+
+    #[test]
+    fn event_without_data_line_is_skipped() {
+        let mut p = SseParser::new();
+        let events = p.feed(b"event: ping\n\n");
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn text_delta_value_is_accessible() {
+        let mut p = SseParser::new();
+        let events = p.feed(
+            b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello\"}}\n\n",
+        );
+        assert_eq!(events.len(), 1);
+        let text = events[0].1["delta"]["text"].as_str().unwrap();
+        assert_eq!(text, "Hello");
     }
 }
 

@@ -17,6 +17,7 @@ use futures_util::Stream;
 
 use crate::traits::{
     HttpClient, HttpResponse, JetStreamConsumerClient, JetStreamPublisher, JsMsg, NatsClient,
+    StreamingHttpResponse,
 };
 
 // ── MockNatsClient ────────────────────────────────────────────────────────────
@@ -156,12 +157,16 @@ impl JetStreamPublisher for MockJetStreamPublisher {
 #[derive(Clone)]
 pub struct MockHttpClient {
     responses: Arc<Mutex<VecDeque<HttpResponse>>>,
+    /// Streaming responses: stored as (status, headers, chunks) so the struct
+    /// remains Clone (StreamingHttpResponse itself is not Clone).
+    streaming: Arc<Mutex<VecDeque<Result<(u16, Vec<(String, String)>, Vec<Vec<u8>>), String>>>>,
 }
 
 impl MockHttpClient {
     pub fn new() -> Self {
         Self {
             responses: Arc::new(Mutex::new(VecDeque::new())),
+            streaming: Arc::new(Mutex::new(VecDeque::new())),
         }
     }
 
@@ -187,6 +192,27 @@ impl MockHttpClient {
             body: body.as_bytes().to_vec(),
         });
     }
+
+    /// Queue a streaming response for the next `send_request_streaming` call.
+    ///
+    /// `chunks` is the sequence of byte slices the stream will yield, one at a
+    /// time, in order.
+    pub fn push_streaming_ok(
+        &self,
+        status: u16,
+        headers: Vec<(String, String)>,
+        chunks: Vec<Vec<u8>>,
+    ) {
+        self.streaming
+            .lock()
+            .unwrap()
+            .push_back(Ok((status, headers, chunks)));
+    }
+
+    /// Queue a transport error for the next `send_request_streaming` call.
+    pub fn push_streaming_error(&self, err: impl Into<String>) {
+        self.streaming.lock().unwrap().push_back(Err(err.into()));
+    }
 }
 
 impl Default for MockHttpClient {
@@ -208,6 +234,35 @@ impl HttpClient for MockHttpClient {
             .unwrap()
             .pop_front()
             .ok_or_else(|| "MockHttpClient: no more queued responses".to_string())
+    }
+
+    async fn send_request_streaming(
+        &self,
+        _method: &str,
+        _url: &str,
+        _headers: &[(String, String)],
+        _body: &[u8],
+    ) -> Result<StreamingHttpResponse, String> {
+        let entry = self
+            .streaming
+            .lock()
+            .unwrap()
+            .pop_front()
+            .ok_or_else(|| "MockHttpClient: no more queued streaming responses".to_string())?;
+
+        match entry {
+            Ok((status, headers, chunks)) => {
+                let chunk_stream = futures_util::stream::iter(
+                    chunks.into_iter().map(|c| Ok::<Bytes, String>(Bytes::from(c))),
+                );
+                Ok(StreamingHttpResponse {
+                    status,
+                    headers,
+                    chunks: Box::pin(chunk_stream),
+                })
+            }
+            Err(e) => Err(e),
+        }
     }
 }
 

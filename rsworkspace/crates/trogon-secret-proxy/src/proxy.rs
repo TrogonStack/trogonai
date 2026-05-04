@@ -16,7 +16,7 @@ use bytes::Bytes;
 use futures_util::StreamExt;
 use uuid::Uuid;
 
-use crate::messages::{OutboundHttpRequest, OutboundHttpResponse};
+use crate::messages::{OutboundHttpRequest, OutboundHttpResponse, StreamFrame};
 use crate::provider;
 use crate::subjects;
 use crate::traits::{JetStreamPublisher, NatsClient};
@@ -154,6 +154,90 @@ where
         "Published outbound request to JetStream, awaiting reply"
     );
 
+    let is_streaming = serde_json::from_slice::<serde_json::Value>(&body_bytes)
+        .ok()
+        .and_then(|v| v.get("stream").and_then(|s| s.as_bool()))
+        .unwrap_or(false);
+
+    if is_streaming {
+        // ── Streaming path ────────────────────────────────────────────────────
+        // Receive the Start frame, then stream Chunk frames to the HTTP client
+        // as they arrive — the body is sent incrementally, not buffered.
+        let start_msg = tokio::time::timeout(state.worker_timeout, reply_sub.next())
+            .await
+            .map_err(|_| ProxyError::Timeout {
+                correlation_id: correlation_id.clone(),
+            })?
+            .ok_or_else(|| ProxyError::ReplyChannelClosed)?;
+
+        let start_frame: StreamFrame = serde_json::from_slice(&start_msg.payload)
+            .map_err(|e| ProxyError::Deserialize(e.to_string()))?;
+
+        let (start_status, start_headers) = match start_frame {
+            StreamFrame::Start { status, headers } => (status, headers),
+            _ => {
+                return Err(ProxyError::Deserialize(
+                    "expected Start frame as first streaming reply".to_string(),
+                ));
+            }
+        };
+
+        let status_code =
+            StatusCode::from_u16(start_status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+
+        // Spawn a task that forwards Chunk frames from NATS into a channel.
+        // The channel feeds the streaming HTTP body so bytes reach the caller
+        // as soon as the worker publishes them.
+        let (chunk_tx, chunk_rx) = tokio::sync::mpsc::channel::<Bytes>(32);
+        let chunk_timeout = state.worker_timeout;
+
+        tokio::spawn(async move {
+            loop {
+                let msg = match tokio::time::timeout(chunk_timeout, reply_sub.next()).await {
+                    Ok(Some(m)) => m,
+                    _ => break,
+                };
+                match serde_json::from_slice::<StreamFrame>(&msg.payload) {
+                    Ok(StreamFrame::Chunk { data, .. }) => {
+                        if chunk_tx.send(Bytes::from(data)).await.is_err() {
+                            break; // Receiver dropped (client disconnected)
+                        }
+                    }
+                    Ok(StreamFrame::End { error }) => {
+                        if let Some(e) = error {
+                            tracing::warn!(error = %e, "Streaming: worker reported mid-stream error");
+                        }
+                        break;
+                    }
+                    _ => break,
+                }
+            }
+        });
+
+        let body_stream = futures_util::stream::unfold(chunk_rx, |mut rx| async move {
+            rx.recv()
+                .await
+                .map(|chunk| (Ok::<Bytes, std::convert::Infallible>(chunk), rx))
+        });
+
+        let mut response_headers = HeaderMap::new();
+        for (k, v) in &start_headers {
+            if let (Ok(name), Ok(value)) = (
+                k.parse::<axum::http::HeaderName>(),
+                v.parse::<axum::http::HeaderValue>(),
+            ) {
+                response_headers.append(name, value);
+            }
+        }
+
+        let mut resp_builder = Response::builder().status(status_code);
+        if let Some(headers) = resp_builder.headers_mut() {
+            *headers = response_headers;
+        }
+        return Ok(resp_builder.body(Body::from_stream(body_stream)).unwrap());
+    }
+
+    // ── Non-streaming path ────────────────────────────────────────────────────
     // Wait for worker reply via Core NATS.
     let reply_msg = tokio::time::timeout(state.worker_timeout, reply_sub.next())
         .await

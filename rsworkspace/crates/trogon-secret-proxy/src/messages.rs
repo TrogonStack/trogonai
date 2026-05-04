@@ -39,6 +39,88 @@ pub struct OutboundHttpResponse {
     pub error: Option<String>,
 }
 
+/// Streaming frame published by the worker to the Core NATS reply subject.
+///
+/// When the request body contains `"stream": true`, the worker publishes three
+/// frame types instead of a single [`OutboundHttpResponse`]:
+///
+/// 1. `Start` — sent first; carries the HTTP status and response headers.
+/// 2. `Chunk` — sent N times; each carries a piece of the response body.
+/// 3. `End` — sent last; signals end-of-stream or reports an error that
+///    occurred after the `Start` frame was already published.
+///
+/// Non-streaming responses continue to use [`OutboundHttpResponse`].
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "frame_type", rename_all = "snake_case")]
+pub enum StreamFrame {
+    Start {
+        status: u16,
+        headers: Vec<(String, String)>,
+    },
+    Chunk {
+        seq: u64,
+        /// Raw body bytes for this chunk, base64-encoded when serialised to JSON.
+        data: Vec<u8>,
+    },
+    End {
+        error: Option<String>,
+    },
+}
+
+#[cfg(test)]
+mod stream_frame_tests {
+    use super::*;
+
+    #[test]
+    fn start_frame_round_trips_json() {
+        let frame = StreamFrame::Start {
+            status: 200,
+            headers: vec![("content-type".to_string(), "text/event-stream".to_string())],
+        };
+        let json = serde_json::to_string(&frame).unwrap();
+        assert!(json.contains("\"frame_type\":\"start\""));
+        let decoded: StreamFrame = serde_json::from_str(&json).unwrap();
+        assert!(matches!(decoded, StreamFrame::Start { status: 200, .. }));
+    }
+
+    #[test]
+    fn chunk_frame_round_trips_json() {
+        let frame = StreamFrame::Chunk {
+            seq: 7,
+            data: b"hello, world".to_vec(),
+        };
+        let json = serde_json::to_string(&frame).unwrap();
+        assert!(json.contains("\"frame_type\":\"chunk\""));
+        let decoded: StreamFrame = serde_json::from_str(&json).unwrap();
+        assert!(
+            matches!(decoded, StreamFrame::Chunk { seq: 7, .. }),
+            "seq must survive round-trip"
+        );
+        if let StreamFrame::Chunk { data, .. } = decoded {
+            assert_eq!(data, b"hello, world");
+        }
+    }
+
+    #[test]
+    fn end_frame_round_trips_json() {
+        let ok = StreamFrame::End { error: None };
+        let json = serde_json::to_string(&ok).unwrap();
+        assert!(json.contains("\"frame_type\":\"end\""));
+        let decoded: StreamFrame = serde_json::from_str(&json).unwrap();
+        assert!(matches!(decoded, StreamFrame::End { error: None }));
+    }
+
+    #[test]
+    fn end_frame_with_error_round_trips_json() {
+        let err = StreamFrame::End {
+            error: Some("mid-stream error".to_string()),
+        };
+        let json = serde_json::to_string(&err).unwrap();
+        let decoded: StreamFrame = serde_json::from_str(&json).unwrap();
+        assert!(matches!(decoded, StreamFrame::End { error: Some(_) }));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
