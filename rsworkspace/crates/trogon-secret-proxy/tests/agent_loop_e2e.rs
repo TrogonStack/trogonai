@@ -108,7 +108,11 @@ const MOCK_SSE: &str = concat!(
 /// Start→Chunk→End frames back (phase 1/2), the proxy reassembles them
 /// into a streaming body (phase 4), and AgentLoop parses SSE events and
 /// emits TextDelta (phase 5/6).
+///
+/// Requires Docker — run with:
+///   cargo test -p trogon-secret-proxy --test agent_loop_e2e -- --ignored
 #[tokio::test]
+#[ignore = "requires Docker"]
 async fn agent_loop_run_chat_streaming_through_proxy_emits_text_delta() {
     let (_nats_container, nats_port) = start_nats().await;
 
