@@ -22,6 +22,7 @@ fn make_agent(base_url: &str) -> AgentLoop {
         // Override the Anthropic endpoint so all requests hit our mock server.
         anthropic_base_url: Some(base_url.to_string()),
         anthropic_extra_headers: vec![],
+        streaming_client: None,
         model: "claude-test".to_string(),
         max_iterations: 5,
         thinking_budget: None,
@@ -37,6 +38,8 @@ fn make_agent(base_url: &str) -> AgentLoop {
         elicitation_provider: None,
     }
 }
+
+// ── JSON body helpers (used by run() and run_chat() tests) ────────────────────
 
 fn end_turn_body(text: &str) -> String {
     serde_json::json!({
@@ -67,6 +70,232 @@ fn tool_use_body() -> String {
         "content": [{"type": "tool_use", "id": "tu_001", "name": "unknown_tool", "input": {}}]
     })
     .to_string()
+}
+
+fn unknown_stop_body() -> String {
+    serde_json::json!({
+        "stop_reason": "pause",
+        "content": [{"type": "text", "text": "partial"}]
+    })
+    .to_string()
+}
+
+fn thinking_end_turn_body(thought: &str, text: &str) -> String {
+    serde_json::json!({
+        "stop_reason": "end_turn",
+        "content": [
+            {"type": "thinking", "thinking": thought},
+            {"type": "text", "text": text}
+        ],
+        "usage": {
+            "input_tokens": 10,
+            "output_tokens": 5,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0
+        }
+    })
+    .to_string()
+}
+
+#[allow(dead_code)]
+fn max_tokens_with_thinking_body() -> String {
+    serde_json::json!({
+        "stop_reason": "max_tokens",
+        "content": [
+            {"type": "thinking", "thinking": "partial thoughts"},
+            {"type": "text", "text": "partial answer"}
+        ],
+        "usage": {"input_tokens": 10, "output_tokens": 4096}
+    })
+    .to_string()
+}
+
+// ── SSE body helpers (used by run_chat_streaming() tests) ─────────────────────
+//
+// run_chat_streaming() always calls complete_streaming(), which expects an SSE
+// response (text/event-stream). These helpers produce the correct SSE wire
+// format so that SseParser can reconstruct stop_reason, content blocks, and
+// usage from the chunks.
+
+fn sse_event(event_type: &str, data: serde_json::Value) -> String {
+    format!(
+        "event: {event_type}\ndata: {}\n\n",
+        serde_json::to_string(&data).unwrap()
+    )
+}
+
+fn sse_end_turn(text: &str) -> String {
+    [
+        sse_event("message_start", serde_json::json!({
+            "type": "message_start",
+            "message": {"usage": {"input_tokens": 10, "output_tokens": 0,
+                                  "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+        })),
+        sse_event("content_block_start", serde_json::json!({
+            "type": "content_block_start", "index": 0,
+            "content_block": {"type": "text", "text": ""}
+        })),
+        sse_event("content_block_delta", serde_json::json!({
+            "type": "content_block_delta", "index": 0,
+            "delta": {"type": "text_delta", "text": text}
+        })),
+        sse_event("content_block_stop", serde_json::json!({"type": "content_block_stop", "index": 0})),
+        sse_event("message_delta", serde_json::json!({
+            "type": "message_delta",
+            "delta": {"stop_reason": "end_turn"},
+            "usage": {"output_tokens": 5}
+        })),
+        sse_event("message_stop", serde_json::json!({"type": "message_stop"})),
+    ]
+    .join("")
+}
+
+fn sse_max_tokens() -> String {
+    [
+        sse_event("message_start", serde_json::json!({
+            "type": "message_start",
+            "message": {"usage": {"input_tokens": 10, "output_tokens": 0,
+                                  "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+        })),
+        sse_event("content_block_start", serde_json::json!({
+            "type": "content_block_start", "index": 0,
+            "content_block": {"type": "text", "text": ""}
+        })),
+        sse_event("content_block_delta", serde_json::json!({
+            "type": "content_block_delta", "index": 0,
+            "delta": {"type": "text_delta", "text": "partial response"}
+        })),
+        sse_event("content_block_stop", serde_json::json!({"type": "content_block_stop", "index": 0})),
+        sse_event("message_delta", serde_json::json!({
+            "type": "message_delta",
+            "delta": {"stop_reason": "max_tokens"},
+            "usage": {"output_tokens": 4096}
+        })),
+        sse_event("message_stop", serde_json::json!({"type": "message_stop"})),
+    ]
+    .join("")
+}
+
+fn sse_tool_use() -> String {
+    [
+        sse_event("message_start", serde_json::json!({
+            "type": "message_start",
+            "message": {"usage": {"input_tokens": 10, "output_tokens": 0,
+                                  "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+        })),
+        sse_event("content_block_start", serde_json::json!({
+            "type": "content_block_start", "index": 0,
+            "content_block": {"type": "tool_use", "id": "tu_001", "name": "unknown_tool"}
+        })),
+        sse_event("content_block_delta", serde_json::json!({
+            "type": "content_block_delta", "index": 0,
+            "delta": {"type": "input_json_delta", "partial_json": "{}"}
+        })),
+        sse_event("content_block_stop", serde_json::json!({"type": "content_block_stop", "index": 0})),
+        sse_event("message_delta", serde_json::json!({
+            "type": "message_delta",
+            "delta": {"stop_reason": "tool_use"},
+            "usage": {"output_tokens": 10}
+        })),
+        sse_event("message_stop", serde_json::json!({"type": "message_stop"})),
+    ]
+    .join("")
+}
+
+fn sse_unknown_stop() -> String {
+    [
+        sse_event("message_start", serde_json::json!({
+            "type": "message_start",
+            "message": {"usage": {"input_tokens": 10, "output_tokens": 0,
+                                  "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+        })),
+        sse_event("content_block_start", serde_json::json!({
+            "type": "content_block_start", "index": 0,
+            "content_block": {"type": "text", "text": ""}
+        })),
+        sse_event("content_block_delta", serde_json::json!({
+            "type": "content_block_delta", "index": 0,
+            "delta": {"type": "text_delta", "text": "partial"}
+        })),
+        sse_event("content_block_stop", serde_json::json!({"type": "content_block_stop", "index": 0})),
+        sse_event("message_delta", serde_json::json!({
+            "type": "message_delta",
+            "delta": {"stop_reason": "pause"},
+            "usage": {"output_tokens": 5}
+        })),
+        sse_event("message_stop", serde_json::json!({"type": "message_stop"})),
+    ]
+    .join("")
+}
+
+fn sse_thinking_end_turn(thought: &str, text: &str) -> String {
+    [
+        sse_event("message_start", serde_json::json!({
+            "type": "message_start",
+            "message": {"usage": {"input_tokens": 10, "output_tokens": 0,
+                                  "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+        })),
+        sse_event("content_block_start", serde_json::json!({
+            "type": "content_block_start", "index": 0,
+            "content_block": {"type": "thinking", "thinking": ""}
+        })),
+        sse_event("content_block_delta", serde_json::json!({
+            "type": "content_block_delta", "index": 0,
+            "delta": {"type": "thinking_delta", "thinking": thought}
+        })),
+        sse_event("content_block_stop", serde_json::json!({"type": "content_block_stop", "index": 0})),
+        sse_event("content_block_start", serde_json::json!({
+            "type": "content_block_start", "index": 1,
+            "content_block": {"type": "text", "text": ""}
+        })),
+        sse_event("content_block_delta", serde_json::json!({
+            "type": "content_block_delta", "index": 1,
+            "delta": {"type": "text_delta", "text": text}
+        })),
+        sse_event("content_block_stop", serde_json::json!({"type": "content_block_stop", "index": 1})),
+        sse_event("message_delta", serde_json::json!({
+            "type": "message_delta",
+            "delta": {"stop_reason": "end_turn"},
+            "usage": {"output_tokens": 5}
+        })),
+        sse_event("message_stop", serde_json::json!({"type": "message_stop"})),
+    ]
+    .join("")
+}
+
+fn sse_max_tokens_with_thinking() -> String {
+    [
+        sse_event("message_start", serde_json::json!({
+            "type": "message_start",
+            "message": {"usage": {"input_tokens": 10, "output_tokens": 0,
+                                  "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+        })),
+        sse_event("content_block_start", serde_json::json!({
+            "type": "content_block_start", "index": 0,
+            "content_block": {"type": "thinking", "thinking": ""}
+        })),
+        sse_event("content_block_delta", serde_json::json!({
+            "type": "content_block_delta", "index": 0,
+            "delta": {"type": "thinking_delta", "thinking": "partial thoughts"}
+        })),
+        sse_event("content_block_stop", serde_json::json!({"type": "content_block_stop", "index": 0})),
+        sse_event("content_block_start", serde_json::json!({
+            "type": "content_block_start", "index": 1,
+            "content_block": {"type": "text", "text": ""}
+        })),
+        sse_event("content_block_delta", serde_json::json!({
+            "type": "content_block_delta", "index": 1,
+            "delta": {"type": "text_delta", "text": "partial answer"}
+        })),
+        sse_event("content_block_stop", serde_json::json!({"type": "content_block_stop", "index": 1})),
+        sse_event("message_delta", serde_json::json!({
+            "type": "message_delta",
+            "delta": {"stop_reason": "max_tokens"},
+            "usage": {"output_tokens": 4096}
+        })),
+        sse_event("message_stop", serde_json::json!({"type": "message_stop"})),
+    ]
+    .join("")
 }
 
 // ── AgentLoop::run ────────────────────────────────────────────────────────────
@@ -234,8 +463,8 @@ async fn run_chat_streaming_emits_text_delta_and_usage_summary() {
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
-            .body(end_turn_body("Streaming reply"));
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn("Streaming reply"));
     });
 
     let agent = make_agent(&server.base_url());
@@ -246,10 +475,7 @@ async fn run_chat_streaming_emits_text_delta_and_usage_summary() {
 
     assert!(result.is_ok(), "run_chat_streaming must succeed");
 
-    let mut events = vec![];
-    while let Ok(e) = rx.try_recv() {
-        events.push(e);
-    }
+    let events: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
 
     assert!(
         events
@@ -272,8 +498,8 @@ async fn run_chat_streaming_returns_updated_history() {
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
-            .body(end_turn_body("Final text"));
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn("Final text"));
     });
 
     let agent = make_agent(&server.base_url());
@@ -308,8 +534,8 @@ async fn run_chat_streaming_max_tokens_emits_usage_and_returns_error() {
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
-            .body(max_tokens_body());
+            .header("Content-Type", "text/event-stream")
+            .body(sse_max_tokens());
     });
 
     let agent = make_agent(&server.base_url());
@@ -320,10 +546,7 @@ async fn run_chat_streaming_max_tokens_emits_usage_and_returns_error() {
 
     assert!(matches!(result, Err(AgentError::MaxTokens)));
 
-    let mut events = vec![];
-    while let Ok(e) = rx.try_recv() {
-        events.push(e);
-    }
+    let events: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
     assert!(
         events
             .iter()
@@ -412,14 +635,14 @@ async fn run_chat_streaming_emits_tool_call_events() {
             .path("/messages")
             .body_contains("tool_result");
         then.status(200)
-            .header("Content-Type", "application/json")
-            .body(end_turn_body("Done after tool"));
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn("Done after tool"));
     });
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
-            .body(tool_use_body());
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use());
     });
 
     let agent = make_agent(&server.base_url());
@@ -430,10 +653,7 @@ async fn run_chat_streaming_emits_tool_call_events() {
 
     assert!(result.is_ok(), "run_chat_streaming must succeed");
 
-    let mut events = vec![];
-    while let Ok(e) = rx.try_recv() {
-        events.push(e);
-    }
+    let events: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
 
     assert!(
         events.iter().any(
@@ -453,59 +673,6 @@ async fn run_chat_streaming_emits_tool_call_events() {
         ),
         "expected final TextDelta after tool"
     );
-}
-
-// ── Additional helpers ────────────────────────────────────────────────────────
-
-fn unknown_stop_body() -> String {
-    serde_json::json!({
-        "stop_reason": "pause",
-        "content": [{"type": "text", "text": "partial"}]
-    })
-    .to_string()
-}
-
-fn thinking_end_turn_body(thought: &str, text: &str) -> String {
-    serde_json::json!({
-        "stop_reason": "end_turn",
-        "content": [
-            {"type": "thinking", "thinking": thought},
-            {"type": "text", "text": text}
-        ],
-        "usage": {
-            "input_tokens": 10,
-            "output_tokens": 5,
-            "cache_creation_input_tokens": 0,
-            "cache_read_input_tokens": 0
-        }
-    })
-    .to_string()
-}
-
-fn max_tokens_with_thinking_body() -> String {
-    serde_json::json!({
-        "stop_reason": "max_tokens",
-        "content": [
-            {"type": "thinking", "thinking": "partial thoughts"},
-            {"type": "text", "text": "partial answer"}
-        ],
-        "usage": {"input_tokens": 10, "output_tokens": 4096}
-    })
-    .to_string()
-}
-
-/// A `PermissionChecker` that always denies tool execution.
-struct DenyAll;
-
-impl PermissionChecker for DenyAll {
-    fn check<'a>(
-        &'a self,
-        _tool_call_id: &'a str,
-        _tool_name: &'a str,
-        _tool_input: &'a serde_json::Value,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send + 'a>> {
-        Box::pin(async { false })
-    }
 }
 
 // ── UnexpectedStopReason ──────────────────────────────────────────────────────
@@ -554,8 +721,8 @@ async fn run_chat_streaming_unexpected_stop_reason() {
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
-            .body(unknown_stop_body());
+            .header("Content-Type", "text/event-stream")
+            .body(sse_unknown_stop());
     });
 
     let agent = make_agent(&server.base_url());
@@ -597,8 +764,8 @@ async fn run_chat_streaming_max_iterations_reached() {
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
-            .body(tool_use_body());
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use());
     });
 
     let mut agent = make_agent(&server.base_url());
@@ -634,6 +801,7 @@ async fn run_with_extra_headers_and_tools() {
         anthropic_token: "tok".to_string(),
         anthropic_base_url: Some(server.base_url()),
         anthropic_extra_headers: vec![("X-Custom-Header".to_string(), "test-value".to_string())],
+        streaming_client: None,
         model: "claude-test".to_string(),
         max_iterations: 5,
         thinking_budget: None,
@@ -675,6 +843,7 @@ async fn run_chat_with_system_prompt_tools_and_extra_headers() {
         anthropic_token: "tok".to_string(),
         anthropic_base_url: Some(server.base_url()),
         anthropic_extra_headers: vec![("X-Custom-Header".to_string(), "test-value".to_string())],
+        streaming_client: None,
         model: "claude-test".to_string(),
         max_iterations: 5,
         thinking_budget: None,
@@ -755,11 +924,8 @@ async fn run_chat_streaming_comprehensive() {
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
-            .body(thinking_end_turn_body(
-                "internal reasoning",
-                "streamed reply",
-            ));
+            .header("Content-Type", "text/event-stream")
+            .body(sse_thinking_end_turn("internal reasoning", "streamed reply"));
     });
 
     let http = reqwest::Client::new();
@@ -770,6 +936,7 @@ async fn run_chat_streaming_comprehensive() {
         anthropic_token: "tok".to_string(),
         anthropic_base_url: Some(server.base_url()),
         anthropic_extra_headers: vec![("X-Custom-Header".to_string(), "test-value".to_string())],
+        streaming_client: None,
         model: "claude-test".to_string(),
         max_iterations: 5,
         thinking_budget: Some(1000), // enables the thinking branch
@@ -798,10 +965,7 @@ async fn run_chat_streaming_comprehensive() {
 
     assert!(result.is_ok());
 
-    let mut events = vec![];
-    while let Ok(e) = rx.try_recv() {
-        events.push(e);
-    }
+    let events: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
 
     assert!(
         events.iter().any(
@@ -825,8 +989,8 @@ async fn run_chat_streaming_max_tokens_with_thinking_block() {
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
-            .body(max_tokens_with_thinking_body());
+            .header("Content-Type", "text/event-stream")
+            .body(sse_max_tokens_with_thinking());
     });
 
     let agent = make_agent(&server.base_url());
@@ -837,17 +1001,13 @@ async fn run_chat_streaming_max_tokens_with_thinking_block() {
 
     assert!(matches!(result, Err(AgentError::MaxTokens)));
 
-    let mut events = vec![];
-    while let Ok(e) = rx.try_recv() {
-        events.push(e);
-    }
+    let events: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
     assert!(
         events
             .iter()
             .any(|e| matches!(e, AgentEvent::UsageSummary { .. })),
         "expected UsageSummary on max_tokens"
     );
-    // partial answer text is non-empty → TextDelta should also be emitted
     assert!(
         events.iter().any(
             |e| matches!(e, AgentEvent::TextDelta { text } if text.contains("partial answer"))
@@ -857,6 +1017,20 @@ async fn run_chat_streaming_max_tokens_with_thinking_block() {
 }
 
 // ── permission_checker ────────────────────────────────────────────────────────
+
+/// A `PermissionChecker` that always denies tool execution.
+struct DenyAll;
+
+impl PermissionChecker for DenyAll {
+    fn check<'a>(
+        &'a self,
+        _tool_call_id: &'a str,
+        _tool_name: &'a str,
+        _tool_input: &'a serde_json::Value,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send + 'a>> {
+        Box::pin(async { false })
+    }
+}
 
 /// When a `permission_checker` denies the tool, `execute_tools_streaming` returns
 /// a "Permission denied" message instead of executing the tool.
@@ -870,14 +1044,14 @@ async fn run_chat_streaming_permission_denied() {
             .path("/messages")
             .body_contains("tool_result");
         then.status(200)
-            .header("Content-Type", "application/json")
-            .body(end_turn_body("done"));
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn("done"));
     });
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
-            .body(tool_use_body());
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use());
     });
 
     let http = reqwest::Client::new();
@@ -887,6 +1061,7 @@ async fn run_chat_streaming_permission_denied() {
         anthropic_token: "tok".to_string(),
         anthropic_base_url: Some(server.base_url()),
         anthropic_extra_headers: vec![],
+        streaming_client: None,
         model: "claude-test".to_string(),
         max_iterations: 5,
         thinking_budget: None,
@@ -909,10 +1084,7 @@ async fn run_chat_streaming_permission_denied() {
 
     assert!(result.is_ok(), "should succeed after permission denial");
 
-    let mut events = vec![];
-    while let Ok(e) = rx.try_recv() {
-        events.push(e);
-    }
+    let events: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
 
     // ToolCallFinished should carry the denial message
     assert!(
@@ -1040,6 +1212,7 @@ async fn run_uses_proxy_url_when_no_anthropic_base_url() {
         anthropic_token: "tok".to_string(),
         anthropic_base_url: None, // <── use proxy path
         anthropic_extra_headers: vec![],
+        streaming_client: None,
         model: "test".to_string(),
         max_iterations: 1,
         thinking_budget: None,
@@ -1078,15 +1251,15 @@ async fn run_chat_streaming_steer_appended_to_tool_results_turn() {
             .body_contains("tool_result")
             .body_contains("think step by step");
         then.status(200)
-            .header("Content-Type", "application/json")
-            .body(end_turn_body("Done with steer"));
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn("Done with steer"));
     });
     // First call: returns tool_use.
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
-            .body(tool_use_body());
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use());
     });
 
     let agent = make_agent(&server.base_url());
@@ -1125,14 +1298,14 @@ async fn run_chat_streaming_steer_present_in_returned_messages() {
             .path("/messages")
             .body_contains("tool_result");
         then.status(200)
-            .header("Content-Type", "application/json")
-            .body(end_turn_body("Done"));
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn("Done"));
     });
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
-            .body(tool_use_body());
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use());
     });
 
     let agent = make_agent(&server.base_url());
@@ -1177,14 +1350,14 @@ async fn run_chat_streaming_multiple_steer_messages_all_appended() {
             .body_contains("hint two")
             .body_contains("hint three");
         then.status(200)
-            .header("Content-Type", "application/json")
-            .body(end_turn_body("Done with all hints"));
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn("Done with all hints"));
     });
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
-            .body(tool_use_body());
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use());
     });
 
     let agent = make_agent(&server.base_url());
@@ -1218,8 +1391,8 @@ async fn run_chat_streaming_steer_ignored_without_tool_use() {
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
-            .body(end_turn_body("Direct reply"));
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn("Direct reply"));
     });
 
     let agent = make_agent(&server.base_url());
@@ -1258,14 +1431,14 @@ async fn run_chat_streaming_steer_none_is_noop() {
             .path("/messages")
             .body_contains("tool_result");
         then.status(200)
-            .header("Content-Type", "application/json")
-            .body(end_turn_body("Done no steer"));
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn("Done no steer"));
     });
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
-            .body(tool_use_body());
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use());
     });
 
     let agent = make_agent(&server.base_url());
