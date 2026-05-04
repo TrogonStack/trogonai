@@ -10,6 +10,7 @@ workspace = true
 async-nats = { workspace = true, features = ["jetstream"] }
 axum = { workspace = true }
 form_urlencoded = "1"
+hex = "0.4"
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = "0.11"
