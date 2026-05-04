@@ -97,9 +97,8 @@ pub trait SnapshotRead<SnapshotPayload, StreamId: ?Sized>: Send + Sync {
 
     fn read_snapshot(
         &self,
-        config: SnapshotStoreConfig,
-        stream_id: &StreamId,
-    ) -> impl std::future::Future<Output = Result<Option<Snapshot<SnapshotPayload>>, Self::Error>> + Send;
+        request: ReadSnapshotRequest<'_, StreamId>,
+    ) -> impl std::future::Future<Output = Result<ReadSnapshotResponse<SnapshotPayload>, Self::Error>> + Send;
 }
 
 pub trait SnapshotWrite<SnapshotPayload, StreamId: ?Sized>: Send + Sync {
@@ -107,8 +106,63 @@ pub trait SnapshotWrite<SnapshotPayload, StreamId: ?Sized>: Send + Sync {
 
     fn write_snapshot(
         &self,
+        request: WriteSnapshotRequest<'_, SnapshotPayload, StreamId>,
+    ) -> impl std::future::Future<Output = Result<WriteSnapshotResponse, Self::Error>> + Send;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReadSnapshotRequest<'a, StreamId: ?Sized> {
+    pub config: SnapshotStoreConfig,
+    pub stream_id: &'a StreamId,
+}
+
+impl<'a, StreamId: ?Sized> ReadSnapshotRequest<'a, StreamId> {
+    pub const fn new(config: SnapshotStoreConfig, stream_id: &'a StreamId) -> Self {
+        Self { config, stream_id }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReadSnapshotResponse<SnapshotPayload> {
+    pub snapshot: Option<Snapshot<SnapshotPayload>>,
+}
+
+impl<SnapshotPayload> ReadSnapshotResponse<SnapshotPayload> {
+    pub const fn new(snapshot: Option<Snapshot<SnapshotPayload>>) -> Self {
+        Self { snapshot }
+    }
+
+    pub fn into_snapshot(self) -> Option<Snapshot<SnapshotPayload>> {
+        self.snapshot
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct WriteSnapshotRequest<'a, SnapshotPayload, StreamId: ?Sized> {
+    pub config: SnapshotStoreConfig,
+    pub stream_id: &'a StreamId,
+    pub snapshot: Snapshot<SnapshotPayload>,
+}
+
+impl<'a, SnapshotPayload, StreamId: ?Sized> WriteSnapshotRequest<'a, SnapshotPayload, StreamId> {
+    pub const fn new(
         config: SnapshotStoreConfig,
-        stream_id: &StreamId,
+        stream_id: &'a StreamId,
         snapshot: Snapshot<SnapshotPayload>,
-    ) -> impl std::future::Future<Output = Result<(), Self::Error>> + Send;
+    ) -> Self {
+        Self {
+            config,
+            stream_id,
+            snapshot,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct WriteSnapshotResponse;
+
+impl WriteSnapshotResponse {
+    pub const fn new() -> Self {
+        Self
+    }
 }

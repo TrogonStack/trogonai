@@ -1,5 +1,11 @@
-use crate::snapshot::{Snapshot, SnapshotRead, SnapshotSchema, SnapshotStoreConfig, SnapshotWrite};
-use crate::stream::{AppendOutcome, StreamAppend, StreamRead, StreamState, resolve_stream_state};
+use crate::snapshot::{
+    ReadSnapshotRequest, Snapshot, SnapshotRead, SnapshotSchema, SnapshotStoreConfig, SnapshotWrite,
+    WriteSnapshotRequest,
+};
+use crate::stream::{
+    AppendStreamRequest, AppendStreamResponse, ReadStreamRequest, StreamAppend, StreamRead, StreamState,
+    resolve_stream_state,
+};
 use crate::{
     CanonicalEventCodec, Decide, Decision, EventCodec, EventData, EventEnvelopeCodec, NonEmpty, RecordedEvent,
 };
@@ -323,7 +329,7 @@ impl<'a, E, C, S, EC> CommandExecutionWithCodec<'a, E, C, S, EC> {
         current_version: Option<u64>,
         stream_id: &C::StreamId,
         state: C::State,
-    ) -> ExecutionStep<C, SErr, (AppendOutcome, NonEmpty<C::Event>, C::State)>
+    ) -> ExecutionStep<C, SErr, (AppendStreamResponse, NonEmpty<C::Event>, C::State)>
     where
         C: Decide,
         C::Event: Clone,
@@ -339,7 +345,7 @@ impl<'a, E, C, S, EC> CommandExecutionWithCodec<'a, E, C, S, EC> {
         let stream_state = resolve_stream_state::<C>(self.write_precondition, current_version);
         let append_outcome = self
             .event_store
-            .append_stream(stream_id, stream_state, encoded_events)
+            .append_stream(AppendStreamRequest::new(stream_id, stream_state, encoded_events))
             .await
             .map_err(|source| CommandFailure::Append(source))?;
 
@@ -412,7 +418,7 @@ where
         let stream_id = self.command.stream_id();
         let stream_read = self
             .event_store
-            .read_stream(stream_id, 1)
+            .read_stream(ReadStreamRequest::new(stream_id, 1))
             .await
             .map_err(|source| CommandFailure::ReadStream(source))?;
         let current_version = stream_read.current_version;
@@ -482,9 +488,13 @@ where
         let snapshot = self
             .snapshots
             .snapshot_store
-            .read_snapshot(self.snapshots.snapshot_config.clone(), stream_id)
+            .read_snapshot(ReadSnapshotRequest::new(
+                self.snapshots.snapshot_config.clone(),
+                stream_id,
+            ))
             .await
             .map_err(|source| CommandFailure::ReadSnapshot(source))?;
+        let snapshot = snapshot.snapshot;
         let snapshot_version = snapshot.as_ref().map(|snapshot| snapshot.version);
         let state = snapshot
             .map(|snapshot| snapshot.payload)
@@ -492,7 +502,7 @@ where
         let start_sequence = snapshot_version.map(|version| version.saturating_add(1)).unwrap_or(1);
         let stream_read = self
             .event_store
-            .read_stream(stream_id, start_sequence)
+            .read_stream(ReadStreamRequest::new(stream_id, start_sequence))
             .await
             .map_err(|source| CommandFailure::ReadStream(source))?;
         let current_version = stream_read.current_version;
@@ -563,7 +573,7 @@ fn schedule_snapshot_write<S, State, StreamId, Spawn>(
 
     schedule_snapshot_task(Box::pin(async move {
         if let Err(source) = snapshot_store
-            .write_snapshot(snapshot_config, stream_id.borrow(), snapshot)
+            .write_snapshot(WriteSnapshotRequest::new(snapshot_config, stream_id.borrow(), snapshot))
             .await
         {
             tracing::warn!(stream_id = %stream_id_for_log, error = %source, "failed to write snapshot");
@@ -625,8 +635,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        CanonicalEventCodec, EventEnvelopeCodec, EventIdentity, EventType, RecordedEvent, SnapshotSchema,
-        StreamReadResult, stream::AppendOutcome,
+        CanonicalEventCodec, EventEnvelopeCodec, EventIdentity, EventType, ReadSnapshotResponse, ReadStreamResponse,
+        RecordedEvent, SnapshotSchema, WriteSnapshotResponse,
     };
 
     #[derive(Debug, Clone)]
@@ -899,17 +909,17 @@ mod tests {
     impl StreamRead<str> for FakeRuntime {
         type Error = TestInfraError;
 
-        async fn read_stream(&self, _stream_id: &str, from_sequence: u64) -> Result<StreamReadResult, Self::Error> {
+        async fn read_stream(&self, request: ReadStreamRequest<'_, str>) -> Result<ReadStreamResponse, Self::Error> {
             if self.fail_read_stream {
                 return Err(TestInfraError::ReadStream);
             }
-            self.read_from_sequences.lock().unwrap().push(from_sequence);
-            Ok(StreamReadResult {
+            self.read_from_sequences.lock().unwrap().push(request.from_sequence);
+            Ok(ReadStreamResponse {
                 current_version: self.current_version,
                 events: self
                     .recorded_events
                     .iter()
-                    .filter(|event| event.log_position.unwrap_or(0) >= from_sequence)
+                    .filter(|event| event.log_position.unwrap_or(0) >= request.from_sequence)
                     .cloned()
                     .collect(),
             })
@@ -921,16 +931,14 @@ mod tests {
 
         async fn append_stream(
             &self,
-            _stream_id: &str,
-            stream_state: StreamState,
-            events: NonEmpty<EventData>,
-        ) -> Result<AppendOutcome, Self::Error> {
+            request: AppendStreamRequest<'_, str>,
+        ) -> Result<AppendStreamResponse, Self::Error> {
             if self.fail_append {
                 return Err(TestInfraError::Append);
             }
-            self.stream_states.lock().unwrap().push(stream_state);
-            self.appended_events.lock().unwrap().extend(events.into_vec());
-            Ok(AppendOutcome {
+            self.stream_states.lock().unwrap().push(request.stream_state);
+            self.appended_events.lock().unwrap().extend(request.events.into_vec());
+            Ok(AppendStreamResponse {
                 next_expected_version: self.next_expected_version,
             })
         }
@@ -941,14 +949,16 @@ mod tests {
 
         async fn read_snapshot(
             &self,
-            _config: SnapshotStoreConfig,
-            stream_id: &str,
-        ) -> Result<Option<Snapshot<TestState>>, Self::Error> {
+            request: ReadSnapshotRequest<'_, str>,
+        ) -> Result<ReadSnapshotResponse<TestState>, Self::Error> {
             if self.fail_read_snapshot {
                 return Err(TestInfraError::ReadSnapshot);
             }
-            self.loaded_stream_ids.lock().unwrap().push(stream_id.to_string());
-            Ok(self.snapshot.clone())
+            self.loaded_stream_ids
+                .lock()
+                .unwrap()
+                .push(request.stream_id.to_string());
+            Ok(ReadSnapshotResponse::new(self.snapshot.clone()))
         }
     }
 
@@ -957,15 +967,13 @@ mod tests {
 
         async fn write_snapshot(
             &self,
-            _config: SnapshotStoreConfig,
-            _stream_id: &str,
-            snapshot: Snapshot<TestState>,
-        ) -> Result<(), Self::Error> {
+            request: WriteSnapshotRequest<'_, TestState, str>,
+        ) -> Result<WriteSnapshotResponse, Self::Error> {
             if self.fail_write_snapshot {
                 return Err(TestInfraError::WriteSnapshot);
             }
-            self.written_snapshots.lock().unwrap().push(snapshot);
-            Ok(())
+            self.written_snapshots.lock().unwrap().push(request.snapshot);
+            Ok(WriteSnapshotResponse::new())
         }
     }
 

@@ -26,6 +26,12 @@ pub use nats::snapshot_store::{
 pub use nats::streams::{
     StreamStoreError, TROGON_EVENT_TYPE, append_stream, read_stream, read_stream_range, record_stream_message,
 };
-pub use snapshot::{Snapshot, SnapshotChange, SnapshotRead, SnapshotSchema, SnapshotStoreConfig, SnapshotWrite};
-pub use stream::{AppendOutcome, StreamAppend, StreamRead, StreamReadResult, StreamState};
+pub use snapshot::{
+    ReadSnapshotRequest, ReadSnapshotResponse, Snapshot, SnapshotChange, SnapshotRead, SnapshotSchema,
+    SnapshotStoreConfig, SnapshotWrite, WriteSnapshotRequest, WriteSnapshotResponse,
+};
+pub use stream::{
+    AppendStreamRequest, AppendStreamResponse, ReadStreamRequest, ReadStreamResponse, StreamAppend, StreamRead,
+    StreamState,
+};
 pub use testing::{Decider, TestCase, ThenError, ThenEvents, ThenExpectation, Timeline, decider};
