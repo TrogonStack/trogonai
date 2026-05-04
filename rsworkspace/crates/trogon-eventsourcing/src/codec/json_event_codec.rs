@@ -1,6 +1,7 @@
 use serde::{Serialize, de::DeserializeOwned};
 
-use crate::{EventCodec, EventEnvelopeCodec, EventId, EventIdentity, EventType};
+use super::{EventCodec, EventEnvelopeCodec, EventIdentity, EventType};
+use crate::EventId;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct JsonEventCodec;
