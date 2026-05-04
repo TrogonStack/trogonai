@@ -8,7 +8,6 @@ use bytes::Bytes;
 
 use crate::jetstream::{JetStreamKeyValueUpdate, JetStreamPublisher};
 
-#[cfg(not(coverage))]
 use super::{NatsKvLease, RenewLease};
 
 #[derive(Clone)]
@@ -43,7 +42,6 @@ impl KvPublishTarget {
     }
 }
 
-#[cfg(not(coverage))]
 impl RenewLease for NatsKvLease {
     type Error = kv::UpdateError;
 
