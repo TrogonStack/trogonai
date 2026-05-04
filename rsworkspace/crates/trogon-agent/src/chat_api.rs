@@ -449,8 +449,8 @@ async fn send_message<R: SessionRepository>(
             tenant_id: state.agent.tenant_id.clone(),
             promise_store: None,
             promise_id: None,
-            permission_checker: None,
-            elicitation_provider: None,
+            permission_checker: state.agent.permission_checker.clone(),
+            elicitation_provider: state.agent.elicitation_provider.clone(),
         };
         &temp_agent
     };

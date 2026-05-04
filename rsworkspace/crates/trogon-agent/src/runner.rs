@@ -162,7 +162,6 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
         mcp_dispatch,
         flag_client,
         tenant_id: cfg.tenant_id.clone(),
-        // Promise fields are set per-run by `prepare_agent_with_promise`.
         promise_store: None,
         promise_id: None,
         permission_checker: None,

@@ -11,6 +11,8 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
+use bytes::Bytes;
+use futures_util::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -50,6 +52,13 @@ pub trait AnthropicClient: Send + Sync + 'static {
         &'a self,
         body: serde_json::Value,
     ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, AnthropicClientError>> + Send + 'a>>;
+
+    fn complete_streaming<'a>(
+        &'a self,
+        _body: serde_json::Value,
+    ) -> Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'a>> {
+        Box::pin(futures_util::stream::empty())
+    }
 }
 
 /// Concrete [`AnthropicClient`] backed by a [`reqwest::Client`].
@@ -70,6 +79,36 @@ impl ReqwestAnthropicClient {
 }
 
 impl AnthropicClient for ReqwestAnthropicClient {
+    fn complete_streaming<'a>(
+        &'a self,
+        body: serde_json::Value,
+    ) -> Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'a>> {
+        let url = format!("{}/anthropic/v1/messages", self.proxy_url);
+        let token = self.anthropic_token.clone();
+        let http = self.http.clone();
+
+        Box::pin(
+            futures_util::stream::once(async move {
+                http.post(&url)
+                    .header("Authorization", format!("Bearer {token}"))
+                    .header("anthropic-version", "2023-06-01")
+                    .timeout(std::time::Duration::from_secs(5 * 60))
+                    .json(&body)
+                    .send()
+                    .await
+                    .and_then(|r| r.error_for_status())
+            })
+            .flat_map(
+                |result| -> Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send>> {
+                    match result {
+                        Ok(resp) => Box::pin(resp.bytes_stream()),
+                        Err(e) => Box::pin(futures_util::stream::once(std::future::ready(Err(e)))),
+                    }
+                },
+            ),
+        )
+    }
+
     fn complete<'a>(
         &'a self,
         body: serde_json::Value,
@@ -239,6 +278,13 @@ pub mod mock {
             let resp = self.response.clone();
             Box::pin(async move { Ok(resp) })
         }
+
+        fn complete_streaming<'a>(
+            &'a self,
+            _body: serde_json::Value,
+        ) -> Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'a>> {
+            Box::pin(futures_util::stream::empty())
+        }
     }
 
     /// Mock that returns responses from a pre-loaded queue, in order.
@@ -282,6 +328,13 @@ pub mod mock {
                 .expect("SequencedMockAnthropicClient ran out of queued responses");
             Box::pin(async move { Ok(resp) })
         }
+
+        fn complete_streaming<'a>(
+            &'a self,
+            _body: serde_json::Value,
+        ) -> Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'a>> {
+            Box::pin(futures_util::stream::empty())
+        }
     }
 
     /// An `AnthropicClient` that always returns a transient error — used to
@@ -289,6 +342,17 @@ pub mod mock {
     pub struct AlwaysErrAnthropicClient;
 
     impl AnthropicClient for AlwaysErrAnthropicClient {
+        fn complete_streaming<'a>(
+            &'a self,
+            _body: serde_json::Value,
+        ) -> Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'a>> {
+            let err = reqwest::Client::new()
+                .get("not a url at all:///")
+                .build()
+                .unwrap_err();
+            Box::pin(futures_util::stream::once(std::future::ready(Err(err))))
+        }
+
         fn complete<'a>(
             &'a self,
             _body: serde_json::Value,
