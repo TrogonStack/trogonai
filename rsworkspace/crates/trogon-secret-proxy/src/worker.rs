@@ -498,7 +498,6 @@ mod tests {
     use trogon_vault::{ApiKeyToken, MemoryVault, VaultStore};
 
     use bytes::Bytes;
-    use futures_util::Stream;
 
     use crate::messages::{OutboundHttpRequest, StreamFrame};
     use crate::traits::{HttpClient, HttpResponse, NatsClient, StreamingHttpResponse};
@@ -2568,6 +2567,37 @@ mod tests {
     /// When the upstream stream yields an error mid-way, the worker must publish
     /// the chunks received so far and then an End frame carrying the error.
     ///
+    /// Upstream 401 during streaming is forwarded as Start{status:401} with NO
+    /// retry. Unlike the non-streaming path (which retries once with the previous
+    /// key), streaming cannot retry after the response has started — so the 401
+    /// reaches the caller immediately and only one HTTP call is made.
+    #[tokio::test]
+    async fn process_request_streaming_upstream_401_is_forwarded_without_retry() {
+        let vault = MemoryVault::new();
+        let token = ApiKeyToken::new("tok_anthropic_prod_stream7").unwrap();
+        vault.store(&token, "sk-ant-currentkey").await.unwrap();
+
+        let http = MockHttpClient::new();
+        // Upstream rejects with 401 — no chunks, just a status.
+        http.enqueue_streaming_ok(401, vec![], vec![b"unauthorized".to_vec()]);
+
+        let nats = MockNatsClient::new();
+        let request = make_streaming_request("Bearer tok_anthropic_prod_stream7");
+
+        process_request_streaming(&request, &vault, &http, &nats, "test.reply").await;
+
+        let frames = nats.published_frames();
+        // Start(401) + Chunk + End — no second HTTP call.
+        assert!(matches!(frames[0], StreamFrame::Start { status: 401, .. }),
+            "Start frame must carry the upstream 401 status");
+
+        // The streaming queue is now empty: exactly one HTTP call was made.
+        assert!(
+            http.streaming.lock().unwrap().is_empty(),
+            "must not retry on upstream 401 during streaming"
+        );
+    }
+
     /// This tests the `Some(Err(e))` branch in `process_request_streaming`.
     #[tokio::test]
     async fn process_request_streaming_mid_stream_error_emits_end_with_error() {
