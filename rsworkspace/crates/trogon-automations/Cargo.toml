@@ -6,6 +6,9 @@ edition = "2024"
 [lints]
 workspace = true
 
+[features]
+test-support = []
+
 [dependencies]
 async-nats = { workspace = true, features = ["jetstream", "kv"] }
 axum         = "0.8"

@@ -18,3 +18,4 @@ trogon-std     = { path = "../trogon-std" }
 
 [dev-dependencies]
 httpmock       = "0.7"
+trogon-mcp     = { path = "../trogon-mcp", features = ["test-support"] }

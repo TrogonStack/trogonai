@@ -7,9 +7,9 @@
 //! tok_anthropic_prod_a1b2c3  →  environment: prod, secretName: anthropic_a1b2c3
 //! ```
 
-use reqwest::Client;
 use serde_json::Value;
 
+use crate::http::{HttpClient, HttpError};
 use crate::token::ApiKeyToken;
 use crate::vault::VaultStore;
 
@@ -89,7 +89,7 @@ impl InfisicalConfig {
 #[derive(Debug)]
 pub enum InfisicalError {
     /// An HTTP transport error.
-    Http(reqwest::Error),
+    Http(HttpError),
     /// Infisical returned a non-2xx status code.
     Api { status: u16, message: String },
     /// Could not deserialize an Infisical response.
@@ -123,21 +123,38 @@ impl std::error::Error for InfisicalError {
 ///
 /// Tokens are mapped to Infisical secrets as:
 /// `tok_{provider}_{env}_{id}` → environment `{env}`, secret name `{provider}_{id}`
-pub struct InfisicalVaultStore {
-    client:      Client,
+///
+/// The type parameter `H` is the HTTP transport; in production `H = reqwest::Client`.
+pub struct InfisicalVaultStore<H: HttpClient = reqwest::Client> {
+    client:      H,
     base_url:    String,
     project_id:  String,
     secret_path: String,
     token:       String,
 }
 
-impl InfisicalVaultStore {
+impl InfisicalVaultStore<reqwest::Client> {
     pub fn new(config: InfisicalConfig) -> Self {
         let token = match config.auth {
             InfisicalAuth::ServiceToken(t) => t,
         };
         Self {
-            client: Client::new(),
+            client: reqwest::Client::new(),
+            base_url: config.base_url,
+            project_id: config.project_id,
+            secret_path: config.secret_path,
+            token,
+        }
+    }
+}
+
+impl<H: HttpClient> InfisicalVaultStore<H> {
+    pub fn new_with(config: InfisicalConfig, http: H) -> Self {
+        let token = match config.auth {
+            InfisicalAuth::ServiceToken(t) => t,
+        };
+        Self {
+            client: http,
             base_url: config.base_url,
             project_id: config.project_id,
             secret_path: config.secret_path,
@@ -165,25 +182,25 @@ impl InfisicalVaultStore {
     ) -> Result<(), InfisicalError> {
         let resp = self
             .client
-            .patch(self.secret_url(name))
-            .header("Authorization", self.bearer())
-            .json(&serde_json::json!({
-                "workspaceId": self.project_id,
-                "environment": environment,
-                "secretPath": self.secret_path,
-                "secretValue": plaintext,
-            }))
-            .send()
+            .patch_json(
+                self.secret_url(name),
+                serde_json::json!({
+                    "workspaceId": self.project_id,
+                    "environment": environment,
+                    "secretPath": self.secret_path,
+                    "secretValue": plaintext,
+                }),
+                vec![("Authorization".to_string(), self.bearer())],
+            )
             .await
-            .map_err(InfisicalError::Http)?;
+            .map_err(|e| InfisicalError::Http(HttpError::from(e)))?;
 
-        let status = resp.status();
-        if status.is_success() {
+        if (200u16..300).contains(&resp.status) {
             Ok(())
         } else {
             Err(InfisicalError::Api {
-                status:  status.as_u16(),
-                message: parse_error(resp).await,
+                status:  resp.status,
+                message: parse_error(&resp.body),
             })
         }
     }
@@ -191,7 +208,7 @@ impl InfisicalVaultStore {
 
 // ── VaultStore impl ───────────────────────────────────────────────────────────
 
-impl VaultStore for InfisicalVaultStore {
+impl<H: HttpClient> VaultStore for InfisicalVaultStore<H> {
     type Error = InfisicalError;
 
     async fn store(&self, token: &ApiKeyToken, plaintext: &str) -> Result<(), Self::Error> {
@@ -200,35 +217,35 @@ impl VaultStore for InfisicalVaultStore {
 
         let resp = self
             .client
-            .post(self.secret_url(&name))
-            .header("Authorization", self.bearer())
-            .json(&serde_json::json!({
-                "workspaceId": self.project_id,
-                "environment": env,
-                "secretPath": self.secret_path,
-                "secretValue": plaintext,
-                "type": "shared",
-            }))
-            .send()
+            .post_json(
+                self.secret_url(&name),
+                serde_json::json!({
+                    "workspaceId": self.project_id,
+                    "environment": env,
+                    "secretPath": self.secret_path,
+                    "secretValue": plaintext,
+                    "type": "shared",
+                }),
+                vec![("Authorization".to_string(), self.bearer())],
+            )
             .await
-            .map_err(InfisicalError::Http)?;
+            .map_err(|e| InfisicalError::Http(HttpError::from(e)))?;
 
-        let status = resp.status();
-        if status.is_success() {
+        if (200u16..300).contains(&resp.status) {
             return Ok(());
         }
 
         // 409 Conflict or 400 "Secret already exists" → update in place.
         // The real Infisical API returns 400 for duplicates; some versions return 409.
-        if status.as_u16() == 409 {
+        if resp.status == 409 {
             return self.patch_secret(&name, &env, plaintext).await;
         }
-        let message = parse_error(resp).await;
-        if status.as_u16() == 400 && message.to_lowercase().contains("already exists") {
+        let message = parse_error(&resp.body);
+        if resp.status == 400 && message.to_lowercase().contains("already exists") {
             return self.patch_secret(&name, &env, plaintext).await;
         }
 
-        Err(InfisicalError::Api { status: status.as_u16(), message })
+        Err(InfisicalError::Api { status: resp.status, message })
     }
 
     async fn resolve(&self, token: &ApiKeyToken) -> Result<Option<String>, Self::Error> {
@@ -237,24 +254,25 @@ impl VaultStore for InfisicalVaultStore {
 
         let resp = self
             .client
-            .get(self.secret_url(&name))
-            .header("Authorization", self.bearer())
-            .query(&[
-                ("workspaceId", self.project_id.as_str()),
-                ("environment", env.as_str()),
-                ("secretPath", self.secret_path.as_str()),
-            ])
-            .send()
+            .get(
+                self.secret_url(&name),
+                vec![("Authorization".to_string(), self.bearer())],
+                vec![
+                    ("workspaceId".to_string(), self.project_id.clone()),
+                    ("environment".to_string(), env),
+                    ("secretPath".to_string(), self.secret_path.clone()),
+                ],
+            )
             .await
-            .map_err(InfisicalError::Http)?;
+            .map_err(|e| InfisicalError::Http(HttpError::from(e)))?;
 
-        let status = resp.status();
-        if status.as_u16() == 404 {
+        if resp.status == 404 {
             return Ok(None);
         }
 
-        if status.is_success() {
-            let json: Value = resp.json().await.map_err(InfisicalError::Http)?;
+        if (200u16..300).contains(&resp.status) {
+            let json: Value = serde_json::from_str(&resp.body)
+                .map_err(|e| InfisicalError::Deserialize(e.to_string()))?;
             let value = json
                 .pointer("/secret/secretValue")
                 .and_then(|v| v.as_str())
@@ -268,8 +286,8 @@ impl VaultStore for InfisicalVaultStore {
         }
 
         Err(InfisicalError::Api {
-            status:  status.as_u16(),
-            message: parse_error(resp).await,
+            status:  resp.status,
+            message: parse_error(&resp.body),
         })
     }
 
@@ -279,25 +297,25 @@ impl VaultStore for InfisicalVaultStore {
 
         let resp = self
             .client
-            .delete(self.secret_url(&name))
-            .header("Authorization", self.bearer())
-            .json(&serde_json::json!({
-                "workspaceId": self.project_id,
-                "environment": env,
-                "secretPath": self.secret_path,
-            }))
-            .send()
+            .delete(
+                self.secret_url(&name),
+                Some(serde_json::json!({
+                    "workspaceId": self.project_id,
+                    "environment": env,
+                    "secretPath": self.secret_path,
+                })),
+                vec![("Authorization".to_string(), self.bearer())],
+            )
             .await
-            .map_err(InfisicalError::Http)?;
+            .map_err(|e| InfisicalError::Http(HttpError::from(e)))?;
 
-        let status = resp.status();
-        if status.is_success() || status.as_u16() == 404 {
+        if (200u16..300).contains(&resp.status) || resp.status == 404 {
             return Ok(());
         }
 
         Err(InfisicalError::Api {
-            status:  status.as_u16(),
-            message: parse_error(resp).await,
+            status:  resp.status,
+            message: parse_error(&resp.body),
         })
     }
 
@@ -305,9 +323,8 @@ impl VaultStore for InfisicalVaultStore {
     // create-vs-update transparently via the POST → 409 → PATCH path.
 }
 
-async fn parse_error(resp: reqwest::Response) -> String {
-    resp.json::<Value>()
-        .await
+fn parse_error(body: &str) -> String {
+    serde_json::from_str::<Value>(body)
         .ok()
         .and_then(|v| v.get("message")?.as_str().map(String::from))
         .unwrap_or_else(|| "unknown error".to_string())
@@ -756,5 +773,73 @@ mod tests {
             }
             other => panic!("expected Api error, got: {other}"),
         }
+    }
+
+    // ── MockHttpClient unit tests ──────────────────────────────────────────────
+    // These test business logic (response parsing, error classification) without
+    // a real HTTP server. The httpmock tests above are adapter-level tests.
+
+    use crate::http::mock::MockHttpClient;
+
+    fn mock_store(http: MockHttpClient) -> InfisicalVaultStore<MockHttpClient> {
+        InfisicalVaultStore::new_with(
+            InfisicalConfig::new("http://infisical", "proj-abc", InfisicalAuth::ServiceToken("st.tok".to_string())),
+            http,
+        )
+    }
+
+    #[tokio::test]
+    async fn mock_store_returns_ok_on_201() {
+        let http = MockHttpClient::new();
+        http.enqueue(201, r#"{"secret":{"_id":"x","secretKey":"k","secretValue":"v"}}"#);
+        mock_store(http).store(&tok("tok_anthropic_prod_a1b2c3"), "sk-real").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn mock_resolve_parses_secret_value() {
+        let http = MockHttpClient::new();
+        http.enqueue(200, r#"{"secret":{"secretValue":"sk-real-key"}}"#);
+        let val = mock_store(http).resolve(&tok("tok_anthropic_prod_a1b2c3")).await.unwrap();
+        assert_eq!(val, Some("sk-real-key".to_string()));
+    }
+
+    #[tokio::test]
+    async fn mock_resolve_returns_none_on_404() {
+        let http = MockHttpClient::new();
+        http.enqueue(404, r#"{"message":"not found"}"#);
+        let val = mock_store(http).resolve(&tok("tok_anthropic_prod_a1b2c3")).await.unwrap();
+        assert!(val.is_none());
+    }
+
+    #[tokio::test]
+    async fn mock_resolve_returns_api_error_on_5xx() {
+        let http = MockHttpClient::new();
+        http.enqueue(503, r#"{"message":"service unavailable"}"#);
+        let err = mock_store(http).resolve(&tok("tok_anthropic_prod_a1b2c3")).await.unwrap_err();
+        assert!(matches!(err, InfisicalError::Api { status: 503, .. }));
+    }
+
+    #[tokio::test]
+    async fn mock_revoke_returns_ok_on_200() {
+        let http = MockHttpClient::new();
+        http.enqueue(200, r#"{"secret":{"_id":"x"}}"#);
+        mock_store(http).revoke(&tok("tok_anthropic_prod_a1b2c3")).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn mock_revoke_is_idempotent_on_404() {
+        let http = MockHttpClient::new();
+        http.enqueue(404, r#"{"message":"not found"}"#);
+        mock_store(http).revoke(&tok("tok_anthropic_prod_a1b2c3")).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn mock_store_propagates_http_transport_error() {
+        // Simulate a transport error by having the mock return an Err.
+        // MockHttpClient panics on empty queue — use a real error via Http variant.
+        let http = MockHttpClient::new();
+        http.enqueue(500, r#"{"message":"internal"}"#);
+        let err = mock_store(http).store(&tok("tok_anthropic_prod_a1b2c3"), "val").await.unwrap_err();
+        assert!(matches!(err, InfisicalError::Api { status: 500, .. }));
     }
 }

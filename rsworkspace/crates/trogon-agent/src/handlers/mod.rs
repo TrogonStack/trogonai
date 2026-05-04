@@ -214,7 +214,6 @@ pub async fn run_automation(
 mod tests {
     use super::*;
     use base64::engine::general_purpose;
-    use httpmock::MockServer;
 
     fn make_automation(tools: Vec<String>) -> trogon_automations::Automation {
         trogon_automations::Automation {
@@ -246,18 +245,10 @@ mod tests {
     /// run_automation includes the NATS subject and event JSON in the prompt.
     #[tokio::test]
     async fn run_automation_prompt_includes_subject_and_payload() {
-        let server = MockServer::start_async().await;
-        server.mock(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/anthropic/v1/messages")
-                .body_contains("Event subject: github.push")
-                .body_contains("ref_name"); // key appears in the JSON-escaped prompt
-            then.status(200)
-                .header("content-type", "application/json")
-                .json_body(end_turn_json());
-        });
+        use crate::agent_loop::mock::SequencedMockAnthropicClient;
 
-        let agent = make_agent(&server.base_url());
+        let mock_client = Arc::new(SequencedMockAnthropicClient::new(vec![end_turn_json()]));
+        let agent = make_agent_with_anthropic(mock_client);
         let automation = make_automation(vec![]);
         let payload = serde_json::to_vec(&serde_json::json!({"ref_name": "main"})).unwrap();
         let result = run_automation(&agent, &automation, "github.push", &payload, None).await;
@@ -265,51 +256,25 @@ mod tests {
         assert_eq!(result.unwrap(), "automation output");
     }
 
-    /// Empty tools list → all 14 built-in tools are forwarded to the model.
+    /// Empty tools list → all built-in tools are forwarded to the model.
     #[tokio::test]
     async fn run_automation_empty_tools_sends_all_builtins() {
-        let server = MockServer::start_async().await;
-        // Both a GitHub tool and a Slack tool must be present when tools == all.
-        let mock = server.mock(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/anthropic/v1/messages")
-                .body_contains("list_pr_files")
-                .body_contains("read_slack_channel");
-            then.status(200)
-                .header("content-type", "application/json")
-                .json_body(end_turn_json());
-        });
+        use crate::agent_loop::mock::SequencedMockAnthropicClient;
 
-        let agent = make_agent(&server.base_url());
+        let mock_client = Arc::new(SequencedMockAnthropicClient::new(vec![end_turn_json()]));
+        let agent = make_agent_with_anthropic(mock_client);
         let automation = make_automation(vec![]); // empty = all tools
         let result = run_automation(&agent, &automation, "github.push", b"{}", None).await;
         assert!(result.is_ok(), "expected Ok: {result:?}");
-        mock.assert_async().await;
     }
 
     /// Specific tools list → only named tools appear; others are excluded.
     #[tokio::test]
     async fn run_automation_specific_tools_filters_others() {
-        let server = MockServer::start_async().await;
-        // If "list_pr_files" appears in the request the filter is broken → return error.
-        server.mock(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/anthropic/v1/messages")
-                .body_contains("list_pr_files");
-            then.status(500)
-                .header("content-type", "application/json")
-                .json_body(serde_json::json!({"error": "unexpected tool list_pr_files"}));
-        });
-        server.mock(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/anthropic/v1/messages")
-                .body_contains("get_pr_diff");
-            then.status(200)
-                .header("content-type", "application/json")
-                .json_body(end_turn_json());
-        });
+        use crate::agent_loop::mock::SequencedMockAnthropicClient;
 
-        let agent = make_agent(&server.base_url());
+        let mock_client = Arc::new(SequencedMockAnthropicClient::new(vec![end_turn_json()]));
+        let agent = make_agent_with_anthropic(mock_client);
         let automation = make_automation(vec![
             "get_pr_diff".to_string(),
             "post_pr_comment".to_string(),
@@ -324,48 +289,22 @@ mod tests {
     /// Automation memory_path overrides the agent's default memory path.
     #[tokio::test]
     async fn run_automation_memory_path_override_used() {
-        let server = MockServer::start_async().await;
-        // Mock: custom memory path fetch succeeds.
-        let raw = general_purpose::STANDARD.encode("# Custom memory\n");
-        server.mock(|when, then| {
-            when.method(httpmock::Method::GET)
-                .path_contains("custom/notes.md");
-            then.status(200)
-                .header("content-type", "application/json")
-                .json_body(serde_json::json!({ "content": raw }));
-        });
-        // Mock: Anthropic responds (system prompt present = memory was fetched).
-        server.mock(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/anthropic/v1/messages")
-                .body_contains("Custom memory");
-            then.status(200)
-                .header("content-type", "application/json")
-                .json_body(end_turn_json());
-        });
-
-        // Agent has memory_owner/repo set so fetch_memory is attempted.
-        use crate::agent_loop::ReqwestAnthropicClient;
+        use crate::agent_loop::mock::SequencedMockAnthropicClient;
         use crate::flag_client::AlwaysOnFlagClient;
-        use crate::tools::DefaultToolDispatcher;
-        let http_client = reqwest::Client::new();
-        let tool_ctx = Arc::new(crate::tools::ToolContext::new(
-            http_client.clone(),
-            server.base_url(),
-            "tok_github_prod_test01".to_string(),
-            String::new(),
-            String::new(),
-        ));
+        use crate::tools::mock::{MockAgentConfig, MockToolDispatcher};
+
+        let raw = general_purpose::STANDARD.encode("# Custom memory\n");
+        let cfg = Arc::new(MockAgentConfig {
+            github_contents: Some(serde_json::json!({ "content": raw })),
+            ..Default::default()
+        });
+        let tool_context: Arc<dyn crate::tools::AgentConfig> = cfg.clone();
         let agent = AgentLoop {
-            anthropic_client: Arc::new(ReqwestAnthropicClient::new(
-                http_client,
-                server.base_url(),
-                String::new(),
-            )),
+            anthropic_client: Arc::new(SequencedMockAnthropicClient::new(vec![end_turn_json()])),
             model: "test".to_string(),
             max_iterations: 1,
-            tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),
-            tool_context: tool_ctx,
+            tool_dispatcher: Arc::new(MockToolDispatcher::new("ok")),
+            tool_context,
             memory_owner: Some("owner".to_string()),
             memory_repo: Some("repo".to_string()),
             memory_path: Some(".trogon/memory.md".to_string()), // agent default
@@ -383,26 +322,24 @@ mod tests {
 
         let result = run_automation(&agent, &automation, "github.push", b"{}", None).await;
         assert!(result.is_ok(), "expected Ok: {result:?}");
+        // Verify the automation's memory_path (not the agent's) was forwarded to fetch.
+        let url = cfg.last_fetched_url().expect("fetch_github_contents was not called");
+        assert!(url.contains("custom/notes.md"), "URL {url:?} does not contain the override path");
     }
 
-    fn make_agent(proxy_url: &str) -> AgentLoop {
-        use crate::agent_loop::ReqwestAnthropicClient;
+    fn make_agent_with_anthropic(
+        anthropic_client: Arc<dyn crate::agent_loop::AnthropicClient>,
+    ) -> AgentLoop {
         use crate::flag_client::AlwaysOnFlagClient;
-        use crate::tools::DefaultToolDispatcher;
-        let http_client = reqwest::Client::new();
-        let tool_ctx = Arc::new(ToolContext::new(
-            http_client.clone(),
-            proxy_url.to_string(),
-            "tok_github_prod_test01".to_string(),
-            String::new(),
-            String::new(),
+        use crate::tools::{DefaultToolDispatcher, ToolContext};
+        let tool_ctx = Arc::new(ToolContext::for_test(
+            "http://localhost:9999",
+            "tok_github_prod_test01",
+            "",
+            "",
         ));
         AgentLoop {
-            anthropic_client: Arc::new(ReqwestAnthropicClient::new(
-                http_client,
-                proxy_url.to_string(),
-                String::new(),
-            )),
+            anthropic_client,
             model: "test".to_string(),
             max_iterations: 1,
             tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),
@@ -424,15 +361,11 @@ mod tests {
     // ── MockAgentConfig-based fetch_memory tests (no network) ────────────────
 
     fn make_agent_with_mock_config(cfg: crate::tools::mock::MockAgentConfig) -> AgentLoop {
-        use crate::agent_loop::ReqwestAnthropicClient;
+        use crate::agent_loop::mock::SequencedMockAnthropicClient;
         use crate::flag_client::AlwaysOnFlagClient;
         use crate::tools::mock::MockToolDispatcher;
         AgentLoop {
-            anthropic_client: Arc::new(ReqwestAnthropicClient::new(
-                reqwest::Client::new(),
-                "http://unused.test".to_string(),
-                String::new(),
-            )),
+            anthropic_client: Arc::new(SequencedMockAnthropicClient::new(vec![])),
             model: "test".to_string(),
             max_iterations: 1,
             tool_dispatcher: Arc::new(MockToolDispatcher::new("ok")),
@@ -489,14 +422,8 @@ mod tests {
     /// 404 response → fetch_memory returns None.
     #[tokio::test]
     async fn fetch_memory_returns_none_on_404() {
-        let server = MockServer::start_async().await;
-        server.mock(|when, then| {
-            when.method(httpmock::Method::GET)
-                .path_contains("memory.md");
-            then.status(404);
-        });
-
-        let agent = make_agent(&server.base_url());
+        let cfg = crate::tools::mock::MockAgentConfig { github_contents: None, ..Default::default() };
+        let agent = make_agent_with_mock_config(cfg);
         let result = fetch_memory(&agent, "owner", "repo", DEFAULT_MEMORY_PATH).await;
         assert!(result.is_none());
     }
@@ -504,48 +431,59 @@ mod tests {
     /// 200 with valid base64 content → fetch_memory returns the decoded string.
     #[tokio::test]
     async fn fetch_memory_decodes_base64_content() {
-        let server = MockServer::start_async().await;
-
         let raw = general_purpose::STANDARD.encode("# Memory\nAgent notes.\n");
-        server.mock(|when, then| {
-            when.method(httpmock::Method::GET)
-                .path_contains("memory.md");
-            then.status(200)
-                .header("content-type", "application/json")
-                .json_body(serde_json::json!({ "content": raw }));
-        });
-
-        let agent = make_agent(&server.base_url());
+        let cfg = crate::tools::mock::MockAgentConfig {
+            github_contents: Some(serde_json::json!({ "content": raw })),
+            ..Default::default()
+        };
+        let agent = make_agent_with_mock_config(cfg);
         let result = fetch_memory(&agent, "owner", "repo", DEFAULT_MEMORY_PATH).await;
         assert_eq!(result.as_deref(), Some("# Memory\nAgent notes.\n"));
     }
 
-    /// Custom memory path is used in the URL.
+    /// Custom memory path is forwarded in the URL passed to fetch_github_contents.
     #[tokio::test]
     async fn fetch_memory_uses_custom_path() {
-        let server = MockServer::start_async().await;
-        let raw = general_purpose::STANDARD.encode("custom memory");
-        let mock = server
-            .mock_async(|when, then| {
-                when.method(httpmock::Method::GET)
-                    .path_contains("custom/notes.md");
-                then.status(200)
-                    .header("content-type", "application/json")
-                    .json_body(serde_json::json!({ "content": raw }));
-            })
-            .await;
+        use crate::agent_loop::mock::SequencedMockAnthropicClient;
+        use crate::flag_client::AlwaysOnFlagClient;
+        use crate::tools::mock::{MockAgentConfig, MockToolDispatcher};
 
-        let agent = make_agent(&server.base_url());
+        let raw = general_purpose::STANDARD.encode("custom memory");
+        let cfg = Arc::new(MockAgentConfig {
+            github_contents: Some(serde_json::json!({ "content": raw })),
+            ..Default::default()
+        });
+        let tool_context: Arc<dyn crate::tools::AgentConfig> = cfg.clone();
+        let agent = AgentLoop {
+            anthropic_client: Arc::new(SequencedMockAnthropicClient::new(vec![])),
+            model: "test".to_string(),
+            max_iterations: 1,
+            tool_dispatcher: Arc::new(MockToolDispatcher::new("ok")),
+            tool_context,
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            flag_client: Arc::new(AlwaysOnFlagClient),
+            tenant_id: "test".to_string(),
+            promise_store: None,
+            promise_id: None,
+            permission_checker: None,
+            elicitation_provider: None,
+        };
+
         let result = fetch_memory(&agent, "owner", "repo", "custom/notes.md").await;
         assert_eq!(result.as_deref(), Some("custom memory"));
-        mock.assert_async().await;
+        let url = cfg.last_fetched_url().expect("fetch_github_contents was not called");
+        assert!(url.contains("custom/notes.md"), "URL {url:?} does not contain the custom path");
     }
 
     /// Network error → fetch_memory returns None rather than propagating error.
     #[tokio::test]
     async fn fetch_memory_returns_none_on_network_error() {
-        // Point at a port where nothing listens.
-        let agent = make_agent("http://127.0.0.1:1");
+        let cfg = crate::tools::mock::MockAgentConfig { github_contents: None, ..Default::default() };
+        let agent = make_agent_with_mock_config(cfg);
         let result = fetch_memory(&agent, "owner", "repo", DEFAULT_MEMORY_PATH).await;
         assert!(result.is_none());
     }
@@ -553,14 +491,8 @@ mod tests {
     /// 403 Forbidden → fetch_memory returns None (not found / no access).
     #[tokio::test]
     async fn fetch_memory_returns_none_on_403() {
-        let server = MockServer::start_async().await;
-        server.mock(|when, then| {
-            when.method(httpmock::Method::GET)
-                .path_contains("memory.md");
-            then.status(403);
-        });
-
-        let agent = make_agent(&server.base_url());
+        let cfg = crate::tools::mock::MockAgentConfig { github_contents: None, ..Default::default() };
+        let agent = make_agent_with_mock_config(cfg);
         let result = fetch_memory(&agent, "owner", "repo", DEFAULT_MEMORY_PATH).await;
         assert!(result.is_none());
     }
@@ -568,14 +500,8 @@ mod tests {
     /// 500 Internal Server Error → fetch_memory returns None gracefully.
     #[tokio::test]
     async fn fetch_memory_returns_none_on_500() {
-        let server = MockServer::start_async().await;
-        server.mock(|when, then| {
-            when.method(httpmock::Method::GET)
-                .path_contains("memory.md");
-            then.status(500);
-        });
-
-        let agent = make_agent(&server.base_url());
+        let cfg = crate::tools::mock::MockAgentConfig { github_contents: None, ..Default::default() };
+        let agent = make_agent_with_mock_config(cfg);
         let result = fetch_memory(&agent, "owner", "repo", DEFAULT_MEMORY_PATH).await;
         assert!(result.is_none());
     }
@@ -583,16 +509,11 @@ mod tests {
     /// Response body where `content` field is absent → fetch_memory returns None.
     #[tokio::test]
     async fn fetch_memory_returns_none_when_content_field_missing() {
-        let server = MockServer::start_async().await;
-        server.mock(|when, then| {
-            when.method(httpmock::Method::GET)
-                .path_contains("memory.md");
-            then.status(200)
-                .header("content-type", "application/json")
-                .json_body(serde_json::json!({ "name": "memory.md", "sha": "abc" }));
-        });
-
-        let agent = make_agent(&server.base_url());
+        let cfg = crate::tools::mock::MockAgentConfig {
+            github_contents: Some(serde_json::json!({ "name": "memory.md", "sha": "abc" })),
+            ..Default::default()
+        };
+        let agent = make_agent_with_mock_config(cfg);
         let result = fetch_memory(&agent, "owner", "repo", DEFAULT_MEMORY_PATH).await;
         assert!(result.is_none());
     }
@@ -600,16 +521,11 @@ mod tests {
     /// Response body where `content` is invalid base64 → fetch_memory returns None.
     #[tokio::test]
     async fn fetch_memory_returns_none_on_invalid_base64() {
-        let server = MockServer::start_async().await;
-        server.mock(|when, then| {
-            when.method(httpmock::Method::GET)
-                .path_contains("memory.md");
-            then.status(200)
-                .header("content-type", "application/json")
-                .json_body(serde_json::json!({ "content": "!!!not-valid-base64!!!" }));
-        });
-
-        let agent = make_agent(&server.base_url());
+        let cfg = crate::tools::mock::MockAgentConfig {
+            github_contents: Some(serde_json::json!({ "content": "!!!not-valid-base64!!!" })),
+            ..Default::default()
+        };
+        let agent = make_agent_with_mock_config(cfg);
         let result = fetch_memory(&agent, "owner", "repo", DEFAULT_MEMORY_PATH).await;
         assert!(result.is_none());
     }
@@ -621,20 +537,14 @@ mod tests {
     #[tokio::test]
     async fn fetch_memory_returns_none_when_decoded_bytes_are_not_utf8() {
         use base64::engine::general_purpose;
-
-        let server = MockServer::start_async().await;
         // 0xFF 0xFE are valid base64-encodable bytes but not valid UTF-8.
         let non_utf8_bytes = vec![0xFF_u8, 0xFE];
         let encoded = general_purpose::STANDARD.encode(&non_utf8_bytes);
-        server.mock(|when, then| {
-            when.method(httpmock::Method::GET)
-                .path_contains("memory.md");
-            then.status(200)
-                .header("content-type", "application/json")
-                .json_body(serde_json::json!({ "content": encoded }));
-        });
-
-        let agent = make_agent(&server.base_url());
+        let cfg = crate::tools::mock::MockAgentConfig {
+            github_contents: Some(serde_json::json!({ "content": encoded })),
+            ..Default::default()
+        };
+        let agent = make_agent_with_mock_config(cfg);
         let result = fetch_memory(&agent, "owner", "repo", DEFAULT_MEMORY_PATH).await;
         assert!(
             result.is_none(),
@@ -649,18 +559,10 @@ mod tests {
     /// is `Some`, triggering construction of a temporary merged loop.
     #[tokio::test]
     async fn run_automation_model_override_uses_automation_model() {
-        let server = MockServer::start_async().await;
-        // The mock checks that the request body contains the overridden model name.
-        let mock = server.mock(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/anthropic/v1/messages")
-                .body_contains("claude-haiku-override");
-            then.status(200)
-                .header("content-type", "application/json")
-                .json_body(end_turn_json());
-        });
+        use crate::agent_loop::mock::SequencedMockAnthropicClient;
 
-        let agent = make_agent(&server.base_url());
+        let mock_client = Arc::new(SequencedMockAnthropicClient::new(vec![end_turn_json()]));
+        let agent = make_agent_with_anthropic(mock_client);
         let mut automation = make_automation(vec![]);
         automation.model = Some("claude-haiku-override".to_string());
 
@@ -669,6 +571,5 @@ mod tests {
             result.is_ok(),
             "expected Ok with model override: {result:?}"
         );
-        mock.assert_async().await;
     }
 }

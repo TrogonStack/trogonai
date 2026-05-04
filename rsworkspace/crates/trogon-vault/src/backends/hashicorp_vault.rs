@@ -10,9 +10,9 @@
 use std::future::Future;
 use std::sync::RwLock;
 
-use reqwest::Client;
 use serde_json::Value;
 
+use crate::http::{HttpClient, HttpError, HttpResponse};
 use crate::token::ApiKeyToken;
 use crate::vault::VaultStore;
 
@@ -61,7 +61,7 @@ impl HashicorpVaultConfig {
 #[derive(Debug)]
 pub enum HashicorpVaultError {
     /// An HTTP transport error.
-    Http(reqwest::Error),
+    Http(HttpError),
     /// Vault returned a non-2xx status code.
     Api { status: u16, errors: Vec<String> },
     /// Authentication failed or the response is missing a client token.
@@ -101,8 +101,10 @@ impl std::error::Error for HashicorpVaultError {
 ///
 /// Tokens are mapped to Vault paths as:
 /// `tok_{provider}_{env}_{id}` → `{mount}/data/{provider}/{env}/{id}`
-pub struct HashicorpVaultStore {
-    client: Client,
+///
+/// The type parameter `H` is the HTTP transport; in production `H = reqwest::Client`.
+pub struct HashicorpVaultStore<H: HttpClient = reqwest::Client> {
+    client: H,
     vault_addr: String,
     mount: String,
     /// Current Vault token. Stored in a `RwLock` so re-authentication can update
@@ -112,25 +114,42 @@ pub struct HashicorpVaultStore {
     auth: VaultAuth,
 }
 
-impl HashicorpVaultStore {
+impl HashicorpVaultStore<reqwest::Client> {
     /// Create a new store and authenticate with Vault.
     ///
     /// For [`VaultAuth::Token`] no network call is made; for other methods an
     /// initial login request is performed.
     pub async fn new(config: HashicorpVaultConfig) -> Result<Self, HashicorpVaultError> {
         let client = if config.tls_skip_verify {
-            Client::builder()
+            reqwest::Client::builder()
                 .danger_accept_invalid_certs(true)
                 .build()
-                .map_err(HashicorpVaultError::Http)?
+                .map_err(|e| HashicorpVaultError::Http(HttpError(e.to_string())))?
         } else {
-            Client::new()
+            reqwest::Client::new()
         };
 
         let initial_token = authenticate(&client, &config.vault_addr, &config.auth).await?;
 
         Ok(Self {
             client,
+            vault_addr: config.vault_addr,
+            mount: config.mount,
+            token: RwLock::new(initial_token),
+            auth: config.auth,
+        })
+    }
+}
+
+impl<H: HttpClient> HashicorpVaultStore<H> {
+    /// Create a new store with an explicit HTTP transport implementation.
+    ///
+    /// Use this in tests with a mock `HttpClient`.
+    pub async fn new_with(config: HashicorpVaultConfig, http: H) -> Result<Self, HashicorpVaultError> {
+        let initial_token = authenticate_with(&http, &config.vault_addr, &config.auth).await?;
+
+        Ok(Self {
+            client: http,
             vault_addr: config.vault_addr,
             mount: config.mount,
             token: RwLock::new(initial_token),
@@ -176,7 +195,7 @@ impl HashicorpVaultStore {
     // ── Re-authentication ─────────────────────────────────────────────────────
 
     async fn reauthenticate(&self) -> Result<(), HashicorpVaultError> {
-        let new_token = authenticate(&self.client, &self.vault_addr, &self.auth).await?;
+        let new_token = authenticate_with(&self.client, &self.vault_addr, &self.auth).await?;
         self.set_token(new_token);
         Ok(())
     }
@@ -212,8 +231,18 @@ impl HashicorpVaultStore {
 
 // ── Free-standing auth helpers ────────────────────────────────────────────────
 
+/// Authenticate using the concrete `reqwest::Client` (for production `new()`).
 async fn authenticate(
-    client: &Client,
+    client: &reqwest::Client,
+    vault_addr: &str,
+    auth: &VaultAuth,
+) -> Result<String, HashicorpVaultError> {
+    authenticate_with(client, vault_addr, auth).await
+}
+
+/// Authenticate using any `HttpClient` (generic, used by `new_with` and `reauthenticate`).
+async fn authenticate_with<H: HttpClient>(
+    client: &H,
     vault_addr: &str,
     auth: &VaultAuth,
 ) -> Result<String, HashicorpVaultError> {
@@ -228,25 +257,22 @@ async fn authenticate(
     }
 }
 
-async fn approle_login(
-    client: &Client,
+async fn approle_login<H: HttpClient>(
+    client: &H,
     vault_addr: &str,
     role_id: &str,
     secret_id: &str,
 ) -> Result<String, HashicorpVaultError> {
     let url = format!("{vault_addr}/v1/auth/approle/login");
-    let body = serde_json::json!({"role_id": role_id, "secret_id": secret_id});
     let resp = client
-        .post(&url)
-        .json(&body)
-        .send()
+        .post_json(url, serde_json::json!({"role_id": role_id, "secret_id": secret_id}), vec![])
         .await
-        .map_err(HashicorpVaultError::Http)?;
-    extract_client_token(resp, "approle").await
+        .map_err(|e| HashicorpVaultError::Http(HttpError::from(e)))?;
+    extract_client_token(resp, "approle")
 }
 
-async fn kubernetes_login(
-    client: &Client,
+async fn kubernetes_login<H: HttpClient>(
+    client: &H,
     vault_addr: &str,
     role: &str,
     jwt_path: Option<&str>,
@@ -261,22 +287,20 @@ async fn kubernetes_login(
     }
 
     let url = format!("{vault_addr}/v1/auth/kubernetes/login");
-    let body = serde_json::json!({"role": role, "jwt": jwt});
     let resp = client
-        .post(&url)
-        .json(&body)
-        .send()
+        .post_json(url, serde_json::json!({"role": role, "jwt": jwt}), vec![])
         .await
-        .map_err(HashicorpVaultError::Http)?;
-    extract_client_token(resp, "kubernetes").await
+        .map_err(|e| HashicorpVaultError::Http(HttpError::from(e)))?;
+    extract_client_token(resp, "kubernetes")
 }
 
-async fn extract_client_token(
-    resp: reqwest::Response,
+fn extract_client_token(
+    resp: HttpResponse,
     method: &str,
 ) -> Result<String, HashicorpVaultError> {
-    if resp.status().is_success() {
-        let json: Value = resp.json().await.map_err(HashicorpVaultError::Http)?;
+    if (200u16..300).contains(&resp.status) {
+        let json: Value = serde_json::from_str(&resp.body)
+            .map_err(|e| HashicorpVaultError::Deserialize(e.to_string()))?;
         json.pointer("/auth/client_token")
             .and_then(|v| v.as_str())
             .map(String::from)
@@ -286,15 +310,13 @@ async fn extract_client_token(
                 ))
             })
     } else {
-        let status = resp.status().as_u16();
-        let errors = parse_vault_errors(resp).await;
-        Err(HashicorpVaultError::Api { status, errors })
+        let errors = parse_vault_errors(&resp.body);
+        Err(HashicorpVaultError::Api { status: resp.status, errors })
     }
 }
 
-async fn parse_vault_errors(resp: reqwest::Response) -> Vec<String> {
-    resp.json::<Value>()
-        .await
+fn parse_vault_errors(body: &str) -> Vec<String> {
+    serde_json::from_str::<Value>(body)
         .ok()
         .and_then(|v| {
             v.get("errors")?.as_array().map(|arr| {
@@ -308,7 +330,7 @@ async fn parse_vault_errors(resp: reqwest::Response) -> Vec<String> {
 
 // ── VaultStore impl ───────────────────────────────────────────────────────────
 
-impl VaultStore for HashicorpVaultStore {
+impl<H: HttpClient> VaultStore for HashicorpVaultStore<H> {
     type Error = HashicorpVaultError;
 
     async fn store(&self, token: &ApiKeyToken, plaintext: &str) -> Result<(), Self::Error> {
@@ -322,19 +344,15 @@ impl VaultStore for HashicorpVaultStore {
             let body = body.clone();
             async move {
                 let resp = client
-                    .put(&url)
-                    .header("X-Vault-Token", vault_token)
-                    .json(&body)
-                    .send()
+                    .put_json(url, body, vec![("X-Vault-Token".to_string(), vault_token)])
                     .await
-                    .map_err(HashicorpVaultError::Http)?;
+                    .map_err(|e| HashicorpVaultError::Http(HttpError::from(e)))?;
 
-                if resp.status().is_success() {
+                if (200u16..300).contains(&resp.status) {
                     Ok(())
                 } else {
-                    let status = resp.status().as_u16();
-                    let errors = parse_vault_errors(resp).await;
-                    Err(HashicorpVaultError::Api { status, errors })
+                    let errors = parse_vault_errors(&resp.body);
+                    Err(HashicorpVaultError::Api { status: resp.status, errors })
                 }
             }
         })
@@ -350,19 +368,17 @@ impl VaultStore for HashicorpVaultStore {
             let client = client.clone();
             async move {
                 let resp = client
-                    .get(&url)
-                    .header("X-Vault-Token", vault_token)
-                    .send()
+                    .get(url, vec![("X-Vault-Token".to_string(), vault_token)], vec![])
                     .await
-                    .map_err(HashicorpVaultError::Http)?;
+                    .map_err(|e| HashicorpVaultError::Http(HttpError::from(e)))?;
 
-                let status = resp.status();
-                if status.as_u16() == 404 {
+                if resp.status == 404 {
                     return Ok(None);
                 }
 
-                if status.is_success() {
-                    let json: Value = resp.json().await.map_err(HashicorpVaultError::Http)?;
+                if (200u16..300).contains(&resp.status) {
+                    let json: Value = serde_json::from_str(&resp.body)
+                        .map_err(|e| HashicorpVaultError::Deserialize(e.to_string()))?;
                     let key = json
                         .pointer("/data/data/api_key")
                         .and_then(|v| v.as_str())
@@ -374,10 +390,9 @@ impl VaultStore for HashicorpVaultStore {
                         })?;
                     Ok(Some(key))
                 } else {
-                    let status_u16 = status.as_u16();
-                    let errors = parse_vault_errors(resp).await;
+                    let errors = parse_vault_errors(&resp.body);
                     Err(HashicorpVaultError::Api {
-                        status: status_u16,
+                        status: resp.status,
                         errors,
                     })
                 }
@@ -395,20 +410,16 @@ impl VaultStore for HashicorpVaultStore {
             let client = client.clone();
             async move {
                 let resp = client
-                    .delete(&url)
-                    .header("X-Vault-Token", vault_token)
-                    .send()
+                    .delete(url, None, vec![("X-Vault-Token".to_string(), vault_token)])
                     .await
-                    .map_err(HashicorpVaultError::Http)?;
+                    .map_err(|e| HashicorpVaultError::Http(HttpError::from(e)))?;
 
-                let status = resp.status();
-                if status.is_success() || status.as_u16() == 404 {
+                if (200u16..300).contains(&resp.status) || resp.status == 404 {
                     Ok(())
                 } else {
-                    let status_u16 = status.as_u16();
-                    let errors = parse_vault_errors(resp).await;
+                    let errors = parse_vault_errors(&resp.body);
                     Err(HashicorpVaultError::Api {
-                        status: status_u16,
+                        status: resp.status,
                         errors,
                     })
                 }
@@ -1296,5 +1307,63 @@ mod tests {
             "expected Api 500 from re-auth, got: {:?}",
             err
         );
+    }
+
+    // ── MockHttpClient unit tests ─────────────────────────────────────────────
+    // VaultAuth::Token skips authentication HTTP calls, so new_with() requires
+    // no enqueued response. Tests verify business-logic: response parsing and
+    // error classification without a real HTTP server.
+
+    use crate::http::mock::MockHttpClient;
+
+    async fn mock_store(http: MockHttpClient) -> HashicorpVaultStore<MockHttpClient> {
+        let config = HashicorpVaultConfig::new("http://vault", "secret", VaultAuth::Token("test-tok".to_string()));
+        HashicorpVaultStore::new_with(config, http).await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn mock_store_returns_ok_on_200() {
+        let http = MockHttpClient::new();
+        http.enqueue(200, r#"{"data":{"created_time":"t"}}"#);
+        mock_store(http).await.store(&tok("tok_anthropic_prod_a1b2c3"), "sk-real").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn mock_resolve_parses_secret_value() {
+        let http = MockHttpClient::new();
+        http.enqueue(200, r#"{"data":{"data":{"api_key":"sk-real-key"},"metadata":{}}}"#);
+        let val = mock_store(http).await.resolve(&tok("tok_anthropic_prod_a1b2c3")).await.unwrap();
+        assert_eq!(val, Some("sk-real-key".to_string()));
+    }
+
+    #[tokio::test]
+    async fn mock_resolve_returns_none_on_404() {
+        let http = MockHttpClient::new();
+        http.enqueue(404, r#"{"errors":[]}"#);
+        let val = mock_store(http).await.resolve(&tok("tok_anthropic_prod_a1b2c3")).await.unwrap();
+        assert!(val.is_none());
+    }
+
+    #[tokio::test]
+    async fn mock_resolve_returns_api_error_on_5xx() {
+        let http = MockHttpClient::new();
+        http.enqueue(500, r#"{"errors":["internal server error"]}"#);
+        let err = mock_store(http).await.resolve(&tok("tok_anthropic_prod_a1b2c3")).await.unwrap_err();
+        assert!(matches!(err, HashicorpVaultError::Api { status: 500, .. }));
+    }
+
+    #[tokio::test]
+    async fn mock_revoke_returns_ok_on_204() {
+        let http = MockHttpClient::new();
+        http.enqueue(204, "");
+        mock_store(http).await.revoke(&tok("tok_anthropic_prod_a1b2c3")).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn mock_revoke_returns_api_error_on_403() {
+        let http = MockHttpClient::new();
+        http.enqueue(403, r#"{"errors":["permission denied"]}"#);
+        let err = mock_store(http).await.revoke(&tok("tok_anthropic_prod_a1b2c3")).await.unwrap_err();
+        assert!(matches!(err, HashicorpVaultError::Api { status: 403, .. }));
     }
 }

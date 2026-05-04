@@ -24,7 +24,7 @@ pub trait AgentRunner: Clone {
     fn add_mcp_tools(
         &mut self,
         defs: Vec<ToolDef>,
-        dispatch: Vec<(String, String, Arc<trogon_mcp::McpClient>)>,
+        dispatch: Vec<(String, String, Arc<dyn trogon_mcp::McpCallTool>)>,
     );
 
     /// Install a permission checker that gates every tool execution.
@@ -67,7 +67,7 @@ impl AgentRunner for trogon_agent_core::agent_loop::AgentLoop {
     fn add_mcp_tools(
         &mut self,
         defs: Vec<ToolDef>,
-        dispatch: Vec<(String, String, Arc<trogon_mcp::McpClient>)>,
+        dispatch: Vec<(String, String, Arc<dyn trogon_mcp::McpCallTool>)>,
     ) {
         self.mcp_tool_defs.extend(defs);
         self.mcp_dispatch.extend(dispatch);
@@ -212,7 +212,7 @@ pub mod mock {
         fn add_mcp_tools(
             &mut self,
             _defs: Vec<ToolDef>,
-            _dispatch: Vec<(String, String, Arc<trogon_mcp::McpClient>)>,
+            _dispatch: Vec<(String, String, Arc<dyn trogon_mcp::McpCallTool>)>,
         ) {
         }
 

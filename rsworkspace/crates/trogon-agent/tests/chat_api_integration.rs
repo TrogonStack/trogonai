@@ -216,6 +216,8 @@ async fn start_with_options(
         tenant_id: "test".to_string(),
         promise_store: None,
         promise_id: None,
+        permission_checker: None,
+        elicitation_provider: None,
     });
 
     let state = ChatAppState {
@@ -1944,6 +1946,8 @@ async fn start_with_compactor_nats() -> (TestEnv, async_nats::Client) {
         tenant_id: "test".to_string(),
         promise_store: None,
         promise_id: None,
+        permission_checker: None,
+        elicitation_provider: None,
     });
 
     let state = ChatAppState {

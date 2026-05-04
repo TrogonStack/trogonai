@@ -47,3 +47,10 @@ pub mod trigger;
 pub use automation::{Automation, McpServer, Visibility};
 pub use runs::{RunRecord, RunRepository, RunStats, RunStatus, RunStore, now_unix};
 pub use store::{AutomationRepository, AutomationStore};
+
+/// In-memory mock implementations available with `feature = "test-support"`.
+#[cfg(any(test, feature = "test-support"))]
+pub mod mock {
+    pub use crate::runs::mock::{ErrorRunStore, MockRunStore};
+    pub use crate::store::mock::MockAutomationStore;
+}

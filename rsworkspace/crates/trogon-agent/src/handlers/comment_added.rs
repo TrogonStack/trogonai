@@ -116,17 +116,13 @@ mod tests {
     }
 
     fn make_agent() -> AgentLoop {
-        use crate::agent_loop::ReqwestAnthropicClient;
+        use crate::agent_loop::mock::SequencedMockAnthropicClient;
         use crate::flag_client::AlwaysOnFlagClient;
         use crate::tools::{DefaultToolDispatcher, ToolContext};
         use std::sync::Arc;
         let tool_ctx = Arc::new(ToolContext::for_test("http://localhost:9999", "", "", ""));
         AgentLoop {
-            anthropic_client: Arc::new(ReqwestAnthropicClient::new(
-                reqwest::Client::new(),
-                "http://localhost:9999".to_string(),
-                String::new(),
-            )),
+            anthropic_client: Arc::new(SequencedMockAnthropicClient::new(vec![])),
             model: "test".to_string(),
             max_iterations: 1,
             tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),

@@ -73,7 +73,7 @@ fn make_agent_loop() -> AgentLoop {
         model: "claude-opus-4-6".to_string(),
         max_iterations: 10,
         thinking_budget: None,
-        tool_context: Arc::new(ToolContext { http_client: http, proxy_url: String::new() }),
+        tool_context: Arc::new(ToolContext { proxy_url: String::new() }),
         memory_owner: None,
         memory_repo: None,
         memory_path: None,

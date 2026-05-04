@@ -283,6 +283,11 @@ async fn dispatch<N, R>(
             }
         }
 
+        ClientMethod::SessionElicitation => {
+            debug!("SessionElicitation — not handled");
+            reply_error(&nats, reply, -32601, "Method not supported by this runtime").await;
+        }
+
         ClientMethod::ExtSessionPromptResponse => {
             debug!("ExtSessionPromptResponse — not handled");
             reply_error(&nats, reply, -32601, "Method not supported by this runtime").await;

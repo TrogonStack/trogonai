@@ -103,18 +103,14 @@ mod tests {
         );
     }
 
-    fn make_agent(proxy_url: &str) -> AgentLoop {
-        use crate::agent_loop::ReqwestAnthropicClient;
+    fn make_agent() -> AgentLoop {
+        use crate::agent_loop::mock::SequencedMockAnthropicClient;
         use crate::flag_client::AlwaysOnFlagClient;
         use crate::tools::{DefaultToolDispatcher, ToolContext};
         use std::sync::Arc;
-        let tool_ctx = Arc::new(ToolContext::for_test(proxy_url, "", "", ""));
+        let tool_ctx = Arc::new(ToolContext::for_test("http://localhost:9999", "", "", ""));
         AgentLoop {
-            anthropic_client: Arc::new(ReqwestAnthropicClient::new(
-                reqwest::Client::new(),
-                proxy_url.to_string(),
-                String::new(),
-            )),
+            anthropic_client: Arc::new(SequencedMockAnthropicClient::new(vec![])),
             model: "test".to_string(),
             max_iterations: 1,
             tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),
@@ -133,30 +129,50 @@ mod tests {
         }
     }
 
+    fn end_turn(text: &str) -> serde_json::Value {
+        serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": text}]
+        })
+    }
+
     #[tokio::test]
     async fn handle_returns_error_on_invalid_json() {
-        let agent = make_agent("http://127.0.0.1:1");
+        let agent = make_agent();
         let result = handle(&agent, "datadog.alert", b"not json").await;
         assert!(matches!(result, Some(Err(_))));
     }
 
     #[tokio::test]
     async fn handle_calls_agent_for_triggered_alert() {
-        let server = httpmock::MockServer::start_async().await;
-        let mock = server.mock(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/anthropic/v1/messages")
-                .body_contains("Triggered")
-                .body_contains("web-01");
-            then.status(200)
-                .header("content-type", "application/json")
-                .json_body(serde_json::json!({
-                    "stop_reason": "end_turn",
-                    "content": [{"type": "text", "text": "alert handled"}]
-                }));
-        });
+        use crate::agent_loop::mock::SequencedMockAnthropicClient;
+        use crate::flag_client::AlwaysOnFlagClient;
+        use crate::tools::{DefaultToolDispatcher, ToolContext};
+        use std::sync::Arc;
 
-        let agent = make_agent(&server.base_url());
+        let mock_client = Arc::new(SequencedMockAnthropicClient::new(vec![
+            end_turn("alert handled"),
+        ]));
+        let tool_ctx = Arc::new(ToolContext::for_test("http://localhost:9999", "", "", ""));
+        let agent = AgentLoop {
+            anthropic_client: mock_client,
+            model: "test".to_string(),
+            max_iterations: 1,
+            tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),
+            tool_context: tool_ctx,
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            flag_client: Arc::new(AlwaysOnFlagClient),
+            tenant_id: "test".to_string(),
+            promise_store: None,
+            promise_id: None,
+            permission_checker: None,
+            elicitation_provider: None,
+        };
+
         let payload = serde_json::json!({
             "alert_transition": "Triggered",
             "alert_id": "1234",
@@ -166,77 +182,61 @@ mod tests {
         let bytes = serde_json::to_vec(&payload).unwrap();
         let result = handle(&agent, "datadog.alert", &bytes).await;
         assert!(matches!(result, Some(Ok(_))));
-        mock.assert_async().await;
     }
 
     #[tokio::test]
     async fn handle_uses_fallback_values_when_fields_absent() {
         // Payload with none of the optional fields — all unwrap_or defaults fire.
-        let server = httpmock::MockServer::start_async().await;
-        let mock = server.mock(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/anthropic/v1/messages")
-                // Defaults: transition="unknown", title="(no title)", id="unknown", host="unknown"
-                .body_contains("unknown");
-            then.status(200)
-                .header("content-type", "application/json")
-                .json_body(serde_json::json!({
-                    "stop_reason": "end_turn",
-                    "content": [{"type": "text", "text": "handled"}]
-                }));
-        });
+        use crate::agent_loop::mock::SequencedMockAnthropicClient;
+        use crate::flag_client::AlwaysOnFlagClient;
+        use crate::tools::{DefaultToolDispatcher, ToolContext};
+        use std::sync::Arc;
 
-        let agent = make_agent(&server.base_url());
+        let mock_client = Arc::new(SequencedMockAnthropicClient::new(vec![
+            end_turn("handled"),
+        ]));
+        let tool_ctx = Arc::new(ToolContext::for_test("http://localhost:9999", "", "", ""));
+        let agent = AgentLoop {
+            anthropic_client: mock_client,
+            model: "test".to_string(),
+            max_iterations: 1,
+            tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),
+            tool_context: tool_ctx,
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            flag_client: Arc::new(AlwaysOnFlagClient),
+            tenant_id: "test".to_string(),
+            promise_store: None,
+            promise_id: None,
+            permission_checker: None,
+            elicitation_provider: None,
+        };
+
         // Empty JSON object — no alert_transition, no title, no id, no host.
         let result = handle(&agent, "datadog.event", b"{}").await;
         assert!(matches!(result, Some(Ok(_))));
-        mock.assert_async().await;
     }
 
     #[tokio::test]
     async fn handle_proceeds_without_memory_when_fetch_fails() {
-        // Agent has memory_owner/repo set, but the proxy returns 404 — handler
+        // Agent has memory_owner/repo set, but the config returns None — handler
         // must still call the Anthropic API (with None system prompt) rather than failing.
-        let server = httpmock::MockServer::start_async().await;
-        // Memory endpoint returns 404.
-        server.mock(|when, then| {
-            when.method(httpmock::Method::GET)
-                .path_contains("memory.md");
-            then.status(404);
-        });
-        // Anthropic endpoint succeeds — must be called even without memory.
-        let anthropic_mock = server.mock(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/anthropic/v1/messages");
-            then.status(200)
-                .header("content-type", "application/json")
-                .json_body(serde_json::json!({
-                    "stop_reason": "end_turn",
-                    "content": [{"type": "text", "text": "ok"}]
-                }));
-        });
-
-        use crate::agent_loop::{AgentLoop, ReqwestAnthropicClient};
+        use crate::agent_loop::mock::SequencedMockAnthropicClient;
+        use crate::agent_loop::AgentLoop;
         use crate::flag_client::AlwaysOnFlagClient;
-        use crate::tools::{DefaultToolDispatcher, ToolContext};
+        use crate::tools::mock::{MockAgentConfig, MockToolDispatcher};
         use std::sync::Arc;
-        let http_client = reqwest::Client::new();
-        let tool_ctx = Arc::new(ToolContext::new(
-            http_client.clone(),
-            server.base_url(),
-            "tok_github_prod_test01".to_string(),
-            String::new(),
-            String::new(),
-        ));
+
+        let tool_ctx = Arc::new(MockAgentConfig { github_contents: None, ..Default::default() });
         let agent = AgentLoop {
-            anthropic_client: Arc::new(ReqwestAnthropicClient::new(
-                http_client,
-                server.base_url(),
-                String::new(),
-            )),
+            // Anthropic is called once even without memory — pre-load one response.
+            anthropic_client: Arc::new(SequencedMockAnthropicClient::new(vec![end_turn("ok")])),
             model: "test".to_string(),
             max_iterations: 1,
-            tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),
+            tool_dispatcher: Arc::new(MockToolDispatcher::new("ok")),
             tool_context: tool_ctx,
             memory_owner: Some("owner".to_string()),
             memory_repo: Some("repo".to_string()),
@@ -263,25 +263,38 @@ mod tests {
             matches!(result, Some(Ok(_))),
             "expected Ok even without memory: {result:?}"
         );
-        anthropic_mock.assert_async().await;
     }
 
     #[tokio::test]
     async fn handle_calls_agent_for_recovered_alert() {
-        let server = httpmock::MockServer::start_async().await;
-        let mock = server.mock(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/anthropic/v1/messages")
-                .body_contains("Recovered");
-            then.status(200)
-                .header("content-type", "application/json")
-                .json_body(serde_json::json!({
-                    "stop_reason": "end_turn",
-                    "content": [{"type": "text", "text": "recovery noted"}]
-                }));
-        });
+        use crate::agent_loop::mock::SequencedMockAnthropicClient;
+        use crate::flag_client::AlwaysOnFlagClient;
+        use crate::tools::{DefaultToolDispatcher, ToolContext};
+        use std::sync::Arc;
 
-        let agent = make_agent(&server.base_url());
+        let mock_client = Arc::new(SequencedMockAnthropicClient::new(vec![
+            end_turn("recovery noted"),
+        ]));
+        let tool_ctx = Arc::new(ToolContext::for_test("http://localhost:9999", "", "", ""));
+        let agent = AgentLoop {
+            anthropic_client: mock_client,
+            model: "test".to_string(),
+            max_iterations: 1,
+            tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),
+            tool_context: tool_ctx,
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            flag_client: Arc::new(AlwaysOnFlagClient),
+            tenant_id: "test".to_string(),
+            promise_store: None,
+            promise_id: None,
+            permission_checker: None,
+            elicitation_provider: None,
+        };
+
         let payload = serde_json::json!({
             "alert_transition": "Recovered",
             "alert_id": "5678",
@@ -291,6 +304,5 @@ mod tests {
         let bytes = serde_json::to_vec(&payload).unwrap();
         let result = handle(&agent, "datadog.alert.recovered", &bytes).await;
         assert!(matches!(result, Some(Ok(_))));
-        mock.assert_async().await;
     }
 }

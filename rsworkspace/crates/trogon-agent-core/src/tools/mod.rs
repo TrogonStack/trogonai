@@ -15,7 +15,6 @@ pub struct ToolDef {
 
 /// Shared HTTP context available to every tool execution.
 pub struct ToolContext {
-    pub http_client: reqwest::Client,
     /// Base URL of the running `trogon-secret-proxy`.
     pub proxy_url: String,
 }
@@ -56,7 +55,6 @@ mod tests {
     #[tokio::test]
     async fn dispatch_unknown_tool_returns_error_string() {
         let ctx = ToolContext {
-            http_client: reqwest::Client::new(),
             proxy_url: "http://localhost:8080".to_string(),
         };
         let result = dispatch_tool(&ctx, "nonexistent_tool", &json!({})).await;

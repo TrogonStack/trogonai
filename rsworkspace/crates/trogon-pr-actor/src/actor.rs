@@ -1,6 +1,58 @@
 use serde::{Deserialize, Serialize};
 use trogon_actor::{ActorContext, EntityActor};
 
+// ── HttpClient trait ──────────────────────────────────────────────────────────
+
+/// Abstraction over HTTP so unit tests can inject a mock without real networking.
+///
+/// Production code uses `reqwest::Client`; tests use [`MockHttpClient`].
+pub trait HttpClient: Clone + Send + Sync + 'static {
+    /// GET request. Returns `(status_code, body_text)` on any HTTP response;
+    /// errors only on network failure.
+    fn get(
+        &self,
+        url: &str,
+        headers: Vec<(String, String)>,
+    ) -> impl std::future::Future<Output = Result<(u16, String), String>> + Send;
+
+    /// POST request with a JSON body. Returns `(status_code, body_text)`.
+    fn post_json(
+        &self,
+        url: &str,
+        headers: Vec<(String, String)>,
+        body: serde_json::Value,
+    ) -> impl std::future::Future<Output = Result<(u16, String), String>> + Send;
+}
+
+impl HttpClient for reqwest::Client {
+    async fn get(&self, url: &str, headers: Vec<(String, String)>) -> Result<(u16, String), String> {
+        let mut req = self.get(url);
+        for (k, v) in headers {
+            req = req.header(k, v);
+        }
+        let resp = req.send().await.map_err(|e| e.to_string())?;
+        let status = resp.status().as_u16();
+        let body = resp.text().await.map_err(|e| e.to_string())?;
+        Ok((status, body))
+    }
+
+    async fn post_json(
+        &self,
+        url: &str,
+        headers: Vec<(String, String)>,
+        body: serde_json::Value,
+    ) -> Result<(u16, String), String> {
+        let mut req = self.post(url).json(&body);
+        for (k, v) in headers {
+            req = req.header(k, v);
+        }
+        let resp = req.send().await.map_err(|e| e.to_string())?;
+        let status = resp.status().as_u16();
+        let text = resp.text().await.map_err(|e| e.to_string())?;
+        Ok((status, text))
+    }
+}
+
 // ── State ──────────────────────────────────────────────────────────────────────
 
 /// Persisted state for a single pull request, accumulating across all events.
@@ -37,9 +89,12 @@ pub struct PrState {
 /// If the LLM API key or GitHub token is not configured the actor degrades
 /// gracefully: it still increments the event counter and writes transcript
 /// entries, but skips the LLM and GitHub calls.
+///
+/// Generic over `H: HttpClient` so unit tests can inject a [`MockHttpClient`]
+/// without real networking. Production uses `reqwest::Client`.
 #[derive(Clone)]
-pub struct PrActor {
-    http: reqwest::Client,
+pub struct PrActor<H: HttpClient = reqwest::Client> {
+    http: H,
     llm_api_url: String,
     llm_api_key: String,
     llm_model: String,
@@ -47,7 +102,7 @@ pub struct PrActor {
     github_api_url: String,
 }
 
-impl Default for PrActor {
+impl Default for PrActor<reqwest::Client> {
     fn default() -> Self {
         Self {
             http: reqwest::Client::new(),
@@ -60,10 +115,10 @@ impl Default for PrActor {
     }
 }
 
-impl PrActor {
+impl<H: HttpClient> PrActor<H> {
     /// Construct an actor with explicit credentials.
     pub fn new(
-        http: reqwest::Client,
+        http: H,
         llm_api_url: impl Into<String>,
         llm_api_key: impl Into<String>,
         llm_model: impl Into<String>,
@@ -77,13 +132,6 @@ impl PrActor {
             github_token: github_token.into(),
             github_api_url: "https://api.github.com".to_string(),
         }
-    }
-
-    /// Override the GitHub API base URL (used in tests to point at a mock server).
-    #[cfg(test)]
-    fn with_github_api_url(mut self, url: impl Into<String>) -> Self {
-        self.github_api_url = url.into();
-        self
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
@@ -131,19 +179,23 @@ impl PrActor {
         number: u64,
     ) -> Result<(String, String), String> {
         let url = format!("{}/repos/{owner}/{repo}/pulls/{number}", self.github_api_url);
+        let auth = format!("Bearer {}", self.github_token);
 
         // First call: JSON to get HEAD SHA.
-        let info: serde_json::Value = self
+        let (_, info_text) = self
             .http
-            .get(&url)
-            .header("Accept", "application/vnd.github+json")
-            .header("Authorization", format!("Bearer {}", self.github_token))
-            .header("User-Agent", "trogon-pr-actor/0.1")
-            .send()
+            .get(
+                &url,
+                vec![
+                    ("Accept".to_string(), "application/vnd.github+json".to_string()),
+                    ("Authorization".to_string(), auth.clone()),
+                    ("User-Agent".to_string(), "trogon-pr-actor/0.1".to_string()),
+                ],
+            )
             .await
-            .map_err(|e| format!("GitHub API request failed: {e}"))?
-            .json()
-            .await
+            .map_err(|e| format!("GitHub API request failed: {e}"))?;
+
+        let info: serde_json::Value = serde_json::from_str(&info_text)
             .map_err(|e| format!("parsing PR info JSON failed: {e}"))?;
 
         let head_sha = info
@@ -153,28 +205,24 @@ impl PrActor {
             .to_string();
 
         // Second call: raw diff.
-        let resp = self
+        let (status, diff_body) = self
             .http
-            .get(&url)
-            .header("Accept", "application/vnd.github.diff")
-            .header("Authorization", format!("Bearer {}", self.github_token))
-            .header("User-Agent", "trogon-pr-actor/0.1")
-            .send()
+            .get(
+                &url,
+                vec![
+                    ("Accept".to_string(), "application/vnd.github.diff".to_string()),
+                    ("Authorization".to_string(), auth),
+                    ("User-Agent".to_string(), "trogon-pr-actor/0.1".to_string()),
+                ],
+            )
             .await
             .map_err(|e| format!("GitHub API request failed: {e}"))?;
 
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            return Err(format!("GitHub API returned {status}: {body}"));
+        if !(200u16..300).contains(&status) {
+            return Err(format!("GitHub API returned {status}: {diff_body}"));
         }
 
-        let diff = resp
-            .text()
-            .await
-            .map_err(|e| format!("reading GitHub diff body failed: {e}"))?;
-
-        Ok((head_sha, diff))
+        Ok((head_sha, diff_body))
     }
 
     /// Ask the LLM to review the diff and return a list of issues found.
@@ -208,25 +256,22 @@ impl PrActor {
             "response_format": {"type": "json_object"},
         });
 
-        let resp = self
+        let (status, text) = self
             .http
-            .post(&url)
-            .bearer_auth(&self.llm_api_key)
-            .json(&body)
-            .send()
+            .post_json(
+                &url,
+                vec![("Authorization".to_string(), format!("Bearer {}", self.llm_api_key))],
+                body,
+            )
             .await
             .map_err(|e| format!("LLM request failed: {e}"))?;
 
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let text = resp.text().await.unwrap_or_default();
+        if !(200u16..300).contains(&status) {
             return Err(format!("LLM returned {status}: {text}"));
         }
 
-        let json: serde_json::Value = resp
-            .json()
-            .await
-            .map_err(|e| format!("parsing LLM response: {e}"))?;
+        let json: serde_json::Value =
+            serde_json::from_str(&text).map_err(|e| format!("parsing LLM response: {e}"))?;
 
         let content = json
             .pointer("/choices/0/message/content")
@@ -261,21 +306,22 @@ impl PrActor {
             "event": "COMMENT",
         });
 
-        let resp = self
+        let (status, resp_body) = self
             .http
-            .post(&url)
-            .header("Authorization", format!("Bearer {}", self.github_token))
-            .header("Accept", "application/vnd.github+json")
-            .header("User-Agent", "trogon-pr-actor/0.1")
-            .json(&payload)
-            .send()
+            .post_json(
+                &url,
+                vec![
+                    ("Authorization".to_string(), format!("Bearer {}", self.github_token)),
+                    ("Accept".to_string(), "application/vnd.github+json".to_string()),
+                    ("User-Agent".to_string(), "trogon-pr-actor/0.1".to_string()),
+                ],
+                payload,
+            )
             .await
             .map_err(|e| format!("GitHub post review failed: {e}"))?;
 
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            return Err(format!("GitHub post review returned {status}: {body}"));
+        if !(200u16..300).contains(&status) {
+            return Err(format!("GitHub post review returned {status}: {resp_body}"));
         }
 
         Ok(())
@@ -284,7 +330,7 @@ impl PrActor {
 
 // ── EntityActor impl ──────────────────────────────────────────────────────────
 
-impl EntityActor for PrActor {
+impl<H: HttpClient> EntityActor for PrActor<H> {
     type State = PrState;
     type Error = std::convert::Infallible;
 
@@ -420,15 +466,69 @@ impl EntityActor for PrActor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::VecDeque;
+    use std::sync::{Arc, Mutex};
     use trogon_actor::ContextBuilder;
 
-    fn actor() -> PrActor {
+    // ── MockHttpClient ────────────────────────────────────────────────────────
+
+    /// In-memory mock for [`HttpClient`]. Returns pre-programmed
+    /// `(status, body)` responses in FIFO order. Panics if the queue is empty.
+    #[derive(Clone)]
+    struct MockHttpClient {
+        responses: Arc<Mutex<VecDeque<(u16, String)>>>,
+    }
+
+    impl MockHttpClient {
+        fn new() -> Self {
+            Self {
+                responses: Arc::new(Mutex::new(VecDeque::new())),
+            }
+        }
+
+        fn push(&self, status: u16, body: impl Into<String>) {
+            self.responses.lock().unwrap().push_back((status, body.into()));
+        }
+    }
+
+    impl HttpClient for MockHttpClient {
+        async fn get(
+            &self,
+            _url: &str,
+            _headers: Vec<(String, String)>,
+        ) -> Result<(u16, String), String> {
+            self.responses
+                .lock()
+                .unwrap()
+                .pop_front()
+                .ok_or_else(|| "MockHttpClient: no response queued for get".to_string())
+        }
+
+        async fn post_json(
+            &self,
+            _url: &str,
+            _headers: Vec<(String, String)>,
+            _body: serde_json::Value,
+        ) -> Result<(u16, String), String> {
+            self.responses
+                .lock()
+                .unwrap()
+                .pop_front()
+                .ok_or_else(|| "MockHttpClient: no response queued for post_json".to_string())
+        }
+    }
+
+    fn actor() -> PrActor<reqwest::Client> {
         PrActor::default() // no credentials — skips GitHub/LLM calls
+    }
+
+    fn mock_actor(http: MockHttpClient) -> PrActor<MockHttpClient> {
+        PrActor::new(http, "http://llm", "llm-key", "test-model", "gh-token")
     }
 
     #[tokio::test]
     async fn actor_type_is_pr() {
-        assert_eq!(PrActor::actor_type(), "pr");
+        assert_eq!(PrActor::<reqwest::Client>::actor_type(), "pr");
     }
 
     #[tokio::test]
@@ -457,7 +557,7 @@ mod tests {
     #[tokio::test]
     async fn on_create_default_is_noop() {
         let mut state = PrState::default();
-        PrActor::on_create(&mut state).await.unwrap();
+        PrActor::<reqwest::Client>::on_create(&mut state).await.unwrap();
         assert_eq!(state.events_processed, 0);
     }
 
@@ -472,7 +572,7 @@ mod tests {
 
     #[test]
     fn parse_entity_key_standard_format() {
-        let result = PrActor::parse_entity_key("anthropics.my-repo.42");
+        let result = PrActor::<reqwest::Client>::parse_entity_key("anthropics.my-repo.42");
         assert_eq!(
             result,
             Some(("anthropics".to_string(), "my-repo".to_string(), 42))
@@ -481,20 +581,18 @@ mod tests {
 
     #[test]
     fn parse_entity_key_invalid_returns_none() {
-        assert!(PrActor::parse_entity_key("missing-number").is_none());
-        assert!(PrActor::parse_entity_key("only.two").is_none());
+        assert!(PrActor::<reqwest::Client>::parse_entity_key("missing-number").is_none());
+        assert!(PrActor::<reqwest::Client>::parse_entity_key("only.two").is_none());
     }
 
     #[test]
     fn parse_entity_key_non_numeric_pr_returns_none() {
-        assert!(PrActor::parse_entity_key("org.repo.notanumber").is_none());
+        assert!(PrActor::<reqwest::Client>::parse_entity_key("org.repo.notanumber").is_none());
     }
 
     #[test]
     fn parse_entity_key_multi_segment_repo() {
-        // "owner.sub.repo.42" → splitn(3) gives parts[2]="sub.repo.42", rsplit on last '.'
-        // → repo = "sub.sub" joined... let's verify the actual join logic
-        let result = PrActor::parse_entity_key("acme.infra.my-repo.7");
+        let result = PrActor::<reqwest::Client>::parse_entity_key("acme.infra.my-repo.7");
         assert_eq!(
             result,
             Some(("acme".to_string(), "infra.my-repo".to_string(), 7))
@@ -505,39 +603,16 @@ mod tests {
 
     mod http_errors {
         use super::*;
-        use httpmock::MockServer;
-        use httpmock::Method::{GET, POST};
-
-        fn actor_for_github(base_url: &str) -> PrActor {
-            PrActor::new(
-                reqwest::Client::new(),
-                "http://unused-llm",
-                "test-llm-key",
-                "test-model",
-                "test-gh-token",
-            )
-            .with_github_api_url(base_url)
-        }
-
-        fn actor_for_llm(base_url: &str) -> PrActor {
-            PrActor::new(
-                reqwest::Client::new(),
-                base_url,
-                "test-llm-key",
-                "test-model",
-                "test-gh-token",
-            )
-        }
 
         #[tokio::test]
         async fn fetch_pr_diff_returns_err_on_404() {
-            let server = MockServer::start();
-            server.mock(|when, then| {
-                when.method(GET).path_contains("/pulls/");
-                then.status(404).body("{\"message\":\"Not Found\"}");
-            });
+            let http = MockHttpClient::new();
+            // First GET (JSON info): 404 with valid JSON body — .json() succeeds, sha = ""
+            http.push(404, r#"{"message":"Not Found"}"#);
+            // Second GET (diff): 404 — triggers the !is_success() error path
+            http.push(404, "Not Found");
 
-            let actor = actor_for_github(&server.base_url());
+            let actor = mock_actor(http);
             let result = actor.fetch_pr_diff_and_sha("owner", "repo", 1).await;
             assert!(result.is_err(), "expected Err on 404, got Ok");
             let msg = result.unwrap_err();
@@ -546,26 +621,21 @@ mod tests {
 
         #[tokio::test]
         async fn fetch_pr_diff_returns_err_on_500() {
-            let server = MockServer::start();
-            server.mock(|when, then| {
-                when.method(GET).path_contains("/pulls/");
-                then.status(500).body("internal server error");
-            });
+            let http = MockHttpClient::new();
+            // First GET returns non-JSON body → JSON parse fails → Err
+            http.push(500, "internal server error");
 
-            let actor = actor_for_github(&server.base_url());
+            let actor = mock_actor(http);
             let result = actor.fetch_pr_diff_and_sha("owner", "repo", 2).await;
             assert!(result.is_err());
         }
 
         #[tokio::test]
         async fn review_with_llm_returns_err_on_500() {
-            let server = MockServer::start();
-            server.mock(|when, then| {
-                when.method(POST).path("/chat/completions");
-                then.status(500).body("overloaded");
-            });
+            let http = MockHttpClient::new();
+            http.push(500, "overloaded");
 
-            let actor = actor_for_llm(&server.base_url());
+            let actor = mock_actor(http);
             let result = actor.review_with_llm("owner.repo.1", 1, "diff text").await;
             assert!(result.is_err());
             let msg = result.unwrap_err();
@@ -574,41 +644,33 @@ mod tests {
 
         #[tokio::test]
         async fn review_with_llm_returns_err_on_missing_choices_field() {
-            let server = MockServer::start();
-            server.mock(|when, then| {
-                when.method(POST).path("/chat/completions");
-                then.status(200).json_body(serde_json::json!({"result": "ok"}));
-            });
+            let http = MockHttpClient::new();
+            http.push(200, r#"{"result":"ok"}"#);
 
-            let actor = actor_for_llm(&server.base_url());
+            let actor = mock_actor(http);
             let result = actor.review_with_llm("owner.repo.1", 1, "diff").await;
             assert!(result.is_err(), "expected Err for missing choices path");
         }
 
         #[tokio::test]
         async fn review_with_llm_returns_err_when_content_is_not_valid_json() {
-            let server = MockServer::start();
-            server.mock(|when, then| {
-                when.method(POST).path("/chat/completions");
-                then.status(200).json_body(serde_json::json!({
-                    "choices": [{"message": {"content": "not json {"}}]
-                }));
-            });
+            let http = MockHttpClient::new();
+            http.push(
+                200,
+                r#"{"choices":[{"message":{"content":"not json {"}}]}"#,
+            );
 
-            let actor = actor_for_llm(&server.base_url());
+            let actor = mock_actor(http);
             let result = actor.review_with_llm("owner.repo.1", 1, "diff").await;
             assert!(result.is_err(), "expected Err for invalid content JSON");
         }
 
         #[tokio::test]
         async fn post_review_comment_returns_err_on_422() {
-            let server = MockServer::start();
-            server.mock(|when, then| {
-                when.method(POST).path_contains("/reviews");
-                then.status(422).body("validation failed");
-            });
+            let http = MockHttpClient::new();
+            http.push(422, "validation failed");
 
-            let actor = actor_for_github(&server.base_url());
+            let actor = mock_actor(http);
             let result = actor.post_review_comment("owner", "repo", 3, "body text").await;
             assert!(result.is_err());
             let msg = result.unwrap_err();
@@ -617,13 +679,10 @@ mod tests {
 
         #[tokio::test]
         async fn post_review_comment_ok_on_200() {
-            let server = MockServer::start();
-            server.mock(|when, then| {
-                when.method(POST).path_contains("/reviews");
-                then.status(200).body("{}");
-            });
+            let http = MockHttpClient::new();
+            http.push(200, "{}");
 
-            let actor = actor_for_github(&server.base_url());
+            let actor = mock_actor(http);
             let result = actor.post_review_comment("owner", "repo", 4, "LGTM").await;
             assert!(result.is_ok());
         }

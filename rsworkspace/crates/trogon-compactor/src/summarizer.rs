@@ -4,7 +4,8 @@
 //! prevents the model from continuing the conversation.  If a previous summary
 //! exists, an update prompt is used to merge new information incrementally.
 
-use reqwest::Client;
+use std::future::Future;
+
 use serde::{Deserialize, Serialize};
 
 use crate::error::CompactorError;
@@ -103,7 +104,7 @@ impl Default for LlmConfig {
 // ── Anthropic wire types ──────────────────────────────────────────────────────
 
 #[derive(Serialize)]
-struct SumRequest<'a> {
+pub(crate) struct SumRequest<'a> {
     model: &'a str,
     max_tokens: u32,
     system: &'static str,
@@ -117,41 +118,83 @@ struct SumMessage<'a> {
 }
 
 #[derive(Deserialize)]
-struct SumResponse {
-    stop_reason: String,
-    content: Vec<SumBlock>,
+pub(crate) struct SumResponse {
+    pub(crate) stop_reason: String,
+    pub(crate) content: Vec<SumBlock>,
 }
 
 #[derive(Deserialize)]
-struct SumBlock {
+pub(crate) struct SumBlock {
     #[serde(rename = "type")]
-    kind: String,
+    pub(crate) kind: String,
     #[serde(default)]
-    text: String,
+    pub(crate) text: String,
+}
+
+// ── HTTP abstraction ──────────────────────────────────────────────────────────
+
+/// Sends a single POST request to the Anthropic messages endpoint.
+///
+/// Concrete implementations use `reqwest`; unit tests use [`MockSumClient`].
+pub(crate) trait SummarizationClient: Send + Sync {
+    fn call<'a>(
+        &'a self,
+        url: &'a str,
+        auth_header: &'a str,
+        auth_value: &'a str,
+        request: &'a SumRequest<'a>,
+    ) -> impl Future<Output = Result<SumResponse, CompactorError>> + Send + 'a;
+}
+
+impl SummarizationClient for reqwest::Client {
+    fn call<'a>(
+        &'a self,
+        url: &'a str,
+        auth_header: &'a str,
+        auth_value: &'a str,
+        request: &'a SumRequest<'a>,
+    ) -> impl Future<Output = Result<SumResponse, CompactorError>> + Send + 'a {
+        async move {
+            Ok(self
+                .post(url)
+                .header(auth_header, auth_value)
+                .header("anthropic-version", "2023-06-01")
+                .json(request)
+                .send()
+                .await?
+                .error_for_status()?
+                .json::<SumResponse>()
+                .await?)
+        }
+    }
 }
 
 // ── AnthropicLlmProvider ──────────────────────────────────────────────────────
 
 /// Real [`LlmProvider`] that calls the Anthropic-compatible API.
-pub struct AnthropicLlmProvider {
+///
+/// Generic over `C: SummarizationClient` so unit tests can inject a mock;
+/// defaults to `reqwest::Client` for production use.
+pub struct AnthropicLlmProvider<C = reqwest::Client> {
     config: LlmConfig,
-    client: Client,
+    client: C,
 }
 
-impl AnthropicLlmProvider {
+impl AnthropicLlmProvider<reqwest::Client> {
     pub fn new(config: LlmConfig) -> Self {
-        Self {
-            config,
-            client: Client::new(),
-        }
+        Self { config, client: reqwest::Client::new() }
     }
+}
 
-    pub fn with_client(config: LlmConfig, client: Client) -> Self {
+#[allow(private_bounds)]
+impl<C: SummarizationClient> AnthropicLlmProvider<C> {
+    pub fn with_client(config: LlmConfig, client: C) -> Self {
         Self { config, client }
     }
 }
 
-impl crate::traits::LlmProvider for AnthropicLlmProvider {
+#[allow(private_bounds)]
+impl<C: SummarizationClient> crate::traits::LlmProvider for AnthropicLlmProvider<C> {
     fn generate_summary<'a>(
         &'a self,
         messages: &'a [crate::types::Message],
@@ -168,11 +211,11 @@ impl crate::traits::LlmProvider for AnthropicLlmProvider {
 ///
 /// If `previous_summary` is `Some`, an incremental update prompt is used so
 /// the model merges new information rather than regenerating from scratch.
-pub async fn generate_summary(
+pub(crate) async fn generate_summary<C: SummarizationClient>(
     messages_to_summarize: &[Message],
     previous_summary: Option<&str>,
     config: &LlmConfig,
-    client: &Client,
+    client: &C,
 ) -> Result<String, CompactorError> {
     let conversation = serialize_for_prompt(messages_to_summarize);
     let prompt = build_prompt(&conversation, previous_summary);
@@ -187,25 +230,12 @@ pub async fn generate_summary(
         }],
     };
 
-    let auth_value = match config.auth_style {
-        AuthStyle::XApiKey => config.api_key.clone(),
-        AuthStyle::Bearer => format!("Bearer {}", config.api_key),
-    };
-    let auth_header = match config.auth_style {
-        AuthStyle::XApiKey => "x-api-key",
-        AuthStyle::Bearer => "Authorization",
+    let (auth_header, auth_value) = match config.auth_style {
+        AuthStyle::XApiKey => ("x-api-key", config.api_key.clone()),
+        AuthStyle::Bearer => ("Authorization", format!("Bearer {}", config.api_key)),
     };
 
-    let resp: SumResponse = client
-        .post(&config.api_url)
-        .header(auth_header, auth_value)
-        .header("anthropic-version", "2023-06-01")
-        .json(&req)
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await?;
+    let resp = client.call(&config.api_url, auth_header, &auth_value, &req).await?;
 
     if resp.stop_reason != "end_turn" {
         return Err(CompactorError::UnexpectedStopReason(resp.stop_reason));
@@ -242,8 +272,85 @@ fn build_prompt(conversation: &str, previous_summary: Option<&str>) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::VecDeque;
+    use std::sync::Mutex;
+
     use super::*;
     use crate::types::Message;
+
+    // ── MockSumClient ─────────────────────────────────────────────────────────
+
+    #[derive(Default)]
+    struct MockSumClient {
+        responses: Mutex<VecDeque<Result<SumResponse, CompactorError>>>,
+        last_auth_header: Mutex<Option<String>>,
+        last_auth_value: Mutex<Option<String>>,
+    }
+
+    impl MockSumClient {
+        fn enqueue_ok(self, stop_reason: &str, blocks: Vec<SumBlock>) -> Self {
+            self.responses.lock().unwrap().push_back(Ok(SumResponse {
+                stop_reason: stop_reason.to_string(),
+                content: blocks,
+            }));
+            self
+        }
+
+        fn enqueue_err(self, msg: impl Into<String>) -> Self {
+            self.responses.lock().unwrap().push_back(Err(CompactorError::Http(msg.into())));
+            self
+        }
+
+        fn last_auth_header(&self) -> Option<String> {
+            self.last_auth_header.lock().unwrap().clone()
+        }
+
+        fn last_auth_value(&self) -> Option<String> {
+            self.last_auth_value.lock().unwrap().clone()
+        }
+
+        fn text_block(text: &str) -> SumBlock {
+            SumBlock { kind: "text".into(), text: text.into() }
+        }
+
+        fn tool_block() -> SumBlock {
+            SumBlock { kind: "tool_use".into(), text: String::new() }
+        }
+    }
+
+    impl SummarizationClient for MockSumClient {
+        fn call<'a>(
+            &'a self,
+            _url: &'a str,
+            auth_header: &'a str,
+            auth_value: &'a str,
+            _request: &'a SumRequest<'a>,
+        ) -> impl Future<Output = Result<SumResponse, CompactorError>> + Send + 'a {
+            *self.last_auth_header.lock().unwrap() = Some(auth_header.to_string());
+            *self.last_auth_value.lock().unwrap() = Some(auth_value.to_string());
+            let result = self
+                .responses
+                .lock()
+                .unwrap()
+                .pop_front()
+                .unwrap_or_else(|| Ok(SumResponse { stop_reason: "end_turn".into(), content: vec![] }));
+            async move { result }
+        }
+    }
+
+    fn one_msg() -> Vec<Message> {
+        vec![Message::user("hello")]
+    }
+
+    fn config() -> LlmConfig {
+        LlmConfig {
+            api_url: "http://unused".to_string(),
+            api_key: "test-key".into(),
+            auth_style: AuthStyle::XApiKey,
+            model: "claude-test".into(),
+            max_summary_tokens: 1_000,
+        }
+    }
 
     // ── build_prompt (pure) ───────────────────────────────────────────────────
 
@@ -287,162 +394,80 @@ mod tests {
         assert!(inner.contains("hello world"));
     }
 
-    // ── generate_summary (HTTP paths via httpmock) ────────────────────────────
-
-    fn one_msg() -> Vec<Message> {
-        vec![Message::user("hello")]
-    }
-
-    fn config(url: &str) -> LlmConfig {
-        LlmConfig {
-            api_url: url.to_string(),
-            api_key: "test-key".into(),
-            auth_style: AuthStyle::XApiKey,
-            model: "claude-test".into(),
-            max_summary_tokens: 1_000,
-        }
-    }
-
-    fn ok_body(text: &str) -> serde_json::Value {
-        serde_json::json!({
-            "stop_reason": "end_turn",
-            "content": [{"type": "text", "text": text}]
-        })
-    }
+    // ── generate_summary via MockSumClient ────────────────────────────────────
 
     #[tokio::test]
     async fn generate_summary_returns_text_on_success() {
-        let server = httpmock::MockServer::start();
-        server.mock(|when, then| {
-            when.method(httpmock::Method::POST).path("/v1/messages");
-            then.status(200).json_body(ok_body("## Summary\nDone."));
-        });
-
-        let client = reqwest::Client::new();
-        let cfg = config(&format!("{}/v1/messages", server.base_url()));
-        let result = generate_summary(&one_msg(), None, &cfg, &client).await.unwrap();
+        let mock = MockSumClient::default()
+            .enqueue_ok("end_turn", vec![MockSumClient::text_block("## Summary\nDone.")]);
+        let result = generate_summary(&one_msg(), None, &config(), &mock).await.unwrap();
         assert!(result.contains("## Summary"));
     }
 
     #[tokio::test]
     async fn generate_summary_returns_http_error_on_5xx() {
-        let server = httpmock::MockServer::start();
-        server.mock(|when, then| {
-            when.method(httpmock::Method::POST).path("/v1/messages");
-            then.status(500).body("internal error");
-        });
-
-        let client = reqwest::Client::new();
-        let cfg = config(&format!("{}/v1/messages", server.base_url()));
-        let err = generate_summary(&one_msg(), None, &cfg, &client).await.unwrap_err();
+        let mock = MockSumClient::default().enqueue_err("500 Internal Server Error");
+        let err = generate_summary(&one_msg(), None, &config(), &mock).await.unwrap_err();
         assert!(matches!(err, CompactorError::Http(_)));
     }
 
     #[tokio::test]
     async fn generate_summary_returns_unexpected_stop_reason() {
-        let server = httpmock::MockServer::start();
-        server.mock(|when, then| {
-            when.method(httpmock::Method::POST).path("/v1/messages");
-            then.status(200).json_body(serde_json::json!({
-                "stop_reason": "max_tokens",
-                "content": [{"type": "text", "text": "partial"}]
-            }));
-        });
-
-        let client = reqwest::Client::new();
-        let cfg = config(&format!("{}/v1/messages", server.base_url()));
-        let err = generate_summary(&one_msg(), None, &cfg, &client).await.unwrap_err();
+        let mock = MockSumClient::default()
+            .enqueue_ok("max_tokens", vec![MockSumClient::text_block("partial")]);
+        let err = generate_summary(&one_msg(), None, &config(), &mock).await.unwrap_err();
         assert!(matches!(err, CompactorError::UnexpectedStopReason(r) if r == "max_tokens"));
     }
 
     #[tokio::test]
     async fn generate_summary_returns_empty_response_when_no_text_blocks() {
-        let server = httpmock::MockServer::start();
-        server.mock(|when, then| {
-            when.method(httpmock::Method::POST).path("/v1/messages");
-            then.status(200).json_body(serde_json::json!({
-                "stop_reason": "end_turn",
-                "content": []
-            }));
-        });
-
-        let client = reqwest::Client::new();
-        let cfg = config(&format!("{}/v1/messages", server.base_url()));
-        let err = generate_summary(&one_msg(), None, &cfg, &client).await.unwrap_err();
+        let mock = MockSumClient::default().enqueue_ok("end_turn", vec![]);
+        let err = generate_summary(&one_msg(), None, &config(), &mock).await.unwrap_err();
         assert!(matches!(err, CompactorError::EmptyResponse));
     }
 
     #[tokio::test]
     async fn generate_summary_returns_http_error_on_malformed_json() {
-        let server = httpmock::MockServer::start();
-        server.mock(|when, then| {
-            when.method(httpmock::Method::POST).path("/v1/messages");
-            then.status(200).body("not json at all");
-        });
-
-        let client = reqwest::Client::new();
-        let cfg = config(&format!("{}/v1/messages", server.base_url()));
-        let err = generate_summary(&one_msg(), None, &cfg, &client).await.unwrap_err();
+        let mock = MockSumClient::default().enqueue_err("response body deserialization failed");
+        let err = generate_summary(&one_msg(), None, &config(), &mock).await.unwrap_err();
         assert!(matches!(err, CompactorError::Http(_)));
     }
 
     #[tokio::test]
     async fn generate_summary_filters_non_text_content_blocks() {
-        let server = httpmock::MockServer::start();
-        server.mock(|when, then| {
-            when.method(httpmock::Method::POST).path("/v1/messages");
-            then.status(200).json_body(serde_json::json!({
-                "stop_reason": "end_turn",
-                "content": [
-                    {"type": "tool_use", "id": "t1", "name": "fn", "input": {}},
-                    {"type": "text", "text": "the summary"},
-                    {"type": "tool_use", "id": "t2", "name": "fn2", "input": {}}
-                ]
-            }));
-        });
-
-        let client = reqwest::Client::new();
-        let cfg = config(&format!("{}/v1/messages", server.base_url()));
-        let result = generate_summary(&one_msg(), None, &cfg, &client).await.unwrap();
+        let mock = MockSumClient::default().enqueue_ok(
+            "end_turn",
+            vec![
+                MockSumClient::tool_block(),
+                MockSumClient::text_block("the summary"),
+                MockSumClient::tool_block(),
+            ],
+        );
+        let result = generate_summary(&one_msg(), None, &config(), &mock).await.unwrap();
         assert_eq!(result.trim(), "the summary");
     }
 
     #[tokio::test]
     async fn generate_summary_sends_x_api_key_header_for_anthropic_auth() {
-        let server = httpmock::MockServer::start();
-        server.mock(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/v1/messages")
-                .header("x-api-key", "my-key");
-            then.status(200).json_body(ok_body("summary text"));
-        });
-
-        let client = reqwest::Client::new();
-        let cfg = config(&format!("{}/v1/messages", server.base_url()));
-        let cfg = LlmConfig { api_key: "my-key".into(), ..cfg };
-        let result = generate_summary(&one_msg(), None, &cfg, &client).await;
-        assert!(result.is_ok(), "request with x-api-key header must succeed: {result:?}");
+        let mock = MockSumClient::default()
+            .enqueue_ok("end_turn", vec![MockSumClient::text_block("summary text")]);
+        let cfg = LlmConfig { api_key: "my-key".into(), ..config() };
+        generate_summary(&one_msg(), None, &cfg, &mock).await.unwrap();
+        assert_eq!(mock.last_auth_header().as_deref(), Some("x-api-key"));
+        assert_eq!(mock.last_auth_value().as_deref(), Some("my-key"));
     }
 
     #[tokio::test]
     async fn generate_summary_sends_authorization_header_for_bearer_auth() {
-        let server = httpmock::MockServer::start();
-        server.mock(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/v1/messages")
-                .header("Authorization", "Bearer my-token");
-            then.status(200).json_body(ok_body("summary text"));
-        });
-
-        let client = reqwest::Client::new();
+        let mock = MockSumClient::default()
+            .enqueue_ok("end_turn", vec![MockSumClient::text_block("summary text")]);
         let cfg = LlmConfig {
-            api_url: format!("{}/v1/messages", server.base_url()),
             api_key: "my-token".into(),
             auth_style: AuthStyle::Bearer,
-            model: "claude-test".into(),
-            max_summary_tokens: 1_000,
+            ..config()
         };
-        let result = generate_summary(&one_msg(), None, &cfg, &client).await;
-        assert!(result.is_ok(), "request with Bearer header must succeed: {result:?}");
+        generate_summary(&one_msg(), None, &cfg, &mock).await.unwrap();
+        assert_eq!(mock.last_auth_header().as_deref(), Some("Authorization"));
+        assert_eq!(mock.last_auth_value().as_deref(), Some("Bearer my-token"));
     }
 }

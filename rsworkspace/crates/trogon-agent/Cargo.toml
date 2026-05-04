@@ -30,6 +30,7 @@ trogon-std     = { path = "../trogon-std" }
 
 [dev-dependencies]
 trogon-std          = { path = "../trogon-std", features = ["test-support"] }
+trogon-automations  = { path = "../trogon-automations", features = ["test-support"] }
 trogon-secret-proxy = { path = "../trogon-secret-proxy" }
 trogon-vault        = { path = "../trogon-vault", features = ["hashicorp-vault"] }
 trogon-github       = { path = "../trogon-github" }

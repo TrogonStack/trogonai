@@ -115,12 +115,12 @@ fn user_message_from_request(req: &PromptRequest) -> Message {
 /// Connect to per-session MCP servers, initialize them, and return tool defs + dispatch table.
 #[cfg_attr(coverage, coverage(off))]
 async fn build_session_mcp(
+    http: &reqwest::Client,
     servers: &[StoredMcpServer],
 ) -> (
     Vec<ToolDef>,
-    Vec<(String, String, Arc<trogon_mcp::McpClient>)>,
+    Vec<(String, String, Arc<dyn trogon_mcp::McpCallTool>)>,
 ) {
-    let http = reqwest::Client::new();
     let mut tool_defs = Vec::new();
     let mut dispatch = Vec::new();
 
@@ -145,7 +145,7 @@ async fn build_session_mcp(
                         input_schema: tool.input_schema,
                         cache_control: None,
                     });
-                    dispatch.push((prefixed, tool.name, client.clone()));
+                    dispatch.push((prefixed, tool.name, client.clone() as Arc<dyn trogon_mcp::McpCallTool>));
                 }
                 info!(name = %server.name, tools = tool_defs.len(), "MCP server connected");
             }
@@ -244,6 +244,8 @@ pub struct TrogonAgent<
     session_locks: Arc<std::sync::Mutex<HashMap<String, Arc<tokio::sync::Semaphore>>>>,
     /// NATS client used to call trogon-compactor.  `None` disables compaction.
     compactor_nats: Option<async_nats::Client>,
+    /// HTTP client injected into per-session MCP connections.
+    http: reqwest::Client,
 }
 
 impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> TrogonAgent<S, A, N> {
@@ -268,6 +270,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> TrogonAgent<
             gateway_config,
             session_locks: Arc::new(std::sync::Mutex::new(HashMap::new())),
             compactor_nats: None,
+            http: reqwest::Client::new(),
         }
     }
 
@@ -416,7 +419,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> TrogonAgent<
                     a.set_model(model.clone());
                 }
                 if !state.mcp_servers.is_empty() {
-                    let (mcp_defs, mcp_dispatch) = build_session_mcp(&state.mcp_servers).await;
+                    let (mcp_defs, mcp_dispatch) = build_session_mcp(&self.http, &state.mcp_servers).await;
                     a.add_mcp_tools(mcp_defs, mcp_dispatch);
                 }
                 if needs_perm {
