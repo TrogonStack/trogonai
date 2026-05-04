@@ -13,6 +13,7 @@ use futures_util::{Stream, StreamExt};
 
 use crate::traits::{
     HttpClient, HttpResponse, JetStreamConsumerClient, JetStreamPublisher, JsMsg, NatsClient,
+    StreamingHttpResponse,
 };
 
 // ── NatsClient for async_nats::Client ─────────────────────────────────────────
@@ -123,6 +124,52 @@ impl HttpClient for reqwest::Client {
             status,
             headers: resp_headers,
             body: resp_body,
+        })
+    }
+
+    async fn send_request_streaming(
+        &self,
+        method: &str,
+        url: &str,
+        headers: &[(String, String)],
+        body: &[u8],
+    ) -> Result<StreamingHttpResponse, String> {
+        let method = method
+            .parse::<reqwest::Method>()
+            .map_err(|e| format!("Invalid HTTP method: {}", e))?;
+
+        let mut builder = self.request(method, url);
+        for (k, v) in headers {
+            builder = builder.header(k.as_str(), v.as_str());
+        }
+        if !body.is_empty() {
+            builder = builder.body(body.to_vec());
+        }
+
+        let resp = builder
+            .send()
+            .await
+            .map_err(|e| format!("HTTP request failed: {}", e))?;
+
+        let status = resp.status().as_u16();
+        let resp_headers: Vec<(String, String)> = resp
+            .headers()
+            .iter()
+            .filter_map(|(k, v)| {
+                v.to_str()
+                    .ok()
+                    .map(|v_str| (k.as_str().to_string(), v_str.to_string()))
+            })
+            .collect();
+
+        let chunks = resp
+            .bytes_stream()
+            .map(|r| r.map_err(|e| e.to_string()));
+
+        Ok(StreamingHttpResponse {
+            status,
+            headers: resp_headers,
+            chunks: Box::pin(chunks),
         })
     }
 }

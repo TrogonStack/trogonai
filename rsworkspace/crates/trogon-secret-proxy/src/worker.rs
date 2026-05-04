@@ -14,7 +14,7 @@ use std::time::Duration;
 use futures_util::StreamExt;
 use trogon_vault::VaultStore;
 
-use crate::messages::{OutboundHttpRequest, OutboundHttpResponse};
+use crate::messages::{OutboundHttpRequest, OutboundHttpResponse, StreamFrame};
 use crate::traits::{HttpClient, HttpResponse, JetStreamConsumerClient, NatsClient};
 
 const BEARER_PREFIX: &str = "Bearer ";
@@ -73,33 +73,42 @@ where
 
         let reply_to = request.reply_to.clone();
 
-        let response = process_request(&request, &*vault, &http_client).await;
+        let is_streaming = serde_json::from_slice::<serde_json::Value>(&request.body)
+            .ok()
+            .and_then(|v| v.get("stream").and_then(|s| s.as_bool()))
+            .unwrap_or(false);
 
-        let payload = match serde_json::to_vec(&response) {
-            Ok(p) => p,
-            Err(e) => {
-                tracing::error!(error = %e, "Failed to serialize OutboundHttpResponse");
-                msg.nack().await;
-                continue;
-            }
-        };
+        if is_streaming {
+            process_request_streaming(&request, &*vault, &http_client, &nats, &reply_to).await;
+        } else {
+            let response = process_request(&request, &*vault, &http_client).await;
 
-        if let Err(e) = nats.publish(reply_to.clone(), payload.into()).await {
-            tracing::error!(
-                reply_to = %reply_to,
-                error = %e,
-                "Failed to publish reply to Core NATS"
-            );
-            // Publish a compact error response so the proxy returns a
-            // descriptive error to the caller instead of timing out with 504.
-            let error_response = OutboundHttpResponse {
-                status: 502,
-                headers: vec![],
-                body: vec![],
-                error: Some(format!("Worker failed to publish reply: {}", e)),
+            let payload = match serde_json::to_vec(&response) {
+                Ok(p) => p,
+                Err(e) => {
+                    tracing::error!(error = %e, "Failed to serialize OutboundHttpResponse");
+                    msg.nack().await;
+                    continue;
+                }
             };
-            if let Ok(error_payload) = serde_json::to_vec(&error_response) {
-                let _ = nats.publish(reply_to.clone(), error_payload.into()).await;
+
+            if let Err(e) = nats.publish(reply_to.clone(), payload.into()).await {
+                tracing::error!(
+                    reply_to = %reply_to,
+                    error = %e,
+                    "Failed to publish reply to Core NATS"
+                );
+                // Publish a compact error response so the proxy returns a
+                // descriptive error to the caller instead of timing out with 504.
+                let error_response = OutboundHttpResponse {
+                    status: 502,
+                    headers: vec![],
+                    body: vec![],
+                    error: Some(format!("Worker failed to publish reply: {}", e)),
+                };
+                if let Ok(error_payload) = serde_json::to_vec(&error_response) {
+                    let _ = nats.publish(reply_to.clone(), error_payload.into()).await;
+                }
             }
         }
 
@@ -107,6 +116,125 @@ where
     }
 
     Ok(())
+}
+
+/// Streaming variant of request processing.
+///
+/// Resolves the token, calls the upstream with `stream: true`, and publishes
+/// `Start → Chunk(s) → End` frames to the Core NATS reply subject.
+///
+/// For error cases (token resolution failure, transport error) the function
+/// publishes `Start(4xx/5xx)` → `Chunk(error body)` → `End` so the proxy
+/// always receives the same three-frame protocol regardless of the outcome.
+async fn process_request_streaming<V, H, N>(
+    request: &OutboundHttpRequest,
+    vault: &V,
+    http_client: &H,
+    nats: &N,
+    reply_to: &str,
+) where
+    V: VaultStore,
+    V::Error: std::fmt::Display,
+    H: HttpClient,
+    N: NatsClient,
+{
+    /// Publish a StreamFrame to the reply subject.  Swallows NATS errors to
+    /// avoid double-panicking when an earlier publish already failed.
+    async fn publish_frame<N: NatsClient>(nats: &N, reply_to: &str, frame: StreamFrame) {
+        if let Ok(payload) = serde_json::to_vec(&frame) {
+            let _ = nats.publish(reply_to.to_string(), payload.into()).await;
+        }
+    }
+
+    /// Send Start(status) + Chunk(body_bytes) + End to surface an error.
+    async fn send_error_response<N: NatsClient>(nats: &N, reply_to: &str, status: u16, body: Vec<u8>) {
+        publish_frame(nats, reply_to, StreamFrame::Start { status, headers: vec![] }).await;
+        publish_frame(nats, reply_to, StreamFrame::Chunk { seq: 0, data: body }).await;
+        publish_frame(nats, reply_to, StreamFrame::End { error: None }).await;
+    }
+
+    // ── Token resolution ──────────────────────────────────────────────────────
+    let (real_key, _previous_key) = match resolve_token(vault, &request.headers).await {
+        Ok(pair) => pair,
+        Err(e) => {
+            tracing::warn!(error = %e, "Streaming: token resolution failed");
+            send_error_response(nats, reply_to, 401, e.into_bytes()).await;
+            return;
+        }
+    };
+
+    // ── Build forwarded headers ───────────────────────────────────────────────
+    let mut forwarded_headers: Vec<(String, String)> = request
+        .headers
+        .iter()
+        .filter(|(k, _)| {
+            !k.eq_ignore_ascii_case("authorization") && !k.eq_ignore_ascii_case("x-request-id")
+        })
+        .cloned()
+        .collect();
+    forwarded_headers.push(("Authorization".to_string(), format!("Bearer {}", real_key)));
+    forwarded_headers.push(("X-Request-Id".to_string(), request.idempotency_key.clone()));
+
+    // ── Streaming upstream call ───────────────────────────────────────────────
+    let streaming_resp = match http_client
+        .send_request_streaming(&request.method, &request.url, &forwarded_headers, &request.body)
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!(error = %e, url = %request.url, "Streaming: upstream HTTP call failed");
+            send_error_response(nats, reply_to, 502, e.into_bytes()).await;
+            return;
+        }
+    };
+
+    // Strip response headers that contain the real API key before forwarding.
+    let resp_headers: Vec<(String, String)> = streaming_resp
+        .headers
+        .iter()
+        .filter(|(_, v)| !v.contains(real_key.as_str()))
+        .cloned()
+        .collect();
+
+    // ── Publish Start frame ───────────────────────────────────────────────────
+    publish_frame(
+        nats,
+        reply_to,
+        StreamFrame::Start {
+            status: streaming_resp.status,
+            headers: resp_headers,
+        },
+    )
+    .await;
+
+    // ── Publish Chunk frames ──────────────────────────────────────────────────
+    let mut chunks = streaming_resp.chunks;
+    let mut seq = 0u64;
+    loop {
+        match chunks.next().await {
+            Some(Ok(bytes)) => {
+                publish_frame(
+                    nats,
+                    reply_to,
+                    StreamFrame::Chunk {
+                        seq,
+                        data: bytes.to_vec(),
+                    },
+                )
+                .await;
+                seq += 1;
+            }
+            Some(Err(e)) => {
+                tracing::error!(error = %e, "Streaming: error reading upstream chunk");
+                publish_frame(nats, reply_to, StreamFrame::End { error: Some(e) }).await;
+                return;
+            }
+            None => break,
+        }
+    }
+
+    // ── Publish End frame ─────────────────────────────────────────────────────
+    publish_frame(nats, reply_to, StreamFrame::End { error: None }).await;
 }
 
 /// Process a single outbound request: detokenize and call the AI provider.
@@ -370,13 +498,51 @@ mod tests {
     use reqwest::Client as ReqwestClient;
     use trogon_vault::{ApiKeyToken, MemoryVault, VaultStore};
 
-    use crate::messages::OutboundHttpRequest;
-    use crate::traits::{HttpClient, HttpResponse};
+    use bytes::Bytes;
+    use futures_util::Stream;
+
+    use crate::messages::{OutboundHttpRequest, StreamFrame};
+    use crate::traits::{HttpClient, HttpResponse, NatsClient, StreamingHttpResponse};
 
     use super::{
-        HTTP_INITIAL_RETRY_DELAY, forward_request, forward_request_with_retry, process_request,
-        resolve_token,
+        HTTP_INITIAL_RETRY_DELAY, forward_request, forward_request_with_retry,
+        process_request, process_request_streaming, resolve_token,
     };
+
+    // ── MockNatsClient ────────────────────────────────────────────────────────
+
+    #[derive(Clone, Default)]
+    struct MockNatsClient {
+        published: Arc<Mutex<Vec<(String, Bytes)>>>,
+    }
+
+    impl MockNatsClient {
+        fn new() -> Self {
+            Self::default()
+        }
+
+        fn published_frames(&self) -> Vec<StreamFrame> {
+            self.published
+                .lock()
+                .unwrap()
+                .iter()
+                .filter_map(|(_, payload)| serde_json::from_slice(payload).ok())
+                .collect()
+        }
+    }
+
+    impl NatsClient for MockNatsClient {
+        type Sub = futures_util::stream::Empty<async_nats::Message>;
+
+        async fn subscribe(&self, _subject: String) -> Result<Self::Sub, String> {
+            Ok(futures_util::stream::empty())
+        }
+
+        async fn publish(&self, subject: String, payload: Bytes) -> Result<(), String> {
+            self.published.lock().unwrap().push((subject, payload));
+            Ok(())
+        }
+    }
 
     // ── MockHttpClient ────────────────────────────────────────────────────────
 
@@ -389,12 +555,14 @@ mod tests {
     #[derive(Clone)]
     struct MockHttpClient {
         responses: Arc<Mutex<VecDeque<Result<HttpResponse, String>>>>,
+        streaming: Arc<Mutex<VecDeque<Result<(u16, Vec<(String, String)>, Vec<Vec<u8>>), String>>>>,
     }
 
     impl MockHttpClient {
         fn new() -> Self {
             Self {
                 responses: Arc::new(Mutex::new(VecDeque::new())),
+                streaming: Arc::new(Mutex::new(VecDeque::new())),
             }
         }
 
@@ -408,6 +576,22 @@ mod tests {
 
         fn enqueue_err(&self, msg: impl Into<String>) {
             self.responses.lock().unwrap().push_back(Err(msg.into()));
+        }
+
+        fn enqueue_streaming_ok(
+            &self,
+            status: u16,
+            headers: Vec<(String, String)>,
+            chunks: Vec<Vec<u8>>,
+        ) {
+            self.streaming
+                .lock()
+                .unwrap()
+                .push_back(Ok((status, headers, chunks)));
+        }
+
+        fn enqueue_streaming_err(&self, msg: impl Into<String>) {
+            self.streaming.lock().unwrap().push_back(Err(msg.into()));
         }
     }
 
@@ -426,6 +610,36 @@ mod tests {
                 .pop_front()
                 .unwrap_or_else(|| Err("MockHttpClient: no more responses enqueued".to_string()));
             Box::pin(async move { result })
+        }
+
+        fn send_request_streaming(
+            &self,
+            _method: &str,
+            _url: &str,
+            _headers: &[(String, String)],
+            _body: &[u8],
+        ) -> Pin<Box<dyn Future<Output = Result<StreamingHttpResponse, String>> + Send + '_>> {
+            let entry = self
+                .streaming
+                .lock()
+                .unwrap()
+                .pop_front()
+                .unwrap_or_else(|| Err("MockHttpClient: no streaming responses enqueued".to_string()));
+            Box::pin(async move {
+                match entry {
+                    Ok((status, headers, chunks)) => {
+                        let stream = futures_util::stream::iter(
+                            chunks.into_iter().map(|c| Ok::<Bytes, String>(Bytes::from(c))),
+                        );
+                        Ok(StreamingHttpResponse {
+                            status,
+                            headers,
+                            chunks: Box::pin(stream),
+                        })
+                    }
+                    Err(e) => Err(e),
+                }
+            })
         }
     }
 
@@ -2159,5 +2373,181 @@ mod tests {
                 attempt
             );
         }
+    }
+
+    // ── process_request_streaming unit tests ──────────────────────────────────
+
+    fn make_streaming_request(auth: &str) -> OutboundHttpRequest {
+        OutboundHttpRequest {
+            method: "POST".to_string(),
+            url: "https://api.anthropic.com/v1/messages".to_string(),
+            headers: make_headers(auth),
+            body: br#"{"stream":true}"#.to_vec(),
+            reply_to: "test.reply".to_string(),
+            idempotency_key: "idem-stream-01".to_string(),
+        }
+    }
+
+    /// Happy path: worker publishes Start → Chunk (one per source chunk) → End.
+    #[tokio::test]
+    async fn process_request_streaming_publishes_start_chunk_end() {
+        let vault = MemoryVault::new();
+        let token = ApiKeyToken::new("tok_anthropic_prod_stream1").unwrap();
+        vault.store(&token, "sk-ant-realkey").await.unwrap();
+
+        let http = MockHttpClient::new();
+        http.enqueue_streaming_ok(
+            200,
+            vec![("content-type".to_string(), "text/event-stream".to_string())],
+            vec![b"chunk-A".to_vec(), b"chunk-B".to_vec()],
+        );
+
+        let nats = MockNatsClient::new();
+        let request = make_streaming_request("Bearer tok_anthropic_prod_stream1");
+
+        process_request_streaming(&request, &vault, &http, &nats, "test.reply").await;
+
+        let frames = nats.published_frames();
+        assert_eq!(frames.len(), 4, "Start + 2 Chunks + End = 4 frames");
+
+        assert!(matches!(frames[0], StreamFrame::Start { status: 200, .. }));
+        assert!(matches!(frames[1], StreamFrame::Chunk { seq: 0, .. }));
+        assert!(matches!(frames[2], StreamFrame::Chunk { seq: 1, .. }));
+        assert!(matches!(frames[3], StreamFrame::End { error: None }));
+    }
+
+    /// Chunk data must be forwarded verbatim in order.
+    #[tokio::test]
+    async fn process_request_streaming_chunk_data_is_forwarded_in_order() {
+        let vault = MemoryVault::new();
+        let token = ApiKeyToken::new("tok_anthropic_prod_stream2").unwrap();
+        vault.store(&token, "sk-ant-realkey").await.unwrap();
+
+        let http = MockHttpClient::new();
+        http.enqueue_streaming_ok(
+            200,
+            vec![],
+            vec![b"first".to_vec(), b"second".to_vec(), b"third".to_vec()],
+        );
+
+        let nats = MockNatsClient::new();
+        let request = make_streaming_request("Bearer tok_anthropic_prod_stream2");
+
+        process_request_streaming(&request, &vault, &http, &nats, "test.reply").await;
+
+        let frames = nats.published_frames();
+        let chunks: Vec<_> = frames
+            .iter()
+            .filter_map(|f| match f {
+                StreamFrame::Chunk { data, seq } => Some((*seq, data.clone())),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(chunks.len(), 3);
+        assert_eq!(chunks[0], (0, b"first".to_vec()));
+        assert_eq!(chunks[1], (1, b"second".to_vec()));
+        assert_eq!(chunks[2], (2, b"third".to_vec()));
+    }
+
+    /// Token not found → Start(401) + Chunk(error msg) + End, no HTTP call.
+    #[tokio::test]
+    async fn process_request_streaming_unknown_token_publishes_401_frames() {
+        let vault = MemoryVault::new(); // empty
+        let http = MockHttpClient::new(); // must not be called
+
+        let nats = MockNatsClient::new();
+        let request = make_streaming_request("Bearer tok_anthropic_prod_notfound");
+
+        process_request_streaming(&request, &vault, &http, &nats, "test.reply").await;
+
+        let frames = nats.published_frames();
+        assert_eq!(frames.len(), 3, "Start + Chunk + End even on error");
+        assert!(matches!(frames[0], StreamFrame::Start { status: 401, .. }));
+        assert!(matches!(frames[2], StreamFrame::End { error: None }));
+
+        // No streaming response was enqueued so the queue is still empty,
+        // proving the HTTP client was never called.
+        assert!(
+            http.streaming.lock().unwrap().is_empty(),
+            "HTTP client must not be called when token is missing"
+        );
+    }
+
+    /// Transport failure → Start(502) + Chunk(error msg) + End.
+    #[tokio::test]
+    async fn process_request_streaming_transport_error_publishes_502_frames() {
+        let vault = MemoryVault::new();
+        let token = ApiKeyToken::new("tok_anthropic_prod_stream3").unwrap();
+        vault.store(&token, "sk-ant-realkey").await.unwrap();
+
+        let http = MockHttpClient::new();
+        http.enqueue_streaming_err("connection refused");
+
+        let nats = MockNatsClient::new();
+        let request = make_streaming_request("Bearer tok_anthropic_prod_stream3");
+
+        process_request_streaming(&request, &vault, &http, &nats, "test.reply").await;
+
+        let frames = nats.published_frames();
+        assert_eq!(frames.len(), 3);
+        assert!(matches!(frames[0], StreamFrame::Start { status: 502, .. }));
+        assert!(matches!(frames[2], StreamFrame::End { .. }));
+    }
+
+    /// The real API key must not appear in the Start frame's response headers.
+    #[tokio::test]
+    async fn process_request_streaming_strips_real_key_from_start_headers() {
+        let vault = MemoryVault::new();
+        let token = ApiKeyToken::new("tok_anthropic_prod_stream4").unwrap();
+        let real_key = "sk-ant-super-secret";
+        vault.store(&token, real_key).await.unwrap();
+
+        let http = MockHttpClient::new();
+        http.enqueue_streaming_ok(
+            200,
+            // Simulate provider echoing the real key in a header.
+            vec![("x-leaked-key".to_string(), real_key.to_string())],
+            vec![],
+        );
+
+        let nats = MockNatsClient::new();
+        let request = make_streaming_request("Bearer tok_anthropic_prod_stream4");
+
+        process_request_streaming(&request, &vault, &http, &nats, "test.reply").await;
+
+        let frames = nats.published_frames();
+        if let StreamFrame::Start { headers, .. } = &frames[0] {
+            for (_, v) in headers {
+                assert!(
+                    !v.contains(real_key),
+                    "Real key must not appear in forwarded Start headers"
+                );
+            }
+        } else {
+            panic!("First frame must be Start");
+        }
+    }
+
+    /// An empty chunk list (provider sends nothing before closing) must still
+    /// produce Start + End with no Chunk frames.
+    #[tokio::test]
+    async fn process_request_streaming_empty_body_produces_start_and_end_only() {
+        let vault = MemoryVault::new();
+        let token = ApiKeyToken::new("tok_anthropic_prod_stream5").unwrap();
+        vault.store(&token, "sk-ant-realkey").await.unwrap();
+
+        let http = MockHttpClient::new();
+        http.enqueue_streaming_ok(200, vec![], vec![]); // no chunks
+
+        let nats = MockNatsClient::new();
+        let request = make_streaming_request("Bearer tok_anthropic_prod_stream5");
+
+        process_request_streaming(&request, &vault, &http, &nats, "test.reply").await;
+
+        let frames = nats.published_frames();
+        assert_eq!(frames.len(), 2, "Start + End only when body is empty");
+        assert!(matches!(frames[0], StreamFrame::Start { status: 200, .. }));
+        assert!(matches!(frames[1], StreamFrame::End { error: None }));
     }
 }
