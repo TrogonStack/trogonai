@@ -2,6 +2,7 @@
 
 pub mod agent;
 pub mod agent_runner;
+pub mod wasm_bash_tool;
 pub mod elicitation;
 pub mod permission;
 pub mod permission_bridge;

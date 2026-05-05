@@ -28,6 +28,7 @@ use trogon_agent_core::tools::ToolDef;
 use crate::agent_runner::AgentRunner;
 use crate::elicitation::{ChannelElicitationProvider, ElicitationTx};
 use crate::permission::{ChannelPermissionChecker, PermissionTx};
+use crate::wasm_bash_tool::WasmRuntimeBashTool;
 use crate::prompt_converter::PromptEventConverter;
 use crate::session_notifier::{PromptEventClient, SessionNotifier};
 use crate::session_store::{NatsSessionStore, SessionStore, StoredMcpServer, now_iso8601};
@@ -246,6 +247,10 @@ pub struct TrogonAgent<
     compactor_nats: Option<async_nats::Client>,
     /// HTTP client injected into per-session MCP connections.
     http: reqwest::Client,
+    /// Registry used to discover execution backends (wasm-runtime).  `None` disables bash tool.
+    registry: Option<Arc<trogon_registry::Registry<async_nats::jetstream::kv::Store>>>,
+    /// NATS client forwarded to `WasmRuntimeBashTool` when an execution backend is available.
+    execution_nats: Option<async_nats::Client>,
 }
 
 impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> TrogonAgent<S, A, N> {
@@ -271,6 +276,8 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> TrogonAgent<
             session_locks: Arc::new(std::sync::Mutex::new(HashMap::new())),
             compactor_nats: None,
             http: reqwest::Client::new(),
+            registry: None,
+            execution_nats: None,
         }
     }
 
@@ -282,6 +289,21 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> TrogonAgent<
     /// continues without compaction.
     pub fn with_compactor(mut self, nats: async_nats::Client) -> Self {
         self.compactor_nats = Some(nats);
+        self
+    }
+
+    /// Enable the `bash` tool by connecting to a `trogon-wasm-runtime` execution backend.
+    ///
+    /// On each prompt the runner discovers the execution backend from the registry.
+    /// If no backend with capability `"execution"` is registered the `bash` tool is
+    /// not injected and the agent runs without it — graceful degradation.
+    pub fn with_execution_backend(
+        mut self,
+        nats: async_nats::Client,
+        registry: trogon_registry::Registry<async_nats::jetstream::kv::Store>,
+    ) -> Self {
+        self.execution_nats = Some(nats);
+        self.registry = Some(Arc::new(registry));
         self
     }
 
@@ -412,7 +434,8 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> TrogonAgent<
                 || !state.mcp_servers.is_empty()
                 || needs_perm
                 || needs_elic
-                || gateway.is_some();
+                || gateway.is_some()
+                || self.execution_nats.is_some();
             if needs_clone {
                 let mut a = (*self.agent).clone();
                 if let Some(ref model) = state.model {
@@ -421,6 +444,26 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> TrogonAgent<
                 if !state.mcp_servers.is_empty() {
                     let (mcp_defs, mcp_dispatch) = build_session_mcp(&self.http, &state.mcp_servers).await;
                     a.add_mcp_tools(mcp_defs, mcp_dispatch);
+                }
+                if let (Some(reg), Some(nats)) = (&self.registry, &self.execution_nats) {
+                    if let Ok(entries) = reg.discover("execution").await {
+                        if let Some(entry) = entries.first() {
+                            let prefix = entry.metadata["acp_prefix"]
+                                .as_str()
+                                .unwrap_or("acp.wasm");
+                            let bash = WasmRuntimeBashTool::new(
+                                nats.clone(),
+                                prefix,
+                                &session_id,
+                                std::time::Duration::from_secs(30),
+                            );
+                            let (name, orig, client) = bash.into_dispatch();
+                            a.add_mcp_tools(
+                                vec![WasmRuntimeBashTool::tool_def()],
+                                vec![(name, orig, client)],
+                            );
+                        }
+                    }
                 }
                 if needs_perm {
                     if let Some(ref perm_tx) = self.permission_tx {

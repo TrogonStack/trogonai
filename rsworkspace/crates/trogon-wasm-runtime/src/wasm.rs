@@ -1324,6 +1324,14 @@ mod tests {
         ) -> Result<async_nats::Message, Box<dyn std::error::Error + Send + Sync>> {
             unimplemented!()
         }
+
+        async fn queue_subscribe(
+            &self,
+            _subject: &str,
+            _queue_group: &str,
+        ) -> Result<Self::Sub, Box<dyn std::error::Error + Send + Sync>> {
+            unimplemented!()
+        }
     }
 
     fn store_data(limit: Option<usize>) -> WasmStoreData<TestNats> {

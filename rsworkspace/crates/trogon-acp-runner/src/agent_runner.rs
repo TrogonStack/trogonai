@@ -141,6 +141,10 @@ pub mod mock {
         started_notify: Arc<tokio::sync::Notify>,
         /// If true, await `steer_rx.recv()` for one message before returning.
         wait_for_steer: bool,
+        /// Names of all tool defs passed to `add_mcp_tools` across all calls.
+        recorded_tool_names: Arc<Mutex<Vec<String>>>,
+        /// Set to true when `set_elicitation_provider` is called.
+        pub elicitation_provider_set: Arc<Mutex<bool>>,
     }
 
     impl MockAgentRunner {
@@ -153,7 +157,14 @@ pub mod mock {
                 captured_steer: Arc::new(Mutex::new(Vec::new())),
                 started_notify: Arc::new(tokio::sync::Notify::new()),
                 wait_for_steer: false,
+                recorded_tool_names: Arc::new(Mutex::new(Vec::new())),
+                elicitation_provider_set: Arc::new(Mutex::new(false)),
             }
+        }
+
+        /// Return the names of all tool defs injected via `add_mcp_tools`.
+        pub fn captured_tool_names(&self) -> Vec<String> {
+            self.recorded_tool_names.lock().unwrap().clone()
         }
 
         /// Provide a fixed response for `run_chat_streaming`.
@@ -211,14 +222,20 @@ pub mod mock {
 
         fn add_mcp_tools(
             &mut self,
-            _defs: Vec<ToolDef>,
+            defs: Vec<ToolDef>,
             _dispatch: Vec<(String, String, Arc<dyn trogon_mcp::McpCallTool>)>,
         ) {
+            let mut recorded = self.recorded_tool_names.lock().unwrap();
+            for def in &defs {
+                recorded.push(def.name.clone());
+            }
         }
 
         fn set_permission_checker(&mut self, _checker: Arc<dyn PermissionChecker>) {}
 
-        fn set_elicitation_provider(&mut self, _provider: Arc<dyn ElicitationProvider>) {}
+        fn set_elicitation_provider(&mut self, _provider: Arc<dyn ElicitationProvider>) {
+            *self.elicitation_provider_set.lock().unwrap() = true;
+        }
 
         fn apply_gateway(&mut self, _config: &GatewayConfig) {}
 

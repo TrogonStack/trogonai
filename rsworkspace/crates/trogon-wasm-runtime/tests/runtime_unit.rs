@@ -48,6 +48,14 @@ impl NatsBroker for MockNatsBroker {
     ) -> Result<async_nats::Message, Box<dyn std::error::Error + Send + Sync>> {
         Err("MockNatsBroker does not implement request".into())
     }
+
+    async fn queue_subscribe(
+        &self,
+        subject: &str,
+        _queue_group: &str,
+    ) -> Result<Self::Sub, Box<dyn std::error::Error + Send + Sync>> {
+        self.subscribe(subject).await
+    }
 }
 
 // ── MockFs ────────────────────────────────────────────────────────────────────

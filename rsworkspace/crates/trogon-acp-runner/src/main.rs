@@ -105,6 +105,7 @@ async fn main() -> anyhow::Result<()> {
     registry.register(&cap).await
         .map_err(|e| anyhow::anyhow!("initial registry registration failed: {e}"))?;
     info!(agent_type, acp_prefix, "registered in agent registry");
+    let registry_for_agent = registry.clone();
     tokio::spawn({
         let cap = cap.clone();
         async move {
@@ -186,7 +187,8 @@ async fn main() -> anyhow::Result<()> {
         Some(elic_tx),
         gateway_config,
     )
-    .with_compactor(nats.clone());
+    .with_compactor(nats.clone())
+    .with_execution_backend(nats.clone(), registry_for_agent);
 
     let prefix = AcpPrefix::new(&acp_prefix)?;
     let nats_for_perm = nats.clone();

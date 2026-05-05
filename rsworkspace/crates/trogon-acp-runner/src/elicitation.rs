@@ -105,9 +105,127 @@ where
 mod tests {
     use super::*;
     use agent_client_protocol::{
-        ElicitationAction, ElicitationFormMode, ElicitationMode, ElicitationResponse, ElicitationSchema,
+        ElicitationAcceptAction, ElicitationAction, ElicitationFormMode, ElicitationMode,
+        ElicitationResponse, ElicitationSchema,
     };
+    use std::collections::BTreeMap;
     use trogon_nats::AdvancedMockNatsClient;
+
+    // ── ChannelElicitationProvider::elicit ────────────────────────────────────
+
+    fn make_provider() -> (ChannelElicitationProvider, mpsc::Receiver<ElicitationReq>) {
+        let (tx, rx) = mpsc::channel(8);
+        let provider = ChannelElicitationProvider {
+            session_id: "sess-1".to_string(),
+            tx,
+        };
+        (provider, rx)
+    }
+
+    fn accept_string(answer: &str) -> ElicitationResponse {
+        let mut content = BTreeMap::new();
+        content.insert("answer".to_string(), ElicitationContentValue::String(answer.to_string()));
+        ElicitationResponse::new(ElicitationAction::Accept(
+            ElicitationAcceptAction::new().content(content),
+        ))
+    }
+
+    /// `elicit` returns the `"answer"` field from an Accept response.
+    #[tokio::test]
+    async fn elicit_accept_string_returns_answer() {
+        let (provider, mut rx) = make_provider();
+
+        let task = tokio::spawn(async move {
+            if let Some(req) = rx.recv().await {
+                let _ = req.response_tx.send(Ok(accept_string("hello")));
+            }
+        });
+
+        let result = provider.elicit("What is your name?").await;
+        task.await.unwrap();
+        assert_eq!(result, Some("hello".to_string()));
+    }
+
+    /// `elicit` returns `None` when the response action is `Cancel`.
+    #[tokio::test]
+    async fn elicit_cancel_returns_none() {
+        let (provider, mut rx) = make_provider();
+
+        let task = tokio::spawn(async move {
+            if let Some(req) = rx.recv().await {
+                let _ = req.response_tx.send(Ok(ElicitationResponse::new(ElicitationAction::Cancel)));
+            }
+        });
+
+        let result = provider.elicit("Continue?").await;
+        task.await.unwrap();
+        assert_eq!(result, None);
+    }
+
+    /// `elicit` returns `None` when the send channel is closed (receiver dropped).
+    #[tokio::test]
+    async fn elicit_closed_channel_returns_none() {
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx); // close immediately
+        let provider = ChannelElicitationProvider { session_id: "s".to_string(), tx };
+        let result = provider.elicit("test?").await;
+        assert_eq!(result, None);
+    }
+
+    /// `elicit` returns `None` when the ACP side drops the response oneshot
+    /// without sending (simulates a crash or protocol error).
+    #[tokio::test]
+    async fn elicit_dropped_response_tx_returns_none() {
+        let (provider, mut rx) = make_provider();
+
+        let task = tokio::spawn(async move {
+            if let Some(req) = rx.recv().await {
+                drop(req.response_tx); // drop without sending
+            }
+        });
+
+        let result = provider.elicit("test?").await;
+        task.await.unwrap();
+        assert_eq!(result, None);
+    }
+
+    /// `elicit` returns `None` when the ACP side sends an `Err` (NATS failure).
+    #[tokio::test]
+    async fn elicit_nats_error_returns_none() {
+        let (provider, mut rx) = make_provider();
+
+        let task = tokio::spawn(async move {
+            if let Some(req) = rx.recv().await {
+                let err = agent_client_protocol::Error::new(-32603, "nats error");
+                let _ = req.response_tx.send(Err(err));
+            }
+        });
+
+        let result = provider.elicit("test?").await;
+        task.await.unwrap();
+        assert_eq!(result, None);
+    }
+
+    /// `elicit` encodes non-string `ElicitationContentValue` variants correctly.
+    #[tokio::test]
+    async fn elicit_accept_integer_returns_string_representation() {
+        let (provider, mut rx) = make_provider();
+
+        let task = tokio::spawn(async move {
+            if let Some(req) = rx.recv().await {
+                let mut content = BTreeMap::new();
+                content.insert("answer".to_string(), ElicitationContentValue::Integer(42));
+                let resp = ElicitationResponse::new(ElicitationAction::Accept(
+                    ElicitationAcceptAction::new().content(content),
+                ));
+                let _ = req.response_tx.send(Ok(resp));
+            }
+        });
+
+        let result = provider.elicit("Pick a number").await;
+        task.await.unwrap();
+        assert_eq!(result, Some("42".to_string()));
+    }
 
     const SESSION: &str = "sess-1";
     const SUBJECT: &str = "acp.session.sess-1.client.session.elicitation";

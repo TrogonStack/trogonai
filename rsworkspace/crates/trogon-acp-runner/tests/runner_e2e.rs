@@ -45,8 +45,8 @@ use testcontainers_modules::testcontainers::runners::AsyncRunner;
 use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt};
 use tokio::sync::{RwLock, mpsc};
 use trogon_acp_runner::{
-    GatewayConfig, NatsSessionNotifier, NatsSessionStore, PermissionReq, SessionState,
-    SessionStore, StoredMcpServer, TrogonAgent,
+    ElicitationReq, ElicitationTx, GatewayConfig, NatsSessionNotifier, NatsSessionStore,
+    PermissionReq, SessionState, SessionStore, StoredMcpServer, TrogonAgent,
 };
 use trogon_agent_core::agent_loop::AgentLoop;
 use trogon_agent_core::tools::ToolContext;
@@ -1656,6 +1656,199 @@ async fn runner_calls_compactor_and_uses_compacted_history() {
             assert!(
                 json.contains("context-summary"),
                 "expected <context-summary> in persisted messages after compaction; got: {json}"
+            );
+        })
+        .await;
+}
+
+// ── Elicitation channel ───────────────────────────────────────────────────────
+
+/// Start a `TrogonAgent` wired with an elicitation channel.
+/// The caller owns `elicitation_rx` and is responsible for draining it.
+async fn start_agent_with_elicitation(
+    nats: async_nats::Client,
+    js: &jetstream::Context,
+    prefix: &str,
+    agent: AgentLoop,
+    elicitation_tx: ElicitationTx,
+) -> NatsSessionStore {
+    let store = NatsSessionStore::open(js).await.unwrap();
+    let notifier = NatsSessionNotifier::new(nats.clone());
+    let ta = TrogonAgent::new(
+        notifier,
+        store.clone(),
+        agent,
+        prefix,
+        "claude-test",
+        None,
+        Some(elicitation_tx),
+        Arc::new(RwLock::new(None)),
+    );
+    let acp_prefix = AcpPrefix::new(prefix).unwrap();
+    let (_, io_task) = AgentSideNatsConnection::new(ta, nats, acp_prefix, |fut| {
+        tokio::task::spawn_local(fut);
+    });
+    tokio::task::spawn_local(io_task);
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    store
+}
+
+fn ask_user_tool_use_body(question: &str) -> String {
+    serde_json::json!({
+        "stop_reason": "tool_use",
+        "content": [{
+            "type": "tool_use",
+            "id": "tu_ask_001",
+            "name": "ask_user",
+            "input": { "question": question }
+        }],
+        "usage": {
+            "input_tokens": 10,
+            "output_tokens": 5,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0
+        }
+    })
+    .to_string()
+}
+
+/// When the agent calls `ask_user` and the elicitation channel returns an
+/// Accept response, the answer is forwarded to the LLM as a tool_result.
+#[tokio::test]
+async fn runner_ask_user_accept_answer_forwarded_to_llm() {
+    use agent_client_protocol::{ElicitationAcceptAction, ElicitationAction, ElicitationResponse};
+    use std::collections::BTreeMap;
+
+    let (_c, nats, js) = start_nats().await;
+
+    let prefix = "test-elic-accept";
+    let session_id = "sess-elic-accept-1";
+    let answer = "the-user-answer";
+
+    let server = MockServer::start();
+    // Second call must contain the answer as a tool_result.
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("the-user-answer");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(end_turn_body("Got the answer."));
+    });
+    // First call → ask_user tool_use.
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(ask_user_tool_use_body("What is your name?"));
+    });
+
+    let (elic_tx, mut elic_rx) = mpsc::channel::<ElicitationReq>(8);
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent_with_elicitation(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                elic_tx,
+            )
+            .await;
+
+            // Accept the elicitation with the hardcoded answer.
+            tokio::spawn(async move {
+                while let Some(req) = elic_rx.recv().await {
+                    let mut content = BTreeMap::new();
+                    content.insert(
+                        "answer".to_string(),
+                        agent_client_protocol::ElicitationContentValue::String(answer.to_string()),
+                    );
+                    let resp = ElicitationResponse::new(ElicitationAction::Accept(
+                        ElicitationAcceptAction::new().content(content),
+                    ));
+                    let _ = req.response_tx.send(Ok(resp));
+                }
+            });
+
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "ask me something").await;
+
+            let (_notifs, resp) =
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn after elicitation accept; got: {resp}"
+            );
+        })
+        .await;
+}
+
+/// When the agent calls `ask_user` and the elicitation channel returns Cancel
+/// (user declined), the agent receives the declined message and continues to
+/// the next LLM turn.
+#[tokio::test]
+async fn runner_ask_user_cancel_sends_declined_message_to_llm() {
+    use agent_client_protocol::{ElicitationAction, ElicitationResponse};
+
+    let (_c, nats, js) = start_nats().await;
+
+    let prefix = "test-elic-cancel";
+    let session_id = "sess-elic-cancel-1";
+
+    let server = MockServer::start();
+    // Any second call (tool_result with declined message) → end_turn.
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(end_turn_body("Understood, question was declined."));
+    });
+    // First call → ask_user tool_use.
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(ask_user_tool_use_body("Continue?"));
+    });
+
+    let (elic_tx, mut elic_rx) = mpsc::channel::<ElicitationReq>(8);
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent_with_elicitation(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                elic_tx,
+            )
+            .await;
+
+            // Cancel every elicitation request.
+            tokio::spawn(async move {
+                while let Some(req) = elic_rx.recv().await {
+                    let resp = ElicitationResponse::new(ElicitationAction::Cancel);
+                    let _ = req.response_tx.send(Ok(resp));
+                }
+            });
+
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "ask me something").await;
+
+            let (_notifs, resp) =
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn after elicitation cancel; got: {resp}"
             );
         })
         .await;

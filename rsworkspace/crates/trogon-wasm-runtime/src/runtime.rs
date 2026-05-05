@@ -1457,6 +1457,14 @@ mod tests {
         ) -> Result<async_nats::Message, Box<dyn std::error::Error + Send + Sync>> {
             Err("no nats broker".into())
         }
+
+        async fn queue_subscribe(
+            &self,
+            _: &str,
+            _: &str,
+        ) -> Result<Self::Sub, Box<dyn std::error::Error + Send + Sync>> {
+            Err("no nats broker".into())
+        }
     }
 
     // ── Test helpers ──────────────────────────────────────────────────────────

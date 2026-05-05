@@ -1286,4 +1286,87 @@ mod tests {
             "system key should be absent when None"
         );
     }
+
+    // ── ElicitationProvider / ask_user ────────────────────────────────────────
+
+    struct ConstElicitation(Option<String>);
+
+    impl ElicitationProvider for ConstElicitation {
+        fn elicit<'a>(
+            &'a self,
+            _question: &'a str,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<String>> + Send + 'a>> {
+            let val = self.0.clone();
+            Box::pin(async move { val })
+        }
+    }
+
+    /// When `elicitation_provider` returns `Some(answer)`, `execute_tools_streaming`
+    /// must return that answer as the tool result content.
+    #[tokio::test]
+    async fn ask_user_with_provider_returning_answer_uses_that_answer() {
+        let mut agent = make_test_agent();
+        agent.elicitation_provider =
+            Some(Arc::new(ConstElicitation(Some("42".to_string()))) as Arc<dyn ElicitationProvider>);
+
+        let (tx, _rx) = tokio::sync::mpsc::channel(32);
+        let content = vec![ContentBlock::ToolUse {
+            id: "u1".to_string(),
+            name: "ask_user".to_string(),
+            input: serde_json::json!({ "question": "What is the answer?" }),
+            parent_tool_use_id: None,
+        }];
+        let results = agent.execute_tools_streaming(&content, &tx).await;
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].content, "42");
+    }
+
+    /// When `elicitation_provider` returns `None` (user declined), `execute_tools_streaming`
+    /// must return the "declined" fallback string.
+    #[tokio::test]
+    async fn ask_user_with_provider_returning_none_uses_declined_message() {
+        let mut agent = make_test_agent();
+        agent.elicitation_provider =
+            Some(Arc::new(ConstElicitation(None)) as Arc<dyn ElicitationProvider>);
+
+        let (tx, _rx) = tokio::sync::mpsc::channel(32);
+        let content = vec![ContentBlock::ToolUse {
+            id: "u2".to_string(),
+            name: "ask_user".to_string(),
+            input: serde_json::json!({ "question": "Continue?" }),
+            parent_tool_use_id: None,
+        }];
+        let results = agent.execute_tools_streaming(&content, &tx).await;
+
+        assert_eq!(results.len(), 1);
+        assert!(
+            results[0].content.contains("declined") || results[0].content.contains("cancelled"),
+            "expected declined/cancelled message, got: {}",
+            results[0].content
+        );
+    }
+
+    /// When `elicitation_provider` is `None`, `execute_tools_streaming` must
+    /// return the "not available" fallback string for `ask_user` tool calls.
+    #[tokio::test]
+    async fn ask_user_without_provider_returns_not_available_message() {
+        let agent = make_test_agent(); // elicitation_provider: None
+
+        let (tx, _rx) = tokio::sync::mpsc::channel(32);
+        let content = vec![ContentBlock::ToolUse {
+            id: "u3".to_string(),
+            name: "ask_user".to_string(),
+            input: serde_json::json!({ "question": "What now?" }),
+            parent_tool_use_id: None,
+        }];
+        let results = agent.execute_tools_streaming(&content, &tx).await;
+
+        assert_eq!(results.len(), 1);
+        assert!(
+            results[0].content.contains("not available"),
+            "expected 'not available' message, got: {}",
+            results[0].content
+        );
+    }
 }

@@ -47,7 +47,7 @@ pub async fn run<N, R>(
 {
     info!(%subject, "WASM runtime dispatcher subscribing");
 
-    let mut sub = match nats.subscribe(&subject).await {
+    let mut sub = match nats.queue_subscribe(&subject, "trogon-wasm-runtime").await {
         Ok(s) => s,
         Err(e) => {
             error!(error = %e, "Failed to subscribe to client subjects");
@@ -475,6 +475,14 @@ mod tests {
             _: &str,
         ) -> Result<Self::Sub, Box<dyn std::error::Error + Send + Sync>> {
             Ok(futures::stream::empty())
+        }
+
+        async fn queue_subscribe(
+            &self,
+            subject: &str,
+            _queue_group: &str,
+        ) -> Result<Self::Sub, Box<dyn std::error::Error + Send + Sync>> {
+            self.subscribe(subject).await
         }
 
         async fn publish(

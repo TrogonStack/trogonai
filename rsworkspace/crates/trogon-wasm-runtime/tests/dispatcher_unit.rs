@@ -51,6 +51,8 @@ struct MockBroker {
     rx: Arc<Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<async_nats::Message>>>>,
     /// All messages published by the dispatcher (replies, errors, etc.).
     pub published: Arc<Mutex<Vec<(String, Bytes)>>>,
+    /// The queue group name passed to the most recent `queue_subscribe` call.
+    recorded_queue_group: Arc<Mutex<Option<String>>>,
 }
 
 impl MockBroker {
@@ -60,7 +62,12 @@ impl MockBroker {
             tx: Arc::new(tx),
             rx: Arc::new(Mutex::new(Some(rx))),
             published: Arc::new(Mutex::new(Vec::new())),
+            recorded_queue_group: Arc::new(Mutex::new(None)),
         }
+    }
+
+    fn recorded_queue_group(&self) -> Option<String> {
+        self.recorded_queue_group.lock().unwrap().clone()
     }
 
     /// Send a simulated NATS message with a reply subject.
@@ -130,6 +137,15 @@ impl NatsBroker for MockBroker {
         _payload: Bytes,
     ) -> Result<async_nats::Message, Box<dyn std::error::Error + Send + Sync>> {
         Err("MockBroker does not implement request".into())
+    }
+
+    async fn queue_subscribe(
+        &self,
+        subject: &str,
+        queue_group: &str,
+    ) -> Result<Self::Sub, Box<dyn std::error::Error + Send + Sync>> {
+        *self.recorded_queue_group.lock().unwrap() = Some(queue_group.to_string());
+        self.subscribe(subject).await
     }
 }
 
@@ -630,4 +646,35 @@ async fn ignores_unparseable_subject() {
         "no routing calls expected for unparseable subject, got: {calls:?}"
     );
     assert!(published.is_empty(), "no reply expected for bad subject");
+}
+
+#[tokio::test]
+async fn dispatcher_subscribes_with_queue_group_trogon_wasm_runtime() {
+    let broker = MockBroker::new();
+    let runtime = Rc::new(MockRuntime::new());
+    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+
+    let broker_clone = broker.clone();
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            tokio::task::spawn_local(dispatcher::run(
+                broker_clone,
+                PREFIX.to_string(),
+                runtime,
+                shutdown_rx,
+            ));
+            tokio::task::yield_now().await;
+            let _ = shutdown_tx.send(true);
+            for _ in 0..5 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await;
+
+    assert_eq!(
+        broker.recorded_queue_group(),
+        Some("trogon-wasm-runtime".to_string()),
+        "dispatcher must subscribe with queue group 'trogon-wasm-runtime'"
+    );
 }
