@@ -296,4 +296,89 @@ mod tests {
         let (_, pairs) = helper.complete("@ hello", 7, &ctx).unwrap();
         assert!(pairs.is_empty());
     }
+
+    #[test]
+    fn expand_mentions_at_end_of_string_is_lone_at() {
+        // "@" at end with nothing after → path_str empty → leave as "@"
+        let result = expand_mentions("end @", Path::new("/tmp"));
+        assert_eq!(result, "end @");
+    }
+
+    #[test]
+    fn expand_mentions_code_block_includes_filename_in_header() {
+        let dir = std::env::temp_dir();
+        let path = dir.join("trogon_header_test.txt");
+        std::fs::write(&path, "content").unwrap();
+        let result = expand_mentions("@trogon_header_test.txt", &dir);
+        assert!(
+            result.contains("`trogon_header_test.txt`"),
+            "filename missing from header: {result}"
+        );
+        assert!(result.contains("```"), "missing fenced block: {result}");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn file_at_helper_complete_filters_by_prefix() {
+        let dir = std::env::temp_dir().join("trogon_compl_prefix");
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("alpha.txt"), "").unwrap();
+        std::fs::write(dir.join("alpha2.txt"), "").unwrap();
+        std::fs::write(dir.join("beta.txt"), "").unwrap();
+
+        let helper = FileAtHelper { cwd: dir.clone() };
+        let history = rustyline::history::DefaultHistory::new();
+        let ctx = Context::new(&history);
+        // "@alpha" — @ at pos 0, partial = "alpha", cursor at pos 6
+        let (start, pairs) = helper.complete("@alpha", 6, &ctx).unwrap();
+
+        assert_eq!(start, 1, "start must be one past '@'");
+        let names: Vec<&str> = pairs.iter().map(|p| p.display.as_str()).collect();
+        assert!(names.contains(&"alpha.txt"), "expected alpha.txt in {names:?}");
+        assert!(names.contains(&"alpha2.txt"), "expected alpha2.txt in {names:?}");
+        assert!(!names.contains(&"beta.txt"), "beta.txt should be filtered out");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn file_at_helper_complete_directory_gets_slash_suffix() {
+        let dir = std::env::temp_dir().join("trogon_compl_dir");
+        let sub = dir.join("mysubdir");
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&sub).unwrap();
+
+        let helper = FileAtHelper { cwd: dir.clone() };
+        let history = rustyline::history::DefaultHistory::new();
+        let ctx = Context::new(&history);
+        let (_, pairs) = helper.complete("@my", 3, &ctx).unwrap();
+
+        let names: Vec<&str> = pairs.iter().map(|p| p.display.as_str()).collect();
+        assert!(names.contains(&"mysubdir/"), "expected 'mysubdir/', got {names:?}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn file_at_helper_complete_results_are_sorted() {
+        let dir = std::env::temp_dir().join("trogon_compl_sorted");
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        for name in ["zzz.txt", "aaa.txt", "mmm.txt"] {
+            std::fs::write(dir.join(name), "").unwrap();
+        }
+
+        let helper = FileAtHelper { cwd: dir.clone() };
+        let history = rustyline::history::DefaultHistory::new();
+        let ctx = Context::new(&history);
+        let (_, pairs) = helper.complete("@", 1, &ctx).unwrap();
+
+        let names: Vec<&str> = pairs.iter().map(|p| p.display.as_str()).collect();
+        let mut sorted = names.clone();
+        sorted.sort();
+        assert_eq!(names, sorted, "completions should be alphabetically sorted");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
