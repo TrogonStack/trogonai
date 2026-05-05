@@ -28,5 +28,5 @@ trogon-std = { workspace = true, features = ["test-support"] }
 tower = "0.5"
 tracing-subscriber = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
-testcontainers-modules = { version = "0.8", features = ["nats"] }
+testcontainers-modules = { workspace = true }
 futures-util = { workspace = true }

@@ -1,0 +1,25 @@
+[package]
+name = "trogon-cli"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "trogon"
+path = "src/main.rs"
+
+[dependencies]
+agent-client-protocol = { workspace = true }
+anyhow = "1"
+async-nats = { workspace = true }
+bytes = { workspace = true }
+clap = { workspace = true, features = ["env"] }
+futures = { workspace = true }
+rustyline = "14"
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+uuid = { workspace = true }
+
+[lints]
+workspace = true
