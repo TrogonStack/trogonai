@@ -22,27 +22,26 @@ impl std::error::Error for MessageHeadersError {}
 pub struct MessageHeaders(Vec<(String, String)>);
 
 impl MessageHeaders {
-    pub fn new<I, N, V>(headers: I) -> Result<Self, MessageHeadersError>
+    pub fn new<I, N, V>(input: I) -> Result<Self, MessageHeadersError>
     where
         I: IntoIterator<Item = (N, V)>,
         N: Into<String>,
         V: Into<String>,
     {
-        let headers = headers
-            .into_iter()
-            .map(|(name, value)| (name.into(), value.into()))
-            .collect::<Vec<_>>();
-
-        for (name, value) in &headers {
+        let mut headers: Vec<(String, String)> = Vec::new();
+        for (name, value) in input {
+            let name: String = name.into();
+            let value: String = value.into();
             if name.trim().is_empty()
                 || name.contains(':')
                 || name.chars().any(|ch| ch.is_control() || ch.is_whitespace())
             {
-                return Err(MessageHeadersError::InvalidName { name: name.clone() });
+                return Err(MessageHeadersError::InvalidName { name });
             }
             if value.chars().any(|ch| ch == '\r' || ch == '\n' || ch == '\0') {
-                return Err(MessageHeadersError::InvalidValue { name: name.clone() });
+                return Err(MessageHeadersError::InvalidValue { name });
             }
+            headers.push((name, value));
         }
 
         Ok(Self(headers))

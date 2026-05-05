@@ -4,7 +4,6 @@ use crate::snapshot::{
 };
 use crate::stream::{
     AppendStreamRequest, AppendStreamResponse, ReadStreamRequest, StreamAppend, StreamRead, StreamState,
-    resolve_stream_state,
 };
 use crate::{
     CanonicalEventCodec, Decide, Decision, EventCodec, EventData, EventEnvelopeCodec, NonEmpty, RecordedEvent,
@@ -553,6 +552,15 @@ where
     Box::new(error)
 }
 
+fn resolve_stream_state<C>(write_precondition: Option<StreamState>, current_version: Option<u64>) -> StreamState
+where
+    C: Decide,
+{
+    C::REQUIRED_WRITE_PRECONDITION
+        .or(write_precondition)
+        .unwrap_or_else(|| StreamState::from_current_version(current_version))
+}
+
 fn schedule_snapshot_write<S, State, StreamId, Spawn>(
     schedule_snapshot_task: &Spawn,
     snapshot_store: &S,
@@ -614,12 +622,15 @@ where
 
 fn encode_events<E, C>(stream_id: &str, codec: &C, events: &NonEmpty<E>) -> Result<NonEmpty<EventData>, C::Error>
 where
-    E: Clone,
     C: EventEnvelopeCodec<E>,
 {
-    events
-        .clone()
-        .try_map(|event| EventData::new_with_codec(stream_id, codec, event))
+    let first = EventData::new_with_codec_ref(stream_id, codec, events.first())?;
+    let rest = events
+        .iter()
+        .skip(1)
+        .map(|event| EventData::new_with_codec_ref(stream_id, codec, event))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(NonEmpty::from_first(first, rest))
 }
 
 #[cfg(test)]

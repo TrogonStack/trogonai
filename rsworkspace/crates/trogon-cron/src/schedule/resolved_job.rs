@@ -194,7 +194,7 @@ fn schedule_parts(schedule: v1::JobScheduleView<'_>) -> Result<(String, Option<S
                 validate_timezone(inner.has_timezone().then(|| inner.timezone().to_string()))?,
             ))
         }
-        v1::job_schedule::KindOneof::not_set(_) | _ => Err(CronError::event_source(
+        _ => Err(CronError::event_source(
             "scheduler received job details without a schedule kind",
             std::io::Error::other("missing schedule kind"),
         )),
@@ -218,7 +218,7 @@ fn delivery_parts(
                 inner.has_source().then(|| source_subject(inner.source())).transpose()?,
             ))
         }
-        v1::job_delivery::KindOneof::not_set(_) | _ => Err(CronError::event_source(
+        _ => Err(CronError::event_source(
             "scheduler received job details without a delivery kind",
             std::io::Error::other("missing delivery kind"),
         )),
@@ -228,7 +228,7 @@ fn delivery_parts(
 fn source_subject(source: v1::JobSamplingSourceView<'_>) -> Result<String, CronError> {
     match source.kind() {
         v1::job_sampling_source::KindOneof::LatestFromSubject(inner) => Ok(inner.subject().to_string()),
-        v1::job_sampling_source::KindOneof::not_set(_) | _ => Err(CronError::event_source(
+        _ => Err(CronError::event_source(
             "scheduler received job details without a sampling source kind",
             std::io::Error::other("missing sampling source kind"),
         )),

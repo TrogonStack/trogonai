@@ -18,6 +18,7 @@ unwrap_used = "deny"
 
 [dependencies]
 async-nats = { workspace = true, features = ["jetstream", "kv", "server_2_12"] }
+bytes = { workspace = true }
 chrono = { version = "0.4", features = ["serde"] }
 futures = { workspace = true }
 serde = { workspace = true }

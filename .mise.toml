@@ -1,4 +1,5 @@
 [tools]
+buf = "1.69.0"
 rust = { version = "1.93.0", profile = "default" }
 
 [tasks.dev]

@@ -79,7 +79,7 @@ impl fmt::Display for JobId {
 
 impl fmt::Display for JobIdError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "job id '{}' is invalid: {:?}", self.raw, self.source)
+        write!(f, "job id '{}' is invalid: {}", self.raw, self.source)
     }
 }
 
