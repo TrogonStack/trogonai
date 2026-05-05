@@ -9,7 +9,7 @@ name = "trogon"
 path = "src/main.rs"
 
 [dependencies]
-agent-client-protocol = { workspace = true }
+agent-client-protocol = { workspace = true, features = ["unstable_session_usage"] }
 anyhow = "1"
 async-nats = { workspace = true }
 bytes = { workspace = true }

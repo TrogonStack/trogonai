@@ -13,7 +13,7 @@ pub async fn run(nats: Client, prefix: &str, cwd: PathBuf, prompt: &str) -> anyh
         match event {
             StreamEvent::Text(text) => print!("{text}"),
             StreamEvent::Done(_) => break,
-            StreamEvent::Thinking | StreamEvent::ToolCall(_) => {}
+            StreamEvent::Thinking | StreamEvent::ToolCall(_) | StreamEvent::Diff(_) | StreamEvent::Usage { .. } => {}
         }
     }
 
