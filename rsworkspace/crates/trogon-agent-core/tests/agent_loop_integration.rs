@@ -1458,3 +1458,238 @@ async fn run_chat_streaming_steer_none_is_noop() {
         "tool use without steer must still succeed: {result:?}"
     );
 }
+
+// ── parallel / serial tool execution ─────────────────────────────────────────
+
+/// SSE response containing two tool_use blocks in one assistant turn.
+fn sse_two_tool_uses() -> String {
+    [
+        sse_event("message_start", serde_json::json!({
+            "type": "message_start",
+            "message": {"usage": {"input_tokens": 10, "output_tokens": 0,
+                                  "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+        })),
+        sse_event("content_block_start", serde_json::json!({
+            "type": "content_block_start", "index": 0,
+            "content_block": {"type": "tool_use", "id": "tu_001", "name": "tool_alpha"}
+        })),
+        sse_event("content_block_delta", serde_json::json!({
+            "type": "content_block_delta", "index": 0,
+            "delta": {"type": "input_json_delta", "partial_json": "{}"}
+        })),
+        sse_event("content_block_stop", serde_json::json!({"type": "content_block_stop", "index": 0})),
+        sse_event("content_block_start", serde_json::json!({
+            "type": "content_block_start", "index": 1,
+            "content_block": {"type": "tool_use", "id": "tu_002", "name": "tool_beta"}
+        })),
+        sse_event("content_block_delta", serde_json::json!({
+            "type": "content_block_delta", "index": 1,
+            "delta": {"type": "input_json_delta", "partial_json": "{}"}
+        })),
+        sse_event("content_block_stop", serde_json::json!({"type": "content_block_stop", "index": 1})),
+        sse_event("message_delta", serde_json::json!({
+            "type": "message_delta",
+            "delta": {"stop_reason": "tool_use"},
+            "usage": {"output_tokens": 20}
+        })),
+        sse_event("message_stop", serde_json::json!({"type": "message_stop"})),
+    ]
+    .join("")
+}
+
+/// A `PermissionChecker` that always allows tool execution.
+struct AllowAll;
+
+impl PermissionChecker for AllowAll {
+    fn check<'a>(
+        &'a self,
+        _tool_call_id: &'a str,
+        _tool_name: &'a str,
+        _tool_input: &'a serde_json::Value,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send + 'a>> {
+        Box::pin(async { true })
+    }
+}
+
+/// When `permission_checker` is `None`, two tool calls are dispatched via `join_all`
+/// (parallel path). Both `ToolCallStarted` and `ToolCallFinished` events must be
+/// emitted for each tool, and the agent must complete successfully.
+#[tokio::test]
+async fn run_chat_streaming_two_tools_parallel_both_executed() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn("done after two tools"));
+    });
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_two_tool_uses());
+    });
+
+    let agent = make_agent(&server.base_url());
+    let (tx, mut rx) = tokio::sync::mpsc::channel(64);
+    let result = agent
+        .run_chat_streaming(vec![Message::user_text("use two tools")], &[], None, tx, None)
+        .await;
+
+    assert!(result.is_ok(), "parallel two-tool run must succeed: {result:?}");
+
+    let events: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+
+    let started_names: Vec<&str> = events
+        .iter()
+        .filter_map(|e| match e {
+            AgentEvent::ToolCallStarted { name, .. } => Some(name.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        started_names.contains(&"tool_alpha"),
+        "expected ToolCallStarted for tool_alpha, got {started_names:?}"
+    );
+    assert!(
+        started_names.contains(&"tool_beta"),
+        "expected ToolCallStarted for tool_beta, got {started_names:?}"
+    );
+
+    let finished_count = events
+        .iter()
+        .filter(|e| matches!(e, AgentEvent::ToolCallFinished { .. }))
+        .count();
+    assert_eq!(finished_count, 2, "expected 2 ToolCallFinished events, got {finished_count}");
+
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::TextDelta { text } if text.contains("done after two tools"))),
+        "expected final TextDelta"
+    );
+}
+
+/// When `permission_checker` is `Some(DenyAll)`, two tool calls are executed via
+/// the serial loop. Both must be denied and both `ToolCallFinished` events must
+/// carry "Permission denied".
+#[tokio::test]
+async fn run_chat_streaming_two_tools_serial_permission_denied() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn("done after denials"));
+    });
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_two_tool_uses());
+    });
+
+    let http = reqwest::Client::new();
+    let agent = AgentLoop {
+        http_client: http,
+        proxy_url: "http://127.0.0.1:1".to_string(),
+        anthropic_token: "tok".to_string(),
+        anthropic_base_url: Some(server.base_url()),
+        anthropic_extra_headers: vec![],
+        streaming_client: None,
+        model: "claude-test".to_string(),
+        max_iterations: 5,
+        thinking_budget: None,
+        tool_context: Arc::new(ToolContext { proxy_url: "http://127.0.0.1:1".to_string() }),
+        memory_owner: None,
+        memory_repo: None,
+        memory_path: None,
+        mcp_tool_defs: vec![],
+        mcp_dispatch: vec![],
+        permission_checker: Some(Arc::new(DenyAll)),
+        elicitation_provider: None,
+    };
+
+    let (tx, mut rx) = tokio::sync::mpsc::channel(64);
+    let result = agent
+        .run_chat_streaming(vec![Message::user_text("use two tools")], &[], None, tx, None)
+        .await;
+
+    assert!(result.is_ok(), "serial two-tool denial must succeed: {result:?}");
+
+    let events: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+
+    let denied: Vec<_> = events
+        .iter()
+        .filter(|e| matches!(e, AgentEvent::ToolCallFinished { output, .. } if output.contains("Permission denied")))
+        .collect();
+    assert_eq!(denied.len(), 2, "expected 2 denied ToolCallFinished, got {}", denied.len());
+}
+
+/// When `permission_checker` is `Some(AllowAll)`, the serial loop allows both
+/// tool calls and `ToolCallFinished` events are emitted for each.
+#[tokio::test]
+async fn run_chat_streaming_two_tools_serial_permission_allowed() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn("done after allowed"));
+    });
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_two_tool_uses());
+    });
+
+    let http = reqwest::Client::new();
+    let agent = AgentLoop {
+        http_client: http,
+        proxy_url: "http://127.0.0.1:1".to_string(),
+        anthropic_token: "tok".to_string(),
+        anthropic_base_url: Some(server.base_url()),
+        anthropic_extra_headers: vec![],
+        streaming_client: None,
+        model: "claude-test".to_string(),
+        max_iterations: 5,
+        thinking_budget: None,
+        tool_context: Arc::new(ToolContext { proxy_url: "http://127.0.0.1:1".to_string() }),
+        memory_owner: None,
+        memory_repo: None,
+        memory_path: None,
+        mcp_tool_defs: vec![],
+        mcp_dispatch: vec![],
+        permission_checker: Some(Arc::new(AllowAll)),
+        elicitation_provider: None,
+    };
+
+    let (tx, mut rx) = tokio::sync::mpsc::channel(64);
+    let result = agent
+        .run_chat_streaming(vec![Message::user_text("use two tools")], &[], None, tx, None)
+        .await;
+
+    assert!(result.is_ok(), "serial two-tool allow must succeed: {result:?}");
+
+    let events: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+
+    let finished_count = events
+        .iter()
+        .filter(|e| matches!(e, AgentEvent::ToolCallFinished { .. }))
+        .count();
+    assert_eq!(finished_count, 2, "expected 2 ToolCallFinished for allowed tools, got {finished_count}");
+
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::TextDelta { text } if text.contains("done after allowed"))),
+        "expected final TextDelta after serial allowed execution"
+    );
+}
