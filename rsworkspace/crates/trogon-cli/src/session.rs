@@ -279,4 +279,57 @@ mod tests {
     fn render_diff_none_input_returns_none() {
         assert!(render_diff("Edit", None).is_none());
     }
+
+    // ── wire-format compatibility ─────────────────────────────────────────────
+
+    #[test]
+    fn usage_update_deserializes_from_nats_wire_format() {
+        // Verify the JSON tag the runner sends actually round-trips through
+        // SessionNotification → SessionUpdate::UsageUpdate.
+        let json = serde_json::json!({
+            "sessionId": "sess-1",
+            "update": {
+                "sessionUpdate": "usage_update",
+                "used": 12345,
+                "size": 200000
+            }
+        });
+        let notif: agent_client_protocol::SessionNotification =
+            serde_json::from_value(json).expect("must deserialize");
+        match notif.update {
+            agent_client_protocol::SessionUpdate::UsageUpdate(u) => {
+                assert_eq!(u.used, 12345);
+                assert_eq!(u.size, 200000);
+            }
+            other => panic!("expected UsageUpdate, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tool_call_raw_input_is_accessible() {
+        // Verify that a ToolCall notification carries raw_input we can parse.
+        let json = serde_json::json!({
+            "sessionId": "sess-1",
+            "update": {
+                "sessionUpdate": "tool_call",
+                "toolCallId": "tc-1",
+                "title": "Edit",
+                "rawInput": {
+                    "file_path": "src/lib.rs",
+                    "old_string": "foo",
+                    "new_string": "bar"
+                }
+            }
+        });
+        let notif: agent_client_protocol::SessionNotification =
+            serde_json::from_value(json).expect("must deserialize");
+        match notif.update {
+            agent_client_protocol::SessionUpdate::ToolCall(tc) => {
+                assert_eq!(tc.title, "Edit");
+                let input = tc.raw_input.expect("raw_input must be present");
+                assert_eq!(input["file_path"].as_str().unwrap(), "src/lib.rs");
+            }
+            other => panic!("expected ToolCall, got {other:?}"),
+        }
+    }
 }
