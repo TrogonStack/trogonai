@@ -214,17 +214,30 @@ if token_estimate > TOKEN_BUDGET * 85 / 100 {
 ## Ramas de trabajo
 
 ```
-feat/dev-tools              ← base compartida con Dev B
-  feat/core-tools           ← PR 1
-  feat/bash-stateful        ← PR 2
-  feat/trogon-md            ← PR 4
-  feat/mcp-stdio-bridge     ← PR 6
-  feat/extra-tools          ← PR 7
-  feat/permissions          ← PR 10
-  feat/vscode               ← PR 11
+feat/claude-code-replacement    ← rama base compartida con Dev B
+  feat/core-tools               ← PR 1
+  feat/bash-stateful            ← PR 2
+  feat/trogon-md                ← PR 4
+  feat/mcp-stdio-bridge         ← PR 6
+  feat/extra-tools              ← PR 7
+  feat/permissions              ← PR 10
+  feat/vscode                   ← PR 11
 ```
 
-Cada rama hace PR a `feat/dev-tools`, no a `platform` directamente.
+Cada rama feature hace PR a `feat/claude-code-replacement`, no a `platform` directamente.
+
+### Flujo cuando Dev B depende de algo de Dev A
+
+1. Dev A termina su PR, lo mergea a `feat/claude-code-replacement`
+2. Dev A avisa a Dev B
+3. Dev B sincroniza su rama local:
+   ```bash
+   git fetch origin
+   git merge origin/feat/claude-code-replacement
+   ```
+4. Dev B ya tiene los módulos de Dev A disponibles y puede compilar
+
+`feat/claude-code-replacement` es la fuente de verdad compartida — cada developer sincroniza desde ahí cuando necesita lo que hizo el otro.
 
 ---
 
