@@ -1,36 +1,36 @@
-# Dev A — Plan de trabajo
-# Services track (backend NATS)
+# Dev A — Work plan
+# Services track (NATS backend)
 
-> Todo el trabajo es aditivo. NATS permanece como backend sin cambios.
-> Los nombres de todos los tools y el contrato de ToolContext están fijados en la sección "Contrato de tools" al final de este documento.
+> All work is additive. NATS remains as backend without changes.
+> The names of all tools and the ToolContext contract are fixed in the "Tool contract" section at the end of this document.
 
 ---
 
-## Resumen de waves
+## Wave summary
 
-| Wave | PRs | Esfuerzo |
+| Wave | PRs | Effort |
 |---|---|---|
-| Wave 1 | PR 1 + PR 2 | 1–2 semanas |
-| Wave 2 | PR 4 + PR 6 | 1 semana |
-| Wave 3 | PR 7 + PR 10 (permisos) | 1–2 semanas |
-| Wave 4 | PR 11 | 4–6 semanas |
-| **Total** | | **7–11 semanas** |
+| Wave 1 | PR 1 + PR 2 | 1–2 weeks |
+| Wave 2 | PR 4 + PR 6 | 1 week |
+| Wave 3 | PR 7 + PR 10 (permissions) | 1–2 weeks |
+| Wave 4 | PR 11 | 4–6 weeks |
+| **Total** | | **7–11 weeks** |
 
 ---
 
 ## Wave 1
 
-### PR 1 — Core tools en `trogon-agent-core`
+### PR 1 — Core tools in `trogon-agent-core`
 
-**`crates/trogon-agent-core/Cargo.toml` — dependencias nuevas**
+**`crates/trogon-agent-core/Cargo.toml` — new dependencies**
 - `globset = "0.4"`
 - `ignore = "0.4"`
 - `walkdir = "2"`
 - `html2text = "0.12"`
 
 **`crates/trogon-agent-core/src/tools/mod.rs`**
-- Agregar campo `cwd: String` a `ToolContext`
-- Completar `dispatch_tool()` con routing real:
+- Add field `cwd: String` to `ToolContext`
+- Complete `dispatch_tool()` with real routing:
   - `"read_file"` → `fs::read_file`
   - `"write_file"` → `fs::write_file`
   - `"list_dir"` → `fs::list_dir`
@@ -42,179 +42,179 @@
   - `"fetch_url"` → `web::fetch_url`
   - `"notebook_edit"` → `fs::notebook_edit`
 
-**`crates/trogon-agent-core/src/tools/fs.rs` — archivo nuevo**
+**`crates/trogon-agent-core/src/tools/fs.rs` — new file**
 
 `read_file`
-- Parámetros: `path: String`, `offset?: u32`, `limit?: u32`
-- Resuelve ruta relativa a `ctx.cwd`
-- Rechaza rutas fuera de `cwd` (protección contra path traversal)
-- Devuelve contenido con números de línea estilo `cat -n`
-- Si `offset`/`limit` presentes, devuelve solo ese rango de líneas
-- Si el archivo no existe, devuelve error legible
+- Parameters: `path: String`, `offset?: u32`, `limit?: u32`
+- Resolves path relative to `ctx.cwd`
+- Rejects paths outside `cwd` (path traversal protection)
+- Returns content with line numbers in `cat -n` style
+- If `offset`/`limit` present, returns only that line range
+- If file does not exist, returns readable error
 
 `write_file`
-- Parámetros: `path: String`, `content: String`
-- Crea directorios intermedios con `tokio::fs::create_dir_all`
-- Escritura atómica: primero escribe a `.tmp`, luego `rename`
-- Devuelve `"OK"` o mensaje de error
+- Parameters: `path: String`, `content: String`
+- Creates intermediate directories with `tokio::fs::create_dir_all`
+- Atomic write: first writes to `.tmp`, then `rename`
+- Returns `"OK"` or error message
 
 `list_dir`
-- Parámetros: `path?: String` (default `"."`)
-- Usa el crate `ignore` para respetar `.gitignore` automáticamente
-- Devuelve árbol de directorios en texto estilo `tree`
-- Limita a 500 entradas
+- Parameters: `path?: String` (default `"."`)
+- Uses the `ignore` crate to respect `.gitignore` automatically
+- Returns directory tree as text in `tree` style
+- Limits to 500 entries
 
 `glob`
-- Parámetros: `pattern: String`, `path?: String`
-- Usa `globset` para matching (`src/**/*.rs`, `**/*.test.ts`)
-- Filtra entradas ignoradas por `.gitignore` via `ignore::Walk`
-- Devuelve lista de rutas relativas a `cwd`
+- Parameters: `pattern: String`, `path?: String`
+- Uses `globset` for matching (`src/**/*.rs`, `**/*.test.ts`)
+- Filters entries ignored by `.gitignore` via `ignore::Walk`
+- Returns list of paths relative to `cwd`
 
 `notebook_edit`
-- Parámetros: `path: String`, `cell_index: u32`, `content: String`, `cell_type?: String`
-- Lee `.ipynb` (JSON puro), edita la celda por índice, escribe el archivo de vuelta
+- Parameters: `path: String`, `cell_index: u32`, `content: String`, `cell_type?: String`
+- Reads `.ipynb` (pure JSON), edits the cell by index, writes the file back
 
-**`crates/trogon-agent-core/src/tools/editor.rs` — archivo nuevo**
+**`crates/trogon-agent-core/src/tools/editor.rs` — new file**
 
 `str_replace`
-- Parámetros: `path: String`, `old_str: String`, `new_str: String`
-- Lee el archivo completo
-- Verifica que `old_str` aparezca **exactamente una vez** — si hay 0 o >1 ocurrencias, devuelve error con el conteo exacto
-- Reemplaza y escribe el resultado
-- Devuelve diff de las líneas cambiadas con contexto ±3 líneas
+- Parameters: `path: String`, `old_str: String`, `new_str: String`
+- Reads the full file
+- Verifies that `old_str` appears **exactly once** — if there are 0 or >1 occurrences, returns error with exact count
+- Replaces and writes the result
+- Returns diff of changed lines with ±3 lines of context
 
-**`crates/trogon-agent-core/src/tools/git.rs` — archivo nuevo**
+**`crates/trogon-agent-core/src/tools/git.rs` — new file**
 
 `git_status`, `git_diff`, `git_log`
-- Ejecutan `git status --short`, `git diff`, `git log --oneline -20`
-- Usan `tokio::process::Command` con `current_dir(&ctx.cwd)`
-- Output limitado a ~4KB; si excede, truncan con aviso al final
+- Execute `git status --short`, `git diff`, `git log --oneline -20`
+- Use `tokio::process::Command` with `current_dir(&ctx.cwd)`
+- Output limited to ~4KB; if exceeded, truncated with notice at the end
 
-**`crates/trogon-agent-core/src/tools/web.rs` — archivo nuevo**
+**`crates/trogon-agent-core/src/tools/web.rs` — new file**
 
 `fetch_url`
-- Parámetros: `url: String`, `raw?: bool`
-- Usa `ctx.http_client` (reutiliza el cliente existente)
-- Si `raw: false` (default): convierte HTML a texto plano con `html2text`
-- Trunca a 8KB con aviso si la respuesta es más grande
+- Parameters: `url: String`, `raw?: bool`
+- Uses `ctx.http_client` (reuses existing client)
+- If `raw: false` (default): converts HTML to plain text with `html2text`
+- Truncates to 8KB with notice if response is larger
 
-**Rama:** `feat/core-tools`
+**Branch:** `feat/core-tools`
 
 ---
 
-### PR 2 — Bash con estado real
+### PR 2 — Bash with real state
 
 **`crates/trogon-acp-runner/src/wasm_bash_tool.rs`**
-- Agregar campo `sandbox_dir: PathBuf` al struct `WasmRuntimeBashTool`
-- Pasar `sandbox_dir` como `cwd` en `CreateTerminalRequest`
-- `sandbox_dir` se inicializa desde `session.cwd` en `new_session`
+- Add field `sandbox_dir: PathBuf` to the `WasmRuntimeBashTool` struct
+- Pass `sandbox_dir` as `cwd` in `CreateTerminalRequest`
+- `sandbox_dir` is initialized from `session.cwd` in `new_session`
 
 **`crates/trogon-acp-runner/src/session_store.rs`**
-- Agregar `terminal_id: Option<String>` a `SessionState` (almacenado en NATS KV)
-- Primera llamada a bash: crear terminal, guardar `terminal_id` en `SessionState`
-- Llamadas posteriores: reusar el mismo terminal con `WriteToTerminalRequest`
-- Protocolo de demarcación: `<comando>; echo "__EXIT_$?__"` — leer stream hasta encontrar `__EXIT_N__`, extraer exit code
-- Timeout configurable, default 30s; al expirar, devuelve error con output parcial
+- Add `terminal_id: Option<String>` to `SessionState` (stored in NATS KV)
+- First bash call: create terminal, save `terminal_id` in `SessionState`
+- Subsequent calls: reuse the same terminal with `WriteToTerminalRequest`
+- Demarcation protocol: `<command>; echo "__EXIT_$?__"` — read stream until `__EXIT_N__` is found, extract exit code
+- Configurable timeout, default 30s; on expiry, returns error with partial output
 
-**Rama:** `feat/bash-stateful`
+**Branch:** `feat/bash-stateful`
 
 ---
 
 ## Wave 2
 
-### PR 4 — Contexto y memoria
+### PR 4 — Context and memory
 
-**`crates/trogon-acp-runner/src/trogon_md.rs` — archivo nuevo**
-- Buscar `TROGON.md` desde `cwd` hacia la raíz del filesystem
-- Cargar `~/.config/trogon/TROGON.md` como configuración global del usuario
-- Concatenar en orden: global → raíz del repo → directorio actual
-- Inyectar en `system_prompt` al crear o cargar una sesión
+**`crates/trogon-acp-runner/src/trogon_md.rs` — new file**
+- Search for `TROGON.md` from `cwd` toward the root of the filesystem
+- Load `~/.config/trogon/TROGON.md` as global user configuration
+- Concatenate in order: global → repo root → current directory
+- Inject into `system_prompt` when creating or loading a session
 
 **`crates/trogon-acp-runner/src/agent.rs`**
-- Cambiar compact incondicional por threshold del 85%:
+- Change unconditional compact to 85% threshold:
 ```rust
-let token_estimate = estimate_token_count(&session.messages); // heurística len_bytes / 4
+let token_estimate = estimate_token_count(&session.messages); // heuristic len_bytes / 4
 if token_estimate > TOKEN_BUDGET * 85 / 100 {
     compact_messages(&mut session).await?;
 }
-// TOKEN_BUDGET configurable en SessionState, default 200_000
+// TOKEN_BUDGET configurable in SessionState, default 200_000
 ```
 
-**Rama:** `feat/trogon-md`
+**Branch:** `feat/trogon-md`
 
 ---
 
-### PR 6 — MCP stdio como proxy HTTP del CLI
+### PR 6 — MCP stdio as CLI HTTP proxy
 
-**`crates/trogon-cli/src/stdio_mcp_bridge.rs` — archivo nuevo**
-- Lanzar proceso MCP stdio como hijo (ej. `npx @modelcontextprotocol/server-filesystem ./`)
-- Levantar servidor axum en puerto local aleatorio
-- Proxy JSON-RPC ↔ stdin/stdout del proceso hijo
-- Registrar en la sesión como `StoredMcpServer::Http { url: "http://127.0.0.1:<port>" }`
-- Al terminar el CLI: matar proceso hijo y liberar puerto
-- El backend NATS no cambia ninguna línea
+**`crates/trogon-cli/src/stdio_mcp_bridge.rs` — new file**
+- Launch MCP stdio process as child (e.g. `npx @modelcontextprotocol/server-filesystem ./`)
+- Start axum server on a random local port
+- Proxy JSON-RPC ↔ stdin/stdout of the child process
+- Register in the session as `StoredMcpServer::Http { url: "http://127.0.0.1:<port>" }`
+- On CLI exit: kill child process and release port
+- The NATS backend changes no lines
 
-**Rama:** `feat/mcp-stdio-bridge`
+**Branch:** `feat/mcp-stdio-bridge`
 
 ---
 
 ## Wave 3
 
-### PR 7 — Tools adicionales y agentes especializados
+### PR 7 — Additional tools and specialized agents
 
 **`crates/trogon-agent-core/src/tools/mod.rs`**
 
 `todo_write`
-- Parámetros: `id: String`, `content: String`, `status: String` (pending / in_progress / completed)
-- Almacena en NATS KV bucket por sesión
+- Parameters: `id: String`, `content: String`, `status: String` (pending / in_progress / completed)
+- Stored in NATS KV bucket per session
 
 `todo_read`
-- Devuelve lista de tareas activas de la sesión actual
+- Returns list of active tasks for the current session
 
 **`crates/trogon-agent/src/tools/mod.rs`**
 
 `spawn_agent`
-- Crear `spawn_agent` ToolDef
-- Dispatch: NATS request-reply a `{prefix}.agent.spawn`
-- El registry resuelve el agente correcto y devuelve el resultado al turn actual del modelo
+- Create `spawn_agent` ToolDef
+- Dispatch: NATS request-reply to `{prefix}.agent.spawn`
+- The registry resolves the correct agent and returns the result to the current model turn
 
 **`trogon-registry`**
-- Registrar agente `Explore` con skill: solo lee archivos y responde preguntas, nunca edita ni ejecuta
-- Registrar agente `Plan` con skill: solo planifica, no ejecuta herramientas destructivas
+- Register `Explore` agent with skill: only reads files and answers questions, never edits or executes
+- Register `Plan` agent with skill: only plans, does not execute destructive tools
 
-**Rama:** `feat/extra-tools`
+**Branch:** `feat/extra-tools`
 
 ---
 
-### PR 10 — Permisos granulares
+### PR 10 — Granular permissions
 
 **`crates/trogon-acp-runner`**
-- Allowlist/denylist por path (ej. `allow: src/**, deny: .env`)
-- Allowlist/denylist por comando bash (ej. `allow: cargo test, deny: rm -rf`)
-- Mismo mecanismo de approval gates del platform branch (NATS request-reply)
-- Configurable en `TROGON.md` y via `/config`
+- Allowlist/denylist by path (e.g. `allow: src/**, deny: .env`)
+- Allowlist/denylist by bash command (e.g. `allow: cargo test, deny: rm -rf`)
+- Same approval gates mechanism from the platform branch (NATS request-reply)
+- Configurable in `TROGON.md` and via `/config`
 
-**Rama:** `feat/permissions`
+**Branch:** `feat/permissions`
 
 ---
 
 ## Wave 4
 
-### PR 11 — Extensión VS Code (`trogon-vscode`)
+### PR 11 — VS Code extension (`trogon-vscode`)
 
-- Panel de chat dentro del editor
-- Inline diffs con aceptar/rechazar cambios por archivo
-- Slash commands desde el editor
-- Comunica con `trogon-cli` o directamente via NATS/ACP
+- Chat panel inside the editor
+- Inline diffs with accept/reject changes per file
+- Slash commands from the editor
+- Communicates with `trogon-cli` or directly via NATS/ACP
 
-**Rama:** `feat/vscode`
+**Branch:** `feat/vscode`
 
 ---
 
-## Ramas de trabajo
+## Working branches
 
 ```
-feat/claude-code-replacement    ← rama base compartida con Dev B
+feat/claude-code-replacement    ← shared base branch with Dev B
   feat/core-tools               ← PR 1
   feat/bash-stateful            ← PR 2
   feat/trogon-md                ← PR 4
@@ -224,57 +224,57 @@ feat/claude-code-replacement    ← rama base compartida con Dev B
   feat/vscode                   ← PR 11
 ```
 
-Cada rama feature hace PR a `feat/claude-code-replacement`, no a `platform` directamente.
+Each feature branch makes a PR to `feat/claude-code-replacement`, not directly to `platform`.
 
-### Flujo cuando Dev B depende de algo de Dev A
+### Flow when Dev B depends on something from Dev A
 
-1. Dev A termina su PR, lo mergea a `feat/claude-code-replacement`
-2. Dev A avisa a Dev B
-3. Dev B sincroniza su rama local:
+1. Dev A finishes their PR, merges it to `feat/claude-code-replacement`
+2. Dev A notifies Dev B
+3. Dev B syncs their local branch:
    ```bash
    git fetch origin
    git merge origin/feat/claude-code-replacement
    ```
-4. Dev B ya tiene los módulos de Dev A disponibles y puede compilar
+4. Dev B now has Dev A's modules available and can compile
 
-`feat/claude-code-replacement` es la fuente de verdad compartida — cada developer sincroniza desde ahí cuando necesita lo que hizo el otro.
+`feat/claude-code-replacement` is the shared source of truth — each developer syncs from there when they need what the other built.
 
 ---
 
-## Contrato de tools — nombres definitivos
+## Tool contract — definitive names
 
-Los nombres están fijados aquí. **No hay coordinación pendiente.** Dev A los implementa exactamente así, Dev B los registra exactamente así.
+The names are fixed here. **There is no pending coordination.** Dev A implements them exactly like this, Dev B registers them exactly like this.
 
-### Nombres de tools
+### Tool names
 
-| Tool | String en `dispatch_tool()` |
+| Tool | String in `dispatch_tool()` |
 |---|---|
-| Leer archivo | `"read_file"` |
-| Escribir archivo | `"write_file"` |
-| Listar directorio | `"list_dir"` |
-| Buscar por patrón | `"glob"` |
-| Editar con reemplazo | `"str_replace"` |
+| Read file | `"read_file"` |
+| Write file | `"write_file"` |
+| List directory | `"list_dir"` |
+| Search by pattern | `"glob"` |
+| Edit with replacement | `"str_replace"` |
 | Git status | `"git_status"` |
 | Git diff | `"git_diff"` |
 | Git log | `"git_log"` |
 | Fetch URL | `"fetch_url"` |
-| Editar notebook | `"notebook_edit"` |
-| Crear/actualizar tarea | `"todo_write"` |
-| Leer tareas | `"todo_read"` |
-| Lanzar sub-agente | `"spawn_agent"` |
+| Edit notebook | `"notebook_edit"` |
+| Create/update task | `"todo_write"` |
+| Read tasks | `"todo_read"` |
+| Launch sub-agent | `"spawn_agent"` |
 
-### Cambio en `ToolContext`
+### Change in `ToolContext`
 
-Dev A agrega el campo `cwd` en `crates/trogon-agent-core/src/tools/mod.rs`:
+Dev A adds the `cwd` field in `crates/trogon-agent-core/src/tools/mod.rs`:
 
 ```rust
 pub struct ToolContext {
     pub proxy_url: String,
-    pub cwd: String,           // directorio de trabajo — viene de session.cwd = current_dir()
+    pub cwd: String,           // working directory — comes from session.cwd = current_dir()
     pub http_client: reqwest::Client,
 }
 ```
 
-### Archivo compartido con riesgo de conflicto
+### Shared file with conflict risk
 
-`trogon-agent-core/src/tools/mod.rs` — Dev A y Dev B agregan entries a `dispatch_tool()`. Coordinarse puntualmente si coinciden en ese archivo al mismo tiempo.
+`trogon-agent-core/src/tools/mod.rs` — Dev A and Dev B both add entries to `dispatch_tool()`. Coordinate briefly if they coincide on that file at the same time.
