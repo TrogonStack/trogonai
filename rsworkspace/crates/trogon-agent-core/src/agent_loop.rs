@@ -1805,4 +1805,221 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
         let result = handle.await.expect("task panicked");
         assert!(result.is_ok(), "run_chat_streaming failed: {result:?}");
     }
+
+    // ── PermissionChecker mocks ───────────────────────────────────────────────
+
+    struct DenyAllChecker;
+
+    impl PermissionChecker for DenyAllChecker {
+        fn check<'a>(
+            &'a self,
+            _tool_call_id: &'a str,
+            _tool_name: &'a str,
+            _tool_input: &'a serde_json::Value,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send + 'a>> {
+            Box::pin(async { false })
+        }
+    }
+
+    struct AllowAllChecker;
+
+    impl PermissionChecker for AllowAllChecker {
+        fn check<'a>(
+            &'a self,
+            _tool_call_id: &'a str,
+            _tool_name: &'a str,
+            _tool_input: &'a serde_json::Value,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send + 'a>> {
+            Box::pin(async { true })
+        }
+    }
+
+    // ── Parallel / serial tool execution ─────────────────────────────────────
+
+    /// Serial path: denied tool returns "Permission denied" message.
+    #[tokio::test]
+    async fn execute_tools_serial_permission_denied() {
+        let mut agent = make_test_agent();
+        agent.permission_checker = Some(Arc::new(DenyAllChecker) as Arc<dyn PermissionChecker>);
+        let content = vec![ContentBlock::ToolUse {
+            id: "t1".to_string(),
+            name: "some_tool".to_string(),
+            input: serde_json::json!({}),
+            parent_tool_use_id: None,
+        }];
+        let results = agent.execute_tools(&content).await;
+        assert_eq!(results.len(), 1);
+        assert!(
+            results[0].content.contains("Permission denied"),
+            "got: {}",
+            results[0].content
+        );
+    }
+
+    /// Serial path (streaming): denied tool returns "Permission denied" message.
+    #[tokio::test]
+    async fn execute_tools_streaming_serial_permission_denied() {
+        let mut agent = make_test_agent();
+        agent.permission_checker = Some(Arc::new(DenyAllChecker) as Arc<dyn PermissionChecker>);
+        let (tx, _rx) = tokio::sync::mpsc::channel(32);
+        let content = vec![ContentBlock::ToolUse {
+            id: "t1".to_string(),
+            name: "some_tool".to_string(),
+            input: serde_json::json!({}),
+            parent_tool_use_id: None,
+        }];
+        let results = agent.execute_tools_streaming(&content, &tx).await;
+        assert_eq!(results.len(), 1);
+        assert!(
+            results[0].content.contains("Permission denied"),
+            "got: {}",
+            results[0].content
+        );
+    }
+
+    /// Serial path: allowed tool still dispatches normally.
+    #[tokio::test]
+    async fn execute_tools_serial_permission_allowed_calls_dispatch() {
+        let mut agent = make_test_agent();
+        agent.permission_checker = Some(Arc::new(AllowAllChecker) as Arc<dyn PermissionChecker>);
+        let content = vec![ContentBlock::ToolUse {
+            id: "t1".to_string(),
+            name: "some_tool".to_string(),
+            input: serde_json::json!({}),
+            parent_tool_use_id: None,
+        }];
+        let results = agent.execute_tools(&content).await;
+        assert_eq!(results.len(), 1);
+        assert!(
+            results[0].content.contains("Unknown tool"),
+            "got: {}",
+            results[0].content
+        );
+    }
+
+    /// Serial path (streaming): allowed tool dispatches and emits events.
+    #[tokio::test]
+    async fn execute_tools_streaming_serial_permission_allowed_emits_events() {
+        let mut agent = make_test_agent();
+        agent.permission_checker = Some(Arc::new(AllowAllChecker) as Arc<dyn PermissionChecker>);
+        let (tx, mut rx) = tokio::sync::mpsc::channel(32);
+        let content = vec![ContentBlock::ToolUse {
+            id: "t1".to_string(),
+            name: "some_tool".to_string(),
+            input: serde_json::json!({}),
+            parent_tool_use_id: None,
+        }];
+        let results = agent.execute_tools_streaming(&content, &tx).await;
+        assert_eq!(results.len(), 1);
+        assert!(results[0].content.contains("Unknown tool"), "got: {}", results[0].content);
+
+        let events: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+        assert!(
+            events.iter().any(|e| matches!(e, AgentEvent::ToolCallStarted { id, .. } if id == "t1")),
+            "ToolCallStarted missing: {events:?}"
+        );
+        assert!(
+            events.iter().any(|e| matches!(e, AgentEvent::ToolCallFinished { id, .. } if id == "t1")),
+            "ToolCallFinished missing: {events:?}"
+        );
+    }
+
+    /// Parallel path: results preserve input order for multiple tools.
+    #[tokio::test]
+    async fn execute_tools_parallel_order_preserved() {
+        let agent = make_test_agent();
+        let content = vec![
+            ContentBlock::ToolUse {
+                id: "t1".to_string(),
+                name: "tool_a".to_string(),
+                input: serde_json::json!({}),
+                parent_tool_use_id: None,
+            },
+            ContentBlock::ToolUse {
+                id: "t2".to_string(),
+                name: "tool_b".to_string(),
+                input: serde_json::json!({}),
+                parent_tool_use_id: None,
+            },
+        ];
+        let results = agent.execute_tools(&content).await;
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].tool_use_id, "t1");
+        assert_eq!(results[1].tool_use_id, "t2");
+    }
+
+    /// Parallel path (streaming): results preserve input order and events are emitted for each tool.
+    #[tokio::test]
+    async fn execute_tools_streaming_parallel_order_and_events() {
+        let agent = make_test_agent();
+        let (tx, mut rx) = tokio::sync::mpsc::channel(64);
+        let content = vec![
+            ContentBlock::ToolUse {
+                id: "t1".to_string(),
+                name: "tool_a".to_string(),
+                input: serde_json::json!({}),
+                parent_tool_use_id: None,
+            },
+            ContentBlock::ToolUse {
+                id: "t2".to_string(),
+                name: "tool_b".to_string(),
+                input: serde_json::json!({}),
+                parent_tool_use_id: None,
+            },
+        ];
+        let results = agent.execute_tools_streaming(&content, &tx).await;
+
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].tool_use_id, "t1");
+        assert_eq!(results[1].tool_use_id, "t2");
+
+        let events: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+        for id in ["t1", "t2"] {
+            assert!(
+                events.iter().any(|e| matches!(e, AgentEvent::ToolCallStarted { id: eid, .. } if eid == id)),
+                "ToolCallStarted missing for {id}: {events:?}"
+            );
+            assert!(
+                events.iter().any(|e| matches!(e, AgentEvent::ToolCallFinished { id: eid, .. } if eid == id)),
+                "ToolCallFinished missing for {id}: {events:?}"
+            );
+        }
+    }
+
+    /// Non-ToolUse content blocks are silently skipped by execute_tools.
+    #[tokio::test]
+    async fn execute_tools_skips_non_tool_use_blocks() {
+        let agent = make_test_agent();
+        let content = vec![
+            ContentBlock::Text { text: "ignore me".to_string() },
+            ContentBlock::ToolUse {
+                id: "t1".to_string(),
+                name: "my_tool".to_string(),
+                input: serde_json::json!({}),
+                parent_tool_use_id: None,
+            },
+        ];
+        let results = agent.execute_tools(&content).await;
+        assert_eq!(results.len(), 1, "text block must not produce a result");
+        assert_eq!(results[0].tool_use_id, "t1");
+    }
+
+    /// Non-ToolUse blocks are also skipped in the streaming path.
+    #[tokio::test]
+    async fn execute_tools_streaming_skips_non_tool_use_blocks() {
+        let agent = make_test_agent();
+        let (tx, _rx) = tokio::sync::mpsc::channel(32);
+        let content = vec![
+            ContentBlock::Text { text: "ignore me".to_string() },
+            ContentBlock::ToolUse {
+                id: "t1".to_string(),
+                name: "my_tool".to_string(),
+                input: serde_json::json!({}),
+                parent_tool_use_id: None,
+            },
+        ];
+        let results = agent.execute_tools_streaming(&content, &tx).await;
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].tool_use_id, "t1");
+    }
 }
