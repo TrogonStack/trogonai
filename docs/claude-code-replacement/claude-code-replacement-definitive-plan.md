@@ -484,32 +484,41 @@ Los comandos se ejecutan localmente, no se envían al agente:
 
 ---
 
-### Flujo y dependencias
+### Contrato de tools — nombres definitivos
 
-Las waves son orden de prioridad, no sincronización de tiempo. Cada developer avanza a su ritmo — cuando termina su wave arranca la siguiente sin esperar al otro.
+Los nombres están fijados aquí. No hay coordinación pendiente entre devs — cada uno consulta este documento y los usa exactamente así.
 
-**Única dependencia dura — día 1:**
+| Tool | String en `dispatch_tool()` |
+|---|---|
+| Leer archivo | `"read_file"` |
+| Escribir archivo | `"write_file"` |
+| Listar directorio | `"list_dir"` |
+| Buscar por patrón | `"glob"` |
+| Editar con reemplazo | `"str_replace"` |
+| Git status | `"git_status"` |
+| Git diff | `"git_diff"` |
+| Git log | `"git_log"` |
+| Fetch URL | `"fetch_url"` |
+| Editar notebook | `"notebook_edit"` |
+| Crear/actualizar tarea | `"todo_write"` |
+| Leer tareas | `"todo_read"` |
+| Lanzar sub-agente | `"spawn_agent"` |
 
-Dev A comunica a Dev B dos cosas **antes de escribir una sola línea de implementación**:
+**Cambio en `ToolContext`** — Dev A agrega el campo `cwd` en `crates/trogon-agent-core/src/tools/mod.rs`:
 
-1. Los nombres exactos de los tools tal como quedarán en `dispatch_tool()`:
-```
-"read_file", "write_file", "list_dir", "glob", "str_replace",
-"git_status", "git_diff", "git_log", "fetch_url", "notebook_edit"
-```
-
-2. El cambio en `ToolContext` — Dev A agrega el campo `cwd`:
 ```rust
 pub struct ToolContext {
     pub proxy_url: String,
-    pub cwd: String,           // ← campo nuevo
+    pub cwd: String,           // directorio de trabajo — viene de session.cwd = current_dir()
     pub http_client: reqwest::Client,
 }
 ```
 
-Con esa información, Dev B agrega los match arms en `crates/trogon-agent/src/tools/mod.rs` y los imports `use trogon_agent_core::tools::{fs, editor, git, web}`. Dev B puede hacer ese PR el mismo día 1 aunque Dev A no haya terminado las implementaciones — mientras los módulos existan (aunque vacíos), compila.
+### Flujo y dependencias
 
-**Riesgo si no se coordina:** si Dev B usa un nombre distinto al que Dev A implementó (ej. `"readFile"` en vez de `"read_file"`), el agente devuelve `"Unknown tool: readFile"` en runtime sin error de compilación — falla silenciosamente.
+Las waves son orden de prioridad, no sincronización de tiempo. Cada developer avanza a su ritmo — cuando termina su wave arranca la siguiente sin esperar al otro.
+
+Dev B puede hacer el wiring en `dispatch_tool()` en cuanto empiece Wave 1, sin esperar a que Dev A termine las implementaciones — mientras los módulos existan (aunque vacíos), compila. Cuando Dev A mergea un PR a `feat/claude-code-replacement`, Dev B sincroniza con `git fetch origin && git merge origin/feat/claude-code-replacement`.
 
 **Único archivo con riesgo de conflicto:** `trogon-agent-core/src/tools/mod.rs` — los dos pueden agregar entries a `dispatch_tool()`. Coordinarse puntualmente si coinciden en ese archivo al mismo tiempo.
 

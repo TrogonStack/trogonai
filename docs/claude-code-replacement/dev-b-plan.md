@@ -2,7 +2,7 @@
 # CLI track (superficie del developer)
 
 > Todo el trabajo es aditivo. NATS permanece como backend sin cambios.
-> Coordinación con Dev A: día 1, recibir nombres de tools y contrato ToolContext.cwd (medio día).
+> Los nombres de todos los tools y el contrato de ToolContext están fijados en la sección "Contrato de tools" al final de este documento.
 
 ---
 
@@ -203,95 +203,65 @@ Cada rama feature hace PR a `feat/claude-code-replacement`, no a `platform` dire
 
 ---
 
-## Coordinación con Dev A
+## Contrato de tools — nombres definitivos
 
-### Día 1 — esperar esto de Dev A antes de hacer el wiring
+Los nombres están fijados aquí. **No hay coordinación pendiente.** Dev A los implementa exactamente así, Dev B los registra exactamente así.
 
-Dev A comunica dos cosas antes de empezar a implementar. No hacer el wiring hasta recibirlas.
+### Nombres de tools
 
----
+| Tool | String en `dispatch_tool()` |
+|---|---|
+| Leer archivo | `"read_file"` |
+| Escribir archivo | `"write_file"` |
+| Listar directorio | `"list_dir"` |
+| Buscar por patrón | `"glob"` |
+| Editar con reemplazo | `"str_replace"` |
+| Git status | `"git_status"` |
+| Git diff | `"git_diff"` |
+| Git log | `"git_log"` |
+| Fetch URL | `"fetch_url"` |
+| Editar notebook | `"notebook_edit"` |
+| Crear/actualizar tarea | `"todo_write"` |
+| Leer tareas | `"todo_read"` |
+| Lanzar sub-agente | `"spawn_agent"` |
 
-**1. Lista exacta de nombres de tools**
+### Cambio en `ToolContext`
 
-Dev A confirma estos strings tal como quedarán en `dispatch_tool()`:
-
-```
-"read_file"
-"write_file"
-"list_dir"
-"glob"
-"str_replace"
-"git_status"
-"git_diff"
-"git_log"
-"fetch_url"
-"notebook_edit"
-```
-
----
-
-**2. Cambio en `ToolContext`**
-
-Dev A agrega el campo `cwd` a la struct en `trogon-agent-core/src/tools/mod.rs`:
+Dev A agrega el campo `cwd` en `crates/trogon-agent-core/src/tools/mod.rs`:
 
 ```rust
-// DESPUÉS del cambio de Dev A
 pub struct ToolContext {
     pub proxy_url: String,
-    pub cwd: String,           // ← campo nuevo que agrega Dev A
+    pub cwd: String,           // directorio de trabajo — viene de session.cwd = current_dir()
     pub http_client: reqwest::Client,
 }
 ```
 
-`cwd` se popula desde `session.cwd`, que es el `std::env::current_dir()` que el CLI pasa al crear la sesión ACP.
+### Wiring que hace Dev B — código exacto
 
----
-
-### Qué hace Dev B con esto — código exacto
-
-Abrir `crates/trogon-agent/src/tools/mod.rs`, encontrar `dispatch_tool()` (donde ya están los tools de GitHub, Linear, Slack) y agregar los nuevos match arms:
-
-```rust
-pub async fn dispatch_tool(ctx: &ToolContext, name: &str, input: &Value) -> String {
-    match name {
-        // tools existentes — no tocar
-        "get_pr_diff"     => github::get_pr_diff(ctx, input).await,
-        "post_pr_comment" => github::post_pr_comment(ctx, input).await,
-        // ... resto de tools existentes ...
-
-        // tools nuevos de Dev A — Dev B agrega estos
-        "read_file"       => fs::read_file(ctx, input).await,
-        "write_file"      => fs::write_file(ctx, input).await,
-        "list_dir"        => fs::list_dir(ctx, input).await,
-        "glob"            => fs::glob_files(ctx, input).await,
-        "str_replace"     => editor::str_replace(ctx, input).await,
-        "git_status"      => git::status(ctx, input).await,
-        "git_diff"        => git::diff(ctx, input).await,
-        "git_log"         => git::log(ctx, input).await,
-        "fetch_url"       => web::fetch_url(ctx, input).await,
-        "notebook_edit"   => fs::notebook_edit(ctx, input).await,
-
-        _                 => format!("Unknown tool: {name}"),
-    }
-}
-```
-
-Agregar los imports al top del archivo:
+Abrir `crates/trogon-agent/src/tools/mod.rs`, agregar los imports y los match arms en `dispatch_tool()`:
 
 ```rust
 use trogon_agent_core::tools::{fs, editor, git, web};
+
+// en dispatch_tool() — agregar junto a los tools existentes de GitHub/Linear/Slack:
+"read_file"      => fs::read_file(ctx, input).await,
+"write_file"     => fs::write_file(ctx, input).await,
+"list_dir"       => fs::list_dir(ctx, input).await,
+"glob"           => fs::glob_files(ctx, input).await,
+"str_replace"    => editor::str_replace(ctx, input).await,
+"git_status"     => git::status(ctx, input).await,
+"git_diff"       => git::diff(ctx, input).await,
+"git_log"        => git::log(ctx, input).await,
+"fetch_url"      => web::fetch_url(ctx, input).await,
+"notebook_edit"  => fs::notebook_edit(ctx, input).await,
+"todo_write"     => todo::write(ctx, input).await,
+"todo_read"      => todo::read(ctx, input).await,
+"spawn_agent"    => agent::spawn(ctx, input).await,
 ```
 
-Dev B puede hacer este PR el mismo día 1 aunque las implementaciones de Dev A no estén listas todavía — mientras los módulos existan (aunque vacíos), compila.
-
----
-
-### Por qué es crítico no improvisar los nombres
-
-Si Dev B usa un nombre distinto al que Dev A implementó (ej. `"readFile"` en vez de `"read_file"`), el agente llama al tool y recibe `"Unknown tool: readFile"` en runtime. **No hay error de compilación** — falla silenciosamente.
-
----
+Dev B puede hacer este PR aunque las implementaciones de Dev A no estén listas — mientras los módulos existan (aunque vacíos), compila.
 
 ### Archivo compartido con riesgo de conflicto
 
-`trogon-agent-core/src/tools/mod.rs` — los dos pueden agregar entries a `dispatch_tool()`. Coordinarse puntualmente si coinciden en ese archivo al mismo tiempo.
+`trogon-agent-core/src/tools/mod.rs` — Dev A y Dev B agregan entries a `dispatch_tool()`. Coordinarse puntualmente si coinciden en ese archivo al mismo tiempo.
