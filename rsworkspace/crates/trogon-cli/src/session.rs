@@ -47,8 +47,8 @@ impl TrogonSession {
         })
     }
 
-    /// Send a prompt and stream `TextDelta` events via the returned channel.
-    /// The channel closes when the turn is done (Done or Error).
+    /// Send a prompt and stream events via the returned channel.
+    /// The channel closes when the turn is done.
     pub async fn prompt(&self, text: &str) -> anyhow::Result<mpsc::Receiver<StreamEvent>> {
         let notif_subject = format!(
             "{}.session.{}.client.session.update",
@@ -115,7 +115,18 @@ impl TrogonSession {
                                     let _ = tx.send(StreamEvent::Thinking).await;
                                 }
                                 SessionUpdate::ToolCall(tc) => {
-                                    let _ = tx.send(StreamEvent::ToolCall(tc.title)).await;
+                                    if let Some(diff) = render_diff(&tc.title, tc.raw_input.as_ref()) {
+                                        let _ = tx.send(StreamEvent::ToolCall(tc.title)).await;
+                                        let _ = tx.send(StreamEvent::Diff(diff)).await;
+                                    } else {
+                                        let _ = tx.send(StreamEvent::ToolCall(tc.title)).await;
+                                    }
+                                }
+                                SessionUpdate::UsageUpdate(u) => {
+                                    let _ = tx.send(StreamEvent::Usage {
+                                        used_tokens: u.used,
+                                        context_size: u.size,
+                                    }).await;
                                 }
                                 _ => {}
                             }
@@ -144,5 +155,128 @@ pub enum StreamEvent {
     Text(String),
     Thinking,
     ToolCall(String),
+    /// Pre-rendered colored diff for Edit/MultiEdit/Write tool calls.
+    Diff(String),
+    /// Token usage update at the end of a turn.
+    Usage { used_tokens: u64, context_size: u64 },
     Done(String),
+}
+
+// ── Diff rendering ────────────────────────────────────────────────────────────
+
+const RED: &str = "\x1b[31m";
+const GREEN: &str = "\x1b[32m";
+const BOLD: &str = "\x1b[1m";
+const RESET: &str = "\x1b[0m";
+const DIM: &str = "\x1b[2m";
+
+/// Render a colored diff for Edit/MultiEdit/Write tool calls.
+/// Returns `None` for tools that don't produce a diff.
+fn render_diff(tool_name: &str, input: Option<&serde_json::Value>) -> Option<String> {
+    let input = input?;
+    match tool_name {
+        "Edit" => {
+            let path = input.get("file_path")?.as_str()?;
+            let old = input.get("old_string").and_then(|v| v.as_str()).unwrap_or("");
+            let new = input.get("new_string").and_then(|v| v.as_str())?;
+            Some(format_edit_diff(path, old, new))
+        }
+        "MultiEdit" => {
+            let path = input.get("file_path")?.as_str()?;
+            let edits = input.get("edits")?.as_array()?;
+            let mut out = format!("{DIM}--- {path}{RESET}\n{DIM}+++ {path}{RESET}");
+            for edit in edits {
+                let old = edit.get("old_string").and_then(|v| v.as_str()).unwrap_or("");
+                let new = edit.get("new_string").and_then(|v| v.as_str()).unwrap_or("");
+                out.push('\n');
+                out.push_str(&diff_lines(old, new));
+            }
+            Some(out)
+        }
+        "Write" => {
+            let path = input.get("file_path")?.as_str()?;
+            let content = input.get("content").and_then(|v| v.as_str()).unwrap_or("");
+            let lines = content.lines().count();
+            Some(format!("{BOLD}[write: {path}]{RESET} {DIM}({lines} lines){RESET}"))
+        }
+        _ => None,
+    }
+}
+
+fn format_edit_diff(path: &str, old: &str, new: &str) -> String {
+    let mut out = format!("{DIM}--- {path}{RESET}\n{DIM}+++ {path}{RESET}\n");
+    out.push_str(&diff_lines(old, new));
+    out
+}
+
+fn diff_lines(old: &str, new: &str) -> String {
+    let mut out = String::new();
+    for line in old.lines() {
+        out.push_str(&format!("{RED}-{line}{RESET}\n"));
+    }
+    for line in new.lines() {
+        out.push_str(&format!("{GREEN}+{line}{RESET}\n"));
+    }
+    out
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn render_diff_edit_returns_colored_diff() {
+        let input = json!({"file_path": "src/main.rs", "old_string": "hello", "new_string": "world"});
+        let diff = render_diff("Edit", Some(&input)).unwrap();
+        assert!(diff.contains("src/main.rs"), "path in header");
+        assert!(diff.contains("-hello"), "old line with minus");
+        assert!(diff.contains("+world"), "new line with plus");
+    }
+
+    #[test]
+    fn render_diff_edit_empty_old_string() {
+        let input = json!({"file_path": "new.rs", "old_string": "", "new_string": "fn main() {}"});
+        let diff = render_diff("Edit", Some(&input)).unwrap();
+        assert!(diff.contains("+fn main() {}"));
+        // No removal lines (lines starting with RED + "-"), only the "---" header.
+        assert!(!diff.contains(&format!("{RED}-")), "no removal lines for empty old_string");
+    }
+
+    #[test]
+    fn render_diff_multiedit_all_edits_shown() {
+        let input = json!({
+            "file_path": "lib.rs",
+            "edits": [
+                {"old_string": "foo", "new_string": "bar"},
+                {"old_string": "baz", "new_string": "qux"},
+            ]
+        });
+        let diff = render_diff("MultiEdit", Some(&input)).unwrap();
+        assert!(diff.contains("-foo") && diff.contains("+bar"));
+        assert!(diff.contains("-baz") && diff.contains("+qux"));
+    }
+
+    #[test]
+    fn render_diff_write_shows_path_and_line_count() {
+        let content = "line1\nline2\nline3";
+        let input = json!({"file_path": "out.txt", "content": content});
+        let diff = render_diff("Write", Some(&input)).unwrap();
+        assert!(diff.contains("out.txt"));
+        assert!(diff.contains("3 lines"));
+    }
+
+    #[test]
+    fn render_diff_unknown_tool_returns_none() {
+        let input = json!({"file_path": "x.rs"});
+        assert!(render_diff("Bash", Some(&input)).is_none());
+        assert!(render_diff("Read", Some(&input)).is_none());
+    }
+
+    #[test]
+    fn render_diff_none_input_returns_none() {
+        assert!(render_diff("Edit", None).is_none());
+    }
 }

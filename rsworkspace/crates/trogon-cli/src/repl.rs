@@ -4,7 +4,7 @@ use rustyline::completion::{Completer, Pair};
 use rustyline::error::ReadlineError;
 use rustyline::highlight::Highlighter;
 use rustyline::hint::Hinter;
-use rustyline::validate::Validator;
+use rustyline::validate::{ValidationContext, ValidationResult, Validator};
 use rustyline::{Context, Editor, Helper};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -13,7 +13,8 @@ const HISTORY_PATH: &str = "~/.local/share/trogon/history";
 
 // ── FileAtHelper ──────────────────────────────────────────────────────────────
 
-/// rustyline helper that tab-completes `@<path>` tokens.
+/// rustyline helper: tab-completes `@<path>` tokens and enables `\`-continuation
+/// for multiline input.
 struct FileAtHelper {
     cwd: PathBuf,
 }
@@ -75,7 +76,20 @@ impl Hinter for FileAtHelper {
 
 impl Highlighter for FileAtHelper {}
 
-impl Validator for FileAtHelper {}
+/// A line ending with `\` continues on the next line.
+impl Validator for FileAtHelper {
+    fn validate(&self, ctx: &mut ValidationContext<'_>) -> rustyline::Result<ValidationResult> {
+        if input_needs_continuation(ctx.input()) {
+            Ok(ValidationResult::Incomplete)
+        } else {
+            Ok(ValidationResult::Valid(None))
+        }
+    }
+}
+
+fn input_needs_continuation(input: &str) -> bool {
+    input.ends_with('\\')
+}
 
 // ── @mention expansion ────────────────────────────────────────────────────────
 
@@ -118,6 +132,13 @@ fn expand_mentions(text: &str, cwd: &Path) -> String {
     result
 }
 
+// ── Multiline join ────────────────────────────────────────────────────────────
+
+/// Join continuation lines: `\` at the end of a line is replaced by a space.
+fn join_continuation(s: &str) -> String {
+    s.replace("\\\n", " ")
+}
+
 // ── REPL entry point ──────────────────────────────────────────────────────────
 
 pub async fn run(nats: Client, prefix: &str, cwd: PathBuf) -> anyhow::Result<()> {
@@ -134,10 +155,15 @@ pub async fn run(nats: Client, prefix: &str, cwd: PathBuf) -> anyhow::Result<()>
 
     eprintln!("trogon — session {} (Ctrl+D to quit)", session.session_id);
 
+    // Accumulated context-window usage across the session.
+    let mut session_used_tokens: u64 = 0;
+    let mut session_context_size: u64 = 0;
+
     loop {
         match rl.readline("> ") {
-            Ok(line) => {
-                let line = line.trim().to_string();
+            Ok(raw_line) => {
+                // Join backslash-continuation lines, then expand @mentions.
+                let line = join_continuation(&raw_line).trim().to_string();
                 if line.is_empty() {
                     continue;
                 }
@@ -147,31 +173,60 @@ pub async fn run(nats: Client, prefix: &str, cwd: PathBuf) -> anyhow::Result<()>
                     continue;
                 }
 
-                let _ = rl.add_history_entry(&line);
+                let _ = rl.add_history_entry(&raw_line);
 
                 let expanded = expand_mentions(&line, &cwd);
                 match session.prompt(&expanded).await {
                     Err(e) => eprintln!("error: {e}"),
                     Ok(mut rx) => {
                         let mut stdout = std::io::stdout();
+                        let ctrl_c = tokio::signal::ctrl_c();
+                        tokio::pin!(ctrl_c);
+
                         loop {
-                            match rx.recv().await {
-                                None => break,
-                                Some(StreamEvent::Text(text)) => {
-                                    print!("{text}");
-                                    let _ = stdout.flush();
-                                }
-                                Some(StreamEvent::Thinking) => {}
-                                Some(StreamEvent::ToolCall(name)) => {
-                                    eprintln!("\n[tool: {name}]");
-                                }
-                                Some(StreamEvent::Done(reason)) => {
-                                    if reason == "cancelled" {
-                                        eprintln!("\n[cancelled]");
-                                    } else {
-                                        println!();
-                                    }
+                            tokio::select! {
+                                biased;
+                                _ = &mut ctrl_c => {
+                                    session.cancel().await;
+                                    eprintln!("\n[cancelled]");
                                     break;
+                                }
+                                event = rx.recv() => {
+                                    match event {
+                                        None => break,
+                                        Some(StreamEvent::Text(text)) => {
+                                            print!("{text}");
+                                            let _ = stdout.flush();
+                                        }
+                                        Some(StreamEvent::Thinking) => {}
+                                        Some(StreamEvent::ToolCall(name)) => {
+                                            eprintln!("\n[tool: {name}]");
+                                        }
+                                        Some(StreamEvent::Diff(diff)) => {
+                                            eprintln!("{diff}");
+                                        }
+                                        Some(StreamEvent::Usage { used_tokens, context_size }) => {
+                                            session_used_tokens = used_tokens;
+                                            session_context_size = context_size;
+                                        }
+                                        Some(StreamEvent::Done(reason)) => {
+                                            if reason == "cancelled" {
+                                                eprintln!("\n[cancelled]");
+                                            } else {
+                                                println!();
+                                                if session_context_size > 0 {
+                                                    let pct = session_used_tokens * 100 / session_context_size;
+                                                    eprintln!(
+                                                        "\x1b[2m[context: {}/{} tokens ({}%)]\x1b[0m",
+                                                        fmt_tokens(session_used_tokens),
+                                                        fmt_tokens(session_context_size),
+                                                        pct,
+                                                    );
+                                                }
+                                            }
+                                            break;
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -179,6 +234,7 @@ pub async fn run(nats: Client, prefix: &str, cwd: PathBuf) -> anyhow::Result<()>
                 }
             }
             Err(ReadlineError::Interrupted) => {
+                // Ctrl+C during the readline prompt (not during streaming).
                 session.cancel().await;
                 eprintln!("(Ctrl+C)");
             }
@@ -205,13 +261,27 @@ fn handle_slash_command(line: &str) -> Option<String> {
     match parts[0] {
         "/help" => Some(
             "Commands: /help /clear /cost /model <id>\n\
-             Ctrl+D  quit"
+             Multiline: end a line with \\ to continue on the next line\n\
+             Ctrl+C  cancel active response    Ctrl+D  quit"
                 .to_string(),
         ),
         "/clear" => Some("[/clear not yet implemented — PR 9]".to_string()),
         "/cost" => Some("[/cost not yet implemented — PR 9]".to_string()),
         _ => Some(format!("unknown command: {}", parts[0])),
     }
+}
+
+/// Format a token count with thousands separator (e.g. 12345 → "12,345").
+fn fmt_tokens(n: u64) -> String {
+    let s = n.to_string();
+    let mut out = String::new();
+    for (i, c) in s.chars().rev().enumerate() {
+        if i > 0 && i % 3 == 0 {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out.chars().rev().collect()
 }
 
 fn expand_tilde(path: &str) -> PathBuf {
@@ -228,6 +298,8 @@ fn expand_tilde(path: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── expand_mentions ───────────────────────────────────────────────────────
 
     #[test]
     fn expand_mentions_no_at_sign_is_unchanged() {
@@ -299,7 +371,6 @@ mod tests {
 
     #[test]
     fn expand_mentions_at_end_of_string_is_lone_at() {
-        // "@" at end with nothing after → path_str empty → leave as "@"
         let result = expand_mentions("end @", Path::new("/tmp"));
         assert_eq!(result, "end @");
     }
@@ -330,7 +401,6 @@ mod tests {
         let helper = FileAtHelper { cwd: dir.clone() };
         let history = rustyline::history::DefaultHistory::new();
         let ctx = Context::new(&history);
-        // "@alpha" — @ at pos 0, partial = "alpha", cursor at pos 6
         let (start, pairs) = helper.complete("@alpha", 6, &ctx).unwrap();
 
         assert_eq!(start, 1, "start must be one past '@'");
@@ -380,5 +450,57 @@ mod tests {
         assert_eq!(names, sorted, "completions should be alphabetically sorted");
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ── multiline join ────────────────────────────────────────────────────────
+
+    #[test]
+    fn join_continuation_single_line_unchanged() {
+        assert_eq!(join_continuation("hello world"), "hello world");
+    }
+
+    #[test]
+    fn join_continuation_backslash_newline_becomes_space() {
+        let input = "line one\\\nline two\\\nline three";
+        let result = join_continuation(input);
+        assert_eq!(result, "line one line two line three");
+    }
+
+    #[test]
+    fn join_continuation_no_backslash_newlines_unchanged() {
+        let input = "line one\nline two";
+        assert_eq!(join_continuation(input), "line one\nline two");
+    }
+
+    // ── input_needs_continuation ──────────────────────────────────────────────
+
+    #[test]
+    fn continuation_true_when_ends_with_backslash() {
+        assert!(input_needs_continuation("hello\\"));
+        assert!(input_needs_continuation("\\"));
+    }
+
+    #[test]
+    fn continuation_false_when_no_trailing_backslash() {
+        assert!(!input_needs_continuation("hello world"));
+        assert!(!input_needs_continuation(""));
+        assert!(!input_needs_continuation("has\\backslash in middle"));
+    }
+
+    // ── fmt_tokens ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn fmt_tokens_small_number() {
+        assert_eq!(fmt_tokens(42), "42");
+    }
+
+    #[test]
+    fn fmt_tokens_thousands() {
+        assert_eq!(fmt_tokens(1_234), "1,234");
+    }
+
+    #[test]
+    fn fmt_tokens_millions() {
+        assert_eq!(fmt_tokens(1_234_567), "1,234,567");
     }
 }
