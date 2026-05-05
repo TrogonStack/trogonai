@@ -1,20 +1,20 @@
-# Dev B — Plan de trabajo
-# CLI track (superficie del developer)
+# Dev B — Work plan
+# CLI track (developer surface)
 
-> Todo el trabajo es aditivo. NATS permanece como backend sin cambios.
-> Los nombres de todos los tools y el contrato de ToolContext están fijados en la sección "Contrato de tools" al final de este documento.
+> All work is additive. NATS remains as backend without changes.
+> The names of all tools and the ToolContext contract are fixed in the "Tool contract" section at the end of this document.
 
 ---
 
-## Resumen de waves
+## Wave summary
 
-| Wave | PRs | Esfuerzo |
+| Wave | PRs | Effort |
 |---|---|---|
-| Wave 1 | PR 3 + wiring dispatch | 1–2 semanas |
-| Wave 2 | PR 5 | 1 semana |
-| Wave 3 | PR 8 + PR 9 | 2–3 semanas |
-| Wave 4 | PR 10 (no-interactivo) + PR 12 | 2–3 semanas |
-| **Total** | | **6–9 semanas** |
+| Wave 1 | PR 3 + wiring dispatch | 1–2 weeks |
+| Wave 2 | PR 5 | 1 week |
+| Wave 3 | PR 8 + PR 9 | 2–3 weeks |
+| Wave 4 | PR 10 (non-interactive) + PR 12 | 2–3 weeks |
+| **Total** | | **6–9 weeks** |
 
 ---
 
@@ -22,45 +22,45 @@
 
 ### PR 3 — `trogon-cli` core
 
-**`crates/trogon-cli/Cargo.toml` — crate nueva**
+**`crates/trogon-cli/Cargo.toml` — new crate**
 ```toml
 rustyline = "14"
-# acp-nats, clap, axum — ya en el workspace
+# acp-nats, clap, axum — already in the workspace
 ```
 
 **`crates/trogon-cli/src/main.rs`**
-- Parsing de argumentos con clap
-- Lee `TROGON_NATS_URL` (default `nats://localhost:4222`)
+- Argument parsing with clap
+- Reads `TROGON_NATS_URL` (default `nats://localhost:4222`)
 - NATS autostart:
-  - Si la conexión falla, lanza `nats-server -p 4222` como proceso hijo
-  - Reintenta hasta 3s con intervalos de 200ms
-  - Si `nats-server` no está en PATH: imprime instrucciones de instalación y sale con error claro
-  - Al salir: mata el proceso hijo solo si fue este proceso quien lo lanzó
+  - If connection fails, launches `nats-server -p 4222` as child process
+  - Retries up to 3s with 200ms intervals
+  - If `nats-server` is not in PATH: prints installation instructions and exits with clear error
+  - On exit: kills child process only if this process launched it
 
 **`crates/trogon-cli/src/session.rs`**
-- Gestión de sesión ACP via NATS
-- Crea sesión con `cwd = std::env::current_dir()`
-- Cierra sesión limpiamente al salir (Ctrl+D)
+- ACP session management via NATS
+- Creates session with `cwd = std::env::current_dir()`
+- Closes session cleanly on exit (Ctrl+D)
 
 **`crates/trogon-cli/src/repl.rs`**
-- Loop REPL con rustyline
-- Recibe stream de eventos ACP e imprime `TextDelta` en tiempo real
-- Ctrl+C envía cancel a la sesión activa y limpia el estado
-- Ctrl+D sale limpiamente cerrando la sesión
-- Historial persistido en `~/.local/share/trogon/history`
+- REPL loop with rustyline
+- Receives ACP event stream and prints `TextDelta` in real time
+- Ctrl+C sends cancel to active session and clears state
+- Ctrl+D exits cleanly closing the session
+- History persisted in `~/.local/share/trogon/history`
 
 **`crates/trogon-cli/src/print.rs`**
-- Stub vacío por ahora (se completa en PR 10)
+- Empty stub for now (completed in PR 10)
 
-**Rama:** `feat/cli-core`
+**Branch:** `feat/cli-core`
 
 ---
 
-### Wiring en `trogon-agent` — Wave 1
+### Wiring in `trogon-agent` — Wave 1
 
 **`crates/trogon-agent/src/tools/mod.rs`**
 
-Registrar en `dispatch_tool()` todos los tools que Dev A implementa en PR 1:
+Register in `dispatch_tool()` all tools that Dev A implements in PR 1:
 - `"read_file"`
 - `"write_file"`
 - `"list_dir"`
@@ -72,43 +72,43 @@ Registrar en `dispatch_tool()` todos los tools que Dev A implementa en PR 1:
 - `"fetch_url"`
 - `"notebook_edit"`
 
-> Esperar confirmación de Dev A el día 1 con los nombres exactos y la firma de `ToolContext` antes de hacer este PR.
+> Wait for confirmation from Dev A on day 1 with the exact names and `ToolContext` signature before making this PR.
 
-**Rama:** parte de `feat/cli-core` o rama propia `feat/dispatch-wiring`
+**Branch:** part of `feat/cli-core` or own branch `feat/dispatch-wiring`
 
 ---
 
 ## Wave 2
 
-### PR 5 — Extensibilidad del agente
+### PR 5 — Agent extensibility
 
-**`crates/trogon-cli/src/repl.rs` — `@mentions` de archivos**
-- Antes de enviar el prompt al agente, escanear el texto en busca de tokens `@<path>`
-- Para cada match:
-  - Resolver el path relativo a `cwd`
-  - Leer el contenido del archivo
-  - Sustituir `@<path>` por bloque de código con el contenido
-- Si el path no existe: dejar el token sin modificar y advertir al usuario
-- Tab-completion del path en rustyline via un `Helper` personalizado
+**`crates/trogon-cli/src/repl.rs` — file `@mentions`**
+- Before sending the prompt to the agent, scan the text for `@<path>` tokens
+- For each match:
+  - Resolve the path relative to `cwd`
+  - Read the file content
+  - Replace `@<path>` with code block containing the content
+- If path does not exist: leave the token unmodified and warn the user
+- Path tab-completion in rustyline via a custom `Helper`
 
-**`crates/trogon-agent-core/src/agent_loop.rs` — herramientas paralelas**
+**`crates/trogon-agent-core/src/agent_loop.rs` — parallel tools**
 
-Reemplazar ejecución secuencial por paralela:
+Replace sequential execution with parallel:
 ```rust
-// antes (secuencial)
+// before (sequential)
 for call in &tool_calls {
     let result = dispatch_tool(&ctx, &call.name, &call.input).await;
 }
 
-// después (paralelo)
+// after (parallel)
 let futures: Vec<_> = tool_calls.iter()
     .map(|call| dispatch_tool(&ctx, &call.name, &call.input))
     .collect();
 let results = futures::future::join_all(futures).await;
 ```
-Restricción: si hay un `PermissionChecker` interactivo activo, serializar las llamadas para no preguntar dos cosas simultáneamente al usuario.
+Restriction: if an interactive `PermissionChecker` is active, serialize the calls to avoid asking the user two things simultaneously.
 
-**Rama:** `feat/mentions-parallel`
+**Branch:** `feat/mentions-parallel`
 
 ---
 
@@ -117,67 +117,67 @@ Restricción: si hay un `PermissionChecker` interactivo activo, serializar las l
 ### PR 8 — TUI
 
 **`crates/trogon-cli/src/repl.rs`**
-- Mostrar diffs coloreados (antes/después) en cada operación `str_replace` y `write_file`
-- Ctrl+C cancela la operación NATS activa y limpia el estado de sesión
-- Consumir `UsageSummary` events (ya emitidos por el platform branch) y mostrar tokens y $ acumulados por sesión
-- Input multilinea
+- Show colored diffs (before/after) on each `str_replace` and `write_file` operation
+- Ctrl+C cancels the active NATS operation and clears session state
+- Consume `UsageSummary` events (already emitted by the platform branch) and show accumulated tokens and $ per session
+- Multiline input
 
-**Rama:** `feat/cli-tui`
+**Branch:** `feat/cli-tui`
 
 ---
 
-### PR 9 — Slash commands completos
+### PR 9 — Complete slash commands
 
 **`crates/trogon-cli/src/repl.rs`**
 
-Los comandos se ejecutan localmente, no se envían al agente:
+Commands execute locally, they are not sent to the agent:
 
-| Comando | Acción |
+| Command | Action |
 |---|---|
-| `/clear` | Limpia historial de mensajes de la sesión via NATS KV |
-| `/compact` | Fuerza compactación del contexto ahora (`trogon.compactor.compact`) |
-| `/cost` | Muestra acumulado de tokens y $ de la sesión actual |
-| `/help` | Lista todos los comandos disponibles |
-| `/config` | Lee/escribe config local del CLI |
-| `/model <id>` | Cambia el modelo usado en la sesión sin reiniciarla |
-| `/init` | Analiza el proyecto con LLM via ACP y genera `TROGON.md` en el directorio actual |
+| `/clear` | Clears session message history via NATS KV |
+| `/compact` | Forces context compaction now (`trogon.compactor.compact`) |
+| `/cost` | Shows accumulated tokens and $ for the current session |
+| `/help` | Lists all available commands |
+| `/config` | Reads/writes local CLI config |
+| `/model <id>` | Changes the model used in the session without restarting it |
+| `/init` | Analyzes the project with LLM via ACP and generates `TROGON.md` in the current directory |
 
-**Rama:** `feat/slash-commands`
+**Branch:** `feat/slash-commands`
 
 ---
 
 ## Wave 4
 
-### PR 10 — Modo no-interactivo
+### PR 10 — Non-interactive mode
 
 **`crates/trogon-cli/src/print.rs`**
-- Activado con `trogon --print "haz X"` o `trogon -p "haz X"`
-- Lee prompt desde argumento o desde stdin: `trogon --print "explica" < error.log`
-- Imprime solo `TextDelta` a stdout (sin colores ni UI interactiva)
-- Exit code 0 si completa sin error, 1 si el agente devuelve error
-- Útil para pipes y CI/CD
+- Activated with `trogon --print "do X"` or `trogon -p "do X"`
+- Reads prompt from argument or from stdin: `trogon --print "explain" < error.log`
+- Prints only `TextDelta` to stdout (no colors or interactive UI)
+- Exit code 0 on success, 1 if agent returns error
+- Useful for pipes and CI/CD
 
-**Rama:** `feat/cli-noninteractive`
-
----
-
-### PR 12 — Plugin JetBrains (`trogon-jetbrains`)
-
-- Mismo concepto que la extensión VS Code (que hace Dev A)
-- API de plugins de JetBrains (IntelliJ, GoLand, RustRover, etc.)
-- Panel de chat dentro del editor
-- Inline diffs con aceptar/rechazar cambios
-- Slash commands desde el editor
-- Comunica con `trogon-cli` o directamente via NATS/ACP
-
-**Rama:** `feat/jetbrains`
+**Branch:** `feat/cli-noninteractive`
 
 ---
 
-## Ramas de trabajo
+### PR 12 — JetBrains plugin (`trogon-jetbrains`)
+
+- Same concept as the VS Code extension (done by Dev A)
+- JetBrains plugin API (IntelliJ, GoLand, RustRover, etc.)
+- Chat panel inside the editor
+- Inline diffs with accept/reject changes
+- Slash commands from the editor
+- Communicates with `trogon-cli` or directly via NATS/ACP
+
+**Branch:** `feat/jetbrains`
+
+---
+
+## Working branches
 
 ```
-feat/claude-code-replacement    ← rama base compartida con Dev A
+feat/claude-code-replacement    ← shared base branch with Dev A
   feat/cli-core                 ← PR 3 + wiring dispatch
   feat/mentions-parallel        ← PR 5
   feat/cli-tui                  ← PR 8
@@ -186,65 +186,65 @@ feat/claude-code-replacement    ← rama base compartida con Dev A
   feat/jetbrains                ← PR 12
 ```
 
-Cada rama feature hace PR a `feat/claude-code-replacement`, no a `platform` directamente.
+Each feature branch makes a PR to `feat/claude-code-replacement`, not directly to `platform`.
 
-### Flujo cuando Dev B depende de algo de Dev A
+### Flow when Dev B depends on something from Dev A
 
-1. Dev A termina su PR, lo mergea a `feat/claude-code-replacement`
-2. Dev A avisa a Dev B
-3. Dev B sincroniza su rama local:
+1. Dev A finishes their PR, merges it to `feat/claude-code-replacement`
+2. Dev A notifies Dev B
+3. Dev B syncs their local branch:
    ```bash
    git fetch origin
    git merge origin/feat/claude-code-replacement
    ```
-4. Dev B ya tiene los módulos de Dev A disponibles y puede compilar
+4. Dev B now has Dev A's modules available and can compile
 
-`feat/claude-code-replacement` es la fuente de verdad compartida — cada developer sincroniza desde ahí cuando necesita lo que hizo el otro.
+`feat/claude-code-replacement` is the shared source of truth — each developer syncs from there when they need what the other built.
 
 ---
 
-## Contrato de tools — nombres definitivos
+## Tool contract — definitive names
 
-Los nombres están fijados aquí. **No hay coordinación pendiente.** Dev A los implementa exactamente así, Dev B los registra exactamente así.
+The names are fixed here. **There is no pending coordination.** Dev A implements them exactly like this, Dev B registers them exactly like this.
 
-### Nombres de tools
+### Tool names
 
-| Tool | String en `dispatch_tool()` |
+| Tool | String in `dispatch_tool()` |
 |---|---|
-| Leer archivo | `"read_file"` |
-| Escribir archivo | `"write_file"` |
-| Listar directorio | `"list_dir"` |
-| Buscar por patrón | `"glob"` |
-| Editar con reemplazo | `"str_replace"` |
+| Read file | `"read_file"` |
+| Write file | `"write_file"` |
+| List directory | `"list_dir"` |
+| Search by pattern | `"glob"` |
+| Edit with replacement | `"str_replace"` |
 | Git status | `"git_status"` |
 | Git diff | `"git_diff"` |
 | Git log | `"git_log"` |
 | Fetch URL | `"fetch_url"` |
-| Editar notebook | `"notebook_edit"` |
-| Crear/actualizar tarea | `"todo_write"` |
-| Leer tareas | `"todo_read"` |
-| Lanzar sub-agente | `"spawn_agent"` |
+| Edit notebook | `"notebook_edit"` |
+| Create/update task | `"todo_write"` |
+| Read tasks | `"todo_read"` |
+| Launch sub-agent | `"spawn_agent"` |
 
-### Cambio en `ToolContext`
+### Change in `ToolContext`
 
-Dev A agrega el campo `cwd` en `crates/trogon-agent-core/src/tools/mod.rs`:
+Dev A adds the `cwd` field in `crates/trogon-agent-core/src/tools/mod.rs`:
 
 ```rust
 pub struct ToolContext {
     pub proxy_url: String,
-    pub cwd: String,           // directorio de trabajo — viene de session.cwd = current_dir()
+    pub cwd: String,           // working directory — comes from session.cwd = current_dir()
     pub http_client: reqwest::Client,
 }
 ```
 
-### Wiring que hace Dev B — código exacto
+### Wiring that Dev B does — exact code
 
-Abrir `crates/trogon-agent/src/tools/mod.rs`, agregar los imports y los match arms en `dispatch_tool()`:
+Open `crates/trogon-agent/src/tools/mod.rs`, add the imports and match arms in `dispatch_tool()`:
 
 ```rust
 use trogon_agent_core::tools::{fs, editor, git, web};
 
-// en dispatch_tool() — agregar junto a los tools existentes de GitHub/Linear/Slack:
+// in dispatch_tool() — add alongside the existing GitHub/Linear/Slack tools:
 "read_file"      => fs::read_file(ctx, input).await,
 "write_file"     => fs::write_file(ctx, input).await,
 "list_dir"       => fs::list_dir(ctx, input).await,
@@ -260,8 +260,8 @@ use trogon_agent_core::tools::{fs, editor, git, web};
 "spawn_agent"    => agent::spawn(ctx, input).await,
 ```
 
-Dev B puede hacer este PR aunque las implementaciones de Dev A no estén listas — mientras los módulos existan (aunque vacíos), compila.
+Dev B can make this PR even if Dev A's implementations are not ready — as long as the modules exist (even if empty), it compiles.
 
-### Archivo compartido con riesgo de conflicto
+### Shared file with conflict risk
 
-`trogon-agent-core/src/tools/mod.rs` — Dev A y Dev B agregan entries a `dispatch_tool()`. Coordinarse puntualmente si coinciden en ese archivo al mismo tiempo.
+`trogon-agent-core/src/tools/mod.rs` — Dev A and Dev B both add entries to `dispatch_tool()`. Coordinate briefly if they coincide on that file at the same time.
