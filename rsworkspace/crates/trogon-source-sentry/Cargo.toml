@@ -10,10 +10,10 @@ workspace = true
 async-nats = { workspace = true, features = ["jetstream"] }
 axum = { workspace = true }
 hex = "0.4"
-hmac = "0.12"
+hmac = "0.13"
 serde = { workspace = true }
 serde_json = { workspace = true }
-sha2 = "0.10"
+sha2 = "0.11"
 tracing = { workspace = true }
 trogon-nats = { workspace = true }
 trogon-std = { workspace = true }

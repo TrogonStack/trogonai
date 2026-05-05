@@ -79,7 +79,6 @@ where
 }
 
 impl NatsKvLease {
-    #[cfg(not(coverage))]
     pub async fn provision(
         js: &async_nats::jetstream::Context,
         config: &NatsKvLeaseConfig,
