@@ -1,4 +1,5 @@
 use async_nats::jetstream::kv;
+use bytes::Bytes;
 use futures::StreamExt;
 use serde::{Serialize, de::DeserializeOwned};
 use std::collections::BTreeMap;
@@ -282,13 +283,14 @@ async fn read_checkpoint_entry(
 }
 
 async fn write_kv_value(bucket: &kv::Store, key: &str, value: Vec<u8>) -> Result<(), SnapshotStoreError> {
+    let value = Bytes::from(value);
     loop {
         if let Some(entry) = bucket
             .entry(key.to_string())
             .await
             .map_err(|source| SnapshotStoreError::kv_source("failed to read key-value entry for update", source))?
         {
-            match bucket.update(key, value.clone().into(), entry.revision).await {
+            match bucket.update(key, value.clone(), entry.revision).await {
                 Ok(_) => return Ok(()),
                 Err(source) if source.kind() == kv::UpdateErrorKind::WrongLastRevision => continue,
                 Err(source) => {
@@ -299,7 +301,7 @@ async fn write_kv_value(bucket: &kv::Store, key: &str, value: Vec<u8>) -> Result
                 }
             }
         } else {
-            match bucket.create(key, value.clone().into()).await {
+            match bucket.create(key, value.clone()).await {
                 Ok(_) => return Ok(()),
                 Err(source) if source.kind() == kv::CreateErrorKind::AlreadyExists => continue,
                 Err(source) => {

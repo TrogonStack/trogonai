@@ -56,6 +56,12 @@ struct SchedulerJob {
     enabled: bool,
 }
 
+#[derive(Debug, Clone)]
+struct DesiredJobsRollback {
+    stream_id: String,
+    previous: Option<DesiredJobState>,
+}
+
 impl SchedulerJob {
     fn from_event(id: &str, details: v1::JobDetailsView<'_>) -> Self {
         let details = details.to_owned();
@@ -86,8 +92,79 @@ impl PartialEq for SchedulerJob {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
             && self.enabled == other.enabled
-            && protobuf::Serialize::serialize(&self.details).ok() == protobuf::Serialize::serialize(&other.details).ok()
+            && job_details_eq(
+                protobuf::AsView::as_view(&self.details),
+                protobuf::AsView::as_view(&other.details),
+            )
     }
+}
+
+fn job_details_eq(left: v1::JobDetailsView<'_>, right: v1::JobDetailsView<'_>) -> bool {
+    left.has_status() == right.has_status()
+        && left.status() == right.status()
+        && left.has_schedule() == right.has_schedule()
+        && job_schedule_eq(left.schedule(), right.schedule())
+        && left.has_delivery() == right.has_delivery()
+        && job_delivery_eq(left.delivery(), right.delivery())
+        && left.has_message() == right.has_message()
+        && job_message_eq(left.message(), right.message())
+}
+
+fn job_schedule_eq(left: v1::JobScheduleView<'_>, right: v1::JobScheduleView<'_>) -> bool {
+    match (left.kind(), right.kind()) {
+        (v1::job_schedule::KindOneof::At(left), v1::job_schedule::KindOneof::At(right)) => {
+            left.has_at() == right.has_at() && left.at().to_string() == right.at().to_string()
+        }
+        (v1::job_schedule::KindOneof::Every(left), v1::job_schedule::KindOneof::Every(right)) => {
+            left.has_every_sec() == right.has_every_sec() && left.every_sec() == right.every_sec()
+        }
+        (v1::job_schedule::KindOneof::Cron(left), v1::job_schedule::KindOneof::Cron(right)) => {
+            left.has_expr() == right.has_expr()
+                && left.expr().to_string() == right.expr().to_string()
+                && left.has_timezone() == right.has_timezone()
+                && left.timezone().to_string() == right.timezone().to_string()
+        }
+        (v1::job_schedule::KindOneof::not_set(_), v1::job_schedule::KindOneof::not_set(_)) => true,
+        _ => false,
+    }
+}
+
+fn job_delivery_eq(left: v1::JobDeliveryView<'_>, right: v1::JobDeliveryView<'_>) -> bool {
+    match (left.kind(), right.kind()) {
+        (v1::job_delivery::KindOneof::NatsEvent(left), v1::job_delivery::KindOneof::NatsEvent(right)) => {
+            left.has_route() == right.has_route()
+                && left.route().to_string() == right.route().to_string()
+                && left.has_ttl_sec() == right.has_ttl_sec()
+                && left.ttl_sec() == right.ttl_sec()
+                && left.has_source() == right.has_source()
+                && job_sampling_source_eq(left.source(), right.source())
+        }
+        (v1::job_delivery::KindOneof::not_set(_), v1::job_delivery::KindOneof::not_set(_)) => true,
+        _ => false,
+    }
+}
+
+fn job_sampling_source_eq(left: v1::JobSamplingSourceView<'_>, right: v1::JobSamplingSourceView<'_>) -> bool {
+    match (left.kind(), right.kind()) {
+        (
+            v1::job_sampling_source::KindOneof::LatestFromSubject(left),
+            v1::job_sampling_source::KindOneof::LatestFromSubject(right),
+        ) => left.has_subject() == right.has_subject() && left.subject().to_string() == right.subject().to_string(),
+        (v1::job_sampling_source::KindOneof::not_set(_), v1::job_sampling_source::KindOneof::not_set(_)) => true,
+        _ => false,
+    }
+}
+
+fn job_message_eq(left: v1::JobMessageView<'_>, right: v1::JobMessageView<'_>) -> bool {
+    left.has_content() == right.has_content()
+        && left.content().to_string() == right.content().to_string()
+        && left.headers().len() == right.headers().len()
+        && left.headers().iter().zip(right.headers().iter()).all(|(left, right)| {
+            left.has_name() == right.has_name()
+                && left.name().to_string() == right.name().to_string()
+                && left.has_value() == right.has_value()
+                && left.value().to_string() == right.value().to_string()
+        })
 }
 
 pub struct CronController<C = Store, P = NatsSchedulePublisher, L = NatsKvLease> {
@@ -199,9 +276,8 @@ where
                 message = scheduler_watcher.next() => {
                     match message {
                         Some(Ok(message)) => {
-                            let mut next_desired_jobs = desired_jobs.clone();
-                            let change = match handle_scheduler_message(&mut next_desired_jobs, &message).await {
-                                Ok(change) => change,
+                            let (change, rollback) = match handle_scheduler_message(&mut desired_jobs, &message).await {
+                                Ok(result) => result,
                                 Err(error) => {
                                     tracing::error!(error = %error, "Failed to apply scheduler event");
                                     nak_scheduler_message(&message).await;
@@ -210,10 +286,10 @@ where
                             };
                             if let Err(error) = apply_scheduler_change(&self.schedule_publisher, &change).await {
                                 tracing::error!(error = %error, "Failed to publish scheduler change");
+                                rollback.restore(&mut desired_jobs);
                                 nak_scheduler_message(&message).await;
                                 continue;
                             }
-                            desired_jobs = next_desired_jobs;
                             ack_scheduler_message(&message).await;
                         }
                         Some(Err(error)) => {
@@ -437,7 +513,7 @@ fn apply_scheduler_event(
             desired_jobs.insert(stream_id.to_string(), DesiredJobState::Deleted);
             Ok(SchedulerChange::Delete(stream_id.to_string()))
         }
-        v1::job_event::EventOneof::not_set(_) | _ => Err(CronError::event_source(
+        _ => Err(CronError::event_source(
             "scheduler received an event without a supported case",
             std::io::Error::other("missing event case"),
         )),
@@ -447,13 +523,36 @@ fn apply_scheduler_event(
 async fn handle_scheduler_message(
     desired_jobs: &mut DesiredJobs,
     message: &jetstream::Message,
-) -> Result<SchedulerChange, CronError> {
+) -> Result<(SchedulerChange, DesiredJobsRollback), CronError> {
     let event = decode_recorded_watch_message(message)?;
     let stream_id = job_id_from_event_subject(&event.recorded_stream_id)?;
     let data = event
         .decode_data_with(&JobEventCodec)
         .map_err(|source| CronError::event_source("failed to decode watched scheduler event payload", source))?;
-    apply_scheduler_event(desired_jobs, &stream_id, &data)
+    let rollback = DesiredJobsRollback {
+        stream_id: stream_id.clone(),
+        previous: desired_jobs.get(&stream_id).cloned(),
+    };
+    match apply_scheduler_event(desired_jobs, &stream_id, &data) {
+        Ok(change) => Ok((change, rollback)),
+        Err(error) => {
+            rollback.clone().restore(desired_jobs);
+            Err(error)
+        }
+    }
+}
+
+impl DesiredJobsRollback {
+    fn restore(self, desired_jobs: &mut DesiredJobs) {
+        match self.previous {
+            Some(previous) => {
+                desired_jobs.insert(self.stream_id, previous);
+            }
+            None => {
+                desired_jobs.remove(&self.stream_id);
+            }
+        }
+    }
 }
 
 async fn apply_scheduler_change<P: SchedulePublisher<Error = CronError>>(
@@ -670,9 +769,9 @@ mod tests {
     use async_nats::jetstream::consumer::{AckPolicy, DeliverPolicy, ReplayPolicy};
 
     use super::{
-        CronController, DesiredJobState, SchedulerChange, SchedulerJob, apply_scheduler_change, apply_scheduler_event,
-        default_leader_timing, next_scheduler_start_sequence, reconcile_snapshot, scheduler_consumer_config,
-        scheduler_replay_consumer_config,
+        CronController, DesiredJobState, DesiredJobsRollback, SchedulerChange, SchedulerJob, apply_scheduler_change,
+        apply_scheduler_event, default_leader_timing, next_scheduler_start_sequence, reconcile_snapshot,
+        scheduler_consumer_config, scheduler_replay_consumer_config,
     };
     use crate::mocks::{MockCronStore, MockLeaderLock, MockSchedulePublisher};
     use crate::proto::v1;
@@ -865,6 +964,26 @@ mod tests {
         let error = apply_scheduler_event(&mut desired_jobs, "missing", &paused_event("missing")).unwrap_err();
 
         assert!(error.to_string().contains("pause"));
+    }
+
+    #[test]
+    fn desired_jobs_rollback_restores_single_touched_job() {
+        let mut desired_jobs = HashMap::from([(
+            "alpha".to_string(),
+            DesiredJobState::Present(Box::new(expected_job("alpha"))),
+        )]);
+        let rollback = DesiredJobsRollback {
+            stream_id: "alpha".to_string(),
+            previous: desired_jobs.get("alpha").cloned(),
+        };
+
+        apply_scheduler_event(&mut desired_jobs, "alpha", &paused_event("alpha")).unwrap();
+        rollback.restore(&mut desired_jobs);
+
+        assert!(match desired_jobs.get("alpha").unwrap() {
+            DesiredJobState::Present(job) => job.enabled,
+            DesiredJobState::Deleted => false,
+        });
     }
 
     #[tokio::test]

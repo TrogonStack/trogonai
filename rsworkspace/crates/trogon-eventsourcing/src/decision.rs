@@ -11,6 +11,13 @@ impl<T> NonEmpty<T> {
         Self(vec![value])
     }
 
+    pub fn from_first(first: T, rest: Vec<T>) -> Self {
+        let mut values = Vec::with_capacity(rest.len() + 1);
+        values.push(first);
+        values.extend(rest);
+        Self(values)
+    }
+
     pub fn from_vec(values: Vec<T>) -> Option<Self> {
         if values.is_empty() { None } else { Some(Self(values)) }
     }

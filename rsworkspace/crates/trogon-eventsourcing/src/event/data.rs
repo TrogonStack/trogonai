@@ -29,6 +29,22 @@ impl EventData {
         Self::new_with_codec_and_generator(stream_id, codec, &UuidV7Generator, event)
     }
 
+    pub fn new_with_codec_ref<E, C>(stream_id: impl AsRef<str>, codec: &C, event: &E) -> Result<Self, C::Error>
+    where
+        C: EventEnvelopeCodec<E>,
+    {
+        let event_id = codec
+            .event_id(event)
+            .unwrap_or_else(|| EventId::now_v7(&UuidV7Generator));
+        Ok(Self {
+            event_id,
+            event_type: codec.event_type(event)?.to_string(),
+            stream_id: stream_id.as_ref().to_string(),
+            payload: codec.encode(event)?,
+            metadata: None,
+        })
+    }
+
     pub fn new_with_event_id<E>(
         stream_id: impl AsRef<str>,
         event_id: impl Into<EventId>,

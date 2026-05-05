@@ -322,7 +322,7 @@ fn schedule_from_proto(schedule: v1::JobScheduleView<'_>) -> JobEventSchedule {
             expr: inner.expr().to_string(),
             timezone: inner.has_timezone().then(|| inner.timezone().to_string()),
         },
-        v1::job_schedule::KindOneof::not_set(_) | _ => JobEventSchedule::Every { every_sec: 0 },
+        _ => JobEventSchedule::Every { every_sec: 0 },
     }
 }
 
@@ -333,7 +333,7 @@ fn delivery_from_proto(delivery: v1::JobDeliveryView<'_>) -> JobEventDelivery {
             ttl_sec: inner.has_ttl_sec().then(|| inner.ttl_sec()),
             source: inner.has_source().then(|| sampling_source_from_proto(inner.source())),
         },
-        v1::job_delivery::KindOneof::not_set(_) | _ => JobEventDelivery::NatsEvent {
+        _ => JobEventDelivery::NatsEvent {
             route: String::new(),
             ttl_sec: None,
             source: None,
@@ -346,9 +346,7 @@ fn sampling_source_from_proto(source: v1::JobSamplingSourceView<'_>) -> JobEvent
         v1::job_sampling_source::KindOneof::LatestFromSubject(inner) => JobEventSamplingSource::LatestFromSubject {
             subject: inner.subject().to_string(),
         },
-        v1::job_sampling_source::KindOneof::not_set(_) | _ => {
-            JobEventSamplingSource::LatestFromSubject { subject: String::new() }
-        }
+        _ => JobEventSamplingSource::LatestFromSubject { subject: String::new() },
     }
 }
 
@@ -489,7 +487,7 @@ impl StreamAppend<str> for MockCronStore {
                 v1::job_event::EventOneof::JobRemoved(_) => {
                     projected_snapshot = None;
                 }
-                v1::job_event::EventOneof::not_set(_) | _ => {
+                _ => {
                     return Err(CronError::event_source(
                         "failed to project mocked job event without supported case",
                         std::io::Error::other("missing event case"),

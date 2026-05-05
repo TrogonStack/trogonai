@@ -1,6 +1,6 @@
 use async_nats::{
-    HeaderMap, HeaderName,
-    header::NATS_MESSAGE_ID,
+    HeaderMap,
+    header::{IntoHeaderName, NATS_MESSAGE_ID},
     jetstream::{self, context, context::PublishErrorKind, message::PublishMessage, publish::PublishAck},
 };
 use chrono::{DateTime, Utc};
@@ -265,10 +265,10 @@ pub fn record_stream_message(message: StreamMessage) -> Result<RecordedEvent, St
         })?;
 
     let headers = &message.headers;
-    let event_id = required_header_name(headers, NATS_MESSAGE_ID, "Nats-Msg-Id")?
+    let event_id = required_header(headers, NATS_MESSAGE_ID, "Nats-Msg-Id")?
         .parse::<EventId>()
         .map_err(|source| StreamStoreError::read_source("failed to read stream message event id", source))?;
-    let event_type = required_header_str(headers, TROGON_EVENT_TYPE, TROGON_EVENT_TYPE)?.to_string();
+    let event_type = required_header(headers, TROGON_EVENT_TYPE, TROGON_EVENT_TYPE)?.to_string();
     let subject = message.subject.to_string();
 
     Ok(RecordedEvent::new(
@@ -284,22 +284,9 @@ pub fn record_stream_message(message: StreamMessage) -> Result<RecordedEvent, St
     ))
 }
 
-fn required_header_name<'a>(
+fn required_header<'a>(
     headers: &'a HeaderMap,
-    name: HeaderName,
-    display_name: &'static str,
-) -> Result<&'a str, StreamStoreError> {
-    headers.get(name).map(|value| value.as_str()).ok_or_else(|| {
-        StreamStoreError::read_source(
-            "failed to read stream message event envelope",
-            std::io::Error::other(format!("stream message is missing {display_name} header")),
-        )
-    })
-}
-
-fn required_header_str<'a>(
-    headers: &'a HeaderMap,
-    name: &'static str,
+    name: impl IntoHeaderName,
     display_name: &'static str,
 ) -> Result<&'a str, StreamStoreError> {
     headers.get(name).map(|value| value.as_str()).ok_or_else(|| {

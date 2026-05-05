@@ -381,7 +381,7 @@ unsafe impl ::protobuf::__internal::runtime::AssociatedMiniTable for JobAdded {
     unsafe {
       ONCE_LOCK.get_or_init(|| {
         super::trogon__cron__jobs__v1__JobAdded_msg_init.0 =
-            ::protobuf::__internal::runtime::build_mini_table("$a3");
+            ::protobuf::__internal::runtime::build_mini_table("$3");
         ::protobuf::__internal::runtime::link_mini_table(
             super::trogon__cron__jobs__v1__JobAdded_msg_init.0, &[<super::JobDetails as ::protobuf::__internal::runtime::AssociatedMiniTable>::mini_table(),
             ], &[]);

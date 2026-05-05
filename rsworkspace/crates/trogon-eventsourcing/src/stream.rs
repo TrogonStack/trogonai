@@ -1,4 +1,4 @@
-use crate::{Decide, EventData, NonEmpty, RecordedEvent};
+use crate::{EventData, NonEmpty, RecordedEvent};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StreamState {
@@ -15,15 +15,6 @@ impl StreamState {
             None => Self::NoStream,
         }
     }
-}
-
-pub fn resolve_stream_state<C>(write_precondition: Option<StreamState>, current_version: Option<u64>) -> StreamState
-where
-    C: Decide,
-{
-    C::REQUIRED_WRITE_PRECONDITION
-        .or(write_precondition)
-        .unwrap_or_else(|| StreamState::from_current_version(current_version))
 }
 
 #[derive(Debug, Clone, PartialEq)]
