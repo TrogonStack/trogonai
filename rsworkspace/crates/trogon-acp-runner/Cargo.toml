@@ -67,7 +67,7 @@ required-features = ["test-helpers"]
 futures                = "0.3"
 httpmock               = "0.7"
 opentelemetry          = { workspace = true }
-testcontainers-modules = { version = "0.8", features = ["nats"] }
+testcontainers-modules = { workspace = true }
 trogon-nats            = { path = "../trogon-nats", features = ["test-support"] }
 trogon-std             = { path = "../trogon-std", features = ["test-support"] }
 trogon-registry        = { workspace = true, features = ["test-support"] }

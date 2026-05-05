@@ -32,7 +32,7 @@ uuid              = { version = "1", features = ["v4"] }
 futures-util = "0.3"
 trogon-acp-runner = { path = "../trogon-acp-runner", features = ["test-helpers"] }
 trogon-nats = { path = "../trogon-nats", features = ["test-support"] }
-testcontainers-modules = { version = "0.8", features = ["nats"] }
+testcontainers-modules = { workspace = true }
 
 [[bin]]
 name = "trogon-acp"
