@@ -9936,4 +9936,202 @@ mod tests {
             "must make exactly 5 calls: tu1, tu2, tu3(high), summarize(fails), end_turn"
         );
     }
+
+    // ── ElicitationProvider / ask_user ────────────────────────────────────────
+
+    struct ConstElicitation(Option<String>);
+
+    impl ElicitationProvider for ConstElicitation {
+        fn elicit<'a>(
+            &'a self,
+            _question: &'a str,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<String>> + Send + 'a>> {
+            let val = self.0.clone();
+            Box::pin(async move { val })
+        }
+    }
+
+    fn make_ask_user_agent(elicitation: Option<Arc<dyn ElicitationProvider>>) -> AgentLoop {
+        use crate::agent_loop::mock::SequencedMockAnthropicClient;
+        use crate::flag_client::AlwaysOnFlagClient;
+        use crate::tools::{DefaultToolDispatcher, ToolContext};
+
+        let tool_ctx = Arc::new(ToolContext::for_test("http://127.0.0.1:1", "", "", ""));
+        AgentLoop {
+            anthropic_client: Arc::new(SequencedMockAnthropicClient::new(vec![
+                // First call: LLM requests ask_user tool.
+                serde_json::json!({
+                    "stop_reason": "tool_use",
+                    "content": [{
+                        "type": "tool_use",
+                        "id": "tu-ask",
+                        "name": "ask_user",
+                        "input": { "question": "What is your name?" }
+                    }],
+                    "usage": { "input_tokens": 10, "output_tokens": 5 }
+                }),
+                // Second call: LLM finishes.
+                serde_json::json!({
+                    "stop_reason": "end_turn",
+                    "content": [{ "type": "text", "text": "Got it." }],
+                    "usage": { "input_tokens": 15, "output_tokens": 4 }
+                }),
+            ])),
+            model: "test".to_string(),
+            max_iterations: 5,
+            tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),
+            tool_context: tool_ctx,
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            flag_client: Arc::new(AlwaysOnFlagClient),
+            tenant_id: "test-tenant".to_string(),
+            promise_store: None,
+            promise_id: None,
+            permission_checker: None,
+            elicitation_provider: elicitation,
+        }
+    }
+
+    /// When `elicitation_provider` returns `Some(answer)`, `run_chat` feeds that
+    /// answer back to the LLM as the tool result and completes successfully.
+    #[tokio::test]
+    async fn run_chat_ask_user_with_provider_returning_answer_forwards_answer_to_llm() {
+        let provider = Arc::new(ConstElicitation(Some("Alice".to_string()))) as Arc<dyn ElicitationProvider>;
+        let agent = make_ask_user_agent(Some(provider));
+
+        let (_, updated) = agent
+            .run_chat(vec![Message::user_text("ask me something")], &[], None)
+            .await
+            .expect("run_chat must succeed");
+
+        // The tool_result message in the history must contain the elicitation answer.
+        let has_answer = updated.iter().any(|m| {
+            m.content.iter().any(|b| {
+                matches!(b, ContentBlock::ToolResult { content, .. } if content.contains("Alice"))
+            })
+        });
+        assert!(
+            has_answer,
+            "tool_result message must contain the elicitation answer 'Alice', got: {updated:?}"
+        );
+    }
+
+    /// When `elicitation_provider` returns `None` (user declined/cancelled),
+    /// the "declined" message is sent back to the LLM and the run completes.
+    #[tokio::test]
+    async fn run_chat_ask_user_provider_returning_none_sends_declined_message_to_llm() {
+        let provider = Arc::new(ConstElicitation(None)) as Arc<dyn ElicitationProvider>;
+        let agent = make_ask_user_agent(Some(provider));
+
+        let (_, updated) = agent
+            .run_chat(vec![Message::user_text("ask me something")], &[], None)
+            .await
+            .expect("run_chat must succeed");
+
+        let tool_result_msg = updated.iter().find(|m| {
+            m.content.iter().any(|b| {
+                matches!(b, ContentBlock::ToolResult { content, .. }
+                    if content.contains("declined") || content.contains("cancelled"))
+            })
+        });
+        assert!(
+            tool_result_msg.is_some(),
+            "tool_result must contain 'declined' or 'cancelled' when provider returns None"
+        );
+    }
+
+    /// When `elicitation_provider` is `None`, the "not available" message is
+    /// sent back to the LLM for any `ask_user` tool call.
+    #[tokio::test]
+    async fn run_chat_ask_user_without_provider_sends_not_available_to_llm() {
+        let agent = make_ask_user_agent(None); // no elicitation_provider
+
+        let (_, updated) = agent
+            .run_chat(vec![Message::user_text("ask me something")], &[], None)
+            .await
+            .expect("run_chat must succeed");
+
+        let tool_result_msg = updated.iter().find(|m| {
+            m.content.iter().any(|b| {
+                matches!(b, ContentBlock::ToolResult { content, .. }
+                    if content.contains("not available"))
+            })
+        });
+        assert!(
+            tool_result_msg.is_some(),
+            "tool_result must say 'not available' when elicitation_provider is None"
+        );
+    }
+
+    // ── reqwest_error_to_anthropic_error ──────────────────────────────────────
+
+    /// A 4xx response (that is not 429) must produce `AnthropicClientError::Permanent`.
+    #[tokio::test]
+    async fn reqwest_error_4xx_not_429_maps_to_permanent() {
+        use httpmock::prelude::*;
+
+        let server = MockServer::start();
+        server.mock(|when, then| {
+            when.method(GET).path("/test");
+            then.status(400);
+        });
+
+        let resp = reqwest::get(format!("{}/test", server.base_url()))
+            .await
+            .unwrap();
+        let err = resp.error_for_status().unwrap_err();
+        let result = super::reqwest_error_to_anthropic_error(err);
+        assert!(
+            matches!(result, AnthropicClientError::Permanent(_)),
+            "400 must map to Permanent, got: {result:?}"
+        );
+    }
+
+    /// A 429 response must produce `AnthropicClientError::Transient` (it is
+    /// rate-limiting, which is retryable — unlike other 4xx errors).
+    #[tokio::test]
+    async fn reqwest_error_429_maps_to_transient() {
+        use httpmock::prelude::*;
+
+        let server = MockServer::start();
+        server.mock(|when, then| {
+            when.method(GET).path("/test");
+            then.status(429);
+        });
+
+        let resp = reqwest::get(format!("{}/test", server.base_url()))
+            .await
+            .unwrap();
+        let err = resp.error_for_status().unwrap_err();
+        let result = super::reqwest_error_to_anthropic_error(err);
+        assert!(
+            matches!(result, AnthropicClientError::Transient(_)),
+            "429 must map to Transient, got: {result:?}"
+        );
+    }
+
+    /// A 5xx response must produce `AnthropicClientError::Transient`.
+    #[tokio::test]
+    async fn reqwest_error_5xx_maps_to_transient() {
+        use httpmock::prelude::*;
+
+        let server = MockServer::start();
+        server.mock(|when, then| {
+            when.method(GET).path("/test");
+            then.status(503);
+        });
+
+        let resp = reqwest::get(format!("{}/test", server.base_url()))
+            .await
+            .unwrap();
+        let err = resp.error_for_status().unwrap_err();
+        let result = super::reqwest_error_to_anthropic_error(err);
+        assert!(
+            matches!(result, AnthropicClientError::Transient(_)),
+            "503 must map to Transient, got: {result:?}"
+        );
+    }
 }

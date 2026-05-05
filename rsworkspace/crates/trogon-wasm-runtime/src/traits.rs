@@ -171,6 +171,13 @@ pub trait NatsBroker: Clone + Send + Sync + 'static {
     ) -> impl std::future::Future<Output = Result<Self::Sub, Box<dyn std::error::Error + Send + Sync>>>
            + Send;
 
+    fn queue_subscribe(
+        &self,
+        subject: &str,
+        queue_group: &str,
+    ) -> impl std::future::Future<Output = Result<Self::Sub, Box<dyn std::error::Error + Send + Sync>>>
+           + Send;
+
     fn publish(
         &self,
         subject: async_nats::Subject,
@@ -196,6 +203,16 @@ impl NatsBroker for async_nats::Client {
         subject: &str,
     ) -> Result<Self::Sub, Box<dyn std::error::Error + Send + Sync>> {
         self.subscribe(subject.to_string())
+            .await
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+    }
+
+    async fn queue_subscribe(
+        &self,
+        subject: &str,
+        queue_group: &str,
+    ) -> Result<Self::Sub, Box<dyn std::error::Error + Send + Sync>> {
+        async_nats::Client::queue_subscribe(self, subject.to_string(), queue_group.to_string())
             .await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
     }

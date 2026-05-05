@@ -14,9 +14,11 @@ use agent_client_protocol::{
     TextContent,
 };
 use tokio::sync::RwLock;
+use tokio::sync::mpsc;
 use trogon_acp_runner::{
     GatewayConfig, SessionStore, TrogonAgent,
     agent_runner::mock::MockAgentRunner,
+    elicitation::ElicitationTx,
     session_notifier::mock::MockSessionNotifier,
     session_store::mock::MemorySessionStore,
 };
@@ -1422,4 +1424,121 @@ async fn prompt_text_delta_events_are_forwarded_without_error() {
             assert!(result.is_ok(), "prompt with events must succeed");
         })
         .await;
+}
+
+// ── execution backend ─────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn no_execution_backend_bash_tool_not_injected() {
+    // When with_execution_backend is not called, the registry is None and
+    // add_mcp_tools must never be called with a "bash" tool def.
+    let runner = MockAgentRunner::new("claude-test");
+    let agent = TrogonAgent::new(
+        MockSessionNotifier::new(),
+        MemorySessionStore::new(),
+        runner.clone(),
+        "acp",
+        "claude-test",
+        None,
+        None,
+        Arc::new(RwLock::new(None::<GatewayConfig>)),
+    );
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let resp = agent
+                .new_session(NewSessionRequest::new("/cwd"))
+                .await
+                .unwrap();
+            let session_id = resp.session_id.to_string();
+            agent
+                .prompt(PromptRequest::new(session_id, vec![]))
+                .await
+                .unwrap();
+        })
+        .await;
+
+    assert!(
+        !runner.captured_tool_names().contains(&"bash".to_string()),
+        "bash tool must not be injected when no execution backend is configured, got: {:?}",
+        runner.captured_tool_names()
+    );
+}
+
+/// When `TrogonAgent` is constructed with a non-None `elicitation_tx`, the
+/// `prompt()` path must call `set_elicitation_provider` on the cloned runner
+/// before dispatching the request.
+#[tokio::test]
+async fn prompt_injects_elicitation_provider_when_elicitation_tx_is_some() {
+    let (elic_tx, _elic_rx): (ElicitationTx, _) = mpsc::channel(8);
+
+    let runner = MockAgentRunner::new("claude-test");
+    let agent = TrogonAgent::new(
+        MockSessionNotifier::new(),
+        MemorySessionStore::new(),
+        runner.clone(),
+        "acp",
+        "claude-test",
+        None,
+        Some(elic_tx),
+        Arc::new(RwLock::new(None::<GatewayConfig>)),
+    );
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let resp = agent
+                .new_session(NewSessionRequest::new("/cwd"))
+                .await
+                .unwrap();
+            let session_id = resp.session_id.to_string();
+            agent
+                .prompt(PromptRequest::new(session_id, vec![]))
+                .await
+                .unwrap();
+        })
+        .await;
+
+    assert!(
+        *runner.elicitation_provider_set.lock().unwrap(),
+        "set_elicitation_provider must be called when elicitation_tx is Some"
+    );
+}
+
+/// When `TrogonAgent` is constructed with `elicitation_tx: None`, `prompt()`
+/// must NOT call `set_elicitation_provider`.
+#[tokio::test]
+async fn prompt_does_not_inject_elicitation_provider_when_elicitation_tx_is_none() {
+    let runner = MockAgentRunner::new("claude-test");
+    let agent = TrogonAgent::new(
+        MockSessionNotifier::new(),
+        MemorySessionStore::new(),
+        runner.clone(),
+        "acp",
+        "claude-test",
+        None,
+        None,
+        Arc::new(RwLock::new(None::<GatewayConfig>)),
+    );
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let resp = agent
+                .new_session(NewSessionRequest::new("/cwd"))
+                .await
+                .unwrap();
+            let session_id = resp.session_id.to_string();
+            agent
+                .prompt(PromptRequest::new(session_id, vec![]))
+                .await
+                .unwrap();
+        })
+        .await;
+
+    assert!(
+        !*runner.elicitation_provider_set.lock().unwrap(),
+        "set_elicitation_provider must NOT be called when elicitation_tx is None"
+    );
 }

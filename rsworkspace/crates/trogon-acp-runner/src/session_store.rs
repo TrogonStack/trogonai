@@ -162,7 +162,7 @@ impl SessionStore for NatsSessionStore {
 
 // ── In-memory mock (test-helpers feature) ─────────────────────────────────────
 
-#[cfg(feature = "test-helpers")]
+#[cfg(any(test, feature = "test-helpers"))]
 pub mod mock {
     use super::*;
     use std::collections::HashMap;

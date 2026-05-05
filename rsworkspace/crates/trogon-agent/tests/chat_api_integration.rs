@@ -2055,3 +2055,264 @@ async fn send_message_calls_compactor_when_wired() {
         "compactor must receive a NATS request when compactor_nats is wired"
     );
 }
+
+/// When the compactor replies with `compacted: true`, the returned (shorter)
+/// message list is used for the subsequent `run_chat` call instead of the
+/// original history.
+#[tokio::test]
+async fn send_message_uses_compacted_messages_when_compactor_returns_compacted_true() {
+    use futures_util::StreamExt;
+
+    let (env, nats) = start_with_compactor_nats().await;
+
+    let nats2 = nats.clone();
+    tokio::spawn(async move {
+        let mut sub = nats2
+            .subscribe("trogon.compactor.compact")
+            .await
+            .expect("subscribe");
+        if let Some(msg) = sub.next().await {
+            if let Some(reply) = msg.reply {
+                // Return a compacted single-message history.
+                let resp = serde_json::json!({
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": [{"type": "text", "text": "compacted-summary"}]
+                        }
+                    ],
+                    "compacted": true,
+                    "tokens_before": 1000,
+                    "tokens_after": 50
+                });
+                nats2
+                    .publish(reply, serde_json::to_vec(&resp).unwrap().into())
+                    .await
+                    .ok();
+            }
+        }
+    });
+
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    // Expect the LLM call to contain the compacted message text.
+    let lm = env.mock_server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages")
+            .body_contains("compacted-summary");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(end_turn("done"));
+    });
+
+    let created: Value = env
+        .client
+        .post(format!("{}/sessions", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = created["id"].as_str().unwrap();
+
+    let res = env
+        .client
+        .post(format!("{}/sessions/{id}/messages", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({"content": "hello"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200, "send_message must succeed after compaction");
+
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+    lm.assert_hits(1);
+}
+
+/// When no compactor subscriber exists (NATS no-responders), `send_message`
+/// degrades gracefully: the original messages are forwarded to the LLM and
+/// the request succeeds with 200.
+#[tokio::test]
+async fn send_message_succeeds_when_compactor_unavailable() {
+    let (env, _nats) = start_with_compactor_nats().await;
+    // No compactor subscriber — NATS request returns "no responders".
+
+    env.mock_server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(end_turn("ok"));
+    });
+
+    let created: Value = env
+        .client
+        .post(format!("{}/sessions", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = created["id"].as_str().unwrap();
+
+    let res = env
+        .client
+        .post(format!("{}/sessions/{id}/messages", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({"content": "hello"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        res.status(),
+        200,
+        "send_message must succeed even when the compactor is unavailable"
+    );
+}
+
+/// When the compactor responds with bytes that are not valid JSON,
+/// `send_message` degrades gracefully: the original messages are used and
+/// the request succeeds with 200.
+#[tokio::test]
+async fn send_message_succeeds_when_compactor_returns_invalid_json() {
+    use futures_util::StreamExt;
+
+    let (env, nats) = start_with_compactor_nats().await;
+
+    let nats2 = nats.clone();
+    tokio::spawn(async move {
+        let mut sub = nats2
+            .subscribe("trogon.compactor.compact")
+            .await
+            .expect("subscribe");
+        if let Some(msg) = sub.next().await {
+            if let Some(reply) = msg.reply {
+                nats2
+                    .publish(reply, bytes::Bytes::from_static(b"not-valid-json!!!"))
+                    .await
+                    .ok();
+            }
+        }
+    });
+
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    env.mock_server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(end_turn("ok"));
+    });
+
+    let created: Value = env
+        .client
+        .post(format!("{}/sessions", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = created["id"].as_str().unwrap();
+
+    let res = env
+        .client
+        .post(format!("{}/sessions/{id}/messages", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({"content": "hello"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        res.status(),
+        200,
+        "send_message must succeed even when the compactor returns invalid JSON"
+    );
+}
+
+/// When the compactor replies with `compacted: false`, the messages it returns
+/// (even if identical to the originals) are forwarded to the LLM — not the
+/// local copy.  The LLM request body must contain the compactor's message text.
+#[tokio::test]
+async fn send_message_uses_compactor_messages_when_compacted_is_false() {
+    use futures_util::StreamExt;
+
+    let (env, nats) = start_with_compactor_nats().await;
+
+    let nats2 = nats.clone();
+    tokio::spawn(async move {
+        let mut sub = nats2
+            .subscribe("trogon.compactor.compact")
+            .await
+            .expect("subscribe");
+        if let Some(msg) = sub.next().await {
+            if let Some(reply) = msg.reply {
+                // Return a single message with a recognisable marker; compacted=false.
+                let resp = serde_json::json!({
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": [{"type": "text", "text": "not-compacted-marker"}]
+                        }
+                    ],
+                    "compacted": false,
+                    "tokens_before": 10,
+                    "tokens_after": 10
+                });
+                nats2
+                    .publish(reply, serde_json::to_vec(&resp).unwrap().into())
+                    .await
+                    .ok();
+            }
+        }
+    });
+
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    // The mock LLM only matches if the compactor's message reached it.
+    let lm = env.mock_server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages")
+            .body_contains("not-compacted-marker");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(end_turn("done"));
+    });
+
+    let created: Value = env
+        .client
+        .post(format!("{}/sessions", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = created["id"].as_str().unwrap();
+
+    let res = env
+        .client
+        .post(format!("{}/sessions/{id}/messages", env.base_url))
+        .header("x-tenant-id", "acme")
+        .json(&json!({"content": "hello"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200, "send_message must succeed");
+
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+    lm.assert_hits(1);
+}
