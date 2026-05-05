@@ -11,7 +11,7 @@ acp-telemetry = { workspace = true }
 async-nats = { workspace = true, features = ["jetstream"] }
 axum = { workspace = true }
 bytes = { workspace = true }
-sha2 = "0.10"
+sha2 = "0.11"
 subtle = "2.6"
 tokio = { workspace = true, features = ["full"] }
 tracing = { workspace = true }
