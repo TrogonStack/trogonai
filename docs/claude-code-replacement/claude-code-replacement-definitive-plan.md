@@ -519,23 +519,36 @@ Con esa información, Dev B agrega los match arms en `crates/trogon-agent/src/to
 
 ```
 platform
-└── feat/dev-tools                ← rama base compartida
-    ├── feat/core-tools           ← Dev A — PR 1
-    ├── feat/bash-stateful        ← Dev A — PR 2
-    ├── feat/trogon-md            ← Dev A — PR 4
-    ├── feat/mcp-stdio-bridge     ← Dev A — PR 6
-    ├── feat/extra-tools          ← Dev A — PR 7
-    ├── feat/permissions          ← Dev A — PR 10 (permisos)
-    ├── feat/vscode               ← Dev A — PR 11
-    ├── feat/cli-core             ← Dev B — PR 3
-    ├── feat/mentions-parallel    ← Dev B — PR 5
-    ├── feat/cli-tui              ← Dev B — PR 8
-    ├── feat/slash-commands       ← Dev B — PR 9
-    ├── feat/cli-noninteractive   ← Dev B — PR 10 (no-interactivo)
-    └── feat/jetbrains            ← Dev B — PR 12
+└── feat/claude-code-replacement      ← rama base compartida (ya existe en origin)
+    ├── feat/core-tools               ← Dev A — PR 1
+    ├── feat/bash-stateful            ← Dev A — PR 2
+    ├── feat/trogon-md                ← Dev A — PR 4
+    ├── feat/mcp-stdio-bridge         ← Dev A — PR 6
+    ├── feat/extra-tools              ← Dev A — PR 7
+    ├── feat/permissions              ← Dev A — PR 10 (permisos)
+    ├── feat/vscode                   ← Dev A — PR 11
+    ├── feat/cli-core                 ← Dev B — PR 3
+    ├── feat/mentions-parallel        ← Dev B — PR 5
+    ├── feat/cli-tui                  ← Dev B — PR 8
+    ├── feat/slash-commands           ← Dev B — PR 9
+    ├── feat/cli-noninteractive       ← Dev B — PR 10 (no-interactivo)
+    └── feat/jetbrains                ← Dev B — PR 12
 ```
 
-PRs cortos por feature → `feat/dev-tools`. Un solo PR final `feat/dev-tools` → `platform` cuando todo esté listo.
+PRs cortos por feature → `feat/claude-code-replacement`. Un solo PR final `feat/claude-code-replacement` → `platform` cuando todo esté listo.
+
+### Flujo cuando un developer depende de trabajo del otro
+
+1. Dev A (o B) termina su PR y lo mergea a `feat/claude-code-replacement`
+2. Avisa al otro developer
+3. El otro sincroniza su rama local:
+   ```bash
+   git fetch origin
+   git merge origin/feat/claude-code-replacement
+   ```
+4. Ya tiene el trabajo del otro disponible y puede compilar
+
+`feat/claude-code-replacement` es la fuente de verdad compartida — cada developer sincroniza desde ahí cuando necesita lo que hizo el otro.
 
 ---
 
