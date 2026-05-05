@@ -21,5 +21,9 @@ serde_json = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 uuid = { workspace = true }
 
+[dev-dependencies]
+testcontainers-modules = { workspace = true }
+futures = { workspace = true }
+
 [lints]
 workspace = true

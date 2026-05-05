@@ -5153,6 +5153,7 @@ dependencies = [
  "rustyline",
  "serde",
  "serde_json",
+ "testcontainers-modules",
  "tokio",
  "uuid",
 ]
