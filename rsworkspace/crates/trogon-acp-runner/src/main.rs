@@ -74,6 +74,7 @@ async fn main() -> anyhow::Result<()> {
     let thinking_budget: Option<u32> = std::env::var("MAX_THINKING_TOKENS")
         .ok()
         .and_then(|v| v.parse().ok());
+    let anthropic_base_url: Option<String> = std::env::var("ANTHROPIC_BASE_URL").ok();
 
     // ── NATS connection ───────────────────────────────────────────────────────
 
@@ -130,7 +131,7 @@ async fn main() -> anyhow::Result<()> {
         http_client,
         proxy_url,
         anthropic_token,
-        anthropic_base_url: None,
+        anthropic_base_url,
         anthropic_extra_headers: vec![],
         streaming_client: None,
         model: model.clone(),
