@@ -148,17 +148,96 @@ fn decode_job_event(event_type: &str, payload: &[u8]) -> Result<v1::JobEvent, Jo
 
 impl PartialEq for v1::JobEvent {
     fn eq(&self, other: &Self) -> bool {
-        match (
-            protobuf::Serialize::serialize(self),
-            protobuf::Serialize::serialize(other),
-        ) {
-            (Ok(left), Ok(right)) => left == right,
-            _ => false,
-        }
+        job_event_eq(protobuf::AsView::as_view(self), protobuf::AsView::as_view(other))
     }
 }
 
 impl Eq for v1::JobEvent {}
+
+fn job_event_eq(left: v1::JobEventView<'_>, right: v1::JobEventView<'_>) -> bool {
+    match (left.event(), right.event()) {
+        (v1::job_event::EventOneof::JobAdded(left), v1::job_event::EventOneof::JobAdded(right)) => {
+            job_added_eq(left, right)
+        }
+        (v1::job_event::EventOneof::JobPaused(_), v1::job_event::EventOneof::JobPaused(_))
+        | (v1::job_event::EventOneof::JobResumed(_), v1::job_event::EventOneof::JobResumed(_))
+        | (v1::job_event::EventOneof::JobRemoved(_), v1::job_event::EventOneof::JobRemoved(_))
+        | (v1::job_event::EventOneof::not_set(_), v1::job_event::EventOneof::not_set(_)) => true,
+        _ => false,
+    }
+}
+
+fn job_added_eq(left: v1::JobAddedView<'_>, right: v1::JobAddedView<'_>) -> bool {
+    left.has_job() == right.has_job() && job_details_eq(left.job(), right.job())
+}
+
+fn job_details_eq(left: v1::JobDetailsView<'_>, right: v1::JobDetailsView<'_>) -> bool {
+    left.has_status() == right.has_status()
+        && left.status() == right.status()
+        && left.has_schedule() == right.has_schedule()
+        && job_schedule_eq(left.schedule(), right.schedule())
+        && left.has_delivery() == right.has_delivery()
+        && job_delivery_eq(left.delivery(), right.delivery())
+        && left.has_message() == right.has_message()
+        && job_message_eq(left.message(), right.message())
+}
+
+fn job_schedule_eq(left: v1::JobScheduleView<'_>, right: v1::JobScheduleView<'_>) -> bool {
+    match (left.kind(), right.kind()) {
+        (v1::job_schedule::KindOneof::At(left), v1::job_schedule::KindOneof::At(right)) => {
+            left.has_at() == right.has_at() && left.at().to_string() == right.at().to_string()
+        }
+        (v1::job_schedule::KindOneof::Every(left), v1::job_schedule::KindOneof::Every(right)) => {
+            left.has_every_sec() == right.has_every_sec() && left.every_sec() == right.every_sec()
+        }
+        (v1::job_schedule::KindOneof::Cron(left), v1::job_schedule::KindOneof::Cron(right)) => {
+            left.has_expr() == right.has_expr()
+                && left.expr().to_string() == right.expr().to_string()
+                && left.has_timezone() == right.has_timezone()
+                && left.timezone().to_string() == right.timezone().to_string()
+        }
+        (v1::job_schedule::KindOneof::not_set(_), v1::job_schedule::KindOneof::not_set(_)) => true,
+        _ => false,
+    }
+}
+
+fn job_delivery_eq(left: v1::JobDeliveryView<'_>, right: v1::JobDeliveryView<'_>) -> bool {
+    match (left.kind(), right.kind()) {
+        (v1::job_delivery::KindOneof::NatsEvent(left), v1::job_delivery::KindOneof::NatsEvent(right)) => {
+            left.has_route() == right.has_route()
+                && left.route().to_string() == right.route().to_string()
+                && left.has_ttl_sec() == right.has_ttl_sec()
+                && left.ttl_sec() == right.ttl_sec()
+                && left.has_source() == right.has_source()
+                && job_sampling_source_eq(left.source(), right.source())
+        }
+        (v1::job_delivery::KindOneof::not_set(_), v1::job_delivery::KindOneof::not_set(_)) => true,
+        _ => false,
+    }
+}
+
+fn job_sampling_source_eq(left: v1::JobSamplingSourceView<'_>, right: v1::JobSamplingSourceView<'_>) -> bool {
+    match (left.kind(), right.kind()) {
+        (
+            v1::job_sampling_source::KindOneof::LatestFromSubject(left),
+            v1::job_sampling_source::KindOneof::LatestFromSubject(right),
+        ) => left.has_subject() == right.has_subject() && left.subject().to_string() == right.subject().to_string(),
+        (v1::job_sampling_source::KindOneof::not_set(_), v1::job_sampling_source::KindOneof::not_set(_)) => true,
+        _ => false,
+    }
+}
+
+fn job_message_eq(left: v1::JobMessageView<'_>, right: v1::JobMessageView<'_>) -> bool {
+    left.has_content() == right.has_content()
+        && left.content().to_string() == right.content().to_string()
+        && left.headers().len() == right.headers().len()
+        && left.headers().iter().zip(right.headers().iter()).all(|(left, right)| {
+            left.has_name() == right.has_name()
+                && left.name().to_string() == right.name().to_string()
+                && left.has_value() == right.has_value()
+                && left.value().to_string() == right.value().to_string()
+        })
+}
 
 impl SnapshotSchema for state_v1::State {
     const SNAPSHOT_STREAM_PREFIX: &'static str = "cron.command.job.v3.";
@@ -195,6 +274,72 @@ impl<'de> Deserialize<'de> for state_v1::State {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn job_added_event(every_sec: u64) -> v1::JobEvent {
+        let mut event = v1::JobEvent::new();
+        let mut added = v1::JobAdded::new();
+        added.set_job(job_details(every_sec));
+        event.set_job_added(added);
+        event
+    }
+
+    fn job_details(every_sec: u64) -> v1::JobDetails {
+        let mut details = v1::JobDetails::new();
+        details.set_status(v1::JobStatus::Enabled);
+        details.set_schedule(every_schedule(every_sec));
+        details.set_delivery(nats_delivery());
+        details.set_message(message());
+        details
+    }
+
+    fn every_schedule(every_sec: u64) -> v1::JobSchedule {
+        let mut schedule = v1::JobSchedule::new();
+        let mut every = v1::EverySchedule::new();
+        every.set_every_sec(every_sec);
+        schedule.set_every(every);
+        schedule
+    }
+
+    fn nats_delivery() -> v1::JobDelivery {
+        let mut delivery = v1::JobDelivery::new();
+        let mut nats = v1::NatsEventDelivery::new();
+        nats.set_route("cron.jobs.backup");
+        delivery.set_nats_event(nats);
+        delivery
+    }
+
+    fn message() -> v1::JobMessage {
+        let mut message = v1::JobMessage::new();
+        message.set_content(r#"{"job":"backup"}"#);
+        let mut header = v1::Header::new();
+        header.set_name("content-type");
+        header.set_value("application/json");
+        message.headers_mut().push(header);
+        message
+    }
+
+    #[test]
+    fn job_event_partial_eq_compares_fields() {
+        assert_eq!(job_added_event(30), job_added_event(30));
+    }
+
+    #[test]
+    fn job_event_partial_eq_detects_nested_differences() {
+        assert_ne!(job_added_event(30), job_added_event(60));
+    }
+
+    #[test]
+    fn job_event_partial_eq_handles_empty_event_variants() {
+        let mut left = v1::JobEvent::new();
+        left.set_job_paused(v1::JobPaused::new());
+        let mut right = v1::JobEvent::new();
+        right.set_job_paused(v1::JobPaused::new());
+        let mut different = v1::JobEvent::new();
+        different.set_job_removed(v1::JobRemoved::new());
+
+        assert_eq!(left, right);
+        assert_ne!(left, different);
+    }
 
     #[test]
     fn state_snapshot_serializes_as_message_shape() {
