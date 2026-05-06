@@ -1,7 +1,6 @@
 use serde::{Serialize, de::DeserializeOwned};
 
-use super::{EventCodec, EventEnvelopeCodec, EventIdentity, EventType};
-use crate::EventId;
+use super::EventCodec;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct JsonEventCodec;
@@ -18,18 +17,5 @@ where
 
     fn decode(&self, _event_type: &str, _stream_id: &str, payload: &[u8]) -> Result<T, Self::Error> {
         serde_json::from_slice(payload)
-    }
-}
-
-impl<T> EventEnvelopeCodec<T> for JsonEventCodec
-where
-    T: EventType + EventIdentity + Serialize + DeserializeOwned,
-{
-    fn event_type(&self, value: &T) -> Result<&'static str, Self::Error> {
-        Ok(value.event_type())
-    }
-
-    fn event_id(&self, value: &T) -> Option<EventId> {
-        value.event_id()
     }
 }

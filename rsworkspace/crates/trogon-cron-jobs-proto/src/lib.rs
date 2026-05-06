@@ -2,7 +2,7 @@
 
 use protobuf::Parse as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeStruct};
-use trogon_eventsourcing::{CanonicalEventCodec, EventCodec, EventEnvelopeCodec, SnapshotSchema};
+use trogon_eventsourcing::{CanonicalEventCodec, EventCodec, EventIdentity, EventType, SnapshotSchema};
 
 pub mod trogon {
     pub mod cron {
@@ -80,9 +80,13 @@ impl EventCodec<v1::JobEvent> for JobEventCodec {
     }
 }
 
-impl EventEnvelopeCodec<v1::JobEvent> for JobEventCodec {
-    fn event_type(&self, value: &v1::JobEvent) -> Result<&'static str, Self::Error> {
-        job_event_type(value)
+impl EventIdentity for v1::JobEvent {}
+
+impl EventType for v1::JobEvent {
+    type Error = JobEventCodecError;
+
+    fn event_type(&self) -> Result<&'static str, Self::Error> {
+        job_event_type(self)
     }
 }
 

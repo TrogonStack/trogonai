@@ -11,16 +11,8 @@ pub trait EventCodec<T> {
     fn decode(&self, event_type: &str, stream_id: &str, payload: &[u8]) -> Result<T, Self::Error>;
 }
 
-pub trait EventEnvelopeCodec<T>: EventCodec<T> {
-    fn event_type(&self, value: &T) -> Result<&'static str, Self::Error>;
-
-    fn event_id(&self, _value: &T) -> Option<EventId> {
-        None
-    }
-}
-
 pub trait CanonicalEventCodec: Sized {
-    type Codec: EventEnvelopeCodec<Self>;
+    type Codec: EventCodec<Self>;
 
     fn canonical_codec() -> Self::Codec;
 }
@@ -32,5 +24,7 @@ pub trait EventIdentity {
 }
 
 pub trait EventType {
-    fn event_type(&self) -> &'static str;
+    type Error;
+
+    fn event_type(&self) -> Result<&'static str, Self::Error>;
 }

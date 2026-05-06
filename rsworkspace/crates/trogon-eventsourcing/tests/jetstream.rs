@@ -60,8 +60,10 @@ struct TestEvent {
 impl EventIdentity for TestEvent {}
 
 impl EventType for TestEvent {
-    fn event_type(&self) -> &'static str {
-        "test.event"
+    type Error = std::convert::Infallible;
+
+    fn event_type(&self) -> Result<&'static str, Self::Error> {
+        Ok("test.event")
     }
 }
 
@@ -83,8 +85,10 @@ struct CounterIncreased {
 impl EventIdentity for CounterIncreased {}
 
 impl EventType for CounterIncreased {
-    fn event_type(&self) -> &'static str {
-        "test.counter_increased"
+    type Error = std::convert::Infallible;
+
+    fn event_type(&self) -> Result<&'static str, Self::Error> {
+        Ok("test.counter_increased")
     }
 }
 
