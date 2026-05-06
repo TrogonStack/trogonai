@@ -225,17 +225,17 @@ mod tests {
         .unwrap();
         assert_eq!(no_metadata.decode_metadata::<TestMetadata>().unwrap(), None);
 
-        let recorded = RecordedEvent::new(
-            explicit.event_id,
-            explicit.event_type.clone(),
-            explicit.stream_id.clone(),
-            explicit.payload.clone(),
-            explicit.metadata.clone(),
-            "recorded-alpha",
-            Some(7),
-            Some(9),
-            DateTime::<Utc>::from_timestamp(1_700_000_002, 0).unwrap(),
-        );
+        let recorded = RecordedEvent {
+            event_id: explicit.event_id,
+            event_type: explicit.event_type.clone(),
+            event_stream_id: explicit.stream_id.clone(),
+            payload: explicit.payload.clone(),
+            metadata: explicit.metadata.clone(),
+            recorded_stream_id: "recorded-alpha".to_string(),
+            stream_position: Some(7),
+            log_position: Some(9),
+            recorded_at: DateTime::<Utc>::from_timestamp(1_700_000_002, 0).unwrap(),
+        };
 
         assert_eq!(recorded.stream_id(), "alpha");
         assert_eq!(recorded.recorded_stream_id, "recorded-alpha");

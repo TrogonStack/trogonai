@@ -17,31 +17,6 @@ pub struct RecordedEvent {
 }
 
 impl RecordedEvent {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        event_id: EventId,
-        event_type: impl Into<String>,
-        event_stream_id: impl Into<String>,
-        payload: Vec<u8>,
-        metadata: Option<Vec<u8>>,
-        recorded_stream_id: impl Into<String>,
-        stream_position: Option<u64>,
-        log_position: Option<u64>,
-        recorded_at: DateTime<Utc>,
-    ) -> Self {
-        Self {
-            event_id,
-            event_type: event_type.into(),
-            event_stream_id: event_stream_id.into(),
-            payload,
-            metadata,
-            recorded_stream_id: recorded_stream_id.into(),
-            stream_position,
-            log_position,
-            recorded_at,
-        }
-    }
-
     pub fn stream_id(&self) -> &str {
         &self.event_stream_id
     }
