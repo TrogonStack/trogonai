@@ -9,7 +9,7 @@ use agent_client_protocol::{
     WriteTextFileResponse,
 };
 use std::time::Duration;
-use trogon_nats::{FlushClient, PublishClient, RequestClient, publish, request_with_timeout};
+use trogon_nats::{FlushClient, PublishClient, RequestClient};
 
 pub struct NatsClientProxy<N> {
     nats: N,
@@ -47,24 +47,19 @@ impl<N: RequestClient + PublishClient + FlushClient> NatsClientProxy<N> {
         subject: &impl crate::nats::markers::ClientRequestable,
         args: &Req,
     ) -> Result<Resp> {
-        request_with_timeout(&self.nats, &subject.to_string(), args, self.timeout)
+        crate::nats::request_with_timeout(&self.nats, subject, args, self.timeout)
             .await
             .map_err(to_acp_error)
     }
 
     async fn notify<Req: serde::Serialize>(
         &self,
-        subject: &impl crate::nats::markers::ClientRequestable,
+        subject: &impl crate::nats::markers::ClientPublishable,
         args: &Req,
     ) -> Result<()> {
-        publish(
-            &self.nats,
-            &subject.to_string(),
-            args,
-            trogon_nats::PublishOptions::default(),
-        )
-        .await
-        .map_err(to_acp_error)
+        crate::nats::publish(&self.nats, subject, args, trogon_nats::PublishOptions::default())
+            .await
+            .map_err(to_acp_error)
     }
 }
 
