@@ -32,7 +32,7 @@ trogon-source-sentry = { workspace = true }
 trogon-source-slack = { workspace = true }
 trogon-source-telegram = { workspace = true }
 trogon-source-twitter = { workspace = true }
-trogon-std = { workspace = true, features = ["clap", "telemetry-http"] }
+trogon-std = { workspace = true, features = ["clap", "signal", "telemetry-http"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }

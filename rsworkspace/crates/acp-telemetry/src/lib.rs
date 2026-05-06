@@ -2,7 +2,6 @@ pub mod constants;
 mod log;
 mod metric;
 mod service_name;
-pub mod signal;
 mod trace;
 
 pub use service_name::ServiceName;

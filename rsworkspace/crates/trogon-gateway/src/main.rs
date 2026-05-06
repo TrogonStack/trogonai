@@ -130,7 +130,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     join_set.spawn(async move {
         let result = axum::serve(listener, app)
-            .with_graceful_shutdown(acp_telemetry::signal::shutdown_signal())
+            .with_graceful_shutdown(trogon_std::signal::shutdown_signal())
             .await;
         ("http", result.map_err(|e| format!("http server: {e}")))
     });
