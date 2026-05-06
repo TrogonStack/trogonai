@@ -15,7 +15,7 @@ class TrogonSettings : PersistentStateComponent<TrogonSettings.State> {
         var acpPrefix: String = "acp",
     )
 
-    private var state = State()
+    internal var state = State()
 
     override fun getState(): State = state
 

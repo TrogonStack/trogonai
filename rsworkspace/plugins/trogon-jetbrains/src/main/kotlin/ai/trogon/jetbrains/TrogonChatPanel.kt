@@ -171,23 +171,33 @@ class TrogonChatPanel(private val project: Project) : JPanel(BorderLayout()) {
     // ── Slash commands ────────────────────────────────────────────────────────
 
     private fun handleSlashCommand(cmd: String) {
-        when (cmd.substringBefore(' ')) {
-            "/clear" -> {
-                try { doc.remove(0, doc.length) } catch (_: BadLocationException) {}
-                lastResponse.clear()
-                applyButton.isVisible = false
-                appendStyled("Session cleared.\n\n", promptStyle)
-            }
-            "/help" -> appendStyled(
-                "\nCommands:\n" +
+        val response = slashCommandResponse(cmd)
+        if (response == null) {
+            // /clear: side-effecting reset
+            try { doc.remove(0, doc.length) } catch (_: BadLocationException) {}
+            lastResponse.clear()
+            applyButton.isVisible = false
+            appendStyled("Session cleared.\n\n", promptStyle)
+        } else {
+            appendStyled(response, if (cmd.startsWith("/help")) promptStyle else errorStyle)
+        }
+    }
+
+    companion object {
+        /**
+         * Pure slash-command response — no UI side effects.
+         * Returns null for /clear (caller handles the reset), a String for all others.
+         * Extracted for unit testing.
+         */
+        internal fun slashCommandResponse(cmd: String): String? = when (cmd.substringBefore(' ')) {
+            "/clear" -> null
+            "/help" -> "\nCommands:\n" +
                 "  /help    show this help\n" +
                 "  /clear   clear the chat\n\n" +
                 "Keyboard:\n" +
                 "  Enter           send prompt\n" +
-                "  Ctrl+Shift+T    ask about selected code (editor action)\n\n",
-                promptStyle
-            )
-            else -> appendStyled("\nUnknown command: $cmd\n\n", errorStyle)
+                "  Ctrl+Shift+T    ask about selected code (editor action)\n\n"
+            else -> "\nUnknown command: $cmd\n\n"
         }
     }
 
@@ -225,18 +235,21 @@ class TrogonChatPanel(private val project: Project) : JPanel(BorderLayout()) {
     // ── Diff apply ────────────────────────────────────────────────────────────
 
     private fun checkForDiff() {
-        val resp = lastResponse.toString()
-        val hasDiff = resp.lines().any { it.startsWith("+++ ") || it.startsWith("--- ") }
-        applyButton.isVisible = hasDiff
+        applyButton.isVisible = DiffApplier.hasDiff(lastResponse.toString())
     }
 
     /**
-     * Parse the unified diff in [lastResponse] and apply it to the project files
-     * using IntelliJ's document API inside a write command action.
-     * Each file modified shows up in the local history and can be undone.
+     * Parse the unified diff in [lastResponse] via DiffApplier and apply changes
+     * to project files using IntelliJ's document API (undo-able, shows in local history).
      */
     private fun applyDiff() {
-        val patches = parseDiff(lastResponse.toString(), project.basePath ?: return)
+        val basePath = project.basePath ?: return
+        val patches = DiffApplier.parse(lastResponse.toString()) { relPath ->
+            val vf = LocalFileSystem.getInstance().findFileByPath("$basePath/$relPath")
+                ?: return@parse null
+            FileDocumentManager.getInstance().getDocument(vf)?.text?.lines()
+        }
+
         if (patches.isEmpty()) {
             appendStyled("\n[no applicable diff found in the last response]\n", promptStyle)
             return
@@ -244,10 +257,12 @@ class TrogonChatPanel(private val project: Project) : JPanel(BorderLayout()) {
 
         WriteCommandAction.runWriteCommandAction(project, "Apply Trogon Changes", null, {
             var applied = 0
-            patches.forEach { (path, newContent) ->
-                val vf = LocalFileSystem.getInstance().findFileByPath(path) ?: return@forEach
-                val document = FileDocumentManager.getInstance().getDocument(vf) ?: return@forEach
-                document.setText(newContent)
+            patches.forEach { (relPath, newLines) ->
+                val vf = LocalFileSystem.getInstance()
+                    .findFileByPath("$basePath/$relPath") ?: return@forEach
+                val document = FileDocumentManager.getInstance().getDocument(vf)
+                    ?: return@forEach
+                document.setText(newLines.joinToString("\n"))
                 applied++
             }
             onEdt {
@@ -263,99 +278,4 @@ class TrogonChatPanel(private val project: Project) : JPanel(BorderLayout()) {
 
     private fun onEdt(block: () -> Unit) =
         com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater(block)
-
-    // ── Diff parser ───────────────────────────────────────────────────────────
-
-    /**
-     * Parse a unified diff and produce a map of absolute file path → new content.
-     * Reads the current file content and applies hunks line by line.
-     * Returns an empty map if parsing fails or the files are not found.
-     */
-    private fun parseDiff(diff: String, basePath: String): Map<String, String> {
-        val result = mutableMapOf<String, String>()
-        val lines = diff.lines()
-        var i = 0
-
-        while (i < lines.size) {
-            // Find next file header
-            if (!lines[i].startsWith("--- ")) { i++; continue }
-            val minusLine = lines[i]
-            if (i + 1 >= lines.size || !lines[i + 1].startsWith("+++ ")) { i++; continue }
-            val plusLine = lines[i + 1]
-            i += 2
-
-            // Extract relative path (strip "a/" / "b/" prefixes from git diff)
-            val relPath = plusLine.removePrefix("+++ ")
-                .removePrefix("b/")
-                .removePrefix("/")
-                .trim()
-            val absPath = "$basePath/$relPath"
-
-            val vf = LocalFileSystem.getInstance().findFileByPath(absPath) ?: continue
-            val document = FileDocumentManager.getInstance().getDocument(vf) ?: continue
-            val originalLines = document.text.split('\n').toMutableList()
-
-            // Collect and apply hunks
-            val modified = applyHunks(originalLines, lines, i).also { (_, nextI) -> i = nextI }
-
-            result[absPath] = modified.first.joinToString("\n")
-        }
-
-        return result
-    }
-
-    /**
-     * Apply all hunks starting at [startIdx] in [diffLines] against [original].
-     * Returns the modified lines and the index in [diffLines] where we stopped.
-     */
-    private fun applyHunks(
-        original: MutableList<String>,
-        diffLines: List<String>,
-        startIdx: Int,
-    ): Pair<List<String>, Int> {
-        val out = original.toMutableList()
-        var i = startIdx
-        var offset = 0   // cumulative line offset from previous hunks
-
-        while (i < diffLines.size) {
-            val line = diffLines[i]
-            // Stop at next file header or end
-            if (line.startsWith("--- ") && i + 1 < diffLines.size && diffLines[i + 1].startsWith("+++ ")) break
-            if (!line.startsWith("@@")) { i++; continue }
-
-            // Parse @@ -startLine,count +startLine,count @@
-            val hunkHeader = Regex("""^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@""").find(line)
-                ?: run { i++; continue }
-            val oldStart = hunkHeader.groupValues[1].toInt() - 1  // 0-based
-            i++
-
-            var pos = oldStart + offset
-            while (i < diffLines.size) {
-                val hunkLine = diffLines[i]
-                when {
-                    hunkLine.startsWith("@@") -> break
-                    hunkLine.startsWith("--- ") -> break
-                    hunkLine.startsWith("+") -> {
-                        // Insert: add line at current position
-                        val content = hunkLine.substring(1)
-                        if (pos <= out.size) out.add(pos, content) else out.add(content)
-                        pos++
-                        offset++
-                    }
-                    hunkLine.startsWith("-") -> {
-                        // Delete: remove line at current position
-                        if (pos < out.size) { out.removeAt(pos); offset-- }
-                    }
-                    hunkLine.startsWith(" ") -> {
-                        // Context: advance
-                        pos++
-                    }
-                    // "\ No newline at end of file" and similar — skip
-                }
-                i++
-            }
-        }
-
-        return Pair(out, i)
-    }
 }
