@@ -3855,7 +3855,6 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-opentelemetry",
- "tracing-subscriber",
  "uuid",
 ]
 
