@@ -237,9 +237,9 @@ where
 {
     match change {
         SnapshotChange::Upsert { stream_id, snapshot } => {
-            let snapshot_version = snapshot.version;
+            let snapshot_position = snapshot.position;
             let value = serde_json::to_vec(snapshot.as_ref())?;
-            write_snapshot_value::<T>(bucket, &snapshot_key(config, &stream_id), snapshot_version, value).await?;
+            write_snapshot_value::<T>(bucket, &snapshot_key(config, &stream_id), snapshot_position, value).await?;
         }
         SnapshotChange::Delete { stream_id } => {
             delete_kv_value(bucket, &snapshot_key(config, &stream_id)).await?;
@@ -318,7 +318,7 @@ async fn write_kv_value(bucket: &kv::Store, key: &str, value: Vec<u8>) -> Result
 async fn write_snapshot_value<T>(
     bucket: &kv::Store,
     key: &str,
-    snapshot_version: u64,
+    snapshot_position: crate::StreamPosition,
     value: Vec<u8>,
 ) -> Result<(), SnapshotStoreError>
 where
@@ -345,7 +345,7 @@ where
         let current = serde_json::from_slice::<Snapshot<T>>(&entry.value)
             .map_err(|source| SnapshotStoreError::kv_source("failed to decode current snapshot entry", source))?;
 
-        if current.version >= snapshot_version {
+        if current.position >= snapshot_position {
             return Ok(());
         }
 
@@ -394,8 +394,13 @@ async fn delete_kv_value(bucket: &kv::Store, key: &str) -> Result<(), SnapshotSt
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::StreamPosition;
     use crate::snapshot::SnapshotSchema;
     use serde::{Deserialize, Serialize};
+
+    fn position(value: u64) -> StreamPosition {
+        StreamPosition::try_new(value).expect("test stream position must be non-zero")
+    }
 
     #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
     struct TestPayload {
@@ -453,15 +458,15 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_constructors_keep_version_and_payload() {
+    fn snapshot_constructors_keep_position_and_payload() {
         let snapshot = Snapshot::new(
-            9,
+            position(9),
             TestPayload {
                 id: "backup".to_string(),
             },
         );
 
-        assert_eq!(snapshot.version, 9);
+        assert_eq!(snapshot.position, position(9));
         assert_eq!(snapshot.payload.id, "backup");
     }
 
@@ -470,7 +475,7 @@ mod tests {
         let upsert = SnapshotChange::upsert(
             "backup",
             Snapshot::new(
-                3,
+                position(3),
                 TestPayload {
                     id: "backup".to_string(),
                 },
@@ -483,7 +488,7 @@ mod tests {
             SnapshotChange::Upsert {
                 stream_id: "backup".to_string(),
                 snapshot: Box::new(Snapshot::new(
-                    3,
+                    position(3),
                     TestPayload {
                         id: "backup".to_string(),
                     },
@@ -501,7 +506,7 @@ mod tests {
     #[test]
     fn snapshot_round_trips_with_nested_payload() {
         let snapshot = Snapshot::new(
-            7,
+            position(7),
             TestPayload {
                 id: "backup".to_string(),
             },
@@ -510,7 +515,7 @@ mod tests {
         let json = serde_json::to_string(&snapshot).unwrap();
         let decoded: Snapshot<TestPayload> = serde_json::from_str(&json).unwrap();
 
-        assert!(json.contains("\"version\":7"));
+        assert!(json.contains("\"position\":7"));
         assert!(json.contains("\"payload\""));
         assert_eq!(decoded, snapshot);
     }

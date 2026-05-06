@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use trogon_std::UuidV7Generator;
 
 use super::{EncodeEventError, EventDataEncodeError, RecordedEvent};
-use crate::{EventCodec, EventId, EventIdentity, EventType};
+use crate::{EventCodec, EventId, EventIdentity, EventType, StreamPosition};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct EventData {
@@ -44,7 +44,7 @@ impl EventData {
     pub fn record(
         self,
         recorded_stream_id: impl Into<String>,
-        stream_position: Option<u64>,
+        stream_position: Option<StreamPosition>,
         log_position: Option<u64>,
         recorded_at: DateTime<Utc>,
     ) -> RecordedEvent {

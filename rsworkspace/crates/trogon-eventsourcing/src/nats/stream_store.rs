@@ -25,7 +25,7 @@ pub enum StreamStoreError {
 }
 
 impl StreamStoreError {
-    fn read_source<E>(context: &'static str, source: E) -> Self
+    pub(crate) fn read_source<E>(context: &'static str, source: E) -> Self
     where
         E: std::error::Error + Send + Sync + 'static,
     {
@@ -74,7 +74,7 @@ pub async fn append_stream<J>(
     subject: String,
     expected_last_subject_sequence: Option<u64>,
     events: &NonEmpty<EventData>,
-) -> Result<u64, StreamStoreError>
+) -> Result<crate::StreamPosition, StreamStoreError>
 where
     J: JetStreamPublishMessage<PublishError = context::PublishError, AckFuture = context::PublishAckFuture>,
 {
@@ -144,7 +144,8 @@ where
         }
     };
 
-    Ok(batch_sequence)
+    crate::StreamPosition::try_new(batch_sequence)
+        .map_err(|source| StreamStoreError::publish_source("failed to read stream append position", source))
 }
 
 fn build_publish_message(

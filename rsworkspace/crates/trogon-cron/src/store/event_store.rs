@@ -47,7 +47,7 @@ impl StreamAppend<str> for EventStore {
             self.inner.snapshot_bucket(),
             stream_id,
             projected_events.as_slice(),
-            outcome.next_expected_version,
+            outcome.stream_position,
         )
         .await?;
 

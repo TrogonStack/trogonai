@@ -258,6 +258,11 @@ fn validate_schedule_stream(stream: &jetstream::stream::Stream) -> Result<(), Cr
 mod tests {
     use super::*;
     use crate::config::JobWriteCondition;
+    use trogon_eventsourcing::StreamPosition;
+
+    fn position(value: u64) -> StreamPosition {
+        StreamPosition::try_new(value).expect("test stream position must be non-zero")
+    }
 
     #[test]
     fn parse_server_version_supports_dev_suffixes() {
@@ -267,15 +272,15 @@ mod tests {
     }
 
     #[test]
-    fn write_condition_rejects_unexpected_version() {
-        let error = JobWriteCondition::MustBeAtVersion(3)
-            .ensure("alpha", JobWriteState::new(Some(4), true))
+    fn write_condition_rejects_unexpected_position() {
+        let error = JobWriteCondition::MustBeAtPosition(position(3))
+            .ensure("alpha", JobWriteState::new(Some(position(4)), true))
             .unwrap_err();
 
         assert!(matches!(
             error,
             CronError::OptimisticConcurrencyConflict {
-                current_version: Some(4),
+                current_position: Some(_),
                 ..
             }
         ));
@@ -286,25 +291,27 @@ mod tests {
         let state = resolve_event_subject_state("alpha", None, None).unwrap();
 
         assert_eq!(state.prefix, EventSubjectPrefix::Canonical);
-        assert_eq!(state.write_state.current_version(), None);
+        assert_eq!(state.write_state.current_position(), None);
         assert!(!state.write_state.exists());
     }
 
     #[test]
     fn legacy_streams_keep_legacy_event_subject() {
-        let state = resolve_event_subject_state("alpha", None, Some(JobWriteState::new(Some(12), true))).unwrap();
+        let state =
+            resolve_event_subject_state("alpha", None, Some(JobWriteState::new(Some(position(12)), true))).unwrap();
 
         assert_eq!(state.prefix, EventSubjectPrefix::Legacy);
-        assert_eq!(state.write_state.current_version(), Some(12));
+        assert_eq!(state.write_state.current_position(), Some(position(12)));
         assert!(state.write_state.exists());
     }
 
     #[test]
     fn deleted_streams_keep_their_subject_and_still_count_as_existing() {
-        let state = resolve_event_subject_state("alpha", Some(JobWriteState::new(Some(12), true)), None).unwrap();
+        let state =
+            resolve_event_subject_state("alpha", Some(JobWriteState::new(Some(position(12)), true)), None).unwrap();
 
         assert_eq!(state.prefix, EventSubjectPrefix::Canonical);
-        assert_eq!(state.write_state.current_version(), Some(12));
+        assert_eq!(state.write_state.current_position(), Some(position(12)));
         assert!(state.write_state.exists());
     }
 
@@ -312,8 +319,8 @@ mod tests {
     fn split_stream_subjects_are_rejected() {
         let error = resolve_event_subject_state(
             "alpha",
-            Some(JobWriteState::new(Some(7), true)),
-            Some(JobWriteState::new(Some(9), true)),
+            Some(JobWriteState::new(Some(position(7)), true)),
+            Some(JobWriteState::new(Some(position(9)), true)),
         )
         .unwrap_err();
 

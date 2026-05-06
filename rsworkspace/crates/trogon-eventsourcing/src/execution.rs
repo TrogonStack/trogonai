@@ -3,7 +3,7 @@ use crate::snapshot::{
     WriteSnapshotRequest,
 };
 use crate::stream::{
-    AppendStreamRequest, AppendStreamResponse, ReadStreamRequest, StreamAppend, StreamRead, StreamState,
+    AppendStreamRequest, AppendStreamResponse, ReadStreamRequest, StreamAppend, StreamPosition, StreamRead, StreamState,
 };
 use crate::{
     CanonicalEventCodec, Decide, Decision, EventCodec, EventData, EventDataEncodeError, EventIdentity, EventType,
@@ -42,7 +42,16 @@ pub enum SnapshotDecision {
 
 #[derive(Debug, Clone, Copy)]
 pub struct SnapshotDecisionContext<'a, State, Event> {
-    pub next_expected_version: u64,
+    /// The stream high-watermark after the append that may trigger a snapshot.
+    ///
+    /// Use this as the checkpoint position if the policy decides to snapshot.
+    /// Do not use it as a gapless event count.
+    pub stream_position: StreamPosition,
+    /// Number of events this execution applied since the loaded snapshot.
+    ///
+    /// Frequency-based policies use this value instead of `stream_position`
+    /// because stream positions may be sparse.
+    pub events_since_snapshot: u64,
     pub state: &'a State,
     pub events: &'a NonEmpty<Event>,
 }
@@ -94,7 +103,7 @@ impl FrequencySnapshot {
 
 impl<State, Event> SnapshotPolicy<State, Event> for FrequencySnapshot {
     fn snapshot_decision(&self, context: SnapshotDecisionContext<'_, State, Event>) -> SnapshotDecision {
-        if context.next_expected_version.is_multiple_of(self.frequency.get()) {
+        if context.events_since_snapshot >= self.frequency.get() {
             SnapshotDecision::Take
         } else {
             SnapshotDecision::Skip
@@ -104,7 +113,8 @@ impl<State, Event> SnapshotPolicy<State, Event> for FrequencySnapshot {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecutionResult<State, Event> {
-    pub next_expected_version: u64,
+    /// The stream high-watermark after the command append completed.
+    pub stream_position: StreamPosition,
     pub events: NonEmpty<Event>,
     pub state: State,
 }
@@ -124,8 +134,8 @@ pub enum CommandFailure<DecideError, EvolveError, RuntimeError> {
     EncodeEvent(BoxError),
     DecodeEvent(BoxError),
     SnapshotAheadOfStream {
-        snapshot_version: u64,
-        stream_version: Option<u64>,
+        snapshot_position: StreamPosition,
+        stream_position: Option<StreamPosition>,
     },
 }
 
@@ -326,7 +336,7 @@ impl<'a, E, C, S, EC> CommandExecutionWithCodec<'a, E, C, S, EC> {
 
     async fn append_decision<SErr>(
         &self,
-        current_version: Option<u64>,
+        current_position: Option<StreamPosition>,
         stream_id: &C::StreamId,
         state: C::State,
     ) -> ExecutionStep<C, SErr, (AppendStreamResponse, NonEmpty<C::Event>, C::State)>
@@ -343,7 +353,7 @@ impl<'a, E, C, S, EC> CommandExecutionWithCodec<'a, E, C, S, EC> {
         let state = evolve_events::<C, SErr>(state, &events)?;
         let encoded_events = encode_events(stream_id.as_ref(), &self.event_codec, &events)
             .map_err(|source| CommandFailure::EncodeEvent(box_error(source)))?;
-        let stream_state = resolve_stream_state::<C>(self.write_precondition, current_version);
+        let stream_state = resolve_stream_state::<C>(self.write_precondition, current_position);
         let append_outcome = self
             .event_store
             .append_stream(AppendStreamRequest::new(stream_id, stream_state, encoded_events))
@@ -424,12 +434,12 @@ where
             .read_stream(ReadStreamRequest::new(stream_id, 1))
             .await
             .map_err(|source| CommandFailure::ReadStream(source))?;
-        let current_version = stream_read.current_version;
+        let current_position = stream_read.current_position;
         let state = replay_recorded_events::<C, EC, SErr>(C::initial_state(), stream_read.events, &self.event_codec)?;
-        let (append_outcome, events, state) = self.append_decision::<SErr>(current_version, stream_id, state).await?;
+        let (append_outcome, events, state) = self.append_decision::<SErr>(current_position, stream_id, state).await?;
 
         Ok(ExecutionResult {
-            next_expected_version: append_outcome.next_expected_version,
+            stream_position: append_outcome.stream_position,
             events,
             state,
         })
@@ -500,35 +510,40 @@ where
             .await
             .map_err(|source| CommandFailure::ReadSnapshot(source))?;
         let snapshot = snapshot.snapshot;
-        let snapshot_version = snapshot.as_ref().map(|snapshot| snapshot.version);
+        let snapshot_position = snapshot.as_ref().map(|snapshot| snapshot.position);
         let state = snapshot
             .map(|snapshot| snapshot.payload)
             .unwrap_or_else(C::initial_state);
-        let start_sequence = snapshot_version.map(|version| version.saturating_add(1)).unwrap_or(1);
+        let start_sequence = snapshot_position
+            .map(|position| position.get().saturating_add(1))
+            .unwrap_or(1);
         let stream_read = self
             .event_store
             .read_stream(ReadStreamRequest::new(stream_id, start_sequence))
             .await
             .map_err(|source| CommandFailure::ReadStream(source))?;
-        let current_version = stream_read.current_version;
+        let current_position = stream_read.current_position;
 
-        if let Some(snapshot_version) = snapshot_version {
-            match current_version {
-                Some(stream_version) if snapshot_version <= stream_version => {}
-                stream_version => {
+        if let Some(snapshot_position) = snapshot_position {
+            match current_position {
+                Some(stream_position) if snapshot_position <= stream_position => {}
+                stream_position => {
                     return Err(CommandFailure::SnapshotAheadOfStream {
-                        snapshot_version,
-                        stream_version,
+                        snapshot_position,
+                        stream_position,
                     });
                 }
             }
         }
 
+        let replayed_event_count = stream_read.events.len() as u64;
         let state = replay_recorded_events::<C, EC, SErr>(state, stream_read.events, &self.event_codec)?;
-        let (append_outcome, events, state) = self.append_decision::<SErr>(current_version, stream_id, state).await?;
+        let (append_outcome, events, state) = self.append_decision::<SErr>(current_position, stream_id, state).await?;
+        let events_since_snapshot = replayed_event_count + events.len() as u64;
 
         let snapshot_decision = self.snapshots.policy.snapshot_decision(SnapshotDecisionContext {
-            next_expected_version: append_outcome.next_expected_version,
+            stream_position: append_outcome.stream_position,
+            events_since_snapshot,
             state: &state,
             events: &events,
         });
@@ -539,12 +554,12 @@ where
                 self.snapshots.snapshot_store,
                 self.snapshots.snapshot_config.clone(),
                 stream_id,
-                Snapshot::new(append_outcome.next_expected_version, state.clone()),
+                Snapshot::new(append_outcome.stream_position, state.clone()),
             );
         }
 
         Ok(ExecutionResult {
-            next_expected_version: append_outcome.next_expected_version,
+            stream_position: append_outcome.stream_position,
             events,
             state,
         })
@@ -558,13 +573,16 @@ where
     Box::new(error)
 }
 
-fn resolve_stream_state<C>(write_precondition: Option<StreamState>, current_version: Option<u64>) -> StreamState
+fn resolve_stream_state<C>(
+    write_precondition: Option<StreamState>,
+    current_position: Option<StreamPosition>,
+) -> StreamState
 where
     C: Decide,
 {
     C::REQUIRED_WRITE_PRECONDITION
         .or(write_precondition)
-        .unwrap_or_else(|| StreamState::from_current_version(current_version))
+        .unwrap_or_else(|| StreamState::from_current_position(current_position))
 }
 
 fn schedule_snapshot_write<S, State, StreamId, Spawn>(
@@ -661,6 +679,10 @@ mod tests {
         SnapshotSchema, WriteSnapshotResponse,
     };
 
+    fn position(value: u64) -> StreamPosition {
+        StreamPosition::try_new(value).expect("test stream position must be non-zero")
+    }
+
     #[derive(Debug, Clone)]
     struct TestCommand {
         id: String,
@@ -749,12 +771,12 @@ mod tests {
         }
     }
 
-    #[derive(Debug, Default, Clone)]
+    #[derive(Debug, Clone)]
     struct FakeRuntime {
         snapshot: Option<Snapshot<TestState>>,
-        current_version: Option<u64>,
+        current_position: Option<StreamPosition>,
         recorded_events: Vec<RecordedEvent>,
-        next_expected_version: u64,
+        stream_position: StreamPosition,
         fail_read_snapshot: bool,
         fail_write_snapshot: bool,
         fail_read_stream: bool,
@@ -764,6 +786,26 @@ mod tests {
         stream_states: Arc<Mutex<Vec<StreamState>>>,
         appended_events: Arc<Mutex<Vec<EventData>>>,
         written_snapshots: Arc<Mutex<Vec<Snapshot<TestState>>>>,
+    }
+
+    impl Default for FakeRuntime {
+        fn default() -> Self {
+            Self {
+                snapshot: None,
+                current_position: None,
+                recorded_events: Vec::new(),
+                stream_position: position(1),
+                fail_read_snapshot: false,
+                fail_write_snapshot: false,
+                fail_read_stream: false,
+                fail_append: false,
+                loaded_stream_ids: Arc::new(Mutex::new(Vec::new())),
+                read_from_sequences: Arc::new(Mutex::new(Vec::new())),
+                stream_states: Arc::new(Mutex::new(Vec::new())),
+                appended_events: Arc::new(Mutex::new(Vec::new())),
+                written_snapshots: Arc::new(Mutex::new(Vec::new())),
+            }
+        }
     }
 
     impl TestCommand {
@@ -948,7 +990,7 @@ mod tests {
             }
             self.read_from_sequences.lock().unwrap().push(request.from_sequence);
             Ok(ReadStreamResponse {
-                current_version: self.current_version,
+                current_position: self.current_position,
                 events: self
                     .recorded_events
                     .iter()
@@ -972,7 +1014,7 @@ mod tests {
             self.stream_states.lock().unwrap().push(request.stream_state);
             self.appended_events.lock().unwrap().extend(request.events.into_vec());
             Ok(AppendStreamResponse {
-                next_expected_version: self.next_expected_version,
+                stream_position: self.stream_position,
             })
         }
     }
@@ -1021,7 +1063,7 @@ mod tests {
             .unwrap()
             .record(
                 "stream-alpha",
-                Some(sequence),
+                Some(position(sequence)),
                 Some(sequence),
                 DateTime::<Utc>::from_timestamp(1_700_000_000 + sequence as i64, 0).unwrap(),
             )
@@ -1030,14 +1072,14 @@ mod tests {
     #[test]
     fn executes_from_initial_state_without_snapshot_or_history() {
         let runtime = FakeRuntime {
-            next_expected_version: 1,
+            stream_position: position(1),
             ..Default::default()
         };
         let command = TestCommand::new("alpha", TestAction::Register);
 
         let result = block_on(CommandExecution::new(&runtime, &command).execute_result()).unwrap();
 
-        assert_eq!(result.next_expected_version, 1);
+        assert_eq!(result.stream_position, position(1));
         assert_eq!(result.state, TestState::Present { enabled: true });
         assert_eq!(
             result.events,
@@ -1053,10 +1095,10 @@ mod tests {
     }
 
     #[test]
-    fn restores_from_snapshot_and_reads_only_delta_after_snapshot_version() {
+    fn restores_from_snapshot_and_reads_only_delta_after_snapshot_position() {
         let runtime = FakeRuntime {
-            snapshot: Some(Snapshot::new(1, TestState::Present { enabled: true })),
-            current_version: Some(2),
+            snapshot: Some(Snapshot::new(position(1), TestState::Present { enabled: true })),
+            current_position: Some(position(2)),
             recorded_events: vec![
                 recorded_event(
                     1,
@@ -1072,7 +1114,7 @@ mod tests {
                     },
                 ),
             ],
-            next_expected_version: 3,
+            stream_position: position(3),
             ..Default::default()
         };
         let command = TestCommand::new("alpha", TestAction::Remove);
@@ -1087,7 +1129,7 @@ mod tests {
         assert_eq!(runtime.read_from_sequences.lock().unwrap().as_slice(), &[2]);
         assert_eq!(
             runtime.stream_states.lock().unwrap().as_slice(),
-            &[StreamState::StreamRevision(2)]
+            &[StreamState::At(position(2))]
         );
         assert_eq!(result.state, TestState::Missing);
     }
@@ -1095,8 +1137,8 @@ mod tests {
     #[test]
     fn errors_when_snapshot_is_ahead_of_stream() {
         let runtime = FakeRuntime {
-            snapshot: Some(Snapshot::new(3, TestState::Present { enabled: true })),
-            current_version: Some(2),
+            snapshot: Some(Snapshot::new(position(3), TestState::Present { enabled: true })),
+            current_position: Some(position(2)),
             ..Default::default()
         };
         let command = TestCommand::new("alpha", TestAction::Remove);
@@ -1108,20 +1150,22 @@ mod tests {
         )
         .unwrap_err();
 
-        assert!(matches!(
-            error,
-            CommandFailure::SnapshotAheadOfStream {
-                snapshot_version: 3,
-                stream_version: Some(2),
-            }
-        ));
+        let CommandFailure::SnapshotAheadOfStream {
+            snapshot_position,
+            stream_position,
+        } = error
+        else {
+            panic!("expected snapshot ahead of stream");
+        };
+        assert_eq!(snapshot_position, position(3));
+        assert_eq!(stream_position, Some(position(2)));
     }
 
     #[test]
     fn errors_when_snapshot_exists_without_stream_history() {
         let runtime = FakeRuntime {
-            snapshot: Some(Snapshot::new(1, TestState::Present { enabled: true })),
-            current_version: None,
+            snapshot: Some(Snapshot::new(position(1), TestState::Present { enabled: true })),
+            current_position: None,
             ..Default::default()
         };
         let command = TestCommand::new("alpha", TestAction::Remove);
@@ -1133,19 +1177,21 @@ mod tests {
         )
         .unwrap_err();
 
-        assert!(matches!(
-            error,
-            CommandFailure::SnapshotAheadOfStream {
-                snapshot_version: 1,
-                stream_version: None,
-            }
-        ));
+        let CommandFailure::SnapshotAheadOfStream {
+            snapshot_position,
+            stream_position,
+        } = error
+        else {
+            panic!("expected snapshot ahead of stream");
+        };
+        assert_eq!(snapshot_position, position(1));
+        assert_eq!(stream_position, None);
     }
 
     #[test]
     fn propagates_replay_evolve_failures() {
         let runtime = FakeRuntime {
-            current_version: Some(1),
+            current_position: Some(position(1)),
             recorded_events: vec![recorded_event(
                 1,
                 TestEvent::Broken {
@@ -1164,7 +1210,7 @@ mod tests {
     #[test]
     fn does_not_append_events_that_cannot_evolve() {
         let runtime = FakeRuntime {
-            next_expected_version: 1,
+            stream_position: position(1),
             ..Default::default()
         };
         let command = TestCommand::new("alpha", TestAction::EmitBroken);
@@ -1179,8 +1225,8 @@ mod tests {
     #[test]
     fn propagates_decision_failures() {
         let runtime = FakeRuntime {
-            snapshot: Some(Snapshot::new(1, TestState::Present { enabled: true })),
-            current_version: Some(1),
+            snapshot: Some(Snapshot::new(position(1), TestState::Present { enabled: true })),
+            current_position: Some(position(1)),
             ..Default::default()
         };
         let command = TestCommand::new("alpha", TestAction::Register);
@@ -1199,11 +1245,11 @@ mod tests {
     }
 
     #[test]
-    fn encodes_emitted_events_and_returns_next_expected_version() {
+    fn encodes_emitted_events_and_returns_stream_position() {
         let runtime = FakeRuntime {
-            snapshot: Some(Snapshot::new(1, TestState::Present { enabled: true })),
-            current_version: Some(1),
-            next_expected_version: 2,
+            snapshot: Some(Snapshot::new(position(1), TestState::Present { enabled: true })),
+            current_position: Some(position(1)),
+            stream_position: position(2),
             ..Default::default()
         };
         let command = TestCommand::new("alpha", TestAction::Disable);
@@ -1216,10 +1262,10 @@ mod tests {
         .unwrap();
         let appended_events = runtime.appended_events.lock().unwrap();
 
-        assert_eq!(result.next_expected_version, 2);
+        assert_eq!(result.stream_position, position(2));
         assert_eq!(
             runtime.stream_states.lock().unwrap().as_slice(),
-            &[StreamState::StreamRevision(1)]
+            &[StreamState::At(position(1))]
         );
         assert_eq!(appended_events.len(), 1);
         assert_eq!(appended_events[0].event_type, "state_changed");
@@ -1230,7 +1276,7 @@ mod tests {
     #[test]
     fn supports_custom_event_codecs() {
         let runtime = FakeRuntime {
-            current_version: Some(1),
+            current_position: Some(position(1)),
             recorded_events: vec![
                 EventData::from_event(
                     "alpha",
@@ -1242,12 +1288,12 @@ mod tests {
                 .unwrap()
                 .record(
                     "stream-alpha",
-                    Some(1),
+                    Some(position(1)),
                     Some(1),
                     DateTime::<Utc>::from_timestamp(1_700_000_001, 0).unwrap(),
                 ),
             ],
-            next_expected_version: 2,
+            stream_position: position(2),
             ..Default::default()
         };
         let command = TestCommand::new("alpha", TestAction::Disable);
@@ -1266,16 +1312,16 @@ mod tests {
     }
 
     #[test]
-    fn falls_back_to_exact_current_version_when_command_has_no_required_rule() {
+    fn falls_back_to_exact_current_position_when_command_has_no_required_rule() {
         let runtime = FakeRuntime {
-            current_version: Some(7),
+            current_position: Some(position(7)),
             recorded_events: vec![recorded_event(
                 7,
                 TestEvent::Registered {
                     id: "alpha".to_string(),
                 },
             )],
-            next_expected_version: 8,
+            stream_position: position(8),
             ..Default::default()
         };
         let command = TestCommand::new("alpha", TestAction::Remove);
@@ -1284,14 +1330,14 @@ mod tests {
 
         assert_eq!(
             runtime.stream_states.lock().unwrap().as_slice(),
-            &[StreamState::StreamRevision(7)]
+            &[StreamState::At(position(7))]
         );
     }
 
     #[test]
-    fn explicit_write_precondition_overrides_exact_current_version_fallback() {
+    fn explicit_write_precondition_overrides_exact_current_position_fallback() {
         let runtime = FakeRuntime {
-            next_expected_version: 1,
+            stream_position: position(1),
             ..Default::default()
         };
         let command = TestCommand::new("alpha", TestAction::Register);
@@ -1309,7 +1355,7 @@ mod tests {
     #[test]
     fn required_command_rule_uses_required_stream_state() {
         let runtime = FakeRuntime {
-            next_expected_version: 1,
+            stream_position: position(1),
             ..Default::default()
         };
         let command = RequiredRegisterCommand::new("alpha");
@@ -1330,7 +1376,7 @@ mod tests {
     #[test]
     fn writes_snapshot_when_policy_requests_it() {
         let runtime = FakeRuntime {
-            next_expected_version: 1,
+            stream_position: position(1),
             ..Default::default()
         };
         let command = TestCommand::new("alpha", TestAction::Register);
@@ -1345,44 +1391,51 @@ mod tests {
         assert_eq!(result.state, TestState::Present { enabled: true });
         assert_eq!(
             runtime.written_snapshots.lock().unwrap().as_slice(),
-            &[Snapshot::new(1, TestState::Present { enabled: true })]
+            &[Snapshot::new(position(1), TestState::Present { enabled: true })]
         );
     }
 
     #[test]
-    fn frequency_snapshot_writes_on_matching_revision() {
-        const EVERY_THREE_REVISIONS: NonZeroU64 = NonZeroU64::new(3).expect("snapshot cadence must be non-zero");
+    fn frequency_snapshot_writes_after_enough_events_since_snapshot() {
+        const EVERY_TWO_EVENTS: NonZeroU64 = NonZeroU64::new(2).expect("snapshot cadence must be non-zero");
         let runtime = FakeRuntime {
-            next_expected_version: 3,
+            current_position: Some(position(1)),
+            recorded_events: vec![recorded_event(
+                1,
+                TestEvent::Registered {
+                    id: "alpha".to_string(),
+                },
+            )],
+            stream_position: position(3),
             ..Default::default()
         };
-        let command = TestCommand::new("alpha", TestAction::Register);
+        let command = TestCommand::new("alpha", TestAction::Disable);
 
         let _ = block_on(
             CommandExecution::new(&runtime, &command)
-                .with_snapshot(test_snapshots(&runtime, FrequencySnapshot::new(EVERY_THREE_REVISIONS)))
+                .with_snapshot(test_snapshots(&runtime, FrequencySnapshot::new(EVERY_TWO_EVENTS)))
                 .execute_result(),
         )
         .unwrap();
 
         assert_eq!(
             runtime.written_snapshots.lock().unwrap().as_slice(),
-            &[Snapshot::new(3, TestState::Present { enabled: true })]
+            &[Snapshot::new(position(3), TestState::Present { enabled: false })]
         );
     }
 
     #[test]
-    fn frequency_snapshot_skips_non_matching_revision() {
-        const EVERY_THREE_REVISIONS: NonZeroU64 = NonZeroU64::new(3).expect("snapshot cadence must be non-zero");
+    fn frequency_snapshot_skips_before_enough_events_since_snapshot() {
+        const EVERY_TWO_EVENTS: NonZeroU64 = NonZeroU64::new(2).expect("snapshot cadence must be non-zero");
         let runtime = FakeRuntime {
-            next_expected_version: 2,
+            stream_position: position(2),
             ..Default::default()
         };
         let command = TestCommand::new("alpha", TestAction::Register);
 
         let _ = block_on(
             CommandExecution::new(&runtime, &command)
-                .with_snapshot(test_snapshots(&runtime, FrequencySnapshot::new(EVERY_THREE_REVISIONS)))
+                .with_snapshot(test_snapshots(&runtime, FrequencySnapshot::new(EVERY_TWO_EVENTS)))
                 .execute_result(),
         )
         .unwrap();
@@ -1393,7 +1446,7 @@ mod tests {
     #[test]
     fn does_not_write_snapshot_when_policy_skips_it() {
         let runtime = FakeRuntime {
-            next_expected_version: 1,
+            stream_position: position(1),
             ..Default::default()
         };
         let command = TestCommand::new("alpha", TestAction::Register);
@@ -1411,7 +1464,7 @@ mod tests {
     #[test]
     fn does_not_fail_committed_command_when_snapshot_write_fails() {
         let runtime = FakeRuntime {
-            next_expected_version: 1,
+            stream_position: position(1),
             fail_write_snapshot: true,
             ..Default::default()
         };
@@ -1424,7 +1477,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(result.next_expected_version, 1);
+        assert_eq!(result.stream_position, position(1));
         assert_eq!(result.state, TestState::Present { enabled: true });
         assert!(runtime.written_snapshots.lock().unwrap().is_empty());
     }
@@ -1432,7 +1485,7 @@ mod tests {
     #[test]
     fn resolves_stream_id_once() {
         let runtime = FakeRuntime {
-            next_expected_version: 1,
+            stream_position: position(1),
             ..Default::default()
         };
         let command = TestCommand::new("alpha", TestAction::Register);

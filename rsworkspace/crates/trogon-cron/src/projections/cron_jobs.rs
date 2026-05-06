@@ -10,8 +10,8 @@ use async_nats::jetstream::{
 use futures::{Stream, StreamExt};
 use trogon_eventsourcing::snapshot::{Snapshot, SnapshotChange};
 use trogon_eventsourcing::{
-    EventData, RecordedEvent, maybe_advance_checkpoint, persist_snapshot_change, read_checkpoint, read_snapshot,
-    read_snapshot_map, record_stream_message, write_checkpoint,
+    EventData, RecordedEvent, StreamPosition, maybe_advance_checkpoint, persist_snapshot_change, read_checkpoint,
+    read_snapshot, read_snapshot_map, record_stream_message, write_checkpoint,
 };
 use trogon_nats::SubjectTokenViolation;
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream};
@@ -228,9 +228,13 @@ impl JobStreamState {
         }
     }
 
-    pub fn into_snapshot(self, version: u64) -> Option<Snapshot<CronJob>> {
-        self.into_job().map(|job| Snapshot::new(version, job))
+    pub fn into_snapshot(self, position: StreamPosition) -> Option<Snapshot<CronJob>> {
+        self.into_job().map(|job| Snapshot::new(position, job))
     }
+}
+
+fn stream_position(value: u64, context: &'static str) -> Result<StreamPosition, CronError> {
+    StreamPosition::try_new(value).map_err(|source| CronError::event_source(context, source))
 }
 
 impl From<CronJob> for JobStreamState {
@@ -399,7 +403,16 @@ where
         let data = event
             .decode_data_with(&JobEventCodec)
             .map_err(|source| CronError::event_source("failed to decode job event during snapshot catch-up", source))?;
-        let change = apply_event_to_snapshot_map(&mut states, &mut snapshots, &stream_id, &data, sequence)?;
+        let change = apply_event_to_snapshot_map(
+            &mut states,
+            &mut snapshots,
+            &stream_id,
+            &data,
+            stream_position(
+                sequence,
+                "snapshot catch-up event sequence must be a valid stream position",
+            )?,
+        )?;
         persist_snapshot_change(&bucket, &snapshot_store_config(), change)
             .await
             .map_err(CronError::from)?;
@@ -418,7 +431,7 @@ pub(crate) async fn project_appended_events(
     bucket: &kv::Store,
     job_id: &str,
     events: &[EventData],
-    final_version: u64,
+    final_position: StreamPosition,
 ) -> Result<(), CronError> {
     if events.is_empty() {
         return Ok(());
@@ -440,12 +453,15 @@ pub(crate) async fn project_appended_events(
         snapshots.insert(job_id.to_string(), snapshot);
     }
 
-    let start_version = final_version.checked_sub(events.len() as u64 - 1).ok_or_else(|| {
-        CronError::event_source(
-            "stream snapshot projection requires a valid batch version range",
-            std::io::Error::other(format!("job '{job_id}'")),
-        )
-    })?;
+    let start_position = final_position
+        .get()
+        .checked_sub(events.len() as u64 - 1)
+        .ok_or_else(|| {
+            CronError::event_source(
+                "stream snapshot projection requires a valid batch position range",
+                std::io::Error::other(format!("job '{job_id}'")),
+            )
+        })?;
 
     for (index, event) in events.iter().enumerate() {
         let decoded = event
@@ -456,13 +472,16 @@ pub(crate) async fn project_appended_events(
             &mut snapshots,
             job_id,
             &decoded,
-            start_version + index as u64,
+            stream_position(
+                start_position + index as u64,
+                "stream snapshot projection requires a valid event position",
+            )?,
         )?;
         persist_snapshot_change(bucket, &snapshot_store_config(), change)
             .await
             .map_err(CronError::from)?;
     }
-    maybe_advance_checkpoint(bucket, &snapshot_store_config(), final_version)
+    maybe_advance_checkpoint(bucket, &snapshot_store_config(), final_position.get())
         .await
         .map_err(CronError::from)
 }
@@ -524,17 +543,23 @@ async fn rebuild_jobs_from_stream(
     while let Some(message) = messages.next().await {
         let message =
             message.map_err(|source| CronError::event_source("failed to read job event from stream", source))?;
-        let version = event_message_sequence(&message, "failed to read job event metadata")?;
-        if version > last_sequence {
+        let position = event_message_sequence(&message, "failed to read job event metadata")?;
+        if position > last_sequence {
             break;
         }
-        let reached_tail = version >= last_sequence;
+        let reached_tail = position >= last_sequence;
         let event = decode_recorded_watch_message(&message)?;
         let stream_id = job_id_from_event_subject(&event.recorded_stream_id)?;
         let data = event
             .decode_data_with(&JobEventCodec)
             .map_err(|source| CronError::event_source("failed to decode recorded job event payload", source))?;
-        apply_event_to_snapshot_map(&mut states, &mut snapshots, &stream_id, &data, version)?;
+        apply_event_to_snapshot_map(
+            &mut states,
+            &mut snapshots,
+            &stream_id,
+            &data,
+            stream_position(position, "recorded job event sequence must be a valid stream position")?,
+        )?;
         if reached_tail {
             break;
         }
@@ -700,7 +725,7 @@ fn apply_event_to_snapshot_map(
     snapshots: &mut BTreeMap<String, Snapshot<CronJob>>,
     stream_id: &str,
     event: &v1::JobEvent,
-    version: u64,
+    position: StreamPosition,
 ) -> Result<SnapshotChange<CronJob>, CronError> {
     let current_state = states.get(stream_id).cloned().unwrap_or_else(initial_state);
     let next_state = apply(stream_id, current_state, event)
@@ -710,7 +735,7 @@ fn apply_event_to_snapshot_map(
 
     match next_state {
         JobStreamState::Present(job) => {
-            let snapshot = Snapshot::new(version, job);
+            let snapshot = Snapshot::new(position, job);
             snapshots.insert(stream_id.to_string(), snapshot.clone());
             Ok(SnapshotChange::upsert(stream_id.to_string(), snapshot))
         }
@@ -760,6 +785,10 @@ mod tests {
     use crate::{
         CronJob, JobEventDelivery, JobEventSchedule, JobEventStatus, MessageContent, MessageEnvelope, MessageHeaders,
     };
+
+    fn position(value: u64) -> StreamPosition {
+        StreamPosition::try_new(value).expect("test stream position must be non-zero")
+    }
 
     fn expected_job(id: &str) -> CronJob {
         CronJob {
@@ -937,11 +966,38 @@ mod tests {
         let mut snapshots = BTreeMap::new();
         let stream_id = "alpha".to_string();
 
-        apply_event_to_snapshot_map(&mut states, &mut snapshots, &stream_id, &added_event("alpha"), 1).unwrap();
-        apply_event_to_snapshot_map(&mut states, &mut snapshots, &stream_id, &paused_event("alpha"), 2).unwrap();
-        apply_event_to_snapshot_map(&mut states, &mut snapshots, &stream_id, &removed_event("alpha"), 3).unwrap();
-        let error =
-            apply_event_to_snapshot_map(&mut states, &mut snapshots, &stream_id, &added_event("alpha"), 4).unwrap_err();
+        apply_event_to_snapshot_map(
+            &mut states,
+            &mut snapshots,
+            &stream_id,
+            &added_event("alpha"),
+            position(1),
+        )
+        .unwrap();
+        apply_event_to_snapshot_map(
+            &mut states,
+            &mut snapshots,
+            &stream_id,
+            &paused_event("alpha"),
+            position(2),
+        )
+        .unwrap();
+        apply_event_to_snapshot_map(
+            &mut states,
+            &mut snapshots,
+            &stream_id,
+            &removed_event("alpha"),
+            position(3),
+        )
+        .unwrap();
+        let error = apply_event_to_snapshot_map(
+            &mut states,
+            &mut snapshots,
+            &stream_id,
+            &added_event("alpha"),
+            position(4),
+        )
+        .unwrap_err();
 
         assert!(error.to_string().contains("deleted"));
         assert!(!snapshots.contains_key("alpha"));
@@ -956,7 +1012,7 @@ mod tests {
             &mut BTreeMap::new(),
             &stream_id,
             &paused_event("alpha"),
-            1,
+            position(1),
         )
         .unwrap_err();
 

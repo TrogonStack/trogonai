@@ -7,7 +7,11 @@ use trogon_cron::{
     commands::domain as command_domain,
     mocks::{MockCronStore, MockLeaderLock, MockSchedulePublisher},
 };
-use trogon_eventsourcing::{CommandExecution, run_task_immediately};
+use trogon_eventsourcing::{CommandExecution, StreamPosition, run_task_immediately};
+
+fn position(value: u64) -> StreamPosition {
+    StreamPosition::try_new(value).expect("test stream position must be non-zero")
+}
 
 fn command_job_id(id: &str) -> command_domain::JobId {
     command_domain::JobId::parse(id).unwrap()
@@ -156,8 +160,11 @@ async fn client_rejects_invalid_source_subject() {
 
 #[tokio::test]
 async fn client_rejects_stale_version() {
-    let error = JobWriteCondition::MustBeAtVersion(99)
-        .ensure("stale", trogon_cron::config::JobWriteState::new(Some(1), true))
+    let error = JobWriteCondition::MustBeAtPosition(position(99))
+        .ensure(
+            "stale",
+            trogon_cron::config::JobWriteState::new(Some(position(1)), true),
+        )
         .unwrap_err();
 
     assert!(matches!(

@@ -31,7 +31,7 @@ pub use snapshot::{
     SnapshotStoreConfig, SnapshotWrite, WriteSnapshotRequest, WriteSnapshotResponse,
 };
 pub use stream::{
-    AppendStreamRequest, AppendStreamResponse, ReadStreamRequest, ReadStreamResponse, StreamAppend, StreamRead,
-    StreamState,
+    AppendStreamRequest, AppendStreamResponse, ReadStreamRequest, ReadStreamResponse, StreamAppend, StreamPosition,
+    StreamRead, StreamState,
 };
 pub use testing::{Decider, TestCase, ThenError, ThenEvents, ThenExpectation, Timeline, decider};

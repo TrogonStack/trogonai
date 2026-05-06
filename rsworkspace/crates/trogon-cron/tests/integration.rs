@@ -373,7 +373,7 @@ async fn commands_execute_full_lifecycle_against_event_store() {
         .execute()
         .await
         .unwrap();
-    let added_version = added.next_expected_version;
+    let added_position = added.stream_position;
     assert_eq!(added.state.state(), state_v1::StateValue::PresentEnabled);
 
     let paused = CommandExecution::new(&store.event_store, &PauseJobCommand::new(command_id.clone()))
@@ -382,7 +382,7 @@ async fn commands_execute_full_lifecycle_against_event_store() {
         .execute()
         .await
         .unwrap();
-    assert_eq!(paused.next_expected_version, added_version + 1);
+    assert_eq!(paused.stream_position.get(), added_position.get() + 1);
     assert_eq!(paused.state.state(), state_v1::StateValue::PresentDisabled);
 
     let resumed = CommandExecution::new(&store.event_store, &ResumeJobCommand::new(command_id.clone()))
@@ -391,7 +391,7 @@ async fn commands_execute_full_lifecycle_against_event_store() {
         .execute()
         .await
         .unwrap();
-    assert_eq!(resumed.next_expected_version, paused.next_expected_version + 1);
+    assert_eq!(resumed.stream_position.get(), paused.stream_position.get() + 1);
     assert_eq!(resumed.state.state(), state_v1::StateValue::PresentEnabled);
 
     let removed = CommandExecution::new(&store.event_store, &RemoveJobCommand::new(command_id))
@@ -400,7 +400,7 @@ async fn commands_execute_full_lifecycle_against_event_store() {
         .execute()
         .await
         .unwrap();
-    assert_eq!(removed.next_expected_version, resumed.next_expected_version + 1);
+    assert_eq!(removed.stream_position.get(), resumed.stream_position.get() + 1);
     assert_eq!(removed.state.state(), state_v1::StateValue::Deleted);
 
     let fresh = connect_store(nats).await.unwrap();
@@ -409,7 +409,7 @@ async fn commands_execute_full_lifecycle_against_event_store() {
         .read_stream(ReadStreamRequest::new("lifecycle", 1))
         .await
         .unwrap();
-    assert_eq!(stream.current_version, Some(removed.next_expected_version));
+    assert_eq!(stream.current_position, Some(removed.stream_position));
     assert_eq!(stream.events.len(), 4);
 
     let events = stream
