@@ -107,7 +107,7 @@ If none are set, the connection is unauthenticated.
 | Variable | Description |
 |----------|-------------|
 | `RUST_LOG` | Tracing filter directive (default: `info`) |
-| `ACP_LOG_DIR` | Directory for file-based logging |
+| `TROGON_LOG_DIR` | Directory for file-based logging |
 
 ### OpenTelemetry
 

@@ -47,7 +47,6 @@ name = "acp-nats-server"
 version = "0.1.0"
 dependencies = [
  "acp-nats",
- "acp-telemetry",
  "agent-client-protocol",
  "async-compat",
  "async-nats",
@@ -66,6 +65,7 @@ dependencies = [
  "tracing-subscriber",
  "trogon-nats",
  "trogon-std",
+ "trogon-telemetry",
  "uuid",
 ]
 
@@ -74,7 +74,6 @@ name = "acp-nats-stdio"
 version = "0.0.1"
 dependencies = [
  "acp-nats",
- "acp-telemetry",
  "agent-client-protocol",
  "async-compat",
  "async-nats",
@@ -87,20 +86,7 @@ dependencies = [
  "tracing-subscriber",
  "trogon-nats",
  "trogon-std",
-]
-
-[[package]]
-name = "acp-telemetry"
-version = "0.1.0"
-dependencies = [
- "opentelemetry",
- "opentelemetry-appender-tracing",
- "opentelemetry-otlp",
- "opentelemetry_sdk",
- "tracing",
- "tracing-opentelemetry",
- "tracing-subscriber",
- "trogon-std",
+ "trogon-telemetry",
 ]
 
 [[package]]
@@ -3479,7 +3465,6 @@ dependencies = [
 name = "trogon-gateway"
 version = "0.1.0"
 dependencies = [
- "acp-telemetry",
  "async-nats",
  "axum",
  "clap",
@@ -3502,6 +3487,7 @@ dependencies = [
  "trogon-source-telegram",
  "trogon-source-twitter",
  "trogon-std",
+ "trogon-telemetry",
 ]
 
 [[package]]
@@ -3537,7 +3523,6 @@ dependencies = [
 name = "trogon-source-discord"
 version = "0.1.0"
 dependencies = [
- "acp-telemetry",
  "async-nats",
  "bytes",
  "futures-core",
@@ -3547,6 +3532,7 @@ dependencies = [
  "tracing",
  "trogon-nats",
  "trogon-std",
+ "trogon-telemetry",
  "twilight-gateway",
  "twilight-model",
 ]
@@ -3555,7 +3541,6 @@ dependencies = [
 name = "trogon-source-github"
 version = "0.1.0"
 dependencies = [
- "acp-telemetry",
  "async-nats",
  "axum",
  "bytes",
@@ -3568,13 +3553,13 @@ dependencies = [
  "tracing-subscriber",
  "trogon-nats",
  "trogon-std",
+ "trogon-telemetry",
 ]
 
 [[package]]
 name = "trogon-source-gitlab"
 version = "0.1.0"
 dependencies = [
- "acp-telemetry",
  "async-nats",
  "axum",
  "bytes",
@@ -3586,6 +3571,7 @@ dependencies = [
  "tracing-subscriber",
  "trogon-nats",
  "trogon-std",
+ "trogon-telemetry",
 ]
 
 [[package]]
@@ -3612,7 +3598,6 @@ dependencies = [
 name = "trogon-source-linear"
 version = "0.1.0"
 dependencies = [
- "acp-telemetry",
  "async-nats",
  "axum",
  "bytes",
@@ -3629,6 +3614,7 @@ dependencies = [
  "tracing-subscriber",
  "trogon-nats",
  "trogon-std",
+ "trogon-telemetry",
 ]
 
 [[package]]
@@ -3694,7 +3680,6 @@ dependencies = [
 name = "trogon-source-slack"
 version = "0.1.0"
 dependencies = [
- "acp-telemetry",
  "async-nats",
  "axum",
  "bytes",
@@ -3709,13 +3694,13 @@ dependencies = [
  "tracing-subscriber",
  "trogon-nats",
  "trogon-std",
+ "trogon-telemetry",
 ]
 
 [[package]]
 name = "trogon-source-telegram"
 version = "0.1.0"
 dependencies = [
- "acp-telemetry",
  "async-nats",
  "axum",
  "bytes",
@@ -3730,6 +3715,7 @@ dependencies = [
  "tracing-subscriber",
  "trogon-nats",
  "trogon-std",
+ "trogon-telemetry",
  "url",
 ]
 
@@ -3770,6 +3756,20 @@ dependencies = [
  "tracing",
  "tracing-opentelemetry",
  "uuid",
+]
+
+[[package]]
+name = "trogon-telemetry"
+version = "0.1.0"
+dependencies = [
+ "opentelemetry",
+ "opentelemetry-appender-tracing",
+ "opentelemetry-otlp",
+ "opentelemetry_sdk",
+ "tracing",
+ "tracing-opentelemetry",
+ "tracing-subscriber",
+ "trogon-std",
 ]
 
 [[package]]

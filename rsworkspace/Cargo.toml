@@ -12,7 +12,7 @@ all = "deny"
 [workspace.dependencies]
 # Internal crates
 acp-nats = { path = "crates/acp-nats" }
-acp-telemetry = { path = "crates/acp-telemetry" }
+trogon-telemetry = { path = "crates/trogon-telemetry" }
 trogon-nats = { path = "crates/trogon-nats" }
 trogon-service-config = { path = "crates/trogon-service-config" }
 trogon-source-discord = { path = "crates/trogon-source-discord" }
