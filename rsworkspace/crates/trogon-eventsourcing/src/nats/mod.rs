@@ -3,7 +3,7 @@ pub mod snapshot_store;
 pub(crate) mod stream_store;
 
 pub use jetstream::{
-    JetStreamStore, JetStreamStoreError, StreamSubjectResolver, SubjectState, subject_current_version,
+    JetStreamStore, JetStreamStoreError, StreamSubjectResolver, SubjectState, subject_current_position,
 };
 pub use snapshot_store::{
     SnapshotStoreError, checkpoint_key, list_snapshots, maybe_advance_checkpoint, persist_snapshot_change,

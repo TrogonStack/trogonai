@@ -9,11 +9,15 @@ pub use recorded::RecordedEvent;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{EventCodec, EventId, EventIdentity, EventType};
+    use crate::{EventCodec, EventId, EventIdentity, EventType, StreamPosition};
     use chrono::{DateTime, Utc};
     use serde::{Deserialize, Serialize, de::DeserializeOwned};
     use std::str::FromStr;
     use uuid::Uuid;
+
+    fn position(value: u64) -> StreamPosition {
+        StreamPosition::try_new(value).expect("test stream position must be non-zero")
+    }
 
     #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
     struct TestEventCodec;
@@ -119,14 +123,14 @@ mod tests {
 
         let recorded = event.record(
             "stream-alpha",
-            Some(2),
+            Some(position(2)),
             Some(10),
             DateTime::<Utc>::from_timestamp(1_700_000_000, 0).unwrap(),
         );
 
         assert_eq!(recorded.stream_id(), "alpha");
         assert_eq!(recorded.recorded_stream_id, "stream-alpha");
-        assert_eq!(recorded.stream_position, Some(2));
+        assert_eq!(recorded.stream_position, Some(position(2)));
         assert_eq!(recorded.log_position, Some(10));
         assert_eq!(recorded.subject_with_prefix("events.test."), "events.test.alpha");
     }
@@ -198,14 +202,14 @@ mod tests {
             payload: generated.payload.clone(),
             metadata: generated.metadata.clone(),
             recorded_stream_id: "recorded-alpha".to_string(),
-            stream_position: Some(7),
+            stream_position: Some(position(7)),
             log_position: Some(9),
             recorded_at: DateTime::<Utc>::from_timestamp(1_700_000_002, 0).unwrap(),
         };
 
         assert_eq!(recorded.stream_id(), "alpha");
         assert_eq!(recorded.recorded_stream_id, "recorded-alpha");
-        assert_eq!(recorded.stream_position, Some(7));
+        assert_eq!(recorded.stream_position, Some(position(7)));
         assert_eq!(recorded.log_position, Some(9));
         assert_eq!(
             recorded.decode_data_with::<TestEvent, _>(&TestEventCodec).unwrap(),

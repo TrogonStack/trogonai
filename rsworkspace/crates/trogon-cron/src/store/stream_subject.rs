@@ -1,5 +1,5 @@
 use async_nats::jetstream;
-use trogon_eventsourcing::nats::jetstream::{StreamSubjectResolver, SubjectState, subject_current_version};
+use trogon_eventsourcing::nats::jetstream::{StreamSubjectResolver, SubjectState, subject_current_position};
 
 use crate::{
     config::JobWriteState,
@@ -11,10 +11,10 @@ async fn current_subject_state(
     stream: &jetstream::stream::Stream,
     subject: &str,
 ) -> Result<Option<JobWriteState>, CronError> {
-    subject_current_version(stream, subject)
+    subject_current_position(stream, subject)
         .await
-        .map_err(|source| CronError::event_source("failed to read latest stream version", source))
-        .map(|version| version.map(|version| JobWriteState::new(Some(version), true)))
+        .map_err(|source| CronError::event_source("failed to read latest stream position", source))
+        .map(|position| position.map(|position| JobWriteState::new(Some(position), true)))
 }
 
 pub(crate) async fn stream_subject_state(
@@ -41,7 +41,7 @@ impl StreamSubjectResolver<str> for JobEventSubjectResolver {
         let state = stream_subject_state(events_stream, stream_id).await?;
         Ok(SubjectState {
             subject: state.prefix.subject(stream_id),
-            current_version: state.write_state.current_version(),
+            current_position: state.write_state.current_position(),
         })
     }
 }

@@ -153,7 +153,7 @@ mod tests {
             .execute()
             .await
             .unwrap();
-        assert_eq!(outcome.next_expected_version, 2);
+        assert_eq!(outcome.stream_position.get(), 2);
         assert_eq!(outcome.events, NonEmpty::one(removed()));
 
         assert!(

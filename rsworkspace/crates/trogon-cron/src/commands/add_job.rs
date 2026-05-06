@@ -177,7 +177,7 @@ mod tests {
             .execute()
             .await
             .unwrap();
-        assert_eq!(outcome.next_expected_version, 1);
+        assert_eq!(outcome.stream_position.get(), 1);
         assert_eq!(outcome.events, NonEmpty::one(added("backup")));
 
         let stored_job = store

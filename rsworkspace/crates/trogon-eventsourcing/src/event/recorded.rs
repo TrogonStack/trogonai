@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 
-use crate::{EventCodec, EventId};
+use crate::{EventCodec, EventId, StreamPosition};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct RecordedEvent {
@@ -10,7 +10,7 @@ pub struct RecordedEvent {
     pub payload: Vec<u8>,
     pub metadata: Option<Vec<u8>>,
     pub recorded_stream_id: String,
-    pub stream_position: Option<u64>,
+    pub stream_position: Option<StreamPosition>,
     pub log_position: Option<u64>,
     pub recorded_at: DateTime<Utc>,
 }

@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::num::NonZeroU64;
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, AtomicU64, Ordering},
@@ -11,8 +12,8 @@ use serde::{Serialize, de::DeserializeOwned};
 use trogon_eventsourcing::snapshot::Snapshot;
 use trogon_eventsourcing::{
     AppendStreamRequest, AppendStreamResponse, EventData, ReadSnapshotRequest, ReadSnapshotResponse, ReadStreamRequest,
-    ReadStreamResponse, SnapshotRead, SnapshotWrite, StreamAppend, StreamRead, StreamState, WriteSnapshotRequest,
-    WriteSnapshotResponse,
+    ReadStreamResponse, SnapshotRead, SnapshotWrite, StreamAppend, StreamPosition, StreamRead, StreamState,
+    WriteSnapshotRequest, WriteSnapshotResponse,
 };
 use trogon_nats::lease::{ReleaseLease, RenewLease, TryAcquireLease};
 
@@ -140,9 +141,14 @@ impl ReleaseLease for MockLeaderLock {
 #[derive(Clone, Default)]
 pub struct MockCronStore {
     jobs: Arc<Mutex<HashMap<String, Snapshot<CronJob>>>>,
-    stream_versions: Arc<Mutex<HashMap<String, u64>>>,
+    stream_positions: Arc<Mutex<HashMap<String, StreamPosition>>>,
     events: Arc<Mutex<HashMap<String, Vec<EventData>>>>,
     command_snapshots: Arc<Mutex<HashMap<String, HashMap<String, String>>>>,
+}
+
+fn stream_position(value: u64) -> Result<StreamPosition, CronError> {
+    StreamPosition::try_new(value)
+        .map_err(|source| CronError::event_source("mock stream position must be non-zero", source))
 }
 
 impl MockCronStore {
@@ -157,12 +163,19 @@ impl MockCronStore {
         let mut event = v1::JobEvent::new();
         event.set_job_added(inner);
 
-        self.stream_versions.lock().unwrap().insert(id.clone(), 1);
+        let initial_position = StreamPosition::new(NonZeroU64::MIN);
+        self.stream_positions
+            .lock()
+            .unwrap()
+            .insert(id.clone(), initial_position);
         self.events.lock().unwrap().insert(
             id.clone(),
             vec![EventData::from_event(&id, &JobEventCodec, &event).unwrap()],
         );
-        self.jobs.lock().unwrap().insert(id.clone(), Snapshot::new(1, job));
+        self.jobs
+            .lock()
+            .unwrap()
+            .insert(id.clone(), Snapshot::new(initial_position, job));
     }
 
     pub(crate) fn read_command_snapshot<Payload>(
@@ -368,11 +381,11 @@ impl StreamRead<str> for MockCronStore {
     async fn read_stream(&self, request: ReadStreamRequest<'_, str>) -> Result<ReadStreamResponse, Self::Error> {
         let stream_id = request.stream_id;
         let from_sequence = request.from_sequence;
-        let current_version = self.stream_versions.lock().unwrap().get(stream_id).copied();
+        let current_position = self.stream_positions.lock().unwrap().get(stream_id).copied();
         let stream_events = self.events.lock().unwrap().get(stream_id).cloned().unwrap_or_default();
         if from_sequence == 0 {
             return Ok(ReadStreamResponse {
-                current_version,
+                current_position,
                 events: Vec::new(),
             });
         }
@@ -385,7 +398,7 @@ impl StreamRead<str> for MockCronStore {
             }
             recorded.push(event.record(
                 stream_id.to_string(),
-                Some(sequence),
+                Some(stream_position(sequence)?),
                 Some(sequence),
                 DateTime::<Utc>::from_timestamp(1_700_000_000 + sequence as i64, 0).ok_or_else(|| {
                     CronError::event_source(
@@ -396,7 +409,7 @@ impl StreamRead<str> for MockCronStore {
             ));
         }
         Ok(ReadStreamResponse {
-            current_version,
+            current_position,
             events: recorded,
         })
     }
@@ -410,7 +423,7 @@ impl StreamAppend<str> for MockCronStore {
         let expected_state = request.stream_state;
         let events = request.events;
         let jobs = self.jobs.clone();
-        let stream_versions = self.stream_versions.clone();
+        let stream_positions = self.stream_positions.clone();
         let event_log = self.events.clone();
         if events.iter().any(|event| event.stream_id() != stream_id.as_str()) {
             return Err(CronError::event_source(
@@ -420,12 +433,12 @@ impl StreamAppend<str> for MockCronStore {
         }
 
         let mut jobs = jobs.lock().unwrap();
-        let mut stream_versions = stream_versions.lock().unwrap();
+        let mut stream_positions = stream_positions.lock().unwrap();
         let mut stream_events = event_log.lock().unwrap();
 
         let current_snapshot = jobs.get(stream_id.as_str()).cloned();
-        let current_version = stream_versions.get(stream_id.as_str()).copied();
-        let write_state = JobWriteState::new(current_version, current_version.is_some());
+        let current_position = stream_positions.get(stream_id.as_str()).copied();
+        let write_state = JobWriteState::new(current_position, current_position.is_some());
         match expected_state {
             StreamState::Any => {}
             StreamState::StreamExists if write_state.exists() => {}
@@ -433,32 +446,32 @@ impl StreamAppend<str> for MockCronStore {
                 return Err(CronError::OptimisticConcurrencyConflict {
                     id: stream_id.to_string(),
                     expected: StreamState::StreamExists,
-                    current_version,
+                    current_position,
                 });
             }
             StreamState::NoStream => {
                 JobWriteCondition::MustNotExist.ensure(stream_id.as_str(), write_state)?;
             }
-            StreamState::StreamRevision(version) => {
-                JobWriteCondition::MustBeAtVersion(version).ensure(stream_id.as_str(), write_state)?;
+            StreamState::At(position) => {
+                JobWriteCondition::MustBeAtPosition(position).ensure(stream_id.as_str(), write_state)?;
             }
         }
 
         let stored_events = stream_events.entry(stream_id.to_string()).or_default();
         let mut projected_snapshot = current_snapshot;
-        let mut version = current_version.unwrap_or(0);
-        let appended_events = events.len() as u64;
+        let mut raw_position = current_position.map(StreamPosition::get).unwrap_or(0);
 
         for event_data in events {
             let event = event_data
                 .decode_data_with(&JobEventCodec)
                 .map_err(|source| CronError::event_source("failed to decode mocked job event payload", source))?;
-            version += 1;
+            raw_position += 1;
+            let event_position = stream_position(raw_position)?;
             stored_events.push(event_data);
             match event.event() {
                 v1::job_event::EventOneof::JobAdded(inner) => {
                     projected_snapshot = Some(Snapshot::new(
-                        version,
+                        event_position,
                         cron_job_from_proto(stream_id.as_str(), inner.job()),
                     ));
                 }
@@ -469,7 +482,7 @@ impl StreamAppend<str> for MockCronStore {
                             std::io::Error::other(stream_id.to_string()),
                         )
                     })?;
-                    snapshot.version = version;
+                    snapshot.position = event_position;
                     snapshot.payload.status = crate::JobEventStatus::Disabled;
                     projected_snapshot = Some(snapshot);
                 }
@@ -480,7 +493,7 @@ impl StreamAppend<str> for MockCronStore {
                             std::io::Error::other(stream_id.to_string()),
                         )
                     })?;
-                    snapshot.version = version;
+                    snapshot.position = event_position;
                     snapshot.payload.status = crate::JobEventStatus::Enabled;
                     projected_snapshot = Some(snapshot);
                 }
@@ -496,14 +509,15 @@ impl StreamAppend<str> for MockCronStore {
             }
         }
 
-        stream_versions.insert(stream_id.to_string(), version);
+        let final_position = stream_position(raw_position)?;
+        stream_positions.insert(stream_id.to_string(), final_position);
         if let Some(snapshot) = projected_snapshot {
             jobs.insert(stream_id.to_string(), snapshot);
         } else {
             jobs.remove(stream_id.as_str());
         }
         Ok(AppendStreamResponse {
-            next_expected_version: current_version.unwrap_or(0) + appended_events,
+            stream_position: final_position,
         })
     }
 }
@@ -555,6 +569,10 @@ mod tests {
         JobWriteCondition, ListJobsCommand, MessageContent, MessageEnvelope, MessageHeaders, PauseJobCommand,
         RemoveJobCommand, ResumeJobCommand,
     };
+
+    fn position(value: u64) -> StreamPosition {
+        StreamPosition::try_new(value).expect("test stream position must be non-zero")
+    }
     use futures::StreamExt;
 
     fn command_job_id(id: &str) -> command_domain::JobId {
@@ -763,28 +781,28 @@ mod tests {
         JobWriteCondition::MustNotExist
             .ensure("alpha", JobWriteState::new(None, false))
             .unwrap();
-        JobWriteCondition::MustBeAtVersion(3)
-            .ensure("alpha", JobWriteState::new(Some(3), true))
+        JobWriteCondition::MustBeAtPosition(position(3))
+            .ensure("alpha", JobWriteState::new(Some(position(3)), true))
             .unwrap();
 
         let error = JobWriteCondition::MustNotExist
-            .ensure("alpha", JobWriteState::new(Some(4), true))
+            .ensure("alpha", JobWriteState::new(Some(position(4)), true))
             .unwrap_err();
         assert!(matches!(
             error,
             CronError::OptimisticConcurrencyConflict {
-                current_version: Some(4),
+                current_position: Some(_),
                 ..
             }
         ));
 
-        let error = JobWriteCondition::MustBeAtVersion(3)
-            .ensure("alpha", JobWriteState::new(Some(4), true))
+        let error = JobWriteCondition::MustBeAtPosition(position(3))
+            .ensure("alpha", JobWriteState::new(Some(position(4)), true))
             .unwrap_err();
         assert!(matches!(
             error,
             CronError::OptimisticConcurrencyConflict {
-                current_version: Some(4),
+                current_position: Some(_),
                 ..
             }
         ));

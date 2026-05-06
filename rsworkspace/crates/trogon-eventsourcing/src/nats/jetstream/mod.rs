@@ -5,16 +5,16 @@ use std::fmt;
 
 use async_nats::jetstream::{self, kv};
 
-use crate::StreamState;
 use crate::nats::snapshot_store::SnapshotStoreError;
 use crate::nats::stream_store::StreamStoreError;
+use crate::{StreamPosition, StreamState};
 
-pub use stream::subject_current_version;
+pub use stream::subject_current_position;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SubjectState {
     pub subject: String,
-    pub current_version: Option<u64>,
+    pub current_position: Option<StreamPosition>,
 }
 
 pub trait StreamSubjectResolver<StreamId: ?Sized>: Send + Sync + Clone + 'static {
@@ -37,7 +37,7 @@ pub enum JetStreamStoreError<Error> {
     OptimisticConcurrencyConflict {
         stream_id: String,
         expected: StreamState,
-        current_version: Option<u64>,
+        current_position: Option<StreamPosition>,
     },
 }
 
@@ -57,15 +57,15 @@ where
             Self::OptimisticConcurrencyConflict {
                 stream_id,
                 expected,
-                current_version,
-            } => match current_version {
-                Some(current_version) => write!(
+                current_position,
+            } => match current_position {
+                Some(current_position) => write!(
                     f,
-                    "OCC conflict for stream '{stream_id}': expected {expected:?}, current version is {current_version}"
+                    "OCC conflict for stream '{stream_id}': expected {expected:?}, current position is {current_position}"
                 ),
                 None => write!(
                     f,
-                    "OCC conflict for stream '{stream_id}': expected {expected:?}, stream has no current version"
+                    "OCC conflict for stream '{stream_id}': expected {expected:?}, stream has no current position"
                 ),
             },
         }

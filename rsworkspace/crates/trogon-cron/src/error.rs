@@ -1,5 +1,5 @@
-use trogon_eventsourcing::StreamState;
 use trogon_eventsourcing::nats::jetstream::JetStreamStoreError;
+use trogon_eventsourcing::{StreamPosition, StreamState};
 
 use crate::commands::domain::MessageHeadersError;
 
@@ -32,7 +32,7 @@ pub enum CronError {
     OptimisticConcurrencyConflict {
         id: String,
         expected: StreamState,
-        current_version: Option<u64>,
+        current_position: Option<StreamPosition>,
     },
     Serde(serde_json::Error),
     InvalidJobSpec {
@@ -88,15 +88,15 @@ impl std::fmt::Display for CronError {
             Self::OptimisticConcurrencyConflict {
                 id,
                 expected,
-                current_version,
-            } => match current_version {
-                Some(current_version) => write!(
+                current_position,
+            } => match current_position {
+                Some(current_position) => write!(
                     f,
-                    "OCC conflict for job '{id}': expected {expected:?}, current version is {current_version}"
+                    "OCC conflict for job '{id}': expected {expected:?}, current position is {current_position}"
                 ),
                 None => write!(
                     f,
-                    "OCC conflict for job '{id}': expected {expected:?}, job has no current version"
+                    "OCC conflict for job '{id}': expected {expected:?}, job has no current position"
                 ),
             },
             Self::Serde(error) => write!(f, "Serialization error: {error}"),
@@ -263,11 +263,11 @@ impl From<JetStreamStoreError<CronError>> for CronError {
             JetStreamStoreError::OptimisticConcurrencyConflict {
                 stream_id,
                 expected,
-                current_version,
+                current_position,
             } => Self::OptimisticConcurrencyConflict {
                 id: stream_id,
                 expected,
-                current_version,
+                current_position,
             },
         }
     }
@@ -276,8 +276,12 @@ impl From<JetStreamStoreError<CronError>> for CronError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use trogon_eventsourcing::StreamState;
+    use trogon_eventsourcing::{StreamPosition, StreamState};
     use trogon_nats::SubjectTokenViolation;
+
+    fn position(value: u64) -> StreamPosition {
+        StreamPosition::try_new(value).expect("test stream position must be non-zero")
+    }
 
     #[test]
     fn invalid_job_spec_display_mentions_field() {
@@ -321,17 +325,17 @@ mod tests {
         let occ_missing = CronError::OptimisticConcurrencyConflict {
             id: "job-1".to_string(),
             expected: StreamState::NoStream,
-            current_version: None,
+            current_position: None,
         };
-        assert!(occ_missing.to_string().contains("job has no current version"));
+        assert!(occ_missing.to_string().contains("job has no current position"));
         assert!(std::error::Error::source(&occ_missing).is_none());
 
         let occ_current = CronError::OptimisticConcurrencyConflict {
             id: "job-1".to_string(),
-            expected: StreamState::StreamRevision(3),
-            current_version: Some(4),
+            expected: StreamState::At(position(3)),
+            current_position: Some(position(4)),
         };
-        assert!(occ_current.to_string().contains("current version is 4"));
+        assert!(occ_current.to_string().contains("current position is 4"));
         assert!(std::error::Error::source(&occ_current).is_none());
 
         let serde_error: CronError = serde_json::from_str::<serde_json::Value>("{").unwrap_err().into();

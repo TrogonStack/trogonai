@@ -658,7 +658,11 @@ impl From<&JobMessage> for MessageEnvelope {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use trogon_eventsourcing::Snapshot;
+    use trogon_eventsourcing::{Snapshot, StreamPosition};
+
+    fn position(value: u64) -> StreamPosition {
+        StreamPosition::try_new(value).expect("test stream position must be non-zero")
+    }
 
     fn job_id(id: &str) -> JobId {
         JobId::parse(id).unwrap()
@@ -741,7 +745,7 @@ mod tests {
     #[test]
     fn snapshot_round_trips() {
         let snapshot = Snapshot::new(
-            9,
+            position(9),
             Job {
                 id: job_id("compact"),
                 status: JobStatus::Enabled,
