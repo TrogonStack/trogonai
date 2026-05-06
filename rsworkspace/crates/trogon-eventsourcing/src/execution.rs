@@ -6,7 +6,8 @@ use crate::stream::{
     AppendStreamRequest, AppendStreamResponse, ReadStreamRequest, StreamAppend, StreamRead, StreamState,
 };
 use crate::{
-    CanonicalEventCodec, Decide, Decision, EventCodec, EventData, EventEnvelopeCodec, NonEmpty, RecordedEvent,
+    CanonicalEventCodec, Decide, Decision, EventCodec, EventData, EventDataEncodeError, EventIdentity, EventType,
+    NonEmpty, RecordedEvent,
 };
 
 use std::{borrow::Borrow, future::Future, num::NonZeroU64, pin::Pin};
@@ -331,10 +332,11 @@ impl<'a, E, C, S, EC> CommandExecutionWithCodec<'a, E, C, S, EC> {
     ) -> ExecutionStep<C, SErr, (AppendStreamResponse, NonEmpty<C::Event>, C::State)>
     where
         C: Decide,
-        C::Event: Clone,
+        C::Event: Clone + EventType + EventIdentity,
         C::StreamId: AsRef<str>,
         E: StreamAppend<C::StreamId, Error = SErr>,
-        EC: EventEnvelopeCodec<C::Event>,
+        EC: EventCodec<C::Event>,
+        <C::Event as EventType>::Error: std::error::Error + Send + Sync + 'static,
         EC::Error: std::error::Error + Send + Sync + 'static,
     {
         let Decision::Event(events) = C::decide(&state, self.command).map_err(CommandFailure::Decide)?;
@@ -384,10 +386,11 @@ impl<'a, E, S, C, P, Spawn, EC> CommandExecutionWithCodec<'a, E, C, Snapshots<'a
 impl<E, C, SErr> CommandExecution<'_, E, C, WithoutSnapshots>
 where
     C: Decide,
-    C::Event: Clone + CanonicalEventCodec,
+    C::Event: Clone + CanonicalEventCodec + EventType + EventIdentity,
     C::StreamId: AsRef<str>,
     E: StreamRead<C::StreamId, Error = SErr> + StreamAppend<C::StreamId, Error = SErr>,
-    <C::Event as CanonicalEventCodec>::Codec: EventEnvelopeCodec<C::Event>,
+    <C::Event as CanonicalEventCodec>::Codec: EventCodec<C::Event>,
+    <C::Event as EventType>::Error: std::error::Error + Send + Sync + 'static,
     <<C::Event as CanonicalEventCodec>::Codec as EventCodec<C::Event>>::Error:
         std::error::Error + Send + Sync + 'static,
 {
@@ -403,10 +406,11 @@ where
 impl<E, C, EC, SErr> CommandExecutionWithCodec<'_, E, C, WithoutSnapshots, EC>
 where
     C: Decide,
-    C::Event: Clone,
+    C::Event: Clone + EventType + EventIdentity,
     C::StreamId: AsRef<str>,
     E: StreamRead<C::StreamId, Error = SErr> + StreamAppend<C::StreamId, Error = SErr>,
-    EC: EventEnvelopeCodec<C::Event>,
+    EC: EventCodec<C::Event>,
+    <C::Event as EventType>::Error: std::error::Error + Send + Sync + 'static,
     EC::Error: std::error::Error + Send + Sync + 'static,
 {
     pub async fn execute(self) -> CommandResult<C, SErr> {
@@ -436,7 +440,7 @@ impl<E, S, C, P, Spawn, SErr> CommandExecution<'_, E, C, Snapshots<'_, S, P, Spa
 where
     C: Decide,
     C::State: Clone + Send + 'static,
-    C::Event: Clone + CanonicalEventCodec,
+    C::Event: Clone + CanonicalEventCodec + EventType + EventIdentity,
     C::StreamId: AsRef<str> + ToOwned,
     <C::StreamId as ToOwned>::Owned: Borrow<C::StreamId> + Send + 'static,
     E: StreamRead<C::StreamId, Error = SErr> + StreamAppend<C::StreamId, Error = SErr>,
@@ -447,7 +451,8 @@ where
     P: SnapshotPolicy<C::State, C::Event>,
     Spawn: Fn(BoxTask) + Send + Sync,
     SErr: std::fmt::Display + Send + 'static,
-    <C::Event as CanonicalEventCodec>::Codec: EventEnvelopeCodec<C::Event>,
+    <C::Event as CanonicalEventCodec>::Codec: EventCodec<C::Event>,
+    <C::Event as EventType>::Error: std::error::Error + Send + Sync + 'static,
     <<C::Event as CanonicalEventCodec>::Codec as EventCodec<C::Event>>::Error:
         std::error::Error + Send + Sync + 'static,
 {
@@ -464,7 +469,7 @@ impl<E, S, C, P, Spawn, SErr, EC> CommandExecutionWithCodec<'_, E, C, Snapshots<
 where
     C: Decide,
     C::State: Clone + Send + 'static,
-    C::Event: Clone,
+    C::Event: Clone + EventType + EventIdentity,
     C::StreamId: AsRef<str> + ToOwned,
     <C::StreamId as ToOwned>::Owned: Borrow<C::StreamId> + Send + 'static,
     E: StreamRead<C::StreamId, Error = SErr> + StreamAppend<C::StreamId, Error = SErr>,
@@ -475,7 +480,8 @@ where
     P: SnapshotPolicy<C::State, C::Event>,
     Spawn: Fn(BoxTask) + Send + Sync,
     SErr: std::fmt::Display + Send + 'static,
-    EC: EventEnvelopeCodec<C::Event>,
+    EC: EventCodec<C::Event>,
+    <C::Event as EventType>::Error: std::error::Error + Send + Sync + 'static,
     EC::Error: std::error::Error + Send + Sync + 'static,
 {
     pub async fn execute(self) -> CommandResult<C, SErr> {
@@ -620,9 +626,14 @@ where
     Ok(state)
 }
 
-fn encode_events<E, C>(stream_id: &str, codec: &C, events: &NonEmpty<E>) -> Result<NonEmpty<EventData>, C::Error>
+fn encode_events<E, C>(
+    stream_id: &str,
+    codec: &C,
+    events: &NonEmpty<E>,
+) -> Result<NonEmpty<EventData>, EventDataEncodeError<E, C>>
 where
-    C: EventEnvelopeCodec<E>,
+    E: EventType + EventIdentity,
+    C: EventCodec<E>,
 {
     let first = EventData::new_with_codec_ref(stream_id, codec, events.first())?;
     let rest = events
@@ -646,8 +657,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        CanonicalEventCodec, EventEnvelopeCodec, EventIdentity, EventType, ReadSnapshotResponse, ReadStreamResponse,
-        RecordedEvent, SnapshotSchema, WriteSnapshotResponse,
+        CanonicalEventCodec, EventIdentity, EventType, ReadSnapshotResponse, ReadStreamResponse, RecordedEvent,
+        SnapshotSchema, WriteSnapshotResponse,
     };
 
     #[derive(Debug, Clone)]
@@ -864,13 +875,15 @@ mod tests {
     impl EventIdentity for TestEvent {}
 
     impl EventType for TestEvent {
-        fn event_type(&self) -> &'static str {
-            match self {
+        type Error = std::convert::Infallible;
+
+        fn event_type(&self) -> Result<&'static str, Self::Error> {
+            Ok(match self {
                 Self::Registered { .. } => "registered",
                 Self::StateChanged { .. } => "state_changed",
                 Self::Removed { .. } => "removed",
                 Self::Broken { .. } => "broken",
-            }
+            })
         }
     }
 
@@ -899,12 +912,6 @@ mod tests {
             let value = std::str::from_utf8(payload).map_err(|_| TestInfraError::Json)?;
             let json = value.strip_prefix("wrapped:").ok_or(TestInfraError::Json)?;
             serde_json::from_str(json).map_err(Into::into)
-        }
-    }
-
-    impl EventEnvelopeCodec<TestEvent> for WrappedJsonCodec {
-        fn event_type(&self, value: &TestEvent) -> Result<&'static str, Self::Error> {
-            Ok(value.event_type())
         }
     }
 

@@ -2,8 +2,8 @@ use chrono::{DateTime, Utc};
 use serde::{Serialize, de::DeserializeOwned};
 use trogon_std::{NowV7, UuidV7Generator};
 
-use super::{CodecError, RecordedEvent};
-use crate::{EventCodec, EventEnvelopeCodec, EventId, EventIdentity, EventType, JsonEventCodec};
+use super::{CodecError, EncodeEventError, EventDataEncodeError, EventDataWithMetadataError, RecordedEvent};
+use crate::{EventCodec, EventId, EventIdentity, EventType, JsonEventCodec};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct EventData {
@@ -15,32 +15,40 @@ pub struct EventData {
 }
 
 impl EventData {
-    pub fn new<E>(stream_id: impl AsRef<str>, event: E) -> serde_json::Result<Self>
+    pub fn new<E>(stream_id: impl AsRef<str>, event: E) -> Result<Self, EventDataEncodeError<E, JsonEventCodec>>
     where
         E: EventType + EventIdentity + Serialize + DeserializeOwned,
     {
         Self::new_with_codec_and_generator(stream_id, &JsonEventCodec, &UuidV7Generator, event)
     }
 
-    pub fn new_with_codec<E, C>(stream_id: impl AsRef<str>, codec: &C, event: E) -> Result<Self, C::Error>
+    pub fn new_with_codec<E, C>(
+        stream_id: impl AsRef<str>,
+        codec: &C,
+        event: E,
+    ) -> Result<Self, EventDataEncodeError<E, C>>
     where
-        C: EventEnvelopeCodec<E>,
+        E: EventType + EventIdentity,
+        C: EventCodec<E>,
     {
         Self::new_with_codec_and_generator(stream_id, codec, &UuidV7Generator, event)
     }
 
-    pub fn new_with_codec_ref<E, C>(stream_id: impl AsRef<str>, codec: &C, event: &E) -> Result<Self, C::Error>
+    pub fn new_with_codec_ref<E, C>(
+        stream_id: impl AsRef<str>,
+        codec: &C,
+        event: &E,
+    ) -> Result<Self, EventDataEncodeError<E, C>>
     where
-        C: EventEnvelopeCodec<E>,
+        E: EventType + EventIdentity,
+        C: EventCodec<E>,
     {
-        let event_id = codec
-            .event_id(event)
-            .unwrap_or_else(|| EventId::now_v7(&UuidV7Generator));
+        let event_id = event.event_id().unwrap_or_else(|| EventId::now_v7(&UuidV7Generator));
         Ok(Self {
             event_id,
-            event_type: codec.event_type(event)?.to_string(),
+            event_type: event.event_type().map_err(EncodeEventError::EventType)?.to_string(),
             stream_id: stream_id.as_ref().to_string(),
-            payload: codec.encode(event)?,
+            payload: codec.encode(event).map_err(EncodeEventError::EventCodec)?,
             metadata: None,
         })
     }
@@ -49,9 +57,9 @@ impl EventData {
         stream_id: impl AsRef<str>,
         event_id: impl Into<EventId>,
         event: E,
-    ) -> serde_json::Result<Self>
+    ) -> Result<Self, EventDataEncodeError<E, JsonEventCodec>>
     where
-        E: EventType + EventIdentity + Serialize + DeserializeOwned,
+        E: EventType + Serialize + DeserializeOwned,
     {
         Self::new_with_codec_and_event_id(stream_id, &JsonEventCodec, event_id, event)
     }
@@ -61,15 +69,16 @@ impl EventData {
         codec: &C,
         event_id: impl Into<EventId>,
         event: E,
-    ) -> Result<Self, C::Error>
+    ) -> Result<Self, EventDataEncodeError<E, C>>
     where
-        C: EventEnvelopeCodec<E>,
+        E: EventType,
+        C: EventCodec<E>,
     {
         Ok(Self {
             event_id: event_id.into(),
-            event_type: codec.event_type(&event)?.to_string(),
+            event_type: event.event_type().map_err(EncodeEventError::EventType)?.to_string(),
             stream_id: stream_id.as_ref().to_string(),
-            payload: codec.encode(&event)?,
+            payload: codec.encode(&event).map_err(EncodeEventError::EventCodec)?,
             metadata: None,
         })
     }
@@ -79,16 +88,21 @@ impl EventData {
         codec: &C,
         now_v7: &N,
         event: E,
-    ) -> Result<Self, C::Error>
+    ) -> Result<Self, EventDataEncodeError<E, C>>
     where
-        C: EventEnvelopeCodec<E>,
+        E: EventType + EventIdentity,
+        C: EventCodec<E>,
         N: NowV7,
     {
-        let event_id = codec.event_id(&event).unwrap_or_else(|| EventId::now_v7(now_v7));
+        let event_id = event.event_id().unwrap_or_else(|| EventId::now_v7(now_v7));
         Self::new_with_codec_and_event_id(stream_id, codec, event_id, event)
     }
 
-    pub fn with_metadata<E, M>(stream_id: impl AsRef<str>, event: E, metadata: Option<M>) -> serde_json::Result<Self>
+    pub fn with_metadata<E, M>(
+        stream_id: impl AsRef<str>,
+        event: E,
+        metadata: Option<M>,
+    ) -> Result<Self, EventDataWithMetadataError<E, M, JsonEventCodec, JsonEventCodec>>
     where
         E: EventType + EventIdentity + Serialize + DeserializeOwned,
         M: Serialize + DeserializeOwned,
@@ -101,9 +115,6 @@ impl EventData {
             event,
             metadata,
         )
-        .map_err(|error| match error {
-            CodecError::Data(source) | CodecError::Metadata(source) => source,
-        })
     }
 
     pub fn with_codecs<E, M, EC, MC>(
@@ -112,9 +123,10 @@ impl EventData {
         metadata_codec: &MC,
         event: E,
         metadata: Option<M>,
-    ) -> Result<Self, CodecError<EC::Error, MC::Error>>
+    ) -> Result<Self, EventDataWithMetadataError<E, M, EC, MC>>
     where
-        EC: EventEnvelopeCodec<E>,
+        E: EventType + EventIdentity,
+        EC: EventCodec<E>,
         MC: EventCodec<M>,
     {
         Self::with_codecs_and_generator(
@@ -132,16 +144,12 @@ impl EventData {
         event_id: impl Into<EventId>,
         event: E,
         metadata: Option<M>,
-    ) -> serde_json::Result<Self>
+    ) -> Result<Self, EventDataWithMetadataError<E, M, JsonEventCodec, JsonEventCodec>>
     where
-        E: EventType + EventIdentity + Serialize + DeserializeOwned,
+        E: EventType + Serialize + DeserializeOwned,
         M: Serialize + DeserializeOwned,
     {
-        Self::with_codecs_and_event_id(stream_id, &JsonEventCodec, &JsonEventCodec, event_id, event, metadata).map_err(
-            |error| match error {
-                CodecError::Data(source) | CodecError::Metadata(source) => source,
-            },
-        )
+        Self::with_codecs_and_event_id(stream_id, &JsonEventCodec, &JsonEventCodec, event_id, event, metadata)
     }
 
     pub fn with_codecs_and_event_id<E, M, EC, MC>(
@@ -151,16 +159,24 @@ impl EventData {
         event_id: impl Into<EventId>,
         event: E,
         metadata: Option<M>,
-    ) -> Result<Self, CodecError<EC::Error, MC::Error>>
+    ) -> Result<Self, EventDataWithMetadataError<E, M, EC, MC>>
     where
-        EC: EventEnvelopeCodec<E>,
+        E: EventType,
+        EC: EventCodec<E>,
         MC: EventCodec<M>,
     {
         Ok(Self {
             event_id: event_id.into(),
-            event_type: event_codec.event_type(&event).map_err(CodecError::Data)?.to_string(),
+            event_type: event
+                .event_type()
+                .map_err(EncodeEventError::EventType)
+                .map_err(CodecError::Data)?
+                .to_string(),
             stream_id: stream_id.as_ref().to_string(),
-            payload: event_codec.encode(&event).map_err(CodecError::Data)?,
+            payload: event_codec
+                .encode(&event)
+                .map_err(EncodeEventError::EventCodec)
+                .map_err(CodecError::Data)?,
             metadata: metadata
                 .map(|value| metadata_codec.encode(&value))
                 .transpose()
@@ -175,13 +191,14 @@ impl EventData {
         now_v7: &N,
         event: E,
         metadata: Option<M>,
-    ) -> Result<Self, CodecError<EC::Error, MC::Error>>
+    ) -> Result<Self, EventDataWithMetadataError<E, M, EC, MC>>
     where
-        EC: EventEnvelopeCodec<E>,
+        E: EventType + EventIdentity,
+        EC: EventCodec<E>,
         MC: EventCodec<M>,
         N: NowV7,
     {
-        let event_id = event_codec.event_id(&event).unwrap_or_else(|| EventId::now_v7(now_v7));
+        let event_id = event.event_id().unwrap_or_else(|| EventId::now_v7(now_v7));
         Self::with_codecs_and_event_id(stream_id, event_codec, metadata_codec, event_id, event, metadata)
     }
 

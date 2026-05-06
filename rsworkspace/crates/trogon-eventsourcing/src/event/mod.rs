@@ -2,7 +2,7 @@ mod codec_error;
 mod data;
 mod recorded;
 
-pub use codec_error::CodecError;
+pub use codec_error::{CodecError, EncodeEventError, EventDataEncodeError, EventDataWithMetadataError};
 pub use data::EventData;
 pub use recorded::RecordedEvent;
 
@@ -29,8 +29,10 @@ mod tests {
     impl EventIdentity for TestEvent {}
 
     impl EventType for TestEvent {
-        fn event_type(&self) -> &'static str {
-            "TestEvent"
+        type Error = std::convert::Infallible;
+
+        fn event_type(&self) -> Result<&'static str, Self::Error> {
+            Ok("TestEvent")
         }
     }
 
@@ -47,8 +49,10 @@ mod tests {
     }
 
     impl EventType for IdentifiedEvent {
-        fn event_type(&self) -> &'static str {
-            "IdentifiedEvent"
+        type Error = std::convert::Infallible;
+
+        fn event_type(&self) -> Result<&'static str, Self::Error> {
+            Ok("IdentifiedEvent")
         }
     }
 
