@@ -1721,7 +1721,6 @@ dependencies = [
  "tokio",
  "tower",
  "tracing",
- "tracing-subscriber",
  "trogon-nats",
  "trogon-std",
  "uuid",
@@ -1738,7 +1737,6 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
- "tracing-subscriber",
  "trogon-std",
 ]
 
@@ -3855,6 +3853,7 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-opentelemetry",
+ "tracing-subscriber",
  "uuid",
 ]
 

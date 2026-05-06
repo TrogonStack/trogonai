@@ -13,9 +13,8 @@ mcp-nats = { workspace = true }
 rmcp = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "net", "sync"] }
 tracing = { workspace = true }
-tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
 trogon-nats = { workspace = true }
-trogon-std = { workspace = true, features = ["clap"] }
+trogon-std = { workspace = true, features = ["clap", "runtime"] }
 uuid = { workspace = true }
 
 [dev-dependencies]

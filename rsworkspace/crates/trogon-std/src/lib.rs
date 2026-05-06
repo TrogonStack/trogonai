@@ -37,6 +37,8 @@ pub mod env;
 pub mod fs;
 pub mod http;
 pub mod json;
+#[cfg(all(feature = "runtime", not(coverage)))]
+pub mod runtime;
 pub mod secret_string;
 #[cfg(feature = "signal")]
 pub mod signal;

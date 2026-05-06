@@ -18,8 +18,9 @@ mod runtime {
     use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
     use tokio::net::TcpListener;
     use tokio::sync::{mpsc, oneshot};
-    use tracing::{error, info, warn};
+    use tracing::{info, warn};
     use trogon_std::env::SystemEnv;
+    use trogon_std::runtime::{init_logging, shutdown_signal};
     use uuid::Uuid;
 
     use crate::config;
@@ -62,56 +63,12 @@ mod runtime {
         Ok(())
     }
 
-    fn init_logging() {
-        let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
-        let _ = tracing_subscriber::fmt()
-            .with_env_filter(env_filter)
-            .with_writer(std::io::stderr)
-            .try_init();
-    }
-
     fn streamable_http_config(allowed_hosts: Vec<String>) -> StreamableHttpServerConfig {
         let config = StreamableHttpServerConfig::default();
         if allowed_hosts.is_empty() {
             config
         } else {
             config.with_allowed_hosts(allowed_hosts)
-        }
-    }
-
-    async fn shutdown_signal() {
-        #[cfg(unix)]
-        {
-            let mut terminate = match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
-                Ok(signal) => Some(signal),
-                Err(error) => {
-                    error!(error = %error, "Failed to listen for SIGTERM");
-                    None
-                }
-            };
-
-            tokio::select! {
-                result = tokio::signal::ctrl_c() => {
-                    if let Err(error) = result {
-                        error!(error = %error, "Failed to listen for shutdown signal");
-                    }
-                }
-                _ = async {
-                    if let Some(signal) = terminate.as_mut() {
-                        signal.recv().await;
-                    } else {
-                        std::future::pending::<()>().await;
-                    }
-                } => {}
-            }
-        }
-
-        #[cfg(not(unix))]
-        {
-            if let Err(error) = tokio::signal::ctrl_c().await {
-                error!(error = %error, "Failed to listen for shutdown signal");
-            }
         }
     }
 
