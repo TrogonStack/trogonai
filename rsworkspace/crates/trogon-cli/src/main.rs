@@ -23,6 +23,11 @@ struct Args {
     ///   echo "what is 2+2?" | trogon --print
     #[arg(short = 'p', long, num_args = 0..=1, default_missing_value = "-")]
     print: Option<String>,
+
+    /// Output format for non-interactive mode: "text" (default) or "json".
+    /// json emits a single line: {"text":"...","stop_reason":"..."}
+    #[arg(long, default_value = "text")]
+    output_format: String,
 }
 
 #[tokio::main]
@@ -45,7 +50,12 @@ async fn main() -> anyhow::Result<()> {
             eprintln!("error: prompt is empty — pass a string or pipe text to stdin");
             std::process::exit(1);
         }
-        let result = print::run(nats, &args.prefix, cwd, &prompt).await;
+        let format = if args.output_format == "json" {
+            print::OutputFormat::Json
+        } else {
+            print::OutputFormat::Text
+        };
+        let result = print::run(nats, &args.prefix, cwd, &prompt, format).await;
         if let Err(e) = result {
             eprintln!("error: {e}");
             std::process::exit(1);

@@ -12,6 +12,7 @@ use std::time::Duration;
 use futures::StreamExt as _;
 use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::{ContainerAsync, runners::AsyncRunner};
+use trogon_cli::OutputFormat;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -28,6 +29,10 @@ async fn connect(port: u16) -> async_nats::Client {
     async_nats::connect(format!("nats://127.0.0.1:{port}"))
         .await
         .expect("connect to NATS")
+}
+
+fn cwd() -> std::path::PathBuf {
+    std::env::current_dir().unwrap()
 }
 
 /// Spawn a fake runner that handles one session.new request and one prompt.
@@ -85,7 +90,7 @@ async fn spawn_fake_runner(
     });
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────────────
+// ── Text format tests ─────────────────────────────────────────────────────────
 
 /// The session receives Text events and Done — run() completes successfully.
 #[tokio::test]
@@ -95,13 +100,7 @@ async fn print_run_streams_text_and_returns_ok() {
 
     spawn_fake_runner(nats.clone(), "sess-print-1", vec!["hello ", "world"], "end_turn").await;
 
-    let result = trogon_cli::print::run(
-        nats,
-        PREFIX,
-        std::env::current_dir().unwrap(),
-        "say hello",
-    )
-    .await;
+    let result = trogon_cli::print::run(nats, PREFIX, cwd(), "say hello", OutputFormat::Text).await;
 
     assert!(result.is_ok(), "expected Ok, got: {result:?}");
 }
@@ -114,13 +113,8 @@ async fn print_run_returns_err_on_error_stop_reason() {
 
     spawn_fake_runner(nats.clone(), "sess-print-err", vec![], "error").await;
 
-    let result = trogon_cli::print::run(
-        nats,
-        PREFIX,
-        std::env::current_dir().unwrap(),
-        "trigger error",
-    )
-    .await;
+    let result =
+        trogon_cli::print::run(nats, PREFIX, cwd(), "trigger error", OutputFormat::Text).await;
 
     assert!(result.is_err(), "expected Err for stop_reason=error");
     let msg = result.unwrap_err().to_string();
@@ -133,7 +127,6 @@ async fn print_run_prompt_routed_to_session_subject() {
     let (_c, port) = start_nats().await;
     let nats = connect(port).await;
 
-    // Fake runner: handle session.new, then expose the received prompt payload.
     let subject_new = format!("{PREFIX}.agent.session.new");
     let mut sub_new = nats.subscribe(subject_new).await.unwrap();
     let nats2 = nats.clone();
@@ -167,14 +160,9 @@ async fn print_run_prompt_routed_to_session_subject() {
         }
     });
 
-    trogon_cli::print::run(
-        nats,
-        PREFIX,
-        std::env::current_dir().unwrap(),
-        "unique-sentinel-prompt",
-    )
-    .await
-    .ok();
+    trogon_cli::print::run(nats, PREFIX, cwd(), "unique-sentinel-prompt", OutputFormat::Text)
+        .await
+        .ok();
 
     let payload = tokio::time::timeout(TIMEOUT, rx.recv())
         .await
@@ -192,21 +180,10 @@ async fn print_run_max_tokens_is_not_an_error() {
     let (_c, port) = start_nats().await;
     let nats = connect(port).await;
 
-    spawn_fake_runner(
-        nats.clone(),
-        "sess-print-maxtok",
-        vec!["partial"],
-        "max_tokens",
-    )
-    .await;
+    spawn_fake_runner(nats.clone(), "sess-print-maxtok", vec!["partial"], "max_tokens").await;
 
-    let result = trogon_cli::print::run(
-        nats,
-        PREFIX,
-        std::env::current_dir().unwrap(),
-        "write a lot",
-    )
-    .await;
+    let result =
+        trogon_cli::print::run(nats, PREFIX, cwd(), "write a lot", OutputFormat::Text).await;
 
     assert!(result.is_ok(), "max_tokens should not be an error: {result:?}");
 }
@@ -217,7 +194,6 @@ async fn print_run_two_calls_get_distinct_session_ids() {
     let (_c, port) = start_nats().await;
     let nats = connect(port).await;
 
-    // Fake runner handles 2 session.new requests.
     let subj = format!("{PREFIX}.agent.session.new");
     let mut sub = nats.subscribe(subj).await.unwrap();
     let nats2 = nats.clone();
@@ -232,7 +208,6 @@ async fn print_run_two_calls_get_distinct_session_ids() {
                         .publish(reply, serde_json::to_vec(&body).unwrap().into())
                         .await
                         .ok();
-                    // Handle the prompt for this session.
                     let sid = format!("sess-iso-{n}");
                     let ps = format!("{PREFIX}.session.{sid}.agent.prompt");
                     let mut sp = nats2.subscribe(ps).await.unwrap();
@@ -250,7 +225,66 @@ async fn print_run_two_calls_get_distinct_session_ids() {
         }
     });
 
-    // Both calls should complete without error.
-    trogon_cli::print::run(nats.clone(), PREFIX, std::env::current_dir().unwrap(), "first").await.unwrap();
-    trogon_cli::print::run(nats.clone(), PREFIX, std::env::current_dir().unwrap(), "second").await.unwrap();
+    trogon_cli::print::run(nats.clone(), PREFIX, cwd(), "first", OutputFormat::Text)
+        .await
+        .unwrap();
+    trogon_cli::print::run(nats.clone(), PREFIX, cwd(), "second", OutputFormat::Text)
+        .await
+        .unwrap();
+}
+
+// ── JSON format tests ─────────────────────────────────────────────────────────
+
+/// JSON mode completes successfully and returns Ok (stdout content is a JSON line).
+#[tokio::test]
+async fn print_run_json_format_returns_ok_on_success() {
+    let (_c, port) = start_nats().await;
+    let nats = connect(port).await;
+
+    spawn_fake_runner(
+        nats.clone(),
+        "sess-json-ok",
+        vec!["hello ", "world"],
+        "end_turn",
+    )
+    .await;
+
+    let result =
+        trogon_cli::print::run(nats, PREFIX, cwd(), "say hello", OutputFormat::Json).await;
+
+    assert!(result.is_ok(), "expected Ok in json mode, got: {result:?}");
+}
+
+/// JSON mode also returns Err when the runner signals stop_reason "error".
+#[tokio::test]
+async fn print_run_json_format_error_stop_reason_returns_err() {
+    let (_c, port) = start_nats().await;
+    let nats = connect(port).await;
+
+    spawn_fake_runner(nats.clone(), "sess-json-err", vec![], "error").await;
+
+    let result =
+        trogon_cli::print::run(nats, PREFIX, cwd(), "trigger error", OutputFormat::Json).await;
+
+    assert!(result.is_err(), "expected Err in json mode for stop_reason=error");
+}
+
+/// JSON mode: max_tokens is not an error.
+#[tokio::test]
+async fn print_run_json_format_max_tokens_is_not_an_error() {
+    let (_c, port) = start_nats().await;
+    let nats = connect(port).await;
+
+    spawn_fake_runner(
+        nats.clone(),
+        "sess-json-maxtok",
+        vec!["partial text"],
+        "max_tokens",
+    )
+    .await;
+
+    let result =
+        trogon_cli::print::run(nats, PREFIX, cwd(), "write a lot", OutputFormat::Json).await;
+
+    assert!(result.is_ok(), "max_tokens should not be an error in json mode: {result:?}");
 }
