@@ -145,6 +145,8 @@ pub mod mock {
         recorded_tool_names: Arc<Mutex<Vec<String>>>,
         /// Set to true when `set_elicitation_provider` is called.
         pub elicitation_provider_set: Arc<Mutex<bool>>,
+        /// The last `system_prompt` argument passed to `run_chat_streaming`.
+        captured_system_prompt: Arc<Mutex<Option<String>>>,
     }
 
     impl MockAgentRunner {
@@ -159,6 +161,7 @@ pub mod mock {
                 wait_for_steer: false,
                 recorded_tool_names: Arc::new(Mutex::new(Vec::new())),
                 elicitation_provider_set: Arc::new(Mutex::new(false)),
+                captured_system_prompt: Arc::new(Mutex::new(None)),
             }
         }
 
@@ -208,6 +211,11 @@ pub mod mock {
         pub fn captured_steer(&self) -> Vec<String> {
             self.captured_steer.lock().unwrap().clone()
         }
+
+        /// Return the `system_prompt` argument from the last `run_chat_streaming` call.
+        pub fn captured_system_prompt(&self) -> Option<String> {
+            self.captured_system_prompt.lock().unwrap().clone()
+        }
     }
 
     #[async_trait::async_trait(?Send)]
@@ -243,10 +251,11 @@ pub mod mock {
             &self,
             messages: Vec<Message>,
             _tools: &[ToolDef],
-            _system_prompt: Option<&str>,
+            system_prompt: Option<&str>,
             event_tx: mpsc::Sender<AgentEvent>,
             mut steer_rx: Option<mpsc::Receiver<String>>,
         ) -> Result<Vec<Message>, AgentError> {
+            *self.captured_system_prompt.lock().unwrap() = system_prompt.map(str::to_string);
             // Signal that the runner has started and the steer subscription is live.
             self.started_notify.notify_one();
 

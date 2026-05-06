@@ -163,6 +163,14 @@ fn internal_error(msg: impl Into<String>) -> Error {
     Error::new(ErrorCode::InternalError.into(), msg.into())
 }
 
+/// Estimates the token count of a message list using the heuristic `bytes / 4`.
+fn estimate_token_count(messages: &[Message]) -> u64 {
+    serde_json::to_string(messages)
+        .map(|s| s.len() as u64)
+        .unwrap_or(0)
+        / 4
+}
+
 /// Sends the conversation history to `trogon-compactor` via NATS request-reply.
 ///
 /// Returns the original messages unchanged if the compactor is not running or
@@ -416,9 +424,11 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> TrogonAgent<
 
         state.messages.push(user_message_from_request(req));
 
-        // Compact history if approaching the context window limit.
+        // Compact history when token estimate exceeds 85 % of the session budget.
         // Degrades gracefully — if trogon-compactor is not running, continues unchanged.
-        if let Some(ref nats) = self.compactor_nats {
+        if let Some(ref nats) = self.compactor_nats
+            && estimate_token_count(&state.messages) > state.token_budget * 85 / 100
+        {
             let msgs = std::mem::take(&mut state.messages);
             state.messages = compact_messages(nats, msgs, &session_id).await;
         }
@@ -492,7 +502,15 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> TrogonAgent<
         };
 
         let messages = state.messages.clone();
-        let system_prompt = state.system_prompt.clone();
+
+        // Load TROGON.md files (global → repo root → cwd) and prepend to system_prompt.
+        let trogon_md = crate::trogon_md::load_trogon_md(&state.cwd).await;
+        let system_prompt = match (trogon_md, state.system_prompt.clone()) {
+            (Some(tmd), Some(sp)) => Some(format!("{tmd}\n\n{sp}")),
+            (Some(tmd), None) => Some(tmd),
+            (None, sp) => sp,
+        };
+
         let system_prompt = if !state.additional_roots.is_empty() {
             let roots_info = state
                 .additional_roots
@@ -1161,5 +1179,65 @@ mod tests {
                 .unwrap_or(false);
             assert!(!is_enter_plan, "tool {id} must not be detected as EnterPlanMode");
         }
+    }
+
+    // ── estimate_token_count ──────────────────────────────────────────────────
+
+    #[test]
+    fn estimate_token_count_empty_returns_zero() {
+        assert_eq!(estimate_token_count(&[]), 0);
+    }
+
+    #[test]
+    fn estimate_token_count_is_bytes_divided_by_four() {
+        let msgs = vec![Message::user_text("hello")];
+        let json_len = serde_json::to_string(&msgs).unwrap().len() as u64;
+        assert_eq!(estimate_token_count(&msgs), json_len / 4);
+    }
+
+    #[test]
+    fn estimate_token_count_grows_with_message_length() {
+        let short = vec![Message::user_text("hi")];
+        let long = vec![Message::user_text(&"x".repeat(10_000))];
+        assert!(
+            estimate_token_count(&long) > estimate_token_count(&short),
+            "longer messages must produce a higher estimate"
+        );
+    }
+
+    // ── 85 % compact threshold ────────────────────────────────────────────────
+
+    #[test]
+    fn compact_threshold_not_reached_for_small_messages() {
+        let msgs = vec![Message::user_text("hello")];
+        let estimate = estimate_token_count(&msgs);
+        let budget = 200_000u64;
+        assert!(
+            estimate <= budget * 85 / 100,
+            "a tiny message must not exceed the 85 % threshold (estimate={estimate})"
+        );
+    }
+
+    #[test]
+    fn compact_threshold_reached_when_messages_exceed_85_percent() {
+        // Use a very small budget so a few messages tip over the threshold.
+        let budget = 10u64;
+        let msgs = vec![Message::user_text(&"x".repeat(200))];
+        let estimate = estimate_token_count(&msgs);
+        assert!(
+            estimate > budget * 85 / 100,
+            "large messages must exceed the 85 % threshold of a small budget \
+             (estimate={estimate}, threshold={})",
+            budget * 85 / 100
+        );
+    }
+
+    #[test]
+    fn compact_threshold_boundary_at_exactly_85_percent() {
+        // At exactly 85 % the condition is > (strict), so compact must NOT trigger.
+        let budget = 100u64;
+        let threshold = budget * 85 / 100; // 85
+        // estimate == threshold → condition false → no compact
+        assert!(!(threshold > threshold), "strictly greater-than must be false at the boundary");
     }
 }

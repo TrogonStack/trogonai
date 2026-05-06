@@ -25,7 +25,8 @@ async fn run_git(cwd: &str, args: &[&str]) -> String {
             if combined.is_empty() {
                 "(no output)".to_string()
             } else if combined.len() > MAX_OUTPUT {
-                format!("{}... (truncated at 4KB)", &combined[..MAX_OUTPUT])
+                let boundary = combined.floor_char_boundary(MAX_OUTPUT);
+                format!("{}... (truncated at 4KB)", &combined[..boundary])
             } else {
                 combined
             }

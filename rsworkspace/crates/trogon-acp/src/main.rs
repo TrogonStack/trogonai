@@ -88,8 +88,14 @@ async fn main() -> anyhow::Result<()> {
     // ── AgentLoop ─────────────────────────────────────────────────────────────
 
     let http_client = reqwest::Client::new();
+    let cwd = std::env::current_dir()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
     let tool_context = Arc::new(ToolContext {
         proxy_url: proxy_url.clone(),
+        cwd,
+        http_client: http_client.clone(),
     });
 
     let mut agent_loop = AgentLoop {
@@ -109,6 +115,7 @@ async fn main() -> anyhow::Result<()> {
         permission_checker: None,
         elicitation_provider: None,
         thinking_budget: None,
+        streaming_client: None,
     };
 
     let thinking_budget: Option<u32> = std::env::var("MAX_THINKING_TOKENS")
@@ -258,6 +265,53 @@ fn allow_bypass() -> bool {
     true
 }
 
+fn exit_plan_mode_options(bypass: bool) -> Vec<PermissionOption> {
+    let mut options = Vec::new();
+    if bypass {
+        options.push(PermissionOption::new(
+            "bypassPermissions",
+            "Yes, and bypass permissions",
+            PermissionOptionKind::AllowAlways,
+        ));
+    }
+    options.push(PermissionOption::new(
+        "acceptEdits",
+        "Yes, and auto-accept edits",
+        PermissionOptionKind::AllowAlways,
+    ));
+    options.push(PermissionOption::new(
+        "default",
+        "Yes, and manually approve edits",
+        PermissionOptionKind::AllowOnce,
+    ));
+    options.push(PermissionOption::new(
+        "plan",
+        "No, keep planning",
+        PermissionOptionKind::RejectOnce,
+    ));
+    options
+}
+
+fn parse_exit_plan_mode_outcome(outcome: RequestPermissionOutcome) -> (bool, Option<String>) {
+    match outcome {
+        RequestPermissionOutcome::Selected(sel) => {
+            let id = sel.option_id.0.as_ref();
+            if id == "plan" { (false, None) } else { (true, Some(id.to_string())) }
+        }
+        _ => (false, None),
+    }
+}
+
+fn parse_tool_permission_outcome(outcome: RequestPermissionOutcome) -> (bool, bool) {
+    match outcome {
+        RequestPermissionOutcome::Selected(sel) => {
+            let id = sel.option_id.0.as_ref();
+            (id == "allow" || id == "allow_always", id == "allow_always")
+        }
+        _ => (false, false),
+    }
+}
+
 /// Call `conn.request_permission` for a tool and send the allow/deny result
 /// back to the Runner via the oneshot channel embedded in `req`.
 ///
@@ -274,46 +328,14 @@ async fn handle_permission_request<S: SessionStore>(
 ) {
     // ── ExitPlanMode: let the user choose which mode to switch to ─────────────
     if req.tool_name == "ExitPlanMode" {
-        let mut options = Vec::new();
-        if allow_bypass() {
-            options.push(PermissionOption::new(
-                "bypassPermissions",
-                "Yes, and bypass permissions",
-                PermissionOptionKind::AllowAlways,
-            ));
-        }
-        options.push(PermissionOption::new(
-            "acceptEdits",
-            "Yes, and auto-accept edits",
-            PermissionOptionKind::AllowAlways,
-        ));
-        options.push(PermissionOption::new(
-            "default",
-            "Yes, and manually approve edits",
-            PermissionOptionKind::AllowOnce,
-        ));
-        options.push(PermissionOption::new(
-            "plan",
-            "No, keep planning",
-            PermissionOptionKind::RejectOnce,
-        ));
+        let options = exit_plan_mode_options(allow_bypass());
 
         let fields = ToolCallUpdateFields::new().title("Exit Plan Mode".to_string());
         let tool_call = ToolCallUpdate::new(req.tool_call_id.clone(), fields);
         let perm_req = RequestPermissionRequest::new(req.session_id.clone(), tool_call, options);
 
         let (allowed, new_mode) = match conn.request_permission(perm_req).await {
-            Ok(resp) => match resp.outcome {
-                RequestPermissionOutcome::Selected(sel) => {
-                    let id = sel.option_id.0.as_ref();
-                    if id == "plan" {
-                        (false, None)
-                    } else {
-                        (true, Some(id.to_string()))
-                    }
-                }
-                _ => (false, None),
-            },
+            Ok(resp) => parse_exit_plan_mode_outcome(resp.outcome),
             Err(e) => {
                 tracing::warn!(error = %e, "ExitPlanMode permission request failed");
                 (false, None)
@@ -376,16 +398,7 @@ async fn handle_permission_request<S: SessionStore>(
     let outcome = conn.request_permission(perm_req).await;
 
     let (allowed, save_always) = match outcome {
-        Ok(resp) => match resp.outcome {
-            RequestPermissionOutcome::Selected(sel) => {
-                let id = sel.option_id.0.as_ref();
-                let is_allowed = id == "allow" || id == "allow_always";
-                let is_always = id == "allow_always";
-                (is_allowed, is_always)
-            }
-            RequestPermissionOutcome::Cancelled => (false, false),
-            _ => (false, false),
-        },
+        Ok(resp) => parse_tool_permission_outcome(resp.outcome),
         Err(e) => {
             tracing::warn!(error = %e, tool = %req.tool_name, "permission request failed — denying");
             (false, false)
@@ -410,6 +423,7 @@ async fn handle_permission_request<S: SessionStore>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use agent_client_protocol::SelectedPermissionOutcome;
 
     // Serialize env-var tests — they mutate global process state.
     static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -439,6 +453,100 @@ mod tests {
             "allow_bypass must return false when SUDO_USER is set"
         );
     }
+
+    // ── exit_plan_mode_options ──────────────────────────────────────────────────
+
+    #[test]
+    fn exit_plan_mode_options_includes_bypass_when_allowed() {
+        let opts = exit_plan_mode_options(true);
+        assert_eq!(opts.len(), 4, "must have 4 options when bypass=true");
+        assert!(
+            opts.iter().any(|o| o.option_id.0.as_ref() == "bypassPermissions"),
+            "bypassPermissions must be present"
+        );
+        assert!(opts.iter().any(|o| o.option_id.0.as_ref() == "plan"));
+    }
+
+    #[test]
+    fn exit_plan_mode_options_excludes_bypass_when_disallowed() {
+        let opts = exit_plan_mode_options(false);
+        assert_eq!(opts.len(), 3, "must have 3 options when bypass=false");
+        assert!(
+            opts.iter().all(|o| o.option_id.0.as_ref() != "bypassPermissions"),
+            "bypassPermissions must be absent"
+        );
+        assert!(opts.iter().any(|o| o.option_id.0.as_ref() == "acceptEdits"));
+        assert!(opts.iter().any(|o| o.option_id.0.as_ref() == "default"));
+        assert!(opts.iter().any(|o| o.option_id.0.as_ref() == "plan"));
+    }
+
+    // ── parse_exit_plan_mode_outcome ────────────────────────────────────────────
+
+    #[test]
+    fn parse_exit_plan_mode_plan_denies_with_no_mode() {
+        let outcome = RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new("plan"));
+        let (allowed, mode) = parse_exit_plan_mode_outcome(outcome);
+        assert!(!allowed, "plan must deny");
+        assert!(mode.is_none(), "plan must return no mode change");
+    }
+
+    #[test]
+    fn parse_exit_plan_mode_bypass_allows_and_returns_mode() {
+        let outcome = RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new("bypassPermissions"));
+        let (allowed, mode) = parse_exit_plan_mode_outcome(outcome);
+        assert!(allowed, "bypassPermissions must allow");
+        assert_eq!(mode.as_deref(), Some("bypassPermissions"));
+    }
+
+    #[test]
+    fn parse_exit_plan_mode_accept_edits_allows_and_returns_mode() {
+        let outcome = RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new("acceptEdits"));
+        let (allowed, mode) = parse_exit_plan_mode_outcome(outcome);
+        assert!(allowed);
+        assert_eq!(mode.as_deref(), Some("acceptEdits"));
+    }
+
+    #[test]
+    fn parse_exit_plan_mode_cancelled_denies() {
+        let (allowed, mode) = parse_exit_plan_mode_outcome(RequestPermissionOutcome::Cancelled);
+        assert!(!allowed, "Cancelled must deny");
+        assert!(mode.is_none());
+    }
+
+    // ── parse_tool_permission_outcome ───────────────────────────────────────────
+
+    #[test]
+    fn parse_tool_permission_allow_always_allows_and_saves() {
+        let outcome = RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new("allow_always"));
+        let (allowed, save_always) = parse_tool_permission_outcome(outcome);
+        assert!(allowed);
+        assert!(save_always);
+    }
+
+    #[test]
+    fn parse_tool_permission_allow_once_allows_without_saving() {
+        let outcome = RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new("allow"));
+        let (allowed, save_always) = parse_tool_permission_outcome(outcome);
+        assert!(allowed);
+        assert!(!save_always);
+    }
+
+    #[test]
+    fn parse_tool_permission_reject_denies() {
+        let outcome = RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new("reject"));
+        let (allowed, save_always) = parse_tool_permission_outcome(outcome);
+        assert!(!allowed);
+        assert!(!save_always);
+    }
+
+    #[test]
+    fn parse_tool_permission_cancelled_denies() {
+        let (allowed, save_always) = parse_tool_permission_outcome(RequestPermissionOutcome::Cancelled);
+        assert!(!allowed);
+        assert!(!save_always);
+    }
+
+    // ── allow_bypass ────────────────────────────────────────────────────────────
 
     #[cfg_attr(coverage, coverage(off))]
     #[test]
