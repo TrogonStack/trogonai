@@ -14,7 +14,7 @@ mod tests {
     fn event_data_and_recorded_event_helpers_work() {
         let mut removed = v1::JobEvent::new();
         removed.set_job_removed(v1::JobRemoved::new());
-        let event = EventData::new_with_codec("cleanup", &JobEventCodec, removed.clone()).unwrap();
+        let event = EventData::from_event("cleanup", &JobEventCodec, &removed).unwrap();
         assert_eq!(event.stream_id(), "cleanup");
         assert_eq!(event.event_type, JOB_REMOVED_EVENT_TYPE);
         assert!(v1::JobRemoved::parse(&event.payload).is_ok());

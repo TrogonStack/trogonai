@@ -160,7 +160,7 @@ impl MockCronStore {
         self.stream_versions.lock().unwrap().insert(id.clone(), 1);
         self.events.lock().unwrap().insert(
             id.clone(),
-            vec![EventData::new_with_codec(&id, &JobEventCodec, event).unwrap()],
+            vec![EventData::from_event(&id, &JobEventCodec, &event).unwrap()],
         );
         self.jobs.lock().unwrap().insert(id.clone(), Snapshot::new(1, job));
     }
