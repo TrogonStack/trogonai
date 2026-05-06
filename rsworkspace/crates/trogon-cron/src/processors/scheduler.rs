@@ -11,7 +11,7 @@ use futures::{Stream, StreamExt, future};
 use trogon_eventsourcing::{RecordedEvent, record_stream_message};
 use trogon_nats::SubjectTokenViolation;
 use trogon_nats::lease::{LeaderElection, LeaseRenewInterval, LeaseTiming, LeaseTtl, NatsKvLease, NatsKvLeaseConfig};
-use trogon_std::{NowV7, UuidV7Generator};
+use trogon_std::{NowV7, UuidV7Generator, signal};
 
 use crate::{
     ResolvedJob,
@@ -235,7 +235,7 @@ where
 
         loop {
             tokio::select! {
-                _ = trogon_telemetry::signal::shutdown_signal() => {
+                _ = signal::shutdown_signal() => {
                     tracing::info!("Shutdown signal received, releasing leader lease");
                     if let Err(error) = leader.release().await {
                         tracing::warn!(error = %error, "Failed to release leader lease");
@@ -376,7 +376,7 @@ where
 {
     loop {
         tokio::select! {
-            _ = trogon_telemetry::signal::shutdown_signal() => {
+            _ = signal::shutdown_signal() => {
                 return Ok(ReestablishedProcessor::Shutdown);
             }
             result = establish_scheduler_processor(store, publisher) => {
