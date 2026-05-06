@@ -150,6 +150,7 @@ fn read_env_port<E: ReadEnv>(env_provider: &E) -> Result<Option<u16>, ConfigErro
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::constants::MCP_ENDPOINT;
     use trogon_std::FixedArgs;
     use trogon_std::env::InMemoryEnv;
 
@@ -190,6 +191,7 @@ mod tests {
         assert_eq!(config.client_id_prefix.as_str(), "http");
         assert_eq!(config.server_id.as_str(), "default");
         assert_eq!(config.bind_addr, "127.0.0.1:8081".parse().unwrap());
+        assert_eq!(MCP_ENDPOINT, "/mcp");
         assert!(config.allowed_hosts.is_empty());
     }
 
