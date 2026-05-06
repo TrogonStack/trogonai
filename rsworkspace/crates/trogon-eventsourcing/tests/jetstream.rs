@@ -14,8 +14,8 @@ use trogon_eventsourcing::nats::{
 use trogon_eventsourcing::{
     AppendStreamRequest, AppendStreamResponse, CanonicalEventCodec, CommandExecution, CommandFailure, Decide, Decision,
     EventData, EventId, EventIdentity, EventType, FrequencySnapshot, JsonEventCodec, NonEmpty, ReadSnapshotRequest,
-    ReadStreamRequest, Snapshot, SnapshotChange, SnapshotStoreConfig, Snapshots, StreamState, WriteSnapshotRequest,
-    spawn_on_tokio,
+    ReadStreamRequest, Snapshot, SnapshotChange, SnapshotRead, SnapshotStoreConfig, SnapshotWrite, Snapshots,
+    StreamAppend, StreamRead, StreamState, WriteSnapshotRequest, spawn_on_tokio,
 };
 use trogon_eventsourcing::{
     SnapshotStoreError, StreamStoreError, TROGON_EVENT_TYPE, checkpoint_key, maybe_advance_checkpoint,
@@ -2287,10 +2287,11 @@ async fn jetstream_snapshot_store_persists_lists_deletes_and_advances_checkpoint
         .put(snapshot_key(&config, "corrupt"), "not-json".into())
         .await?;
     assert_snapshot_error(
-        fixture
-            .store
-            .read_snapshot::<str, TestSnapshot>(ReadSnapshotRequest::new(config.clone(), "corrupt"))
-            .await,
+        SnapshotRead::<TestSnapshot, str>::read_snapshot(
+            &fixture.store,
+            ReadSnapshotRequest::new(config.clone(), "corrupt"),
+        )
+        .await,
     )?;
     assert_snapshot_error(
         fixture

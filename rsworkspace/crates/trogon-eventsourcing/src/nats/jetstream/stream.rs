@@ -7,15 +7,14 @@ use crate::{
     StreamState,
 };
 
-impl<Resolver> JetStreamStore<Resolver> {
-    pub async fn read_stream<StreamId>(
-        &self,
-        request: ReadStreamRequest<'_, StreamId>,
-    ) -> Result<ReadStreamResponse, JetStreamStoreError<Resolver::Error>>
-    where
-        StreamId: AsRef<str> + ToString + Send + Sync + ?Sized,
-        Resolver: StreamSubjectResolver<StreamId>,
-    {
+impl<StreamId, Resolver> StreamRead<StreamId> for JetStreamStore<Resolver>
+where
+    StreamId: AsRef<str> + ToString + Send + Sync + ?Sized,
+    Resolver: StreamSubjectResolver<StreamId>,
+{
+    type Error = JetStreamStoreError<Resolver::Error>;
+
+    async fn read_stream(&self, request: ReadStreamRequest<'_, StreamId>) -> Result<ReadStreamResponse, Self::Error> {
         let stream_id = request.stream_id;
         let subject_state = self
             .subject_resolver
@@ -38,15 +37,19 @@ impl<Resolver> JetStreamStore<Resolver> {
             events,
         })
     }
+}
 
-    pub async fn append_stream<StreamId>(
+impl<StreamId, Resolver> StreamAppend<StreamId> for JetStreamStore<Resolver>
+where
+    StreamId: AsRef<str> + ToString + Send + Sync + ?Sized,
+    Resolver: StreamSubjectResolver<StreamId>,
+{
+    type Error = JetStreamStoreError<Resolver::Error>;
+
+    async fn append_stream(
         &self,
         request: AppendStreamRequest<'_, StreamId>,
-    ) -> Result<AppendStreamResponse, JetStreamStoreError<Resolver::Error>>
-    where
-        StreamId: AsRef<str> + ToString + Send + Sync + ?Sized,
-        Resolver: StreamSubjectResolver<StreamId>,
-    {
+    ) -> Result<AppendStreamResponse, Self::Error> {
         let stream_id = request.stream_id;
         let expected_state = request.stream_state;
         let events = request.events;
@@ -127,32 +130,5 @@ pub async fn subject_current_version(
             context: "failed to read latest subject message",
             source: Box::new(error),
         }),
-    }
-}
-
-impl<StreamId, Resolver> StreamRead<StreamId> for JetStreamStore<Resolver>
-where
-    StreamId: AsRef<str> + ToString + Send + Sync + ?Sized,
-    Resolver: StreamSubjectResolver<StreamId>,
-{
-    type Error = JetStreamStoreError<Resolver::Error>;
-
-    async fn read_stream(&self, request: ReadStreamRequest<'_, StreamId>) -> Result<ReadStreamResponse, Self::Error> {
-        JetStreamStore::read_stream(self, request).await
-    }
-}
-
-impl<StreamId, Resolver> StreamAppend<StreamId> for JetStreamStore<Resolver>
-where
-    StreamId: AsRef<str> + ToString + Send + Sync + ?Sized,
-    Resolver: StreamSubjectResolver<StreamId>,
-{
-    type Error = JetStreamStoreError<Resolver::Error>;
-
-    async fn append_stream(
-        &self,
-        request: AppendStreamRequest<'_, StreamId>,
-    ) -> Result<AppendStreamResponse, Self::Error> {
-        JetStreamStore::append_stream(self, request).await
     }
 }
