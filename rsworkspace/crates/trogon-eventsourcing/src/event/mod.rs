@@ -9,11 +9,29 @@ pub use recorded::RecordedEvent;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{EventId, EventIdentity, EventType, JsonEventCodec};
+    use crate::{EventCodec, EventId, EventIdentity, EventType};
     use chrono::{DateTime, Utc};
-    use serde::{Deserialize, Serialize};
+    use serde::{Deserialize, Serialize, de::DeserializeOwned};
     use std::str::FromStr;
     use uuid::Uuid;
+
+    #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+    struct TestEventCodec;
+
+    impl<T> EventCodec<T> for TestEventCodec
+    where
+        T: Serialize + DeserializeOwned,
+    {
+        type Error = serde_json::Error;
+
+        fn encode(&self, value: &T) -> Result<Vec<u8>, Self::Error> {
+            serde_json::to_vec(value)
+        }
+
+        fn decode(&self, _event_type: &str, _stream_id: &str, payload: &[u8]) -> Result<T, Self::Error> {
+            serde_json::from_slice(payload)
+        }
+    }
 
     #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
     struct TestEvent {
@@ -62,13 +80,16 @@ mod tests {
             id: "alpha".to_string(),
             value: "beta".to_string(),
         };
-        let event = EventData::from_event("alpha", &JsonEventCodec, &payload).unwrap();
+        let event = EventData::from_event("alpha", &TestEventCodec, &payload).unwrap();
 
         assert_eq!(event.stream_id(), "alpha");
         assert_eq!(event.event_id.as_uuid().get_version_num(), 7);
         assert_eq!(event.event_type, "TestEvent");
         assert_eq!(event.subject_with_prefix("events.test."), "events.test.alpha");
-        assert_eq!(event.decode_data::<TestEvent>().unwrap().value, "beta");
+        assert_eq!(
+            event.decode_data_with::<TestEvent, _>(&TestEventCodec).unwrap().value,
+            "beta"
+        );
     }
 
     #[test]
@@ -78,7 +99,7 @@ mod tests {
             id: event_id,
             value: "beta".to_string(),
         };
-        let event = EventData::from_event("alpha", &JsonEventCodec, &payload).unwrap();
+        let event = EventData::from_event("alpha", &TestEventCodec, &payload).unwrap();
 
         assert_eq!(event.event_id, event_id);
     }
@@ -94,7 +115,7 @@ mod tests {
             id: "alpha".to_string(),
             value: "beta".to_string(),
         };
-        let event = EventData::from_event("alpha", &JsonEventCodec, &payload).unwrap();
+        let event = EventData::from_event("alpha", &TestEventCodec, &payload).unwrap();
 
         let recorded = event.record(
             "stream-alpha",
@@ -116,8 +137,11 @@ mod tests {
             id: "alpha".to_string(),
             value: "beta".to_string(),
         };
-        let event = EventData::from_event("alpha", &JsonEventCodec, &payload).unwrap();
-        assert_eq!(event.decode_data::<TestEvent>().unwrap().id, "alpha");
+        let event = EventData::from_event("alpha", &TestEventCodec, &payload).unwrap();
+        assert_eq!(
+            event.decode_data_with::<TestEvent, _>(&TestEventCodec).unwrap().id,
+            "alpha"
+        );
 
         let recorded = event.record(
             "stream-alpha",
@@ -125,7 +149,10 @@ mod tests {
             Some(42),
             DateTime::<Utc>::from_timestamp(1_700_000_001, 0).unwrap(),
         );
-        assert_eq!(recorded.decode_data::<TestEvent>().unwrap().id, "alpha");
+        assert_eq!(
+            recorded.decode_data_with::<TestEvent, _>(&TestEventCodec).unwrap().id,
+            "alpha"
+        );
     }
 
     #[test]
@@ -138,21 +165,31 @@ mod tests {
             trace_id: "trace-1".to_string(),
         };
 
-        let generated = EventData::from_event("alpha", &JsonEventCodec, &event)
+        let generated = EventData::from_event("alpha", &TestEventCodec, &event)
             .unwrap()
-            .with_metadata(&JsonEventCodec, Some(&metadata))
+            .with_metadata(&TestEventCodec, Some(&metadata))
             .unwrap();
-        assert_eq!(generated.decode_data::<TestEvent>().unwrap(), event);
         assert_eq!(
-            generated.decode_metadata::<TestMetadata>().unwrap(),
+            generated.decode_data_with::<TestEvent, _>(&TestEventCodec).unwrap(),
+            event
+        );
+        assert_eq!(
+            generated
+                .decode_metadata_with::<TestMetadata, _>(&TestEventCodec)
+                .unwrap(),
             Some(metadata.clone())
         );
 
-        let no_metadata = EventData::from_event("alpha", &JsonEventCodec, &event)
+        let no_metadata = EventData::from_event("alpha", &TestEventCodec, &event)
             .unwrap()
-            .with_metadata::<TestMetadata, _>(&JsonEventCodec, None)
+            .with_metadata::<TestMetadata, _>(&TestEventCodec, None)
             .unwrap();
-        assert_eq!(no_metadata.decode_metadata::<TestMetadata>().unwrap(), None);
+        assert_eq!(
+            no_metadata
+                .decode_metadata_with::<TestMetadata, _>(&TestEventCodec)
+                .unwrap(),
+            None
+        );
 
         let recorded = RecordedEvent {
             event_id: generated.event_id,
@@ -170,8 +207,16 @@ mod tests {
         assert_eq!(recorded.recorded_stream_id, "recorded-alpha");
         assert_eq!(recorded.stream_position, Some(7));
         assert_eq!(recorded.log_position, Some(9));
-        assert_eq!(recorded.decode_data::<TestEvent>().unwrap(), event);
-        assert_eq!(recorded.decode_metadata::<TestMetadata>().unwrap(), Some(metadata));
+        assert_eq!(
+            recorded.decode_data_with::<TestEvent, _>(&TestEventCodec).unwrap(),
+            event
+        );
+        assert_eq!(
+            recorded
+                .decode_metadata_with::<TestMetadata, _>(&TestEventCodec)
+                .unwrap(),
+            Some(metadata)
+        );
         assert_eq!(recorded.subject_with_prefix("events.test."), "events.test.alpha");
     }
 }
