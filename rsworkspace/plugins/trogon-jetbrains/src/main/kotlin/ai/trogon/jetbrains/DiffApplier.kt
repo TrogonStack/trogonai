@@ -66,7 +66,7 @@ object DiffApplier {
             if (!line.startsWith("@@")) { i++; continue }
 
             val m = Regex("""^@@ -(\d+)(?:,\d+)? \+\d+(?:,\d+)? @@""").find(line)
-                ?: run { i++; continue }
+            if (m == null) { i++; continue }
             val oldStart = m.groupValues[1].toInt() - 1   // 0-based
             i++
 

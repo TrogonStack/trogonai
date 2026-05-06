@@ -1,8 +1,9 @@
 package ai.trogon.jetbrains
 
+import com.intellij.testFramework.PlatformTestUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Integration tests for TrogonService using the IntelliJ Platform test harness.
@@ -10,6 +11,9 @@ import java.util.concurrent.TimeUnit
  *
  * These tests use the host's `echo` binary (always on PATH) to verify that the
  * subprocess streaming machinery works without needing a real `trogon` install.
+ *
+ * Note: tests run on the EDT; use PlatformTestUtil.waitWithEventsDispatching()
+ * rather than CountDownLatch.await() to avoid blocking the EDT.
  */
 class TrogonServiceTest : BasePlatformTestCase() {
 
@@ -33,87 +37,90 @@ class TrogonServiceTest : BasePlatformTestCase() {
 
     fun testSendPromptWithEchoStreamsOutputAndCallsDone() {
         // Override trogon binary to `echo` — produces output and exits 0
-        TrogonSettings.getInstance().trogonPath = "echo"
+        TrogonSettings.getInstance().trogonPath = "/bin/echo"
 
         val chunks = mutableListOf<String>()
-        val doneLatch = CountDownLatch(1)
-        val errorLatch = CountDownLatch(1)
+        val done = AtomicBoolean(false)
+        val errorMsg = AtomicReference<String?>(null)
 
         service.sendPrompt(
             prompt = "hello trogon",
             onChunk = { chunks.add(it) },
-            onDone = { doneLatch.countDown() },
-            onError = { errorLatch.countDown() },
+            onDone = { done.set(true) },
+            onError = { errorMsg.set(it) },
         )
 
-        // echo exits in <1s; 5s timeout is generous for CI
-        val done = doneLatch.await(5, TimeUnit.SECONDS)
-        assertTrue("onDone was not called within 5s", done)
-        assertFalse("onError must not be called when echo succeeds", errorLatch.count == 0L)
+        PlatformTestUtil.waitWithEventsDispatching(
+            "onDone was not called within 5s",
+            { done.get() || errorMsg.get() != null },
+            5,
+        )
 
-        val combined = chunks.joinToString("")
-        // echo should have printed "--print hello trogon\n" or similar
-        assertTrue("Expected non-empty output from echo, got: '$combined'", combined.isNotBlank())
+        assertNull("onError was called: ${errorMsg.get()}", errorMsg.get())
+        assertTrue("Expected non-empty output from echo", chunks.any { it.isNotBlank() })
     }
 
     fun testSendPromptWithMissingBinaryCallsOnError() {
         TrogonSettings.getInstance().trogonPath = "this-binary-does-not-exist-xyz"
 
-        val errorMessages = mutableListOf<String>()
-        val latch = CountDownLatch(1)
+        val done = AtomicBoolean(false)
+        val errorMsg = AtomicReference<String?>(null)
 
         service.sendPrompt(
             prompt = "anything",
             onChunk = {},
-            onDone = { latch.countDown() },
-            onError = { msg -> errorMessages.add(msg); latch.countDown() },
+            onDone = { done.set(true) },
+            onError = { errorMsg.set(it) },
         )
 
-        assertTrue("Expected callback within 5s", latch.await(5, TimeUnit.SECONDS))
-        assertTrue("Expected onError to be called, but got: $errorMessages", errorMessages.isNotEmpty())
-        assertTrue(
-            "Error message should mention the binary name, got: ${errorMessages.first()}",
-            errorMessages.first().isNotBlank()
+        PlatformTestUtil.waitWithEventsDispatching(
+            "Expected callback within 5s",
+            { done.get() || errorMsg.get() != null },
+            5,
         )
+
+        assertFalse("onDone must not be called for missing binary", done.get())
+        assertNotNull("onError should be called", errorMsg.get())
+        assertTrue("Error message should be non-blank", errorMsg.get()!!.isNotBlank())
     }
 
     fun testCancelStopsActiveProcess() {
         // Use `sleep 30` to simulate a long-running trogon call
-        TrogonSettings.getInstance().trogonPath = "sleep"
+        TrogonSettings.getInstance().trogonPath = "/bin/sleep"
 
-        val doneLatch = CountDownLatch(1)
-        service.sendPrompt(
-            prompt = "30",
-            onChunk = {},
-            onDone = { doneLatch.countDown() },
-            onError = { doneLatch.countDown() },
-        )
+        service.sendPrompt(prompt = "30", onChunk = {}, onDone = {}, onError = {})
 
         Thread.sleep(100)   // let the process start
         service.cancel()    // cancel must not throw
-
         // After cancel the process is gone — we just assert no hang/exception
-        // The latch may or may not fire depending on timing; that's intentional
     }
 
     fun testSecondSendPromptCancelsFirst() {
-        TrogonSettings.getInstance().trogonPath = "sleep"
+        TrogonSettings.getInstance().trogonPath = "/bin/sleep"
 
-        val firstErrorLatch = CountDownLatch(1)
-        service.sendPrompt("30", onChunk = {}, onDone = {}, onError = { firstErrorLatch.countDown() })
+        service.sendPrompt("30", onChunk = {}, onDone = {}, onError = {})
 
-        Thread.sleep(100)
+        Thread.sleep(100)  // let the sleep process start
 
         // Starting a second prompt must implicitly cancel the first
-        val secondDoneLatch = CountDownLatch(1)
-        TrogonSettings.getInstance().trogonPath = "echo"
+        val secondDone = AtomicBoolean(false)
+        val secondError = AtomicReference<String?>(null)
+        TrogonSettings.getInstance().trogonPath = "/bin/echo"
         service.sendPrompt(
             prompt = "second",
             onChunk = {},
-            onDone = { secondDoneLatch.countDown() },
-            onError = { secondDoneLatch.countDown() },
+            onDone = { secondDone.set(true) },
+            onError = { secondError.set(it) },
         )
 
-        assertTrue("Second prompt should complete within 5s", secondDoneLatch.await(5, TimeUnit.SECONDS))
+        PlatformTestUtil.waitWithEventsDispatching(
+            "Second prompt should complete within 5s",
+            { secondDone.get() || secondError.get() != null },
+            5,
+        )
+        assertTrue(
+            "Second prompt should complete (done=${secondDone.get()}, error=${secondError.get()})",
+            secondDone.get(),
+        )
     }
 }
