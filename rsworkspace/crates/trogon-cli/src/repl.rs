@@ -291,8 +291,9 @@ Ctrl+D    quit"
                 "no usage data yet — send a message first".to_string()
             } else {
                 let pct = used_tokens * 100 / context_size;
+                let cost = estimate_cost(used_tokens);
                 format!(
-                    "context: {}/{} tokens ({}%)",
+                    "context: {}/{} tokens ({}%)  |  ~${cost}",
                     fmt_tokens(used_tokens),
                     fmt_tokens(context_size),
                     pct,
@@ -382,6 +383,38 @@ fn handle_config_cmd(arg: &str) -> String {
             }
         }
         other => format!("unknown config subcommand: {other}  (use get, set, or no args)"),
+    }
+}
+
+// ── cost estimation ───────────────────────────────────────────────────────────
+
+/// Blended $/MTok rates (input:output assumed 3:1).
+/// Usage from the runner is input+cache+output combined, so we can't split
+/// them precisely — the blended rate gives a reasonable estimate.
+fn blended_rate_per_mtoken(model: &str) -> f64 {
+    if model.contains("opus") {
+        28.5 // ($15*3 + $75) / 4
+    } else if model.contains("haiku") {
+        1.6 // ($0.80*3 + $4) / 4
+    } else {
+        6.0 // sonnet default: ($3*3 + $15) / 4
+    }
+}
+
+/// Return a formatted cost string like "0.0123" for the given token count,
+/// using the model stored in config (defaults to sonnet if unset).
+fn estimate_cost(tokens: u64) -> String {
+    let model = read_config()
+        .get("model")
+        .and_then(|v| v.as_str())
+        .unwrap_or("claude-sonnet-4-6")
+        .to_string();
+    let rate = blended_rate_per_mtoken(&model);
+    let cost = tokens as f64 * rate / 1_000_000.0;
+    if cost < 0.01 {
+        format!("{cost:.4}")
+    } else {
+        format!("{cost:.2}")
     }
 }
 
@@ -644,11 +677,88 @@ mod tests {
     }
 
     #[test]
-    fn slash_cost_shows_percentage() {
+    fn slash_cost_shows_percentage_and_estimated_cost() {
         let out = handle_slash_command("/cost", "", 50_000, 200_000);
         assert!(out.contains("25%"), "got: {out}");
         assert!(out.contains("50,000"), "got: {out}");
         assert!(out.contains("200,000"), "got: {out}");
+        assert!(out.contains("~$"), "expected cost estimate, got: {out}");
+    }
+
+    // ── estimate_cost / blended_rate ──────────────────────────────────────────
+
+    #[test]
+    fn blended_rate_sonnet_default() {
+        assert_eq!(blended_rate_per_mtoken("claude-sonnet-4-6"), 6.0);
+    }
+
+    #[test]
+    fn blended_rate_opus() {
+        assert_eq!(blended_rate_per_mtoken("claude-opus-4-7"), 28.5);
+    }
+
+    #[test]
+    fn blended_rate_haiku() {
+        assert_eq!(blended_rate_per_mtoken("claude-haiku-4-5"), 1.6);
+    }
+
+    #[test]
+    fn blended_rate_unknown_model_falls_back_to_sonnet() {
+        assert_eq!(blended_rate_per_mtoken("unknown-model"), 6.0);
+    }
+
+    #[test]
+    fn estimate_cost_zero_tokens_is_zero() {
+        let cost = estimate_cost(0);
+        assert_eq!(cost, "0.0000", "got: {cost}");
+    }
+
+    #[test]
+    fn estimate_cost_1m_tokens_sonnet_is_6_dollars() {
+        let _guard = HOME_LOCK.lock().unwrap();
+        let dir = std::env::temp_dir().join("trogon_cost_sonnet");
+        std::fs::remove_dir_all(&dir).ok();
+        let old_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", &dir);
+
+        // No config set → defaults to sonnet at $6/MTok blended
+        let cost = estimate_cost(1_000_000);
+        assert_eq!(cost, "6.00", "got: {cost}");
+
+        if let Some(h) = old_home { std::env::set_var("HOME", h); }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn estimate_cost_uses_model_from_config() {
+        let _guard = HOME_LOCK.lock().unwrap();
+        let dir = std::env::temp_dir().join("trogon_cost_opus");
+        std::fs::remove_dir_all(&dir).ok();
+        let old_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", &dir);
+
+        handle_config_cmd("set model claude-opus-4-7");
+        let cost = estimate_cost(1_000_000);
+        assert_eq!(cost, "28.50", "got: {cost}");
+
+        if let Some(h) = old_home { std::env::set_var("HOME", h); }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn estimate_cost_small_amount_shows_four_decimals() {
+        let _guard = HOME_LOCK.lock().unwrap();
+        let dir = std::env::temp_dir().join("trogon_cost_small");
+        std::fs::remove_dir_all(&dir).ok();
+        let old_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", &dir);
+
+        // 1000 tokens at $6/MTok = $0.006 → four decimals
+        let cost = estimate_cost(1_000);
+        assert!(cost.starts_with("0.00"), "expected 4-decimal format, got: {cost}");
+
+        if let Some(h) = old_home { std::env::set_var("HOME", h); }
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
