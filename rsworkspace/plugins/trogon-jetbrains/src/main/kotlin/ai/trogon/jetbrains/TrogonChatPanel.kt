@@ -24,8 +24,8 @@ import javax.swing.text.*
  *   └──────────────────────────────┘
  *
  * Diff display: lines prefixed with `+` are green, `-` are red, `@@` are blue.
- * Apply Changes: saves the diff to a temp file and invokes IntelliJ's
- * ApplyPatchAction so the user gets the standard accept/reject diff viewer.
+ * Apply Changes: uses WriteCommandAction to write patched content directly to
+ * IntelliJ Documents (undo-able, visible in Local History).
  */
 class TrogonChatPanel(private val project: Project) : JPanel(BorderLayout()) {
 
@@ -144,19 +144,25 @@ class TrogonChatPanel(private val project: Project) : JPanel(BorderLayout()) {
         service.sendPrompt(
             prompt,
             onChunk = { chunk ->
-                lastResponse.append(chunk)
-                appendChunk(chunk)
+                onEdt {
+                    lastResponse.append(chunk)
+                    appendChunk(chunk)
+                }
             },
             onDone = {
-                appendStyled("\n", normalStyle)
-                sendButton.isEnabled = true
-                cancelButton.isEnabled = false
-                checkForDiff()
+                onEdt {
+                    appendStyled("\n", normalStyle)
+                    sendButton.isEnabled = true
+                    cancelButton.isEnabled = false
+                    checkForDiff()
+                }
             },
             onError = { err ->
-                appendStyled("\n[error: $err]\n", errorStyle)
-                sendButton.isEnabled = true
-                cancelButton.isEnabled = false
+                onEdt {
+                    appendStyled("\n[error: $err]\n", errorStyle)
+                    sendButton.isEnabled = true
+                    cancelButton.isEnabled = false
+                }
             }
         )
     }
