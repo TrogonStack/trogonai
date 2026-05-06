@@ -25,14 +25,6 @@ pub(crate) fn init_provider(resource: &Resource) -> Result<SdkLoggerProvider, Bo
     Ok(provider)
 }
 
-pub(crate) fn force_flush() {
-    if let Some(provider) = LOGGER_PROVIDER.get()
-        && let Err(e) = provider.force_flush()
-    {
-        eprintln!("Failed to flush logger provider: {e}");
-    }
-}
-
 pub(crate) fn shutdown() -> Result<(), String> {
     if let Some(provider) = LOGGER_PROVIDER.get() {
         provider
@@ -47,7 +39,7 @@ pub(crate) fn ensure_log_dir<E: ReadEnv, F: CreateDirAll>(
     env: &E,
     fs: &F,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
-    if let Ok(dir) = env.var("ACP_LOG_DIR") {
+    if let Ok(dir) = env.var("TROGON_LOG_DIR") {
         let path = PathBuf::from(dir);
         fs.create_dir_all(&path)?;
         return Ok(path);
@@ -80,12 +72,24 @@ mod tests {
     #[test]
     fn ensure_log_dir_uses_env_override() {
         let env = InMemoryEnv::new();
-        env.set("ACP_LOG_DIR", "/custom/logs");
+        env.set("TROGON_LOG_DIR", "/custom/logs");
         let fs = MemFs::new();
 
         let dir = ensure_log_dir(ServiceName::AcpNatsStdio, &env, &fs).unwrap();
         assert_eq!(dir, PathBuf::from("/custom/logs"));
         assert!(fs.dir_exists(&PathBuf::from("/custom/logs")));
+    }
+
+    #[test]
+    fn ensure_log_dir_ignores_legacy_acp_env_override() {
+        let env = InMemoryEnv::new();
+        env.set("ACP_LOG_DIR", "/legacy/logs");
+        let fs = MemFs::new();
+
+        let dir = ensure_log_dir(ServiceName::AcpNatsStdio, &env, &fs).unwrap();
+
+        assert!(dir.ends_with(ServiceName::AcpNatsStdio.as_str()));
+        assert!(!fs.dir_exists(&PathBuf::from("/legacy/logs")));
     }
 
     #[test]

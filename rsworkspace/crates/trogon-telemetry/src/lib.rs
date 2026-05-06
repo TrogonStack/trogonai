@@ -1,12 +1,13 @@
 pub mod constants;
 mod log;
 mod metric;
+mod resource_attribute;
 mod service_name;
 mod trace;
 
+pub use resource_attribute::ResourceAttribute;
 pub use service_name::ServiceName;
 
-use opentelemetry::KeyValue;
 use opentelemetry::trace::TracerProvider;
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
 use opentelemetry_sdk::Resource;
@@ -59,12 +60,12 @@ fn try_open_log_file<F: CreateDirAll + OpenAppendFile>(
     }
 }
 
-pub fn init_logger<E: ReadEnv, F: CreateDirAll + OpenAppendFile>(
-    service_name: ServiceName,
-    acp_prefix: &str,
-    env: &E,
-    fs: &F,
-) {
+pub fn init_logger<E, F, A>(service_name: ServiceName, resource_attributes: A, env: &E, fs: &F)
+where
+    E: ReadEnv,
+    F: CreateDirAll + OpenAppendFile,
+    A: IntoIterator<Item = ResourceAttribute>,
+{
     let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 
     let stderr_layer = tracing_subscriber::fmt::layer()
@@ -82,7 +83,7 @@ pub fn init_logger<E: ReadEnv, F: CreateDirAll + OpenAppendFile>(
             .json()
     });
 
-    match try_init_otel(service_name, acp_prefix) {
+    match try_init_otel(service_name, resource_attributes) {
         Ok((tracer_provider, meter_provider, logger_provider)) => {
             opentelemetry::global::set_text_map_propagator(TraceContextPropagator::new());
             opentelemetry::global::set_tracer_provider(tracer_provider.clone());
@@ -103,13 +104,16 @@ pub fn init_logger<E: ReadEnv, F: CreateDirAll + OpenAppendFile>(
                 eprintln!("WARN: logger provider already initialized");
             }
 
-            tracing_subscriber::registry()
+            if let Err(e) = tracing_subscriber::registry()
                 .with(env_filter)
                 .with(stderr_layer)
                 .with(file_layer)
                 .with(otel_trace_layer)
                 .with(otel_logs_layer)
-                .init();
+                .try_init()
+            {
+                eprintln!("WARN: tracing subscriber already initialized: {e}");
+            }
 
             tracing::info!("Logger initialized with OpenTelemetry");
             if let Some(msg) = file_layer_info {
@@ -117,11 +121,14 @@ pub fn init_logger<E: ReadEnv, F: CreateDirAll + OpenAppendFile>(
             }
         }
         Err(e) => {
-            tracing_subscriber::registry()
+            if let Err(init_error) = tracing_subscriber::registry()
                 .with(env_filter)
                 .with(stderr_layer)
                 .with(file_layer)
-                .init();
+                .try_init()
+            {
+                eprintln!("WARN: tracing subscriber already initialized: {init_error}");
+            }
 
             tracing::warn!(
                 error = %e,
@@ -134,9 +141,9 @@ pub fn init_logger<E: ReadEnv, F: CreateDirAll + OpenAppendFile>(
     }
 }
 
-fn try_init_otel(
+fn try_init_otel<A>(
     service_name: ServiceName,
-    acp_prefix: &str,
+    resource_attributes: A,
 ) -> Result<
     (
         opentelemetry_sdk::trace::SdkTracerProvider,
@@ -144,10 +151,13 @@ fn try_init_otel(
         opentelemetry_sdk::logs::SdkLoggerProvider,
     ),
     Box<dyn std::error::Error>,
-> {
+>
+where
+    A: IntoIterator<Item = ResourceAttribute>,
+{
     let resource = Resource::builder()
         .with_service_name(service_name.as_str())
-        .with_attributes(vec![KeyValue::new("acp.prefix", acp_prefix.to_owned())])
+        .with_attributes(resource_attributes.into_iter().map(opentelemetry::KeyValue::from))
         .build();
 
     let tracer_provider = trace::init_provider(&resource)?;
@@ -159,10 +169,6 @@ fn try_init_otel(
 
 pub fn shutdown_otel() -> Result<(), TelemetryShutdownError> {
     tracing::info!("Shutting down OpenTelemetry providers");
-
-    trace::force_flush();
-    metric::force_flush();
-    log::force_flush();
 
     let mut errors = Vec::new();
     if let Err(e) = trace::shutdown() {
@@ -189,13 +195,52 @@ pub fn meter(name: &'static str) -> opentelemetry::metrics::Meter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io;
+    use std::path::Path;
     use trogon_std::env::InMemoryEnv;
-    use trogon_std::fs::MemFs;
+    use trogon_std::fs::{MemAppendWriter, MemFs};
+
+    struct OpenAppendErrorFs {
+        inner: MemFs,
+    }
+
+    impl OpenAppendErrorFs {
+        fn new() -> Self {
+            Self { inner: MemFs::new() }
+        }
+    }
+
+    impl CreateDirAll for OpenAppendErrorFs {
+        fn create_dir_all(&self, path: &Path) -> io::Result<()> {
+            self.inner.create_dir_all(path)
+        }
+    }
+
+    impl OpenAppendFile for OpenAppendErrorFs {
+        type Writer = MemAppendWriter;
+
+        fn open_append(&self, _path: &Path) -> io::Result<Self::Writer> {
+            Err(io::Error::other("open append failed"))
+        }
+    }
+
+    #[test]
+    fn telemetry_shutdown_error_formats_all_errors() {
+        let error = TelemetryShutdownError {
+            errors: vec!["trace failed".to_string(), "metric failed".to_string()],
+        };
+
+        let message = error.to_string();
+
+        assert!(message.contains("failed to shutdown OpenTelemetry providers"));
+        assert!(message.contains("trace failed"));
+        assert!(message.contains("metric failed"));
+    }
 
     #[test]
     fn try_open_log_file_succeeds_with_env_override() {
         let env = InMemoryEnv::new();
-        env.set("ACP_LOG_DIR", "/tmp/test-logs");
+        env.set("TROGON_LOG_DIR", "/tmp/test-logs");
         let fs = MemFs::new();
 
         let (writer, info) = try_open_log_file(ServiceName::AcpNatsStdio, &env, &fs);
@@ -221,12 +266,26 @@ mod tests {
         let env = InMemoryEnv::new();
         let fs = MemFs::new();
         fs.insert("/tmp/test-logs", "file-blocking-dir");
-        env.set("ACP_LOG_DIR", "/tmp/test-logs/sub");
+        env.set("TROGON_LOG_DIR", "/tmp/test-logs/sub");
 
         let (writer, info) = try_open_log_file(ServiceName::AcpNatsStdio, &env, &fs);
         assert!(writer.is_none());
         let msg = info.unwrap();
         assert!(msg.contains("File logging disabled"));
+    }
+
+    #[test]
+    fn try_open_log_file_reports_open_append_error() {
+        let env = InMemoryEnv::new();
+        env.set("TROGON_LOG_DIR", "/tmp/test-logs");
+        let fs = OpenAppendErrorFs::new();
+
+        let (writer, info) = try_open_log_file(ServiceName::AcpNatsStdio, &env, &fs);
+
+        assert!(writer.is_none());
+        let msg = info.unwrap();
+        assert!(msg.contains("Failed to create log file"));
+        assert!(msg.contains("open append failed"));
     }
 
     #[test]

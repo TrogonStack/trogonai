@@ -8,7 +8,7 @@ workspace = true
 
 [dependencies]
 acp-nats = { workspace = true }
-acp-telemetry = { workspace = true }
+trogon-telemetry = { workspace = true }
 agent-client-protocol = { workspace = true }
 async-compat = { workspace = true }
 async-nats = { workspace = true }

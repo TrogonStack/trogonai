@@ -15,14 +15,6 @@ pub(crate) fn init_provider(resource: &Resource) -> Result<sdktrace::SdkTracerPr
     Ok(provider)
 }
 
-pub(crate) fn force_flush() {
-    if let Some(provider) = TRACER_PROVIDER.get()
-        && let Err(e) = provider.force_flush()
-    {
-        eprintln!("Failed to flush tracer provider: {e}");
-    }
-}
-
 pub(crate) fn shutdown() -> Result<(), String> {
     if let Some(provider) = TRACER_PROVIDER.get()
         && let Err(e) = provider.shutdown()
