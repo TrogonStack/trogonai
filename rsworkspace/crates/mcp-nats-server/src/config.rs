@@ -7,18 +7,12 @@ use trogon_std::ParseArgs;
 use trogon_std::env::ReadEnv;
 
 use crate::allowed_host::{AllowedHost, AllowedHostError};
+use crate::constants::{
+    DEFAULT_MCP_CLIENT_ID_PREFIX, DEFAULT_MCP_HTTP_HOST, DEFAULT_MCP_HTTP_PATH, DEFAULT_MCP_HTTP_PORT,
+    DEFAULT_MCP_SERVER_ID, ENV_MCP_CLIENT_ID_PREFIX, ENV_MCP_HTTP_HOST, ENV_MCP_HTTP_PATH, ENV_MCP_HTTP_PORT,
+    ENV_MCP_SERVER_ID,
+};
 use crate::mcp_http_path::{McpHttpPath, McpHttpPathError};
-
-pub const DEFAULT_MCP_HTTP_HOST: &str = "127.0.0.1";
-pub const DEFAULT_MCP_HTTP_PATH: &str = "/mcp";
-pub const DEFAULT_MCP_HTTP_PORT: u16 = 8081;
-pub const DEFAULT_MCP_CLIENT_ID_PREFIX: &str = "http";
-pub const DEFAULT_MCP_SERVER_ID: &str = "default";
-pub const ENV_MCP_CLIENT_ID_PREFIX: &str = "MCP_CLIENT_ID_PREFIX";
-pub const ENV_MCP_HTTP_HOST: &str = "MCP_HTTP_HOST";
-pub const ENV_MCP_HTTP_PATH: &str = "MCP_HTTP_PATH";
-pub const ENV_MCP_HTTP_PORT: &str = "MCP_HTTP_PORT";
-pub const ENV_MCP_SERVER_ID: &str = "MCP_SERVER_ID";
 
 #[derive(Parser, Debug, Clone)]
 #[command(name = "mcp-nats-server")]
