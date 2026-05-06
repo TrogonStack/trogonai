@@ -415,6 +415,9 @@ fn expand_tilde(path: &str) -> PathBuf {
 mod tests {
     use super::*;
 
+    // Single lock for all tests that mutate the HOME env var.
+    static HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     // ── expand_mentions ───────────────────────────────────────────────────────
 
     #[test]
@@ -671,10 +674,7 @@ mod tests {
 
     #[test]
     fn config_set_and_get_roundtrip() {
-        use std::sync::Mutex;
-        // Isolate config file per test by overriding HOME to a temp dir.
-        static LOCK: Mutex<()> = Mutex::new(());
-        let _guard = LOCK.lock().unwrap();
+        let _guard = HOME_LOCK.lock().unwrap();
 
         let dir = std::env::temp_dir().join("trogon_cfg_test");
         std::fs::remove_dir_all(&dir).ok();
@@ -697,9 +697,7 @@ mod tests {
 
     #[test]
     fn config_get_missing_key_says_not_set() {
-        use std::sync::Mutex;
-        static LOCK: Mutex<()> = Mutex::new(());
-        let _guard = LOCK.lock().unwrap();
+        let _guard = HOME_LOCK.lock().unwrap();
 
         let dir = std::env::temp_dir().join("trogon_cfg_missing");
         std::fs::remove_dir_all(&dir).ok();
@@ -732,5 +730,154 @@ mod tests {
     fn config_get_missing_key_arg_shows_usage() {
         let out = handle_config_cmd("get");
         assert!(out.contains("usage"), "got: {out}");
+    }
+
+    #[test]
+    fn config_unknown_subcommand_returns_error() {
+        let out = handle_config_cmd("delete mykey");
+        assert!(out.contains("unknown config subcommand"), "got: {out}");
+    }
+
+    #[test]
+    fn config_set_overwrites_existing_value() {
+        let _guard = HOME_LOCK.lock().unwrap();
+
+        let dir = std::env::temp_dir().join("trogon_cfg_overwrite");
+        std::fs::remove_dir_all(&dir).ok();
+        let old_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", &dir);
+
+        handle_config_cmd("set model claude-sonnet-4-6");
+        let out = handle_config_cmd("set model claude-opus-4-7");
+        assert!(out.contains("claude-opus-4-7"), "got: {out}");
+
+        let get = handle_config_cmd("get model");
+        assert!(get.contains("claude-opus-4-7"), "got: {get}");
+        assert!(!get.contains("claude-sonnet-4-6"), "old value should be gone: {get}");
+
+        if let Some(h) = old_home { std::env::set_var("HOME", h); }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn config_set_value_with_spaces_preserved() {
+        let _guard = HOME_LOCK.lock().unwrap();
+
+        let dir = std::env::temp_dir().join("trogon_cfg_spaces");
+        std::fs::remove_dir_all(&dir).ok();
+        let old_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", &dir);
+
+        // splitn(3, ' ') means value gets everything after the second space
+        handle_config_cmd("set description hello world foo");
+        let out = handle_config_cmd("get description");
+        assert!(out.contains("hello world foo"), "got: {out}");
+
+        if let Some(h) = old_home { std::env::set_var("HOME", h); }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn config_show_reflects_set_values() {
+        let _guard = HOME_LOCK.lock().unwrap();
+
+        let dir = std::env::temp_dir().join("trogon_cfg_show");
+        std::fs::remove_dir_all(&dir).ok();
+        let old_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", &dir);
+
+        handle_config_cmd("set theme dark");
+        let show = handle_config_cmd("");
+        assert!(show.contains("dark"), "got: {show}");
+        assert!(show.contains("theme"), "got: {show}");
+
+        if let Some(h) = old_home { std::env::set_var("HOME", h); }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn read_config_returns_empty_object_when_file_missing() {
+        let _guard = HOME_LOCK.lock().unwrap();
+
+        let dir = std::env::temp_dir().join("trogon_cfg_missing_file");
+        std::fs::remove_dir_all(&dir).ok();
+        let old_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", &dir);
+
+        let cfg = read_config();
+        assert!(cfg.is_object(), "expected object, got: {cfg}");
+        assert_eq!(cfg.as_object().unwrap().len(), 0);
+
+        if let Some(h) = old_home { std::env::set_var("HOME", h); }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn write_config_creates_parent_directories() {
+        let _guard = HOME_LOCK.lock().unwrap();
+
+        let dir = std::env::temp_dir().join("trogon_cfg_mkdir");
+        std::fs::remove_dir_all(&dir).ok();
+        let old_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", &dir);
+
+        let cfg = serde_json::json!({"x": "y"});
+        write_config(&cfg).unwrap();
+        assert!(config_path().exists(), "config file should exist after write");
+
+        if let Some(h) = old_home { std::env::set_var("HOME", h); }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // ── expand_tilde ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn expand_tilde_replaces_home() {
+        let old = std::env::var("HOME").ok();
+        std::env::set_var("HOME", "/tmp/fakehome");
+        let result = expand_tilde("~/.config/trogon/config.json");
+        assert_eq!(result, PathBuf::from("/tmp/fakehome/.config/trogon/config.json"));
+        if let Some(h) = old { std::env::set_var("HOME", h); }
+    }
+
+    #[test]
+    fn expand_tilde_without_tilde_is_unchanged() {
+        let result = expand_tilde("/absolute/path");
+        assert_eq!(result, PathBuf::from("/absolute/path"));
+    }
+
+    #[test]
+    fn expand_tilde_bare_tilde_without_slash_is_unchanged() {
+        let result = expand_tilde("~nodot");
+        assert_eq!(result, PathBuf::from("~nodot"));
+    }
+
+    // ── /cost edge cases ──────────────────────────────────────────────────────
+
+    #[test]
+    fn slash_cost_at_full_context_shows_100_percent() {
+        let out = handle_slash_command("/cost", "", 200_000, 200_000);
+        assert!(out.contains("100%"), "got: {out}");
+    }
+
+    #[test]
+    fn slash_cost_rounds_down() {
+        // 1 / 3 = 33% (integer division)
+        let out = handle_slash_command("/cost", "", 1, 3);
+        assert!(out.contains("33%"), "got: {out}");
+    }
+
+    // ── remaining stub commands ───────────────────────────────────────────────
+
+    #[test]
+    fn slash_init_returns_not_implemented() {
+        let out = handle_slash_command("/init", "", 0, 0);
+        assert!(out.contains("not yet implemented"), "got: {out}");
+    }
+
+    #[test]
+    fn slash_model_with_arg_returns_not_implemented() {
+        let out = handle_slash_command("/model", "claude-opus-4-7", 0, 0);
+        assert!(out.contains("not yet implemented"), "got: {out}");
     }
 }
