@@ -254,6 +254,7 @@ pub struct TrogonAgent<
 }
 
 impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> TrogonAgent<S, A, N> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         notifier: N,
         store: S,
@@ -445,34 +446,35 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> TrogonAgent<
                     let (mcp_defs, mcp_dispatch) = build_session_mcp(&self.http, &state.mcp_servers).await;
                     a.add_mcp_tools(mcp_defs, mcp_dispatch);
                 }
-                if let (Some(reg), Some(nats)) = (&self.registry, &self.execution_nats) {
-                    if let Ok(entries) = reg.discover("execution").await {
-                        if let Some(entry) = entries.first() {
-                            let prefix = entry.metadata["acp_prefix"]
-                                .as_str()
-                                .unwrap_or("acp.wasm");
-                            let bash = WasmRuntimeBashTool::new(
-                                nats.clone(),
-                                prefix,
-                                &session_id,
-                                std::time::Duration::from_secs(30),
-                            );
-                            let (name, orig, client) = bash.into_dispatch();
-                            a.add_mcp_tools(
-                                vec![WasmRuntimeBashTool::tool_def()],
-                                vec![(name, orig, client)],
-                            );
-                        }
-                    }
+                if let (Some(reg), Some(nats)) = (&self.registry, &self.execution_nats)
+                    && let Ok(entries) = reg.discover("execution").await
+                    && let Some(entry) = entries.first()
+                {
+                    let prefix = entry.metadata["acp_prefix"]
+                        .as_str()
+                        .unwrap_or("acp.wasm");
+                    let bash = WasmRuntimeBashTool::new(
+                        nats.clone(),
+                        prefix,
+                        &session_id,
+                        std::path::PathBuf::from(&state.cwd),
+                        std::time::Duration::from_secs(30),
+                        self.store.clone(),
+                    );
+                    let (name, orig, client) = bash.into_dispatch();
+                    a.add_mcp_tools(
+                        vec![WasmRuntimeBashTool::<S>::tool_def()],
+                        vec![(name, orig, client)],
+                    );
                 }
-                if needs_perm {
-                    if let Some(ref perm_tx) = self.permission_tx {
-                        a.set_permission_checker(Arc::new(ChannelPermissionChecker {
-                            session_id: session_id.clone(),
-                            tx: perm_tx.clone(),
-                            allowed_tools: state.allowed_tools.clone(),
-                        }));
-                    }
+                if needs_perm
+                    && let Some(ref perm_tx) = self.permission_tx
+                {
+                    a.set_permission_checker(Arc::new(ChannelPermissionChecker {
+                        session_id: session_id.clone(),
+                        tx: perm_tx.clone(),
+                        allowed_tools: state.allowed_tools.clone(),
+                    }));
                 }
                 if let Some(ref elic_tx) = self.elicitation_tx {
                     a.set_elicitation_provider(Arc::new(ChannelElicitationProvider {

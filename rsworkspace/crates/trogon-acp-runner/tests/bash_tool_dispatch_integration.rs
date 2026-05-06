@@ -15,16 +15,14 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use agent_client_protocol::{
-    CreateTerminalResponse, TerminalExitStatus, TerminalId, TerminalOutputResponse,
-    WaitForTerminalExitResponse,
-};
+use agent_client_protocol::{CreateTerminalResponse, TerminalId};
 use futures_util::StreamExt as _;
 use httpmock::prelude::*;
 use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
 use trogon_agent_core::agent_loop::{AgentEvent, AgentLoop, Message};
 use trogon_agent_core::tools::ToolContext;
+use trogon_acp_runner::session_store::mock::MemorySessionStore;
 use trogon_acp_runner::wasm_bash_tool::WasmRuntimeBashTool;
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -50,7 +48,9 @@ fn make_agent(base_url: &str, nats: async_nats::Client, prefix: &str, session_id
         nats,
         prefix,
         session_id,
+        std::path::PathBuf::from("/tmp"),
         Duration::from_secs(10),
+        MemorySessionStore::new(),
     );
     let (dispatch_name, orig_name, client) = bash_tool.into_dispatch();
 
@@ -58,6 +58,7 @@ fn make_agent(base_url: &str, nats: async_nats::Client, prefix: &str, session_id
         http_client: reqwest::Client::new(),
         proxy_url: "http://127.0.0.1:1".to_string(),
         anthropic_token: "test-token".to_string(),
+        streaming_client: None,
         anthropic_base_url: Some(base_url.to_string()),
         anthropic_extra_headers: vec![],
         model: "claude-test".to_string(),
@@ -65,85 +66,125 @@ fn make_agent(base_url: &str, nats: async_nats::Client, prefix: &str, session_id
         thinking_budget: None,
         tool_context: Arc::new(ToolContext {
             proxy_url: "http://127.0.0.1:1".to_string(),
+            cwd: ".".to_string(),
+            http_client: reqwest::Client::new(),
         }),
         memory_owner: None,
         memory_repo: None,
         memory_path: None,
-        mcp_tool_defs: vec![WasmRuntimeBashTool::tool_def()],
+        mcp_tool_defs: vec![WasmRuntimeBashTool::<MemorySessionStore>::tool_def()],
         mcp_dispatch: vec![(dispatch_name, orig_name, client)],
         permission_checker: None,
         elicitation_provider: None,
     }
 }
 
-/// Mock Anthropic response: the LLM requests a `bash` tool call.
-fn bash_tool_use_body(command: &str) -> String {
-    serde_json::json!({
-        "stop_reason": "tool_use",
-        "content": [{
-            "type": "tool_use",
-            "id": "bash_001",
-            "name": "bash",
-            "input": { "command": command }
-        }],
-        "usage": {
-            "input_tokens": 10,
-            "output_tokens": 5,
-            "cache_creation_input_tokens": 0,
-            "cache_read_input_tokens": 0
-        }
-    })
-    .to_string()
+fn sse_event(event_type: &str, data: serde_json::Value) -> String {
+    format!(
+        "event: {event_type}\ndata: {}\n\n",
+        serde_json::to_string(&data).unwrap()
+    )
 }
 
-/// Mock Anthropic response: the LLM finishes with a text reply.
-fn end_turn_body(text: &str) -> String {
-    serde_json::json!({
-        "stop_reason": "end_turn",
-        "content": [{ "type": "text", "text": text }],
-        "usage": {
-            "input_tokens": 15,
-            "output_tokens": 8,
-            "cache_creation_input_tokens": 0,
-            "cache_read_input_tokens": 0
-        }
-    })
-    .to_string()
+/// SSE stream: the LLM requests a `bash` tool call with the given command.
+fn sse_bash_tool_use(command: &str) -> String {
+    [
+        sse_event("message_start", serde_json::json!({
+            "type": "message_start",
+            "message": {"usage": {"input_tokens": 10, "output_tokens": 0,
+                                  "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+        })),
+        sse_event("content_block_start", serde_json::json!({
+            "type": "content_block_start", "index": 0,
+            "content_block": {"type": "tool_use", "id": "bash_001", "name": "bash"}
+        })),
+        sse_event("content_block_delta", serde_json::json!({
+            "type": "content_block_delta", "index": 0,
+            "delta": {
+                "type": "input_json_delta",
+                "partial_json": serde_json::json!({"command": command}).to_string()
+            }
+        })),
+        sse_event("content_block_stop", serde_json::json!({"type": "content_block_stop", "index": 0})),
+        sse_event("message_delta", serde_json::json!({
+            "type": "message_delta",
+            "delta": {"stop_reason": "tool_use"},
+            "usage": {"output_tokens": 5}
+        })),
+        sse_event("message_stop", serde_json::json!({"type": "message_stop"})),
+    ]
+    .join("")
 }
 
-/// Spawn mock NATS responders for the four terminal subjects used by
-/// `WasmRuntimeBashTool`: create → wait_for_exit → output → release.
-fn spawn_terminal_responders(nats: async_nats::Client, base: String, terminal_id: &'static str, output: &'static str) {
+/// SSE stream: the LLM finishes with a text reply.
+fn sse_end_turn(text: &str) -> String {
+    [
+        sse_event("message_start", serde_json::json!({
+            "type": "message_start",
+            "message": {"usage": {"input_tokens": 15, "output_tokens": 0,
+                                  "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+        })),
+        sse_event("content_block_start", serde_json::json!({
+            "type": "content_block_start", "index": 0,
+            "content_block": {"type": "text", "text": ""}
+        })),
+        sse_event("content_block_delta", serde_json::json!({
+            "type": "content_block_delta", "index": 0,
+            "delta": {"type": "text_delta", "text": text}
+        })),
+        sse_event("content_block_stop", serde_json::json!({"type": "content_block_stop", "index": 0})),
+        sse_event("message_delta", serde_json::json!({
+            "type": "message_delta",
+            "delta": {"stop_reason": "end_turn"},
+            "usage": {"output_tokens": 8}
+        })),
+        sse_event("message_stop", serde_json::json!({"type": "message_stop"})),
+    ]
+    .join("")
+}
+
+/// Spawn mock NATS responders for the four interactions used by the
+/// demarcation-marker protocol: create → output(baseline) → write_stdin → output(poll).
+fn spawn_terminal_responders(
+    nats: async_nats::Client,
+    base: String,
+    ext_base: String,
+    terminal_id: &'static str,
+    output: &'static str,
+) {
     tokio::spawn(async move {
-        // 1. create terminal
-        let mut sub = nats.subscribe(format!("{base}.create")).await.unwrap();
-        if let Some(msg) = sub.next().await {
+        let mut create_sub = nats.subscribe(format!("{base}.create")).await.unwrap();
+        let mut output_sub = nats.subscribe(format!("{base}.output")).await.unwrap();
+        let mut write_sub = nats
+            .subscribe(format!("{ext_base}.terminal.write_stdin"))
+            .await
+            .unwrap();
+
+        // 1. terminal.create
+        if let Some(msg) = create_sub.next().await {
             let resp = CreateTerminalResponse::new(TerminalId::new(terminal_id));
             let payload = serde_json::to_vec(&resp).unwrap();
             nats.publish(msg.reply.unwrap(), payload.into()).await.unwrap();
         }
 
-        // 2. wait for exit
-        let mut sub = nats.subscribe(format!("{base}.wait_for_exit")).await.unwrap();
-        if let Some(msg) = sub.next().await {
-            let resp = WaitForTerminalExitResponse::new(
-                TerminalExitStatus::new().exit_code(Some(0)),
-            );
-            let payload = serde_json::to_vec(&resp).unwrap();
+        // 2. terminal.output — baseline (empty)
+        if let Some(msg) = output_sub.next().await {
+            let payload = serde_json::to_vec(&serde_json::json!({"output": ""})).unwrap();
             nats.publish(msg.reply.unwrap(), payload.into()).await.unwrap();
         }
 
-        // 3. output
-        let mut sub = nats.subscribe(format!("{base}.output")).await.unwrap();
-        if let Some(msg) = sub.next().await {
-            let resp = TerminalOutputResponse::new(output.to_string(), false);
-            let payload = serde_json::to_vec(&resp).unwrap();
+        // 3. ext.terminal.write_stdin — ACK
+        if let Some(msg) = write_sub.next().await {
+            let payload = serde_json::to_vec(&serde_json::json!({"ok": true})).unwrap();
             nats.publish(msg.reply.unwrap(), payload.into()).await.unwrap();
         }
 
-        // 4. release (best-effort, no reply expected)
-        let mut sub = nats.subscribe(format!("{base}.release")).await.unwrap();
-        sub.next().await;
+        // 4. terminal.output — poll with demarcation marker
+        if let Some(msg) = output_sub.next().await {
+            let full = format!("{output}__EXIT_0__\n");
+            let payload = serde_json::to_vec(&serde_json::json!({"output": full})).unwrap();
+            nats.publish(msg.reply.unwrap(), payload.into()).await.unwrap();
+        }
     });
 }
 
@@ -170,8 +211,10 @@ async fn agent_loop_dispatches_bash_tool_via_nats_and_returns_output() {
     let cmd_output = "hello\n";
     let base = format!("{prefix}.session.{session_id}.client.terminal");
 
+    let ext_base = format!("{prefix}.session.{session_id}.client.ext");
+
     // Spawn NATS mock responders before the agent runs.
-    spawn_terminal_responders(nats.clone(), base, "tid-001", cmd_output);
+    spawn_terminal_responders(nats.clone(), base, ext_base, "tid-001", cmd_output);
     tokio::time::sleep(Duration::from_millis(50)).await;
 
     // Mock Anthropic API:
@@ -183,14 +226,14 @@ async fn agent_loop_dispatches_bash_tool_via_nats_and_returns_output() {
             .path("/messages")
             .body_contains("tool_result");
         then.status(200)
-            .header("Content-Type", "application/json")
-            .body(end_turn_body("Command completed successfully."));
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn("Command completed successfully."));
     });
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
-            .body(bash_tool_use_body(command));
+            .header("Content-Type", "text/event-stream")
+            .body(sse_bash_tool_use(command));
     });
 
     let agent = make_agent(&server.base_url(), nats, prefix, session_id);
@@ -254,14 +297,14 @@ async fn agent_loop_handles_bash_tool_nats_error_without_crashing() {
             .path("/messages")
             .body_contains("tool_result");
         then.status(200)
-            .header("Content-Type", "application/json")
-            .body(end_turn_body("Handled the error."));
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn("Handled the error."));
     });
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
-            .body(bash_tool_use_body("echo hi"));
+            .header("Content-Type", "text/event-stream")
+            .body(sse_bash_tool_use("echo hi"));
     });
 
     let agent = make_agent(&server.base_url(), nats, prefix, session_id);

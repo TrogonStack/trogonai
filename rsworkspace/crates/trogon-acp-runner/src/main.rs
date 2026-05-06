@@ -124,6 +124,11 @@ async fn main() -> anyhow::Result<()> {
     let http_client = reqwest::Client::new();
     let tool_context = Arc::new(ToolContext {
         proxy_url: proxy_url.clone(),
+        cwd: std::env::current_dir()
+            .unwrap_or_else(|_| std::path::PathBuf::from("."))
+            .to_string_lossy()
+            .into_owned(),
+        http_client: reqwest::Client::new(),
     });
 
     let mut agent_loop = AgentLoop {

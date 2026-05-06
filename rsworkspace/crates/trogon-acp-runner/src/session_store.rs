@@ -63,6 +63,10 @@ pub struct SessionState {
     /// None means the entire source history was copied.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branched_at_index: Option<usize>,
+    /// ID of the persistent bash terminal created for this session.
+    /// Set on the first bash call; subsequent calls reuse the same terminal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_id: Option<String>,
 }
 
 // ── SessionStore trait ────────────────────────────────────────────────────────
@@ -72,8 +76,8 @@ pub struct SessionState {
 /// The production implementation (`NatsSessionStore`) is backed by NATS KV.
 /// Tests can use `MemorySessionStore` (behind the `test-helpers` feature) to
 /// avoid any network dependencies.
-#[async_trait(?Send)]
-pub trait SessionStore: Clone {
+#[async_trait]
+pub trait SessionStore: Clone + Send + Sync + 'static {
     async fn load(&self, session_id: &str) -> anyhow::Result<SessionState>;
     async fn save(&self, session_id: &str, state: &SessionState) -> anyhow::Result<()>;
     async fn delete(&self, session_id: &str) -> anyhow::Result<()>;
@@ -104,7 +108,7 @@ impl NatsSessionStore {
     }
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl SessionStore for NatsSessionStore {
     /// Load session history, returning an empty state if the key does not exist.
     #[cfg_attr(coverage, coverage(off))]
@@ -150,10 +154,10 @@ impl SessionStore for NatsSessionStore {
         let ids = self.list_ids().await?;
         let mut children = Vec::new();
         for id in ids {
-            if let Ok(state) = self.load(&id).await {
-                if state.parent_session_id.as_deref() == Some(parent_id) {
-                    children.push(id);
-                }
+            if let Ok(state) = self.load(&id).await
+                && state.parent_session_id.as_deref() == Some(parent_id)
+            {
+                children.push(id);
             }
         }
         Ok(children)
@@ -180,7 +184,7 @@ pub mod mock {
         }
     }
 
-    #[async_trait::async_trait(?Send)]
+    #[async_trait::async_trait]
     impl SessionStore for MemorySessionStore {
         async fn load(&self, session_id: &str) -> anyhow::Result<SessionState> {
             Ok(self

@@ -253,12 +253,11 @@ pub mod mock {
             // If configured, wait for the first steer message asynchronously.
             // This is used by NATS integration tests where the message arrives
             // after the runner starts rather than being pre-injected.
-            if self.wait_for_steer {
-                if let Some(ref mut rx) = steer_rx {
-                    if let Some(msg) = rx.recv().await {
-                        self.captured_steer.lock().unwrap().push(msg);
-                    }
-                }
+            if self.wait_for_steer
+                && let Some(ref mut rx) = steer_rx
+                && let Some(msg) = rx.recv().await
+            {
+                self.captured_steer.lock().unwrap().push(msg);
             }
 
             // Drain any remaining buffered steer messages.
