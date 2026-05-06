@@ -271,17 +271,17 @@ pub fn record_stream_message(message: StreamMessage) -> Result<RecordedEvent, St
     let event_type = required_header(headers, TROGON_EVENT_TYPE, TROGON_EVENT_TYPE)?.to_string();
     let subject = message.subject.to_string();
 
-    Ok(RecordedEvent::new(
+    Ok(RecordedEvent {
         event_id,
         event_type,
-        subject.clone(),
-        message.payload.to_vec(),
-        None,
-        subject,
-        None,
-        Some(message.sequence),
+        event_stream_id: subject.clone(),
+        payload: message.payload.to_vec(),
+        metadata: None,
+        recorded_stream_id: subject,
+        stream_position: None,
+        log_position: Some(message.sequence),
         recorded_at,
-    ))
+    })
 }
 
 fn required_header<'a>(
