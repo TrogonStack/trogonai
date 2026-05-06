@@ -22,14 +22,6 @@ pub(crate) fn init_provider(resource: &Resource) -> Result<SdkMeterProvider, Box
     Ok(provider)
 }
 
-pub(crate) fn force_flush() {
-    if let Some(provider) = METER_PROVIDER.get()
-        && let Err(e) = provider.force_flush()
-    {
-        eprintln!("Failed to flush meter provider: {e}");
-    }
-}
-
 pub(crate) fn shutdown() -> Result<(), String> {
     if let Some(provider) = METER_PROVIDER.get()
         && let Err(e) = provider.shutdown()
