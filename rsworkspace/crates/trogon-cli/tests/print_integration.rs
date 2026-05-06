@@ -12,6 +12,7 @@ use std::time::Duration;
 use futures::StreamExt as _;
 use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::{ContainerAsync, runners::AsyncRunner};
+use trogon_cli::session::TrogonSession;
 use trogon_cli::OutputFormat;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -100,7 +101,8 @@ async fn print_run_streams_text_and_returns_ok() {
 
     spawn_fake_runner(nats.clone(), "sess-print-1", vec!["hello ", "world"], "end_turn").await;
 
-    let result = trogon_cli::print::run(nats, PREFIX, cwd(), "say hello", OutputFormat::Text).await;
+    let session = TrogonSession::new(nats, PREFIX, cwd()).await.unwrap();
+    let result = trogon_cli::print::run(session, "say hello", OutputFormat::Text).await;
 
     assert!(result.is_ok(), "expected Ok, got: {result:?}");
 }
@@ -113,8 +115,8 @@ async fn print_run_returns_err_on_error_stop_reason() {
 
     spawn_fake_runner(nats.clone(), "sess-print-err", vec![], "error").await;
 
-    let result =
-        trogon_cli::print::run(nats, PREFIX, cwd(), "trigger error", OutputFormat::Text).await;
+    let session = TrogonSession::new(nats, PREFIX, cwd()).await.unwrap();
+    let result = trogon_cli::print::run(session, "trigger error", OutputFormat::Text).await;
 
     assert!(result.is_err(), "expected Err for stop_reason=error");
     let msg = result.unwrap_err().to_string();
@@ -160,9 +162,8 @@ async fn print_run_prompt_routed_to_session_subject() {
         }
     });
 
-    trogon_cli::print::run(nats, PREFIX, cwd(), "unique-sentinel-prompt", OutputFormat::Text)
-        .await
-        .ok();
+    let session = TrogonSession::new(nats, PREFIX, cwd()).await.unwrap();
+    trogon_cli::print::run(session, "unique-sentinel-prompt", OutputFormat::Text).await.ok();
 
     let payload = tokio::time::timeout(TIMEOUT, rx.recv())
         .await
@@ -182,8 +183,8 @@ async fn print_run_max_tokens_is_not_an_error() {
 
     spawn_fake_runner(nats.clone(), "sess-print-maxtok", vec!["partial"], "max_tokens").await;
 
-    let result =
-        trogon_cli::print::run(nats, PREFIX, cwd(), "write a lot", OutputFormat::Text).await;
+    let session = TrogonSession::new(nats, PREFIX, cwd()).await.unwrap();
+    let result = trogon_cli::print::run(session, "write a lot", OutputFormat::Text).await;
 
     assert!(result.is_ok(), "max_tokens should not be an error: {result:?}");
 }
@@ -225,12 +226,10 @@ async fn print_run_two_calls_get_distinct_session_ids() {
         }
     });
 
-    trogon_cli::print::run(nats.clone(), PREFIX, cwd(), "first", OutputFormat::Text)
-        .await
-        .unwrap();
-    trogon_cli::print::run(nats.clone(), PREFIX, cwd(), "second", OutputFormat::Text)
-        .await
-        .unwrap();
+    let s1 = TrogonSession::new(nats.clone(), PREFIX, cwd()).await.unwrap();
+    trogon_cli::print::run(s1, "first", OutputFormat::Text).await.unwrap();
+    let s2 = TrogonSession::new(nats.clone(), PREFIX, cwd()).await.unwrap();
+    trogon_cli::print::run(s2, "second", OutputFormat::Text).await.unwrap();
 }
 
 // ── JSON format tests ─────────────────────────────────────────────────────────
@@ -249,8 +248,8 @@ async fn print_run_json_format_returns_ok_on_success() {
     )
     .await;
 
-    let result =
-        trogon_cli::print::run(nats, PREFIX, cwd(), "say hello", OutputFormat::Json).await;
+    let session = TrogonSession::new(nats, PREFIX, cwd()).await.unwrap();
+    let result = trogon_cli::print::run(session, "say hello", OutputFormat::Json).await;
 
     assert!(result.is_ok(), "expected Ok in json mode, got: {result:?}");
 }
@@ -263,8 +262,8 @@ async fn print_run_json_format_error_stop_reason_returns_err() {
 
     spawn_fake_runner(nats.clone(), "sess-json-err", vec![], "error").await;
 
-    let result =
-        trogon_cli::print::run(nats, PREFIX, cwd(), "trigger error", OutputFormat::Json).await;
+    let session = TrogonSession::new(nats, PREFIX, cwd()).await.unwrap();
+    let result = trogon_cli::print::run(session, "trigger error", OutputFormat::Json).await;
 
     assert!(result.is_err(), "expected Err in json mode for stop_reason=error");
 }
@@ -283,8 +282,8 @@ async fn print_run_json_format_max_tokens_is_not_an_error() {
     )
     .await;
 
-    let result =
-        trogon_cli::print::run(nats, PREFIX, cwd(), "write a lot", OutputFormat::Json).await;
+    let session = TrogonSession::new(nats, PREFIX, cwd()).await.unwrap();
+    let result = trogon_cli::print::run(session, "write a lot", OutputFormat::Json).await;
 
     assert!(result.is_ok(), "max_tokens should not be an error in json mode: {result:?}");
 }

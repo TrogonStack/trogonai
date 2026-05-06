@@ -1,7 +1,5 @@
-use crate::session::{StreamEvent, TrogonSession};
-use async_nats::Client;
+use crate::session::{Session, StreamEvent};
 use std::io::Write as _;
-use std::path::PathBuf;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum OutputFormat {
@@ -15,16 +13,8 @@ pub enum OutputFormat {
 /// `Json` mode accumulates all text then emits a single JSON line:
 ///   `{"text":"...","stop_reason":"end_turn"}`
 ///
-/// Returns `Err` (→ exit code 1 in `main`) if the session cannot be created,
-/// the prompt cannot be sent, or the runner signals stop reason `"error"`.
-pub async fn run(
-    nats: Client,
-    prefix: &str,
-    cwd: PathBuf,
-    prompt: &str,
-    format: OutputFormat,
-) -> anyhow::Result<()> {
-    let session = TrogonSession::new(nats, prefix, cwd).await?;
+/// Returns `Err` if the prompt cannot be sent or the runner signals stop reason `"error"`.
+pub async fn run<S: Session>(session: S, prompt: &str, format: OutputFormat) -> anyhow::Result<()> {
     let mut rx = session.prompt(prompt).await?;
     let mut stdout = std::io::stdout();
 
@@ -74,7 +64,6 @@ pub async fn run(
             }
         }
 
-        // Ensure output ends on a clean line.
         if !trailing_newline {
             println!();
         }
@@ -82,4 +71,78 @@ pub async fn run(
     }
 
     Ok(())
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::session::mock::MockSession;
+
+    #[tokio::test]
+    async fn text_mode_returns_ok_on_end_turn() {
+        let session = MockSession::new("s");
+        session.queue_turn(vec![
+            StreamEvent::Text("hello\n".into()),
+            StreamEvent::Done("end_turn".into()),
+        ]);
+        let result = run(session, "test", OutputFormat::Text).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn text_mode_returns_err_on_error_stop_reason() {
+        let session = MockSession::new("s");
+        session.queue_turn(vec![StreamEvent::Done("error".into())]);
+        let result = run(session, "test", OutputFormat::Text).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("error"));
+    }
+
+    #[tokio::test]
+    async fn json_mode_returns_ok_and_accumulates_text() {
+        let session = MockSession::new("s");
+        session.queue_turn(vec![
+            StreamEvent::Text("foo".into()),
+            StreamEvent::Text("bar".into()),
+            StreamEvent::Done("end_turn".into()),
+        ]);
+        // We can't easily capture stdout in tests, but we verify it doesn't error.
+        let result = run(session, "test", OutputFormat::Json).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn json_mode_returns_err_on_error_stop_reason() {
+        let session = MockSession::new("s");
+        session.queue_turn(vec![StreamEvent::Done("error".into())]);
+        let result = run(session, "test", OutputFormat::Json).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn non_text_events_are_ignored_in_both_modes() {
+        for format in [OutputFormat::Text, OutputFormat::Json] {
+            let session = MockSession::new("s");
+            session.queue_turn(vec![
+                StreamEvent::Thinking,
+                StreamEvent::ToolCall("Read".into()),
+                StreamEvent::Diff("--- a\n+++ b\n".into()),
+                StreamEvent::Usage { used_tokens: 100, context_size: 1000 },
+                StreamEvent::Done("end_turn".into()),
+            ]);
+            let result = run(session, "test", format).await;
+            assert!(result.is_ok(), "format={format:?}: {result:?}", format = format as u8);
+        }
+    }
+
+    #[tokio::test]
+    async fn empty_event_stream_completes_without_panic() {
+        let session = MockSession::new("s");
+        // queue_turn with only Done — channel closes after Done is consumed
+        session.queue_turn(vec![StreamEvent::Done("end_turn".into())]);
+        let result = run(session, "test", OutputFormat::Text).await;
+        assert!(result.is_ok());
+    }
 }

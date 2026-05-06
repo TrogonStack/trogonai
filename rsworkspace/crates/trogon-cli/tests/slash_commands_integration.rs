@@ -13,6 +13,7 @@ use futures::StreamExt as _;
 use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::{ContainerAsync, runners::AsyncRunner};
 use trogon_cli::session::{StreamEvent, TrogonSession};
+use trogon_cli::Session as _;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -101,11 +102,11 @@ async fn clear_creates_session_with_different_id() {
         .unwrap();
 
     assert_ne!(
-        session1.session_id, session2.session_id,
+        session1.session_id(), session2.session_id(),
         "new session after /clear must have a distinct session_id"
     );
-    assert_eq!(session1.session_id, "sess-clear-1");
-    assert_eq!(session2.session_id, "sess-clear-2");
+    assert_eq!(session1.session_id(), "sess-clear-1");
+    assert_eq!(session2.session_id(), "sess-clear-2");
 }
 
 /// After /clear, the new session can send prompts and receive events normally.
@@ -121,7 +122,7 @@ async fn new_session_after_clear_can_prompt() {
         .await
         .unwrap();
 
-    let resp_sub1 = format!("{PREFIX}.session.{}.agent.prompt", session1.session_id);
+    let resp_sub1 = format!("{PREFIX}.session.{}.agent.prompt", session1.session_id());
     let mut sub1 = nats.subscribe(resp_sub1).await.unwrap();
     let rx1 = session1.prompt("hello from session 1").await.unwrap();
     let msg1 = tokio::time::timeout(TIMEOUT, sub1.next()).await.unwrap().unwrap();
@@ -133,7 +134,7 @@ async fn new_session_after_clear_can_prompt() {
         .await
         .unwrap();
 
-    let resp_sub2 = format!("{PREFIX}.session.{}.agent.prompt", session2.session_id);
+    let resp_sub2 = format!("{PREFIX}.session.{}.agent.prompt", session2.session_id());
     let mut sub2 = nats.subscribe(resp_sub2).await.unwrap();
     let rx2 = session2.prompt("hello from session 2").await.unwrap();
     let msg2 = tokio::time::timeout(TIMEOUT, sub2.next()).await.unwrap().unwrap();
@@ -163,15 +164,15 @@ async fn new_session_starts_with_no_usage_events() {
         .await
         .unwrap();
 
-    let notif1 = format!("{PREFIX}.session.{}.client.session.update", session1.session_id);
-    let resp_sub1 = format!("{PREFIX}.session.{}.agent.prompt", session1.session_id);
+    let notif1 = format!("{PREFIX}.session.{}.client.session.update", session1.session_id());
+    let resp_sub1 = format!("{PREFIX}.session.{}.agent.prompt", session1.session_id());
     let mut sub1 = nats.subscribe(resp_sub1).await.unwrap();
     let rx1 = session1.prompt("first").await.unwrap();
     let msg1 = tokio::time::timeout(TIMEOUT, sub1.next()).await.unwrap().unwrap();
 
     // Emit a usage notification on the first session.
     let usage_notif = serde_json::json!({
-        "sessionId": session1.session_id,
+        "sessionId": session1.session_id(),
         "update": { "sessionUpdate": "usage_update", "used": 50000, "size": 200000 }
     });
     nats.publish(notif1, serde_json::to_vec(&usage_notif).unwrap().into())
@@ -186,7 +187,7 @@ async fn new_session_starts_with_no_usage_events() {
         .await
         .unwrap();
 
-    let resp_sub2 = format!("{PREFIX}.session.{}.agent.prompt", session2.session_id);
+    let resp_sub2 = format!("{PREFIX}.session.{}.agent.prompt", session2.session_id());
     let mut sub2 = nats.subscribe(resp_sub2).await.unwrap();
     let mut rx2 = session2.prompt("after clear").await.unwrap();
     let msg2 = tokio::time::timeout(TIMEOUT, sub2.next()).await.unwrap().unwrap();

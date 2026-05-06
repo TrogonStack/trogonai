@@ -11,6 +11,7 @@ use futures::StreamExt as _;
 use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::{ContainerAsync, runners::AsyncRunner};
 use trogon_cli::session::{StreamEvent, TrogonSession};
+use trogon_cli::Session as _;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -85,7 +86,7 @@ async fn usage_update_notification_emits_usage_event() {
     let session = TrogonSession::new(nats.clone(), PREFIX, std::env::current_dir().unwrap())
         .await
         .unwrap();
-    assert_eq!(session.session_id, session_id);
+    assert_eq!(session.session_id(), session_id);
 
     // Subscribe to the prompt subject to capture the request, but don't reply
     // (no reply needed — the channel closes on notif_sub drain).
