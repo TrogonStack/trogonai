@@ -1,14 +1,25 @@
-# mcp-nats-server
+# MCP NATS Streamable HTTP
 
-Bridges Model Context Protocol Streamable HTTP to NATS. The binary acts as an
-MCP server over HTTP for local and remote MCP clients, and as an MCP client over
-NATS for a remote MCP server.
+Translates [Model Context Protocol](https://modelcontextprotocol.io) (MCP)
+messages between [NATS](https://nats.io) and Streamable HTTP served on `/mcp`.
+
+For managed NATS infrastructure in production, we recommend <a href="https://synadia.com"><img src="../acp-nats-stdio/assets/synadia-logo.png" alt="Synadia" width="20" style="vertical-align: middle;"> Synadia</a>.
 
 ```mermaid
 graph LR
-    A[MCP HTTP client] <-->|Streamable HTTP| B[mcp-nats-server]
-    B <-->|NATS| C[MCP server]
+    A1[Client1] <-->|http| B[mcp-nats-server]
+    A2[Client2] <-->|http| B
+    AN[ClientN] <-->|http| B
+    B <-->|NATS| C[Backend]
 ```
+
+## Features
+
+- Streamable HTTP transport on `/mcp`
+- Multiple concurrent MCP HTTP sessions sharing the same NATS bridge
+- Graceful shutdown (SIGINT/SIGTERM)
+- Custom prefix support for multi-tenancy
+- Configurable generated HTTP peer ID prefix
 
 ## Quick Start
 
@@ -20,36 +31,64 @@ cargo build --release -p mcp-nats-server
 ./target/release/mcp-nats-server --server-id filesystem
 ```
 
-Connect with any MCP Streamable HTTP client at:
+Use Streamable HTTP:
 
-```text
-http://127.0.0.1:8081/mcp
+```bash
+curl -i \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"curl","version":"1.0.0"}}}' \
+  http://127.0.0.1:8081/mcp
 ```
+
+Follow-up requests for the same MCP session must include the `Mcp-Session-Id`
+header returned by `initialize`.
 
 ## Configuration
 
+### Server
+
 | Variable | CLI Flag | Description | Default |
-| --- | --- | --- | --- |
-| `MCP_PREFIX` | `--mcp-prefix` | NATS subject prefix | `mcp` |
-| `MCP_CLIENT_ID_PREFIX` | `--client-id-prefix` | Prefix for generated HTTP session peer IDs | `http` |
-| `MCP_SERVER_ID` | `--server-id` | Remote server peer ID for NATS server-bound messages | `default` |
+|----------|----------|-------------|---------|
 | `MCP_HTTP_HOST` | `--host` | Listen address | `127.0.0.1` |
 | `MCP_HTTP_PORT` | `--port` | Listen port | `8081` |
 | `MCP_HTTP_PATH` | `--path` | Streamable HTTP route | `/mcp` |
-| `MCP_OPERATION_TIMEOUT_SECS` | | Timeout for NATS request/reply operations | `30` |
-| `MCP_NATS_CONNECT_TIMEOUT_SECS` | | NATS connection timeout | `10` |
-| `NATS_URL` | | NATS server URL(s), comma-separated for failover | `localhost:4222` |
-| `RUST_LOG` | | Tracing filter directive | `info` |
+| | `--allowed-host` | Allowed host for Streamable HTTP validation | RMCP default |
 
-Use repeated `--allowed-host` flags to override the RMCP Streamable HTTP
-allowed-host validation list.
+### MCP
 
-NATS authentication is loaded through [`trogon-nats`](../trogon-nats/README.md)
-using the same environment variables as the rest of the workspace.
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `MCP_PREFIX` | Subject prefix for multi-tenancy | `mcp` |
+| `MCP_CLIENT_ID_PREFIX` | Prefix for generated HTTP session peer IDs | `http` |
+| `MCP_SERVER_ID` | Remote server peer ID for NATS server-bound messages | `default` |
+| `MCP_OPERATION_TIMEOUT_SECS` | Timeout for NATS request/reply operations | `30` |
+| `MCP_NATS_CONNECT_TIMEOUT_SECS` | NATS connection timeout | `10` |
 
-## Testing
+CLI flags `--mcp-prefix`, `--client-id-prefix`, and `--server-id` override the
+matching environment variables.
 
-```sh
-mise exec -- cargo test -p mcp-nats-server
-mise exec -- cargo clippy -p mcp-nats-server --all-targets
-```
+### NATS
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `NATS_URL` | Server URL(s), comma-separated for failover | `localhost:4222` |
+
+### NATS Authentication
+
+Resolved in priority order — the first match wins:
+
+| Priority | Variable(s) | Method |
+|----------|-------------|--------|
+| 1 | `NATS_CREDS` | Credentials file path |
+| 2 | `NATS_NKEY` | NKey seed |
+| 3 | `NATS_USER` + `NATS_PASSWORD` | Username/password |
+| 4 | `NATS_TOKEN` | Token |
+
+If none are set, the connection is unauthenticated.
+
+### Observability
+
+| Variable | Description |
+|----------|-------------|
+| `RUST_LOG` | Tracing filter directive (default: `info`) |

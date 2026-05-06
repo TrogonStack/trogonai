@@ -1,7 +1,16 @@
-# mcp-nats
+# MCP NATS
 
-`mcp-nats` routes Model Context Protocol JSON-RPC messages over NATS using the
-official Rust MCP SDK (`rmcp`) model and transport traits.
+Routes [Model Context Protocol](https://modelcontextprotocol.io) (MCP) JSON-RPC
+messages over [NATS](https://nats.io) using the official Rust MCP SDK (`rmcp`)
+model and transport traits.
+
+For managed NATS infrastructure in production, we recommend <a href="https://synadia.com"><img src="../acp-nats-stdio/assets/synadia-logo.png" alt="Synadia" width="20" style="vertical-align: middle;"> Synadia</a>.
+
+## When to Use
+
+- Use `mcp-nats` when embedding the NATS transport into an MCP client or server.
+- Use `mcp-nats-stdio` when a local MCP client launches a stdio process.
+- Use `mcp-nats-server` when MCP clients connect over Streamable HTTP.
 
 ## Subject Layout
 
@@ -43,7 +52,7 @@ over NATS. Use `server::connect` for a local MCP server that talks to a remote
 MCP client over NATS.
 
 ```rust,no_run
-use mcp_nats::{Config, McpPeerId, McpPrefix, client};
+use mcp_nats::{client, Config, McpPeerId, McpPrefix};
 use rmcp::ServiceExt;
 
 # async fn example() -> Result<(), Box<dyn std::error::Error>> {
@@ -64,37 +73,36 @@ let transport = client::connect(
 )
 .await?;
 
-let running = ().serve(transport).await?;
+let _running = ().serve(transport).await?;
 # Ok(())
 # }
 ```
 
-## Environment
+## Configuration
 
-| Variable | Purpose | Default |
-| --- | --- | --- |
-| `MCP_PREFIX` | NATS subject prefix | `mcp` |
-| `MCP_OPERATION_TIMEOUT_SECS` | NATS request/reply timeout | `30` |
-| `MCP_NATS_CONNECT_TIMEOUT_SECS` | NATS connect timeout | `10` |
-| `NATS_URL` | NATS server URL(s) | `localhost:4222` |
+### MCP
 
-NATS authentication is loaded through [`trogon-nats`](../trogon-nats/README.md)
-using the same environment variables as the rest of the workspace.
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `MCP_PREFIX` | Subject prefix for multi-tenancy | `mcp` |
+| `MCP_OPERATION_TIMEOUT_SECS` | Timeout for NATS request/reply operations | `30` |
+| `MCP_NATS_CONNECT_TIMEOUT_SECS` | NATS connection timeout | `10` |
 
-## Stdio Bridge
+### NATS
 
-Use `mcp-nats-stdio` when a local MCP client expects to launch an MCP server
-process over stdio, but the target MCP server is reachable through NATS.
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `NATS_URL` | Server URL(s), comma-separated for failover | `localhost:4222` |
 
-```sh
-mise exec -- cargo run -p mcp-nats-stdio -- --server-id filesystem
-```
+### NATS Authentication
 
-## Testing
+Resolved in priority order — the first match wins:
 
-Run the crate checks with:
+| Priority | Variable(s) | Method |
+|----------|-------------|--------|
+| 1 | `NATS_CREDS` | Credentials file path |
+| 2 | `NATS_NKEY` | NKey seed |
+| 3 | `NATS_USER` + `NATS_PASSWORD` | Username/password |
+| 4 | `NATS_TOKEN` | Token |
 
-```sh
-mise exec -- cargo test -p mcp-nats
-mise exec -- cargo clippy -p mcp-nats --all-targets
-```
+If none are set, the connection is unauthenticated.
