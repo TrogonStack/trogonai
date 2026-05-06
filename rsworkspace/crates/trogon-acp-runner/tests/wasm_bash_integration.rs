@@ -9,8 +9,7 @@ use std::sync::Arc;
 
 use agent_client_protocol::{
     Agent, CreateTerminalResponse, InitializeRequest, NewSessionRequest, PromptRequest,
-    ProtocolVersion, TerminalExitStatus, TerminalId, TerminalOutputResponse,
-    WaitForTerminalExitResponse,
+    ProtocolVersion, TerminalId,
 };
 use async_nats::jetstream;
 use futures_util::StreamExt as _;
@@ -21,6 +20,7 @@ use trogon_acp_runner::{
     GatewayConfig, NatsSessionStore, TrogonAgent,
     agent_runner::mock::MockAgentRunner,
     session_notifier::mock::MockSessionNotifier,
+    session_store::{SessionStore, mock::MemorySessionStore},
     wasm_bash_tool::WasmRuntimeBashTool,
 };
 use trogon_mcp::McpCallTool;
@@ -59,60 +59,46 @@ async fn wasm_bash_tool_call_tool_completes_round_trip() {
     let session_id = "test-session-1";
     let terminal_id = "tid-abc";
     let base = format!("{prefix}.session.{session_id}.client.terminal");
+    let ext_base = format!("{prefix}.session.{session_id}.client.ext");
 
-    // Spawn mock responders for each terminal subject.
+    // Spawn mock responders for the four NATS interactions used by the new
+    // demarcation-marker protocol: create → output(baseline) → write_stdin → output(poll).
     let nats_srv = nats.clone();
     tokio::spawn(async move {
-        // 1. create
-        let mut sub = nats_srv
-            .subscribe(format!("{base}.create"))
+        let mut create_sub = nats_srv.subscribe(format!("{base}.create")).await.unwrap();
+        let mut output_sub = nats_srv.subscribe(format!("{base}.output")).await.unwrap();
+        let mut write_sub = nats_srv
+            .subscribe(format!("{ext_base}.terminal.write_stdin"))
             .await
             .unwrap();
-        if let Some(msg) = sub.next().await {
+
+        // 1. terminal.create
+        if let Some(msg) = create_sub.next().await {
             let resp = CreateTerminalResponse::new(TerminalId::new(terminal_id));
             let payload = serde_json::to_vec(&resp).unwrap();
-            nats_srv
-                .publish(msg.reply.unwrap(), payload.into())
-                .await
-                .unwrap();
+            nats_srv.publish(msg.reply.unwrap(), payload.into()).await.unwrap();
         }
 
-        // 2. wait_for_exit
-        let mut sub = nats_srv
-            .subscribe(format!("{base}.wait_for_exit"))
-            .await
-            .unwrap();
-        if let Some(msg) = sub.next().await {
-            let resp = WaitForTerminalExitResponse::new(
-                TerminalExitStatus::new().exit_code(Some(0)),
-            );
-            let payload = serde_json::to_vec(&resp).unwrap();
-            nats_srv
-                .publish(msg.reply.unwrap(), payload.into())
-                .await
-                .unwrap();
+        // 2. terminal.output — baseline (empty, no prior output)
+        if let Some(msg) = output_sub.next().await {
+            let payload = serde_json::to_vec(&serde_json::json!({"output": ""})).unwrap();
+            nats_srv.publish(msg.reply.unwrap(), payload.into()).await.unwrap();
         }
 
-        // 3. output
-        let mut sub = nats_srv
-            .subscribe(format!("{base}.output"))
-            .await
-            .unwrap();
-        if let Some(msg) = sub.next().await {
-            let resp = TerminalOutputResponse::new("hello\n".to_string(), false);
-            let payload = serde_json::to_vec(&resp).unwrap();
-            nats_srv
-                .publish(msg.reply.unwrap(), payload.into())
-                .await
-                .unwrap();
+        // 3. ext.terminal.write_stdin — ACK the command write
+        if let Some(msg) = write_sub.next().await {
+            let payload = serde_json::to_vec(&serde_json::json!({"ok": true})).unwrap();
+            nats_srv.publish(msg.reply.unwrap(), payload.into()).await.unwrap();
         }
 
-        // 4. release (best-effort, no reply needed)
-        let mut sub = nats_srv
-            .subscribe(format!("{base}.release"))
-            .await
+        // 4. terminal.output — poll response with demarcation marker
+        if let Some(msg) = output_sub.next().await {
+            let payload = serde_json::to_vec(
+                &serde_json::json!({"output": "echo hello\nhello\n__EXIT_0__\n"}),
+            )
             .unwrap();
-        sub.next().await; // drain
+            nats_srv.publish(msg.reply.unwrap(), payload.into()).await.unwrap();
+        }
     });
 
     // Give subscribers a moment to register.
@@ -122,7 +108,9 @@ async fn wasm_bash_tool_call_tool_completes_round_trip() {
         nats.clone(),
         prefix,
         session_id,
+        std::path::PathBuf::from("/tmp"),
         std::time::Duration::from_secs(5),
+        MemorySessionStore::new(),
     );
 
     let args = serde_json::json!({ "command": "echo hello" });
@@ -131,7 +119,7 @@ async fn wasm_bash_tool_call_tool_completes_round_trip() {
         .await
         .expect("call_tool must succeed");
 
-    assert_eq!(result, "hello\n", "output must match mock terminal response");
+    assert!(result.contains("hello"), "output must contain 'hello', got: {result}");
 }
 
 // ── Registry-based bash tool injection ───────────────────────────────────────
@@ -213,7 +201,9 @@ async fn wasm_bash_tool_missing_command_returns_error() {
         nats,
         "acp.wasm",
         "test-session-miss",
+        std::path::PathBuf::from("/tmp"),
         std::time::Duration::from_secs(5),
+        MemorySessionStore::new(),
     );
 
     let result = tool.call_tool("bash", &serde_json::json!({})).await;
@@ -231,7 +221,9 @@ async fn wasm_bash_tool_no_responder_returns_error() {
         nats,
         "acp.wasm",
         "test-session-noresp",
+        std::path::PathBuf::from("/tmp"),
         std::time::Duration::from_secs(5),
+        MemorySessionStore::new(),
     );
 
     let result = tool
@@ -429,13 +421,250 @@ async fn with_execution_backend_injects_bash_tool_exactly_once_with_multiple_ent
     );
 }
 
+// ── terminal reuse ────────────────────────────────────────────────────────────
+
+/// Calling `call_tool` twice on the same tool instance must create the terminal
+/// only once.  The second call must load the `terminal_id` from `SessionState`
+/// (persisted by the first call) and skip the create step entirely.
+#[tokio::test]
+async fn wasm_bash_tool_reuses_terminal_across_calls() {
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    let (_c, port) = start_nats().await;
+    let (nats, _js) = connect(port).await;
+
+    let prefix = "acp.wasm";
+    let session_id = "test-session-reuse";
+    let base = format!("{prefix}.session.{session_id}.client.terminal");
+    let ext_base = format!("{prefix}.session.{session_id}.client.ext");
+
+    let create_count = Arc::new(AtomicU32::new(0));
+    let create_count_clone = create_count.clone();
+
+    let nats_srv = nats.clone();
+    tokio::spawn(async move {
+        let mut create_sub = nats_srv.subscribe(format!("{base}.create")).await.unwrap();
+        let mut output_sub = nats_srv.subscribe(format!("{base}.output")).await.unwrap();
+        let mut write_sub = nats_srv
+            .subscribe(format!("{ext_base}.terminal.write_stdin"))
+            .await
+            .unwrap();
+
+        // Only one create — only the first call should trigger it.
+        if let Some(msg) = create_sub.next().await {
+            create_count_clone.fetch_add(1, Ordering::SeqCst);
+            let resp = CreateTerminalResponse::new(TerminalId::new("tid-reuse"));
+            nats_srv
+                .publish(msg.reply.unwrap(), serde_json::to_vec(&resp).unwrap().into())
+                .await
+                .unwrap();
+        }
+
+        // Two full interaction sequences (baseline + write + poll), one per call.
+        for _ in 0..2u8 {
+            if let Some(msg) = output_sub.next().await {
+                let payload = serde_json::to_vec(&serde_json::json!({"output": ""})).unwrap();
+                nats_srv.publish(msg.reply.unwrap(), payload.into()).await.unwrap();
+            }
+            if let Some(msg) = write_sub.next().await {
+                let payload = serde_json::to_vec(&serde_json::json!({"ok": true})).unwrap();
+                nats_srv.publish(msg.reply.unwrap(), payload.into()).await.unwrap();
+            }
+            if let Some(msg) = output_sub.next().await {
+                let payload = serde_json::to_vec(
+                    &serde_json::json!({"output": "hello\n__EXIT_0__\n"}),
+                )
+                .unwrap();
+                nats_srv.publish(msg.reply.unwrap(), payload.into()).await.unwrap();
+            }
+        }
+    });
+
+    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+    let store = MemorySessionStore::new();
+    let tool = WasmRuntimeBashTool::new(
+        nats.clone(),
+        prefix,
+        session_id,
+        std::path::PathBuf::from("/tmp"),
+        std::time::Duration::from_secs(5),
+        store.clone(),
+    );
+
+    let args = serde_json::json!({ "command": "echo hello" });
+    tool.call_tool("bash", &args).await.expect("first call must succeed");
+    tool.call_tool("bash", &args).await.expect("second call must succeed");
+
+    assert_eq!(
+        create_count.load(Ordering::SeqCst),
+        1,
+        "terminal must be created only once across multiple calls"
+    );
+    let state = store.load(session_id).await.unwrap();
+    assert_eq!(
+        state.terminal_id.as_deref(),
+        Some("tid-reuse"),
+        "terminal_id must be persisted in SessionState after the first call"
+    );
+}
+
+// ── sandbox_dir → cwd in CreateTerminalRequest ───────────────────────────────
+
+/// `sandbox_dir` passed to `WasmRuntimeBashTool::new` must appear as the `cwd`
+/// field of the `CreateTerminalRequest` sent over NATS.
+#[tokio::test]
+async fn wasm_bash_tool_passes_sandbox_dir_as_cwd_in_create_request() {
+    let (_c, port) = start_nats().await;
+    let (nats, _js) = connect(port).await;
+
+    let prefix = "acp.wasm";
+    let session_id = "test-session-cwd";
+    let sandbox_dir = "/custom/sandbox/path";
+    let base = format!("{prefix}.session.{session_id}.client.terminal");
+    let ext_base = format!("{prefix}.session.{session_id}.client.ext");
+
+    let captured = Arc::new(tokio::sync::Mutex::new(serde_json::Value::Null));
+    let captured_clone = captured.clone();
+
+    let nats_srv = nats.clone();
+    tokio::spawn(async move {
+        let mut create_sub = nats_srv.subscribe(format!("{base}.create")).await.unwrap();
+        let mut output_sub = nats_srv.subscribe(format!("{base}.output")).await.unwrap();
+        let mut write_sub = nats_srv
+            .subscribe(format!("{ext_base}.terminal.write_stdin"))
+            .await
+            .unwrap();
+
+        if let Some(msg) = create_sub.next().await {
+            *captured_clone.lock().await =
+                serde_json::from_slice(&msg.payload).unwrap_or_default();
+            let resp = CreateTerminalResponse::new(TerminalId::new("tid-cwd"));
+            nats_srv
+                .publish(msg.reply.unwrap(), serde_json::to_vec(&resp).unwrap().into())
+                .await
+                .unwrap();
+        }
+        if let Some(msg) = output_sub.next().await {
+            let p = serde_json::to_vec(&serde_json::json!({"output": ""})).unwrap();
+            nats_srv.publish(msg.reply.unwrap(), p.into()).await.unwrap();
+        }
+        if let Some(msg) = write_sub.next().await {
+            let p = serde_json::to_vec(&serde_json::json!({"ok": true})).unwrap();
+            nats_srv.publish(msg.reply.unwrap(), p.into()).await.unwrap();
+        }
+        if let Some(msg) = output_sub.next().await {
+            let p = serde_json::to_vec(
+                &serde_json::json!({"output": "result\n__EXIT_0__\n"}),
+            )
+            .unwrap();
+            nats_srv.publish(msg.reply.unwrap(), p.into()).await.unwrap();
+        }
+    });
+
+    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+    let tool = WasmRuntimeBashTool::new(
+        nats.clone(),
+        prefix,
+        session_id,
+        std::path::PathBuf::from(sandbox_dir),
+        std::time::Duration::from_secs(5),
+        MemorySessionStore::new(),
+    );
+    tool.call_tool("bash", &serde_json::json!({ "command": "pwd" }))
+        .await
+        .expect("call_tool must succeed");
+
+    let payload = captured.lock().await;
+    assert_eq!(
+        payload["cwd"].as_str(),
+        Some(sandbox_dir),
+        "CreateTerminalRequest must carry sandbox_dir as cwd, got: {payload}"
+    );
+}
+
+// ── timeout with partial output ───────────────────────────────────────────────
+
+/// When the demarcation marker never arrives before the deadline, `call_tool`
+/// must return `Err` whose message contains "timeout" and the partial output
+/// that was accumulated up to that point.
+#[tokio::test]
+async fn wasm_bash_tool_timeout_returns_error_with_partial_output() {
+    let (_c, port) = start_nats().await;
+    let (nats, _js) = connect(port).await;
+
+    let prefix = "acp.wasm";
+    let session_id = "test-session-timeout";
+    let base = format!("{prefix}.session.{session_id}.client.terminal");
+    let ext_base = format!("{prefix}.session.{session_id}.client.ext");
+
+    let nats_srv = nats.clone();
+    tokio::spawn(async move {
+        let mut create_sub = nats_srv.subscribe(format!("{base}.create")).await.unwrap();
+        let mut output_sub = nats_srv.subscribe(format!("{base}.output")).await.unwrap();
+        let mut write_sub = nats_srv
+            .subscribe(format!("{ext_base}.terminal.write_stdin"))
+            .await
+            .unwrap();
+
+        if let Some(msg) = create_sub.next().await {
+            let resp = CreateTerminalResponse::new(TerminalId::new("tid-timeout"));
+            nats_srv
+                .publish(msg.reply.unwrap(), serde_json::to_vec(&resp).unwrap().into())
+                .await
+                .unwrap();
+        }
+        if let Some(msg) = output_sub.next().await {
+            // baseline — empty
+            let p = serde_json::to_vec(&serde_json::json!({"output": ""})).unwrap();
+            nats_srv.publish(msg.reply.unwrap(), p.into()).await.unwrap();
+        }
+        if let Some(msg) = write_sub.next().await {
+            let p = serde_json::to_vec(&serde_json::json!({"ok": true})).unwrap();
+            nats_srv.publish(msg.reply.unwrap(), p.into()).await.unwrap();
+        }
+        // Every poll returns partial output with no exit marker.
+        while let Some(msg) = output_sub.next().await {
+            let p = serde_json::to_vec(
+                &serde_json::json!({"output": "partial line 1\npartial line 2\n"}),
+            )
+            .unwrap();
+            nats_srv.publish(msg.reply.unwrap(), p.into()).await.unwrap();
+        }
+    });
+
+    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+    let tool = WasmRuntimeBashTool::new(
+        nats.clone(),
+        prefix,
+        session_id,
+        std::path::PathBuf::from("/tmp"),
+        std::time::Duration::from_millis(500),
+        MemorySessionStore::new(),
+    );
+
+    let result = tool
+        .call_tool("bash", &serde_json::json!({ "command": "sleep 10" }))
+        .await;
+
+    assert!(result.is_err(), "call_tool must return Err on timeout");
+    let err = result.unwrap_err();
+    assert!(err.contains("timeout"), "error must mention timeout, got: {err}");
+    assert!(
+        err.contains("partial line"),
+        "error must include partial output, got: {err}"
+    );
+}
+
 // ── tool_def shape ────────────────────────────────────────────────────────────
 
 /// `WasmRuntimeBashTool::tool_def()` returns a well-formed `ToolDef`: name is
 /// `"bash"`, the input schema lists `command` as a required string property.
 #[test]
 fn wasm_bash_tool_def_has_correct_shape() {
-    let def = WasmRuntimeBashTool::tool_def();
+    let def = WasmRuntimeBashTool::<MemorySessionStore>::tool_def();
 
     assert_eq!(def.name, "bash");
 
