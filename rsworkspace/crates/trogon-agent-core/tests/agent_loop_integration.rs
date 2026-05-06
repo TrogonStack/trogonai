@@ -28,6 +28,8 @@ fn make_agent(base_url: &str) -> AgentLoop {
         thinking_budget: None,
         tool_context: Arc::new(ToolContext {
             proxy_url: "http://127.0.0.1:1".to_string(),
+            cwd: ".".to_string(),
+            http_client: reqwest::Client::new(),
         }),
         memory_owner: None,
         memory_repo: None,
@@ -807,6 +809,8 @@ async fn run_with_extra_headers_and_tools() {
         thinking_budget: None,
         tool_context: Arc::new(ToolContext {
             proxy_url: "http://127.0.0.1:1".to_string(),
+            cwd: ".".to_string(),
+            http_client: reqwest::Client::new(),
         }),
         memory_owner: None,
         memory_repo: None,
@@ -849,6 +853,8 @@ async fn run_chat_with_system_prompt_tools_and_extra_headers() {
         thinking_budget: None,
         tool_context: Arc::new(ToolContext {
             proxy_url: "http://127.0.0.1:1".to_string(),
+            cwd: ".".to_string(),
+            http_client: reqwest::Client::new(),
         }),
         memory_owner: None,
         memory_repo: None,
@@ -942,6 +948,8 @@ async fn run_chat_streaming_comprehensive() {
         thinking_budget: Some(1000), // enables the thinking branch
         tool_context: Arc::new(ToolContext {
             proxy_url: "http://127.0.0.1:1".to_string(),
+            cwd: ".".to_string(),
+            http_client: reqwest::Client::new(),
         }),
         memory_owner: None,
         memory_repo: None,
@@ -1067,6 +1075,8 @@ async fn run_chat_streaming_permission_denied() {
         thinking_budget: None,
         tool_context: Arc::new(ToolContext {
             proxy_url: "http://127.0.0.1:1".to_string(),
+            cwd: ".".to_string(),
+            http_client: reqwest::Client::new(),
         }),
         memory_owner: None,
         memory_repo: None,
@@ -1218,6 +1228,8 @@ async fn run_uses_proxy_url_when_no_anthropic_base_url() {
         thinking_budget: None,
         tool_context: Arc::new(ToolContext {
             proxy_url: "http://127.0.0.1:1".to_string(),
+            cwd: ".".to_string(),
+            http_client: reqwest::Client::new(),
         }),
         memory_owner: None,
         memory_repo: None,
@@ -1457,4 +1469,467 @@ async fn run_chat_streaming_steer_none_is_noop() {
         result.is_ok(),
         "tool use without steer must still succeed: {result:?}"
     );
+}
+
+// ── PR 1: real tool dispatch integration ─────────────────────────────────────
+
+/// When the model returns two `tool_use` blocks in a single response, both
+/// are dispatched and both `tool_result`s appear in the follow-up request.
+#[tokio::test]
+async fn run_chat_multiple_tool_use_blocks_all_results_sent_back() {
+    use tempfile::TempDir;
+
+    let dir = TempDir::new().unwrap();
+    tokio::fs::write(dir.path().join("a.txt"), "content_a").await.unwrap();
+    tokio::fs::write(dir.path().join("b.txt"), "content_b").await.unwrap();
+
+    let server = MockServer::start();
+
+    // Second call: both tool results must be present.
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("content_a")
+            .body_contains("content_b");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(end_turn_body("both files read"));
+    });
+
+    // First call: two tool_use blocks in one response.
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(
+                serde_json::json!({
+                    "stop_reason": "tool_use",
+                    "content": [
+                        {"type": "tool_use", "id": "tu_a", "name": "read_file", "input": {"path": "a.txt"}},
+                        {"type": "tool_use", "id": "tu_b", "name": "read_file", "input": {"path": "b.txt"}}
+                    ]
+                })
+                .to_string(),
+            );
+    });
+
+    let mut agent = make_agent(&server.base_url());
+    agent.tool_context = Arc::new(ToolContext {
+        proxy_url: "http://127.0.0.1:1".to_string(),
+        cwd: dir.path().to_string_lossy().into_owned(),
+        http_client: reqwest::Client::new(),
+    });
+
+    let (text, msgs) = agent
+        .run_chat(vec![Message::user_text("read both files")], &[], None)
+        .await
+        .unwrap();
+
+    assert_eq!(text, "both files read");
+    // The tool_results message must contain two ToolResult blocks.
+    let tool_result_msg = msgs.iter().find(|m| {
+        m.content.iter().any(|b| matches!(b, ContentBlock::ToolResult { .. }))
+    });
+    assert!(tool_result_msg.is_some(), "expected a tool_results message");
+    let result_count = tool_result_msg.unwrap().content.iter()
+        .filter(|b| matches!(b, ContentBlock::ToolResult { .. }))
+        .count();
+    assert_eq!(result_count, 2, "expected 2 tool results, got {result_count}");
+}
+
+/// When a tool fails (file does not exist), the error string is sent back as
+/// `tool_result` and the agent loop continues without panicking.
+#[tokio::test]
+async fn run_chat_tool_error_propagated_as_tool_result() {
+    let server = MockServer::start();
+
+    // Second call: the tool_result must contain an error string, not a crash.
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(end_turn_body("handled error"));
+    });
+
+    // First call: tool_use for read_file on a file that does not exist.
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(
+                serde_json::json!({
+                    "stop_reason": "tool_use",
+                    "content": [{
+                        "type": "tool_use",
+                        "id": "tu_err",
+                        "name": "read_file",
+                        "input": {"path": "does_not_exist.txt"}
+                    }]
+                })
+                .to_string(),
+            );
+    });
+
+    // Use a tempdir as cwd so the file is guaranteed to not exist.
+    let dir = tempfile::TempDir::new().unwrap();
+    let mut agent = make_agent(&server.base_url());
+    agent.tool_context = Arc::new(ToolContext {
+        proxy_url: "http://127.0.0.1:1".to_string(),
+        cwd: dir.path().to_string_lossy().into_owned(),
+        http_client: reqwest::Client::new(),
+    });
+
+    let result = agent
+        .run_chat(vec![Message::user_text("read missing file")], &[], None)
+        .await;
+
+    // The agent must not crash — it should complete and return the final text.
+    assert_eq!(result.unwrap().0, "handled error");
+}
+
+/// The agent receives a `tool_use` block for `read_file`, dispatches it to the
+/// real `fs::read_file` implementation, and sends the file content back as a
+/// `tool_result` in the next request.
+#[tokio::test]
+async fn run_chat_real_read_file_tool_result_sent_back() {
+    use tempfile::TempDir;
+
+    let dir = TempDir::new().unwrap();
+    tokio::fs::write(dir.path().join("hello.txt"), "integration content")
+        .await
+        .unwrap();
+
+    let server = MockServer::start();
+
+    // Second call: must contain both "tool_result" and the file's actual content.
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result")
+            .body_contains("integration content");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(end_turn_body("file read successfully"));
+    });
+
+    // First call: return a tool_use for read_file targeting the temp file.
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(
+                serde_json::json!({
+                    "stop_reason": "tool_use",
+                    "content": [{
+                        "type": "tool_use",
+                        "id": "tu_rf_001",
+                        "name": "read_file",
+                        "input": {"path": "hello.txt"}
+                    }]
+                })
+                .to_string(),
+            );
+    });
+
+    let mut agent = make_agent(&server.base_url());
+    agent.tool_context = Arc::new(ToolContext {
+        proxy_url: "http://127.0.0.1:1".to_string(),
+        cwd: dir.path().to_string_lossy().into_owned(),
+        http_client: reqwest::Client::new(),
+    });
+
+    let (text, _msgs) = agent
+        .run_chat(vec![Message::user_text("read the file")], &[], None)
+        .await
+        .unwrap();
+
+    assert_eq!(text, "file read successfully");
+}
+
+/// `ToolContext.cwd` is used when resolving relative paths in real tool
+/// execution: a file only reachable via `cwd` is found and its content is
+/// included in the tool_result sent to the API.
+#[tokio::test]
+async fn run_chat_cwd_is_propagated_to_tool_execution() {
+    use tempfile::TempDir;
+
+    let dir = TempDir::new().unwrap();
+    tokio::fs::write(dir.path().join("marker.txt"), "cwd_marker_value")
+        .await
+        .unwrap();
+
+    let server = MockServer::start();
+
+    // Second call: the tool_result must contain the content from the cwd file.
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("cwd_marker_value");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(end_turn_body("cwd confirmed"));
+    });
+
+    // First call: tool_use for read_file with a relative path.
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(
+                serde_json::json!({
+                    "stop_reason": "tool_use",
+                    "content": [{
+                        "type": "tool_use",
+                        "id": "tu_cwd_001",
+                        "name": "read_file",
+                        "input": {"path": "marker.txt"}
+                    }]
+                })
+                .to_string(),
+            );
+    });
+
+    let mut agent = make_agent(&server.base_url());
+    agent.tool_context = Arc::new(ToolContext {
+        proxy_url: "http://127.0.0.1:1".to_string(),
+        cwd: dir.path().to_string_lossy().into_owned(),
+        http_client: reqwest::Client::new(),
+    });
+
+    let result = agent
+        .run_chat(vec![Message::user_text("check cwd")], &[], None)
+        .await;
+
+    assert_eq!(result.unwrap().0, "cwd confirmed");
+}
+
+/// When `all_tool_defs()` is passed to `run_chat`, the request body sent to
+/// the Anthropic API contains the tool schemas (verified by name).
+#[tokio::test]
+async fn run_chat_all_tool_defs_present_in_request_body() {
+    use trogon_agent_core::tools::all_tool_defs;
+
+    let server = MockServer::start();
+
+    // Verify the request body contains several tool names from all_tool_defs().
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("read_file")
+            .body_contains("write_file")
+            .body_contains("str_replace")
+            .body_contains("fetch_url")
+            .body_contains("git_status");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(end_turn_body("tools received"));
+    });
+
+    let agent = make_agent(&server.base_url());
+    let (text, _) = agent
+        .run_chat(
+            vec![Message::user_text("hi")],
+            &all_tool_defs(),
+            None,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(text, "tools received");
+}
+
+/// The agent receives a `tool_use` block for `write_file`, dispatches it to the
+/// real `fs::write_file` implementation, and the file is created on disk.
+/// The tool_result "OK" is sent back in the next request.
+#[tokio::test]
+async fn run_chat_real_write_file_creates_file_on_disk() {
+    use tempfile::TempDir;
+
+    let dir = TempDir::new().unwrap();
+    let file_path = dir.path().join("output.txt");
+
+    let server = MockServer::start();
+
+    // Second call: tool_result must contain "OK".
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result")
+            .body_contains("OK");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(end_turn_body("file written"));
+    });
+
+    // First call: tool_use for write_file.
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(
+                serde_json::json!({
+                    "stop_reason": "tool_use",
+                    "content": [{
+                        "type": "tool_use",
+                        "id": "tu_wf_001",
+                        "name": "write_file",
+                        "input": {"path": "output.txt", "content": "written_by_agent"}
+                    }]
+                })
+                .to_string(),
+            );
+    });
+
+    let mut agent = make_agent(&server.base_url());
+    agent.tool_context = Arc::new(ToolContext {
+        proxy_url: "http://127.0.0.1:1".to_string(),
+        cwd: dir.path().to_string_lossy().into_owned(),
+        http_client: reqwest::Client::new(),
+    });
+
+    let (text, _) = agent
+        .run_chat(vec![Message::user_text("write a file")], &[], None)
+        .await
+        .unwrap();
+
+    assert_eq!(text, "file written");
+    let contents = tokio::fs::read_to_string(&file_path).await.unwrap();
+    assert_eq!(contents, "written_by_agent");
+}
+
+/// The agent receives a `tool_use` block for `str_replace`, dispatches it to
+/// the real `editor::str_replace` implementation, and the file is modified on disk.
+/// The diff is included in the tool_result sent back to the API.
+#[tokio::test]
+async fn run_chat_real_str_replace_modifies_file_on_disk() {
+    use tempfile::TempDir;
+
+    let dir = TempDir::new().unwrap();
+    tokio::fs::write(dir.path().join("src.rs"), "fn old_name() {}\n")
+        .await
+        .unwrap();
+
+    let server = MockServer::start();
+
+    // Second call: tool_result must contain the diff (shows the replacement).
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result")
+            .body_contains("new_name");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(end_turn_body("file edited"));
+    });
+
+    // First call: tool_use for str_replace.
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(
+                serde_json::json!({
+                    "stop_reason": "tool_use",
+                    "content": [{
+                        "type": "tool_use",
+                        "id": "tu_sr_001",
+                        "name": "str_replace",
+                        "input": {
+                            "path": "src.rs",
+                            "old_str": "old_name",
+                            "new_str": "new_name"
+                        }
+                    }]
+                })
+                .to_string(),
+            );
+    });
+
+    let mut agent = make_agent(&server.base_url());
+    agent.tool_context = Arc::new(ToolContext {
+        proxy_url: "http://127.0.0.1:1".to_string(),
+        cwd: dir.path().to_string_lossy().into_owned(),
+        http_client: reqwest::Client::new(),
+    });
+
+    let (text, _) = agent
+        .run_chat(vec![Message::user_text("rename the function")], &[], None)
+        .await
+        .unwrap();
+
+    assert_eq!(text, "file edited");
+    let contents = tokio::fs::read_to_string(dir.path().join("src.rs"))
+        .await
+        .unwrap();
+    assert!(contents.contains("new_name"), "got: {contents}");
+    assert!(!contents.contains("old_name"), "old name still present: {contents}");
+}
+
+/// The agent receives a `tool_use` block for `git_status`, dispatches it to
+/// the real `git::status` implementation, and the real git output is included
+/// in the tool_result sent back to the API.
+#[tokio::test]
+async fn run_chat_real_git_status_result_sent_back() {
+    use std::process::Command;
+    use tempfile::TempDir;
+
+    let dir = TempDir::new().unwrap();
+
+    // Initialise a real git repo with one untracked file.
+    Command::new("git")
+        .args(["init"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    tokio::fs::write(dir.path().join("untracked.rs"), "")
+        .await
+        .unwrap();
+
+    let server = MockServer::start();
+
+    // Second call: tool_result must contain the git status output.
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result")
+            .body_contains("untracked.rs");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(end_turn_body("git status received"));
+    });
+
+    // First call: tool_use for git_status.
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(
+                serde_json::json!({
+                    "stop_reason": "tool_use",
+                    "content": [{
+                        "type": "tool_use",
+                        "id": "tu_gs_001",
+                        "name": "git_status",
+                        "input": {}
+                    }]
+                })
+                .to_string(),
+            );
+    });
+
+    let mut agent = make_agent(&server.base_url());
+    agent.tool_context = Arc::new(ToolContext {
+        proxy_url: "http://127.0.0.1:1".to_string(),
+        cwd: dir.path().to_string_lossy().into_owned(),
+        http_client: reqwest::Client::new(),
+    });
+
+    let (text, _) = agent
+        .run_chat(vec![Message::user_text("check git status")], &[], None)
+        .await
+        .unwrap();
+
+    assert_eq!(text, "git status received");
 }
