@@ -170,10 +170,12 @@ pub(crate) struct AnthropicResponse {
     pub(crate) stop_reason: String,
     pub(crate) content: Vec<ContentBlock>,
     #[serde(default)]
+    #[allow(dead_code)]
     pub(crate) usage: Option<AnthropicUsage>,
 }
 
 #[derive(Debug, Default, Deserialize)]
+#[allow(dead_code)]
 pub(crate) struct AnthropicUsage {
     input_tokens: u32,
     output_tokens: u32,
@@ -196,32 +198,30 @@ pub(crate) trait AnthropicHttpClient: Send + Sync + Clone + 'static {
 }
 
 impl AnthropicHttpClient for reqwest::Client {
-    fn call_anthropic<'a>(
+    async fn call_anthropic<'a>(
         &'a self,
         url: &'a str,
         token: &'a str,
         extra_headers: &'a [(String, String)],
         body: &'a Value,
-    ) -> impl std::future::Future<Output = Result<AnthropicResponse, AgentError>> + Send + 'a {
-        async move {
-            let mut req_builder = self
-                .post(url)
-                .header("Authorization", format!("Bearer {token}"))
-                .header("anthropic-version", "2023-06-01");
-            for (k, v) in extra_headers {
-                req_builder = req_builder.header(k.as_str(), v.as_str());
-            }
-            Ok(req_builder
-                .json(body)
-                .send()
-                .await
-                .map_err(|e| AgentError::Http(HttpError(e.to_string())))?
-                .error_for_status()
-                .map_err(|e| AgentError::Http(HttpError(e.to_string())))?
-                .json::<AnthropicResponse>()
-                .await
-                .map_err(|e| AgentError::Http(HttpError(e.to_string())))?)
+    ) -> Result<AnthropicResponse, AgentError> {
+        let mut req_builder = self
+            .post(url)
+            .header("Authorization", format!("Bearer {token}"))
+            .header("anthropic-version", "2023-06-01");
+        for (k, v) in extra_headers {
+            req_builder = req_builder.header(k.as_str(), v.as_str());
         }
+        req_builder
+            .json(body)
+            .send()
+            .await
+            .map_err(|e| AgentError::Http(HttpError(e.to_string())))?
+            .error_for_status()
+            .map_err(|e| AgentError::Http(HttpError(e.to_string())))?
+            .json::<AnthropicResponse>()
+            .await
+            .map_err(|e| AgentError::Http(HttpError(e.to_string())))
     }
 }
 
@@ -651,7 +651,8 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
         system_prompt: Option<&str>,
         event_tx: tokio::sync::mpsc::Sender<AgentEvent>,
         mut steer_rx: Option<tokio::sync::mpsc::Receiver<String>>,
-    ) -> Result<Vec<Message>, AgentError> {
+    ) -> Result<Vec<Message>, AgentError>
+    {
         let mut messages = initial_messages;
 
         let mut all_tools: Vec<ToolDef> = tools.to_vec();
@@ -722,7 +723,7 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                 Some(c) => c.as_ref(),
                 None => {
                     built_client = Arc::new(ReqwestAnthropicStreamingClient {
-                        http: self.http_client.clone(),
+                        http: reqwest::Client::new(),
                         proxy_url: self.proxy_url.clone(),
                         anthropic_token: self.anthropic_token.clone(),
                         anthropic_base_url: self.anthropic_base_url.clone(),
@@ -744,7 +745,7 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
             let mut turn_cache_read = 0u32;
 
             while let Some(chunk_result) = byte_stream.next().await {
-                let bytes = chunk_result.map_err(AgentError::Http)?;
+                let bytes = chunk_result.map_err(AgentError::from)?;
 
                 for (event_type, data) in sse.feed(&bytes) {
                     match event_type.as_str() {
@@ -1059,10 +1060,9 @@ impl SseParser {
                 }
             }
 
-            if !data.is_empty() {
-                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&data) {
-                    events.push((event_type, v));
-                }
+            if !data.is_empty()
+                && let Ok(v) = serde_json::from_str::<serde_json::Value>(&data) {
+                events.push((event_type, v));
             }
         }
         events
@@ -1150,10 +1150,12 @@ mod tests {
     // ── MockAnthropicClient ───────────────────────────────────────────────────
 
     #[derive(Clone)]
+    #[allow(dead_code)]
     struct MockAnthropicClient {
         response_json: String,
     }
 
+    #[allow(dead_code)]
     impl MockAnthropicClient {
         fn with_response(json: impl Into<String>) -> Self {
             Self { response_json: json.into() }
@@ -1171,33 +1173,6 @@ mod tests {
             let resp: AnthropicResponse = serde_json::from_str(&self.response_json)
                 .expect("test fixture must be valid JSON");
             async move { Ok(resp) }
-        }
-    }
-
-    fn make_test_agent() -> AgentLoop<MockAnthropicClient> {
-        use crate::tools::ToolContext;
-        let tool_context = Arc::new(ToolContext {
-            proxy_url: "http://unused:9999".to_string(),
-        });
-        AgentLoop {
-            http_client: MockAnthropicClient::with_response(
-                r#"{"stop_reason":"end_turn","content":[],"usage":null}"#,
-            ),
-            proxy_url: "http://unused:9999".to_string(),
-            anthropic_token: "test".to_string(),
-            anthropic_base_url: None,
-            anthropic_extra_headers: vec![],
-            model: "claude-opus-4-6".to_string(),
-            max_iterations: 1,
-            thinking_budget: None,
-            tool_context,
-            memory_owner: None,
-            memory_repo: None,
-            memory_path: None,
-            mcp_tool_defs: vec![],
-            mcp_dispatch: vec![],
-            permission_checker: None,
-            elicitation_provider: None,
         }
     }
 
@@ -1352,6 +1327,7 @@ mod tests {
         let tool_context = Arc::new(ToolContext {
             http_client: http_client.clone(),
             proxy_url: "http://unused:9999".to_string(),
+            cwd: ".".to_string(),
         });
         AgentLoop {
             http_client,
@@ -1497,38 +1473,32 @@ mod tests {
     /// Covers: TextDelta emitted in the max_tokens path when text is non-empty.
     #[tokio::test]
     async fn run_chat_streaming_max_tokens_with_text_emits_text_delta() {
+        struct MaxTokensMock;
+        impl AnthropicStreamingClient for MaxTokensMock {
+            fn complete_streaming(
+                &self,
+                _body: serde_json::Value,
+            ) -> Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'static>> {
+                let sse: &'static [u8] = b"\
+event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":10,\"output_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0}}}\n\n\
+event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n\
+event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"partial\"}}\n\n\
+event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n\
+event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"max_tokens\"},\"usage\":{\"output_tokens\":1}}\n\n\
+event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
+                Box::pin(futures_util::stream::once(std::future::ready(Ok(Bytes::from_static(sse)))))
+            }
+        }
+
+        let mut agent = make_test_agent();
+        agent.streaming_client = Some(Arc::new(MaxTokensMock));
+
         let (tx, mut rx) = tokio::sync::mpsc::channel(32);
-        let agent = AgentLoop {
-            http_client: MockAnthropicClient::with_response(
-                r#"{"stop_reason":"max_tokens","content":[{"type":"text","text":"partial"}],"usage":{"input_tokens":10,"output_tokens":5}}"#,
-            ),
-            proxy_url: "http://unused".to_string(),
-            anthropic_token: "test".to_string(),
-            anthropic_base_url: None,
-            anthropic_extra_headers: vec![],
-            streaming_client: None,
-            model: "claude-opus-4-6".to_string(),
-            max_iterations: 1,
-            thinking_budget: None,
-            tool_context: Arc::new(crate::tools::ToolContext {
-                proxy_url: "http://unused".to_string(),
-            }),
-            memory_owner: None,
-            memory_repo: None,
-            memory_path: None,
-            mcp_tool_defs: vec![],
-            mcp_dispatch: vec![],
-            permission_checker: None,
-            elicitation_provider: None,
-        };
         let result = agent
             .run_chat_streaming(vec![Message::user_text("hello")], &[], None, tx, None)
             .await;
         assert!(result.is_err());
-        let mut events = vec![];
-        while let Ok(ev) = rx.try_recv() {
-            events.push(ev);
-        }
+        let events: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
         assert!(
             events
                 .iter()
