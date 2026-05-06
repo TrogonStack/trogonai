@@ -943,6 +943,7 @@ mod tests {
 
     #[test]
     fn expand_tilde_replaces_home() {
+        let _guard = HOME_LOCK.lock().unwrap();
         let old = std::env::var("HOME").ok();
         std::env::set_var("HOME", "/tmp/fakehome");
         let result = expand_tilde("~/.config/trogon/config.json");
