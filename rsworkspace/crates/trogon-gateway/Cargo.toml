@@ -11,7 +11,7 @@ name = "trogon-gateway"
 path = "src/main.rs"
 
 [dependencies]
-acp-telemetry = { workspace = true }
+trogon-telemetry = { workspace = true }
 async-nats = { workspace = true, features = ["jetstream"] }
 axum = { workspace = true }
 clap = { workspace = true }
