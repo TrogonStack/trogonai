@@ -12,9 +12,7 @@ pub mod testing;
 
 pub use codec::{CanonicalEventCodec, EventCodec, EventIdentity, EventType, JsonEventCodec};
 pub use decision::{Act, Decide, Decision, NonEmpty};
-pub use event::{
-    CodecError, EncodeEventError, EventData, EventDataEncodeError, EventDataWithMetadataError, RecordedEvent,
-};
+pub use event::{EncodeEventError, EventData, EventDataEncodeError, RecordedEvent};
 pub use event_id::EventId;
 pub use execution::{
     BoxTask, CommandExecution, CommandFailure, CommandResult, CommandSnapshotPolicy, ExecutionResult,

@@ -2,7 +2,7 @@ mod codec_error;
 mod data;
 mod recorded;
 
-pub use codec_error::{CodecError, EncodeEventError, EventDataEncodeError, EventDataWithMetadataError};
+pub use codec_error::{EncodeEventError, EventDataEncodeError};
 pub use data::EventData;
 pub use recorded::RecordedEvent;
 
@@ -58,14 +58,11 @@ mod tests {
 
     #[test]
     fn event_data_uses_event_traits() {
-        let event = EventData::new(
-            "alpha",
-            TestEvent {
-                id: "alpha".to_string(),
-                value: "beta".to_string(),
-            },
-        )
-        .unwrap();
+        let payload = TestEvent {
+            id: "alpha".to_string(),
+            value: "beta".to_string(),
+        };
+        let event = EventData::from_event("alpha", &JsonEventCodec, &payload).unwrap();
 
         assert_eq!(event.stream_id(), "alpha");
         assert_eq!(event.event_id.as_uuid().get_version_num(), 7);
@@ -75,51 +72,15 @@ mod tests {
     }
 
     #[test]
-    fn event_data_accepts_caller_supplied_uuid_event_id() {
-        let event_id = EventId::from(Uuid::from_u128(0x018f_8f4d_94a8_7000_8000_0000_0000_0001));
-        let event = EventData::new_with_event_id(
-            "alpha",
-            event_id,
-            TestEvent {
-                id: "alpha".to_string(),
-                value: "beta".to_string(),
-            },
-        )
-        .unwrap();
-
-        assert_eq!(event.event_id, event_id);
-    }
-
-    #[test]
     fn event_data_accepts_event_supplied_event_id() {
-        let event_id = EventId::from(Uuid::from_u128(0x018f_8f4d_94a8_7000_8000_0000_0000_0002));
-        let event = EventData::new(
-            "alpha",
-            IdentifiedEvent {
-                id: event_id,
-                value: "beta".to_string(),
-            },
-        )
-        .unwrap();
+        let event_id = EventId::from(Uuid::from_u128(0x018f_8f4d_94a8_7000_8000_0000_0000_0001));
+        let payload = IdentifiedEvent {
+            id: event_id,
+            value: "beta".to_string(),
+        };
+        let event = EventData::from_event("alpha", &JsonEventCodec, &payload).unwrap();
 
         assert_eq!(event.event_id, event_id);
-    }
-
-    #[test]
-    fn caller_supplied_event_id_wins_over_event_identity() {
-        let event_id = EventId::from(Uuid::from_u128(0x018f_8f4d_94a8_7000_8000_0000_0000_0003));
-        let explicit_event_id = EventId::from(Uuid::from_u128(0x018f_8f4d_94a8_7000_8000_0000_0000_0004));
-        let event = EventData::new_with_event_id(
-            "alpha",
-            explicit_event_id,
-            IdentifiedEvent {
-                id: event_id,
-                value: "beta".to_string(),
-            },
-        )
-        .unwrap();
-
-        assert_eq!(event.event_id, explicit_event_id);
     }
 
     #[test]
@@ -129,14 +90,11 @@ mod tests {
 
     #[test]
     fn recorded_event_preserves_store_context() {
-        let event = EventData::new(
-            "alpha",
-            TestEvent {
-                id: "alpha".to_string(),
-                value: "beta".to_string(),
-            },
-        )
-        .unwrap();
+        let payload = TestEvent {
+            id: "alpha".to_string(),
+            value: "beta".to_string(),
+        };
+        let event = EventData::from_event("alpha", &JsonEventCodec, &payload).unwrap();
 
         let recorded = event.record(
             "stream-alpha",
@@ -154,14 +112,11 @@ mod tests {
 
     #[test]
     fn event_data_and_recorded_event_decode_payloads() {
-        let event = EventData::new(
-            "alpha",
-            TestEvent {
-                id: "alpha".to_string(),
-                value: "beta".to_string(),
-            },
-        )
-        .unwrap();
+        let payload = TestEvent {
+            id: "alpha".to_string(),
+            value: "beta".to_string(),
+        };
+        let event = EventData::from_event("alpha", &JsonEventCodec, &payload).unwrap();
         assert_eq!(event.decode_data::<TestEvent>().unwrap().id, "alpha");
 
         let recorded = event.record(
@@ -175,7 +130,6 @@ mod tests {
 
     #[test]
     fn event_data_and_recorded_event_round_trip_metadata() {
-        let event_id = EventId::from(Uuid::from_u128(0x018f_8f4d_94a8_7000_8000_0000_0000_0005));
         let event = TestEvent {
             id: "alpha".to_string(),
             value: "beta".to_string(),
@@ -184,53 +138,28 @@ mod tests {
             trace_id: "trace-1".to_string(),
         };
 
-        let generated = EventData::with_metadata("alpha", event.clone(), Some(metadata.clone())).unwrap();
+        let generated = EventData::from_event("alpha", &JsonEventCodec, &event)
+            .unwrap()
+            .with_metadata(&JsonEventCodec, Some(&metadata))
+            .unwrap();
         assert_eq!(generated.decode_data::<TestEvent>().unwrap(), event);
         assert_eq!(
             generated.decode_metadata::<TestMetadata>().unwrap(),
             Some(metadata.clone())
         );
 
-        let with_codecs = EventData::with_codecs(
-            "alpha",
-            &JsonEventCodec,
-            &JsonEventCodec,
-            event.clone(),
-            Some(metadata.clone()),
-        )
-        .unwrap();
-        assert_eq!(
-            with_codecs.decode_data_with::<TestEvent, _>(&JsonEventCodec).unwrap(),
-            event
-        );
-        assert_eq!(
-            with_codecs
-                .decode_metadata_with::<TestMetadata, _>(&JsonEventCodec)
-                .unwrap(),
-            Some(metadata.clone())
-        );
-
-        let explicit =
-            EventData::with_metadata_and_event_id("alpha", event_id, event.clone(), Some(metadata.clone())).unwrap();
-        assert_eq!(explicit.event_id, event_id);
-
-        let no_metadata = EventData::with_codecs_and_event_id(
-            "alpha",
-            &JsonEventCodec,
-            &JsonEventCodec,
-            event_id,
-            event.clone(),
-            None::<TestMetadata>,
-        )
-        .unwrap();
+        let no_metadata = EventData::from_event("alpha", &JsonEventCodec, &event)
+            .unwrap()
+            .with_metadata::<TestMetadata, _>(&JsonEventCodec, None)
+            .unwrap();
         assert_eq!(no_metadata.decode_metadata::<TestMetadata>().unwrap(), None);
 
         let recorded = RecordedEvent {
-            event_id: explicit.event_id,
-            event_type: explicit.event_type.clone(),
-            event_stream_id: explicit.stream_id.clone(),
-            payload: explicit.payload.clone(),
-            metadata: explicit.metadata.clone(),
+            event_id: generated.event_id,
+            event_type: generated.event_type.clone(),
+            event_stream_id: generated.stream_id.clone(),
+            payload: generated.payload.clone(),
+            metadata: generated.metadata.clone(),
             recorded_stream_id: "recorded-alpha".to_string(),
             stream_position: Some(7),
             log_position: Some(9),

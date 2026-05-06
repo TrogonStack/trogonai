@@ -635,11 +635,11 @@ where
     E: EventType + EventIdentity,
     C: EventCodec<E>,
 {
-    let first = EventData::new_with_codec_ref(stream_id, codec, events.first())?;
+    let first = EventData::from_event(stream_id, codec, events.first())?;
     let rest = events
         .iter()
         .skip(1)
-        .map(|event| EventData::new_with_codec_ref(stream_id, codec, event))
+        .map(|event| EventData::from_event(stream_id, codec, event))
         .collect::<Result<Vec<_>, _>>()?;
     Ok(NonEmpty::from_first(first, rest))
 }
@@ -657,8 +657,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        CanonicalEventCodec, EventIdentity, EventType, ReadSnapshotResponse, ReadStreamResponse, RecordedEvent,
-        SnapshotSchema, WriteSnapshotResponse,
+        CanonicalEventCodec, EventIdentity, EventType, JsonEventCodec, ReadSnapshotResponse, ReadStreamResponse,
+        RecordedEvent, SnapshotSchema, WriteSnapshotResponse,
     };
 
     #[derive(Debug, Clone)]
@@ -1002,12 +1002,14 @@ mod tests {
             | TestEvent::Removed { id }
             | TestEvent::Broken { id } => id.clone(),
         };
-        EventData::new(stream_id, event).unwrap().record(
-            "stream-alpha",
-            Some(sequence),
-            Some(sequence),
-            DateTime::<Utc>::from_timestamp(1_700_000_000 + sequence as i64, 0).unwrap(),
-        )
+        EventData::from_event(stream_id, &JsonEventCodec, &event)
+            .unwrap()
+            .record(
+                "stream-alpha",
+                Some(sequence),
+                Some(sequence),
+                DateTime::<Utc>::from_timestamp(1_700_000_000 + sequence as i64, 0).unwrap(),
+            )
     }
 
     #[test]
@@ -1215,10 +1217,10 @@ mod tests {
         let runtime = FakeRuntime {
             current_version: Some(1),
             recorded_events: vec![
-                EventData::new_with_codec(
+                EventData::from_event(
                     "alpha",
                     &WrappedJsonCodec,
-                    TestEvent::Registered {
+                    &TestEvent::Registered {
                         id: "alpha".to_string(),
                     },
                 )

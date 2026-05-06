@@ -1,8 +1,8 @@
 use chrono::{DateTime, Utc};
 use serde::{Serialize, de::DeserializeOwned};
-use trogon_std::{NowV7, UuidV7Generator};
+use trogon_std::UuidV7Generator;
 
-use super::{CodecError, EncodeEventError, EventDataEncodeError, EventDataWithMetadataError, RecordedEvent};
+use super::{EncodeEventError, EventDataEncodeError, RecordedEvent};
 use crate::{EventCodec, EventId, EventIdentity, EventType, JsonEventCodec};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -15,26 +15,7 @@ pub struct EventData {
 }
 
 impl EventData {
-    pub fn new<E>(stream_id: impl AsRef<str>, event: E) -> Result<Self, EventDataEncodeError<E, JsonEventCodec>>
-    where
-        E: EventType + EventIdentity + Serialize + DeserializeOwned,
-    {
-        Self::new_with_codec_and_generator(stream_id, &JsonEventCodec, &UuidV7Generator, event)
-    }
-
-    pub fn new_with_codec<E, C>(
-        stream_id: impl AsRef<str>,
-        codec: &C,
-        event: E,
-    ) -> Result<Self, EventDataEncodeError<E, C>>
-    where
-        E: EventType + EventIdentity,
-        C: EventCodec<E>,
-    {
-        Self::new_with_codec_and_generator(stream_id, codec, &UuidV7Generator, event)
-    }
-
-    pub fn new_with_codec_ref<E, C>(
+    pub fn from_event<E, C>(
         stream_id: impl AsRef<str>,
         codec: &C,
         event: &E,
@@ -53,153 +34,12 @@ impl EventData {
         })
     }
 
-    pub fn new_with_event_id<E>(
-        stream_id: impl AsRef<str>,
-        event_id: impl Into<EventId>,
-        event: E,
-    ) -> Result<Self, EventDataEncodeError<E, JsonEventCodec>>
+    pub fn with_metadata<M, C>(mut self, codec: &C, metadata: Option<&M>) -> Result<Self, C::Error>
     where
-        E: EventType + Serialize + DeserializeOwned,
+        C: EventCodec<M>,
     {
-        Self::new_with_codec_and_event_id(stream_id, &JsonEventCodec, event_id, event)
-    }
-
-    pub fn new_with_codec_and_event_id<E, C>(
-        stream_id: impl AsRef<str>,
-        codec: &C,
-        event_id: impl Into<EventId>,
-        event: E,
-    ) -> Result<Self, EventDataEncodeError<E, C>>
-    where
-        E: EventType,
-        C: EventCodec<E>,
-    {
-        Ok(Self {
-            event_id: event_id.into(),
-            event_type: event.event_type().map_err(EncodeEventError::EventType)?.to_string(),
-            stream_id: stream_id.as_ref().to_string(),
-            payload: codec.encode(&event).map_err(EncodeEventError::EventCodec)?,
-            metadata: None,
-        })
-    }
-
-    pub fn new_with_codec_and_generator<E, C, N>(
-        stream_id: impl AsRef<str>,
-        codec: &C,
-        now_v7: &N,
-        event: E,
-    ) -> Result<Self, EventDataEncodeError<E, C>>
-    where
-        E: EventType + EventIdentity,
-        C: EventCodec<E>,
-        N: NowV7,
-    {
-        let event_id = event.event_id().unwrap_or_else(|| EventId::now_v7(now_v7));
-        Self::new_with_codec_and_event_id(stream_id, codec, event_id, event)
-    }
-
-    pub fn with_metadata<E, M>(
-        stream_id: impl AsRef<str>,
-        event: E,
-        metadata: Option<M>,
-    ) -> Result<Self, EventDataWithMetadataError<E, M, JsonEventCodec, JsonEventCodec>>
-    where
-        E: EventType + EventIdentity + Serialize + DeserializeOwned,
-        M: Serialize + DeserializeOwned,
-    {
-        Self::with_codecs_and_generator(
-            stream_id,
-            &JsonEventCodec,
-            &JsonEventCodec,
-            &UuidV7Generator,
-            event,
-            metadata,
-        )
-    }
-
-    pub fn with_codecs<E, M, EC, MC>(
-        stream_id: impl AsRef<str>,
-        event_codec: &EC,
-        metadata_codec: &MC,
-        event: E,
-        metadata: Option<M>,
-    ) -> Result<Self, EventDataWithMetadataError<E, M, EC, MC>>
-    where
-        E: EventType + EventIdentity,
-        EC: EventCodec<E>,
-        MC: EventCodec<M>,
-    {
-        Self::with_codecs_and_generator(
-            stream_id,
-            event_codec,
-            metadata_codec,
-            &UuidV7Generator,
-            event,
-            metadata,
-        )
-    }
-
-    pub fn with_metadata_and_event_id<E, M>(
-        stream_id: impl AsRef<str>,
-        event_id: impl Into<EventId>,
-        event: E,
-        metadata: Option<M>,
-    ) -> Result<Self, EventDataWithMetadataError<E, M, JsonEventCodec, JsonEventCodec>>
-    where
-        E: EventType + Serialize + DeserializeOwned,
-        M: Serialize + DeserializeOwned,
-    {
-        Self::with_codecs_and_event_id(stream_id, &JsonEventCodec, &JsonEventCodec, event_id, event, metadata)
-    }
-
-    pub fn with_codecs_and_event_id<E, M, EC, MC>(
-        stream_id: impl AsRef<str>,
-        event_codec: &EC,
-        metadata_codec: &MC,
-        event_id: impl Into<EventId>,
-        event: E,
-        metadata: Option<M>,
-    ) -> Result<Self, EventDataWithMetadataError<E, M, EC, MC>>
-    where
-        E: EventType,
-        EC: EventCodec<E>,
-        MC: EventCodec<M>,
-    {
-        Ok(Self {
-            event_id: event_id.into(),
-            event_type: event
-                .event_type()
-                .map_err(EncodeEventError::EventType)
-                .map_err(CodecError::Data)?
-                .to_string(),
-            stream_id: stream_id.as_ref().to_string(),
-            payload: event_codec
-                .encode(&event)
-                .map_err(EncodeEventError::EventCodec)
-                .map_err(CodecError::Data)?,
-            metadata: metadata
-                .map(|value| metadata_codec.encode(&value))
-                .transpose()
-                .map_err(CodecError::Metadata)?,
-        })
-    }
-
-    pub fn with_codecs_and_generator<E, M, EC, MC, N>(
-        stream_id: impl AsRef<str>,
-        event_codec: &EC,
-        metadata_codec: &MC,
-        now_v7: &N,
-        event: E,
-        metadata: Option<M>,
-    ) -> Result<Self, EventDataWithMetadataError<E, M, EC, MC>>
-    where
-        E: EventType + EventIdentity,
-        EC: EventCodec<E>,
-        MC: EventCodec<M>,
-        N: NowV7,
-    {
-        let event_id = event.event_id().unwrap_or_else(|| EventId::now_v7(now_v7));
-        Self::with_codecs_and_event_id(stream_id, event_codec, metadata_codec, event_id, event, metadata)
+        self.metadata = metadata.map(|value| codec.encode(value)).transpose()?;
+        Ok(self)
     }
 
     pub fn record(

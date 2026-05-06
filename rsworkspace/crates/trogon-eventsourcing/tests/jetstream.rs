@@ -68,6 +68,27 @@ impl EventType for TestEvent {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct IdentifiedTestEvent {
+    #[serde(skip)]
+    event_id: Option<EventId>,
+    value: String,
+}
+
+impl EventIdentity for IdentifiedTestEvent {
+    fn event_id(&self) -> Option<EventId> {
+        self.event_id
+    }
+}
+
+impl EventType for IdentifiedTestEvent {
+    type Error = Infallible;
+
+    fn event_type(&self) -> Result<&'static str, Self::Error> {
+        Ok("test.event")
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct TestSnapshot {
     value: String,
 }
@@ -86,6 +107,27 @@ impl EventIdentity for CounterIncreased {}
 
 impl EventType for CounterIncreased {
     type Error = std::convert::Infallible;
+
+    fn event_type(&self) -> Result<&'static str, Self::Error> {
+        Ok("test.counter_increased")
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct IdentifiedCounterIncreased {
+    #[serde(skip)]
+    event_id: Option<EventId>,
+    amount: u64,
+}
+
+impl EventIdentity for IdentifiedCounterIncreased {
+    fn event_id(&self) -> Option<EventId> {
+        self.event_id
+    }
+}
+
+impl EventType for IdentifiedCounterIncreased {
+    type Error = Infallible;
 
     fn event_type(&self) -> Result<&'static str, Self::Error> {
         Ok("test.counter_increased")
@@ -216,20 +258,17 @@ fn nats_test_url() -> String {
 }
 
 fn test_event(stream_id: &str, value: impl Into<String>) -> Result<EventData, JetStreamStoreError<std::io::Error>> {
-    EventData::new_with_event_id(
-        stream_id,
-        EventId::from(Uuid::new_v4()),
-        TestEvent { value: value.into() },
-    )
-    .map_err(|source| JetStreamStoreError::Codec(std::io::Error::other(source)))
+    let event = TestEvent { value: value.into() };
+    EventData::from_event(stream_id, &JsonEventCodec, &event)
+        .map_err(|source| JetStreamStoreError::Codec(std::io::Error::other(source)))
 }
 
 fn test_event_with_id(stream_id: &str, event_id: Uuid, value: impl Into<String>) -> TestResult<EventData> {
-    Ok(EventData::new_with_event_id(
-        stream_id,
-        EventId::from(event_id),
-        TestEvent { value: value.into() },
-    )?)
+    let event = IdentifiedTestEvent {
+        event_id: Some(EventId::from(event_id)),
+        value: value.into(),
+    };
+    Ok(EventData::from_event(stream_id, &JsonEventCodec, &event)?)
 }
 
 fn event_batch(events: Vec<EventData>) -> TestResult<NonEmpty<EventData>> {
@@ -931,16 +970,14 @@ async fn jetstream_store_rejects_unsupported_append_batches() -> TestResult {
         .await;
     assert_append_publish_error(mixed_streams)?;
 
-    let metadata_event = EventData::with_metadata_and_event_id(
-        "alpha",
-        EventId::from(Uuid::new_v4()),
-        TestEvent {
-            value: "metadata".to_string(),
-        },
-        Some(TestSnapshot {
-            value: "metadata".to_string(),
-        }),
-    )?;
+    let metadata_payload = TestEvent {
+        value: "metadata".to_string(),
+    };
+    let metadata = TestSnapshot {
+        value: "metadata".to_string(),
+    };
+    let metadata_event = EventData::from_event("alpha", &JsonEventCodec, &metadata_payload)?
+        .with_metadata(&JsonEventCodec, Some(&metadata))?;
     let metadata_result = fixture
         .store
         .append_stream(AppendStreamRequest::new(
@@ -1210,11 +1247,13 @@ async fn jetstream_command_execution_snapshot_skips_earlier_corrupt_same_subject
         )
         .await?
         .await?;
-    let seed = EventData::new_with_event_id(
-        "counter",
-        EventId::from(Uuid::from_u128(0x018f_8f4d_94a8_7000_8000_0000_0000_0502)),
-        CounterIncreased { amount: 5 },
-    )?;
+    let seed_payload = IdentifiedCounterIncreased {
+        event_id: Some(EventId::from(Uuid::from_u128(
+            0x018f_8f4d_94a8_7000_8000_0000_0000_0502,
+        ))),
+        amount: 5,
+    };
+    let seed = EventData::from_event("counter", &JsonEventCodec, &seed_payload)?;
     let seed_outcome = fixture
         .store
         .append_stream(AppendStreamRequest::new(
@@ -1625,14 +1664,12 @@ async fn jetstream_store_any_rejects_concurrent_duplicate_event_ids_without_adva
     let results = join_all((0..attempts).map(|index| {
         let store = fixture.store.clone();
         async move {
-            let event = EventData::new_with_event_id(
-                "alpha",
-                EventId::from(event_id),
-                TestEvent {
-                    value: format!("attempt-{index}"),
-                },
-            )
-            .map_err(|source| JetStreamStoreError::Codec(std::io::Error::other(source)))?;
+            let payload = IdentifiedTestEvent {
+                event_id: Some(EventId::from(event_id)),
+                value: format!("attempt-{index}"),
+            };
+            let event = EventData::from_event("alpha", &JsonEventCodec, &payload)
+                .map_err(|source| JetStreamStoreError::Codec(std::io::Error::other(source)))?;
             store
                 .append_stream(AppendStreamRequest::new(
                     "alpha",
