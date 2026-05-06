@@ -35,7 +35,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             &config,
             stdout,
             stdin,
-            acp_telemetry::signal::shutdown_signal(),
+            trogon_std::signal::shutdown_signal(),
         ))
         .await;
 

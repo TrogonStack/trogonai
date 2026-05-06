@@ -38,6 +38,8 @@ pub mod fs;
 pub mod http;
 pub mod json;
 pub mod secret_string;
+#[cfg(feature = "signal")]
+pub mod signal;
 #[cfg(feature = "telemetry-http")]
 pub mod telemetry;
 pub mod time;
