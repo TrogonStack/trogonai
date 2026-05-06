@@ -1,4 +1,6 @@
+mod allowed_host;
 mod config;
+mod mcp_http_path;
 
 #[cfg(not(coverage))]
 mod runtime {
@@ -23,6 +25,7 @@ mod runtime {
     use trogon_std::runtime::{init_logging, shutdown_signal};
     use uuid::Uuid;
 
+    use crate::allowed_host::AllowedHost;
     use crate::config;
 
     type BoxError = Box<dyn Error + Send + Sync>;
@@ -63,12 +66,17 @@ mod runtime {
         Ok(())
     }
 
-    fn streamable_http_config(allowed_hosts: Vec<String>) -> StreamableHttpServerConfig {
+    fn streamable_http_config(allowed_hosts: Vec<AllowedHost>) -> StreamableHttpServerConfig {
         let config = StreamableHttpServerConfig::default();
         if allowed_hosts.is_empty() {
             config
         } else {
-            config.with_allowed_hosts(allowed_hosts)
+            config.with_allowed_hosts(
+                allowed_hosts
+                    .iter()
+                    .map(|allowed_host| allowed_host.as_str().to_string())
+                    .collect::<Vec<_>>(),
+            )
         }
     }
 
@@ -484,7 +492,7 @@ mod runtime {
                 StreamableHttpServerConfig::default().allowed_hosts
             );
             assert_eq!(
-                streamable_http_config(vec!["example.com".to_string()]).allowed_hosts,
+                streamable_http_config(vec![AllowedHost::new("example.com").unwrap()]).allowed_hosts,
                 vec!["example.com"]
             );
         }

@@ -23,12 +23,14 @@ graph LR
 ## Quick Start
 
 ```bash
-docker run -p 4222:4222 nats:latest
+docker run -d --name nats -p 4222:4222 nats:latest
 
 cargo build --release -p mcp-nats-stdio
 
 ./target/release/mcp-nats-stdio --server-id filesystem
 ```
+
+Remove the local NATS container with `docker rm -f nats` when done.
 
 ## Configuration
 
