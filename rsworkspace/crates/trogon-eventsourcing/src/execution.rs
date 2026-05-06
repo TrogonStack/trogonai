@@ -657,8 +657,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        CanonicalEventCodec, EventIdentity, EventType, JsonEventCodec, ReadSnapshotResponse, ReadStreamResponse,
-        RecordedEvent, SnapshotSchema, WriteSnapshotResponse,
+        CanonicalEventCodec, EventIdentity, EventType, ReadSnapshotResponse, ReadStreamResponse, RecordedEvent,
+        SnapshotSchema, WriteSnapshotResponse,
     };
 
     #[derive(Debug, Clone)]
@@ -887,11 +887,26 @@ mod tests {
         }
     }
 
+    #[derive(Debug, Clone, Copy, Default)]
+    struct TestEventCodec;
+
+    impl EventCodec<TestEvent> for TestEventCodec {
+        type Error = serde_json::Error;
+
+        fn encode(&self, value: &TestEvent) -> Result<Vec<u8>, Self::Error> {
+            serde_json::to_vec(value)
+        }
+
+        fn decode(&self, _event_type: &str, _stream_id: &str, payload: &[u8]) -> Result<TestEvent, Self::Error> {
+            serde_json::from_slice(payload)
+        }
+    }
+
     impl CanonicalEventCodec for TestEvent {
-        type Codec = crate::JsonEventCodec;
+        type Codec = TestEventCodec;
 
         fn canonical_codec() -> Self::Codec {
-            crate::JsonEventCodec
+            TestEventCodec
         }
     }
 
@@ -1002,7 +1017,7 @@ mod tests {
             | TestEvent::Removed { id }
             | TestEvent::Broken { id } => id.clone(),
         };
-        EventData::from_event(stream_id, &JsonEventCodec, &event)
+        EventData::from_event(stream_id, &TestEventCodec, &event)
             .unwrap()
             .record(
                 "stream-alpha",

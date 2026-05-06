@@ -10,7 +10,7 @@ pub mod snapshot;
 mod stream;
 pub mod testing;
 
-pub use codec::{CanonicalEventCodec, EventCodec, EventIdentity, EventType, JsonEventCodec};
+pub use codec::{CanonicalEventCodec, EventCodec, EventIdentity, EventType};
 pub use decision::{Act, Decide, Decision, NonEmpty};
 pub use event::{EncodeEventError, EventData, EventDataEncodeError, RecordedEvent};
 pub use event_id::EventId;

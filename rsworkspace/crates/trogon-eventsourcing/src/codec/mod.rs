@@ -1,9 +1,5 @@
 use crate::EventId;
 
-mod json_event_codec;
-
-pub use json_event_codec::JsonEventCodec;
-
 pub trait EventCodec<T> {
     type Error;
 

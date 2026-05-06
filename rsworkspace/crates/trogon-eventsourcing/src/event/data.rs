@@ -1,9 +1,8 @@
 use chrono::{DateTime, Utc};
-use serde::{Serialize, de::DeserializeOwned};
 use trogon_std::UuidV7Generator;
 
 use super::{EncodeEventError, EventDataEncodeError, RecordedEvent};
-use crate::{EventCodec, EventId, EventIdentity, EventType, JsonEventCodec};
+use crate::{EventCodec, EventId, EventIdentity, EventType};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct EventData {
@@ -70,25 +69,11 @@ impl EventData {
         format!("{prefix}{}", self.stream_id())
     }
 
-    pub fn decode_data<E>(&self) -> serde_json::Result<E>
-    where
-        E: Serialize + DeserializeOwned,
-    {
-        self.decode_data_with(&JsonEventCodec)
-    }
-
     pub fn decode_data_with<E, C>(&self, codec: &C) -> Result<E, C::Error>
     where
         C: EventCodec<E>,
     {
         codec.decode(&self.event_type, &self.stream_id, &self.payload)
-    }
-
-    pub fn decode_metadata<M>(&self) -> serde_json::Result<Option<M>>
-    where
-        M: Serialize + DeserializeOwned,
-    {
-        self.decode_metadata_with(&JsonEventCodec)
     }
 
     pub fn decode_metadata_with<M, C>(&self, codec: &C) -> Result<Option<M>, C::Error>
