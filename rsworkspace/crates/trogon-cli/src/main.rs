@@ -1,10 +1,7 @@
-mod print;
-mod repl;
-mod session;
-
 use clap::Parser;
 use std::process::{Child, Command};
 use std::time::{Duration, Instant};
+use trogon_cli::{session::TrogonSession, OutputFormat, RealFs};
 
 #[derive(Parser)]
 #[command(name = "trogon", about = "Trogon AI CLI")]
@@ -50,18 +47,15 @@ async fn main() -> anyhow::Result<()> {
             eprintln!("error: prompt is empty — pass a string or pipe text to stdin");
             std::process::exit(1);
         }
-        let format = if args.output_format == "json" {
-            print::OutputFormat::Json
-        } else {
-            print::OutputFormat::Text
-        };
-        let result = print::run(nats, &args.prefix, cwd, &prompt, format).await;
+        let format = if args.output_format == "json" { OutputFormat::Json } else { OutputFormat::Text };
+        let session = TrogonSession::new(nats, &args.prefix, cwd).await?;
+        let result = trogon_cli::print::run(session, &prompt, format).await;
         if let Err(e) = result {
             eprintln!("error: {e}");
             std::process::exit(1);
         }
     } else {
-        repl::run(nats, &args.prefix, cwd).await?;
+        trogon_cli::repl::run(nats, &args.prefix, cwd, RealFs).await?;
     }
 
     Ok(())
@@ -74,7 +68,6 @@ async fn connect_or_start_nats(url: &str) -> anyhow::Result<(async_nats::Client,
         return Ok((client, None));
     }
 
-    // Try to launch nats-server
     let child = match Command::new("nats-server").args(["-p", "4222"]).spawn() {
         Ok(c) => c,
         Err(_) => {
@@ -88,7 +81,9 @@ async fn connect_or_start_nats(url: &str) -> anyhow::Result<(async_nats::Client,
     let deadline = Instant::now() + Duration::from_secs(3);
     loop {
         if Instant::now() >= deadline {
-            return Err(anyhow::anyhow!("nats-server started but not accepting connections after 3s"));
+            return Err(anyhow::anyhow!(
+                "nats-server started but not accepting connections after 3s"
+            ));
         }
         tokio::time::sleep(Duration::from_millis(200)).await;
         if let Ok(client) = async_nats::connect(url).await {
@@ -96,4 +91,3 @@ async fn connect_or_start_nats(url: &str) -> anyhow::Result<(async_nats::Client,
         }
     }
 }
-

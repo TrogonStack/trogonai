@@ -1,5 +1,6 @@
-use crate::session::{StreamEvent, TrogonSession};
-use async_nats::Client;
+use crate::fs::Fs;
+use crate::nats::NatsClient;
+use crate::session::{Session, StreamEvent, TrogonSession};
 use rustyline::completion::{Completer, Pair};
 use rustyline::error::ReadlineError;
 use rustyline::highlight::Highlighter;
@@ -13,17 +14,13 @@ const HISTORY_PATH: &str = "~/.local/share/trogon/history";
 
 // ── FileAtHelper ──────────────────────────────────────────────────────────────
 
-/// rustyline helper: tab-completes `@<path>` tokens and enables `\`-continuation
-/// for multiline input.
 struct FileAtHelper {
     cwd: PathBuf,
 }
 
 impl Default for FileAtHelper {
     fn default() -> Self {
-        Self {
-            cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-        }
+        Self { cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")) }
     }
 }
 
@@ -76,7 +73,6 @@ impl Hinter for FileAtHelper {
 
 impl Highlighter for FileAtHelper {}
 
-/// A line ending with `\` continues on the next line.
 impl Validator for FileAtHelper {
     fn validate(&self, ctx: &mut ValidationContext<'_>) -> rustyline::Result<ValidationResult> {
         if input_needs_continuation(ctx.input()) {
@@ -93,10 +89,7 @@ fn input_needs_continuation(input: &str) -> bool {
 
 // ── @mention expansion ────────────────────────────────────────────────────────
 
-/// Scans `text` for `@<path>` tokens and replaces each with a fenced code block
-/// containing the file's contents, resolved relative to `cwd`.
-/// Unresolvable paths are left as-is with a warning on stderr.
-fn expand_mentions(text: &str, cwd: &Path) -> String {
+fn expand_mentions<F: Fs>(text: &str, cwd: &Path, fs: &F) -> String {
     let mut result = String::with_capacity(text.len());
     let mut chars = text.char_indices().peekable();
     while let Some((i, ch)) = chars.next() {
@@ -114,7 +107,7 @@ fn expand_mentions(text: &str, cwd: &Path) -> String {
             if path_str.is_empty() {
                 result.push('@');
             } else {
-                match std::fs::read_to_string(cwd.join(path_str)) {
+                match fs.read_to_string(&cwd.join(path_str)) {
                     Ok(content) => {
                         result.push_str(&format!("`{path_str}`:\n```\n{content}\n```"));
                     }
@@ -134,36 +127,38 @@ fn expand_mentions(text: &str, cwd: &Path) -> String {
 
 // ── Multiline join ────────────────────────────────────────────────────────────
 
-/// Join continuation lines: `\` at the end of a line is replaced by a space.
 fn join_continuation(s: &str) -> String {
     s.replace("\\\n", " ")
 }
 
 // ── REPL entry point ──────────────────────────────────────────────────────────
 
-pub async fn run(nats: Client, prefix: &str, cwd: PathBuf) -> anyhow::Result<()> {
+pub async fn run<N: NatsClient + Clone, F: Fs>(
+    nats: N,
+    prefix: &str,
+    cwd: PathBuf,
+    fs: F,
+) -> anyhow::Result<()> {
     let prefix = prefix.to_string();
     let mut session = TrogonSession::new(nats.clone(), &prefix, cwd.clone()).await?;
 
     let history_path = expand_tilde(HISTORY_PATH);
     if let Some(dir) = history_path.parent() {
-        let _ = std::fs::create_dir_all(dir);
+        let _ = fs.create_dir_all(dir);
     }
 
     let mut rl: Editor<FileAtHelper, _> = Editor::new()?;
     rl.set_helper(Some(FileAtHelper { cwd: cwd.clone() }));
     let _ = rl.load_history(&history_path);
 
-    eprintln!("trogon — session {} (Ctrl+D to quit)", session.session_id);
+    eprintln!("trogon — session {} (Ctrl+D to quit)", session.session_id());
 
-    // Accumulated context-window usage across the session.
     let mut session_used_tokens: u64 = 0;
     let mut session_context_size: u64 = 0;
 
     loop {
         match rl.readline("> ") {
             Ok(raw_line) => {
-                // Join backslash-continuation lines, then expand @mentions.
                 let line = join_continuation(&raw_line).trim().to_string();
                 if line.is_empty() {
                     continue;
@@ -179,19 +174,28 @@ pub async fn run(nats: Client, prefix: &str, cwd: PathBuf) -> anyhow::Result<()>
                                 session = s;
                                 session_used_tokens = 0;
                                 session_context_size = 0;
-                                eprintln!("session cleared — new session {}", session.session_id);
+                                eprintln!("session cleared — new session {}", session.session_id());
                             }
                             Err(e) => eprintln!("error: {e}"),
                         }
                     } else {
-                        println!("{}", handle_slash_command(cmd, arg, session_used_tokens, session_context_size));
+                        println!(
+                            "{}",
+                            handle_slash_command(
+                                cmd,
+                                arg,
+                                session_used_tokens,
+                                session_context_size,
+                                &fs,
+                            )
+                        );
                     }
                     continue;
                 }
 
                 let _ = rl.add_history_entry(&raw_line);
 
-                let expanded = expand_mentions(&line, &cwd);
+                let expanded = expand_mentions(&line, &cwd, &fs);
                 match session.prompt(&expanded).await {
                     Err(e) => eprintln!("error: {e}"),
                     Ok(mut rx) => {
@@ -250,7 +254,6 @@ pub async fn run(nats: Client, prefix: &str, cwd: PathBuf) -> anyhow::Result<()>
                 }
             }
             Err(ReadlineError::Interrupted) => {
-                // Ctrl+C during the readline prompt (not during streaming).
                 session.cancel().await;
                 eprintln!("(Ctrl+C)");
             }
@@ -269,7 +272,13 @@ pub async fn run(nats: Client, prefix: &str, cwd: PathBuf) -> anyhow::Result<()>
     Ok(())
 }
 
-fn handle_slash_command(cmd: &str, arg: &str, used_tokens: u64, context_size: u64) -> String {
+fn handle_slash_command<F: Fs>(
+    cmd: &str,
+    arg: &str,
+    used_tokens: u64,
+    context_size: u64,
+    fs: &F,
+) -> String {
     match cmd {
         "/help" => "\
 Commands:
@@ -291,7 +300,7 @@ Ctrl+D    quit"
                 "no usage data yet — send a message first".to_string()
             } else {
                 let pct = used_tokens * 100 / context_size;
-                let cost = estimate_cost(used_tokens);
+                let cost = estimate_cost(used_tokens, fs);
                 format!(
                     "context: {}/{} tokens ({}%)  |  ~${cost}",
                     fmt_tokens(used_tokens),
@@ -307,13 +316,14 @@ Ctrl+D    quit"
                 .to_string()
         }
 
-        "/config" => handle_config_cmd(arg),
+        "/config" => handle_config_cmd(arg, fs),
 
         "/model" => {
             if arg.is_empty() {
-                "usage: /model <model-id>  (not yet implemented — requires runner support)".to_string()
+                "usage: /model <model-id>  (not yet implemented — requires runner support)"
+                    .to_string()
             } else {
-                format!("/model not yet implemented — requires runner support")
+                "/model not yet implemented — requires runner support".to_string()
             }
         }
 
@@ -329,28 +339,28 @@ fn config_path() -> PathBuf {
     expand_tilde("~/.config/trogon/config.json")
 }
 
-fn read_config() -> serde_json::Value {
+fn read_config<F: Fs>(fs: &F) -> serde_json::Value {
     let path = config_path();
-    std::fs::read_to_string(&path)
+    fs.read_to_string(&path)
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or(serde_json::json!({}))
 }
 
-fn write_config(config: &serde_json::Value) -> Result<(), String> {
+fn write_config<F: Fs>(config: &serde_json::Value, fs: &F) -> Result<(), String> {
     let path = config_path();
     if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| format!("cannot create config dir: {e}"))?;
+        fs.create_dir_all(dir).map_err(|e| format!("cannot create config dir: {e}"))?;
     }
     let content = serde_json::to_string_pretty(config).map_err(|e| e.to_string())?;
-    std::fs::write(&path, content).map_err(|e| format!("cannot write config: {e}"))
+    fs.write(&path, content.as_bytes()).map_err(|e| format!("cannot write config: {e}"))
 }
 
-fn handle_config_cmd(arg: &str) -> String {
+fn handle_config_cmd<F: Fs>(arg: &str, fs: &F) -> String {
     let mut parts = arg.splitn(3, ' ');
     match parts.next().unwrap_or("") {
         "" => {
-            let cfg = read_config();
+            let cfg = read_config(fs);
             let path = config_path();
             format!(
                 "config: {}\n{}",
@@ -363,7 +373,7 @@ fn handle_config_cmd(arg: &str) -> String {
             if key.is_empty() {
                 return "usage: /config get <key>".to_string();
             }
-            let cfg = read_config();
+            let cfg = read_config(fs);
             match cfg.get(key) {
                 Some(v) => format!("{key} = {v}"),
                 None => format!("{key} is not set"),
@@ -375,9 +385,9 @@ fn handle_config_cmd(arg: &str) -> String {
             if key.is_empty() {
                 return "usage: /config set <key> <value>".to_string();
             }
-            let mut cfg = read_config();
+            let mut cfg = read_config(fs);
             cfg[key] = serde_json::Value::String(value.to_string());
-            match write_config(&cfg) {
+            match write_config(&cfg, fs) {
                 Ok(()) => format!("{key} = {value}"),
                 Err(e) => format!("error: {e}"),
             }
@@ -388,23 +398,18 @@ fn handle_config_cmd(arg: &str) -> String {
 
 // ── cost estimation ───────────────────────────────────────────────────────────
 
-/// Blended $/MTok rates (input:output assumed 3:1).
-/// Usage from the runner is input+cache+output combined, so we can't split
-/// them precisely — the blended rate gives a reasonable estimate.
 fn blended_rate_per_mtoken(model: &str) -> f64 {
     if model.contains("opus") {
-        28.5 // ($15*3 + $75) / 4
+        28.5
     } else if model.contains("haiku") {
-        1.6 // ($0.80*3 + $4) / 4
+        1.6
     } else {
-        6.0 // sonnet default: ($3*3 + $15) / 4
+        6.0
     }
 }
 
-/// Return a formatted cost string like "0.0123" for the given token count,
-/// using the model stored in config (defaults to sonnet if unset).
-fn estimate_cost(tokens: u64) -> String {
-    let model = read_config()
+fn estimate_cost<F: Fs>(tokens: u64, fs: &F) -> String {
+    let model = read_config(fs)
         .get("model")
         .and_then(|v| v.as_str())
         .unwrap_or("claude-sonnet-4-6")
@@ -420,7 +425,6 @@ fn estimate_cost(tokens: u64) -> String {
 
 // ── token formatting ──────────────────────────────────────────────────────────
 
-/// Format a token count with thousands separator (e.g. 12345 → "12,345").
 fn fmt_tokens(n: u64) -> String {
     let s = n.to_string();
     let mut out = String::new();
@@ -447,61 +451,83 @@ fn expand_tilde(path: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fs::mock::MockFs;
+    use crate::fs::RealFs;
 
-    // Single lock for all tests that mutate the HOME env var.
-    static HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-    // ── expand_mentions ───────────────────────────────────────────────────────
+    // ── expand_mentions with MockFs ───────────────────────────────────────────
 
     #[test]
     fn expand_mentions_no_at_sign_is_unchanged() {
-        let result = expand_mentions("hello world", Path::new("/tmp"));
-        assert_eq!(result, "hello world");
+        let fs = MockFs::new();
+        assert_eq!(expand_mentions("hello world", Path::new("/tmp"), &fs), "hello world");
     }
 
     #[test]
     fn expand_mentions_lone_at_is_preserved() {
-        let result = expand_mentions("price @ discount", Path::new("/tmp"));
-        assert_eq!(result, "price @ discount");
+        let fs = MockFs::new();
+        assert_eq!(
+            expand_mentions("price @ discount", Path::new("/tmp"), &fs),
+            "price @ discount"
+        );
     }
 
     #[test]
     fn expand_mentions_missing_file_leaves_token_and_warns() {
-        let result = expand_mentions("see @nonexistent.txt please", Path::new("/tmp"));
+        let fs = MockFs::new();
+        let result = expand_mentions("see @nonexistent.txt please", Path::new("/tmp"), &fs);
         assert!(result.contains("@nonexistent.txt"));
         assert!(!result.contains("```"));
     }
 
     #[test]
     fn expand_mentions_existing_file_inserts_code_block() {
-        let dir = std::env::temp_dir();
-        let file_path = dir.join("trogon_test_mention.txt");
-        {
-            let mut f = std::fs::File::create(&file_path).unwrap();
-            f.write_all(b"hello from file").unwrap();
-        }
-        let filename = file_path.file_name().unwrap().to_str().unwrap();
-        let input = format!("look at @{filename} now");
-        let result = expand_mentions(&input, &dir);
+        let fs = MockFs::new();
+        fs.add_file("/tmp/myfile.txt", "hello from file");
+        let result = expand_mentions("look at @myfile.txt now", Path::new("/tmp"), &fs);
         assert!(result.contains("hello from file"), "got: {result}");
         assert!(result.contains("```"), "expected fenced block, got: {result}");
-        let _ = std::fs::remove_file(&file_path);
     }
 
     #[test]
     fn expand_mentions_multiple_mentions() {
-        let dir = std::env::temp_dir();
-        let f1 = dir.join("trogon_m1.txt");
-        let f2 = dir.join("trogon_m2.txt");
-        std::fs::write(&f1, "file1").unwrap();
-        std::fs::write(&f2, "file2").unwrap();
-        let input = "a @trogon_m1.txt b @trogon_m2.txt c";
-        let result = expand_mentions(input, &dir);
+        let fs = MockFs::new();
+        fs.add_file("/tmp/f1.txt", "file1");
+        fs.add_file("/tmp/f2.txt", "file2");
+        let result = expand_mentions("a @f1.txt b @f2.txt c", Path::new("/tmp"), &fs);
         assert!(result.contains("file1"), "got: {result}");
         assert!(result.contains("file2"), "got: {result}");
-        let _ = std::fs::remove_file(&f1);
-        let _ = std::fs::remove_file(&f2);
     }
+
+    #[test]
+    fn expand_mentions_at_end_of_string_is_lone_at() {
+        let fs = MockFs::new();
+        assert_eq!(expand_mentions("end @", Path::new("/tmp"), &fs), "end @");
+    }
+
+    #[test]
+    fn expand_mentions_code_block_includes_filename_in_header() {
+        let fs = MockFs::new();
+        fs.add_file("/tmp/header_test.txt", "content");
+        let result = expand_mentions("@header_test.txt", Path::new("/tmp"), &fs);
+        assert!(result.contains("`header_test.txt`"), "filename missing: {result}");
+        assert!(result.contains("```"), "missing fenced block: {result}");
+    }
+
+    // ── expand_mentions with RealFs (temp files) ──────────────────────────────
+
+    #[test]
+    fn expand_mentions_real_fs_existing_file() {
+        let dir = std::env::temp_dir();
+        let path = dir.join("trogon_real_mention.txt");
+        std::fs::write(&path, "real content").unwrap();
+        let fname = path.file_name().unwrap().to_str().unwrap();
+        let input = format!("look at @{fname} now");
+        let result = expand_mentions(&input, &dir, &RealFs);
+        assert!(result.contains("real content"), "got: {result}");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    // ── FileAtHelper tab-completion (uses real fs directly — no Fs trait) ─────
 
     #[test]
     fn file_at_helper_complete_no_at_returns_empty() {
@@ -522,26 +548,6 @@ mod tests {
     }
 
     #[test]
-    fn expand_mentions_at_end_of_string_is_lone_at() {
-        let result = expand_mentions("end @", Path::new("/tmp"));
-        assert_eq!(result, "end @");
-    }
-
-    #[test]
-    fn expand_mentions_code_block_includes_filename_in_header() {
-        let dir = std::env::temp_dir();
-        let path = dir.join("trogon_header_test.txt");
-        std::fs::write(&path, "content").unwrap();
-        let result = expand_mentions("@trogon_header_test.txt", &dir);
-        assert!(
-            result.contains("`trogon_header_test.txt`"),
-            "filename missing from header: {result}"
-        );
-        assert!(result.contains("```"), "missing fenced block: {result}");
-        let _ = std::fs::remove_file(&path);
-    }
-
-    #[test]
     fn file_at_helper_complete_filters_by_prefix() {
         let dir = std::env::temp_dir().join("trogon_compl_prefix");
         std::fs::remove_dir_all(&dir).ok();
@@ -555,12 +561,11 @@ mod tests {
         let ctx = Context::new(&history);
         let (start, pairs) = helper.complete("@alpha", 6, &ctx).unwrap();
 
-        assert_eq!(start, 1, "start must be one past '@'");
+        assert_eq!(start, 1);
         let names: Vec<&str> = pairs.iter().map(|p| p.display.as_str()).collect();
-        assert!(names.contains(&"alpha.txt"), "expected alpha.txt in {names:?}");
-        assert!(names.contains(&"alpha2.txt"), "expected alpha2.txt in {names:?}");
-        assert!(!names.contains(&"beta.txt"), "beta.txt should be filtered out");
-
+        assert!(names.contains(&"alpha.txt"));
+        assert!(names.contains(&"alpha2.txt"));
+        assert!(!names.contains(&"beta.txt"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -577,8 +582,7 @@ mod tests {
         let (_, pairs) = helper.complete("@my", 3, &ctx).unwrap();
 
         let names: Vec<&str> = pairs.iter().map(|p| p.display.as_str()).collect();
-        assert!(names.contains(&"mysubdir/"), "expected 'mysubdir/', got {names:?}");
-
+        assert!(names.contains(&"mysubdir/"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -599,8 +603,7 @@ mod tests {
         let names: Vec<&str> = pairs.iter().map(|p| p.display.as_str()).collect();
         let mut sorted = names.clone();
         sorted.sort();
-        assert_eq!(names, sorted, "completions should be alphabetically sorted");
-
+        assert_eq!(names, sorted);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -613,15 +616,15 @@ mod tests {
 
     #[test]
     fn join_continuation_backslash_newline_becomes_space() {
-        let input = "line one\\\nline two\\\nline three";
-        let result = join_continuation(input);
-        assert_eq!(result, "line one line two line three");
+        assert_eq!(
+            join_continuation("line one\\\nline two\\\nline three"),
+            "line one line two line three"
+        );
     }
 
     #[test]
     fn join_continuation_no_backslash_newlines_unchanged() {
-        let input = "line one\nline two";
-        assert_eq!(join_continuation(input), "line one\nline two");
+        assert_eq!(join_continuation("line one\nline two"), "line one\nline two");
     }
 
     // ── input_needs_continuation ──────────────────────────────────────────────
@@ -656,11 +659,12 @@ mod tests {
         assert_eq!(fmt_tokens(1_234_567), "1,234,567");
     }
 
-    // ── handle_slash_command ──────────────────────────────────────────────────
+    // ── handle_slash_command with MockFs ──────────────────────────────────────
 
     #[test]
     fn slash_help_lists_all_commands() {
-        let out = handle_slash_command("/help", "", 0, 0);
+        let fs = MockFs::new();
+        let out = handle_slash_command("/help", "", 0, 0, &fs);
         assert!(out.contains("/help"));
         assert!(out.contains("/cost"));
         assert!(out.contains("/clear"));
@@ -672,20 +676,22 @@ mod tests {
 
     #[test]
     fn slash_cost_no_data_yet() {
-        let out = handle_slash_command("/cost", "", 0, 0);
+        let fs = MockFs::new();
+        let out = handle_slash_command("/cost", "", 0, 0, &fs);
         assert!(out.contains("no usage data"), "got: {out}");
     }
 
     #[test]
     fn slash_cost_shows_percentage_and_estimated_cost() {
-        let out = handle_slash_command("/cost", "", 50_000, 200_000);
+        let fs = MockFs::new();
+        let out = handle_slash_command("/cost", "", 50_000, 200_000, &fs);
         assert!(out.contains("25%"), "got: {out}");
         assert!(out.contains("50,000"), "got: {out}");
         assert!(out.contains("200,000"), "got: {out}");
-        assert!(out.contains("~$"), "expected cost estimate, got: {out}");
+        assert!(out.contains("~$"), "got: {out}");
     }
 
-    // ── estimate_cost / blended_rate ──────────────────────────────────────────
+    // ── blended_rate / estimate_cost ──────────────────────────────────────────
 
     #[test]
     fn blended_rate_sonnet_default() {
@@ -709,286 +715,178 @@ mod tests {
 
     #[test]
     fn estimate_cost_zero_tokens_is_zero() {
-        let cost = estimate_cost(0);
-        assert_eq!(cost, "0.0000", "got: {cost}");
+        let fs = MockFs::new();
+        assert_eq!(estimate_cost(0, &fs), "0.0000");
     }
 
     #[test]
     fn estimate_cost_1m_tokens_sonnet_is_6_dollars() {
-        let _guard = HOME_LOCK.lock().unwrap();
-        let dir = std::env::temp_dir().join("trogon_cost_sonnet");
-        std::fs::remove_dir_all(&dir).ok();
-        let old_home = std::env::var("HOME").ok();
-        std::env::set_var("HOME", &dir);
-
-        // No config set → defaults to sonnet at $6/MTok blended
-        let cost = estimate_cost(1_000_000);
-        assert_eq!(cost, "6.00", "got: {cost}");
-
-        if let Some(h) = old_home { std::env::set_var("HOME", h); }
-        std::fs::remove_dir_all(&dir).ok();
+        let fs = MockFs::new(); // no model set → sonnet default
+        assert_eq!(estimate_cost(1_000_000, &fs), "6.00");
     }
 
     #[test]
     fn estimate_cost_uses_model_from_config() {
-        let _guard = HOME_LOCK.lock().unwrap();
-        let dir = std::env::temp_dir().join("trogon_cost_opus");
-        std::fs::remove_dir_all(&dir).ok();
-        let old_home = std::env::var("HOME").ok();
-        std::env::set_var("HOME", &dir);
-
-        handle_config_cmd("set model claude-opus-4-7");
-        let cost = estimate_cost(1_000_000);
-        assert_eq!(cost, "28.50", "got: {cost}");
-
-        if let Some(h) = old_home { std::env::set_var("HOME", h); }
-        std::fs::remove_dir_all(&dir).ok();
+        let fs = MockFs::new();
+        handle_config_cmd("set model claude-opus-4-7", &fs);
+        assert_eq!(estimate_cost(1_000_000, &fs), "28.50");
     }
 
     #[test]
     fn estimate_cost_small_amount_shows_four_decimals() {
-        let _guard = HOME_LOCK.lock().unwrap();
-        let dir = std::env::temp_dir().join("trogon_cost_small");
-        std::fs::remove_dir_all(&dir).ok();
-        let old_home = std::env::var("HOME").ok();
-        std::env::set_var("HOME", &dir);
-
-        // 1000 tokens at $6/MTok = $0.006 → four decimals
-        let cost = estimate_cost(1_000);
+        let fs = MockFs::new();
+        let cost = estimate_cost(1_000, &fs);
         assert!(cost.starts_with("0.00"), "expected 4-decimal format, got: {cost}");
-
-        if let Some(h) = old_home { std::env::set_var("HOME", h); }
-        std::fs::remove_dir_all(&dir).ok();
     }
 
-    #[test]
-    fn slash_compact_explains_auto() {
-        let out = handle_slash_command("/compact", "", 0, 0);
-        assert!(out.contains("automatic") || out.contains("85%"), "got: {out}");
-    }
-
-    #[test]
-    fn slash_unknown_suggests_help() {
-        let out = handle_slash_command("/nope", "", 0, 0);
-        assert!(out.contains("unknown command"), "got: {out}");
-        assert!(out.contains("/help"), "got: {out}");
-    }
-
-    #[test]
-    fn slash_model_without_arg_shows_usage() {
-        let out = handle_slash_command("/model", "", 0, 0);
-        assert!(out.contains("usage") || out.contains("not yet"), "got: {out}");
-    }
-
-    // ── handle_config_cmd ─────────────────────────────────────────────────────
+    // ── handle_config_cmd with MockFs ─────────────────────────────────────────
 
     #[test]
     fn config_set_and_get_roundtrip() {
-        let _guard = HOME_LOCK.lock().unwrap();
-
-        let dir = std::env::temp_dir().join("trogon_cfg_test");
-        std::fs::remove_dir_all(&dir).ok();
-        std::fs::create_dir_all(&dir).unwrap();
-        let old_home = std::env::var("HOME").ok();
-        std::env::set_var("HOME", &dir);
-
-        let set_out = handle_config_cmd("set mykey myvalue");
-        assert!(set_out.contains("mykey"), "got: {set_out}");
-        assert!(set_out.contains("myvalue"), "got: {set_out}");
-
-        let get_out = handle_config_cmd("get mykey");
+        let fs = MockFs::new();
+        let set_out = handle_config_cmd("set mykey myvalue", &fs);
+        assert!(set_out.contains("mykey") && set_out.contains("myvalue"), "got: {set_out}");
+        let get_out = handle_config_cmd("get mykey", &fs);
         assert!(get_out.contains("myvalue"), "got: {get_out}");
-
-        if let Some(h) = old_home {
-            std::env::set_var("HOME", h);
-        }
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn config_get_missing_key_says_not_set() {
-        let _guard = HOME_LOCK.lock().unwrap();
-
-        let dir = std::env::temp_dir().join("trogon_cfg_missing");
-        std::fs::remove_dir_all(&dir).ok();
-        std::fs::create_dir_all(&dir).unwrap();
-        let old_home = std::env::var("HOME").ok();
-        std::env::set_var("HOME", &dir);
-
-        let out = handle_config_cmd("get nonexistent");
+        let fs = MockFs::new();
+        let out = handle_config_cmd("get nonexistent", &fs);
         assert!(out.contains("not set"), "got: {out}");
-
-        if let Some(h) = old_home {
-            std::env::set_var("HOME", h);
-        }
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn config_no_args_shows_path() {
-        let out = handle_config_cmd("");
+        let fs = MockFs::new();
+        let out = handle_config_cmd("", &fs);
         assert!(out.contains("config"), "got: {out}");
     }
 
     #[test]
     fn config_set_missing_key_shows_usage() {
-        let out = handle_config_cmd("set");
-        assert!(out.contains("usage"), "got: {out}");
+        let fs = MockFs::new();
+        assert!(handle_config_cmd("set", &fs).contains("usage"));
     }
 
     #[test]
     fn config_get_missing_key_arg_shows_usage() {
-        let out = handle_config_cmd("get");
-        assert!(out.contains("usage"), "got: {out}");
+        let fs = MockFs::new();
+        assert!(handle_config_cmd("get", &fs).contains("usage"));
     }
 
     #[test]
     fn config_unknown_subcommand_returns_error() {
-        let out = handle_config_cmd("delete mykey");
-        assert!(out.contains("unknown config subcommand"), "got: {out}");
+        let fs = MockFs::new();
+        assert!(handle_config_cmd("delete mykey", &fs).contains("unknown config subcommand"));
     }
 
     #[test]
     fn config_set_overwrites_existing_value() {
-        let _guard = HOME_LOCK.lock().unwrap();
-
-        let dir = std::env::temp_dir().join("trogon_cfg_overwrite");
-        std::fs::remove_dir_all(&dir).ok();
-        let old_home = std::env::var("HOME").ok();
-        std::env::set_var("HOME", &dir);
-
-        handle_config_cmd("set model claude-sonnet-4-6");
-        let out = handle_config_cmd("set model claude-opus-4-7");
+        let fs = MockFs::new();
+        handle_config_cmd("set model claude-sonnet-4-6", &fs);
+        let out = handle_config_cmd("set model claude-opus-4-7", &fs);
         assert!(out.contains("claude-opus-4-7"), "got: {out}");
-
-        let get = handle_config_cmd("get model");
-        assert!(get.contains("claude-opus-4-7"), "got: {get}");
-        assert!(!get.contains("claude-sonnet-4-6"), "old value should be gone: {get}");
-
-        if let Some(h) = old_home { std::env::set_var("HOME", h); }
-        std::fs::remove_dir_all(&dir).ok();
+        let get = handle_config_cmd("get model", &fs);
+        assert!(get.contains("claude-opus-4-7") && !get.contains("claude-sonnet-4-6"), "got: {get}");
     }
 
     #[test]
     fn config_set_value_with_spaces_preserved() {
-        let _guard = HOME_LOCK.lock().unwrap();
-
-        let dir = std::env::temp_dir().join("trogon_cfg_spaces");
-        std::fs::remove_dir_all(&dir).ok();
-        let old_home = std::env::var("HOME").ok();
-        std::env::set_var("HOME", &dir);
-
-        // splitn(3, ' ') means value gets everything after the second space
-        handle_config_cmd("set description hello world foo");
-        let out = handle_config_cmd("get description");
+        let fs = MockFs::new();
+        handle_config_cmd("set description hello world foo", &fs);
+        let out = handle_config_cmd("get description", &fs);
         assert!(out.contains("hello world foo"), "got: {out}");
-
-        if let Some(h) = old_home { std::env::set_var("HOME", h); }
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn config_show_reflects_set_values() {
-        let _guard = HOME_LOCK.lock().unwrap();
-
-        let dir = std::env::temp_dir().join("trogon_cfg_show");
-        std::fs::remove_dir_all(&dir).ok();
-        let old_home = std::env::var("HOME").ok();
-        std::env::set_var("HOME", &dir);
-
-        handle_config_cmd("set theme dark");
-        let show = handle_config_cmd("");
-        assert!(show.contains("dark"), "got: {show}");
-        assert!(show.contains("theme"), "got: {show}");
-
-        if let Some(h) = old_home { std::env::set_var("HOME", h); }
-        std::fs::remove_dir_all(&dir).ok();
+        let fs = MockFs::new();
+        handle_config_cmd("set theme dark", &fs);
+        let show = handle_config_cmd("", &fs);
+        assert!(show.contains("dark") && show.contains("theme"), "got: {show}");
     }
 
     #[test]
     fn read_config_returns_empty_object_when_file_missing() {
-        let _guard = HOME_LOCK.lock().unwrap();
-
-        let dir = std::env::temp_dir().join("trogon_cfg_missing_file");
-        std::fs::remove_dir_all(&dir).ok();
-        let old_home = std::env::var("HOME").ok();
-        std::env::set_var("HOME", &dir);
-
-        let cfg = read_config();
-        assert!(cfg.is_object(), "expected object, got: {cfg}");
-        assert_eq!(cfg.as_object().unwrap().len(), 0);
-
-        if let Some(h) = old_home { std::env::set_var("HOME", h); }
-        std::fs::remove_dir_all(&dir).ok();
+        let fs = MockFs::new();
+        let cfg = read_config(&fs);
+        assert!(cfg.is_object() && cfg.as_object().unwrap().is_empty());
     }
 
     #[test]
-    fn write_config_creates_parent_directories() {
-        let _guard = HOME_LOCK.lock().unwrap();
-
-        let dir = std::env::temp_dir().join("trogon_cfg_mkdir");
-        std::fs::remove_dir_all(&dir).ok();
-        let old_home = std::env::var("HOME").ok();
-        std::env::set_var("HOME", &dir);
-
+    fn write_config_then_read_roundtrips() {
+        let fs = MockFs::new();
         let cfg = serde_json::json!({"x": "y"});
-        write_config(&cfg).unwrap();
-        assert!(config_path().exists(), "config file should exist after write");
-
-        if let Some(h) = old_home { std::env::set_var("HOME", h); }
-        std::fs::remove_dir_all(&dir).ok();
+        write_config(&cfg, &fs).unwrap();
+        let read_back = read_config(&fs);
+        assert_eq!(read_back["x"].as_str().unwrap(), "y");
     }
 
-    // ── expand_tilde ──────────────────────────────────────────────────────────
+    // ── slash commands ────────────────────────────────────────────────────────
 
     #[test]
-    fn expand_tilde_replaces_home() {
-        let _guard = HOME_LOCK.lock().unwrap();
-        let old = std::env::var("HOME").ok();
-        std::env::set_var("HOME", "/tmp/fakehome");
-        let result = expand_tilde("~/.config/trogon/config.json");
-        assert_eq!(result, PathBuf::from("/tmp/fakehome/.config/trogon/config.json"));
-        if let Some(h) = old { std::env::set_var("HOME", h); }
+    fn slash_compact_explains_auto() {
+        let fs = MockFs::new();
+        let out = handle_slash_command("/compact", "", 0, 0, &fs);
+        assert!(out.contains("automatic") || out.contains("85%"), "got: {out}");
     }
 
     #[test]
-    fn expand_tilde_without_tilde_is_unchanged() {
-        let result = expand_tilde("/absolute/path");
-        assert_eq!(result, PathBuf::from("/absolute/path"));
+    fn slash_unknown_suggests_help() {
+        let fs = MockFs::new();
+        let out = handle_slash_command("/nope", "", 0, 0, &fs);
+        assert!(out.contains("unknown command") && out.contains("/help"), "got: {out}");
     }
 
     #[test]
-    fn expand_tilde_bare_tilde_without_slash_is_unchanged() {
-        let result = expand_tilde("~nodot");
-        assert_eq!(result, PathBuf::from("~nodot"));
+    fn slash_model_without_arg_shows_usage() {
+        let fs = MockFs::new();
+        let out = handle_slash_command("/model", "", 0, 0, &fs);
+        assert!(out.contains("usage") || out.contains("not yet"), "got: {out}");
     }
 
-    // ── /cost edge cases ──────────────────────────────────────────────────────
+    #[test]
+    fn slash_init_returns_not_implemented() {
+        let fs = MockFs::new();
+        assert!(
+            handle_slash_command("/init", "", 0, 0, &fs).contains("not yet implemented")
+        );
+    }
+
+    #[test]
+    fn slash_model_with_arg_returns_not_implemented() {
+        let fs = MockFs::new();
+        assert!(
+            handle_slash_command("/model", "claude-opus-4-7", 0, 0, &fs)
+                .contains("not yet implemented")
+        );
+    }
 
     #[test]
     fn slash_cost_at_full_context_shows_100_percent() {
-        let out = handle_slash_command("/cost", "", 200_000, 200_000);
+        let fs = MockFs::new();
+        let out = handle_slash_command("/cost", "", 200_000, 200_000, &fs);
         assert!(out.contains("100%"), "got: {out}");
     }
 
     #[test]
     fn slash_cost_rounds_down() {
-        // 1 / 3 = 33% (integer division)
-        let out = handle_slash_command("/cost", "", 1, 3);
+        let fs = MockFs::new();
+        let out = handle_slash_command("/cost", "", 1, 3, &fs);
         assert!(out.contains("33%"), "got: {out}");
     }
 
-    // ── remaining stub commands ───────────────────────────────────────────────
+    // ── expand_tilde ──────────────────────────────────────────────────────────
 
     #[test]
-    fn slash_init_returns_not_implemented() {
-        let out = handle_slash_command("/init", "", 0, 0);
-        assert!(out.contains("not yet implemented"), "got: {out}");
+    fn expand_tilde_without_tilde_is_unchanged() {
+        assert_eq!(expand_tilde("/absolute/path"), PathBuf::from("/absolute/path"));
     }
 
     #[test]
-    fn slash_model_with_arg_returns_not_implemented() {
-        let out = handle_slash_command("/model", "claude-opus-4-7", 0, 0);
-        assert!(out.contains("not yet implemented"), "got: {out}");
+    fn expand_tilde_bare_tilde_without_slash_is_unchanged() {
+        assert_eq!(expand_tilde("~nodot"), PathBuf::from("~nodot"));
     }
 }

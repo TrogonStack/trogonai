@@ -1,9 +1,8 @@
+use crate::nats::NatsClient;
 use agent_client_protocol::{
     ContentBlock, NewSessionRequest, PromptRequest, SessionNotification, SessionUpdate, TextContent,
 };
-use async_nats::Client;
 use bytes::Bytes;
-use futures::StreamExt;
 use serde_json::Value;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -11,28 +10,56 @@ use tokio::sync::mpsc;
 
 const SESSION_NEW_TIMEOUT: Duration = Duration::from_secs(15);
 
-pub struct TrogonSession {
-    nats: Client,
-    pub session_id: String,
+// ── Session trait ─────────────────────────────────────────────────────────────
+
+/// Abstraction over an ACP session. Allows injecting a mock in tests.
+pub trait Session: Send + Sync + 'static {
+    fn session_id(&self) -> &str;
+
+    fn prompt(
+        &self,
+        text: &str,
+    ) -> impl std::future::Future<Output = anyhow::Result<mpsc::Receiver<StreamEvent>>> + Send + '_;
+
+    fn cancel(&self) -> impl std::future::Future<Output = ()> + Send + '_;
+}
+
+// ── TrogonSession ─────────────────────────────────────────────────────────────
+
+pub struct TrogonSession<N: NatsClient> {
+    nats: N,
+    session_id: String,
     prefix: String,
 }
 
-impl TrogonSession {
-    /// Create a new ACP session via NATS. `cwd` is the working directory for the session.
-    pub async fn new(nats: Client, prefix: &str, cwd: PathBuf) -> anyhow::Result<Self> {
+impl<N: NatsClient> std::fmt::Debug for TrogonSession<N> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TrogonSession")
+            .field("session_id", &self.session_id)
+            .field("prefix", &self.prefix)
+            .finish()
+    }
+}
+
+impl<N: NatsClient> TrogonSession<N> {
+    pub async fn new(nats: N, prefix: &str, cwd: PathBuf) -> anyhow::Result<Self> {
         let subject = format!("{prefix}.agent.session.new");
         let req = NewSessionRequest::new(cwd);
         let payload = serde_json::to_vec(&req)?;
 
-        let reply = tokio::time::timeout(
+        let reply_bytes = tokio::time::timeout(
             SESSION_NEW_TIMEOUT,
-            nats.request(subject, payload.into()),
+            nats.request_bytes(subject, payload.into()),
         )
         .await
-        .map_err(|_| anyhow::anyhow!("timed out waiting for session creation (is trogon-acp-runner running?)"))?
+        .map_err(|_| {
+            anyhow::anyhow!(
+                "timed out waiting for session creation (is trogon-acp-runner running?)"
+            )
+        })?
         .map_err(|e| anyhow::anyhow!("NATS error creating session: {e}"))?;
 
-        let resp: Value = serde_json::from_slice(&reply.payload)
+        let resp: Value = serde_json::from_slice(&reply_bytes)
             .map_err(|e| anyhow::anyhow!("invalid session response: {e}"))?;
 
         let session_id = resp["sessionId"]
@@ -40,117 +67,127 @@ impl TrogonSession {
             .ok_or_else(|| anyhow::anyhow!("session response missing sessionId: {resp}"))?
             .to_string();
 
-        Ok(Self {
-            nats,
-            session_id,
-            prefix: prefix.to_string(),
-        })
+        Ok(Self { nats, session_id, prefix: prefix.to_string() })
+    }
+}
+
+impl<N: NatsClient> Session for TrogonSession<N> {
+    fn session_id(&self) -> &str {
+        &self.session_id
     }
 
-    /// Send a prompt and stream events via the returned channel.
-    /// The channel closes when the turn is done.
-    pub async fn prompt(&self, text: &str) -> anyhow::Result<mpsc::Receiver<StreamEvent>> {
-        let notif_subject = format!(
-            "{}.session.{}.client.session.update",
-            self.prefix, self.session_id
-        );
-        let prompt_subject = format!(
-            "{}.session.{}.agent.prompt",
-            self.prefix, self.session_id
-        );
+    fn prompt(
+        &self,
+        text: &str,
+    ) -> impl std::future::Future<Output = anyhow::Result<mpsc::Receiver<StreamEvent>>> + Send + '_
+    {
+        // Clone text upfront so the returned future owns it (no captured &str across awaits).
+        let text = text.to_string();
+        let nats = &self.nats;
+        let session_id = self.session_id.clone();
+        let prefix = self.prefix.clone();
+        async move {
+            let notif_subject =
+                format!("{prefix}.session.{session_id}.client.session.update");
+            let prompt_subject =
+                format!("{prefix}.session.{session_id}.agent.prompt");
 
-        let mut notif_sub = self
-            .nats
-            .subscribe(notif_subject)
-            .await
-            .map_err(|e| anyhow::anyhow!("subscribe notifications: {e}"))?;
+            let mut notif_rx = nats
+                .subscribe_bytes(notif_subject)
+                .await
+                .map_err(|e| anyhow::anyhow!("subscribe notifications: {e}"))?;
 
-        let inbox = self.nats.new_inbox();
-        let mut resp_sub = self
-            .nats
-            .subscribe(inbox.clone())
-            .await
-            .map_err(|e| anyhow::anyhow!("subscribe inbox: {e}"))?;
+            let inbox = nats.new_inbox();
+            let mut resp_rx = nats
+                .subscribe_bytes(inbox.clone())
+                .await
+                .map_err(|e| anyhow::anyhow!("subscribe inbox: {e}"))?;
 
-        let req = PromptRequest::new(
-            self.session_id.clone(),
-            vec![ContentBlock::Text(TextContent::new(text))],
-        );
-        let payload = serde_json::to_vec(&req)?;
+            let req = PromptRequest::new(
+                session_id,
+                vec![ContentBlock::Text(TextContent::new(&text))],
+            );
+            let payload = serde_json::to_vec(&req)?;
 
-        self.nats
-            .publish_with_reply(prompt_subject, inbox, payload.into())
-            .await
-            .map_err(|e| anyhow::anyhow!("publish prompt: {e}"))?;
+            nats.publish_with_reply_bytes(prompt_subject, inbox, payload.into())
+                .await
+                .map_err(|e| anyhow::anyhow!("publish prompt: {e}"))?;
 
-        let (tx, rx) = mpsc::channel(64);
+            let (tx, rx) = mpsc::channel(64);
 
-        tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    biased;
-                    msg = resp_sub.next() => {
-                        let Some(msg) = msg else { break };
-                        if let Ok(v) = serde_json::from_slice::<Value>(&msg.payload) {
-                            let stop = v.get("stopReason")
-                                .and_then(|s| s.as_str())
-                                .unwrap_or("end_turn")
-                                .to_string();
+            tokio::spawn(async move {
+                loop {
+                    tokio::select! {
+                        biased;
+                        bytes = resp_rx.recv() => {
+                            let Some(bytes) = bytes else { break };
+                            let stop = serde_json::from_slice::<Value>(&bytes)
+                                .ok()
+                                .and_then(|v| {
+                                    v.get("stopReason")
+                                        .and_then(|s| s.as_str())
+                                        .map(|s| s.to_string())
+                                })
+                                .unwrap_or_else(|| "end_turn".to_string());
                             let _ = tx.send(StreamEvent::Done(stop)).await;
-                        } else {
-                            let _ = tx.send(StreamEvent::Done("end_turn".into())).await;
+                            break;
                         }
-                        break;
-                    }
-                    msg = notif_sub.next() => {
-                        let Some(msg) = msg else { break };
-                        if let Ok(notif) = serde_json::from_slice::<SessionNotification>(&msg.payload) {
-                            match notif.update {
-                                SessionUpdate::AgentMessageChunk(chunk) => {
-                                    if let ContentBlock::Text(t) = chunk.content {
-                                        let _ = tx.send(StreamEvent::Text(t.text)).await;
+                        bytes = notif_rx.recv() => {
+                            let Some(bytes) = bytes else { break };
+                            if let Ok(notif) = serde_json::from_slice::<SessionNotification>(&bytes) {
+                                match notif.update {
+                                    SessionUpdate::AgentMessageChunk(chunk) => {
+                                        if let ContentBlock::Text(t) = chunk.content {
+                                            let _ = tx.send(StreamEvent::Text(t.text)).await;
+                                        }
                                     }
-                                }
-                                SessionUpdate::AgentThoughtChunk(_chunk) => {
-                                    let _ = tx.send(StreamEvent::Thinking).await;
-                                }
-                                SessionUpdate::ToolCall(tc) => {
-                                    if let Some(diff) = render_diff(&tc.title, tc.raw_input.as_ref()) {
-                                        let _ = tx.send(StreamEvent::ToolCall(tc.title)).await;
-                                        let _ = tx.send(StreamEvent::Diff(diff)).await;
-                                    } else {
-                                        let _ = tx.send(StreamEvent::ToolCall(tc.title)).await;
+                                    SessionUpdate::AgentThoughtChunk(_) => {
+                                        let _ = tx.send(StreamEvent::Thinking).await;
                                     }
+                                    SessionUpdate::ToolCall(tc) => {
+                                        if let Some(diff) =
+                                            render_diff(&tc.title, tc.raw_input.as_ref())
+                                        {
+                                            let _ = tx.send(StreamEvent::ToolCall(tc.title.clone())).await;
+                                            let _ = tx.send(StreamEvent::Diff(diff)).await;
+                                        } else {
+                                            let _ = tx.send(StreamEvent::ToolCall(tc.title)).await;
+                                        }
+                                    }
+                                    SessionUpdate::UsageUpdate(u) => {
+                                        let _ = tx
+                                            .send(StreamEvent::Usage {
+                                                used_tokens: u.used,
+                                                context_size: u.size,
+                                            })
+                                            .await;
+                                    }
+                                    _ => {}
                                 }
-                                SessionUpdate::UsageUpdate(u) => {
-                                    let _ = tx.send(StreamEvent::Usage {
-                                        used_tokens: u.used,
-                                        context_size: u.size,
-                                    }).await;
-                                }
-                                _ => {}
                             }
                         }
                     }
                 }
-            }
-        });
+            });
 
-        Ok(rx)
+            Ok(rx)
+        }
     }
 
-    /// Fire-and-forget cancel for the active prompt turn.
-    pub async fn cancel(&self) {
+    fn cancel(&self) -> impl std::future::Future<Output = ()> + Send + '_ {
         let subject = format!(
             "{}.session.{}.agent.cancel",
             self.prefix, self.session_id
         );
-        let _ = self.nats.publish(subject, Bytes::new()).await;
+        async move {
+            let _ = self.nats.publish_bytes(subject, Bytes::new()).await;
+        }
     }
 }
 
-/// Events produced during a prompt turn.
-#[derive(Debug)]
+// ── StreamEvent ───────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
 pub enum StreamEvent {
     Text(String),
     Thinking,
@@ -170,8 +207,6 @@ const BOLD: &str = "\x1b[1m";
 const RESET: &str = "\x1b[0m";
 const DIM: &str = "\x1b[2m";
 
-/// Render a colored diff for Edit/MultiEdit/Write tool calls.
-/// Returns `None` for tools that don't produce a diff.
 fn render_diff(tool_name: &str, input: Option<&serde_json::Value>) -> Option<String> {
     let input = input?;
     match tool_name {
@@ -220,12 +255,87 @@ fn diff_lines(old: &str, new: &str) -> String {
     out
 }
 
+// ── Mock (test only) ──────────────────────────────────────────────────────────
+
+#[cfg(test)]
+pub mod mock {
+    use super::*;
+    use std::collections::VecDeque;
+    use std::sync::Mutex;
+
+    /// A mock `Session` for unit tests.
+    ///
+    /// Pre-load a sequence of event batches with `queue_turn`. Each `prompt` call
+    /// drains one batch; if none are queued, a `Done("end_turn")` is returned.
+    pub struct MockSession {
+        session_id: String,
+        turns: Mutex<VecDeque<Vec<StreamEvent>>>,
+        cancelled: Mutex<Vec<String>>,
+    }
+
+    impl MockSession {
+        pub fn new(session_id: impl Into<String>) -> Self {
+            Self {
+                session_id: session_id.into(),
+                turns: Mutex::new(VecDeque::new()),
+                cancelled: Mutex::new(Vec::new()),
+            }
+        }
+
+        /// Queue one turn's worth of events to be returned by the next `prompt` call.
+        pub fn queue_turn(&self, events: Vec<StreamEvent>) {
+            self.turns.lock().unwrap().push_back(events);
+        }
+
+        pub fn cancel_count(&self) -> usize {
+            self.cancelled.lock().unwrap().len()
+        }
+    }
+
+    impl Session for MockSession {
+        fn session_id(&self) -> &str {
+            &self.session_id
+        }
+
+        fn prompt(
+            &self,
+            _text: &str,
+        ) -> impl std::future::Future<Output = anyhow::Result<mpsc::Receiver<StreamEvent>>> + Send + '_
+        {
+            let events = self
+                .turns
+                .lock()
+                .unwrap()
+                .pop_front()
+                .unwrap_or_else(|| vec![StreamEvent::Done("end_turn".into())]);
+            async move {
+                let (tx, rx) = mpsc::channel(events.len().max(1));
+                for event in events {
+                    let _ = tx.try_send(event);
+                }
+                Ok(rx)
+            }
+        }
+
+        fn cancel(&self) -> impl std::future::Future<Output = ()> + Send + '_ {
+            let id = self.session_id.clone();
+            async move {
+                self.cancelled.lock().unwrap().push(id);
+            }
+        }
+    }
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::nats::mock::MockNatsClient;
+    use bytes::Bytes;
     use serde_json::json;
+
+    // ── render_diff ───────────────────────────────────────────────────────────
 
     #[test]
     fn render_diff_edit_returns_colored_diff() {
@@ -241,7 +351,6 @@ mod tests {
         let input = json!({"file_path": "new.rs", "old_string": "", "new_string": "fn main() {}"});
         let diff = render_diff("Edit", Some(&input)).unwrap();
         assert!(diff.contains("+fn main() {}"));
-        // No removal lines (lines starting with RED + "-"), only the "---" header.
         assert!(!diff.contains(&format!("{RED}-")), "no removal lines for empty old_string");
     }
 
@@ -284,9 +393,7 @@ mod tests {
 
     #[test]
     fn usage_update_deserializes_from_nats_wire_format() {
-        // Verify the JSON tag the runner sends actually round-trips through
-        // SessionNotification → SessionUpdate::UsageUpdate.
-        let json = serde_json::json!({
+        let json = json!({
             "sessionId": "sess-1",
             "update": {
                 "sessionUpdate": "usage_update",
@@ -307,8 +414,7 @@ mod tests {
 
     #[test]
     fn tool_call_raw_input_is_accessible() {
-        // Verify that a ToolCall notification carries raw_input we can parse.
-        let json = serde_json::json!({
+        let json = json!({
             "sessionId": "sess-1",
             "update": {
                 "sessionUpdate": "tool_call",
@@ -331,5 +437,119 @@ mod tests {
             }
             other => panic!("expected ToolCall, got {other:?}"),
         }
+    }
+
+    // ── TrogonSession::new via MockNatsClient ─────────────────────────────────
+
+    #[tokio::test]
+    async fn new_session_extracts_session_id_from_response() {
+        let nats = MockNatsClient::new();
+        let resp = json!({"sessionId": "test-session-42"});
+        nats.queue_request_ok(Bytes::from(serde_json::to_vec(&resp).unwrap()));
+
+        let session =
+            TrogonSession::new(nats, "acp", std::path::PathBuf::from("/tmp")).await.unwrap();
+        assert_eq!(session.session_id(), "test-session-42");
+    }
+
+    #[tokio::test]
+    async fn new_session_returns_error_on_nats_failure() {
+        let nats = MockNatsClient::new();
+        nats.queue_request_err("connection refused");
+
+        let err = TrogonSession::new(nats, "acp", std::path::PathBuf::from("/tmp"))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("NATS error"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn new_session_returns_error_on_missing_session_id() {
+        let nats = MockNatsClient::new();
+        let resp = json!({"other": "field"});
+        nats.queue_request_ok(Bytes::from(serde_json::to_vec(&resp).unwrap()));
+
+        let err = TrogonSession::new(nats, "acp", std::path::PathBuf::from("/tmp"))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("sessionId"), "got: {err}");
+    }
+
+    // ── TrogonSession::prompt via MockNatsClient ──────────────────────────────
+
+    #[tokio::test]
+    async fn prompt_streams_text_events_and_done() {
+        let nats = MockNatsClient::new();
+        let resp = json!({"sessionId": "s1"});
+        nats.queue_request_ok(Bytes::from(serde_json::to_vec(&resp).unwrap()));
+
+        // Two subscriptions: notif channel + inbox (reply) channel.
+        let (notif_tx, notif_rx) = tokio::sync::mpsc::channel::<Bytes>(8);
+        let (reply_tx, reply_rx) = tokio::sync::mpsc::channel::<Bytes>(8);
+        nats.add_subscription(notif_rx);
+        nats.add_subscription(reply_rx);
+
+        let session =
+            TrogonSession::new(nats, "acp", std::path::PathBuf::from("/tmp")).await.unwrap();
+
+        let mut events_rx = session.prompt("hello").await.unwrap();
+
+        // Send a text notification.
+        let text_notif = json!({
+            "sessionId": "s1",
+            "update": {
+                "sessionUpdate": "agent_message_chunk",
+                "content": {"type": "text", "text": "hello world"}
+            }
+        });
+        notif_tx.send(Bytes::from(serde_json::to_vec(&text_notif).unwrap())).await.unwrap();
+
+        // Yield so the spawned task processes the notification before we send Done.
+        // Without this, the biased select! would pick the Done reply first if both
+        // channels are ready simultaneously.
+        tokio::task::yield_now().await;
+
+        // Send done reply.
+        let done = json!({"stopReason": "end_turn"});
+        reply_tx.send(Bytes::from(serde_json::to_vec(&done).unwrap())).await.unwrap();
+
+        let mut got_text = false;
+        let mut got_done = false;
+        while let Some(ev) = events_rx.recv().await {
+            match ev {
+                StreamEvent::Text(t) => { assert_eq!(t, "hello world"); got_text = true; }
+                StreamEvent::Done(r) => { assert_eq!(r, "end_turn"); got_done = true; break; }
+                _ => {}
+            }
+        }
+        assert!(got_text, "expected Text event");
+        assert!(got_done, "expected Done event");
+    }
+
+    // ── MockSession ───────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn mock_session_returns_queued_events() {
+        use mock::MockSession;
+        let session = MockSession::new("mock-session");
+        session.queue_turn(vec![
+            StreamEvent::Text("hi".into()),
+            StreamEvent::Done("end_turn".into()),
+        ]);
+
+        let mut rx = session.prompt("anything").await.unwrap();
+        let ev1 = rx.recv().await.unwrap();
+        let ev2 = rx.recv().await.unwrap();
+        assert!(matches!(ev1, StreamEvent::Text(t) if t == "hi"));
+        assert!(matches!(ev2, StreamEvent::Done(r) if r == "end_turn"));
+    }
+
+    #[tokio::test]
+    async fn mock_session_default_turn_is_done() {
+        use mock::MockSession;
+        let session = MockSession::new("s");
+        let mut rx = session.prompt("anything").await.unwrap();
+        let ev = rx.recv().await.unwrap();
+        assert!(matches!(ev, StreamEvent::Done(_)));
     }
 }
