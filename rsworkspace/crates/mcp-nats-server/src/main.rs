@@ -1,7 +1,7 @@
 mod allowed_host;
 mod config;
 mod constants;
-mod mcp_http_path;
+mod http_route_path;
 
 #[cfg(not(coverage))]
 mod runtime {

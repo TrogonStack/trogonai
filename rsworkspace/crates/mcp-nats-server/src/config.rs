@@ -12,7 +12,7 @@ use crate::constants::{
     DEFAULT_MCP_SERVER_ID, ENV_MCP_CLIENT_ID_PREFIX, ENV_MCP_HTTP_HOST, ENV_MCP_HTTP_PATH, ENV_MCP_HTTP_PORT,
     ENV_MCP_SERVER_ID,
 };
-use crate::mcp_http_path::{McpHttpPath, McpHttpPathError};
+use crate::http_route_path::{HttpRoutePath, HttpRoutePathError};
 
 #[derive(Parser, Debug, Clone)]
 #[command(name = "mcp-nats-server")]
@@ -40,7 +40,7 @@ pub struct HttpBridgeConfig {
     pub client_id_prefix: McpPeerId,
     pub server_id: McpPeerId,
     pub bind_addr: SocketAddr,
-    pub path: McpHttpPath,
+    pub path: HttpRoutePath,
     pub allowed_hosts: Vec<AllowedHost>,
 }
 
@@ -93,7 +93,7 @@ fn base_config_from_args<E: ReadEnv>(args: Args, env_provider: &E) -> Result<Htt
         client_id_prefix: McpPeerId::new(raw_client_id_prefix).map_err(ConfigError::ClientIdPrefix)?,
         server_id: McpPeerId::new(raw_server_id).map_err(ConfigError::ServerId)?,
         bind_addr: SocketAddr::new(host, port),
-        path: McpHttpPath::new(raw_path).map_err(ConfigError::Path)?,
+        path: HttpRoutePath::new(raw_path).map_err(ConfigError::Path)?,
         allowed_hosts,
     })
 }
@@ -103,7 +103,7 @@ pub enum ConfigError {
     Prefix(McpPrefixError),
     ClientIdPrefix(McpPeerIdError),
     ServerId(McpPeerIdError),
-    Path(McpHttpPathError),
+    Path(HttpRoutePathError),
     AllowedHost(AllowedHostError),
     InvalidHost { value: String, source: AddrParseError },
     InvalidPort { value: String, source: ParseIntError },
@@ -368,8 +368,8 @@ mod tests {
     #[test]
     fn config_error_display_and_source_are_specific() {
         assert_eq!(
-            McpHttpPathError.to_string(),
-            "MCP HTTP path must start with '/', include a route segment, and contain only valid path characters"
+            HttpRoutePathError.to_string(),
+            "HTTP route path must start with '/', include a route segment, and contain only valid path characters"
         );
 
         let prefix = err(base_config(

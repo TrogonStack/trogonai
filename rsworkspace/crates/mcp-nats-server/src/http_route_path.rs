@@ -1,11 +1,11 @@
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct McpHttpPath(String);
+pub struct HttpRoutePath(String);
 
-impl McpHttpPath {
-    pub fn new(path: impl Into<String>) -> Result<Self, McpHttpPathError> {
+impl HttpRoutePath {
+    pub fn new(path: impl Into<String>) -> Result<Self, HttpRoutePathError> {
         let path = path.into();
         if !is_valid_http_path(&path) {
-            return Err(McpHttpPathError);
+            return Err(HttpRoutePathError);
         }
         Ok(Self(path))
     }
@@ -16,18 +16,18 @@ impl McpHttpPath {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct McpHttpPathError;
+pub struct HttpRoutePathError;
 
-impl std::fmt::Display for McpHttpPathError {
+impl std::fmt::Display for HttpRoutePathError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "MCP HTTP path must start with '/', include a route segment, and contain only valid path characters"
+            "HTTP route path must start with '/', include a route segment, and contain only valid path characters"
         )
     }
 }
 
-impl std::error::Error for McpHttpPathError {}
+impl std::error::Error for HttpRoutePathError {}
 
 fn is_valid_http_path(path: &str) -> bool {
     path.starts_with('/')
@@ -45,7 +45,7 @@ mod tests {
     #[test]
     fn accepts_valid_http_paths() {
         for path in ["/mcp", "/tenant/mcp", "/mcp-v1", "/mcp_v1", "/mcp~v1"] {
-            assert_eq!(McpHttpPath::new(path).unwrap().as_str(), path);
+            assert_eq!(HttpRoutePath::new(path).unwrap().as_str(), path);
         }
     }
 
@@ -66,15 +66,15 @@ mod tests {
             "/tenant/../mcp",
             "/unicode/é",
         ] {
-            assert!(McpHttpPath::new(path).is_err(), "{path:?} should be invalid");
+            assert!(HttpRoutePath::new(path).is_err(), "{path:?} should be invalid");
         }
     }
 
     #[test]
     fn error_display_is_specific() {
         assert_eq!(
-            McpHttpPathError.to_string(),
-            "MCP HTTP path must start with '/', include a route segment, and contain only valid path characters"
+            HttpRoutePathError.to_string(),
+            "HTTP route path must start with '/', include a route segment, and contain only valid path characters"
         );
     }
 }
