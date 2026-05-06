@@ -19,7 +19,7 @@ pub struct StoredMcpServer {
 const BUCKET: &str = "ACP_SESSIONS";
 
 /// Persisted state for a single ACP session.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionState {
     pub messages: Vec<Message>,
     /// Per-session model override. `None` means use the agent's default model.
@@ -67,6 +67,41 @@ pub struct SessionState {
     /// Set on the first bash call; subsequent calls reuse the same terminal.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal_id: Option<String>,
+    /// Token budget used to decide when to compact the message history.
+    /// Compaction triggers at 85 % of this value. Default: 200 000.
+    #[serde(default = "default_token_budget", skip_serializing_if = "is_default_token_budget")]
+    pub token_budget: u64,
+}
+
+fn default_token_budget() -> u64 {
+    200_000
+}
+
+fn is_default_token_budget(v: &u64) -> bool {
+    *v == 200_000
+}
+
+impl Default for SessionState {
+    fn default() -> Self {
+        Self {
+            messages: Vec::new(),
+            model: None,
+            mode: String::new(),
+            cwd: String::new(),
+            created_at: String::new(),
+            updated_at: String::new(),
+            title: String::new(),
+            mcp_servers: Vec::new(),
+            system_prompt: None,
+            additional_roots: Vec::new(),
+            disable_builtin_tools: false,
+            allowed_tools: Vec::new(),
+            parent_session_id: None,
+            branched_at_index: None,
+            terminal_id: None,
+            token_budget: default_token_budget(),
+        }
+    }
 }
 
 // ── SessionStore trait ────────────────────────────────────────────────────────
@@ -479,6 +514,55 @@ mod tests {
         let back: SessionState = serde_json::from_str(&json).unwrap();
         assert_eq!(back.parent_session_id.as_deref(), Some("root-session"));
         assert_eq!(back.branched_at_index, Some(5));
+    }
+
+    // ── token_budget serde ────────────────────────────────────────────────────
+
+    #[test]
+    fn token_budget_default_is_200_000() {
+        let state = SessionState::default();
+        assert_eq!(state.token_budget, 200_000);
+    }
+
+    #[test]
+    fn token_budget_default_omitted_from_json() {
+        let state = SessionState::default();
+        let json = serde_json::to_string(&state).unwrap();
+        assert!(
+            !json.contains("token_budget"),
+            "default token_budget must be omitted from JSON: {json}"
+        );
+    }
+
+    #[test]
+    fn token_budget_custom_value_serialized() {
+        let state = SessionState {
+            token_budget: 50_000,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&state).unwrap();
+        assert!(
+            json.contains("\"token_budget\":50000"),
+            "custom token_budget must appear in JSON: {json}"
+        );
+    }
+
+    #[test]
+    fn token_budget_missing_from_json_deserializes_to_default() {
+        let json = r#"{"messages":[],"mode":""}"#;
+        let state: SessionState = serde_json::from_str(json).unwrap();
+        assert_eq!(state.token_budget, 200_000);
+    }
+
+    #[test]
+    fn token_budget_custom_value_roundtrip() {
+        let state = SessionState {
+            token_budget: 100_000,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&state).unwrap();
+        let back: SessionState = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.token_budget, 100_000);
     }
 
     // ── MemorySessionStore::list_children ─────────────────────────────────────

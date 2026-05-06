@@ -10,8 +10,8 @@ use std::sync::Arc;
 use agent_client_protocol::{
     Agent, CancelNotification, CloseSessionRequest, ExtRequest, ForkSessionRequest,
     InitializeRequest, ListSessionsRequest, LoadSessionRequest, NewSessionRequest, PromptRequest,
-    ProtocolVersion, ResumeSessionRequest, SetSessionModeRequest, SetSessionModelRequest,
-    TextContent,
+    ProtocolVersion, ResumeSessionRequest, SetSessionConfigOptionRequest, SetSessionModeRequest,
+    SetSessionModelRequest, SessionConfigOptionValue, TextContent,
 };
 use tokio::sync::RwLock;
 use tokio::sync::mpsc;
@@ -1504,6 +1504,224 @@ async fn prompt_injects_elicitation_provider_when_elicitation_tx_is_some() {
         *runner.elicitation_provider_set.lock().unwrap(),
         "set_elicitation_provider must be called when elicitation_tx is Some"
     );
+}
+
+// ── TROGON.md injection ───────────────────────────────────────────────────────
+
+/// When the session cwd contains a TROGON.md, its content is prepended to the
+/// system_prompt passed to run_chat_streaming.
+#[tokio::test]
+async fn prompt_injects_trogon_md_content_into_system_prompt() {
+    let dir = std::env::temp_dir().join("trogon_agent_unit_tmd_inject");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("TROGON.md"), "custom workspace instructions").unwrap();
+    let cwd = dir.to_str().unwrap().to_string();
+
+    let runner = MockAgentRunner::new("claude-test");
+    let agent = TrogonAgent::new(
+        MockSessionNotifier::new(),
+        MemorySessionStore::new(),
+        runner.clone(),
+        "acp",
+        "claude-test",
+        None,
+        None,
+        Arc::new(RwLock::new(None::<GatewayConfig>)),
+    );
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let resp = agent.new_session(NewSessionRequest::new(&cwd)).await.unwrap();
+            let session_id = resp.session_id.to_string();
+            agent
+                .prompt(PromptRequest::new(session_id, vec![]))
+                .await
+                .unwrap();
+
+            let sp = runner.captured_system_prompt();
+            assert!(sp.is_some(), "system_prompt must be set when TROGON.md is present");
+            assert!(
+                sp.unwrap().contains("custom workspace instructions"),
+                "system_prompt must contain TROGON.md content"
+            );
+        })
+        .await;
+}
+
+/// When the session has its own system_prompt and a TROGON.md is present, both
+/// appear in the final system_prompt (TROGON.md first).
+#[tokio::test]
+async fn prompt_prepends_trogon_md_before_session_system_prompt() {
+    let dir = std::env::temp_dir().join("trogon_agent_unit_tmd_prepend");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("TROGON.md"), "trogon instructions").unwrap();
+    let cwd = dir.to_str().unwrap().to_string();
+
+    let store = MemorySessionStore::new();
+    let runner = MockAgentRunner::new("claude-test");
+    let agent = TrogonAgent::new(
+        MockSessionNotifier::new(),
+        store.clone(),
+        runner.clone(),
+        "acp",
+        "claude-test",
+        None,
+        None,
+        Arc::new(RwLock::new(None::<GatewayConfig>)),
+    );
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let resp = agent.new_session(NewSessionRequest::new(&cwd)).await.unwrap();
+            let session_id = resp.session_id.to_string();
+
+            // Set a session-level system_prompt directly in the store.
+            let mut state = store.load(&session_id).await.unwrap();
+            state.system_prompt = Some("session instructions".to_string());
+            store.save(&session_id, &state).await.unwrap();
+
+            agent
+                .prompt(PromptRequest::new(session_id, vec![]))
+                .await
+                .unwrap();
+
+            let sp = runner.captured_system_prompt().unwrap();
+            let trogon_pos = sp.find("trogon instructions").unwrap();
+            let session_pos = sp.find("session instructions").unwrap();
+            assert!(
+                trogon_pos < session_pos,
+                "TROGON.md content must precede session system_prompt; got: {sp:?}"
+            );
+        })
+        .await;
+}
+
+// ── set_session_config_option ─────────────────────────────────────────────────
+
+#[tokio::test]
+async fn set_session_config_option_mode_persists_to_store() {
+    let (store, _, agent) = make_agent_parts();
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let resp = agent.new_session(NewSessionRequest::new("/cwd")).await.unwrap();
+            let sid = resp.session_id.to_string();
+            agent
+                .set_session_config_option(SetSessionConfigOptionRequest::new(
+                    sid.clone(),
+                    "mode",
+                    SessionConfigOptionValue::ValueId { value: "plan".into() },
+                ))
+                .await
+                .unwrap();
+            let state = store.load(&sid).await.unwrap();
+            assert_eq!(state.mode, "plan", "mode must be persisted after config update");
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn set_session_config_option_model_persists_to_store() {
+    let (store, _, agent) = make_agent_parts();
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let resp = agent.new_session(NewSessionRequest::new("/cwd")).await.unwrap();
+            let sid = resp.session_id.to_string();
+            agent
+                .set_session_config_option(SetSessionConfigOptionRequest::new(
+                    sid.clone(),
+                    "model",
+                    SessionConfigOptionValue::ValueId { value: "claude-sonnet-4-6".into() },
+                ))
+                .await
+                .unwrap();
+            let state = store.load(&sid).await.unwrap();
+            assert_eq!(
+                state.model.as_deref(),
+                Some("claude-sonnet-4-6"),
+                "model must be persisted after config update"
+            );
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn set_session_config_option_unknown_id_is_silently_ignored() {
+    let (_, _, agent) = make_agent_parts();
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let resp = agent.new_session(NewSessionRequest::new("/cwd")).await.unwrap();
+            let sid = resp.session_id.to_string();
+            let result = agent
+                .set_session_config_option(SetSessionConfigOptionRequest::new(
+                    sid.clone(),
+                    "unknown_config_key_xyz",
+                    SessionConfigOptionValue::ValueId { value: "whatever".into() },
+                ))
+                .await;
+            assert!(
+                result.is_ok(),
+                "unknown config_id must return Ok (silently ignored), got: {:?}",
+                result
+            );
+        })
+        .await;
+}
+
+// ── elicitation ───────────────────────────────────────────────────────────────
+
+// ── additional_roots injection ────────────────────────────────────────────────
+
+#[tokio::test]
+async fn prompt_appends_additional_roots_to_system_prompt() {
+    let store = MemorySessionStore::new();
+    let runner = MockAgentRunner::new("claude-test");
+    let agent = TrogonAgent::new(
+        MockSessionNotifier::new(),
+        store.clone(),
+        runner.clone(),
+        "acp",
+        "claude-test",
+        None,
+        None,
+        Arc::new(RwLock::new(None::<GatewayConfig>)),
+    );
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let resp = agent.new_session(NewSessionRequest::new("/cwd")).await.unwrap();
+            let session_id = resp.session_id.to_string();
+
+            let mut state = store.load(&session_id).await.unwrap();
+            state.additional_roots =
+                vec!["/extra/path".to_string(), "/another/root".to_string()];
+            store.save(&session_id, &state).await.unwrap();
+
+            agent
+                .prompt(PromptRequest::new(session_id, vec![]))
+                .await
+                .unwrap();
+
+            let sp = runner.captured_system_prompt().unwrap();
+            assert!(
+                sp.contains("Additional working directories:"),
+                "system_prompt must contain 'Additional working directories:'; got: {sp:?}"
+            );
+            assert!(
+                sp.contains("- /extra/path"),
+                "system_prompt must list extra path; got: {sp:?}"
+            );
+            assert!(
+                sp.contains("- /another/root"),
+                "system_prompt must list second root; got: {sp:?}"
+            );
+        })
+        .await;
 }
 
 /// When `TrogonAgent` is constructed with `elicitation_tx: None`, `prompt()`

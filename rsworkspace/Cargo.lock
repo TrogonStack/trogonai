@@ -5116,6 +5116,7 @@ dependencies = [
  "tracing-subscriber",
  "trogon-acp-runner",
  "trogon-agent-core",
+ "trogon-cli",
  "trogon-nats",
  "trogon-std",
  "uuid",
@@ -5247,6 +5248,17 @@ dependencies = [
  "trogon-nats",
  "trogon-std",
  "uuid",
+]
+
+[[package]]
+name = "trogon-cli"
+version = "0.1.0"
+dependencies = [
+ "axum 0.8.9",
+ "reqwest",
+ "serde_json",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

@@ -3,7 +3,9 @@
 //! Handles all lifecycle methods locally.  Delegates `prompt` and `cancel`
 //! to the inner [`Bridge`], which routes them through NATS to the Runner.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use agent_client_protocol::{
@@ -23,7 +25,7 @@ use agent_client_protocol::{
     SetSessionModelRequest, SetSessionModelResponse, TextContent, ToolCall, ToolCallContent,
     ToolCallLocation, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
 };
-use tokio::sync::{RwLock, mpsc};
+use tokio::sync::{Mutex, RwLock, mpsc};
 use tracing::{info, warn};
 
 use acp_nats::{AcpPrefix, AcpSessionId, Bridge};
@@ -97,6 +99,9 @@ where
     /// Whether the connected client supports streaming terminal output.
     /// Set from `_meta.terminal_output` in `initialize()`.
     pub(crate) terminal_output_cap: std::cell::Cell<bool>,
+    /// Per-session stdio MCP bridges. Keyed by session_id.
+    /// Spawned in `new_session`/`fork_session`, shut down in `close_session`.
+    stdio_bridges: Arc<Mutex<HashMap<String, Vec<trogon_cli::StdioMcpBridge>>>>,
 }
 
 impl<N, C, J, S: SessionStore + 'static, Notif: SessionNotifier + 'static> TrogonAcpAgent<N, C, J, S, Notif>
@@ -124,6 +129,7 @@ where
             default_model: default_model.into(),
             gateway_config,
             terminal_output_cap: std::cell::Cell::new(false),
+            stdio_bridges: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -520,9 +526,57 @@ where
             .collect()
     }
 
+    /// Spawn stdio MCP bridges for any `McpServer::Stdio` entries.
+    ///
+    /// Returns `(stored_servers, bridges)` where each bridge is already
+    /// listening on a random local port.  The caller stores the bridges for
+    /// the session and registers the HTTP URLs with the session state.
+    #[cfg_attr(coverage, coverage(off))]
+    async fn spawn_stdio_bridges(
+        servers: &[agent_client_protocol::McpServer],
+    ) -> (Vec<StoredMcpServer>, Vec<trogon_cli::StdioMcpBridge>) {
+        let mut stored = Vec::new();
+        let mut bridges = Vec::new();
+        for s in servers {
+            if let agent_client_protocol::McpServer::Stdio(stdio) = s {
+                let env: Vec<(String, String)> = stdio
+                    .env
+                    .iter()
+                    .map(|ev| (ev.name.clone(), ev.value.clone()))
+                    .collect();
+                match trogon_cli::StdioMcpBridge::spawn(
+                    &stdio.command.to_string_lossy(),
+                    &stdio.args,
+                    &env,
+                )
+                .await
+                {
+                    Ok(bridge) => {
+                        stored.push(StoredMcpServer {
+                            name: stdio.name.clone(),
+                            url: bridge.url.clone(),
+                            headers: vec![],
+                        });
+                        bridges.push(bridge);
+                    }
+                    Err(e) => {
+                        warn!(name = %stdio.name, error = %e, "failed to spawn stdio MCP bridge — skipping");
+                    }
+                }
+            }
+        }
+        (stored, bridges)
+    }
+
     /// Delete a session from KV and publish a cancel to abort any running prompt.
     #[cfg_attr(coverage, coverage(off))]
     async fn close_session_impl(&self, session_id: &str) {
+        // Shut down any stdio MCP bridges belonging to this session.
+        if let Some(bridges) = self.stdio_bridges.lock().await.remove(session_id) {
+            for bridge in bridges {
+                bridge.shutdown().await;
+            }
+        }
         let acp_prefix = AcpPrefix::new(&self.prefix).expect("valid prefix");
         let acp_session_id = AcpSessionId::new(session_id).expect("valid session_id");
         let cancel_subject = session_subjects::agent::CancelSubject::new(&acp_prefix, &acp_session_id).to_string();
@@ -711,11 +765,15 @@ where
             .and_then(|m| m.get("disableBuiltInTools"))
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
+        let (stdio_servers, session_bridges) =
+            Self::spawn_stdio_bridges(&args.mcp_servers).await;
+        let mut mcp_servers = Self::convert_mcp_servers(&args.mcp_servers);
+        mcp_servers.extend(stdio_servers);
         let state = SessionState {
             cwd,
             created_at: now_iso8601(),
             mode: "default".to_string(),
-            mcp_servers: Self::convert_mcp_servers(&args.mcp_servers),
+            mcp_servers,
             system_prompt,
             additional_roots,
             disable_builtin_tools,
@@ -723,6 +781,9 @@ where
         };
         if let Err(e) = self.store.save(&session_id, &state).await {
             Self::warn_init_session_kv_failed(&session_id, &e);
+        }
+        if !session_bridges.is_empty() {
+            self.stdio_bridges.lock().await.insert(session_id.clone(), session_bridges);
         }
 
         let sid = SessionId::from(session_id.clone());
@@ -1086,6 +1147,10 @@ where
         if let Some(idx) = branch_at {
             messages.truncate(idx);
         }
+        let (stdio_servers, fork_bridges) =
+            Self::spawn_stdio_bridges(&args.mcp_servers).await;
+        let mut mcp_servers = Self::convert_mcp_servers(&args.mcp_servers);
+        mcp_servers.extend(stdio_servers);
         let new_state = SessionState {
             messages,
             model: src_state.model.clone(),
@@ -1094,16 +1159,21 @@ where
             created_at: now_iso8601(),
             updated_at: now_iso8601(),
             title: src_state.title.clone(),
-            mcp_servers: Self::convert_mcp_servers(&args.mcp_servers),
+            mcp_servers,
             system_prompt,
             additional_roots,
             disable_builtin_tools,
             allowed_tools: src_state.allowed_tools.clone(),
             parent_session_id: Some(src_id.clone()),
             branched_at_index: branch_at,
+            terminal_id: None,
+            token_budget: src_state.token_budget,
         };
         if let Err(e) = self.store.save(&new_id, &new_state).await {
             Self::warn_save_forked_session_failed(&new_id, &e);
+        }
+        if !fork_bridges.is_empty() {
+            self.stdio_bridges.lock().await.insert(new_id.clone(), fork_bridges);
         }
 
         let sid = SessionId::from(new_id.clone());
@@ -1566,6 +1636,136 @@ mod tests {
                 !desc.is_empty(),
                 "slash command '/{name}' must have a non-empty description"
             );
+        }
+    }
+
+    // ── build_mode_state ──────────────────────────────────────────────────────
+
+    #[test]
+    fn build_mode_state_current_mode_id_matches_argument() {
+        let state = TestAgent::build_mode_state("plan", false);
+        assert_eq!(state.current_mode_id.0.as_ref(), "plan");
+    }
+
+    #[test]
+    fn build_mode_state_without_bypass_has_four_modes() {
+        let state = TestAgent::build_mode_state("default", false);
+        assert_eq!(state.available_modes.len(), 4);
+    }
+
+    #[test]
+    fn build_mode_state_with_bypass_has_five_modes() {
+        let state = TestAgent::build_mode_state("default", true);
+        assert_eq!(state.available_modes.len(), 5);
+    }
+
+    #[test]
+    fn build_mode_state_with_bypass_includes_bypass_permissions_mode() {
+        let state = TestAgent::build_mode_state("default", true);
+        let ids: Vec<&str> = state.available_modes.iter().map(|m| m.id.0.as_ref()).collect();
+        assert!(
+            ids.contains(&"bypassPermissions"),
+            "bypassPermissions must be present when allow_bypass=true; got: {ids:?}"
+        );
+    }
+
+    #[test]
+    fn build_mode_state_without_bypass_excludes_bypass_permissions_mode() {
+        let state = TestAgent::build_mode_state("default", false);
+        let ids: Vec<&str> = state.available_modes.iter().map(|m| m.id.0.as_ref()).collect();
+        assert!(
+            !ids.contains(&"bypassPermissions"),
+            "bypassPermissions must be absent when allow_bypass=false; got: {ids:?}"
+        );
+    }
+
+    // ── build_model_state ─────────────────────────────────────────────────────
+
+    #[test]
+    fn build_model_state_current_model_id_matches_argument() {
+        let state = TestAgent::build_model_state("claude-sonnet-4-6");
+        assert_eq!(state.current_model_id.0.as_ref(), "claude-sonnet-4-6");
+    }
+
+    #[test]
+    fn build_model_state_available_models_count_matches_available_models_const() {
+        let state = TestAgent::build_model_state("claude-sonnet-4-6");
+        assert_eq!(state.available_models.len(), AVAILABLE_MODELS.len());
+    }
+
+    #[test]
+    fn build_model_state_available_models_contain_all_ids() {
+        let state = TestAgent::build_model_state("claude-opus-4-6");
+        let ids: Vec<&str> = state.available_models.iter().map(|m| m.model_id.0.as_ref()).collect();
+        for (expected_id, _) in AVAILABLE_MODELS {
+            assert!(
+                ids.contains(expected_id),
+                "model '{expected_id}' must appear in available_models; got: {ids:?}"
+            );
+        }
+    }
+
+    // ── build_config_options ──────────────────────────────────────────────────
+
+    #[test]
+    fn build_config_options_returns_two_options() {
+        let opts = TestAgent::build_config_options("default", "claude-sonnet-4-6", false);
+        assert_eq!(opts.len(), 2);
+    }
+
+    #[test]
+    fn build_config_options_first_option_is_mode() {
+        let opts = TestAgent::build_config_options("plan", "claude-sonnet-4-6", false);
+        assert_eq!(opts[0].id.0.as_ref(), "mode");
+        if let agent_client_protocol::SessionConfigKind::Select(s) = &opts[0].kind {
+            assert_eq!(s.current_value.0.as_ref(), "plan");
+        } else {
+            panic!("mode option must be a Select kind");
+        }
+    }
+
+    #[test]
+    fn build_config_options_second_option_is_model() {
+        let opts = TestAgent::build_config_options("default", "claude-opus-4-6", false);
+        assert_eq!(opts[1].id.0.as_ref(), "model");
+        if let agent_client_protocol::SessionConfigKind::Select(s) = &opts[1].kind {
+            assert_eq!(s.current_value.0.as_ref(), "claude-opus-4-6");
+        } else {
+            panic!("model option must be a Select kind");
+        }
+    }
+
+    #[test]
+    fn build_config_options_with_bypass_mode_has_five_select_options() {
+        let opts = TestAgent::build_config_options("default", "claude-sonnet-4-6", true);
+        if let agent_client_protocol::SessionConfigKind::Select(s) = &opts[0].kind {
+            let flat: Vec<agent_client_protocol::SessionConfigSelectOption> = match &s.options {
+                agent_client_protocol::SessionConfigSelectOptions::Ungrouped(v) => v.clone(),
+                agent_client_protocol::SessionConfigSelectOptions::Grouped(groups) => {
+                    groups.iter().flat_map(|g| g.options.clone()).collect()
+                }
+                _ => unreachable!("unexpected SessionConfigSelectOptions variant"),
+            };
+            assert_eq!(flat.len(), 5, "allow_bypass=true must add bypassPermissions option");
+        } else {
+            panic!("mode option must be a Select kind");
+        }
+    }
+
+    #[test]
+    fn build_config_options_without_bypass_mode_has_four_select_options() {
+        let opts = TestAgent::build_config_options("default", "claude-sonnet-4-6", false);
+        if let agent_client_protocol::SessionConfigKind::Select(s) = &opts[0].kind {
+            let flat: Vec<agent_client_protocol::SessionConfigSelectOption> = match &s.options {
+                agent_client_protocol::SessionConfigSelectOptions::Ungrouped(v) => v.clone(),
+                agent_client_protocol::SessionConfigSelectOptions::Grouped(groups) => {
+                    groups.iter().flat_map(|g| g.options.clone()).collect()
+                }
+                _ => unreachable!("unexpected SessionConfigSelectOptions variant"),
+            };
+            assert_eq!(flat.len(), 4, "allow_bypass=false must not include bypassPermissions");
+        } else {
+            panic!("mode option must be a Select kind");
         }
     }
 
@@ -2098,6 +2298,176 @@ mod tests {
                 assert!(root_info.meta.is_none(), "root must not have branch _meta");
             }).await;
         }
+
+        // ── stdio MCP bridge ──────────────────────────────────────────────────
+
+        /// Write a minimal MCP echo script to a temp file and make it executable.
+        async fn echo_mcp_script() -> std::path::PathBuf {
+            let path = std::env::temp_dir().join("trogon_acp_echo_mcp.sh");
+            tokio::fs::write(
+                &path,
+                b"#!/bin/sh\nwhile IFS= read -r line; do \
+                  id=$(echo \"$line\" | sed 's/.*\"id\":[[:space:]]*\\([0-9]*\\).*/\\1/'); \
+                  printf '{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":{}}\n' \"$id\"; \
+                done\n",
+            )
+            .await
+            .unwrap();
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = tokio::fs::metadata(&path).await.unwrap().permissions();
+            perms.set_mode(0o755);
+            tokio::fs::set_permissions(&path, perms).await.unwrap();
+            path
+        }
+
+        /// A session created with a stdio MCP server must have a local HTTP URL
+        /// stored in `mcp_servers`.
+        #[tokio::test(flavor = "current_thread")]
+        async fn new_session_with_stdio_mcp_registers_http_url() {
+            use agent_client_protocol::McpServerStdio;
+            run_in_local(|| async {
+                let script = echo_mcp_script().await;
+                let (agent, _rx) = make_mock_agent();
+
+                let stdio = McpServerStdio::new("test-server", script.as_path());
+                let resp = agent
+                    .new_session(
+                        NewSessionRequest::new("/cwd")
+                            .mcp_servers(vec![McpServer::Stdio(stdio)]),
+                    )
+                    .await
+                    .unwrap();
+                let sid = resp.session_id.to_string();
+
+                let state = agent.store.load(&sid).await.unwrap();
+                assert_eq!(state.mcp_servers.len(), 1, "one MCP server must be registered");
+                assert_eq!(state.mcp_servers[0].name, "test-server");
+                assert!(
+                    state.mcp_servers[0].url.starts_with("http://127.0.0.1:"),
+                    "url must be a local http address; got: {}",
+                    state.mcp_servers[0].url
+                );
+
+                // Clean up: close the session to kill the bridge.
+                let params_json = format!(r#"{{"sessionId":"{}"}}"#, sid);
+                let params: std::sync::Arc<serde_json::value::RawValue> =
+                    serde_json::value::RawValue::from_string(params_json).unwrap().into();
+                agent.ext_method(ExtRequest::new("session/close", params)).await.unwrap();
+            }).await;
+        }
+
+        /// After `session/close`, the stdio bridge must no longer accept connections.
+        #[tokio::test(flavor = "current_thread")]
+        async fn close_session_shuts_down_stdio_mcp_bridge() {
+            use agent_client_protocol::McpServerStdio;
+            run_in_local(|| async {
+                let script = echo_mcp_script().await;
+                let (agent, _rx) = make_mock_agent();
+
+                let stdio = McpServerStdio::new("srv", script.as_path());
+                let resp = agent
+                    .new_session(
+                        NewSessionRequest::new("/cwd")
+                            .mcp_servers(vec![McpServer::Stdio(stdio)]),
+                    )
+                    .await
+                    .unwrap();
+                let sid = resp.session_id.to_string();
+                let url = agent.store.load(&sid).await.unwrap().mcp_servers[0].url.clone();
+
+                // Bridge must be reachable before close.
+                let client = reqwest::Client::new();
+                let body = serde_json::json!({"jsonrpc":"2.0","id":1,"method":"ping","params":{}});
+                let alive = client.post(&url).json(&body).send().await;
+                assert!(alive.is_ok(), "bridge must be reachable before close: {alive:?}");
+
+                // Close the session — bridge must be shut down.
+                let params_json = format!(r#"{{"sessionId":"{}"}}"#, sid);
+                let params: std::sync::Arc<serde_json::value::RawValue> =
+                    serde_json::value::RawValue::from_string(params_json).unwrap().into();
+                agent.ext_method(ExtRequest::new("session/close", params)).await.unwrap();
+
+                // Brief wait for the OS to release the port.
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+                // Bridge must be dead after close.
+                let dead = client.post(&url).json(&body).send().await;
+                assert!(dead.is_err(), "bridge must be unreachable after close");
+            }).await;
+        }
+
+        // ── prompt / cancel delegation ────────────────────────────────────────
+
+        /// `prompt` must delegate to `Bridge::prompt`.  With no JetStream consumers
+        /// configured in the mock, the bridge fails immediately — confirming the
+        /// delegation path is wired up (a missing call would be a compile-time or
+        /// panic failure, not an Err).
+        #[tokio::test(flavor = "current_thread")]
+        async fn prompt_delegates_to_bridge_and_errors_without_runner() {
+            use agent_client_protocol::PromptRequest;
+            run_in_local(|| async {
+                let (agent, _rx) = make_mock_agent();
+                let sid = agent
+                    .new_session(NewSessionRequest::new("/cwd").mcp_servers(vec![]))
+                    .await
+                    .unwrap()
+                    .session_id
+                    .to_string();
+                let result = agent.prompt(PromptRequest::new(sid, vec![])).await;
+                assert!(result.is_err(), "prompt must return Err when no runner is connected");
+            }).await;
+        }
+
+        /// `cancel` is fire-and-forget via publish.  With the mock NATS client,
+        /// publish succeeds → `cancel` must return `Ok(())`, confirming delegation
+        /// to `Bridge::cancel` is wired up.
+        #[tokio::test(flavor = "current_thread")]
+        async fn cancel_delegates_to_bridge_and_returns_ok() {
+            use agent_client_protocol::CancelNotification;
+            run_in_local(|| async {
+                let (agent, _rx) = make_mock_agent();
+                let sid = agent
+                    .new_session(NewSessionRequest::new("/cwd").mcp_servers(vec![]))
+                    .await
+                    .unwrap()
+                    .session_id
+                    .to_string();
+                let result = agent.cancel(CancelNotification::new(sid)).await;
+                assert!(result.is_ok(), "cancel must succeed; got: {result:?}");
+            }).await;
+        }
+
+        // ── spawn_stdio_bridges — failing command ─────────────────────────────
+
+        /// When a stdio MCP server references a non-existent command, `spawn_stdio_bridges`
+        /// logs a warning and skips it.  The session must still be created successfully
+        /// with zero MCP servers registered.
+        #[tokio::test(flavor = "current_thread")]
+        async fn new_session_with_nonexistent_stdio_command_creates_session_without_mcp_servers() {
+            use agent_client_protocol::{McpServer, McpServerStdio};
+            run_in_local(|| async {
+                let (agent, _rx) = make_mock_agent();
+                let stdio = McpServerStdio::new(
+                    "bad-srv",
+                    std::path::Path::new("/nonexistent/command/xyz_trogon_test"),
+                );
+                let resp = agent
+                    .new_session(
+                        NewSessionRequest::new("/cwd")
+                            .mcp_servers(vec![McpServer::Stdio(stdio)]),
+                    )
+                    .await
+                    .unwrap();
+                let sid = resp.session_id.to_string();
+                let state = agent.store.load(&sid).await.unwrap();
+                assert_eq!(
+                    state.mcp_servers.len(),
+                    0,
+                    "failed stdio spawn must be skipped, not registered, got: {:?}",
+                    state.mcp_servers
+                );
+            }).await;
+        }
     }
 
     // ── Integration tests (require Docker) ────────────────────────────────────
@@ -2178,6 +2548,24 @@ mod tests {
                 gateway_config,
             );
             (agent, notif_rx)
+        }
+
+        async fn echo_mcp_script() -> std::path::PathBuf {
+            let path = std::env::temp_dir().join("trogon_acp_integration_echo_mcp.sh");
+            tokio::fs::write(
+                &path,
+                b"#!/bin/sh\nwhile IFS= read -r line; do \
+                  id=$(echo \"$line\" | sed 's/.*\"id\":[[:space:]]*\\([0-9]*\\).*/\\1/'); \
+                  printf '{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":{}}\n' \"$id\"; \
+                done\n",
+            )
+            .await
+            .unwrap();
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = tokio::fs::metadata(&path).await.unwrap().permissions();
+            perms.set_mode(0o755);
+            tokio::fs::set_permissions(&path, perms).await.unwrap();
+            path
         }
 
         // ── initialize ────────────────────────────────────────────────────────
@@ -2473,6 +2861,94 @@ mod tests {
                 state.system_prompt.as_deref(),
                 Some("Appended prompt."),
                 "system_prompt must be parsed from append field"
+            );
+        }
+
+        // ── stdio MCP bridge ─────────────────────────────────────────────────
+
+        /// After `new_session` with `McpServer::Stdio`, the session state in NATS KV
+        /// records the spawned bridge's local HTTP URL as the MCP server endpoint.
+        #[tokio::test(flavor = "current_thread")]
+        async fn new_session_with_stdio_mcp_persists_http_url_in_nats_kv() {
+            use agent_client_protocol::{McpServer, McpServerStdio};
+
+            let (_c, nats, js) = start_nats().await;
+            let (agent, _rx) = make_agent(nats.clone(), &js).await;
+
+            let script = echo_mcp_script().await;
+            let stdio = McpServerStdio::new("echo-srv", script.as_path());
+            let resp = agent
+                .new_session(
+                    NewSessionRequest::new("/tmp").mcp_servers(vec![McpServer::Stdio(stdio)]),
+                )
+                .await
+                .unwrap();
+            let sid = resp.session_id.to_string();
+
+            let store2 = NatsSessionStore::open(&js).await.unwrap();
+            let state = store2.load(&sid).await.unwrap();
+
+            assert_eq!(state.mcp_servers.len(), 1, "one MCP server must be registered");
+            assert!(
+                state.mcp_servers[0].url.starts_with("http://127.0.0.1:"),
+                "stdio bridge must register a local HTTP URL; got: {}",
+                state.mcp_servers[0].url
+            );
+        }
+
+        /// After `close_session`, the stdio bridge's HTTP endpoint is no longer reachable.
+        #[tokio::test(flavor = "current_thread")]
+        async fn close_session_with_stdio_mcp_shuts_down_http_bridge() {
+            use agent_client_protocol::{McpServer, McpServerStdio};
+
+            let (_c, nats, js) = start_nats().await;
+            let (agent, _rx) = make_agent(nats.clone(), &js).await;
+
+            let script = echo_mcp_script().await;
+            let stdio = McpServerStdio::new("echo-srv", script.as_path());
+            let resp = agent
+                .new_session(
+                    NewSessionRequest::new("/tmp").mcp_servers(vec![McpServer::Stdio(stdio)]),
+                )
+                .await
+                .unwrap();
+            let sid = resp.session_id.to_string();
+
+            let store2 = NatsSessionStore::open(&js).await.unwrap();
+            let url = store2.load(&sid).await.unwrap().mcp_servers[0].url.clone();
+
+            // Sanity-check: bridge is reachable before close.
+            let client = reqwest::Client::new();
+            let pre = client
+                .post(&url)
+                .body(r#"{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}"#)
+                .send()
+                .await;
+            assert!(pre.is_ok(), "bridge must be reachable before close_session");
+
+            // Close the session.
+            let params: Arc<serde_json::value::RawValue> =
+                serde_json::value::RawValue::from_string(format!(r#"{{"sessionId":"{}"}}"#, sid))
+                    .unwrap()
+                    .into();
+            agent
+                .ext_method(ExtRequest::new("session/close", params))
+                .await
+                .unwrap();
+
+            // Yield to let the abort propagate in the single-threaded executor.
+            tokio::task::yield_now().await;
+
+            // Bridge must no longer be reachable.
+            let port: u16 = url.rsplit(':').next().unwrap().parse().unwrap();
+            let connect = tokio::time::timeout(
+                Duration::from_millis(200),
+                tokio::net::TcpStream::connect(("127.0.0.1", port)),
+            )
+            .await;
+            assert!(
+                matches!(connect, Err(_) | Ok(Err(_))),
+                "HTTP bridge must be unreachable after close_session"
             );
         }
 
@@ -3142,6 +3618,109 @@ mod tests {
 
             let src_state = store.load(&src_id.to_string()).await.unwrap();
             assert_eq!(src_state.messages.len(), 3, "source must remain unchanged");
+        }
+
+        // ── fork_session — stdio MCP bridge ──────────────────────────────────
+
+        /// After `fork_session` with `McpServer::Stdio`, the forked session state in
+        /// NATS KV records the spawned bridge's local HTTP URL as the MCP server endpoint.
+        #[tokio::test(flavor = "current_thread")]
+        async fn fork_session_with_stdio_mcp_persists_http_url_in_nats_kv() {
+            use agent_client_protocol::{McpServer, McpServerStdio};
+
+            let (_c, nats, js) = start_nats().await;
+            let (agent, _rx) = make_agent(nats.clone(), &js).await;
+
+            let parent_resp = agent
+                .new_session(NewSessionRequest::new("/parent"))
+                .await
+                .unwrap();
+            let parent_id = parent_resp.session_id.clone();
+
+            let script = echo_mcp_script().await;
+            let stdio = McpServerStdio::new("echo-srv", script.as_path());
+            let fork_resp = agent
+                .fork_session(
+                    ForkSessionRequest::new(parent_id, "/fork")
+                        .mcp_servers(vec![McpServer::Stdio(stdio)]),
+                )
+                .await
+                .unwrap();
+            let fork_id = fork_resp.session_id.to_string();
+
+            let store2 = NatsSessionStore::open(&js).await.unwrap();
+            let state = store2.load(&fork_id).await.unwrap();
+
+            assert_eq!(state.mcp_servers.len(), 1, "forked session must have one MCP server");
+            assert!(
+                state.mcp_servers[0].url.starts_with("http://127.0.0.1:"),
+                "stdio bridge must register a local HTTP URL; got: {}",
+                state.mcp_servers[0].url
+            );
+        }
+
+        /// After `close_session` on a forked session that had a stdio MCP server,
+        /// the bridge's HTTP endpoint is no longer reachable.
+        #[tokio::test(flavor = "current_thread")]
+        async fn close_forked_session_with_stdio_mcp_shuts_down_http_bridge() {
+            use agent_client_protocol::{McpServer, McpServerStdio};
+
+            let (_c, nats, js) = start_nats().await;
+            let (agent, _rx) = make_agent(nats.clone(), &js).await;
+
+            let parent_resp = agent
+                .new_session(NewSessionRequest::new("/parent"))
+                .await
+                .unwrap();
+            let parent_id = parent_resp.session_id.clone();
+
+            let script = echo_mcp_script().await;
+            let stdio = McpServerStdio::new("echo-srv", script.as_path());
+            let fork_resp = agent
+                .fork_session(
+                    ForkSessionRequest::new(parent_id, "/fork")
+                        .mcp_servers(vec![McpServer::Stdio(stdio)]),
+                )
+                .await
+                .unwrap();
+            let fork_id = fork_resp.session_id.to_string();
+
+            let store2 = NatsSessionStore::open(&js).await.unwrap();
+            let url = store2.load(&fork_id).await.unwrap().mcp_servers[0].url.clone();
+
+            // Sanity-check: bridge is reachable before close.
+            let client = reqwest::Client::new();
+            let pre = client
+                .post(&url)
+                .body(r#"{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}"#)
+                .send()
+                .await;
+            assert!(pre.is_ok(), "bridge must be reachable before close_session");
+
+            // Close the forked session.
+            let params: Arc<serde_json::value::RawValue> =
+                serde_json::value::RawValue::from_string(format!(r#"{{"sessionId":"{}"}}"#, fork_id))
+                    .unwrap()
+                    .into();
+            agent
+                .ext_method(ExtRequest::new("session/close", params))
+                .await
+                .unwrap();
+
+            // Yield to let the abort propagate in the single-threaded executor.
+            tokio::task::yield_now().await;
+
+            // Bridge must no longer be reachable.
+            let port: u16 = url.rsplit(':').next().unwrap().parse().unwrap();
+            let connect = tokio::time::timeout(
+                Duration::from_millis(200),
+                tokio::net::TcpStream::connect(("127.0.0.1", port)),
+            )
+            .await;
+            assert!(
+                matches!(connect, Err(_) | Ok(Err(_))),
+                "HTTP bridge must be unreachable after close of forked session"
+            );
         }
 
         // ── ext_method ─────────────────────────────────────────────────────────
