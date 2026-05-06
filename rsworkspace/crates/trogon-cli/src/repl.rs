@@ -186,6 +186,7 @@ pub async fn run<N: NatsClient + Clone, F: Fs>(
                                 arg,
                                 session_used_tokens,
                                 session_context_size,
+                                &cwd,
                                 &fs,
                             )
                         );
@@ -277,6 +278,7 @@ fn handle_slash_command<F: Fs>(
     arg: &str,
     used_tokens: u64,
     context_size: u64,
+    cwd: &Path,
     fs: &F,
 ) -> String {
     match cmd {
@@ -285,10 +287,10 @@ Commands:
   /help               show this help
   /cost               show token usage for this session
   /clear              start a new session (clears conversation history)
-  /compact            force context compaction
+  /compact            show context usage and compaction status
   /config             show config  |  /config set <key> <value>
-  /model <id>         change model for this session (not yet implemented)
-  /init               generate TROGON.md for this project (not yet implemented)
+  /model              show current model  |  /model <id> change model
+  /init               generate TROGON.md for this project
 
 Multiline: end a line with \\ to continue on the next line
 Ctrl+C    cancel active response
@@ -311,23 +313,49 @@ Ctrl+D    quit"
         }
 
         "/compact" => {
-            "compaction is triggered automatically at 85% context usage.\n\
-             Force compact is not yet implemented."
-                .to_string()
+            if context_size == 0 {
+                "no context data yet — send a message first to see usage".to_string()
+            } else {
+                let pct = used_tokens * 100 / context_size;
+                let advice = if pct >= 85 {
+                    "context is nearly full — compaction will trigger automatically before the next message"
+                } else {
+                    "use /clear to start a fresh session if you need immediate relief"
+                };
+                format!(
+                    "context: {}/{} tokens ({}%)\nauto-compaction triggers at 85%\n{advice}",
+                    fmt_tokens(used_tokens),
+                    fmt_tokens(context_size),
+                    pct,
+                )
+            }
         }
 
         "/config" => handle_config_cmd(arg, fs),
 
         "/model" => {
             if arg.is_empty() {
-                "usage: /model <model-id>  (not yet implemented — requires runner support)"
-                    .to_string()
+                let model = read_config(fs)
+                    .get("model")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("claude-sonnet-4-6")
+                    .to_string();
+                format!("current model: {model}\nchange with: /model <model-id>")
             } else {
-                "/model not yet implemented — requires runner support".to_string()
+                let model = arg.trim();
+                let mut cfg = read_config(fs);
+                cfg["model"] = serde_json::Value::String(model.to_string());
+                match write_config(&cfg, fs) {
+                    Ok(()) => format!(
+                        "model set to: {model}\n\
+                         cost estimates updated  |  restart runner with AGENT_MODEL={model} to apply"
+                    ),
+                    Err(e) => format!("error saving model: {e}"),
+                }
             }
         }
 
-        "/init" => "not yet implemented".to_string(),
+        "/init" => handle_init_cmd(cwd, fs),
 
         other => format!("unknown command: {other}  (type /help for a list)"),
     }
@@ -394,6 +422,92 @@ fn handle_config_cmd<F: Fs>(arg: &str, fs: &F) -> String {
         }
         other => format!("unknown config subcommand: {other}  (use get, set, or no args)"),
     }
+}
+
+// ── /init ─────────────────────────────────────────────────────────────────────
+
+fn handle_init_cmd<F: Fs>(cwd: &Path, fs: &F) -> String {
+    let root = find_git_root(cwd).unwrap_or_else(|| cwd.to_path_buf());
+    let dest = root.join("TROGON.md");
+
+    if fs.read_to_string(&dest).is_ok() {
+        return format!(
+            "TROGON.md already exists at {}\nEdit it to update project context.",
+            dest.display()
+        );
+    }
+
+    let project_name = root
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "project".to_string());
+
+    let langs = detect_languages(&root);
+    let content = generate_trogon_md(&project_name, &langs);
+
+    match fs.write(&dest, content.as_bytes()) {
+        Ok(()) => format!(
+            "created {}\nEdit it to give Claude context about this project.",
+            dest.display()
+        ),
+        Err(e) => format!("error creating TROGON.md: {e}"),
+    }
+}
+
+fn find_git_root(start: &Path) -> Option<PathBuf> {
+    let mut dir = start.to_path_buf();
+    loop {
+        if dir.join(".git").exists() {
+            return Some(dir);
+        }
+        if !dir.pop() {
+            return None;
+        }
+    }
+}
+
+fn detect_languages(root: &Path) -> Vec<&'static str> {
+    const INDICATORS: &[(&str, &str)] = &[
+        ("Cargo.toml", "Rust"),
+        ("package.json", "JavaScript/TypeScript"),
+        ("go.mod", "Go"),
+        ("pyproject.toml", "Python"),
+        ("setup.py", "Python"),
+        ("build.gradle", "Kotlin/Java"),
+        ("build.gradle.kts", "Kotlin"),
+        ("pom.xml", "Java"),
+        ("Gemfile", "Ruby"),
+        ("mix.exs", "Elixir"),
+        ("pubspec.yaml", "Dart/Flutter"),
+        ("CMakeLists.txt", "C/C++"),
+    ];
+    let mut found: Vec<&'static str> = Vec::new();
+    for (file, lang) in INDICATORS {
+        if root.join(file).exists() && !found.contains(lang) {
+            found.push(lang);
+        }
+    }
+    found
+}
+
+fn generate_trogon_md(project_name: &str, langs: &[&str]) -> String {
+    let lang_line = if langs.is_empty() {
+        String::new()
+    } else {
+        format!("\nLanguages/frameworks: {}\n", langs.join(", "))
+    };
+    format!(
+        "# {project_name}\n\
+         {lang_line}\
+         \n## Overview\n\
+         <!-- Describe the project purpose and goals -->\n\
+         \n## Architecture\n\
+         <!-- Key components and their interactions -->\n\
+         \n## Development\n\
+         <!-- Build, test, and run commands -->\n\
+         \n## Notes\n\
+         <!-- Project-specific context for Claude -->\n"
+    )
 }
 
 // ── cost estimation ───────────────────────────────────────────────────────────
@@ -664,7 +778,7 @@ mod tests {
     #[test]
     fn slash_help_lists_all_commands() {
         let fs = MockFs::new();
-        let out = handle_slash_command("/help", "", 0, 0, &fs);
+        let out = handle_slash_command("/help", "", 0, 0, Path::new("/tmp"), &fs);
         assert!(out.contains("/help"));
         assert!(out.contains("/cost"));
         assert!(out.contains("/clear"));
@@ -677,14 +791,14 @@ mod tests {
     #[test]
     fn slash_cost_no_data_yet() {
         let fs = MockFs::new();
-        let out = handle_slash_command("/cost", "", 0, 0, &fs);
+        let out = handle_slash_command("/cost", "", 0, 0, Path::new("/tmp"), &fs);
         assert!(out.contains("no usage data"), "got: {out}");
     }
 
     #[test]
     fn slash_cost_shows_percentage_and_estimated_cost() {
         let fs = MockFs::new();
-        let out = handle_slash_command("/cost", "", 50_000, 200_000, &fs);
+        let out = handle_slash_command("/cost", "", 50_000, 200_000, Path::new("/tmp"), &fs);
         assert!(out.contains("25%"), "got: {out}");
         assert!(out.contains("50,000"), "got: {out}");
         assert!(out.contains("200,000"), "got: {out}");
@@ -827,54 +941,103 @@ mod tests {
     // ── slash commands ────────────────────────────────────────────────────────
 
     #[test]
-    fn slash_compact_explains_auto() {
+    fn slash_compact_no_data_explains() {
         let fs = MockFs::new();
-        let out = handle_slash_command("/compact", "", 0, 0, &fs);
-        assert!(out.contains("automatic") || out.contains("85%"), "got: {out}");
+        let out = handle_slash_command("/compact", "", 0, 0, Path::new("/tmp"), &fs);
+        assert!(out.contains("no context data"), "got: {out}");
+    }
+
+    #[test]
+    fn slash_compact_shows_usage_stats() {
+        let fs = MockFs::new();
+        let out = handle_slash_command("/compact", "", 100_000, 200_000, Path::new("/tmp"), &fs);
+        assert!(out.contains("50%"), "got: {out}");
+        assert!(out.contains("100,000"), "got: {out}");
+        assert!(out.contains("85%"), "auto-compaction threshold missing: {out}");
+    }
+
+    #[test]
+    fn slash_compact_nearly_full_shows_warning() {
+        let fs = MockFs::new();
+        let out = handle_slash_command("/compact", "", 175_000, 200_000, Path::new("/tmp"), &fs);
+        assert!(out.contains("nearly full") || out.contains("87%"), "got: {out}");
     }
 
     #[test]
     fn slash_unknown_suggests_help() {
         let fs = MockFs::new();
-        let out = handle_slash_command("/nope", "", 0, 0, &fs);
+        let out = handle_slash_command("/nope", "", 0, 0, Path::new("/tmp"), &fs);
         assert!(out.contains("unknown command") && out.contains("/help"), "got: {out}");
     }
 
     #[test]
-    fn slash_model_without_arg_shows_usage() {
+    fn slash_model_without_arg_shows_current_model() {
         let fs = MockFs::new();
-        let out = handle_slash_command("/model", "", 0, 0, &fs);
-        assert!(out.contains("usage") || out.contains("not yet"), "got: {out}");
+        let out = handle_slash_command("/model", "", 0, 0, Path::new("/tmp"), &fs);
+        assert!(out.contains("current model"), "got: {out}");
+        assert!(out.contains("claude-sonnet-4-6"), "expected default model: {out}");
     }
 
     #[test]
-    fn slash_init_returns_not_implemented() {
+    fn slash_model_with_arg_saves_and_confirms() {
         let fs = MockFs::new();
-        assert!(
-            handle_slash_command("/init", "", 0, 0, &fs).contains("not yet implemented")
-        );
+        let out = handle_slash_command("/model", "claude-opus-4-7", 0, 0, Path::new("/tmp"), &fs);
+        assert!(out.contains("claude-opus-4-7"), "got: {out}");
+        assert!(!out.contains("not yet implemented"), "should be implemented: {out}");
+        // Verify it was actually persisted.
+        let check = handle_slash_command("/model", "", 0, 0, Path::new("/tmp"), &fs);
+        assert!(check.contains("claude-opus-4-7"), "model not persisted: {check}");
     }
 
     #[test]
-    fn slash_model_with_arg_returns_not_implemented() {
+    fn slash_model_updates_cost_estimates() {
         let fs = MockFs::new();
-        assert!(
-            handle_slash_command("/model", "claude-opus-4-7", 0, 0, &fs)
-                .contains("not yet implemented")
-        );
+        handle_slash_command("/model", "claude-haiku-4-5", 0, 0, Path::new("/tmp"), &fs);
+        let cost_out = handle_slash_command("/cost", "", 1_000_000, 2_000_000, Path::new("/tmp"), &fs);
+        // haiku rate is 1.6 $/Mtok → 1M tokens ≈ $1.60
+        assert!(cost_out.contains("1.60") || cost_out.contains("1.6"), "got: {cost_out}");
+    }
+
+    #[test]
+    fn slash_init_creates_trogon_md() {
+        let fs = MockFs::new();
+        let out = handle_slash_command("/init", "", 0, 0, Path::new("/tmp"), &fs);
+        assert!(out.contains("TROGON.md"), "got: {out}");
+        assert!(!out.contains("not yet implemented"), "should be implemented: {out}");
+    }
+
+    #[test]
+    fn slash_init_idempotent_if_file_exists() {
+        let fs = MockFs::new();
+        // First call creates it.
+        handle_slash_command("/init", "", 0, 0, Path::new("/tmp"), &fs);
+        // Second call should say it already exists.
+        let out = handle_slash_command("/init", "", 0, 0, Path::new("/tmp"), &fs);
+        assert!(out.contains("already exists"), "got: {out}");
+    }
+
+    #[test]
+    fn slash_init_content_has_required_sections() {
+        let md = generate_trogon_md("my-project", &["Rust", "Python"]);
+        assert!(md.contains("# my-project"), "missing title: {md}");
+        assert!(md.contains("Rust"), "missing lang: {md}");
+        assert!(md.contains("## Overview"), "missing section: {md}");
+        assert!(md.contains("## Architecture"), "missing section: {md}");
+        assert!(md.contains("## Development"), "missing section: {md}");
+        assert!(md.contains("## Notes"), "missing section: {md}");
     }
 
     #[test]
     fn slash_cost_at_full_context_shows_100_percent() {
         let fs = MockFs::new();
-        let out = handle_slash_command("/cost", "", 200_000, 200_000, &fs);
+        let out = handle_slash_command("/cost", "", 200_000, 200_000, Path::new("/tmp"), &fs);
         assert!(out.contains("100%"), "got: {out}");
     }
 
     #[test]
     fn slash_cost_rounds_down() {
         let fs = MockFs::new();
-        let out = handle_slash_command("/cost", "", 1, 3, &fs);
+        let out = handle_slash_command("/cost", "", 1, 3, Path::new("/tmp"), &fs);
         assert!(out.contains("33%"), "got: {out}");
     }
 
