@@ -14,7 +14,8 @@ rmcp = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "net", "sync"] }
 tracing = { workspace = true }
 trogon-nats = { workspace = true }
-trogon-std = { workspace = true, features = ["clap", "runtime"] }
+trogon-std = { workspace = true, features = ["clap", "signal"] }
+trogon-telemetry = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]

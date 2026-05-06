@@ -14,15 +14,13 @@ use tracing::{error, info};
 type BoxError = Box<dyn Error + Send + Sync>;
 
 #[cfg(not(coverage))]
-use trogon_std::env::SystemEnv;
+use trogon_std::{env::SystemEnv, fs::SystemFs, signal::shutdown_signal};
 #[cfg(not(coverage))]
-use trogon_std::runtime::{init_logging, shutdown_signal};
+use trogon_telemetry::{ResourceAttribute, ServiceName};
 
 #[cfg(not(coverage))]
 #[tokio::main]
 async fn main() -> Result<(), BoxError> {
-    init_logging();
-
     let config = config::base_config(&trogon_std::CliArgs::<config::Args>::new(), &SystemEnv)?;
     let config::BridgeConfig {
         mcp,
@@ -30,6 +28,12 @@ async fn main() -> Result<(), BoxError> {
         server_id,
     } = config;
     let mcp = mcp_nats::apply_timeout_overrides(mcp, &SystemEnv);
+    trogon_telemetry::init_logger(
+        ServiceName::McpNatsStdio,
+        [ResourceAttribute::mcp_prefix(mcp.prefix_str())],
+        &SystemEnv,
+        &SystemFs,
+    );
 
     info!(
         mcp_prefix = %mcp.prefix_str(),
@@ -49,6 +53,10 @@ async fn main() -> Result<(), BoxError> {
     match &result {
         Ok(()) => info!("MCP bridge stopped"),
         Err(error) => error!(error = %error, "MCP bridge stopped with error"),
+    }
+
+    if let Err(error) = trogon_telemetry::shutdown_otel() {
+        error!(error = %error, "OpenTelemetry shutdown failed");
     }
 
     result

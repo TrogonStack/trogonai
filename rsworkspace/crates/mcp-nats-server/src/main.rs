@@ -21,9 +21,9 @@ mod runtime {
     use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
     use tokio::net::TcpListener;
     use tokio::sync::{mpsc, oneshot};
-    use tracing::{info, warn};
-    use trogon_std::env::SystemEnv;
-    use trogon_std::runtime::{init_logging, shutdown_signal};
+    use tracing::{error, info, warn};
+    use trogon_std::{env::SystemEnv, fs::SystemFs, signal::shutdown_signal};
+    use trogon_telemetry::{ResourceAttribute, ServiceName};
     use uuid::Uuid;
 
     use crate::allowed_host::AllowedHost;
@@ -35,8 +35,6 @@ mod runtime {
 
     #[tokio::main]
     pub async fn main() -> Result<(), BoxError> {
-        init_logging();
-
         let config = config::base_config(&trogon_std::CliArgs::<config::Args>::new(), &SystemEnv)?;
         let config::HttpBridgeConfig {
             mcp,
@@ -47,6 +45,12 @@ mod runtime {
             allowed_hosts,
         } = config;
         let mcp = mcp_nats::apply_timeout_overrides(mcp, &SystemEnv);
+        trogon_telemetry::init_logger(
+            ServiceName::McpNatsServer,
+            [ResourceAttribute::mcp_prefix(mcp.prefix_str())],
+            &SystemEnv,
+            &SystemFs,
+        );
 
         let nats_connect_timeout = mcp_nats::nats_connect_timeout(&SystemEnv);
         let nats_client = mcp_nats::nats::connect(mcp.nats(), nats_connect_timeout).await?;
@@ -58,12 +62,20 @@ mod runtime {
 
         info!(endpoint = %format!("http://{bind_addr}{}", path.as_str()), "MCP HTTP bridge starting");
 
-        axum::serve(listener, app)
+        let result = axum::serve(listener, app)
             .with_graceful_shutdown(shutdown_signal())
-            .await?;
+            .await;
 
-        info!("MCP HTTP bridge stopped");
+        match &result {
+            Ok(()) => info!("MCP HTTP bridge stopped"),
+            Err(error) => error!(error = %error, "MCP HTTP bridge stopped with error"),
+        }
 
+        if let Err(error) = trogon_telemetry::shutdown_otel() {
+            error!(error = %error, "OpenTelemetry shutdown failed");
+        }
+
+        result?;
         Ok(())
     }
 
